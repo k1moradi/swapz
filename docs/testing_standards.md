@@ -62,11 +62,16 @@ effects, but suppresses repetitive per-control diagnostics. Detailed cache,
 window and counter evidence remains in the single replace-in-place
 root `test_results.json` report.
 
-Every console table printed by the official `make test` reporter must be an
-unindented GitHub-Flavored Markdown pipe table. Header-separator cells contain
-at least three dashes, and the reporter emits a literal `---` horizontal rule
-immediately after every table. Each table is followed by a legend that defines
-every column and an automated interpretation derived from its rows. Paired
+Every console table printed by the official `make test` reporter must have a
+clear, self-contained Markdown title immediately before an unindented
+GitHub-Flavored Markdown pipe table. The title names the measurement, workload
+or comparison without depending on a nearby section heading. Header-separator
+cells use explicit left alignment with a leading colon and at least three
+dashes. Each table is followed immediately by a legend that defines every
+column, including whether higher, lower or zero is preferred when that
+direction is meaningful; context-dependent diagnostics are labeled descriptive.
+An automated interpretation derived from the rows follows the legend, and a
+literal `---` horizontal rule follows the interpretation. Paired
 confidence-interval interpretations must say whether intervals exclude or
 overlap zero; descriptive tables must not imply that the largest value is
 automatically best. Operator-facing headings and scope names use plain,

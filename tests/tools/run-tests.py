@@ -2625,6 +2625,60 @@ TABLE_HEADER_LEGEND = {
     "rescue ms": "classifier, transform, second LZ4 and copy wall ms; not CPU time",
 }
 
+TABLE_HEADER_GOAL = {
+    "xform ns": "lower is better for equivalent work",
+    "inv ns": "lower is better for equivalent work",
+    "LZ4-2 ns": "lower is better for equivalent work",
+    "neg call/eligible": "lower is better",
+    "cpu/page ns": "lower is better",
+    "ns/saved block": "lower is better",
+    "old ms": "lower is faster",
+    "select ms": "lower is faster",
+    "map ms": "lower is faster",
+    "list ms": "lower is faster",
+    "old probe ms": "lower is faster",
+    "mapped probe ms": "lower is faster",
+    "waste": "lower is better",
+    "W runs": "lower is better for equivalent useful work",
+    "cold R blk": "lower is better",
+    "seq req": "lower is better",
+    "W": "higher is better",
+    "lower W": "lower is better for equivalent useful work",
+    "W req": "lower is better",
+    "R": "higher is better",
+    "R p99": "lower is better",
+    "host busy %": "lower is preferable for equivalent useful work",
+    "CPU wait %": "lower is better",
+    "steal %": "lower is better",
+    "replay cores": "lower is preferable for equivalent useful work",
+    "CPU n": "target is all expected phases",
+    "lower KiB": "lower is better",
+    "lower": "lower is better",
+    "req": "lower is better",
+    "p99": "lower is better",
+    "engine": "lower is better for equivalent work",
+    "LZ4": "lower is better for equivalent work",
+    "copy": "lower is better for equivalent work",
+    "seq p99": "lower is better",
+    "rnd req": "lower is better",
+    "rnd p99": "lower is better",
+    "seq saved": "higher is better if latency and correctness hold",
+    "rnd saved": "higher is better if latency and correctness hold",
+    "extra": "target is zero",
+    "other": "target is zero for defensive skip accounting",
+    "probes/lookup": "lower is better",
+    "repl": "lower is better",
+    "meta copy KiB": "lower is better",
+    "set hit %": "higher is preferable; end-to-end I/O still decides",
+    "raw QD32 MB/s": "higher is better",
+    "raw": "higher is better",
+    "sync": "higher is better",
+    "async": "higher is better",
+    "A/S": "higher is better when other acceptance gates hold",
+    "A req": "lower is better",
+    "rescue ms": "lower is better for equivalent rescue outcome",
+}
+
 
 def _table_number(value):
     """Read a scalar measurement; slash-separated tuples are not scalars."""
@@ -2809,8 +2863,8 @@ def _table_interpretation(headers, rows):
             "a check result or evidence limit.")
 
 
-def print_table(headers, rows):
-    """Print a GFM table, then a column legend and data-derived interpretation."""
+def print_table(title, headers, rows):
+    """Print a titled GFM table, legend, interpretation, then a horizontal rule."""
     text_headers = [str(header) for header in headers]
     text_rows = [[str(value) for value in row] for row in rows]
     widths = [
@@ -2818,21 +2872,24 @@ def print_table(headers, rows):
             *(len(row[index]) for row in text_rows))
         for index in range(len(headers))
     ]
+    print(f"\n**{title}**")
     print("| " + " | ".join(
         f"{header:<{widths[index]}}"
         for index, header in enumerate(text_headers)) + " |")
-    print("| " + " | ".join("-" * width for width in widths) + " |")
+    print("| " + " | ".join(
+        ":" + "-" * max(3, width - 1) for width in widths) + " |")
     for row in text_rows:
         print("| " + " | ".join(
             f"{value:<{widths[index]}}"
             for index, value in enumerate(row)) + " |")
-    print("---")
     legend = "; ".join(
-        f"{header} = {TABLE_HEADER_LEGEND.get(header, 'literal column: ' + header)}"
+        f"{header} = {TABLE_HEADER_LEGEND.get(header, 'literal column: ' + header)} "
+        f"(goal: {TABLE_HEADER_GOAL.get(header, 'descriptive/context-dependent')})"
         for header in text_headers)
     _print_table_note("Legend", legend)
     _print_table_note("Interpretation",
                       _table_interpretation(text_headers, text_rows))
+    print("---")
 
 
 def print_bench(result):
@@ -2840,6 +2897,7 @@ def print_bench(result):
     if isinstance(predictor, dict):
         print("\n  Predictive-compression screening — native corpus; not loaded attribution")
         print_table(
+            "Predictive transform compression and planner savings — native corpus",
             ("transform", "adopt", "RAW+", "<=2024", "blocks", "extents",
              "xform ns", "inv ns", "LZ4-2 ns"),
             [(
@@ -2859,6 +2917,7 @@ def print_bench(result):
               f"transform={transform['transform_backend']} "
               f"inverse={transform['inverse_backend']}; classifier=scalar")
         print_table(
+            "Delta64 backend transform and inverse timing — native corpus",
             ("backend", "xform ns", "inv ns"),
             [(row["name"], row["transform_ns_per_page"],
               row["inverse_ns_per_page"])
@@ -2870,6 +2929,7 @@ def print_bench(result):
               f"{classifier['early_abort_pages']}/{classifier['eligible_pages']}; "
               f"timing: {classifier['benchmark_repeats']} batched repeats")
         print_table(
+            "Delta64 classifier routing quality by score threshold — native corpus",
             ("score", "neg call/eligible", "neg useful", "struct call/eligible",
              "struct useful"),
             [(
@@ -2881,6 +2941,7 @@ def print_bench(result):
             ) for row in predictor["thresholds"]])
         print("  Routed delta64 planner savings")
         print_table(
+            "Delta64 planner block and extent savings by score threshold — native corpus",
             ("score", "blocks", "extents"),
             [(row["threshold"], f"{row['routed_blocks_saved']:+d}",
               f"{row['routed_extents_saved']:+d}")
@@ -2888,6 +2949,7 @@ def print_bench(result):
         io_ns = predictor["io_model_block_ns"]
         print("  Routed delta64 CPU economics — elapsed-time model")
         print_table(
+            "Delta64 modeled CPU cost versus I/O opportunity — native corpus",
             ("score", "cpu/page ns", "ns/saved block", "SD x", "SSD x"),
             [(row["threshold"], row["routed_cpu_ns_per_page"],
               row["ns_per_saved_block"],
@@ -2898,6 +2960,7 @@ def print_bench(result):
              for row in predictor["thresholds"]])
         print("  Negative classifier profile breakdown")
         print_table(
+            "Delta64 negative-control classifier calls by profile — native corpus",
             ("score", "profile", "call/eligible", "useful"),
             [(row["threshold"], profile["name"],
               f"{profile['calls']}/{profile['eligible']}",
@@ -2909,6 +2972,7 @@ def print_bench(result):
     if isinstance(gc_scale, dict):
         print("\n  Garbage-collection map-scan scaling — native CPU only; no lower I/O")
         print_table(
+            "Garbage-collection victim and relocation scan scaling — native CPU",
             ("pages", "segs", "old ms", "select ms", "map ms", "list ms"),
             [(
                 row["logical_pages"], row["segments"],
@@ -2919,6 +2983,7 @@ def print_bench(result):
             ) for row in gc_scale["rows"]])
         print("  Dead-segment allocator-probe scaling — native CPU only; no lower I/O")
         print_table(
+            "Dead-segment allocator probe scaling — native CPU",
             ("logical pages", "segments", "old probe ms", "mapped probe ms"),
             [(
                 row["logical_pages"], row["segments"],
@@ -2930,6 +2995,7 @@ def print_bench(result):
     if isinstance(geometry, dict):
         print("\n  Simulated extent geometry — offline model; no format policy")
         print_table(
+            "Simulated extent placement geometry and estimated I/O",
             ("geometry", "blocks", "waste", "W runs", "cold R blk", "seq req"),
             [(
                 row["name"], row["physical_blocks"], row["waste_blocks"],
@@ -2948,6 +3014,7 @@ def print_bench(result):
     if isinstance(opportunity, dict):
         print("\n  Workload content opportunity — trace/fixture only; not kernel savings.")
         print_table(
+            "Trace workload duplicate-content opportunity",
             ("writes", "same-filled", "same-page", "resident-dup", "uniq payloads"),
             [(
                 opportunity["measured_write_ops"],
@@ -2968,12 +3035,14 @@ def print_bench(result):
         asynchronous = columns["async"]
         prep = data["preparation_counters"]
         counters = data["kernel_counters"]
+        model_label = "Serial-depth" if regime == "sd_emulated" else "Fast"
 
         print(f"\n  {regime.upper()} QD32 mixed — synthetic RAM model "
               f"{cfg['cap_mib_s']} MiB/s, {cfg['completion_nsec']} ns, "
               f"hwq={cfg['hw_queue_depth']}")
         print("  Throughput MB/s; p99 ms. Sync stays as the scheduling control.")
         print_table(
+            f"{model_label} QD32 mixed I/O throughput and latency",
             ("mode", "W", "lower W", "W req", "R", "R p99"),
             [
                 (mode,
@@ -3005,11 +3074,14 @@ def print_bench(result):
                              cpu_number(host["steal_fraction"], 100),
                              cpu_number(replay_cores), cpus,
                              f"{host['observations']}/{host['expected_observations']}"))
-        print_table(("mode", "host busy %", "CPU wait %", "steal %",
+        print_table(
+            f"{model_label} mixed-I/O host CPU and load context",
+            ("mode", "host busy %", "CPU wait %", "steal %",
                      "replay cores", "CPUs", "CPU n"), cpu_rows)
 
         print("  Production delta64 during mixed I/O — mean foreground attempt counters")
         print_table(
+            f"{model_label} mixed-I/O delta64 general attempt counters",
             ("mode", "rescue", "eligible", "passed", "attempts", "adopted", "RAW+", "LZ4+"),
             [(mode, {0: "off", 1: "on"}.get(columns[mode]['mixed_delta64_rescue'], "mixed"),
               *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
@@ -3017,18 +3089,21 @@ def print_bench(result):
                 "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues")))
              for mode in ("sync", "async")])
         print_table(
+            f"{model_label} mixed-I/O delta64 packing-path activity",
             ("mode", "pack eligible", "pack try", "cliff", "pack+"),
             [(mode, *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
                 "delta64_pack_eligible", "delta64_pack_attempts",
                 "delta64_pack_cliff_crossings", "delta64_pack_adopted")))
              for mode in ("sync", "async")])
         print_table(
+            f"{model_label} mixed-I/O delta64 classifier score distribution",
             ("mode", "score 0-7", "8-15", "16-23", "24+"),
             [(mode, *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
                 "delta64_score_0_7", "delta64_score_8_15",
                 "delta64_score_16_23", "delta64_score_ge24")))
              for mode in ("sync", "async")])
         print_table(
+            f"{model_label} mixed-I/O delta64 payload savings and rescue wall time",
             ("mode", "payload KiB", "RAW+ KiB", "LZ4+ KiB", "rescue ms"),
             [(mode, *(f"{columns[mode]['mixed_' + field] / 1024:.3f}" for field in (
                 "delta64_payload_bytes_saved", "delta64_raw_payload_bytes_saved",
@@ -3047,9 +3122,12 @@ def print_bench(result):
                     f"{columns[mode][f'{read_mode}_lower_read_requests']:.1f}",
                     f"{columns[mode][f'{read_mode}_read_p99_ms']:.2f}",
                 ))
-        print_table(("read", "lower KiB", "req", "p99"), read_rows)
+        print_table(
+            f"{model_label} verified 4 MiB packed-READ backing I/O and p99 latency",
+            ("read", "lower KiB", "req", "p99"), read_rows)
         print("  Packed-read C attribution — wall ms; engine excludes lower READ.")
         print_table(
+            f"{model_label} packed-READ engine wall-time attribution",
             ("read", "lower", "engine", "LZ4", "copy"),
             [
                 (label,
@@ -3079,11 +3157,14 @@ def print_bench(result):
                 f"{asynchronous[f'{mode}_read_meta_set_replacements']:.1f}",
                 f"{asynchronous[f'{mode}_read_meta_copy_bytes'] / 1024:.1f}",
             ))
-        print_table(("read", "lookups", "set hit %", "primary %", "secondary %", "probes/lookup",
+        print_table(
+            f"{model_label} packed-READ metadata-cache locality — async arm",
+            ("read", "lookups", "set hit %", "primary %", "secondary %", "probes/lookup",
                      "repl", "meta copy KiB"), locality_rows)
 
         print("  Lower queue — sampled time-weighted mean / peak during mixed I/O.")
         print_table(
+            f"{model_label} mixed-I/O lower-queue and K=1 run-slot occupancy",
             ("mode", "bdev R", "bdev W", "K=1 run slot"),
             [
                 (mode,
@@ -3098,6 +3179,7 @@ def print_bench(result):
             ])
         print("  Mixed window bins; close=P/D/I")
         print_table(
+            f"{model_label} mixed-I/O retained-window size and close reasons",
             ("mode", "1", "2", "3-4", "5-8", "9-16", "17-64", "P/D/I"),
             [
                 (mode,
@@ -3117,6 +3199,7 @@ def print_bench(result):
             "pack_close_tail_target_le4", "pack_close_tail_target",
             "pack_close_burst_target", "pack_close_service_dry")
         print_table(
+            f"{model_label} mixed-I/O PACK_READY close causes",
             ("mode", "tail<=4", "tail", "burst", "dry"),
             [
                 (mode, *(f"{columns[mode][f'mixed_{field}']:.1f}"
@@ -3136,6 +3219,7 @@ def print_bench(result):
             "pack_close_burst_count_9_16", "pack_close_burst_count_17_64",
             "pack_close_burst_overshoot")
         print_table(
+            f"{model_label} mixed-I/O burst-close site and geometry attribution",
             ("mode", "adm/wrk", "t<=4/5-8/9-16/17+", "c<=4/5-8/9-16/17+", "over"),
             [
                 (mode,
@@ -3172,7 +3256,9 @@ def print_bench(result):
                 f"{columns[mode]['mixed_pack_tail_many_idle']:.1f}",
                 f"{columns[mode]['mixed_burst_target_grows']:.1f}/"
                 f"{columns[mode]['mixed_burst_target_shrinks']:.1f}"))
-        print_table(("mode", "0 I/N", "1 I/N", "2+ I/N", "grow/shrink"),
+        print_table(
+            f"{model_label} mixed-I/O post-PACK tail samples",
+            ("mode", "0 I/N", "1 I/N", "2+ I/N", "grow/shrink"),
                     tail_rows)
         print("  Mixed burst-target shrink attribution")
         shrink_rows = []
@@ -3196,7 +3282,9 @@ def print_bench(result):
             *(f"{columns['async'][f'mixed_{field}'] - columns['sync'][f'mixed_{field}']:+.1f}"
               for field in shrink_fields),
         ))
-        print_table(("mode", "skip-I0", "after-I0", "after-read", "other",
+        print_table(
+            f"{model_label} mixed-I/O burst-target shrink attribution",
+            ("mode", "skip-I0", "after-I0", "after-read", "other",
                      "<=8", "9-32", ">32"), shrink_rows)
         if regime == "ssd_emulated":
             mixed_ab = data["criteria"]["async_vs_sync"]
@@ -3220,6 +3308,7 @@ def print_bench(result):
                     ("burst", "pack_close_burst_target"),
                     ("dry", "pack_close_service_dry")))
             print_table(
+                "Fast mixed-I/O async-minus-sync paired 95% confidence intervals",
                 ("metric", "mean", "low", "high"),
                 [(label, f"{mean:+.1f}", f"{low:+.1f}", f"{high:+.1f}")
                  for label, mean, low, high in ci_rows])
@@ -3243,9 +3332,12 @@ def print_bench(result):
                 burst_ci_rows.append((
                     label, f"{interval['mean']:+.1f}",
                     f"{interval['low']:+.1f}", f"{interval['high']:+.1f}"))
-            print_table(("metric", "mean", "low", "high"), burst_ci_rows)
+            print_table(
+                "Fast mixed-I/O burst-close async-minus-sync paired 95% confidence intervals",
+                ("metric", "mean", "low", "high"), burst_ci_rows)
         print("  Async pipeline — wall timings overlap; callback rows include scheduler delay.")
         print_table(
+            f"{model_label} async pipeline wall-time attribution",
             ("stage", "busy ms", "overlap/stall ms"),
             [
                 ("LZ4",
@@ -3296,6 +3388,7 @@ def print_bench(result):
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
             ])
         print_table(
+            f"{model_label} asynchronous-preparation scheduling signals",
             ("async signal", "mean"),
             [
                 ("direct LZ4 input",
@@ -3369,6 +3462,7 @@ def print_bench(result):
         async_criteria = data["criteria"]["async"]
         print("  Verdict")
         print_table(
+            f"{model_label} mixed-I/O qualification criteria",
             ("check", "result"),
             [
                 ("async/raw W", async_criteria["throughput_vs_raw"]),
@@ -3394,11 +3488,14 @@ def print_bench(result):
                 f"{seq['parallel_read_coalesced_reqs_saved']:.1f}",
                 f"{rnd['parallel_read_coalesced_reqs_saved']:.1f}",
             ))
-        print_table(("merge", "seq req", "seq p99", "rnd req", "rnd p99",
+        print_table(
+            "Fast-model adjacent-range READ coalescing means — five matched rounds",
+            ("merge", "seq req", "seq p99", "rnd req", "rnd p99",
                      "seq saved", "rnd saved"), rows)
         active = coalesce_ab["modes"]["1"]
         print("  Merged-range accounting")
         print_table(
+            "Fast-model merged-range READ accounting — merge enabled",
             ("read", "dist", "adj", "merged", "blocks", "extra"),
             [
                 ("seq",
@@ -3416,6 +3513,7 @@ def print_bench(result):
             ])
         print("  Reasons adjacent READs were not merged")
         print_table(
+            "Fast-model reasons eligible adjacent READs were not merged",
             ("read", "cached", "noncontig", "gap", "other"),
             [
                 ("seq",
@@ -3455,11 +3553,14 @@ def print_bench(result):
                 f"{rnd['read_p99_ms']:.2f}",
                 f"{seq['parallel_read_coalesced_reqs_saved']:.1f}",
             ))
-        print_table(("merge", "seq req", "seq p99", "rnd req", "rnd p99",
+        print_table(
+            "Serial-depth adjacent-range READ coalescing means — five matched rounds",
+            ("merge", "seq req", "seq p99", "rnd req", "rnd p99",
                      "seq saved"), rows)
         active = sd_coalesce_ab["modes"]["1"]
         print("  Serial-depth merged-range attribution")
         print_table(
+            "Serial-depth merged-range READ attribution — merge enabled",
             ("read", "merged", "cached", "noncontig", "gap", "other"),
             [
                 ("seq",
@@ -3487,7 +3588,9 @@ def print_bench(result):
                 (label, "p99", f"{p99['mean'] * 100:+.1f}%",
                  f"{p99['low'] * 100:+.1f}%", f"{p99['high'] * 100:+.1f}%"),
             ))
-        print_table(("read", "metric", "mean", "low", "high"), ci_rows)
+        print_table(
+            "Serial-depth READ coalescing paired 95% confidence intervals",
+            ("read", "metric", "mean", "low", "high"), ci_rows)
     else:
         print("\n  Serial-depth adjacent-range READ coalescing: NOT QUALIFIED "
               f"({sd_coalesce_ab.get('reason', sd_coalesce_ab.get('overall', 'NOT_RUN'))})")
@@ -3496,6 +3599,7 @@ def print_bench(result):
     if loaded.get("overall") == "PASS":
         print("\n  Lifecycle")
         print_table(
+            "Loaded correctness, lifecycle, GC, and reclaim checks",
             ("check", "result"),
             [
                 ("RAW/zero pages",
@@ -3553,6 +3657,7 @@ def print_bench(result):
 
     print("\n  Limitations")
     print_table(
+        "Qualification scope and evidence limitations",
         ("scope", "value"),
         [
             ("media", "synthetic RAM only; no physical-device evidence"),
@@ -3585,13 +3690,16 @@ def print_bench(result):
                 f"{limits['effective_4k_model_ceiling_mbps']:.2f}",
                 f"{raw_qd32:.2f}",
             ))
-        print_table(("model", "cap MB/s", "4K latency MB/s",
+        print_table(
+            "Synthetic lower-device model limits and measured raw QD32 throughput",
+            ("model", "cap MB/s", "4K latency MB/s",
                      "effective MB/s", "raw QD32 MB/s"), rows)
 
         print("\n  WRITE-ONLY SUSTAINED-QD EVIDENCE")
         print("  Persistent lane workers; logical WRITE MB/s, no timed per-I/O Future dispatch.")
         for regime in MODEL_ORDER:
             cfg = MODEL_SPECS[regime]
+            model_label = "Serial-depth" if regime == "sd_emulated" else "Fast"
             points = saturation["regimes"][regime]
             by_qd = {}
             for point in points:
@@ -3637,13 +3745,19 @@ def print_bench(result):
                     f"{windows['close_deadline']}/"
                     f"{windows['close_idle']}",
                 ))
-            print_table(("QD", "raw", "sync", "async", "A/S", "A req"),
+            print_table(
+                f"{model_label} sustained-QD WRITE throughput and lower requests",
+                ("QD", "raw", "sync", "async", "A/S", "A req"),
                         throughput_rows)
             print("  Async preparation")
-            print_table(("QD", "wave", "head/tail", "inline", "hand/wait"),
+            print_table(
+                f"{model_label} sustained-QD asynchronous-preparation activity",
+                ("QD", "wave", "head/tail", "inline", "hand/wait"),
                         prep_rows)
             print("  Async windows; close=P/D/I")
-            print_table(("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
+            print_table(
+                f"{model_label} sustained-QD retained-window geometry and close reasons",
+                ("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
                         window_rows)
         for qd in (4, 8, 32):
             ci = saturation[f"fast_qd{qd}_paired"][

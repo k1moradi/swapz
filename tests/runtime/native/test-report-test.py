@@ -1268,34 +1268,50 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("Timed 4MiB", rendered)
         self.assertNotIn("QD4 sync windows:", rendered)
         # Every stdout table must be directly copy/pasteable as Markdown:
-        # unindented GFM pipe syntax, >=3 separator dashes per column, and a
-        # literal horizontal rule immediately after the last row.
+        # a bold self-contained title, unindented GFM pipe syntax, explicit
+        # left alignment with >=3 separator dashes per column, then the legend,
+        # interpretation, and a literal horizontal rule.
         lines = rendered.splitlines()
+
+        def is_left_aligned_separator(cell):
+            cell = cell.strip()
+            return (cell.startswith(":") and len(cell[1:]) >= 3 and
+                    set(cell[1:]) <= {"-"})
+
         table_starts = [
             index for index in range(len(lines) - 1)
             if lines[index].startswith("| ") and
             lines[index + 1].startswith("| ") and
-            all(set(cell.strip()) <= {"-"} and len(cell.strip()) >= 3
+            all(is_left_aligned_separator(cell)
                 for cell in lines[index + 1].strip("|").split("|"))
         ]
         self.assertGreater(len(table_starts), 10)
         self.assertEqual(rendered.count("  Legend:"), len(table_starts))
         self.assertEqual(rendered.count("  Interpretation:"), len(table_starts))
+        self.assertEqual(
+            sum(line.startswith("**") and line.endswith("**") for line in lines),
+            len(table_starts))
         for start in table_starts:
+            self.assertGreater(start, 0)
+            self.assertRegex(lines[start - 1], r"^\*\*\S.+\S\*\*$")
             index = start + 2
             while index < len(lines) and lines[index].startswith("| "):
                 index += 1
             self.assertLess(index, len(lines))
-            self.assertEqual(lines[index], "---")
-            index += 1
-            self.assertLess(index, len(lines))
             self.assertTrue(lines[index].startswith("  Legend:"))
+            legend_lines = [lines[index]]
             index += 1
-            while (index < len(lines) and lines[index].startswith("    ") and
-                   not lines[index].startswith("  Interpretation:")):
+            while index < len(lines) and lines[index].startswith("    "):
+                legend_lines.append(lines[index])
                 index += 1
+            self.assertIn("goal:", " ".join(legend_lines))
             self.assertLess(index, len(lines))
             self.assertTrue(lines[index].startswith("  Interpretation:"))
+            index += 1
+            while index < len(lines) and lines[index].startswith("    "):
+                index += 1
+            self.assertLess(index, len(lines))
+            self.assertEqual(lines[index], "---")
         self.assertNotRegex(rendered, r"(?m)^  \|")
         self.assertLess(max(map(len, lines)), 96)
 
