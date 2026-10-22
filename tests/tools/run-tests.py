@@ -64,7 +64,8 @@ def paired_ci95(values):
 
 
 def matched_binary_pairs(rows, field):
-    if len(rows) != len(CONFIRMATION_SEQUENCE) or             [row.get(field) for row in rows] != list(CONFIRMATION_SEQUENCE):
+    if len(rows) != len(CONFIRMATION_SEQUENCE) or \
+            [row.get(field) for row in rows] != list(CONFIRMATION_SEQUENCE):
         raise ValueError("five counterbalanced matched rounds required")
     pairs = []
     for index in range(0, len(rows), 2):
@@ -73,6 +74,22 @@ def matched_binary_pairs(rows, field):
             first[field]: first,
             second[field]: second,
         })
+    return pairs
+
+
+def matched_value_pairs(rows, field, low, high):
+    expected = [high if bit else low for bit in CONFIRMATION_SEQUENCE]
+    if len(rows) != len(expected) or \
+            [row.get(field) for row in rows] != expected:
+        raise ValueError(
+            f"five counterbalanced {low}/{high} matched rounds required")
+    pairs = []
+    for index in range(0, len(rows), 2):
+        first, second = rows[index:index + 2]
+        pair = {first[field]: first, second[field]: second}
+        if set(pair) != {low, high}:
+            raise ValueError("matched pair does not contain both settings")
+        pairs.append(pair)
     return pairs
 
 CLOSE_REASON_LABELS = (
@@ -1358,9 +1375,9 @@ def run_stage(title, command, result, *, parse_bench=False):
                        sd_coalesce_diagnostic.get("overall") !=
                        "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
                        lz4_acceleration_diagnostic.get("overall") !=
-                       "PASS_DIRECTIONAL_SWEEP" or
+                       "PASS_LZ4_ACCELERATION_AB" or
                        delta64_prepare_diagnostic.get("overall") !=
-                       "PASS_DELTA64_PREPARE_PILOT"))
+                       "PASS_DELTA64_PREPARE_AB"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -1402,15 +1419,15 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
                     "reason", "serial-depth adjacent-range READ coalescing evidence is incomplete")
             elif lz4_acceleration_diagnostic.get("overall") != (
-                    "PASS_DIRECTIONAL_SWEEP"):
-                record["failed_phase"] = "loaded LZ4 acceleration sweep"
+                    "PASS_LZ4_ACCELERATION_AB"):
+                record["failed_phase"] = "loaded LZ4 acceleration 1/4 A/B"
                 record["diagnostic"] = lz4_acceleration_diagnostic.get(
-                    "reason", "loaded LZ4 acceleration evidence is incomplete")
+                    "reason", "paired loaded LZ4 acceleration evidence is incomplete")
             elif delta64_prepare_diagnostic.get("overall") != (
-                    "PASS_DELTA64_PREPARE_PILOT"):
-                record["failed_phase"] = "delta64 preparation-width pilot"
+                    "PASS_DELTA64_PREPARE_AB"):
+                record["failed_phase"] = "delta64 K=1/K=2 preparation A/B"
                 record["diagnostic"] = delta64_prepare_diagnostic.get(
-                    "reason", "delta64 preparation-width evidence is incomplete")
+                    "reason", "paired delta64 preparation evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1655,61 +1672,63 @@ def parse_lz4_acceleration(output):
 
 
 def lz4_acceleration_verdict(sessions):
-    """Fail closed unless the directional 1/2/3/4 sweep is isolated and exact."""
-    if [row.get("lz4_acceleration") for row in sessions] != list(LZ4_ACCELERATIONS):
-        return {"overall": "NOT_QUALIFIED",
-                "reason": "loaded LZ4 sweep must contain acceleration 1/2/3/4 once"}
+    """Require five counterbalanced loaded acceleration-1/4 matched pairs."""
+    try:
+        pairs = matched_value_pairs(
+            sessions, "lz4_acceleration", 1, 4)
+    except ValueError as exc:
+        return {"overall": "NOT_QUALIFIED", "reason": str(exc)}
+
     expected_model = MODEL_SPECS["ssd_emulated"]
     provenance = None
-    observations = []
     for index, row in enumerate(sessions):
         if row.get("status") != "PASS" or row.get("async_prepare") != 1 or \
                 row.get("regime") != "ssd_emulated" or \
-                row.get("order") != ("swapz-first" if index % 2 else "off-first"):
+                row.get("order") != ("swapz-first" if index % 2 else
+                                     "off-first"):
             return {"overall": "NOT_QUALIFIED",
-                    "reason": "loaded LZ4 sweep session is incomplete or misordered"}
+                    "reason": "loaded LZ4 A/B session is incomplete or misordered"}
         model = row.get("device_model")
         if not isinstance(model, dict) or any(
                 model.get(key) != expected_model[key]
                 for key in ("cap_mib_s", "completion_nsec", "irqmode",
                             "queue_mode", "submit_queues", "hw_queue_depth")):
             return {"overall": "NOT_QUALIFIED",
-                    "reason": "loaded LZ4 sweep device model mismatch"}
+                    "reason": "loaded LZ4 A/B device model mismatch"}
         if set(row.get("arms", {})) != {"off", "swapz"}:
             return {"overall": "NOT_QUALIFIED",
-                    "reason": "loaded LZ4 sweep must retain both paired arms"}
+                    "reason": "loaded LZ4 A/B must retain both paired arms"}
         swapz = row["arms"]["swapz"]
+        off = row["arms"]["off"]
         kernel = swapz.get("kernel_write_path")
         error = timed_window_error(kernel)
         if error:
             return {"overall": "NOT_QUALIFIED",
-                    "reason": "loaded LZ4 sweep telemetry: " + error}
+                    "reason": "loaded LZ4 A/B telemetry: " + error}
         if (kernel["lz4_acceleration"] != row["lz4_acceleration"] or
                 kernel["delta64_rescue"] != 0):
             return {"overall": "NOT_QUALIFIED",
-                    "reason": "loaded LZ4 sweep policy does not match its arm"}
-        off = row["arms"]["off"]
-        arm_provenance = tuple(swapz.get(key) for key in (
-            "source_sha", "fixture_sha256", "trace_sha256"))
-        off_provenance = tuple(off.get(key) for key in (
-            "source_sha", "fixture_sha256", "trace_sha256"))
+                    "reason": "loaded LZ4 A/B policy does not match its arm"}
+        arm_provenance = tuple(swapz.get(key) for key in
+                               BENCHMARK_PROVENANCE_FIELDS)
+        off_provenance = tuple(off.get(key) for key in
+                               BENCHMARK_PROVENANCE_FIELDS)
         if (not isinstance(arm_provenance[0], str) or
                 not re.fullmatch(r"[0-9a-f]{40}", arm_provenance[0]) or
                 not isinstance(arm_provenance[1], str) or
                 not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[1]) or
                 not isinstance(arm_provenance[2], str) or
                 not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[2]) or
-                any(not isinstance(value, str) or not value
-                    for value in off_provenance) or
                 arm_provenance != off_provenance):
             return {"overall": "INCONCLUSIVE",
-                    "reason": "loaded LZ4 sweep paired provenance is missing or mismatched"}
+                    "reason": "loaded LZ4 A/B paired provenance is missing or mismatched"}
         if provenance is None:
             provenance = arm_provenance
         elif arm_provenance != provenance:
             return {"overall": "INCONCLUSIVE",
-                    "reason": "loaded LZ4 sweep workload differs across accelerations"}
+                    "reason": "loaded LZ4 A/B workload differs across sessions"}
         for arm in (off, swapz):
+            host = arm.get("host_cpu")
             if (type(arm.get("input_write_mbps")) not in (int, float) or
                     not math.isfinite(arm["input_write_mbps"]) or
                     arm["input_write_mbps"] <= 0 or
@@ -1719,38 +1738,128 @@ def lz4_acceleration_verdict(sessions):
                     arm["lower_write_requests"] <= 0 or
                     type(arm.get("write_p99_ms")) not in (int, float) or
                     not math.isfinite(arm["write_p99_ms"]) or
-                    arm["write_p99_ms"] < 0):
+                    arm["write_p99_ms"] <= 0 or
+                    not isinstance(host, dict) or
+                    host.get("status") != "AVAILABLE" or
+                    type(host.get("busy_fraction")) not in (int, float) or
+                    type(host.get("pressure_some_fraction")) not in
+                    (int, float)):
                 return {"overall": "NOT_QUALIFIED",
-                        "reason": "loaded LZ4 sweep performance counters are missing"}
-        observations.append({
-            "lz4_acceleration": row["lz4_acceleration"],
-            "order": row["order"],
-            "arms": row["arms"],
-        })
+                        "reason": "loaded LZ4 A/B performance or host-load counters are missing"}
+        if any(type(kernel.get(field)) is not int or kernel[field] <= 0
+               for field in ("lz4_wall_ns", "ordered_lz4_wall_ns",
+                             "prep_lz4_wall_ns", "direct_lz4_input_pages")):
+            return {"overall": "NOT_QUALIFIED",
+                    "reason": "loaded LZ4 A/B compression timing is missing"}
+
+    modes = {}
+    for acceleration in (1, 4):
+        rows = [row for row in sessions
+                if row["lz4_acceleration"] == acceleration]
+        modes[str(acceleration)] = {
+            "observations": len(rows),
+            "swapz_write_mbps": statistics.mean(
+                row["arms"]["swapz"]["input_write_mbps"] for row in rows),
+            "swapz_write_p99_ms": statistics.mean(
+                row["arms"]["swapz"]["write_p99_ms"] for row in rows),
+            "lower_write_bytes": statistics.mean(
+                row["arms"]["swapz"]["lower_write_bytes"] for row in rows),
+            "lower_write_requests": statistics.mean(
+                row["arms"]["swapz"]["lower_write_requests"] for row in rows),
+            "lz4_wall_ns": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]["lz4_wall_ns"]
+                for row in rows),
+            "ordered_lz4_wall_ns": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]["ordered_lz4_wall_ns"]
+                for row in rows),
+            "prep_lz4_wall_ns": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]["prep_lz4_wall_ns"]
+                for row in rows),
+            "direct_lz4_input_pages": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["direct_lz4_input_pages"] for row in rows),
+            "off_write_mbps": statistics.mean(
+                row["arms"]["off"]["input_write_mbps"] for row in rows),
+            "host_busy_fraction": statistics.mean(
+                row["arms"]["swapz"]["host_cpu"]["busy_fraction"] for row in rows),
+            "host_pressure_some_fraction": statistics.mean(
+                row["arms"]["swapz"]["host_cpu"]["pressure_some_fraction"]
+                for row in rows),
+        }
+
+    changes = {
+        "throughput_change_fraction": [],
+        "p99_change_fraction": [],
+        "lower_bytes_change_fraction": [],
+        "lower_requests_change_fraction": [],
+        "lz4_wall_change_fraction": [],
+        "ordered_lz4_wall_change_fraction": [],
+        "prep_lz4_wall_change_fraction": [],
+        "off_throughput_change_fraction": [],
+        "host_busy_delta": [],
+        "host_pressure_some_delta": [],
+    }
+    for pair in pairs:
+        a1, a4 = pair[1], pair[4]
+        lo, hi = a1["arms"]["swapz"], a4["arms"]["swapz"]
+        lo_k, hi_k = lo["kernel_write_path"], hi["kernel_write_path"]
+        changes["throughput_change_fraction"].append(
+            hi["input_write_mbps"] / lo["input_write_mbps"] - 1.0)
+        changes["p99_change_fraction"].append(
+            hi["write_p99_ms"] / lo["write_p99_ms"] - 1.0)
+        changes["lower_bytes_change_fraction"].append(
+            hi["lower_write_bytes"] / lo["lower_write_bytes"] - 1.0)
+        changes["lower_requests_change_fraction"].append(
+            hi["lower_write_requests"] / lo["lower_write_requests"] - 1.0)
+        changes["lz4_wall_change_fraction"].append(
+            hi_k["lz4_wall_ns"] / lo_k["lz4_wall_ns"] - 1.0)
+        changes["ordered_lz4_wall_change_fraction"].append(
+            hi_k["ordered_lz4_wall_ns"] /
+            lo_k["ordered_lz4_wall_ns"] - 1.0)
+        changes["prep_lz4_wall_change_fraction"].append(
+            hi_k["prep_lz4_wall_ns"] / lo_k["prep_lz4_wall_ns"] - 1.0)
+        changes["off_throughput_change_fraction"].append(
+            a4["arms"]["off"]["input_write_mbps"] /
+            a1["arms"]["off"]["input_write_mbps"] - 1.0)
+        changes["host_busy_delta"].append(
+            hi["host_cpu"]["busy_fraction"] -
+            lo["host_cpu"]["busy_fraction"])
+        changes["host_pressure_some_delta"].append(
+            hi["host_cpu"]["pressure_some_fraction"] -
+            lo["host_cpu"]["pressure_some_fraction"])
+
     return {
-        "overall": "PASS_DIRECTIONAL_SWEEP",
-        "scope": "DIRECTIONAL_SINGLE_OBSERVATION_PER_SETTING",
-        "observations": observations,
-        "interpretation": "SYNTHETIC_RAM_MODEL_DIRECTIONAL_ONLY_NO_PROMOTION",
+        "overall": "PASS_LZ4_ACCELERATION_AB",
+        "scope": "PAIRED_SYNTHETIC_RAM_MODEL_ONLY",
+        "confidence": "PAIRED_95PCT_CI_REPORTED",
+        "matched_pairs": 5,
+        "device_model": expected_model,
+        "modes": modes,
+        "paired": {name: paired_ci95(values)
+                   for name, values in changes.items()},
+        "interpretation":
+            "SAME_SOURCE_ACCEL1_ACCEL4_COUNTERBALANCED_ASYNC_DELTA64_OFF",
     }
 
 
 def parse_delta64_prepare_sessions(output):
-    """Parse the directional SSD-model delta64 K=1/2/4 preparation pilot."""
+    """Parse the counterbalanced SSD-model delta64 K=1/K=2 preparation A/B."""
     sessions, current = [], None
     for line in output.splitlines():
         line = line.strip()
-        match = re.fullmatch(r"START_DELTA64_PREPARE_WORKERS=(1|2|4)", line)
+        match = re.fullmatch(r"START_DELTA64_PREPARE_WORKERS=(1|2)", line)
         if match:
             current = {
                 "workers": int(match.group(1)), "status": "INCOMPLETE",
-                "device_model": None, "swapz": None,
+                "device_model": None, "arms": {}, "order": "unknown",
             }
             sessions.append(current)
             continue
         if current is None:
             continue
-        if line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+        if line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
             model = re.fullmatch(
                 r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
                 line)
@@ -1768,123 +1877,247 @@ def parse_delta64_prepare_sessions(output):
                 obj = json.loads(line)
             except (ValueError, TypeError):
                 continue
-            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
+            if obj.get("candidate") not in ("off", "swapz") or \
+                    obj.get("verdict") != "PASS":
                 continue
+            candidate = obj["candidate"]
             rates = obj.get("throughput_mbps") or {}
             lower = obj.get("lower_io") or {}
-            current["swapz"] = {
+            current["arms"][candidate] = {
                 "source_sha": obj.get("source_sha"),
                 "fixture_sha256": obj.get("fixture_sha256"),
                 "trace_sha256": obj.get("trace_sha256"),
                 "write_mbps": rates.get("logical_write_mbps"),
                 "lower_write_bytes": lower.get("lower_write_bytes"),
                 "lower_write_requests": lower.get("lower_write_requests"),
-                "write_p99_ms": obj.get("write_p99_ns", 0) / 1e6,
+                "write_p99_ms": (obj.get("write_p99_ns") / 1e6
+                                 if type(obj.get("write_p99_ns")) in
+                                 (int, float) else None),
                 "host_cpu": host_cpu_record(obj),
                 "kernel_write_path": obj.get("kernel_write_path"),
             }
         else:
-            done = re.fullmatch(r"PASS_DELTA64_PREPARE_WORKERS=(1|2|4)", line)
-            if done and int(done.group(1)) == current["workers"]:
+            done = re.fullmatch(r"PASS_DELTA64_PREPARE_WORKERS=(1|2)", line)
+            if done and int(done.group(1)) == current["workers"] and \
+                    set(current["arms"]) == {"off", "swapz"}:
                 current["status"] = "PASS"
                 current = None
     return sessions
 
 
 def delta64_prepare_verdict(sessions):
-    """Require real rescue work and real K>1 execution before reporting the pilot."""
-    if [row.get("workers") for row in sessions] != [1, 2, 4]:
-        return {"overall": "INCOMPLETE",
-                "reason": "delta64 preparation pilot must contain K=1/2/4 in order"}
+    """Require five counterbalanced K=1/K=2 pairs with real timed overlap."""
+    try:
+        pairs = matched_value_pairs(sessions, "workers", 1, 2)
+    except ValueError as exc:
+        return {"overall": "INCOMPLETE", "reason": str(exc)}
+
     expected = MODEL_SPECS["ssd_emulated"]
-    source = fixture = trace = None
-    modes = {}
-    for row in sessions:
-        if row.get("status") != "PASS":
+    provenance = None
+    for index, row in enumerate(sessions):
+        if row.get("status") != "PASS" or \
+                row.get("order") != ("swapz-first" if index % 2 else
+                                     "off-first"):
             return {"overall": "INCOMPLETE",
-                    "reason": "delta64 preparation pilot did not complete"}
+                    "reason": "delta64 K=1/K=2 A/B did not complete in counterbalanced order"}
         model = row.get("device_model")
         if not isinstance(model, dict) or any(
                 model.get(key) != expected[key]
                 for key in ("cap_mib_s", "completion_nsec", "irqmode",
                             "queue_mode", "submit_queues", "hw_queue_depth")):
             return {"overall": "INCOMPLETE",
-                    "reason": "delta64 preparation pilot device model mismatch"}
-        arm = row.get("swapz")
-        kernel = arm.get("kernel_write_path") if isinstance(arm, dict) else None
+                    "reason": "delta64 K=1/K=2 A/B device model mismatch"}
+        if set(row.get("arms", {})) != {"off", "swapz"}:
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 K=1/K=2 A/B requires both paired arms"}
+        arm = row["arms"]["swapz"]
+        off = row["arms"]["off"]
+        kernel = arm.get("kernel_write_path")
         if not isinstance(kernel, dict) or any(
                 type(kernel.get(field)) is not int or kernel[field] < 0
                 for field in KERNEL_WRITE_FIELDS):
             return {"overall": "INCOMPLETE",
-                    "reason": "delta64 preparation pilot telemetry missing"}
+                    "reason": "delta64 K=1/K=2 A/B telemetry missing"}
         error = timed_window_error(kernel)
         if error:
             return {"overall": "INCOMPLETE",
-                    "reason": "delta64 preparation pilot: " + error}
+                    "reason": "delta64 K=1/K=2 A/B: " + error}
         workers = row["workers"]
         if (kernel["delta64_rescue"] != 1 or
                 kernel["delta64_prepare_workers"] != workers):
             return {"overall": "INCOMPLETE",
-                    "reason": "delta64 preparation pilot policy mismatch"}
+                    "reason": "delta64 K=1/K=2 A/B policy mismatch"}
         if (not kernel["delta64_classifier_pass"] or
                 not kernel["delta64_attempts"] or
-                not kernel["delta64_adopted"]):
+                not kernel["delta64_adopted"] or
+                not kernel["delta64_prepare_pages"]):
             return {"overall": "INCOMPLETE",
-                    "reason": "delta64 preparation pilot did not exercise rescue"}
-        if not kernel["delta64_prepare_pages"]:
+                    "reason": "delta64 K=1/K=2 A/B did not exercise rescue and producer lanes"}
+        if workers == 1 and (
+                kernel["delta64_prepare_active_max"] > 1 or
+                kernel["delta64_prepare_parallel_starts"]):
             return {"overall": "INCOMPLETE",
-                    "reason": "delta64 preparation pilot bypassed producer lanes"}
-        if workers == 1 and kernel["delta64_prepare_active_max"] > 1:
-            return {"overall": "INCOMPLETE",
-                    "reason": "K=1 delta64 preparation exceeded one lane"}
-        if workers > 1 and (
+                    "reason": "K=1 delta64 preparation unexpectedly overlapped"}
+        if workers == 2 and (
                 kernel["delta64_prepare_active_max"] <= 1 or
                 not kernel["delta64_prepare_parallel_starts"]):
             return {"overall": "INCOMPLETE",
-                    "reason": "parallel delta64 arm never overlapped during timed replay"}
-        if (not isinstance(arm.get("write_mbps"), (int, float)) or
-                arm["write_mbps"] <= 0 or
-                not isinstance(arm.get("write_p99_ms"), (int, float)) or
-                arm["write_p99_ms"] < 0 or
-                not isinstance(arm.get("lower_write_bytes"), int) or
-                arm["lower_write_bytes"] <= 0 or
-                not isinstance(arm.get("lower_write_requests"), int) or
-                arm["lower_write_requests"] <= 0):
-            return {"overall": "INCOMPLETE",
-                    "reason": "delta64 preparation pilot performance metrics missing"}
-        source = source or arm.get("source_sha")
-        fixture = fixture or arm.get("fixture_sha256")
-        trace = trace or arm.get("trace_sha256")
-        if (arm.get("source_sha"), arm.get("fixture_sha256"),
-                arm.get("trace_sha256")) != (source, fixture, trace):
+                    "reason": "K=2 delta64 preparation never overlapped during timed replay"}
+        arm_provenance = tuple(arm.get(key) for key in
+                               BENCHMARK_PROVENANCE_FIELDS)
+        off_provenance = tuple(off.get(key) for key in
+                               BENCHMARK_PROVENANCE_FIELDS)
+        if (not isinstance(arm_provenance[0], str) or
+                not re.fullmatch(r"[0-9a-f]{40}", arm_provenance[0]) or
+                not isinstance(arm_provenance[1], str) or
+                not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[1]) or
+                not isinstance(arm_provenance[2], str) or
+                not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[2]) or
+                arm_provenance != off_provenance):
             return {"overall": "INCONCLUSIVE",
-                    "reason": "delta64 preparation pilot provenance mismatch"}
+                    "reason": "delta64 K=1/K=2 paired provenance is missing or mismatched"}
+        if provenance is None:
+            provenance = arm_provenance
+        elif arm_provenance != provenance:
+            return {"overall": "INCONCLUSIVE",
+                    "reason": "delta64 K=1/K=2 workload differs across sessions"}
+        for candidate in (off, arm):
+            host = candidate.get("host_cpu")
+            if (type(candidate.get("write_mbps")) not in (int, float) or
+                    candidate["write_mbps"] <= 0 or
+                    type(candidate.get("write_p99_ms")) not in (int, float) or
+                    candidate["write_p99_ms"] <= 0 or
+                    type(candidate.get("lower_write_bytes")) is not int or
+                    candidate["lower_write_bytes"] <= 0 or
+                    type(candidate.get("lower_write_requests")) is not int or
+                    candidate["lower_write_requests"] <= 0 or
+                    not isinstance(host, dict) or
+                    host.get("status") != "AVAILABLE" or
+                    type(host.get("busy_fraction")) not in (int, float) or
+                    type(host.get("pressure_some_fraction")) not in
+                    (int, float)):
+                return {"overall": "INCOMPLETE",
+                        "reason": "delta64 K=1/K=2 performance or host-load counters missing"}
+
+    for pair in pairs:
+        k1 = pair[1]["arms"]["swapz"]["kernel_write_path"]
+        k2 = pair[2]["arms"]["swapz"]["kernel_write_path"]
+        for field in ("delta64_attempts", "delta64_adopted",
+                      "delta64_payload_bytes_saved"):
+            if k1[field] != k2[field]:
+                return {"overall": "INCONCLUSIVE",
+                        "reason": f"delta64 K=1/K=2 useful work differs for {field}"}
+
+    modes = {}
+    for workers in (1, 2):
+        rows = [row for row in sessions if row["workers"] == workers]
         modes[str(workers)] = {
-            "write_mbps": arm["write_mbps"],
-            "write_p99_ms": arm["write_p99_ms"],
-            "lower_write_bytes": arm["lower_write_bytes"],
-            "lower_write_requests": arm["lower_write_requests"],
-            "prepare_active_max": kernel["delta64_prepare_active_max"],
-            "prepare_pages": kernel["delta64_prepare_pages"],
-            "prepare_parallel_starts":
-                kernel["delta64_prepare_parallel_starts"],
-            "delta64_attempts": kernel["delta64_attempts"],
-            "delta64_adopted": kernel["delta64_adopted"],
-            "delta64_payload_bytes_saved":
-                kernel["delta64_payload_bytes_saved"],
-            "delta64_transform_wall_ns":
-                kernel["delta64_transform_wall_ns"],
-            "delta64_wall_ns": kernel["delta64_wall_ns"],
-            "prep_lz4_wall_ns": kernel["prep_lz4_wall_ns"],
-            "host_cpu": arm["host_cpu"],
+            "observations": len(rows),
+            "write_mbps": statistics.mean(
+                row["arms"]["swapz"]["write_mbps"] for row in rows),
+            "write_p99_ms": statistics.mean(
+                row["arms"]["swapz"]["write_p99_ms"] for row in rows),
+            "lower_write_bytes": statistics.mean(
+                row["arms"]["swapz"]["lower_write_bytes"] for row in rows),
+            "lower_write_requests": statistics.mean(
+                row["arms"]["swapz"]["lower_write_requests"] for row in rows),
+            "prepare_active_max": max(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["delta64_prepare_active_max"] for row in rows),
+            "prepare_pages": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["delta64_prepare_pages"] for row in rows),
+            "prepare_parallel_starts": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["delta64_prepare_parallel_starts"] for row in rows),
+            "delta64_attempts": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["delta64_attempts"] for row in rows),
+            "delta64_adopted": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["delta64_adopted"] for row in rows),
+            "delta64_payload_bytes_saved": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["delta64_payload_bytes_saved"] for row in rows),
+            "delta64_transform_wall_ns": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["delta64_transform_wall_ns"] for row in rows),
+            "delta64_wall_ns": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["delta64_wall_ns"] for row in rows),
+            "prep_lz4_wall_ns": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["prep_lz4_wall_ns"] for row in rows),
+            "prep_worker_cpu_ns": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]
+                ["prep_worker_cpu_ns"] for row in rows),
+            "host_busy_fraction": statistics.mean(
+                row["arms"]["swapz"]["host_cpu"]["busy_fraction"] for row in rows),
+            "host_pressure_some_fraction": statistics.mean(
+                row["arms"]["swapz"]["host_cpu"]["pressure_some_fraction"]
+                for row in rows),
         }
+
+    changes = {
+        "throughput_change_fraction": [],
+        "p99_change_fraction": [],
+        "lower_bytes_change_fraction": [],
+        "lower_requests_change_fraction": [],
+        "delta64_wall_change_fraction": [],
+        "transform_wall_change_fraction": [],
+        "prep_lz4_wall_change_fraction": [],
+        "prep_worker_cpu_change_fraction": [],
+        "off_throughput_change_fraction": [],
+        "host_busy_delta": [],
+        "host_pressure_some_delta": [],
+    }
+    for pair in pairs:
+        r1, r2 = pair[1], pair[2]
+        k1, k2 = r1["arms"]["swapz"], r2["arms"]["swapz"]
+        w1, w2 = k1["kernel_write_path"], k2["kernel_write_path"]
+        changes["throughput_change_fraction"].append(
+            k2["write_mbps"] / k1["write_mbps"] - 1.0)
+        changes["p99_change_fraction"].append(
+            k2["write_p99_ms"] / k1["write_p99_ms"] - 1.0)
+        changes["lower_bytes_change_fraction"].append(
+            k2["lower_write_bytes"] / k1["lower_write_bytes"] - 1.0)
+        changes["lower_requests_change_fraction"].append(
+            k2["lower_write_requests"] / k1["lower_write_requests"] - 1.0)
+        changes["delta64_wall_change_fraction"].append(
+            w2["delta64_wall_ns"] / w1["delta64_wall_ns"] - 1.0)
+        changes["transform_wall_change_fraction"].append(
+            w2["delta64_transform_wall_ns"] /
+            w1["delta64_transform_wall_ns"] - 1.0)
+        changes["prep_lz4_wall_change_fraction"].append(
+            w2["prep_lz4_wall_ns"] / w1["prep_lz4_wall_ns"] - 1.0)
+        if w1["prep_worker_cpu_ns"] and w2["prep_worker_cpu_ns"]:
+            changes["prep_worker_cpu_change_fraction"].append(
+                w2["prep_worker_cpu_ns"] / w1["prep_worker_cpu_ns"] - 1.0)
+        changes["off_throughput_change_fraction"].append(
+            r2["arms"]["off"]["write_mbps"] /
+            r1["arms"]["off"]["write_mbps"] - 1.0)
+        changes["host_busy_delta"].append(
+            k2["host_cpu"]["busy_fraction"] -
+            k1["host_cpu"]["busy_fraction"])
+        changes["host_pressure_some_delta"].append(
+            k2["host_cpu"]["pressure_some_fraction"] -
+            k1["host_cpu"]["pressure_some_fraction"])
+
+    if len(changes["prep_worker_cpu_change_fraction"]) != 5:
+        return {"overall": "INCOMPLETE",
+                "reason": "delta64 K=1/K=2 worker CPU samples are incomplete"}
+
     return {
-        "overall": "PASS_DELTA64_PREPARE_PILOT",
-        "qualification": "DIRECTIONAL_SYNTHETIC_RAM_ONLY",
+        "overall": "PASS_DELTA64_PREPARE_AB",
+        "qualification": "PAIRED_SYNTHETIC_RAM_ONLY",
+        "confidence": "PAIRED_95PCT_CI_REPORTED",
+        "matched_pairs": 5,
         "device_model": expected,
         "modes": modes,
+        "paired": {name: paired_ci95(values)
+                   for name, values in changes.items()},
         "interpretation":
-            "K1_K2_K4_SAME_SOURCE_SAME_POSITIVE_FIXTURE_ORDERED_PUBLICATION_UNCHANGED",
+            "SAME_SOURCE_K1_K2_COUNTERBALANCED_POSITIVE_FIXTURE_ORDERED_PUBLICATION_UNCHANGED",
     }
 
 
@@ -4040,27 +4273,87 @@ def print_bench(result):
             ])
 
     lz4_sweep = result["benchmarks"].get("lz4_acceleration", {})
-    if lz4_sweep.get("overall") == "PASS_DIRECTIONAL_SWEEP":
+    if lz4_sweep.get("overall") == "PASS_LZ4_ACCELERATION_AB":
+        print("\n  LZ4 acceleration 1 vs 4 — five matched SSD-model rounds")
         rows = []
-        for observation in lz4_sweep["observations"]:
-            off = observation["arms"]["off"]
-            swapz = observation["arms"]["swapz"]
+        for acceleration in ("1", "4"):
+            mode = lz4_sweep["modes"][acceleration]
             rows.append((
-                observation["lz4_acceleration"],
-                f"{off['input_write_mbps']:.2f}",
-                f"{swapz['input_write_mbps']:.2f}",
-                f"{off['lower_write_bytes'] / 1024:.1f}",
-                f"{swapz['lower_write_bytes'] / 1024:.1f}",
-                off["lower_write_requests"],
-                swapz["lower_write_requests"],
-                f"{swapz['write_p99_ms']:.2f}",
+                acceleration,
+                f"{mode['swapz_write_mbps']:.2f}",
+                f"{mode['swapz_write_p99_ms']:.2f}",
+                f"{mode['lower_write_bytes'] / 1024:.1f}",
+                f"{mode['lower_write_requests']:.1f}",
+                f"{mode['lz4_wall_ns'] / 1e6:.2f}",
+                f"{mode['host_pressure_some_fraction'] * 100:.1f}",
             ))
         print_table(
-            "Loaded LZ4 acceleration — SSD RAM model; directional",
-            ("accel", "off W", "swap W", "off KiB", "swap KiB",
-             "off req", "swap req", "swap p99"), rows)
-        print("  One observation per setting; this sweep has no confidence intervals "
-              "or production promotion.")
+            "Loaded LZ4 acceleration means — SSD RAM model",
+            ("accel", "swap W", "p99", "lower KiB", "lower req",
+             "LZ4 ms", "PSI some %"), rows)
+        print("  accel4-vs-1 paired 95% CI")
+        ci_rows = []
+        for label, field in (
+                ("W %", "throughput_change_fraction"),
+                ("p99 %", "p99_change_fraction"),
+                ("lower B %", "lower_bytes_change_fraction"),
+                ("lower req %", "lower_requests_change_fraction"),
+                ("LZ4 wall %", "lz4_wall_change_fraction"),
+                ("ordered LZ4 %", "ordered_lz4_wall_change_fraction"),
+                ("prep LZ4 %", "prep_lz4_wall_change_fraction"),
+                ("raw-control W %", "off_throughput_change_fraction")):
+            ci = lz4_sweep["paired"][field]
+            ci_rows.append((label, f"{ci['mean'] * 100:+.1f}",
+                            f"{ci['low'] * 100:+.1f}",
+                            f"{ci['high'] * 100:+.1f}"))
+        print_table(
+            "Acceleration 4 minus 1 paired 95% confidence intervals",
+            ("metric", "mean", "low", "high"), ci_rows)
+    else:
+        print("\n  LZ4 acceleration 1/4 A/B: NOT QUALIFIED "
+              f"({lz4_sweep.get('reason', lz4_sweep.get('overall', 'NOT_RUN'))})")
+
+    delta64_ab = result["benchmarks"].get("delta64_prepare", {})
+    if delta64_ab.get("overall") == "PASS_DELTA64_PREPARE_AB":
+        print("\n  Delta64 preparation K=1 vs K=2 — five matched SSD-model rounds")
+        rows = []
+        for workers in ("1", "2"):
+            mode = delta64_ab["modes"][workers]
+            rows.append((
+                workers,
+                f"{mode['write_mbps']:.2f}",
+                f"{mode['write_p99_ms']:.2f}",
+                f"{mode['lower_write_requests']:.1f}",
+                f"{mode['delta64_wall_ns'] / 1e6:.2f}",
+                f"{mode['prep_lz4_wall_ns'] / 1e6:.2f}",
+                f"{mode['prepare_parallel_starts']:.1f}",
+                f"{mode['host_pressure_some_fraction'] * 100:.1f}",
+            ))
+        print_table(
+            "Delta64 preparation means — positive fixture",
+            ("K", "W MB/s", "p99", "lower req", "D64 ms",
+             "prep LZ4 ms", "parallel", "PSI some %"), rows)
+        ci_rows = []
+        for label, field in (
+                ("W %", "throughput_change_fraction"),
+                ("p99 %", "p99_change_fraction"),
+                ("lower B %", "lower_bytes_change_fraction"),
+                ("lower req %", "lower_requests_change_fraction"),
+                ("D64 wall %", "delta64_wall_change_fraction"),
+                ("xform wall %", "transform_wall_change_fraction"),
+                ("prep LZ4 %", "prep_lz4_wall_change_fraction"),
+                ("prep CPU %", "prep_worker_cpu_change_fraction"),
+                ("raw-control W %", "off_throughput_change_fraction")):
+            ci = delta64_ab["paired"][field]
+            ci_rows.append((label, f"{ci['mean'] * 100:+.1f}",
+                            f"{ci['low'] * 100:+.1f}",
+                            f"{ci['high'] * 100:+.1f}"))
+        print_table(
+            "K=2 minus K=1 paired 95% confidence intervals",
+            ("metric", "mean", "low", "high"), ci_rows)
+    else:
+        print("\n  Delta64 K=1/K=2 A/B: NOT QUALIFIED "
+              f"({delta64_ab.get('reason', delta64_ab.get('overall', 'NOT_RUN'))})")
 
     coalesce_ab = result["benchmarks"].get("read_coalesce_ab", {})
     if coalesce_ab.get("overall") == "PASS_READ_COALESCE_AB_CONFIRMATION":
@@ -4608,7 +4901,7 @@ def main():
                 saturation["overall"] = "INCONCLUSIVE"
                 saturation["reason"] = "Write-only evidence source Git ID mismatched tested checkout"
         lz4_sweep = result["benchmarks"]["lz4_acceleration"]
-        if lz4_sweep.get("overall") == "PASS_DIRECTIONAL_SWEEP" and \
+        if lz4_sweep.get("overall") == "PASS_LZ4_ACCELERATION_AB" and \
                 re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
             if any(session.get("arms", {}).get(candidate, {}).get("source_sha") !=
                    result["tested_commit_sha"]
@@ -4616,10 +4909,21 @@ def main():
                    for candidate in ("off", "swapz")):
                 lz4_sweep["overall"] = "INCONCLUSIVE"
                 lz4_sweep["reason"] = (
-                    "Loaded LZ4 sweep source Git ID mismatched tested checkout")
+                    "Loaded LZ4 A/B source Git ID mismatched tested checkout")
+        delta64_ab = result["benchmarks"]["delta64_prepare"]
+        if delta64_ab.get("overall") == "PASS_DELTA64_PREPARE_AB" and \
+                re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
+            if any(session.get("arms", {}).get(candidate, {}).get("source_sha") !=
+                   result["tested_commit_sha"]
+                   for session in result["benchmarks"]["delta64_prepare_sessions"]
+                   for candidate in ("off", "swapz")):
+                delta64_ab["overall"] = "INCONCLUSIVE"
+                delta64_ab["reason"] = (
+                    "Delta64 K=1/K=2 A/B source Git ID mismatched tested checkout")
         if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
                 saturation.get("overall") != "PASS_WRITE_SATURATION_EVIDENCE" or \
-                lz4_sweep.get("overall") != "PASS_DIRECTIONAL_SWEEP":
+                lz4_sweep.get("overall") != "PASS_LZ4_ACCELERATION_AB" or \
+                delta64_ab.get("overall") != "PASS_DELTA64_PREPARE_AB":
             result["overall"] = "FAIL"
             exit_code = 1
     write_report(result)
