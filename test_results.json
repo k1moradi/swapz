@@ -59,33 +59,6 @@
 }
 ],
 "scope": "OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY"
-},
-"gc_scan_scale": {
-"rows": [
-{
-"incremental_select_ns": 3984,
-"legacy_dead_probe_ns": 453145,
-"legacy_score_scan_ns": 4651417,
-"logical_pages": 262144,
-"mapped_dead_probe_ns": 2057,
-"relocation_list_ns": 1760,
-"relocation_scan_ns": 1212574,
-"segments": 1024,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 13882,
-"legacy_dead_probe_ns": 1665991,
-"legacy_score_scan_ns": 17998142,
-"logical_pages": 1048576,
-"mapped_dead_probe_ns": 6404,
-"relocation_list_ns": 2374,
-"relocation_scan_ns": 4547608,
-"segments": 4096,
-"victim_records": 256
-}
-],
-"scope": "OFFLINE_NATIVE_GC_SCALE_ONLY"
 }
 },
 "kernel_release": "7.0.0-38-generic",
@@ -95,20 +68,18 @@
 "source_sha": "dd46cc5e3ad5d730748e51e3a06718042b71c2b5",
 "stages": [
 {
-"elapsed_s": 9.313,
+"elapsed_s": 1.446,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
 "diagnostic": "Child returned nonzero in this non-privileged stage",
-"elapsed_s": 4.819,
+"elapsed_s": 2.569,
 "exit_code": 2,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
-"signals": [
-"PASS"
-],
+"signals": [],
 "status": "FAIL"
 }
 ],
