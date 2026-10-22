@@ -33,6 +33,11 @@ swapz_u32 swapz_predict_delta64_scalar(const swapz_u8 *input, swapz_u8 *output);
 void swapz_unpredict_delta64_scalar(const swapz_u8 *input, swapz_u8 *output);
 #if defined(CONFIG_X86_64) || defined(__x86_64__)
 swapz_u32 swapz_predict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output);
+#if defined(__x86_64__) && !defined(__KERNEL__)
+/* Native-only comparison function; never selected by kernel dispatch. */
+swapz_u32 swapz_predict_delta64_sse2_unrolled(const swapz_u8 *input,
+					      swapz_u8 *output);
+#endif
 void swapz_unpredict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output);
 swapz_u32 swapz_predict_delta64_avx2(const swapz_u8 *input, swapz_u8 *output);
 void swapz_unpredict_delta64_avx2(const swapz_u8 *input, swapz_u8 *output);

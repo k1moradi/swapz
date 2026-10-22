@@ -39,6 +39,62 @@ swapz_u32 swapz_predict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output)
 	return 0;
 }
 
+#ifndef __KERNEL__
+/*
+ * Native A/B candidate only: leave the production SSE2 encoder unchanged.
+ * Each pair has independent load/shuffle/subtract work and a shared retained
+ * previous input vector. No encoded-format or alignment assumptions change.
+ */
+swapz_u32 swapz_predict_delta64_sse2_unrolled(const swapz_u8 *input,
+					      swapz_u8 *output)
+{
+	unsigned long long previous = swapz_predictor_load64(input);
+	unsigned long long value = swapz_predictor_load64(
+		input + SWAPZ_PREDICTOR_U64_BYTES);
+	swapz_u64x2 previous_values;
+	swapz_u32 offset = 2U * SWAPZ_PREDICTOR_U64_BYTES;
+
+	swapz_predictor_store64(output, previous);
+	swapz_predictor_store64(output + SWAPZ_PREDICTOR_U64_BYTES,
+			       value - previous);
+	memcpy(&previous_values, input, sizeof(previous_values));
+	for (; offset + 2U * sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
+	     offset += 2U * sizeof(swapz_u64x2)) {
+		swapz_u64x2 values0, values1, predecessors0, predecessors1;
+		swapz_u64x2 delta0, delta1;
+
+		memcpy(&values0, input + offset, sizeof(values0));
+		memcpy(&values1, input + offset + sizeof(values0),
+		       sizeof(values1));
+		predecessors0 = previous_values;
+		predecessors1 = values0;
+		__asm__("shufpd $1, %1, %0"
+			: "+x"(predecessors0) : "x"(values0));
+		__asm__("shufpd $1, %1, %0"
+			: "+x"(predecessors1) : "x"(values1));
+		delta0 = values0 - predecessors0;
+		delta1 = values1 - predecessors1;
+		memcpy(output + offset, &delta0, sizeof(delta0));
+		memcpy(output + offset + sizeof(delta0), &delta1,
+		       sizeof(delta1));
+		previous_values = values1;
+	}
+	for (; offset + sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
+	     offset += sizeof(swapz_u64x2)) {
+		swapz_u64x2 values, predecessors, delta;
+
+		memcpy(&values, input + offset, sizeof(values));
+		predecessors = previous_values;
+		__asm__("shufpd $1, %1, %0"
+			: "+x"(predecessors) : "x"(values));
+		delta = values - predecessors;
+		memcpy(output + offset, &delta, sizeof(delta));
+		previous_values = values;
+	}
+	return 0;
+}
+#endif
+
 void swapz_unpredict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output)
 {
 	unsigned long long previous = swapz_predictor_load64(input);

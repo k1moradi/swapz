@@ -2542,6 +2542,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('pshufd $0xee', predictor_sse2)
         self.assertIn("base += step0", predictor_sse2)
         self.assertNotIn("previous = prefix.u64[1]", predictor_sse2)
+        self.assertIn("#ifndef __KERNEL__", predictor_sse2)
+        self.assertIn("swapz_predict_delta64_sse2_unrolled", predictor_sse2)
+        self.assertIn("2U * sizeof(swapz_u64x2)", predictor_sse2)
+        self.assertNotIn("swapz_predict_delta64_sse2_unrolled",
+                         predictor_dispatch)
+        self.assertIn("benchmark_sse2_forward_ab(count, sse2_forward_ab)",
+                      predictor_qualification)
+        self.assertIn("SAME_HOST_NATIVE_ONLY_PRODUCTION_UNCHANGED",
+                      predictor_qualification)
         self.assertNotIn(
             "input + offset - SWAPZ_PREDICTOR_U64_BYTES", predictor_sse2)
 

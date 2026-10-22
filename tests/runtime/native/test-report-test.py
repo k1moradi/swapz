@@ -110,6 +110,19 @@ def predictor_evidence():
             {"name": "avx2", "transform_ns_per_page": 300,
              "inverse_ns_per_page": 600},
         ],
+        "sse2_forward_ab": {
+            "scope": "SAME_HOST_NATIVE_ONLY_PRODUCTION_UNCHANGED",
+            "pages": 576,
+            "repeats_per_arm": 64,
+            "pairs": [
+                {
+                    "order": "unrolled_first" if index % 2 else "baseline_first",
+                    "baseline_ns_per_page": 300 + index,
+                    "unrolled_ns_per_page": 287 + index,
+                }
+                for index in range(5)
+            ],
+        },
         "io_model_block_ns": {"sd_emulated": 390625, "ssd_emulated": 48828},
         "thresholds": thresholds,
         "transforms": transforms,
@@ -873,6 +886,14 @@ class ReportContract(unittest.TestCase):
         parsed = runner.parse_predictor_evidence(
             "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(raw) + "\n")
         self.assertEqual(parsed, raw)
+        broken = json.loads(json.dumps(raw))
+        broken["sse2_forward_ab"]["pairs"][2]["order"] = "unrolled_first"
+        self.assertIsNone(runner.parse_predictor_evidence(
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(broken) + "\n"))
+        broken = json.loads(json.dumps(raw))
+        broken["sse2_forward_ab"]["pairs"][0]["unrolled_ns_per_page"] = 0
+        self.assertIsNone(runner.parse_predictor_evidence(
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(broken) + "\n"))
         broken = json.loads(json.dumps(raw))
         broken["thresholds"][2]["negative_calls"] = 65
         self.assertIsNone(runner.parse_predictor_evidence(

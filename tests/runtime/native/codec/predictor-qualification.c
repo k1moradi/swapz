@@ -25,6 +25,8 @@
 #define THRESHOLD_COUNT 5U
 #define CLASSIFIER_BENCH_REPEATS 256U
 #define TRANSFORM_BENCH_REPEATS 64U
+#define SSE2_FORWARD_AB_REPEATS 64U
+#define SSE2_FORWARD_AB_PAIRS 5U
 #define LZ4_BENCH_REPEATS 32U
 #define LZ4_ACCEL_BENCH_REPEATS 16U
 #define LZ4_ACCELERATION_COUNT 4U
@@ -46,6 +48,10 @@ struct backend_benchmark {
 	unpredict_fn unpredict;
 	uint64_t transform_ns_per_page;
 	uint64_t inverse_ns_per_page;
+};
+struct sse2_forward_ab_pair {
+	uint64_t baseline_ns_per_page;
+	uint64_t unrolled_ns_per_page;
 };
 
 struct page_evidence {
@@ -834,6 +840,91 @@ static int collect_backend_benchmarks(struct backend_benchmark *backends,
 	for (index = 0; index < count; ++index) { int error = benchmark_backend(&backends[index], page_count); if (error) return error; }
 	*count_out = count; return 0;
 }
+
+#if defined(__x86_64__)
+static int benchmark_sse2_forward_arm(predict_fn transform, swapz_u32 count,
+				      uint64_t *ns_per_page)
+{
+	const uint64_t calls = (uint64_t)count * SSE2_FORWARD_AB_REPEATS;
+	uint64_t start, end, sink = 0;
+	unsigned int repeat;
+	swapz_u32 index;
+
+	if (!transform || !count || !ns_per_page)
+		return -EINVAL;
+	start = now_ns();
+	for (repeat = 0; repeat < SSE2_FORWARD_AB_REPEATS; ++repeat)
+		for (index = 0; index < count; ++index) {
+			if (transform(evidence_pages[index], transform_page))
+				return -EUCLEAN;
+			sink += transform_page[(index + repeat) &
+					      (SWAPZ_BLOCK_BYTES - 1U)];
+		}
+	end = now_ns();
+	transform_benchmark_sink += sink;
+	if (!start || end <= start)
+		return -EUCLEAN;
+	*ns_per_page = (end - start) / calls;
+	return *ns_per_page ? 0 : -EUCLEAN;
+}
+#endif
+
+static int benchmark_sse2_forward_ab(
+	swapz_u32 count, struct sse2_forward_ab_pair *pairs)
+{
+#if defined(__x86_64__)
+	unsigned int round;
+	swapz_u32 index;
+
+	if (!pairs || !count)
+		return -EINVAL;
+	/* Match every candidate page byte-for-byte against the scalar format. */
+	for (index = 0; index < count; ++index) {
+		if (swapz_predict_delta64_sse2_unrolled(
+			    evidence_pages[index], transform_page) ||
+		    memcmp(transform_page, delta64_pages[index],
+			   SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
+	}
+	for (round = 0; round < SSE2_FORWARD_AB_PAIRS; ++round) {
+		struct sse2_forward_ab_pair *pair = &pairs[round];
+
+		/*
+		 * Warm both arms on the same immutable corpus before each pair.
+		 * Alternate the timed order between rounds to limit drift bias.
+		 */
+		for (index = 0; index < count; ++index) {
+			if (swapz_predict_delta64_sse2(
+				    evidence_pages[index], transform_page) ||
+			    swapz_predict_delta64_sse2_unrolled(
+				    evidence_pages[index], transform_page))
+				return -EUCLEAN;
+		}
+		if (round & 1U) {
+			if (benchmark_sse2_forward_arm(
+				    swapz_predict_delta64_sse2_unrolled, count,
+				    &pair->unrolled_ns_per_page) ||
+			    benchmark_sse2_forward_arm(
+				    swapz_predict_delta64_sse2, count,
+				    &pair->baseline_ns_per_page))
+				return -EUCLEAN;
+		} else {
+			if (benchmark_sse2_forward_arm(
+				    swapz_predict_delta64_sse2, count,
+				    &pair->baseline_ns_per_page) ||
+			    benchmark_sse2_forward_arm(
+				    swapz_predict_delta64_sse2_unrolled, count,
+				    &pair->unrolled_ns_per_page))
+				return -EUCLEAN;
+		}
+	}
+#else
+	(void)count;
+	(void)pairs;
+#endif
+	return 0;
+}
+
 static const struct backend_benchmark *find_backend(const struct backend_benchmark *backends,
 						     unsigned int count, const char *name)
 {
@@ -1016,6 +1107,7 @@ int main(int argc, char **argv)
 	struct production_route_summary production_route = { 0 };
 	struct sampling_control sampling_controls[2] = { 0 };
 	struct backend_benchmark backend_benchmarks[MAX_BACKEND_BENCHMARKS] = { 0 };
+	struct sse2_forward_ab_pair sse2_forward_ab[SSE2_FORWARD_AB_PAIRS] = { 0 };
 	struct lz4_acceleration_summary
 		lz4_acceleration_summaries[LZ4_ACCELERATION_COUNT] = { 0 };
 	const struct backend_benchmark *selected_transform, *selected_inverse, *scalar_backend;
@@ -1092,6 +1184,7 @@ int main(int argc, char **argv)
 	}
 	error = build_delta64_pages(count);
 	if (!error) error = collect_backend_benchmarks(backend_benchmarks, &backend_count, count);
+	if (!error) error = benchmark_sse2_forward_ab(count, sse2_forward_ab);
 	if (!error) error = benchmark_second_lz4(count, &second_lz4_ns_per_page);
 	if (error) { fprintf(stderr, "predictor backend batch benchmark failed: %d\n", error); return 1; }
 	selected_transform = find_backend(backend_benchmarks, backend_count, swapz_predictor_transform_backend_name());
@@ -1214,7 +1307,27 @@ int main(int argc, char **argv)
 		printf("%s{\"name\":\"%s\",\"transform_ns_per_page\":%" PRIu64 ",\"inverse_ns_per_page\":%" PRIu64 "}",
 		       transform_index ? "," : "", backend->name, backend->transform_ns_per_page, backend->inverse_ns_per_page);
 	}
-	printf("],\"io_model_block_ns\":{\"sd_emulated\":%" PRIu64 ",\"ssd_emulated\":%" PRIu64 "},\"thresholds\":[",
+	printf("],\"sse2_forward_ab\":");
+#if defined(__x86_64__)
+	printf("{\"scope\":\"SAME_HOST_NATIVE_ONLY_PRODUCTION_UNCHANGED\","
+	       "\"pages\":%u,\"repeats_per_arm\":%u,\"pairs\":[",
+	       count, SSE2_FORWARD_AB_REPEATS);
+	for (transform_index = 0; transform_index < SSE2_FORWARD_AB_PAIRS;
+	     ++transform_index) {
+		const struct sse2_forward_ab_pair *pair =
+			&sse2_forward_ab[transform_index];
+
+		printf("%s{\"order\":\"%s\",\"baseline_ns_per_page\":%" PRIu64
+		       ",\"unrolled_ns_per_page\":%" PRIu64 "}",
+		       transform_index ? "," : "",
+		       transform_index & 1U ? "unrolled_first" : "baseline_first",
+		       pair->baseline_ns_per_page, pair->unrolled_ns_per_page);
+	}
+	printf("]}");
+#else
+	printf("null");
+#endif
+	printf(",\"io_model_block_ns\":{\"sd_emulated\":%" PRIu64 ",\"ssd_emulated\":%" PRIu64 "},\"thresholds\":[",
 	       (uint64_t)SD_EMULATED_BLOCK_NS, (uint64_t)SSD_EMULATED_BLOCK_NS);
 	for (threshold_index = 0; threshold_index < THRESHOLD_COUNT;
 	     ++threshold_index) {

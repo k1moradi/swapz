@@ -401,6 +401,30 @@ def parse_predictor_evidence(output):
                 for row in backend_rows) or \
             len({row["name"] for row in backend_rows}) != len(backend_rows):
         return None
+    # SSE2 is native-only evidence; the production forward dispatch is fixed.
+    sse2_ab = record.get("sse2_forward_ab")
+    has_sse2 = any(row["name"] == "sse2" for row in backend_rows)
+    if has_sse2:
+        if not isinstance(sse2_ab, dict) or \
+                sse2_ab.get("scope") != (
+                    "SAME_HOST_NATIVE_ONLY_PRODUCTION_UNCHANGED") or \
+                sse2_ab.get("repeats_per_arm") != 64 or \
+                sse2_ab.get("pages") != (
+                    record["negative_pages"] + record["structured_pages"]):
+            return None
+        pairs = sse2_ab.get("pairs")
+        if not isinstance(pairs, list) or len(pairs) != 5:
+            return None
+        for index, pair in enumerate(pairs):
+            if not isinstance(pair, dict) or pair.get("order") != (
+                    "unrolled_first" if index % 2 else "baseline_first"):
+                return None
+            if any(type(pair.get(name)) is not int or pair[name] <= 0
+                   for name in ("baseline_ns_per_page",
+                                "unrolled_ns_per_page")):
+                return None
+    elif sse2_ab is not None:
+        return None
     io_model_block_ns = record.get("io_model_block_ns")
     if not isinstance(io_model_block_ns, dict) or \
             io_model_block_ns.get("sd_emulated") != 390625 or \
@@ -554,6 +578,7 @@ def parse_predictor_evidence(output):
         "lz4_acceleration_sweep": lz4_acceleration_sweep,
         "sampling_controls": sampling_controls,
         "backend_benchmarks": backend_rows,
+        "sse2_forward_ab": sse2_ab,
         "io_model_block_ns": io_model_block_ns,
         "thresholds": threshold_rows,
         "transforms": transform_rows,
@@ -4094,6 +4119,25 @@ def print_bench(result):
             [(row["name"], row["transform_ns_per_page"],
               row["inverse_ns_per_page"])
              for row in predictor["backend_benchmarks"]])
+        sse2_ab = predictor["sse2_forward_ab"]
+        if sse2_ab is not None:
+            paired = sse2_ab["pairs"]
+            ci = paired_ci95([
+                row["unrolled_ns_per_page"] / row["baseline_ns_per_page"] - 1.0
+                for row in paired
+            ])
+            print_table(
+                "SSE2 forward 2x unroll A/B — native same-host corpus, "
+                "production unchanged",
+                ("pair", "order", "baseline ns/page", "2x ns/page"),
+                [(index + 1, row["order"], row["baseline_ns_per_page"],
+                  row["unrolled_ns_per_page"])
+                 for index, row in enumerate(paired)])
+            print("  SSE2 2x minus baseline paired 95% CI "
+                  f"(n={ci['n']}, {sse2_ab['repeats_per_arm']} repeats/arm): "
+                  f"{ci['mean'] * 100:+.1f}% "
+                  f"[{ci['low'] * 100:+.1f}%, {ci['high'] * 100:+.1f}%]; "
+                  "native-only, not production promotion")
         print("  Sampled delta64 classifier — scalar; "
               f"{classifier['stage1_pairs']} -> {classifier['sample_pairs']} pairs; "
               f"{classifier['ns_per_page']} ns/eligible page")
