@@ -3,6 +3,12 @@
 # Never touches system swap, physical devices, or unrelated DM resources.
 set -Eeuo pipefail
 umask 077
+VALIDATED_SOURCE=""
+if [[ $# -ge 3 && $1 == --validated-source &&
+      $2 =~ ^[0-9a-f]{40}$ ]]; then
+    VALIDATED_SOURCE="$2"
+    shift 2
+fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
     echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-prepare-workers 1|2|4] [--parallel-reads 0|1] [--read-coalesce 0|1] [--lz4-acceleration 1|2|3|4] (private Make test orchestration)'
@@ -158,10 +164,8 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source "$ROOT/tests/tools/nullblk-identity.sh"
 source "$ROOT/tests/tools/swap-inventory.sh"
 cd "$ROOT"
-# This script runs as root during loaded qualification. Git source checks are
-# read-only; disable optional index refresh/locking so privileged inspection can
-# never replace the operator-owned .git/index with a root-owned file.
-export GIT_OPTIONAL_LOCKS=0
+# Git validation is completed by the unprivileged parent before sudo.
+# Privileged code must never invoke Git inside the operator checkout.
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 CFGBASE=/sys/kernel/config/nullb
 declare -a NAMES=() CONFIGS=() DISKS=() INDEXES=() DEVS=() LOWERS=()
@@ -180,18 +184,14 @@ devno() {
     IFS=: read -r major minor <<< "$encoded"
     printf '%d:%d\n' "0x$major" "0x$minor"
 }
-for program in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
+for program in insmod rmmod modprobe dmsetup modinfo blockdev readlink \
                findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
                mkdir rmdir stat tee cat ls sleep python3 sort cp; do
     command -v "$program" >/dev/null || fail "missing command $program"
 done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
-[[ $(git branch --show-current) == main ]] || fail "main only"
-# The canonical report is generated evidence, not tested source. Ignore only
-# that path; every other tracked/staged change still blocks loaded qualification.
-git diff --quiet -- . ':(exclude)test_results.json' &&
-    git diff --cached --quiet -- . ':(exclude)test_results.json' ||
-    fail "dirty tracked sources"
+[[ "$VALIDATED_SOURCE" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "unprivileged parent did not provide a validated source revision"
 version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
     fail "malformed canonical swapz version"
@@ -208,19 +208,14 @@ for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
 done
 [[ ! -d /sys/module/dm_swapz && -r /proc/swaps ]] ||
     fail "another dm_swapz loaded or swap inventory unavailable"
-mkdir -p "$ROOT/build/benchmark"
-SESSION="$(mktemp -d "$ROOT/build/benchmark/session.XXXXXXXX")"
+SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-benchmark.XXXXXXXX")"
 exec > >(tee -a "$SESSION/session.log") 2>&1
 SWAPS="$(cat /proc/swaps)"
 SWAPS_ID="$(printf '%s
 ' "$SWAPS" |
     swapz_swap_inventory_identity /dev/stdin)" ||
     fail "cannot parse initial host swap identity"
-SOURCE="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
-[[ "$SOURCE" =~ ^[0-9a-f]{40}$ ]] || fail "invalid tested source revision"
-git merge-base --is-ancestor "$SOURCE" HEAD >/dev/null 2>&1 &&
-    git diff --quiet "$SOURCE..HEAD" -- . ':(exclude)test_results.json' ||
-    fail "tested source does not match checkout code"
+SOURCE="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
 note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_PREPARE_WORKERS=$DELTA64_PREPARE_WORKERS PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
