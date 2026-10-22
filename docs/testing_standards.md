@@ -717,11 +717,12 @@ is attempted. Rewritten/diverged history or exhausted retries fail closed.
 ### Generated report versus tracked source cleanliness
 
 `test_results.json` is the one generated overwriteable evidence file and is
-not tested source. Privileged loaded qualification therefore excludes only that
-exact root path from its tracked/staged source-cleanliness check. This permits a
-previous local report to remain until the current run finishes, including after
-an earlier publication failure. Every other tracked or staged change still
-blocks loaded qualification before module/device work.
+not tested source. The unprivileged loaded-test parent excludes only that exact
+root path from its tracked/staged source-cleanliness check before crossing the
+privilege boundary. This permits a previous local report to remain until the
+current run finishes, including after an earlier publication failure. Every
+other tracked or staged change still blocks loaded qualification before
+module/device work.
 
 
 Immutable-run native qualification must accept a bounded prepared prefix rather
@@ -746,16 +747,22 @@ lives in run completion. The synchronous compatibility wrapper is orchestration
 and lower-I/O submission only; it must not duplicate those phase timers.
 
 
-### Privileged Git inspection must not mutate the checkout index
+### Privileged helpers must not access Git metadata
 
-Loaded qualification executes its device helpers as root, but their Git checks
-are source-identity/read-cleanliness assertions only. Every privileged helper
-that invokes Git must set `GIT_OPTIONAL_LOCKS=0` before the first Git command.
-This forbids optional index refresh/locking during root-side `git branch`,
-`git diff`, and `git rev-parse` inspection, preventing a successful
-qualification from replacing the operator-owned `.git/index` with a
-root-owned file. Privileged helpers must never stage, refresh, rewrite, or
-otherwise own the checkout index.
+All branch, source-identity and tracked/staged cleanliness checks run in the
+unprivileged loaded-test parent before the first privilege boundary. The tested
+source SHA is then passed explicitly to each privileged device helper.
+Privileged helpers must not invoke Git at all and must not create temporary
+session directories inside the checkout. Their session logs/results live under
+the system temporary directory.
+
+Before the first privileged child, the parent records the ownership/mode of the
+repository administration directory and index and requires both to be writable
+by the invoking user. After every privileged child it verifies that both
+identities and writability are unchanged. Any change fails qualification
+immediately. `GIT_OPTIONAL_LOCKS=0` is not an acceptable substitute for this
+boundary because a root-side Git command must never be allowed to own or
+replace operator Git metadata.
 
 
 ### Explicit lower queue geometry

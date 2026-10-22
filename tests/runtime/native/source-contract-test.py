@@ -2330,17 +2330,25 @@ static swapz_u16 swapz_probe_set(
         self.assertGreaterEqual(deploy.count('insmod "$MODULE"'), 2)
         self.assertIn("10:1000000:1|80:150000:64", benchmark)
 
-    def test_loaded_dirty_source_gate_ignores_only_canonical_report(self):
+    def test_loaded_privilege_boundary_preserves_git_metadata(self):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
-        pathspec = "' :(exclude)test_results.json'".replace("' :", "':")
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        self.assertIn("git diff --cached --quiet", loaded)
+        self.assertIn("assert_git_metadata_unchanged", loaded)
+        self.assertIn("run_privileged()", loaded)
+        self.assertIn("--validated-source", loaded)
         for script in (deploy, benchmark):
-            self.assertIn("export GIT_OPTIONAL_LOCKS=0", script)
-            self.assertLess(script.index("export GIT_OPTIONAL_LOCKS=0"),
-                            script.index("git branch --show-current"))
-            self.assertIn("git diff --quiet -- . " + pathspec, script)
-            self.assertIn("git diff --cached --quiet -- . " + pathspec, script)
-            self.assertNotIn("git diff --quiet && git diff --cached --quiet", script)
+            self.assertIn("--validated-source", script)
+            self.assertIn("VALIDATED_SOURCE", script)
+            self.assertNotIn("GIT_OPTIONAL_LOCKS", script)
+            self.assertNotIn("git branch --show-current", script)
+            self.assertNotIn("git merge-base", script)
+            self.assertNotIn("git rev-parse", script)
+            self.assertNotRegex(script, r"(?m)^\s*git\s")
+            self.assertNotIn("$(git ", script)
+        self.assertIn("${TMPDIR:-/tmp}/swapz-deploy.", deploy)
+        self.assertIn("${TMPDIR:-/tmp}/swapz-benchmark.", benchmark)
 
     def test_owned_nullblk_smoke_qualifies_retained_synthetic_faults(self):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()

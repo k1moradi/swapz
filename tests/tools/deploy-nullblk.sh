@@ -3,15 +3,21 @@
 # NEVER alter current swap, unrelated DM mappings or physical storage.
 set -Eeuo pipefail
 umask 077
+VALIDATED_SOURCE=""
+if [[ $# == 2 && $1 == --validated-source &&
+      $2 =~ ^[0-9a-f]{40}$ ]]; then
+    VALIDATED_SOURCE="$2"
+else
+    printf '%s\n' 'BLOCKED: validated source revision required' >&2
+    exit 2
+fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source "$ROOT/tests/tools/nullblk-identity.sh"
 source "$ROOT/tests/tools/quiet-lower-io.sh"
 source "$ROOT/tests/tools/swap-inventory.sh"
 cd "$ROOT"
-# This script runs as root during loaded qualification. Git source checks are
-# read-only; disable optional index refresh/locking so privileged inspection can
-# never replace the operator-owned .git/index with a root-owned file.
-export GIT_OPTIONAL_LOCKS=0
+# Git validation is completed by the unprivileged parent before sudo.
+# Privileged code must never invoke Git inside the operator checkout.
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
 CONFIG=""
@@ -29,18 +35,12 @@ QUARANTINE=0
 SUSPENDED=0
 fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
-for cmd in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
+for cmd in insmod rmmod modprobe dmsetup modinfo blockdev readlink \
            findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
            tee mktemp ls sleep cat id rmdir stat sort dd; do
 	command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "sudo is required for isolated module loading"
-[[ $(git branch --show-current) == main ]] || fail "work only on main"
-# test_results.json is the one generated, overwriteable evidence file.
-# It is not source and may contain the previous run until this run finishes.
-git diff --quiet -- . ':(exclude)test_results.json' &&
-	git diff --cached --quiet -- . ':(exclude)test_results.json' ||
-	fail "dirty tracked source: preserve and commit changes first"
 version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
     fail "malformed canonical swapz version"
@@ -59,14 +59,9 @@ done
 [[ ! -d /sys/module/dm_swapz ]] ||
 	fail "another dm_swapz module already loaded; do not touch it"
 [[ -r /proc/swaps ]] || fail "cannot audit host swap"
-mkdir -p "$ROOT/build/deploy"
-SESSION="$(mktemp -d "$ROOT/build/deploy/session.XXXXXXXX")"
+SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-deploy.XXXXXXXX")"
 exec > >(tee -a "$SESSION/session.log") 2>&1
-SOURCE_HEAD="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
-[[ "$SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]] || fail "invalid tested source revision"
-git merge-base --is-ancestor "$SOURCE_HEAD" HEAD >/dev/null 2>&1 &&
-    git diff --quiet "$SOURCE_HEAD..HEAD" -- . ':(exclude)test_results.json' ||
-    fail "tested source does not match checkout code"
+SOURCE_HEAD="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE_HEAD"
 note "RUNNING_KERNEL=$(uname -r)"
 note "MODULE_SHA256=$(sha256sum "$MODULE")"

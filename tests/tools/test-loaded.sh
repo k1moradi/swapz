@@ -25,13 +25,45 @@ fi
 tested_source="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
 [[ "$tested_source" =~ ^[0-9a-f]{40}$ ]] ||
     { printf '%s\n' 'BLOCKED: invalid tested source revision' >&2; exit 2; }
+[[ $(git branch --show-current) == main ]] ||
+    { printf '%s\n' 'BLOCKED: loaded qualification requires main' >&2; exit 2; }
+git diff --quiet -- . ':(exclude)test_results.json' &&
+    git diff --cached --quiet -- . ':(exclude)test_results.json' ||
+    { printf '%s\n' 'BLOCKED: dirty tracked source; commit or preserve changes first' >&2; exit 2; }
 git merge-base --is-ancestor "$tested_source" HEAD >/dev/null 2>&1 &&
     git diff --quiet "$tested_source..HEAD" -- . ':(exclude)test_results.json' ||
     { printf '%s\n' 'BLOCKED: tested source does not match checkout code' >&2; exit 2; }
-"${privileged[@]}" tests/tools/loaded-preflight.sh
+git_admin_dir="$(git rev-parse --absolute-git-dir)"
+git_index_path="$(git rev-parse --git-path index)"
+[[ "$git_index_path" == /* ]] || git_index_path="$ROOT/$git_index_path"
+[[ -d "$git_admin_dir" && -f "$git_index_path" &&
+   -w "$git_admin_dir" && -w "$git_index_path" ]] ||
+    { printf '%s\n' 'BLOCKED: Git metadata is not writable by the invoking user' >&2; exit 2; }
+git_admin_identity="$(stat -Lc '%u:%g:%a' "$git_admin_dir")"
+git_index_identity="$(stat -Lc '%u:%g:%a' "$git_index_path")"
+assert_git_metadata_unchanged() {
+    [[ $(stat -Lc '%u:%g:%a' "$git_admin_dir") == "$git_admin_identity" &&
+       $(stat -Lc '%u:%g:%a' "$git_index_path") == "$git_index_identity" &&
+       -w "$git_admin_dir" && -w "$git_index_path" ]] || {
+        printf '%s\n' >&2 'FAIL: privileged loaded qualification changed Git metadata ownership or mode'
+        return 1
+    }
+}
+run_privileged() {
+    local rc
+    if "${privileged[@]}" "$@"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    assert_git_metadata_unchanged || return 1
+    return "$rc"
+}
+
+run_privileged tests/tools/loaded-preflight.sh
 printf 'LOADED_QUALIFICATION_SOURCE=%s\n' "$tested_source"
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
-"${privileged[@]}" tests/tools/deploy-nullblk.sh
+run_privileged tests/tools/deploy-nullblk.sh --validated-source "$tested_source"
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
 
 # One deterministic, measured-LZ4 immutable fixture/trace for the paired
@@ -146,7 +178,7 @@ for regime in sd_emulated ssd_emulated; do
             arguments+=(--swapz-first)
         fi
         printf 'START_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
-        "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+        run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
         printf 'PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
         (( index += 1 ))
     done
@@ -174,7 +206,7 @@ for acceleration_mode in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_LZ4_ACCELERATION=%s\n' "$lz4_acceleration"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_LZ4_ACCELERATION=%s\n' "$lz4_acceleration"
     (( index += 1 ))
 done
@@ -202,7 +234,7 @@ for delta64_mode in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
     (( index += 1 ))
 done
@@ -220,7 +252,7 @@ for read_coalesce in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_READ_COALESCE_AB=%s\n' "$read_coalesce"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_READ_COALESCE_AB=%s\n' "$read_coalesce"
     (( index += 1 ))
 done
@@ -237,7 +269,7 @@ for read_coalesce in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_SD_READ_COALESCE_AB=%s\n' "$read_coalesce"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_SD_READ_COALESCE_AB=%s\n' "$read_coalesce"
     (( index += 1 ))
 done
@@ -272,7 +304,7 @@ for regime in sd_emulated ssd_emulated; do
             fi
             printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
                 "$qd" "$async_prepare"
-            "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+            run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
             printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
                 "$qd" "$async_prepare"
             (( index += 1 ))
