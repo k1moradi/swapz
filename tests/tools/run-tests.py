@@ -253,7 +253,9 @@ KERNEL_WRITE_FIELDS = (
     "pipeline_read_bypass_skips",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms",
-    "write_wait_gt4ms", "retained_burst_target", "delta64_rescue",
+    "write_wait_gt4ms", "delta64_prepare_pages",
+    "retained_burst_target", "delta64_rescue",
+    "delta64_prepare_workers", "delta64_prepare_active_max",
     "lz4_acceleration"
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
@@ -646,6 +648,15 @@ def timed_window_error(record):
         return "missing timed swapz window telemetry"
     if type(record.get("delta64_rescue")) is not int or record["delta64_rescue"] not in (0, 1):
         return "missing or invalid timed delta64 policy"
+    if type(record.get("delta64_prepare_workers")) is not int or not (
+            0 <= record["delta64_prepare_workers"] <= 4):
+        return "missing or invalid timed delta64 preparation width"
+    if type(record.get("delta64_prepare_active_max")) is not int or not (
+            0 <= record["delta64_prepare_active_max"] <=
+            record["delta64_prepare_workers"]):
+        return "invalid timed delta64 preparation concurrency"
+    if type(record.get("delta64_prepare_pages")) is not int or             record["delta64_prepare_pages"] < 0:
+        return "invalid timed delta64 preparation page count"
     if any(type(record.get(field)) is not int or record[field] < 0
            for field in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS):
         return "invalid timed swapz window telemetry"
@@ -1325,12 +1336,19 @@ def run_stage(title, command, result, *, parse_bench=False):
     sd_coalesce_diagnostic = (
         sd_read_coalesce_ab_verdict(sd_coalesce_sessions)
         if parse_bench else None)
+    delta64_prepare_sessions = (
+        parse_delta64_prepare_sessions(output) if parse_bench else [])
+    delta64_prepare_diagnostic = (
+        delta64_prepare_verdict(delta64_prepare_sessions)
+        if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_coalesce_diagnostic.get("overall") !=
-                       "PASS_SD_READ_COALESCE_AB_CONFIRMATION"))
+                       "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
+                       delta64_prepare_diagnostic.get("overall") !=
+                       "PASS_DELTA64_PREPARE_PILOT"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -1396,6 +1414,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["read_coalesce_ab"] = read_coalesce_diagnostic
         result["benchmarks"]["sd_read_coalesce_ab_sessions"] = sd_coalesce_sessions
         result["benchmarks"]["sd_read_coalesce_ab"] = sd_coalesce_diagnostic
+        result["benchmarks"]["delta64_prepare_sessions"] = delta64_prepare_sessions
+        result["benchmarks"]["delta64_prepare"] = delta64_prepare_diagnostic
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
@@ -1415,6 +1435,7 @@ def parse_sessions(output):
             regime = line.partition("=")[2]
         elif line.startswith(("START_READ_COALESCE_AB=",
                               "START_SD_READ_COALESCE_AB=",
+                              "START_DELTA64_PREPARE_WORKERS=",
                               "START_BURST_GUARD_AB=",
                               "START_WRITE_SATURATION_REGIME=")):
             current = None
@@ -1525,6 +1546,145 @@ def parse_sessions(output):
                     current["trace_sha256"] = obj["trace_sha256"]
     return sessions
 
+
+
+def parse_delta64_prepare_sessions(output):
+    """Parse the directional SSD-model delta64 K=1/2/4 preparation pilot."""
+    sessions, current = [], None
+    for line in output.splitlines():
+        line = line.strip()
+        match = re.fullmatch(r"START_DELTA64_PREPARE_WORKERS=(1|2|4)", line)
+        if match:
+            current = {
+                "workers": int(match.group(1)), "status": "INCOMPLETE",
+                "device_model": None, "swapz": None,
+            }
+            sessions.append(current)
+            continue
+        if current is None:
+            continue
+        if line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            model = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
+                line)
+            if model:
+                current["device_model"] = {
+                    "cap_mib_s": int(model.group(1)),
+                    "completion_nsec": int(model.group(2)),
+                    "irqmode": int(model.group(3)),
+                    "queue_mode": int(model.group(4)),
+                    "submit_queues": int(model.group(5)),
+                    "hw_queue_depth": int(model.group(6)),
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
+                continue
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            current["swapz"] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "write_mbps": rates.get("logical_write_mbps"),
+                "lower_write_bytes": lower.get("lower_write_bytes"),
+                "lower_write_requests": lower.get("lower_write_requests"),
+                "write_p99_ms": obj.get("write_p99_ns", 0) / 1e6,
+                "host_cpu": host_cpu_record(obj),
+                "kernel_write_path": obj.get("kernel_write_path"),
+            }
+        else:
+            done = re.fullmatch(r"PASS_DELTA64_PREPARE_WORKERS=(1|2|4)", line)
+            if done and int(done.group(1)) == current["workers"]:
+                current["status"] = "PASS"
+                current = None
+    return sessions
+
+
+def delta64_prepare_verdict(sessions):
+    """Require real rescue work and real K>1 execution before reporting the pilot."""
+    if [row.get("workers") for row in sessions] != [1, 2, 4]:
+        return {"overall": "INCOMPLETE",
+                "reason": "delta64 preparation pilot must contain K=1/2/4 in order"}
+    expected = MODEL_SPECS["ssd_emulated"]
+    source = fixture = trace = None
+    modes = {}
+    for row in sessions:
+        if row.get("status") != "PASS":
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 preparation pilot did not complete"}
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(
+                model.get(key) != expected[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 preparation pilot device model mismatch"}
+        arm = row.get("swapz")
+        kernel = arm.get("kernel_write_path") if isinstance(arm, dict) else None
+        if not isinstance(kernel, dict) or any(
+                type(kernel.get(field)) is not int or kernel[field] < 0
+                for field in KERNEL_WRITE_FIELDS):
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 preparation pilot telemetry missing"}
+        error = timed_window_error(kernel)
+        if error:
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 preparation pilot: " + error}
+        workers = row["workers"]
+        if kernel["delta64_rescue"] != 1 or                 kernel["delta64_prepare_workers"] != workers:
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 preparation pilot policy mismatch"}
+        if not kernel["delta64_classifier_pass"] or                 not kernel["delta64_attempts"] or not kernel["delta64_adopted"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 preparation pilot did not exercise rescue"}
+        if not kernel["delta64_prepare_pages"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 preparation pilot bypassed producer lanes"}
+        if workers == 1 and kernel["delta64_prepare_active_max"] > 1:
+            return {"overall": "INCOMPLETE",
+                    "reason": "K=1 delta64 preparation exceeded one lane"}
+        if workers > 1 and kernel["delta64_prepare_active_max"] <= 1:
+            return {"overall": "INCOMPLETE",
+                    "reason": "parallel delta64 arm never ran concurrently"}
+        if not isinstance(arm.get("write_mbps"), (int, float)) or                 arm["write_mbps"] <= 0 or                 not isinstance(arm.get("write_p99_ms"), (int, float)) or                 arm["write_p99_ms"] < 0 or                 not isinstance(arm.get("lower_write_bytes"), int) or                 arm["lower_write_bytes"] <= 0 or                 not isinstance(arm.get("lower_write_requests"), int) or                 arm["lower_write_requests"] <= 0:
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 preparation pilot performance metrics missing"}
+        source = source or arm.get("source_sha")
+        fixture = fixture or arm.get("fixture_sha256")
+        trace = trace or arm.get("trace_sha256")
+        if (arm.get("source_sha"), arm.get("fixture_sha256"),
+                arm.get("trace_sha256")) != (source, fixture, trace):
+            return {"overall": "INCONCLUSIVE",
+                    "reason": "delta64 preparation pilot provenance mismatch"}
+        modes[str(workers)] = {
+            "write_mbps": arm["write_mbps"],
+            "write_p99_ms": arm["write_p99_ms"],
+            "lower_write_bytes": arm["lower_write_bytes"],
+            "lower_write_requests": arm["lower_write_requests"],
+            "prepare_active_max": kernel["delta64_prepare_active_max"],
+            "prepare_pages": kernel["delta64_prepare_pages"],
+            "delta64_attempts": kernel["delta64_attempts"],
+            "delta64_adopted": kernel["delta64_adopted"],
+            "delta64_payload_bytes_saved":
+                kernel["delta64_payload_bytes_saved"],
+            "delta64_transform_wall_ns":
+                kernel["delta64_transform_wall_ns"],
+            "delta64_wall_ns": kernel["delta64_wall_ns"],
+            "prep_lz4_wall_ns": kernel["prep_lz4_wall_ns"],
+            "host_cpu": arm["host_cpu"],
+        }
+    return {
+        "overall": "PASS_DELTA64_PREPARE_PILOT",
+        "qualification": "DIRECTIONAL_SYNTHETIC_RAM_ONLY",
+        "device_model": expected,
+        "modes": modes,
+        "interpretation":
+            "K1_K2_K4_SAME_SOURCE_SAME_POSITIVE_FIXTURE_ORDERED_PUBLICATION_UNCHANGED",
+    }
 
 
 def parse_read_coalesce_ab(output):
