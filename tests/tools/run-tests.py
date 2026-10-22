@@ -3098,15 +3098,18 @@ def print_bench(result):
         route = predictor["production_route"]
         print("  Exact hybrid production route — native-only model; no loaded I/O proof")
         print_table(
-            "Delta64 shared production-route screening — native corpus",
-            ("eligible", "pack eligible", "passed", "attempts", "adopted",
-             "RAW+", "LZ4+", "pack+", "payload bytes", "blocks saved",
-             "extents saved", "modeled ns/page", "ns/saved block"),
+            "Delta64 shared production-route decisions — native corpus",
+            ("eligible", "pack eligible", "passed", "attempts",
+             "adopt", "RAW+", "LZ4+", "pack+"),
             [(route["eligible_pages"], route["packing_eligible_pages"],
               route["classifier_passes"], route["candidate_attempts"],
               route["adopted_pages"], route["raw_rescues"],
-              route["lz4_rescues"], route["packing_adoptions"],
-              route["payload_bytes_saved"], f"{route['blocks_saved']:+d}",
+              route["lz4_rescues"], route["packing_adoptions"])])
+        print_table(
+            "Delta64 shared production-route savings and CPU model — native corpus",
+            ("payload bytes", "blocks saved", "extents saved",
+             "modeled ns/page", "ns/saved block"),
+            [(route["payload_bytes_saved"], f"{route['blocks_saved']:+d}",
               f"{route['extents_saved']:+d}",
               route["modeled_wall_ns_per_page"],
               route["ns_per_saved_block"])])
