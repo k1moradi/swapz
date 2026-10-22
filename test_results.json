@@ -59,29 +59,58 @@
 }
 ],
 "scope": "OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY"
+},
+"gc_scan_scale": {
+"rows": [
+{
+"incremental_select_ns": 3722,
+"legacy_dead_probe_ns": 438092,
+"legacy_score_scan_ns": 4430377,
+"logical_pages": 262144,
+"mapped_dead_probe_ns": 1951,
+"relocation_list_ns": 1607,
+"relocation_scan_ns": 1134044,
+"segments": 1024,
+"victim_records": 256
+},
+{
+"incremental_select_ns": 13841,
+"legacy_dead_probe_ns": 1647680,
+"legacy_score_scan_ns": 19219897,
+"logical_pages": 1048576,
+"mapped_dead_probe_ns": 6596,
+"relocation_list_ns": 1846,
+"relocation_scan_ns": 4495464,
+"segments": 4096,
+"victim_records": 256
+}
+],
+"scope": "OFFLINE_NATIVE_GC_SCALE_ONLY"
 }
 },
 "kernel_release": "7.0.0-38-generic",
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "142fe2e95506573185ad017d4d63a8ed52ba9e64",
+"source_sha": "55d983f88c302a28f663925c4da63f4b200e946d",
 "stages": [
 {
-"elapsed_s": 8.237,
+"elapsed_s": 1.455,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Child returned nonzero in this non-privileged stage",
-"elapsed_s": 2.562,
+"diagnostic": "Native build error: operand of ??:? changes signedness from ?int? to ?unsigned int? due to unsignedness of other operand [-Werror=sign-compare]",
+"elapsed_s": 4.084,
 "exit_code": 2,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
-"signals": [],
+"signals": [
+"PASS"
+],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "142fe2e95506573185ad017d4d63a8ed52ba9e64"
+"tested_commit_sha": "55d983f88c302a28f663925c4da63f4b200e946d"
 }
