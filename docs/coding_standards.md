@@ -768,7 +768,11 @@ completion. These diagnostics must not be used to skip CRC, generation or
 transaction-snapshot validation without a separately qualified replacement.
 
 The producer uses one constructor-allocated, zeroed 64-element prepared-page
-array and an `atomic64_t` free mask, initialized with all bits set. Claim a bit
+array and an `atomic64_t` free mask, initialized with all bits set. Each element
+is aligned and size-rounded to 64 bytes so adjacent producer/consumer slots
+cannot share a boundary cache line. A `READ_ONCE(preparation_queued)` hint may
+avoid an empty wakeup's reservation; the list must still be rechecked under
+`queue_lock`, never inspected through an unlocked `list_empty()`. Claim a bit
 using the shared production helper before taking `queue_lock` or claiming a
 BIO. There is one serialized claimant; other owners only return slots, so at
 most 64 concurrent returns can invalidate a compare/exchange and 65 attempts
@@ -782,8 +786,11 @@ clear its BIO pointer before releasing the slot, before `bio_endio()` can
 invalidate per-BIO data. Slot return uses a full barrier before relaxed
 `atomic64_or`; a successful fully ordered claim acquires that release before
 overwriting the array element. Returning the bit without this ordering is not
-sufficient. Suspend/drain must leave every bit free before destruction frees
-the array after both workqueues. Tail claiming never consumes
+sufficient. Close admission before draining, and drain the producer again after
+the ordered workqueue has finished: ordered callbacks may queue a late producer
+invocation after the first producer drain. Check the all-free mask only after
+this final drain. Destruction frees the array after both workqueues. Tail
+claiming never consumes
 completion/publication ownership: the FIFO worker can continue inline-stealing
 unclaimed heads and releases prepared slots as it reaches completed tail
 entries. Separate LZ4 scratch/work memory remains mandatory for concurrent
@@ -1085,11 +1092,15 @@ instructions accidentally.
 ### Core-2-class cache locality
 
 Optimize hot metadata lookup for a 32KiB private L1D and shared L2 without
-assuming an LLC. The 512-entry metadata cache retains its qualified capacity
-and exact LRU replacement, but common hits first consult a fixed 128-entry
-direct front index. A front collision is only a hint miss and must fall back to
-the exact LRU scan; it may never authorize stale metadata. Mutation fences clear
-the front index with the LRU validity state.
+assuming an LLC. The current directory has 128 aligned four-way sets and 512
+block-zero storage slots; replacement is local LRU within a set. Mutation fences
+advance its epoch. Commit must find an existing epoch/start/class key before
+selecting an invalid or oldest way, including when scratch/extent residency
+bypassed directory lookup and when an invalid way precedes a matching key.
+Refresh an existing key's age without copying 4KiB or charging replacement.
+One immutable extent must occupy at most one way per set. Fix duplicate-key
+self-eviction before evaluating whether distinct-key conflicts justify a cache
+redesign; allocated slot count does not establish effective cache capacity.
 
 SSE2 delta64 keeps its full-page semantics byte-identical to scalar C but starts
 vector work after the first 16 bytes so pair-sized output stores and inverse

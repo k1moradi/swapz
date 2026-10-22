@@ -2487,7 +2487,7 @@ TABLE_HEADER_LEGEND = {
     "cold R blk": "cold READ blocks per logical workload unit",
     "seq req": "sequential lower READ requests",
     "writes": "logical WRITE operations",
-    "same-filled": "writes matching a prior page value",
+    "same-filled": "nonzero pages filled by one repeated 64-bit word",
     "same-page": "rewrites to the same logical page",
     "resident-dup": "writes matching a currently resident value",
     "uniq payloads": "distinct payload values",
@@ -2580,12 +2580,25 @@ TABLE_HEADER_LEGEND = {
     "inline": "ordered-worker inline preparations",
     "hand/wait": "preparation handoffs / blocking waits",
     "target": "retained burst target in records",
-    "eligible": "foreground pages with ordinary LZ4 >2024 bytes or RAW fallback",
+    "eligible": "RAW or >2024-byte LZ4 baselines, plus smaller LZ4 pages with a uniform packing limit",
     "rescue": "delta64 policy: off=default bypass, on=opted in, mixed=unmatched policy",
-    "passed": "eligible pages passing the threshold-24 classifier",
+    "passed": "eligible pages passing threshold 24, or threshold 16 on the smaller-LZ4 packing path",
     "attempts": "full-page delta64 transform attempts",
     "adopted": "attempts selecting a strictly smaller delta64 payload",
-    "LZ4+": "adoptions replacing a >2024-byte ordinary LZ4 payload",
+    "LZ4+": "adoptions replacing ordinary LZ4, including smaller packing-path payloads",
+    "pack eligible": "LZ4 baselines at most 2024 bytes with a lower uniform packing limit",
+    "pack try": "packing-path full-page delta64 attempts after threshold-16 classification",
+    "cliff": "candidates crossing a uniform packing limit; not measured lower blocks saved",
+    "pack+": "smaller-LZ4 packing-path adoptions that crossed their uniform limit",
+    "score 0-7": "eligible pages with sampled classifier scores from zero through seven",
+    "8-15": "eligible pages with classifier scores from eight through fifteen",
+    "16-23": "eligible pages with classifier scores from sixteen through twenty-three",
+    "24+": "eligible pages with classifier scores of at least twenty-four",
+    "lookups": "metadata-directory lookups; scratch/extent-cache hits bypass this lookup",
+    "set hit %": "percentage of directory lookups finding the exact extent key in its set",
+    "probes/lookup": "mean directory tags inspected per lookup; at most four",
+    "repl": "metadata insertions evicting a valid tag in the same directory set",
+    "meta copy KiB": "cached block-zero payload fragments copied to read scratch; excludes cache insertion copies",
     "payload KiB": "encoded bytes avoided versus ordinary LZ4 or 4KiB RAW; not lower I/O",
     "RAW+ KiB": "encoded bytes avoided by RAW rescues, in KiB",
     "LZ4+ KiB": "encoded bytes avoided by ordinary LZ4 rescues, in KiB",
@@ -2611,6 +2624,22 @@ def _print_table_note(label, message):
 def _table_interpretation(headers, rows):
     """Summarize table data without turning descriptive rows into a verdict."""
     header_index = {str(header): index for index, header in enumerate(headers)}
+    if "set hit %" in header_index:
+        summary = ", ".join(
+            f"{row[0]} {row[header_index['set hit %']]}% hits / "
+            f"{row[header_index['repl']]} replacements" for row in rows)
+        return (f"Directory observations: {summary}. Scratch/extent hits bypass "
+                "directory lookup. Replacements can increase lower reads; compare "
+                "lower bytes/requests as well as engine wall time. These counts alone "
+                "cannot distinguish set conflicts from duplicate-insertion defects.")
+    if "pack eligible" in header_index:
+        return ("Packing-path attempts concern already-compressed pages at most 2024 bytes. "
+                "A cliff crossing is uniform-page geometry opportunity; the actual mixed "
+                "window may save no blocks. A disabled rescue policy also produces all zeros.")
+    if "score 0-7" in header_index:
+        return ("The four score bins partition eligible pages. Threshold 24 applies to RAW "
+                "and larger LZ4 baselines; threshold 16 applies to smaller packing candidates. "
+                "All-zero bins under rescue=off provide no classifier-selectivity evidence.")
     if "cpu/page ns" in header_index:
         return ("This model combines separate native elapsed-time measurements, "
                 "which include scheduling effects. It does not measure worker CPU, "

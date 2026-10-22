@@ -413,6 +413,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("way < SWAPZ_READ_METADATA_CACHE_WAYS", lru_commit)
         self.assertNotIn("index < SWAPZ_READ_METADATA_CACHE_ENTRIES", lru_commit)
         self.assertIn("engine->read_metadata_set_replacements++", lru_commit)
+        self.assertIn("tag->start_block == start_block", lru_commit)
+        self.assertIn("tag->extent_blocks == extent_blocks", lru_commit)
+        self.assertIn("hit_slot = candidate", lru_commit)
+        self.assertIn("if (hit_slot < 0 && have_slot &&", lru_commit)
+        self.assertIn("if (hit_slot < 0)\n\t\tmemcpy(", lru_commit)
         self.assertIn("struct swapz_read_metadata_tag", header)
         self.assertIn("read_metadata_tags[SWAPZ_READ_METADATA_CACHE_ENTRIES]", header)
         self.assertIn("__attribute__((aligned(64)))", header)
@@ -2204,6 +2209,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *", ctor)
         self.assertIn("ctx->preparation_lz4_workmem", ctor)
         self.assertIn("atomic64_set(&ctx->preparation_free_mask", ctor)
+        self.assertRegex(DM, r"struct swapz_prepared_page \{[^}]+\} __aligned\(64\);")
+        self.assertIn("if (!READ_ONCE(ctx->preparation_queued))", producer)
+        self.assertLess(producer.index("if (!READ_ONCE(ctx->preparation_queued))"),
+                        producer.index("swapz_preparation_claim_slot("))
         self.assertIn("swapz_preparation_claim_slot(&ctx->preparation_free_mask)",
                       producer)
         self.assertNotIn("mempool_", DM)
@@ -2327,6 +2336,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))
+        self.assertLess(drain.index("drain_workqueue(ctx->workqueue)"),
+                        drain.rindex("drain_workqueue(ctx->preparation_workqueue)"))
+        self.assertLess(drain.rindex("drain_workqueue(ctx->preparation_workqueue)"),
+                        drain.index("atomic64_read(&ctx->preparation_free_mask)"))
         self.assertIn("destroy_workqueue(ctx->preparation_workqueue)", freeing)
         self.assertIn("vfree(ctx->preparation_pages)", freeing)
         self.assertLess(freeing.index("destroy_workqueue(ctx->preparation_workqueue)"),

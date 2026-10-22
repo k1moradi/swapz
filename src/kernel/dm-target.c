@@ -122,7 +122,7 @@ struct swapz_prepared_page {
 	swapz_u8 encoding;
 	swapz_u32 payload_crc32c;
 	u8 bytes[SWAPZ_BLOCK_BYTES];
-};
+} __aligned(64);
 
 struct swapz_inflight_write {
 	struct swapz_io_run run;
@@ -1414,6 +1414,15 @@ static void swapz_preparation_worker(struct work_struct *work)
 		int error;
 		int slot;
 
+		/* Only a hint: the locked list check below remains authoritative.
+		 * Avoid reserving a slot for an already-empty producer wakeup. */
+		if (!READ_ONCE(ctx->preparation_queued)) {
+			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->preparation_worker_cpu_ns,
+						 cpu_start_ns);
+			return;
+		}
 		/*
 		 * Reserve bounded prepared-page capacity before claiming a BIO.
 		 * Never block here: with opposite-end claiming, blocking after
@@ -4483,6 +4492,12 @@ static void swapz_drain(struct dm_target *ti)
 		flush_delayed_work(&ctx->worker);
 	}
 	drain_workqueue(ctx->workqueue);
+	/* The ordered worker can queue a final producer invocation while it
+	 * drains. Wait for that invocation to release even an empty-queue slot
+	 * before checking the free mask. Admission and ordered work are now
+	 * quiescent, and the producer never queues ordered work itself. */
+	if (ctx->preparation_workqueue)
+		drain_workqueue(ctx->preparation_workqueue);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!list_empty(&ctx->incoming) ||
 	    !list_empty(&ctx->preparation_incoming) || ctx->preparation_queued ||

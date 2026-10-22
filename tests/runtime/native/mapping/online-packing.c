@@ -365,6 +365,87 @@ static int test_metadata_set_cache_reuses_validated_block_zero(void)
 	return 0;
 }
 
+static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
+{
+	struct swapz_compressed_page pages[28];
+	swapz_u8 output[3568], committed;
+	swapz_u16 length = 0, first_slot = 0, last_slot = 0;
+	swapz_u32 extent, record, slot, valid = 0, matches = 0;
+	swapz_u32 epoch, reads_before;
+
+	CHECK(setup() == 0);
+	engine.read_metadata_cache = scratch_metadata_cache;
+	engine.read_extent_cache = scratch_extent_cache;
+	prepare(pages, 28, 0, 0);
+	/* All four starts hash into the same four-way set. Use real engine
+	 * writes and authoritative maps, leaving unused physical gaps only
+	 * to construct this collision fixture. */
+	for (extent = 0; extent < 4; ++extent) {
+		authority.next_block = extent * 128U;
+		committed = 0;
+		CHECK(write_window_sequential(pages + extent * 7U, 7,
+					      &committed) == 0);
+		CHECK(committed == 7);
+		CHECK(maps[extent * 7U].start_block == extent * 128U);
+		CHECK(maps[extent * 7U].extent_blocks == 4);
+	}
+	for (extent = 0; extent < 4; ++extent)
+		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
+					   sizeof(output), &length) == 0);
+	epoch = engine.read_metadata_epoch;
+	CHECK(epoch != 0 && engine.read_metadata_set_replacements == 0);
+	for (slot = 0; slot < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++slot) {
+		if (engine.read_metadata_tags[slot].epoch != epoch)
+			continue;
+		if (!valid)
+			first_slot = slot;
+		last_slot = slot;
+		valid++;
+	}
+	CHECK(valid == 4 && last_slot == first_slot + 3U);
+	CHECK(first_slot / 4U == last_slot / 4U);
+	CHECK(engine.read_metadata_tags[last_slot].start_block == 384U);
+
+	/* A hole before a matching tag must not terminate the commit scan.
+	 * The scratch hit below skips the initial metadata-set lookup. */
+	engine.read_metadata_tags[first_slot].epoch = 0;
+	CHECK(swapz_engine_read_page(&engine, 21, output,
+				   sizeof(output), &length) == 0);
+	CHECK(engine.read_metadata_tags[first_slot].epoch == 0);
+	CHECK(engine.read_metadata_tags[last_slot].start_block == 384U);
+	engine.read_metadata_tags[first_slot].epoch = epoch;
+
+	reads_before = disk.read_blocks;
+	for (record = 0; record < 7; ++record)
+		for (extent = 0; extent < 4; ++extent) {
+			swapz_u32 logical = extent * 7U + record;
+
+			CHECK(swapz_engine_read_page(&engine, logical, output,
+						   sizeof(output), &length) == 0);
+			CHECK(length == 2072);
+			CHECK(!memcmp(output, originals[logical], length));
+		}
+	/* The first record warmed only block zero of each four-block extent;
+	 * its siblings must fetch exactly the remaining three blocks once. */
+	CHECK(disk.read_blocks == reads_before + 12U);
+	reads_before = disk.read_blocks;
+	for (extent = 0; extent < 4; ++extent)
+		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
+					   sizeof(output), &length) == 0);
+	CHECK(disk.read_blocks == reads_before);
+	CHECK(engine.read_metadata_set_replacements == 0);
+	for (extent = 0; extent < 4; ++extent) {
+		matches = 0;
+		for (slot = first_slot; slot <= last_slot; ++slot)
+			if (engine.read_metadata_tags[slot].epoch == epoch &&
+			    engine.read_metadata_tags[slot].start_block == extent * 128U &&
+			    engine.read_metadata_tags[slot].extent_blocks == 4)
+				matches++;
+		CHECK(matches == 1);
+	}
+	return 0;
+}
+
 static int test_four_block_extent_reuses_each_payload_block_once(void)
 {
 	struct swapz_compressed_page pages[7];
@@ -897,6 +978,7 @@ int main(void)
 	CHECK(test_uniform_pack_cliff_reduces_physical_blocks() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_metadata_set_cache_reuses_validated_block_zero() == 0); completed++;
+	CHECK(test_metadata_siblings_keep_unique_tags_in_a_full_set() == 0); completed++;
 	CHECK(test_four_block_extent_reuses_each_payload_block_once() == 0); completed++;
 	CHECK(test_extent_lru_reuses_eight_interleaved_extents() == 0); completed++;
 	CHECK(test_prime_absorb_preserves_shared_read_residency() == 0); completed++;

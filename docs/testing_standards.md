@@ -107,32 +107,33 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 ## Current qualified baseline
 
 The latest standard owner matrix tested source
-`5bdd040334ee0739e1663e98eef4c875a1c4629a`, passed all five stages, and
+`9a802eff7d9d832a6b26c855042c9b1f71e9c62c`, passed all five stages, and
 published report-only commit
-`1df2e5a6d7c52682c2ac048310b0ed2f932a2791`. This qualifies the standard
-owned-RAM matrix for that source only. Later metadata-locality work and the
-reviewed preparation-array/default-off rescue changes remain owner-unqualified.
+`6f5c6e56e6d84090384279742ffa936f2b4a0f5e`. This qualifies the default
+fixed-array preparation and default-off rescue on the standard owned-RAM
+matrix. Rescue-on routing, deliberate low-RAM/heavy-CPU operation, realistic
+churn, actual kernel swap and physical endurance remain unqualified.
 
-Five matched fast-model write pairs measured async/sync throughput changes:
-QD4 +0.88% (95% CI [-0.59%,+2.34%]), QD8 +19.62%
-([+15.02%,+24.22%]), QD32 +26.37% ([+21.31%,+31.43%]). QD8 lower WRITE
-requests fell 16.19% while bytes rose 0.39%; QD32 requests rose 25.44% and
-bytes rose 0.70%. Those four I/O intervals exclude zero. Fast mixed async/sync
-throughput +1.27% ([-1.06%,+3.61%]) remains inconclusive.
+Five matched fast-model async/sync write pairs measured QD4 -0.88% (95% CI
+[-7.91%,+6.16%]), QD8 +25.64% ([+19.91%,+31.37%]), and QD32 +32.87%
+([+24.44%,+41.30%]). QD8 requests fell 19.90% ([-23.39%,-16.41%]); QD32
+requests rose 26.93% ([+0.32%,+53.54%]). QD32 bytes rose 0.61%
+([-0.04%,+1.25%]), an inconclusive change. Fast mixed throughput +4.2%
+([-1.5%,+9.9%]) also remains inconclusive versus sync. All default mixed and
+sustained-write rescue counters and wall time are zero because rescue is off.
 
-All 14 mixed and 40 sustained-write sessions recorded zero delta64 classifier
-passes, attempts and adoptions. Classification still consumed measured wall
-time; it is not isolated CPU consumption. The reviewed policy therefore makes
-`delta64_rescue=0` the default and allocates predictor scratch only when opted
-in. The codec/GC encoding and native structured-corpus controls remain intact.
+Fast random packed reads consumed 3592 KiB / 734.6 requests, versus 2493 KiB /
+623.2 requests in the prior `5bdd040` report. The tested source can insert
+duplicate metadata keys on scratch/extent-cache hits; fix this defect before
+attributing all extra reads to four-way set conflicts or replacing the cache.
+The alpha.26 duplicate-insertion and final-producer-drain fixes await owner
+qualification; the stored report still identifies the tested alpha.25 source.
 
-Fast QD32 whole-host CPU activity averaged 38.8% sync versus 53.8% async;
-CPU PSI averaged 19.1% versus 25.9%. These include benchmark, kernel and
-background work such as Codex. No idle-host control or code-specific CPU
-attribution exists. Do not pool unlike host conditions or treat elapsed engine
-timings as CPU time. K=1, activation thresholds and packing geometry remain
-unchanged. Low-RAM/heavy-CPU, realistic churn, actual kernel swap and physical
-endurance remain open qualification gates.
+Fast QD32 whole-host CPU activity averaged 39.4% sync versus 56.1% async;
+CPU PSI averaged 19.5% versus 26.8%. These include benchmark, kernel and
+background work such as Codex. They do not isolate swapz CPU or establish an
+idle-host control. Keep K=1 and its activation policy fixed for this repair;
+compare useful throughput, lower I/O, read tails and CPU/load context together.
 
 ## Deferred optimization evidence gates
 
@@ -551,6 +552,12 @@ all three early-release paths, pointer clearing before bit return, release
 barrier plus ordered compare/exchange, array destruction after worker drain,
 and an all-free mask in the suspend/drain invariant. The owner matrix must
 still cover byte-exact reads, deep-QD reuse, faults and suspend/teardown.
+Require 64-byte element alignment/stride and a cheap queue-count hint before
+claiming, followed by the authoritative locked queue check. Source contracts
+must require a final producer drain after the ordered queue drain and before
+the free-mask invariant. An early producer drain alone cannot exclude work
+queued by an ordered callback still running. Native mask stress does not
+exercise this workqueue lifecycle; loaded suspend/teardown remains required.
 
 
 ### Lower-WRITE queue starvation and GC distribution attribution
@@ -1094,6 +1101,16 @@ starting a new nonzero epoch.
 A cold zero-epoch lookup still performs the bounded four-way probe for stable
 telemetry, but zero epoch can never validate a tag as a hit.
 
+Directory commit must deduplicate keys even when scratch/extent-cache hits
+skip directory lookup. Scan all four ways for an existing key before using
+an invalid/oldest slot; a hole before a match must not hide that match.
+Refresh age without inserting, copying the block, or counting replacement.
+Exact production-C coverage creates four distinct colliding extents, repeats
+their sibling reads, and requires one tag per key, no replacements, exact
+payloads and each payload block fetched only once. Test a hole before a match
+as well. These checks prevent duplicate self-eviction; they do not establish
+that four-way conflicts among more than four distinct keys are harmless.
+
 An ordinary metadata-cache hit parses and sequence-checks the cached block
 directly. It must not copy all 4096 bytes into read scratch merely to decode one
 record. If the selected payload overlaps block zero, copy only that exact
@@ -1139,8 +1156,12 @@ already-compressed baseline at or below 2024 bytes, the engine computes the
 next exact uniform-payload packing limit across 4/8/16KiB SWZ extents. Pages
 with such a lower limit may use threshold 16, but adoption also requires
 crossing that packing limit. Neither path runs while rescue is disabled.
-These inherited packing-aware changes and the allocation/default-off increment
-remain owner-unqualified. Native structured pages are opportunity evidence.
+Source `9a802eff7d9d` is owner-qualified with rescue off and fixed-array
+preparation. Packing-aware rescue-on behavior still lacks loaded qualification;
+native structured pages remain opportunity evidence. Console legends must
+describe both eligibility paths, thresholds 24/16, all score bands and the
+uniform-cliff limit. Metadata payload-copy counters exclude cache insertion
+copies and directory lookup counts exclude scratch/extent-cache hits.
 
 Capture every production `delta64_*` counter in drained, timed mixed and
 sustained-write snapshots. Missing fields are unavailable evidence, not zero

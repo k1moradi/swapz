@@ -375,7 +375,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 {
 	swapz_u32 oldest_age = ~(swapz_u32)0;
 	swapz_u16 set, base, way, slot = 0;
-	int have_slot = 0;
+	int have_slot = 0, have_invalid = 0;
 
 	if (!engine->read_metadata_cache || !metadata)
 		return;
@@ -398,18 +398,32 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 			swapz_u16 candidate = base + way;
 
 			tag = &engine->read_metadata_tags[candidate];
-			if (tag->epoch != engine->read_metadata_epoch) {
+			/* Scratch/extent-cache hits skip the directory lookup. They
+			 * must refresh an existing tag, not insert another copy. Scan
+			 * past invalid ways too: a matching tag may follow a hole. */
+			if (tag->epoch == engine->read_metadata_epoch &&
+			    tag->start_block == start_block &&
+			    tag->extent_blocks == extent_blocks) {
+				hit_slot = candidate;
 				slot = candidate;
 				have_slot = 1;
 				break;
 			}
-			if (!have_slot || tag->age < oldest_age) {
+			if (tag->epoch != engine->read_metadata_epoch) {
+				if (!have_invalid) {
+					slot = candidate;
+					have_slot = 1;
+					have_invalid = 1;
+				}
+				continue;
+			}
+			if (!have_invalid && (!have_slot || tag->age < oldest_age)) {
 				oldest_age = tag->age;
 				slot = candidate;
 				have_slot = 1;
 			}
 		}
-		if (have_slot &&
+		if (hit_slot < 0 && have_slot &&
 		    engine->read_metadata_tags[slot].epoch ==
 			engine->read_metadata_epoch)
 			engine->read_metadata_set_replacements++;

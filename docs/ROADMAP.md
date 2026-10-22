@@ -9,47 +9,46 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest standard owner matrix tested source
-`5bdd040334ee0739e1663e98eef4c875a1c4629a`, passed all five stages, and
+`9a802eff7d9d832a6b26c855042c9b1f71e9c62c`, passed all five stages, and
 published report-only commit
-`1df2e5a6d7c52682c2ac048310b0ed2f932a2791`. This qualifies the standard
-owned-RAM matrix for that source only. Later metadata-locality work and the
-reviewed preparation-array/default-off rescue changes remain owner-unqualified.
-The packing-aware delta64 path added concurrently also remains behind that
-default-off gate; it has no loaded performance evidence on this source.
+`6f5c6e56e6d84090384279742ffa936f2b4a0f5e`. This qualifies the default
+fixed-array preparation and default-off rescue on the standard owned-RAM
+matrix. Rescue-on routing, deliberate low-RAM/heavy-CPU operation, realistic
+churn, actual kernel swap and physical endurance remain unqualified.
 
-Five matched fast-model write pairs measured async/sync throughput changes:
-QD4 +0.88% (95% CI [-0.59%,+2.34%]), QD8 +19.62%
-([+15.02%,+24.22%]), QD32 +26.37% ([+21.31%,+31.43%]). QD8 lower WRITE
-requests fell 16.19% while bytes rose 0.39%; QD32 requests rose 25.44% and
-bytes rose 0.70%. Those four I/O intervals exclude zero. Fast mixed async/sync
-throughput +1.27% ([-1.06%,+3.61%]) remains inconclusive.
+Five matched fast-model async/sync write pairs measured QD4 -0.88% (95% CI
+[-7.91%,+6.16%]), QD8 +25.64% ([+19.91%,+31.37%]), and QD32 +32.87%
+([+24.44%,+41.30%]). QD8 requests fell 19.90% ([-23.39%,-16.41%]); QD32
+requests rose 26.93% ([+0.32%,+53.54%]). QD32 bytes rose 0.61%
+([-0.04%,+1.25%]), an inconclusive change. Fast mixed throughput +4.2%
+([-1.5%,+9.9%]) also remains inconclusive versus sync. All default mixed and
+sustained-write rescue counters and wall time are zero because rescue is off.
 
-All 14 mixed and 40 sustained-write sessions recorded zero delta64 classifier
-passes, attempts and adoptions. Classification still consumed measured wall
-time; it is not isolated CPU consumption. The reviewed policy therefore makes
-`delta64_rescue=0` the default and allocates predictor scratch only when opted
-in. The codec/GC encoding and native structured-corpus controls remain intact.
+Fast random packed reads consumed 3592 KiB / 734.6 requests, versus 2493 KiB /
+623.2 requests in the prior `5bdd040` report. The tested source can insert
+duplicate metadata keys on scratch/extent-cache hits; fix this defect before
+attributing all extra reads to four-way set conflicts or replacing the cache.
+The alpha.26 duplicate-insertion and final-producer-drain fixes await owner
+qualification; the stored report still identifies the tested alpha.25 source.
 
-Fast QD32 whole-host CPU activity averaged 38.8% sync versus 53.8% async;
-CPU PSI averaged 19.1% versus 25.9%. These include benchmark, kernel and
-background work such as Codex. No idle-host control or code-specific CPU
-attribution exists. Do not pool unlike host conditions or treat elapsed engine
-timings as CPU time. K=1, activation thresholds and packing geometry remain
-unchanged. Low-RAM/heavy-CPU, realistic churn, actual kernel swap and physical
-endurance remain open qualification gates.
+Fast QD32 whole-host CPU activity averaged 39.4% sync versus 56.1% async;
+CPU PSI averaged 19.5% versus 26.8%. These include benchmark, kernel and
+background work such as Codex. They do not isolate swapz CPU or establish an
+idle-host control. Keep K=1 and its activation policy fixed for this repair;
+compare useful throughput, lower I/O, read tails and CPU/load context together.
 
 ## Current bottleneck ranking
 
-The next owner run must first qualify the reviewed fixed preparation array,
-default-off delta64 gate and inherited metadata-locality work on one pinned
-source. These changes have not been compiled or tested locally. Then perform
-ID36 low-RAM/heavy-CPU qualification of explicit sync versus
-default async, including target-creation failure cleanup, sustained QD1/4/8/32,
-suspend/drain, faults and teardown. Constrain the whole disposable guest's RAM
-and oversubscribe its CPUs; limiting the replay process alone does not establish
-the target's kernel-allocation behavior. Record preparation-array high-water,
-waits, throughput, p99 and byte-exact verification. Keep the release gate open
-until this evidence exists.
+The next owner run must qualify alpha.26's metadata-key uniqueness, cache-line
+slot alignment and final producer drain without changing K=1 scheduling.
+Require full readback and suspend/fault lifecycle success, and inspect random
+lower READ bytes/requests alongside metadata replacements and engine wall time.
+No local compilation or tests were run for this increment. After qualification,
+perform ID36 low-RAM/heavy-CPU comparison of explicit sync versus default async,
+including allocation failure cleanup, sustained QD1/4/8/32, suspend/drain, faults
+and teardown. Constrain the disposable guest's RAM and oversubscribe its CPUs;
+limiting the replay process alone does not establish kernel-allocation behavior.
+Keep that release gate open until the evidence exists.
 
 Ordinary benchmark reports now observe host CPU activity and PSI at phase
 boundaries. These observations expose contention but do not supply an idle
@@ -71,8 +70,9 @@ Only then decide whether asynchronous TRIM merits the added state machine.
 Fast and serial adjacent READ coalescing retain five matched rounds.
 
 ID67 remains an opt-in production page-local rescue path. Raw LZ4 remains the first
-attempt; only a result above 2024 bytes or RAW fallback reaches the scalar
-8->32-pair classifier at threshold 24. A selected page is transformed with the
+attempt. RAW or >2024-byte baselines use the scalar 8->32-pair classifier
+at threshold 24; smaller LZ4 packing candidates use threshold 16 and must
+cross their exact uniform packing limit before adoption. A selected page is transformed with the
 runtime SIMD/scalar delta64 backend, compressed a second time, and adopted only
 when the stored payload is strictly smaller than the raw-LZ4 baseline. SWZ
 records carry the encoding explicitly and reads invert delta64 after LZ4.
@@ -172,7 +172,7 @@ changes.
 | 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Page-local delta64 rescue around LZ4 | **4 opt-in evidence; default-off change awaits owner qualification** | Source 5bdd040 measured zero adoptions in all timed mixed/write sessions. The reviewed `delta64_rescue=0` default skips classification and predictor scratch allocation. Opt-in baselines >2024 bytes or RAW use threshold 24 and adopt only a smaller payload. Keep per-record codec/GC support; require representative content and a loaded controlled comparison before promotion. |
+| 67 | Page-local delta64 rescue around LZ4 | **4 opt-in evidence; default-off owner-qualified** | Source 9a802eff qualified `delta64_rescue=0` with zero classification, rescue wall time and predictor scratch allocation in the default configuration. Opt-in baselines >2024 bytes or RAW use threshold 24 and adopt only a smaller payload. Keep per-record codec/GC support; require representative content and a loaded controlled comparison before promotion. |
 | 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
 | 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |

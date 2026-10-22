@@ -1154,6 +1154,14 @@ class ReportContract(unittest.TestCase):
         self.assertIn("delta64", rendered)
         self.assertIn("pack eligible", rendered)
         self.assertIn("score 0-7", rendered)
+        readable = " ".join(rendered.split())
+        for column in ("pack eligible", "pack try", "cliff", "pack+", "score 0-7",
+                       "8-15", "16-23", "24+", "lookups", "set hit %",
+                       "probes/lookup", "repl", "meta copy KiB"):
+            self.assertNotIn(f"literal column: {column}", readable)
+        self.assertIn("excludes cache insertion copies", readable)
+        self.assertIn("threshold 16", readable)
+        self.assertIn("cannot distinguish set conflicts", readable)
         self.assertIn("classifier=scalar", rendered)
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)
