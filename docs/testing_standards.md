@@ -111,12 +111,21 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-The latest standard owner matrix tested source
+The latest successful standard owner matrix tested source
 `5bf2c0a6f0384ccf3829dc02dc0e9b737c857e40`, passed all five stages, and
 published report-only commit
 `85aeac4cbb368bb4900cd94c9c73f46d952520ef`. This qualifies alpha.26's
 metadata-key deduplication, final producer drain and aligned preparation array
-on owned RAM-backed `null_blk`. It does not qualify the new alpha.27 cache.
+on owned RAM-backed `null_blk`.
+
+The later owner run for `b7aae67fc230ceb4323e8be4c6f1ebf219cba405` failed in
+stage 2 before loaded qualification because the native source-contract parser
+did not recognize alpha.27's `swapz_u16` metadata-cache helper. Report-only
+commit `7faef62418e9563efde947cef432e63af1236629` correctly records overall
+FAIL and loaded `NOT_RUN`. Commits
+`55183d7c7d041c74068ed553ba42213fc44cf713` and
+`30ba10ce38ebae3da2e401bba15b1ca4178765c5` repair and pin only that parser
+defect; they do not promote alpha.27 without another complete owner `make test`.
 
 Against the preceding `9a802eff` report, fast random backing reads fell from
 3592 to 2993 KiB and 734.6 to 678 requests. Directory hit rate rose from 71.2%
@@ -149,8 +158,12 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 - **ID60 same-extent grouping:** refuted and retired. Do not keep a dedicated
   loaded A/B after the code path is removed; ordinary reads already use the
   shared extent/metadata caches.
-- **ID63 adjacent READ coalescing:** retain five matched fast rounds and five
-  matched serial-depth rounds. Every merge remains exact, same-segment,
+- **ID63 adjacent READ coalescing:** production keeps `read_coalesce=1` by
+  default. Retain five matched fast rounds and five matched serial-depth rounds.
+  The latest successful matrix reconfirms fast sequential request reduction
+  without a statistically established throughput/p99 loss and strong serial
+  request/throughput/p99 wins; exact-current-main confirmation remains required
+  after alpha.27's cache change. Every merge remains exact, same-segment,
   <=8 blocks total and zero-padding; `parallel_read_coalesce_extra_blocks`
   stays zero and defensive skip-other stays zero. Eligibility must use shared
   cache metadata without private-slot memcpy, and source contracts must prove
@@ -158,16 +171,21 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 - **ID64 one-shot in-flight-zero shrink guard:** retired. Do not restore the module parameter, shrink helper or loaded A/B. Compatibility status fields stay zero so existing report parsers remain stable.
 - **K=1 shallow detach gate:** fast QD4/QD8/QD32 require five matched sync/async pairs. Acceptance requires the prior QD4 regression to disappear, QD8/QD32 to keep statistically positive async gains, and fast mixed lower request inflation to improve without useful-throughput or read-tail loss.
 - **Device-model limits:** every report must distinguish the configured null_blk MiB/s cap from the analytical unmerged-4KiB latency ceiling (4096 * hw_queue_depth / completion_nsec). The console must show both in decimal MB/s and must not call the calculation a measured bulk calibration.
-- **ID65 synchronous read cleanup:**- **ID65 synchronous read cleanup:** owner-qualified. Any non-ID63 candidate
+- **ID65 synchronous read cleanup:** owner-qualified. Any non-ID63 candidate
   must now return before slot preparation/priming; no standalone same-extent
   slot execution remains. Fast/serial ID63 retain five-pair confirmation.
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
   continue proving the temporary live-reference decrement is exactly restored
   before return/commit, including an error after a validated shared-extent page.
-- **ID67 predictive rescue:** production uses page-local delta64 only after raw
-  LZ4 is >2024 bytes or RAW and the threshold-24 classifier accepts the page;
-  the candidate is stored only when strictly smaller. The official rootless
-  stage must build/run the native evaluator, emit exactly one sanitized
+- **ID67 predictive rescue:** rescue remains default-off. RAW or >2024-byte LZ4
+  baselines use threshold 24 and require a strictly smaller candidate. A
+  baseline at or below 2024 bytes is eligible only when the production planner
+  identifies the exact next uniform SWZ packing limit; that route uses threshold
+  16 and the candidate must cross the packing cliff as well as remain strictly
+  smaller. Default-off qualification is not promotion evidence: enabling rescue
+  requires representative positive content and a controlled loaded on/off A/B.
+  The official rootless stage must build/run the native evaluator, emit exactly
+  one sanitized
   `SWAPZ_PREDICTOR_EVIDENCE` record, and fail if it is missing or malformed.
   SHAKE entropy/mixed/medium plus generated zero/repeat pages are negative
   controls; deterministic pointer/page-table/integer/float/struct and
@@ -1017,7 +1035,11 @@ per-segment-list relocation of the same 256 survivors. The sanitized report
 must retain both geometry rows. Timing is directional CPU evidence, not a
 physical-media latency claim. Loaded qualification must additionally prove that
 successful GC visits exactly `gc_pages` relocation-list entries, rather than
-merely timing a native surrogate.
+merely timing a native surrogate. Report `85aeac4` satisfies this production
+gate with 20 relocation-list visits for 20 relocated pages,
+`gc_choose_map_entries=0`, 20 victim rotations and byte-exact verification of
+all 4,096 logical pages. Keep the full-map relocation path only as the portable
+fallback when the segment-membership sidecar is absent.
 
 
 ### Placement/reclaim qualification
@@ -1062,9 +1084,15 @@ candidate liveness scan, repeated live-GC correctness, exact readback, and
 nonfatal DISCARD semantics.
 
 Logical segment-open spread is allocator telemetry, not flash-wear evidence.
-A default-off least-opened-segment experiment may be qualified as logical
-allocator fairness only. No threshold from RAM-backed null_blk may turn that
-counter into a NAND-wear claim or promote cold-data relocation.
+The production least-opened-segment switch remains default-off and the official
+loaded harness currently requires `logical_open_balance=0`; native semantics
+alone do not qualify promotion. The latest qualified baseline reports
+1/1.25/2 min/mean/max opens across 64 segments and 80 total opens, already the
+best possible integer min/max spread for that workload. A future loaded A/B
+must therefore use deliberately skewed churn and compare spread, allocator
+probe count/wall time, GC work, lower I/O, useful throughput and p99 while
+varying only this policy. No threshold from RAM-backed `null_blk` may turn
+that counter into a NAND-wear claim or promote cold-data relocation.
 
 
 ID70c loaded qualification uses only the owned RAM null_blk mapping. It must

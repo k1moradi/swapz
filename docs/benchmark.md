@@ -115,12 +115,21 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
-The latest standard owner matrix tested source
+The latest successful standard owner matrix tested source
 `5bf2c0a6f0384ccf3829dc02dc0e9b737c857e40`, passed all five stages, and
 published report-only commit
 `85aeac4cbb368bb4900cd94c9c73f46d952520ef`. This qualifies alpha.26's
 metadata-key deduplication, final producer drain and aligned preparation array
-on owned RAM-backed `null_blk`. It does not qualify the new alpha.27 cache.
+on owned RAM-backed `null_blk`.
+
+The later owner run for `b7aae67fc230ceb4323e8be4c6f1ebf219cba405` stopped in
+native/rootless stage 2 before the loaded matrix because the source-contract
+parser did not recognize a new alpha.27 `swapz_u16` helper. Report
+`7faef62418e9563efde947cef432e63af1236629` is therefore a valid FAIL record,
+not performance evidence. Commits
+`55183d7c7d041c74068ed553ba42213fc44cf713` and
+`30ba10ce38ebae3da2e401bba15b1ca4178765c5` repair and pin the parser only;
+a fresh full owner run is still required for alpha.27.
 
 Against the preceding `9a802eff` report, fast random backing reads fell from
 3592 to 2993 KiB and 734.6 to 678 requests. Directory hit rate rose from 71.2%
@@ -206,7 +215,7 @@ zero `parallel_read_coalesce_extra_blocks`.
 
 ID64 no longer has a confirmation gate. Its loaded A/B is removed. The active scheduling question is shallow K=1 detachment: fast QD4/QD8/QD32 use five matched sync/async rounds while fast mixed retains five matched pairs.
 
-ID65 and ID66 are owner-qualifiedID65 and ID66 are owner-qualified at source
+ID65 and ID66 are owner-qualified at source
 `2fabd0dc4b3fe09b8e52e9a624e9452647229e09`. The READ helper remains absent
 and compatibility telemetry stays zero. ID63 now carries the entire grouped-slot
 execution path: a non-ID63 candidate must return before slot preparation,
@@ -224,15 +233,25 @@ restored before either error return or commit.
 completion wait; the slow model records zero. Keep this passive. Do not expand
 authority/batch state for a theoretical sub-percent wall opportunity.
 
-**ID63 adjacent distinct-extent READ coalescing.** Passive evidence finds
-162.4/207.0 sequential distinct pairs physically adjacent but only 2.6/392.2
-random. The bounded active experiment is stricter: prime private slots from the
-shared caches, derive the exact missing block range for every grouped BIO, and
-merge only when both missing ranges are nonempty, individually contiguous,
-immediately adjacent, in one 1MiB segment and <=8 blocks total. Issue one lower
-READ with no padding, seed only private slot scratch, then run the unchanged
-per-record metadata/generation/CRC/decompression path. Shared cache publication
-still waits for every grouped read and upper copy to succeed.
+**ID63 adjacent distinct-extent READ coalescing.** The latest successful owner
+matrix (`85aeac4`) reconfirms the promoted request benefit. Fast sequential
+lower requests improve 21.09% with 95% CI [18.54%,23.64%], while throughput
+(-1.11%, CI [-13.53%,+11.31%]) and p99 (-1.02%, CI [-6.26%,+4.21%]) do not show
+a significant loss. Serial-depth sequential requests improve 40.16%, throughput
+52.03%, and p99 36.28%, with all three paired intervals excluding zero.
+Production therefore keeps `read_coalesce=1` by default. Alpha.27 changed the
+metadata-cache implementation after this qualified source, so exact-current-main
+confirmation is still required.
+
+Passive evidence finds 162.4/207.0 sequential distinct pairs physically
+adjacent but only 2.6/392.2 random. The bounded active experiment is stricter:
+prime private slots from the shared caches, derive the exact missing block range
+for every grouped BIO, and merge only when both missing ranges are nonempty,
+individually contiguous, immediately adjacent, in one 1MiB segment and <=8
+blocks total. Issue one lower READ with no padding, seed only private slot
+scratch, then run the unchanged per-record metadata/generation/CRC/decompression
+path. Shared cache publication still waits for every grouped read and upper copy
+to succeed.
 
 All queue depths may use one-request ID63 coalescing on the ordered worker.
 Standalone same-extent slot grouping and the rejected helper dispatch are
@@ -254,23 +273,45 @@ the pre-pressure latency baseline; the maximum p99 from later rounds is the
 pressure observation. Report GC wall as parts-per-million of useful WRITE wall.
 This is synthetic owned-RAM evidence and must not be relabeled physical-device
 latency. The owner pressure run put foreground GC near 0.8% of useful-write
-wall, refuting a background worker at current geometry. Victim selection now
-maintains per-segment live-byte/I/O/min-block scores with the existing exact
-mapping count, so loaded qualification requires zero
-`gc_choose_map_entries`. The relocation scan remains until native scaling
-evidence shows it is material.
+wall, refuting a background worker at current geometry. Victim selection now maintains per-segment live-byte/I/O/min-block scores with
+the existing exact mapping count, so loaded qualification requires zero
+`gc_choose_map_entries`. ID61b relocation is also production-qualified:
+report `85aeac4` records 20 relocation-list visits for exactly 20 relocated
+pages, zero victim-selection map visits, 1,280 segment-score visits and
+byte-exact verification after 20 victim rotations. The portable full-map path
+remains only as a compatibility fallback for callers without the sidecar.
 
 **ID62 physical media.** No current benchmark may collect physical evidence.
 ID29/ID63 RAM qualification does not authorize physical storage or active swap.
 
+**ID72 logical allocator fairness.** The production switch exists, but the
+official loaded harness still pins `logical_open_balance=0`; there is no owner
+loaded A/B. The latest qualified baseline already reports segment opens
+1/1.25/2 min/mean/max across 64 segments and 80 total opens, which is the
+minimum possible integer min/max spread for that workload. A meaningful future
+A/B must deliberately create skewed reusable-segment histories and compare
+open-count spread, allocator probes/wall time, GC work, lower I/O, useful
+throughput and p99. RAM `null_blk` results remain allocator-fairness evidence,
+not NAND-wear evidence.
+
 ## ID67 predictor evidence and production route
 
-The native ID67 evidence remains the measurement basis for the production
-page-local delta64 rescue. Production now keeps raw LZ4 as the first attempt,
-routes only baselines above 2024 bytes or RAW fallback through the threshold-24
-classifier, and adopts delta64+LZ4 only when the resulting stored payload is
-strictly smaller. The following historical/native controls continue to measure
-routing quality and backend cost. ID67a.3 uses
+The native ID67 evidence remains the measurement basis for the opt-in
+page-local delta64 rescue. Production keeps raw LZ4 as the first attempt. RAW
+or >2024-byte baselines use the threshold-24 classifier and adopt only a
+strictly smaller delta64+LZ4 payload. Already-compressed baselines at or below
+2024 bytes are considered only when the production planner identifies an exact
+next uniform SWZ packing limit; that packing path uses threshold 16 and adoption
+must cross the identified packing cliff as well as remain strictly smaller.
+Rescue is default-off.
+
+Earlier loaded enabled-policy evidence observed eligible pages in all 14 mixed
+and 40 sustained-write sessions but zero classifier passes, transform attempts
+or adoptions while still accumulating classifier wall time. That result
+justified the default-off policy. The newer packing-aware route is materially
+different, but it has not yet passed a controlled loaded rescue-on/off A/B on
+representative positive content. The following historical/native controls
+continue to measure routing quality and backend cost. ID67a.3 uses
 `anon-page-fixture.py` SHAKE-generated entropy, mixed and medium pages plus
 generated zero/repeated-word controls. The sampled delta64 signpost runs only
 after raw LZ4 leaves a page above the rescue threshold and never treats an
