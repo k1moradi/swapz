@@ -59,6 +59,7 @@
 #define SWAPZ_PREPARATION_STARTER_WAKE_MIN \
 	(SWAPZ_PREPARATION_TAIL_WAKE_MIN + 1U)
 #define SWAPZ_PREPARATION_TAIL_CLAIM_MIN 2U
+#define SWAPZ_MAX_PREPARATION_WORKERS 4U
 /*
  * A separate bounded LZ4 producer may prepare future writes while the
  * existing ordered commit worker waits on lower dm_io. WRITE physical I/O
@@ -75,6 +76,12 @@ static bool swapz_delta64_rescue_enabled;
 module_param_named(delta64_rescue, swapz_delta64_rescue_enabled, bool, 0444);
 MODULE_PARM_DESC(delta64_rescue,
 		 "Opt in to page-local delta64 rescue after ordinary LZ4; default off");
+
+static unsigned int swapz_delta64_prepare_workers = 1U;
+module_param_named(delta64_prepare_workers, swapz_delta64_prepare_workers, uint, 0444);
+MODULE_PARM_DESC(delta64_prepare_workers,
+		 "Bounded delta64 preparation lanes 1..4; effective only with "
+		 "async_prepare=1 and delta64_rescue=1");
 
 static unsigned int swapz_lz4_acceleration = 1U;
 module_param_named(lz4_acceleration, swapz_lz4_acceleration, uint, 0444);
@@ -144,6 +151,39 @@ struct swapz_inflight_write {
 };
 
 struct swapz_dm;
+
+struct swapz_preparation_lane {
+	struct work_struct work;
+	struct swapz_dm *ctx;
+	u8 *input_page;
+	u8 *predictor_page;
+	void *lz4_workmem;
+	struct swapz_delta64_stats delta64;
+	u64 lz4_wall_ns;
+	u64 lower_write_overlap_ns;
+	u64 copy_wall_ns;
+	u64 copy_bytes;
+	u64 direct_lz4_pages;
+	u64 crc_wall_ns;
+	u64 worker_wall_ns;
+	u64 worker_cpu_ns;
+	u64 prepared_during_lower_write;
+	u64 prepared_pages;
+};
+
+struct swapz_preparation_totals {
+	struct swapz_delta64_stats delta64;
+	u64 lz4_wall_ns;
+	u64 lower_write_overlap_ns;
+	u64 copy_wall_ns;
+	u64 copy_bytes;
+	u64 direct_lz4_pages;
+	u64 crc_wall_ns;
+	u64 worker_wall_ns;
+	u64 worker_cpu_ns;
+	u64 prepared_during_lower_write;
+	u64 prepared_pages;
+};
 
 struct swapz_read_slot {
 	struct swapz_dm *ctx;
@@ -265,19 +305,18 @@ struct swapz_dm {
 	bool delta64_rescue_enabled;
 	swapz_u8 lz4_acceleration;
 	struct workqueue_struct *preparation_workqueue;
-	struct work_struct preparation_worker;
+	struct swapz_preparation_lane *preparation_lanes;
+	swapz_u8 preparation_worker_count;
 	struct list_head preparation_incoming;
 	/* Exact unclaimed preparation descriptors, protected by queue_lock. */
 	swapz_u32 preparation_queued;
 	struct swapz_prepared_page *preparation_pages;
 	atomic64_t preparation_free_mask;
-	u8 *preparation_input_page;
-	u8 *preparation_predictor_page;
-	/* Producer and ordered worker may now compress concurrently. Never
-	 * share LZ4 work memory or a single-writer timing accumulator. */
-	void *preparation_lz4_workmem;
-	u64 preparation_lz4_wall_ns;
+	/* Each producer lane owns input/predictor/LZ4 scratch and diagnostics.
+	 * The ordered worker remains the sole planner/publisher/ACK owner. */
 	atomic_t lower_write_active;
+	atomic_t preparation_workers_active;
+	atomic_t preparation_workers_active_max;
 	/*
 	 * One opposite-end preparation token earned by ordered inline WRITE work.
 	 * For a retained window the token may outlive swapz_process() and bridge
@@ -293,8 +332,6 @@ struct swapz_dm {
 	u64 preparation_ordered_waits;
 	u64 preparation_ordered_wait_wall_ns;
 	u64 preparation_wave_kicks;
-	u64 prepared_during_lower_write;
-	u64 preparation_lz4_lower_write_overlap_ns;
 	/* Diagnostic queue-depth samples at synchronous lower-WRITE boundaries. */
 	u64 prep_lower_write_samples;
 	u64 prep_lower_write_start_queued;
@@ -586,7 +623,6 @@ struct swapz_dm {
 	 * later aborted before publication. Each worker owns its accumulator;
 	 * only status sums them. Payload savings are not lower-device savings. */
 	struct swapz_delta64_stats ordered_delta64;
-	struct swapz_delta64_stats preparation_delta64;
 	/* Cumulative monotonic wall-time diagnostics; includes warmup and
 	 * oracle, NOT CPU cycles and NOT a measurement-interval delta. */
 	u64 lz4_wall_ns;
@@ -596,9 +632,6 @@ struct swapz_dm {
 	 * separate single-writer accumulators and are summed only for status.
 	 * Bytes count successful explicit copies, not LZ4's own memory traffic.
 	 */
-	u64 preparation_copy_wall_ns;
-	u64 preparation_copy_bytes;
-	u64 preparation_direct_lz4_pages;
 	u64 ordered_write_copy_wall_ns;
 	u64 ordered_write_copy_bytes;
 	u64 ordered_direct_lz4_pages;
@@ -624,12 +657,9 @@ struct swapz_dm {
 	 * current unaccounted slice but never turn sleep into CPU time.
 	 */
 	u64 ordered_worker_wall_ns;
-	u64 preparation_worker_wall_ns;
 	u64 ordered_worker_cpu_ns;
-	u64 preparation_worker_cpu_ns;
 	/* Retained status-ABI field for the retired ID39 helper; remains zero. */
 	u64 read_worker_cpu_ns;
-	u64 preparation_crc_wall_ns;
 	u64 ordered_crc_wall_ns;
 	/* Completed synchronous lower WRITE callbacks by wall-wait duration;
 	 * nested in lower_write_wall_ns, not hardware command latency. */
@@ -656,6 +686,60 @@ static void swapz_account_worker_runtime(u64 *wall_counter, u64 wall_start_ns,
 
 	*wall_counter += swapz_elapsed_ns(wall_start_ns, ktime_get_ns());
 	*cpu_counter += swapz_elapsed_ns(cpu_start_ns, cpu_end_ns);
+}
+
+static void swapz_delta64_stats_add(struct swapz_delta64_stats *total,
+				    const struct swapz_delta64_stats *part)
+{
+#define SWAPZ_ADD_DELTA64_FIELD(field) total->field += READ_ONCE(part->field)
+	SWAPZ_ADD_DELTA64_FIELD(eligible);
+	SWAPZ_ADD_DELTA64_FIELD(classifier_pass);
+	SWAPZ_ADD_DELTA64_FIELD(attempts);
+	SWAPZ_ADD_DELTA64_FIELD(adopted);
+	SWAPZ_ADD_DELTA64_FIELD(raw_rescues);
+	SWAPZ_ADD_DELTA64_FIELD(lz4_rescues);
+	SWAPZ_ADD_DELTA64_FIELD(pack_eligible);
+	SWAPZ_ADD_DELTA64_FIELD(pack_attempts);
+	SWAPZ_ADD_DELTA64_FIELD(pack_cliff_crossings);
+	SWAPZ_ADD_DELTA64_FIELD(pack_adopted);
+	SWAPZ_ADD_DELTA64_FIELD(score_0_7);
+	SWAPZ_ADD_DELTA64_FIELD(score_8_15);
+	SWAPZ_ADD_DELTA64_FIELD(score_16_23);
+	SWAPZ_ADD_DELTA64_FIELD(score_ge24);
+	SWAPZ_ADD_DELTA64_FIELD(payload_bytes_saved);
+	SWAPZ_ADD_DELTA64_FIELD(raw_payload_bytes_saved);
+	SWAPZ_ADD_DELTA64_FIELD(lz4_payload_bytes_saved);
+	SWAPZ_ADD_DELTA64_FIELD(transform_calls);
+	SWAPZ_ADD_DELTA64_FIELD(transform_wall_ns);
+	SWAPZ_ADD_DELTA64_FIELD(wall_ns);
+#undef SWAPZ_ADD_DELTA64_FIELD
+}
+
+static void swapz_preparation_totals_snapshot(
+	const struct swapz_dm *ctx, struct swapz_preparation_totals *total)
+{
+	swapz_u8 index;
+
+	memset(total, 0, sizeof(*total));
+	if (!ctx->preparation_lanes)
+		return;
+	for (index = 0; index < ctx->preparation_worker_count; ++index) {
+		const struct swapz_preparation_lane *lane =
+			&ctx->preparation_lanes[index];
+
+		swapz_delta64_stats_add(&total->delta64, &lane->delta64);
+		total->lz4_wall_ns += READ_ONCE(lane->lz4_wall_ns);
+		total->lower_write_overlap_ns += READ_ONCE(lane->lower_write_overlap_ns);
+		total->copy_wall_ns += READ_ONCE(lane->copy_wall_ns);
+		total->copy_bytes += READ_ONCE(lane->copy_bytes);
+		total->direct_lz4_pages += READ_ONCE(lane->direct_lz4_pages);
+		total->crc_wall_ns += READ_ONCE(lane->crc_wall_ns);
+		total->worker_wall_ns += READ_ONCE(lane->worker_wall_ns);
+		total->worker_cpu_ns += READ_ONCE(lane->worker_cpu_ns);
+		total->prepared_during_lower_write +=
+			READ_ONCE(lane->prepared_during_lower_write);
+		total->prepared_pages += READ_ONCE(lane->prepared_pages);
+	}
 }
 
 /*
@@ -705,6 +789,17 @@ static void swapz_invalidate_read_caches(struct swapz_dm *ctx)
 		return;
 	for (slot = 0; slot < SWAPZ_PARALLEL_READ_SLOTS; ++slot)
 		swapz_engine_invalidate_read_cache(&ctx->read_slots[slot].engine);
+}
+
+static void swapz_queue_preparation_workers(struct swapz_dm *ctx)
+{
+	swapz_u8 lane;
+
+	if (!ctx->preparation_workqueue || !ctx->preparation_lanes)
+		return;
+	for (lane = 0; lane < ctx->preparation_worker_count; ++lane)
+		queue_work(ctx->preparation_workqueue,
+			   &ctx->preparation_lanes[lane].work);
 }
 
 static void swapz_async_lower_write_done(unsigned long error, void *context)
@@ -796,7 +891,7 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx)
 	if (ctx->preparation_queued)
 		ctx->prep_lower_write_start_nonempty++;
 	if (ctx->async_prepare && ctx->preparation_queued)
-		queue_work(ctx->preparation_workqueue, &ctx->preparation_worker);
+		swapz_queue_preparation_workers(ctx);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	error = dm_io(&req, 1, &region, NULL, IOPRIO_DEFAULT);
 	if (error) {
@@ -977,8 +1072,7 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 		if (ctx->preparation_queued)
 			ctx->prep_lower_write_start_nonempty++;
 		if (ctx->async_prepare && ctx->preparation_queued)
-			queue_work(ctx->preparation_workqueue,
-				   &ctx->preparation_worker);
+			swapz_queue_preparation_workers(ctx);
 		spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
 	}
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
@@ -1411,12 +1505,24 @@ out:
  */
 static void swapz_preparation_worker(struct work_struct *work)
 {
-	struct swapz_dm *ctx =
-		container_of(work, struct swapz_dm, preparation_worker);
+	struct swapz_preparation_lane *lane =
+		container_of(work, struct swapz_preparation_lane, work);
+	struct swapz_dm *ctx = lane->ctx;
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
 	u64 wall_start_ns = ktime_get_ns();
 	u64 cpu_start_ns = swapz_worker_cpu_sample();
+	int active, peak, observed;
+
+	active = atomic_inc_return(&ctx->preparation_workers_active);
+	peak = atomic_read(&ctx->preparation_workers_active_max);
+	while (active > peak) {
+		observed = atomic_cmpxchg(&ctx->preparation_workers_active_max,
+					 peak, active);
+		if (observed == peak)
+			break;
+		peak = observed;
+	}
 
 	for (;;) {
 		struct swapz_prepared_page *prepared;
@@ -1424,86 +1530,52 @@ static void swapz_preparation_worker(struct work_struct *work)
 		void *mapped_input = NULL;
 		u64 section_start;
 		bool tail_claim = false;
+		bool parallel_tail_claim = false;
 		bool lower_write_overlap;
 		u64 elapsed_ns;
 		int error;
 		int slot;
 
-		/* Only a hint: the locked list check below remains authoritative.
-		 * Avoid reserving a slot for an already-empty producer wakeup. */
-		if (!READ_ONCE(ctx->preparation_queued)) {
-			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
-						 wall_start_ns,
-						 &ctx->preparation_worker_cpu_ns,
-						 cpu_start_ns);
-			return;
-		}
-		/*
-		 * Reserve bounded prepared-page capacity before claiming a BIO.
-		 * Never block here: with opposite-end claiming, blocking after
-		 * removing an earlier FIFO entry could deadlock the ordered worker
-		 * behind prepared tail entries that own every slot. If capacity is
-		 * exhausted, leave all remaining entries claimable by inline steal.
-		 */
+		if (!READ_ONCE(ctx->preparation_queued))
+			goto out;
 		slot = swapz_preparation_claim_slot(&ctx->preparation_free_mask);
-		if (slot < 0) {
-			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
-						 wall_start_ns,
-						 &ctx->preparation_worker_cpu_ns,
-						 cpu_start_ns);
-			return;
-		}
+		if (slot < 0)
+			goto out;
 		prepared = &ctx->preparation_pages[slot];
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (list_empty(&ctx->preparation_incoming)) {
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			swapz_preparation_release_slot(&ctx->preparation_free_mask, slot);
-			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
-						 wall_start_ns,
-						 &ctx->preparation_worker_cpu_ns,
-						 cpu_start_ns);
-			return;
+			goto out;
 		}
 		/*
-		 * If the ordered worker is sleeping in synchronous lower WRITE I/O,
-		 * prepare the FIFO head it will need next. Otherwise that worker is
-		 * free to steal from the head, so consume the tail and let both CPUs
-		 * meet in the middle instead of convoying on wait_for_completion().
+		 * Active lower WRITE I/O remains a head-first overlap signal. When
+		 * it is absent, K=1 retains the historical one-credit tail policy.
+		 * Delta64 K>1 lanes may instead take true tails while preserving one
+		 * unclaimed FIFO head for the ordered publisher.
 		 */
 		if (atomic_read(&ctx->lower_write_active)) {
-			/*
-			 * The ordered worker is blocked in synchronous lower WRITE I/O.
-			 * Drain from the FIFO head while that real overlap interval lasts.
-			 * A prior tail credit is obsolete once lower I/O becomes the owner
-			 * of preparation overlap.
-			 */
 			atomic_set(&ctx->preparation_tail_credit, 0);
 			entry = list_first_entry(&ctx->preparation_incoming,
 						 struct swapz_bio_ref,
 						 preparation_list);
 			ctx->preparation_producer_head_claims++;
 		} else {
-			/*
-			 * On a singular list, list_last_entry is also the FIFO head the
-			 * ordered worker is about to steal inline. Claiming that sole
-			 * entry manufactures a wait_for_completion() collision. Leave
-			 * both the head and its earned credit intact until a true tail
-			 * exists behind it.
-			 */
-			if (ctx->preparation_queued <
-				SWAPZ_PREPARATION_TAIL_CLAIM_MIN ||
+			parallel_tail_claim =
+				ctx->preparation_worker_count > 1U &&
+				ctx->preparation_queued >= SWAPZ_PREPARATION_TAIL_CLAIM_MIN &&
+				!list_is_singular(&ctx->preparation_incoming);
+			if (ctx->preparation_queued < SWAPZ_PREPARATION_TAIL_CLAIM_MIN ||
 			    list_is_singular(&ctx->preparation_incoming) ||
-			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
+			    (!parallel_tail_claim &&
+			     !atomic_xchg(&ctx->preparation_tail_credit, 0))) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				swapz_preparation_release_slot(
 					&ctx->preparation_free_mask, slot);
-				swapz_account_worker_runtime(
-					&ctx->preparation_worker_wall_ns,
-					wall_start_ns,
-					&ctx->preparation_worker_cpu_ns,
-					cpu_start_ns);
-				return;
+				goto out;
 			}
+			if (parallel_tail_claim)
+				atomic_set(&ctx->preparation_tail_credit, 0);
 			entry = list_last_entry(&ctx->preparation_incoming,
 						struct swapz_bio_ref,
 						preparation_list);
@@ -1517,12 +1589,11 @@ static void swapz_preparation_worker(struct work_struct *work)
 
 		input = swapz_map_single_bio_input(entry->bio, &mapped_input);
 		if (input) {
-			ctx->preparation_direct_lz4_pages++;
+			lane->direct_lz4_pages++;
 		} else {
-			error = swapz_copy_bio_accounted(entry->bio,
-					    ctx->preparation_input_page, false,
-					    &ctx->preparation_copy_wall_ns,
-					    &ctx->preparation_copy_bytes);
+			error = swapz_copy_bio_accounted(entry->bio, lane->input_page,
+						 false, &lane->copy_wall_ns,
+						 &lane->copy_bytes);
 			if (error) {
 				swapz_preparation_release_slot(
 					&ctx->preparation_free_mask, slot);
@@ -1530,89 +1601,65 @@ static void swapz_preparation_worker(struct work_struct *work)
 				complete(&entry->preparation_finished);
 				if (tail_claim &&
 				    !atomic_read(&ctx->lower_write_active) &&
-				    !atomic_read(&ctx->preparation_tail_credit)) {
-					swapz_account_worker_runtime(
-						&ctx->preparation_worker_wall_ns,
-						wall_start_ns,
-						&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
-					return;
-				}
+				    !atomic_read(&ctx->preparation_tail_credit) &&
+				    !parallel_tail_claim)
+					goto out;
 				continue;
 			}
-			input = ctx->preparation_input_page;
+			input = lane->input_page;
 		}
 		section_start = ktime_get_ns();
-		/*
-		 * Count a producer compression as lower-I/O overlap only when the
-		 * synchronous WRITE is active at both ends of this short LZ4 section.
-		 * This deliberately undercounts boundary crossings rather than
-		 * inventing overlap that did not fully exist.
-		 */
 		lower_write_overlap = atomic_read(&ctx->lower_write_active);
 		if (lower_write_overlap)
-			ctx->prepared_during_lower_write++;
+			lane->prepared_during_lower_write++;
 		prepared->length = LZ4_compress_fast(
-					input,
-					prepared->bytes, SWAPZ_BLOCK_BYTES,
-					SWAPZ_MAX_COMPRESSED,
-					ctx->lz4_acceleration,
-					ctx->preparation_lz4_workmem);
+					input, prepared->bytes, SWAPZ_BLOCK_BYTES,
+					SWAPZ_MAX_COMPRESSED, ctx->lz4_acceleration,
+					lane->lz4_workmem);
 		elapsed_ns = swapz_elapsed_ns(section_start, ktime_get_ns());
-		ctx->preparation_lz4_wall_ns += elapsed_ns;
-		if (lower_write_overlap &&
-		    atomic_read(&ctx->lower_write_active))
-			ctx->preparation_lz4_lower_write_overlap_ns += elapsed_ns;
+		lane->lz4_wall_ns += elapsed_ns;
+		if (lower_write_overlap && atomic_read(&ctx->lower_write_active))
+			lane->lower_write_overlap_ns += elapsed_ns;
 		prepared->encoding = SWAPZ_ENCODING_LZ4;
 		prepared->zero = prepared->length > 0 &&
-				 prepared->length <= 64 &&
-				 swapz_page_is_zero(input);
+				 prepared->length <= 64 && swapz_page_is_zero(input);
 		if (ctx->delta64_rescue_enabled && !prepared->zero)
 			prepared->length = swapz_delta64_rescue(
 				input, prepared->length, prepared->bytes,
-				ctx->preparation_predictor_page,
-				prepared->length > 0 ? ctx->preparation_input_page :
+				lane->predictor_page,
+				prepared->length > 0 ? lane->input_page :
 						      prepared->bytes,
-				ctx->preparation_lz4_workmem,
-				&ctx->preparation_lz4_wall_ns, &prepared->encoding,
-				&ctx->preparation_delta64);
+				lane->lz4_workmem, &lane->lz4_wall_ns,
+				&prepared->encoding, &lane->delta64);
 		prepared->payload_crc32c_valid = false;
 		if (prepared->length > 0 && !prepared->zero) {
 			section_start = ktime_get_ns();
 			prepared->payload_crc32c =
-				swapz_crc32c_bytes(prepared->bytes,
-						   prepared->length);
-			ctx->preparation_crc_wall_ns +=
+				swapz_crc32c_bytes(prepared->bytes, prepared->length);
+			lane->crc_wall_ns +=
 				swapz_elapsed_ns(section_start, ktime_get_ns());
 			prepared->payload_crc32c_valid = true;
 		}
 		if (prepared->length <= 0)
 			swapz_memcpy_accounted(prepared->bytes, input,
 					      SWAPZ_BLOCK_BYTES,
-					      &ctx->preparation_copy_wall_ns,
-					      &ctx->preparation_copy_bytes);
+					      &lane->copy_wall_ns, &lane->copy_bytes);
 		if (mapped_input)
 			kunmap_local(mapped_input);
-		/* Release ordering: complete() wakes the sole consumer. Do not
-		 * touch entry again after signaling: it may be bio_endio'd. */
+		lane->prepared_pages++;
 		entry->prepared_page = prepared;
 		entry->preparation_error = 0;
 		complete(&entry->preparation_finished);
-		/*
-		 * A tail claim consumes one token. If ordered inline work earned a
-		 * fresh token while this page was being prepared, stay on this
-		 * already-running worker and consume that token on the next loop.
-		 * Otherwise stop; the producer never drains uncredited tail work.
-		 */
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
-		    !atomic_read(&ctx->preparation_tail_credit)) {
-			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
-						 wall_start_ns,
-						 &ctx->preparation_worker_cpu_ns,
-						 cpu_start_ns);
-			return;
-		}
+		    !atomic_read(&ctx->preparation_tail_credit) &&
+		    !parallel_tail_claim)
+			goto out;
 	}
+out:
+	lane->worker_wall_ns += swapz_elapsed_ns(wall_start_ns, ktime_get_ns());
+	lane->worker_cpu_ns +=
+		swapz_elapsed_ns(cpu_start_ns, swapz_worker_cpu_sample());
+	atomic_dec(&ctx->preparation_workers_active);
 }
 
 /*
@@ -4189,8 +4236,7 @@ static void swapz_worker(struct work_struct *work)
 			    SWAPZ_PREPARATION_STARTER_WAKE_MIN) {
 			atomic_set(&ctx->preparation_tail_credit, 1);
 			ctx->preparation_wave_kicks++;
-			queue_work(ctx->preparation_workqueue,
-				   &ctx->preparation_worker);
+			swapz_queue_preparation_workers(ctx);
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
@@ -4235,8 +4281,7 @@ static void swapz_worker(struct work_struct *work)
 					    (atomic_read(&ctx->lower_write_active) ||
 					     ctx->preparation_queued >=
 						SWAPZ_PREPARATION_TAIL_WAKE_MIN))
-						queue_work(ctx->preparation_workqueue,
-							   &ctx->preparation_worker);
+						swapz_queue_preparation_workers(ctx);
 				} else {
 					/* This head is already producer-owned. It cannot earn a
 					 * second tail claim until ordered work resumes inline. */
@@ -4571,8 +4616,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		if (atomic_read(&ctx->lower_write_active) ||
 		    (atomic_read(&ctx->preparation_tail_credit) &&
 		     ctx->preparation_queued >= SWAPZ_PREPARATION_TAIL_WAKE_MIN))
-			queue_work(ctx->preparation_workqueue,
-				   &ctx->preparation_worker);
+			swapz_queue_preparation_workers(ctx);
 	}
 	/*
 	 * Urgent dependencies wake the ordered worker immediately. Retained
@@ -4668,7 +4712,7 @@ static void swapz_resume(struct dm_target *ti)
 
 static void swapz_free(struct swapz_dm *ctx)
 {
-	swapz_u8 slot;
+	swapz_u8 slot, prep_lane;
 
 	if (!ctx)
 		return;
@@ -4682,14 +4726,22 @@ static void swapz_free(struct swapz_dm *ctx)
 		destroy_workqueue(ctx->workqueue);
 	}
 	if (ctx->preparation_workqueue) {
-		cancel_work_sync(&ctx->preparation_worker);
+		for (prep_lane = 0; prep_lane < ctx->preparation_worker_count;
+		     ++prep_lane)
+			cancel_work_sync(&ctx->preparation_lanes[prep_lane].work);
 		drain_workqueue(ctx->preparation_workqueue);
 		destroy_workqueue(ctx->preparation_workqueue);
 	}
+	if (ctx->preparation_lanes) {
+		for (prep_lane = 0; prep_lane < ctx->preparation_worker_count;
+		     ++prep_lane) {
+			vfree(ctx->preparation_lanes[prep_lane].input_page);
+			kfree(ctx->preparation_lanes[prep_lane].predictor_page);
+			kfree(ctx->preparation_lanes[prep_lane].lz4_workmem);
+		}
+		kfree(ctx->preparation_lanes);
+	}
 	vfree(ctx->preparation_pages);
-	kfree(ctx->preparation_lz4_workmem);
-	kfree(ctx->preparation_predictor_page);
-	vfree(ctx->preparation_input_page);
 	if (ctx->io_client)
 		dm_io_client_destroy(ctx->io_client);
 	if (ctx->backing)
@@ -4753,7 +4805,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	u32 budget = 0, window = SWAPZ_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, flush_fail_nth = 0;
 	u32 lower_bulk = 1, write_fail_nth = 0, retain = 0;
-	swapz_u8 read_slot;
+	swapz_u8 read_slot, prep_lane;
 	int error;
 
 	if (argc < 1 || argc > 9 || ti->len % SWAPZ_SECTORS) {
@@ -4790,6 +4842,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "lz4_acceleration must be in 1..4";
 		return -EINVAL;
 	}
+	if (!swapz_delta64_prepare_workers ||
+	    swapz_delta64_prepare_workers > SWAPZ_MAX_PREPARATION_WORKERS) {
+		ti->error = "delta64_prepare_workers must be in 1..4";
+		return -EINVAL;
+	}
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -4807,15 +4864,20 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
 	ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled;
+	ctx->preparation_worker_count =
+		ctx->async_prepare ?
+		(ctx->delta64_rescue_enabled ?
+		 (swapz_u8)swapz_delta64_prepare_workers : 1U) : 0U;
 	ctx->lz4_acceleration = (swapz_u8)swapz_lz4_acceleration;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
-	INIT_WORK(&ctx->preparation_worker, swapz_preparation_worker);
 	atomic64_set(&ctx->preparation_free_mask,
 		     (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic_set(&ctx->lower_write_active, 0);
+	atomic_set(&ctx->preparation_workers_active, 0);
+	atomic_set(&ctx->preparation_workers_active_max, 0);
 	atomic_set(&ctx->preparation_tail_credit, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
@@ -5050,25 +5112,40 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	if (ctx->async_prepare) {
-		/* One fixed array: no per-page allocation or slab-size rounding. */
+		/* Prepared payload capacity stays globally bounded at 64 pages.
+		 * K>1 adds only per-lane scratch/workmem; it does not duplicate
+		 * planner state, authority, or packed-output buffers. */
 		ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *
 					       sizeof(*ctx->preparation_pages));
-		ctx->preparation_input_page = vzalloc(SWAPZ_BLOCK_BYTES);
-		if (ctx->delta64_rescue_enabled)
-			ctx->preparation_predictor_page =
-				kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
-		ctx->preparation_lz4_workmem =
-			kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
-		if (!ctx->preparation_pages || !ctx->preparation_input_page ||
-		    (ctx->delta64_rescue_enabled &&
-		     !ctx->preparation_predictor_page) ||
-		    !ctx->preparation_lz4_workmem) {
+		ctx->preparation_lanes = kcalloc(ctx->preparation_worker_count,
+					       sizeof(*ctx->preparation_lanes),
+					       GFP_KERNEL);
+		if (!ctx->preparation_pages || !ctx->preparation_lanes) {
 			error = -ENOMEM;
 			goto fail;
 		}
+		for (prep_lane = 0; prep_lane < ctx->preparation_worker_count;
+		     ++prep_lane) {
+			struct swapz_preparation_lane *lane =
+				&ctx->preparation_lanes[prep_lane];
+
+			lane->ctx = ctx;
+			INIT_WORK(&lane->work, swapz_preparation_worker);
+			lane->input_page = vzalloc(SWAPZ_BLOCK_BYTES);
+			if (ctx->delta64_rescue_enabled)
+				lane->predictor_page =
+					kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+			lane->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
+			if (!lane->input_page ||
+			    (ctx->delta64_rescue_enabled && !lane->predictor_page) ||
+			    !lane->lz4_workmem) {
+				error = -ENOMEM;
+				goto fail;
+			}
+		}
 		ctx->preparation_workqueue = alloc_workqueue(
 					"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,
-					1);
+					ctx->preparation_worker_count);
 		if (!ctx->preparation_workqueue) {
 			error = -ENOMEM;
 			goto fail;
@@ -5166,9 +5243,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 	swapz_u32 segment_program_min, segment_program_max;
 	u64 segment_program_sum;
 	u64 engine_publish_auth_wall_ns;
+	struct swapz_preparation_totals prep;
 	unsigned int sz = 0;
 
 	(void)flags;
+	swapz_preparation_totals_snapshot(ctx, &prep);
 	swapz_gc_victim_distribution(ctx, &gc_distinct_victims,
 				     &gc_victim_min_evictions,
 				     &gc_victim_max_evictions);
@@ -5267,7 +5346,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
 		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
 		       "retain_timer_arm_skips=%llu "
-		       "async_prepare=%u guard_inflight_zero_shrink=%u "
+		       "async_prepare=%u delta64_prepare_workers=%u "
+		       "delta64_prepare_active_max=%u delta64_prepare_pages=%llu "
+		       "guard_inflight_zero_shrink=%u "
 		       "prep_lower_write_overlap_starts=%llu "
 		       "prep_lower_write_overlap_ns=%llu prep_wave_kicks=%llu "
 		       "prep_lower_write_samples=%llu "
@@ -5498,9 +5579,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_age_max_ns,
 		       ctx->retain_ms, ctx->retain_worker_passes,
 		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
-		       ctx->async_prepare, 0U,
-		       ctx->prepared_during_lower_write,
-		       ctx->preparation_lz4_lower_write_overlap_ns,
+		       ctx->async_prepare, ctx->preparation_worker_count,
+		       (unsigned int)atomic_read(&ctx->preparation_workers_active_max),
+		       prep.prepared_pages, 0U,
+		       prep.prepared_during_lower_write,
+		       prep.lower_write_overlap_ns,
 		       ctx->preparation_wave_kicks,
 		       ctx->prep_lower_write_samples,
 		       ctx->prep_lower_write_start_queued,
@@ -5528,16 +5611,16 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->preparation_ordered_handoffs,
 		       ctx->preparation_ordered_waits,
 		       ctx->preparation_ordered_wait_wall_ns,
-		       ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns,
+		       ctx->lz4_wall_ns + prep.lz4_wall_ns,
 		       ctx->decode_wall_ns,
-		       ctx->lz4_wall_ns, ctx->preparation_lz4_wall_ns,
-		       ctx->preparation_copy_wall_ns +
+		       ctx->lz4_wall_ns, prep.lz4_wall_ns,
+		       prep.copy_wall_ns +
 			       ctx->ordered_write_copy_wall_ns,
-		       ctx->preparation_copy_bytes +
+		       prep.copy_bytes +
 			       ctx->ordered_write_copy_bytes,
 		       ctx->ordered_write_copy_wall_ns,
-		       ctx->preparation_copy_wall_ns,
-		       ctx->preparation_direct_lz4_pages +
+		       prep.copy_wall_ns,
+		       prep.direct_lz4_pages +
 			       ctx->ordered_direct_lz4_pages,
 		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
@@ -5548,13 +5631,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->authority.batch_snapshot_crc_wall_ns,
 		       ctx->authority.batch_pause_crc_wall_ns,
 		       ctx->authority.batch_resume_crc_wall_ns,
-		       ctx->preparation_crc_wall_ns, ctx->ordered_crc_wall_ns,
+		       prep.crc_wall_ns, ctx->ordered_crc_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->ordered_worker_wall_ns,
-		       ctx->preparation_worker_wall_ns,
+		       prep.worker_wall_ns,
 		       ctx->ordered_worker_cpu_ns,
-		       ctx->preparation_worker_cpu_ns,
+		       prep.worker_cpu_ns,
 		       ctx->read_worker_cpu_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
@@ -5652,45 +5735,45 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "delta64_transform_wall_ns=%llu delta64_wall_ns=%llu",
 		       ctx->delta64_rescue_enabled,
 		       READ_ONCE(ctx->ordered_delta64.eligible) +
-			READ_ONCE(ctx->preparation_delta64.eligible),
+			prep.delta64.eligible,
 		       READ_ONCE(ctx->ordered_delta64.classifier_pass) +
-			READ_ONCE(ctx->preparation_delta64.classifier_pass),
+			prep.delta64.classifier_pass,
 		       READ_ONCE(ctx->ordered_delta64.attempts) +
-			READ_ONCE(ctx->preparation_delta64.attempts),
+			prep.delta64.attempts,
 		       READ_ONCE(ctx->ordered_delta64.adopted) +
-			READ_ONCE(ctx->preparation_delta64.adopted),
+			prep.delta64.adopted,
 		       READ_ONCE(ctx->ordered_delta64.raw_rescues) +
-			READ_ONCE(ctx->preparation_delta64.raw_rescues),
+			prep.delta64.raw_rescues,
 		       READ_ONCE(ctx->ordered_delta64.lz4_rescues) +
-			READ_ONCE(ctx->preparation_delta64.lz4_rescues),
+			prep.delta64.lz4_rescues,
 		       READ_ONCE(ctx->ordered_delta64.pack_eligible) +
-			READ_ONCE(ctx->preparation_delta64.pack_eligible),
+			prep.delta64.pack_eligible,
 		       READ_ONCE(ctx->ordered_delta64.pack_attempts) +
-			READ_ONCE(ctx->preparation_delta64.pack_attempts),
+			prep.delta64.pack_attempts,
 		       READ_ONCE(ctx->ordered_delta64.pack_cliff_crossings) +
-			READ_ONCE(ctx->preparation_delta64.pack_cliff_crossings),
+			prep.delta64.pack_cliff_crossings,
 		       READ_ONCE(ctx->ordered_delta64.pack_adopted) +
-			READ_ONCE(ctx->preparation_delta64.pack_adopted),
+			prep.delta64.pack_adopted,
 		       READ_ONCE(ctx->ordered_delta64.score_0_7) +
-			READ_ONCE(ctx->preparation_delta64.score_0_7),
+			prep.delta64.score_0_7,
 		       READ_ONCE(ctx->ordered_delta64.score_8_15) +
-			READ_ONCE(ctx->preparation_delta64.score_8_15),
+			prep.delta64.score_8_15,
 		       READ_ONCE(ctx->ordered_delta64.score_16_23) +
-			READ_ONCE(ctx->preparation_delta64.score_16_23),
+			prep.delta64.score_16_23,
 		       READ_ONCE(ctx->ordered_delta64.score_ge24) +
-			READ_ONCE(ctx->preparation_delta64.score_ge24),
+			prep.delta64.score_ge24,
 		       READ_ONCE(ctx->ordered_delta64.payload_bytes_saved) +
-			READ_ONCE(ctx->preparation_delta64.payload_bytes_saved),
+			prep.delta64.payload_bytes_saved,
 		       READ_ONCE(ctx->ordered_delta64.raw_payload_bytes_saved) +
-			READ_ONCE(ctx->preparation_delta64.raw_payload_bytes_saved),
+			prep.delta64.raw_payload_bytes_saved,
 		       READ_ONCE(ctx->ordered_delta64.lz4_payload_bytes_saved) +
-			READ_ONCE(ctx->preparation_delta64.lz4_payload_bytes_saved),
+			prep.delta64.lz4_payload_bytes_saved,
 		       READ_ONCE(ctx->ordered_delta64.transform_calls) +
-			READ_ONCE(ctx->preparation_delta64.transform_calls),
+			prep.delta64.transform_calls,
 		       READ_ONCE(ctx->ordered_delta64.transform_wall_ns) +
-			READ_ONCE(ctx->preparation_delta64.transform_wall_ns),
+			prep.delta64.transform_wall_ns,
 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
-			READ_ONCE(ctx->preparation_delta64.wall_ns));
+			prep.delta64.wall_ns);
 		break;
 	case STATUSTYPE_TABLE:
 		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,
