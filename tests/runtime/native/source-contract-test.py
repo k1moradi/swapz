@@ -257,6 +257,7 @@ static swapz_u16 swapz_probe_set(
 
     def test_production_delta64_telemetry_has_separate_worker_owners(self):
         rescue = body("swapz_delta64_rescue")
+        route = (ROOT / "src/kernel/predictor-route.h").read_text()
         producer = body("swapz_preparation_worker")
         ordered = body("swapz_accept_write")
         status = body("swapz_status")
@@ -266,17 +267,17 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("&ctx->preparation_delta64", ordered)
         self.assertNotIn("atomic_", rescue)
         self.assertNotIn("spin_lock", rescue)
-        self.assertLess(rescue.index("swapz_engine_next_uniform_pack_limit"),
+        self.assertLess(rescue.index("swapz_delta64_route_init"),
                         rescue.index("stats->eligible++"))
-        self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", rescue)
+        self.assertIn("swapz_engine_next_uniform_pack_limit", route)
+        self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", route)
         self.assertLess(rescue.index("swapz_predict_delta64_sample_score"),
                         rescue.index("stats->classifier_pass++"))
         self.assertLess(rescue.index("stats->attempts++"),
                         rescue.index("swapz_predict_delta64(input"))
-        self.assertIn("candidate > (int)pack_target", rescue)
-        self.assertLess(rescue.index("candidate > (int)pack_target"),
-                        rescue.index("stats->adopted++"))
-        self.assertLess(rescue.index("candidate >= baseline_length"),
+        self.assertIn("swapz_delta64_candidate_adoptable", rescue)
+        self.assertIn("swapz_delta64_candidate_smaller", rescue)
+        self.assertLess(rescue.index("swapz_delta64_candidate_adoptable"),
                         rescue.index("stats->adopted++"))
         self.assertIn("(u64)baseline_length : SWAPZ_BLOCK_BYTES", rescue)
         self.assertIn("stats->raw_payload_bytes_saved += saved", rescue)
@@ -1467,6 +1468,7 @@ static swapz_u16 swapz_probe_set(
         predictor = (ROOT / "src/kernel/predictor.h").read_text()
         internal = (ROOT / "src/kernel/predictor-internal.h").read_text()
         dispatch = (ROOT / "src/kernel/predictor.c").read_text()
+        route = (ROOT / "src/kernel/predictor-route.h").read_text()
         sse2 = (ROOT / "src/kernel/predictor-sse2.c").read_text()
         avx2 = (ROOT / "src/kernel/predictor-avx2.c").read_text()
         avx512 = (ROOT / "src/kernel/predictor-avx512.c").read_text()
@@ -1497,6 +1499,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_predict_delta64_sample_score_scalar", internal)
         self.assertIn("SWAPZ_PREDICTOR_STAGE1_PAIRS 8U", predictor)
         self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PAIRS 32U", predictor)
+        self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PHASE_BYTES 16U", predictor)
+        self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PHASE_STEP 2U", predictor)
+        self.assertIn("SWAPZ_PREDICTOR_SUBPAGE_LANES", predictor)
+        self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PHASES", predictor)
 
         self.assertIn("DEFINE_STATIC_CALL", dispatch)
         self.assertIn("static_call_update", dispatch)
@@ -1555,12 +1561,16 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_predictor_inverse_backend_name()", qualification)
         rescue = body("swapz_delta64_rescue")
         self.assertIn("swapz_predict_delta64_sample_score", rescue)
-        self.assertIn("swapz_engine_next_uniform_pack_limit", rescue)
-        self.assertIn("SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD", rescue)
-        self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", rescue)
-        self.assertIn("SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH", rescue)
+        self.assertIn("swapz_delta64_route_init", rescue)
+        self.assertIn("swapz_delta64_candidate_smaller", rescue)
+        self.assertIn("swapz_delta64_candidate_adoptable", rescue)
+        self.assertIn("swapz_engine_next_uniform_pack_limit", route)
+        self.assertIn("SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD", route)
+        self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", route)
+        self.assertIn("SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH", route)
+        self.assertIn("baseline_length <= 0", route)
+        self.assertIn("candidate_length <= route->pack_limit", route)
         self.assertIn("swapz_predict_delta64", rescue)
-        self.assertIn("candidate >= baseline_length", rescue)
         self.assertIn("LZ4_compress_fast", rescue)
         self.assertIn("swapz_unpredict_delta64", DM)
         predictor_header = (ROOT / "src/kernel/predictor.h").read_text()
@@ -1579,6 +1589,12 @@ static swapz_u16 swapz_probe_set(
                       qualification)
         self.assertIn("swapz_predict_delta64_sample_score_scalar(page)",
                       qualification)
+        self.assertIn("evaluate_sampling_controls", qualification)
+        self.assertIn("repeated_512b_headers", qualification)
+        self.assertIn("lane1_only_signal", qualification)
+        self.assertIn("evaluate_route_controls", qualification)
+        self.assertIn("production_route", qualification)
+        self.assertIn('#include "predictor-route.h"', DM)
         self.assertIn("routed_blocks_saved", qualification)
         self.assertIn("benchmark_classifier", qualification)
         self.assertIn("scalar_ns_per_page", qualification)

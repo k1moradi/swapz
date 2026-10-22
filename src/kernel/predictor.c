@@ -25,17 +25,44 @@ static swapz_u32 swapz_predict_delta64_pair_score_scalar(const swapz_u8 *input)
 		swapz_predictor_small_nonzero_delta32((swapz_u32)(value >> 32),
 						      (swapz_u32)(previous >> 32));
 }
+
+static swapz_u32 swapz_predict_delta64_sample_offset(swapz_u32 subpage,
+						       swapz_u32 lane)
+{
+	swapz_u32 phase = (subpage + SWAPZ_PREDICTOR_SAMPLE_PHASE_STEP * lane) %
+		SWAPZ_PREDICTOR_SAMPLE_PHASES;
+
+	return subpage * SWAPZ_PREDICTOR_SUBPAGE_BYTES +
+		lane * SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES +
+		phase * SWAPZ_PREDICTOR_SAMPLE_PHASE_BYTES;
+}
+
 swapz_u32 swapz_predict_delta64_sample_score_scalar(const swapz_u8 *input)
 {
-	swapz_u32 score = 0, base;
-	for (base = 0; base < SWAPZ_BLOCK_BYTES; base += SWAPZ_PREDICTOR_SUBPAGE_BYTES)
-		score += swapz_predict_delta64_pair_score_scalar(input + base);
+	swapz_u32 score = 0, subpage, lane;
+
+	/*
+	 * Spread the cheap stage across every 128-byte record lane and all
+	 * eight 16-byte phases. Sampling only offset zero in each 512-byte
+	 * region allowed repeated headers to hide structured values elsewhere.
+	 */
+	for (subpage = 0; subpage <
+	     SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage) {
+		lane = subpage % SWAPZ_PREDICTOR_SUBPAGE_LANES;
+		score += swapz_predict_delta64_pair_score_scalar(
+			input + swapz_predict_delta64_sample_offset(subpage, lane));
+	}
 	if (score < SWAPZ_PREDICTOR_STAGE1_MIN_SCORE)
 		return 0;
-	for (base = 0; base < SWAPZ_BLOCK_BYTES; base += SWAPZ_PREDICTOR_SUBPAGE_BYTES) {
-		score += swapz_predict_delta64_pair_score_scalar(input + base + SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES);
-		score += swapz_predict_delta64_pair_score_scalar(input + base + 2U * SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES);
-		score += swapz_predict_delta64_pair_score_scalar(input + base + 3U * SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES);
+	for (subpage = 0; subpage <
+	     SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage) {
+		for (lane = 0; lane < SWAPZ_PREDICTOR_SUBPAGE_LANES; ++lane) {
+			if (lane == subpage % SWAPZ_PREDICTOR_SUBPAGE_LANES)
+				continue;
+			score += swapz_predict_delta64_pair_score_scalar(
+				input + swapz_predict_delta64_sample_offset(subpage,
+									   lane));
+		}
 	}
 	return score;
 }

@@ -78,13 +78,19 @@ def predictor_evidence():
             "sample_pairs": 32,
             "stage1_pairs": 8,
             "stage1_min_score": 2,
-            "eligible_pages": 320,
+            "eligible_pages": 269,
             "early_abort_pages": 120,
             "benchmark_repeats": 256,
-            "benchmark_calls": 81920,
+            "benchmark_calls": 68864,
             "ns_per_page": 55,
             "scalar_ns_per_page": 70,
         },
+        "sampling_controls": [
+            {"name": "repeated_512b_headers", "score": 32,
+             "minimum_score": 24},
+            {"name": "lane1_only_signal", "score": 32,
+             "minimum_score": 16},
+        ],
         "backend_benchmarks": [
             {"name": "scalar", "transform_ns_per_page": 700,
              "inverse_ns_per_page": 650},
@@ -96,6 +102,29 @@ def predictor_evidence():
         "io_model_block_ns": {"sd_emulated": 390625, "ssd_emulated": 48828},
         "thresholds": thresholds,
         "transforms": transforms,
+        "production_route": {
+            "scope": "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY",
+            "general_threshold": 24,
+            "packing_threshold": 16,
+            "eligible_pages": 269,
+            "packing_eligible_pages": 20,
+            "classifier_passes": 100,
+            "candidate_attempts": 100,
+            "adopted_pages": 80,
+            "raw_rescues": 20,
+            "lz4_rescues": 60,
+            "packing_adoptions": 10,
+            "payload_bytes_saved": 10000,
+            "baseline_blocks": 400,
+            "candidate_blocks": 350,
+            "blocks_saved": 50,
+            "baseline_extents": 200,
+            "candidate_extents": 180,
+            "extents_saved": 20,
+            "modeled_wall_ns_total": 2500000,
+            "modeled_wall_ns_per_page": 4340,
+            "ns_per_saved_block": 50000,
+        },
     }
 
 
@@ -673,6 +702,14 @@ class ReportContract(unittest.TestCase):
         broken["thresholds"][2]["routed_blocks_saved"] += 1
         self.assertIsNone(runner.parse_predictor_evidence(
             "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(broken) + "\n"))
+        broken = predictor_evidence()
+        broken["sampling_controls"][0]["score"] = 1
+        self.assertIsNone(runner.parse_predictor_evidence(
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(broken) + "\n"))
+        broken = predictor_evidence()
+        broken["production_route"]["candidate_attempts"] -= 1
+        self.assertIsNone(runner.parse_predictor_evidence(
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(broken) + "\n"))
         duplicate = (
             "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(raw) + "\n" +
             "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(raw) + "\n")
@@ -1167,6 +1204,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("packed smoke", rendered)
         self.assertIn("1048576", rendered)
         self.assertIn("Sampled delta64 classifier", rendered)
+        self.assertIn("classifier sampling regressions", rendered)
+        self.assertIn("shared production-route screening", rendered)
+        self.assertIn("no loaded I/O proof", rendered)
         self.assertIn("Negative classifier profile breakdown", rendered)
         self.assertIn("delta64", rendered)
         self.assertIn("pack eligible", rendered)

@@ -12,6 +12,7 @@
 #include "engine.h"
 #include "predictor.h"
 #include "predictor-internal.h"
+#include "predictor-route.h"
 
 #define PREDICTOR_CAP ((int)SWAPZ_MAX_COMPRESSED)
 #define MAX_EVIDENCE_PAGES 1024U
@@ -48,6 +49,7 @@ struct backend_benchmark {
 struct page_evidence {
 	int baseline_length;
 	int candidate_length[TRANSFORM_COUNT];
+	struct swapz_delta64_route route;
 	swapz_u32 classifier_score;
 	swapz_u8 negative_profile;
 	swapz_u8 classifier_ran;
@@ -102,6 +104,31 @@ struct classifier_summary {
 	uint64_t benchmark_calls;
 	swapz_u32 pages;
 	swapz_u32 early_abort_pages;
+};
+
+struct production_route_summary {
+	swapz_u32 eligible_pages;
+	swapz_u32 packing_eligible_pages;
+	swapz_u32 classifier_passes;
+	swapz_u32 candidate_attempts;
+	swapz_u32 adopted_pages;
+	swapz_u32 raw_rescues;
+	swapz_u32 lz4_rescues;
+	swapz_u32 packing_adoptions;
+	uint64_t payload_bytes_saved;
+	swapz_u32 baseline_blocks;
+	swapz_u32 candidate_blocks;
+	swapz_u32 baseline_extents;
+	swapz_u32 candidate_extents;
+	uint64_t modeled_wall_ns_total;
+	uint64_t modeled_wall_ns_per_page;
+	uint64_t ns_per_saved_block;
+};
+
+struct sampling_control {
+	const char *name;
+	swapz_u32 score;
+	swapz_u32 minimum_score;
 };
 
 static struct page_evidence evidence[MAX_EVIDENCE_PAGES];
@@ -304,6 +331,95 @@ static void generate_structured_page(unsigned int kind, unsigned int page_index,
 	}
 }
 
+static int evaluate_sampling_controls(struct sampling_control *controls)
+{
+	swapz_u8 page[SWAPZ_BLOCK_BYTES];
+	swapz_u32 subpage, word;
+	uint64_t value;
+
+	if (!controls)
+		return -EINVAL;
+
+	/* Repeated headers occupy the old fixed sample offset in every 512B area. */
+	for (subpage = 0; subpage <
+	     SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage) {
+		swapz_u32 base = subpage * SWAPZ_PREDICTOR_SUBPAGE_BYTES;
+		uint64_t header = 0x1122334455667788ULL;
+
+		put_u64(page + base, header);
+		put_u64(page + base + sizeof(header), header);
+		value = header;
+		for (word = 2; word <
+		     SWAPZ_PREDICTOR_SUBPAGE_BYTES / sizeof(value); ++word) {
+			value += 8U;
+			put_u64(page + base + word * sizeof(value), value);
+		}
+	}
+	controls[0].name = "repeated_512b_headers";
+	controls[0].score = swapz_predict_delta64_sample_score(page);
+	controls[0].minimum_score = 24U;
+	if (controls[0].score < controls[0].minimum_score ||
+	    controls[0].score !=
+		swapz_predict_delta64_sample_score_scalar(page))
+		return -EUCLEAN;
+
+	/* Structured pairs exist only in lane 1 of each 512B region. */
+	memset(page, 0, sizeof(page));
+	for (subpage = 0; subpage <
+	     SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage) {
+		swapz_u32 base = subpage * SWAPZ_PREDICTOR_SUBPAGE_BYTES +
+			SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES;
+		value = 0x100000000ULL + (uint64_t)subpage * 0x10000ULL;
+		for (word = 0; word <
+		     SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES / sizeof(value); ++word) {
+			put_u64(page + base + word * sizeof(value), value);
+			value += 8U;
+		}
+	}
+	controls[1].name = "lane1_only_signal";
+	controls[1].score = swapz_predict_delta64_sample_score(page);
+	controls[1].minimum_score = SWAPZ_PREDICTOR_PACK_THRESHOLD;
+	if (controls[1].score < controls[1].minimum_score ||
+	    controls[1].score !=
+		swapz_predict_delta64_sample_score_scalar(page))
+		return -EUCLEAN;
+
+	return 0;
+}
+
+static int evaluate_route_controls(void)
+{
+	struct swapz_delta64_route route;
+	swapz_u16 baseline;
+
+	if (!swapz_delta64_route_init(-1, &route) || route.pack_path ||
+	    route.threshold != SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD ||
+	    !swapz_delta64_candidate_adoptable(&route, -1, 1) ||
+	    swapz_delta64_candidate_adoptable(&route, 100, 100) ||
+	    !swapz_delta64_route_init(SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH + 1,
+				      &route) || route.pack_path ||
+	    route.threshold != SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD ||
+	    swapz_delta64_route_init(SWAPZ_BLOCK_BYTES + 1, &route))
+		return -EUCLEAN;
+
+	for (baseline = 1; baseline <= SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH;
+	     ++baseline) {
+		int eligible = swapz_delta64_route_init(baseline, &route);
+
+		if (eligible != !!route.pack_limit ||
+		    (eligible && (!route.pack_path ||
+				  route.threshold != SWAPZ_PREDICTOR_PACK_THRESHOLD ||
+				  route.pack_limit >= baseline ||
+				  !swapz_delta64_candidate_adoptable(
+					  &route, baseline, route.pack_limit) ||
+				  swapz_delta64_candidate_adoptable(
+					  &route, baseline,
+					  route.pack_limit + 1U))))
+			return -EUCLEAN;
+	}
+	return 0;
+}
+
 static int evaluate_page(const swapz_u8 *page, int structured,
 			 swapz_u8 negative_profile, struct page_evidence *out,
 			 struct transform_summary *summary,
@@ -311,13 +427,15 @@ static int evaluate_page(const swapz_u8 *page, int structured,
 {
 	unsigned int transform_index;
 	int baseline;
+	int route_eligible;
 	(void)summary;
 	baseline = compress_page_lz4(page);
 	if (baseline < 0 || baseline > PREDICTOR_CAP) return -EINVAL;
 	memset(out, 0, sizeof(*out));
 	out->baseline_length = baseline; out->structured = structured;
 	out->negative_profile = negative_profile;
-	if (!baseline || baseline > 2024) {
+	route_eligible = swapz_delta64_route_init(baseline, &out->route);
+	if (route_eligible) {
 		swapz_u32 scalar_score = swapz_predict_delta64_sample_score_scalar(page);
 		out->classifier_score = swapz_predict_delta64_sample_score(page);
 		if (out->classifier_score != scalar_score) return -EUCLEAN;
@@ -442,12 +560,21 @@ static int planner_totals(const struct page_evidence *rows, swapz_u32 count,
 			const struct page_evidence *row = &rows[offset + index];
 			int length = row->baseline_length;
 
-			if (candidate_mode &&
-			    (!route_threshold ||
-			     (row->classifier_ran &&
-			      row->classifier_score >= route_threshold)))
+			if (candidate_mode == 1)
 				length = chosen_length(length,
 					row->candidate_length[transform_index]);
+			else if (candidate_mode == 2 && row->classifier_ran) {
+				struct swapz_delta64_route route = row->route;
+				int candidate =
+					row->candidate_length[transform_index];
+
+				if (route_threshold)
+					route.threshold = (swapz_u8)route_threshold;
+				if (row->classifier_score >= route.threshold &&
+				    swapz_delta64_candidate_adoptable(
+					    &route, row->baseline_length, candidate))
+					length = candidate;
+			}
 			if (!length) {
 				raw_count++;
 				continue;
@@ -499,7 +626,7 @@ static void summarize_transform(const struct page_evidence *rows,
 		}
 		if (!baseline && candidate > 0)
 			summary->raw_rescued++;
-		if ((!baseline || baseline > 2024) &&
+		if (rows[index].route.threshold &&
 		    candidate > 0 && candidate <= 2024)
 			summary->cliff_2024++;
 	}
@@ -638,14 +765,17 @@ static int summarize_thresholds(const struct page_evidence *rows,
 		summary->threshold = thresholds[threshold_index];
 		for (index = 0; index < total_count; ++index) {
 			const struct page_evidence *row = &rows[index];
-			int baseline = row->baseline_length;
 			int candidate = row->candidate_length[TRANSFORM_DELTA64];
-			int eligible = !baseline || baseline > 2024;
+			struct swapz_delta64_route route = row->route;
+			int eligible = route.threshold != 0;
 			int call = eligible && row->classifier_ran &&
 				row->classifier_score >= summary->threshold;
-			int useful = call && candidate > 0 &&
-				(!baseline || candidate < baseline);
+			int useful;
 			int structured = index >= structured_start;
+
+			route.threshold = (swapz_u8)summary->threshold;
+			useful = call && swapz_delta64_candidate_adoptable(
+				&route, row->baseline_length, candidate);
 
 			if (structured) {
 				if (!eligible)
@@ -674,14 +804,77 @@ static int summarize_thresholds(const struct page_evidence *rows,
 			0, 0, &summary->routed_baseline_blocks,
 			&summary->routed_baseline_extents);
 		if (!error)
-			error = planner_totals(rows + structured_start,
+				error = planner_totals(rows + structured_start,
 				total_count - structured_start, TRANSFORM_DELTA64,
-				1, summary->threshold,
+				2, summary->threshold,
 				&summary->routed_candidate_blocks,
 				&summary->routed_candidate_extents);
 		if (error)
 			return error;
 	}
+	return 0;
+}
+
+static int summarize_production_route(const struct page_evidence *rows,
+				      swapz_u32 count,
+				      uint64_t classifier_ns_per_page,
+				      uint64_t transform_ns_per_page,
+				      uint64_t second_lz4_ns_per_page,
+				      struct production_route_summary *summary)
+{
+	swapz_u32 index;
+	uint64_t transform_calls = 0;
+	long saved_blocks;
+	int error;
+
+	if (!rows || !count || !summary)
+		return -EINVAL;
+	memset(summary, 0, sizeof(*summary));
+	for (index = 0; index < count; ++index) {
+		const struct page_evidence *row = &rows[index];
+		int candidate = row->candidate_length[TRANSFORM_DELTA64];
+
+		if (!row->route.threshold)
+			continue;
+		summary->eligible_pages++;
+		summary->packing_eligible_pages += row->route.pack_path;
+		if (!row->classifier_ran ||
+		    row->classifier_score < row->route.threshold)
+			continue;
+		summary->classifier_passes++;
+		transform_calls++;
+		summary->candidate_attempts++;
+		if (!swapz_delta64_candidate_smaller(row->baseline_length,
+						     candidate))
+			continue;
+		if (row->route.pack_path && candidate > row->route.pack_limit)
+			continue;
+		summary->adopted_pages++;
+		summary->packing_adoptions += row->route.pack_path;
+		if (row->baseline_length > 0)
+			summary->lz4_rescues++;
+		else
+			summary->raw_rescues++;
+		summary->payload_bytes_saved += (uint64_t)(
+			(row->baseline_length > 0 ? row->baseline_length :
+			 SWAPZ_BLOCK_BYTES) - candidate);
+	}
+	error = planner_totals(rows, count, TRANSFORM_DELTA64, 0, 0,
+		&summary->baseline_blocks, &summary->baseline_extents);
+	if (!error)
+		error = planner_totals(rows, count, TRANSFORM_DELTA64, 2, 0,
+			&summary->candidate_blocks, &summary->candidate_extents);
+	if (error)
+		return error;
+	summary->modeled_wall_ns_total =
+		(uint64_t)summary->eligible_pages * classifier_ns_per_page +
+		transform_calls * (transform_ns_per_page + second_lz4_ns_per_page);
+	summary->modeled_wall_ns_per_page =
+		summary->modeled_wall_ns_total / count;
+	saved_blocks = (long)summary->baseline_blocks -
+		(long)summary->candidate_blocks;
+	summary->ns_per_saved_block = saved_blocks > 0 ?
+		summary->modeled_wall_ns_total / (uint64_t)saved_blocks : 0;
 	return 0;
 }
 
@@ -691,6 +884,8 @@ int main(int argc, char **argv)
 	struct transform_summary structured_summary[TRANSFORM_COUNT] = { 0 };
 	struct threshold_summary threshold_summary[THRESHOLD_COUNT] = { 0 };
 	struct classifier_summary classifier_summary = { 0 };
+	struct production_route_summary production_route = { 0 };
+	struct sampling_control sampling_controls[2] = { 0 };
 	struct backend_benchmark backend_benchmarks[MAX_BACKEND_BENCHMARKS] = { 0 };
 	const struct backend_benchmark *selected_transform, *selected_inverse, *scalar_backend;
 	uint64_t second_lz4_ns_per_page = 0;
@@ -703,6 +898,14 @@ int main(int argc, char **argv)
 	error = swapz_predictor_init();
 	if (error) {
 		fprintf(stderr, "predictor backend initialization failed: %d\n",
+			error);
+		return 1;
+	}
+	error = evaluate_sampling_controls(sampling_controls);
+	if (!error)
+		error = evaluate_route_controls();
+	if (error) {
+		fprintf(stderr, "predictor sampling/route control failed: %d\n",
 			error);
 		return 1;
 	}
@@ -803,6 +1006,16 @@ int main(int argc, char **argv)
 	}
 	error = summarize_thresholds(evidence, negative_count, structured_start, count, threshold_summary);
 	if (!error) error = account_routed_cpu(threshold_summary, &classifier_summary, &total_summary[0], count);
+	if (!error)
+		error = summarize_production_route(evidence, count,
+			classifier_summary.benchmark_calls ?
+			classifier_summary.wall_ns /
+			classifier_summary.benchmark_calls : 0,
+			total_summary[0].transform_ns / count,
+			total_summary[0].second_lz4_ns / count,
+			&production_route);
+	if (!error && production_route.eligible_pages != classifier_summary.pages)
+		error = -EUCLEAN;
 	if (error) {
 		fprintf(stderr, "routed production planner rejected evidence: %d\n",
 			error);
@@ -837,7 +1050,15 @@ int main(int argc, char **argv)
 	       classifier_summary.wall_ns / classifier_summary.benchmark_calls : 0,
 	       classifier_summary.benchmark_calls ?
 	       classifier_summary.scalar_wall_ns / classifier_summary.benchmark_calls : 0);
-	printf(",\"backend_benchmarks\":[");
+	printf(",\"sampling_controls\":[");
+	for (threshold_index = 0; threshold_index < 2U; ++threshold_index)
+		printf("%s{\"name\":\"%s\",\"score\":%u,"
+		       "\"minimum_score\":%u}",
+		       threshold_index ? "," : "",
+		       sampling_controls[threshold_index].name,
+		       sampling_controls[threshold_index].score,
+		       sampling_controls[threshold_index].minimum_score);
+	printf("],\"backend_benchmarks\":[");
 	for (transform_index = 0; transform_index < backend_count; ++transform_index) {
 		const struct backend_benchmark *backend = &backend_benchmarks[transform_index];
 		printf("%s{\"name\":\"%s\",\"transform_ns_per_page\":%" PRIu64 ",\"inverse_ns_per_page\":%" PRIu64 "}",
@@ -922,7 +1143,42 @@ int main(int argc, char **argv)
 		       total_summary[transform_index].scalar_inverse_ns / pages,
 		       total_summary[transform_index].second_lz4_ns / pages);
 	}
-	printf("]}\n");
+	printf("],\"production_route\":{\"scope\":"
+	       "\"OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY\","
+	       "\"general_threshold\":%u,\"packing_threshold\":%u,"
+	       "\"eligible_pages\":%u,\"packing_eligible_pages\":%u,"
+	       "\"classifier_passes\":%u,\"candidate_attempts\":%u,"
+	       "\"adopted_pages\":%u,\"raw_rescues\":%u,"
+	       "\"lz4_rescues\":%u,\"packing_adoptions\":%u,"
+	       "\"payload_bytes_saved\":%" PRIu64 ","
+	       "\"baseline_blocks\":%u,\"candidate_blocks\":%u,"
+	       "\"blocks_saved\":%ld,\"baseline_extents\":%u,"
+	       "\"candidate_extents\":%u,\"extents_saved\":%ld,"
+	       "\"modeled_wall_ns_total\":%" PRIu64 ","
+	       "\"modeled_wall_ns_per_page\":%" PRIu64 ","
+	       "\"ns_per_saved_block\":%" PRIu64 "}}\n",
+	       SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD,
+	       SWAPZ_PREDICTOR_PACK_THRESHOLD,
+	       production_route.eligible_pages,
+	       production_route.packing_eligible_pages,
+	       production_route.classifier_passes,
+	       production_route.candidate_attempts,
+	       production_route.adopted_pages,
+	       production_route.raw_rescues,
+	       production_route.lz4_rescues,
+	       production_route.packing_adoptions,
+	       production_route.payload_bytes_saved,
+	       production_route.baseline_blocks,
+	       production_route.candidate_blocks,
+	       (long)production_route.baseline_blocks -
+	       (long)production_route.candidate_blocks,
+	       production_route.baseline_extents,
+	       production_route.candidate_extents,
+	       (long)production_route.baseline_extents -
+	       (long)production_route.candidate_extents,
+	       production_route.modeled_wall_ns_total,
+	       production_route.modeled_wall_ns_per_page,
+	       production_route.ns_per_saved_block);
 	printf("PASS: predictor transforms round-trip; structured corpus saves planner blocks; "
 	       "negative controls measured\n");
 	return 0;

@@ -77,7 +77,8 @@ $(OUT)/predictor-neon.o: $(KERNEL)/predictor-neon.c $(KERNEL)/predictor.h $(KERN
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(KERNEL)/predictor-neon.c -o "$@"
 
 $(OUT)/predictor-qualification: $(NATIVE)/codec/predictor-qualification.c \
-		$(ENGINE) $(AUTH) $(CODEC) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) | $(OUT)
+		$(KERNEL)/predictor-route.h $(ENGINE) $(AUTH) $(CODEC) \
+		$(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NATIVE)/codec/predictor-qualification.c \
 		$(ENGINE) $(AUTH) $(CODEC) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) \
 		-o "$@" -llz4

@@ -37,6 +37,7 @@
 #include "window-policy.h"
 #include "preparation-slots.h"
 #include "predictor.h"
+#include "predictor-route.h"
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz requires 4KiB PAGE_SIZE"
@@ -58,10 +59,6 @@
 #define SWAPZ_PREPARATION_STARTER_WAKE_MIN \
 	(SWAPZ_PREPARATION_TAIL_WAKE_MIN + 1U)
 #define SWAPZ_PREPARATION_TAIL_CLAIM_MIN 2U
-/* Legacy 2024-byte two-record/4KiB boundary remains the split between the
- * original rescue policy and the new packing-cliff path. */
-#define SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH 2024U
-
 /*
  * A separate bounded LZ4 producer may prepare future writes while the
  * existing ordered commit worker waits on lower dm_io. WRITE physical I/O
@@ -1290,10 +1287,9 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 				 struct swapz_delta64_stats *stats)
 {
 	u64 section_start, rescue_start, saved;
-	swapz_u32 score, threshold = SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD;
-	swapz_u16 pack_target = 0;
+	struct swapz_delta64_route route;
+	swapz_u32 score;
 	int candidate, result = baseline_length;
-	bool pack_path = false;
 
 	if (!input || !baseline_output || !transform_scratch ||
 	    !candidate_output || !lz4_workmem || !lz4_wall_ns || !encoding ||
@@ -1308,18 +1304,10 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 	 * next uniform-payload limit; if none exists within SWZ_MAX_RECORDS,
 	 * delta64 cannot improve this geometry and remains skipped.
 	 */
-	if (baseline_length > 0) {
-		pack_target = swapz_engine_next_uniform_pack_limit(
-			(swapz_u16)baseline_length);
-		if (baseline_length <= SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH) {
-			if (!pack_target)
-				return baseline_length;
-			pack_path = true;
-			threshold = SWAPZ_PREDICTOR_PACK_THRESHOLD;
-		}
-	}
+	if (!swapz_delta64_route_init(baseline_length, &route))
+		return baseline_length;
 	stats->eligible++;
-	if (pack_path)
+	if (route.pack_path)
 		stats->pack_eligible++;
 	rescue_start = ktime_get_ns();
 	score = swapz_predict_delta64_sample_score(input);
@@ -1331,11 +1319,11 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 		stats->score_16_23++;
 	else
 		stats->score_ge24++;
-	if (score < threshold)
+	if (score < route.threshold)
 		goto out;
 	stats->classifier_pass++;
 	stats->attempts++;
-	if (pack_path)
+	if (route.pack_path)
 		stats->pack_attempts++;
 	if (swapz_predict_delta64(input, transform_scratch))
 		goto out;
@@ -1344,18 +1332,18 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 				      SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED,
 				      1, lz4_workmem);
 	*lz4_wall_ns += swapz_elapsed_ns(section_start, ktime_get_ns());
-	if (candidate <= 0 ||
-	    (baseline_length > 0 && candidate >= baseline_length))
+	if (!swapz_delta64_candidate_smaller(baseline_length, candidate))
 		goto out;
-	if (baseline_length > 0 && pack_target &&
-	    candidate <= (int)pack_target)
+	if (baseline_length > 0 && route.pack_limit &&
+	    candidate <= (int)route.pack_limit)
 		stats->pack_cliff_crossings++;
 	/*
 	 * For the new sub-2024 path, byte savings alone are not enough. Require
 	 * crossing the next exact SWZ packing cliff so any adopted candidate can
 	 * increase uniform records-per-extent in at least one 4/8/16KiB class.
 	 */
-	if (pack_path && candidate > (int)pack_target)
+	if (!swapz_delta64_candidate_adoptable(&route, baseline_length,
+						      candidate))
 		goto out;
 	if (candidate_output != baseline_output)
 		memcpy(baseline_output, candidate_output, (size_t)candidate);
@@ -1364,7 +1352,7 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 	saved = baseline_length > 0 ? (u64)baseline_length : SWAPZ_BLOCK_BYTES;
 	saved -= (u64)candidate;
 	stats->adopted++;
-	if (pack_path)
+	if (route.pack_path)
 		stats->pack_adopted++;
 	stats->payload_bytes_saved += saved;
 	if (baseline_length > 0) {

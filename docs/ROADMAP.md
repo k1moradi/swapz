@@ -88,12 +88,17 @@ when the stored payload is strictly smaller than the raw-LZ4 baseline. SWZ
 records carry the encoding explicitly and reads invert delta64 after LZ4.
 Transforms never span logical pages or packed extents, preserving independent
 authority, selective reads, GC relocation and random-read units. Source
-`5bdd040` qualified usage telemetry: all 14 mixed and 40 sustained-write
-sessions had zero classifier passes/adoptions. The reviewed default is therefore
-`delta64_rescue=0`; disabled targets allocate no predictor scratch and perform
-no rescue classification or timing. Native structured-corpus savings remain
-opportunity evidence. Keep opt-in threshold, dispatch and K=1 unchanged until
-representative content and a controlled loaded A/B support another policy.
+`5bdd040` recorded zero classifier passes on its loaded fixture, but its fixed
+first-stage sample phase could miss structured pages behind repeated headers.
+That zero-call result does not establish that representative pages lack useful
+delta64 structure. The current correction rotates first-stage samples across
+all 128-byte lanes and 16-byte phases, adds deterministic classifier controls,
+and shares exact eligibility/adoption helpers between production and native
+qualification. This correction still needs the owner's exact-source run. Keep
+`delta64_rescue=0` until a corrected, representative rescue-on/off loaded A/B
+measures actual lower-WRITE bytes/requests, useful throughput, latency and rescue
+cost. Disabled targets continue to allocate no predictor scratch and perform
+no rescue classification or timing.
 
 ID61 remains an evidence problem: timed mixed I/O observed zero GC victims, so
 background GC is unjustified. First measure useful-I/O wall/p99 while foreground
@@ -270,9 +275,10 @@ AVX-512 review/build evidence does not qualify runtime on this SSE2-only host.
 5. Keep SWZ 1/2/4 classes, K=1 scheduling and ID63 completion semantics
    unchanged. Do not implement the currently weak 3/8/16-block class ideas.
 6. Fully qualify the production ID67 route, including byte-exact delta64 reads,
-   GC preservation and fast/slow CPU-throughput effects; continue representative
-   content evidence. Map RAM compaction remains an isolated later experiment
-   with measured bytes/page.
+   GC preservation and fast/slow CPU-throughput effects; first owner-qualify the
+   corrected classifier and shared native/production routing, then run a
+   representative-content rescue-on/off loaded A/B. Map RAM compaction remains
+   an isolated later experiment with measured bytes/page.
 7. Keep ID62 blocked. Physical-device testing remains separately unauthorized
    and requires its own owner approval and safety review.
 

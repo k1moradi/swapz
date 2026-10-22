@@ -190,7 +190,13 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
   `SWAPZ_PREDICTOR_EVIDENCE` record, and fail if it is missing or malformed.
   SHAKE entropy/mixed/medium plus generated zero/repeat pages are negative
   controls; deterministic pointer/page-table/integer/float/struct and
-  independently based 512-byte regions are positive controls. Delta64 is the
+  independently based 512-byte regions are positive controls. The classifier's
+  eight-pair first stage rotates across all four 128-byte lanes and eight
+  16-byte phases; deterministic repeated-header and lane-specific signal
+  controls must catch regressions in those sample positions. The native evaluator
+  shares production eligibility, threshold and packing-cliff helpers and reports
+  the exact hybrid route separately from threshold sweeps. These native controls
+  qualify route behavior, not loaded performance. Delta64 is the
   sole maintained predictor. The classifier is always scalar C. Qualification
   compares scalar/SSE2/AVX2 (or scalar/NEON) full-page transform and inverse
   implementations byte-for-byte, batch-times them independently on the same
@@ -199,7 +205,12 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
   rows; malformed evidence fails the official runner even when the C binary
   itself exits zero.
   The rescue signpost ignores zero residuals, aborts after the 8-pair first
-  stage below score two, and extends passing pages to 32 strided pairs.
+  stage below score two, and extends passing pages to 32 strided pairs. A prior
+  fixed-phase first stage could miss structured pages with repeated headers;
+  historical zero-call loaded counters from that classifier are not reliable
+  evidence that representative pages lack delta64 structure. Keep the default
+  off pending a rescue-on/off loaded A/B using the corrected sampler and
+  representative page content.
   Classifier ns/page uses repeated batched sweeps. Every threshold reports
   per-negative-profile false calls, classifier-routed planner block/extent
   savings, routed extra CPU ns/corpus-page and ns/saved-block. CPU accounting

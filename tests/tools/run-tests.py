@@ -269,6 +269,8 @@ PREDICTOR_TRANSFORM_NAMES = ("delta64",)
 PREDICTOR_BACKENDS = ("scalar", "sse2", "avx2", "avx512", "neon")
 PREDICTOR_THRESHOLDS = (4, 8, 16, 24, 32)
 PREDICTOR_NEGATIVE_PROFILES = ("zero", "repeat", "entropy", "mixed", "medium")
+PREDICTOR_SAMPLING_CONTROL_NAMES = (
+    "repeated_512b_headers", "lane1_only_signal")
 PREDICTOR_TRANSFORM_FIELDS = (
     "adopted", "raw_rescued", "cliff_2024", "saved_payload_bytes",
     "baseline_blocks", "candidate_blocks", "planner_blocks_saved",
@@ -323,6 +325,20 @@ def parse_predictor_evidence(output):
             type(classifier.get("scalar_ns_per_page")) is not int or \
             classifier["scalar_ns_per_page"] < 0:
         return None
+
+    sampling_controls = record.get("sampling_controls")
+    if not isinstance(sampling_controls, list) or \
+            len(sampling_controls) != len(PREDICTOR_SAMPLING_CONTROL_NAMES):
+        return None
+    for item, expected_name, expected_minimum in zip(
+            sampling_controls, PREDICTOR_SAMPLING_CONTROL_NAMES, (24, 16)):
+        if not isinstance(item, dict) or \
+                item.get("name") != expected_name or \
+                type(item.get("score")) is not int or \
+                type(item.get("minimum_score")) is not int or \
+                item["minimum_score"] != expected_minimum or \
+                not expected_minimum <= item["score"] <= 64:
+            return None
 
     backend_rows = record.get("backend_benchmarks")
     if not isinstance(backend_rows, list) or not backend_rows or \
@@ -417,15 +433,79 @@ def parse_predictor_evidence(output):
                 row["planner_extents_saved"] != (
                 row["baseline_extents"] - row["candidate_extents"]):
             return None
+    production_route = record.get("production_route")
+    if not isinstance(production_route, dict) or \
+            production_route.get("scope") != (
+                "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY") or \
+            production_route.get("general_threshold") != 24 or \
+            production_route.get("packing_threshold") != 16:
+        return None
+    route_count_fields = (
+        "eligible_pages", "packing_eligible_pages", "classifier_passes",
+        "candidate_attempts", "adopted_pages", "raw_rescues", "lz4_rescues",
+        "packing_adoptions", "baseline_blocks", "candidate_blocks",
+        "baseline_extents", "candidate_extents")
+    route_timing_fields = (
+        "payload_bytes_saved", "modeled_wall_ns_total",
+        "modeled_wall_ns_per_page", "ns_per_saved_block")
+    if any(type(production_route.get(field)) is not int or
+           production_route[field] < 0 for field in route_count_fields +
+           route_timing_fields):
+        return None
+    total_pages = record["negative_pages"] + record["structured_pages"]
+    if production_route["eligible_pages"] <= 0 or \
+            production_route["eligible_pages"] > total_pages or \
+            production_route["packing_eligible_pages"] > \
+            production_route["eligible_pages"] or \
+            production_route["classifier_passes"] > \
+            production_route["eligible_pages"] or \
+            production_route["candidate_attempts"] != \
+            production_route["classifier_passes"] or \
+            production_route["adopted_pages"] > \
+            production_route["candidate_attempts"] or \
+            production_route["raw_rescues"] + \
+            production_route["lz4_rescues"] != \
+            production_route["adopted_pages"] or \
+            production_route["packing_adoptions"] > \
+            production_route["adopted_pages"] or \
+            production_route["packing_adoptions"] > \
+            production_route["packing_eligible_pages"] or \
+            production_route["baseline_blocks"] <= 0 or \
+            production_route["candidate_blocks"] <= 0 or \
+            production_route["baseline_extents"] <= 0 or \
+            production_route["candidate_extents"] <= 0:
+        return None
+    if type(production_route.get("blocks_saved")) is not int or \
+            type(production_route.get("extents_saved")) is not int or \
+            production_route["blocks_saved"] != (
+                production_route["baseline_blocks"] -
+                production_route["candidate_blocks"]) or \
+            production_route["extents_saved"] != (
+                production_route["baseline_extents"] -
+                production_route["candidate_extents"]) or \
+            production_route["modeled_wall_ns_per_page"] != (
+                production_route["modeled_wall_ns_total"] // total_pages) or \
+            production_route["ns_per_saved_block"] != (
+                production_route["modeled_wall_ns_total"] //
+                production_route["blocks_saved"]
+                if production_route["blocks_saved"] > 0 else 0):
+        return None
+    if classifier["eligible_pages"] != production_route["eligible_pages"]:
+        return None
+    if any(row["negative_eligible"] + row["structured_eligible"] !=
+           production_route["eligible_pages"] for row in threshold_rows):
+        return None
     return {
         "scope": record["scope"],
         "negative_pages": record["negative_pages"],
         "structured_pages": record["structured_pages"],
         "classifier": classifier,
+        "sampling_controls": sampling_controls,
         "backend_benchmarks": backend_rows,
         "io_model_block_ns": io_model_block_ns,
         "thresholds": threshold_rows,
         "transforms": transform_rows,
+        "production_route": production_route,
     }
 
 
@@ -2468,6 +2548,15 @@ def benchmark_verdicts(sessions):
 TABLE_HEADER_LEGEND = {
     "scope": "evidence area",
     "value": "scope limit or result detail",
+    "control": "deterministic classifier input designed to catch a sampling blind spot",
+    "minimum": "minimum score required for the control to pass",
+    "pack eligible": "already-compressed pages with an exact uniform packing limit",
+    "passed": "eligible pages meeting their configured route threshold",
+    "attempts": "full-page transform and second-LZ4 attempts",
+    "payload bytes": "encoded payload bytes avoided in the native model",
+    "blocks saved": "physical blocks saved by the actual native window planner",
+    "extents saved": "physical extents saved by the actual native window planner",
+    "modeled ns/page": "elapsed-time model per page; not measured worker CPU",
     "transform": "candidate page transform",
     "adopt": "whether the candidate is selected",
     "RAW+": "raw pages made compressible",
@@ -2933,6 +3022,11 @@ def print_bench(result):
               f"{classifier['early_abort_pages']}/{classifier['eligible_pages']}; "
               f"timing: {classifier['benchmark_repeats']} batched repeats")
         print_table(
+            "Delta64 classifier sampling regressions — native controls",
+            ("control", "score", "minimum"),
+            [(row["name"], row["score"], row["minimum_score"])
+             for row in predictor["sampling_controls"]])
+        print_table(
             "Delta64 classifier routing quality by score threshold — native corpus",
             ("score", "neg call/eligible", "neg useful", "struct call/eligible",
              "struct useful"),
@@ -2971,6 +3065,21 @@ def print_bench(result):
               profile["useful"])
              for row in predictor["thresholds"]
              for profile in row["negative_profiles"]])
+        route = predictor["production_route"]
+        print("  Exact hybrid production route — native-only model; no loaded I/O proof")
+        print_table(
+            "Delta64 shared production-route screening — native corpus",
+            ("eligible", "pack eligible", "passed", "attempts", "adopted",
+             "RAW+", "LZ4+", "pack+", "payload bytes", "blocks saved",
+             "extents saved", "modeled ns/page", "ns/saved block"),
+            [(route["eligible_pages"], route["packing_eligible_pages"],
+              route["classifier_passes"], route["candidate_attempts"],
+              route["adopted_pages"], route["raw_rescues"],
+              route["lz4_rescues"], route["packing_adoptions"],
+              route["payload_bytes_saved"], f"{route['blocks_saved']:+d}",
+              f"{route['extents_saved']:+d}",
+              route["modeled_wall_ns_per_page"],
+              route["ns_per_saved_block"])])
 
     gc_scale = result.get("evidence", {}).get("gc_scan_scale")
     if isinstance(gc_scale, dict):
