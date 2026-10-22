@@ -296,6 +296,12 @@ class PublicMakeContract(unittest.TestCase):
                     "mixed_replay_cpu_user_s": 0.12,
                     "mixed_replay_cpu_system_s": 0.08,
                     "mixed_replay_peak_rss_kb": 10000,
+                    "host_cpu": {
+                        "status": "AVAILABLE", "wall_ns": 2_000_000_000,
+                        "online_cpus": 4, "affinity_cpus": 4, "tick_hz": 100,
+                        "busy_fraction": 0.50, "steal_fraction": 0.0,
+                        "pressure_some_fraction": 0.10,
+                    },
                     "lower_inflight": mock_lower_inflight(True),
                     "workload_opportunity": mock_opportunity(),
                     "kernel_write_path": (
@@ -440,6 +446,12 @@ class PublicMakeContract(unittest.TestCase):
                     "mixed_replay_cpu_user_s": 0.12,
                     "mixed_replay_cpu_system_s": 0.08,
                     "mixed_replay_peak_rss_kb": 10000,
+                    "host_cpu": {
+                        "status": "AVAILABLE", "wall_ns": 2_000_000_000,
+                        "online_cpus": 4, "affinity_cpus": 4, "tick_hz": 100,
+                        "busy_fraction": 0.50, "steal_fraction": 0.0,
+                        "pressure_some_fraction": 0.10,
+                    },
                     "lower_inflight": mock_lower_inflight(False),
                     "kernel_write_path": (
                         mock_kernel_write(mode, max(4, qd))
