@@ -1394,6 +1394,11 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
                     "reason", "serial-depth adjacent-range READ coalescing evidence is incomplete")
+            elif delta64_prepare_diagnostic.get("overall") != (
+                    "PASS_DELTA64_PREPARE_PILOT"):
+                record["failed_phase"] = "delta64 preparation-width pilot"
+                record["diagnostic"] = delta64_prepare_diagnostic.get(
+                    "reason", "delta64 preparation-width evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1640,10 +1645,13 @@ def delta64_prepare_verdict(sessions):
             return {"overall": "INCOMPLETE",
                     "reason": "delta64 preparation pilot: " + error}
         workers = row["workers"]
-        if kernel["delta64_rescue"] != 1 or                 kernel["delta64_prepare_workers"] != workers:
+        if (kernel["delta64_rescue"] != 1 or
+                kernel["delta64_prepare_workers"] != workers):
             return {"overall": "INCOMPLETE",
                     "reason": "delta64 preparation pilot policy mismatch"}
-        if not kernel["delta64_classifier_pass"] or                 not kernel["delta64_attempts"] or not kernel["delta64_adopted"]:
+        if (not kernel["delta64_classifier_pass"] or
+                not kernel["delta64_attempts"] or
+                not kernel["delta64_adopted"]):
             return {"overall": "INCOMPLETE",
                     "reason": "delta64 preparation pilot did not exercise rescue"}
         if not kernel["delta64_prepare_pages"]:
@@ -1657,7 +1665,14 @@ def delta64_prepare_verdict(sessions):
                 not kernel["delta64_prepare_parallel_starts"]):
             return {"overall": "INCOMPLETE",
                     "reason": "parallel delta64 arm never overlapped during timed replay"}
-        if not isinstance(arm.get("write_mbps"), (int, float)) or                 arm["write_mbps"] <= 0 or                 not isinstance(arm.get("write_p99_ms"), (int, float)) or                 arm["write_p99_ms"] < 0 or                 not isinstance(arm.get("lower_write_bytes"), int) or                 arm["lower_write_bytes"] <= 0 or                 not isinstance(arm.get("lower_write_requests"), int) or                 arm["lower_write_requests"] <= 0:
+        if (not isinstance(arm.get("write_mbps"), (int, float)) or
+                arm["write_mbps"] <= 0 or
+                not isinstance(arm.get("write_p99_ms"), (int, float)) or
+                arm["write_p99_ms"] < 0 or
+                not isinstance(arm.get("lower_write_bytes"), int) or
+                arm["lower_write_bytes"] <= 0 or
+                not isinstance(arm.get("lower_write_requests"), int) or
+                arm["lower_write_requests"] <= 0):
             return {"overall": "INCOMPLETE",
                     "reason": "delta64 preparation pilot performance metrics missing"}
         source = source or arm.get("source_sha")
