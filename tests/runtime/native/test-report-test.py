@@ -1415,6 +1415,8 @@ class ReportContract(unittest.TestCase):
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
             "lz4_acceleration": runner.lz4_acceleration_verdict(
                 runner.parse_lz4_acceleration(synthetic_log())),
+            "delta64_prepare": runner.delta64_prepare_verdict(
+                runner.parse_delta64_prepare_sessions(synthetic_log())),
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
@@ -1422,8 +1424,12 @@ class ReportContract(unittest.TestCase):
             runner.print_bench(report)
         rendered = output.getvalue()
         self.assertIn("Predictive-compression screening", rendered)
-        self.assertIn("Loaded LZ4 acceleration", rendered)
-        self.assertIn("One observation per setting", rendered)
+        self.assertIn("LZ4 acceleration 1 vs 4", rendered)
+        self.assertIn("Acceleration 4 minus 1 paired 95% confidence intervals",
+                      rendered)
+        self.assertIn("Delta64 preparation K=1 vs K=2", rendered)
+        self.assertIn("K=2 minus K=1 paired 95% confidence intervals",
+                      rendered)
         self.assertIn("native corpus; not loaded attribution", rendered)
         self.assertIn("Production delta64 during mixed I/O", rendered)
         self.assertIn("payload KiB", rendered)
