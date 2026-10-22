@@ -17,7 +17,8 @@ from pathlib import Path
 
 PAGE = 4096
 CAP = 3568
-PROFILES = ("zero", "heap", "text", "cow", "raster", "mixed", "medium", "entropy")
+PROFILES = ("zero", "heap", "text", "cow", "raster", "mixed", "medium",
+            "delta64", "entropy")
 DEFAULT_WEIGHTS = "zero=8,heap=32,text=20,cow=12,raster=15,mixed=8,entropy=5"
 
 
@@ -78,6 +79,16 @@ def page_bytes(seed, index, profile):
         # liblz4 output is measured later, never inferred from this
         # recipe; no implication that actual swap pages look like this.
         b[:2040] = raw[:2040]
+    elif profile == "delta64":
+        # Deterministic 64-bit counter/timestamp-like positive control.
+        # The absolute starting value is high entropy, while every adjacent
+        # delta is nonzero and <=256. Ordinary LZ4 therefore sees a roughly
+        # 2.3KiB page, while page-local delta64 exposes the narrow deltas.
+        # This is synthetic qualification input, not a population claim.
+        value = struct.unpack_from("<Q", raw, 0)[0]
+        for slot in range(PAGE // 8):
+            value = (value + 1 + raw[8 + slot]) & 0xffffffffffffffff
+            struct.pack_into("<Q", b, slot * 8, value)
     else:
         raise ValueError(profile)
     return bytes(b)
