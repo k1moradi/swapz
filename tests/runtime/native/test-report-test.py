@@ -593,7 +593,8 @@ def delta64_prepare_arm(workers):
 def lz4_acceleration_log():
     out = []
     spec = runner.MODEL_SPECS["ssd_emulated"]
-    for index, acceleration in enumerate(runner.LZ4_ACCELERATIONS):
+    sequence = [4 if bit else 1 for bit in runner.CONFIRMATION_SEQUENCE]
+    for index, acceleration in enumerate(sequence):
         out.append(f"START_LZ4_ACCELERATION={acceleration}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
                    "REPLAY_ORDER=off-first")
@@ -605,8 +606,16 @@ def lz4_acceleration_log():
         off = arm("off", mode=1, regime="ssd_emulated")
         swapz = arm("swapz", mode=1, regime="ssd_emulated")
         off["throughput_mbps"]["logical_write_mbps"] = 28.0
-        swapz["throughput_mbps"]["logical_write_mbps"] = 25.0 + acceleration
-        swapz["kernel_write_path"]["lz4_acceleration"] = acceleration
+        swapz["throughput_mbps"]["logical_write_mbps"] = (
+            26.0 if acceleration == 1 else 27.0)
+        swapz["write_p99_ns"] = 4_000_000 if acceleration == 1 else 3_800_000
+        kernel = swapz["kernel_write_path"]
+        kernel["lz4_acceleration"] = acceleration
+        kernel["lz4_wall_ns"] = 1_000_000 if acceleration == 1 else 800_000
+        kernel["ordered_lz4_wall_ns"] = (
+            700_000 if acceleration == 1 else 560_000)
+        kernel["prep_lz4_wall_ns"] = (
+            300_000 if acceleration == 1 else 240_000)
         for record in ((swapz, off) if index % 2 else (off, swapz)):
             out.append(json.dumps(record))
         out.append(f"PASS_LZ4_ACCELERATION={acceleration}")
@@ -673,16 +682,23 @@ def synthetic_log():
             out.append(json.dumps(record))
         out.append(f"PASS_SD_READ_COALESCE_AB={enabled}")
     spec = runner.MODEL_SPECS["ssd_emulated"]
-    for workers in (1, 2, 4):
+    delta64_sequence = [2 if bit else 1
+                        for bit in runner.CONFIRMATION_SEQUENCE]
+    for index, workers in enumerate(delta64_sequence):
         out.append(f"START_DELTA64_PREPARE_WORKERS={workers}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
         out.append(
             "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
             "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
             "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
             "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
-        out.append(json.dumps(write_arm(
-            "off", qd=32, regime="ssd_emulated", mode=0)))
-        out.append(json.dumps(delta64_prepare_arm(workers)))
+        off = write_arm("off", qd=32, regime="ssd_emulated", mode=0)
+        off["fixture_sha256"] = "e" * 64
+        off["trace_sha256"] = "f" * 64
+        swapz = delta64_prepare_arm(workers)
+        for record in ((swapz, off) if index % 2 else (off, swapz)):
+            out.append(json.dumps(record))
         out.append(f"PASS_DELTA64_PREPARE_WORKERS={workers}")
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
@@ -988,39 +1004,34 @@ class ReportContract(unittest.TestCase):
     def test_loaded_lz4_acceleration_sweep_is_separate_and_fail_closed(self):
         log = synthetic_log()
         sessions = runner.parse_lz4_acceleration(log)
-        self.assertEqual([row["lz4_acceleration"] for row in sessions],
-                         list(runner.LZ4_ACCELERATIONS))
+        expected = [4 if bit else 1 for bit in runner.CONFIRMATION_SEQUENCE]
+        self.assertEqual([row["lz4_acceleration"] for row in sessions], expected)
         verdict = runner.lz4_acceleration_verdict(sessions)
-        self.assertEqual(verdict["overall"], "PASS_DIRECTIONAL_SWEEP")
-        self.assertEqual(
-            [row["arms"]["swapz"]["kernel_write_path"]["lz4_acceleration"]
-             for row in sessions], list(runner.LZ4_ACCELERATIONS))
-        self.assertEqual(
-            [row["arms"]["swapz"]["input_write_mbps"] for row in sessions],
-            [26.0, 27.0, 28.0, 29.0])
-        self.assertEqual(
-            verdict["interpretation"],
-            "SYNTHETIC_RAM_MODEL_DIRECTIONAL_ONLY_NO_PROMOTION")
+        self.assertEqual(verdict["overall"], "PASS_LZ4_ACCELERATION_AB", verdict)
+        self.assertEqual(verdict["matched_pairs"], 5)
+        self.assertEqual(verdict["modes"]["1"]["observations"], 5)
+        self.assertEqual(verdict["modes"]["4"]["observations"], 5)
+        self.assertLess(
+            verdict["paired"]["lz4_wall_change_fraction"]["high"], 0)
+        self.assertGreater(
+            verdict["paired"]["throughput_change_fraction"]["low"], 0)
 
-        missing_terminal = log.replace("PASS_LZ4_ACCELERATION=4\n", "")
-        incomplete = runner.parse_lz4_acceleration(missing_terminal)
+        incomplete_log = log.replace("PASS_LZ4_ACCELERATION=4\n", "", 1)
+        incomplete = runner.parse_lz4_acceleration(incomplete_log)
         self.assertNotEqual(
             runner.lz4_acceleration_verdict(incomplete)["overall"],
-            "PASS_DIRECTIONAL_SWEEP")
+            "PASS_LZ4_ACCELERATION_AB")
 
         duplicate = sessions + [sessions[0]]
         self.assertNotEqual(
             runner.lz4_acceleration_verdict(duplicate)["overall"],
-            "PASS_DIRECTIONAL_SWEEP")
+            "PASS_LZ4_ACCELERATION_AB")
 
-        for field, value in (("lz4_acceleration", 1),
-                             ("delta64_rescue", 1)):
-            changed = runner.parse_lz4_acceleration(log)
-            changed[1]["arms"]["swapz"]["kernel_write_path"][field] = value
-            with self.subTest(policy=field):
-                self.assertNotEqual(
-                    runner.lz4_acceleration_verdict(changed)["overall"],
-                    "PASS_DIRECTIONAL_SWEEP")
+        changed = runner.parse_lz4_acceleration(log)
+        changed[1]["arms"]["swapz"]["kernel_write_path"]["lz4_acceleration"] = 1
+        self.assertNotEqual(
+            runner.lz4_acceleration_verdict(changed)["overall"],
+            "PASS_LZ4_ACCELERATION_AB")
 
         changed = runner.parse_lz4_acceleration(log)
         changed[2]["arms"]["off"]["trace_sha256"] = "d" * 64
@@ -1032,7 +1043,7 @@ class ReportContract(unittest.TestCase):
         changed[0]["arms"]["off"]["lower_write_requests"] = True
         self.assertNotEqual(
             runner.lz4_acceleration_verdict(changed)["overall"],
-            "PASS_DIRECTIONAL_SWEEP")
+            "PASS_LZ4_ACCELERATION_AB")
 
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
@@ -1072,15 +1083,20 @@ class ReportContract(unittest.TestCase):
                 "parallel_read_coalesce_skip_other"], 0)
 
         delta64_pilot = runner.parse_delta64_prepare_sessions(synthetic_log())
-        self.assertEqual([row["workers"] for row in delta64_pilot], [1, 2, 4])
+        expected_workers = [2 if bit else 1
+                            for bit in runner.CONFIRMATION_SEQUENCE]
+        self.assertEqual([row["workers"] for row in delta64_pilot],
+                         expected_workers)
         delta64_diag = runner.delta64_prepare_verdict(delta64_pilot)
         self.assertEqual(delta64_diag["overall"],
-                         "PASS_DELTA64_PREPARE_PILOT", delta64_diag)
+                         "PASS_DELTA64_PREPARE_AB", delta64_diag)
+        self.assertEqual(delta64_diag["matched_pairs"], 5)
         self.assertEqual(delta64_diag["modes"]["1"]["prepare_parallel_starts"], 0)
         self.assertGreater(
             delta64_diag["modes"]["2"]["prepare_parallel_starts"], 0)
         self.assertGreater(
-            delta64_diag["modes"]["4"]["prepare_active_max"], 1)
+            delta64_diag["modes"]["2"]["prepare_active_max"], 1)
+        self.assertIn("throughput_change_fraction", delta64_diag["paired"])
 
         self.assertEqual(
             [s["async_prepare"] for s in sessions],
