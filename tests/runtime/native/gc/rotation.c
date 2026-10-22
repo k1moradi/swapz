@@ -92,6 +92,7 @@ static int test_three_rotations_and_foreground_progress(void)
 	/* GC cannot pick a reserved victim: src must be eligible foreground. */
 	CHECK(swapz_gc_begin_rotation(&a, 2) == -EINVAL);
 	CHECK(relocate_all_live_pages(0) == 0);
+	CHECK(a.next_segment_probe == 3);
 	CHECK(roles[0] == 0 && roles[2] == 1);
 	CHECK(a.open_segment == 2 && a.maps[0].start_block == 512);
 	CHECK(a.next_block == 513);
@@ -101,6 +102,7 @@ static int test_three_rotations_and_foreground_progress(void)
 	/* Preserve the circular probe: after destination2, the untouched
 	 * reserve3 is selected before wrapping to the evacuated victim0. */
 	CHECK(relocate_all_live_pages(1) == 0);
+	CHECK(a.next_segment_probe == 0);
 	CHECK(roles[1] == 0 && roles[3] == 1);
 	CHECK(a.open_segment == 3 && a.maps[1].start_block == 768);
 	CHECK(write_raw(3) == 0 && a.maps[3].start_block == 769);
@@ -112,7 +114,7 @@ static int test_three_rotations_and_foreground_progress(void)
 	CHECK(a.maps[1].valid && a.maps[1].start_block == 768);
 	CHECK(a.maps[2].valid && a.maps[2].start_block == 1); /* moved with victim 2 */
 	CHECK(a.maps[3].valid && a.maps[3].start_block == 769);
-	CHECK(a.next_segment_probe == 3);
+	CHECK(a.next_segment_probe == 1);
 	for (cycle = 0; cycle < 4; ++cycle) {
 		CHECK(write_raw(4) == 0);
 		CHECK(maps[4].valid && maps[4].raw_crc32c ==
