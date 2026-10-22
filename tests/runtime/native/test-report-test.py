@@ -217,6 +217,9 @@ def timed_kernel_write(*, mode, target=8):
     record.update({
         "physical_write_reqs": 5,
         "lz4_acceleration": 1,
+        "k1_allow_after_read_bypass": 0,
+        "read_coalesce_max_blocks": 8,
+        "invalidate_cache_on_write_admit": 0,
         "delta64_rescue": 1,
         "delta64_eligible": 10,
         "delta64_classifier_pass": 5,
@@ -414,6 +417,7 @@ def arm(candidate, *, mode, regime):
                     "parallel_read_coalesce_skip_gap": 1,
                     "parallel_read_coalesce_skip_other": 0,
                     "read_worker_cpu_ns": 1000000,
+                    "read_coalesce_max_blocks": 8,
                 } if swapz else None),
                 "replay_cpu_user_s": .15,
                 "replay_cpu_system_s": .12,
@@ -522,6 +526,27 @@ def coalesce_arm(enabled, regime="ssd_emulated"):
             phase["lower_io"]["lower_read_requests"] -= (
                 kernel["parallel_read_coalesced_reqs_saved"])
             phase["read_p99_ms"] *= .95
+    return record
+
+
+def k1_read_bypass_arm(allow, regime):
+    record = arm("swapz", mode=1, regime=regime)
+    kernel = record["kernel_write_path"]
+    kernel["k1_allow_after_read_bypass"] = allow
+    kernel["read_coalesce_max_blocks"] = 8
+    kernel["invalidate_cache_on_write_admit"] = 0
+    kernel["pipeline_read_bypass_skips"] = 3 if not allow else 0
+    record["fixture_sha256"] = "1" * 64
+    record["trace_sha256"] = "2" * 64
+    return record
+
+
+def read_coalesce_cap_arm(cap, regime):
+    record = coalesce_arm(True, regime=regime)
+    for phase in record["packed_read"]["passes"].values():
+        phase["kernel_read_path"]["read_coalesce_max_blocks"] = cap
+    record["fixture_sha256"] = "3" * 64
+    record["trace_sha256"] = "4" * 64
     return record
 
 
@@ -693,6 +718,36 @@ def synthetic_log():
         for record in ((swapz, raw) if index % 2 else (raw, swapz)):
             out.append(json.dumps(record))
         out.append(f"PASS_SD_READ_COALESCE_AB={enabled}")
+    for regime in runner.MODEL_ORDER:
+        policy_spec = runner.MODEL_SPECS[regime]
+        for index, allow in enumerate(runner.CONFIRMATION_SEQUENCE):
+            out.append(f"START_K1_READ_BYPASS_AB={regime}:{allow}")
+            out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                       "REPLAY_ORDER=off-first")
+            out.append(
+                "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+                "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+                "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+                "HW_QUEUE_DEPTH={hw_queue_depth}".format(**policy_spec))
+            raw = arm("off", mode=1, regime=regime)
+            swapz = k1_read_bypass_arm(allow, regime)
+            for record in ((swapz, raw) if index % 2 else (raw, swapz)):
+                out.append(json.dumps(record))
+            out.append(f"PASS_K1_READ_BYPASS_AB={regime}:{allow}")
+        for index, read_cap in enumerate(runner.READ_COALESCE_CAP_SEQUENCE):
+            out.append(f"START_READ_COALESCE_CAP_AB={regime}:{read_cap}")
+            out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                       "REPLAY_ORDER=off-first")
+            out.append(
+                "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+                "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+                "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+                "HW_QUEUE_DEPTH={hw_queue_depth}".format(**policy_spec))
+            raw = arm("off", mode=0, regime=regime)
+            swapz = read_coalesce_cap_arm(read_cap, regime)
+            for record in ((swapz, raw) if index % 2 else (raw, swapz)):
+                out.append(json.dumps(record))
+            out.append(f"PASS_READ_COALESCE_CAP_AB={regime}:{read_cap}")
     spec = runner.MODEL_SPECS["ssd_emulated"]
     delta64_sequence = [2 if bit else 1
                         for bit in runner.CONFIRMATION_SEQUENCE]
