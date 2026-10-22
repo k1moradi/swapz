@@ -1569,7 +1569,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", route)
         self.assertIn("SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH", route)
         self.assertIn("baseline_length <= 0", route)
-        self.assertIn("candidate_length <= route->pack_limit", route)
+        self.assertIn("candidate_length <= (int)route->pack_limit", route)
         self.assertIn("swapz_predict_delta64", rescue)
         self.assertIn("LZ4_compress_fast", rescue)
         self.assertIn("swapz_unpredict_delta64", DM)

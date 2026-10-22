@@ -23,10 +23,10 @@ static inline int swapz_delta64_route_init(
 	route->pack_limit = 0;
 	route->threshold = 0;
 	route->pack_path = 0;
-	if (baseline_length > SWAPZ_BLOCK_BYTES)
+	if (baseline_length > (int)SWAPZ_BLOCK_BYTES)
 		return 0;
 	if (baseline_length <= 0 ||
-	    baseline_length > SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH) {
+	    baseline_length > (int)SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH) {
 		route->threshold = SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD;
 		return 1;
 	}
@@ -54,7 +54,8 @@ static inline int swapz_delta64_candidate_adoptable(
 	return route && route->threshold &&
 		swapz_delta64_candidate_smaller(baseline_length,
 						candidate_length) &&
-		(!route->pack_path || candidate_length <= route->pack_limit);
+		(!route->pack_path ||
+		 candidate_length <= (int)route->pack_limit);
 }
 
 #endif
