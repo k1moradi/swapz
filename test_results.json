@@ -65,17 +65,17 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "dd46cc5e3ad5d730748e51e3a06718042b71c2b5",
+"source_sha": "142fe2e95506573185ad017d4d63a8ed52ba9e64",
 "stages": [
 {
-"elapsed_s": 1.446,
+"elapsed_s": 8.237,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
 "diagnostic": "Child returned nonzero in this non-privileged stage",
-"elapsed_s": 2.569,
+"elapsed_s": 2.562,
 "exit_code": 2,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -83,5 +83,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "dd46cc5e3ad5d730748e51e3a06718042b71c2b5"
+"tested_commit_sha": "142fe2e95506573185ad017d4d63a8ed52ba9e64"
 }
