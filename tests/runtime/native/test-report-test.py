@@ -85,6 +85,17 @@ def predictor_evidence():
             "ns_per_page": 55,
             "scalar_ns_per_page": 70,
         },
+        "lz4_acceleration_sweep": [
+            {
+                "acceleration": acceleration,
+                "wall_ns_per_page": 1000 // acceleration,
+                "accepted_payload_bytes": 10000 + acceleration,
+                "raw_pages": 12,
+                "planner_blocks": 20,
+                "planner_extents": 16,
+            }
+            for acceleration in runner.LZ4_ACCELERATIONS
+        ],
         "sampling_controls": [
             {"name": "repeated_512b_headers", "score": 32,
              "minimum_score": 24},
