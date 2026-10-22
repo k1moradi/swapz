@@ -917,14 +917,16 @@ a larger payload is acceptable only if the same 4/8/16KiB geometry is retained
 and loaded lower I/O plus useful service improve. Delta64's second LZ4 remains
 acceleration 1 throughout this sweep.
 
-The loaded first-pass acceleration sweep is a separate directional family on
-the 80 MiB/s, 0.15 ms, depth-64 RAM model. It runs one paired observation for
-each acceleration 1/2/3/4 with asynchronous preparation enabled and delta64
-rescue disabled. Arm order alternates, and source, fixture, trace and device
-geometry stay fixed. Its useful WRITE rate, lower WRITE bytes/requests and
-swapz p99 are retained separately from the 14 mixed sessions and 40 sustained
-write-only sessions. One observation per setting has no confidence interval
-and cannot promote a production policy.
+The loaded promotion test now narrows the decision to acceleration 1 versus
+4 on the 80 MiB/s, 0.15 ms, depth-64 RAM model. Native evidence already shows
+the monotonic CPU direction while preserving the same planner-block geometry,
+so loaded time is spent on five adjacent counterbalanced 1/4 pairs rather than
+one observation at every intermediate value. Keep `async_prepare=1`,
+`delta64_rescue=0`, source, fixture, trace and device geometry fixed. Report
+paired 95% confidence intervals for useful WRITE throughput, p99, lower WRITE
+bytes/requests, total/ordered/preparation LZ4 wall, raw-control throughput
+drift, and host CPU/PSI. The 14 mixed sessions and 40 sustained write-only
+sessions remain separate controls.
 
 For delta64, retain raw native backend transform/inverse ns/page and add loaded
 `delta64_transform_wall_ns / delta64_transform_calls`. The latter surrounds
