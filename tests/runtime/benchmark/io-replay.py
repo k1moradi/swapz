@@ -1005,7 +1005,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "pipeline_async_runs", "pipeline_read_bypass_skips",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms",
-    "delta64_prepare_pages"
+    "delta64_prepare_pages", "delta64_prepare_parallel_starts"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",
