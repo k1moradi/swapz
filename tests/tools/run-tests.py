@@ -1330,6 +1330,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         if isinstance(tested_source, str) and re.fullmatch(
                 r"[0-9a-f]{40}", tested_source):
             child_env["SWAPZ_TESTED_SOURCE_SHA"] = tested_source
+        if title == "Build module and helpers":
+            child_env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
         proc = subprocess.run(command, cwd=ROOT, text=True, encoding="utf-8",
                               errors="replace", stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, check=False,
@@ -1380,9 +1382,13 @@ def run_stage(title, command, result, *, parse_bench=False):
                        "PASS_DELTA64_PREPARE_AB"))
     if marker_failure:
         rc = 1
-    blocked_marker = parse_bench and any(
+    secure_boot_signing_blocked = (
+        title == "Build module and helpers" and any(
+            line.startswith("BLOCKED: Secure Boot module signing:")
+            for line in output.splitlines()))
+    blocked_marker = secure_boot_signing_blocked or (parse_bench and any(
         line.startswith(("BLOCKED:", "BLOCKED_LOADED_QUALIFICATION"))
-        for line in output.splitlines())
+        for line in output.splitlines()))
     status = ("PASS" if rc == 0 else "BLOCKED" if blocked_marker else "FAIL")
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}

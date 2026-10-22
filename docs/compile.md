@@ -52,6 +52,27 @@ selection never changes the single-module artifact.
 
 The official test runner may use Make jobserver parallelism for independent compilation, but loaded device phases and benchmark pairs remain sequential.
 
+## Secure Boot module signing
+
+After the normal current-kernel Kbuild finishes, the root `make` path checks
+whether firmware Secure Boot is enabled. When it is enabled,
+`build/kernel/experimental/dm-swapz.ko` is signed with `kmodsign sha512`
+before the build succeeds. The default Ubuntu MOK locations are
+`/var/lib/shim-signed/mok/MOK.priv` and
+`/var/lib/shim-signed/mok/MOK.der`; `SWAPZ_MOK_PRIVATE_KEY` and
+`SWAPZ_MOK_CERT` may select an equivalent enrolled signing key and
+certificate. Secure Boot-disabled and non-EFI hosts do not sign the module.
+
+The signing hook compares the module's current signature key with the
+certificate serial and does not append a duplicate signature on an unchanged
+build. If the private key is not readable by the invoking user, plain `make`
+uses `sudo` only for `kmodsign`. The official `make test` build stage is
+noninteractive and therefore uses `sudo -n`; unavailable authorization,
+missing signing tools/key material, or an indeterminate EFI Secure Boot state
+is BLOCKED rather than silently producing an unloadable qualification module.
+The warning-only W=1/W=2 artifacts are never loaded and are not signed by this
+hook.
+
 ## Packaging
 
 DKMS uses `AUTOINSTALL="no"`. Installation does not load the module, create a mapper or activate swap. Uninstall verifies ownership/version and refuses unsafe removal. Packaging tests run in a rootless sandbox; they are not system-install qualification.

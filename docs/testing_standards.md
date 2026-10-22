@@ -33,6 +33,16 @@ A complete run includes:
 
 Stages are ordered and fail fast. Privileged device sessions must never overlap. If noninteractive privilege or safe owned-device provisioning is unavailable, the complete run reports BLOCKED rather than silently skipping loaded work.
 
+On Secure Boot-enabled hosts, stage 1 uses the same root-build signing hook as
+`make` and must leave the experimental `dm-swapz.ko` signed before any
+loaded work can begin. Qualification never prompts for signing privilege:
+the runner marks signing noninteractive and the helper may use only cached
+`sudo -n` authorization to read a protected private key. Missing
+authorization, signing tools/key material, or an indeterminate EFI Secure Boot
+state makes the build stage BLOCKED. Repeated qualification must recognize an
+existing signature from the configured certificate and must not append another
+signature to an unchanged module.
+
 ## Direct production-C tests
 
 Native tests compile the real `src/kernel/{codec,authority,engine}.c` where applicable. They cover codec integrity, authority publication, torn/short failure, overwrite generations, discard, zero-write representation, online packing, randomized authority, lower-run aggregation, flush/FUA accounting, retention/window policy and GC rotation/cost invariants.

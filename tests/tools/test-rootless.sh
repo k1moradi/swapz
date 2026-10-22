@@ -18,6 +18,7 @@ python3 -B tests/runtime/native/make-interface-test.py -v
 python3 -B tests/runtime/native/test-report-test.py -v
 python3 -B tests/runtime/native/package-dkms-test.py -v
 bash -n tests/tools/test-rootless.sh tests/tools/test-loaded.sh packaging/package-dkms.sh \
+  packaging/sign-module.sh \
   tests/tools/deploy-nullblk.sh tests/tools/loaded-preflight.sh tests/tools/swap-inventory.sh \
   tests/tools/quiet-lower-io.sh \
   tests/tools/benchmark-owned-pair.sh tests/tools/nullblk-identity.sh \

@@ -26,6 +26,7 @@ all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/us
 
 build/kernel/experimental/dm-swapz.ko:
 	$(MAKE) -C src/kernel KDIR="$(KDIR)" all
+	@bash packaging/sign-module.sh "$@"
 
 build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile
 	@mkdir -p build/tests

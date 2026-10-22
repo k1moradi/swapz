@@ -57,6 +57,69 @@ class PublicMakeContract(unittest.TestCase):
                                cwd=ROOT, capture_output=True, text=True, timeout=5)
             self.assertNotEqual(p.returncode, 0, forbidden)
 
+
+    def test_secure_boot_signing_hook_is_idempotent(self):
+        helper = ROOT / "packaging/sign-module.sh"
+        content = helper.read_text()
+        for required in ("mokutil --sb-state", "kmodsign sha512",
+                         "SWAPZ_MOK_PRIVATE_KEY", "SWAPZ_MOK_CERT",
+                         "SWAPZ_SIGN_NONINTERACTIVE", "sudo_command+=(-n)"):
+            self.assertIn(required, content)
+        self.assertIn('bash packaging/sign-module.sh "$@"', MAKE)
+
+        import os
+        import tempfile
+        build_tests = ROOT / "build/tests"
+        build_tests.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="module-signing-",
+                                         dir=build_tests) as directory:
+            fixture = pathlib.Path(directory)
+            fake_bin = fixture / "bin"
+            fake_bin.mkdir()
+            module = fixture / "dm-swapz.ko"
+            key = fixture / "MOK.priv"
+            cert = fixture / "MOK.der"
+            module.write_bytes(b"module")
+            key.write_text("private")
+            cert.write_text("certificate")
+
+            commands = {
+                "mokutil": "#!/bin/sh\nprintf '%s\\n' 'SecureBoot enabled'\n",
+                "openssl": "#!/bin/sh\nprintf '%s\\n' 'serial=ABCD'\n",
+                "modinfo": (
+                    "#!/bin/sh\n"
+                    "field=$2; module=$3\n"
+                    "if [ \"$field\" = sig_key ] && [ -f \"$module.signed\" ]; then\n"
+                    "  printf '%s\\n' 'AB:CD'\n"
+                    "fi\n"
+                ),
+                "kmodsign": (
+                    "#!/bin/sh\n"
+                    "module=$4\n"
+                    "printf '%s\\n' call >> \"$module.calls\"\n"
+                    ": > \"$module.signed\"\n"
+                ),
+                "sudo": "#!/bin/sh\n[ \"$1\" = -n ] && shift\nexec \"$@\"\n",
+            }
+            for name, script in commands.items():
+                path = fake_bin / name
+                path.write_text(script)
+                path.chmod(0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["SWAPZ_MOK_PRIVATE_KEY"] = str(key)
+            env["SWAPZ_MOK_CERT"] = str(cert)
+            env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
+            for _ in range(2):
+                proc = subprocess.run(
+                    ["bash", str(helper), str(module)], env=env,
+                    capture_output=True, text=True, timeout=5)
+                self.assertEqual(proc.returncode, 0,
+                                 proc.stdout + "\n" + proc.stderr)
+            self.assertEqual((fixture / "dm-swapz.ko.calls").read_text(),
+                             "call\n")
+
     def test_make_test_is_only_official_documented_test_command(self):
         canonical = ("docs/README.md", "docs/VISION.md",
                      "docs/coding_standards.md", "docs/testing_standards.md",
@@ -104,10 +167,16 @@ class PublicMakeContract(unittest.TestCase):
                                          dir=build_tests) as directory:
             fixture = pathlib.Path(directory)
             for part in ("src/kernel", "src/userspace", "tests/tools",
-                         "fake-headers"):
+                         "packaging", "fake-headers", "fake-bin"):
                 (fixture / part).mkdir(parents=True, exist_ok=True)
 
             (fixture / "Makefile").write_text(MAKE)
+            (fixture / "packaging/sign-module.sh").write_text(
+                (ROOT / "packaging/sign-module.sh").read_text())
+            fake_mokutil = fixture / "fake-bin/mokutil"
+            fake_mokutil.write_text(
+                "#!/bin/sh\nprintf '%s\\n' 'SecureBoot disabled'\n")
+            fake_mokutil.chmod(0o755)
             (fixture / "src/kernel/Makefile").write_text(
                 (ROOT / "src/kernel/Makefile").read_text())
             (fixture / "src/kernel/VERSION").write_text(
@@ -643,6 +712,7 @@ class PublicMakeContract(unittest.TestCase):
             env.pop("MAKEFLAGS", None)
             env.pop("MFLAGS", None)
             env.pop("W", None)
+            env["PATH"] = f"{fixture / 'fake-bin'}:{env.get('PATH', '')}"
 
             def execute(phase):
                 print(f"MAKE_INCREMENTAL_PHASE={phase}", flush=True)
