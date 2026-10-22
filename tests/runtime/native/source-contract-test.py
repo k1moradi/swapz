@@ -2355,6 +2355,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("!ctx->retained_window_read_bypasses", flush)
         self.assertIn("(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U)",
                       flush)
+        self.assertIn("ctx->pipeline_read_bypass_skips++", flush)
+        self.assertIn("pipeline_read_bypass_skips=%llu", status)
         self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))

@@ -366,6 +366,7 @@ struct swapz_dm {
 	u64 pipeline_async_runs;
 	u64 pipeline_completed_runs;
 	u64 pipeline_collected_pages;
+	u64 pipeline_read_bypass_skips;
 	u64 pipeline_finalize_waits;
 	u64 pipeline_finalize_wait_wall_ns;
 	/* ID38 passive evidence: a nonempty ready window reached flush while
@@ -2149,6 +2150,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	bool chain_continues;
 	bool deferred_single_tail = ctx->retained_single_tail_deferred;
 	bool async_submitted = false;
+	bool async_detach_ready;
 	int error = 0;
 
 	/* A second close, barrier, read, zero/raw mutation, GC retry or shutdown
@@ -2371,23 +2373,31 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
+	async_detach_ready =
+		ctx->async_prepare && READ_ONCE(ctx->accepting) &&
+		(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U) &&
+		!needs_fua && ctx->engine.bulk_enabled &&
+		!ctx->engine.verify_after_write &&
+		(close_reason == SWAPZ_CLOSE_FULL ||
+		 close_reason == SWAPZ_CLOSE_DUPLICATE ||
+		 close_reason == SWAPZ_CLOSE_QUANTUM ||
+		 close_reason == SWAPZ_CLOSE_IDLE ||
+		 close_reason == SWAPZ_CLOSE_DEADLINE ||
+		 close_reason == SWAPZ_CLOSE_PACK_READY);
+	/*
+	 * Passive attribution only: count a window when the qualified read-bypass
+	 * guard is the sole remaining reason it cannot use the K=1 detach path.
+	 * This counter must not change scheduling or retained-window state.
+	 */
+	if (async_detach_ready && ctx->retained_window_read_bypasses)
+		ctx->pipeline_read_bypass_skips++;
 	/*
 	 * First ping-pong experiment: only a complete multi-record window with
 	 * no hard immediate fence is detached. If geometry yields only a prefix,
 	 * complete that prefix synchronously and keep the existing retry path for
 	 * the remainder; never split a good window merely to manufacture overlap.
 	 */
-	if (ctx->async_prepare && READ_ONCE(ctx->accepting) &&
-	    (count > 4U || READ_ONCE(ctx->preparation_queued) > 0U) &&
-	    !needs_fua && !ctx->retained_window_read_bypasses &&
-	    ctx->engine.bulk_enabled &&
-	    !ctx->engine.verify_after_write &&
-	    (close_reason == SWAPZ_CLOSE_FULL ||
-	     close_reason == SWAPZ_CLOSE_DUPLICATE ||
-	     close_reason == SWAPZ_CLOSE_QUANTUM ||
-	     close_reason == SWAPZ_CLOSE_IDLE ||
-	     close_reason == SWAPZ_CLOSE_DEADLINE ||
-	     close_reason == SWAPZ_CLOSE_PACK_READY)) {
+	if (async_detach_ready && !ctx->retained_window_read_bypasses) {
 		struct swapz_inflight_write *inflight = &ctx->inflight_write;
 		swapz_u8 prepared = 0;
 		u64 plan_before = ctx->engine.plan_wall_ns;
@@ -5135,8 +5145,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_lower_write_end_queued=%llu "
 		       "prep_lower_write_end_nonempty=%llu "
 		       "pipeline_async_runs=%llu pipeline_completed_runs=%llu "
-		       "pipeline_collected_pages=%llu pipeline_finalize_waits=%llu "
-		       "pipeline_finalize_wait_wall_ns=%llu "
+		       "pipeline_collected_pages=%llu pipeline_read_bypass_skips=%llu "
+		       "pipeline_finalize_waits=%llu pipeline_finalize_wait_wall_ns=%llu "
 		       "k1_ready_wait_windows=%llu k1_ready_wait_records=%llu "
 		       "k1_ready_wait_wall_ns=%llu k1_ready_wait_max_records=%llu "
 		       "k1_ready_wait_pack_ready=%llu k1_ready_wait_full=%llu "
@@ -5363,7 +5373,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->prep_lower_write_end_queued,
 		       ctx->prep_lower_write_end_nonempty,
 		       ctx->pipeline_async_runs, ctx->pipeline_completed_runs,
-		       ctx->pipeline_collected_pages, ctx->pipeline_finalize_waits,
+		       ctx->pipeline_collected_pages,
+		       ctx->pipeline_read_bypass_skips,
+		       ctx->pipeline_finalize_waits,
 		       ctx->pipeline_finalize_wait_wall_ns,
 		       ctx->k1_ready_wait_windows,
 		       ctx->k1_ready_wait_records,

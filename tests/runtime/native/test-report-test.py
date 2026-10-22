@@ -231,6 +231,7 @@ def timed_kernel_write(*, mode, target=8):
         "prep_lower_write_end_queued": 1,
         "prep_lower_write_end_nonempty": 1,
         "pipeline_async_runs": 4 if mode else 0,
+        "pipeline_read_bypass_skips": 3 if mode else 0,
         "pipeline_active_wall_ns": 800000000 if mode else 0,
         "pipeline_finalize_wait_wall_ns": 5000000 if mode else 0,
         "k1_ready_wait_windows": 2 if mode else 0,

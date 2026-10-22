@@ -246,6 +246,7 @@ KERNEL_WRITE_FIELDS = (
     "prep_lower_write_samples", "prep_lower_write_start_queued",
     "prep_lower_write_start_nonempty", "prep_lower_write_end_queued",
     "prep_lower_write_end_nonempty", "pipeline_async_runs",
+    "pipeline_read_bypass_skips",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms",
     "write_wait_gt4ms", "retained_burst_target", "delta64_rescue"
@@ -3450,6 +3451,8 @@ def print_bench(result):
                 ("lower-W nonempty start/end",
                  f"{asynchronous['mixed_prep_lower_write_start_nonempty']:.1f}/"
                  f"{asynchronous['mixed_prep_lower_write_end_nonempty']:.1f}"),
+                ("K=1 read-bypass detach skips",
+                 f"{asynchronous['mixed_pipeline_read_bypass_skips']:.1f}"),
                 ("K=1 ready wait win/records/ms",
                  f"{counters['k1_ready_wait_windows']:.1f}/"
                  f"{counters['k1_ready_wait_records']:.1f}/"
