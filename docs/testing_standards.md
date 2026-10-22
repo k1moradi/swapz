@@ -281,9 +281,11 @@ ordering fence. Completion remains fail-closed.
 The first pipeline qualification uses one lower run outstanding plus one active
 collector. Higher lower-I/O depth is a later explicit K experiment. Generic
 ordinary-LZ4 preparation concurrency remains blocked by the prior shallow-backlog
-evidence. The separate delta64 K=2/K=4 pilot is permitted because rescue adds an
-independent transform plus second LZ4 pass; it must prove timed lane overlap on
-the deterministic positive fixture before any broader concurrency claim.
+evidence. Delta64 rescue is the only preparation-concurrency exception: the
+default qualification now compares K=1 against K=2 because K=4 regressed in
+both directional four-CPU observations. K=2 must prove timed lane overlap on
+the deterministic positive fixture before any broader concurrency claim; K=4
+is diagnostic-only unless future topology-specific evidence reopens it.
 
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
