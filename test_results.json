@@ -63,24 +63,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 5884,
-"legacy_dead_probe_ns": 660984,
-"legacy_score_scan_ns": 6655414,
+"incremental_select_ns": 7058,
+"legacy_dead_probe_ns": 743154,
+"legacy_score_scan_ns": 7262894,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3013,
-"relocation_list_ns": 2880,
-"relocation_scan_ns": 1428886,
+"mapped_dead_probe_ns": 3742,
+"relocation_list_ns": 2582,
+"relocation_scan_ns": 2097838,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 20606,
-"legacy_dead_probe_ns": 2669716,
-"legacy_score_scan_ns": 28925763,
+"incremental_select_ns": 25718,
+"legacy_dead_probe_ns": 3540395,
+"legacy_score_scan_ns": 29907710,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 11489,
-"relocation_list_ns": 3073,
-"relocation_scan_ns": 6153799,
+"mapped_dead_probe_ns": 12645,
+"relocation_list_ns": 2872,
+"relocation_scan_ns": 7329233,
 "segments": 4096,
 "victim_records": 256
 }
@@ -90,14 +90,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1656,
+"inverse_ns_per_page": 1548,
 "name": "scalar",
-"transform_ns_per_page": 1597
+"transform_ns_per_page": 1673
 },
 {
-"inverse_ns_per_page": 1198,
+"inverse_ns_per_page": 1340,
 "name": "sse2",
-"transform_ns_per_page": 1016
+"transform_ns_per_page": 1003
 }
 ],
 "classifier": {
@@ -107,9 +107,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 1244,
+"ns_per_page": 619,
 "sample_pairs": 32,
-"scalar_ns_per_page": 1244,
+"scalar_ns_per_page": 619,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -124,7 +124,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 10871
+"wall_ns_per_page": 12666
 },
 {
 "acceleration": 2,
@@ -132,7 +132,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 10205
+"wall_ns_per_page": 7775
 },
 {
 "acceleration": 3,
@@ -140,7 +140,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 9803
+"wall_ns_per_page": 7419
 },
 {
 "acceleration": 4,
@@ -148,7 +148,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 9794
+"wall_ns_per_page": 7256
 }
 ],
 "negative_pages": 256,
@@ -165,9 +165,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 7177,
-"modeled_wall_ns_total": 4134400,
-"ns_per_saved_block": 79507,
+"modeled_wall_ns_per_page": 7188,
+"modeled_wall_ns_total": 4140800,
+"ns_per_saved_block": 79630,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -231,14 +231,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 80442,
+"ns_per_saved_block": 81293,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 7960,
-"routed_cpu_ns_total": 4585246,
+"routed_cpu_ns_per_page": 8044,
+"routed_cpu_ns_total": 4633721,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -286,14 +286,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 81132,
+"ns_per_saved_block": 81805,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 7747,
-"routed_cpu_ns_total": 4462288,
+"routed_cpu_ns_per_page": 7811,
+"routed_cpu_ns_total": 4499288,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -341,14 +341,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 79507,
+"ns_per_saved_block": 79630,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 7177,
-"routed_cpu_ns_total": 4134400,
+"routed_cpu_ns_per_page": 7188,
+"routed_cpu_ns_total": 4140800,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -396,14 +396,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 79507,
+"ns_per_saved_block": 79630,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 7177,
-"routed_cpu_ns_total": 4134400,
+"routed_cpu_ns_per_page": 7188,
+"routed_cpu_ns_total": 4140800,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -451,14 +451,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 79507,
+"ns_per_saved_block": 79630,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 7177,
-"routed_cpu_ns_total": 4134400,
+"routed_cpu_ns_per_page": 7188,
+"routed_cpu_ns_total": 4140800,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -475,17 +475,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1198,
+"inverse_ns_per_page": 1340,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1656,
-"scalar_transform_ns_per_page": 1597,
-"second_lz4_ns_per_page": 12646,
+"scalar_inverse_ns_per_page": 1548,
+"scalar_transform_ns_per_page": 1673,
+"second_lz4_ns_per_page": 13934,
 "transform_backend": "sse2",
-"transform_ns_per_page": 1016
+"transform_ns_per_page": 1003
 }
 ]
 }
@@ -494,17 +494,17 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "c8fb28c22b7fcc1dcf328eddee45da7821df9b29",
+"source_sha": "280220bb1d14b4eb698293e16eb2df092e014688",
 "stages": [
 {
-"elapsed_s": 10.366,
+"elapsed_s": 1.471,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_gc_production_uses_exact_segment_mapping_counts",
-"elapsed_s": 19.452,
+"diagnostic": "Unit test failed: test_delta64_rescue_is_opt_in_and_default_avoids_scratch",
+"elapsed_s": 10.978,
 "exit_code": 1,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -515,5 +515,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "c8fb28c22b7fcc1dcf328eddee45da7821df9b29"
+"tested_commit_sha": "280220bb1d14b4eb698293e16eb2df092e014688"
 }
