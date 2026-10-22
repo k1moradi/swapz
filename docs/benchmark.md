@@ -928,6 +928,14 @@ useful read throughput, p99 and worker CPU. The optimization is valid only if
 cold/provisional metadata still takes the full validator and no corruption or
 stale-sequence test weakens.
 
+For ID63, the merge-on arm may combine 2..8 exact contiguous missing ranges
+inside the unchanged eight-block/32KiB cap. A successful N-extent chain adds
+N-1 to `parallel_read_coalesced_reqs_saved`; no padding byte is permitted.
+Keep the existing matched sequential/random merge-off control and require
+byte-exact reconstruction, zero `parallel_read_coalesce_extra_blocks`, lower
+request direction, useful throughput and p99 before calling the extension a
+performance win.
+
 For publication preflight, compare
 `engine_publish_auth_wall_ns`, batch snapshot CRC wall, planner wall and final
 payload-CRC wall on the same mixed and write-heavy arms. The target is lower

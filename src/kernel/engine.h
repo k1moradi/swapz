@@ -9,7 +9,7 @@
 #define SWAPZ_READ_METADATA_CACHE_SETS \
 	(SWAPZ_READ_METADATA_CACHE_ENTRIES / SWAPZ_READ_METADATA_CACHE_WAYS)
 #define SWAPZ_READ_EXTENT_CACHE_ENTRIES 16U
-#define SWAPZ_PARALLEL_READ_SLOTS 2U
+#define SWAPZ_PARALLEL_READ_SLOTS (2U * SWAPZ_MAX_BLOCKS)
 
 /* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
 int swapz_page_is_zero(const swapz_u8 *page);
@@ -268,8 +268,10 @@ void swapz_engine_absorb_read_slot(struct swapz_engine *master,
  * required_read_range_cached performs the same calculation directly against
  * the ordered owner's direct/LRU residency without copying cached blocks into a
  * private slot. coalesced_span accepts only zero-gap, same-segment ranges.
- * coalesce_read_pair performs exactly one lower callback and seeds two private
- * engines; normal per-record generation/CRC validation remains mandatory
+ * coalesce_read_chain performs exactly one lower callback for two through eight
+ * exact contiguous missing ranges within the existing eight-block/32KiB bound,
+ * then seeds each private engine. The pair wrapper preserves the qualified
+ * two-range API. Normal per-record generation/CRC validation remains mandatory
  * before shared cache publication.
  */
 int swapz_engine_required_read_range(
@@ -295,6 +297,15 @@ int swapz_engine_coalesced_span(
 				   swapz_u8 first1, swapz_u8 blocks1,
 				   swapz_u32 *combined_start,
 				   swapz_u8 *combined_blocks);
+int swapz_engine_coalesce_read_chain(
+				   struct swapz_engine *const *engines,
+				   const swapz_u32 *start_blocks,
+				   const swapz_u8 *extent_blocks,
+				   const swapz_u8 *first_blocks,
+				   const swapz_u8 *blocks,
+				   swapz_u8 count,
+				   swapz_u8 *scratch,
+				   swapz_u8 scratch_blocks);
 int swapz_engine_coalesce_read_pair(
 				   struct swapz_engine *first,
 				   struct swapz_engine *second,

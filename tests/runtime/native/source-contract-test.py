@@ -1315,7 +1315,7 @@ static swapz_u16 swapz_probe_set(
         freeing = body("swapz_free")
         status = body("swapz_status")
 
-        self.assertIn("#define SWAPZ_PARALLEL_READ_SLOTS 2U", header)
+        self.assertIn("#define SWAPZ_PARALLEL_READ_SLOTS (2U * SWAPZ_MAX_BLOCKS)", header)
         self.assertIn("#define SWAPZ_READ_EXTENT_CACHE_ENTRIES 16U", header)
         self.assertIn("read_extent_cache", header)
         self.assertIn("swapz_engine_prime_read_slot", header)
@@ -1323,6 +1323,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_engine_required_read_range", header)
         self.assertIn("swapz_engine_required_read_range_cached", header)
         self.assertIn("swapz_engine_coalesced_span", header)
+        self.assertIn("swapz_engine_coalesce_read_chain", header)
         self.assertIn("swapz_engine_coalesce_read_pair", header)
         self.assertIn("read_coalesced_block_mask", header)
         self.assertIn("struct swapz_read_slot", DM)
@@ -1340,6 +1341,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("int swapz_engine_required_read_range", engine)
         self.assertIn("int swapz_engine_required_read_range_cached", engine)
         self.assertIn("int swapz_engine_coalesced_span", engine)
+        self.assertIn("int swapz_engine_coalesce_read_chain", engine)
         self.assertIn("int swapz_engine_coalesce_read_pair", engine)
         self.assertIn("engine->read_coalesced_block_mask", engine)
         self.assertIn("read_extent_lru_valid",
@@ -1348,36 +1350,29 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("list_for_each_entry(entry, local, list)", batch)
         self.assertIn("swapz_read_can_parallel(ctx, entry->bio)", batch)
         self.assertIn("swapz_parallel_read_extent", batch)
-        self.assertIn("swapz_engine_prime_read_slot(&ctx->engine", batch)
+        self.assertIn("swapz_adjacent_extent_chain_candidate(", batch)
         self.assertIn("swapz_engine_required_read_range_cached(", batch)
-        self.assertIn("if (!have1 || !ctx->read_coalescing_enabled)", batch)
-        self.assertIn("if (!passive_adjacent)", batch)
-        self.assertIn("if (!coalesce)", batch)
-        self.assertNotIn("if (slot0->bio_count < 2U)", batch)
-        self.assertNotIn("have1 = false;", batch)
-        self.assertLess(
-            batch.index("if (!have1 || !ctx->read_coalescing_enabled)"),
-            batch.index("swapz_read_slot_prepare(slot0"))
-        self.assertLess(batch.index("if (!passive_adjacent)"),
-                        batch.index("swapz_read_slot_prepare(slot0"))
+        self.assertIn("swapz_engine_prime_read_slot(&ctx->engine", batch)
+        self.assertIn("swapz_engine_coalesce_read_chain(", batch)
+        self.assertIn("execute_count = chain_last - chain_first + 1U", batch)
+        self.assertIn("parallel_read_coalesced_reqs_saved += execute_count - 1U", batch)
+        self.assertIn("ctx->read_pages_store +", batch)
         self.assertLess(batch.index("swapz_engine_required_read_range_cached("),
                         batch.index("swapz_engine_prime_read_slot(&ctx->engine"))
-        self.assertLess(batch.index("if (!coalesce)"),
+        self.assertLess(batch.index("chain_last == chain_first"),
                         batch.index("swapz_engine_prime_read_slot(&ctx->engine"))
-        self.assertLess(batch.index("if (!coalesce)"),
+        self.assertLess(batch.index("swapz_engine_prime_read_slot(&ctx->engine"),
                         batch.index("list_del_init(&entry->list)"))
         self.assertNotIn("queue_work(ctx->read_workqueue", batch)
-        self.assertNotIn("wait_for_completion(&slot0->done)", batch)
-        self.assertNotIn("flush_work(&slot0->work)", batch)
-        self.assertIn("slot0->error = swapz_read_slot_run(slot0)", batch)
-        self.assertIn("slot1->error = swapz_read_slot_run(slot1)", batch)
+        self.assertNotIn("wait_for_completion(", batch)
+        self.assertNotIn("flush_work(", batch)
+        self.assertIn("slot->error = swapz_read_slot_run(slot)", batch)
         self.assertIn("swapz_engine_absorb_read_slot", body("swapz_merge_read_slot"))
         self.assertIn("*processed_out = selected", batch)
         self.assertIn("swapz_copy_bio_accounted(", batch)
-        self.assertIn("swapz_complete(slot0->bios[index]", batch)
-        success_complete = batch.rindex("swapz_complete(slot0->bios[index], 0)")
-        success_absorb = batch.rindex(
-            "swapz_engine_absorb_read_slot(&ctx->engine, &slot0->engine)")
+        self.assertIn("swapz_complete(slot->bios[index]", batch)
+        success_complete = batch.rindex("swapz_complete(slot->bios[index], 0)")
+        success_absorb = batch.rindex("swapz_engine_absorb_read_slot(")
         self.assertLess(success_complete, success_absorb)
         self.assertNotIn("swapz_complete(", slot_run)
         self.assertNotIn("swapz_finish(", slot_run)
@@ -1401,9 +1396,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("SWAPZ_READ_EXTENT_CACHE_ENTRIES * SWAPZ_MAX_EXTENT_BYTES", ctor)
         self.assertNotIn('"swapz-read"', ctor)
         self.assertIn("slot->engine.read_scratch = vzalloc(SWAPZ_MAX_EXTENT_BYTES)", ctor)
-        self.assertIn("slot->read_pages = vzalloc(", ctor)
+        self.assertIn("ctx->read_pages_store =", ctor)
+        self.assertNotIn("slot->read_pages = vzalloc(", ctor)
         self.assertIn("vfree(ctx->engine.read_extent_cache)", freeing)
-        self.assertIn("vfree(ctx->read_slots[slot].read_pages)", freeing)
+        self.assertIn("vfree(ctx->read_pages_store)", freeing)
+        self.assertNotIn("vfree(ctx->read_slots[slot].read_pages)", freeing)
         self.assertIn("read_worker_cpu_ns=%llu", status)
         self.assertIn("read_grouping_enabled=%u", status)
         self.assertIn("read_coalescing_enabled=%u", status)
@@ -2626,10 +2623,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("planner_length_totals(", predictor_qualification)
         self.assertIn("LZ4_decompress_safe(", predictor_qualification)
 
-        # The existing ID63 pair remains the active path; 3+ full-extent
-        # adjacency is passive evidence bounded by the same 8-block scratch.
+        # ID63 may actively merge 2..8 exact contiguous missing ranges while
+        # the full-extent 3+ counters remain conservative opportunity evidence.
         batch = body("swapz_try_parallel_read_batch")
         self.assertIn("swapz_adjacent_extent_chain_candidate(", batch)
+        self.assertIn("swapz_engine_coalesce_read_chain(", batch)
         self.assertIn("parallel_read_adjacent_chain_3plus++", batch)
         self.assertIn("parallel_read_adjacent_chain_extent_max=%llu",
                       body("swapz_status"))

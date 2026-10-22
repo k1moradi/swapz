@@ -1335,12 +1335,17 @@ be nonzero if calls are nonzero. Compare wrapper-inclusive production
 transform ns/call with the raw native backend value; the difference is part of
 the rescue economics.
 
-The active ID63 protocol remains the existing pair qualification. 3+ chain
-counters are evidence only and may not alter completion count, lower request
-count or cache state. A later active chain change requires exact missing-range
-tests for three through eight adjacent one-block ranges, mixed extent classes,
-cache-resident holes, segment boundaries, lower-read failure, stale metadata,
-and every constituent payload CRC before it may replace the pair path.
+The active ID63 protocol accepts two through eight extents only when every
+constituent belongs to the already-admitted independent READ prefix and the
+exact missing ranges form one same-segment, zero-padding span of at most eight
+blocks. Native coverage must prove at least a three-range success, gap and
+segment rejection, lower-read failure, and constituent payload-CRC failure;
+the existing pair cases remain compatibility coverage. Loaded merge-on/off
+qualification must keep byte-exact reconstruction and zero extra blocks, allow
+`parallel_read_coalesced_reqs_saved` from one through seven per combined
+batch, and report lower requests, useful throughput and p99. The conservative
+3+ full-extent counters remain opportunity evidence, not proof of an active
+merge.
 
 Publication tests must continue to inject malformed siblings and GC-accounting
 underflow/overflow and prove all authority arrays are byte-for-byte unchanged

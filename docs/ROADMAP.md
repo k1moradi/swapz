@@ -403,11 +403,13 @@ SWZ geometry, authority ordering or the default compression policy.
   round-trip bytes, and feeds each set of lengths to the real bounded planner.
   Do not promote a value solely because compressed bytes differ; compare CPU,
   planned blocks/extents, lower I/O, throughput and tails.
-- **ID63 3+ opportunity evidence:** active coalescing remains the qualified
-  two-range pair. Passive counters record 3+ physically adjacent admitted
-  full extents whose combined span fits the existing eight-block/32KiB scratch.
-  This conservative evidence must justify a later exact-missing-range chain
-  implementation; no extra RAM or lower I/O is added here.
+- **ID63 bounded adjacent-range chain:** the active path now extends the
+  qualified pair mechanism to 2..8 physically adjacent immutable extents when
+  their exact missing ranges form one zero-padding lower read. The lower-read
+  span remains capped by the existing eight-block/32KiB scratch. Eight private
+  engines share one 64-page decode-output pool rather than multiplying 256KiB
+  buffers. Conservative 3+ full-extent counters remain opportunity evidence;
+  `parallel_read_coalesced_reqs_saved` records N-1 for an N-extent chain.
 - **Production delta64 wrapper cost:** kernel status now reports transform calls
   and transform wall around the dispatched transform, which includes
   `kernel_fpu_begin/end` on x86. Compare this with raw native backend ns/page
@@ -425,8 +427,9 @@ instruction-shape checks, W=1/W=2 kernel builds, and the existing owner-only
 loaded matrix. For performance promotion require matched same-host evidence.
 For `lz4_acceleration`, report per-setting compression CPU plus planner
 blocks/extents and loaded lower WRITE bytes/requests. For delta64, report
-wrapper-inclusive transform ns/call alongside raw backend ns/page. For ID63,
-report the 3+ chain opportunity counters before implementing an active chain.
+wrapper-inclusive transform ns/call alongside raw backend ns/page. For ID63, report both the conservative 3+ opportunity counters and active
+request savings; any 3+ promotion requires exact-range native coverage plus
+matched loaded lower-request, throughput and p99 evidence.
 
 ## Release gates
 

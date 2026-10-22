@@ -909,6 +909,97 @@ static int swapz_engine_seed_coalesced_range(struct swapz_engine *engine,
 	return 0;
 }
 
+int swapz_engine_coalesce_read_chain(
+				    struct swapz_engine *const *engines,
+				    const swapz_u32 *start_blocks,
+				    const swapz_u8 *extent_blocks,
+				    const swapz_u8 *first_blocks,
+				    const swapz_u8 *blocks,
+				    swapz_u8 count,
+				    swapz_u8 *scratch,
+				    swapz_u8 scratch_blocks)
+{
+	swapz_u32 physical_starts[SWAPZ_PARALLEL_READ_SLOTS];
+	swapz_u32 combined_start = ~(swapz_u32)0;
+	swapz_u32 combined_end;
+	swapz_u16 used = 0, total_blocks = 0;
+	swapz_u8 index, step;
+	int error;
+
+	if (!engines || !start_blocks || !extent_blocks || !first_blocks ||
+	    !blocks || !scratch || count < 2U ||
+	    count > SWAPZ_PARALLEL_READ_SLOTS || !scratch_blocks)
+		return -EINVAL;
+	for (index = 0; index < count; ++index) {
+		struct swapz_engine *engine = engines[index];
+		swapz_u8 earlier;
+
+		if (!engine || !engine->authority || !engine->read_scratch ||
+		    !extent_blocks[index] || extent_blocks[index] > SWAPZ_MAX_BLOCKS ||
+		    !blocks[index] || first_blocks[index] >= extent_blocks[index] ||
+		    blocks[index] > extent_blocks[index] - first_blocks[index] ||
+		    start_blocks[index] > ~(swapz_u32)0 - first_blocks[index])
+			return -EINVAL;
+		if (index && engine->authority != engines[0]->authority)
+			return -EINVAL;
+		for (earlier = 0; earlier < index; ++earlier)
+			if (engine == engines[earlier] ||
+			    (start_blocks[index] == start_blocks[earlier] &&
+			     extent_blocks[index] == extent_blocks[earlier]))
+				return -EINVAL;
+		physical_starts[index] = start_blocks[index] + first_blocks[index];
+		if (physical_starts[index] > ~(swapz_u32)0 - blocks[index])
+			return -EINVAL;
+		if (engine->read_cache_valid &&
+		    (engine->read_cached_start_block != start_blocks[index] ||
+		     engine->read_cached_extent_blocks != extent_blocks[index]))
+			return -ESTALE;
+		if (blocks[index] > scratch_blocks - total_blocks)
+			return -ENOSPC;
+		total_blocks += blocks[index];
+		if (total_blocks > 2U * SWAPZ_MAX_BLOCKS)
+			return -EOPNOTSUPP;
+		if (physical_starts[index] < combined_start)
+			combined_start = physical_starts[index];
+	}
+	if (!engines[0]->io.read_blocks)
+		return -EINVAL;
+	combined_end = combined_start;
+	for (step = 0; step < count; ++step) {
+		int found = -1;
+
+		for (index = 0; index < count; ++index)
+			if (!(used & (1U << index)) &&
+			    physical_starts[index] == combined_end) {
+				found = index;
+				break;
+			}
+		if (found < 0)
+			return -EOPNOTSUPP;
+		used |= (swapz_u16)(1U << found);
+		combined_end += blocks[found];
+	}
+	if (combined_start / SWAPZ_SEGMENT_BLOCKS !=
+	    (combined_end - 1U) / SWAPZ_SEGMENT_BLOCKS)
+		return -EOPNOTSUPP;
+	error = engines[0]->io.read_blocks(engines[0]->io.opaque, combined_start,
+					  (swapz_u8)total_blocks, scratch);
+	if (error)
+		return error;
+	for (index = 0; index < count; ++index) {
+		const swapz_u8 *bytes = scratch +
+			(size_t)(physical_starts[index] - combined_start) *
+				SWAPZ_BLOCK_BYTES;
+
+		error = swapz_engine_seed_coalesced_range(
+			engines[index], start_blocks[index], extent_blocks[index],
+			first_blocks[index], blocks[index], bytes);
+		if (error)
+			return error;
+	}
+	return 0;
+}
+
 int swapz_engine_coalesce_read_pair(struct swapz_engine *first,
 				    struct swapz_engine *second,
 				    swapz_u32 start0, swapz_u8 extent0,
@@ -918,35 +1009,15 @@ int swapz_engine_coalesce_read_pair(struct swapz_engine *first,
 				    swapz_u8 *scratch,
 				    swapz_u8 scratch_blocks)
 {
-	swapz_u32 combined_start, phys0, phys1;
-	swapz_u8 combined_blocks;
-	const swapz_u8 *bytes0, *bytes1;
-	int error;
+	struct swapz_engine *engines[2] = { first, second };
+	const swapz_u32 start_blocks[2] = { start0, start1 };
+	const swapz_u8 extent_blocks[2] = { extent0, extent1 };
+	const swapz_u8 first_blocks[2] = { first0, first1 };
+	const swapz_u8 blocks[2] = { blocks0, blocks1 };
 
-	if (!first || !second || first == second || !scratch ||
-	    !first->io.read_blocks || first->authority != second->authority)
-		return -EINVAL;
-	error = swapz_engine_coalesced_span(start0, extent0, first0, blocks0,
-					   start1, extent1, first1, blocks1,
-					   &combined_start, &combined_blocks);
-	if (error)
-		return error;
-	if (combined_blocks > scratch_blocks)
-		return -ENOSPC;
-	error = first->io.read_blocks(first->io.opaque, combined_start,
-				      combined_blocks, scratch);
-	if (error)
-		return error;
-	phys0 = start0 + first0;
-	phys1 = start1 + first1;
-	bytes0 = scratch + (size_t)(phys0 - combined_start) * SWAPZ_BLOCK_BYTES;
-	bytes1 = scratch + (size_t)(phys1 - combined_start) * SWAPZ_BLOCK_BYTES;
-	error = swapz_engine_seed_coalesced_range(first, start0, extent0,
-						  first0, blocks0, bytes0);
-	if (error)
-		return error;
-	return swapz_engine_seed_coalesced_range(second, start1, extent1,
-						 first1, blocks1, bytes1);
+	return swapz_engine_coalesce_read_chain(
+		engines, start_blocks, extent_blocks, first_blocks, blocks, 2U,
+		scratch, scratch_blocks);
 }
 
 static int swapz_engine_write_window_planned(struct swapz_engine *engine,

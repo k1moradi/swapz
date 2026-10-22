@@ -2447,8 +2447,10 @@ def benchmark_verdicts(sessions):
                                8 * record["parallel_read_adjacent_extent_pairs"] or
                            record["parallel_read_coalesced_pairs"] >
                                record["parallel_read_adjacent_extent_pairs"] or
-                           record["parallel_read_coalesced_reqs_saved"] !=
+                           record["parallel_read_coalesced_reqs_saved"] <
                                record["parallel_read_coalesced_pairs"] or
+                           record["parallel_read_coalesced_reqs_saved"] >
+                               7 * record["parallel_read_coalesced_pairs"] or
                            record["parallel_read_coalesced_blocks"] <
                                2 * record["parallel_read_coalesced_pairs"] or
                            record["parallel_read_coalesced_blocks"] >

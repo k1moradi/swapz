@@ -25,6 +25,7 @@ static swapz_u8 classes[PHYSICAL_BLOCKS];
 static swapz_u8 scratch_write[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_read[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_read_second[SWAPZ_MAX_EXTENT_BYTES];
+static swapz_u8 scratch_read_third[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_coalesced[2U * SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_metadata_cache[
 	SWAPZ_READ_METADATA_CACHE_ENTRIES * SWAPZ_BLOCK_BYTES];
@@ -949,9 +950,14 @@ static void init_private_read_engine(struct swapz_engine *private,
 
 static int test_adjacent_distinct_extent_coalescing(void)
 {
-	struct swapz_compressed_page pages[2];
-	struct swapz_engine first, second;
+	struct swapz_compressed_page pages[3];
+	struct swapz_engine first, second, third;
+	struct swapz_engine *chain_engines[3] = { &first, &second, &third };
 	swapz_u32 logical0[1] = { 0 }, logical1[1] = { 1 };
+	swapz_u32 chain_starts[3];
+	const swapz_u8 chain_extents[3] = { 1, 1, 1 };
+	const swapz_u8 chain_first[3] = { 0, 0, 0 };
+	const swapz_u8 chain_blocks[3] = { 1, 1, 1 };
 	swapz_u32 combined_start;
 	swapz_u8 committed = 0, first0, first1, blocks0, blocks1;
 	swapz_u8 combined_blocks, output[3568];
@@ -960,15 +966,23 @@ static int test_adjacent_distinct_extent_coalescing(void)
 	int error;
 
 	CHECK(setup() == 0);
-	prepare(pages, 2, 0, 0);
+	prepare(pages, 3, 0, 0);
 	CHECK(write_window_sequential(&pages[0], 1, &committed) == 0);
 	CHECK(committed == 1);
 	committed = 0;
 	CHECK(write_window_sequential(&pages[1], 1, &committed) == 0);
 	CHECK(committed == 1);
-	CHECK(maps[0].valid && maps[1].valid);
-	CHECK(maps[0].extent_blocks == 1 && maps[1].extent_blocks == 1);
+	committed = 0;
+	CHECK(write_window_sequential(&pages[2], 1, &committed) == 0);
+	CHECK(committed == 1);
+	CHECK(maps[0].valid && maps[1].valid && maps[2].valid);
+	CHECK(maps[0].extent_blocks == 1 && maps[1].extent_blocks == 1 &&
+	      maps[2].extent_blocks == 1);
 	CHECK(maps[0].start_block + 1U == maps[1].start_block);
+	CHECK(maps[1].start_block + 1U == maps[2].start_block);
+	chain_starts[0] = maps[0].start_block;
+	chain_starts[1] = maps[1].start_block;
+	chain_starts[2] = maps[2].start_block;
 
 	init_private_read_engine(&first, scratch_read);
 	init_private_read_engine(&second, scratch_read_second);
@@ -1018,6 +1032,47 @@ static int test_adjacent_distinct_extent_coalescing(void)
 	CHECK(disk.read_calls == 1);
 	CHECK(first.read_coalesced_block_mask == 0);
 	CHECK(second.read_coalesced_block_mask == 0);
+
+	/* Three adjacent one-block ranges use the same 32KiB scratch and one
+	 * lower callback. Each constituent still validates its own payload CRC. */
+	init_private_read_engine(&first, scratch_read);
+	init_private_read_engine(&second, scratch_read_second);
+	init_private_read_engine(&third, scratch_read_third);
+	disk.read_calls = 0;
+	disk.read_blocks = 0;
+	CHECK(swapz_engine_coalesce_read_chain(
+			chain_engines, chain_starts, chain_extents,
+			chain_first, chain_blocks, 3,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == 0);
+	CHECK(disk.read_calls == 1 && disk.read_blocks == 3);
+	CHECK(first.physical_read_blocks == 1 &&
+	      second.physical_read_blocks == 1 &&
+	      third.physical_read_blocks == 1);
+	CHECK(swapz_engine_read_page(&first, 0, output,
+				     sizeof(output), &length) == 0);
+	CHECK(swapz_engine_read_page(&second, 1, output,
+				     sizeof(output), &length) == 0);
+	CHECK(swapz_engine_read_page(&third, 2, output,
+				     sizeof(output), &length) == 0);
+	CHECK(disk.read_calls == 1);
+
+	/* A gap is rejected before lower I/O. */
+	init_private_read_engine(&first, scratch_read);
+	init_private_read_engine(&second, scratch_read_second);
+	init_private_read_engine(&third, scratch_read_third);
+	{
+		swapz_u32 gapped_starts[3] = {
+			chain_starts[0], chain_starts[1], chain_starts[2] + 1U
+		};
+
+		disk.read_calls = 0;
+		CHECK(swapz_engine_coalesce_read_chain(
+				chain_engines, gapped_starts, chain_extents,
+				chain_first, chain_blocks, 3,
+				scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) ==
+		      -EOPNOTSUPP);
+		CHECK(disk.read_calls == 0);
+	}
 
 	/* A failed combined lower callback publishes no seeded private residency. */
 	init_private_read_engine(&first, scratch_read);
