@@ -983,8 +983,8 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "prep_lower_write_overlap_ns", "prep_lower_write_samples",
     "prep_lower_write_start_queued", "prep_lower_write_start_nonempty",
     "prep_lower_write_end_queued", "prep_lower_write_end_nonempty",
-    "pipeline_async_runs", "pipeline_active_wall_ns",
-    "pipeline_finalize_wait_wall_ns",
+    "pipeline_async_runs", "pipeline_read_bypass_skips",
+    "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target", "delta64_rescue")
