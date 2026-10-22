@@ -2345,6 +2345,8 @@ static swapz_u16 swapz_probe_set(
             self.assertNotIn("git branch --show-current", script)
             self.assertNotIn("git merge-base", script)
             self.assertNotIn("git rev-parse", script)
+            self.assertNotRegex(script, r"(?m)^\s*git\s")
+            self.assertNotIn("$(git ", script)
         self.assertIn("${TMPDIR:-/tmp}/swapz-deploy.", deploy)
         self.assertIn("${TMPDIR:-/tmp}/swapz-benchmark.", benchmark)
 
