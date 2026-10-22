@@ -224,10 +224,10 @@ def timed_kernel_write(*, mode, target=8):
         "delta64_adopted": 3,
         "delta64_raw_rescues": 1,
         "delta64_lz4_rescues": 2,
-        "delta64_pack_eligible": 0,
-        "delta64_pack_attempts": 0,
-        "delta64_pack_cliff_crossings": 0,
-        "delta64_pack_adopted": 0,
+        "delta64_pack_eligible": 4,
+        "delta64_pack_attempts": 1,
+        "delta64_pack_cliff_crossings": 1,
+        "delta64_pack_adopted": 1,
         "delta64_score_0_7": 2,
         "delta64_score_8_15": 2,
         "delta64_score_16_23": 2,
@@ -560,6 +560,10 @@ def delta64_prepare_arm(workers):
         "delta64_adopted": 100,
         "delta64_raw_rescues": 0,
         "delta64_lz4_rescues": 100,
+        "delta64_pack_eligible": 0,
+        "delta64_pack_attempts": 0,
+        "delta64_pack_cliff_crossings": 0,
+        "delta64_pack_adopted": 0,
         "delta64_score_0_7": 0,
         "delta64_score_8_15": 0,
         "delta64_score_16_23": 0,
@@ -950,7 +954,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual([row["workers"] for row in delta64_pilot], [1, 2, 4])
         delta64_diag = runner.delta64_prepare_verdict(delta64_pilot)
         self.assertEqual(delta64_diag["overall"],
-                         "PASS_DELTA64_PREPARE_PILOT")
+                         "PASS_DELTA64_PREPARE_PILOT", delta64_diag)
         self.assertEqual(delta64_diag["modes"]["1"]["prepare_parallel_starts"], 0)
         self.assertGreater(
             delta64_diag["modes"]["2"]["prepare_parallel_starts"], 0)
