@@ -254,6 +254,7 @@ KERNEL_WRITE_FIELDS = (
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms",
     "write_wait_gt4ms", "delta64_prepare_pages",
+    "delta64_prepare_parallel_starts",
     "retained_burst_target", "delta64_rescue",
     "delta64_prepare_workers", "delta64_prepare_active_max",
     "lz4_acceleration"
@@ -655,8 +656,12 @@ def timed_window_error(record):
             0 <= record["delta64_prepare_active_max"] <=
             record["delta64_prepare_workers"]):
         return "invalid timed delta64 preparation concurrency"
-    if type(record.get("delta64_prepare_pages")) is not int or             record["delta64_prepare_pages"] < 0:
+    if (type(record.get("delta64_prepare_pages")) is not int or
+            record["delta64_prepare_pages"] < 0):
         return "invalid timed delta64 preparation page count"
+    if (type(record.get("delta64_prepare_parallel_starts")) is not int or
+            record["delta64_prepare_parallel_starts"] < 0):
+        return "invalid timed delta64 parallel-start count"
     if any(type(record.get(field)) is not int or record[field] < 0
            for field in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS):
         return "invalid timed swapz window telemetry"
@@ -1647,9 +1652,11 @@ def delta64_prepare_verdict(sessions):
         if workers == 1 and kernel["delta64_prepare_active_max"] > 1:
             return {"overall": "INCOMPLETE",
                     "reason": "K=1 delta64 preparation exceeded one lane"}
-        if workers > 1 and kernel["delta64_prepare_active_max"] <= 1:
+        if workers > 1 and (
+                kernel["delta64_prepare_active_max"] <= 1 or
+                not kernel["delta64_prepare_parallel_starts"]):
             return {"overall": "INCOMPLETE",
-                    "reason": "parallel delta64 arm never ran concurrently"}
+                    "reason": "parallel delta64 arm never overlapped during timed replay"}
         if not isinstance(arm.get("write_mbps"), (int, float)) or                 arm["write_mbps"] <= 0 or                 not isinstance(arm.get("write_p99_ms"), (int, float)) or                 arm["write_p99_ms"] < 0 or                 not isinstance(arm.get("lower_write_bytes"), int) or                 arm["lower_write_bytes"] <= 0 or                 not isinstance(arm.get("lower_write_requests"), int) or                 arm["lower_write_requests"] <= 0:
             return {"overall": "INCOMPLETE",
                     "reason": "delta64 preparation pilot performance metrics missing"}
@@ -1667,6 +1674,8 @@ def delta64_prepare_verdict(sessions):
             "lower_write_requests": arm["lower_write_requests"],
             "prepare_active_max": kernel["delta64_prepare_active_max"],
             "prepare_pages": kernel["delta64_prepare_pages"],
+            "prepare_parallel_starts":
+                kernel["delta64_prepare_parallel_starts"],
             "delta64_attempts": kernel["delta64_attempts"],
             "delta64_adopted": kernel["delta64_adopted"],
             "delta64_payload_bytes_saved":
