@@ -298,6 +298,7 @@ class PairReplayContract(unittest.TestCase):
         before.update({
             "physical_write_reqs": 2,
             "lz4_acceleration": 1,
+            "read_coalesce_max_blocks": 8,
             "lz4_wall_ns": 100,
             "ordered_lz4_wall_ns": 60,
             "prep_lz4_wall_ns": 40,
@@ -627,6 +628,9 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "retained burst target"):
             module.kernel_write_delta(
                 before, dict(after, retained_burst_target=0))
+        with self.assertRaisesRegex(ValueError, "READ coalescing cap"):
+            module.kernel_write_delta(
+                before, dict(after, read_coalesce_max_blocks=4))
         with self.assertRaisesRegex(ValueError, "close-reason"):
             module.kernel_write_delta(
                 before, dict(after, close_idle=1))
