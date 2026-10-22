@@ -63,24 +63,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 6679,
-"legacy_dead_probe_ns": 902474,
-"legacy_score_scan_ns": 7458335,
+"incremental_select_ns": 6662,
+"legacy_dead_probe_ns": 851519,
+"legacy_score_scan_ns": 7111316,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3782,
-"relocation_list_ns": 3289,
-"relocation_scan_ns": 2093438,
+"mapped_dead_probe_ns": 3595,
+"relocation_list_ns": 2513,
+"relocation_scan_ns": 1773903,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 25868,
-"legacy_dead_probe_ns": 3590166,
-"legacy_score_scan_ns": 34416795,
+"incremental_select_ns": 26248,
+"legacy_dead_probe_ns": 3550680,
+"legacy_score_scan_ns": 29626129,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 12560,
-"relocation_list_ns": 2685,
-"relocation_scan_ns": 7257669,
+"mapped_dead_probe_ns": 12447,
+"relocation_list_ns": 2673,
+"relocation_scan_ns": 7143970,
 "segments": 4096,
 "victim_records": 256
 }
@@ -90,14 +90,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1630,
+"inverse_ns_per_page": 1668,
 "name": "scalar",
-"transform_ns_per_page": 1682
+"transform_ns_per_page": 1909
 },
 {
-"inverse_ns_per_page": 1322,
+"inverse_ns_per_page": 1369,
 "name": "sse2",
-"transform_ns_per_page": 960
+"transform_ns_per_page": 1117
 }
 ],
 "classifier": {
@@ -107,9 +107,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 689,
+"ns_per_page": 780,
 "sample_pairs": 32,
-"scalar_ns_per_page": 689,
+"scalar_ns_per_page": 780,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -124,7 +124,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 12802
+"wall_ns_per_page": 12747
 },
 {
 "acceleration": 2,
@@ -132,7 +132,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 7790
+"wall_ns_per_page": 8133
 },
 {
 "acceleration": 3,
@@ -140,7 +140,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 7383
+"wall_ns_per_page": 7420
 },
 {
 "acceleration": 4,
@@ -148,7 +148,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 7391
+"wall_ns_per_page": 7178
 }
 ],
 "negative_pages": 256,
@@ -165,9 +165,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6841,
-"modeled_wall_ns_total": 3940864,
-"ns_per_saved_block": 75785,
+"modeled_wall_ns_per_page": 6982,
+"modeled_wall_ns_total": 4021760,
+"ns_per_saved_block": 77341,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -231,14 +231,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 77252,
+"ns_per_saved_block": 78749,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 7644,
-"routed_cpu_ns_total": 4403392,
+"routed_cpu_ns_per_page": 7792,
+"routed_cpu_ns_total": 4488710,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -286,14 +286,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 77768,
+"ns_per_saved_block": 79297,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 7425,
-"routed_cpu_ns_total": 4277248,
+"routed_cpu_ns_per_page": 7571,
+"routed_cpu_ns_total": 4361360,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -341,14 +341,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 75785,
+"ns_per_saved_block": 77341,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6841,
-"routed_cpu_ns_total": 3940864,
+"routed_cpu_ns_per_page": 6982,
+"routed_cpu_ns_total": 4021760,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -396,14 +396,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 75785,
+"ns_per_saved_block": 77341,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6841,
-"routed_cpu_ns_total": 3940864,
+"routed_cpu_ns_per_page": 6982,
+"routed_cpu_ns_total": 4021760,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -451,14 +451,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 75785,
+"ns_per_saved_block": 77341,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6841,
-"routed_cpu_ns_total": 3940864,
+"routed_cpu_ns_per_page": 6982,
+"routed_cpu_ns_total": 4021760,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -475,17 +475,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1322,
+"inverse_ns_per_page": 1369,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1630,
-"scalar_transform_ns_per_page": 1682,
-"second_lz4_ns_per_page": 13056,
+"scalar_inverse_ns_per_page": 1668,
+"scalar_transform_ns_per_page": 1909,
+"second_lz4_ns_per_page": 13033,
 "transform_backend": "sse2",
-"transform_ns_per_page": 960
+"transform_ns_per_page": 1117
 }
 ]
 }
@@ -494,17 +494,17 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "fa5e86843a46605f91d0414c6b53b57e451598df",
+"source_sha": "b3320bddbf13cc5a33d11e14e3b11513148d1d77",
 "stages": [
 {
-"elapsed_s": 1.49,
+"elapsed_s": 1.483,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_parallel_build_is_incremental_and_test_stages_stay_ordered; nested predictive-compression screening: Native predictor evidence marker missing, malformed or incomplete",
-"elapsed_s": 19.068,
+"diagnostic": "Unit test failed: test_slow_model_gain_and_fast_model_loss_are_both_visible",
+"elapsed_s": 29.785,
 "exit_code": 1,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -515,5 +515,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "fa5e86843a46605f91d0414c6b53b57e451598df"
+"tested_commit_sha": "b3320bddbf13cc5a33d11e14e3b11513148d1d77"
 }
