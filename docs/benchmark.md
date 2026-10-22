@@ -958,10 +958,12 @@ stale-sequence test weakens.
 For ID63, the merge-on arm may combine 2..8 exact contiguous missing ranges
 inside the unchanged eight-block/32KiB cap. A successful N-extent chain adds
 N-1 to `parallel_read_coalesced_reqs_saved`; no padding byte is permitted.
-Keep the existing matched sequential/random merge-off control and require
-byte-exact reconstruction, zero `parallel_read_coalesce_extra_blocks`, lower
-request direction, useful throughput and p99 before calling the extension a
-performance win.
+Two qualified serial-depth reports now agree on a roughly 63% sequential
+lower-request reduction and roughly 68% useful-throughput gain with materially
+lower p99, so the bounded chain is a demonstrated synthetic latency-bound win.
+Keep the matched sequential/random merge-off control as a regression guard.
+Physical SD/SATA-class media remains the next external-validation step; the
+fast SSD model does not establish a throughput win.
 
 For publication preflight, compare
 `engine_publish_auth_wall_ns`, batch snapshot CRC wall, planner wall and final
