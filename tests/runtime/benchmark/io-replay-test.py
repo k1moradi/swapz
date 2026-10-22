@@ -182,9 +182,12 @@ class PairReplayContract(unittest.TestCase):
             "parallel_read_distinct_extent_pairs": 5,
             "parallel_read_adjacent_extent_pairs": 2,
             "parallel_read_adjacent_extent_blocks": 12,
+            "parallel_read_adjacent_chain_3plus": 2,
+            "parallel_read_adjacent_chain_extent_max": 3,
+            "parallel_read_adjacent_chain_blocks_max": 4,
             "parallel_read_coalesced_pairs": 2,
-            "parallel_read_coalesced_reqs_saved": 2,
-            "parallel_read_coalesced_blocks": 8,
+            "parallel_read_coalesced_reqs_saved": 4,
+            "parallel_read_coalesced_blocks": 6,
             "parallel_read_coalesce_extra_blocks": 0,
             "parallel_read_coalesce_skip_cached": 3,
             "parallel_read_coalesce_skip_noncontig_slot": 4,
@@ -222,9 +225,12 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["parallel_read_distinct_extent_pairs"], 5)
         self.assertEqual(measured["parallel_read_adjacent_extent_pairs"], 2)
         self.assertEqual(measured["parallel_read_adjacent_extent_blocks"], 12)
+        self.assertEqual(measured["parallel_read_adjacent_chain_3plus"], 2)
+        self.assertEqual(measured["parallel_read_adjacent_chain_extent_max"], 3)
+        self.assertEqual(measured["parallel_read_adjacent_chain_blocks_max"], 4)
         self.assertEqual(measured["parallel_read_coalesced_pairs"], 2)
-        self.assertEqual(measured["parallel_read_coalesced_reqs_saved"], 2)
-        self.assertEqual(measured["parallel_read_coalesced_blocks"], 8)
+        self.assertEqual(measured["parallel_read_coalesced_reqs_saved"], 4)
+        self.assertEqual(measured["parallel_read_coalesced_blocks"], 6)
         self.assertEqual(measured["parallel_read_coalesce_extra_blocks"], 0)
         self.assertEqual(measured["parallel_read_coalesce_skip_cached"], 3)
         self.assertEqual(
@@ -253,6 +259,10 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_meta_set_probes=9000))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(
+                before,
+                dict(after, parallel_read_coalesced_reqs_saved=15))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_meta_secondary_hits=52))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_meta_set_probes=700))
@@ -264,9 +274,6 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(
                 before, dict(after, parallel_read_adjacent_extent_pairs=6))
-        with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(
-                before, dict(after, parallel_read_coalesced_reqs_saved=4))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(
                 before, dict(after, parallel_read_coalesce_extra_blocks=1))

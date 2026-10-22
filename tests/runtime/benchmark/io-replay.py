@@ -874,8 +874,10 @@ def kernel_read_delta(before, after):
             8 * counters["parallel_read_adjacent_extent_pairs"] or
             counters["parallel_read_coalesced_pairs"] >
             counters["parallel_read_adjacent_extent_pairs"] or
-            counters["parallel_read_coalesced_reqs_saved"] !=
+            counters["parallel_read_coalesced_reqs_saved"] <
             counters["parallel_read_coalesced_pairs"] or
+            counters["parallel_read_coalesced_reqs_saved"] >
+            7 * counters["parallel_read_coalesced_pairs"] or
             counters["parallel_read_coalesced_blocks"] <
             2 * counters["parallel_read_coalesced_pairs"] or
             counters["parallel_read_coalesced_blocks"] >
