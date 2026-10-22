@@ -1335,16 +1335,18 @@ payload bytes, raw fallbacks, and physical blocks/extents from
 loaded matched evidence also preserves or improves lower WRITE bytes/requests,
 throughput and tails.
 
-The loaded first-pass LZ4 acceleration sweep is a separate, directional family
-with exactly one SSD-model observation for each setting 1/2/3/4. Keep
-`async_prepare=1`, `delta64_rescue=0`, workload, fixture, trace and RAM-device
-geometry fixed; alternate arm order. Require a terminal marker for each
-observation and matching source/fixture/trace provenance across both arms and
-all settings. Report useful WRITE rate, lower WRITE bytes/requests and swapz
-p99, but do not calculate confidence intervals or promote from this single
-observation per setting. The parser must close the mixed session before this
-family starts and keep the sweep out of mixed-matrix and sustained-QD results.
-Those standard families use LZ4 acceleration 1 with delta64 disabled.
+The loaded LZ4 acceleration family is a five-pair, counterbalanced SSD-model
+A/B between settings 1 and 4. Keep `async_prepare=1`,
+`delta64_rescue=0`, workload, fixture, trace and RAM-device geometry fixed;
+alternate raw/swapz replay order. Require terminal markers, exact
+source/fixture/trace provenance across all ten sessions, valid host CPU/PSI,
+and nonzero total/ordered/preparation LZ4 timing. Report paired 95% confidence
+intervals for useful WRITE rate, p99, lower WRITE bytes/requests, LZ4 timing,
+raw-control throughput drift and host-load deltas. The parser must close the
+mixed session before this family starts and keep the A/B out of mixed-matrix
+and sustained-QD results. Intermediate acceleration 2/3 remain covered by the
+native round-trip/geometry sweep; standard loaded families use acceleration 1
+with delta64 disabled.
 
 Source-contract qualification must pin the safety boundaries of the optimized
 paths: generic-planner duplicate protection remains enabled; only the
