@@ -540,7 +540,11 @@ concurrency. Every lane must own private input/predictor/LZ4 scratch and
 single-writer diagnostics, while the existing 64-page prepared-payload mask is
 shared and bounded. Bound/affinity-pinned preparation remains rejected. FIFO
 admission, global packing, physical WRITE submission, authority publication and
-BIO completion remain serialized under the ordered owner.
+BIO completion remain serialized under the ordered owner. Loaded K=2/K=4
+qualification must fail unless the exact timed interval reports at least one
+overlapping preparation start; lifetime peak concurrency alone is insufficient.
+Rootless/report fixtures must carry the same K=1/2/4 telemetry shape so parser
+and fail-closed evidence gates remain covered without privileged module loading.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
