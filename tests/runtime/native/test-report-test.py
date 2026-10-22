@@ -446,6 +446,12 @@ def arm(candidate, *, mode, regime):
         "mixed_replay_cpu_user_s": .12,
         "mixed_replay_cpu_system_s": .08,
         "mixed_replay_peak_rss_kb": 12000,
+        "host_cpu": {
+            "status": "AVAILABLE", "wall_ns": 2_000_000_000,
+            "online_cpus": 4, "affinity_cpus": 4, "tick_hz": 100,
+            "busy_fraction": 0.50, "steal_fraction": 0.0,
+            "pressure_some_fraction": 0.10,
+        },
         "lower_inflight": lower_inflight(has_reads=True),
         "workload_opportunity": {
             "scope": "TRACE_FIXTURE_OPPORTUNITY_ONLY_NOT_KERNEL_SAVINGS",
@@ -549,6 +555,12 @@ def write_arm(candidate, *, qd, regime, mode):
         "mixed_replay_cpu_user_s": .12,
         "mixed_replay_cpu_system_s": .08,
         "mixed_replay_peak_rss_kb": 12000,
+        "host_cpu": {
+            "status": "AVAILABLE", "wall_ns": 2_000_000_000,
+            "online_cpus": 4, "affinity_cpus": 4, "tick_hz": 100,
+            "busy_fraction": 0.50, "steal_fraction": 0.0,
+            "pressure_some_fraction": 0.10,
+        },
         "lower_inflight": lower_inflight(has_reads=False),
         "kernel_write_path": (standard_kernel_write(
             mode=mode, target=max(4, qd)) if swapz else None),
