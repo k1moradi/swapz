@@ -2867,8 +2867,11 @@ def print_table(title, headers, rows):
     """Print a titled GFM table, legend, interpretation, then a horizontal rule."""
     text_headers = [str(header) for header in headers]
     text_rows = [[str(value) for value in row] for row in rows]
+    # GFM requires at least three dashes after an alignment colon. Keep
+    # the terminal divider exactly as wide as the data column by making four
+    # characters the minimum printable column width.
     widths = [
-        max(3, len(text_headers[index]),
+        max(4, len(text_headers[index]),
             *(len(row[index]) for row in text_rows))
         for index in range(len(headers))
     ]
@@ -2877,7 +2880,7 @@ def print_table(title, headers, rows):
         f"{header:<{widths[index]}}"
         for index, header in enumerate(text_headers)) + " |")
     print("| " + " | ".join(
-        ":" + "-" * max(3, width - 1) for width in widths) + " |")
+        ":" + "-" * (width - 1) for width in widths) + " |")
     for row in text_rows:
         print("| " + " | ".join(
             f"{value:<{widths[index]}}"

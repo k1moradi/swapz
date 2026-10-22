@@ -1294,6 +1294,14 @@ class ReportContract(unittest.TestCase):
         for start in table_starts:
             self.assertGreater(start, 0)
             self.assertRegex(lines[start - 1], r"^\*\*\S.+\S\*\*$")
+            # GFM alignment cells are at least four characters wide (:---).
+            # Keep every divider pipe at the same terminal column as the
+            # header, including narrow columns such as W, R, 1 and 2.
+            header_pipes = [pos for pos, char in enumerate(lines[start])
+                            if char == "|"]
+            divider_pipes = [pos for pos, char in enumerate(lines[start + 1])
+                             if char == "|"]
+            self.assertEqual(divider_pipes, header_pipes)
             index = start + 2
             while index < len(lines) and lines[index].startswith("| "):
                 index += 1
