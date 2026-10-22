@@ -2623,7 +2623,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("stats->transform_wall_ns", rescue)
         self.assertIn("stats->transform_calls++", rescue)
         self.assertIn("delta64_transform_wall_ns=%llu", body("swapz_status"))
-        self.assertIn('\"lz4_acceleration_sweep\"', predictor_qualification)
+        self.assertIn(r'\"lz4_acceleration_sweep\"', predictor_qualification)
         self.assertIn("1U, 2U, 3U, 4U", predictor_qualification)
         self.assertIn("planner_length_totals(", predictor_qualification)
         self.assertIn("LZ4_decompress_safe(", predictor_qualification)
