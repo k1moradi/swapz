@@ -857,7 +857,7 @@ static int summarize_production_route(const struct page_evidence *rows,
 			summary->raw_rescues++;
 		summary->payload_bytes_saved += (uint64_t)(
 			(row->baseline_length > 0 ? row->baseline_length :
-			 SWAPZ_BLOCK_BYTES) - candidate);
+			 (int)SWAPZ_BLOCK_BYTES) - candidate);
 	}
 	error = planner_totals(rows, count, TRANSFORM_DELTA64, 0, 0,
 		&summary->baseline_blocks, &summary->baseline_extents);
