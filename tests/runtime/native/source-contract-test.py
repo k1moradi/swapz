@@ -759,6 +759,9 @@ static swapz_u16 swapz_probe_set(
         # Physical WRITE submission remains the mutation boundary.
         self.assertNotIn("op != REQ_OP_READ", process)
         self.assertIn("op == REQ_OP_DISCARD", process)
+        self.assertIn(
+            "op == REQ_OP_WRITE && ctx->invalidate_cache_on_write_admit",
+            process)
         self.assertIn("REQ_PREFLUSH | REQ_FUA", process)
         self.assertIn("swapz_invalidate_read_caches(ctx)", lower)
         self.assertIn("swapz_invalidate_read_caches(ctx)", submit)
@@ -1362,6 +1365,12 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_complete(slot->bios[index]", batch)
         success_complete = batch.rindex("swapz_complete(slot->bios[index], 0)")
         success_absorb = batch.rindex("swapz_engine_absorb_read_slot(")
+        # Preserve fail-closed selected-chain semantics: all slot decode/CRC
+        # work and the chain failure decision happen before any success ACK.
+        self.assertLess(batch.rindex("slot->error = swapz_read_slot_run(slot)"),
+                        success_complete)
+        self.assertLess(batch.index("swapz_fail(ctx, batch_error)"),
+                        success_complete)
         self.assertLess(success_complete, success_absorb)
         self.assertNotIn("swapz_complete(", slot_run)
         self.assertNotIn("swapz_finish(", slot_run)
@@ -1377,8 +1386,12 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444)", DM)
         self.assertIn("static bool swapz_read_coalesce = true;", DM)
         self.assertIn("module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444)", DM)
+        self.assertIn("module_param_named(read_coalesce_max_blocks,", DM)
+        self.assertIn("module_param_named(k1_allow_after_read_bypass,", DM)
+        self.assertIn("module_param_named(invalidate_cache_on_write_admit,", DM)
         self.assertIn("ctx->read_grouping_enabled = swapz_parallel_reads;", ctor)
         self.assertIn("ctx->read_coalescing_enabled =", ctor)
+        self.assertIn("ctx->read_coalesce_max_blocks =", ctor)
         self.assertIn("ctx->parallel_reads_enabled = false;", ctor)
         self.assertNotIn("bdev_get_queue(ctx->backing->bdev)->nr_requests > 1U", ctor)
         self.assertIn("if (ctx->read_grouping_enabled)", ctor)
@@ -1415,8 +1428,14 @@ static swapz_u16 swapz_probe_set(
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
         self.assertIn("--parallel-reads 0|1", pair)
         self.assertIn("--read-coalesce 0|1", pair)
+        self.assertIn("--read-coalesce-max-blocks 2|4|8", pair)
+        self.assertIn("--k1-allow-after-read-bypass 0|1", pair)
+        self.assertIn("--invalidate-cache-on-write-admit 0|1", pair)
         self.assertIn('"parallel_reads=$PARALLEL_READS"', pair)
         self.assertIn('"read_coalesce=$READ_COALESCE"', pair)
+        self.assertIn('"read_coalesce_max_blocks=$READ_COALESCE_MAX_BLOCKS"', pair)
+        self.assertIn('"k1_allow_after_read_bypass=$K1_ALLOW_AFTER_READ_BYPASS"', pair)
+        self.assertIn('"invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT"', pair)
         self.assertIn("read_grouping_enabled=$expected_grouping", pair)
         self.assertIn("read_coalescing_enabled=$expected_coalescing", pair)
         self.assertIn("expected_parallel=0", pair)
@@ -1443,6 +1462,15 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL", runner)
         self.assertIn("def parse_sd_read_coalesce_ab", runner)
         self.assertIn("PASS_SD_READ_COALESCE_AB_CONFIRMATION", runner)
+        self.assertIn("def parse_k1_read_bypass_ab", runner)
+        self.assertIn("PASS_K1_READ_BYPASS_AB_EVIDENCE", runner)
+        self.assertIn("def parse_read_coalesce_cap_ab", runner)
+        self.assertIn("PASS_READ_COALESCE_CAP_EVIDENCE", runner)
+        self.assertIn("START_K1_READ_BYPASS_AB=", loaded)
+        self.assertIn("--k1-allow-after-read-bypass", loaded)
+        self.assertIn("--async-prepare", loaded)
+        self.assertIn("START_READ_COALESCE_CAP_AB=", loaded)
+        self.assertIn("read_coalesce_cap_sequence=(2 4 8", loaded)
         self.assertIn("CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)",
                       runner)
         self.assertNotIn("DIRECTIONAL_SEQUENCE =", runner)
@@ -1498,6 +1526,13 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("return swapz_predict_delta64_sample_score_scalar(input);",
                       dispatch)
         self.assertIn("kernel_fpu_end()", dispatch)
+        self.assertIn("SWAPZ_X86_INVERSE_WRAPPER(avx512)", dispatch)
+        self.assertIn(
+            "static_call_update(swapz_predictor_inverse_call, swapz_unpredict_avx512)",
+            dispatch)
+        self.assertIn(
+            "swapz_unpredict_impl = swapz_unpredict_delta64_avx512",
+            dispatch)
         self.assertIn("X86_FEATURE_AVX512F", dispatch)
         self.assertIn("XFEATURE_MASK_AVX512", dispatch)
         self.assertIn("X86_FEATURE_AVX2", dispatch)

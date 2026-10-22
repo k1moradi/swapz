@@ -11,7 +11,7 @@ if [[ $# -ge 3 && $1 == --validated-source &&
 fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-prepare-workers 1|2|4] [--parallel-reads 0|1] [--read-coalesce 0|1] [--lz4-acceleration 1|2|3|4] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-prepare-workers 1|2|4] [--parallel-reads 0|1] [--read-coalesce 0|1] [--read-coalesce-max-blocks 2|4|8] [--k1-allow-after-read-bypass 0|1] [--invalidate-cache-on-write-admit 0|1] [--lz4-acceleration 1|2|3|4] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -26,6 +26,9 @@ DELTA64_RESCUE=0
 DELTA64_PREPARE_WORKERS=1
 PARALLEL_READS=1
 READ_COALESCE=1
+READ_COALESCE_MAX_BLOCKS=8
+K1_ALLOW_AFTER_READ_BYPASS=0
+INVALIDATE_CACHE_ON_WRITE_ADMIT=0
 LZ4_ACCELERATION=1
 WRITE_ONLY_QD=0
 READ_PCT=25
@@ -59,6 +62,24 @@ if [[ $# -gt 1 && ${!#} == --delta64-rescue ]]; then
     DELTA64_RESCUE=1
     set -- "${@:1:$(( $# - 1 ))}"
 fi
+# Test-only policy controls. They are accepted only from make test's private
+# orchestration and remain read-only module parameters after insertion.
+if [[ $# -ge 3 && ${@: -2:1} == --invalidate-cache-on-write-admit &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    INVALIDATE_CACHE_ON_WRITE_ADMIT="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+if [[ $# -ge 3 && ${@: -2:1} == --k1-allow-after-read-bypass &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    K1_ALLOW_AFTER_READ_BYPASS="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+if [[ $# -ge 3 && ${@: -2:1} == --read-coalesce-max-blocks &&
+      ( ${!#} == 2 || ${!#} == 4 || ${!#} == 8 ) ]]; then
+    READ_COALESCE_MAX_BLOCKS="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+
 # First-pass LZ4 policy sweep. Only make test may select the bounded values
 # admitted by the read-only module parameter.
 if [[ $# -ge 3 && ${@: -2:1} == --lz4-acceleration &&
@@ -217,7 +238,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_PREPARE_WORKERS=$DELTA64_PREPARE_WORKERS PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_PREPARE_WORKERS=$DELTA64_PREPARE_WORKERS PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE READ_COALESCE_MAX_BLOCKS=$READ_COALESCE_MAX_BLOCKS K1_ALLOW_AFTER_READ_BYPASS=$K1_ALLOW_AFTER_READ_BYPASS INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -406,7 +427,14 @@ create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
 modprobe dm_mod
-insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "delta64_rescue=$DELTA64_RESCUE" "delta64_prepare_workers=$DELTA64_PREPARE_WORKERS" "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" "lz4_acceleration=$LZ4_ACCELERATION" ||
+insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
+    "delta64_rescue=$DELTA64_RESCUE" \
+    "delta64_prepare_workers=$DELTA64_PREPARE_WORKERS" \
+    "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" \
+    "read_coalesce_max_blocks=$READ_COALESCE_MAX_BLOCKS" \
+    "k1_allow_after_read_bypass=$K1_ALLOW_AFTER_READ_BYPASS" \
+    "invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT" \
+    "lz4_acceleration=$LZ4_ACCELERATION" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -464,6 +492,12 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_grouping_enabled=$expec
     fail 'loaded swapz read-grouping gate does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" ||
     fail 'loaded swapz read-coalescing gate does not match selected benchmark arm'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalesce_max_blocks=$READ_COALESCE_MAX_BLOCKS([[:space:]]|$)" ||
+    fail 'loaded swapz READ coalescing cap does not match selected benchmark arm'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])k1_allow_after_read_bypass=$K1_ALLOW_AFTER_READ_BYPASS([[:space:]]|$)" ||
+    fail 'loaded swapz K=1 read-bypass policy does not match selected benchmark arm'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT([[:space:]]|$)" ||
+    fail 'loaded swapz write-admission cache policy does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])parallel_reads_enabled=$expected_parallel([[:space:]]|$)" ||
     fail 'loaded swapz parallel-read gate does not match selected benchmark arm'
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||

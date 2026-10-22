@@ -807,7 +807,8 @@ KERNEL_READ_COUNTER_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_worker_cpu_ns")
 KERNEL_READ_GAUGE_FIELDS = (
     "parallel_read_adjacent_chain_extent_max",
-    "parallel_read_adjacent_chain_blocks_max")
+    "parallel_read_adjacent_chain_blocks_max",
+    "read_coalesce_max_blocks")
 KERNEL_READ_FIELDS = KERNEL_READ_COUNTER_FIELDS + KERNEL_READ_GAUGE_FIELDS
 
 
@@ -1009,7 +1010,9 @@ KERNEL_WRITE_COUNTER_FIELDS = (
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",
-    "delta64_prepare_active_max", "lz4_acceleration")
+    "delta64_prepare_active_max", "lz4_acceleration",
+    "k1_allow_after_read_bypass", "read_coalesce_max_blocks",
+    "invalidate_cache_on_write_admit")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
@@ -1050,6 +1053,13 @@ def kernel_write_delta(before, after):
     if (before["delta64_prepare_workers"] != after["delta64_prepare_workers"] or
             not 0 <= after["delta64_prepare_workers"] <= 4):
         raise ValueError("invalid or changed swapz delta64 preparation width")
+    for field in ("k1_allow_after_read_bypass",
+                  "invalidate_cache_on_write_admit"):
+        if before[field] != after[field] or after[field] not in (0, 1):
+            raise ValueError("invalid or changed swapz " + field + " policy")
+    if (before["read_coalesce_max_blocks"] != after["read_coalesce_max_blocks"] or
+            not 2 <= after["read_coalesce_max_blocks"] <= 8):
+        raise ValueError("invalid or changed swapz READ coalescing cap")
     if not 0 <= after["delta64_prepare_active_max"] <= after["delta64_prepare_workers"]:
         raise ValueError("invalid swapz delta64 preparation concurrency")
     if not after["delta64_rescue"] and any(

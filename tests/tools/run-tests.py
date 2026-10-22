@@ -33,6 +33,15 @@ MODEL_SPECS = {
 MODEL_ORDER = tuple(MODEL_SPECS)
 # Five adjacent matched rounds with mode order alternated between rounds.
 CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)
+# Five balanced three-arm rounds. Each consecutive triplet contains 2/4/8
+# exactly once so within-round pairwise deltas remain matched.
+READ_COALESCE_CAP_SEQUENCE = (
+    2, 4, 8,
+    4, 8, 2,
+    8, 2, 4,
+    2, 8, 4,
+    4, 2, 8,
+)
 PAIRED_CI95_T_N5 = 2.7764451051977987
 LOGICAL_BLOCK_BYTES = 4096
 
@@ -201,7 +210,8 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "parallel_read_coalesce_skip_noncontig_slot",
                       "parallel_read_coalesce_skip_gap",
                       "parallel_read_coalesce_skip_other",
-                      "read_worker_cpu_ns")
+                      "read_worker_cpu_ns",
+                      "read_coalesce_max_blocks")
 
 
 def read_metadata_counters_consistent(record):
@@ -274,7 +284,8 @@ KERNEL_WRITE_FIELDS = (
     "delta64_prepare_parallel_starts",
     "retained_burst_target", "delta64_rescue",
     "delta64_prepare_workers", "delta64_prepare_active_max",
-    "lz4_acceleration"
+    "lz4_acceleration", "k1_allow_after_read_bypass",
+    "read_coalesce_max_blocks", "invalidate_cache_on_write_admit"
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
@@ -1370,6 +1381,16 @@ def run_stage(title, command, result, *, parse_bench=False):
     delta64_prepare_diagnostic = (
         delta64_prepare_verdict(delta64_prepare_sessions)
         if parse_bench else None)
+    k1_read_bypass_sessions = (
+        parse_k1_read_bypass_ab(output) if parse_bench else [])
+    k1_read_bypass_diagnostic = (
+        k1_read_bypass_ab_verdict(k1_read_bypass_sessions)
+        if parse_bench else None)
+    read_coalesce_cap_sessions = (
+        parse_read_coalesce_cap_ab(output) if parse_bench else [])
+    read_coalesce_cap_diagnostic = (
+        read_coalesce_cap_ab_verdict(read_coalesce_cap_sessions)
+        if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
@@ -1379,7 +1400,11 @@ def run_stage(title, command, result, *, parse_bench=False):
                        lz4_acceleration_diagnostic.get("overall") !=
                        "PASS_LZ4_ACCELERATION_AB" or
                        delta64_prepare_diagnostic.get("overall") !=
-                       "PASS_DELTA64_PREPARE_AB"))
+                       "PASS_DELTA64_PREPARE_AB" or
+                       k1_read_bypass_diagnostic.get("overall") !=
+                       "PASS_K1_READ_BYPASS_AB_EVIDENCE" or
+                       read_coalesce_cap_diagnostic.get("overall") !=
+                       "PASS_READ_COALESCE_CAP_EVIDENCE"))
     if marker_failure:
         rc = 1
     secure_boot_signing_blocked = (
@@ -1434,6 +1459,16 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "delta64 K=1/K=2 preparation A/B"
                 record["diagnostic"] = delta64_prepare_diagnostic.get(
                     "reason", "paired delta64 preparation evidence is incomplete")
+            elif k1_read_bypass_diagnostic.get("overall") != (
+                    "PASS_K1_READ_BYPASS_AB_EVIDENCE"):
+                record["failed_phase"] = "K=1 read-bypass detach A/B"
+                record["diagnostic"] = k1_read_bypass_diagnostic.get(
+                    "reason", "K=1 read-bypass evidence is incomplete")
+            elif read_coalesce_cap_diagnostic.get("overall") != (
+                    "PASS_READ_COALESCE_CAP_EVIDENCE"):
+                record["failed_phase"] = "READ coalescing cap 2/4/8 evidence"
+                record["diagnostic"] = read_coalesce_cap_diagnostic.get(
+                    "reason", "READ coalescing cap evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1464,6 +1499,11 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["lz4_acceleration"] = lz4_acceleration_diagnostic
         result["benchmarks"]["delta64_prepare_sessions"] = delta64_prepare_sessions
         result["benchmarks"]["delta64_prepare"] = delta64_prepare_diagnostic
+        result["benchmarks"]["k1_read_bypass_sessions"] = k1_read_bypass_sessions
+        result["benchmarks"]["k1_read_bypass"] = k1_read_bypass_diagnostic
+        result["benchmarks"]["read_coalesce_cap_sessions"] = (
+            read_coalesce_cap_sessions)
+        result["benchmarks"]["read_coalesce_cap"] = read_coalesce_cap_diagnostic
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
@@ -2124,6 +2164,357 @@ def delta64_prepare_verdict(sessions):
                    for name, values in changes.items()},
         "interpretation":
             "SAME_SOURCE_K1_K2_COUNTERBALANCED_POSITIVE_FIXTURE_ORDERED_PUBLICATION_UNCHANGED",
+    }
+
+
+def _parse_policy_evidence_sessions(output, marker, values):
+    """Parse private same-source policy evidence emitted by test-loaded.sh."""
+    start_re = re.compile(
+        r"START_" + marker + r"=(sd_emulated|ssd_emulated):(" +
+        "|".join(str(value) for value in values) + r")")
+    pass_re = re.compile(
+        r"PASS_" + marker + r"=(sd_emulated|ssd_emulated):(" +
+        "|".join(str(value) for value in values) + r")")
+    sessions, current = [], None
+    for line in output.splitlines():
+        line = line.strip()
+        match = start_re.fullmatch(line)
+        if match:
+            current = {
+                "regime": match.group(1), "value": int(match.group(2)),
+                "status": "INCOMPLETE", "order": "unknown",
+                "device_model": None, "swapz": None,
+            }
+            sessions.append(current)
+            continue
+        if current is None:
+            continue
+        if line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            model = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) "
+                r"IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) "
+                r"HW_QUEUE_DEPTH=(\d+)", line)
+            if model:
+                current["device_model"] = {
+                    "cap_mib_s": int(model.group(1)),
+                    "completion_nsec": int(model.group(2)),
+                    "irqmode": int(model.group(3)),
+                    "queue_mode": int(model.group(4)),
+                    "submit_queues": int(model.group(5)),
+                    "hw_queue_depth": int(model.group(6)),
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
+                continue
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            packed = obj.get("packed_read") or {}
+            packed_passes = {}
+            for mode in ("sequential", "seeded_random"):
+                phase = (packed.get("passes") or {}).get(mode) or {}
+                lower_read = phase.get("lower_io") or {}
+                packed_passes[mode] = {
+                    "useful_read_mbps": phase.get("useful_read_mbps"),
+                    "read_p99_ms": phase.get("read_p99_ms"),
+                    "lower_read_bytes": lower_read.get("lower_read_bytes"),
+                    "lower_read_requests": lower_read.get("lower_read_requests"),
+                    "kernel_read_path": phase.get("kernel_read_path"),
+                }
+            current["swapz"] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "write_mbps": rates.get("logical_write_mbps"),
+                "read_mbps": rates.get("logical_read_mbps"),
+                "read_p99_ms": (obj.get("read_p99_ns", 0) / 1e6
+                                if isinstance(obj.get("read_p99_ns"), (int, float))
+                                else None),
+                "lower_write_requests": lower.get("lower_write_requests"),
+                "lower_read_requests": lower.get("lower_read_requests"),
+                "kernel_write_path": obj.get("kernel_write_path"),
+                "packed_passes": packed_passes,
+            }
+        else:
+            done = pass_re.fullmatch(line)
+            if done and done.group(1) == current["regime"] and \
+                    int(done.group(2)) == current["value"] and \
+                    current["swapz"] is not None:
+                current["status"] = "PASS"
+                current = None
+    return sessions
+
+
+def parse_k1_read_bypass_ab(output):
+    return _parse_policy_evidence_sessions(
+        output, "K1_READ_BYPASS_AB", (0, 1))
+
+
+def k1_read_bypass_ab_verdict(sessions):
+    verdict = {}
+    for regime in MODEL_ORDER:
+        rows = [row for row in sessions if row.get("regime") == regime]
+        paired_rows = [{"allow": row["value"], **row} for row in rows]
+        try:
+            pairs = matched_binary_pairs(paired_rows, "allow")
+        except ValueError as exc:
+            return {"overall": "INCOMPLETE",
+                    "reason": f"{regime}: {exc}"}
+        expected = MODEL_SPECS[regime]
+        provenance = None
+        for index, row in enumerate(rows):
+            if row.get("status") != "PASS" or row.get("order") != (
+                    "swapz-first" if index % 2 else "off-first"):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: K=1 read-bypass order/status mismatch"}
+            model = row.get("device_model")
+            if not isinstance(model, dict) or any(
+                    model.get(key) != expected[key]
+                    for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                                "queue_mode", "submit_queues", "hw_queue_depth")):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: K=1 read-bypass device model mismatch"}
+            arm = row.get("swapz") or {}
+            kernel = arm.get("kernel_write_path")
+            error = timed_window_error(kernel)
+            if error:
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: K=1 read-bypass telemetry: {error}"}
+            allow = row["value"]
+            if (kernel["k1_allow_after_read_bypass"] != allow or
+                    kernel["invalidate_cache_on_write_admit"] != 0 or
+                    kernel["read_coalesce_max_blocks"] != 8):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: K=1 read-bypass policy mismatch"}
+            if allow == 0 and not kernel["pipeline_read_bypass_skips"]:
+                return {"overall": "INCONCLUSIVE",
+                        "reason": f"{regime}: control arm hit no read-bypass detach block"}
+            if allow == 1 and kernel["pipeline_read_bypass_skips"]:
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: enabled arm still counted blocked detach skips"}
+            arm_provenance = tuple(arm.get(key) for key in
+                                   BENCHMARK_PROVENANCE_FIELDS)
+            if (not isinstance(arm_provenance[0], str) or
+                    not re.fullmatch(r"[0-9a-f]{40}", arm_provenance[0]) or
+                    not isinstance(arm_provenance[1], str) or
+                    not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[1]) or
+                    not isinstance(arm_provenance[2], str) or
+                    not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[2])):
+                return {"overall": "INCONCLUSIVE",
+                        "reason": f"{regime}: K=1 read-bypass provenance missing"}
+            if provenance is None:
+                provenance = arm_provenance
+            elif arm_provenance != provenance:
+                return {"overall": "INCONCLUSIVE",
+                        "reason": f"{regime}: K=1 read-bypass workload differs"}
+            for field in ("write_mbps", "read_p99_ms",
+                          "lower_write_requests", "lower_read_requests"):
+                if not isinstance(arm.get(field), (int, float)) or arm[field] <= 0:
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: K=1 read-bypass metric missing"}
+
+        modes = {}
+        for allow in (0, 1):
+            selected = [row["swapz"] for row in rows if row["value"] == allow]
+            modes[str(allow)] = {
+                "observations": len(selected),
+                "write_mbps": statistics.mean(row["write_mbps"] for row in selected),
+                "read_p99_ms": statistics.mean(row["read_p99_ms"] for row in selected),
+                "lower_write_requests": statistics.mean(
+                    row["lower_write_requests"] for row in selected),
+                "lower_read_requests": statistics.mean(
+                    row["lower_read_requests"] for row in selected),
+                "pipeline_read_bypass_skips": statistics.mean(
+                    row["kernel_write_path"]["pipeline_read_bypass_skips"]
+                    for row in selected),
+                "prep_lower_write_overlap_starts": statistics.mean(
+                    row["kernel_write_path"]["prep_lower_write_overlap_starts"]
+                    for row in selected),
+                "prep_lower_write_overlap_ns": statistics.mean(
+                    row["kernel_write_path"]["prep_lower_write_overlap_ns"]
+                    for row in selected),
+                "pipeline_async_runs": statistics.mean(
+                    row["kernel_write_path"]["pipeline_async_runs"]
+                    for row in selected),
+            }
+        changes = {
+            "throughput_change_fraction": [],
+            "read_p99_change_fraction": [],
+            "lower_write_requests_change_fraction": [],
+            "lower_read_requests_change_fraction": [],
+            "overlap_starts_delta": [],
+            "overlap_ns_delta": [],
+            "pipeline_async_runs_delta": [],
+        }
+        for pair in pairs:
+            control = pair[0]["swapz"]
+            enabled = pair[1]["swapz"]
+            kc, ke = control["kernel_write_path"], enabled["kernel_write_path"]
+            changes["throughput_change_fraction"].append(
+                enabled["write_mbps"] / control["write_mbps"] - 1.0)
+            changes["read_p99_change_fraction"].append(
+                enabled["read_p99_ms"] / control["read_p99_ms"] - 1.0)
+            changes["lower_write_requests_change_fraction"].append(
+                enabled["lower_write_requests"] /
+                control["lower_write_requests"] - 1.0)
+            changes["lower_read_requests_change_fraction"].append(
+                enabled["lower_read_requests"] /
+                control["lower_read_requests"] - 1.0)
+            changes["overlap_starts_delta"].append(
+                ke["prep_lower_write_overlap_starts"] -
+                kc["prep_lower_write_overlap_starts"])
+            changes["overlap_ns_delta"].append(
+                ke["prep_lower_write_overlap_ns"] -
+                kc["prep_lower_write_overlap_ns"])
+            changes["pipeline_async_runs_delta"].append(
+                ke["pipeline_async_runs"] - kc["pipeline_async_runs"])
+        verdict[regime] = {
+            "device_model": expected,
+            "modes": modes,
+            "paired": {name: paired_ci95(values)
+                       for name, values in changes.items()},
+        }
+    return {
+        "overall": "PASS_K1_READ_BYPASS_AB_EVIDENCE",
+        "confidence": "FIVE_PAIRED_ROUNDS_PER_MODEL",
+        "regimes": verdict,
+        "interpretation":
+            "SAME_SOURCE_DEFAULT_OFF_K1_READ_BYPASS_DETACH_ELIGIBILITY_ONLY",
+    }
+
+
+def parse_read_coalesce_cap_ab(output):
+    return _parse_policy_evidence_sessions(
+        output, "READ_COALESCE_CAP_AB", (2, 4, 8))
+
+
+def read_coalesce_cap_ab_verdict(sessions):
+    verdict = {}
+    for regime in MODEL_ORDER:
+        rows = [row for row in sessions if row.get("regime") == regime]
+        if len(rows) != len(READ_COALESCE_CAP_SEQUENCE) or \
+                [row.get("value") for row in rows] != \
+                list(READ_COALESCE_CAP_SEQUENCE):
+            return {"overall": "INCOMPLETE",
+                    "reason": f"{regime}: balanced 2/4/8 cap rounds missing"}
+        expected = MODEL_SPECS[regime]
+        provenance = None
+        for index, row in enumerate(rows):
+            if row.get("status") != "PASS" or row.get("order") != (
+                    "swapz-first" if index % 2 else "off-first"):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: cap study order/status mismatch"}
+            model = row.get("device_model")
+            if not isinstance(model, dict) or any(
+                    model.get(key) != expected[key]
+                    for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                                "queue_mode", "submit_queues", "hw_queue_depth")):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: cap study device model mismatch"}
+            arm = row.get("swapz") or {}
+            arm_provenance = tuple(arm.get(key) for key in
+                                   BENCHMARK_PROVENANCE_FIELDS)
+            if (not isinstance(arm_provenance[0], str) or
+                    not re.fullmatch(r"[0-9a-f]{40}", arm_provenance[0]) or
+                    not isinstance(arm_provenance[1], str) or
+                    not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[1]) or
+                    not isinstance(arm_provenance[2], str) or
+                    not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[2])):
+                return {"overall": "INCONCLUSIVE",
+                        "reason": f"{regime}: cap-study provenance missing"}
+            if provenance is None:
+                provenance = arm_provenance
+            elif arm_provenance != provenance:
+                return {"overall": "INCONCLUSIVE",
+                        "reason": f"{regime}: cap-study workload differs"}
+            for mode in ("sequential", "seeded_random"):
+                phase = (arm.get("packed_passes") or {}).get(mode) or {}
+                kernel = phase.get("kernel_read_path")
+                if not isinstance(kernel, dict) or any(
+                        type(kernel.get(field)) is not int or kernel[field] < 0
+                        for field in KERNEL_READ_FIELDS):
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: cap-study READ telemetry missing"}
+                if kernel["read_coalesce_max_blocks"] != row["value"]:
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: cap-study policy mismatch"}
+                if kernel["parallel_read_coalesce_extra_blocks"]:
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: cap study read extra blocks"}
+                for field in ("useful_read_mbps", "read_p99_ms",
+                              "lower_read_bytes", "lower_read_requests"):
+                    if not isinstance(phase.get(field), (int, float)) or \
+                            phase[field] <= 0:
+                        return {"overall": "INCOMPLETE",
+                                "reason": f"{regime}: cap-study metric missing"}
+
+        modes = {}
+        for cap in (2, 4, 8):
+            selected = [row["swapz"] for row in rows if row["value"] == cap]
+            modes[str(cap)] = {}
+            for mode in ("sequential", "seeded_random"):
+                phases = [row["packed_passes"][mode] for row in selected]
+                modes[str(cap)][mode] = {
+                    "useful_read_mbps": statistics.mean(
+                        phase["useful_read_mbps"] for phase in phases),
+                    "read_p99_ms": statistics.mean(
+                        phase["read_p99_ms"] for phase in phases),
+                    "lower_read_bytes": statistics.mean(
+                        phase["lower_read_bytes"] for phase in phases),
+                    "lower_read_requests": statistics.mean(
+                        phase["lower_read_requests"] for phase in phases),
+                    "coalesced_requests_saved": statistics.mean(
+                        phase["kernel_read_path"]
+                        ["parallel_read_coalesced_reqs_saved"]
+                        for phase in phases),
+                }
+
+        rounds = []
+        for offset in range(0, len(rows), 3):
+            group = rows[offset:offset + 3]
+            rounds.append({row["value"]: row for row in group})
+        comparisons = {}
+        for low, high in ((2, 4), (4, 8), (2, 8)):
+            comparison = {}
+            for mode in ("sequential", "seeded_random"):
+                changes = {
+                    "throughput_change_fraction": [],
+                    "p99_change_fraction": [],
+                    "lower_bytes_change_fraction": [],
+                    "lower_requests_change_fraction": [],
+                }
+                for group in rounds:
+                    a = group[low]["swapz"]["packed_passes"][mode]
+                    b = group[high]["swapz"]["packed_passes"][mode]
+                    changes["throughput_change_fraction"].append(
+                        b["useful_read_mbps"] / a["useful_read_mbps"] - 1.0)
+                    changes["p99_change_fraction"].append(
+                        b["read_p99_ms"] / a["read_p99_ms"] - 1.0)
+                    changes["lower_bytes_change_fraction"].append(
+                        b["lower_read_bytes"] / a["lower_read_bytes"] - 1.0)
+                    changes["lower_requests_change_fraction"].append(
+                        b["lower_read_requests"] / a["lower_read_requests"] - 1.0)
+                comparison[mode] = {
+                    name: paired_ci95(values)
+                    for name, values in changes.items()
+                }
+            comparisons[f"{high}_vs_{low}"] = comparison
+        verdict[regime] = {
+            "device_model": expected,
+            "modes": modes,
+            "paired": comparisons,
+        }
+    return {
+        "overall": "PASS_READ_COALESCE_CAP_EVIDENCE",
+        "confidence": "FIVE_BALANCED_THREE_ARM_ROUNDS_PER_MODEL",
+        "regimes": verdict,
+        "interpretation":
+            "SAME_SOURCE_ZERO_EXTRA_READ_COALESCE_CAP_2_4_8",
     }
 
 

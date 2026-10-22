@@ -99,6 +99,26 @@ module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
 MODULE_PARM_DESC(read_coalesce,
 		 "Enable zero-extra adjacent distinct-extent READ coalescing");
 
+static unsigned int swapz_read_coalesce_max_blocks = 2U * SWAPZ_MAX_BLOCKS;
+module_param_named(read_coalesce_max_blocks, swapz_read_coalesce_max_blocks,
+		   uint, 0444);
+MODULE_PARM_DESC(read_coalesce_max_blocks,
+		 "Maximum exact contiguous blocks in one coalesced READ; 2..8");
+
+static bool swapz_k1_allow_after_read_bypass;
+module_param_named(k1_allow_after_read_bypass,
+		   swapz_k1_allow_after_read_bypass, bool, 0444);
+MODULE_PARM_DESC(k1_allow_after_read_bypass,
+		 "A/B only: allow K=1 async lower-WRITE detach after an "
+		 "independent READ bypass; default off");
+
+static bool swapz_invalidate_cache_on_write_admit;
+module_param_named(invalidate_cache_on_write_admit,
+		   swapz_invalidate_cache_on_write_admit, bool, 0444);
+MODULE_PARM_DESC(invalidate_cache_on_write_admit,
+		 "A/B only: restore pre-2e309ec read-cache invalidation at "
+		 "ordinary WRITE admission; default off");
+
 static bool swapz_logical_open_balance;
 module_param_named(logical_open_balance, swapz_logical_open_balance, bool, 0444);
 MODULE_PARM_DESC(logical_open_balance,
@@ -271,6 +291,7 @@ struct swapz_dm {
 	u8 *read_coalesce_scratch; /* 2 * SWAPZ_MAX_EXTENT_BYTES */
 	bool read_grouping_enabled;
 	bool read_coalescing_enabled;
+	swapz_u8 read_coalesce_max_blocks;
 	/* Status-ABI token for the retired ID39 helper; always false. */
 	bool parallel_reads_enabled;
 	u64 parallel_read_pairs;
@@ -303,6 +324,8 @@ struct swapz_dm {
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
 	bool delta64_rescue_enabled;
+	bool k1_allow_after_read_bypass;
+	bool invalidate_cache_on_write_admit;
 	swapz_u8 lz4_acceleration;
 	struct workqueue_struct *preparation_workqueue;
 	struct swapz_preparation_lane *preparation_lanes;
@@ -2463,15 +2486,22 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 * guard is the sole remaining reason it cannot use the K=1 detach path.
 	 * This counter must not change scheduling or retained-window state.
 	 */
-	if (async_detach_ready && ctx->retained_window_read_bypasses)
+	if (async_detach_ready && ctx->retained_window_read_bypasses &&
+	    !ctx->k1_allow_after_read_bypass)
 		ctx->pipeline_read_bypass_skips++;
 	/*
-	 * First ping-pong experiment: only a complete multi-record window with
-	 * no hard immediate fence is detached. If geometry yields only a prefix,
-	 * complete that prefix synchronously and keep the existing retry path for
-	 * the remainder; never split a good window merely to manufacture overlap.
+	 * A/B control only: the default preserves the historical read-bypass
+	 * guard. The opt-in arm changes only detach eligibility; publication,
+	 * same-page dependency checks and the one immutable K=1 run remain
+	 * unchanged.
+	 *
+	 * Only a complete multi-record window with no hard immediate fence is
+	 * detached. If geometry yields only a prefix, complete that prefix
+	 * synchronously and keep the existing retry path for the remainder.
 	 */
-	if (async_detach_ready && !ctx->retained_window_read_bypasses) {
+	if (async_detach_ready &&
+	    (!ctx->retained_window_read_bypasses ||
+	     ctx->k1_allow_after_read_bypass)) {
 		struct swapz_inflight_write *inflight = &ctx->inflight_write;
 		swapz_u8 prepared = 0;
 		u64 plan_before = ctx->engine.plan_wall_ns;
@@ -3631,8 +3661,9 @@ static bool swapz_parallel_read_extent(struct swapz_dm *ctx,
 
 /*
  * Find the longest physically adjacent sequence containing the FIFO-head
- * extent whose complete span fits the existing eight-block/32KiB scratch.
- * Exact missing ranges are checked before FIFO ownership or cache copies.
+ * extent whose complete span fits the selected 2..8-block evidence cap.
+ * The scratch remains sized for the hard eight-block/32KiB maximum. Exact
+ * missing ranges are checked before FIFO ownership or cache copies.
  */
 static unsigned int swapz_adjacent_extent_chain_candidate(
 					struct swapz_dm *ctx,
@@ -3687,7 +3718,8 @@ static unsigned int swapz_adjacent_extent_chain_candidate(
 
 		while (next < unique && starts[next] == next_start &&
 		       starts[next] / SWAPZ_SEGMENT_BLOCKS == segment &&
-		       chain_blocks + extents[next] <= 2U * SWAPZ_MAX_BLOCKS) {
+		       chain_blocks + extents[next] <=
+			ctx->read_coalesce_max_blocks) {
 			if (starts[next] == required_start)
 				contains_required = true;
 			chain_blocks += extents[next];
@@ -3831,7 +3863,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		physical = chain_starts[previous] + request_first[previous];
 		if (physical + request_blocks[previous] != combined_start ||
 		    combined_blocks + request_blocks[previous] >
-				2U * SWAPZ_MAX_BLOCKS)
+				ctx->read_coalesce_max_blocks)
 			break;
 		combined_start = physical;
 		combined_blocks += request_blocks[previous];
@@ -3846,7 +3878,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		physical = chain_starts[next] + request_first[next];
 		if (physical != combined_end ||
 		    combined_blocks + request_blocks[next] >
-				2U * SWAPZ_MAX_BLOCKS)
+				ctx->read_coalesce_max_blocks)
 			break;
 		combined_end += request_blocks[next];
 		combined_blocks += request_blocks[next];
@@ -3898,7 +3930,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	batch_error = swapz_engine_coalesce_read_chain(
 		chain_engines, execute_starts, execute_extents, execute_first,
 		execute_blocks, (swapz_u8)execute_count,
-		ctx->read_coalesce_scratch, 2U * SWAPZ_MAX_BLOCKS);
+		ctx->read_coalesce_scratch, ctx->read_coalesce_max_blocks);
 	if (!batch_error) {
 		ctx->parallel_read_coalesced_pairs++;
 		ctx->parallel_read_coalesced_reqs_saved += execute_count - 1U;
@@ -4029,6 +4061,7 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 	 * lower media I/O, and keep hard ordering barriers as explicit resets.
 	 */
 	if (op == REQ_OP_DISCARD ||
+	    (op == REQ_OP_WRITE && ctx->invalidate_cache_on_write_admit) ||
 	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
 		swapz_invalidate_read_caches(ctx);
 	if (ctx->failed) {
@@ -4858,6 +4891,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "delta64_prepare_workers must be in 1..4";
 		return -EINVAL;
 	}
+	if (swapz_read_coalesce_max_blocks < 2U ||
+	    swapz_read_coalesce_max_blocks > 2U * SWAPZ_MAX_BLOCKS) {
+		ti->error = "read_coalesce_max_blocks must be in 2..8";
+		return -EINVAL;
+	}
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -4875,6 +4913,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
 	ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled;
+	ctx->k1_allow_after_read_bypass = swapz_k1_allow_after_read_bypass;
+	ctx->invalidate_cache_on_write_admit =
+		swapz_invalidate_cache_on_write_admit;
 	ctx->preparation_worker_count =
 		ctx->async_prepare ?
 		(ctx->delta64_rescue_enabled ?
@@ -4932,6 +4973,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->read_grouping_enabled = swapz_parallel_reads;
 	ctx->read_coalescing_enabled =
 		ctx->read_grouping_enabled && swapz_read_coalesce;
+	ctx->read_coalesce_max_blocks =
+		(swapz_u8)swapz_read_coalesce_max_blocks;
 	ctx->parallel_reads_enabled = false;
 	logical = div_u64(ti->len, SWAPZ_SECTORS);
 	physical = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
@@ -5732,6 +5775,12 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->parallel_read_coalesce_skip_gap,
 		       ctx->parallel_read_coalesce_skip_other,
 		       ctx->failed, ctx->last_error);
+		DMEMIT(" k1_allow_after_read_bypass=%u "
+		       "read_coalesce_max_blocks=%u "
+		       "invalidate_cache_on_write_admit=%u",
+		       ctx->k1_allow_after_read_bypass,
+		       ctx->read_coalesce_max_blocks,
+		       ctx->invalidate_cache_on_write_admit);
 		/* These independent single-writer values are diagnostic while busy;
 		 * qualification snapshots only at drained measurement boundaries. */
 		DMEMIT(" delta64_rescue=%u delta64_eligible=%llu "

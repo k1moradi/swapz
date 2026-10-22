@@ -185,6 +185,36 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
+# K=1 read-bypass detach A/B. Async preparation is enabled in both arms;
+# the only policy difference is whether an otherwise-qualified immutable lower
+# run may detach after an independent READ bypass. Five counterbalanced pairs
+# are collected on each synthetic model.
+for regime in sd_emulated ssd_emulated; do
+    index=0
+    for allow_after_read in "${confirmation_modes[@]}"; do
+        arguments=(--run-owned-ram-pair --profile medium
+                   --retain-ms 2 --unpaced)
+        case "$regime" in
+            sd_emulated) arguments+=(--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000) ;;
+            ssd_emulated) arguments+=(--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000) ;;
+            *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
+        esac
+        # The private helper consumes suffix controls from the tail. Append
+        # async after the device-model suffixes so both controls are parsed
+        # after --shared-plan is stripped.
+        arguments+=(--async-prepare
+                   --k1-allow-after-read-bypass "$allow_after_read"
+                   --shared-plan "$shared_plan")
+        if (( index % 2 )); then
+            arguments+=(--swapz-first)
+        fi
+        printf 'START_K1_READ_BYPASS_AB=%s:%s\n' "$regime" "$allow_after_read"
+        run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+        printf 'PASS_K1_READ_BYPASS_AB=%s:%s\n' "$regime" "$allow_after_read"
+        (( index += 1 ))
+    done
+done
+
 # ID73 promotion-quality LZ4 acceleration A/B. The native sweep has already
 # shown that acceleration 4 materially lowers CPU time while retaining the
 # same bounded planner block geometry. Loaded qualification therefore spends
@@ -274,6 +304,32 @@ for read_coalesce in "${confirmation_modes[@]}"; do
     (( index += 1 ))
 done
 
+# ID63 merge-cap Pareto study. Every arm keeps coalescing enabled and changes
+# only the exact contiguous block cap. Five balanced three-arm rounds avoid
+# treating cross-host results as causal evidence.
+read_coalesce_cap_sequence=(2 4 8 4 8 2 8 2 4 2 8 4 4 2 8)
+for regime in sd_emulated ssd_emulated; do
+    index=0
+    for max_blocks in "${read_coalesce_cap_sequence[@]}"; do
+        arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced)
+        case "$regime" in
+            sd_emulated) arguments+=(--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000) ;;
+            ssd_emulated) arguments+=(--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000) ;;
+            *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
+        esac
+        arguments+=(--read-coalesce 1 --parallel-reads 1
+                   --read-coalesce-max-blocks "$max_blocks"
+                   --shared-plan "$shared_plan")
+        if (( index % 2 )); then
+            arguments+=(--swapz-first)
+        fi
+        printf 'START_READ_COALESCE_CAP_AB=%s:%s\n' "$regime" "$max_blocks"
+        run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+        printf 'PASS_READ_COALESCE_CAP_AB=%s:%s\n' "$regime" "$max_blocks"
+        (( index += 1 ))
+    done
+done
+
 # Write-only sustained-QD controls stay one sync/async observation per point
 # except fast QD8 and QD32, which keep five adjacent counterbalanced rounds.
 # Historical wave-driver evidence is not reused as sustained-QD qualification.
@@ -314,5 +370,5 @@ for regime in sd_emulated ssd_emulated; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 paired LZ4 acceleration sessions, 10 paired delta64 preparation-width sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 K=1 read-bypass sessions, 10 paired LZ4 acceleration sessions, 10 paired delta64 preparation-width sessions, 20 ID63 toggle sessions, 30 ID63 cap sessions, and 40 write-only sessions completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry bounded matched evidence; ID69 is now a loaded structural invariant.'

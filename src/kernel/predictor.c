@@ -97,6 +97,7 @@ SWAPZ_X86_TRANSFORM_WRAPPER(avx2)
 SWAPZ_X86_TRANSFORM_WRAPPER(avx512)
 SWAPZ_X86_INVERSE_WRAPPER(sse2)
 SWAPZ_X86_INVERSE_WRAPPER(avx2)
+SWAPZ_X86_INVERSE_WRAPPER(avx512)
 #undef SWAPZ_X86_TRANSFORM_WRAPPER
 #undef SWAPZ_X86_INVERSE_WRAPPER
 #endif
@@ -125,11 +126,13 @@ int swapz_predictor_init(void)
 	    cpu_has_xfeatures(XFEATURE_MASK_SSE | XFEATURE_MASK_YMM |
 			      XFEATURE_MASK_AVX512, NULL)) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_avx512);
+		static_call_update(swapz_predictor_inverse_call, swapz_unpredict_avx512);
 		/*
-		 * Keep the inverse scalar until same-host qualification proves the
-		 * dependency-heavy eight-lane prefix scan wins end-to-end.
+		 * Native same-host qualification selected AVX-512 for both directions.
+		 * Loaded rescue A/B remains the end-to-end policy evidence because the
+		 * native timing does not include kernel_fpu_begin/end transition cost.
 		 */
-		swapz_transform_backend = "avx512"; swapz_inverse_backend = "scalar";
+		swapz_transform_backend = "avx512"; swapz_inverse_backend = "avx512";
 	} else if (kernel_fpu_available() && boot_cpu_has(X86_FEATURE_AVX2) &&
 		   cpu_has_xfeatures(XFEATURE_MASK_SSE | XFEATURE_MASK_YMM, NULL)) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_avx2);
@@ -177,8 +180,8 @@ int swapz_predictor_init(void)
 	__builtin_cpu_init();
 	if (__builtin_cpu_supports("avx512f")) {
 		swapz_predict_impl = swapz_predict_delta64_avx512;
-		swapz_unpredict_impl = swapz_unpredict_delta64_scalar;
-		swapz_transform_backend = "avx512"; swapz_inverse_backend = "scalar";
+		swapz_unpredict_impl = swapz_unpredict_delta64_avx512;
+		swapz_transform_backend = "avx512"; swapz_inverse_backend = "avx512";
 	} else if (__builtin_cpu_supports("avx2")) {
 		swapz_predict_impl = swapz_predict_delta64_avx2;
 		swapz_unpredict_impl = swapz_unpredict_delta64_scalar;
