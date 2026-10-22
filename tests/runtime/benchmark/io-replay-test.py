@@ -368,6 +368,7 @@ class PairReplayContract(unittest.TestCase):
             "read_worker_cpu_ns": 1010,
             "prep_wait_wall_ns": 510,
             "prep_lower_write_overlap_ns": 5020,
+            "pipeline_read_bypass_skips": 4,
             "pipeline_finalize_wait_wall_ns": 9000,
             "k1_ready_wait_windows": 1,
             "k1_ready_wait_records": 8,
@@ -551,6 +552,7 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["prep_lower_write_end_nonempty"], 2)
         self.assertEqual(delta["prep_wait_wall_ns"], 500)
         self.assertEqual(delta["prep_lower_write_overlap_ns"], 5000)
+        self.assertEqual(delta["pipeline_read_bypass_skips"], 4)
         self.assertEqual(delta["pipeline_finalize_wait_wall_ns"], 9000)
         self.assertEqual(delta["k1_ready_wait_windows"], 1)
         self.assertEqual(delta["k1_ready_wait_records"], 8)
