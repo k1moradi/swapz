@@ -545,6 +545,8 @@ qualification must fail unless the exact timed interval reports at least one
 overlapping preparation start; lifetime peak concurrency alone is insufficient.
 Rootless/report fixtures must carry the same K=1/2/4 telemetry shape so parser
 and fail-closed evidence gates remain covered without privileged module loading.
+Synthetic delta64-positive records must keep score-band totals exactly equal to
+eligible pages; mocks may not bypass the production accounting invariants.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
