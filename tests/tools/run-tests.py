@@ -1341,6 +1341,11 @@ def run_stage(title, command, result, *, parse_bench=False):
     sd_coalesce_diagnostic = (
         sd_read_coalesce_ab_verdict(sd_coalesce_sessions)
         if parse_bench else None)
+    lz4_acceleration_sessions = (
+        parse_lz4_acceleration(output) if parse_bench else [])
+    lz4_acceleration_diagnostic = (
+        lz4_acceleration_verdict(lz4_acceleration_sessions)
+        if parse_bench else None)
     delta64_prepare_sessions = (
         parse_delta64_prepare_sessions(output) if parse_bench else [])
     delta64_prepare_diagnostic = (
@@ -1352,6 +1357,8 @@ def run_stage(title, command, result, *, parse_bench=False):
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_coalesce_diagnostic.get("overall") !=
                        "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
+                       lz4_acceleration_diagnostic.get("overall") !=
+                       "PASS_DIRECTIONAL_SWEEP" or
                        delta64_prepare_diagnostic.get("overall") !=
                        "PASS_DELTA64_PREPARE_PILOT"))
     if marker_failure:
@@ -1394,6 +1401,11 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
                     "reason", "serial-depth adjacent-range READ coalescing evidence is incomplete")
+            elif lz4_acceleration_diagnostic.get("overall") != (
+                    "PASS_DIRECTIONAL_SWEEP"):
+                record["failed_phase"] = "loaded LZ4 acceleration sweep"
+                record["diagnostic"] = lz4_acceleration_diagnostic.get(
+                    "reason", "loaded LZ4 acceleration evidence is incomplete")
             elif delta64_prepare_diagnostic.get("overall") != (
                     "PASS_DELTA64_PREPARE_PILOT"):
                 record["failed_phase"] = "delta64 preparation-width pilot"
@@ -1424,6 +1436,9 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["read_coalesce_ab"] = read_coalesce_diagnostic
         result["benchmarks"]["sd_read_coalesce_ab_sessions"] = sd_coalesce_sessions
         result["benchmarks"]["sd_read_coalesce_ab"] = sd_coalesce_diagnostic
+        result["benchmarks"]["lz4_acceleration_sessions"] = (
+            lz4_acceleration_sessions)
+        result["benchmarks"]["lz4_acceleration"] = lz4_acceleration_diagnostic
         result["benchmarks"]["delta64_prepare_sessions"] = delta64_prepare_sessions
         result["benchmarks"]["delta64_prepare"] = delta64_prepare_diagnostic
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
@@ -1441,19 +1456,16 @@ def parse_sessions(output):
     sessions, current, regime = [], None, None
     for line in output.splitlines():
         line = line.strip()
-        if line.startswith("START_OWNED_RAM_REGIME="):
-            regime = line.partition("=")[2]
-        elif line.startswith(("START_READ_COALESCE_AB=",
-                              "START_SD_READ_COALESCE_AB=",
-                              "START_DELTA64_PREPARE_WORKERS=",
-                              "START_BURST_GUARD_AB=",
-                              "START_WRITE_SATURATION_REGIME=")):
-            current = None
-        elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
+        if line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             current = {"async_prepare": int(line.rsplit("=", 1)[-1]),
                        "regime": regime, "status": "INCOMPLETE", "arms": {},
                        "order": "unknown", "device_model": None}
             sessions.append(current)
+        elif line.startswith("START_OWNED_RAM_REGIME="):
+            current = None
+            regime = line.partition("=")[2]
+        elif line.startswith("START_") or line.startswith("PASS_OWNED_RAM_REGIME="):
+            current = None
         elif current is not None and line.startswith("REPLAY_ORDER="):
             current["order"] = line.partition("=")[2].strip()
         elif current is not None and line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
@@ -1478,6 +1490,7 @@ def parse_sessions(output):
         elif current is not None and line.startswith(
                 "PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             current["status"] = "PASS"
+            current = None
         elif current is not None and line.startswith(
                 "PASS_ASYNC_LOWER_IO_OVERLAP_STARTS="):
             current["overlap_starts"] = int(line.rsplit("=", 1)[-1])
@@ -1556,6 +1569,170 @@ def parse_sessions(output):
                     current["trace_sha256"] = obj["trace_sha256"]
     return sessions
 
+
+
+def parse_lz4_acceleration(output):
+    """Parse each terminally bracketed loaded LZ4 acceleration observation."""
+    sessions, current = [], None
+    model_pattern = re.compile(
+        r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) "
+        r"IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) "
+        r"HW_QUEUE_DEPTH=(\d+)")
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("START_LZ4_ACCELERATION="):
+            match = re.fullmatch(r"START_LZ4_ACCELERATION=([1-4])", line)
+            acceleration = int(match.group(1)) if match else None
+            current = {
+                "lz4_acceleration": acceleration,
+                "async_prepare": 1,
+                "regime": "ssd_emulated",
+                "status": "INCOMPLETE",
+                "arms": {},
+                "order": "unknown",
+                "device_model": None,
+                "parse_error": None,
+            }
+            sessions.append(current)
+            continue
+        if line.startswith("START_"):
+            current = None
+            continue
+        if current is None:
+            continue
+        if line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            match = model_pattern.fullmatch(line)
+            if match:
+                current["device_model"] = {
+                    "cap_mib_s": int(match.group(1)),
+                    "completion_nsec": int(match.group(2)),
+                    "irqmode": int(match.group(3)),
+                    "queue_mode": int(match.group(4)),
+                    "submit_queues": int(match.group(5)),
+                    "hw_queue_depth": int(match.group(6)),
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") not in ("off", "swapz") or \
+                    obj.get("verdict") != "PASS":
+                continue
+            candidate = obj["candidate"]
+            if candidate in current["arms"]:
+                current["parse_error"] = "duplicate paired arm"
+                continue
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            current["arms"][candidate] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "input_write_mbps": rates.get("logical_write_mbps"),
+                "output_lower_write_mbps": rates.get("lower_write_mbps"),
+                "write_p99_ms": (obj.get("write_p99_ns") / 1e6
+                                 if type(obj.get("write_p99_ns")) in
+                                 (int, float) else None),
+                "lower_write_bytes": lower.get("lower_write_bytes"),
+                "lower_write_requests": lower.get("lower_write_requests"),
+                "host_cpu": host_cpu_record(obj),
+                "kernel_write_path": ({
+                    field: obj["kernel_write_path"].get(field)
+                    for field in KERNEL_WRITE_FIELDS
+                } if isinstance(obj.get("kernel_write_path"), dict) else None),
+            }
+        elif line.startswith("PASS_LZ4_ACCELERATION="):
+            match = re.fullmatch(r"PASS_LZ4_ACCELERATION=(\d+)", line)
+            if match and current["lz4_acceleration"] == int(match.group(1)) and \
+                    current["parse_error"] is None and \
+                    set(current["arms"]) == {"off", "swapz"}:
+                current["status"] = "PASS"
+            current = None
+    return sessions
+
+
+def lz4_acceleration_verdict(sessions):
+    """Fail closed unless the directional 1/2/3/4 sweep is isolated and exact."""
+    if [row.get("lz4_acceleration") for row in sessions] != list(LZ4_ACCELERATIONS):
+        return {"overall": "NOT_QUALIFIED",
+                "reason": "loaded LZ4 sweep must contain acceleration 1/2/3/4 once"}
+    expected_model = MODEL_SPECS["ssd_emulated"]
+    provenance = None
+    observations = []
+    for index, row in enumerate(sessions):
+        if row.get("status") != "PASS" or row.get("async_prepare") != 1 or \
+                row.get("regime") != "ssd_emulated" or \
+                row.get("order") != ("swapz-first" if index % 2 else "off-first"):
+            return {"overall": "NOT_QUALIFIED",
+                    "reason": "loaded LZ4 sweep session is incomplete or misordered"}
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(
+                model.get(key) != expected_model[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "NOT_QUALIFIED",
+                    "reason": "loaded LZ4 sweep device model mismatch"}
+        if set(row.get("arms", {})) != {"off", "swapz"}:
+            return {"overall": "NOT_QUALIFIED",
+                    "reason": "loaded LZ4 sweep must retain both paired arms"}
+        swapz = row["arms"]["swapz"]
+        kernel = swapz.get("kernel_write_path")
+        error = timed_window_error(kernel)
+        if error:
+            return {"overall": "NOT_QUALIFIED",
+                    "reason": "loaded LZ4 sweep telemetry: " + error}
+        if (kernel["lz4_acceleration"] != row["lz4_acceleration"] or
+                kernel["delta64_rescue"] != 0):
+            return {"overall": "NOT_QUALIFIED",
+                    "reason": "loaded LZ4 sweep policy does not match its arm"}
+        off = row["arms"]["off"]
+        arm_provenance = tuple(swapz.get(key) for key in (
+            "source_sha", "fixture_sha256", "trace_sha256"))
+        off_provenance = tuple(off.get(key) for key in (
+            "source_sha", "fixture_sha256", "trace_sha256"))
+        if (not isinstance(arm_provenance[0], str) or
+                not re.fullmatch(r"[0-9a-f]{40}", arm_provenance[0]) or
+                not isinstance(arm_provenance[1], str) or
+                not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[1]) or
+                not isinstance(arm_provenance[2], str) or
+                not re.fullmatch(r"[0-9a-f]{64}", arm_provenance[2]) or
+                any(not isinstance(value, str) or not value
+                    for value in off_provenance) or
+                arm_provenance != off_provenance):
+            return {"overall": "INCONCLUSIVE",
+                    "reason": "loaded LZ4 sweep paired provenance is missing or mismatched"}
+        if provenance is None:
+            provenance = arm_provenance
+        elif arm_provenance != provenance:
+            return {"overall": "INCONCLUSIVE",
+                    "reason": "loaded LZ4 sweep workload differs across accelerations"}
+        for arm in (off, swapz):
+            if (type(arm.get("input_write_mbps")) not in (int, float) or
+                    not math.isfinite(arm["input_write_mbps"]) or
+                    arm["input_write_mbps"] <= 0 or
+                    type(arm.get("lower_write_bytes")) is not int or
+                    arm["lower_write_bytes"] <= 0 or
+                    type(arm.get("lower_write_requests")) is not int or
+                    arm["lower_write_requests"] <= 0 or
+                    type(arm.get("write_p99_ms")) not in (int, float) or
+                    not math.isfinite(arm["write_p99_ms"]) or
+                    arm["write_p99_ms"] < 0):
+                return {"overall": "NOT_QUALIFIED",
+                        "reason": "loaded LZ4 sweep performance counters are missing"}
+        observations.append({
+            "lz4_acceleration": row["lz4_acceleration"],
+            "order": row["order"],
+            "arms": row["arms"],
+        })
+    return {
+        "overall": "PASS_DIRECTIONAL_SWEEP",
+        "scope": "DIRECTIONAL_SINGLE_OBSERVATION_PER_SETTING",
+        "observations": observations,
+        "interpretation": "SYNTHETIC_RAM_MODEL_DIRECTIONAL_ONLY_NO_PROMOTION",
+    }
 
 
 def parse_delta64_prepare_sessions(output):
@@ -2272,6 +2449,9 @@ def write_saturation_verdict(sessions):
                 return {"overall": "INCOMPLETE",
                         "reason":
                             f"{regime}: write-only timed attribution missing"}
+            if timed["lz4_acceleration"] != 1 or timed["delta64_rescue"] != 0:
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: standard write-only policy mismatch"}
             row["timed_window_delta"] = {
                 field: timed[field] for field in TIMED_WINDOW_COUNTER_FIELDS
             }
@@ -2498,6 +2678,9 @@ def benchmark_verdicts(sessions):
         if error is not None:
             return {"overall": "INCOMPLETE",
                     "reason": f"timed mixed window telemetry: {error}"}
+        if timed["lz4_acceleration"] != 1 or timed["delta64_rescue"] != 0:
+            return {"overall": "INCOMPLETE",
+                    "reason": "standard mixed sessions require LZ4 acceleration 1 and delta64 off"}
         row["kernel_counter_delta"] = {
             key: timed[key]
             for key in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS
@@ -3856,6 +4039,29 @@ def print_bench(result):
                 ("packed read", async_criteria["packed_4mib_sequential"]),
             ])
 
+    lz4_sweep = result["benchmarks"].get("lz4_acceleration", {})
+    if lz4_sweep.get("overall") == "PASS_DIRECTIONAL_SWEEP":
+        rows = []
+        for observation in lz4_sweep["observations"]:
+            off = observation["arms"]["off"]
+            swapz = observation["arms"]["swapz"]
+            rows.append((
+                observation["lz4_acceleration"],
+                f"{off['input_write_mbps']:.2f}",
+                f"{swapz['input_write_mbps']:.2f}",
+                f"{off['lower_write_bytes'] / 1024:.1f}",
+                f"{swapz['lower_write_bytes'] / 1024:.1f}",
+                off["lower_write_requests"],
+                swapz["lower_write_requests"],
+                f"{swapz['write_p99_ms']:.2f}",
+            ))
+        print_table(
+            "Loaded LZ4 acceleration — SSD RAM model; directional",
+            ("accel", "off W", "swap W", "off KiB", "swap KiB",
+             "off req", "swap req", "swap p99"), rows)
+        print("  One observation per setting; this sweep has no confidence intervals "
+              "or production promotion.")
+
     coalesce_ab = result["benchmarks"].get("read_coalesce_ab", {})
     if coalesce_ab.get("overall") == "PASS_READ_COALESCE_AB_CONFIRMATION":
         print("\n  Adjacent-range READ coalescing — five matched rounds")
@@ -4361,6 +4567,8 @@ def main():
         "stages": [],
         "benchmarks": {"sessions": [], "verdicts": {"overall": "NOT_RUN"},
                        "loaded_correctness": {"overall": "NOT_RUN"},
+                       "lz4_acceleration_sessions": [],
+                       "lz4_acceleration": {"overall": "NOT_RUN"},
                        "write_saturation_sessions": [],
                        "write_saturation": {"overall": "NOT_RUN"}},
         "overall": "INCOMPLETE"
@@ -4399,8 +4607,19 @@ def main():
                    for session in result["benchmarks"]["write_saturation_sessions"]):
                 saturation["overall"] = "INCONCLUSIVE"
                 saturation["reason"] = "Write-only evidence source Git ID mismatched tested checkout"
+        lz4_sweep = result["benchmarks"]["lz4_acceleration"]
+        if lz4_sweep.get("overall") == "PASS_DIRECTIONAL_SWEEP" and \
+                re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
+            if any(session.get("arms", {}).get(candidate, {}).get("source_sha") !=
+                   result["tested_commit_sha"]
+                   for session in result["benchmarks"]["lz4_acceleration_sessions"]
+                   for candidate in ("off", "swapz")):
+                lz4_sweep["overall"] = "INCONCLUSIVE"
+                lz4_sweep["reason"] = (
+                    "Loaded LZ4 sweep source Git ID mismatched tested checkout")
         if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
-                saturation.get("overall") != "PASS_WRITE_SATURATION_EVIDENCE":
+                saturation.get("overall") != "PASS_WRITE_SATURATION_EVIDENCE" or \
+                lz4_sweep.get("overall") != "PASS_DIRECTIONAL_SWEEP":
             result["overall"] = "FAIL"
             exit_code = 1
     write_report(result)

@@ -1333,6 +1333,17 @@ payload bytes, raw fallbacks, and physical blocks/extents from
 loaded matched evidence also preserves or improves lower WRITE bytes/requests,
 throughput and tails.
 
+The loaded first-pass LZ4 acceleration sweep is a separate, directional family
+with exactly one SSD-model observation for each setting 1/2/3/4. Keep
+`async_prepare=1`, `delta64_rescue=0`, workload, fixture, trace and RAM-device
+geometry fixed; alternate arm order. Require a terminal marker for each
+observation and matching source/fixture/trace provenance across both arms and
+all settings. Report useful WRITE rate, lower WRITE bytes/requests and swapz
+p99, but do not calculate confidence intervals or promote from this single
+observation per setting. The parser must close the mixed session before this
+family starts and keep the sweep out of mixed-matrix and sustained-QD results.
+Those standard families use LZ4 acceleration 1 with delta64 disabled.
+
 Source-contract qualification must pin the safety boundaries of the optimized
 paths: generic-planner duplicate protection remains enabled; only the
 prevalidated production planner sets the uniqueness fast flag; cached metadata

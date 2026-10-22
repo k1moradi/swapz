@@ -917,6 +917,15 @@ a larger payload is acceptable only if the same 4/8/16KiB geometry is retained
 and loaded lower I/O plus useful service improve. Delta64's second LZ4 remains
 acceleration 1 throughout this sweep.
 
+The loaded first-pass acceleration sweep is a separate directional family on
+the 80 MiB/s, 0.15 ms, depth-64 RAM model. It runs one paired observation for
+each acceleration 1/2/3/4 with asynchronous preparation enabled and delta64
+rescue disabled. Arm order alternates, and source, fixture, trace and device
+geometry stay fixed. Its useful WRITE rate, lower WRITE bytes/requests and
+swapz p99 are retained separately from the 14 mixed sessions and 40 sustained
+write-only sessions. One observation per setting has no confidence interval
+and cannot promote a production policy.
+
 For delta64, retain raw native backend transform/inverse ns/page and add loaded
 `delta64_transform_wall_ns / delta64_transform_calls`. The latter surrounds
 the production dispatch and therefore includes x86 kernel-FPU transitions.

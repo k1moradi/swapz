@@ -459,6 +459,14 @@ class PublicMakeContract(unittest.TestCase):
                     },
                 }, sort_keys=True)
 
+            def mock_lz4_acceleration_arm(candidate, acceleration):
+                record = json.loads(mock_arm(candidate, 1))
+                record["fixture_sha256"] = "b" * 64
+                record["trace_sha256"] = "c" * 64
+                if candidate == "swapz":
+                    record["kernel_write_path"]["lz4_acceleration"] = acceleration
+                return json.dumps(record, sort_keys=True)
+
             def mock_delta64_arm(workers):
                 record = json.loads(mock_write_arm("swapz", 32, 1))
                 kernel = record["kernel_write_path"]
@@ -522,6 +530,21 @@ class PublicMakeContract(unittest.TestCase):
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
+            for index, acceleration in enumerate(
+                    runner_contract.LZ4_ACCELERATIONS):
+                records.extend((
+                    f"START_LZ4_ACCELERATION={acceleration}",
+                    "REPLAY_ORDER=swapz-first" if index % 2 else
+                    "REPLAY_ORDER=off-first",
+                    "PASS_RAM_MODEL_LOWER_MBPS=80 COMPLETION_NSEC=150000 "
+                    "IRQMODE=2 QUEUE_MODE=2 SUBMIT_QUEUES=1 "
+                    "HW_QUEUE_DEPTH=64",
+                    mock_lz4_acceleration_arm(
+                        "swapz" if index % 2 else "off", acceleration),
+                    mock_lz4_acceleration_arm(
+                        "off" if index % 2 else "swapz", acceleration),
+                    f"PASS_LZ4_ACCELERATION={acceleration}",
+                ))
             for index, enabled in enumerate(confirmation):
                 records.extend((
                     f"START_READ_COALESCE_AB={enabled}",
@@ -711,6 +734,9 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000", loaded)
         self.assertIn("--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000", loaded)
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
+        self.assertIn("START_LZ4_ACCELERATION=%s", loaded)
+        self.assertIn("PASS_LZ4_ACCELERATION=%s", loaded)
+        self.assertIn("--lz4-acceleration", loaded)
         self.assertIn("--async-prepare", loaded)
         self.assertIn("confirmation_modes=(0 1 1 0 0 1 1 0 0 1)", loaded)
         self.assertIn('for async_prepare in "${modes[@]}"', loaded)

@@ -343,6 +343,15 @@ def timed_kernel_write(*, mode, target=8):
     return record
 
 
+def standard_kernel_write(*, mode, target=8):
+    """Standard loaded benchmark policy: LZ4 accel 1, delta64 disabled."""
+    record = timed_kernel_write(mode=mode, target=target)
+    record["delta64_rescue"] = 0
+    for field in runner.DELTA64_FIELDS:
+        record[field] = 0
+    return record
+
+
 def arm(candidate, *, mode, regime):
     swapz = candidate == "swapz"
     raw_mbps = 14 if regime == "sd_emulated" else 32
@@ -450,7 +459,7 @@ def arm(candidate, *, mode, regime):
             "final_live_nonzero_same_filled_pages": 3,
         },
         "packed_read": packed,
-        "kernel_write_path": (timed_kernel_write(mode=mode, target=8)
+        "kernel_write_path": (standard_kernel_write(mode=mode, target=8)
                               if swapz else None),
     }
 
@@ -541,7 +550,7 @@ def write_arm(candidate, *, qd, regime, mode):
         "mixed_replay_cpu_system_s": .08,
         "mixed_replay_peak_rss_kb": 12000,
         "lower_inflight": lower_inflight(has_reads=False),
-        "kernel_write_path": (timed_kernel_write(
+        "kernel_write_path": (standard_kernel_write(
             mode=mode, target=max(4, qd)) if swapz else None),
     }
 
@@ -581,6 +590,29 @@ def delta64_prepare_arm(workers):
     return record
 
 
+def lz4_acceleration_log():
+    out = []
+    spec = runner.MODEL_SPECS["ssd_emulated"]
+    for index, acceleration in enumerate(runner.LZ4_ACCELERATIONS):
+        out.append(f"START_LZ4_ACCELERATION={acceleration}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+        off = arm("off", mode=1, regime="ssd_emulated")
+        swapz = arm("swapz", mode=1, regime="ssd_emulated")
+        off["throughput_mbps"]["logical_write_mbps"] = 28.0
+        swapz["throughput_mbps"]["logical_write_mbps"] = 25.0 + acceleration
+        swapz["kernel_write_path"]["lz4_acceleration"] = acceleration
+        for record in ((swapz, off) if index % 2 else (off, swapz)):
+            out.append(json.dumps(record))
+        out.append(f"PASS_LZ4_ACCELERATION={acceleration}")
+    return out
+
+
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
@@ -610,6 +642,7 @@ def synthetic_log():
                 out.append("PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=42")
             out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
+    out.extend(lz4_acceleration_log())
     for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
         out.append(f"START_READ_COALESCE_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
@@ -913,6 +946,94 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.parse_loaded_correctness(bad)["overall"],
                          "INCOMPLETE")
 
+    def test_mixed_sessions_end_before_later_benchmark_families(self):
+        log = synthetic_log()
+        sessions = runner.parse_sessions(log)
+        self.assertEqual(len(sessions), 14)
+        self.assertTrue(all(
+            row["arms"]["swapz"]["kernel_write_path"][
+                "lz4_acceleration"] == 1 and
+            row["arms"]["swapz"]["kernel_write_path"][
+                "delta64_rescue"] == 0
+            for row in sessions))
+
+        lz4_start = log.index("START_LZ4_ACCELERATION=")
+        self.assertEqual(
+            sessions,
+            runner.parse_sessions(log[:lz4_start]))
+
+        # An incomplete mixed pair remains incomplete when the next family
+        # starts; its later JSON must never be attached to that pair.
+        unfinished = "\n".join((
+            "START_OWNED_RAM_REGIME=ssd_emulated",
+            "START_OWNED_RAM_PAIR_ASYNC_PREPARE=1",
+            json.dumps(arm("swapz", mode=1, regime="ssd_emulated")),
+            "START_LZ4_ACCELERATION=1",
+            json.dumps(arm("off", mode=1, regime="ssd_emulated")),
+        ))
+        incomplete = runner.parse_sessions(unfinished)
+        self.assertEqual(len(incomplete), 1)
+        self.assertEqual(incomplete[0]["status"], "INCOMPLETE")
+        self.assertEqual(set(incomplete[0]["arms"]), {"swapz"})
+
+        for field, value in (("lz4_acceleration", 4),
+                             ("delta64_rescue", 1)):
+            mixed = runner.parse_sessions(log)
+            mixed[-1]["arms"]["swapz"]["kernel_write_path"][field] = value
+            with self.subTest(mixed_policy=field):
+                self.assertEqual(
+                    runner.benchmark_verdicts(mixed)["overall"],
+                    "INCOMPLETE")
+
+    def test_loaded_lz4_acceleration_sweep_is_separate_and_fail_closed(self):
+        log = synthetic_log()
+        sessions = runner.parse_lz4_acceleration(log)
+        self.assertEqual([row["lz4_acceleration"] for row in sessions],
+                         list(runner.LZ4_ACCELERATIONS))
+        verdict = runner.lz4_acceleration_verdict(sessions)
+        self.assertEqual(verdict["overall"], "PASS_DIRECTIONAL_SWEEP")
+        self.assertEqual(
+            [row["arms"]["swapz"]["kernel_write_path"]["lz4_acceleration"]
+             for row in sessions], list(runner.LZ4_ACCELERATIONS))
+        self.assertEqual(
+            [row["arms"]["swapz"]["input_write_mbps"] for row in sessions],
+            [26.0, 27.0, 28.0, 29.0])
+        self.assertEqual(
+            verdict["interpretation"],
+            "SYNTHETIC_RAM_MODEL_DIRECTIONAL_ONLY_NO_PROMOTION")
+
+        missing_terminal = log.replace("PASS_LZ4_ACCELERATION=4\n", "")
+        incomplete = runner.parse_lz4_acceleration(missing_terminal)
+        self.assertNotEqual(
+            runner.lz4_acceleration_verdict(incomplete)["overall"],
+            "PASS_DIRECTIONAL_SWEEP")
+
+        duplicate = sessions + [sessions[0]]
+        self.assertNotEqual(
+            runner.lz4_acceleration_verdict(duplicate)["overall"],
+            "PASS_DIRECTIONAL_SWEEP")
+
+        for field, value in (("lz4_acceleration", 1),
+                             ("delta64_rescue", 1)):
+            changed = runner.parse_lz4_acceleration(log)
+            changed[1]["arms"]["swapz"]["kernel_write_path"][field] = value
+            with self.subTest(policy=field):
+                self.assertNotEqual(
+                    runner.lz4_acceleration_verdict(changed)["overall"],
+                    "PASS_DIRECTIONAL_SWEEP")
+
+        changed = runner.parse_lz4_acceleration(log)
+        changed[2]["arms"]["off"]["trace_sha256"] = "d" * 64
+        self.assertEqual(
+            runner.lz4_acceleration_verdict(changed)["overall"],
+            "INCONCLUSIVE")
+
+        changed = runner.parse_lz4_acceleration(log)
+        changed[0]["arms"]["off"]["lower_write_requests"] = True
+        self.assertNotEqual(
+            runner.lz4_acceleration_verdict(changed)["overall"],
+            "PASS_DIRECTIONAL_SWEEP")
+
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
         self.assertEqual(len(sessions), 14)
@@ -1048,6 +1169,16 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(
                     runner.write_saturation_verdict(broken)["overall"],
                     "INCONCLUSIVE")
+
+    def test_standard_write_only_policy_is_pinned(self):
+        for field, value in (("lz4_acceleration", 2),
+                             ("delta64_rescue", 1)):
+            sessions = runner.parse_write_saturation(synthetic_log())
+            sessions[0]["arms"]["swapz"]["kernel_write_path"][field] = value
+            with self.subTest(policy=field):
+                self.assertEqual(
+                    runner.write_saturation_verdict(sessions)["overall"],
+                    "INCOMPLETE")
 
     def test_paired_benchmark_provenance_mismatch_is_inconclusive(self):
         for field, bad_value in (
@@ -1254,6 +1385,8 @@ class ReportContract(unittest.TestCase):
                 runner.parse_read_coalesce_ab(synthetic_log())),
             "sd_read_coalesce_ab": runner.sd_read_coalesce_ab_verdict(
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
+            "lz4_acceleration": runner.lz4_acceleration_verdict(
+                runner.parse_lz4_acceleration(synthetic_log())),
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
@@ -1261,12 +1394,14 @@ class ReportContract(unittest.TestCase):
             runner.print_bench(report)
         rendered = output.getvalue()
         self.assertIn("Predictive-compression screening", rendered)
+        self.assertIn("Loaded LZ4 acceleration", rendered)
+        self.assertIn("One observation per setting", rendered)
         self.assertIn("native corpus; not loaded attribution", rendered)
         self.assertIn("Production delta64 during mixed I/O", rendered)
         self.assertIn("payload KiB", rendered)
         self.assertIn("RAW+ KiB", rendered)
         self.assertIn("rescue ms", rendered)
-        self.assertIn("not committed mappings", rendered)
+        self.assertIn("Delta64 rescue is disabled", rendered)
         self.assertNotIn("not kernel policy", rendered)
         self.assertIn("Garbage-collection map-scan scaling", rendered)
         self.assertIn("Simulated extent geometry", rendered)
