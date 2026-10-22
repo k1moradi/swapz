@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--parallel-reads 0|1] [--read-coalesce 0|1] [--lz4-acceleration 1|2|3|4] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-prepare-workers 1|2|4] [--parallel-reads 0|1] [--read-coalesce 0|1] [--lz4-acceleration 1|2|3|4] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -16,6 +16,8 @@ WARMUP_OPS=256
 MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
+DELTA64_RESCUE=0
+DELTA64_PREPARE_WORKERS=1
 PARALLEL_READS=1
 READ_COALESCE=1
 LZ4_ACCELERATION=1
@@ -39,6 +41,17 @@ SHARED_PLAN=""
 if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
     SHARED_PLAN="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
+fi
+# Delta64 CPU-parallelism experiment. K=1 is the production-compatible
+# control; K=2/4 are accepted only as bounded read-only module policy.
+if [[ $# -ge 3 && ${@: -2:1} == --delta64-prepare-workers &&
+      ( ${!#} == 1 || ${!#} == 2 || ${!#} == 4 ) ]]; then
+    DELTA64_PREPARE_WORKERS="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+if [[ $# -gt 1 && ${!#} == --delta64-rescue ]]; then
+    DELTA64_RESCUE=1
+    set -- "${@:1:$(( $# - 1 ))}"
 fi
 # First-pass LZ4 policy sweep. Only make test may select the bounded values
 # admitted by the read-only module parameter.
@@ -209,7 +222,7 @@ git merge-base --is-ancestor "$SOURCE" HEAD >/dev/null 2>&1 &&
     git diff --quiet "$SOURCE..HEAD" -- . ':(exclude)test_results.json' ||
     fail "tested source does not match checkout code"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_PREPARE_WORKERS=$DELTA64_PREPARE_WORKERS PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -398,7 +411,7 @@ create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
 modprobe dm_mod
-insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" "lz4_acceleration=$LZ4_ACCELERATION" ||
+insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "delta64_rescue=$DELTA64_RESCUE" "delta64_prepare_workers=$DELTA64_PREPARE_WORKERS" "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" "lz4_acceleration=$LZ4_ACCELERATION" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -432,6 +445,17 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])lz4_acceleration=$LZ4_ACCELE
     fail 'loaded target LZ4 acceleration policy mismatch'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
     fail 'loaded swapz async preparation does not match selected benchmark arm'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" ||
+    fail 'loaded swapz delta64 rescue does not match selected benchmark arm'
+expected_delta64_workers=0
+if (( ASYNC_PREPARE )); then
+    expected_delta64_workers=1
+    if (( DELTA64_RESCUE )); then
+        expected_delta64_workers=$DELTA64_PREPARE_WORKERS
+    fi
+fi
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_prepare_workers=$expected_delta64_workers([[:space:]]|$)" ||
+    fail 'loaded swapz delta64 preparation width does not match selected arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])guard_inflight_zero_shrink=0([[:space:]]|$)" ||
     fail 'retired ID64 compatibility token must remain zero'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])packed_placement=1([[:space:]]|$)" ||
@@ -566,6 +590,25 @@ else
 fi
 swapz_status_after="$(dmsetup status "$DMNAME")"
 note "SWAPZ_STATUS_AFTER=$swapz_status_after"
+if (( DELTA64_RESCUE )); then
+    [[ "$swapz_status_after" =~ delta64_classifier_pass=([0-9]+) ]] ||
+        fail 'delta64 experiment did not expose classifier activity'
+    (( ${BASH_REMATCH[1]} > 0 )) ||
+        fail 'delta64-positive experiment recorded zero classifier passes'
+    [[ "$swapz_status_after" =~ delta64_adopted=([0-9]+) ]] ||
+        fail 'delta64 experiment did not expose adoption activity'
+    (( ${BASH_REMATCH[1]} > 0 )) ||
+        fail 'delta64-positive experiment recorded zero adoptions'
+    [[ "$swapz_status_after" =~ delta64_prepare_active_max=([0-9]+) ]] ||
+        fail 'delta64 experiment did not expose preparation concurrency'
+    active_max=${BASH_REMATCH[1]}
+    (( active_max <= expected_delta64_workers )) ||
+        fail 'delta64 preparation exceeded configured concurrency'
+    if (( DELTA64_PREPARE_WORKERS > 1 )); then
+        (( active_max > 1 )) ||
+            fail 'delta64 parallel arm never executed concurrent preparation'
+    fi
+fi
 if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
     if [[ "$swapz_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]]; then
         (( ${BASH_REMATCH[1]} > 0 )) ||
