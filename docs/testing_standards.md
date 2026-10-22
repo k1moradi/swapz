@@ -279,9 +279,11 @@ publication. Same-page writes across runs require generation reservation or an
 ordering fence. Completion remains fail-closed.
 
 The first pipeline qualification uses one lower run outstanding plus one active
-collector. Higher lower-I/O depth is a later explicit K experiment. Multiple
-preparation workers/credits are tested only if the new collector actually shows
-sustained eligible backlog.
+collector. Higher lower-I/O depth is a later explicit K experiment. Generic
+ordinary-LZ4 preparation concurrency remains blocked by the prior shallow-backlog
+evidence. The separate delta64 K=2/K=4 pilot is permitted because rescue adds an
+independent transform plus second LZ4 pass; it must prove timed lane overlap on
+the deterministic positive fixture before any broader concurrency claim.
 
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
