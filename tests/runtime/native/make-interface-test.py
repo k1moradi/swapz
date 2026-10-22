@@ -459,6 +459,34 @@ class PublicMakeContract(unittest.TestCase):
                     },
                 }, sort_keys=True)
 
+            def mock_delta64_arm(workers):
+                record = json.loads(mock_write_arm("swapz", 32, 1))
+                kernel = record["kernel_write_path"]
+                kernel.update({
+                    "delta64_rescue": 1,
+                    "delta64_prepare_workers": workers,
+                    "delta64_prepare_active_max": workers,
+                    "delta64_prepare_pages": 100,
+                    "delta64_prepare_parallel_starts": 0 if workers == 1 else 20,
+                    "delta64_eligible": 100,
+                    "delta64_classifier_pass": 100,
+                    "delta64_attempts": 100,
+                    "delta64_adopted": 100,
+                    "delta64_raw_rescues": 100,
+                    "delta64_lz4_rescues": 0,
+                    "delta64_score_ge24": 100,
+                    "delta64_payload_bytes_saved": 100000,
+                    "delta64_raw_payload_bytes_saved": 100000,
+                    "delta64_lz4_payload_bytes_saved": 0,
+                    "delta64_transform_calls": 100,
+                    "delta64_transform_wall_ns": 100000,
+                    "delta64_wall_ns": 1500000,
+                })
+                record["throughput_mbps"]["logical_write_mbps"] = 18 + workers
+                record["fixture_sha256"] = "delta64-fixture"
+                record["trace_sha256"] = "delta64-trace"
+                return json.dumps(record, sort_keys=True)
+
             records = [
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
@@ -505,6 +533,16 @@ class PublicMakeContract(unittest.TestCase):
                     mock_coalesce_arm(enabled, sd=True) if index % 2 else mock_arm("off", 0),
                     mock_arm("off", 0) if index % 2 else mock_coalesce_arm(enabled, sd=True),
                     f"PASS_SD_READ_COALESCE_AB={enabled}",
+                ))
+            cap, ns, irq, queue_mode, submit_queues, hw_depth = (
+                80, 150000, 2, 2, 1, 64)
+            for workers in (1, 2, 4):
+                records.extend((
+                    f"START_DELTA64_PREPARE_WORKERS={workers}",
+                    f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
+                    mock_arm("off", 0),
+                    mock_delta64_arm(workers),
+                    f"PASS_DELTA64_PREPARE_WORKERS={workers}",
                 ))
             for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
                 records.append(f"START_WRITE_SATURATION_REGIME={regime}")
@@ -678,6 +716,8 @@ class PublicMakeContract(unittest.TestCase):
         self.assertNotIn("PASS_SD_READ_GROUPING_AB=", loaded)
         self.assertIn("START_SD_READ_COALESCE_AB=", loaded)
         self.assertIn("PASS_SD_READ_COALESCE_AB=", loaded)
+        self.assertIn("START_DELTA64_PREPARE_WORKERS=", loaded)
+        self.assertIn("PASS_DELTA64_PREPARE_WORKERS=", loaded)
         self.assertGreaterEqual(
             loaded.count(
                 "--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000"),
