@@ -57,6 +57,8 @@ cleanup_shared_plan() {
             "$shared_plan/plan-write-qd$qd/manifest.json"
         rmdir -- "$shared_plan/plan-write-qd$qd" 2>/dev/null || true
     done
+    rm -f -- "$shared_plan/delta64/fixture.bin"         "$shared_plan/delta64/fixture.json"         "$shared_plan/delta64/plan-write-qd32/trace.jsonl"         "$shared_plan/delta64/plan-write-qd32/manifest.json"
+    rmdir -- "$shared_plan/delta64/plan-write-qd32"         "$shared_plan/delta64" 2>/dev/null || true
     rmdir -- "$shared_plan/plan" "$shared_plan" 2>/dev/null || true
 }
 trap cleanup_shared_plan EXIT
@@ -91,6 +93,27 @@ assert fixture["profile_pages"] == {"medium": 128}
 assert fixture["lz4_size_buckets"] == {"2049_3072": 128}
 assert fixture["raw_pages"] == 0
 assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
+PY
+
+# Delta64 CPU-parallelism positive control. The fixture is deliberately
+# synthetic: every page is a 64-bit counter/timestamp-like sequence whose
+# adjacent deltas are small and nonzero. This makes classifier passes and
+# adoptions mandatory evidence instead of benchmarking worker overhead on the
+# historical medium fixture, which produced zero production rescue attempts.
+mkdir -p "$shared_plan/delta64"
+python3 -B tests/runtime/benchmark/anon-page-fixture.py     --output-prefix "$shared_plan/delta64/fixture" --pages 128     --seed 0x51a0a9 --weights delta64=100
+python3 -B tests/runtime/benchmark/io-replay.py prepare     --fixture "$shared_plan/delta64/fixture.bin"     --output-dir "$shared_plan/delta64/plan-write-qd32"     --logical-pages 1024 --writer-pages 256 --reader-start 512     --reader-pages 256 --qd 32 --read-pct 0     --warmup-ops 256 --measure-ops 4096 --iops 0 --sustained-write
+python3 -B - "$shared_plan/delta64/fixture.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as inp:
+    fixture = json.load(inp)
+assert fixture["pages"] == 128
+assert fixture["profile_pages"] == {"delta64": 128}
+assert fixture["lz4_size_buckets"] == {"2049_3072": 128}
+assert fixture["raw_pages"] == 0
+assert 2200 <= fixture["lz4_min_accepted_payload_bytes"]
+assert fixture["lz4_max_accepted_payload_bytes"] <= 2450
 PY
 
 # Two representative delay-modeled RAM-backed environments provide paired
@@ -147,6 +170,24 @@ for lz4_acceleration in 1 2 3 4; do
     "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
     printf 'PASS_LZ4_ACCELERATION=%s\n' "$lz4_acceleration"
     (( index += 1 ))
+done
+
+# Delta64 rescue CPU-parallelism pilot. Keep the SSD model, QD32 write-only
+# replay, fixture, LZ4 policy, packing and ordered publication identical; vary
+# only the bounded preparation lane count. K=1 is the control. K=2/K=4 must
+# actually observe >1 concurrent lane in target status or the experiment fails.
+# This first pass is directional; promotion still requires repeated matched
+# K=1/K=2 (and K=4 if useful) pairs plus CPU/PSI evidence.
+for delta64_workers in 1 2 4; do
+    arguments=(--run-owned-ram-pair --profile medium
+               --retain-ms 2 --unpaced
+               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
+               --write-only-qd 32 --async-prepare --delta64-rescue
+               --delta64-prepare-workers "$delta64_workers"
+               --shared-plan "$shared_plan/delta64")
+    printf 'START_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
+    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    printf 'PASS_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
 done
 
 # ID63 adjacent distinct-extent confirmation: vary only exact zero-extra
@@ -224,5 +265,5 @@ for regime in sd_emulated ssd_emulated; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 4 LZ4 acceleration sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 4 LZ4 acceleration sessions, 3 delta64 preparation-width sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry bounded matched evidence; ID69 is now a loaded structural invariant.'
