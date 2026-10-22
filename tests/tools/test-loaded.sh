@@ -63,7 +63,7 @@ run_privileged() {
 run_privileged tests/tools/loaded-preflight.sh
 printf 'LOADED_QUALIFICATION_SOURCE=%s\n' "$tested_source"
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
-"${privileged[@]}" tests/tools/deploy-nullblk.sh
+run_privileged tests/tools/deploy-nullblk.sh --validated-source "$tested_source"
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
 
 # One deterministic, measured-LZ4 immutable fixture/trace for the paired
@@ -178,7 +178,7 @@ for regime in sd_emulated ssd_emulated; do
             arguments+=(--swapz-first)
         fi
         printf 'START_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
-        "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+        run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
         printf 'PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
         (( index += 1 ))
     done
@@ -206,7 +206,7 @@ for acceleration_mode in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_LZ4_ACCELERATION=%s\n' "$lz4_acceleration"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_LZ4_ACCELERATION=%s\n' "$lz4_acceleration"
     (( index += 1 ))
 done
@@ -234,7 +234,7 @@ for delta64_mode in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
     (( index += 1 ))
 done
@@ -252,7 +252,7 @@ for read_coalesce in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_READ_COALESCE_AB=%s\n' "$read_coalesce"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_READ_COALESCE_AB=%s\n' "$read_coalesce"
     (( index += 1 ))
 done
@@ -269,7 +269,7 @@ for read_coalesce in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_SD_READ_COALESCE_AB=%s\n' "$read_coalesce"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_SD_READ_COALESCE_AB=%s\n' "$read_coalesce"
     (( index += 1 ))
 done
@@ -304,7 +304,7 @@ for regime in sd_emulated ssd_emulated; do
             fi
             printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
                 "$qd" "$async_prepare"
-            "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+            run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
             printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
                 "$qd" "$async_prepare"
             (( index += 1 ))
