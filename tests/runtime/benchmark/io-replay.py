@@ -780,7 +780,7 @@ def packed_closes(path, identity):
     return int(match.group(1))
 
 # C READ callback diagnostics: capture outside the READ stopwatch.
-KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
+KERNEL_READ_COUNTER_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_copy_wall_ns",
                       "read_copy_bytes", "read_engine_nonio_wall_ns",
@@ -795,6 +795,7 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "parallel_read_distinct_extent_pairs",
                       "parallel_read_adjacent_extent_pairs",
                       "parallel_read_adjacent_extent_blocks",
+                      "parallel_read_adjacent_chain_3plus",
                       "parallel_read_coalesced_pairs",
                       "parallel_read_coalesced_reqs_saved",
                       "parallel_read_coalesced_blocks",
@@ -804,6 +805,10 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "parallel_read_coalesce_skip_gap",
                       "parallel_read_coalesce_skip_other",
                       "read_worker_cpu_ns")
+KERNEL_READ_GAUGE_FIELDS = (
+    "parallel_read_adjacent_chain_extent_max",
+    "parallel_read_adjacent_chain_blocks_max")
+KERNEL_READ_FIELDS = KERNEL_READ_COUNTER_FIELDS + KERNEL_READ_GAUGE_FIELDS
 
 
 def kernel_read_snapshot(path, identity):
@@ -829,9 +834,13 @@ def kernel_read_delta(before, after):
     if before is None or after is None:
         raise ValueError("incomplete swapz read telemetry")
     counters = {field: after[field] - before[field]
-                for field in KERNEL_READ_FIELDS}
+                for field in KERNEL_READ_COUNTER_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz read telemetry reset during measurement")
+    for field in KERNEL_READ_GAUGE_FIELDS:
+        if after[field] < before[field]:
+            raise ValueError("swapz read gauge regressed during measurement")
+        counters[field] = after[field]
     # Cache reuse can legitimately reduce metadata requests below payload
     # requests. Only counted payload block quantities must remain consistent.
     if (counters["read_payload_blocks"] < counters["read_payload_reqs"] or
@@ -871,7 +880,14 @@ def kernel_read_delta(before, after):
             2 * counters["parallel_read_coalesced_pairs"] or
             counters["parallel_read_coalesced_blocks"] >
             8 * counters["parallel_read_coalesced_pairs"] or
-            counters["parallel_read_coalesce_extra_blocks"] != 0):
+            counters["parallel_read_coalesce_extra_blocks"] != 0 or
+            counters["parallel_read_adjacent_chain_extent_max"] > 8 or
+            counters["parallel_read_adjacent_chain_blocks_max"] > 8 or
+            (counters["parallel_read_adjacent_chain_extent_max"] and
+             counters["parallel_read_adjacent_chain_extent_max"] < 3) or
+            (counters["parallel_read_adjacent_chain_extent_max"] and
+             counters["parallel_read_adjacent_chain_blocks_max"] <
+             counters["parallel_read_adjacent_chain_extent_max"])):
         raise ValueError("inconsistent swapz parallel read accounting")
     return counters
 
@@ -962,7 +978,8 @@ DELTA64_FIELDS = (
     "delta64_score_0_7", "delta64_score_8_15",
     "delta64_score_16_23", "delta64_score_ge24",
     "delta64_payload_bytes_saved", "delta64_raw_payload_bytes_saved",
-    "delta64_lz4_payload_bytes_saved", "delta64_wall_ns",
+    "delta64_lz4_payload_bytes_saved", "delta64_transform_calls",
+    "delta64_transform_wall_ns", "delta64_wall_ns",
 )
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
@@ -987,7 +1004,8 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
-KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target", "delta64_rescue")
+KERNEL_WRITE_GAUGE_FIELDS = (
+    "retained_burst_target", "delta64_rescue", "lz4_acceleration")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
@@ -1022,12 +1040,19 @@ def kernel_write_delta(before, after):
     if (before["delta64_rescue"] != after["delta64_rescue"] or
             after["delta64_rescue"] not in (0, 1)):
         raise ValueError("invalid or changed swapz delta64 policy")
+    if (before["lz4_acceleration"] != after["lz4_acceleration"] or
+            not 1 <= after["lz4_acceleration"] <= 4):
+        raise ValueError("invalid or changed swapz LZ4 acceleration policy")
     if not after["delta64_rescue"] and any(
             before[key] or after[key] for key in DELTA64_FIELDS):
         raise ValueError("disabled swapz delta64 recorded rescue activity")
     if not (counters["delta64_adopted"] <= counters["delta64_attempts"] <=
             counters["delta64_classifier_pass"] <= counters["delta64_eligible"]):
         raise ValueError("inconsistent swapz delta64 attempt accounting")
+    if counters["delta64_transform_calls"] > counters["delta64_attempts"] or (
+            counters["delta64_transform_calls"] and
+            not counters["delta64_transform_wall_ns"]):
+        raise ValueError("inconsistent swapz delta64 transform timing")
     if (sum(counters[field] for field in (
             "delta64_score_0_7", "delta64_score_8_15",
             "delta64_score_16_23", "delta64_score_ge24")) !=

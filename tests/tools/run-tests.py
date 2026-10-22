@@ -173,6 +173,9 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "parallel_read_distinct_extent_pairs",
                       "parallel_read_adjacent_extent_pairs",
                       "parallel_read_adjacent_extent_blocks",
+                      "parallel_read_adjacent_chain_3plus",
+                      "parallel_read_adjacent_chain_extent_max",
+                      "parallel_read_adjacent_chain_blocks_max",
                       "parallel_read_coalesced_pairs",
                       "parallel_read_coalesced_reqs_saved",
                       "parallel_read_coalesced_blocks",
@@ -225,7 +228,8 @@ DELTA64_FIELDS = (
     "delta64_score_0_7", "delta64_score_8_15",
     "delta64_score_16_23", "delta64_score_ge24",
     "delta64_payload_bytes_saved", "delta64_raw_payload_bytes_saved",
-    "delta64_lz4_payload_bytes_saved", "delta64_wall_ns",
+    "delta64_lz4_payload_bytes_saved", "delta64_transform_calls",
+    "delta64_transform_wall_ns", "delta64_wall_ns",
 )
 KERNEL_WRITE_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
@@ -249,7 +253,8 @@ KERNEL_WRITE_FIELDS = (
     "pipeline_read_bypass_skips",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms",
-    "write_wait_gt4ms", "retained_burst_target", "delta64_rescue"
+    "write_wait_gt4ms", "retained_burst_target", "delta64_rescue",
+    "lz4_acceleration"
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
@@ -268,6 +273,7 @@ WORKLOAD_OPPORTUNITY_FIELDS = (
 PREDICTOR_TRANSFORM_NAMES = ("delta64",)
 PREDICTOR_BACKENDS = ("scalar", "sse2", "avx2", "avx512", "neon")
 PREDICTOR_THRESHOLDS = (4, 8, 16, 24, 32)
+LZ4_ACCELERATIONS = (1, 2, 3, 4)
 PREDICTOR_NEGATIVE_PROFILES = ("zero", "repeat", "entropy", "mixed", "medium")
 PREDICTOR_SAMPLING_CONTROL_NAMES = (
     "repeated_512b_headers", "lane1_only_signal")
@@ -325,6 +331,20 @@ def parse_predictor_evidence(output):
             type(classifier.get("scalar_ns_per_page")) is not int or \
             classifier["scalar_ns_per_page"] < 0:
         return None
+
+    lz4_acceleration_sweep = record.get("lz4_acceleration_sweep")
+    if not isinstance(lz4_acceleration_sweep, list) or \
+            len(lz4_acceleration_sweep) != len(LZ4_ACCELERATIONS) or \
+            [row.get("acceleration") if isinstance(row, dict) else None
+             for row in lz4_acceleration_sweep] != list(LZ4_ACCELERATIONS):
+        return None
+    for row in lz4_acceleration_sweep:
+        if any(type(row.get(field)) is not int or row[field] < 0
+               for field in ("wall_ns_per_page", "accepted_payload_bytes",
+                             "raw_pages", "planner_blocks",
+                             "planner_extents")) or \
+                row["planner_blocks"] <= 0 or row["planner_extents"] <= 0:
+            return None
 
     sampling_controls = record.get("sampling_controls")
     if not isinstance(sampling_controls, list) or \
@@ -500,6 +520,7 @@ def parse_predictor_evidence(output):
         "negative_pages": record["negative_pages"],
         "structured_pages": record["structured_pages"],
         "classifier": classifier,
+        "lz4_acceleration_sweep": lz4_acceleration_sweep,
         "sampling_controls": sampling_controls,
         "backend_benchmarks": backend_rows,
         "io_model_block_ns": io_model_block_ns,
@@ -3057,6 +3078,14 @@ def print_bench(result):
             ) for row in predictor["transforms"]])
         transform = predictor["transforms"][0]
         classifier = predictor["classifier"]
+        print_table(
+            "Ordinary LZ4 acceleration CPU and planner geometry — native corpus",
+            ("accel", "ns/page", "payload B", "RAW", "blocks", "extents"),
+            [(
+                row["acceleration"], row["wall_ns_per_page"],
+                row["accepted_payload_bytes"], row["raw_pages"],
+                row["planner_blocks"], row["planner_extents"],
+            ) for row in predictor["lz4_acceleration_sweep"]])
         print("  Delta64 selected backends — "
               f"transform={transform['transform_backend']} "
               f"inverse={transform['inverse_backend']}; classifier=scalar")

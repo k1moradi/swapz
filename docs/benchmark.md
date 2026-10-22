@@ -902,3 +902,44 @@ post-PACK tails during detached K=1 service. The candidate removes READ/barrier
 tail credits, defers an empty PACK tail sample until lower completion, and
 keeps read-interrupted windows synchronous. Pure write QD8/QD32 remains
 eligible for K=1 detach. No new status fields are added.
+
+### ID73 CPU/cache evidence protocol
+
+The next qualification run must preserve the normal rootless/native and loaded
+matrix while adding the following evidence. The changes are intentionally
+measurement-driven; no result below is assumed before the run.
+
+For ordinary LZ4, native predictor qualification prints a
+`lz4_acceleration_sweep` for acceleration 1/2/3/4 on identical pages. Record
+ns/page, accepted payload bytes, RAW fallbacks, bounded-planner blocks and
+bounded-planner extents. The planner geometry is the primary storage signal:
+a larger payload is acceptable only if the same 4/8/16KiB geometry is retained
+and loaded lower I/O plus useful service improve. Delta64's second LZ4 remains
+acceleration 1 throughout this sweep.
+
+For delta64, retain raw native backend transform/inverse ns/page and add loaded
+`delta64_transform_wall_ns / delta64_transform_calls`. The latter surrounds
+the production dispatch and therefore includes x86 kernel-FPU transitions.
+Do not promote rescue from raw SSE2 timing alone.
+
+For validated metadata-cache hits, compare `read_engine_nonio_wall_ns` with
+metadata-set hits/lookups, metadata-copy bytes, lower metadata/payload requests,
+useful read throughput, p99 and worker CPU. The optimization is valid only if
+cold/provisional metadata still takes the full validator and no corruption or
+stale-sequence test weakens.
+
+For publication preflight, compare
+`engine_publish_auth_wall_ns`, batch snapshot CRC wall, planner wall and final
+payload-CRC wall on the same mixed and write-heavy arms. The target is lower
+authority/preflight CPU with identical published maps, lower I/O and GC
+accounting. Final payload CRC remains mandatory.
+
+For ID63, report passive 3+ chain candidate count and maximum full-extent
+chain/blocks beside the existing adjacent/coalesced pair counters. These are a
+conservative full-extent proxy using the existing 32KiB scratch; they authorize an active
+chain experiment only if 3+ opportunities are common enough to matter.
+
+The SSE2 native stage also disassembles the exact compiled object and requires
+the rolling-predecessor shuffle plus register-only inverse shift. Timing remains
+reported rather than threshold-gated because CI host microarchitecture is not a
+stable performance oracle.

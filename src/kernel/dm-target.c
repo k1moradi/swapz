@@ -76,6 +76,12 @@ module_param_named(delta64_rescue, swapz_delta64_rescue_enabled, bool, 0444);
 MODULE_PARM_DESC(delta64_rescue,
 		 "Opt in to page-local delta64 rescue after ordinary LZ4; default off");
 
+static unsigned int swapz_lz4_acceleration = 1U;
+module_param_named(lz4_acceleration, swapz_lz4_acceleration, uint, 0444);
+MODULE_PARM_DESC(lz4_acceleration,
+		 "Ordinary LZ4 acceleration 1..4 for planner-geometry qualification; "
+		 "delta64 rescue stays at 1");
+
 static bool swapz_parallel_reads = true;
 module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);
 MODULE_PARM_DESC(parallel_reads,
@@ -109,6 +115,8 @@ struct swapz_delta64_stats {
 	u64 payload_bytes_saved;
 	u64 raw_payload_bytes_saved;
 	u64 lz4_payload_bytes_saved;
+	u64 transform_calls;
+	u64 transform_wall_ns;
 	u64 wall_ns;
 } ____cacheline_aligned_in_smp;
 
@@ -230,6 +238,13 @@ struct swapz_dm {
 	u64 parallel_read_distinct_extent_pairs;
 	u64 parallel_read_adjacent_extent_pairs;
 	u64 parallel_read_adjacent_extent_blocks;
+	/* Passive conservative evidence for extending ID63 beyond a pair. These
+	 * count 3+ physically adjacent admitted extents whose complete extent
+	 * span fits the existing eight-block/32KiB coalescing scratch. Exact
+	 * missing ranges can only create additional opportunities. */
+	u64 parallel_read_adjacent_chain_3plus;
+	u64 parallel_read_adjacent_chain_extent_max;
+	u64 parallel_read_adjacent_chain_blocks_max;
 	/* ID63 active zero-extra-byte merges of the exact missing lower ranges. */
 	u64 parallel_read_coalesced_pairs;
 	u64 parallel_read_coalesced_reqs_saved;
@@ -246,6 +261,7 @@ struct swapz_dm {
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
 	bool delta64_rescue_enabled;
+	swapz_u8 lz4_acceleration;
 	struct workqueue_struct *preparation_workqueue;
 	struct work_struct preparation_worker;
 	struct list_head preparation_incoming;
@@ -1325,8 +1341,16 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 	stats->attempts++;
 	if (route.pack_path)
 		stats->pack_attempts++;
-	if (swapz_predict_delta64(input, transform_scratch))
+	section_start = ktime_get_ns();
+	if (swapz_predict_delta64(input, transform_scratch)) {
+		stats->transform_wall_ns +=
+			swapz_elapsed_ns(section_start, ktime_get_ns());
+		stats->transform_calls++;
 		goto out;
+	}
+	stats->transform_wall_ns +=
+		swapz_elapsed_ns(section_start, ktime_get_ns());
+	stats->transform_calls++;
 	section_start = ktime_get_ns();
 	candidate = LZ4_compress_fast(transform_scratch, candidate_output,
 				      SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED,
@@ -1529,7 +1553,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 		prepared->length = LZ4_compress_fast(
 					input,
 					prepared->bytes, SWAPZ_BLOCK_BYTES,
-					SWAPZ_MAX_COMPRESSED, 1,
+					SWAPZ_MAX_COMPRESSED,
+					ctx->lz4_acceleration,
 					ctx->preparation_lz4_workmem);
 		elapsed_ns = swapz_elapsed_ns(section_start, ktime_get_ns());
 		ctx->preparation_lz4_wall_ns += elapsed_ns;
@@ -1537,7 +1562,10 @@ static void swapz_preparation_worker(struct work_struct *work)
 		    atomic_read(&ctx->lower_write_active))
 			ctx->preparation_lz4_lower_write_overlap_ns += elapsed_ns;
 		prepared->encoding = SWAPZ_ENCODING_LZ4;
-		if (ctx->delta64_rescue_enabled)
+		prepared->zero = prepared->length > 0 &&
+				 prepared->length <= 64 &&
+				 swapz_page_is_zero(input);
+		if (ctx->delta64_rescue_enabled && !prepared->zero)
 			prepared->length = swapz_delta64_rescue(
 				input, prepared->length, prepared->bytes,
 				ctx->preparation_predictor_page,
@@ -1547,7 +1575,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 				&ctx->preparation_lz4_wall_ns, &prepared->encoding,
 				&ctx->preparation_delta64);
 		prepared->payload_crc32c_valid = false;
-		if (prepared->length > 0) {
+		if (prepared->length > 0 && !prepared->zero) {
 			section_start = ktime_get_ns();
 			prepared->payload_crc32c =
 				swapz_crc32c_bytes(prepared->bytes,
@@ -1556,10 +1584,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 				swapz_elapsed_ns(section_start, ktime_get_ns());
 			prepared->payload_crc32c_valid = true;
 		}
-		prepared->zero = prepared->encoding == SWAPZ_ENCODING_LZ4 &&
-				 prepared->length > 0 &&
-				 prepared->length <= 64 &&
-				 swapz_page_is_zero(input);
 		if (prepared->length <= 0)
 			swapz_memcpy_accounted(prepared->bytes, input,
 					      SWAPZ_BLOCK_BYTES,
@@ -1691,6 +1715,11 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 {
 	swapz_u8 position = 0, i;
 
+	if (swapz_window_uniform_compressed(ctx->gc_pending, ctx->gc_count)) {
+		for (position = 0; position < ctx->gc_count; ++position)
+			ctx->gc_to_pending[position] = position;
+		goto materialize;
+	}
 	memset(ctx->gc_used, 0, sizeof(ctx->gc_used));
 	while (position < ctx->gc_count) {
 		int largest = -1, partner = -1, slack_best = INT_MAX;
@@ -1720,6 +1749,7 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 			ctx->gc_to_pending[position++] = partner;
 		}
 	}
+materialize:
 	for (position = 0; position < ctx->gc_count; ++position) {
 		swapz_u8 index = ctx->gc_to_pending[position];
 
@@ -1790,7 +1820,8 @@ static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
  */
 static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 {
-	swapz_u32 segment, selected = ~(swapz_u32)0;
+	swapz_u32 scan, segment, selected = ~(swapz_u32)0;
+	swapz_u32 start_probe = ctx->authority.next_segment_probe;
 	swapz_u32 best = ~(swapz_u32)0, best_programs = ~(swapz_u32)0;
 	swapz_u16 best_count = ~(swapz_u16)0;
 
@@ -1801,8 +1832,11 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 		    ctx->gc_min_live_blocks ||
 	    ctx->authority.segment_mapped_pages != ctx->segment_mapped_pages)
 		return -EUCLEAN;
-	for (segment = 0; segment < ctx->segment_count; ++segment) {
-		swapz_u32 mapped = ctx->segment_mapped_pages[segment];
+	for (scan = 0; scan < ctx->segment_count; ++scan) {
+		swapz_u32 mapped;
+
+		segment = (start_probe + scan) % ctx->segment_count;
+		mapped = ctx->segment_mapped_pages[segment];
 		swapz_u16 count;
 		swapz_u32 score, programs;
 
@@ -1894,7 +1928,7 @@ static int swapz_gc_relocate_one(struct swapz_dm *ctx, swapz_u32 victim,
 			.bio = NULL,
 			.logical = logical,
 			.payload_crc32c =
-				swapz_crc32c_bytes(ctx->read_compressed, length),
+				ctx->engine.read_validated_payload_crc32c,
 			.length = length,
 			.payload_crc32c_valid = 1,
 			.encoding = swapz_map_encoding(&snapshot),
@@ -2951,7 +2985,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		payload_crc32c = entry->prepared_page->payload_crc32c;
 		payload_crc32c_valid = entry->prepared_page->payload_crc32c_valid;
 		encoding = entry->prepared_page->encoding;
-		if (length > 0)
+		if (length > 0 && !entry->prepared_page->zero)
 			swapz_memcpy_accounted(
 				ctx->batch_bytes +
 					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
@@ -2975,11 +3009,13 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		length = LZ4_compress_fast(input,
 				ctx->batch_bytes +
 					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-				SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED, 1,
-				ctx->lz4_workmem);
+				SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED,
+				ctx->lz4_acceleration, ctx->lz4_workmem);
 		ctx->lz4_wall_ns += swapz_elapsed_ns(section_start,
 						   ktime_get_ns());
-		if (ctx->delta64_rescue_enabled)
+		if (length > 0 && length <= 64)
+			inline_zero = swapz_page_is_zero(input);
+		if (ctx->delta64_rescue_enabled && !inline_zero)
 			length = swapz_delta64_rescue(
 				input, length,
 				ctx->batch_bytes +
@@ -2990,7 +3026,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
 				ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding,
 				&ctx->ordered_delta64);
-		if (length > 0) {
+		if (length > 0 && !inline_zero) {
 			section_start = ktime_get_ns();
 			payload_crc32c = swapz_crc32c_bytes(
 				ctx->batch_bytes +
@@ -3000,9 +3036,6 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				swapz_elapsed_ns(section_start, ktime_get_ns());
 			payload_crc32c_valid = true;
 		}
-		if (encoding == SWAPZ_ENCODING_LZ4 &&
-		    length > 0 && length <= 64)
-			inline_zero = swapz_page_is_zero(input);
 		/*
 		 * If retained bulk RAW admission is available, copy the mapped
 		 * upper page exactly once into its durable batch slot before the
@@ -3544,6 +3577,78 @@ static bool swapz_parallel_read_extent(struct swapz_dm *ctx,
 	return true;
 }
 
+/*
+ * Passive ID63-chain evidence only. Measure the longest physically adjacent
+ * sequence of distinct admitted extents whose complete span fits the existing
+ * eight-block/32KiB scratch. This deliberately conservative full-extent proxy
+ * can undercount opportunities where cached blocks shrink exact missing ranges;
+ * active execution remains the qualified exact-missing-range pair path below.
+ */
+static unsigned int swapz_adjacent_extent_chain_candidate(
+					struct swapz_dm *ctx,
+					struct list_head *local,
+					unsigned int prefix,
+					swapz_u16 *blocks_out)
+{
+	struct swapz_bio_ref *entry;
+	swapz_u32 starts[SWAPZ_MAX_RECORDS];
+	swapz_u8 extents[SWAPZ_MAX_RECORDS];
+	unsigned int seen = 0, unique = 0, best_extents = 0, index;
+	swapz_u16 best_blocks = 0;
+
+	*blocks_out = 0;
+	list_for_each_entry(entry, local, list) {
+		swapz_u32 start;
+		swapz_u8 blocks;
+		unsigned int position;
+
+		if (seen++ >= prefix)
+			break;
+		if (!swapz_parallel_read_extent(ctx, entry->bio, &start, &blocks))
+			continue;
+		for (position = 0; position < unique; ++position) {
+			if (starts[position] == start)
+				break;
+			if (starts[position] > start)
+				break;
+		}
+		if (position < unique && starts[position] == start)
+			continue;
+		if (unique >= SWAPZ_MAX_RECORDS)
+			break;
+		for (index = unique; index > position; --index) {
+			starts[index] = starts[index - 1U];
+			extents[index] = extents[index - 1U];
+		}
+		starts[position] = start;
+		extents[position] = blocks;
+		unique++;
+	}
+	for (index = 0; index < unique; ++index) {
+		swapz_u32 next_start = starts[index] + extents[index];
+		swapz_u32 segment = starts[index] / SWAPZ_SEGMENT_BLOCKS;
+		swapz_u16 chain_blocks = extents[index];
+		unsigned int chain_extents = 1, next = index + 1U;
+
+		while (next < unique && starts[next] == next_start &&
+		       starts[next] / SWAPZ_SEGMENT_BLOCKS == segment &&
+		       chain_blocks + extents[next] <=
+				2U * SWAPZ_MAX_BLOCKS) {
+			chain_blocks += extents[next];
+			next_start += extents[next];
+			chain_extents++;
+			next++;
+		}
+		if (chain_extents > best_extents ||
+		    (chain_extents == best_extents && chain_blocks > best_blocks)) {
+			best_extents = chain_extents;
+			best_blocks = chain_blocks;
+		}
+	}
+	*blocks_out = best_blocks;
+	return best_extents;
+}
+
 /* Scan only the already-admitted independent READ prefix. ID63 may consume two
  * physically adjacent immutable extents only when their exact missing ranges
  * form one zero-padding lower read. Standalone same-extent grouping is retired:
@@ -3597,6 +3702,24 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		}
 		if (start == start1 && blocks == blocks1)
 			selected1++;
+	}
+	if (prefix >= 3U) {
+		swapz_u16 chain_blocks = 0;
+		unsigned int chain_extents =
+			swapz_adjacent_extent_chain_candidate(
+				ctx, local, prefix, &chain_blocks);
+
+		if (chain_extents >= 3U) {
+			ctx->parallel_read_adjacent_chain_3plus++;
+			if (chain_extents >
+			    ctx->parallel_read_adjacent_chain_extent_max)
+				ctx->parallel_read_adjacent_chain_extent_max =
+					chain_extents;
+			if (chain_blocks >
+			    ctx->parallel_read_adjacent_chain_blocks_max)
+				ctx->parallel_read_adjacent_chain_blocks_max =
+					chain_blocks;
+		}
 	}
 	/*
 	 * With ID39/ID60 retired, slot execution exists only for an ID63 pair.
@@ -4649,6 +4772,10 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 8 && (kstrtou32(argv[8], 10, &retain) ||
 			 retain > SWAPZ_MAX_RETAIN_MS))
 		return -EINVAL;
+	if (!swapz_lz4_acceleration || swapz_lz4_acceleration > 4U) {
+		ti->error = "lz4_acceleration must be in 1..4";
+		return -EINVAL;
+	}
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -4666,6 +4793,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
 	ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled;
+	ctx->lz4_acceleration = (swapz_u8)swapz_lz4_acceleration;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
@@ -5041,7 +5169,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "physical_write=%llu physical_write_reqs=%llu "
 		       "physical_read=%llu physical_read_reqs=%llu "
 		       "compressed=%llu raw=%llu zero_elided=%llu discarded=%llu "
-		       "lz4_attempts=%llu lz4_accepted_bytes=%llu "
+		       "lz4_acceleration=%u lz4_attempts=%llu lz4_accepted_bytes=%llu "
 		       "lz4_size_le256=%llu lz4_size_257_1024=%llu "
 		       "lz4_size_1025_2048=%llu lz4_size_2049_3072=%llu "
 		       "lz4_size_3073_3568=%llu lz4_raw_fallback=%llu "
@@ -5212,6 +5340,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "parallel_read_distinct_extent_pairs=%llu "
 		       "parallel_read_adjacent_extent_pairs=%llu "
 		       "parallel_read_adjacent_extent_blocks=%llu "
+		       "parallel_read_adjacent_chain_3plus=%llu "
+		       "parallel_read_adjacent_chain_extent_max=%llu "
+		       "parallel_read_adjacent_chain_blocks_max=%llu "
 		       "parallel_read_coalesced_pairs=%llu "
 		       "parallel_read_coalesced_reqs_saved=%llu "
 		       "parallel_read_coalesced_blocks=%llu "
@@ -5227,6 +5358,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->physical_read_reqs, ctx->compressed_pages,
 		       ctx->raw_pages, ctx->zero_elided_pages,
 		       ctx->discard_pages,
+		       ctx->lz4_acceleration,
 		       ctx->lz4_attempts, ctx->lz4_accepted_bytes,
 		       ctx->lz4_size_bins[0], ctx->lz4_size_bins[1],
 		       ctx->lz4_size_bins[2], ctx->lz4_size_bins[3],
@@ -5476,6 +5608,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->parallel_read_distinct_extent_pairs,
 		       ctx->parallel_read_adjacent_extent_pairs,
 		       ctx->parallel_read_adjacent_extent_blocks,
+		       ctx->parallel_read_adjacent_chain_3plus,
+		       ctx->parallel_read_adjacent_chain_extent_max,
+		       ctx->parallel_read_adjacent_chain_blocks_max,
 		       ctx->parallel_read_coalesced_pairs,
 		       ctx->parallel_read_coalesced_reqs_saved,
 		       ctx->parallel_read_coalesced_blocks,
@@ -5497,7 +5632,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "delta64_score_16_23=%llu delta64_score_ge24=%llu "
 		       "delta64_payload_bytes_saved=%llu "
 		       "delta64_raw_payload_bytes_saved=%llu "
-		       "delta64_lz4_payload_bytes_saved=%llu delta64_wall_ns=%llu",
+		       "delta64_lz4_payload_bytes_saved=%llu "
+		       "delta64_transform_calls=%llu "
+		       "delta64_transform_wall_ns=%llu delta64_wall_ns=%llu",
 		       ctx->delta64_rescue_enabled,
 		       READ_ONCE(ctx->ordered_delta64.eligible) +
 			READ_ONCE(ctx->preparation_delta64.eligible),
@@ -5533,6 +5670,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			READ_ONCE(ctx->preparation_delta64.raw_payload_bytes_saved),
 		       READ_ONCE(ctx->ordered_delta64.lz4_payload_bytes_saved) +
 			READ_ONCE(ctx->preparation_delta64.lz4_payload_bytes_saved),
+		       READ_ONCE(ctx->ordered_delta64.transform_calls) +
+			READ_ONCE(ctx->preparation_delta64.transform_calls),
+		       READ_ONCE(ctx->ordered_delta64.transform_wall_ns) +
+			READ_ONCE(ctx->preparation_delta64.transform_wall_ns),
 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
 			READ_ONCE(ctx->preparation_delta64.wall_ns));
 		break;

@@ -130,6 +130,25 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
+# ID73 first-pass LZ4 acceleration directional sweep. Keep async preparation,
+# device model, workload, packing policy and replay plan fixed; only the
+# immutable compression acceleration changes. Native qualification supplies the
+# repeated CPU/geometry evidence; these loaded arms expose lower-I/O cliffs.
+index=0
+for lz4_acceleration in 1 2 3 4; do
+    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
+               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
+               --async-prepare --lz4-acceleration "$lz4_acceleration"
+               --shared-plan "$shared_plan")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_LZ4_ACCELERATION=%s\n' "$lz4_acceleration"
+    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    printf 'PASS_LZ4_ACCELERATION=%s\n' "$lz4_acceleration"
+    (( index += 1 ))
+done
+
 # ID63 adjacent distinct-extent confirmation: vary only exact zero-extra
 # coalescing for five matched fast rounds. Standalone same-extent grouping is
 # retired; the off arm therefore remains on the ordinary swapz_read() path.
@@ -205,5 +224,5 @@ for regime in sd_emulated ssd_emulated; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 4 LZ4 acceleration sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry bounded matched evidence; ID69 is now a loaded structural invariant.'

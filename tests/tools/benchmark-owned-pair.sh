@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--parallel-reads 0|1] [--read-coalesce 0|1] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--parallel-reads 0|1] [--read-coalesce 0|1] [--lz4-acceleration 1|2|3|4] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -18,6 +18,7 @@ IOPS=500
 ASYNC_PREPARE=0
 PARALLEL_READS=1
 READ_COALESCE=1
+LZ4_ACCELERATION=1
 WRITE_ONLY_QD=0
 READ_PCT=25
 PACKED_READ=1
@@ -37,6 +38,13 @@ SHARED_PLAN=""
 # Only make test supplies its freshly made immutable workload directory.
 if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
     SHARED_PLAN="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# First-pass LZ4 policy sweep. Only make test may select the bounded values
+# admitted by the read-only module parameter.
+if [[ $# -ge 3 && ${@: -2:1} == --lz4-acceleration &&
+      ( ${!#} == 1 || ${!#} == 2 || ${!#} == 3 || ${!#} == 4 ) ]]; then
+    LZ4_ACCELERATION="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Explicit same-source Kread A/B control. The module parameter defaults on;
@@ -390,7 +398,7 @@ create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
 modprobe dm_mod
-insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" ||
+insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" "lz4_acceleration=$LZ4_ACCELERATION" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -420,6 +428,8 @@ OWN_DM=1
       tr -d '[:space:]') == "$DMUUID" ]] || fail 'owned DM UUID mismatch'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:space:]]|$)" ||
     fail 'unexpected swapz retained policy after owned DM creation'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])lz4_acceleration=$LZ4_ACCELERATION([[:space:]]|$)" ||
+    fail 'loaded target LZ4 acceleration policy mismatch'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
     fail 'loaded swapz async preparation does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])guard_inflight_zero_shrink=0([[:space:]]|$)" ||

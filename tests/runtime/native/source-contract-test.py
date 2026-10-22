@@ -1277,10 +1277,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("&a->batch_pause_crc_wall_ns", authority)
         self.assertIn("&a->batch_resume_crc_wall_ns", authority)
         snapshot = source_body("swapz_batch_snapshot_crc32c", authority)
-        self.assertIn("swapz_crc32c_bytes(tx, sizeof(*tx))", snapshot)
+        self.assertIn("offsetof(struct swapz_tx, records)", snapshot)
+        self.assertIn("tx->count * (swapz_u32)sizeof(tx->records[0])", snapshot)
+        self.assertNotIn("swapz_crc32c_bytes(tx, sizeof(*tx))", snapshot)
         self.assertIn("a->batch_snapshot_crc_wall_ns += elapsed", snapshot)
         self.assertIn("*phase_wall_ns += elapsed", snapshot)
-        self.assertNotIn("offsetof(", snapshot)
         self.assertIn("swapz_crc32c_bytes(prepared->bytes", producer)
         self.assertIn("payload_crc32c_valid", accept)
         self.assertNotIn("swapz_note_dry_pack_close", DM)
@@ -1908,7 +1909,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("WINDOW_INTERVAL_FIELDS", replay)
         self.assertIn("KERNEL_WRITE_COUNTER_FIELDS", replay)
         self.assertIn(
-            'KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target", "delta64_rescue")',
+            'KERNEL_WRITE_GAUGE_FIELDS = (',
             replay)
         self.assertIn("counters[key] = after[key]", replay)
         self.assertIn('before["delta64_rescue"] != after["delta64_rescue"]', replay)
@@ -2538,6 +2539,125 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('const char *prefix = "/dev/mapper/swapz-demo-"', oracle)
         self.assertNotIn("tests/runtime/write-fault.sh", deploy)
         self.assertNotIn("tests/runtime/read-fault.sh", deploy)
+
+    def test_cpu_and_cache_optimization_contracts(self):
+        engine = (ROOT / "src/kernel/engine.c").read_text()
+        engine_h = (ROOT / "src/kernel/engine.h").read_text()
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        authority_h = (ROOT / "src/kernel/authority.h").read_text()
+        predictor_sse2 = (ROOT / "src/kernel/predictor-sse2.c").read_text()
+        predictor_qualification = (
+            ROOT / "tests/runtime/native/codec/predictor-qualification.c"
+        ).read_text()
+        producer = body("swapz_preparation_worker")
+        accept = body("swapz_accept_write")
+        read = source_body("swapz_engine_read_page", engine)
+        finish = source_body("swapz_finish", authority)
+        gc_relocate = body("swapz_gc_relocate_one")
+        gc_choose = body("swapz_gc_choose_victim")
+        gc_sort = body("swapz_gc_sort")
+        gc_commit = source_body("swapz_gc_commit_rotation", authority)
+
+        # SSE2 consumes one new input vector per output pair and shifts the
+        # inverse delta in-register instead of reloading delta[0].
+        self.assertIn('shufpd $1', predictor_sse2)
+        self.assertIn('pslldq $8', predictor_sse2)
+        self.assertNotIn(
+            "input + offset - SWAPZ_PREDICTOR_U64_BYTES", predictor_sse2)
+        self.assertNotIn("(swapz_u64x2){0ULL, delta.u64[0]}", predictor_sse2)
+
+        # Validated metadata-cache bytes bypass full swapz_validate(), but a
+        # sequence mismatch is rejected before any lower payload read.
+        self.assertIn("metadata_already_validated", read)
+        self.assertIn("swapz_lookup_validated_descriptor(", read)
+        self.assertIn("metadata_sequence != observed.sequence", read)
+        self.assertLess(read.index("metadata_sequence != observed.sequence"),
+                        read.index("if (last >= start)"))
+        self.assertIn("copy_mask = extent_mask &", read)
+        self.assertIn("coalesced_mask &= (swapz_u8)~extent_mask", read)
+        self.assertIn("copy_mask = block_mask &",
+                      source_body("swapz_read_extent_lru_commit", engine))
+        prime = source_body("swapz_engine_prime_read_slot", engine)
+        self.assertIn("(swapz_u8)~master->read_coalesced_block_mask", prime)
+        self.assertIn("copy_mask = extent_mask & (swapz_u8)~mask", prime)
+
+        # Batched production planning consumes the uniqueness proof it already
+        # paid for; the public planner still performs duplicate protection.
+        self.assertIn("logical_pages_unique", engine)
+        prepare = source_body("swapz_engine_prepare_batched_run", engine)
+        self.assertIn("&extent_count, 1, 1,", prepare)
+        public_plan = source_body("swapz_engine_plan_bounded", engine)
+        self.assertIn("extent_count, 0, 0, 0", public_plan)
+
+        # Publication preflight is local/bounded and does not mutate+restore
+        # global GC arrays or apply per-record GC transitions in phase 2.
+        self.assertIn("struct swapz_finish_extent_delta", authority_h)
+        self.assertIn("finish_segment_deltas[SWAPZ_MAX_RECORDS]", authority_h)
+        self.assertNotIn("swapz_gc_account_batch_preflight", authority)
+        self.assertIn("swapz_finish_extent_delta_get", finish)
+        self.assertIn("swapz_finish_segment_delta_get", finish)
+        self.assertNotIn("swapz_gc_account_transition_apply", finish)
+
+        # First-pass LZ4 can be qualified at 1/2/3/4 without changing the
+        # delta64 second pass. Exact zero skips rescue, CRC, and batch copy.
+        self.assertIn(
+            "module_param_named(lz4_acceleration, swapz_lz4_acceleration, uint, 0444)",
+            DM)
+        self.assertIn("ctx->lz4_acceleration", producer)
+        self.assertIn("ctx->lz4_acceleration", accept)
+        self.assertLess(producer.index("prepared->zero ="),
+                        producer.index(
+                            "if (ctx->delta64_rescue_enabled && !prepared->zero)"))
+        self.assertLess(accept.index("inline_zero = swapz_page_is_zero(input)"),
+                        accept.index(
+                            "if (ctx->delta64_rescue_enabled && !inline_zero)"))
+        self.assertIn("prepared->length > 0 && !prepared->zero", producer)
+        self.assertIn("length > 0 && !entry->prepared_page->zero", accept)
+        self.assertIn("length > 0 && !inline_zero", accept)
+
+        # Production transform telemetry includes the dispatched SIMD wrapper;
+        # native qualification continues to report the raw backend separately.
+        rescue = body("swapz_delta64_rescue")
+        self.assertIn("stats->transform_wall_ns", rescue)
+        self.assertIn("stats->transform_calls++", rescue)
+        self.assertIn("delta64_transform_wall_ns=%llu", body("swapz_status"))
+        self.assertIn('\"lz4_acceleration_sweep\"', predictor_qualification)
+        self.assertIn("1U, 2U, 3U, 4U", predictor_qualification)
+        self.assertIn("planner_length_totals(", predictor_qualification)
+        self.assertIn("LZ4_decompress_safe(", predictor_qualification)
+
+        # The existing ID63 pair remains the active path; 3+ full-extent
+        # adjacency is passive evidence bounded by the same 8-block scratch.
+        batch = body("swapz_try_parallel_read_batch")
+        self.assertIn("swapz_adjacent_extent_chain_candidate(", batch)
+        self.assertIn("parallel_read_adjacent_chain_3plus++", batch)
+        self.assertIn("parallel_read_adjacent_chain_extent_max=%llu",
+                      body("swapz_status"))
+        self.assertIn("parallel_read_adjacent_chain_blocks_max=%llu",
+                      body("swapz_status"))
+
+        # Reuse already verified survivor CRCs and preserve circular allocator
+        # fairness across successful GC rotations and equal-cost victim ties.
+        self.assertIn("read_validated_payload_crc32c", engine_h)
+        self.assertIn(
+            "engine->read_validated_payload_crc32c = peek.payload_crc32c", read)
+        self.assertIn("ctx->engine.read_validated_payload_crc32c", gc_relocate)
+        self.assertIn("start_probe = ctx->authority.next_segment_probe", gc_choose)
+        self.assertIn("(start_probe + scan) % ctx->segment_count", gc_choose)
+        self.assertNotIn("next_segment_probe = (victim + 1U)", gc_commit)
+        self.assertIn("swapz_window_uniform_compressed", gc_sort)
+
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn("--lz4-acceleration 1|2|3|4", pair)
+        self.assertIn('"lz4_acceleration=$LZ4_ACCELERATION"', pair)
+        self.assertIn("for lz4_acceleration in 1 2 3 4", loaded)
+        self.assertIn("START_LZ4_ACCELERATION=%s", loaded)
+        self.assertIn('"lz4_acceleration"', replay)
+        self.assertIn("delta64_transform_wall_ns", replay)
+        self.assertIn("LZ4_ACCELERATIONS = (1, 2, 3, 4)", runner)
 
     def test_map_and_teardown_are_owned(self):
         admitted = body("swapz_map")

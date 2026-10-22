@@ -360,6 +360,74 @@ behind that node's PCIe root complex). If multiple nodes share one backing
 device, preserve one global storage authority so extent packing, barriers,
 physical allocation and GC do not fragment across independent writers.
 
+## ID73 — CPU/cache qualification batch
+
+Status: **implemented on `main`; native and loaded qualification required before
+any optional policy promotion**.
+
+This batch targets work that current phase timings made visible without changing
+SWZ geometry, authority ordering or the default compression policy.
+
+- **SSE2 delta64 load path:** forward transform retains the previous XMM pair
+  and forms `[previous.high,current.low]` with `shufpd`, so each 16-byte
+  output consumes one new 16-byte input load. The inverse forms its shifted
+  prefix operand with register-only `pslldq $8`. Both remain byte-identical
+  to scalar delta64. Native qualification checks emitted instructions and
+  continues to report backend ns/page.
+- **Validated metadata hits:** metadata from the direct validated cache,
+  metadata set, or validated extent LRU uses descriptor-only lookup rather than
+  recomputing metadata CRC and duplicate-record validation. Cold metadata and
+  provisional ID63 coalesced bytes still run full `swapz_validate()`.
+  Cached metadata sequence must match the observed authoritative map before
+  any payload lower read; logical identity, generation, offsets, authority
+  comparison and payload CRC still execute on every logical read.
+- **Publication preflight:** `swapz_finish()` builds bounded old-extent and
+  old-segment deltas in authority-owned scratch, validates aggregate mapped/GC
+  accounting without touching global arrays, then applies each aggregate once.
+  The old mutate/restore GC preflight and repeated per-record authority scans
+  are removed. Paused transaction hashes cover only the active transaction
+  prefix through `records[count]`; staging zero-initializes the transaction,
+  and all semantically active header/record bytes remain protected.
+- **Planner uniqueness reuse:** the generic planner retains duplicate-page
+  defense. The private production batched path alone skips repeated duplicate
+  scans after `swapz_validate_batched_pages()` has already proved the whole
+  batch unique.
+- **Early exact-zero routing:** after ordinary LZ4 returns a tiny candidate,
+  the existing full-page zero scan runs before delta64 rescue and payload CRC.
+  A true zero becomes the same logical hole as before and no payload bytes are
+  copied into the ordered batch.
+- **LZ4 acceleration evidence:** ordinary first-pass LZ4 exposes read-only
+  `lz4_acceleration=1..4`, default 1. The delta64 second LZ4 remains fixed at
+  1 because that path explicitly targets tight packing cliffs. Native
+  qualification sweeps 1/2/3/4 on the same deterministic corpus, verifies
+  round-trip bytes, and feeds each set of lengths to the real bounded planner.
+  Do not promote a value solely because compressed bytes differ; compare CPU,
+  planned blocks/extents, lower I/O, throughput and tails.
+- **ID63 3+ opportunity evidence:** active coalescing remains the qualified
+  two-range pair. Passive counters record 3+ physically adjacent admitted
+  full extents whose combined span fits the existing eight-block/32KiB scratch.
+  This conservative evidence must justify a later exact-missing-range chain
+  implementation; no extra RAM or lower I/O is added here.
+- **Production delta64 wrapper cost:** kernel status now reports transform calls
+  and transform wall around the dispatched transform, which includes
+  `kernel_fpu_begin/end` on x86. Compare this with raw native backend ns/page
+  before using native transform economics to justify rescue policy.
+- **Low-risk companion work:** validated extent-cache refreshes copy only
+  missing blocks; slot priming never republishes provisional coalesced bytes;
+  GC relocation reuses the payload CRC just verified by the read engine; the
+  GC sorter uses the existing uniform-length identity fast path; successful GC
+  no longer rewinds the allocator's circular probe, and equal-cost victim scans
+  begin from that probe. These are allocator-fairness changes, not NAND wear
+  claims.
+
+Acceptance is byte-exact native correctness, sanitizer cleanliness, x86 SSE2
+instruction-shape checks, W=1/W=2 kernel builds, and the existing owner-only
+loaded matrix. For performance promotion require matched same-host evidence.
+For `lz4_acceleration`, report per-setting compression CPU plus planner
+blocks/extents and loaded lower WRITE bytes/requests. For delta64, report
+wrapper-inclusive transform ns/call alongside raw backend ns/page. For ID63,
+report the 3+ chain opportunity counters before implementing an active chain.
+
 ## Release gates
 
 A release or physical-media trial remains blocked until the same pinned source has repeated byte-exact loaded correctness, genuine lower error coverage, sustained GC, bounded resource behavior, acceptable read p95/p99 and CPU/RAM, statistically defensible matched performance, and an independent safety review. Physical-device admission is not part of the current roadmap implementation.

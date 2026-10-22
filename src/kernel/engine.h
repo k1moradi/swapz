@@ -152,6 +152,9 @@ struct swapz_engine {
 	 * by a constituent record. Residency is not cache-hit evidence. */
 	swapz_u8 read_coalesced_block_mask;
 	swapz_u32 read_metadata_cache_hits;
+	/* Set only after a successful authoritative payload CRC verification;
+	 * GC relocation may reuse this exact CRC instead of hashing again. */
+	swapz_u32 read_validated_payload_crc32c;
 	/*
 	 * Owner-preallocated metadata-only cache. Capacity remains 512 immutable
 	 * SWZ block-zero images in 128 sets x 4 ways. Each key has two distinct

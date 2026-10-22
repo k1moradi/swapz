@@ -1118,3 +1118,79 @@ SSE2 delta64 keeps its full-page semantics byte-identical to scalar C but starts
 vector work after the first 16 bytes so pair-sized output stores and inverse
 loads/stores do not begin at byte offset 8. This targets older x86 split-access
 costs without assuming a wider ISA or changing predictor policy.
+
+## Validated-read and publication CPU fast paths
+
+A metadata cache hit may skip full SWZ metadata validation only when the bytes
+were published to that cache after a successful authoritative read and are not
+still marked as provisional coalesced input. Descriptor-only lookup does not
+weaken read validation: compare the cached on-media sequence with the observed
+map before any payload lower read, then retain the existing logical-page,
+generation, payload bounds/encoding, authority and payload-CRC checks. Cold
+metadata and unvalidated coalesced seed bytes always use the full validator.
+When a validated extent-LRU block replaces provisional scratch, clear the
+corresponding provisional bit. Cache refresh and slot priming copy only blocks
+that are not already resident.
+
+The generic bounded planner must remain defensive against duplicate logical
+pages. A private caller may bypass the inner duplicate search only immediately
+after one complete bounded-batch uniqueness validation and without allowing an
+intervening mutation of the page list.
+
+`swapz_finish()` publication preflight is serialized and uses only
+authority-owned, fixed-size scratch. Aggregate old-extent reference removals,
+per-segment mapped removals and GC score deltas without mutating global
+accounting. Validate all aggregate underflow/overflow conditions before
+publication, then apply each aggregate once and publish distinct mappings.
+Never move a fallible check into the mutation phase. Keep these summaries out
+of the kernel stack; `SWAPZ_MAX_RECORDS` bounds all scratch.
+
+Paused transaction integrity hashes only the active prefix:
+`offsetof(struct swapz_tx, records) + count * sizeof(records[0])`.
+`swapz_stage*` must continue to zero-initialize the transaction before filling
+active fields. The hash must always cover start block, sequence, extent class,
+count, and every active logical-page/generation record.
+
+## LZ4, zero routing and delta64 microarchitecture
+
+Ordinary first-pass LZ4 may use the immutable per-target acceleration selected
+from 1..4; default 1 is the production policy until matched loaded evidence
+proves another setting improves useful service without worse physical geometry.
+The second LZ4 in delta64 rescue stays at acceleration 1 unless independently
+qualified because it exists specifically to cross packing thresholds.
+
+The exact-zero scan is allowed only after ordinary LZ4 has produced the
+existing tiny-candidate admission. If the full 4KiB source page is zero, route
+it directly to zero elision before delta64 rescue, payload CRC or batch payload
+copy. Any nonzero page follows the unchanged compression/CRC path.
+
+SSE2 delta64 must consume one new aligned 16-byte source vector per 16-byte
+output pair after the scalar 16-byte prefix. Retain the prior vector and use an
+SSE2 shuffle for predecessor formation; inverse prefix formation must shift the
+already-loaded delta register rather than reload a lane from memory. Inline
+assembly is restricted to these explicit SSE2 register operations and the
+native x86 qualification must verify the emitted instructions.
+
+Production transform timing surrounds `swapz_predict_delta64()`, not just the
+raw architecture function. On x86 this intentionally includes the per-call
+kernel FPU enter/exit wrapper. Native backend timings remain raw implementation
+evidence and must not be substituted for the wrapper-inclusive production
+cost.
+
+## Bounded read-chain and GC companion rules
+
+ID63 active coalescing remains a two-slot exact-missing-range mechanism. Passive
+3+ evidence may inspect only already-admitted independent READs and must remain
+bounded by the existing eight-block/32KiB scratch. Full-extent chain counters
+are conservative opportunity evidence, not proof that an active missing-range
+chain will save the same requests.
+
+A successful authoritative read exposes the payload CRC it just verified so GC
+relocation can reuse that value for the unchanged payload bytes. Clear this
+value before each read and on read-cache invalidation; never reuse a CRC from a
+failed or stale read.
+
+GC victim tie traversal and dead-segment allocation share the circular allocator
+probe only as a fairness cursor. Successful rotation must not reset that cursor
+to the victim index. This is logical allocator fairness and must not be
+described as physical flash wear leveling.

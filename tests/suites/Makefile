@@ -7,6 +7,7 @@ CODEC := $(KERNEL)/codec.c
 AUTH := $(KERNEL)/authority.c
 ENGINE := $(KERNEL)/engine.c
 CC ?= cc
+OBJDUMP ?= objdump
 CFLAGS ?= -std=c11 -O1 -g -Wall -Wextra -Werror
 ifeq ($(SANITIZE),1)
 CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
@@ -97,7 +98,11 @@ test-predictor: $(OUT)/predictor-qualification
 	  "$(OUT)/predictor-qualification" \
 	    "$(OUT)/predictor-entropy.bin" \
 	    "$(OUT)/predictor-mixed.bin" \
-	    "$(OUT)/predictor-medium.bin"
+	    "$(OUT)/predictor-medium.bin"; \
+	  if [ "$(UNAME_M)" = x86_64 ]; then \
+	    "$(OBJDUMP)" -d "$(OUT)/predictor-sse2.o" | grep -q 'shufpd'; \
+	    "$(OBJDUMP)" -d "$(OUT)/predictor-sse2.o" | grep -q 'pslldq'; \
+	  fi
 
 test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/transaction-publication $(OUT)/write-verification $(OUT)/dead-segment-reclamation $(OUT)/raw-discard $(OUT)/online-packing $(OUT)/randomized-authority
 	@set -e; "$(OUT)/zero-write-elision"; "$(OUT)/mapping-authority"; "$(OUT)/transaction-publication"; "$(OUT)/write-verification"; "$(OUT)/dead-segment-reclamation"; "$(OUT)/raw-discard"; "$(OUT)/online-packing"; "$(OUT)/randomized-authority"

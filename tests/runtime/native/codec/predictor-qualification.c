@@ -26,6 +26,8 @@
 #define CLASSIFIER_BENCH_REPEATS 256U
 #define TRANSFORM_BENCH_REPEATS 64U
 #define LZ4_BENCH_REPEATS 32U
+#define LZ4_ACCEL_BENCH_REPEATS 16U
+#define LZ4_ACCELERATION_COUNT 4U
 #define MAX_BACKEND_BENCHMARKS 4U
 #define SD_EMULATED_BLOCK_NS 390625ULL
 #define SSD_EMULATED_BLOCK_NS 48828ULL
@@ -106,6 +108,15 @@ struct classifier_summary {
 	swapz_u32 early_abort_pages;
 };
 
+struct lz4_acceleration_summary {
+	unsigned int acceleration;
+	uint64_t wall_ns_per_page;
+	uint64_t accepted_payload_bytes;
+	swapz_u32 raw_pages;
+	swapz_u32 planner_blocks;
+	swapz_u32 planner_extents;
+};
+
 struct production_route_summary {
 	swapz_u32 eligible_pages;
 	swapz_u32 packing_eligible_pages;
@@ -140,6 +151,7 @@ static swapz_u8 transform_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 scalar_transform_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 recovered_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 scalar_recovered_page[SWAPZ_BLOCK_BYTES];
+static int lz4_acceleration_lengths[MAX_EVIDENCE_PAGES];
 static char compressed_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 planner_dummy[SWAPZ_BLOCK_BYTES];
 
@@ -604,6 +616,123 @@ static int planner_totals(const struct page_evidence *rows, swapz_u32 count,
 	return 0;
 }
 
+static int planner_length_totals(const int *lengths, swapz_u32 count,
+				 swapz_u32 *blocks_out,
+				 swapz_u32 *extents_out)
+{
+	swapz_u32 offset = 0, blocks_total = 0, extents_total = 0;
+
+	while (offset < count) {
+		struct swapz_compressed_page pages[SWAPZ_MAX_RECORDS];
+		swapz_u8 classes[SWAPZ_MAX_RECORDS], takes[SWAPZ_MAX_RECORDS];
+		swapz_u8 extent_count = 0, compressed_count = 0;
+		swapz_u32 raw_count = 0;
+		swapz_u32 window = count - offset;
+		swapz_u32 index;
+		int error;
+
+		if (window > SWAPZ_MAX_RECORDS)
+			window = SWAPZ_MAX_RECORDS;
+		memset(pages, 0, sizeof(pages));
+		for (index = 0; index < window; ++index) {
+			int length = lengths[offset + index];
+
+			if (length <= 0) {
+				raw_count++;
+				continue;
+			}
+			pages[compressed_count].logical_page = compressed_count;
+			pages[compressed_count].payload = planner_dummy;
+			pages[compressed_count].length = (swapz_u16)length;
+			compressed_count++;
+		}
+		blocks_total += raw_count;
+		extents_total += raw_count;
+		if (compressed_count) {
+			error = swapz_engine_plan_bounded(
+				pages, compressed_count, 0, classes, takes,
+				&extent_count);
+			if (error)
+				return error;
+			for (index = 0; index < extent_count; ++index)
+				blocks_total += classes[index];
+			extents_total += extent_count;
+		}
+		offset += window;
+	}
+	*blocks_out = blocks_total;
+	*extents_out = extents_total;
+	return 0;
+}
+
+static int collect_lz4_acceleration_sweep(
+			const struct page_evidence *rows, swapz_u32 count,
+			struct lz4_acceleration_summary *summaries)
+{
+	static const unsigned int accelerations[LZ4_ACCELERATION_COUNT] = {
+		1U, 2U, 3U, 4U
+	};
+	unsigned int acceleration_index;
+
+	for (acceleration_index = 0;
+	     acceleration_index < LZ4_ACCELERATION_COUNT;
+	     ++acceleration_index) {
+		struct lz4_acceleration_summary *summary =
+			&summaries[acceleration_index];
+		uint64_t start, end, calls;
+		unsigned int repeat;
+		swapz_u32 index;
+		int error;
+
+		summary->acceleration = accelerations[acceleration_index];
+		start = now_ns();
+		for (repeat = 0; repeat < LZ4_ACCEL_BENCH_REPEATS; ++repeat)
+			for (index = 0; index < count; ++index) {
+				int length = LZ4_compress_fast(
+					(const char *)evidence_pages[index],
+					compressed_page, SWAPZ_BLOCK_BYTES,
+					PREDICTOR_CAP, summary->acceleration);
+
+				if (length < 0 || length > PREDICTOR_CAP)
+					return -EUCLEAN;
+				transform_benchmark_sink += (uint64_t)length;
+				if (repeat)
+					continue;
+				lz4_acceleration_lengths[index] = length;
+				if (summary->acceleration == 1U &&
+				    length != rows[index].baseline_length)
+					return -EUCLEAN;
+				if (length > 0) {
+					int decoded = LZ4_decompress_safe(
+						compressed_page,
+						(char *)recovered_page,
+						length, SWAPZ_BLOCK_BYTES);
+
+					if (decoded != SWAPZ_BLOCK_BYTES ||
+					    memcmp(recovered_page,
+						   evidence_pages[index],
+						   SWAPZ_BLOCK_BYTES))
+						return -EBADMSG;
+					summary->accepted_payload_bytes +=
+						(uint64_t)length;
+				} else {
+					summary->raw_pages++;
+				}
+			}
+		end = now_ns();
+		calls = (uint64_t)count * LZ4_ACCEL_BENCH_REPEATS;
+		if (!start || !end || !calls || end < start)
+			return -EUCLEAN;
+		summary->wall_ns_per_page = (end - start) / calls;
+		error = planner_length_totals(
+			lz4_acceleration_lengths, count,
+			&summary->planner_blocks, &summary->planner_extents);
+		if (error)
+			return error;
+	}
+	return 0;
+}
+
 static void summarize_transform(const struct page_evidence *rows,
 				swapz_u32 count, unsigned int transform_index,
 				struct transform_summary *summary)
@@ -887,6 +1016,8 @@ int main(int argc, char **argv)
 	struct production_route_summary production_route = { 0 };
 	struct sampling_control sampling_controls[2] = { 0 };
 	struct backend_benchmark backend_benchmarks[MAX_BACKEND_BENCHMARKS] = { 0 };
+	struct lz4_acceleration_summary
+		lz4_acceleration_summaries[LZ4_ACCELERATION_COUNT] = { 0 };
 	const struct backend_benchmark *selected_transform, *selected_inverse, *scalar_backend;
 	uint64_t second_lz4_ns_per_page = 0;
 	unsigned int backend_count = 0;
@@ -1016,6 +1147,9 @@ int main(int argc, char **argv)
 			&production_route);
 	if (!error && production_route.eligible_pages != classifier_summary.pages)
 		error = -EUCLEAN;
+	if (!error)
+		error = collect_lz4_acceleration_sweep(
+			evidence, count, lz4_acceleration_summaries);
 	if (error) {
 		fprintf(stderr, "routed production planner rejected evidence: %d\n",
 			error);
@@ -1050,7 +1184,23 @@ int main(int argc, char **argv)
 	       classifier_summary.wall_ns / classifier_summary.benchmark_calls : 0,
 	       classifier_summary.benchmark_calls ?
 	       classifier_summary.scalar_wall_ns / classifier_summary.benchmark_calls : 0);
-	printf(",\"sampling_controls\":[");
+	printf(",\"lz4_acceleration_sweep\":[");
+	for (threshold_index = 0;
+	     threshold_index < LZ4_ACCELERATION_COUNT;
+	     ++threshold_index) {
+		const struct lz4_acceleration_summary *item =
+			&lz4_acceleration_summaries[threshold_index];
+
+		printf("%s{\"acceleration\":%u,\"wall_ns_per_page\":%" PRIu64
+		       ",\"accepted_payload_bytes\":%" PRIu64
+		       ",\"raw_pages\":%u,\"planner_blocks\":%u,"
+		       "\"planner_extents\":%u}",
+		       threshold_index ? "," : "", item->acceleration,
+		       item->wall_ns_per_page, item->accepted_payload_bytes,
+		       item->raw_pages, item->planner_blocks,
+		       item->planner_extents);
+	}
+	printf("],\"sampling_controls\":[");
 	for (threshold_index = 0; threshold_index < 2U; ++threshold_index)
 		printf("%s{\"name\":\"%s\",\"score\":%u,"
 		       "\"minimum_score\":%u}",

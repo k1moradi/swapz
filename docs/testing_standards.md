@@ -1298,3 +1298,52 @@ source qualification rejects the retired generation-suffixed format name. The
 codec keeps the unversioned `SWZ\\0` magic and requires reserved header flags
 to remain zero; a future incompatible format change must introduce its identity
 deliberately rather than pre-versioning an undeployed format.
+
+## ID73 CPU/cache qualification
+
+`make test -jN` remains the only public qualification entry point. The native
+predictor stage must additionally verify x86 SSE2 object code contains
+`shufpd` and `pslldq`; byte-exact scalar/SIMD round-trip tests remain
+authoritative for semantics. Do not impose a cross-host nanosecond threshold on
+CI.
+
+The same deterministic entropy/mixed/medium plus structured corpus must run an
+ordinary-LZ4 acceleration sweep at 1, 2, 3 and 4. For every accepted compressed
+page, decompress and compare all 4096 bytes. Acceleration 1 must reproduce the
+existing baseline length exactly. For each setting report ns/page, accepted
+payload bytes, raw fallbacks, and physical blocks/extents from
+`swapz_engine_plan_bounded()`. A faster compressor is not a promotion unless
+loaded matched evidence also preserves or improves lower WRITE bytes/requests,
+throughput and tails.
+
+Source-contract qualification must pin the safety boundaries of the optimized
+paths: generic-planner duplicate protection remains enabled; only the
+prevalidated production planner sets the uniqueness fast flag; cached metadata
+uses descriptor-only lookup only behind a validated-source test; metadata
+sequence is checked before payload lower I/O; provisional coalesced blocks
+cannot be published as validated cache; publication preflight contains no
+global GC mutate/restore loop; and paused-batch hashing covers the active
+transaction prefix.
+
+Loaded drained status snapshots must include `lz4_acceleration`,
+`delta64_transform_calls`, `delta64_transform_wall_ns`, and the passive
+`parallel_read_adjacent_chain_3plus`,
+`parallel_read_adjacent_chain_extent_max`, and
+`parallel_read_adjacent_chain_blocks_max` fields. When delta64 is enabled,
+transform calls must be bounded by candidate attempts and transform wall must
+be nonzero if calls are nonzero. Compare wrapper-inclusive production
+transform ns/call with the raw native backend value; the difference is part of
+the rescue economics.
+
+The active ID63 protocol remains the existing pair qualification. 3+ chain
+counters are evidence only and may not alter completion count, lower request
+count or cache state. A later active chain change requires exact missing-range
+tests for three through eight adjacent one-block ranges, mixed extent classes,
+cache-resident holes, segment boundaries, lower-read failure, stale metadata,
+and every constituent payload CRC before it may replace the pair path.
+
+Publication tests must continue to inject malformed siblings and GC-accounting
+underflow/overflow and prove all authority arrays are byte-for-byte unchanged
+on failure. Successful multi-record publication must prove live-record,
+mapped-page, GC-score and page-list totals equal a slow recomputation after the
+aggregate fast path.

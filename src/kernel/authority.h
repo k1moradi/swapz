@@ -64,6 +64,26 @@ struct swapz_tx {
 	struct swapz_tx_record records[SWAPZ_MAX_RECORDS];
 };
 
+/*
+ * Serialized publication-preflight scratch. Keeping these bounded aggregates
+ * in the authority object avoids multi-kilobyte kernel stack frames while
+ * eliminating repeated authority scans and temporary global GC mutations.
+ */
+struct swapz_finish_extent_delta {
+	swapz_u32 start_block;
+	swapz_u8 references;
+	swapz_u8 reserved[3];
+};
+
+struct swapz_finish_segment_delta {
+	swapz_u32 segment;
+	swapz_u32 live_bytes;
+	swapz_u32 io_cost;
+	swapz_u16 min_live_blocks;
+	swapz_u8 mapped_pages;
+	swapz_u8 reserved;
+};
+
 typedef int (*swapz_dead_segment_recycle_fn)(void *opaque,
 					      swapz_u32 segment);
 
@@ -173,6 +193,11 @@ struct swapz_authority {
 	 * pause is outside engine publish; resume is inside publish authority. */
 	unsigned long long batch_pause_crc_wall_ns;
 	unsigned long long batch_resume_crc_wall_ns;
+	/* Single ordered authority owner; never shared across publications. */
+	struct swapz_finish_extent_delta
+		finish_extent_deltas[SWAPZ_MAX_RECORDS];
+	struct swapz_finish_segment_delta
+		finish_segment_deltas[SWAPZ_MAX_RECORDS];
 };
 
 /*

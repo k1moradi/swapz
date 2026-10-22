@@ -7,6 +7,7 @@ swapz_u32 swapz_predict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output)
 	unsigned long long previous = swapz_predictor_load64(input);
 	unsigned long long value = swapz_predictor_load64(
 		input + SWAPZ_PREDICTOR_U64_BYTES);
+	swapz_u64x2 previous_values;
 	swapz_u32 offset = 2U * SWAPZ_PREDICTOR_U64_BYTES;
 
 	/*
@@ -16,16 +17,24 @@ swapz_u32 swapz_predict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output)
 	swapz_predictor_store64(output, previous);
 	swapz_predictor_store64(output + SWAPZ_PREDICTOR_U64_BYTES,
 			       value - previous);
+	memcpy(&previous_values, input, sizeof(previous_values));
 	for (; offset + sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
 	     offset += sizeof(swapz_u64x2)) {
 		swapz_u64x2 values, predecessors, delta;
 
+		/*
+		 * Retain the preceding input pair in-register. SHUFPD imm=1 forms
+		 * [previous.high, current.low], so every 16-byte result needs only
+		 * one new 16-byte input load instead of two overlapping loads.
+		 */
 		memcpy(&values, input + offset, sizeof(values));
-		memcpy(&predecessors,
-		       input + offset - SWAPZ_PREDICTOR_U64_BYTES,
-		       sizeof(predecessors));
+		predecessors = previous_values;
+		__asm__("shufpd $1, %1, %0"
+			: "+x"(predecessors)
+			: "x"(values));
 		delta = values - predecessors;
 		memcpy(output + offset, &delta, sizeof(delta));
+		previous_values = values;
 	}
 	return 0;
 }
@@ -49,7 +58,9 @@ void swapz_unpredict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output)
 		swapz_u64x2 shifted, base;
 
 		memcpy(&delta.u64, input + offset, sizeof(delta.u64));
-		shifted = (swapz_u64x2){0ULL, delta.u64[0]};
+		/* Shift the already-loaded XMM value instead of reloading delta[0]. */
+		shifted = delta.u64;
+		__asm__("pslldq $8, %0" : "+x"(shifted));
 		prefix.u64 = delta.u64 + shifted;
 		base = (swapz_u64x2){previous, previous};
 		prefix.u64 += base;
