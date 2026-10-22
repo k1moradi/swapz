@@ -2330,7 +2330,7 @@ static swapz_u16 swapz_probe_set(
         self.assertGreaterEqual(deploy.count('insmod "$MODULE"'), 2)
         self.assertIn("10:1000000:1|80:150000:64", benchmark)
 
-    def test_loaded_dirty_source_gate_ignores_only_canonical_report(self):
+    def test_loaded_privilege_boundary_preserves_git_metadata(self):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
