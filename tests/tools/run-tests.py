@@ -3098,7 +3098,7 @@ def print_bench(result):
         route = predictor["production_route"]
         print("  Exact hybrid production route — native-only model; no loaded I/O proof")
         print_table(
-            "Delta64 shared production-route decisions — native corpus",
+            "Delta64 shared production-route screening decisions — native corpus",
             ("eligible", "pack eligible", "passed", "attempts",
              "adopt", "RAW+", "LZ4+", "pack+"),
             [(route["eligible_pages"], route["packing_eligible_pages"],

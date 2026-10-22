@@ -1224,8 +1224,8 @@ Source `9a802eff7d9d` is owner-qualified with rescue off and fixed-array
 preparation. Packing-aware rescue-on behavior still lacks loaded qualification;
 native structured pages remain opportunity evidence. Console legends must
 describe both eligibility paths, thresholds 24/16, all score bands and the
-uniform-cliff limit. Shared production-route evidence must be split across
-compact Markdown tables so every rendered console line remains below 96
+uniform-cliff limit. Shared production-route screening evidence must be split
+across compact Markdown tables so every rendered console line remains below 96
 characters. Metadata payload-copy counters exclude cache insertion copies and
 directory lookup counts exclude scratch/extent-cache hits.
 
