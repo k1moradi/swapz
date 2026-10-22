@@ -546,7 +546,10 @@ overlapping preparation start; lifetime peak concurrency alone is insufficient.
 Rootless/report fixtures must carry the same K=1/2/4 telemetry shape so parser
 and fail-closed evidence gates remain covered without privileged module loading.
 Synthetic delta64-positive records must keep score-band totals exactly equal to
-eligible pages; mocks may not bypass the production accounting invariants.
+eligible pages; mocks may not bypass the production accounting invariants. The
+current positive control starts from an accepted >2024-byte LZ4 baseline, so
+mocked adoptions are LZ4 rescues and its sub-2024 packing-cliff counters remain
+zero.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
