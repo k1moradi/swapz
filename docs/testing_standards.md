@@ -530,9 +530,15 @@ must keep it absent.
 
 Source coverage must require both the ordered `swapz` workqueue and the
 `swapz-lz4` preparation workqueue to use
-`WQ_MEM_RECLAIM | WQ_UNBOUND` with one active worker. Bound preparation is a
-rejected experiment. FIFO ordering and sole publication/completion ownership
-remain serialized.
+`WQ_MEM_RECLAIM | WQ_UNBOUND`. The ordered authority workqueue remains
+single-active. Preparation remains one lane unless both async preparation and
+delta64 rescue are enabled; the read-only
+`delta64_prepare_workers=1|2|4` experiment may then raise only preparation
+concurrency. Every lane must own private input/predictor/LZ4 scratch and
+single-writer diagnostics, while the existing 64-page prepared-payload mask is
+shared and bounded. Bound/affinity-pinned preparation remains rejected. FIFO
+admission, global packing, physical WRITE submission, authority publication and
+BIO completion remain serialized under the ordered owner.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
