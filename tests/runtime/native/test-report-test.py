@@ -640,6 +640,19 @@ def delta64_prepare_arm(workers):
     return record
 
 
+def delta64_rescue_arm(enabled):
+    if enabled:
+        record = delta64_prepare_arm(1)
+        record["throughput_mbps"]["logical_write_mbps"] = 20.0
+        record["write_p99_ns"] = 2_300_000
+        return record
+    record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
+    record["kernel_write_path"]["delta64_prepare_workers"] = 1
+    record["fixture_sha256"] = "e" * 64
+    record["trace_sha256"] = "f" * 64
+    return record
+
+
 def lz4_acceleration_log():
     out = []
     spec = runner.MODEL_SPECS["ssd_emulated"]
@@ -762,6 +775,22 @@ def synthetic_log():
                 out.append(json.dumps(record))
             out.append(f"PASS_READ_COALESCE_CAP_AB={regime}:{read_cap}")
     spec = runner.MODEL_SPECS["ssd_emulated"]
+    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
+        out.append(f"START_DELTA64_RESCUE={enabled}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+        off = write_arm("off", qd=32, regime="ssd_emulated", mode=0)
+        off["fixture_sha256"] = "e" * 64
+        off["trace_sha256"] = "f" * 64
+        swapz = delta64_rescue_arm(enabled)
+        for record in ((swapz, off) if index % 2 else (off, swapz)):
+            out.append(json.dumps(record))
+        out.append(f"PASS_DELTA64_RESCUE={enabled}")
     delta64_sequence = [2 if bit else 1
                         for bit in runner.CONFIRMATION_SEQUENCE]
     for index, workers in enumerate(delta64_sequence):
@@ -1170,6 +1199,18 @@ class ReportContract(unittest.TestCase):
             sd_coalesce_diag["modes"]["1"]["sequential"][
                 "parallel_read_coalesce_skip_other"], 0)
 
+        delta64_rescue = runner.parse_delta64_rescue_sessions(
+            synthetic_log())
+        self.assertEqual([row["rescue"] for row in delta64_rescue],
+                         list(runner.CONFIRMATION_SEQUENCE))
+        rescue_diag = runner.delta64_rescue_verdict(delta64_rescue)
+        self.assertEqual(rescue_diag["overall"],
+                         "PASS_DELTA64_RESCUE_AB", rescue_diag)
+        self.assertEqual(rescue_diag["matched_pairs"], 5)
+        self.assertEqual(rescue_diag["modes"]["0"]["delta64_attempts"], 0)
+        self.assertGreater(rescue_diag["modes"]["1"]["delta64_attempts"], 0)
+        self.assertIn("throughput_change_fraction", rescue_diag["paired"])
+
         delta64_pilot = runner.parse_delta64_prepare_sessions(synthetic_log())
         expected_workers = [2 if bit else 1
                             for bit in runner.CONFIRMATION_SEQUENCE]
@@ -1491,6 +1532,8 @@ class ReportContract(unittest.TestCase):
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
             "lz4_acceleration": runner.lz4_acceleration_verdict(
                 runner.parse_lz4_acceleration(synthetic_log())),
+            "delta64_rescue": runner.delta64_rescue_verdict(
+                runner.parse_delta64_rescue_sessions(synthetic_log())),
             "delta64_prepare": runner.delta64_prepare_verdict(
                 runner.parse_delta64_prepare_sessions(synthetic_log())),
             "write_saturation": saturation,
@@ -1502,6 +1545,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Predictive-compression screening", rendered)
         self.assertIn("LZ4 acceleration 1 vs 4", rendered)
         self.assertIn("Acceleration 4 minus 1 paired 95% confidence intervals",
+                      rendered)
+        self.assertIn("Delta64 rescue off vs on", rendered)
+        self.assertIn("Rescue on minus off paired 95% confidence intervals",
                       rendered)
         self.assertIn("Delta64 preparation K=1 vs K=2", rendered)
         self.assertIn("K=2 minus K=1 paired 95% confidence intervals",

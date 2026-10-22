@@ -5,35 +5,40 @@ typedef unsigned long long swapz_u64x8 __attribute__((vector_size(64)));
 
 swapz_u32 swapz_predict_delta64_avx512(const swapz_u8 *input, swapz_u8 *output)
 {
-	swapz_u64x8 previous_block, current_block, shifted, delta;
-	swapz_u32 base = 0, offset = SWAPZ_PREDICTOR_U64_BYTES;
+	swapz_u64x8 previous_block = { 0 };
+	swapz_u32 offset = 0;
 
-	swapz_predictor_store64(output, swapz_predictor_load64(input));
-	memcpy(&previous_block, input, sizeof(previous_block));
-	for (; base + 2U * sizeof(swapz_u64x8) <= SWAPZ_BLOCK_BYTES;
-	     base += sizeof(swapz_u64x8), offset += sizeof(swapz_u64x8)) {
-		memcpy(&current_block, input + base + sizeof(swapz_u64x8),
-		       sizeof(current_block));
+	/*
+	 * delta64 defines y[0] = x[0], which is x[0] - virtual x[-1] with
+	 * x[-1] = 0. Start at byte zero so every 64-byte load/store is naturally
+	 * cache-line aligned and the scalar prologue/tail disappear completely.
+	 * Process two ZMM vectors per iteration to cover one 128-byte pair.
+	 */
+	for (; offset + 2U * sizeof(swapz_u64x8) <= SWAPZ_BLOCK_BYTES;
+	     offset += 2U * sizeof(swapz_u64x8)) {
+		swapz_u64x8 current0, current1, predecessor0, predecessor1;
+		swapz_u64x8 delta0, delta1;
+
+		memcpy(&current0, input + offset, sizeof(current0));
+		memcpy(&current1, input + offset + sizeof(current0),
+		       sizeof(current1));
 		/*
-		 * previous_block = x[n..n+7], current_block = x[n+8..n+15].
-		 * VALIGNQ builds x[n+1..n+8], so one packed subtraction emits
-		 * eight consecutive deltas while each 64-byte input block is
-		 * loaded only once.
+		 * In AT&T VALIGNQ form used here, imm=7 produces
+		 * [previous[7], current[0..6]]. The first iteration uses an all-zero
+		 * previous vector, so lane zero emits x[0] unchanged.
 		 */
-		__asm__ volatile("valignq $1, %1, %2, %0"
-				 : "=v"(shifted)
-				 : "v"(previous_block), "v"(current_block));
-		delta = shifted - previous_block;
-		memcpy(output + offset, &delta, sizeof(delta));
-		previous_block = current_block;
-	}
-	for (; offset < SWAPZ_BLOCK_BYTES; offset += SWAPZ_PREDICTOR_U64_BYTES) {
-		unsigned long long value = swapz_predictor_load64(input + offset);
-		unsigned long long previous =
-			swapz_predictor_load64(input + offset -
-					       SWAPZ_PREDICTOR_U64_BYTES);
-
-		swapz_predictor_store64(output + offset, value - previous);
+		__asm__("valignq $7, %1, %2, %0"
+			: "=v"(predecessor0)
+			: "v"(previous_block), "v"(current0));
+		__asm__("valignq $7, %1, %2, %0"
+			: "=v"(predecessor1)
+			: "v"(current0), "v"(current1));
+		delta0 = current0 - predecessor0;
+		delta1 = current1 - predecessor1;
+		memcpy(output + offset, &delta0, sizeof(delta0));
+		memcpy(output + offset + sizeof(delta0), &delta1,
+		       sizeof(delta1));
+		previous_block = current1;
 	}
 	return 0;
 }

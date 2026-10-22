@@ -241,6 +241,31 @@ for acceleration_mode in "${confirmation_modes[@]}"; do
     (( index += 1 ))
 done
 
+# Delta64 rescue policy confirmation at fixed K=1. Five counterbalanced
+# off/on pairs reuse the exact positive delta64 fixture and SSD RAM model so
+# the report can distinguish rescue value from preparation-width effects.
+index=0
+for delta64_rescue in "${confirmation_modes[@]}"; do
+    arguments=(--run-owned-ram-pair --profile medium
+               --retain-ms 2 --unpaced
+               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
+               --write-only-qd 32 --async-prepare)
+    # benchmark-owned-pair.sh consumes private suffixes from the tail in
+    # reverse parser order: rescue, then workers, then shared plan.
+    if (( delta64_rescue )); then
+        arguments+=(--delta64-rescue)
+    fi
+    arguments+=(--delta64-prepare-workers 1
+               --shared-plan "$shared_plan/delta64")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_DELTA64_RESCUE=%s\n' "$delta64_rescue"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+    printf 'PASS_DELTA64_RESCUE=%s\n' "$delta64_rescue"
+    (( index += 1 ))
+done
+
 # Delta64 CPU-parallelism confirmation. K=4 regressed in both qualified
 # observations, so the default matrix no longer spends time on it. Five
 # adjacent counterbalanced K=1/K=2 pairs reuse the exact positive fixture and
@@ -370,5 +395,5 @@ for regime in sd_emulated ssd_emulated; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 K=1 read-bypass sessions, 10 paired LZ4 acceleration sessions, 10 paired delta64 preparation-width sessions, 20 ID63 toggle sessions, 30 ID63 cap sessions, and 40 write-only sessions completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 K=1 read-bypass sessions, 10 paired LZ4 acceleration sessions, 10 paired delta64 rescue sessions, 10 paired delta64 preparation-width sessions, 20 ID63 toggle sessions, 30 ID63 cap sessions, and 40 write-only sessions completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry bounded matched evidence; ID69 is now a loaded structural invariant.'

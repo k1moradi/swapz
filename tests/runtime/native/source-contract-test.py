@@ -1470,6 +1470,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("--k1-allow-after-read-bypass", loaded)
         self.assertIn("--async-prepare", loaded)
         self.assertIn("START_READ_COALESCE_CAP_AB=", loaded)
+        self.assertIn("START_DELTA64_RESCUE=", loaded)
+        self.assertIn("PASS_DELTA64_RESCUE=", loaded)
+        self.assertIn("--delta64-prepare-workers 1", loaded)
         self.assertIn("read_coalesce_cap_sequence=(2 4 8", loaded)
         self.assertIn("CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)",
                       runner)
@@ -2530,6 +2533,9 @@ static swapz_u16 swapz_probe_set(
         predictor_avx512 = (
             ROOT / "src/kernel/predictor-avx512.c"
         ).read_text()
+        predictor_neon = (
+            ROOT / "src/kernel/predictor-neon.c"
+        ).read_text()
         predictor_dispatch = (
             ROOT / "src/kernel/predictor.c"
         ).read_text()
@@ -2559,6 +2565,13 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("base += step0", predictor_avx2)
         self.assertNotIn("previous = prefix.u64[3]", predictor_avx2)
 
+        avx512_forward = source_body(
+            "swapz_predict_delta64_avx512", predictor_avx512)
+        self.assertIn("previous_block = { 0 }", avx512_forward)
+        self.assertIn("swapz_u32 offset = 0", avx512_forward)
+        self.assertIn("2U * sizeof(swapz_u64x8)", avx512_forward)
+        self.assertIn('valignq $7', avx512_forward)
+        self.assertNotIn("swapz_predictor_store64(", avx512_forward)
         self.assertIn("2U * sizeof(swapz_u64x8)", predictor_avx512)
         self.assertIn("base += step0", predictor_avx512)
         self.assertNotIn("previous = prefix[7]", predictor_avx512)
@@ -2568,6 +2581,16 @@ static swapz_u16 swapz_probe_set(
         self.assertIn(
             "swapz_unpredict_impl = swapz_unpredict_delta64_avx2",
             predictor_dispatch)
+        neon_forward = source_body("swapz_predict_delta64_neon", predictor_neon)
+        neon_inverse = source_body("swapz_unpredict_delta64_neon", predictor_neon)
+        for neon_body in (neon_forward, neon_inverse):
+            self.assertIn("swapz_u32 offset = 0", neon_body)
+            self.assertIn("2U * sizeof(swapz_u64x2)", neon_body)
+        self.assertIn("previous = { 0ULL, 0ULL }", neon_forward)
+        self.assertIn("base = { 0ULL, 0ULL }", neon_inverse)
+        self.assertIn('ext %0.16b', predictor_neon)
+        self.assertIn('dup %0.2d', neon_inverse)
+        self.assertIn("base += step_pair", neon_inverse)
 
         # Validated metadata-cache bytes bypass full swapz_validate(), but a
         # sequence mismatch is rejected before any lower payload read.
