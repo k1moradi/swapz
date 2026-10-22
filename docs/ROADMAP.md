@@ -399,10 +399,11 @@ SWZ geometry, authority ordering or the default compression policy.
 - **LZ4 acceleration evidence:** ordinary first-pass LZ4 exposes read-only
   `lz4_acceleration=1..4`, default 1. The delta64 second LZ4 remains fixed at
   1 because that path explicitly targets tight packing cliffs. Native
-  qualification sweeps 1/2/3/4 on the same deterministic corpus, verifies
-  round-trip bytes, and feeds each set of lengths to the real bounded planner.
-  Do not promote a value solely because compressed bytes differ; compare CPU,
-  planned blocks/extents, lower I/O, throughput and tails.
+  qualification still sweeps 1/2/3/4 for round-trip CPU/geometry evidence.
+  Loaded qualification now concentrates on five counterbalanced acceleration
+  1-versus-4 pairs because 4 has repeatedly been the native CPU winner while
+  retaining the same planner-block geometry. Promotion still requires neutral
+  lower-I/O geometry and paired useful-service/tail evidence.
 - **ID63 bounded adjacent-range chain:** the active path now extends the
   qualified pair mechanism to 2..8 physically adjacent immutable extents when
   their exact missing ranges form one zero-padding lower read. The lower-read
