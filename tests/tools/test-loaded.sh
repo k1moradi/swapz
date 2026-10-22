@@ -153,12 +153,19 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
-# ID73 first-pass LZ4 acceleration directional sweep. Keep async preparation,
-# device model, workload, packing policy and replay plan fixed; only the
-# immutable compression acceleration changes. Native qualification supplies the
-# repeated CPU/geometry evidence; these loaded arms expose lower-I/O cliffs.
+# ID73 promotion-quality LZ4 acceleration A/B. The native sweep has already
+# shown that acceleration 4 materially lowers CPU time while retaining the
+# same bounded planner block geometry. Loaded qualification therefore spends
+# its repetitions on the decision boundary only: acceleration 1 versus 4.
+# Five adjacent counterbalanced pairs keep source, fixture, trace, device
+# model, async preparation, delta64 policy and packing policy identical.
 index=0
-for lz4_acceleration in 1 2 3 4; do
+for acceleration_mode in "${confirmation_modes[@]}"; do
+    if (( acceleration_mode )); then
+        lz4_acceleration=4
+    else
+        lz4_acceleration=1
+    fi
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
                --async-prepare --lz4-acceleration "$lz4_acceleration"
@@ -172,22 +179,32 @@ for lz4_acceleration in 1 2 3 4; do
     (( index += 1 ))
 done
 
-# Delta64 rescue CPU-parallelism pilot. Keep the SSD model, QD32 write-only
-# replay, fixture, LZ4 policy, packing and ordered publication identical; vary
-# only the bounded preparation lane count. K=1 is the control. K=2/K=4 must
-# actually observe >1 concurrent lane in target status or the experiment fails.
-# This first pass is directional; promotion still requires repeated matched
-# K=1/K=2 (and K=4 if useful) pairs plus CPU/PSI evidence.
-for delta64_workers in 1 2 4; do
+# Delta64 CPU-parallelism confirmation. K=4 regressed in both qualified
+# observations, so the default matrix no longer spends time on it. Five
+# adjacent counterbalanced K=1/K=2 pairs reuse the exact positive fixture and
+# QD32 SSD model. K=2 must execute overlapping preparation during the timed
+# interval, while ordered planning/publication and lower-I/O semantics remain
+# unchanged. The module still accepts K=4 for explicit diagnostic work.
+index=0
+for delta64_mode in "${confirmation_modes[@]}"; do
+    if (( delta64_mode )); then
+        delta64_workers=2
+    else
+        delta64_workers=1
+    fi
     arguments=(--run-owned-ram-pair --profile medium
                --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
                --write-only-qd 32 --async-prepare --delta64-rescue
                --delta64-prepare-workers "$delta64_workers"
                --shared-plan "$shared_plan/delta64")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
     printf 'START_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
     "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
     printf 'PASS_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
+    (( index += 1 ))
 done
 
 # ID63 adjacent distinct-extent confirmation: vary only exact zero-extra
@@ -265,5 +282,5 @@ for regime in sd_emulated ssd_emulated; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 4 LZ4 acceleration sessions, 3 delta64 preparation-width sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 paired LZ4 acceleration sessions, 10 paired delta64 preparation-width sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry bounded matched evidence; ID69 is now a loaded structural invariant.'
