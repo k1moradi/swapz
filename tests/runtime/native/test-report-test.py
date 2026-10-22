@@ -545,6 +545,35 @@ def write_arm(candidate, *, qd, regime, mode):
             mode=mode, target=max(4, qd)) if swapz else None),
     }
 
+def delta64_prepare_arm(workers):
+    record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
+    kernel = record["kernel_write_path"]
+    kernel.update({
+        "delta64_rescue": 1,
+        "delta64_prepare_workers": workers,
+        "delta64_prepare_active_max": workers,
+        "delta64_prepare_pages": 100,
+        "delta64_prepare_parallel_starts": 0 if workers == 1 else 20,
+        "delta64_eligible": 100,
+        "delta64_classifier_pass": 100,
+        "delta64_attempts": 100,
+        "delta64_adopted": 100,
+        "delta64_raw_rescues": 100,
+        "delta64_lz4_rescues": 0,
+        "delta64_score_ge24": 100,
+        "delta64_payload_bytes_saved": 100000,
+        "delta64_raw_payload_bytes_saved": 100000,
+        "delta64_lz4_payload_bytes_saved": 0,
+        "delta64_transform_calls": 100,
+        "delta64_transform_wall_ns": 100000,
+        "delta64_wall_ns": 1500000,
+    })
+    record["throughput_mbps"]["logical_write_mbps"] = 18 + workers
+    record["fixture_sha256"] = "e" * 64
+    record["trace_sha256"] = "f" * 64
+    return record
+
+
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
@@ -603,6 +632,18 @@ def synthetic_log():
         for record in ((swapz, raw) if index % 2 else (raw, swapz)):
             out.append(json.dumps(record))
         out.append(f"PASS_SD_READ_COALESCE_AB={enabled}")
+    spec = runner.MODEL_SPECS["ssd_emulated"]
+    for workers in (1, 2, 4):
+        out.append(f"START_DELTA64_PREPARE_WORKERS={workers}")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+        out.append(json.dumps(write_arm(
+            "off", qd=32, regime="ssd_emulated", mode=0)))
+        out.append(json.dumps(delta64_prepare_arm(workers)))
+        out.append(f"PASS_DELTA64_PREPARE_WORKERS={workers}")
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
         out.append(f"START_WRITE_SATURATION_REGIME={regime}")
@@ -901,6 +942,17 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             sd_coalesce_diag["modes"]["1"]["sequential"][
                 "parallel_read_coalesce_skip_other"], 0)
+
+        delta64_pilot = runner.parse_delta64_prepare_sessions(synthetic_log())
+        self.assertEqual([row["workers"] for row in delta64_pilot], [1, 2, 4])
+        delta64_diag = runner.delta64_prepare_verdict(delta64_pilot)
+        self.assertEqual(delta64_diag["overall"],
+                         "PASS_DELTA64_PREPARE_PILOT")
+        self.assertEqual(delta64_diag["modes"]["1"]["prepare_parallel_starts"], 0)
+        self.assertGreater(
+            delta64_diag["modes"]["2"]["prepare_parallel_starts"], 0)
+        self.assertGreater(
+            delta64_diag["modes"]["4"]["prepare_active_max"], 1)
 
         self.assertEqual(
             [s["async_prepare"] for s in sessions],
