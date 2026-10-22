@@ -325,9 +325,12 @@ static swapz_u16 swapz_probe_set(
                       "swapz_delta64_rescue_enabled, bool, 0444)", DM)
         self.assertIn("ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled",
                       ctor)
-        for owner in (producer, ordered):
-            self.assertRegex(owner, r"if \(ctx->delta64_rescue_enabled\)\s+"
-                             r"(?:prepared->length|length) = swapz_delta64_rescue\(")
+        self.assertRegex(producer,
+                         r"if \(ctx->delta64_rescue_enabled && !prepared->zero\)\s+"
+                         r"prepared->length = swapz_delta64_rescue\(")
+        self.assertRegex(ordered,
+                         r"if \(ctx->delta64_rescue_enabled && !inline_zero\)\s+"
+                         r"length = swapz_delta64_rescue\(")
         for allocation in ("ctx->predictor_page = kmalloc(",
                            "slot->predictor_page = kmalloc(",
                            "ctx->preparation_predictor_page ="):
