@@ -4342,8 +4342,8 @@ def print_bench(result):
             print("  SSE2 2x minus baseline paired 95% CI "
                   f"(n={ci['n']}, {sse2_ab['repeats_per_arm']} repeats/arm): "
                   f"{ci['mean'] * 100:+.1f}% "
-                  f"[{ci['low'] * 100:+.1f}%, {ci['high'] * 100:+.1f}%]; "
-                  "native-only, not production promotion")
+                  f"[{ci['low'] * 100:+.1f}%, {ci['high'] * 100:+.1f}%]")
+            print("  Native-only evidence; not production promotion.")
         print("  Sampled delta64 classifier — scalar; "
               f"{classifier['stage1_pairs']} -> {classifier['sample_pairs']} pairs; "
               f"{classifier['ns_per_page']} ns/eligible page")
