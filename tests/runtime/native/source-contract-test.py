@@ -36,7 +36,7 @@ def body(symbol: str) -> str:
 
 
 def source_body(symbol: str, source: str) -> str:
-    match = re.search(r"(?:static\s+)?(?:int|void|swapz_u32)\s+" + re.escape(symbol) +
+    match = re.search(r"(?:static\s+)?(?:int|void|swapz_u16|swapz_u32)\s+" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", source, re.S)
     if not match:
         raise AssertionError(f"Missing source symbol {symbol}")
