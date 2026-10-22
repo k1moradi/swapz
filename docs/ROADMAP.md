@@ -411,22 +411,22 @@ SWZ geometry, authority ordering or the default compression policy.
   engines share one 64-page decode-output pool rather than multiplying 256KiB
   buffers. Conservative 3+ full-extent counters remain opportunity evidence;
   `parallel_read_coalesced_reqs_saved` records N-1 for an N-extent chain.
-- **Production delta64 wrapper cost:** kernel status now reports transform calls
-  and transform wall around the dispatched transform, which includes
-  `kernel_fpu_begin/end` on x86. Compare this with raw native backend ns/page
-  before using native transform economics to justify rescue policy.
+- **Production delta64 wrapper cost:** kernel status reports transform calls
+  and wrapper-inclusive transform wall, including `kernel_fpu_begin/end` on
+  x86. Current loaded/native comparisons put the wrapper premium in the
+  hundreds-of-nanoseconds range while total rescue work is tens of
+  microseconds per page, so FPU-transition batching is deprioritized relative
+  to compression and scheduling work.
 - **Bounded delta64 preparation parallelism:** production-compatible policy
   remains `delta64_prepare_workers=1`. With both `async_prepare=1` and
-  `delta64_rescue=1`, qualification may select 2 or 4 unbound preparation
-  lanes. Every lane owns its input page, predictor page, LZ4 work memory,
-  delta64 counters and timing state; the 64-page prepared-payload pool remains
-  globally bounded. Lanes may prepare independent tails, but the existing
-  ordered worker remains the sole planner, physical-WRITE, authority,
-  publication and BIO-completion owner. Status reports configured effective
-  width, maximum active lanes, producer-prepared pages and timed overlapping
-  worker starts. The first SSD-model pilot uses a deterministic delta64-positive
-  64-bit counter/timestamp-like fixture so K>1 must actually overlap during the
-  timed replay. This is an experiment, not a default-policy promotion.
+  `delta64_rescue=1`, the diagnostic parameter still accepts 2 or 4 unbound
+  lanes, with private per-lane scratch and diagnostics and one ordered
+  planner/publisher owner. K=4 regressed useful throughput in both qualified
+  directional four-CPU observations, so it is removed from the default
+  qualification matrix. K=2 changed sign between those observations and now
+  receives five counterbalanced K=1/K=2 pairs with exact useful-work equality,
+  timed-overlap proof, CPU/PSI and 95% confidence intervals before any
+  promotion decision.
 - **Low-risk companion work:** validated extent-cache refreshes copy only
   missing blocks; slot priming never republishes provisional coalesced bytes;
   GC relocation reuses the payload CRC just verified by the read engine; the
