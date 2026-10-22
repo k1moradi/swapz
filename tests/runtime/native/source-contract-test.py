@@ -2524,13 +2524,41 @@ static swapz_u16 swapz_probe_set(
         gc_sort = body("swapz_gc_sort")
         gc_commit = source_body("swapz_gc_commit_rotation", authority)
 
-        # SSE2 consumes one new input vector per output pair and shifts the
-        # inverse delta in-register instead of reloading delta[0].
+        predictor_avx2 = (
+            ROOT / "src/kernel/predictor-avx2.c"
+        ).read_text()
+        predictor_avx512 = (
+            ROOT / "src/kernel/predictor-avx512.c"
+        ).read_text()
+        predictor_dispatch = (
+            ROOT / "src/kernel/predictor.c"
+        ).read_text()
+
+        # SIMD inverse scans keep their cross-vector carry in SIMD registers.
+        # The local prefix/total is independent of the incoming base, allowing
+        # OoO execution to overlap shuffle work across the two-way unroll.
         self.assertIn('shufpd $1', predictor_sse2)
         self.assertIn('pslldq $8', predictor_sse2)
+        self.assertIn('pshufd $0xee', predictor_sse2)
+        self.assertIn("base += step0", predictor_sse2)
+        self.assertNotIn("previous = prefix.u64[1]", predictor_sse2)
         self.assertNotIn(
             "input + offset - SWAPZ_PREDICTOR_U64_BYTES", predictor_sse2)
-        self.assertNotIn("(swapz_u64x2){0ULL, delta.u64[0]}", predictor_sse2)
+
+        self.assertIn("offset < sizeof(swapz_u64x4)", predictor_avx2)
+        self.assertIn('vpermq $0xff', predictor_avx2)
+        self.assertIn("base += step0", predictor_avx2)
+        self.assertNotIn("previous = prefix.u64[3]", predictor_avx2)
+
+        self.assertIn("2U * sizeof(swapz_u64x8)", predictor_avx512)
+        self.assertIn("base += step0", predictor_avx512)
+        self.assertNotIn("previous = prefix[7]", predictor_avx512)
+        self.assertIn(
+            "static_call_update(swapz_predictor_inverse_call, swapz_unpredict_avx2)",
+            predictor_dispatch)
+        self.assertIn(
+            "swapz_unpredict_impl = swapz_unpredict_delta64_avx2",
+            predictor_dispatch)
 
         # Validated metadata-cache bytes bypass full swapz_validate(), but a
         # sequence mismatch is rejected before any lower payload read.
