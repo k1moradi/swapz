@@ -535,16 +535,18 @@ Source coverage must require both the ordered `swapz` workqueue and the
 `WQ_MEM_RECLAIM | WQ_UNBOUND`. The ordered authority workqueue remains
 single-active. Preparation remains one lane unless both async preparation and
 delta64 rescue are enabled; the read-only
-`delta64_prepare_workers=1|2|4` experiment may then raise only preparation
-concurrency. Every lane must own private input/predictor/LZ4 scratch and
-single-writer diagnostics, while the existing 64-page prepared-payload mask is
-shared and bounded. Bound/affinity-pinned preparation remains rejected. FIFO
-admission, global packing, physical WRITE submission, authority publication and
-BIO completion remain serialized under the ordered owner. Loaded K=2/K=4
-qualification must fail unless the exact timed interval reports at least one
-overlapping preparation start; lifetime peak concurrency alone is insufficient.
-Rootless/report fixtures must carry the same K=1/2/4 telemetry shape so parser
-and fail-closed evidence gates remain covered without privileged module loading.
+`delta64_prepare_workers=1|2|4` diagnostic parameter may then raise only
+preparation concurrency. The default loaded qualification uses K=1 and K=2
+only; K=4 is retained solely for explicit diagnostics after two directional
+four-CPU observations regressed throughput. Every lane must own private
+input/predictor/LZ4 scratch and single-writer diagnostics, while the existing
+64-page prepared-payload mask is shared and bounded. Bound/affinity-pinned
+preparation remains rejected. FIFO admission, global packing, physical WRITE
+submission, authority publication and BIO completion remain serialized under
+the ordered owner. Every K=2 qualification observation must report timed
+overlap; every K=1 observation must report none. Rootless/report fixtures must
+carry the same five counterbalanced K=1/K=2 pairs so parser and fail-closed
+evidence gates remain covered without privileged module loading.
 Synthetic delta64-positive records must keep score-band totals exactly equal to
 eligible pages; mocks may not bypass the production accounting invariants. The
 current positive control starts from an accepted >2024-byte LZ4 baseline, so
