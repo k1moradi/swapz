@@ -230,6 +230,7 @@ class PublicMakeContract(unittest.TestCase):
                 record.update({
                     "physical_write_reqs": 5,
                     "lz4_acceleration": 1,
+                    "read_coalesce_max_blocks": 8,
                     "lz4_wall_ns": 20000000,
                     "ordered_lz4_wall_ns": 15000000,
                     "prep_lz4_wall_ns": 5000000,
@@ -431,6 +432,7 @@ class PublicMakeContract(unittest.TestCase):
                     "parallel_read_coalesce_skip_gap": 1,
                     "parallel_read_coalesce_skip_other": 0,
                     "read_worker_cpu_ns": 1000000,
+                    "read_coalesce_max_blocks": 8,
                                 } if is_swapz else None),
                             }
                             for key in ("sequential", "seeded_random")
@@ -583,6 +585,25 @@ class PublicMakeContract(unittest.TestCase):
                 record["trace_sha256"] = "f" * 64
                 return json.dumps(record, sort_keys=True)
 
+            def mock_k1_read_bypass_arm(allow):
+                record = json.loads(mock_arm("swapz", 1))
+                kernel = record["kernel_write_path"]
+                kernel["k1_allow_after_read_bypass"] = allow
+                kernel["read_coalesce_max_blocks"] = 8
+                kernel["invalidate_cache_on_write_admit"] = 0
+                kernel["pipeline_read_bypass_skips"] = 4 if not allow else 0
+                record["fixture_sha256"] = "1" * 64
+                record["trace_sha256"] = "2" * 64
+                return json.dumps(record, sort_keys=True)
+
+            def mock_read_coalesce_cap_arm(cap, sd=False):
+                record = json.loads(mock_coalesce_arm(True, sd=sd))
+                for phase in record["packed_read"]["passes"].values():
+                    phase["kernel_read_path"]["read_coalesce_max_blocks"] = cap
+                record["fixture_sha256"] = "3" * 64
+                record["trace_sha256"] = "4" * 64
+                return json.dumps(record, sort_keys=True)
+
             records = [
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
@@ -646,6 +667,40 @@ class PublicMakeContract(unittest.TestCase):
                     mock_arm("off", 0) if index % 2 else mock_coalesce_arm(enabled, sd=True),
                     f"PASS_SD_READ_COALESCE_AB={enabled}",
                 ))
+            for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
+                for index, allow in enumerate(confirmation):
+                    records.extend((
+                        f"START_K1_READ_BYPASS_AB={regime}:{allow}",
+                        "REPLAY_ORDER=swapz-first" if index % 2 else
+                        "REPLAY_ORDER=off-first",
+                        f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} "
+                        f"IRQMODE={irq} QUEUE_MODE={queue_mode} "
+                        f"SUBMIT_QUEUES={submit_queues} "
+                        f"HW_QUEUE_DEPTH={hw_depth}",
+                        mock_k1_read_bypass_arm(allow) if index % 2 else
+                        mock_arm("off", 1),
+                        mock_arm("off", 1) if index % 2 else
+                        mock_k1_read_bypass_arm(allow),
+                        f"PASS_K1_READ_BYPASS_AB={regime}:{allow}",
+                    ))
+                for index, read_cap in enumerate(
+                        runner_contract.READ_COALESCE_CAP_SEQUENCE):
+                    records.extend((
+                        f"START_READ_COALESCE_CAP_AB={regime}:{read_cap}",
+                        "REPLAY_ORDER=swapz-first" if index % 2 else
+                        "REPLAY_ORDER=off-first",
+                        f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} "
+                        f"IRQMODE={irq} QUEUE_MODE={queue_mode} "
+                        f"SUBMIT_QUEUES={submit_queues} "
+                        f"HW_QUEUE_DEPTH={hw_depth}",
+                        mock_read_coalesce_cap_arm(
+                            read_cap, sd=(regime == "sd_emulated"))
+                        if index % 2 else mock_arm("off", 0),
+                        mock_arm("off", 0) if index % 2 else
+                        mock_read_coalesce_cap_arm(
+                            read_cap, sd=(regime == "sd_emulated")),
+                        f"PASS_READ_COALESCE_CAP_AB={regime}:{read_cap}",
+                    ))
             cap, ns, irq, queue_mode, submit_queues, hw_depth = (
                 80, 150000, 2, 2, 1, 64)
             delta64_sequence = [
