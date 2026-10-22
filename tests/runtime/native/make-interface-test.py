@@ -510,8 +510,8 @@ class PublicMakeContract(unittest.TestCase):
                     "delta64_wall_ns": 1500000,
                 })
                 record["throughput_mbps"]["logical_write_mbps"] = 18 + workers
-                record["fixture_sha256"] = "delta64-fixture"
-                record["trace_sha256"] = "delta64-trace"
+                record["fixture_sha256"] = "e" * 64
+                record["trace_sha256"] = "f" * 64
                 return json.dumps(record, sort_keys=True)
 
             records = [
@@ -542,8 +542,9 @@ class PublicMakeContract(unittest.TestCase):
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
-            for index, acceleration in enumerate(
-                    runner_contract.LZ4_ACCELERATIONS):
+            lz4_sequence = [
+                4 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
+            for index, acceleration in enumerate(lz4_sequence):
                 records.extend((
                     f"START_LZ4_ACCELERATION={acceleration}",
                     "REPLAY_ORDER=swapz-first" if index % 2 else
@@ -578,12 +579,20 @@ class PublicMakeContract(unittest.TestCase):
                 ))
             cap, ns, irq, queue_mode, submit_queues, hw_depth = (
                 80, 150000, 2, 2, 1, 64)
-            for workers in (1, 2, 4):
+            delta64_sequence = [
+                2 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
+            for index, workers in enumerate(delta64_sequence):
+                off = json.loads(mock_write_arm("off", 32, 0))
+                off["fixture_sha256"] = "e" * 64
+                off["trace_sha256"] = "f" * 64
+                swapz = json.loads(mock_delta64_arm(workers))
                 records.extend((
                     f"START_DELTA64_PREPARE_WORKERS={workers}",
+                    "REPLAY_ORDER=swapz-first" if index % 2 else
+                    "REPLAY_ORDER=off-first",
                     f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
-                    mock_arm("off", 0),
-                    mock_delta64_arm(workers),
+                    json.dumps(swapz if index % 2 else off, sort_keys=True),
+                    json.dumps(off if index % 2 else swapz, sort_keys=True),
                     f"PASS_DELTA64_PREPARE_WORKERS={workers}",
                 ))
             for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
