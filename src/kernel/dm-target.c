@@ -916,7 +916,7 @@ static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
 				if (tx->records[record].logical_page == logical)
 					return true;
 		}
-		slot_index = (slot_index + 1U) % SWAPZ_MAX_WRITE_PIPELINE_DEPTH;
+		slot_index = (slot_index + 1U) % ctx->write_pipeline_depth;
 	}
 	return ctx->authority.batch_pending != pending;
 }
@@ -1031,7 +1031,7 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	ctx->inflight_count++;
 	ctx->inflight_group_submissions++;
 	ctx->inflight_tail =
-		(ctx->inflight_tail + 1U) % SWAPZ_MAX_WRITE_PIPELINE_DEPTH;
+		(ctx->inflight_tail + 1U) % ctx->write_pipeline_depth;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	atomic_inc(&ctx->lower_write_active);
 	ctx->prep_lower_write_samples++;
@@ -1136,7 +1136,7 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 
 	WRITE_ONCE(inflight->active, false);
 	ctx->inflight_head =
-		(ctx->inflight_head + 1U) % SWAPZ_MAX_WRITE_PIPELINE_DEPTH;
+		(ctx->inflight_head + 1U) % ctx->write_pipeline_depth;
 	ctx->inflight_count--;
 	if (!ctx->inflight_count) {
 		ctx->inflight_tail = ctx->inflight_head;

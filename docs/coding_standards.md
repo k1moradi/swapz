@@ -78,9 +78,11 @@ K>1 lower-WRITE slots require immutable per-run ownership exactly as K=1 does.
 Adding a slot without measured ready-run pressure is forbidden. The bounded
 depth-2 diagnostic is permitted only because fast-QD32 ready-wait evidence
 established that pressure. Each slot owns disjoint packed bytes, transaction
-snapshots, BIO references and completion state. Same-page writes across runs
-require an explicit generation/order fence; authority publication and upper-BIO
-completion remain FIFO even if lower I/O completes out of order. A two-run
+snapshots, BIO references and completion state. Ring indices wrap by the
+configured runtime `write_pipeline_depth`, not the compile-time slot-array
+capacity; depth 1 must therefore remain permanently on slot 0. Same-page writes
+across runs require an explicit generation/order fence; authority publication
+and upper-BIO completion remain FIFO even if lower I/O completes out of order. A two-run
 authority group may not append after replay has consumed its prefix; failed
 second-run preparation/submission must roll back only its verified tail
 reservations. PREFLUSH/FUA/DISCARD, GC ownership boundaries, suspend, teardown

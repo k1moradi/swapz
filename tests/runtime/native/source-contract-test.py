@@ -2149,8 +2149,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->authority.batch_pending && !inflight_active", independent)
         run_fence = body("swapz_inflight_run_touches_logical")
         self.assertIn("ctx->authority.batch_pending != pending", run_fence)
-        self.assertIn("slot_index = (slot_index + 1U) % SWAPZ_MAX_WRITE_PIPELINE_DEPTH",
+        self.assertIn("slot_index = (slot_index + 1U) % ctx->write_pipeline_depth",
                       run_fence)
+        self.assertNotIn("% SWAPZ_MAX_WRITE_PIPELINE_DEPTH", run_fence)
         self.assertIn("tx->records[record].logical_page == logical", run_fence)
         self.assertIn("swapz_inflight_run_touches_logical(ctx, logical)", independent)
         self.assertIn("swapz_window_read_independent(ctx->batch, ctx->batch_count",
@@ -2285,6 +2286,12 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("bio_endio", done)
         self.assertIn("swapz_engine_complete_batched_run", finalize)
         self.assertIn("ctx->inflight_head", finalize)
+        self.assertIn("(ctx->inflight_tail + 1U) % ctx->write_pipeline_depth",
+                      submit)
+        self.assertIn("(ctx->inflight_head + 1U) % ctx->write_pipeline_depth",
+                      finalize)
+        self.assertNotIn("% SWAPZ_MAX_WRITE_PIPELINE_DEPTH", submit)
+        self.assertNotIn("% SWAPZ_MAX_WRITE_PIPELINE_DEPTH", finalize)
         self.assertIn("ctx->pipeline_active_wall_ns +=", finalize)
         self.assertIn("swapz_complete(inflight->bios[index]", finalize)
         self.assertIn("swapz_inflight_run_touches_logical", append)
