@@ -11,7 +11,7 @@ if [[ $# -ge 3 && $1 == --validated-source &&
 fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--parallel-reads 0|1] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--parallel-reads 0|1] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -30,6 +30,7 @@ INVALIDATE_CACHE_ON_WRITE_ADMIT=0
 WRITE_ONLY_QD=0
 READ_PCT=25
 PACKED_READ=1
+RESOURCE_PRESSURE_SHORT=0
 LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
@@ -47,6 +48,12 @@ SHARED_PLAN=""
 if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
     SHARED_PLAN="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
+fi
+# ID36 uses a shorter immutable mixed trace because it qualifies bounded
+# forward progress/correctness under pressure, not throughput promotion.
+if [[ $# -gt 1 && ${!#} == --resource-pressure-short ]]; then
+    RESOURCE_PRESSURE_SHORT=1
+    set -- "${@:1:$(( $# - 1 ))}"
 fi
 # Second LZ4 pass used only by delta64 rescue.
 if [[ $# -ge 3 && ${@: -2:1} == --delta64-lz4-acceleration &&
@@ -140,6 +147,16 @@ elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
 else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
     exit 2
+fi
+if (( RESOURCE_PRESSURE_SHORT )); then
+    [[ $RATE_MODE == unpaced && $PROFILE == medium &&
+       $ASYNC_PREPARE == 1 && $WRITE_ONLY_QD == 0 ]] || {
+        echo 'BLOCKED: resource-pressure short trace requires async unpaced QD32 medium profile' >&2
+        exit 2
+    }
+    WARMUP_OPS=128
+    MEASURE_OPS=2048
+    IOPS=0
 fi
 if (( WRITE_ONLY_QD )); then
     QD="$WRITE_ONLY_QD"
@@ -483,6 +500,9 @@ done
 DMDEV="$(devno "/dev/mapper/$DMNAME")"
 if [[ -n $SHARED_PLAN ]]; then
     plan_dir="$SHARED_PLAN/plan"
+    if (( RESOURCE_PRESSURE_SHORT )); then
+        plan_dir="$SHARED_PLAN/plan-id36"
+    fi
     if (( WRITE_ONLY_QD )); then
         plan_dir="$SHARED_PLAN/plan-write-qd$QD"
     fi
