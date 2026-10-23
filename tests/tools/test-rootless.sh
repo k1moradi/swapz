@@ -41,6 +41,7 @@ if [[ "$(uname -m)" == "x86_64" ]]; then
 fi
 grep -Fq 'dmsetup create "$DMNAME" --uuid "$UUID"' tests/tools/deploy-nullblk.sh
 grep -Fq 'memory_backed' tests/tools/deploy-nullblk.sh
+grep -Fq 'modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"' tests/tools/deploy-nullblk.sh
 grep -Fq 'SWAPS_ID_BEFORE' tests/tools/deploy-nullblk.sh
 grep -Fq 'SWAPS_ID' tests/tools/benchmark-owned-pair.sh
 grep -Fq 'cat /sys/module/dm_swapz/refcnt' tests/tools/loaded-preflight.sh

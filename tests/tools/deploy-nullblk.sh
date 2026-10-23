@@ -243,6 +243,7 @@ while read -r SWAP_PATH rest; do
 done < /proc/swaps
 note "OWNED_RAM_LOWER=$LOWER CONFIG=$CONFIG DISK=$DISK DEVICE=$DEVNO UUID=$UUID"
 modprobe dm_mod || fail "device mapper core unavailable"
+modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 insmod "$MODULE" || fail "swapz kernel module rejected"
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
