@@ -102,7 +102,9 @@ confidence-interval interpretations must say whether intervals exclude or
 overlap zero; descriptive tables must not imply that the largest value is
 automatically best. Operator-facing headings and scope names use plain,
 human-readable descriptions rather than roadmap IDs. Keep every printed line
-under 96 columns so captured stdout stays copy/pasteable and readable.
+under 96 columns so captured stdout stays copy/pasteable and readable. When a
+paired confidence summary would exceed that bound, wrap at a metric boundary
+rather than dropping a metric or weakening the width limit.
 Legends must distinguish a ratio from its percentage change. READ rates and
 latencies from the mixed interval must be labeled as mixed-load observations;
 only the separately measured `packed_read` passes describe the 4MiB read phase.
