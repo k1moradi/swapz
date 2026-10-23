@@ -2161,7 +2161,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(diagnostic["overall"], "INCOMPLETE")
         self.assertIn("ID36", diagnostic["reason"])
 
-    def test_parallel_read_diagnostic_failure_reports_its_own_reason(self):
+    def test_retired_parallel_read_diagnostic_is_observational(self):
         broken = synthetic_log().replace("PASS_PARALLEL_READ_AB=1\n", "", 1)
         fake_process = type("FakeProcess", (), {
             "stdout": broken,
@@ -2175,15 +2175,15 @@ class ReportContract(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(
                     runner.run_stage("Owned RAM smoke and pairs",
-                                     ["unused"], report, parse_bench=True), 1)
+                                     ["unused"], report, parse_bench=True), 0)
         finally:
             runner.subprocess.run = original_run
         stage = report["stages"][-1]
-        self.assertEqual(stage["status"], "FAIL")
-        self.assertEqual(stage["failed_phase"],
-                         "independent READ fan-out A/B evidence")
+        self.assertEqual(stage["status"], "PASS")
+        diagnostic = report["benchmarks"]["parallel_read_ab"]
+        self.assertEqual(diagnostic["overall"], "INCOMPLETE")
         self.assertIn("five counterbalanced matched rounds",
-                      stage["diagnostic"])
+                      diagnostic["reason"])
 
     def test_read_coalesce_diagnostic_failure_reports_its_own_reason(self):
         broken = synthetic_log().replace("PASS_READ_COALESCE_AB=1\n", "", 1)
