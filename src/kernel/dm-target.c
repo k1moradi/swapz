@@ -4292,7 +4292,6 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 			}
 			if (batch_error)
 				break;
-			swapz_merge_read_slot(ctx, slot, false);
 			for (index = 0; index < slot->bio_count; ++index) {
 				swapz_complete(slot->bios[index], 0);
 				slot->bios[index] = NULL;
@@ -4587,7 +4586,6 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 			}
 			if (batch_error)
 				break;
-			swapz_merge_read_slot(ctx, slot, false);
 			for (index = 0; index < slot->bio_count; ++index) {
 				swapz_complete(slot->bios[index], 0);
 				slot->bios[index] = NULL;
