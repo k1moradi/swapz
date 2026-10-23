@@ -494,11 +494,13 @@ or participate in policy.
 
 ID63 may operate only on the already-admitted independent READ prefix. It never
 waits for another BIO and never crosses a write, barrier or dependent read.
-Eligibility must first inspect the ordered owner's direct/LRU residency metadata
-without copying cached blocks into private slot scratch. If the FIFO head is
-already satisfied by shared cache residency, reject in O(1) before the bounded
-candidate-chain scan; do not repeatedly walk the same 64-BIO prefix for cached
-siblings of one extent. Private slots are primed only after the exact missing
+Eligibility runs only when ID63 coalescing is enabled; the disabled A/B arm
+must return before any coalescing cache probe, candidate scan, private-slot work
+or coalescing counter update. When enabled, first inspect the ordered owner's
+direct/LRU residency metadata without copying cached blocks into private slot
+scratch. If the FIFO head is already satisfied by shared cache residency, reject
+in O(1) before the bounded candidate-chain scan; do not repeatedly walk the same
+64-BIO prefix for cached siblings of one extent. Private slots are primed only after the exact missing
 ranges prove one zero-padding coalesced lower request.
 
 Eligibility is based on the exact lower blocks still missing for every grouped

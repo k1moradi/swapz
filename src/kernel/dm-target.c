@@ -3976,8 +3976,13 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	int batch_error = 0, head_range_error;
 
 	*processed_out = 0;
-	if (!ctx->read_grouping_enabled || !ctx->read_slots ||
-	    !ctx->read_pages_store || remaining < 2U || list_empty(local))
+	/*
+	 * The disabled arm is the performance control: it must not execute any
+	 * ID63 cache probe, candidate scan, private-slot preparation or counters.
+	 */
+	if (!ctx->read_grouping_enabled || !ctx->read_coalescing_enabled ||
+	    !ctx->read_slots || !ctx->read_pages_store ||
+	    remaining < 2U || list_empty(local))
 		return false;
 	entry = list_first_entry(local, struct swapz_bio_ref, list);
 	if (!swapz_parallel_read_extent(ctx, entry->bio, &start0, &blocks0))
@@ -4014,7 +4019,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		if (candidate_blocks > ctx->parallel_read_adjacent_chain_blocks_max)
 			ctx->parallel_read_adjacent_chain_blocks_max = candidate_blocks;
 	}
-	if (!ctx->read_coalescing_enabled || chain_count < 2U)
+	if (chain_count < 2U)
 		return false;
 
 	for (slot_index = 0; slot_index < chain_count; ++slot_index) {

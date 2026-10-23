@@ -1349,6 +1349,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("read_extent_lru_valid",
                       source_body("swapz_engine_invalidate_read_cache", engine))
         self.assertIn("!ctx->read_grouping_enabled", batch)
+        self.assertIn("!ctx->read_coalescing_enabled", batch)
+        self.assertLess(batch.index("!ctx->read_coalescing_enabled"),
+                        batch.index("head_range_error = swapz_engine_required_read_range_cached("))
+        self.assertLess(batch.index("!ctx->read_coalescing_enabled"),
+                        batch.index("swapz_adjacent_extent_chain_candidate("))
         self.assertIn("list_for_each_entry(entry, local, list)", batch)
         self.assertIn("swapz_read_can_parallel(ctx, entry->bio)", batch)
         self.assertIn("swapz_parallel_read_extent", batch)
