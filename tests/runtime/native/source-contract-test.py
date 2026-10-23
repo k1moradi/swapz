@@ -550,11 +550,34 @@ static swapz_u16 swapz_probe_set(
                          result.stdout + "\\n" + result.stderr)
         self.assertIn("OK", result.stderr)
 
-    def test_alpha_rejects_all_physical_devices(self):
+    def test_physical_backing_is_opt_in_and_superblock_guarded(self):
         ctr = body("swapz_ctr")
+        lower = body("swapz_lower")
+        parallel = body("swapz_parallel_lower_read")
+        async_read = body("swapz_submit_read_slot_range")
+        submit = body("swapz_submit_inflight_write")
+        discard = body("swapz_discard_dead_segment")
+        validator = body("swapz_validate_physical_superblock")
+        fail = body("swapz_fail")
+        process = body("swapz_process")
+
         self.assertIn('disk_name, "nullb", 5', ctr)
-        self.assertIn('swapz alpha accepts null_blk backing only', ctr)
-        self.assertIn("goto fail;", ctr)
+        self.assertIn("swapz_allow_physical_backing", ctr)
+        self.assertIn("swapz_validate_physical_superblock(ctx, device_bytes)", ctr)
+        self.assertIn("ctx->data_start_block = 0", ctr)
+        self.assertIn("ctx->data_start_block = 1U", ctr)
+        self.assertIn("flush_fail_nth || write_fail_nth", ctr)
+        self.assertIn("swapz_sb_valid(block, device_bytes)", validator)
+        self.assertIn("region.sector = 0", validator)
+        self.assertIn("ctx->data_start_block + block", lower)
+        self.assertIn("ctx->data_start_block + block", parallel)
+        self.assertIn("ctx->data_start_block +", async_read)
+        self.assertIn("ctx->data_start_block + inflight->run.start_block", submit)
+        self.assertIn("ctx->data_start_block * SWAPZ_SECTORS", discard)
+        self.assertIn("if (error == -ENOSPC)", fail)
+        self.assertIn("error != -ENOSPC", process)
+        self.assertGreaterEqual(process.count("op == REQ_OP_READ && error == -ENOSPC"),
+                                2)
 
     def test_real_swapz_not_memory_smoke(self):
         for snippet in ("dm_register_target(&swapz_target)",

@@ -4,12 +4,12 @@
  *
  * Uses SWZ 4/8/16KiB extents, 4KiB logical pages, LZ4 and bounded
  * size-aware write windows. Write publication stays on one serialized
- * WQ_MEM_RECLAIM | WQ_UNBOUND owner; safe READ pairs may use one bounded
- * helper so at most two independent lower READs execute concurrently.
+ * WQ_MEM_RECLAIM | WQ_UNBOUND owner; bounded private read slots may overlap
+ * up to eight independent lower READs without publishing authority.
  *
- * IMPORTANT ALPHA LIMIT: GC is experimentally live with rotating reserved
- * segments, but it remains null_blk-only until independently qualified.
- * On ENOSPC or failed lower I/O, fail closed; never use as system swap.
+ * Physical backing is opt-in and requires an explicit block-0 SWAPZ format
+ * header; null_blk remains the default qualification path. Capacity exhaustion
+ * fails only the affected write BIOs so committed pages remain readable.
  */
 #define DM_MSG_PREFIX "swapz"
 #include <linux/bio.h>
@@ -38,6 +38,7 @@
 #include "preparation-slots.h"
 #include "predictor.h"
 #include "predictor-route.h"
+#include "superblock.h"
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz requires 4KiB PAGE_SIZE"
@@ -73,10 +74,15 @@ MODULE_PARM_DESC(async_prepare,
 		 "Prepare bounded LZ4 writes concurrently with ordered lower I/O; "
 		 "set async_prepare=0 for synchronous qualification");
 
+static bool swapz_allow_physical_backing;
+module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0444);
+MODULE_PARM_DESC(allow_physical_backing,
+		 "Allow explicitly formatted non-null_blk backing; default off");
+
 static bool swapz_delta64_rescue_enabled;
 module_param_named(delta64_rescue, swapz_delta64_rescue_enabled, bool, 0444);
 MODULE_PARM_DESC(delta64_rescue,
-		 "Opt in to page-local delta64 rescue after ordinary LZ4; default off");
+		 "Opt in to page-local delta64 rescue with predictor-first high-score path; default off");
 
 static unsigned int swapz_delta64_prepare_workers = 1U;
 module_param_named(delta64_prepare_workers, swapz_delta64_prepare_workers, uint, 0444);
@@ -93,7 +99,7 @@ MODULE_PARM_DESC(delta64_lz4_acceleration,
 static unsigned int swapz_lz4_acceleration = 1U;
 module_param_named(lz4_acceleration, swapz_lz4_acceleration, uint, 0444);
 MODULE_PARM_DESC(lz4_acceleration,
-		 "Ordinary first-pass LZ4 acceleration 1..4");
+		 "Ordinary LZ4 baseline acceleration 1..4");
 
 static unsigned int swapz_write_pipeline_depth = 1U;
 module_param_named(write_pipeline_depth, swapz_write_pipeline_depth, uint, 0444);
@@ -104,7 +110,7 @@ MODULE_PARM_DESC(write_pipeline_depth,
 static bool swapz_parallel_reads = true;
 module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);
 MODULE_PARM_DESC(parallel_reads,
-		 "Enable bounded read grouping and Kread=2 service");
+		 "Enable bounded read grouping and private-slot lower-READ fan-out");
 
 static bool swapz_read_coalesce = true;
 module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
@@ -396,6 +402,9 @@ struct swapz_dm {
 	swapz_u16 *live_records;
 	swapz_u8 *extent_classes;
 	swapz_u32 physical_blocks;
+	swapz_u32 data_start_block;
+	bool physical_backing;
+	u64 backing_device_bytes;
 	swapz_u32 logical_pages;
 
 	/* Serialized, entirely preallocated normal reclaim path. */
@@ -827,6 +836,11 @@ static void swapz_complete(struct bio *bio, int error)
 
 static void swapz_fail(struct swapz_dm *ctx, int error)
 {
+	/* Capacity exhaustion is a per-write result. Existing committed maps
+	 * remain authoritative and readable; only integrity/lower-I/O faults
+	 * poison the target. */
+	if (error == -ENOSPC)
+		return;
 	if (!ctx->failed) {
 		ctx->failed = true;
 		ctx->last_error = error < 0 ? error : -EIO;
@@ -835,6 +849,43 @@ static void swapz_fail(struct swapz_dm *ctx, int error)
 		      ctx->last_error);
 	}
 }
+
+static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
+					      u64 device_bytes)
+{
+	struct dm_io_region region;
+	struct dm_io_request req = {
+		.bi_opf = REQ_OP_READ | REQ_SYNC,
+		.mem = {
+			.type = DM_IO_KMEM,
+			.offset = 0,
+		},
+		.notify = {
+			.fn = NULL,
+			.context = NULL,
+		},
+		.client = ctx->io_client,
+	};
+	unsigned long error_bits = 0;
+	u8 *block;
+	int error;
+
+	block = kzalloc(SWAPZ_SUPERBLOCK_BYTES, GFP_KERNEL);
+	if (!block)
+		return -ENOMEM;
+	req.mem.ptr.addr = block;
+	region.bdev = ctx->backing->bdev;
+	region.sector = 0;
+	region.count = SWAPZ_SUPERBLOCK_BYTES >> SECTOR_SHIFT;
+	error = dm_io(&req, 1, &region, &error_bits, IOPRIO_DEFAULT);
+	if (!error && error_bits)
+		error = -EIO;
+	if (!error && !swapz_sb_valid(block, device_bytes))
+		error = -EPERM;
+	kfree(block);
+	return error;
+}
+
 
 static void swapz_invalidate_read_caches(struct swapz_dm *ctx)
 {
@@ -1036,7 +1087,8 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	ctx->lower_write_submitted_reqs++;
 	ctx->engine.submitted_blocks += inflight->run.blocks;
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)inflight->run.start_block * SWAPZ_SECTORS;
+	region.sector = (sector_t)(ctx->data_start_block + inflight->run.start_block) *
+		SWAPZ_SECTORS;
 	region.count = (sector_t)inflight->run.blocks * SWAPZ_SECTORS;
 	reinit_completion(&inflight->lower_done);
 	inflight->lower_error = 0;
@@ -1227,7 +1279,7 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	    blocks > ctx->physical_blocks - block)
 		return -ERANGE;
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)block * SWAPZ_SECTORS;
+	region.sector = (sector_t)(ctx->data_start_block + block) * SWAPZ_SECTORS;
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
 	/* Inject at the common physical WRITE boundary, including foreground
 	 * mixed runs, serialized controls and GC relocation. Never count this
@@ -1429,7 +1481,8 @@ static int swapz_discard_dead_segment(void *opaque, swapz_u32 segment)
 		ctx->segment_discards_unsupported++;
 		return 0;
 	}
-	start_sector = (sector_t)segment * sectors;
+	start_sector = (sector_t)ctx->data_start_block * SWAPZ_SECTORS +
+		(sector_t)segment * sectors;
 	ctx->segment_discards_issued++;
 	start_ns = ktime_get_ns();
 	error = blkdev_issue_discard(ctx->backing->bdev, start_sector, sectors,
@@ -1477,7 +1530,7 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	    blocks > ctx->physical_blocks - block)
 		return -ERANGE;
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)block * SWAPZ_SECTORS;
+	region.sector = (sector_t)(ctx->data_start_block + block) * SWAPZ_SECTORS;
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
 	slot->lower_read_submitted_bytes += (u64)blocks * SWAPZ_BLOCK_BYTES;
 	slot->lower_read_submitted_reqs++;
@@ -1528,7 +1581,8 @@ static int swapz_submit_read_slot_range(struct swapz_read_slot *slot,
 	    slot->extent_blocks > ctx->physical_blocks - slot->start_block)
 		return -EINVAL;
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)(slot->start_block + first_block) *
+	region.sector = (sector_t)(ctx->data_start_block +
+			      slot->start_block + first_block) *
 		SWAPZ_SECTORS;
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
 	reinit_completion(&slot->lower_done);
@@ -4650,10 +4704,12 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 		ctx->deadline_before_bio++;
 		error = swapz_flush_window(ctx);
-		if (error) {
+		if (error && !(op == REQ_OP_READ && error == -ENOSPC)) {
 			swapz_complete(bio, error);
 			return;
 		}
+		if (op == REQ_OP_READ && error == -ENOSPC)
+			error = 0;
 	}
 	/* Only the opt-in retained stream can service a disjoint READ from
 	 * committed authority. Read scratch is separate from batch_bytes;
@@ -4731,10 +4787,12 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 		}
 		error = swapz_flush_window(ctx);
-		if (error) {
+		if (error && !(op == REQ_OP_READ && error == -ENOSPC)) {
 			swapz_complete(bio, error);
 			return;
 		}
+		if (op == REQ_OP_READ && error == -ENOSPC)
+			error = 0;
 	}
 	if (bio->bi_opf & REQ_PREFLUSH) {
 		error = swapz_issue_flush(ctx);
@@ -4774,7 +4832,7 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		error = -EOPNOTSUPP;
 		break;
 	}
-	if (error && error != -EOPNOTSUPP)
+	if (error && error != -EOPNOTSUPP && error != -ENOSPC)
 		swapz_fail(ctx, error);
 	swapz_complete(bio, error);
 }
@@ -5439,7 +5497,8 @@ static void swapz_dtr(struct dm_target *ti)
 static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct swapz_dm *ctx;
-	u64 logical, physical;
+	u64 logical, physical, total_blocks, device_bytes;
+	bool is_nullb;
 	u32 budget = 0, window = SWAPZ_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, flush_fail_nth = 0;
 	u32 lower_bulk = 1, write_fail_nth = 0, retain = 0;
@@ -5447,7 +5506,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	int error;
 
 	if (argc < 1 || argc > 9 || ti->len % SWAPZ_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4]";
+		ti->error = "Usage: <dedicated backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -5552,19 +5611,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Cannot open swapz dedicated backing device";
 		goto fail;
 	}
-	/*
-	 * Alpha device admission is intentionally stricter than user
-	 * authorization. Only an owned, RAM-backed null_blk node may become
-	 * a live swapz target before fault/reclaim qualification; a physical
-	 * SD, HDD or SSD partition must never be selected accidentally.
-	 * Device ownership/UUID checks remain the test harness's duty.
-	 */
-	if (!ctx->backing->bdev->bd_disk ||
-	    strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5)) {
-		ti->error = "swapz alpha accepts null_blk backing only";
-		error = -EOPNOTSUPP;
+	if (!ctx->backing->bdev->bd_disk) {
+		ti->error = "Backing device has no disk identity";
+		error = -EINVAL;
 		goto fail;
 	}
+	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
 	if (bdev_is_zoned(ctx->backing->bdev) ||
 	    bdev_read_only(ctx->backing->bdev) ||
 	    bdev_logical_block_size(ctx->backing->bdev) > SWAPZ_BLOCK_BYTES ||
@@ -5572,6 +5624,36 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Unsupported zoned, read-only or unaligned swapz backing";
 		error = -EINVAL;
 		goto fail;
+	}
+	ctx->io_client = dm_io_client_create();
+	if (IS_ERR(ctx->io_client)) {
+		error = PTR_ERR(ctx->io_client);
+		ctx->io_client = NULL;
+		goto fail;
+	}
+	device_bytes = (u64)bdev_nr_sectors(ctx->backing->bdev) << SECTOR_SHIFT;
+	ctx->backing_device_bytes = device_bytes;
+	if (is_nullb) {
+		ctx->data_start_block = 0;
+		ctx->physical_backing = false;
+	} else {
+		if (!swapz_allow_physical_backing) {
+			ti->error = "Physical backing requires allow_physical_backing=1";
+			error = -EOPNOTSUPP;
+			goto fail;
+		}
+		if (flush_fail_nth || write_fail_nth) {
+			ti->error = "Fault injection is forbidden on physical backing";
+			error = -EINVAL;
+			goto fail;
+		}
+		error = swapz_validate_physical_superblock(ctx, device_bytes);
+		if (error) {
+			ti->error = "Physical backing lacks a valid matching SWAPZ superblock";
+			goto fail;
+		}
+		ctx->data_start_block = 1U;
+		ctx->physical_backing = true;
 	}
 	/* parallel_reads authorizes adjacent coalescing plus bounded independent
 	 * private-slot lower-READ fan-out. Ordered worker owns validation/ACK. */
@@ -5582,7 +5664,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		(swapz_u8)swapz_read_coalesce_max_blocks;
 	ctx->parallel_reads_enabled = ctx->read_coalescing_enabled;
 	logical = div_u64(ti->len, SWAPZ_SECTORS);
-	physical = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
+	total_blocks = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
+	if (total_blocks <= ctx->data_start_block) {
+		ti->error = "Backing has no usable SWAPZ data blocks";
+		error = -EINVAL;
+		goto fail;
+	}
+	physical = total_blocks - ctx->data_start_block;
 	physical = div_u64(physical, SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
 	if (!logical || logical > U32_MAX || physical > U32_MAX ||
 	    physical < 3U * SWAPZ_SEGMENT_BLOCKS) {
@@ -5778,12 +5866,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ctx->inflight_writes[read_slot].slot_index = read_slot;
 		init_completion(&ctx->inflight_writes[read_slot].lower_done);
 	}
-	ctx->io_client = dm_io_client_create();
-	if (IS_ERR(ctx->io_client)) {
-		error = PTR_ERR(ctx->io_client);
-		ctx->io_client = NULL;
-		goto fail;
-	}
 	ctx->workqueue = alloc_workqueue(
 				"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
 	if (!ctx->workqueue) {
@@ -5844,8 +5926,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (error)
 		goto fail;
 	WRITE_ONCE(ctx->accepting, true);
-	DMINFO("swapz alpha %s logical_pages=%u physical_blocks=%u window=%u read_cap=%u LIVE GC EXPERIMENTAL",
+	DMINFO("swapz alpha %s logical_pages=%u physical_blocks=%u data_start=%u physical=%u window=%u read_cap=%u LIVE GC EXPERIMENTAL",
 	       SWAPZ_ALPHA_VERSION, ctx->logical_pages, ctx->physical_blocks,
+	       ctx->data_start_block, ctx->physical_backing ? 1U : 0U,
 	       ctx->max_window, (unsigned int)budget);
 	return 0;
 fail:
@@ -5860,7 +5943,8 @@ static int swapz_iterate_devices(struct dm_target *ti,
 	struct swapz_dm *ctx = ti->private;
 
 	return fn(ti, ctx->backing, 0,
-		  (sector_t)ctx->physical_blocks * SWAPZ_SECTORS, data);
+		  (sector_t)(ctx->data_start_block + ctx->physical_blocks) *
+			  SWAPZ_SECTORS, data);
 }
 
 static void swapz_io_hints(struct dm_target *ti, struct queue_limits *limits)

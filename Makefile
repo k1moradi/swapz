@@ -32,7 +32,7 @@ build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-build/userspace/swapzctl: src/userspace/swapzctl.c src/kernel/VERSION Makefile
+build/userspace/swapzctl: src/userspace/swapzctl.c src/kernel/VERSION src/kernel/superblock.h Makefile
 	@mkdir -p build/userspace
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' $< -o $@
 
