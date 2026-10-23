@@ -10,7 +10,7 @@ There is one product. The active product source is under `src/`; test-only code 
 
 ## Product identity and version
 
-Public identities are immutable: `swapz`, `dm-swapz.ko`, `dm_swapz`, target `swapz`, alias `dm-swapz`, and the read-only utility `swapzctl`. SWZ describes the current on-disk format only and is intentionally unversioned while no incompatible deployed format exists.
+Public identities are immutable: `swapz`, `dm-swapz.ko`, `dm_swapz`, target `swapz`, alias `dm-swapz`, and the administrative utility `swapzctl`. SWZ describes the current on-disk format only and is intentionally unversioned while no incompatible deployed format exists.
 
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the single source of truth for release metadata. Do not duplicate the release number in source names, reports, workflow names, binaries, or documentation headings.
 
@@ -31,7 +31,7 @@ No legacy, recall, NBD, pressure, alternate-module, or historical-model subsyste
 
 ## Supported commands
 
-The root Make interface is exactly `make`, `make install`, `make uninstall`, and `make test`. Installation never activates swap. The module remains limited to positively owned RAM-backed `null_blk` for current loaded qualification. Physical media, active system swap, reboot, `swapon`, `swapoff`, force removal, or unrelated block devices are not authorized.
+The root Make interface is exactly `make`, `make install`, `make uninstall`, and `make test`. Installation never activates swap. Official loaded qualification remains limited to positively owned RAM-backed `null_blk`. Physical backing is disabled by default; the implementation can attach only when `allow_physical_backing=1` and block 0 contains a valid matching SWAPZ authorization header created by the conservative `swapzctl format <blockdev>` command. That formatter writes block 0 and refuses non-block devices, busy devices, and nonzero unrecognized headers. This safety gate does not itself qualify physical media or authorize active system swap, reboot, `swapon`, `swapoff`, force removal, or unrelated block devices.
 
 Every completed `make test` run replaces exactly one generated evidence file,
 root `test_results.json`, with the latest sanitized PASS/FAIL/BLOCKED test
