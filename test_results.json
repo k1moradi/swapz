@@ -20,7 +20,7 @@
 },
 "write_saturation_sessions": []
 },
-"kernel_release": "7.0.0-38-generic",
+"kernel_release": "7.0.0-34-generic",
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
@@ -28,7 +28,7 @@
 "stages": [
 {
 "diagnostic": "Native build error: expected ?;? before ?bool?",
-"elapsed_s": 4.128,
+"elapsed_s": 1.16,
 "exit_code": 2,
 "failed_phase": "Build module and helpers",
 "name": "Build module and helpers",
