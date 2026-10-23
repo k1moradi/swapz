@@ -449,7 +449,8 @@ class PairReplayContract(unittest.TestCase):
                 Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"}), before)
         after.update({
             "delta64_eligible": 10, "delta64_classifier_pass": 5,
-            "delta64_attempts": 5, "delta64_adopted": 3,
+            "delta64_attempts": 5, "delta64_adopted": 4,
+            "delta64_direct_adopted": 1, "delta64_first_lz4_skipped": 1,
             "delta64_raw_rescues": 1, "delta64_lz4_rescues": 2,
             "delta64_pack_eligible": 4, "delta64_pack_attempts": 1,
             "delta64_pack_cliff_crossings": 1, "delta64_pack_adopted": 1,
@@ -461,7 +462,9 @@ class PairReplayContract(unittest.TestCase):
         })
         before["delta64_rescue"] = after["delta64_rescue"] = 1
         delta = module.kernel_write_delta(before, after)
-        self.assertEqual(delta["delta64_adopted"], 3)
+        self.assertEqual(delta["delta64_adopted"], 4)
+        self.assertEqual(delta["delta64_direct_adopted"], 1)
+        self.assertEqual(delta["delta64_first_lz4_skipped"], 1)
         self.assertEqual(delta["delta64_pack_adopted"], 1)
         self.assertEqual(delta["delta64_pack_cliff_crossings"], 1)
         self.assertEqual(delta["delta64_score_16_23"], 2)
@@ -479,6 +482,8 @@ class PairReplayContract(unittest.TestCase):
                 {"delta64_classifier_pass": 11},
                 {"delta64_attempts": 6},
                 {"delta64_adopted": 6},
+                {"delta64_direct_adopted": 2},
+                {"delta64_first_lz4_skipped": 0},
                 {"delta64_raw_rescues": 2},
                 {"delta64_payload_bytes_saved": 1201},
                 {"delta64_raw_payload_bytes_saved": 527,

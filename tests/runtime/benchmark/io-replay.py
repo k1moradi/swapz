@@ -975,7 +975,9 @@ WINDOW_INTERVAL_FIELDS = (
 ) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
-    "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues",
+    "delta64_adopted", "delta64_direct_adopted",
+    "delta64_first_lz4_skipped", "delta64_raw_rescues",
+    "delta64_lz4_rescues",
     "delta64_pack_eligible", "delta64_pack_attempts",
     "delta64_pack_cliff_crossings", "delta64_pack_adopted",
     "delta64_score_0_7", "delta64_score_8_15",
@@ -1098,8 +1100,10 @@ def kernel_write_delta(before, after):
             counters["delta64_pack_eligible"] <= counters["delta64_eligible"] and
             counters["delta64_pack_adopted"] <= counters["delta64_lz4_rescues"]):
         raise ValueError("inconsistent swapz delta64 packing accounting")
-    if (counters["delta64_raw_rescues"] + counters["delta64_lz4_rescues"] !=
-            counters["delta64_adopted"] or
+    if (counters["delta64_raw_rescues"] + counters["delta64_lz4_rescues"] +
+            counters["delta64_direct_adopted"] != counters["delta64_adopted"] or
+            counters["delta64_first_lz4_skipped"] <
+            counters["delta64_direct_adopted"] or
             counters["delta64_raw_payload_bytes_saved"] +
             counters["delta64_lz4_payload_bytes_saved"] !=
             counters["delta64_payload_bytes_saved"]):

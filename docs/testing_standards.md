@@ -1318,9 +1318,12 @@ activity. Require adopted <= attempts <= classifier passes <= eligible; the four
 score bins 0-7, 8-15, 16-23 and 24+ must sum exactly to eligible; 24+ scores are
 a subset of classifier passes; packing-adopted <= packing-cliff-crossings <=
 attempts; packing-adopted <= packing-attempts <= packing-eligible <= eligible;
-packing-adopted <= LZ4 rescues; adopted = RAW rescues + LZ4 rescues; and
-total/split payload-byte savings must match. Reject resets and impossible
-per-rescue savings.
+packing-adopted <= LZ4 rescues; adopted = RAW rescues + LZ4 rescues + direct
+adoptions; and first-LZ4-skipped >= direct adoptions. Predictor-first direct
+adoptions have no ordinary-LZ4 baseline, so they do not claim baseline-relative
+payload-byte savings; total/split payload savings remain the RAW/LZ4 rescue
+buckets. Reject resets and impossible per-rescue savings. The loaded replay
+snapshot and the report validator must enforce the same accounting.
 
 The replay records `delta64_rescue` as a required policy gauge, not a counter
 delta. The snapshot source contract must require both this gauge and the retained
