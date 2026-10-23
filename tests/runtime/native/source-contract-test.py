@@ -2138,6 +2138,7 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("hrtimer_start", mapping)
 
     def test_retained_reads_require_independence_and_abort_on_failure(self):
+        self.assertNotIn("swapz_read_is_independentstatic bool", DM)
         independent = body("swapz_read_is_independent")
         process = body("swapz_process")
         flush = body("swapz_flush_window")
