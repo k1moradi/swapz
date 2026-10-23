@@ -5461,8 +5461,9 @@ def print_bench(result):
               f"MB/s {throughput_ci['mean'] * 100:+.1f}% "
               f"[{throughput_ci['low'] * 100:+.1f},{throughput_ci['high'] * 100:+.1f}]%; "
               f"req {req_ci['mean'] * 100:+.1f}% "
-              f"[{req_ci['low'] * 100:+.1f},{req_ci['high'] * 100:+.1f}]%; "
-              f"p99 {p99_ci['mean'] * 100:+.1f}% "
+              f"[{req_ci['low'] * 100:+.1f},{req_ci['high'] * 100:+.1f}]%")
+        print("    p99 "
+              f"{p99_ci['mean'] * 100:+.1f}% "
               f"[{p99_ci['low'] * 100:+.1f},{p99_ci['high'] * 100:+.1f}]%")
     else:
         print("\n  Adjacent-range READ coalescing: NOT QUALIFIED "
