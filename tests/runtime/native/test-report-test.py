@@ -1718,7 +1718,14 @@ class ReportContract(unittest.TestCase):
             while index < len(lines) and lines[index].startswith("    "):
                 legend_lines.append(lines[index])
                 index += 1
-            self.assertIn("goal:", " ".join(legend_lines))
+            legend_text = " ".join(line.strip() for line in legend_lines)
+            headers = [cell.strip() for cell in lines[start].strip("|").split("|")]
+            for header in headers:
+                self.assertIn(f"{header}:", legend_text)
+                goal = runner.TABLE_HEADER_GOAL.get(header)
+                if goal:
+                    self.assertIn(f"[{goal}]", legend_text)
+            self.assertNotIn("goal:", legend_text)
             self.assertLess(index, len(lines))
             self.assertTrue(lines[index].startswith("  Interpretation:"))
             index += 1
