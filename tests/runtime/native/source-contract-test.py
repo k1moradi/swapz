@@ -2314,12 +2314,13 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(flush.index("if (!count)"),
                         flush.index("ctx->single_pack_deferred = false"))
         self.assertIn("ctx->retained_wave_interrupted", flush)
-        evidence_reset = flush[flush.rindex("if (!ctx->retain_ms"):
-                               flush.rindex("return 0;")]
+        reset_pos = flush.rindex("ctx->retained_window_read_bypasses = 0;")
+        policy_pos = flush.rindex("if (!ctx->retain_ms")
+        self.assertLess(reset_pos, policy_pos)
+        evidence_reset = flush[policy_pos:flush.rindex("return 0;")]
         self.assertIn("packed_close && !ctx->worker_has_immediate_followup",
                       evidence_reset)
         self.assertIn("close_reason == SWAPZ_CLOSE_DUPLICATE", evidence_reset)
-        self.assertIn("ctx->retained_window_read_bypasses = 0", evidence_reset)
         self.assertIn("ctx->retained_wave_interrupted = false", evidence_reset)
         self.assertIn("swapz_refresh_accepted_followup(ctx)", process)
         normal_read = process[process.index("case REQ_OP_READ:"):
