@@ -1412,6 +1412,8 @@ def replay(args):
             after = None
             kernel_write_before = None
             kernel_write_after = None
+            kernel_read_before = None
+            kernel_read_after = None
             lower_inflight = None
             lower_inflight_sampler = LowerInflightSampler(
                 identity.get("owned_disk"))
@@ -1479,6 +1481,7 @@ def replay(args):
                         lower_inflight_sampler.start()
                         before = lower_stat(identity.get("owned_disk"))
                         kernel_write_before = kernel_write_snapshot(path, identity)
+                        kernel_read_before = kernel_read_snapshot(path, identity)
                         host_before = host_cpu_snapshot()
                         cpu_before = process_cpu()
                         measured_start_ns = lower_inflight_sampler.begin()
@@ -1496,6 +1499,7 @@ def replay(args):
                                 lower_inflight_sampler.start()
                                 before = lower_stat(identity.get("owned_disk"))
                                 kernel_write_before = kernel_write_snapshot(path, identity)
+                                kernel_read_before = kernel_read_snapshot(path, identity)
                                 host_before = host_cpu_snapshot()
                                 cpu_before = process_cpu()
                                 measured_start_ns = lower_inflight_sampler.begin()
@@ -1520,6 +1524,7 @@ def replay(args):
                     host_after = host_cpu_snapshot()
                     after = lower_stat(identity.get("owned_disk"))
                     kernel_write_after = kernel_write_snapshot(path, identity)
+                    kernel_read_after = kernel_read_snapshot(path, identity)
             finally:
                 lower_inflight_sampler.close()
                 for view in mixed_views:
@@ -1588,6 +1593,7 @@ def replay(args):
             "and post-run oracle"),
         "packed_read": packed_read,
         "kernel_write_path": kernel_write_delta(kernel_write_before, kernel_write_after),
+        "kernel_read_path": kernel_read_delta(kernel_read_before, kernel_read_after),
         "lower_inflight": lower_inflight,
         "lower_io": iostat_delta(before, after), "verdict": "PASS",
         "read_p50_ns": percentile(samples["R"], .50),

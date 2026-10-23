@@ -205,9 +205,12 @@ actual kernel swap and physical media remain open qualification gates.
   exact-source run therefore qualifies the cached-head fast reject before any
   policy change: a FIFO head already satisfied by shared cache residency must
   return before the bounded 64-BIO candidate scan and private-slot preparation.
-  Selected-chain success ACKs remain fail-closed: all selected slot decode/CRC
-  work and the chain failure decision must finish before the first success ACK.
-  Every merge remains exact, same-segment,
+  After one successful combined lower READ, each constituent may complete only
+  after its own authority/generation checks, metadata and payload CRC validation,
+  decode, and upper copy have succeeded. A later constituent failure fails the
+  target and every BIO still owned by the worker; it does not retroactively
+  invalidate an already fully verified constituent. A combined lower-I/O
+  failure publishes no constituent success. Every merge remains exact, same-segment,
   <=8 blocks total and zero-padding; `parallel_read_coalesce_extra_blocks`
   stays zero and defensive skip-other stays zero. Eligibility must use shared
   cache metadata without private-slot memcpy, and source contracts must prove
@@ -956,12 +959,51 @@ rather than rerunning the old optimization sequence.
 Do not add another singleton timing policy merely because these counters remain
 available. The ROADMAP evidence table is the reopen authority for IDs 50-57.
 
+### ID36 low-RAM plus heavy-CPU qualification
+
+ID36 is a release gate for default-on asynchronous preparation, not a
+throughput-promotion benchmark. The loaded stage runs one ordinary fast-model
+QD32 async OFF/swapz pair inside a dedicated cgroup-v2 domain while a separate
+helper faults 576 MiB of anonymous memory and runs twice the online CPU count
+of integer burners, capped at 32. The cgroup sets `memory.high=576MiB`,
+`memory.max=896MiB` and `memory.swap.max=0` when supported. The host must
+have at least 1 GiB MemAvailable before this destructive-to-performance but
+RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
+weakened.
+
+The pressure helper must reach readiness with at least the requested resident
+memory charged to the cgroup and remain alive through benchmark teardown.
+Qualification requires a positive `memory.events high` delta, positive CPU
+PSI `some total` delta, zero `oom` and `oom_kill` deltas, and the normal
+owned-pair byte-exact verification/teardown to pass with `async_prepare=1`.
+The test uses only positively owned `null_blk` backings and never authorizes
+physical media or active swap. Performance under this gate is observational:
+record it, but do not tune a scheduling threshold from one pressure run.
+
+Rootless contracts must lint both the pressure helper and shell wrapper, and the
+loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`
+marker. Missing cgroup-v2 controllers, insufficient host safety headroom,
+missing PSI, an OOM event, a dead pressure helper, or failed owned-device
+teardown blocks release qualification.
+
 ### Bounded concurrent READ qualification
 
-Routine qualification no longer uses the retired directional
-`parallel_reads=0/1` grouping experiment. Production qualification keeps
-`parallel_reads=1`, so bounded independent lower-READ fan-out is common
-infrastructure rather than part of the ID63 treatment.
+The retired `swapz-read` helper workqueue remains absent. Current
+`parallel_reads=1` is a different mechanism: the ordered worker owns private
+slots, submits multiple independent missing lower ranges before joining any of
+them, then performs validation/decode/cache publication and upper completion
+itself. Before treating that fan-out as settled infrastructure, run one final
+five-pair fast-model `parallel_reads=0/1` decision family with
+`read_coalesce=0` in both arms and `async_prepare=1`. Each benchmark pair
+already contains Fast QD32 mixed I/O plus the byte-exact 4 MiB packed
+sequential/random phases, so this one family must report both scopes. The off
+arm must execute zero async-read batches/slots; the on arm must exercise real
+fan-out in mixed service. Report paired 95% confidence intervals for useful
+mixed WRITE/READ throughput, mixed READ p99 and lower READ work, plus packed
+sequential/random throughput, p99 and lower READ work. Nonzero concurrency
+without useful service or tail-latency benefit is not sufficient to retain the
+mechanism; after the decision, retire the A/B rather than adding another
+permanent tuning family.
 
 ID63 remains the adjacent request-efficiency experiment. The loaded test keeps
 exactly ten SSD_EMULATED and ten SD_EMULATED sessions in the fixed
@@ -1099,6 +1141,37 @@ must therefore use deliberately skewed churn and compare spread, allocator
 probe count/wall time, GC work, lower I/O, useful throughput and p99 while
 varying only this policy. No threshold from RAM-backed `null_blk` may turn
 that counter into a NAND-wear claim or promote cold-data relocation.
+
+### ID72 skewed-churn logical-open balancing decision
+
+ID72 remains default-off and is not part of routine qualification until ID36
+passes. Its one promotion/removal experiment must use the existing owned-RAM
+target and one immutable medium-compressibility fixture/trace for both arms.
+Seed exactly 2,867 of 4,096 logical pages (70.0% occupancy): 2,294 cold pages
+remain untouched after seeding and 573 hot pages receive all rewrites. Then
+issue 40,960 deterministic hot-page writes (ten complete logical capacities),
+with a fixed permutation and an fsync every 256 writes. Verify every seeded
+cold page and the final generation of every hot page byte-for-byte.
+
+Run five counterbalanced same-source pairs varying only
+`logical_open_balance=0/1`. Record logical-open min/sum/max/segment count,
+allocator probe segments/full scans/wall, GC victims/relocated pages/read and
+write bytes/requests/wall, discard/TRIM counts, useful WRITE throughput and p99,
+and total lower WRITE bytes/requests. Logical-open counts remain allocator
+fairness telemetry, never NAND P/E evidence.
+
+The decision is intentionally terminal for the current design. If every
+unbalanced arm already has `max-min <= 1`, the workload exposes no useful
+balancing opportunity and the optional switch should be removed. Otherwise,
+promotion requires a paired 95% interval excluding zero in the favorable
+direction for `max-min` spread, at least 20% mean spread reduction, byte-exact
+equivalence, and no paired harmful regression larger than 5% in useful
+throughput, p99, GC write bytes, allocator-probe wall, or total lower WRITE
+bytes/requests. If the spread benefit is unresolved, below 20%, or bought with
+a >5% repeatable regression in any guard metric, remove
+`logical_open_balance` and retain circular allocator fairness only. Do not
+retune thresholds after observing the five pairs.
+
 
 
 ID70c loaded qualification uses only the owned RAM null_blk mapping. It must

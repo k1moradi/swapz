@@ -159,7 +159,10 @@ lower-I/O sleep and callback wall may include scheduler delay. ID24 additionally
 reports scheduler-accounted sampled worker CPU from
 `current->se.sum_exec_runtime` for ordered and preparation work.
 `read_worker_cpu_ns` is retained as a zero-valued compatibility token after
-ID39 helper removal. Direct boundary samples can materially miss short callbacks that return before
+the ID39 helper-workqueue removal. Current independent lower-READ fan-out does
+not restore a read worker: the ordered worker submits and joins private lower
+ranges and retains decode/publication/completion ownership. Direct boundary
+samples can materially miss short callbacks that return before
 the scheduler updates the current entity, so treat them only as a lower-bound
 diagnostic. The report also carries separate ordered/preparation LZ4 and copy
 timers and derives measured non-sleeping phase floors from LZ4/CRC/copy plus
@@ -214,10 +217,12 @@ ID64 no longer has a confirmation gate. Its loaded A/B is removed. The active sc
 
 ID65 and ID66 are owner-qualified at source
 `2fabd0dc4b3fe09b8e52e9a624e9452647229e09`. The READ helper remains absent
-and compatibility telemetry stays zero. ID63 now carries the entire grouped-slot
-execution path: a non-ID63 candidate must return before slot preparation,
-cache-LRU scans or cached-block copies. Standalone same-extent grouping is
-retired.
+and compatibility read-worker telemetry stays zero. ID63 owns adjacent-range
+coalescing, while the ordered worker separately has bounded independent
+lower-READ fan-out through the same private-slot infrastructure. Standalone
+same-extent grouping is retired. The final fan-out decision run varies only
+`parallel_reads=0/1` with `read_coalesce=0` on the fast model and reports
+both Fast QD32 mixed I/O and packed sequential/random reads.
 
 Multi-page DISCARD retains all-or-nothing
 generation/mapping/shared-extent-liveness validation with no per-physical-block
@@ -247,14 +252,19 @@ for every grouped BIO, and merge only when both missing ranges are nonempty,
 individually contiguous, immediately adjacent, in one 1MiB segment and <=8
 blocks total. Issue one lower READ with no padding, seed only private slot
 scratch, then run the unchanged per-record metadata/generation/CRC/decompression
-path. Shared cache publication still waits for every grouped read and upper copy
-to succeed.
+path. Each constituent may publish verified cache residency and complete only
+after its own validation/decode/upper copy succeeds; a later constituent failure
+fails still-owned BIOs and the target without retroactively invalidating an
+already verified constituent.
 
 All queue depths may use one-request ID63 coalescing on the ordered worker.
-Standalone same-extent slot grouping and the rejected helper dispatch are
-removed. When coalescing is disabled or the first two immutable extents are not
-physically adjacent in one segment, selection must return before slot
-prepare/prime/absorb work and leave FIFO ownership untouched.
+Standalone same-extent slot grouping and the rejected helper workqueue remain
+removed. The ID63 selector itself must return before coalescing-specific slot
+prime/ownership work when coalescing is disabled or no exact adjacent chain
+exists. After that rejection, the separate ordered-worker fan-out path may
+still prepare private slots for two or more independent missing lower ranges
+when `parallel_reads=1`; it never merges those ranges and preserves same-page
+ordering across any skipped retained WRITEs.
 
 **IDs58/59.** Current fixture has zero nonzero same-filled writes and extreme
 128-payload synthetic duplication. Keep representative-corpus evidence only.
@@ -415,6 +425,12 @@ Current benchmark work must preserve these contracts:
 - **Preparation:** async preparation owns one unbound producer lane regardless
   of delta64 policy. Predictor scratch allocation may remain rescue-dependent;
   lane count is not.
+- **Independent READ fan-out:** one final five-pair fast-model decision varies
+  only `parallel_reads=0/1` with `read_coalesce=0` and
+  `async_prepare=1`. The same sessions report Fast QD32 mixed service and
+  packed sequential/random reads. OFF must submit zero async-read slots; ON
+  must exercise real mixed fan-out. Concurrency without a repeatable useful
+  service or tail-latency benefit is insufficient to keep the complexity.
 - **READ coalescing:** merge-off/on confirmation uses the same independent READ
   fan-out in both arms. A merge may combine 2..8 exact contiguous missing
   ranges in one segment, at most eight 4KiB blocks, with zero padding. A

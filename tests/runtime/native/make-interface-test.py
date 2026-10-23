@@ -486,6 +486,46 @@ class PublicMakeContract(unittest.TestCase):
                         kernel[field] = 0
                 return json.dumps(record, sort_keys=True)
 
+            def mock_fanout_arm(enabled):
+                record = json.loads(mock_parallel_arm(enabled))
+                coalesce_fields = (
+                    "parallel_read_adjacent_extent_pairs",
+                    "parallel_read_adjacent_extent_blocks",
+                    "parallel_read_adjacent_chain_3plus",
+                    "parallel_read_adjacent_chain_extent_max",
+                    "parallel_read_adjacent_chain_blocks_max",
+                    "parallel_read_coalesced_pairs",
+                    "parallel_read_coalesced_reqs_saved",
+                    "parallel_read_coalesced_blocks",
+                    "parallel_read_coalesce_extra_blocks",
+                    "parallel_read_coalesce_skip_cached",
+                    "parallel_read_coalesce_skip_noncontig_slot",
+                    "parallel_read_coalesce_skip_gap",
+                    "parallel_read_coalesce_skip_other",
+                )
+                for phase in record["packed_read"]["passes"].values():
+                    kernel = phase["kernel_read_path"]
+                    for field in coalesce_fields:
+                        kernel[field] = 0
+                    if not enabled:
+                        kernel["parallel_read_async_batches"] = 0
+                        kernel["parallel_read_async_slots"] = 0
+                mixed = dict(
+                    record["packed_read"]["passes"]["sequential"]
+                    ["kernel_read_path"])
+                if enabled:
+                    mixed["parallel_read_async_batches"] = 48
+                    mixed["parallel_read_async_slots"] = 144
+                    record["throughput_mbps"]["logical_write_mbps"] = 21
+                    record["throughput_mbps"]["logical_read_mbps"] = 7
+                    record["read_p99_ns"] = 4_000_000
+                    record["lower_io"]["lower_read_requests"] = 3
+                else:
+                    mixed["parallel_read_async_batches"] = 0
+                    mixed["parallel_read_async_slots"] = 0
+                record["kernel_read_path"] = mixed
+                return json.dumps(record, sort_keys=True)
+
             def mock_coalesce_arm(enabled, sd=False):
                 record = json.loads(mock_parallel_arm(enabled, sd=sd))
                 for key, phase in record["packed_read"]["passes"].items():
@@ -647,6 +687,7 @@ class PublicMakeContract(unittest.TestCase):
                 "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
                 "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
                 "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
+                "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
             ]
             specs = (("sd_emulated", 10, 1000000, 2, 2, 1, 1),
                      ("ssd_emulated", 80, 150000, 2, 2, 1, 64))
@@ -700,6 +741,23 @@ class PublicMakeContract(unittest.TestCase):
                     mock_coalesce_arm(enabled, sd=True) if index % 2 else mock_arm("off", 0),
                     mock_arm("off", 0) if index % 2 else mock_coalesce_arm(enabled, sd=True),
                     f"PASS_SD_READ_COALESCE_AB={enabled}",
+                ))
+            cap, ns, irq, queue_mode, submit_queues, hw_depth = (
+                80, 150000, 2, 2, 1, 64)
+            for index, enabled in enumerate(confirmation):
+                records.extend((
+                    f"START_PARALLEL_READ_AB={enabled}",
+                    "REPLAY_ORDER=swapz-first" if index % 2 else
+                    "REPLAY_ORDER=off-first",
+                    f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} "
+                    f"IRQMODE={irq} QUEUE_MODE={queue_mode} "
+                    f"SUBMIT_QUEUES={submit_queues} "
+                    f"HW_QUEUE_DEPTH={hw_depth}",
+                    mock_fanout_arm(enabled) if index % 2 else
+                    mock_arm("off", 0),
+                    mock_arm("off", 0) if index % 2 else
+                    mock_fanout_arm(enabled),
+                    f"PASS_PARALLEL_READ_AB={enabled}",
                 ))
             for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
                 for index, allow in enumerate(confirmation):
@@ -960,8 +1018,11 @@ class PublicMakeContract(unittest.TestCase):
         self.assertNotIn('for parallel_reads in "${directional_modes[@]}"', loaded)
         self.assertNotIn("START_BURST_GUARD_AB=", loaded)
         self.assertNotIn("--guard-inflight-zero-shrink", loaded)
-        self.assertNotIn("START_PARALLEL_READ_AB=", loaded)
-        self.assertNotIn("PASS_PARALLEL_READ_AB=", loaded)
+        self.assertIn("START_PARALLEL_READ_AB=", loaded)
+        self.assertIn("PASS_PARALLEL_READ_AB=", loaded)
+        self.assertIn('for parallel_reads in "${confirmation_modes[@]}"', loaded)
+        self.assertIn("--read-coalesce 0", loaded)
+        self.assertIn("qualify-resource-pressure.sh", loaded)
         self.assertNotIn("START_SD_READ_GROUPING_AB=", loaded)
         self.assertNotIn("PASS_SD_READ_GROUPING_AB=", loaded)
         self.assertIn("START_SD_READ_COALESCE_AB=", loaded)

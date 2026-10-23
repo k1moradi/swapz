@@ -42,10 +42,11 @@ that exact-source run passes, source `174d42eb7135...` remains the latest
 qualified baseline.
 
 The first open release gate is deliberate low-RAM plus heavy-CPU pressure.
-Measure target creation, bounded allocations, preparation progress, useful
-throughput, p99, and teardown while memory and CPU are constrained. Ordinary
-host CPU/PSI observations from benchmark pairs do not substitute for this
-pressure experiment.
+The bounded cgroup-v2 ID36 test is now implemented in `make test`; owner
+qualification on the exact source is still required. It measures target
+creation/teardown and byte-exact async service while forcing memory.high events
+and CPU PSI without permitting OOM. Ordinary host CPU/PSI observations from
+benchmark pairs do not substitute for this pressure experiment.
 
 Next collect realistic churn/GC/TRIM evidence: about 70% logical occupancy, an
 explicit cold/hot split, and at least ten logical capacities of hot rewrites.
@@ -129,10 +130,10 @@ changes.
 | 33 | Linux kernel CRC32C primitive | **1** | Already implemented; keep architecture-selected kernel backend. |
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
-| 36 | Heavy-CPU plus low-RAM qualification | **6** | Open release gate for the async default and any increase beyond K=1. Measure target-creation behavior and resource use under memory pressure and CPU oversubscription before release qualification. |
+| 36 | Heavy-CPU plus low-RAM qualification | **6 implemented gate; owner-loaded evidence pending** | `make test` now runs one production async fast-QD32 pair inside a cgroup-v2 domain with 576MiB resident pressure, `memory.high=576MiB`, `memory.max=896MiB`, swap disabled for the cgroup, and 2x CPU oversubscription (cap 32). Pass requires memory-high and CPU-PSI evidence, zero OOM/OOM-kill, byte-exact verification and ordinary teardown. This remains unqualified until the three owner hosts pass the exact source. |
 | 37 | K=1 ping-pong WRITE pipeline | **1 qualified / keep; release gate open** | Latest five-pair fast sustained-write evidence shows async/sync QD4 +1.66% CI [+0.33%,+3.00%], QD8 +23.88% [+18.52%,+29.24%], and QD32 +22.15% [+15.65%,+28.65%]. QD8 lower requests fall 17.96%; QD32 requests fall 9.96% while bytes are statistically neutral. Keep the fixed one-slot path and existing activation gates; low-RAM/heavy-CPU remains a release gate. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5 refuted / removed** | Repeated depth-1/depth-2 evidence did not establish a useful service benefit. Production is fixed at one slot, and the second-slot allocation/append path plus runtime selector are removed. Reopening K>1 requires a new workload and an explicit architecture experiment. |
-| 39 | Latency-first bounded parallel READ service | **5 refuted; helper removed from current source** | Owner evidence showed no standalone benefit. ID65 removes the `swapz-read` helper; the legacy `parallel_reads_enabled`/read-worker CPU status tokens remain zero for schema compatibility. |
+| 39 | Latency-first bounded parallel READ service | **4 active ordered-worker fan-out; final isolated A/B required** | The retired `swapz-read` helper workqueue remains removed and its `read_worker_cpu_ns` compatibility field stays zero. Current production separately supports bounded ordered-worker fan-out through private read slots: it submits independent missing lower ranges before joining them, while the ordered worker retains decode, cache publication and upper-BIO completion ownership. Run one final five-pair `parallel_reads=0/1` fast-model decision family with `read_coalesce=0`; the same sessions must report Fast QD32 mixed service and packed sequential/random reads. Keep the mechanism only if useful service or tail latency earns the complexity. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
@@ -165,7 +166,7 @@ changes.
 | 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
 | 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
-| 72 | Physical wear / logical allocator fairness | **4 production switch/native semantics implemented; loaded A/B still missing** | Optional `logical_open_balance=1` prefers the least-opened eligible dead destination and uses logical-open count only as an exact-score/count GC victim tie-break, but the official loaded harness still requires `logical_open_balance=0`. The latest qualified baseline already reports 1/1.25/2 min/mean/max opens across 64 segments and 80 opens, the best possible integer min/max spread for that workload. Keep default-off; any promotion test needs deliberately skewed churn plus allocator-probe/GC/I/O/throughput/tail comparisons. Logical opens are not NAND P/E cycles and cannot support physical-wear claims. |
+| 72 | Physical wear / logical allocator fairness | **4 production switch/native semantics implemented; terminal loaded A/B designed** | Optional `logical_open_balance=1` remains default-off. After ID36 passes, run the predeclared five-pair 70%-occupied cold/hot workload: 2,294 cold + 573 hot pages and 40,960 deterministic hot rewrites. If baseline spread is already <=1, remove the switch. Otherwise promotion requires >=20% mean `max-min` spread reduction with a favorable paired 95% interval and no >5% repeatable regression in service, GC/probe cost or lower WRITE work. Logical opens are allocator fairness telemetry, not NAND P/E cycles. |
 | 73 | Flexible/larger extent study | **5 larger/irregular classes deprioritized** | Report 711ceaad shows packed 1/2/4 captures the dominant geometry gain. A 3-block class saves only 2/2,089 blocks; 32/64KiB maxima save 14/22 more blocks while cold-read cost rises 1.47->1.53/1.55. Keep SWZ 1/2/4 classes unchanged unless a broader representative corpus materially overturns this result. |
 
 
@@ -243,9 +244,10 @@ AVX-512 review/build evidence does not qualify runtime on this SSE2-only host.
    `async_prepare=0` as the sync control, and preserve the fast-mixed paired
    intervals. The ID36 low-RAM/heavy-CPU gate still blocks release
    qualification of the default-on path.
-3. Implement the low-RAM/heavy-CPU evidence step first. Attribute QD32 requests
-   next, then collect realistic churn/GC/TRIM evidence before choosing the
-   asynchronous-TRIM implementation. The design below is a review proposal.
+3. Owner-qualify the implemented ID36 low-RAM/heavy-CPU gate first. Attribute
+   QD32 requests next, then collect realistic churn/GC/TRIM evidence before
+   choosing the asynchronous-TRIM implementation. The design below is a review
+   proposal.
 4. Keep `logical_open_balance=0` until the churn A/B establishes allocator
    spread and probe/GC cost. Logical opens remain distinct from NAND wear.
 5. Keep SWZ 1/2/4 classes, K=1 scheduling and ID63 completion semantics
