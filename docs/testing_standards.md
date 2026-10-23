@@ -962,10 +962,13 @@ available. The ROADMAP evidence table is the reopen authority for IDs 50-57.
 ### ID36 low-RAM plus heavy-CPU qualification
 
 ID36 is a release gate for default-on asynchronous preparation, not a
-throughput-promotion benchmark. The loaded stage runs one ordinary fast-model
-QD32 async OFF/swapz pair inside a dedicated cgroup-v2 domain while a separate
-helper faults 576 MiB of anonymous memory and runs twice the online CPU count
-of integer burners, capped at 32. The cgroup sets `memory.high=576MiB`,
+throughput-promotion benchmark. The loaded stage runs one fast-model QD32 async
+OFF/swapz pair with a fixed short trace (128 warmup + 2048 measured operations)
+and the normal packed byte-exact readback inside a dedicated cgroup-v2 domain,
+while a separate helper faults 576 MiB of anonymous memory and runs twice the
+online CPU count of integer burners, capped at 32. The shorter trace preserves
+mixed QD32 concurrency while preventing arbitrary benchmark-duration timeouts
+from being mistaken for a forward-progress failure. The cgroup sets `memory.high=576MiB`,
 `memory.max=896MiB` and `memory.swap.max=0` when supported. The host must
 have at least 1 GiB MemAvailable before this destructive-to-performance but
 RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
