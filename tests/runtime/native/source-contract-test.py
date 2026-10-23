@@ -1898,8 +1898,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->pack_close_burst_count_le4++", flush)
         self.assertIn("ctx->pack_close_burst_overshoot++", flush)
         sample = body("swapz_sample_pack_tail_locked")
-        self.assertIn("READ_ONCE(ctx->inflight_write.active)", sample)
-        self.assertIn("!completion_done(&ctx->inflight_write.lower_done)", sample)
+        self.assertIn("swapz_inflight_lower_pending(ctx)", sample)
+        self.assertNotIn("ctx->inflight_write", sample)
         self.assertLess(sample.index("if (!tail && inflight)"),
                         sample.index("ctx->pack_tail_samples++"))
         self.assertIn("ctx->pack_tail_samples++", sample)
@@ -1922,7 +1922,8 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("hold_zero_after_finalize", DM)
         self.assertNotIn("swapz_inflight_write_busy", DM)
         self.assertIn("ctx->k1_ready_wait_windows++", flush)
-        self.assertIn("!completion_done(&ctx->inflight_write.lower_done)", flush)
+        self.assertIn("head && !completion_done(&head->lower_done)", flush)
+        self.assertIn("ctx->write_pipeline_depth == 1U", flush)
         self.assertIn("ctx->pipeline_finalize_wait_wall_ns", flush)
         self.assertIn("SWAPZ_BURST_CLOSE_ADMISSION", writer)
         self.assertIn("SWAPZ_BURST_CLOSE_WORKER", worker)
@@ -1957,7 +1958,7 @@ static swapz_u16 swapz_probe_set(
                         gc.index("swapz_discard_dead_segment(ctx, victim)"))
         self.assertIn("a->active_start / SWAPZ_SEGMENT_BLOCKS == segment", discard)
         self.assertIn("a->batch_segment == segment", discard)
-        self.assertIn("ctx->inflight_write.run.start_block / SWAPZ_SEGMENT_BLOCKS == segment", discard)
+        self.assertIn("swapz_inflight_uses_segment(ctx, segment)", discard)
         self.assertIn("bdev_max_discard_sectors(ctx->backing->bdev)", discard)
         self.assertIn("blkdev_issue_discard(ctx->backing->bdev", discard)
         self.assertIn("error == -EOPNOTSUPP", discard)
@@ -2141,7 +2142,9 @@ static swapz_u16 swapz_probe_set(
             self.assertIn(fence, independent)
         self.assertIn("ctx->authority.batch_pending && !inflight_active", independent)
         run_fence = body("swapz_inflight_run_touches_logical")
-        self.assertIn("ctx->authority.batch_pending != run->extent_count", run_fence)
+        self.assertIn("ctx->authority.batch_pending != pending", run_fence)
+        self.assertIn("slot_index = (slot_index + 1U) % SWAPZ_MAX_WRITE_PIPELINE_DEPTH",
+                      run_fence)
         self.assertIn("tx->records[record].logical_page == logical", run_fence)
         self.assertIn("swapz_inflight_run_touches_logical(ctx, logical)", independent)
         self.assertIn("swapz_window_read_independent(ctx->batch, ctx->batch_count",
@@ -2604,7 +2607,12 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('shufpd $1', predictor_sse2)
         self.assertIn('pslldq $8', predictor_sse2)
         self.assertIn('pshufd $0xee', predictor_sse2)
-        self.assertIn("base += step0", predictor_sse2)
+        sse2_inverse = source_body("swapz_unpredict_delta64_sse2",
+                                   predictor_sse2)
+        self.assertIn("swapz_u32 offset = 0", sse2_inverse)
+        self.assertIn("step_pair = step0 + step1", sse2_inverse)
+        self.assertIn("base += step_pair", sse2_inverse)
+        self.assertNotIn("base += step0", sse2_inverse)
         self.assertNotIn("previous = prefix.u64[1]", predictor_sse2)
         self.assertIn("#ifndef __KERNEL__", predictor_sse2)
         self.assertIn("swapz_predict_delta64_sse2_baseline", predictor_sse2)
@@ -2622,9 +2630,13 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn(
             "input + offset - SWAPZ_PREDICTOR_U64_BYTES", predictor_sse2)
 
-        self.assertIn("offset < sizeof(swapz_u64x4)", predictor_avx2)
-        self.assertIn('vpermq $0xff', predictor_avx2)
-        self.assertIn("base += step0", predictor_avx2)
+        avx2_inverse = source_body("swapz_unpredict_delta64_avx2",
+                                   predictor_avx2)
+        self.assertIn("swapz_u32 offset = 0", avx2_inverse)
+        self.assertIn('vpermq $0xff', avx2_inverse)
+        self.assertIn("step_pair = step0 + step1", avx2_inverse)
+        self.assertIn("base += step_pair", avx2_inverse)
+        self.assertNotIn("base += step0", avx2_inverse)
         self.assertNotIn("previous = prefix.u64[3]", predictor_avx2)
 
         avx512_forward = source_body(
@@ -2635,7 +2647,12 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('valignq $7', avx512_forward)
         self.assertNotIn("swapz_predictor_store64(", avx512_forward)
         self.assertIn("2U * sizeof(swapz_u64x8)", predictor_avx512)
-        self.assertIn("base += step0", predictor_avx512)
+        avx512_inverse = source_body("swapz_unpredict_delta64_avx512",
+                                     predictor_avx512)
+        self.assertIn("swapz_u32 offset = 0", avx512_inverse)
+        self.assertIn("step_pair = step0 + step1", avx512_inverse)
+        self.assertIn("base += step_pair", avx512_inverse)
+        self.assertNotIn("base += step0", avx512_inverse)
         self.assertNotIn("previous = prefix[7]", predictor_avx512)
         self.assertIn(
             "static_call_update(swapz_predictor_inverse_call, swapz_unpredict_avx2)",

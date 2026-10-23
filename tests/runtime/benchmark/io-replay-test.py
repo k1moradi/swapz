@@ -298,6 +298,9 @@ class PairReplayContract(unittest.TestCase):
         before.update({
             "physical_write_reqs": 2,
             "lz4_acceleration": 1,
+            "delta64_lz4_acceleration": 1,
+            "write_pipeline_depth": 1,
+            "pipeline_active_max": 0,
             "read_coalesce_max_blocks": 8,
             "lz4_wall_ns": 100,
             "ordered_lz4_wall_ns": 60,
