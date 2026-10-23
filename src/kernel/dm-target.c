@@ -3795,7 +3795,7 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 
 static bool swapz_retention_expired(struct swapz_dm *ctx);
 
-static bool swapz_read_is_independentstatic bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
+static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	bool inflight_active = swapz_has_inflight(ctx);
