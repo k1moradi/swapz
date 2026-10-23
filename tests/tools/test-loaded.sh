@@ -83,7 +83,9 @@ cleanup_shared_plan() {
     [[ $shared_plan == "$ROOT/build/tests/benchmark-plan."* &&
        -d $shared_plan && ! -L $shared_plan ]] || return
     rm -f -- "$shared_plan/fixture.bin" "$shared_plan/fixture.json" \
-        "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json"
+        "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json" \
+        "$shared_plan/plan-id36/trace.jsonl" "$shared_plan/plan-id36/manifest.json"
+    rmdir -- "$shared_plan/plan-id36" 2>/dev/null || true
     for qd in 1 4 8 32; do
         rm -f -- "$shared_plan/plan-write-qd$qd/trace.jsonl" \
             "$shared_plan/plan-write-qd$qd/manifest.json"
@@ -102,6 +104,15 @@ python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
     --reader-pages 256 --qd 32 --read-pct 25 \
     --warmup-ops 1024 --measure-ops 16384 --iops 0
+# ID36 is a forward-progress/correctness gate, not a throughput benchmark.
+# Keep the same QD32 mixed geometry and immutable fixture, but shorten the
+# measured trace so CPU/memory contention cannot turn a fixed replay timeout
+# into the qualification result. Packed byte-exact reads remain enabled.
+python3 -B tests/runtime/benchmark/io-replay.py prepare \
+    --fixture "$shared_plan/fixture.bin" --output-dir "$shared_plan/plan-id36" \
+    --logical-pages 1024 --writer-pages 256 --reader-start 512 \
+    --reader-pages 256 --qd 32 --read-pct 25 \
+    --warmup-ops 128 --measure-ops 2048 --iops 0
 # Four immutable unpaced write-only plans reuse the identical fixture and
 # logical volume. Persistent lane-owned workers sustain offered QD without
 # per-I/O Future dispatch or an artificial barrier between completed writes.
