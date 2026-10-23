@@ -194,7 +194,7 @@ if ! bash -c '
     shift
     echo $$ > "$cgroup/cgroup.procs"
     exec "$@"
-' _ "$CGROUP" timeout --signal=TERM --kill-after=10s 300s     "$PAIR" --validated-source "$VALIDATED_SOURCE"     --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced     --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000     --async-prepare --shared-plan "$SHARED_PLAN"; then
+' _ "$CGROUP" timeout --signal=TERM --kill-after=10s 300s     bash "$PAIR" --validated-source "$VALIDATED_SOURCE"     --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced     --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000     --async-prepare --shared-plan "$SHARED_PLAN"; then
     printf '%s\n' 'FAIL: ID36 owned-RAM pair failed under resource pressure' >&2
     exit 1
 fi
