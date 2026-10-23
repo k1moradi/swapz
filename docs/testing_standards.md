@@ -205,9 +205,12 @@ actual kernel swap and physical media remain open qualification gates.
   exact-source run therefore qualifies the cached-head fast reject before any
   policy change: a FIFO head already satisfied by shared cache residency must
   return before the bounded 64-BIO candidate scan and private-slot preparation.
-  Selected-chain success ACKs remain fail-closed: all selected slot decode/CRC
-  work and the chain failure decision must finish before the first success ACK.
-  Every merge remains exact, same-segment,
+  After one successful combined lower READ, each constituent may complete only
+  after its own authority/generation checks, metadata and payload CRC validation,
+  decode, and upper copy have succeeded. A later constituent failure fails the
+  target and every BIO still owned by the worker; it does not retroactively
+  invalidate an already fully verified constituent. A combined lower-I/O
+  failure publishes no constituent success. Every merge remains exact, same-segment,
   <=8 blocks total and zero-padding; `parallel_read_coalesce_extra_blocks`
   stays zero and defensive skip-other stays zero. Eligibility must use shared
   cache metadata without private-slot memcpy, and source contracts must prove
@@ -958,10 +961,22 @@ available. The ROADMAP evidence table is the reopen authority for IDs 50-57.
 
 ### Bounded concurrent READ qualification
 
-Routine qualification no longer uses the retired directional
-`parallel_reads=0/1` grouping experiment. Production qualification keeps
-`parallel_reads=1`, so bounded independent lower-READ fan-out is common
-infrastructure rather than part of the ID63 treatment.
+The retired `swapz-read` helper workqueue remains absent. Current
+`parallel_reads=1` is a different mechanism: the ordered worker owns private
+slots, submits multiple independent missing lower ranges before joining any of
+them, then performs validation/decode/cache publication and upper completion
+itself. Before treating that fan-out as settled infrastructure, run one final
+five-pair fast-model `parallel_reads=0/1` decision family with
+`read_coalesce=0` in both arms and `async_prepare=1`. Each benchmark pair
+already contains Fast QD32 mixed I/O plus the byte-exact 4 MiB packed
+sequential/random phases, so this one family must report both scopes. The off
+arm must execute zero async-read batches/slots; the on arm must exercise real
+fan-out in mixed service. Report paired 95% confidence intervals for useful
+mixed WRITE/READ throughput, mixed READ p99 and lower READ work, plus packed
+sequential/random throughput, p99 and lower READ work. Nonzero concurrency
+without useful service or tail-latency benefit is not sufficient to retain the
+mechanism; after the decision, retire the A/B rather than adding another
+permanent tuning family.
 
 ID63 remains the adjacent request-efficiency experiment. The loaded test keeps
 exactly ten SSD_EMULATED and ten SD_EMULATED sessions in the fixed
