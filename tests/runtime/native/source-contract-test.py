@@ -333,6 +333,7 @@ static swapz_u16 swapz_probe_set(
         ctor = body("swapz_ctr")
         producer = body("swapz_preparation_worker")
         ordered = body("swapz_accept_write")
+        compressor = body("swapz_compress_page")
         read = body("swapz_read")
         slot_read = body("swapz_read_slot_run")
         self.assertRegex(DM, r"static\s+bool\s+swapz_delta64_rescue_enabled\s*;")
@@ -340,15 +341,15 @@ static swapz_u16 swapz_probe_set(
                       "swapz_delta64_rescue_enabled, bool, 0444)", DM)
         self.assertIn("ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled",
                       ctor)
-        self.assertRegex(producer,
-                         r"if \(ctx->delta64_rescue_enabled && !prepared->zero\)\s+"
-                         r"prepared->length = swapz_delta64_rescue\(")
-        self.assertRegex(ordered,
-                         r"if \(ctx->delta64_rescue_enabled && !inline_zero\)\s+"
-                         r"length = swapz_delta64_rescue\(")
+        self.assertIn("prepared->length = swapz_compress_page(", producer)
+        self.assertIn("length = swapz_compress_page(", ordered)
+        self.assertIn("if (ctx->delta64_rescue_enabled)", compressor)
+        self.assertIn("swapz_predict_delta64_sample_score(input)", compressor)
         for allocation in ("ctx->predictor_page = kmalloc(",
+                           "ctx->delta64_candidate_page = kmalloc(",
                            "slot->predictor_page = kmalloc(",
-                           "lane->predictor_page ="):
+                           "lane->predictor_page =",
+                           "lane->delta64_candidate_page ="):
             self.assertRegex(ctor, r"if \(ctx->delta64_rescue_enabled\)\s+" +
                              re.escape(allocation))
         self.assertIn("if (!ctx->predictor_page)", read)
@@ -366,10 +367,12 @@ static swapz_u16 swapz_probe_set(
         read = body("swapz_read")
         status = body("swapz_status")
         self.assertIn("length > 0 && length <= 64", accept)
-        self.assertIn("inline_zero = swapz_page_is_zero(input)", accept)
+        self.assertIn("baseline > 0 && baseline <= 64 && swapz_page_is_zero(input)",
+                      compressor)
+        self.assertIn("candidate <= 64 && swapz_page_is_zero(input)", compressor)
         self.assertIn("(prepared_async ? entry->prepared_page->zero : inline_zero)",
                       accept)
-        self.assertLess(accept.index("inline_zero = swapz_page_is_zero(input)"),
+        self.assertLess(accept.index("length = swapz_compress_page("),
                         accept.index("kunmap_local(mapped_input)"))
         self.assertIn("swapz_flush_window(ctx)", accept)
         self.assertIn("swapz_discard_page(&ctx->authority, logical)", accept)
@@ -377,8 +380,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->zero_elided_pages++", accept)
         self.assertIn("swapz_complete(bio, error)", accept)
         self.assertIn("swapz_issue_flush(ctx)", accept)
-        self.assertLess(accept.index("swapz_flush_window(ctx);",
-                                    accept.index("inline_zero = swapz_page_is_zero(input)")),
+        zero_branch = accept.index(
+            "(prepared_async ? entry->prepared_page->zero : inline_zero)")
+        self.assertLess(zero_branch,
+                        accept.index("swapz_flush_window(ctx);", zero_branch))
+        self.assertLess(accept.index("swapz_flush_window(ctx);", zero_branch),
                         accept.index("swapz_discard_page(&ctx->authority"))
         self.assertIn("if (!map->valid)", read)
         self.assertIn("memset(ctx->read_page, 0, SWAPZ_BLOCK_BYTES)", read)
@@ -1691,19 +1697,19 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_predictor_init()", qualification)
         self.assertIn("swapz_predictor_transform_backend_name()", qualification)
         self.assertIn("swapz_predictor_inverse_backend_name()", qualification)
-        rescue = body("swapz_delta64_rescue")
-        self.assertIn("swapz_predict_delta64_sample_score", rescue)
-        self.assertIn("swapz_delta64_route_init", rescue)
-        self.assertIn("swapz_delta64_candidate_smaller", rescue)
-        self.assertIn("swapz_delta64_candidate_adoptable", rescue)
+        compressor = body("swapz_compress_page")
+        self.assertIn("swapz_predict_delta64_sample_score", compressor)
+        self.assertIn("swapz_delta64_route_init", compressor)
+        self.assertIn("swapz_delta64_candidate_smaller", compressor)
+        self.assertIn("swapz_delta64_candidate_adoptable", compressor)
         self.assertIn("swapz_engine_next_uniform_pack_limit", route)
         self.assertIn("SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD", route)
         self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", route)
         self.assertIn("SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH", route)
         self.assertIn("baseline_length <= 0", route)
         self.assertIn("candidate_length <= (int)route->pack_limit", route)
-        self.assertIn("swapz_predict_delta64", rescue)
-        self.assertIn("LZ4_compress_fast", rescue)
+        self.assertIn("swapz_predict_delta64", compressor)
+        self.assertIn("LZ4_compress_fast", compressor)
         self.assertIn("swapz_unpredict_delta64", DM)
         predictor_header = (ROOT / "src/kernel/predictor.h").read_text()
         codec_header = (ROOT / "src/kernel/codec.h").read_text()
@@ -2656,6 +2662,7 @@ static swapz_u16 swapz_probe_set(
         ).read_text()
         producer = body("swapz_preparation_worker")
         accept = body("swapz_accept_write")
+        compressor = body("swapz_compress_page")
         read = source_body("swapz_engine_read_page", engine)
         finish = source_body("swapz_finish", authority)
         gc_relocate = body("swapz_gc_relocate_one")
@@ -2785,27 +2792,23 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("swapz_gc_account_transition_apply", finish)
 
         # First-pass LZ4 can be qualified at 1/2/3/4 without changing the
-        # delta64 second pass. Exact zero skips rescue, CRC, and batch copy.
+        # delta64 rescue LZ4 setting. Zero recognition stays inside the shared
+        # compressor so producer and ordered paths cannot diverge.
         self.assertIn(
             "module_param_named(lz4_acceleration, swapz_lz4_acceleration, uint, 0444)",
             DM)
-        self.assertIn("ctx->lz4_acceleration", producer)
-        self.assertIn("ctx->lz4_acceleration", accept)
-        self.assertLess(producer.index("prepared->zero ="),
-                        producer.index(
-                            "if (ctx->delta64_rescue_enabled && !prepared->zero)"))
-        self.assertLess(accept.index("inline_zero = swapz_page_is_zero(input)"),
-                        accept.index(
-                            "if (ctx->delta64_rescue_enabled && !inline_zero)"))
+        self.assertIn("ctx->lz4_acceleration", compressor)
+        self.assertIn("ctx->delta64_lz4_acceleration", compressor)
+        self.assertIn("prepared->length = swapz_compress_page(", producer)
+        self.assertIn("length = swapz_compress_page(", accept)
         self.assertIn("prepared->length > 0 && !prepared->zero", producer)
         self.assertIn("length > 0 && !entry->prepared_page->zero", accept)
         self.assertIn("length > 0 && !inline_zero", accept)
 
         # Production transform telemetry includes the dispatched SIMD wrapper;
         # native qualification continues to report the raw backend separately.
-        rescue = body("swapz_delta64_rescue")
-        self.assertIn("stats->transform_wall_ns", rescue)
-        self.assertIn("stats->transform_calls++", rescue)
+        self.assertIn("stats->transform_wall_ns", compressor)
+        self.assertIn("stats->transform_calls++", compressor)
         self.assertIn("delta64_transform_wall_ns=%llu", body("swapz_status"))
         self.assertIn(r'\"lz4_acceleration_sweep\"', predictor_qualification)
         self.assertIn("1U, 2U, 3U, 4U", predictor_qualification)
