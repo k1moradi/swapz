@@ -179,6 +179,8 @@ class PairReplayContract(unittest.TestCase):
             "read_two_block_skips": 200,
             "parallel_read_pairs": 8,
             "parallel_read_same_extent_pairs": 3,
+            "parallel_read_async_batches": 2,
+            "parallel_read_async_slots": 5,
             "parallel_read_distinct_extent_pairs": 5,
             "parallel_read_adjacent_extent_pairs": 2,
             "parallel_read_adjacent_extent_blocks": 12,
@@ -222,6 +224,8 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_two_block_skips"], 200)
         self.assertEqual(measured["parallel_read_pairs"], 8)
         self.assertEqual(measured["parallel_read_same_extent_pairs"], 3)
+        self.assertEqual(measured["parallel_read_async_batches"], 2)
+        self.assertEqual(measured["parallel_read_async_slots"], 5)
         self.assertEqual(measured["parallel_read_distinct_extent_pairs"], 5)
         self.assertEqual(measured["parallel_read_adjacent_extent_pairs"], 2)
         self.assertEqual(measured["parallel_read_adjacent_extent_blocks"], 12)

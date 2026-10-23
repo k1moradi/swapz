@@ -1067,9 +1067,11 @@ infrastructure rather than part of the ID63 treatment.
 ID63 remains the adjacent request-efficiency experiment. The loaded test keeps
 exactly ten SSD_EMULATED and ten SD_EMULATED sessions in the fixed
 counterbalanced sequence while varying only `read_coalesce=0/1`. Both arms
-must report `parallel_reads_enabled=1`. The merge-off arm may therefore
-record `parallel_read_async_batches`, `parallel_read_async_slots`, generic
-parallel pairs and distinct-extent service, but every ID63 adjacency,
+must report `parallel_reads_enabled=1`. The loaded replay snapshot must
+preserve `parallel_read_async_batches` and `parallel_read_async_slots` in
+the same measured C-counter record consumed by the report parser. The merge-off
+arm may therefore record those fan-out counters, generic parallel pairs and
+distinct-extent service, but every ID63 adjacency,
 coalesced-range and coalescing-skip counter must remain zero. The merge-on arm
 uses the identical fan-out fallback after any non-coalescible prefix.
 
