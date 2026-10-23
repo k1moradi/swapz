@@ -1439,9 +1439,11 @@ aggregate fast path.
 
 Routine qualification no longer repeats the lower-WRITE depth 1/2 A/B: the
 completed idle SSE2 and AVX-512 five-pair cycles found no throughput/latency
-benefit. Production is fixed at depth one; do not retain a runtime depth-two
-diagnostic solely for hypothetical physical media. Git history preserves that
-experiment if future real-device evidence supplies a specific reason to revive it.
+benefit. Production is fixed at depth one; the second-slot allocation and append path
+are removed rather than retained as dormant diagnostic code. Fixed
+`write_pipeline_depth=1` status remains compatibility telemetry only. Git
+history preserves the experiment if future real-device evidence supplies a
+specific reason to revive it.
 
 Predictor-first delta64 telemetry must distinguish direct adoptions from
 baseline-measured RAW/LZ4 rescues. The rescue A/B continues to pin

@@ -60,10 +60,9 @@
 #define SWAPZ_PREPARATION_STARTER_WAKE_MIN \
 	(SWAPZ_PREPARATION_TAIL_WAKE_MIN + 1U)
 #define SWAPZ_PREPARATION_TAIL_CLAIM_MIN 2U
-#define SWAPZ_MAX_WRITE_PIPELINE_DEPTH 2U
+#define SWAPZ_WRITE_PIPELINE_DEPTH 1U
 #define SWAPZ_DELTA64_PREPARATION_WORKERS 1U
 #define SWAPZ_ORDINARY_LZ4_ACCELERATION 1U
-#define SWAPZ_PRODUCTION_WRITE_PIPELINE_DEPTH 1U
 #define SWAPZ_READ_COALESCE_MAX_BLOCKS (2U * SWAPZ_MAX_BLOCKS)
 /*
  * A separate bounded LZ4 producer may prepare future writes while the
@@ -451,11 +450,10 @@ struct swapz_dm {
 	 * ordered worker publishes authority and upper BIO completions in FIFO.
 	 */
 	struct swapz_inflight_write
-		inflight_writes[SWAPZ_MAX_WRITE_PIPELINE_DEPTH];
+		inflight_writes[SWAPZ_WRITE_PIPELINE_DEPTH];
 	swapz_u8 inflight_head;
 	swapz_u8 inflight_tail;
 	swapz_u8 inflight_count;
-	swapz_u8 inflight_group_submissions;
 	swapz_u8 pipeline_active_max;
 	u64 pipeline_async_runs;
 	u64 pipeline_completed_runs;
@@ -912,7 +910,7 @@ static bool swapz_inflight_lower_pending(struct swapz_dm *ctx)
 {
 	swapz_u8 index;
 
-	for (index = 0; index < SWAPZ_MAX_WRITE_PIPELINE_DEPTH; ++index)
+	for (index = 0; index < SWAPZ_WRITE_PIPELINE_DEPTH; ++index)
 		if (READ_ONCE(ctx->inflight_writes[index].active) &&
 		    !completion_done(&ctx->inflight_writes[index].lower_done))
 			return true;
@@ -923,7 +921,7 @@ static bool swapz_inflight_uses_segment(struct swapz_dm *ctx, swapz_u32 segment)
 {
 	swapz_u8 index;
 
-	for (index = 0; index < SWAPZ_MAX_WRITE_PIPELINE_DEPTH; ++index)
+	for (index = 0; index < SWAPZ_WRITE_PIPELINE_DEPTH; ++index)
 		if (READ_ONCE(ctx->inflight_writes[index].active) &&
 		    ctx->inflight_writes[index].run.start_block /
 			    SWAPZ_SEGMENT_BLOCKS == segment)
@@ -941,7 +939,7 @@ static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
 		return false;
 	if (!ctx->inflight_count ||
 	    ctx->inflight_count > ctx->write_pipeline_depth ||
-	    ctx->inflight_count > SWAPZ_MAX_WRITE_PIPELINE_DEPTH)
+	    ctx->inflight_count > SWAPZ_WRITE_PIPELINE_DEPTH)
 		return true;
 	for (ring = 0; ring < ctx->inflight_count; ++ring) {
 		struct swapz_inflight_write *inflight =
@@ -965,36 +963,6 @@ static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
 		slot_index = (slot_index + 1U) % ctx->write_pipeline_depth;
 	}
 	return ctx->authority.batch_pending != pending;
-}
-
-static bool swapz_write_pipeline_can_append(struct swapz_dm *ctx,
-					     swapz_u8 count)
-{
-	swapz_u32 segment_end;
-	swapz_u8 index;
-
-	if (ctx->write_pipeline_depth < 2U || ctx->inflight_count != 1U ||
-	    ctx->inflight_group_submissions != 1U ||
-	    ctx->authority.in_flight || ctx->authority.batch_replaying ||
-	    ctx->authority.batch_consumed || !ctx->authority.batch_pending ||
-	    ctx->authority.batch_pending > SWAPZ_MAX_RECORDS - count ||
-	    ctx->authority.batch_segment >= ctx->segment_count ||
-	    ctx->authority.next_block / SWAPZ_SEGMENT_BLOCKS !=
-		    ctx->authority.batch_segment)
-		return false;
-	/*
-	 * Full-run headroom guarantees the second bounded planner cannot cross
-	 * the authority batch segment. This is intentionally conservative.
-	 */
-	segment_end = (ctx->authority.batch_segment + 1U) * SWAPZ_SEGMENT_BLOCKS;
-	if (ctx->authority.next_block > segment_end ||
-	    segment_end - ctx->authority.next_block < SWAPZ_BULK_BLOCKS)
-		return false;
-	for (index = 0; index < count; ++index)
-		if (swapz_inflight_run_touches_logical(
-			    ctx, ctx->planned[index].logical_page))
-			return false;
-	return true;
 }
 
 static void swapz_async_lower_write_done(unsigned long error, void *context)
@@ -1076,7 +1044,6 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	inflight->lower_end_ns = 0;
 	WRITE_ONCE(inflight->active, true);
 	ctx->inflight_count++;
-	ctx->inflight_group_submissions++;
 	ctx->inflight_tail =
 		(ctx->inflight_tail + 1U) % ctx->write_pipeline_depth;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
@@ -1101,9 +1068,6 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 		WRITE_ONCE(inflight->active, false);
 		ctx->inflight_tail = inflight->slot_index;
 		ctx->inflight_count--;
-		ctx->inflight_group_submissions--;
-		if (!ctx->inflight_count)
-			ctx->inflight_group_submissions = 0;
 		return error;
 	}
 	ctx->pipeline_active_max =
@@ -1187,7 +1151,6 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	ctx->inflight_count--;
 	if (!ctx->inflight_count) {
 		ctx->inflight_tail = ctx->inflight_head;
-		ctx->inflight_group_submissions = 0;
 	}
 	if (ctx->retained_single_tail_deferred)
 		ctx->single_tail_lower_done_seen = true;
@@ -2593,7 +2556,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	bool deferred_single_tail = ctx->retained_single_tail_deferred;
 	bool async_submitted = false;
 	bool async_detach_ready;
-	bool append_second = false;
 	struct swapz_inflight_write *detached_inflight = NULL;
 	int error = 0;
 
@@ -2811,11 +2773,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			head && !completion_done(&head->lower_done);
 		u64 wait_before = ctx->pipeline_finalize_wait_wall_ns;
 
-		append_second = async_detach_ready &&
-			!ctx->retained_window_read_bypasses &&
-			swapz_write_pipeline_can_append(ctx, count);
-		if (!append_second)
-			error = swapz_finalize_all_inflight(ctx, true);
+		error = swapz_finalize_all_inflight(ctx, true);
 		if (k1_ready_wait) {
 			u64 waited = ctx->pipeline_finalize_wait_wall_ns - wait_before;
 
@@ -5455,10 +5413,6 @@ static void swapz_free(struct swapz_dm *ctx)
 		}
 		kvfree(ctx->read_slots);
 	}
-	for (slot = 1; slot < SWAPZ_MAX_WRITE_PIPELINE_DEPTH; ++slot) {
-		vfree(ctx->inflight_writes[slot].run.bytes);
-		kvfree(ctx->inflight_writes[slot].run.txs);
-	}
 	vfree(ctx->engine.bulk_scratch);
 	kvfree(ctx->engine.bulk_txs);
 	kfree(ctx->lz4_workmem);
@@ -5546,7 +5500,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->lz4_acceleration = SWAPZ_ORDINARY_LZ4_ACCELERATION;
 	ctx->delta64_lz4_acceleration =
 		(swapz_u8)swapz_delta64_lz4_acceleration;
-	ctx->write_pipeline_depth = SWAPZ_PRODUCTION_WRITE_PIPELINE_DEPTH;
+	ctx->write_pipeline_depth = SWAPZ_WRITE_PIPELINE_DEPTH;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
@@ -5768,13 +5722,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_txs = kvcalloc(SWAPZ_MAX_RECORDS,
 				       sizeof(*ctx->engine.bulk_txs),
 				       GFP_KERNEL);
-	if (ctx->write_pipeline_depth > 1U) {
-		ctx->inflight_writes[1].run.bytes =
-			vzalloc(SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES);
-		ctx->inflight_writes[1].run.txs =
-			kvcalloc(SWAPZ_MAX_RECORDS,
-				 sizeof(*ctx->engine.bulk_txs), GFP_KERNEL);
-	}
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
 	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
@@ -5787,9 +5734,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	     (!ctx->read_slots || !ctx->read_pages_store ||
 	      !ctx->read_coalesce_scratch)) ||
 	    !ctx->engine.bulk_scratch || !ctx->engine.bulk_txs ||
-	    (ctx->write_pipeline_depth > 1U &&
-	     (!ctx->inflight_writes[1].run.bytes ||
-	      !ctx->inflight_writes[1].run.txs)) ||
 	    !ctx->lz4_workmem) {
 		error = -ENOMEM;
 		goto fail;
@@ -5821,7 +5765,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	ctx->inflight_writes[0].run.bytes = ctx->engine.bulk_scratch;
 	ctx->inflight_writes[0].run.txs = ctx->engine.bulk_txs;
-	for (read_slot = 0; read_slot < SWAPZ_MAX_WRITE_PIPELINE_DEPTH;
+	for (read_slot = 0; read_slot < SWAPZ_WRITE_PIPELINE_DEPTH;
 	     ++read_slot) {
 		ctx->inflight_writes[read_slot].ctx = ctx;
 		ctx->inflight_writes[read_slot].slot_index = read_slot;
@@ -5835,8 +5779,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	if (ctx->async_prepare) {
 		/* Prepared payload capacity stays globally bounded at 64 pages.
-		 * K>1 adds only per-lane scratch/workmem; it does not duplicate
-		 * planner state, authority, or packed-output buffers. */
+		 * Production uses one preparation lane; planner/authority publication
+		 * remains ordered and singular. */
 		ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *
 					       sizeof(*ctx->preparation_pages));
 		ctx->preparation_lanes = kcalloc(ctx->preparation_worker_count,
