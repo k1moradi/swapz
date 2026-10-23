@@ -4462,6 +4462,9 @@ TABLE_HEADER_LEGEND = {
     "check": "qualification criterion",
     "result": "measured outcome for that criterion",
     "merge": "adjacent-range merge: 0=off, 1=on",
+    "fanout": "independent lower-READ fan-out: 0=off, 1=on",
+    "R req": "backing-device READ request count during mixed I/O",
+    "batches/slots": "asynchronous independent READ batches / submitted lower ranges",
     "seq req": "sequential lower READ requests",
     "seq p99": "sequential READ p99 latency in milliseconds",
     "rnd req": "seeded-random lower READ requests",
@@ -4562,6 +4565,7 @@ TABLE_HEADER_GOAL = {
     "seq p99": "lower is better",
     "rnd req": "lower is better",
     "rnd p99": "lower is better",
+    "R req": "lower is better",
     "seq saved": "higher is better if latency and correctness hold",
     "rnd saved": "higher is better if latency and correctness hold",
     "extra": "target is zero",
@@ -5823,6 +5827,58 @@ def print_bench(result):
     elif delta64_ab.get("overall") != "NOT_RUN":
         print("\n  Delta64 K=1/K=2 diagnostic: NOT QUALIFIED "
               f"({delta64_ab.get('reason', delta64_ab.get('overall', 'NOT_RUN'))})")
+
+    parallel_ab = result["benchmarks"].get("parallel_read_ab", {})
+    if parallel_ab.get("overall") == "PASS_PARALLEL_READ_AB_EVIDENCE":
+        print("\n  Independent lower-READ fan-out — final five matched fast-model rounds")
+        rows = []
+        for enabled in ("0", "1"):
+            mixed = parallel_ab["modes"][enabled]["mixed"]
+            rows.append((
+                enabled,
+                f"{mixed['write_mbps']:.2f}",
+                f"{mixed['read_mbps']:.2f}",
+                f"{mixed['read_p99_ms']:.2f}",
+                f"{mixed['lower_read_requests']:.1f}",
+                f"{mixed['async_batches']:.1f}/{mixed['async_slots']:.1f}",
+            ))
+        print_table(
+            "Fast QD32 mixed independent READ fan-out means — ID63 off",
+            ("fanout", "W", "R", "R p99", "R req", "batches/slots"), rows)
+
+        ci_rows = []
+        for label, ci in (
+                ("mixed W MB/s", parallel_ab["paired"]["mixed"]["write_mbps"]),
+                ("mixed R MB/s", parallel_ab["paired"]["mixed"]["read_mbps"]),
+                ("mixed R p99", parallel_ab["paired"]["mixed"]["read_p99_ms"]),
+                ("mixed lower B", parallel_ab["paired"]["mixed"]["lower_read_bytes"]),
+                ("mixed lower req", parallel_ab["paired"]["mixed"]["lower_read_requests"]),
+                ("seq R MB/s", parallel_ab["paired"]["packed"]["sequential"]["read_mbps"]),
+                ("seq R p99", parallel_ab["paired"]["packed"]["sequential"]["read_p99_ms"]),
+                ("seq lower req", parallel_ab["paired"]["packed"]["sequential"]["lower_read_requests"]),
+                ("rnd R MB/s", parallel_ab["paired"]["packed"]["seeded_random"]["read_mbps"]),
+                ("rnd R p99", parallel_ab["paired"]["packed"]["seeded_random"]["read_p99_ms"]),
+                ("rnd lower req", parallel_ab["paired"]["packed"]["seeded_random"]["lower_read_requests"])):
+            ci_rows.append((label, f"{ci['mean'] * 100:+.1f}",
+                            f"{ci['low'] * 100:+.1f}",
+                            f"{ci['high'] * 100:+.1f}"))
+        print_table(
+            "Fan-out on minus off paired 95% confidence intervals",
+            ("metric", "mean", "low", "high"), ci_rows)
+        raw_rows = []
+        for label, key in (("raw W MB/s", "write_mbps"),
+                           ("raw R MB/s", "read_mbps"),
+                           ("raw R p99", "read_p99_ms")):
+            ci = parallel_ab["raw_control_paired"][key]
+            raw_rows.append((label, f"{ci['mean'] * 100:+.1f}",
+                             f"{ci['low'] * 100:+.1f}",
+                             f"{ci['high'] * 100:+.1f}"))
+        print_table(
+            "Fan-out experiment raw-control drift paired 95% intervals",
+            ("metric", "mean", "low", "high"), raw_rows)
+    else:
+        print("\n  Independent lower-READ fan-out: NOT QUALIFIED "
+              f"({parallel_ab.get('reason', parallel_ab.get('overall', 'NOT_RUN'))})")
 
     coalesce_ab = result["benchmarks"].get("read_coalesce_ab", {})
     if coalesce_ab.get("overall") == "PASS_READ_COALESCE_AB_CONFIRMATION":
