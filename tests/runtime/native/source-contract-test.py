@@ -364,7 +364,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("if (!slot->predictor_page)", slot_read)
         self.assertIn("delta64_rescue=%u", body("swapz_status"))
         self.assertIn("ctx->preparation_worker_count =", ctor)
-        self.assertIn("ctx->delta64_rescue_enabled ?", ctor)
+        self.assertIn("ctx->async_prepare ? SWAPZ_DELTA64_PREPARATION_WORKERS : 0U",
+                      ctor)
+        self.assertNotIn("ctx->delta64_rescue_enabled ?", ctor)
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         self.assertIn("delta64_rescue=0([[:space:]]|$)", deploy)
         self.assertIn('status_u64 "$packed_before" delta64_rescue', deploy)

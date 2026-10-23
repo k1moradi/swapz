@@ -304,7 +304,9 @@ shallow-backlog evidence. Delta64 preparation is likewise fixed at K=1:
 two-host paired evidence found no service gain from K=2 and materially worse
 p99/preparation cost on the newer host, with earlier K=4 regressions. The
 runtime preparation-width selector and routine K=2/K=4 qualification are
-retired; Git history is the archive.
+retired; Git history is the archive. Async preparation therefore owns one
+producer lane regardless of delta64 policy; only predictor scratch allocation
+remains conditional on rescue being enabled.
 
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
