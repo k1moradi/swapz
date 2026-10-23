@@ -1707,6 +1707,8 @@ class ReportContract(unittest.TestCase):
                                 "extent_geometry": extent_geometry_evidence()},
                   "benchmarks": {
             "verdicts": verdicts,
+            "parallel_read_ab": runner.parallel_read_ab_verdict(
+                runner.parse_parallel_read_ab(synthetic_log())),
             "read_coalesce_ab": runner.read_coalesce_ab_verdict(
                 runner.parse_read_coalesce_ab(synthetic_log())),
             "sd_read_coalesce_ab": runner.sd_read_coalesce_ab_verdict(
@@ -1802,6 +1804,10 @@ class ReportContract(unittest.TestCase):
         self.assertIn("skip-I0", rendered)
         self.assertIn("after-I0", rendered)
         self.assertIn("segment TRIM", rendered)
+        self.assertIn("Independent lower-READ fan-out", rendered)
+        self.assertIn("Fan-out on minus off paired 95% confidence intervals",
+                      rendered)
+        self.assertIn("Fan-out experiment raw-control drift", rendered)
         self.assertIn("Adjacent-range READ coalescing", rendered)
         self.assertNotIn("ID39 SAME-CACHE PARALLEL READ", rendered)
         self.assertNotIn("SD ID60 SAME-EXTENT GROUPING", rendered)
@@ -2130,6 +2136,30 @@ class ReportContract(unittest.TestCase):
                               stage["failed_phase"])
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
+
+    def test_parallel_read_diagnostic_failure_reports_its_own_reason(self):
+        broken = synthetic_log().replace("PASS_PARALLEL_READ_AB=1\n", "", 1)
+        fake_process = type("FakeProcess", (), {
+            "stdout": broken,
+            "returncode": 0,
+        })()
+        original_run = runner.subprocess.run
+        report = {"schema": "swapz-test-results-v1", "stages": [],
+                  "benchmarks": {"sessions": [], "verdicts": {}}}
+        try:
+            runner.subprocess.run = lambda *args, **kwargs: fake_process
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    runner.run_stage("Owned RAM smoke and pairs",
+                                     ["unused"], report, parse_bench=True), 1)
+        finally:
+            runner.subprocess.run = original_run
+        stage = report["stages"][-1]
+        self.assertEqual(stage["status"], "FAIL")
+        self.assertEqual(stage["failed_phase"],
+                         "independent READ fan-out A/B evidence")
+        self.assertIn("five counterbalanced matched rounds",
+                      stage["diagnostic"])
 
     def test_read_coalesce_diagnostic_failure_reports_its_own_reason(self):
         broken = synthetic_log().replace("PASS_READ_COALESCE_AB=1\n", "", 1)
