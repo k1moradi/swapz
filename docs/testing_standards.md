@@ -1333,9 +1333,10 @@ aggregate fast path.
 
 Routine qualification no longer repeats the lower-WRITE depth 1/2 A/B: the
 completed idle SSE2 and AVX-512 five-pair cycles found no throughput/latency
-benefit. Production is fixed at depth one; the second-slot allocation and append path
-are removed rather than retained as dormant diagnostic code. The fixed
-depth is no longer stored per target; `write_pipeline_depth=1` status remains
+benefit. Production is fixed at depth one; the second-slot allocation, append path,
+ring indices and modulo bookkeeping are removed rather than retained as dormant
+diagnostic code. The target owns one inflight lower-WRITE object. The fixed
+depth is not stored per target; `write_pipeline_depth=1` status remains
 compatibility telemetry only. Git history preserves the experiment if future
 real-device evidence supplies a specific reason to revive it.
 
