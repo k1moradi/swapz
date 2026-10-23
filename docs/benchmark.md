@@ -252,8 +252,10 @@ for every grouped BIO, and merge only when both missing ranges are nonempty,
 individually contiguous, immediately adjacent, in one 1MiB segment and <=8
 blocks total. Issue one lower READ with no padding, seed only private slot
 scratch, then run the unchanged per-record metadata/generation/CRC/decompression
-path. Shared cache publication still waits for every grouped read and upper copy
-to succeed.
+path. Each constituent may publish verified cache residency and complete only
+after its own validation/decode/upper copy succeeds; a later constituent failure
+fails still-owned BIOs and the target without retroactively invalidating an
+already verified constituent.
 
 All queue depths may use one-request ID63 coalescing on the ordered worker.
 Standalone same-extent slot grouping and the rejected helper workqueue remain
