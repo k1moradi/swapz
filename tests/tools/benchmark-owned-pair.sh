@@ -427,7 +427,7 @@ if (( RESOURCE_PRESSURE_SHORT )); then
             fail 'ID36 null_blk backing prewarm failed'
     done
     note 'PASS_ID36_NULLBLK_PREWARM=devices:2 bytes:134217728'
-    printf %s\\n ready > "$ID36_PAIR_READY"
+    printf '%s\n' ready > "$ID36_PAIR_READY"
     for _ in {1..600}; do
         [[ -e $ID36_PAIR_GO ]] && break
         sleep 0.05
