@@ -1441,6 +1441,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("--read-coalesce 0|1", pair)
         self.assertIn("--read-coalesce-max-blocks 2|4|8", pair)
         self.assertNotIn("--k1-allow-after-read-bypass", pair)
+        self.assertNotIn("$K1_ALLOW_AFTER_READ_BYPASS", pair)
         self.assertIn("--invalidate-cache-on-write-admit 0|1", pair)
         self.assertIn('"parallel_reads=$PARALLEL_READS"', pair)
         self.assertIn('"read_coalesce=$READ_COALESCE"', pair)
