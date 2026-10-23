@@ -92,11 +92,6 @@ module_param_named(delta64_lz4_acceleration, swapz_delta64_lz4_acceleration,
 MODULE_PARM_DESC(delta64_lz4_acceleration,
 		 "Second-pass LZ4 acceleration 1..4 used only by delta64 rescue");
 
-static bool swapz_parallel_reads = true;
-module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);
-MODULE_PARM_DESC(parallel_reads,
-		 "Enable bounded read grouping and private-slot lower-READ fan-out");
-
 static bool swapz_read_coalesce = true;
 module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
 MODULE_PARM_DESC(read_coalesce,
@@ -293,7 +288,6 @@ struct swapz_dm {
 	bool read_grouping_enabled;
 	bool read_coalescing_enabled;
 	/* Bounded independent lower-READ fan-out uses private slot scratch. */
-	bool parallel_reads_enabled;
 	u64 parallel_read_pairs;
 	u64 parallel_read_async_batches;
 	u64 parallel_read_async_slots;
@@ -3009,19 +3003,15 @@ accounted:
 		ctx->pack_close_pending_tail_sample = false;
 	}
 	/*
-	 * Carry read/fence service across intermediate retained work, but consume
-	 * it when PACK_READY closes a refreshed dry tail. That close has already
-	 * used the finite wave-tail exception; carrying it farther would fragment
-	 * later windows into repeated singleton PACK_READY closes.
-	 *
-	 * DUPLICATE/FULL are different: they flush an older batch while the
-	 * current WRITE itself continues into the next batch, so no-followup does
-	 * not mean the retained wave is dry there. Empty flushes returned above
-	 * also preserve the existing evidence semantics.
+	 * READ service evidence belongs to the write window that was just
+	 * committed. Never carry it into the next nonempty window: stale bypass
+	 * evidence can otherwise authorize a false service-dry close or block a
+	 * K=1 detach before the new window has serviced any READ. Empty flushes
+	 * returned above retain their separate boundary semantics.
 	 */
+	ctx->retained_window_read_bypasses = 0;
 	if (!ctx->retain_ms || hard_boundary ||
 	    (packed_close && !ctx->worker_has_immediate_followup)) {
-		ctx->retained_window_read_bypasses = 0;
 		ctx->retained_wave_interrupted = false;
 	} else if (interrupted_close &&
 		   (ctx->worker_has_immediate_followup ||
@@ -4069,9 +4059,9 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 	int batch_error = 0;
 
 	/*
-	 * read_coalesce controls only adjacent exact-range merging. Independent
-	 * lower-READ fan-out remains common to both coalescing A/B arms whenever
-	 * parallel_reads is enabled, so the ID63 control varies one mechanism.
+	 * Independent lower-READ fan-out is fixed-on production infrastructure.
+	 * read_coalesce controls only adjacent exact-range merging, so the ID63
+	 * control still varies one mechanism while this fallback remains common.
 	 *
 	 * A retained plain WRITE has only staged immutable RAM state and no
 	 * ordering flag. Independent READs may pass such queued WRITEs exactly as
@@ -4079,8 +4069,7 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 	 * ordering by rejecting a READ that conflicts with any earlier skipped
 	 * WRITE in this local FIFO prefix.
 	 */
-	if (!ctx->parallel_reads_enabled ||
-	    !ctx->read_slots || !ctx->read_pages_store ||
+	if (!ctx->read_slots || !ctx->read_pages_store ||
 	    remaining < 2U || list_empty(local))
 		return false;
 
@@ -5347,9 +5336,9 @@ static void swapz_free(struct swapz_dm *ctx)
 		for (prep_lane = 0; prep_lane < ctx->preparation_worker_count;
 		     ++prep_lane) {
 			vfree(ctx->preparation_lanes[prep_lane].input_page);
-			kfree(ctx->preparation_lanes[prep_lane].predictor_page);
-			kfree(ctx->preparation_lanes[prep_lane].delta64_candidate_page);
-			kfree(ctx->preparation_lanes[prep_lane].lz4_workmem);
+			kvfree(ctx->preparation_lanes[prep_lane].predictor_page);
+			kvfree(ctx->preparation_lanes[prep_lane].delta64_candidate_page);
+			kvfree(ctx->preparation_lanes[prep_lane].lz4_workmem);
 		}
 		kfree(ctx->preparation_lanes);
 	}
@@ -5376,8 +5365,8 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->segment_trimmed);
 	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
-	kfree(ctx->predictor_page);
-	kfree(ctx->delta64_candidate_page);
+	kvfree(ctx->predictor_page);
+	kvfree(ctx->delta64_candidate_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
 	vfree(ctx->engine.write_scratch);
@@ -5390,13 +5379,13 @@ static void swapz_free(struct swapz_dm *ctx)
 		for (slot = 0; slot < SWAPZ_PARALLEL_READ_SLOTS; ++slot) {
 			vfree(ctx->read_slots[slot].engine.read_scratch);
 			vfree(ctx->read_slots[slot].read_compressed);
-			kfree(ctx->read_slots[slot].predictor_page);
+			kvfree(ctx->read_slots[slot].predictor_page);
 		}
 		kvfree(ctx->read_slots);
 	}
 	vfree(ctx->engine.bulk_scratch);
 	kvfree(ctx->engine.bulk_txs);
-	kfree(ctx->lz4_workmem);
+	kvfree(ctx->lz4_workmem);
 	kfree(ctx);
 }
 
@@ -5548,12 +5537,10 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ctx->data_start_block = 1U;
 		ctx->physical_backing = true;
 	}
-	/* parallel_reads authorizes adjacent coalescing plus bounded independent
-	 * private-slot lower-READ fan-out. Ordered worker owns validation/ACK. */
-	ctx->read_grouping_enabled = swapz_parallel_reads;
-	ctx->read_coalescing_enabled =
-		ctx->read_grouping_enabled && swapz_read_coalesce;
-	ctx->parallel_reads_enabled = ctx->read_grouping_enabled;
+	/* Bounded ordered-worker fan-out is fixed-on production infrastructure.
+	 * ID63 independently controls only adjacent exact-range coalescing. */
+	ctx->read_grouping_enabled = true;
+	ctx->read_coalescing_enabled = swapz_read_coalesce;
 	logical = div_u64(ti->len, SWAPZ_SECTORS);
 	total_blocks = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
 	if (total_blocks <= ctx->data_start_block) {
@@ -5675,8 +5662,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->gc_bytes_store = vzalloc(SWAPZ_BATCH_BYTES);
 	ctx->input_page = vzalloc(SWAPZ_BLOCK_BYTES);
 	if (ctx->delta64_rescue_enabled) {
-		ctx->predictor_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
-		ctx->delta64_candidate_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+		ctx->predictor_page = kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+		ctx->delta64_candidate_page = kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 	}
 	ctx->read_page = vzalloc(SWAPZ_BLOCK_BYTES);
 	ctx->read_compressed = vzalloc(SWAPZ_BLOCK_BYTES);
@@ -5698,7 +5685,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_txs = kvcalloc(SWAPZ_MAX_RECORDS,
 				       sizeof(*ctx->engine.bulk_txs),
 				       GFP_KERNEL);
-	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
+	ctx->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
 	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
 	    (ctx->delta64_rescue_enabled &&
@@ -5732,7 +5719,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		slot->engine.read_scratch = vzalloc(SWAPZ_MAX_EXTENT_BYTES);
 		slot->read_compressed = vzalloc(SWAPZ_BLOCK_BYTES);
 		if (ctx->delta64_rescue_enabled)
-			slot->predictor_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+			slot->predictor_page = kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 		if (!slot->engine.read_scratch || !slot->read_compressed ||
 		    (ctx->delta64_rescue_enabled && !slot->predictor_page)) {
 			error = -ENOMEM;
@@ -5772,11 +5759,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			lane->input_page = vzalloc(SWAPZ_BLOCK_BYTES);
 			if (ctx->delta64_rescue_enabled) {
 				lane->predictor_page =
-					kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+					kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 				lane->delta64_candidate_page =
-					kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+					kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 			}
-			lane->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
+			lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 			if (!lane->input_page ||
 			    (ctx->delta64_rescue_enabled &&
 			     (!lane->predictor_page || !lane->delta64_candidate_page)) ||
@@ -6350,7 +6337,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.read_two_block_skips,
 		       ctx->read_grouping_enabled,
 		       ctx->read_coalescing_enabled,
-		       ctx->parallel_reads_enabled,
+		       1U,
 		       ctx->parallel_read_pairs,
 		       ctx->parallel_read_same_extent_pairs,
 		       ctx->parallel_read_async_batches,

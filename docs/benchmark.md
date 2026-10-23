@@ -220,9 +220,9 @@ ID65 and ID66 are owner-qualified at source
 and compatibility read-worker telemetry stays zero. ID63 owns adjacent-range
 coalescing, while the ordered worker separately has bounded independent
 lower-READ fan-out through the same private-slot infrastructure. Standalone
-same-extent grouping is retired. The final fan-out decision run varies only
-`parallel_reads=0/1` with `read_coalesce=0` on the fast model and reports
-both Fast QD32 mixed I/O and packed sequential/random reads.
+same-extent grouping is retired. The final fan-out decision at `11fbc839...`
+established large useful-service and tail-latency gains with ID63 disabled, so
+fan-out is now fixed on and its runtime selector/routine A/B are retired.
 
 Multi-page DISCARD retains all-or-nothing
 generation/mapping/shared-extent-liveness validation with no per-physical-block
@@ -261,10 +261,10 @@ All queue depths may use one-request ID63 coalescing on the ordered worker.
 Standalone same-extent slot grouping and the rejected helper workqueue remain
 removed. The ID63 selector itself must return before coalescing-specific slot
 prime/ownership work when coalescing is disabled or no exact adjacent chain
-exists. After that rejection, the separate ordered-worker fan-out path may
-still prepare private slots for two or more independent missing lower ranges
-when `parallel_reads=1`; it never merges those ranges and preserves same-page
-ordering across any skipped retained WRITEs.
+exists. After that rejection, the fixed-on ordered-worker fan-out path may still
+prepare private slots for two or more independent missing lower ranges; it
+never merges those ranges and preserves same-page ordering across any skipped
+retained WRITEs.
 
 **IDs58/59.** Current fixture has zero nonzero same-filled writes and extreme
 128-payload synthetic duplication. Keep representative-corpus evidence only.
@@ -425,12 +425,11 @@ Current benchmark work must preserve these contracts:
 - **Preparation:** async preparation owns one unbound producer lane regardless
   of delta64 policy. Predictor scratch allocation may remain rescue-dependent;
   lane count is not.
-- **Independent READ fan-out:** one final five-pair fast-model decision varies
-  only `parallel_reads=0/1` with `read_coalesce=0` and
-  `async_prepare=1`. The same sessions report Fast QD32 mixed service and
-  packed sequential/random reads. OFF must submit zero async-read slots; ON
-  must exercise real mixed fan-out. Concurrency without a repeatable useful
-  service or tail-latency benefit is insufficient to keep the complexity.
+- **Independent READ fan-out:** fixed-on production infrastructure. The final
+  five-pair fast-model decision at `11fbc839...` established repeatable mixed
+  throughput/tail-latency and packed sequential/random READ gains with ID63
+  disabled. The runtime selector and routine A/B are retired; preserve its
+  bounded private-slot ownership and same-page ordering contracts.
 - **READ coalescing:** merge-off/on confirmation uses the same independent READ
   fan-out in both arms. A merge may combine 2..8 exact contiguous missing
   ranges in one segment, at most eight 4KiB blocks, with zero padding. A

@@ -256,26 +256,9 @@ for read_coalesce in "${confirmation_modes[@]}"; do
     (( index += 1 ))
 done
 
-# Final independent lower-READ fan-out decision: vary only parallel_reads on
-# the fast model, force ID63 coalescing off, and keep production async_prepare.
-# Each pair already contains both Fast QD32 mixed I/O and byte-exact packed
-# sequential/random READ phases, so this one family measures the mechanism in
-# the two scopes that matter without introducing another production policy.
-index=0
-for parallel_reads in "${confirmation_modes[@]}"; do
-    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
-               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
-               --async-prepare --read-coalesce 0
-               --parallel-reads "$parallel_reads"
-               --shared-plan "$shared_plan")
-    if (( index % 2 )); then
-        arguments+=(--swapz-first)
-    fi
-    printf 'START_PARALLEL_READ_AB=%s\n' "$parallel_reads"
-    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
-    printf 'PASS_PARALLEL_READ_AB=%s\n' "$parallel_reads"
-    (( index += 1 ))
-done
+# Independent lower-READ fan-out is fixed-on production infrastructure.
+# The final 11fbc83 ARM64 five-pair decision established large useful-service
+# and tail-latency gains; the off/on selector is retired from routine tests.
 
 # Write-only sustained-QD controls stay one sync/async observation per point
 # except fast QD8 and QD32, which keep five adjacent counterbalanced rounds.
@@ -328,5 +311,5 @@ run_privileged tests/tools/qualify-resource-pressure.sh \
 # remains depth=1 and routine qualification no longer spends ten sessions here.
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 10 final independent-READ fan-out sessions, 40 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
-    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, predictor-first delta64, final independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 40 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
+    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, predictor-first delta64, promoted independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'

@@ -974,11 +974,17 @@ have at least 1 GiB MemAvailable before this destructive-to-performance but
 RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
 weakened.
 
-The pressure helper must reach readiness with at least the requested resident
-memory charged to the cgroup and remain alive through benchmark teardown.
-Qualification requires a positive `memory.events high` delta, positive CPU
-PSI `some total` delta, zero `oom` and `oom_kill` deltas, and the normal
-owned-pair byte-exact verification/teardown to pass with `async_prepare=1`.
+The owned pair first creates and fully faults both 64MiB memory-backed
+`null_blk` devices, then stops at a private barrier. Only then does the
+pressure helper fault its anonymous resident set and start niceness-10 CPU
+burners. The barrier releases after pressure is observable, so module insertion,
+target construction and replay still execute under reclaim/CPU contention
+without making lazy null_blk page allocation the test subject. The pressure
+helper must reach readiness with at least the requested resident memory charged
+to the cgroup and remain alive through benchmark teardown. Qualification
+requires a positive `memory.events high` delta, positive CPU PSI `some total`
+delta, zero `oom` and `oom_kill` deltas, and the normal owned-pair byte-exact
+verification/teardown to pass with `async_prepare=1`.
 The test uses only positively owned `null_blk` backings and never authorizes
 physical media or active swap. Performance under this gate is observational:
 record it, but do not tune a scheduling threshold from one pressure run.
@@ -991,22 +997,17 @@ teardown blocks release qualification.
 
 ### Bounded concurrent READ qualification
 
-The retired `swapz-read` helper workqueue remains absent. Current
-`parallel_reads=1` is a different mechanism: the ordered worker owns private
-slots, submits multiple independent missing lower ranges before joining any of
-them, then performs validation/decode/cache publication and upper completion
-itself. Before treating that fan-out as settled infrastructure, run one final
-five-pair fast-model `parallel_reads=0/1` decision family with
-`read_coalesce=0` in both arms and `async_prepare=1`. Each benchmark pair
-already contains Fast QD32 mixed I/O plus the byte-exact 4 MiB packed
-sequential/random phases, so this one family must report both scopes. The off
-arm must execute zero async-read batches/slots; the on arm must exercise real
-fan-out in mixed service. Report paired 95% confidence intervals for useful
-mixed WRITE/READ throughput, mixed READ p99 and lower READ work, plus packed
-sequential/random throughput, p99 and lower READ work. Nonzero concurrency
-without useful service or tail-latency benefit is not sufficient to retain the
-mechanism; after the decision, retire the A/B rather than adding another
-permanent tuning family.
+The retired `swapz-read` helper workqueue remains absent. Ordered-worker
+private-slot lower-READ fan-out is now fixed-on production infrastructure.
+The final five-pair fast-model decision at source `11fbc839...` ran with
+`read_coalesce=0` and established repeatable useful-service and tail-latency
+gains: mixed WRITE/READ throughput +17.9% (95% CI +17.2..+18.5), mixed READ
+p99 -48.7%, packed sequential READ throughput +67.9%, and seeded-random READ
+throughput +101.8%. The off arm executed zero async batches/slots and the on
+arm exercised real fan-out; raw-control drift overlapped zero. The
+`parallel_reads` module parameter and routine A/B are retired. Keep the
+historical parser so older reports remain readable, but current loaded
+qualification must report `parallel_reads_enabled=1`.
 
 ID63 remains the adjacent request-efficiency experiment. The loaded test keeps
 exactly ten SSD_EMULATED and ten SD_EMULATED sessions in the fixed

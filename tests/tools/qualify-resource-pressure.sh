@@ -72,15 +72,22 @@ CGROUP="$CGROUP_ROOT/swapz-id36-$token"
 SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-id36.XXXXXXXX")"
 READY="$SESSION/pressure.ready"
 STOP="$SESSION/pressure.stop"
+PAIR_READY="$SESSION/pair.ready"
+PAIR_GO="$SESSION/pair.go"
 PRESSURE_LOG="$SESSION/pressure.log"
 PAIR_LOG="$SESSION/pair.log"
 PRESSURE_PID=""
+PAIR_PID=""
 
 cleanup() {
     local result=$?
     trap - EXIT HUP INT TERM
     set +e
     : > "$STOP"
+    if [[ -n $PAIR_PID ]]; then
+        kill -TERM "$PAIR_PID" 2>/dev/null
+        wait "$PAIR_PID" 2>/dev/null
+    fi
     if [[ -n $PRESSURE_PID ]]; then
         for _ in {1..40}; do
             kill -0 "$PRESSURE_PID" 2>/dev/null || break
@@ -153,15 +160,51 @@ oom_before="$(event_value oom)"
 oom_kill_before="$(event_value oom_kill)"
 cpu_some_before="$(cpu_some_total)"
 
-# Enter the child cgroup before allocating so both resident pressure and CPU
-# burners are accounted to the bounded ID36 domain.
+# Start the owned pair in the constrained cgroup first, but stop it at a
+# private barrier after both null_blk devices have been fully faulted. Target
+# construction still happens only after pressure becomes active.
+bash -c '
+    set -e
+    cgroup=$1
+    pair_ready=$2
+    pair_go=$3
+    shift 3
+    echo $$ > "$cgroup/cgroup.procs"
+    export SWAPZ_ID36_PAIR_READY="$pair_ready"
+    export SWAPZ_ID36_PAIR_GO="$pair_go"
+    exec "$@"
+' _ "$CGROUP" "$PAIR_READY" "$PAIR_GO" \
+    timeout --signal=TERM --kill-after=10s 300s \
+    bash "$PAIR" --validated-source "$VALIDATED_SOURCE" \
+    --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced \
+    --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000 \
+    --async-prepare --resource-pressure-short --shared-plan "$SHARED_PLAN" \
+    >"$PAIR_LOG" 2>&1 &
+PAIR_PID=$!
+
+for _ in {1..600}; do
+    [[ -s $PAIR_READY ]] && break
+    kill -0 "$PAIR_PID" 2>/dev/null || {
+        cat "$PAIR_LOG" >&2
+        printf '%s\n' 'FAIL: ID36 owned-RAM pair exited before null_blk prewarm barrier' >&2
+        exit 1
+    }
+    sleep 0.05
+done
+[[ -s $PAIR_READY ]] || {
+    printf '%s\n' 'FAIL: ID36 owned-RAM pair did not reach null_blk prewarm barrier' >&2
+    exit 1
+}
+
 bash -c '
     set -e
     cgroup=$1
     shift
     echo $$ > "$cgroup/cgroup.procs"
     exec "$@"
-' _ "$CGROUP" python3 -B "$PRESSURE_SCRIPT"     --memory-mib "$PRESSURE_MIB" --cpu-workers "$cpu_workers"     --ready-file "$READY" --stop-file "$STOP" >"$PRESSURE_LOG" 2>&1 &
+' _ "$CGROUP" python3 -B "$PRESSURE_SCRIPT" \
+    --memory-mib "$PRESSURE_MIB" --cpu-workers "$cpu_workers" \
+    --ready-file "$READY" --stop-file "$STOP" >"$PRESSURE_LOG" 2>&1 &
 PRESSURE_PID=$!
 
 for _ in {1..400}; do
@@ -185,27 +228,15 @@ pressure_current="$(cat "$CGROUP/memory.current")"
     exit 1
 }
 
-printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%s cpu_workers:%s\n'     "$MEMORY_HIGH_BYTES" "$MEMORY_MAX_BYTES" "$PRESSURE_MIB" "$cpu_workers"
-
-# Use the production async policy and the fast/deep owned-RAM model. ID36
-# intentionally uses a shorter immutable trace: this gate asks whether the
-# target makes bounded, byte-exact forward progress under reclaim/CPU pressure,
-# not whether a full performance trace finishes within an arbitrary timeout.
+printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%s cpu_workers:%s\n' \
+    "$MEMORY_HIGH_BYTES" "$MEMORY_MAX_BYTES" "$PRESSURE_MIB" "$cpu_workers"
+: > "$PAIR_GO"
 set +e
-bash -c '
-    set -e
-    cgroup=$1
-    shift
-    echo $$ > "$cgroup/cgroup.procs"
-    exec "$@"
-' _ "$CGROUP" timeout --signal=TERM --kill-after=10s 300s \
-    bash "$PAIR" --validated-source "$VALIDATED_SOURCE" \
-    --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced \
-    --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000 \
-    --async-prepare --resource-pressure-short --shared-plan "$SHARED_PLAN" \
-    2>&1 | tee "$PAIR_LOG"
-pair_rc=${PIPESTATUS[0]}
+wait "$PAIR_PID"
+pair_rc=$?
 set -e
+PAIR_PID=""
+cat "$PAIR_LOG"
 
 high_after="$(event_value high)"
 oom_after="$(event_value oom)"
@@ -230,8 +261,7 @@ if (( pair_rc != 0 )); then
         printf '%s\n' 'FAIL: ID36 swapz replay exceeded its bounded timeout under pressure' >&2
     else
         printf 'FAIL: ID36 owned-RAM pair failed rc:%s high:%s cpu_psi_usec:%s oom:%s oom_kill:%s\n' \
-            "$pair_rc" "$high_delta" "$cpu_some_delta" "$oom_delta" \
-            "$oom_kill_delta" >&2
+            "$pair_rc" "$high_delta" "$cpu_some_delta" "$oom_delta" "$oom_kill_delta" >&2
     fi
     exit 1
 fi

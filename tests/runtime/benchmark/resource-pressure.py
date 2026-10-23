@@ -15,6 +15,8 @@ MIB = 1024 * 1024
 
 
 def cpu_burn(stop_event):
+    # Preserve CPU contention without starving dmsetup/io-replay control paths.
+    os.nice(10)
     value = (os.getpid() << 1) | 1
     while not stop_event.is_set():
         # Fixed integer-only work avoids optional dependencies and allocations.
@@ -75,6 +77,9 @@ def main():
     try:
         sweep = 0
         while not stopping and not args.stop_file.exists():
+            if any(not worker.is_alive() for worker in workers):
+                print("FAIL: ID36 CPU pressure worker exited early", file=sys.stderr)
+                return 1
             # Re-reference a sparse subset so reclaim pressure stays active
             # without turning the memory worker into the dominant CPU load.
             start = (sweep % 16) * PAGE_BYTES

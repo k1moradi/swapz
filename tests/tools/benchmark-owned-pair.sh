@@ -11,7 +11,7 @@ if [[ $# -ge 3 && $1 == --validated-source &&
 fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--parallel-reads 0|1] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -24,13 +24,14 @@ IOPS=500
 ASYNC_PREPARE=0
 DELTA64_RESCUE=0
 DELTA64_LZ4_ACCELERATION=1
-PARALLEL_READS=1
 READ_COALESCE=1
 INVALIDATE_CACHE_ON_WRITE_ADMIT=0
 WRITE_ONLY_QD=0
 READ_PCT=25
 PACKED_READ=1
 RESOURCE_PRESSURE_SHORT=0
+ID36_PAIR_READY="${SWAPZ_ID36_PAIR_READY:-}"
+ID36_PAIR_GO="${SWAPZ_ID36_PAIR_GO:-}"
 LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
@@ -70,13 +71,6 @@ fi
 if [[ $# -ge 3 && ${@: -2:1} == --invalidate-cache-on-write-admit &&
       ( ${!#} == 0 || ${!#} == 1 ) ]]; then
     INVALIDATE_CACHE_ON_WRITE_ADMIT="${!#}"
-    set -- "${@:1:$(( $# - 2 ))}"
-fi
-# Explicit same-source Kread A/B control. The module parameter defaults on;
-# only make test may supply this bounded suffix before device provisioning.
-if [[ $# -ge 3 && ${@: -2:1} == --parallel-reads &&
-      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
-    PARALLEL_READS="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Isolated ID63 A/B control. Kread may remain enabled while only the
@@ -202,7 +196,7 @@ devno() {
 }
 for program in insmod rmmod modprobe dmsetup modinfo blockdev readlink \
                findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
-               mkdir rmdir stat tee cat ls sleep python3 sort cp; do
+               mkdir rmdir stat tee cat ls sleep python3 sort cp dd; do
     command -v "$program" >/dev/null || fail "missing command $program"
 done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
@@ -233,7 +227,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=1 READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -421,11 +415,31 @@ create_owned_ram  # bare uncompressed
 create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
+if (( RESOURCE_PRESSURE_SHORT )); then
+    id36_pair_dir="${ID36_PAIR_READY%/*}"
+    [[ -n $ID36_PAIR_READY && -n $ID36_PAIR_GO &&
+       $ID36_PAIR_READY == "$id36_pair_dir/pair.ready" &&
+       $ID36_PAIR_GO == "$id36_pair_dir/pair.go" &&
+       -d $id36_pair_dir && ! -L $id36_pair_dir ]] ||
+        fail 'ID36 start barrier is not an owned private directory'
+    for lower in "${LOWERS[@]}"; do
+        dd if=/dev/zero of="$lower" bs=1M count=64 oflag=direct status=none ||
+            fail 'ID36 null_blk backing prewarm failed'
+    done
+    note 'PASS_ID36_NULLBLK_PREWARM=devices:2 bytes:134217728'
+    : > "$ID36_PAIR_READY"
+    for _ in {1..600}; do
+        [[ -e $ID36_PAIR_GO ]] && break
+        sleep 0.05
+    done
+    [[ -e $ID36_PAIR_GO ]] ||
+        fail 'ID36 pressure start barrier timed out'
+fi
 modprobe dm_mod
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
     "delta64_rescue=$DELTA64_RESCUE" \
     "delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION" \
-    "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" \
+    "read_coalesce=$READ_COALESCE" \
     "invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
@@ -475,9 +489,9 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])packed_placement=1([[:space:
     fail 'loaded swapz packed-placement invariant is not canonical'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])logical_open_balance=0([[:space:]]|$)" ||
     fail 'logical-open balance must remain off in placement A/B'
-expected_grouping=$PARALLEL_READS
-expected_coalescing=$(( PARALLEL_READS && READ_COALESCE ? 1 : 0 ))
-expected_parallel=$expected_grouping
+expected_grouping=1
+expected_coalescing=$READ_COALESCE
+expected_parallel=1
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_grouping_enabled=$expected_grouping([[:space:]]|$)" ||
     fail 'loaded swapz read-grouping gate does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" ||
