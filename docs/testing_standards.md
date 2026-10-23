@@ -1115,6 +1115,37 @@ probe count/wall time, GC work, lower I/O, useful throughput and p99 while
 varying only this policy. No threshold from RAM-backed `null_blk` may turn
 that counter into a NAND-wear claim or promote cold-data relocation.
 
+### ID72 skewed-churn logical-open balancing decision
+
+ID72 remains default-off and is not part of routine qualification until ID36
+passes. Its one promotion/removal experiment must use the existing owned-RAM
+target and one immutable medium-compressibility fixture/trace for both arms.
+Seed exactly 2,867 of 4,096 logical pages (70.0% occupancy): 2,294 cold pages
+remain untouched after seeding and 573 hot pages receive all rewrites. Then
+issue 40,960 deterministic hot-page writes (ten complete logical capacities),
+with a fixed permutation and an fsync every 256 writes. Verify every seeded
+cold page and the final generation of every hot page byte-for-byte.
+
+Run five counterbalanced same-source pairs varying only
+`logical_open_balance=0/1`. Record logical-open min/sum/max/segment count,
+allocator probe segments/full scans/wall, GC victims/relocated pages/read and
+write bytes/requests/wall, discard/TRIM counts, useful WRITE throughput and p99,
+and total lower WRITE bytes/requests. Logical-open counts remain allocator
+fairness telemetry, never NAND P/E evidence.
+
+The decision is intentionally terminal for the current design. If every
+unbalanced arm already has `max-min <= 1`, the workload exposes no useful
+balancing opportunity and the optional switch should be removed. Otherwise,
+promotion requires a paired 95% interval excluding zero in the favorable
+direction for `max-min` spread, at least 20% mean spread reduction, byte-exact
+equivalence, and no paired harmful regression larger than 5% in useful
+throughput, p99, GC write bytes, allocator-probe wall, or total lower WRITE
+bytes/requests. If the spread benefit is unresolved, below 20%, or bought with
+a >5% repeatable regression in any guard metric, remove
+`logical_open_balance` and retain circular allocator fairness only. Do not
+retune thresholds after observing the five pairs.
+
+
 
 ID70c loaded qualification uses only the owned RAM null_blk mapping. It must
 prove that an upper DISCARD which removes the final mapping from a closed
