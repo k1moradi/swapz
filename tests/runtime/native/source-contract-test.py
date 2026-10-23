@@ -1584,6 +1584,17 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("missing_slots < 2U", concurrent)
         self.assertIn("!ctx->parallel_reads_enabled", concurrent)
         self.assertNotIn("!ctx->read_coalescing_enabled", concurrent)
+        self.assertIn("swapz_plain_retained_write(bio)", concurrent)
+        self.assertIn("skipped_writes[SWAPZ_MAX_RECORDS]", concurrent)
+        self.assertIn("skipped_write_count", concurrent)
+        self.assertIn("write_conflict", concurrent)
+        self.assertIn("skipped_writes[write_index] == logical", concurrent)
+        self.assertIn("entry = list_first_entry(local, struct swapz_bio_ref, list)",
+                      concurrent)
+        self.assertIn("if (bio_op(entry->bio) != REQ_OP_READ)", concurrent)
+        self.assertNotIn(
+            "else if (ctx->retain_ms && ctx->worker_has_immediate_followup)",
+            concurrent)
         self.assertIn(".fn = swapz_async_lower_read_done", submit_read)
         self.assertIn(".context = slot", submit_read)
         self.assertIn("complete(&slot->lower_done)", done_read)
@@ -2253,13 +2264,22 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(bypass.index("swapz_fail(ctx, error)"),
                         bypass.index("swapz_flush_window(ctx)"))
         self.assertIn("u64 read_start_ns = ktime_get_ns()", bypass)
+        self.assertIn("u64 lower_reqs_before = ctx->lower_read_submitted_reqs", bypass)
         self.assertIn("u64 read_end_ns = ktime_get_ns()", bypass)
+        self.assertIn("bool had_lower_io =", bypass)
+        self.assertIn("ctx->lower_read_submitted_reqs != lower_reqs_before", bypass)
+        self.assertIn("if (had_lower_io)", bypass)
+        self.assertIn("swapz_note_single_tail_read_bypass(ctx)", bypass)
         self.assertIn("ctx->window_first_ns += read_elapsed", bypass)
         self.assertIn("ctx->window_first_ns = read_end_ns", bypass)
+        had_lower_io = bypass.index("if (had_lower_io)")
+        note_bypass = bypass.index("swapz_note_single_tail_read_bypass(ctx)")
         service_shift = bypass.index("ctx->window_first_ns += read_elapsed")
         completion = bypass.index("swapz_complete(bio, error)")
         self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
-                        service_shift)
+                        had_lower_io)
+        self.assertLess(had_lower_io, note_bypass)
+        self.assertLess(note_bypass, service_shift)
         self.assertLess(service_shift, completion)
         self.assertIn("if (!error && !ctx->worker_has_immediate_followup &&",
                       bypass)
@@ -2282,7 +2302,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_refresh_accepted_followup(ctx)", process)
         normal_read = process[process.index("case REQ_OP_READ:"):
                               process.index("case REQ_OP_DISCARD:")]
-        self.assertIn("ctx->retained_window_read_bypasses++", normal_read)
+        self.assertIn("swapz_refresh_accepted_followup(ctx)", normal_read)
+        self.assertNotIn("ctx->retained_window_read_bypasses++", normal_read)
+        self.assertNotIn("swapz_note_single_tail_read_bypass(ctx)", normal_read)
         abort = flush[flush.index("if (ctx->failed)"):
                       flush.index("swapz_order_window(ctx)")]
         self.assertIn("swapz_complete(ctx->batch[index].bio, error)", abort)
@@ -2373,6 +2395,16 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("swapz_complete(", done)
         self.assertNotIn("bio_endio", done)
         self.assertIn("swapz_engine_complete_batched_run", finalize)
+        self.assertIn(
+            "lower_elapsed = swapz_elapsed_ns(inflight->lower_start_ns, lower_end)",
+            finalize)
+        self.assertIn("if (!lower_end || lower_end < inflight->lower_start_ns)",
+                      finalize)
+        self.assertIn("lower_error = -EUCLEAN", finalize)
+        self.assertNotIn("return -EUCLEAN;", finalize)
+        self.assertLess(
+            finalize.index("if (!lower_end || lower_end < inflight->lower_start_ns)"),
+            finalize.index("swapz_engine_complete_batched_run"))
         self.assertNotIn("ctx->inflight_head", DM)
         self.assertNotIn("ctx->inflight_tail", DM)
         self.assertNotIn("% SWAPZ_WRITE_PIPELINE_DEPTH", submit)
@@ -2819,6 +2851,15 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("ctx->lz4_acceleration", DM)
         self.assertIn("SWAPZ_ORDINARY_LZ4_ACCELERATION", compressor)
         self.assertIn("ctx->delta64_lz4_acceleration", compressor)
+        high_score_start = compressor.index("if (high_score)")
+        ordinary_start = compressor.index("\nordinary:")
+        high_score = compressor[high_score_start:ordinary_start]
+        self.assertIn(
+            "LZ4_compress_fast(\n\t\t\t\ttransform_scratch, output,",
+            high_score)
+        self.assertNotIn("memcpy(output, candidate_output", high_score)
+        self.assertIn("memcpy(candidate_output, output, (size_t)candidate)",
+                      high_score)
         self.assertIn("prepared->length = swapz_compress_page(", producer)
         self.assertIn("length = swapz_compress_page(", accept)
         self.assertIn("prepared->length > 0 && !prepared->zero", producer)
