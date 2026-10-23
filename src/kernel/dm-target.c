@@ -441,9 +441,9 @@ struct swapz_dm {
 	swapz_u8 batch_count;
 	swapz_u8 max_window;
 	/*
-	 * At most two immutable physical lower-WRITE owners. Slot zero reuses
-	 * engine.bulk_scratch/bulk_txs; slot one has disjoint storage. Only the
-	 * ordered worker publishes authority and upper BIO completions in FIFO.
+	 * One immutable physical lower-WRITE owner reuses
+	 * engine.bulk_scratch/bulk_txs. Only the ordered worker publishes
+	 * authority and upper BIO completions.
 	 */
 	struct swapz_inflight_write inflight_write;
 	swapz_u8 inflight_count;
