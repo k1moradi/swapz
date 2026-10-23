@@ -345,13 +345,20 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("length = swapz_compress_page(", ordered)
         self.assertIn("if (ctx->delta64_rescue_enabled)", compressor)
         self.assertIn("swapz_predict_delta64_sample_score(input)", compressor)
-        for allocation in ("ctx->predictor_page = kmalloc(",
-                           "ctx->delta64_candidate_page = kmalloc(",
-                           "slot->predictor_page = kmalloc(",
-                           "lane->predictor_page =",
-                           "lane->delta64_candidate_page ="):
-            self.assertRegex(ctor, r"if \(ctx->delta64_rescue_enabled\)\s+" +
-                             re.escape(allocation))
+        self.assertRegex(
+            ctor,
+            r"(?s)if \(ctx->delta64_rescue_enabled\)\s*\{\s*"
+            r"ctx->predictor_page = kmalloc\(.*?"
+            r"ctx->delta64_candidate_page = kmalloc\(")
+        self.assertRegex(
+            ctor,
+            r"if \(ctx->delta64_rescue_enabled\)\s+"
+            r"slot->predictor_page = kmalloc\(")
+        self.assertRegex(
+            ctor,
+            r"(?s)if \(ctx->delta64_rescue_enabled\)\s*\{\s*"
+            r"lane->predictor_page =.*?"
+            r"lane->delta64_candidate_page =")
         self.assertIn("if (!ctx->predictor_page)", read)
         self.assertIn("if (!slot->predictor_page)", slot_read)
         self.assertIn("delta64_rescue=%u", body("swapz_status"))
