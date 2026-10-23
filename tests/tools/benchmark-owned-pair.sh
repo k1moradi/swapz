@@ -11,7 +11,7 @@ if [[ $# -ge 3 && $1 == --validated-source &&
 fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--delta64-prepare-workers 1|2|4] [--write-pipeline-depth 1|2] [--parallel-reads 0|1] [--read-coalesce 0|1] [--read-coalesce-max-blocks 2|4|8] [--invalidate-cache-on-write-admit 0|1] [--lz4-acceleration 1|2|3|4] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--parallel-reads 0|1] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -23,12 +23,8 @@ MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
 DELTA64_RESCUE=0
-DELTA64_LZ4_ACCELERATION=1
-DELTA64_PREPARE_WORKERS=1
-WRITE_PIPELINE_DEPTH=1
-PARALLEL_READS=1
+DELTA64_PARALLEL_READS=1
 READ_COALESCE=1
-READ_COALESCE_MAX_BLOCKS=8
 INVALIDATE_CACHE_ON_WRITE_ADMIT=0
 LZ4_ACCELERATION=1
 WRITE_ONLY_QD=0
@@ -52,20 +48,6 @@ if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
     SHARED_PLAN="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
-# Lower-WRITE submission depth experiment. Depth=1 is production-compatible;
-# depth=2 keeps independent immutable run storage and FIFO publication.
-if [[ $# -ge 3 && ${@: -2:1} == --write-pipeline-depth &&
-      ( ${!#} == 1 || ${!#} == 2 ) ]]; then
-    WRITE_PIPELINE_DEPTH="${!#}"
-    set -- "${@:1:$(( $# - 2 ))}"
-fi
-# Delta64 CPU-parallelism experiment. K=1 is the production-compatible
-# control; K=2/4 are accepted only as bounded read-only module policy.
-if [[ $# -ge 3 && ${@: -2:1} == --delta64-prepare-workers &&
-      ( ${!#} == 1 || ${!#} == 2 || ${!#} == 4 ) ]]; then
-    DELTA64_PREPARE_WORKERS="${!#}"
-    set -- "${@:1:$(( $# - 2 ))}"
-fi
 # Second LZ4 pass used only by delta64 rescue.
 if [[ $# -ge 3 && ${@: -2:1} == --delta64-lz4-acceleration &&
       ( ${!#} == 1 || ${!#} == 2 || ${!#} == 3 || ${!#} == 4 ) ]]; then
@@ -81,19 +63,6 @@ fi
 if [[ $# -ge 3 && ${@: -2:1} == --invalidate-cache-on-write-admit &&
       ( ${!#} == 0 || ${!#} == 1 ) ]]; then
     INVALIDATE_CACHE_ON_WRITE_ADMIT="${!#}"
-    set -- "${@:1:$(( $# - 2 ))}"
-fi
-if [[ $# -ge 3 && ${@: -2:1} == --read-coalesce-max-blocks &&
-      ( ${!#} == 2 || ${!#} == 4 || ${!#} == 8 ) ]]; then
-    READ_COALESCE_MAX_BLOCKS="${!#}"
-    set -- "${@:1:$(( $# - 2 ))}"
-fi
-
-# First-pass LZ4 policy sweep. Only make test may select the bounded values
-# admitted by the read-only module parameter.
-if [[ $# -ge 3 && ${@: -2:1} == --lz4-acceleration &&
-      ( ${!#} == 1 || ${!#} == 2 || ${!#} == 3 || ${!#} == 4 ) ]]; then
-    LZ4_ACCELERATION="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Explicit same-source Kread A/B control. The module parameter defaults on;
@@ -247,7 +216,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION DELTA64_PREPARE_WORKERS=$DELTA64_PREPARE_WORKERS WRITE_PIPELINE_DEPTH=$WRITE_PIPELINE_DEPTH PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE READ_COALESCE_MAX_BLOCKS=$READ_COALESCE_MAX_BLOCKS K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -439,12 +408,8 @@ modprobe dm_mod
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
     "delta64_rescue=$DELTA64_RESCUE" \
     "delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION" \
-    "delta64_prepare_workers=$DELTA64_PREPARE_WORKERS" \
-    "write_pipeline_depth=$WRITE_PIPELINE_DEPTH" \
     "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" \
-    "read_coalesce_max_blocks=$READ_COALESCE_MAX_BLOCKS" \
-    "invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT" \
-    "lz4_acceleration=$LZ4_ACCELERATION" ||
+    "invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -474,23 +439,17 @@ OWN_DM=1
       tr -d '[:space:]') == "$DMUUID" ]] || fail 'owned DM UUID mismatch'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:space:]]|$)" ||
     fail 'unexpected swapz retained policy after owned DM creation'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])lz4_acceleration=$LZ4_ACCELERATION([[:space:]]|$)" ||
-    fail 'loaded target LZ4 acceleration policy mismatch'
+dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])lz4_acceleration=1([[:space:]]|$)' ||
+    fail 'loaded target ordinary LZ4 policy is not fixed at acceleration 1'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION([[:space:]]|$)" ||
     fail 'loaded target delta64 second-LZ4 acceleration mismatch'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])write_pipeline_depth=$WRITE_PIPELINE_DEPTH([[:space:]]|$)" ||
-    fail 'loaded target lower-WRITE pipeline depth mismatch'
+dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])write_pipeline_depth=1([[:space:]]|$)' ||
+    fail 'loaded target lower-WRITE pipeline depth is not fixed at one'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
     fail 'loaded swapz async preparation does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" ||
     fail 'loaded swapz delta64 rescue does not match selected benchmark arm'
-expected_delta64_workers=0
-if (( ASYNC_PREPARE )); then
-    expected_delta64_workers=1
-    if (( DELTA64_RESCUE )); then
-        expected_delta64_workers=$DELTA64_PREPARE_WORKERS
-    fi
-fi
+expected_delta64_workers=$ASYNC_PREPARE
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_prepare_workers=$expected_delta64_workers([[:space:]]|$)" ||
     fail 'loaded swapz delta64 preparation width does not match selected arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])guard_inflight_zero_shrink=0([[:space:]]|$)" ||
@@ -506,8 +465,8 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_grouping_enabled=$expec
     fail 'loaded swapz read-grouping gate does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" ||
     fail 'loaded swapz read-coalescing gate does not match selected benchmark arm'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalesce_max_blocks=$READ_COALESCE_MAX_BLOCKS([[:space:]]|$)" ||
-    fail 'loaded swapz READ coalescing cap does not match selected benchmark arm'
+dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])read_coalesce_max_blocks=8([[:space:]]|$)' ||
+    fail 'loaded swapz READ coalescing cap is not fixed at eight blocks'
 dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])k1_allow_after_read_bypass=0([[:space:]]|$)' ||
     fail 'retired K=1 read-bypass override compatibility token is not zero'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT([[:space:]]|$)" ||

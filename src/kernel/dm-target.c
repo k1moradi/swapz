@@ -60,8 +60,11 @@
 #define SWAPZ_PREPARATION_STARTER_WAKE_MIN \
 	(SWAPZ_PREPARATION_TAIL_WAKE_MIN + 1U)
 #define SWAPZ_PREPARATION_TAIL_CLAIM_MIN 2U
-#define SWAPZ_MAX_PREPARATION_WORKERS 4U
 #define SWAPZ_MAX_WRITE_PIPELINE_DEPTH 2U
+#define SWAPZ_DELTA64_PREPARATION_WORKERS 1U
+#define SWAPZ_ORDINARY_LZ4_ACCELERATION 1U
+#define SWAPZ_PRODUCTION_WRITE_PIPELINE_DEPTH 1U
+#define SWAPZ_READ_COALESCE_MAX_BLOCKS (2U * SWAPZ_MAX_BLOCKS)
 /*
  * A separate bounded LZ4 producer may prepare future writes while the
  * existing ordered commit worker waits on lower dm_io. WRITE physical I/O
@@ -84,28 +87,11 @@ module_param_named(delta64_rescue, swapz_delta64_rescue_enabled, bool, 0444);
 MODULE_PARM_DESC(delta64_rescue,
 		 "Opt in to page-local delta64 rescue with predictor-first high-score path; default off");
 
-static unsigned int swapz_delta64_prepare_workers = 1U;
-module_param_named(delta64_prepare_workers, swapz_delta64_prepare_workers, uint, 0444);
-MODULE_PARM_DESC(delta64_prepare_workers,
-		 "Bounded delta64 preparation lanes 1..4; effective only with "
-		 "async_prepare=1 and delta64_rescue=1");
-
 static unsigned int swapz_delta64_lz4_acceleration = 1U;
 module_param_named(delta64_lz4_acceleration, swapz_delta64_lz4_acceleration,
 		   uint, 0444);
 MODULE_PARM_DESC(delta64_lz4_acceleration,
 		 "Second-pass LZ4 acceleration 1..4 used only by delta64 rescue");
-
-static unsigned int swapz_lz4_acceleration = 1U;
-module_param_named(lz4_acceleration, swapz_lz4_acceleration, uint, 0444);
-MODULE_PARM_DESC(lz4_acceleration,
-		 "Ordinary LZ4 baseline acceleration 1..4");
-
-static unsigned int swapz_write_pipeline_depth = 1U;
-module_param_named(write_pipeline_depth, swapz_write_pipeline_depth, uint, 0444);
-MODULE_PARM_DESC(write_pipeline_depth,
-		 "Experimental immutable lower-WRITE submission depth 1..2; "
-		 "authority publication remains FIFO");
 
 static bool swapz_parallel_reads = true;
 module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);
@@ -116,12 +102,6 @@ static bool swapz_read_coalesce = true;
 module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
 MODULE_PARM_DESC(read_coalesce,
 		 "Enable zero-extra adjacent distinct-extent READ coalescing");
-
-static unsigned int swapz_read_coalesce_max_blocks = 2U * SWAPZ_MAX_BLOCKS;
-module_param_named(read_coalesce_max_blocks, swapz_read_coalesce_max_blocks,
-		   uint, 0444);
-MODULE_PARM_DESC(read_coalesce_max_blocks,
-		 "Maximum exact contiguous blocks in one coalesced READ; 2..8");
 
 static bool swapz_invalidate_cache_on_write_admit;
 module_param_named(invalidate_cache_on_write_admit,
@@ -5537,28 +5517,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 8 && (kstrtou32(argv[8], 10, &retain) ||
 			 retain > SWAPZ_MAX_RETAIN_MS))
 		return -EINVAL;
-	if (!swapz_lz4_acceleration || swapz_lz4_acceleration > 4U) {
-		ti->error = "lz4_acceleration must be in 1..4";
-		return -EINVAL;
-	}
-	if (!swapz_delta64_prepare_workers ||
-	    swapz_delta64_prepare_workers > SWAPZ_MAX_PREPARATION_WORKERS) {
-		ti->error = "delta64_prepare_workers must be in 1..4";
-		return -EINVAL;
-	}
 	if (!swapz_delta64_lz4_acceleration ||
 	    swapz_delta64_lz4_acceleration > 4U) {
 		ti->error = "delta64_lz4_acceleration must be in 1..4";
-		return -EINVAL;
-	}
-	if (!swapz_write_pipeline_depth ||
-	    swapz_write_pipeline_depth > SWAPZ_MAX_WRITE_PIPELINE_DEPTH) {
-		ti->error = "write_pipeline_depth must be in 1..2";
-		return -EINVAL;
-	}
-	if (swapz_read_coalesce_max_blocks < 2U ||
-	    swapz_read_coalesce_max_blocks > 2U * SWAPZ_MAX_BLOCKS) {
-		ti->error = "read_coalesce_max_blocks must be in 2..8";
 		return -EINVAL;
 	}
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
@@ -5581,13 +5542,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->invalidate_cache_on_write_admit =
 		swapz_invalidate_cache_on_write_admit;
 	ctx->preparation_worker_count =
-		ctx->async_prepare ?
-		(ctx->delta64_rescue_enabled ?
-		 (swapz_u8)swapz_delta64_prepare_workers : 1U) : 0U;
-	ctx->lz4_acceleration = (swapz_u8)swapz_lz4_acceleration;
+		ctx->async_prepare ? SWAPZ_DELTA64_PREPARATION_WORKERS : 0U;
+	ctx->lz4_acceleration = SWAPZ_ORDINARY_LZ4_ACCELERATION;
 	ctx->delta64_lz4_acceleration =
 		(swapz_u8)swapz_delta64_lz4_acceleration;
-	ctx->write_pipeline_depth = (swapz_u8)swapz_write_pipeline_depth;
+	ctx->write_pipeline_depth = SWAPZ_PRODUCTION_WRITE_PIPELINE_DEPTH;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
@@ -5663,7 +5622,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->read_coalescing_enabled =
 		ctx->read_grouping_enabled && swapz_read_coalesce;
 	ctx->read_coalesce_max_blocks =
-		(swapz_u8)swapz_read_coalesce_max_blocks;
+		(swapz_u8)SWAPZ_READ_COALESCE_MAX_BLOCKS;
 	ctx->parallel_reads_enabled = ctx->read_grouping_enabled;
 	logical = div_u64(ti->len, SWAPZ_SECTORS);
 	total_blocks = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);

@@ -292,30 +292,19 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 
 ## Open qualification gaps
 
-The current architecture experiment is the bounded immutable lower-WRITE
-pipeline. Production depth remains one; the standard evidence arm may submit a
-second sealed run only while the first run's authority snapshots are still
-unconsumed. Per-page LZ4/CRC happens during collection, not after freeze. Each
-submitted run owns disjoint packed bytes, transaction snapshots, upper BIO
-references and completion state until physical completion and FIFO authority
-publication. A shared serialized planner/authority remains the only publisher.
-
-Depth two must fence same-logical-page writes across slots, stay in the same
-unconsumed authority batch group, roll back a failed second preparation or
-submission from the verified tail only, and drain both slots for barriers,
-suspend, teardown and failure. Physical completion may occur out of order;
-mapping publication and upper-BIO completion may not. The standard five-pair
-fast-QD32 A/B is evidence collection, not promotion, and must observe
-`pipeline_active_max=2` in the depth-two arm.
+The immutable lower-WRITE production policy is fixed at depth one. Repeated
+paired evidence did not establish a useful depth-two service benefit, so the
+runtime depth selector and routine depth A/B are retired. Authority publication
+and upper-BIO completion remain serialized after the sole immutable lower run
+completes. Historical depth-two code may be removed mechanically only while
+preserving the byte-exact, barrier, suspend, teardown and failure contracts.
 
 Generic ordinary-LZ4 preparation concurrency remains blocked by the prior
-shallow-backlog evidence. Delta64 rescue is the only preparation-concurrency
-exception, but its production-compatible preparation width remains K=1.
-Two-host paired evidence refutes routine delta64 K=2 qualification: it produced
-no service gain on the older host and materially worsened p99 and preparation
-cost on the newer host. K=2/4 delta64 preparation widths remain private
-diagnostic-only controls for a specifically motivated future workload; neither
-belongs in the standard loaded matrix.
+shallow-backlog evidence. Delta64 preparation is likewise fixed at K=1:
+two-host paired evidence found no service gain from K=2 and materially worse
+p99/preparation cost on the newer host, with earlier K=4 regressions. The
+runtime preparation-width selector and routine K=2/K=4 qualification are
+retired; Git history is the archive.
 
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
@@ -1073,7 +1062,11 @@ the same measured C-counter record consumed by the report parser. The merge-off
 arm may therefore record those fan-out counters, generic parallel pairs and
 distinct-extent service, but every ID63 adjacency,
 coalesced-range and coalescing-skip counter must remain zero. The merge-on arm
-uses the identical fan-out fallback after any non-coalescible prefix.
+uses the identical fan-out fallback after any non-coalescible prefix. Three-host
+cap evidence is sufficient to fix the maximum coalesced span at eight blocks:
+8 materially improves serial sequential service versus 4 on all three hosts,
+while fast-model comparisons do not establish a smaller cap as better. The
+runtime cap selector and routine 2/4/8 sweep are retired.
 
 Every packed READ pass remains 4 MiB/1024 byte-exact verified pages. Reports
 must show sequential and seeded-random useful READ MB/s, p99, lower bytes and
@@ -1388,18 +1381,15 @@ payload bytes, raw fallbacks, and physical blocks/extents from
 loaded matched evidence also preserves or improves lower WRITE bytes/requests,
 throughput and tails.
 
-The loaded LZ4 acceleration family is a five-pair, counterbalanced SSD-model
-A/B between settings 1 and 4. Keep `async_prepare=1`,
-`delta64_rescue=0`, workload, fixture, trace and RAM-device geometry fixed;
-alternate raw/swapz replay order. Require terminal markers, exact
-source/fixture/trace provenance across all ten sessions, valid host CPU/PSI,
-and nonzero total/ordered/preparation LZ4 timing. Report paired 95% confidence
-intervals for useful WRITE rate, p99, lower WRITE bytes/requests, LZ4 timing,
-raw-control throughput drift and host-load deltas. The parser must close the
-mixed session before this family starts and keep the A/B out of mixed-matrix
-and sustained-QD results. Intermediate acceleration 2/3 remain covered by the
-native round-trip/geometry sweep; standard loaded families use acceleration 1
-with delta64 disabled.
+Three-host loaded evidence closes the ordinary first-pass LZ4 acceleration
+experiment. Acceleration 4 reduced compression wall time but did not produce a
+repeatable service gain; the AVX-512 host showed a small significant throughput
+loss and p99 increase, while SSE2 was unresolved and ARM64 was too noisy to
+promote. Production ordinary LZ4 is therefore fixed at acceleration 1 and the
+runtime selector plus ten-session loaded 1/4 A/B are retired. The deterministic
+native 1/2/3/4 sweep remains only as low-cost codec/geometry regression evidence;
+it is not a promotion gate. Delta64's second LZ4 acceleration is a separate
+opt-in rescue policy and remains independently qualified.
 
 Source-contract qualification must pin the safety boundaries of the optimized
 paths: generic-planner duplicate protection remains enabled; only the

@@ -1408,7 +1408,9 @@ def run_stage(title, command, result, *, parse_bench=False):
         parse_lz4_acceleration(output) if parse_bench else [])
     lz4_acceleration_diagnostic = (
         lz4_acceleration_verdict(lz4_acceleration_sessions)
-        if parse_bench else None)
+        if lz4_acceleration_sessions else
+        {"overall": "NOT_RUN",
+         "reason": "retired; ordinary LZ4 is fixed at acceleration 1"})
     delta64_rescue_sessions = (
         parse_delta64_rescue_sessions(output) if parse_bench else [])
     delta64_rescue_diagnostic = (
@@ -1430,7 +1432,9 @@ def run_stage(title, command, result, *, parse_bench=False):
         parse_read_coalesce_cap_ab(output) if parse_bench else [])
     read_coalesce_cap_diagnostic = (
         read_coalesce_cap_ab_verdict(read_coalesce_cap_sessions)
-        if parse_bench else None)
+        if read_coalesce_cap_sessions else
+        {"overall": "NOT_RUN",
+         "reason": "retired; production coalescing cap is fixed at 8 blocks"})
     write_pipeline_sessions = (
         parse_write_pipeline_depth(output) if parse_bench else [])
     write_pipeline_diagnostic = (
@@ -1444,12 +1448,8 @@ def run_stage(title, command, result, *, parse_bench=False):
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_coalesce_diagnostic.get("overall") !=
                        "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
-                       lz4_acceleration_diagnostic.get("overall") !=
-                       "PASS_LZ4_ACCELERATION_AB" or
                        delta64_rescue_diagnostic.get("overall") !=
-                       "PASS_DELTA64_RESCUE_AB" or
-                       read_coalesce_cap_diagnostic.get("overall") !=
-                       "PASS_READ_COALESCE_CAP_EVIDENCE"))
+                       "PASS_DELTA64_RESCUE_AB"))
     if marker_failure:
         rc = 1
     secure_boot_signing_blocked = (
@@ -1494,21 +1494,11 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
                     "reason", "serial-depth adjacent-range READ coalescing evidence is incomplete")
-            elif lz4_acceleration_diagnostic.get("overall") != (
-                    "PASS_LZ4_ACCELERATION_AB"):
-                record["failed_phase"] = "loaded LZ4 acceleration 1/4 A/B"
-                record["diagnostic"] = lz4_acceleration_diagnostic.get(
-                    "reason", "paired loaded LZ4 acceleration evidence is incomplete")
             elif delta64_rescue_diagnostic.get("overall") != (
                     "PASS_DELTA64_RESCUE_AB"):
                 record["failed_phase"] = "delta64 rescue off/on A/B"
                 record["diagnostic"] = delta64_rescue_diagnostic.get(
                     "reason", "paired delta64 rescue evidence is incomplete")
-            elif read_coalesce_cap_diagnostic.get("overall") != (
-                    "PASS_READ_COALESCE_CAP_EVIDENCE"):
-                record["failed_phase"] = "READ coalescing cap 2/4/8 evidence"
-                record["diagnostic"] = read_coalesce_cap_diagnostic.get(
-                    "reason", "READ coalescing cap evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
