@@ -959,6 +959,33 @@ rather than rerunning the old optimization sequence.
 Do not add another singleton timing policy merely because these counters remain
 available. The ROADMAP evidence table is the reopen authority for IDs 50-57.
 
+### ID36 low-RAM plus heavy-CPU qualification
+
+ID36 is a release gate for default-on asynchronous preparation, not a
+throughput-promotion benchmark. The loaded stage runs one ordinary fast-model
+QD32 async OFF/swapz pair inside a dedicated cgroup-v2 domain while a separate
+helper faults 576 MiB of anonymous memory and runs twice the online CPU count
+of integer burners, capped at 32. The cgroup sets `memory.high=576MiB`,
+`memory.max=896MiB` and `memory.swap.max=0` when supported. The host must
+have at least 1 GiB MemAvailable before this destructive-to-performance but
+RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
+weakened.
+
+The pressure helper must reach readiness with at least the requested resident
+memory charged to the cgroup and remain alive through benchmark teardown.
+Qualification requires a positive `memory.events high` delta, positive CPU
+PSI `some total` delta, zero `oom` and `oom_kill` deltas, and the normal
+owned-pair byte-exact verification/teardown to pass with `async_prepare=1`.
+The test uses only positively owned `null_blk` backings and never authorizes
+physical media or active swap. Performance under this gate is observational:
+record it, but do not tune a scheduling threshold from one pressure run.
+
+Rootless contracts must lint both the pressure helper and shell wrapper, and the
+loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`
+marker. Missing cgroup-v2 controllers, insufficient host safety headroom,
+missing PSI, an OOM event, a dead pressure helper, or failed owned-device
+teardown blocks release qualification.
+
 ### Bounded concurrent READ qualification
 
 The retired `swapz-read` helper workqueue remains absent. Current
