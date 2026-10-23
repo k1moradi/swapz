@@ -260,7 +260,7 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("LZ4_compress_fast(", body("swapz_gc_compact_one_inner"))
 
     def test_production_delta64_telemetry_has_separate_worker_owners(self):
-        rescue = body("swapz_delta64_rescue")
+        compressor = body("swapz_compress_page")
         route = (ROOT / "src/kernel/predictor-route.h").read_text()
         producer = body("swapz_preparation_worker")
         ordered = body("swapz_accept_write")
@@ -272,25 +272,32 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("&lane->delta64", ordered)
         self.assertIn("swapz_delta64_stats_add(&total->delta64, &lane->delta64)",
                       totals)
-        self.assertNotIn("atomic_", rescue)
-        self.assertNotIn("spin_lock", rescue)
-        self.assertLess(rescue.index("swapz_delta64_route_init"),
-                        rescue.index("stats->eligible++"))
+        self.assertNotIn("atomic_", compressor)
+        self.assertNotIn("spin_lock", compressor)
         self.assertIn("swapz_engine_next_uniform_pack_limit", route)
         self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", route)
-        self.assertLess(rescue.index("swapz_predict_delta64_sample_score"),
-                        rescue.index("stats->classifier_pass++"))
-        self.assertLess(rescue.index("stats->attempts++"),
-                        rescue.index("swapz_predict_delta64(input"))
-        self.assertIn("swapz_delta64_candidate_adoptable", rescue)
-        self.assertIn("swapz_delta64_candidate_smaller", rescue)
-        self.assertLess(rescue.index("swapz_delta64_candidate_adoptable"),
-                        rescue.index("stats->adopted++"))
-        self.assertIn("(u64)baseline_length : SWAPZ_BLOCK_BYTES", rescue)
-        self.assertIn("stats->raw_payload_bytes_saved += saved", rescue)
-        self.assertIn("stats->lz4_payload_bytes_saved += saved", rescue)
-        self.assertIn("swapz_elapsed_ns(rescue_start, ktime_get_ns())", rescue)
+        self.assertLess(compressor.index("swapz_predict_delta64_sample_score"),
+                        compressor.index("ordinary:"))
+        self.assertLess(compressor.index("swapz_predict_delta64_sample_score"),
+                        compressor.index("baseline = LZ4_compress_fast(input"))
+        self.assertLess(compressor.index("stats->classifier_pass++"),
+                        compressor.index("swapz_predict_delta64(input"))
+        self.assertLess(compressor.index("stats->attempts++"),
+                        compressor.index("swapz_predict_delta64(input"))
+        self.assertIn("candidate <= (int)SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH",
+                      compressor)
+        self.assertIn("stats->direct_adopted++", compressor)
+        self.assertIn("stats->first_lz4_skipped++", compressor)
+        self.assertIn("swapz_delta64_route_init", compressor)
+        self.assertIn("swapz_delta64_candidate_adoptable", compressor)
+        self.assertIn("swapz_delta64_candidate_smaller", compressor)
+        self.assertIn("saved = baseline > 0 ? (u64)baseline : SWAPZ_BLOCK_BYTES",
+                      compressor)
+        self.assertIn("stats->raw_payload_bytes_saved += saved", compressor)
+        self.assertIn("stats->lz4_payload_bytes_saved += saved", compressor)
+        self.assertIn("stats->wall_ns += rescue_wall", compressor)
         for field in ("eligible", "classifier_pass", "attempts", "adopted",
+                      "direct_adopted", "first_lz4_skipped",
                       "raw_rescues", "lz4_rescues", "pack_eligible",
                       "pack_attempts", "pack_cliff_crossings", "pack_adopted",
                       "score_0_7", "score_8_15", "score_16_23", "score_ge24",
@@ -355,6 +362,7 @@ static swapz_u16 swapz_probe_set(
 
     def test_exact_zero_write_elides_lower_io_without_losing_ordering(self):
         accept = body("swapz_accept_write")
+        compressor = body("swapz_compress_page")
         read = body("swapz_read")
         status = body("swapz_status")
         self.assertIn("length > 0 && length <= 64", accept)
@@ -1266,7 +1274,8 @@ static swapz_u16 swapz_probe_set(
                         lower.index("error = dm_io("))
         self.assertIn("ctx->lower_read_wall_ns +=", lower)
         self.assertIn("ctx->lower_write_wall_ns +=", lower)
-        self.assertIn("ctx->lz4_wall_ns += swapz_elapsed_ns", accept)
+        self.assertIn("swapz_compress_page(", accept)
+        self.assertIn("*lz4_wall_ns += swapz_elapsed_ns", compressor)
         self.assertIn("ctx->decode_wall_ns +=", read)
         self.assertIn("ctx->window_sort_wall_ns +=", flush)
         self.assertIn("ctx->window_commit_wall_ns +=", flush)
