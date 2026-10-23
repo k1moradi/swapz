@@ -71,24 +71,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 916,
-"legacy_dead_probe_ns": 108995,
-"legacy_score_scan_ns": 668848,
+"incremental_select_ns": 875,
+"legacy_dead_probe_ns": 111207,
+"legacy_score_scan_ns": 666490,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 542,
+"mapped_dead_probe_ns": 875,
 "relocation_list_ns": 500,
-"relocation_scan_ns": 129912,
+"relocation_scan_ns": 131123,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 3667,
-"legacy_dead_probe_ns": 436232,
-"legacy_score_scan_ns": 2662768,
+"incremental_select_ns": 3541,
+"legacy_dead_probe_ns": 422077,
+"legacy_score_scan_ns": 2660042,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 3041,
-"relocation_list_ns": 666,
-"relocation_scan_ns": 515438,
+"mapped_dead_probe_ns": 1750,
+"relocation_list_ns": 625,
+"relocation_scan_ns": 506242,
 "segments": 4096,
 "victim_records": 256
 }
@@ -98,14 +98,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 226,
+"inverse_ns_per_page": 221,
 "name": "scalar",
-"transform_ns_per_page": 202
+"transform_ns_per_page": 201
 },
 {
-"inverse_ns_per_page": 162,
+"inverse_ns_per_page": 168,
 "name": "neon",
-"transform_ns_per_page": 134
+"transform_ns_per_page": 200
 }
 ],
 "classifier": {
@@ -132,7 +132,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2813
+"wall_ns_per_page": 2668
 },
 {
 "acceleration": 2,
@@ -140,7 +140,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2531
+"wall_ns_per_page": 2510
 },
 {
 "acceleration": 3,
@@ -148,7 +148,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2466
+"wall_ns_per_page": 2441
 },
 {
 "acceleration": 4,
@@ -156,7 +156,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2444
+"wall_ns_per_page": 2404
 }
 ],
 "negative_pages": 256,
@@ -173,9 +173,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1953,
-"modeled_wall_ns_total": 1125376,
-"ns_per_saved_block": 21641,
+"modeled_wall_ns_per_page": 1990,
+"modeled_wall_ns_total": 1146624,
+"ns_per_saved_block": 22050,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -240,14 +240,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 22230,
+"ns_per_saved_block": 22651,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 2199,
-"routed_cpu_ns_total": 1267144,
+"routed_cpu_ns_per_page": 2241,
+"routed_cpu_ns_total": 1291131,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -295,14 +295,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 22336,
+"ns_per_saved_block": 22758,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 2132,
-"routed_cpu_ns_total": 1228480,
+"routed_cpu_ns_per_page": 2173,
+"routed_cpu_ns_total": 1251720,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -350,14 +350,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 21641,
+"ns_per_saved_block": 22050,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1953,
-"routed_cpu_ns_total": 1125376,
+"routed_cpu_ns_per_page": 1990,
+"routed_cpu_ns_total": 1146624,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -405,14 +405,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 21641,
+"ns_per_saved_block": 22050,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1953,
-"routed_cpu_ns_total": 1125376,
+"routed_cpu_ns_per_page": 1990,
+"routed_cpu_ns_total": 1146624,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -460,14 +460,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 21641,
+"ns_per_saved_block": 22050,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1953,
-"routed_cpu_ns_total": 1125376,
+"routed_cpu_ns_per_page": 1990,
+"routed_cpu_ns_total": 1146624,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -484,17 +484,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 162,
+"inverse_ns_per_page": 168,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 226,
-"scalar_transform_ns_per_page": 202,
-"second_lz4_ns_per_page": 4162,
+"scalar_inverse_ns_per_page": 221,
+"scalar_transform_ns_per_page": 201,
+"second_lz4_ns_per_page": 4179,
 "transform_backend": "neon",
-"transform_ns_per_page": 134
+"transform_ns_per_page": 200
 }
 ]
 }
@@ -503,17 +503,17 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "889dd70ddff89476c9e46e060d18af56b77bb155",
+"source_sha": "c81cfd005448b8dcfb5ad371d2be8109b862afdd",
 "stages": [
 {
-"elapsed_s": 2.514,
+"elapsed_s": 0.385,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_retained_reads_require_independence_and_abort_on_failure",
-"elapsed_s": 2.763,
+"diagnostic": "Unit test failed: test_packaging_and_loaded_tests_are_bounded",
+"elapsed_s": 5.316,
 "exit_code": 1,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -524,5 +524,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "889dd70ddff89476c9e46e060d18af56b77bb155"
+"tested_commit_sha": "c81cfd005448b8dcfb5ad371d2be8109b862afdd"
 }
