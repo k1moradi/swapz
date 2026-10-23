@@ -1643,6 +1643,7 @@ def parse_sessions(output):
                     "host_cpu": host_cpu_record(obj),
                     "workload_opportunity": workload_opportunity_record(obj),
                     "kernel_write_path": obj.get("kernel_write_path"),
+                    "kernel_read_path": obj.get("kernel_read_path"),
                     "packed_read": None,
                 }
                 packed = obj.get("packed_read")
