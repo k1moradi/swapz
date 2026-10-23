@@ -16,63 +16,8 @@
 },
 "k1_read_bypass_sessions": [],
 "loaded_correctness": {
-"alignment_hole_blocks_foreground": 0,
-"alignment_hole_blocks_gc": 0,
-"alloc_probe_full_scans": 80,
-"alloc_probe_segments": 1360,
-"alloc_probe_wall_ns": 105905,
-"discard_trim_immediate": 1,
-"discard_trim_pages": 256,
-"discard_trim_reuse_skips": 1,
-"discard_trim_sectors": 2048,
-"discard_trim_verified_pages": 4096,
-"flush_calls": 386,
-"gc_baseline_p99_ns": 116628,
-"gc_choose_calls": 20,
-"gc_choose_map_entries": 0,
-"gc_choose_segment_entries": 1280,
-"gc_choose_wall_ns": 20774,
-"gc_distinct_victims": 20,
-"gc_fraction_ppm": 3606,
-"gc_no_headroom_skips": 280,
-"gc_pages": 20,
-"gc_pressure_p99_ns": 232655,
-"gc_pressure_rounds": 5,
-"gc_read_bytes": 81920,
-"gc_read_reqs": 20,
-"gc_relocation_map_entries": 20,
-"gc_rotations": 20,
-"gc_segment_discard_sectors": 40960,
-"gc_segment_discards": 20,
-"gc_useful_write_wall_ns": 822024069,
-"gc_verified_pages": 4096,
-"gc_victim_max_evictions": 1,
-"gc_victim_min_evictions": 1,
-"gc_victims": 20,
-"gc_wall_ns": 2964636,
-"gc_write_bytes": 81920,
-"gc_write_reqs": 20,
-"overall": "PASS",
-"packed_placement_enabled": 1,
-"packed_placement_holes": 0,
-"packed_placement_run_splits": 0,
-"packed_placement_verified_pages": 128,
-"raw_pages": 64,
-"retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
-"retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
-"run_splits_by_hole": 0,
-"scope": "OWNED_RAM_NULL_BLK_SYNTHETIC_FAILURE_ONLY",
-"segment_discards_skipped_already_trimmed": 16,
-"segment_program_max": 2,
-"segment_program_min": 1,
-"segment_program_segments": 64,
-"segment_program_sum": 80,
-"segment_tail_waste_blocks_foreground": 0,
-"segment_tail_waste_blocks_gc": 0,
-"suspend_observed_open": 1,
-"suspend_retain_ms": 4,
-"suspend_verified_pages": 128,
-"zero_pages": 9
+"overall": "INCOMPLETE",
+"reason": "missing loaded correctness markers: packed_placement,suspend,write_fault,flush_fault"
 },
 "lz4_acceleration": {
 "overall": "NOT_QUALIFIED",
@@ -94,16 +39,7 @@
 "reason": "five counterbalanced matched rounds required"
 },
 "sd_read_coalesce_ab_sessions": [],
-"sessions": [
-{
-"arms": {},
-"async_prepare": 0,
-"device_model": null,
-"order": "unknown",
-"regime": "sd_emulated",
-"status": "INCOMPLETE"
-}
-],
+"sessions": [],
 "verdicts": {
 "overall": "INCOMPLETE",
 "reason": "sd_emulated: required counterbalanced sessions missing"
@@ -165,24 +101,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 6942,
-"legacy_dead_probe_ns": 871704,
-"legacy_score_scan_ns": 7104322,
+"incremental_select_ns": 2358,
+"legacy_dead_probe_ns": 247508,
+"legacy_score_scan_ns": 4002633,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3848,
-"relocation_list_ns": 2899,
-"relocation_scan_ns": 1822235,
+"mapped_dead_probe_ns": 1350,
+"relocation_list_ns": 1227,
+"relocation_scan_ns": 1719869,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 25936,
-"legacy_dead_probe_ns": 3503806,
-"legacy_score_scan_ns": 29599268,
+"incremental_select_ns": 8048,
+"legacy_dead_probe_ns": 1039198,
+"legacy_score_scan_ns": 11200688,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 12720,
-"relocation_list_ns": 2776,
-"relocation_scan_ns": 7170944,
+"mapped_dead_probe_ns": 4060,
+"relocation_list_ns": 1568,
+"relocation_scan_ns": 2901824,
 "segments": 4096,
 "victim_records": 256
 }
@@ -192,14 +128,24 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1566,
+"inverse_ns_per_page": 529,
 "name": "scalar",
-"transform_ns_per_page": 1601
+"transform_ns_per_page": 647
 },
 {
-"inverse_ns_per_page": 1160,
+"inverse_ns_per_page": 929,
 "name": "sse2",
-"transform_ns_per_page": 797
+"transform_ns_per_page": 395
+},
+{
+"inverse_ns_per_page": 669,
+"name": "avx2",
+"transform_ns_per_page": 465
+},
+{
+"inverse_ns_per_page": 288,
+"name": "avx512",
+"transform_ns_per_page": 290
 }
 ],
 "classifier": {
@@ -209,9 +155,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 585,
+"ns_per_page": 227,
 "sample_pairs": 32,
-"scalar_ns_per_page": 585,
+"scalar_ns_per_page": 227,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -226,7 +172,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 7786
+"wall_ns_per_page": 7102
 },
 {
 "acceleration": 2,
@@ -234,7 +180,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 7213
+"wall_ns_per_page": 6404
 },
 {
 "acceleration": 3,
@@ -242,7 +188,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 6964
+"wall_ns_per_page": 6880
 },
 {
 "acceleration": 4,
@@ -250,7 +196,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 8600
+"wall_ns_per_page": 6189
 }
 ],
 "negative_pages": 256,
@@ -267,9 +213,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 5820,
-"modeled_wall_ns_total": 3352576,
-"ns_per_saved_block": 64472,
+"modeled_wall_ns_per_page": 4147,
+"modeled_wall_ns_total": 2388736,
+"ns_per_saved_block": 45937,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -294,29 +240,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 930,
+"baseline_ns_per_page": 556,
 "order": "baseline_first",
-"unrolled_ns_per_page": 766
+"unrolled_ns_per_page": 551
 },
 {
-"baseline_ns_per_page": 927,
+"baseline_ns_per_page": 871,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 781
+"unrolled_ns_per_page": 648
 },
 {
-"baseline_ns_per_page": 930,
+"baseline_ns_per_page": 670,
 "order": "baseline_first",
-"unrolled_ns_per_page": 768
+"unrolled_ns_per_page": 699
 },
 {
-"baseline_ns_per_page": 931,
+"baseline_ns_per_page": 750,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 775
+"unrolled_ns_per_page": 642
 },
 {
-"baseline_ns_per_page": 924,
+"baseline_ns_per_page": 798,
 "order": "baseline_first",
-"unrolled_ns_per_page": 777
+"unrolled_ns_per_page": 625
 }
 ],
 "repeats_per_arm": 64,
@@ -365,14 +311,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 65721,
+"ns_per_saved_block": 47046,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 6503,
-"routed_cpu_ns_total": 3746134,
+"routed_cpu_ns_per_page": 4655,
+"routed_cpu_ns_total": 2681677,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -420,14 +366,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 66160,
+"ns_per_saved_block": 47305,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 6317,
-"routed_cpu_ns_total": 3638800,
+"routed_cpu_ns_per_page": 4516,
+"routed_cpu_ns_total": 2601784,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -475,14 +421,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 64472,
+"ns_per_saved_block": 45937,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 5820,
-"routed_cpu_ns_total": 3352576,
+"routed_cpu_ns_per_page": 4147,
+"routed_cpu_ns_total": 2388736,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -530,14 +476,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 64472,
+"ns_per_saved_block": 45937,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 5820,
-"routed_cpu_ns_total": 3352576,
+"routed_cpu_ns_per_page": 4147,
+"routed_cpu_ns_total": 2388736,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -585,14 +531,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 64472,
+"ns_per_saved_block": 45937,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 5820,
-"routed_cpu_ns_total": 3352576,
+"routed_cpu_ns_per_page": 4147,
+"routed_cpu_ns_total": 2388736,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -608,57 +554,57 @@
 "candidate_blocks": 192,
 "candidate_extents": 84,
 "cliff_2024": 160,
-"inverse_backend": "sse2",
-"inverse_ns_per_page": 1160,
+"inverse_backend": "avx512",
+"inverse_ns_per_page": 288,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1566,
-"scalar_transform_ns_per_page": 1601,
-"second_lz4_ns_per_page": 11129,
-"transform_backend": "sse2",
-"transform_ns_per_page": 797
+"scalar_inverse_ns_per_page": 529,
+"scalar_transform_ns_per_page": 647,
+"second_lz4_ns_per_page": 8587,
+"transform_backend": "avx512",
+"transform_ns_per_page": 290
 }
 ]
 }
 },
-"kernel_release": "7.0.0-38-generic",
-"overall": "FAIL",
+"kernel_release": "7.0.0-34-generic",
+"overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
 "source_sha": "494152ba57ec1b669f6207718b398de9cd7302dc",
 "stages": [
 {
-"elapsed_s": 1.452,
+"elapsed_s": 1.727,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 37.471,
+"elapsed_s": 61.032,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 9.997,
+"elapsed_s": 22.915,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 10.109,
+"elapsed_s": 7.09,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
-"diagnostic": "Child returned nonzero without a sanitized loaded diagnostic marker",
-"elapsed_s": 10.575,
+"diagnostic": "BLOCKED: retained lifecycle writer never exposed an open timed window",
+"elapsed_s": 9.076,
 "exit_code": 1,
-"failed_phase": "owned RAM sd_emulated comparison 1/8 (sync)",
+"failed_phase": "owned RAM retained suspend/drain",
 "name": "Owned RAM smoke + mixed/QD pilot",
 "signals": [
 "PASS_DEFAULT_ASYNC_PREPARE",
@@ -672,13 +618,10 @@
 "PASS_LOADED_LIVE_GC",
 "PASS_LOADED_GC_PRESSURE",
 "PASS_LOADED_DISCARD_TRIM",
-"PASS_LOADED_SUSPEND_DRAIN",
-"PASS_RETAINED_SYNTHETIC_WRITE_FAULT",
-"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT",
-"PASS_LOADED_PACKED_PLACEMENT",
-"PASS_LOADED_OWNED_NULLBLK_SMOKE"
+"BLOCKED",
+"FAIL"
 ],
-"status": "FAIL"
+"status": "BLOCKED"
 }
 ],
 "tested_commit_sha": "494152ba57ec1b669f6207718b398de9cd7302dc"
