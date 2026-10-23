@@ -29,12 +29,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq liblz4-dev
-      - name: Reuse one build directory for native production-C tests
+      - name: Run the complete rootless make-test stage
         shell: bash
         run: |
           set -euo pipefail
-          make -C tests/suites SANITIZE=1 test-all
-          python3 -B tests/runtime/native/source-contract-test.py -v
+          bash tests/tools/test-rootless.sh
           git diff --check
   compile-only:
     runs-on: ubuntu-24.04
