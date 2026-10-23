@@ -231,6 +231,7 @@ class PublicMakeContract(unittest.TestCase):
                     "physical_write_reqs": 5,
                     "lz4_acceleration": 1,
                     "delta64_lz4_acceleration": 1,
+                    "delta64_prepare_workers": 1,
                     "write_pipeline_depth": 1,
                     "pipeline_active_max": 1 if mode else 0,
                     "read_coalesce_max_blocks": 8,
