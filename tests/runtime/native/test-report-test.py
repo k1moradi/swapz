@@ -1793,7 +1793,8 @@ class ReportContract(unittest.TestCase):
             self.assertLess(index, len(lines))
             self.assertEqual(lines[index], "---")
         self.assertNotRegex(rendered, r"(?m)^  \|")
-        self.assertLess(max(map(len, lines)), 96)
+        longest = max(lines, key=len)
+        self.assertLess(len(longest), 96, longest)
 
     def test_mixed_write_diagnostics_missing_or_inconsistent_fails_closed(self):
         sessions = runner.parse_sessions(synthetic_log())
