@@ -24,7 +24,7 @@ All allocations, work queues, staging arrays, segment scans and retries must rem
 
 ## Safety scope
 
-Current loaded work is restricted to newly created, positively identified, RAM-backed `null_blk`. No current result authorizes physical storage, active swap, mounting, reboot, `swapon`, `swapoff`, force removal or touching unrelated mappings. Real-device work is a separately authorized future project.
+Current official loaded qualification is restricted to newly created, positively identified, RAM-backed `null_blk`. Physical backing remains disabled by default and is admitted only behind an explicit module opt-in plus a matching block-0 SWAPZ authorization header on a dedicated device. The formatter/guard are safety prerequisites, not performance or endurance qualification. No current result authorizes active system swap, mounting, reboot, `swapon`, `swapoff`, force removal or touching unrelated mappings. Real-device work remains a separately authorized qualification project.
 
 ## Engineering direction
 
