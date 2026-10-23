@@ -1335,10 +1335,12 @@ Routine qualification no longer repeats the lower-WRITE depth 1/2 A/B: the
 completed idle SSE2 and AVX-512 five-pair cycles found no throughput/latency
 benefit. Production is fixed at depth one; the second-slot allocation, append path,
 ring indices and modulo bookkeeping are removed rather than retained as dormant
-diagnostic code. The target owns one inflight lower-WRITE object. The fixed
-depth is not stored per target; `write_pipeline_depth=1` status remains
-compatibility telemetry only. Git history preserves the experiment if future
-real-device evidence supplies a specific reason to revive it.
+diagnostic code. The target owns one inflight lower-WRITE object, with no
+ring head/tail state or modulo bookkeeping. Source qualification names this
+single-owner contract explicitly. The fixed depth is not stored per target;
+`write_pipeline_depth=1` status remains compatibility telemetry only. Git
+history preserves the experiment if future real-device evidence supplies a
+specific reason to revive it.
 
 Predictor-first delta64 telemetry must distinguish direct adoptions from
 baseline-measured RAW/LZ4 rescues. The rescue A/B continues to pin

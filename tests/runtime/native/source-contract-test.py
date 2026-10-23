@@ -2350,7 +2350,7 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("mode=alpha-no-gc", body("swapz_status"))
         self.assertIn("experimental live GC", DM)
 
-    def test_bounded_lower_write_ring_keeps_publication_on_ordered_worker(self):
+    def test_single_lower_write_owner_keeps_publication_on_ordered_worker(self):
         submit = body("swapz_submit_inflight_write")
         done = body("swapz_async_lower_write_done")
         finalize = body("swapz_finalize_inflight_write")
