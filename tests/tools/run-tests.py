@@ -3851,6 +3851,14 @@ TABLE_HEADER_LEGEND = {
     "scope": "evidence area",
     "value": "scope limit or result detail",
     "control": "deterministic classifier input designed to catch a sampling blind spot",
+    "accel": "LZ4 compression acceleration setting",
+    "ns/page": "elapsed LZ4 compression nanoseconds per page",
+    "payload B": "total accepted encoded payload bytes",
+    "RAW": "pages retained uncompressed",
+    "pair": "counterbalanced same-host measurement pair",
+    "order": "measurement order within the pair",
+    "baseline ns/page": "original SSE2 forward nanoseconds per page",
+    "2x ns/page": "two-vector SSE2 forward nanoseconds per page",
     "minimum": "minimum score required for the control to pass",
     "pack eligible": "already-compressed pages with an exact uniform packing limit",
     "passed": "eligible pages meeting their configured route threshold",
@@ -3860,10 +3868,10 @@ TABLE_HEADER_LEGEND = {
     "extents saved": "physical extents saved by the actual native window planner",
     "modeled ns/page": "elapsed-time model per page; not measured worker CPU",
     "transform": "candidate page transform",
-    "adopt": "whether the candidate is selected",
+    "adopt": "pages adopting the candidate transform",
     "RAW+": "raw pages made compressible",
     "<=2024": "payloads at or below 2024 bytes",
-    "blocks": "physical 4KiB blocks",
+    "blocks": "physical 4KiB blocks (signed values indicate savings)",
     "extents": "physical extents",
     "xform ns": "native elapsed transform nanoseconds per page",
     "inv ns": "native elapsed inverse-transform nanoseconds per page",
@@ -4018,6 +4026,10 @@ TABLE_HEADER_LEGEND = {
 }
 
 TABLE_HEADER_GOAL = {
+    "ns/page": "lower for equal work",
+    "payload B": "lower for equal input",
+    "baseline ns/page": "lower is faster",
+    "2x ns/page": "lower is faster",
     "xform ns": "lower is better for equivalent work",
     "inv ns": "lower is better for equivalent work",
     "LZ4-2 ns": "lower is better for equivalent work",
@@ -4226,11 +4238,138 @@ def _table_interpretation(headers, rows):
         return (f"{len(outcomes)} criteria are summarized by these outcomes: {shown}{suffix}. "
                 "Read each criterion separately; the rows do not form one overall verdict.")
 
-    # For all other tables, report the observed range of the first numeric
-    # measure. The text deliberately avoids assigning a good/bad direction.
+    # Compare the experiment's outcome, rather than an identifier, input size
+    # or threshold. These are native/offline observations unless titled loaded.
+    if "transform" in header_index and "adopt" in header_index and rows:
+        adopted = _table_number(rows[0][header_index["adopt"]])
+        raw = _table_number(rows[0][header_index["RAW+"]])
+        blocks = _table_number(rows[0][header_index["blocks"]])
+        extents = _table_number(rows[0][header_index["extents"]])
+        if None not in (adopted, raw, blocks, extents):
+            return (f"Native candidate adopted on {adopted:g} pages, including {raw:g} "
+                    f"RAW rescues; the planner saves {blocks:g} blocks and "
+                    f"{extents:g} extents on this corpus. Neither result "
+                    "establishes loaded-device savings.")
+    if "accel" in header_index and "ns/page" in header_index and rows:
+        timings = [(_table_number(row[header_index["ns/page"]]), row)
+                   for row in rows]
+        timings = [(value, row) for value, row in timings if value is not None]
+        if timings:
+            fastest = min(timings, key=lambda item: item[0])
+            slowest = max(timings, key=lambda item: item[0])
+            difference = ((1 - fastest[0] / slowest[0]) * 100
+                          if slowest[0] else 0)
+            return (f"Acceleration {fastest[1][header_index['accel']]} has the "
+                    f"lowest native compression time ({fastest[0]:g} ns/page; "
+                    f"{difference:.1f}% below the slowest setting). "
+                    "Compare accepted payload bytes and planner blocks as well; "
+                    "native timing alone does not establish loaded throughput.")
+    if "backend" in header_index and "xform ns" in header_index and rows:
+        fastest = min(rows, key=lambda row:
+                      _table_number(row[header_index["xform ns"]]) or float("inf"))
+        inverse = min(rows, key=lambda row:
+                      _table_number(row[header_index["inv ns"]]) or float("inf"))
+        return (f"Fastest native forward: {fastest[0]} "
+                f"({fastest[header_index['xform ns']]} ns/page); fastest inverse: "
+                f"{inverse[0]} ({inverse[header_index['inv ns']]} ns/page). "
+                "These are separate measurements, not a loaded speedup.")
+    if "baseline ns/page" in header_index and "2x ns/page" in header_index and rows:
+        differences = []
+        for row in rows:
+            baseline = _table_number(row[header_index["baseline ns/page"]])
+            unrolled = _table_number(row[header_index["2x ns/page"]])
+            if baseline and unrolled is not None:
+                differences.append(100 * (unrolled / baseline - 1))
+        if differences:
+            return (f"The 2x forward candidate is faster in "
+                    f"{sum(change < 0 for change in differences)}/{len(differences)} "
+                    f"same-host pairs; mean paired change "
+                    f"{statistics.mean(differences):+.1f}%. "
+                    "Use the separately reported paired 95% interval for inference.")
+    if "control" in header_index and "minimum" in header_index and rows:
+        margins = []
+        for row in rows:
+            score = _table_number(row[header_index["score"]])
+            minimum = _table_number(row[header_index["minimum"]])
+            if score is not None and minimum is not None:
+                margins.append((str(row[0]), score - minimum))
+        if margins:
+            failed = [name for name, margin in margins if margin < 0]
+            return (f"{len(margins) - len(failed)}/{len(margins)} classifier "
+                    "blind-spot controls meet their minimum scores"
+                    + (f"; failures: {', '.join(failed)}." if failed else
+                       f"; narrowest margin {min(margins, key=lambda x: x[1])[1]:g} points."))
+    if "neg call/eligible" in header_index and "struct useful" in header_index:
+        safe = [row for row in rows if row[header_index["neg call/eligible"]]
+                .startswith("0/")]
+        if safe:
+            best = max(safe, key=lambda row:
+                       _table_number(row[header_index["struct useful"]]) or 0)
+            return (f"Among thresholds with zero negative calls, score "
+                    f"{best[header_index['score']]} retains "
+                    f"{best[header_index['struct useful']]} useful structured "
+                    "calls. Lower thresholds route more negative pages; this "
+                    "corpus does not establish loaded savings.")
+    if "score" in header_index and "blocks" in header_index and "extents" in header_index:
+        best = max(rows, key=lambda row:
+                   _table_number(row[header_index["blocks"]]) or 0)
+        return (f"Threshold {best[header_index['score']]} yields the most "
+                f"modeled planner block savings ({best[header_index['blocks']]} "
+                f"blocks, {best[header_index['extents']]} extents). "
+                "More savings can require more classification/transform work.")
+    if "old ms" in header_index and "map ms" in header_index and rows:
+        ratios = []
+        for row in rows:
+            old = _table_number(row[header_index["old ms"]])
+            mapping = _table_number(row[header_index["map ms"]])
+            if old and mapping is not None:
+                ratios.append(old / mapping if mapping else float("inf"))
+        if ratios:
+            return (f"Mapping scan versus legacy scan: "
+                    f"{min(ratios):.1f}–{max(ratios):.1f}x less elapsed time "
+                    "across tested sizes; selection and survivor-list costs "
+                    "are separate. Native CPU benchmark, not loaded GC I/O.")
+    if "old probe ms" in header_index and "mapped probe ms" in header_index and rows:
+        ratios = []
+        for row in rows:
+            old = _table_number(row[header_index["old probe ms"]])
+            mapped = _table_number(row[header_index["mapped probe ms"]])
+            if old is not None and mapped:
+                ratios.append(old / mapped)
+        if ratios:
+            return (f"Mapped-count probing takes "
+                    f"{min(ratios):.1f}–{max(ratios):.1f}x less elapsed time "
+                    "than legacy probing at tested sizes (rounded timings); "
+                    "native CPU only, not lower-device I/O.")
+    if "geometry" in header_index and "W runs" in header_index and rows:
+        fewest = min(rows, key=lambda row:
+                     _table_number(row[header_index["W runs"]]) or float("inf"))
+        return (f"{fewest[0]} has the fewest modeled contiguous WRITE runs "
+                f"({fewest[header_index['W runs']]}). Check wasted blocks, "
+                "cold READ blocks and sequential READ requests before choosing "
+                "a placement policy; this is an offline simulation.")
+    if "resident-dup" in header_index and "uniq payloads" in header_index and rows:
+        row = rows[0]
+        return (f"The trace contains {row[header_index['uniq payloads']]} distinct "
+                f"payloads across {row[header_index['writes']]} writes; "
+                f"{row[header_index['resident-dup']]} writes match a resident "
+                "value. Duplicate-content potential is not an implemented "
+                "deduplication or a measured lower-I/O saving.")
+    if "blocks saved" in header_index and "modeled ns/page" in header_index and rows:
+        row = rows[0]
+        return (f"Native planner saves {row[header_index['blocks saved']]} blocks "
+                f"and {row[header_index['extents saved']]} extents, with modeled "
+                f"{row[header_index['modeled ns/page']]} ns/page write cost. "
+                "Modeled elapsed cost is not worker CPU or loaded performance.")
+
+    # Fallback: prefer a directional measurement over identifiers or workload
+    # sizes. Never treat a descriptive maximum as automatically preferable.
     metric_index = None
     values = []
-    for index in range(1, len(headers)):
+    prioritized = [index for index, name in enumerate(headers)
+                   if index and name in TABLE_HEADER_GOAL]
+    for index in prioritized + [index for index in range(1, len(headers))
+                                if index not in prioritized]:
         parsed = [(_table_number(row[index]), str(row[0])) for row in rows]
         parsed = [(value, label) for value, label in parsed if value is not None]
         if parsed:
@@ -4242,12 +4381,15 @@ def _table_interpretation(headers, rows):
         high = max(values, key=lambda item: item[0])
         metric = str(headers[metric_index])
         if len(rows) == 1:
-            return (f"One row: {metric}={low[0]:g}. This is a descriptive measurement, "
-                    "not a comparison.")
+            return (f"{metric}={low[0]:g} in this single observation. "
+                    "No across-setting comparison or performance claim is possible.")
         if low[0] == high[0]:
             return f"{metric} is {low[0]:g} across {len(rows)} rows; no difference is visible."
-        return (f"{metric} ranges {low[0]:g} to {high[0]:g} "
-                f"(lowest: {low[1]}; highest: {high[1]}). Direction is workload-specific.")
+        direction = TABLE_HEADER_GOAL.get(metric)
+        return (f"{metric}: {low[0]:g} ({low[1]}) to {high[0]:g} "
+                f"({high[1]}). " +
+                (f"Preference: {direction}; verify other outcomes and scope."
+                 if direction else "Descriptive range, not a performance verdict."))
 
     if not rows:
         return "No rows were reported."
@@ -4277,9 +4419,10 @@ def print_table(title, headers, rows):
         print("| " + " | ".join(
             f"{value:<{widths[index]}}"
             for index, value in enumerate(row)) + " |")
+    # Define each column once; omit repetitive context-dependent boilerplate.
     legend = "; ".join(
-        f"{header} = {TABLE_HEADER_LEGEND.get(header, 'literal column: ' + header)} "
-        f"(goal: {TABLE_HEADER_GOAL.get(header, 'descriptive/context-dependent')})"
+        f"{header}: {TABLE_HEADER_LEGEND.get(header, 'reported ' + header)}" +
+        (f" [{TABLE_HEADER_GOAL[header]}]" if header in TABLE_HEADER_GOAL else "")
         for header in text_headers)
     _print_table_note("Legend", legend)
     _print_table_note("Interpretation",
