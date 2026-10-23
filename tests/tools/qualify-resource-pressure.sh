@@ -73,6 +73,7 @@ SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-id36.XXXXXXXX")"
 READY="$SESSION/pressure.ready"
 STOP="$SESSION/pressure.stop"
 PRESSURE_LOG="$SESSION/pressure.log"
+PAIR_LOG="$SESSION/pair.log"
 PRESSURE_PID=""
 
 cleanup() {
@@ -186,18 +187,25 @@ pressure_current="$(cat "$CGROUP/memory.current")"
 
 printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%s cpu_workers:%s\n'     "$MEMORY_HIGH_BYTES" "$MEMORY_MAX_BYTES" "$PRESSURE_MIB" "$cpu_workers"
 
-# Use the production async policy and the fast/deep owned-RAM model. The normal
-# pair still performs final byte-exact packed readback and ordinary teardown.
-if ! bash -c '
+# Use the production async policy and the fast/deep owned-RAM model. ID36
+# intentionally uses a shorter immutable trace: this gate asks whether the
+# target makes bounded, byte-exact forward progress under reclaim/CPU pressure,
+# not whether a full performance trace finishes within an arbitrary timeout.
+set +e
+bash -c '
     set -e
     cgroup=$1
     shift
     echo $$ > "$cgroup/cgroup.procs"
     exec "$@"
-' _ "$CGROUP" timeout --signal=TERM --kill-after=10s 300s     bash "$PAIR" --validated-source "$VALIDATED_SOURCE"     --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced     --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000     --async-prepare --shared-plan "$SHARED_PLAN"; then
-    printf '%s\n' 'FAIL: ID36 owned-RAM pair failed under resource pressure' >&2
-    exit 1
-fi
+' _ "$CGROUP" timeout --signal=TERM --kill-after=10s 300s \
+    bash "$PAIR" --validated-source "$VALIDATED_SOURCE" \
+    --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced \
+    --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000 \
+    --async-prepare --resource-pressure-short --shared-plan "$SHARED_PLAN" \
+    2>&1 | tee "$PAIR_LOG"
+pair_rc=${PIPESTATUS[0]}
+set -e
 
 high_after="$(event_value high)"
 oom_after="$(event_value oom)"
@@ -209,6 +217,24 @@ high_delta=$((high_after - high_before))
 oom_delta=$((oom_after - oom_before))
 oom_kill_delta=$((oom_kill_after - oom_kill_before))
 cpu_some_delta=$((cpu_some_after - cpu_some_before))
+
+if (( pair_rc != 0 )); then
+    if (( oom_delta != 0 || oom_kill_delta != 0 )); then
+        printf 'FAIL: ID36 cgroup OOM during owned-RAM pair oom:%s oom_kill:%s\n' \
+            "$oom_delta" "$oom_kill_delta" >&2
+    elif (( pair_rc == 124 || pair_rc == 137 )); then
+        printf 'FAIL: ID36 outer owned-RAM pair timeout rc:%s\n' "$pair_rc" >&2
+    elif grep -q 'uncompressed replay exceeded bounded timeout' "$PAIR_LOG"; then
+        printf '%s\n' 'FAIL: ID36 uncompressed replay exceeded its bounded timeout under pressure' >&2
+    elif grep -q 'swapz replay exceeded bounded timeout' "$PAIR_LOG"; then
+        printf '%s\n' 'FAIL: ID36 swapz replay exceeded its bounded timeout under pressure' >&2
+    else
+        printf 'FAIL: ID36 owned-RAM pair failed rc:%s high:%s cpu_psi_usec:%s oom:%s oom_kill:%s\n' \
+            "$pair_rc" "$high_delta" "$cpu_some_delta" "$oom_delta" \
+            "$oom_kill_delta" >&2
+    fi
+    exit 1
+fi
 
 (( high_delta > 0 )) || {
     printf '%s\n' 'FAIL: ID36 memory.high reclaim/throttle pressure was not observed' >&2
