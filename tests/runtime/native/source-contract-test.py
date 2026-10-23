@@ -2497,7 +2497,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *", ctor)
         self.assertIn("ctx->preparation_lanes = kcalloc(", ctor)
         self.assertIn("lane->input_page = vzalloc(SWAPZ_BLOCK_BYTES)", ctor)
-        self.assertIn("lane->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS", ctor)
+        self.assertIn("lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS", ctor)
         self.assertIn("atomic64_set(&ctx->preparation_free_mask", ctor)
         self.assertRegex(DM, r"struct swapz_prepared_page \{[^}]+\} __aligned\(64\);")
         self.assertRegex(DM, r"struct swapz_preparation_lane \{[^}]+\};")
@@ -2575,7 +2575,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("cancel_work_sync(&ctx->preparation_lanes[prep_lane].work)",
                       freeing)
         self.assertIn("destroy_workqueue(ctx->preparation_workqueue)", freeing)
-        self.assertIn("kfree(ctx->preparation_lanes[prep_lane].lz4_workmem)",
+        self.assertIn("kvfree(ctx->preparation_lanes[prep_lane].lz4_workmem)",
                       freeing)
         self.assertIn("kfree(ctx->preparation_lanes)", freeing)
         self.assertIn("vfree(ctx->preparation_pages)", freeing)
@@ -2598,7 +2598,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("async_prepare=%u delta64_prepare_workers=%u", status)
         self.assertIn('"delta64_rescue=$DELTA64_RESCUE"', benchmark)
         self.assertRegex(benchmark, r"(?m)^DELTA64_LZ4_ACCELERATION=1$")
-        self.assertRegex(benchmark, r"(?m)^PARALLEL_READS=1$")
+        self.assertNotRegex(benchmark, r"(?m)^PARALLEL_READS=")
         self.assertNotIn("DELTA64_PARALLEL_READS", benchmark)
         self.assertNotIn("$DELTA64_PREPARE_WORKERS", benchmark)
         self.assertNotIn("--delta64-prepare-workers", benchmark)
