@@ -885,10 +885,13 @@ published or aborted.
 READs and barriers never grant idle preparation tail credit. A detached K=1
 PACK_READY close must not consume an empty tail sample while its lower WRITE is
 still incomplete; keep that sample pending until ordered finalization. A window
-that recorded a read bypass is not eligible for asynchronous K=1 detach.
-`pipeline_read_bypass_skips` is passive attribution: increment it only when every
-other detach predicate is satisfied and the read-bypass guard alone rejects the
-window. It must not alter timers, scheduling, authority or completion ownership.
+that recorded a read bypass is not eligible for asynchronous K=1 detach. This
+guard is production-fixed after the two-host allow-after-read A/B showed no
+service benefit; do not add a runtime override without new workload evidence.
+`pipeline_read_bypass_skips` remains passive pressure attribution: increment it
+only when every other detach predicate is satisfied and the fixed read-bypass
+guard alone rejects the window. It must not alter timers, scheduling, authority
+or completion ownership.
 
 K=1 lower-WRITE detachment is a depth/backlog policy, not merely a multi-record test. A prepared window may detach asynchronously only when it contains more than four records or when a separate unclaimed preparation descriptor is already queued. Shallow <=4-record windows with no confirmed WRITE successor stay synchronous. This removes callback/workqueue cost where no overlap can exist while preserving QD8/QD32 overlap.
 

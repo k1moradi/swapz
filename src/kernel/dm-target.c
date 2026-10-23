@@ -105,13 +105,6 @@ module_param_named(read_coalesce_max_blocks, swapz_read_coalesce_max_blocks,
 MODULE_PARM_DESC(read_coalesce_max_blocks,
 		 "Maximum exact contiguous blocks in one coalesced READ; 2..8");
 
-static bool swapz_k1_allow_after_read_bypass;
-module_param_named(k1_allow_after_read_bypass,
-		   swapz_k1_allow_after_read_bypass, bool, 0444);
-MODULE_PARM_DESC(k1_allow_after_read_bypass,
-		 "A/B only: allow K=1 async lower-WRITE detach after an "
-		 "independent READ bypass; default off");
-
 static bool swapz_invalidate_cache_on_write_admit;
 module_param_named(invalidate_cache_on_write_admit,
 		   swapz_invalidate_cache_on_write_admit, bool, 0444);
@@ -324,7 +317,6 @@ struct swapz_dm {
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
 	bool delta64_rescue_enabled;
-	bool k1_allow_after_read_bypass;
 	bool invalidate_cache_on_write_admit;
 	swapz_u8 lz4_acceleration;
 	struct workqueue_struct *preparation_workqueue;
@@ -2482,26 +2474,18 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		 close_reason == SWAPZ_CLOSE_DEADLINE ||
 		 close_reason == SWAPZ_CLOSE_PACK_READY);
 	/*
-	 * Passive attribution only: count a window when the qualified read-bypass
-	 * guard is the sole remaining reason it cannot use the K=1 detach path.
-	 * This counter must not change scheduling or retained-window state.
+	 * The read-bypass guard is fixed after the two-host A/B showed no service
+	 * benefit from relaxing it. Keep passive pressure attribution, but do not
+	 * carry an alternate scheduling branch in production.
 	 */
-	if (async_detach_ready && ctx->retained_window_read_bypasses &&
-	    !ctx->k1_allow_after_read_bypass)
+	if (async_detach_ready && ctx->retained_window_read_bypasses)
 		ctx->pipeline_read_bypass_skips++;
 	/*
-	 * A/B control only: the default preserves the historical read-bypass
-	 * guard. The opt-in arm changes only detach eligibility; publication,
-	 * same-page dependency checks and the one immutable K=1 run remain
-	 * unchanged.
-	 *
-	 * Only a complete multi-record window with no hard immediate fence is
-	 * detached. If geometry yields only a prefix, complete that prefix
-	 * synchronously and keep the existing retry path for the remainder.
+	 * Only a complete multi-record window with no hard immediate fence and no
+	 * read bypass is detached. If geometry yields only a prefix, complete that
+	 * prefix synchronously and keep the existing retry path for the remainder.
 	 */
-	if (async_detach_ready &&
-	    (!ctx->retained_window_read_bypasses ||
-	     ctx->k1_allow_after_read_bypass)) {
+	if (async_detach_ready && !ctx->retained_window_read_bypasses) {
 		struct swapz_inflight_write *inflight = &ctx->inflight_write;
 		swapz_u8 prepared = 0;
 		u64 plan_before = ctx->engine.plan_wall_ns;
@@ -4934,7 +4918,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
 	ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled;
-	ctx->k1_allow_after_read_bypass = swapz_k1_allow_after_read_bypass;
 	ctx->invalidate_cache_on_write_admit =
 		swapz_invalidate_cache_on_write_admit;
 	ctx->preparation_worker_count =
@@ -5796,10 +5779,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->parallel_read_coalesce_skip_gap,
 		       ctx->parallel_read_coalesce_skip_other,
 		       ctx->failed, ctx->last_error);
-		DMEMIT(" k1_allow_after_read_bypass=%u "
+		/* Retired compatibility token: the read-bypass detach override is gone. */
+		DMEMIT(" k1_allow_after_read_bypass=0 "
 		       "read_coalesce_max_blocks=%u "
 		       "invalidate_cache_on_write_admit=%u",
-		       ctx->k1_allow_after_read_bypass,
 		       ctx->read_coalesce_max_blocks,
 		       ctx->invalidate_cache_on_write_admit);
 		/* These independent single-writer values are diagnostic while busy;

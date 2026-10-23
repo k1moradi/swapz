@@ -246,7 +246,11 @@ The alpha.24 policy change only enables the already implemented bounded
 `async_prepare` path by default. Do not change its scheduling gates, K=1
 ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
-- **ID38:** retain ready-wait windows/records/wall/cause; do not implement K=2.
+- **ID38:** retain ready-wait windows/records/wall/cause. The next architecture
+  experiment may compare lower-WRITE submission depth 1 versus 2 using separate
+  immutable run ownership and strictly ordered publication; production remains
+  depth 1 until paired evidence closes the fast-mixed gap without p99 or
+  amplification regressions.
 - **ID65:** owner-qualify the synchronous read-path cleanup; do not restore or
   replace the rejected helper workqueue unless new measured evidence requires it.
 - **ID58/59:** keep representative-content collection offline.
@@ -421,12 +425,12 @@ SWZ geometry, authority ordering or the default compression policy.
   remains `delta64_prepare_workers=1`. With both `async_prepare=1` and
   `delta64_rescue=1`, the diagnostic parameter still accepts 2 or 4 unbound
   lanes, with private per-lane scratch and diagnostics and one ordered
-  planner/publisher owner. K=4 regressed useful throughput in both qualified
-  directional four-CPU observations, so it is removed from the default
-  qualification matrix. K=2 changed sign between those observations and now
-  receives five counterbalanced K=1/K=2 pairs with exact useful-work equality,
-  timed-overlap proof, CPU/PSI and 95% confidence intervals before any
-  promotion decision.
+  planner/publisher owner. Two-host paired evidence now closes the routine K=2
+  question: the older host showed no service gain, while the newer host showed
+  a p99 and preparation-cost regression. K=2 and K=4 are therefore removed
+  from the default qualification matrix and remain private diagnostic widths
+  only. Freed owner time should target lower-WRITE submission depth and
+  representative-content rescue evidence instead.
 - **Low-risk companion work:** validated extent-cache refreshes copy only
   missing blocks; slot priming never republishes provisional coalesced bytes;
   GC relocation reuses the payload CRC just verified by the read engine; the

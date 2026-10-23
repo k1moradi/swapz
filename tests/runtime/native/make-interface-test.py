@@ -925,8 +925,8 @@ class PublicMakeContract(unittest.TestCase):
         self.assertNotIn("PASS_SD_READ_GROUPING_AB=", loaded)
         self.assertIn("START_SD_READ_COALESCE_AB=", loaded)
         self.assertIn("PASS_SD_READ_COALESCE_AB=", loaded)
-        self.assertIn("START_DELTA64_PREPARE_WORKERS=", loaded)
-        self.assertIn("PASS_DELTA64_PREPARE_WORKERS=", loaded)
+        self.assertNotIn("START_DELTA64_PREPARE_WORKERS=", loaded)
+        self.assertNotIn("PASS_DELTA64_PREPARE_WORKERS=", loaded)
         self.assertGreaterEqual(
             loaded.count(
                 "--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000"),

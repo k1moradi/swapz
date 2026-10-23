@@ -933,21 +933,16 @@ For delta64, retain raw native backend transform/inverse ns/page and add loaded
 the production dispatch and therefore includes x86 kernel-FPU transitions.
 Do not promote rescue from raw SSE2 timing alone.
 
-The delta64 CPU-parallelism qualification now compares only
-`delta64_prepare_workers=1` versus 2 on the fast SSD model with
-`async_prepare=1` and `delta64_rescue=1`. K=4 remains available for explicit
-diagnostic work but is no longer in the default matrix because both qualified
-directional observations regressed useful throughput on the four-CPU test
-host. The immutable 128-page positive control remains a deterministic 64-bit
-counter/timestamp-like sequence, forcing real classifier passes, transforms
-and adoptions. Run five adjacent counterbalanced K=1/K=2 pairs. K=2 must report
-`delta64_prepare_parallel_starts > 0` and
-`delta64_prepare_active_max > 1` during each timed replay; K=1 must report no
-parallel starts. Require identical attempts, adoptions and payload-byte savings
-inside every matched pair. Report paired 95% confidence intervals for useful
-WRITE throughput/p99, lower WRITE bytes/requests, wrapper-inclusive transform
-wall, total rescue wall, preparation LZ4 wall, preparation worker CPU,
-raw-control throughput drift, and host CPU/PSI.
+Delta64 preparation stays at `delta64_prepare_workers=1` in the standard
+loaded matrix. Five counterbalanced K=1/K=2 pairs on each of two hosts answered
+the concurrency question: the older host showed no service gain, while the
+newer host showed materially worse p99 and preparation cost at K=2. Routine
+qualification therefore no longer spends ten privileged sessions on this A/B.
+The read-only K=2/4 widths remain available through private benchmark plumbing
+only when a new workload specifically motivates reopening preparation
+parallelism. Such a diagnostic must still prove real timed overlap, exact
+attempt/adoption/payload equality, matched provenance and paired confidence
+intervals before any policy change.
 
 For validated metadata-cache hits, compare `read_engine_nonio_wall_ns` with
 metadata-set hits/lookups, metadata-copy bytes, lower metadata/payload requests,

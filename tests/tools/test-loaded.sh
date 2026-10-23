@@ -185,36 +185,6 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
-# K=1 read-bypass detach A/B. Async preparation is enabled in both arms;
-# the only policy difference is whether an otherwise-qualified immutable lower
-# run may detach after an independent READ bypass. Five counterbalanced pairs
-# are collected on each synthetic model.
-for regime in sd_emulated ssd_emulated; do
-    index=0
-    for allow_after_read in "${confirmation_modes[@]}"; do
-        arguments=(--run-owned-ram-pair --profile medium
-                   --retain-ms 2 --unpaced)
-        case "$regime" in
-            sd_emulated) arguments+=(--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000) ;;
-            ssd_emulated) arguments+=(--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000) ;;
-            *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
-        esac
-        # The private helper consumes suffix controls from the tail. Append
-        # async after the device-model suffixes so both controls are parsed
-        # after --shared-plan is stripped.
-        arguments+=(--async-prepare
-                   --k1-allow-after-read-bypass "$allow_after_read"
-                   --shared-plan "$shared_plan")
-        if (( index % 2 )); then
-            arguments+=(--swapz-first)
-        fi
-        printf 'START_K1_READ_BYPASS_AB=%s:%s\n' "$regime" "$allow_after_read"
-        run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
-        printf 'PASS_K1_READ_BYPASS_AB=%s:%s\n' "$regime" "$allow_after_read"
-        (( index += 1 ))
-    done
-done
-
 # ID73 promotion-quality LZ4 acceleration A/B. The native sweep has already
 # shown that acceleration 4 materially lowers CPU time while retaining the
 # same bounded planner block geometry. Loaded qualification therefore spends
@@ -263,34 +233,6 @@ for delta64_rescue in "${confirmation_modes[@]}"; do
     printf 'START_DELTA64_RESCUE=%s\n' "$delta64_rescue"
     run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_DELTA64_RESCUE=%s\n' "$delta64_rescue"
-    (( index += 1 ))
-done
-
-# Delta64 CPU-parallelism confirmation. K=4 regressed in both qualified
-# observations, so the default matrix no longer spends time on it. Five
-# adjacent counterbalanced K=1/K=2 pairs reuse the exact positive fixture and
-# QD32 SSD model. K=2 must execute overlapping preparation during the timed
-# interval, while ordered planning/publication and lower-I/O semantics remain
-# unchanged. The module still accepts K=4 for explicit diagnostic work.
-index=0
-for delta64_mode in "${confirmation_modes[@]}"; do
-    if (( delta64_mode )); then
-        delta64_workers=2
-    else
-        delta64_workers=1
-    fi
-    arguments=(--run-owned-ram-pair --profile medium
-               --retain-ms 2 --unpaced
-               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
-               --write-only-qd 32 --async-prepare --delta64-rescue
-               --delta64-prepare-workers "$delta64_workers"
-               --shared-plan "$shared_plan/delta64")
-    if (( index % 2 )); then
-        arguments+=(--swapz-first)
-    fi
-    printf 'START_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
-    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
-    printf 'PASS_DELTA64_PREPARE_WORKERS=%s\n' "$delta64_workers"
     (( index += 1 ))
 done
 

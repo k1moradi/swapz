@@ -196,7 +196,7 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
   successful upper BIO completion precedes shared LRU absorption.
 - **ID64 one-shot in-flight-zero shrink guard:** retired. Do not restore the module parameter, shrink helper or loaded A/B. Compatibility status fields stay zero so existing report parsers remain stable.
 - **K=1 shallow detach gate:** fast QD4/QD8/QD32 require five matched sync/async pairs. Acceptance requires the prior QD4 regression to disappear, QD8/QD32 to keep statistically positive async gains, and fast mixed lower request inflation to improve without useful-throughput or read-tail loss.
-- **K=1 read-bypass detach attribution:** `pipeline_read_bypass_skips` counts a window only when every asynchronous-detach predicate except the existing read-bypass guard is satisfied. It is passive evidence, not a policy change. Do not infer this count from serviced READs, PACK_READY service-dry closes or rounded run-slot occupancy; use the exact counter before proposing a controlled guard A/B. Any new timed write-status counter required by report qualification must also be carried through the replay snapshot/delta schema and covered by a nonzero replay regression, so missing telemetry cannot be mistaken for a benchmark failure.
+- **K=1 read-bypass detach guard:** the guard is fixed on. Two-host paired evidence showed that relaxing it activates substantially more detach work without improving useful throughput or read tail latency, so the module override and routine A/B are retired. `pipeline_read_bypass_skips` remains passive pressure attribution for the active guard only; it must not alter scheduling or justify reopening the policy without a new workload.
 - **Device-model limits:** every report must distinguish the configured null_blk MiB/s cap from the analytical unmerged-4KiB latency ceiling (4096 * hw_queue_depth / completion_nsec). The console must show both in decimal MB/s and must not call the calculation a measured bulk calibration.
 - **ID65 synchronous read cleanup:** owner-qualified. Any non-ID63 candidate
   must now return before slot preparation/priming; no standalone same-extent
@@ -291,11 +291,12 @@ ordering fence. Completion remains fail-closed.
 The first pipeline qualification uses one lower run outstanding plus one active
 collector. Higher lower-I/O depth is a later explicit K experiment. Generic
 ordinary-LZ4 preparation concurrency remains blocked by the prior shallow-backlog
-evidence. Delta64 rescue is the only preparation-concurrency exception: the
-default qualification now compares K=1 against K=2 because K=4 regressed in
-both directional four-CPU observations. K=2 must prove timed lane overlap on
-the deterministic positive fixture before any broader concurrency claim; K=4
-is diagnostic-only unless future topology-specific evidence reopens it.
+evidence. Delta64 rescue is the only preparation-concurrency exception, but its
+production-compatible preparation width remains K=1. Two-host paired evidence
+now refutes routine K=2 qualification: it produced no service gain on the older
+host and materially worsened p99 and preparation cost on the newer host. K=2/4
+remain bounded diagnostic-only widths for a specifically motivated future
+workload; neither belongs in the standard loaded matrix.
 
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
@@ -548,17 +549,16 @@ Source coverage must require both the ordered `swapz` workqueue and the
 single-active. Preparation remains one lane unless both async preparation and
 delta64 rescue are enabled; the read-only
 `delta64_prepare_workers=1|2|4` diagnostic parameter may then raise only
-preparation concurrency. The default loaded qualification uses K=1 and K=2
-only; K=4 is retained solely for explicit diagnostics after two directional
-four-CPU observations regressed throughput. Every lane must own private
-input/predictor/LZ4 scratch and single-writer diagnostics, while the existing
-64-page prepared-payload mask is shared and bounded. Bound/affinity-pinned
-preparation remains rejected. FIFO admission, global packing, physical WRITE
-submission, authority publication and BIO completion remain serialized under
-the ordered owner. Every K=2 qualification observation must report timed
-overlap; every K=1 observation must report none. Rootless/report fixtures must
-carry the same five counterbalanced K=1/K=2 pairs so parser and fail-closed
-evidence gates remain covered without privileged module loading.
+preparation concurrency. Standard loaded qualification stays at K=1. K=2 and
+K=4 remain available only to private, explicitly motivated diagnostics after
+the two-host K=2 result and prior K=4 regressions; they are not routine evidence
+gates. Every lane must own private input/predictor/LZ4 scratch and single-writer
+diagnostics, while the existing 64-page prepared-payload mask is shared and
+bounded. Bound/affinity-pinned preparation remains rejected. FIFO admission,
+global packing, physical WRITE submission, authority publication and BIO
+completion remain serialized under the ordered owner. Private K>1 diagnostics
+must still prove real timed overlap and exact useful-work equality; K=1 must
+report no parallel starts.
 Synthetic delta64-positive records must keep score-band totals exactly equal to
 eligible pages; mocks may not bypass the production accounting invariants. The
 current positive control starts from an accepted >2024-byte LZ4 baseline, so

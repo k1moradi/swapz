@@ -1410,12 +1410,14 @@ def run_stage(title, command, result, *, parse_bench=False):
         parse_delta64_prepare_sessions(output) if parse_bench else [])
     delta64_prepare_diagnostic = (
         delta64_prepare_verdict(delta64_prepare_sessions)
-        if parse_bench else None)
+        if delta64_prepare_sessions else
+        {"overall": "NOT_RUN", "reason": "retired from routine qualification"})
     k1_read_bypass_sessions = (
         parse_k1_read_bypass_ab(output) if parse_bench else [])
     k1_read_bypass_diagnostic = (
         k1_read_bypass_ab_verdict(k1_read_bypass_sessions)
-        if parse_bench else None)
+        if k1_read_bypass_sessions else
+        {"overall": "NOT_RUN", "reason": "refuted and retired"})
     read_coalesce_cap_sessions = (
         parse_read_coalesce_cap_ab(output) if parse_bench else [])
     read_coalesce_cap_diagnostic = (
@@ -1431,10 +1433,6 @@ def run_stage(title, command, result, *, parse_bench=False):
                        "PASS_LZ4_ACCELERATION_AB" or
                        delta64_rescue_diagnostic.get("overall") !=
                        "PASS_DELTA64_RESCUE_AB" or
-                       delta64_prepare_diagnostic.get("overall") !=
-                       "PASS_DELTA64_PREPARE_AB" or
-                       k1_read_bypass_diagnostic.get("overall") !=
-                       "PASS_K1_READ_BYPASS_AB_EVIDENCE" or
                        read_coalesce_cap_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_CAP_EVIDENCE"))
     if marker_failure:
@@ -1491,16 +1489,6 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "delta64 rescue off/on A/B"
                 record["diagnostic"] = delta64_rescue_diagnostic.get(
                     "reason", "paired delta64 rescue evidence is incomplete")
-            elif delta64_prepare_diagnostic.get("overall") != (
-                    "PASS_DELTA64_PREPARE_AB"):
-                record["failed_phase"] = "delta64 K=1/K=2 preparation A/B"
-                record["diagnostic"] = delta64_prepare_diagnostic.get(
-                    "reason", "paired delta64 preparation evidence is incomplete")
-            elif k1_read_bypass_diagnostic.get("overall") != (
-                    "PASS_K1_READ_BYPASS_AB_EVIDENCE"):
-                record["failed_phase"] = "K=1 read-bypass detach A/B"
-                record["diagnostic"] = k1_read_bypass_diagnostic.get(
-                    "reason", "K=1 read-bypass evidence is incomplete")
             elif read_coalesce_cap_diagnostic.get("overall") != (
                     "PASS_READ_COALESCE_CAP_EVIDENCE"):
                 record["failed_phase"] = "READ coalescing cap 2/4/8 evidence"
@@ -5177,8 +5165,8 @@ def print_bench(result):
         print_table(
             "K=2 minus K=1 paired 95% confidence intervals",
             ("metric", "mean", "low", "high"), ci_rows)
-    else:
-        print("\n  Delta64 K=1/K=2 A/B: NOT QUALIFIED "
+    elif delta64_ab.get("overall") != "NOT_RUN":
+        print("\n  Delta64 K=1/K=2 diagnostic: NOT QUALIFIED "
               f"({delta64_ab.get('reason', delta64_ab.get('overall', 'NOT_RUN'))})")
 
     coalesce_ab = result["benchmarks"].get("read_coalesce_ab", {})
@@ -5745,11 +5733,10 @@ def main():
                    for candidate in ("off", "swapz")):
                 delta64_ab["overall"] = "INCONCLUSIVE"
                 delta64_ab["reason"] = (
-                    "Delta64 K=1/K=2 A/B source Git ID mismatched tested checkout")
+                    "Delta64 K=1/K=2 diagnostic source Git ID mismatched tested checkout")
         if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
                 saturation.get("overall") != "PASS_WRITE_SATURATION_EVIDENCE" or \
-                lz4_sweep.get("overall") != "PASS_LZ4_ACCELERATION_AB" or \
-                delta64_ab.get("overall") != "PASS_DELTA64_PREPARE_AB":
+                lz4_sweep.get("overall") != "PASS_LZ4_ACCELERATION_AB":
             result["overall"] = "FAIL"
             exit_code = 1
     write_report(result)
