@@ -419,6 +419,8 @@ def arm(candidate, *, mode, regime):
                     "read_two_block_skips": 128,
                     "parallel_read_pairs": 128,
                     "parallel_read_same_extent_pairs": 64,
+                    "parallel_read_async_batches": 32,
+                    "parallel_read_async_slots": 64,
                     "parallel_read_distinct_extent_pairs": 64,
                     "parallel_read_adjacent_extent_pairs": 24,
                     "parallel_read_adjacent_extent_blocks": 144,
@@ -501,6 +503,7 @@ def parallel_arm(enabled, regime="ssd_emulated"):
         if not enabled:
             for field in (
                     "parallel_read_pairs", "parallel_read_same_extent_pairs",
+                    "parallel_read_async_batches", "parallel_read_async_slots",
                     "parallel_read_distinct_extent_pairs",
                     "parallel_read_adjacent_extent_pairs",
                     "parallel_read_adjacent_extent_blocks"):
@@ -508,6 +511,8 @@ def parallel_arm(enabled, regime="ssd_emulated"):
         else:
             kernel["parallel_read_pairs"] = 128
             kernel["parallel_read_same_extent_pairs"] = 64
+            kernel["parallel_read_async_batches"] = 32
+            kernel["parallel_read_async_slots"] = 64
         for field in (
                 "parallel_read_coalesced_pairs",
                 "parallel_read_coalesced_reqs_saved",
@@ -1434,6 +1439,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_two_block_skips"], 128)
         self.assertEqual(slow["columns"]["sync"]["sequential_parallel_read_pairs"], 128)
         self.assertEqual(slow["columns"]["sync"]["sequential_parallel_read_same_extent_pairs"], 64)
+        self.assertEqual(slow["columns"]["sync"]["sequential_parallel_read_async_batches"], 32)
+        self.assertEqual(slow["columns"]["sync"]["sequential_parallel_read_async_slots"], 64)
         self.assertEqual(slow["columns"]["sync"]["mixed_physical_write_reqs"], 5)
         self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
         self.assertEqual(slow["columns"]["sync"]["mixed_write_copy_wall_ns"], 3000000)
