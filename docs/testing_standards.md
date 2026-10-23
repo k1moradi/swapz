@@ -1071,6 +1071,8 @@ Rootless source/build contracts assert that retired production selectors and
 their routine loaded markers are absent, while fixed compatibility telemetry
 continues to report the selected production values. The private benchmark
 helper must not retain retired selector variables or command-line suffixes.
+Its delta64 second-pass acceleration and independent-READ defaults remain
+separate pinned controls so retiring ordinary LZ4 tuning cannot alias them.
 
 Every packed READ pass remains 4 MiB/1024 byte-exact verified pages. Reports
 must show sequential and seeded-random useful READ MB/s, p99, lower bytes and

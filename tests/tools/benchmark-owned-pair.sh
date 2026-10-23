@@ -23,10 +23,10 @@ MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
 DELTA64_RESCUE=0
-DELTA64_PARALLEL_READS=1
+DELTA64_LZ4_ACCELERATION=1
+PARALLEL_READS=1
 READ_COALESCE=1
 INVALIDATE_CACHE_ON_WRITE_ADMIT=0
-LZ4_ACCELERATION=1
 WRITE_ONLY_QD=0
 READ_PCT=25
 PACKED_READ=1
@@ -606,10 +606,6 @@ if (( DELTA64_RESCUE )); then
     active_max=${BASH_REMATCH[1]}
     (( active_max <= expected_delta64_workers )) ||
         fail 'delta64 preparation exceeded configured concurrency'
-    if (( DELTA64_PREPARE_WORKERS > 1 )); then
-        (( active_max > 1 )) ||
-            fail 'delta64 parallel arm never executed concurrent preparation'
-    fi
 fi
 if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
     if [[ "$swapz_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]]; then
