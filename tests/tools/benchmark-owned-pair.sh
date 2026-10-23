@@ -501,7 +501,7 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])logical_open_balance=0([[:sp
     fail 'logical-open balance must remain off in placement A/B'
 expected_grouping=$PARALLEL_READS
 expected_coalescing=$(( PARALLEL_READS && READ_COALESCE ? 1 : 0 ))
-expected_parallel=0
+expected_parallel=$expected_coalescing
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_grouping_enabled=$expected_grouping([[:space:]]|$)" ||
     fail 'loaded swapz read-grouping gate does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" ||
@@ -513,7 +513,7 @@ dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])k1_allow_after_read_bypass=0
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT([[:space:]]|$)" ||
     fail 'loaded swapz write-admission cache policy does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])parallel_reads_enabled=$expected_parallel([[:space:]]|$)" ||
-    fail 'loaded swapz parallel-read gate does not match selected benchmark arm'
+    fail 'loaded swapz independent lower-READ fan-out gate does not match selected benchmark arm'
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'
 for (( n=0; n<50; ++n )); do

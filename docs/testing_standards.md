@@ -1420,3 +1420,12 @@ underflow/overflow and prove all authority arrays are byte-for-byte unchanged
 on failure. Successful multi-record publication must prove live-record,
 mapped-page, GC-score and page-list totals equal a slow recomputation after the
 aggregate fast path.
+
+
+Routine qualification no longer repeats the lower-WRITE depth 1/2 A/B: the
+completed idle SSE2 and AVX-512 five-pair cycles found no throughput/latency
+benefit. Keep depth two as an explicit diagnostic for future physical media.
+
+Predictor-first delta64 telemetry must distinguish direct adoptions from
+baseline-measured RAW/LZ4 rescues. The rescue A/B continues to pin
+`delta64_lz4_acceleration=4` and K=1.

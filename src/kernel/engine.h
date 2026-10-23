@@ -303,6 +303,12 @@ int swapz_engine_coalesced_span(
 				   swapz_u8 first1, swapz_u8 blocks1,
 				   swapz_u32 *combined_start,
 				   swapz_u8 *combined_blocks);
+int swapz_engine_seed_read_range(struct swapz_engine *engine,
+				 swapz_u32 start_block,
+				 swapz_u8 extent_blocks,
+				 swapz_u8 first_block,
+				 swapz_u8 blocks);
+
 int swapz_engine_coalesce_read_chain(
 				   struct swapz_engine *const *engines,
 				   const swapz_u32 *start_blocks,

@@ -906,8 +906,11 @@ static int swapz_engine_seed_coalesced_range(struct swapz_engine *engine,
 	    (engine->read_cached_start_block != start_block ||
 	     engine->read_cached_extent_blocks != extent_blocks))
 		return -ESTALE;
-	memcpy(engine->read_scratch + (size_t)first_block * SWAPZ_BLOCK_BYTES,
-	       bytes, (size_t)blocks * SWAPZ_BLOCK_BYTES);
+	if (bytes != engine->read_scratch +
+			     (size_t)first_block * SWAPZ_BLOCK_BYTES)
+		memcpy(engine->read_scratch +
+		       (size_t)first_block * SWAPZ_BLOCK_BYTES,
+		       bytes, (size_t)blocks * SWAPZ_BLOCK_BYTES);
 	block_mask = swapz_block_range_mask(first_block, blocks);
 	engine->read_cached_start_block = start_block;
 	engine->read_cached_extent_blocks = extent_blocks;
@@ -918,6 +921,19 @@ static int swapz_engine_seed_coalesced_range(struct swapz_engine *engine,
 	engine->read_cache_valid = 1;
 	engine->physical_read_blocks += blocks;
 	return 0;
+}
+
+int swapz_engine_seed_read_range(struct swapz_engine *engine,
+				 swapz_u32 start_block,
+				 swapz_u8 extent_blocks,
+				 swapz_u8 first_block,
+				 swapz_u8 blocks)
+{
+	if (!engine || !engine->read_scratch)
+		return -EINVAL;
+	return swapz_engine_seed_coalesced_range(
+		engine, start_block, extent_blocks, first_block, blocks,
+		engine->read_scratch + (size_t)first_block * SWAPZ_BLOCK_BYTES);
 }
 
 int swapz_engine_coalesce_read_chain(

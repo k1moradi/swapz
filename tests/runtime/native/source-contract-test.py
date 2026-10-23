@@ -1385,12 +1385,12 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_complete(slot->bios[index]", batch)
         success_complete = batch.rindex("swapz_complete(slot->bios[index], 0)")
         success_absorb = batch.rindex("swapz_engine_absorb_read_slot(")
-        # Preserve fail-closed selected-chain semantics: all slot decode/CRC
-        # work and the chain failure decision happen before any success ACK.
-        self.assertLess(batch.rindex("slot->error = swapz_read_slot_run(slot)"),
+        # A slot may ACK after its own generation/CRC validation and copy.
+        # Later unrelated slot failure must only fail BIOs still worker-owned.
+        self.assertLess(batch.index("slot->error = swapz_read_slot_run(slot)"),
                         success_complete)
-        self.assertLess(batch.index("swapz_fail(ctx, batch_error)"),
-                        success_complete)
+        self.assertIn("slot->bios[index] = NULL", batch)
+        self.assertIn("if (slot->bios[index])", batch)
         self.assertLess(success_complete, success_absorb)
         self.assertNotIn("swapz_complete(", slot_run)
         self.assertNotIn("swapz_finish(", slot_run)
@@ -1413,7 +1413,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->read_grouping_enabled = swapz_parallel_reads;", ctor)
         self.assertIn("ctx->read_coalescing_enabled =", ctor)
         self.assertIn("ctx->read_coalesce_max_blocks =", ctor)
-        self.assertIn("ctx->parallel_reads_enabled = false;", ctor)
+        self.assertIn("ctx->parallel_reads_enabled = ctx->read_coalescing_enabled;", ctor)
         self.assertNotIn("bdev_get_queue(ctx->backing->bdev)->nr_requests > 1U", ctor)
         self.assertIn("if (ctx->read_grouping_enabled)", ctor)
         self.assertIn("SWAPZ_READ_EXTENT_CACHE_ENTRIES * SWAPZ_MAX_EXTENT_BYTES", ctor)
@@ -1430,6 +1430,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("parallel_reads_enabled=%u", status)
         self.assertIn("parallel_read_pairs=%llu", status)
         self.assertIn("parallel_read_same_extent_pairs=%llu", status)
+        self.assertIn("parallel_read_async_batches=%llu", status)
+        self.assertIn("parallel_read_async_slots=%llu", status)
         self.assertIn("parallel_read_distinct_extent_pairs=%llu", status)
         self.assertIn("parallel_read_adjacent_extent_pairs=%llu", status)
         self.assertIn("parallel_read_adjacent_extent_blocks=%llu", status)
@@ -1460,7 +1462,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('"invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT"', pair)
         self.assertIn("read_grouping_enabled=$expected_grouping", pair)
         self.assertIn("read_coalescing_enabled=$expected_coalescing", pair)
-        self.assertIn("expected_parallel=0", pair)
+        self.assertIn("expected_parallel=$expected_coalescing", pair)
         self.assertIn("parallel_reads_enabled=$expected_parallel", pair)
         self.assertNotIn('for parallel_reads in "${directional_modes[@]}"', loaded)
         self.assertNotIn("START_BURST_GUARD_AB=", loaded)
@@ -1496,9 +1498,19 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("PASS_DELTA64_RESCUE=", loaded)
         self.assertIn("--delta64-lz4-acceleration 4", loaded)
         self.assertIn("--delta64-prepare-workers 1", loaded)
-        self.assertIn("START_WRITE_PIPELINE_DEPTH=", loaded)
-        self.assertIn("PASS_WRITE_PIPELINE_DEPTH=", loaded)
-        self.assertIn("--write-pipeline-depth", loaded)
+        compressor = body("swapz_compress_page")
+        producer = body("swapz_preparation_worker")
+        ordered = body("swapz_accept_write")
+        self.assertIn("swapz_compress_page(", producer)
+        self.assertIn("swapz_compress_page(", ordered)
+        self.assertIn("swapz_predict_delta64_sample_score(input)", compressor)
+        self.assertIn("candidate <= (int)SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH",
+                      compressor)
+        self.assertIn("stats->direct_adopted++", compressor)
+        self.assertIn("stats->first_lz4_skipped++", compressor)
+        self.assertNotIn("START_WRITE_PIPELINE_DEPTH=", loaded)
+        self.assertNotIn("PASS_WRITE_PIPELINE_DEPTH=", loaded)
+        self.assertNotIn("--write-pipeline-depth", loaded)
         self.assertIn("def parse_write_pipeline_depth", runner)
         self.assertIn("PASS_WRITE_PIPELINE_DEPTH_EVIDENCE", runner)
         self.assertIn("read_coalesce_cap_sequence=(2 4 8", loaded)
@@ -1509,6 +1521,24 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('kernel["parallel_read_pairs"]', runner)
         self.assertIn("parallel_read_coalesced_reqs_saved", runner)
         self.assertIn("parallel_read_coalesce_extra_blocks", runner)
+
+        concurrent = body("swapz_try_concurrent_read_slots")
+        submit_read = body("swapz_submit_read_slot_range")
+        done_read = body("swapz_async_lower_read_done")
+        finish_read = body("swapz_finish_read_slot_range")
+        self.assertIn("missing_slots < 2U", concurrent)
+        self.assertIn(".fn = swapz_async_lower_read_done", submit_read)
+        self.assertIn(".context = slot", submit_read)
+        self.assertIn("complete(&slot->lower_done)", done_read)
+        self.assertNotIn("swapz_complete(", done_read)
+        self.assertNotIn("swapz_engine_absorb_read_slot", done_read)
+        self.assertIn("wait_for_completion(&slot->lower_done)", finish_read)
+        self.assertIn("swapz_engine_seed_read_range", finish_read)
+        self.assertLess(concurrent.index("swapz_submit_read_slot_range("),
+                        concurrent.index("swapz_finish_read_slot_range("))
+        self.assertLess(concurrent.index("swapz_complete(slot->bios[index], 0)"),
+                        concurrent.index("swapz_engine_absorb_read_slot"))
+        self.assertIn("slot->bios[index] = NULL", concurrent)
 
     def test_id67_delta64_is_single_candidate_with_arch_dispatch(self):
         predictor = (ROOT / "src/kernel/predictor.h").read_text()
