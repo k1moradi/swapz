@@ -1002,6 +1002,10 @@ def parse_loaded_correctness(output):
         "flush_fault": re.compile(
             r"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:(\d+) "
             r"injected:(\d+) data_write_reached_lower:(\d+)$"),
+        "id36": re.compile(
+            r"PASS_ID36_RESOURCE_PRESSURE=memory_high_events:(\d+) "
+            r"memory_peak_bytes:(\d+) cpu_some_usec:(\d+) "
+            r"cpu_workers:(\d+) pressure_mib:(\d+) oom:(\d+) oom_kill:(\d+)$"),
     }
     found = {}
     for line in output.splitlines():
@@ -1038,6 +1042,9 @@ def parse_loaded_correctness(output):
     suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
+    (id36_high_events, id36_peak_bytes, id36_cpu_some_usec,
+     id36_cpu_workers, id36_pressure_mib, id36_oom,
+     id36_oom_kill) = found["id36"]
     if raw_pages != 64 or zero_pages != 9 or flush_calls < 2:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded RAW/zero/flush oracle counters are inconsistent"}
@@ -1091,6 +1098,12 @@ def parse_loaded_correctness(output):
     if flush_retain != 2 or flush_injected != 1 or flush_data_lower != 1:
         return {"overall": "INCOMPLETE",
                 "reason": "synthetic retained FLUSH fault contract failed"}
+    if (id36_high_events <= 0 or id36_peak_bytes <
+            id36_pressure_mib * 1024 * 1024 or
+            id36_cpu_some_usec <= 0 or id36_cpu_workers < 2 or
+            id36_pressure_mib != 576 or id36_oom or id36_oom_kill):
+        return {"overall": "INCOMPLETE",
+                "reason": "ID36 low-RAM/heavy-CPU evidence is incomplete"}
     return {
         "overall": "PASS",
         "raw_pages": raw_pages,
@@ -1148,7 +1161,12 @@ def parse_loaded_correctness(output):
         "suspend_verified_pages": verified_pages,
         "retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
         "retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
-        "scope": "OWNED_RAM_NULL_BLK_SYNTHETIC_FAILURE_ONLY",
+        "id36_memory_high_events": id36_high_events,
+        "id36_memory_peak_bytes": id36_peak_bytes,
+        "id36_cpu_some_usec": id36_cpu_some_usec,
+        "id36_cpu_workers": id36_cpu_workers,
+        "id36_pressure_mib": id36_pressure_mib,
+        "scope": "OWNED_RAM_NULL_BLK_SYNTHETIC_FAILURE_AND_RESOURCE_PRESSURE",
     }
 
 
@@ -1225,6 +1243,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = "owned RAM retained synthetic WRITE fault"
             elif line.startswith("START_LOADED_RETAINED_FLUSH_FAULT"):
                 phase = "owned RAM retained synthetic FLUSH fault"
+            elif line.startswith("START_ID36_RESOURCE_PRESSURE="):
+                phase = "ID36 low-RAM/heavy-CPU pressure"
             elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "shared fixture allocation and workload generation"
             elif line.startswith("START_OWNED_RAM_REGIME="):
