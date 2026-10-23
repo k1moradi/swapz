@@ -672,36 +672,27 @@ when its shell helper returned 2; BLOCKED is reserved for an explicit blocked
 stage marker.
 
 
-### Immutable ping-pong lower-I/O qualification
+### Immutable one-slot lower-I/O qualification
 
-A write run may become asynchronous only after its mutable engine buffers and
-transaction state have been moved into a caller-owned immutable run object.
-Submission completion callbacks must never observe reused `bulk_scratch`,
-`bulk_txs`, batch hashes, upper-BIO pointers or ordering flags.
+A submitted WRITE run is immutable until definitive lower completion and ordered
+publication. Completion callbacks must never observe reused packed bytes,
+transaction snapshots, batch hashes, upper-BIO pointers or ordering state.
 
-The active collector and immutable streaming run are separate ownership
-domains. The collector performs zero detection, LZ4 and payload CRC while the
-previous run is in lower I/O. Freezing a collector forbids further mutation; it
-does not start compression. Planning/packing may use the exact prepared lengths
-before submission.
+The active collector and the one streaming run are separate ownership domains.
+Collection may perform zero detection, compression and payload CRC while the
+previous run is in lower I/O; freezing a run forbids further mutation. Do not
+split a well-packed wave merely to manufacture overlap.
 
-For a serial-depth experiment, keep exactly one lower run outstanding while a
-second ownership domain collects/prepares the next run. Do not force smaller
-runs merely to manufacture overlap. A candidate fails if lower WRITE bytes or
-request count regress materially, if a well-packed QD wave is fragmented
-without compensating useful throughput, or if any generation/order/read-tail
-gate regresses.
+Production now has one lower-WRITE slot. The former depth-two allocation/append
+path and routine K=1/K=2 A/B are removed. Source qualification must prove the
+fixed one-slot bound, immutable ownership, ordered publication, and complete
+drain at barriers, suspend, teardown and failure. Any future K>1 design is a new
+architecture experiment and must re-establish same-page ordering, independent
+run ownership and FIFO publication from first principles.
 
-For parallel-depth experiments, retain one global collector/planner and vary
-only the number of immutable lower runs allowed in flight. Start with explicit
-K values rather than protocol-name assumptions. Per-lane independent write
-accumulators are not the default because they reduce the global set available
-to the packing planner.
-
-A latency-sensitive READ queue must bypass batching when lower I/O is idle.
-Any busy-time coalescing/reordering experiment requires private request/run read
-scratch and same-page dependency checks against active/frozen/in-flight writes.
-
+Latency-sensitive READs still bypass batching when lower I/O is idle. Busy-time
+READ fan-out/coalescing uses private scratch and must respect same-page
+dependencies against collected/frozen/in-flight writes.
 
 ### Report publication authentication and concurrency
 
@@ -912,126 +903,41 @@ For every timed `win1_pack_ready`, exactly one T/R/W counter must still incremen
 and their sum must equal `win1_pack_ready`; ID50 must not make suppressed tail
 closes reappear under the read-bypass or wave bucket.
 
-### Sampled-single-tail PACK_READY qualification
+### Retained-singleton and PACK_READY regression contract
 
-Direct policy coverage must prove a sampled admitted tail of one cannot close a
-one-record window early, while sampled tails of two and three can close at their
-exact one-shot targets. Source contracts must prove `tail == 1U` updates learned
-burst width, clears the one-shot tail target and sets
-`retained_single_tail_deferred`; multi-record samples arm the exact tail target
-and clear the deferral.
+The retained policy is settled; qualification protects the current behavior
+rather than rerunning the old optimization sequence.
 
-Both `swapz_retained_target_close_ready()` and
-`swapz_retained_pack_close_ready()` must refuse a deferred singleton. The
-second admitted record clears the deferral, and real nonempty flushes, hard
-boundaries and true empty burst boundaries clear it as well. After ID53
-rejection, source/native contracts must prove no shorter singleton deadline,
-cutoff watermark or hrtimer reprogramming remains: the ordinary first-record
-deadline is the only retained deadline.
+- **ID50 remains active:** a sampled admitted tail of one may update learned
+  burst width but cannot arm a one-record PACK_READY target. It sets
+  `retained_single_tail_deferred`; tails of two or more may arm their exact
+  finite target. The second admitted WRITE resolves the deferral.
+- **One deadline only:** a deferred singleton uses the ordinary first-record
+  retained deadline. ID53's short cutoff/watermark/timer is rejected and must
+  remain absent.
+- **Lifecycle accounting:** timed deltas must satisfy
+  `D == C + DL + I + O` for deferrals, companions, deadline, idle and other
+  clears. Deadline/idle subsets may not exceed their matching one-page close
+  counters. Missing or inconsistent fields fail qualification.
+- **Timing/service telemetry is observational:** companion/deadline age bins
+  must conserve to their terminal counts; lower-done/read-bypass/both are
+  bounded subsets. These counters do not authorize an early close.
+- **PACK_READY cause telemetry is observational:** tail-target, burst-target and
+  service-dry primary causes must conserve exactly to PACK_READY closes. Burst
+  site/target/count bins and overshoot must conserve to the burst-target subset.
+- **ID56 tail sampling remains observational:** the six 0/1/2+ crossed-with-
+  active/idle buckets conserve to `pack_tail_samples`.
+- **ID57 remains rejected:** no K=1-busy PACK_READY suppression, zero-tail hold
+  state or completion-aware carry into a later wave may reappear. Source tests
+  assert absence; reopening requires a new ownership model, not another tuning
+  constant.
+- **Worker CPU attribution stays bounded:** scheduler-accounted
+  `ordered_worker_cpu_ns` and `prep_worker_cpu_ns` are lower bounds, not total
+  CPU. The retired read-helper compatibility CPU field remains zero. Keep
+  ordered/preparation LZ4 and explicit copy wall counters separate.
 
-The owner-qualified ID50 mechanism remains active after the ID53 rollback.
-Qualification must preserve exact deferred-singleton lifecycle conservation,
-prevent sampled-tail singleton PACK_READY closes from reappearing under
-read-bypass/wave labels, and reject any successor that materially grows lower
-WRITE bytes/requests or regresses useful mixed throughput/read tails.
-
-### Deferred-singleton outcome attribution
-
-ID51 is instrumentation only. Production code must expose cumulative
-`single_tail_deferrals`, `single_tail_companions`,
-`win1_deadline_deferred_tail`, `win1_idle_deferred_tail` and
-`single_tail_other_clears`. Direct source coverage must prove every clear site
-accounts before clearing and that companion admission resolves exactly once.
-
-The mixed benchmark snapshots these counters around the same timed waves as the
-existing window telemetry. Because every closed-loop wave is fully acknowledged
-before the next wave and the final snapshot follows `fsync`, no deferred
-singleton may straddle a timed boundary. Both replay validation and report
-validation therefore require exact delta conservation:
-`D == C + DL + I + O`, with `DL <= win1_deadline` and
-`I <= win1_idle`. Missing or inconsistent telemetry fails qualification.
-
-The operator report must print the compact row `deferred tail D/C/DL/I/O`;
-rootless report-contract coverage must assert that row is present so schema
-plumbing cannot silently omit the new lifecycle evidence. ID51 answers where
-ID50 work goes; it does not itself justify another retention rule. Any successor
-must be a separate source revision after owner evidence.
-
-### Deferred-singleton timing/service evidence
-
-ID52 extends ID51 without changing policy. Timed replay validation must require
-that the four companion-age bins sum to `single_tail_companions` and the four
-deadline-age bins sum to `win1_deadline_deferred_tail`. After the ID53
-rollback, the four passive companion sub-bins 1001-1250/1251-1500/1501-1750/
->1750 us must sum exactly to the aggregate >1000 us companion bin. For
-companion and deadline service attribution, lower-done and read-bypass counts
-cannot exceed the terminal total, and the both count cannot exceed either
-subset. The report must print both original age rows, the upper-tail companion
-row and both L/R/B service rows.
-
-Interpretation is predeclared: an event such as lower-W completion or READ
-service is not a candidate early-close discriminator if it commonly occurs
-before companion resolutions as well as deadline resolutions. A successor
-policy requires a separate source revision after owner evidence.
-
-### Rejected ID53 rollback and passive attribution qualification
-
-Owner evidence rejected the fixed 1 ms active cutoff: 13.8 of 31.5 cutoff
-closes were followed by an ordinary WRITE before the original deadline. Direct
-source/native coverage must therefore prove `SWAPZ_SINGLE_TAIL_CUTOFF_NS`,
-the single-tail cutoff deadline helper and cutoff/watermark production counters
-are absent, while ID50 still blocks a one-record deferred singleton until a
-companion or the ordinary deadline.
-
-ID54 PACK_READY attribution is measurement only. Every timed PACK_READY close
-must increment exactly one of `pack_close_tail_target`,
-`pack_close_burst_target` or `pack_close_service_dry`; their sum must equal
-`close_pack_ready`. `pack_close_tail_target_le4` must not exceed the tail
-counter. The operator report must display tail<=4/tail/burst/dry separately for
-sync and async and, on the fast five-pair model, print paired async-minus-sync
-95% CIs for those causes plus mixed throughput and absolute lower-request
-delta. Never average sync/async causes into an “async signal” row.
-
-ID55 remains measurement only. For every learned burst-target close,
-`pack_close_burst_admission + pack_close_burst_worker` must equal
-`pack_close_burst_target`; the four learned-target bins and four actual-count
-bins must independently sum to that same total, and overshoot cannot exceed it.
-The compact report prints sync/async/delta plus fast paired confidence intervals.
-Source contracts prove admission/worker snapshot the existing learned target
-without changing readiness.
-
-ID56 first-observation conservation remains mandatory: the six post-PACK
-tail-size/state buckets (0/1/2+ crossed with active K=1 vs idle) sum exactly to
-`pack_tail_samples`; deferred ID57 re-samples do not double-count that total.
-
-ID57 production intervention counters are removed with the rollback. Rootless and
-source contracts instead require the old ID56 observational tail sampler,
-absence of K=1-busy PACK_READY suppression/zero-tail hold state, and the new
-passive ID38 ready-wait accounting described above. The owner run must verify
-that fast write-only QD8 returns toward the pre-ID57 target-8/no-deadline
-geometry and that fast mixed service-dry/request fragmentation does not remain.
-
-The next passive shrink-attribution counters do not alter ID56/ID57 policy.
-Every actual `burst_target_shrinks` event is assigned exactly once to
-after-inflight-zero, after-read-bypass or other, and independently to <=8,
-9..32 or >32. Both sums must equal `burst_target_shrinks`. The remembered
-in-flight-zero flag is cleared by a nonzero tail sample or a truly quiescent
-hard boundary; it must not suppress PACK_READY, defer sampling, or change the
-target.
-
-ID24 boundary CPU attribution is measurement only and is not a trustworthy
-total for short callbacks. Status/timed deltas retain
-`ordered_worker_cpu_ns` and `prep_worker_cpu_ns` as scheduler-accounted
-lower bounds. The retired ID39 compatibility field `read_worker_cpu_ns` must
-remain zero; there is no read-helper workqueue or separate read-worker CPU
-accumulator. Bounded lower-READ completion callbacks may exist only to record
-per-slot lower completion and wake the ordered worker; they perform no decode,
-cache publication, authority mutation or upper-BIO completion. Reports must also expose separate `ordered_lz4_wall_ns`,
-`prep_lz4_wall_ns`, `ordered_write_copy_wall_ns` and
-`prep_write_copy_wall_ns`. The report shows
-callback wall, scheduler lower bound and measured non-sleeping phase floors
-separately. No worker-count/affinity conclusion may rely on the boundary
-`sum_exec_runtime` value alone.
+Do not add another singleton timing policy merely because these counters remain
+available. The ROADMAP evidence table is the reopen authority for IDs 50-57.
 
 ### Bounded concurrent READ qualification
 
