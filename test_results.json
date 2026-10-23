@@ -71,496 +71,51 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 962,
-"legacy_dead_probe_ns": 125747,
-"legacy_score_scan_ns": 863687,
+"incremental_select_ns": 666,
+"legacy_dead_probe_ns": 73834,
+"legacy_score_scan_ns": 445667,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 563,
-"relocation_list_ns": 582,
-"relocation_scan_ns": 264426,
+"mapped_dead_probe_ns": 583,
+"relocation_list_ns": 417,
+"relocation_scan_ns": 86209,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 3200,
-"legacy_dead_probe_ns": 509192,
-"legacy_score_scan_ns": 3737179,
+"incremental_select_ns": 2417,
+"legacy_dead_probe_ns": 286626,
+"legacy_score_scan_ns": 1767796,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 1981,
-"relocation_list_ns": 806,
-"relocation_scan_ns": 2193612,
+"mapped_dead_probe_ns": 1125,
+"relocation_list_ns": 500,
+"relocation_scan_ns": 352085,
 "segments": 4096,
 "victim_records": 256
 }
 ],
 "scope": "OFFLINE_NATIVE_GC_SCALE_ONLY"
-},
-"predictor": {
-"backend_benchmarks": [
-{
-"inverse_ns_per_page": 183,
-"name": "scalar",
-"transform_ns_per_page": 245
-},
-{
-"inverse_ns_per_page": 273,
-"name": "sse2",
-"transform_ns_per_page": 173
-},
-{
-"inverse_ns_per_page": 123,
-"name": "avx2",
-"transform_ns_per_page": 80
-},
-{
-"inverse_ns_per_page": 89,
-"name": "avx512",
-"transform_ns_per_page": 69
-}
-],
-"classifier": {
-"backend": "scalar",
-"benchmark_calls": 131072,
-"benchmark_repeats": 256,
-"candidate": "delta64",
-"early_abort_pages": 223,
-"eligible_pages": 512,
-"ns_per_page": 83,
-"sample_pairs": 32,
-"scalar_ns_per_page": 83,
-"stage1_min_score": 2,
-"stage1_pairs": 8
-},
-"io_model_block_ns": {
-"sd_emulated": 390625,
-"ssd_emulated": 48828
-},
-"lz4_acceleration_sweep": [
-{
-"acceleration": 1,
-"accepted_payload_bytes": 698180,
-"planner_blocks": 384,
-"planner_extents": 273,
-"raw_pages": 192,
-"wall_ns_per_page": 2373
-},
-{
-"acceleration": 2,
-"accepted_payload_bytes": 698589,
-"planner_blocks": 384,
-"planner_extents": 273,
-"raw_pages": 192,
-"wall_ns_per_page": 2210
-},
-{
-"acceleration": 3,
-"accepted_payload_bytes": 702958,
-"planner_blocks": 384,
-"planner_extents": 272,
-"raw_pages": 192,
-"wall_ns_per_page": 2134
-},
-{
-"acceleration": 4,
-"accepted_payload_bytes": 698627,
-"planner_blocks": 384,
-"planner_extents": 272,
-"raw_pages": 192,
-"wall_ns_per_page": 2098
-}
-],
-"negative_pages": 256,
-"production_route": {
-"adopted_pages": 256,
-"baseline_blocks": 384,
-"baseline_extents": 273,
-"blocks_saved": 52,
-"candidate_attempts": 256,
-"candidate_blocks": 332,
-"candidate_extents": 224,
-"classifier_passes": 256,
-"eligible_pages": 512,
-"extents_saved": 49,
-"general_threshold": 24,
-"lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1643,
-"modeled_wall_ns_total": 946688,
-"ns_per_saved_block": 18205,
-"packing_adoptions": 0,
-"packing_eligible_pages": 51,
-"packing_threshold": 16,
-"payload_bytes_saved": 208499,
-"raw_rescues": 64,
-"scope": "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY"
-},
-"sampling_controls": [
-{
-"minimum_score": 24,
-"name": "repeated_512b_headers",
-"score": 62
-},
-{
-"minimum_score": 16,
-"name": "lane1_only_signal",
-"score": 16
-}
-],
-"scope": "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY",
-"sse2_forward_ab": {
-"pages": 576,
-"pairs": [
-{
-"baseline_ns_per_page": 180,
-"order": "baseline_first",
-"unrolled_ns_per_page": 173
-},
-{
-"baseline_ns_per_page": 180,
-"order": "unrolled_first",
-"unrolled_ns_per_page": 173
-},
-{
-"baseline_ns_per_page": 180,
-"order": "baseline_first",
-"unrolled_ns_per_page": 173
-},
-{
-"baseline_ns_per_page": 180,
-"order": "unrolled_first",
-"unrolled_ns_per_page": 173
-},
-{
-"baseline_ns_per_page": 180,
-"order": "baseline_first",
-"unrolled_ns_per_page": 173
-}
-],
-"repeats_per_arm": 64,
-"scope": "SAME_HOST_NATIVE_BASELINE_VS_PROMOTED_PRODUCTION"
-},
-"structured_pages": 320,
-"thresholds": [
-{
-"negative_calls": 10,
-"negative_eligible": 192,
-"negative_profiles": [
-{
-"calls": 0,
-"eligible": 0,
-"name": "zero",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 0,
-"name": "repeat",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "entropy",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 10,
-"eligible": 64,
-"name": "mixed",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "medium",
-"pages": 64,
-"useful": 0
-}
-],
-"negative_useful": 0,
-"ns_per_saved_block": 18653,
-"routed_baseline_blocks": 257,
-"routed_baseline_extents": 182,
-"routed_blocks_saved": 57,
-"routed_candidate_blocks": 200,
-"routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1845,
-"routed_cpu_ns_total": 1063244,
-"routed_extents_saved": 69,
-"structured_calls": 279,
-"structured_eligible": 320,
-"structured_useful": 279,
-"threshold": 4
-},
-{
-"negative_calls": 8,
-"negative_eligible": 192,
-"negative_profiles": [
-{
-"calls": 0,
-"eligible": 0,
-"name": "zero",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 0,
-"name": "repeat",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "entropy",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 8,
-"eligible": 64,
-"name": "mixed",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "medium",
-"pages": 64,
-"useful": 0
-}
-],
-"negative_useful": 0,
-"ns_per_saved_block": 18753,
-"routed_baseline_blocks": 257,
-"routed_baseline_extents": 182,
-"routed_blocks_saved": 55,
-"routed_candidate_blocks": 202,
-"routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1790,
-"routed_cpu_ns_total": 1031456,
-"routed_extents_saved": 61,
-"structured_calls": 272,
-"structured_eligible": 320,
-"structured_useful": 272,
-"threshold": 8
-},
-{
-"negative_calls": 0,
-"negative_eligible": 192,
-"negative_profiles": [
-{
-"calls": 0,
-"eligible": 0,
-"name": "zero",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 0,
-"name": "repeat",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "entropy",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "mixed",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "medium",
-"pages": 64,
-"useful": 0
-}
-],
-"negative_useful": 0,
-"ns_per_saved_block": 18205,
-"routed_baseline_blocks": 257,
-"routed_baseline_extents": 182,
-"routed_blocks_saved": 52,
-"routed_candidate_blocks": 205,
-"routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1643,
-"routed_cpu_ns_total": 946688,
-"routed_extents_saved": 49,
-"structured_calls": 256,
-"structured_eligible": 320,
-"structured_useful": 256,
-"threshold": 16
-},
-{
-"negative_calls": 0,
-"negative_eligible": 192,
-"negative_profiles": [
-{
-"calls": 0,
-"eligible": 0,
-"name": "zero",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 0,
-"name": "repeat",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "entropy",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "mixed",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "medium",
-"pages": 64,
-"useful": 0
-}
-],
-"negative_useful": 0,
-"ns_per_saved_block": 18205,
-"routed_baseline_blocks": 257,
-"routed_baseline_extents": 182,
-"routed_blocks_saved": 52,
-"routed_candidate_blocks": 205,
-"routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1643,
-"routed_cpu_ns_total": 946688,
-"routed_extents_saved": 49,
-"structured_calls": 256,
-"structured_eligible": 320,
-"structured_useful": 256,
-"threshold": 24
-},
-{
-"negative_calls": 0,
-"negative_eligible": 192,
-"negative_profiles": [
-{
-"calls": 0,
-"eligible": 0,
-"name": "zero",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 0,
-"name": "repeat",
-"pages": 32,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "entropy",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "mixed",
-"pages": 64,
-"useful": 0
-},
-{
-"calls": 0,
-"eligible": 64,
-"name": "medium",
-"pages": 64,
-"useful": 0
-}
-],
-"negative_useful": 0,
-"ns_per_saved_block": 18205,
-"routed_baseline_blocks": 257,
-"routed_baseline_extents": 182,
-"routed_blocks_saved": 52,
-"routed_candidate_blocks": 205,
-"routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1643,
-"routed_cpu_ns_total": 946688,
-"routed_extents_saved": 49,
-"structured_calls": 256,
-"structured_eligible": 320,
-"structured_useful": 256,
-"threshold": 32
-}
-],
-"transforms": [
-{
-"adopted": 320,
-"baseline_blocks": 257,
-"baseline_extents": 182,
-"candidate_blocks": 192,
-"candidate_extents": 84,
-"cliff_2024": 160,
-"inverse_backend": "avx512",
-"inverse_ns_per_page": 89,
-"name": "delta64",
-"planner_blocks_saved": 65,
-"planner_extents_saved": 98,
-"raw_rescued": 128,
-"saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 183,
-"scalar_transform_ns_per_page": 245,
-"second_lz4_ns_per_page": 3463,
-"transform_backend": "avx512",
-"transform_ns_per_page": 69
-}
-]
 }
 },
-"kernel_release": "7.0.0-34-generic",
+"kernel_release": "7.0.0-38-generic",
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
 "source_sha": "d27cd1b0e79c4fa8910869d20044ad930d9aba5f",
 "stages": [
 {
-"elapsed_s": 0.546,
+"elapsed_s": 1.958,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_benchmark_console_is_compact_and_keeps_sync_control",
-"elapsed_s": 9.446,
-"exit_code": 1,
+"diagnostic": "Native build error: lz4.h: No such file or directory",
+"elapsed_s": 1.215,
+"exit_code": 2,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
 "signals": [
-"PASS",
-"FAIL"
+"PASS"
 ],
 "status": "FAIL"
 }
