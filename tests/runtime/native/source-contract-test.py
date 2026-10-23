@@ -1533,9 +1533,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("SWAPZ_PREDICTOR_SUBPAGE_LANES", predictor)
         self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PHASES", predictor)
         self.assertIn("for (step = 1U; step < SWAPZ_PREDICTOR_SUBPAGE_LANES;",
-                      predictor)
+                      dispatch)
         self.assertNotIn("if (lane == subpage % SWAPZ_PREDICTOR_SUBPAGE_LANES)",
-                         predictor)
+                         dispatch)
 
         self.assertIn("DEFINE_STATIC_CALL", dispatch)
         self.assertIn("static_call_update", dispatch)
