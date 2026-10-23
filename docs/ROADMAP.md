@@ -42,10 +42,11 @@ that exact-source run passes, source `174d42eb7135...` remains the latest
 qualified baseline.
 
 The first open release gate is deliberate low-RAM plus heavy-CPU pressure.
-Measure target creation, bounded allocations, preparation progress, useful
-throughput, p99, and teardown while memory and CPU are constrained. Ordinary
-host CPU/PSI observations from benchmark pairs do not substitute for this
-pressure experiment.
+The bounded cgroup-v2 ID36 test is now implemented in `make test`; owner
+qualification on the exact source is still required. It measures target
+creation/teardown and byte-exact async service while forcing memory.high events
+and CPU PSI without permitting OOM. Ordinary host CPU/PSI observations from
+benchmark pairs do not substitute for this pressure experiment.
 
 Next collect realistic churn/GC/TRIM evidence: about 70% logical occupancy, an
 explicit cold/hot split, and at least ten logical capacities of hot rewrites.
@@ -129,7 +130,7 @@ changes.
 | 33 | Linux kernel CRC32C primitive | **1** | Already implemented; keep architecture-selected kernel backend. |
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
-| 36 | Heavy-CPU plus low-RAM qualification | **6** | Open release gate for the async default and any increase beyond K=1. Measure target-creation behavior and resource use under memory pressure and CPU oversubscription before release qualification. |
+| 36 | Heavy-CPU plus low-RAM qualification | **6 implemented gate; owner-loaded evidence pending** | `make test` now runs one production async fast-QD32 pair inside a cgroup-v2 domain with 576MiB resident pressure, `memory.high=576MiB`, `memory.max=896MiB`, swap disabled for the cgroup, and 2x CPU oversubscription (cap 32). Pass requires memory-high and CPU-PSI evidence, zero OOM/OOM-kill, byte-exact verification and ordinary teardown. This remains unqualified until the three owner hosts pass the exact source. |
 | 37 | K=1 ping-pong WRITE pipeline | **1 qualified / keep; release gate open** | Latest five-pair fast sustained-write evidence shows async/sync QD4 +1.66% CI [+0.33%,+3.00%], QD8 +23.88% [+18.52%,+29.24%], and QD32 +22.15% [+15.65%,+28.65%]. QD8 lower requests fall 17.96%; QD32 requests fall 9.96% while bytes are statistically neutral. Keep the fixed one-slot path and existing activation gates; low-RAM/heavy-CPU remains a release gate. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5 refuted / removed** | Repeated depth-1/depth-2 evidence did not establish a useful service benefit. Production is fixed at one slot, and the second-slot allocation/append path plus runtime selector are removed. Reopening K>1 requires a new workload and an explicit architecture experiment. |
 | 39 | Latency-first bounded parallel READ service | **4 active ordered-worker fan-out; final isolated A/B required** | The retired `swapz-read` helper workqueue remains removed and its `read_worker_cpu_ns` compatibility field stays zero. Current production separately supports bounded ordered-worker fan-out through private read slots: it submits independent missing lower ranges before joining them, while the ordered worker retains decode, cache publication and upper-BIO completion ownership. Run one final five-pair `parallel_reads=0/1` fast-model decision family with `read_coalesce=0`; the same sessions must report Fast QD32 mixed service and packed sequential/random reads. Keep the mechanism only if useful service or tail latency earns the complexity. |
@@ -243,9 +244,10 @@ AVX-512 review/build evidence does not qualify runtime on this SSE2-only host.
    `async_prepare=0` as the sync control, and preserve the fast-mixed paired
    intervals. The ID36 low-RAM/heavy-CPU gate still blocks release
    qualification of the default-on path.
-3. Implement the low-RAM/heavy-CPU evidence step first. Attribute QD32 requests
-   next, then collect realistic churn/GC/TRIM evidence before choosing the
-   asynchronous-TRIM implementation. The design below is a review proposal.
+3. Owner-qualify the implemented ID36 low-RAM/heavy-CPU gate first. Attribute
+   QD32 requests next, then collect realistic churn/GC/TRIM evidence before
+   choosing the asynchronous-TRIM implementation. The design below is a review
+   proposal.
 4. Keep `logical_open_balance=0` until the churn A/B establishes allocator
    spread and probe/GC cost. Logical opens remain distinct from NAND wear.
 5. Keep SWZ 1/2/4 classes, K=1 scheduling and ID63 completion semantics
