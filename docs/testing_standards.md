@@ -1285,10 +1285,12 @@ experiment. Acceleration 4 reduced compression wall time but did not produce a
 repeatable service gain; the AVX-512 host showed a small significant throughput
 loss and p99 increase, while SSE2 was unresolved and ARM64 was too noisy to
 promote. Production ordinary LZ4 is therefore fixed at acceleration 1 and the
-runtime selector plus ten-session loaded 1/4 A/B are retired. The deterministic
-native 1/2/3/4 sweep remains only as low-cost codec/geometry regression evidence;
-it is not a promotion gate. Delta64's second LZ4 acceleration is a separate
-opt-in rescue policy and remains independently qualified.
+runtime selector plus ten-session loaded 1/4 A/B are retired. The fixed ordinary
+acceleration is not stored per target; status emits the compile-time policy
+value. The deterministic native 1/2/3/4 sweep remains only as low-cost
+codec/geometry regression evidence; it is not a promotion gate. Delta64's
+second LZ4 acceleration is a separate opt-in rescue policy and remains
+independently qualified.
 
 Source-contract qualification must pin the safety boundaries of the optimized
 paths: generic-planner duplicate protection remains enabled; only the
@@ -1317,9 +1319,10 @@ segment rejection, lower-read failure, and constituent payload-CRC failure;
 the existing pair cases remain compatibility coverage. Loaded merge-on/off
 qualification must keep byte-exact reconstruction and zero extra blocks, allow
 `parallel_read_coalesced_reqs_saved` from one through seven per combined
-batch, and report lower requests, useful throughput and p99. The conservative
-3+ full-extent counters remain opportunity evidence, not proof of an active
-merge.
+batch, and report lower requests, useful throughput and p99. The fixed
+eight-block cap is not stored per target; status emits the compile-time policy
+value. The conservative 3+ full-extent counters remain opportunity evidence,
+not proof of an active merge.
 
 Publication tests must continue to inject malformed siblings and GC-accounting
 underflow/overflow and prove all authority arrays are byte-for-byte unchanged
@@ -1331,10 +1334,10 @@ aggregate fast path.
 Routine qualification no longer repeats the lower-WRITE depth 1/2 A/B: the
 completed idle SSE2 and AVX-512 five-pair cycles found no throughput/latency
 benefit. Production is fixed at depth one; the second-slot allocation and append path
-are removed rather than retained as dormant diagnostic code. Fixed
-`write_pipeline_depth=1` status remains compatibility telemetry only. Git
-history preserves the experiment if future real-device evidence supplies a
-specific reason to revive it.
+are removed rather than retained as dormant diagnostic code. The fixed
+depth is no longer stored per target; `write_pipeline_depth=1` status remains
+compatibility telemetry only. Git history preserves the experiment if future
+real-device evidence supplies a specific reason to revive it.
 
 Predictor-first delta64 telemetry must distinguish direct adoptions from
 baseline-measured RAW/LZ4 rescues. The rescue A/B continues to pin

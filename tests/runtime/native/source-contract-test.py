@@ -1461,7 +1461,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("module_param_named(invalidate_cache_on_write_admit,", DM)
         self.assertIn("ctx->read_grouping_enabled = swapz_parallel_reads;", ctor)
         self.assertIn("ctx->read_coalescing_enabled =", ctor)
-        self.assertIn("ctx->read_coalesce_max_blocks =", ctor)
+        self.assertNotIn("ctx->read_coalesce_max_blocks", DM)
+        self.assertIn("#define SWAPZ_READ_COALESCE_MAX_BLOCKS (2U * SWAPZ_MAX_BLOCKS)", DM)
         self.assertIn("ctx->parallel_reads_enabled = ctx->read_grouping_enabled;", ctor)
         self.assertNotIn("bdev_get_queue(ctx->backing->bdev)->nr_requests > 1U", ctor)
         self.assertIn("if (ctx->read_grouping_enabled)", ctor)
@@ -2014,7 +2015,8 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("swapz_inflight_write_busy", DM)
         self.assertIn("ctx->k1_ready_wait_windows++", flush)
         self.assertIn("head && !completion_done(&head->lower_done)", flush)
-        self.assertIn("ctx->write_pipeline_depth == 1U", flush)
+        self.assertIn("SWAPZ_WRITE_PIPELINE_DEPTH == 1U", flush)
+        self.assertNotIn("ctx->write_pipeline_depth", DM)
         self.assertIn("ctx->pipeline_finalize_wait_wall_ns", flush)
         self.assertIn("SWAPZ_BURST_CLOSE_ADMISSION", writer)
         self.assertIn("SWAPZ_BURST_CLOSE_WORKER", worker)
@@ -2235,7 +2237,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->authority.batch_pending && !inflight_active", independent)
         run_fence = body("swapz_inflight_run_touches_logical")
         self.assertIn("ctx->authority.batch_pending != pending", run_fence)
-        self.assertIn("slot_index = (slot_index + 1U) % ctx->write_pipeline_depth",
+        self.assertIn("slot_index = (slot_index + 1U) % SWAPZ_WRITE_PIPELINE_DEPTH",
                       run_fence)
         self.assertNotIn("% SWAPZ_MAX_WRITE_PIPELINE_DEPTH", run_fence)
         self.assertIn("tx->records[record].logical_page == logical", run_fence)
@@ -2371,9 +2373,9 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("bio_endio", done)
         self.assertIn("swapz_engine_complete_batched_run", finalize)
         self.assertIn("ctx->inflight_head", finalize)
-        self.assertIn("(ctx->inflight_tail + 1U) % ctx->write_pipeline_depth",
+        self.assertIn("(ctx->inflight_tail + 1U) % SWAPZ_WRITE_PIPELINE_DEPTH",
                       submit)
-        self.assertIn("(ctx->inflight_head + 1U) % ctx->write_pipeline_depth",
+        self.assertIn("(ctx->inflight_head + 1U) % SWAPZ_WRITE_PIPELINE_DEPTH",
                       finalize)
         self.assertNotIn("% SWAPZ_WRITE_PIPELINE_DEPTH", submit)
         self.assertNotIn("% SWAPZ_WRITE_PIPELINE_DEPTH", finalize)
@@ -2816,7 +2818,8 @@ static swapz_u16 swapz_probe_set(
         # compressor so producer and ordered paths cannot diverge.
         self.assertNotIn("module_param_named(lz4_acceleration,", DM)
         self.assertIn("#define SWAPZ_ORDINARY_LZ4_ACCELERATION 1U", DM)
-        self.assertIn("ctx->lz4_acceleration", compressor)
+        self.assertNotIn("ctx->lz4_acceleration", DM)
+        self.assertIn("SWAPZ_ORDINARY_LZ4_ACCELERATION", compressor)
         self.assertIn("ctx->delta64_lz4_acceleration", compressor)
         self.assertIn("prepared->length = swapz_compress_page(", producer)
         self.assertIn("length = swapz_compress_page(", accept)
