@@ -2896,7 +2896,7 @@ def parallel_read_ab_verdict(sessions):
         if row.get("status") != "PASS" or row.get("order") != (
                 "swapz-first" if index % 2 else "off-first"):
             return {"overall": "INCOMPLETE",
-                    "reason": "independent READ fan-out order/status mismatch"}
+                    "reason": "independent READ fan-out requires five counterbalanced matched rounds with matching order/status"}
         model = row.get("device_model")
         if not isinstance(model, dict) or any(
                 model.get(key) != expected[key]
