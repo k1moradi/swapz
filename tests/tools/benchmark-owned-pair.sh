@@ -501,7 +501,7 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])logical_open_balance=0([[:sp
     fail 'logical-open balance must remain off in placement A/B'
 expected_grouping=$PARALLEL_READS
 expected_coalescing=$(( PARALLEL_READS && READ_COALESCE ? 1 : 0 ))
-expected_parallel=$expected_coalescing
+expected_parallel=$expected_grouping
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_grouping_enabled=$expected_grouping([[:space:]]|$)" ||
     fail 'loaded swapz read-grouping gate does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" ||

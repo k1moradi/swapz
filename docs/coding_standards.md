@@ -1009,40 +1009,43 @@ page. This optimization may remove duplicate reads of sibling records but must
 not turn cached bytes into mapping authority or weaken the existing mutation
 fence.
 
-### Synchronous grouped READ ownership
+### Bounded READ fan-out and coalescing ownership
 
-Grouped READ handling is bounded to `SWAPZ_PARALLEL_READ_SLOTS == 2`, but the
-slots are scratch/telemetry containers executed synchronously by the ordered
-worker. The read-only `parallel_reads` parameter, default true, controls
-grouping eligibility only; it no longer enables independent lower-READ
-concurrency or depends on backing queue depth.
+The read-only `parallel_reads` parameter, default true, authorizes bounded
+private-slot grouping and independent lower-READ fan-out across the
+preallocated `SWAPZ_PARALLEL_READ_SLOTS` slots. `read_coalesce` is a
+separate policy: it controls only exact zero-gap adjacent-range merging.
+Disabling `read_coalesce` must not disable independent fan-out when
+`parallel_reads=1`; the ID63 A/B must vary only the merge mechanism.
 
-The ordered worker remains the sole mapping, cache-publication, retained-window,
-global-accounting and upper-BIO completion owner. The master engine owns the
-512-entry metadata LRU and a 16-entry immutable extent-residency cache. Private
-slot engine state is primed from master residency before a grouped operation and
-absorbed only after successful validation/copy; it never mutates shared cache
-state or authority independently.
+The ordered worker remains the sole mapping, retained-window, global-accounting
+and upper-BIO ownership authority. For independent fan-out, it prepares private
+slot engines, submits every missing lower range before joining any slot, then
+waits for the bounded completions. The lower completion callback may only record
+that slot's lower result and signal its completion object; it must never mutate
+mapping authority, publish shared cache state or complete an upper BIO.
 
-Within one already-admitted contiguous independent-READ prefix, same-extent
-siblings may be grouped. Two distinct extents may be consumed together only
-when the exact ID63 coalescing predicate proves one zero-padding lower request.
-Otherwise the helper returns without taking BIO ownership and the ordinary FIFO
-`swapz_read()` path runs. No grace interval, fill timer, spin, sleep, helper
-workqueue, completion wait or `flush_work()` is permitted.
+After join, each slot may complete its upper BIOs immediately after that slot's
+own generation/descriptor/payload-CRC validation and copy succeeds. Completed
+BIO pointers are cleared before processing the next slot, so a later slot
+failure fails only BIOs still owned by the worker. Shared extent-cache state is
+absorbed only for a successfully validated slot. Same-page and ordering
+conflicts still fence through the serialized authority path.
 
-The shared extent cache is fixed at 16 * 16KiB = 256KiB per target. Each slot
-stores only blocks proven fetched for one immutable extent, with an exact block
-mask. The 512-entry metadata LRU remains the block-zero fallback. Every
-write/GC/discard/barrier mutation fence invalidates the master one-extent cache,
-metadata LRU, shared extent cache and private-slot residency before authority
-changes. Cache reuse never skips generation/descriptor/payload CRC validation.
+ID63 adjacent coalescing runs before independent fan-out. It may combine only
+requests already waiting in the admitted independent READ prefix, only when the
+exact missing ranges form one same-segment zero-padding span within the bounded
+scratch cap. Its disabled arm returns before ID63 cache probes, adjacency scans
+or coalescing counters; the subsequent independent fan-out path remains common
+to both arms.
 
-A grouped read failure fails closed through the ordered owner. Teardown drains
-the ordered worker before freeing read scratch; there is no read-helper work to
-cancel or drain. End-to-end latency plus independently measured lower
-bytes/requests remain the acceptance evidence.
-
+The master engine owns the 512-entry metadata LRU and 16-entry immutable
+extent-residency cache. Private slot state is primed from master residency and
+never publishes authority independently. Every write/GC/discard/barrier
+mutation fence invalidates master and private residency before authority
+changes. Teardown drains the ordered worker after all submitted slot completions
+have been joined. Useful READ throughput, p99 and independently measured lower
+bytes/requests are all required evidence.
 
 ### Incremental GC victim accounting
 

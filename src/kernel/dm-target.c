@@ -4162,8 +4162,12 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 	u64 read_start_ns, read_end_ns;
 	int batch_error = 0;
 
-	/* read_coalesce=0 remains the untouched performance-control arm. */
-	if (!ctx->parallel_reads_enabled || !ctx->read_coalescing_enabled ||
+	/*
+	 * read_coalesce controls only adjacent exact-range merging. Independent
+	 * lower-READ fan-out remains common to both coalescing A/B arms whenever
+	 * parallel_reads is enabled, so the ID63 control varies one mechanism.
+	 */
+	if (!ctx->parallel_reads_enabled ||
 	    !ctx->read_slots || !ctx->read_pages_store ||
 	    remaining < 2U || list_empty(local))
 		return false;
@@ -5660,7 +5664,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ctx->read_grouping_enabled && swapz_read_coalesce;
 	ctx->read_coalesce_max_blocks =
 		(swapz_u8)swapz_read_coalesce_max_blocks;
-	ctx->parallel_reads_enabled = ctx->read_coalescing_enabled;
+	ctx->parallel_reads_enabled = ctx->read_grouping_enabled;
 	logical = div_u64(ti->len, SWAPZ_SECTORS);
 	total_blocks = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
 	if (total_blocks <= ctx->data_start_block) {

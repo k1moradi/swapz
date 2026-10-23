@@ -2879,10 +2879,10 @@ def read_coalesce_ab_verdict(sessions):
                     for name in KERNEL_READ_FIELDS) or not read_metadata_counters_consistent(kernel):
                 return {"overall": "INCOMPLETE",
                         "reason": "adjacent-range READ kernel telemetry missing"}
-            if not row["read_coalesce"] and kernel["parallel_read_pairs"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "merge-off arm executed a retired grouped READ path"}
             if not row["read_coalesce"] and any(kernel[field] for field in (
+                    "parallel_read_adjacent_extent_pairs",
+                    "parallel_read_adjacent_extent_blocks",
+                    "parallel_read_adjacent_chain_3plus",
                     "parallel_read_coalesced_pairs",
                     "parallel_read_coalesced_reqs_saved",
                     "parallel_read_coalesced_blocks",
@@ -2976,7 +2976,7 @@ def read_coalesce_ab_verdict(sessions):
         "modes": modes,
         "paired": paired,
         "interpretation":
-            "SAME_SOURCE_ID63_TOGGLE_ORDINARY_OFF_PATH_SYNTHETIC_RAM_ONLY",
+            "SAME_SOURCE_ID63_TOGGLE_COMMON_INDEPENDENT_FANOUT_SYNTHETIC_RAM_ONLY",
     }
 
 
@@ -3113,7 +3113,9 @@ def _sd_read_ab_verdict(sessions, field, kind):
                 arm["passes"][mode]["kernel_read_path"][name]
                 for mode in ("sequential", "seeded_random")
                 for name in (
-                    "parallel_read_pairs",
+                    "parallel_read_adjacent_extent_pairs",
+                    "parallel_read_adjacent_extent_blocks",
+                    "parallel_read_adjacent_chain_3plus",
                     "parallel_read_coalesced_pairs",
                     "parallel_read_coalesced_reqs_saved",
                     "parallel_read_coalesced_blocks",
@@ -3186,7 +3188,7 @@ def _sd_read_ab_verdict(sessions, field, kind):
         "modes": modes,
         "paired": paired,
         "interpretation":
-            "SAME_SOURCE_HWQ1_ID63_TOGGLE_ORDINARY_OFF_PATH_SYNTHETIC_RAM",
+            "SAME_SOURCE_HWQ1_ID63_TOGGLE_COMMON_INDEPENDENT_FANOUT_SYNTHETIC_RAM",
     }
 
 
@@ -5403,8 +5405,10 @@ def print_bench(result):
             rnd = coalesce_ab["modes"][enabled]["seeded_random"]
             rows.append((
                 enabled,
+                f"{seq['useful_read_mbps']:.2f}",
                 f"{seq['lower_read_requests']:.1f}",
                 f"{seq['read_p99_ms']:.2f}",
+                f"{rnd['useful_read_mbps']:.2f}",
                 f"{rnd['lower_read_requests']:.1f}",
                 f"{rnd['read_p99_ms']:.2f}",
                 f"{seq['parallel_read_coalesced_reqs_saved']:.1f}",
@@ -5412,8 +5416,8 @@ def print_bench(result):
             ))
         print_table(
             "Fast-model adjacent-range READ coalescing means — five matched rounds",
-            ("merge", "seq req", "seq p99", "rnd req", "rnd p99",
-                     "seq saved", "rnd saved"), rows)
+            ("merge", "seq MB/s", "seq req", "seq p99", "rnd MB/s",
+                     "rnd req", "rnd p99", "seq saved", "rnd saved"), rows)
         active = coalesce_ab["modes"]["1"]
         print("  Merged-range accounting")
         print_table(
@@ -5449,9 +5453,13 @@ def print_bench(result):
                  f"{active['seeded_random']['parallel_read_coalesce_skip_gap']:.1f}",
                  f"{active['seeded_random']['parallel_read_coalesce_skip_other']:.1f}"),
             ])
+        throughput_ci = coalesce_ab["paired"]["sequential"][
+            "throughput_change_fraction"]
         req_ci = coalesce_ab["paired"]["sequential"]["lower_requests_change_fraction"]
         p99_ci = coalesce_ab["paired"]["sequential"]["p99_change_fraction"]
         print("  seq on/off paired 95% CI: "
+              f"MB/s {throughput_ci['mean'] * 100:+.1f}% "
+              f"[{throughput_ci['low'] * 100:+.1f},{throughput_ci['high'] * 100:+.1f}]%; "
               f"req {req_ci['mean'] * 100:+.1f}% "
               f"[{req_ci['low'] * 100:+.1f},{req_ci['high'] * 100:+.1f}]%; "
               f"p99 {p99_ci['mean'] * 100:+.1f}% "
@@ -5469,16 +5477,18 @@ def print_bench(result):
             rnd = sd_coalesce_ab["modes"][enabled]["seeded_random"]
             rows.append((
                 enabled,
+                f"{seq['useful_read_mbps']:.2f}",
                 f"{seq['lower_read_requests']:.1f}",
                 f"{seq['read_p99_ms']:.2f}",
+                f"{rnd['useful_read_mbps']:.2f}",
                 f"{rnd['lower_read_requests']:.1f}",
                 f"{rnd['read_p99_ms']:.2f}",
                 f"{seq['parallel_read_coalesced_reqs_saved']:.1f}",
             ))
         print_table(
             "Serial-depth adjacent-range READ coalescing means — five matched rounds",
-            ("merge", "seq req", "seq p99", "rnd req", "rnd p99",
-                     "seq saved"), rows)
+            ("merge", "seq MB/s", "seq req", "seq p99", "rnd MB/s",
+                     "rnd req", "rnd p99", "seq saved"), rows)
         active = sd_coalesce_ab["modes"]["1"]
         print("  Serial-depth merged-range attribution")
         print_table(
@@ -5501,10 +5511,15 @@ def print_bench(result):
         ci_rows = []
         for label, mode in (("seq", "sequential"),
                             ("rnd", "seeded_random")):
+            throughput = sd_coalesce_ab["paired"][mode][
+                "throughput_change_fraction"]
             req = sd_coalesce_ab["paired"][mode][
                 "lower_requests_change_fraction"]
             p99 = sd_coalesce_ab["paired"][mode]["p99_change_fraction"]
             ci_rows.extend((
+                (label, "MB/s", f"{throughput['mean'] * 100:+.1f}%",
+                 f"{throughput['low'] * 100:+.1f}%",
+                 f"{throughput['high'] * 100:+.1f}%"),
                 (label, "req", f"{req['mean'] * 100:+.1f}%",
                  f"{req['low'] * 100:+.1f}%", f"{req['high'] * 100:+.1f}%"),
                 (label, "p99", f"{p99['mean'] * 100:+.1f}%",

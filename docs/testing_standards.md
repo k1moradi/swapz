@@ -1045,36 +1045,46 @@ ID24 boundary CPU attribution is measurement only and is not a trustworthy
 total for short callbacks. Status/timed deltas retain
 `ordered_worker_cpu_ns` and `prep_worker_cpu_ns` as scheduler-accounted
 lower bounds. The retired ID39 compatibility field `read_worker_cpu_ns` must
-remain zero; source contracts assert that no read-helper callback or CPU
-accumulator survives. Reports must also expose separate `ordered_lz4_wall_ns`,
+remain zero; there is no read-helper workqueue or separate read-worker CPU
+accumulator. Bounded lower-READ completion callbacks may exist only to record
+per-slot lower completion and wake the ordered worker; they perform no decode,
+cache publication, authority mutation or upper-BIO completion. Reports must also expose separate `ordered_lz4_wall_ns`,
 `prep_lz4_wall_ns`, `ordered_write_copy_wall_ns` and
 `prep_write_copy_wall_ns`. The report shows
 callback wall, scheduler lower bound and measured non-sleeping phase floors
 separately. No worker-count/affinity conclusion may rely on the boundary
 `sum_exec_runtime` value alone.
 
-### Synchronous grouped-READ qualification
+### Bounded concurrent READ qualification
 
-The fast directional `parallel_reads=0/1` control remains a single off/on
-observation with `read_coalesce=0`. It now measures grouping-regression
-behavior only; it is not a Kread concurrency experiment. Both arms must report
-`parallel_reads_enabled=0` and `read_worker_cpu_ns=0`. The off arm must
-report zero grouped pairs; the on arm must exercise same-extent grouping before
-the control is accepted.
+Routine qualification no longer uses the retired directional
+`parallel_reads=0/1` grouping experiment. Production qualification keeps
+`parallel_reads=1`, so bounded independent lower-READ fan-out is common
+infrastructure rather than part of the ID63 treatment.
 
-ID63 is the promoted request-efficiency mechanism. The loaded test therefore
-keeps exactly ten SSD_EMULATED and ten SD_EMULATED ID63 sessions in the fixed
-counterbalanced confirmation sequence while varying only `read_coalesce=0/1`.
-Every pass remains 4 MiB/1024 byte-exact verified pages. Report paired p99,
-useful-throughput, lower-byte and lower-request changes with two-sided
-Student-t 95% confidence intervals.
+ID63 remains the adjacent request-efficiency experiment. The loaded test keeps
+exactly ten SSD_EMULATED and ten SD_EMULATED sessions in the fixed
+counterbalanced sequence while varying only `read_coalesce=0/1`. Both arms
+must report `parallel_reads_enabled=1`. The merge-off arm may therefore
+record `parallel_read_async_batches`, `parallel_read_async_slots`, generic
+parallel pairs and distinct-extent service, but every ID63 adjacency,
+coalesced-range and coalescing-skip counter must remain zero. The merge-on arm
+uses the identical fan-out fallback after any non-coalescible prefix.
 
-No `swapz-read` workqueue, per-slot work/completion object, helper
-`queue_work`, `wait_for_completion` or `flush_work` is permitted. A
-non-coalescible distinct-extent pair must return from grouped-batch selection
-without taking BIO ownership. Same-extent siblings and exact ID63 pairs run
-synchronously on the ordered worker; shared cache mutation and BIO completion
-remain single-owner.
+Every packed READ pass remains 4 MiB/1024 byte-exact verified pages. Reports
+must show sequential and seeded-random useful READ MB/s, p99, lower bytes and
+lower requests, plus paired two-sided Student-t 95% confidence intervals for
+throughput, p99, lower bytes and lower requests. Request reduction alone is not
+a performance win.
+
+No `swapz-read` workqueue is permitted. Independent missing ranges are
+submitted asynchronously into disjoint preallocated slot scratch, all selected
+submissions happen before the ordered worker joins any slot, and each callback
+only signals lower completion. The ordered worker performs generation,
+descriptor and payload-CRC validation, copies the logical page and then may ACK
+that slot immediately. If a later slot fails, already ACKed validated slots are
+not retroactively failed; only still-owned BIOs fail closed. Shared cache
+absorption remains ordered-worker-only.
 
 The existing one-block selective-read budget remains an exact compatibility
 contract. `read_cached_full` denotes reusable multi-block extent residency; it
