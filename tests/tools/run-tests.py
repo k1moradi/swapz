@@ -1396,6 +1396,10 @@ def run_stage(title, command, result, *, parse_bench=False):
     if predictor_failure or gc_scale_failure or extent_geometry_failure:
         rc = 1
     loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
+    parallel_read_sessions = parse_parallel_read_ab(output) if parse_bench else []
+    parallel_read_diagnostic = (
+        parallel_read_ab_verdict(parallel_read_sessions)
+        if parse_bench else None)
     read_coalesce_sessions = parse_read_coalesce_ab(output) if parse_bench else []
     read_coalesce_diagnostic = (
         read_coalesce_ab_verdict(read_coalesce_sessions)
@@ -1444,6 +1448,8 @@ def run_stage(title, command, result, *, parse_bench=False):
          "reason": "refuted and retired from routine qualification"})
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
+                       parallel_read_diagnostic.get("overall") !=
+                       "PASS_PARALLEL_READ_AB_EVIDENCE" or
                        read_coalesce_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_coalesce_diagnostic.get("overall") !=
@@ -1484,6 +1490,11 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "owned RAM lifecycle evidence"
                 record["diagnostic"] = loaded_correctness.get(
                     "reason", "Loaded correctness evidence is incomplete")
+            elif parallel_read_diagnostic.get("overall") != (
+                    "PASS_PARALLEL_READ_AB_EVIDENCE"):
+                record["failed_phase"] = "independent READ fan-out A/B evidence"
+                record["diagnostic"] = parallel_read_diagnostic.get(
+                    "reason", "independent READ fan-out evidence is incomplete")
             elif read_coalesce_diagnostic.get("overall") != (
                     "PASS_READ_COALESCE_AB_CONFIRMATION"):
                 record["failed_phase"] = "adjacent READ coalescing A/B evidence"
@@ -1520,6 +1531,8 @@ def run_stage(title, command, result, *, parse_bench=False):
                 "PASS_BOUNDED_RAM_MATRIX"):
             result["benchmarks"]["verdicts"]["gc"] = (
                 "LIVE_VICTIMS_EXERCISED_OWNED_RAM")
+        result["benchmarks"]["parallel_read_ab_sessions"] = parallel_read_sessions
+        result["benchmarks"]["parallel_read_ab"] = parallel_read_diagnostic
         result["benchmarks"]["read_coalesce_ab_sessions"] = read_coalesce_sessions
         result["benchmarks"]["read_coalesce_ab"] = read_coalesce_diagnostic
         result["benchmarks"]["sd_read_coalesce_ab_sessions"] = sd_coalesce_sessions
