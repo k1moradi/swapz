@@ -84,10 +84,18 @@ behavior and endurance remain open qualification gates.
 ## Documentation
 
 - [VISION.md](VISION.md): product objective and non-negotiable constraints.
-- [ROADMAP.md](ROADMAP.md): current work queue only.
-- [coding_standards.md](coding_standards.md): production engineering rules.
-- [testing_standards.md](testing_standards.md): required qualification and evidence.
+- [ROADMAP.md](ROADMAP.md): active work plus the canonical optimization decision
+  memory. Use its evidence table before proposing an experiment.
+- [coding_standards.md](coding_standards.md): current production invariants, not
+  experiment chronology.
+- [testing_standards.md](testing_standards.md): current qualification contract,
+  not a history of retired A/B protocols.
 - [compile.md](compile.md): build/install/test interface and artifacts.
-- [benchmark.md](benchmark.md): benchmark design, metrics and interpretation.
+- [benchmark.md](benchmark.md): current benchmark methodology, interpretation and
+  only the minimum settled evidence needed to avoid repeating a test.
 
-Historical transcripts, rejected designs and old operator procedures are intentionally absent from current documentation; use immutable Git history when forensic provenance is required.
+A settled idea should have one compact record in the ROADMAP evidence table:
+**decision, evidence anchor when useful, and the condition that would justify
+reopening it**. Do not duplicate the full experiment story across documents.
+Detailed trial narratives and superseded procedures belong in immutable Git
+history and report commits.

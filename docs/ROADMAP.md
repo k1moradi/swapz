@@ -66,6 +66,14 @@ safety review.
 
 ## Optimization evidence table
 
+This table is the canonical anti-retest index. Before proposing optimization
+work, find the matching ID here. Keep each row compact: the current decision,
+one evidence/report anchor when it materially helps, and the specific condition
+that can reopen the question. Do not copy the experiment chronology into other
+documents. Class 1/2/3/5 items are closed unless their row states a reopen
+condition or a materially different workload/device invalidates the evidence;
+Class 4 items are evidence-ready; Class 6 items are external gates.
+
 **Three-host 2026-10-23 cleanup decision:** source `174d42eb7135` passed the
 complete owned-RAM matrix on AVX-512, ARM64/NEON and SSE2. Ordinary first-pass
 LZ4 acceleration selection, READ-coalescing cap selection, delta64 preparation

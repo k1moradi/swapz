@@ -21,6 +21,14 @@ strictly sequential.
 
 It must execute the supported qualification in order and fail closed. Rootless/CI-only success is partial evidence and cannot substitute for the loaded owned-RAM phase. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
+## Scope discipline
+
+This file specifies tests that current source must pass. It is not the archive
+for retired optimization protocols. Once an experiment is settled and its
+runtime/test control is removed, keep only any still-required regression or
+safety assertion here; record the anti-retest decision in the ROADMAP evidence
+table and leave detailed trial history in Git/report commits.
+
 ## Required stages
 
 A complete run includes:

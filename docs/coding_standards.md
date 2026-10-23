@@ -90,405 +90,72 @@ PREFLUSH/FUA/DISCARD, GC, suspend, teardown and failure.
 Physical-device support is not a coding shortcut around current safety policy.
 No production/test flag may silently relax the RAM-backed owned-device gate.
 
-### Admission-policy cleanup
+## Current write-window, packing and preparation rules
 
-The old `coalesce_ms` constructor option is retired. Supported mappings had
-used value zero, and retained writes bypassed it, so nonzero delayed admission
-was a dormant experiment rather than current policy. With retention disabled,
-ordinary writes preserve the former zero-delay behavior by queuing one
-immediate worker instance; dependencies and retained writes wake the worker
-immediately. Do not reintroduce an independent admission delay without new
-production evidence and ordering qualification.
+These are current implementation invariants. Historical experiment sequences
+belong in the ROADMAP decision table and Git history.
 
+- **Admission:** the retired `coalesce_ms` delay must stay absent. Ordinary
+  writes queue immediate work; dependencies and retained writes wake the owner
+  immediately. Never add a sleep/spin/grace wait for a future arrival.
+- **Finite accepted work:** a retained window may consume only BIOs already
+  accepted into the worker-local FIFO or `incoming`, bounded by the existing
+  64-BIO quantum. Refresh accepted queue state after synchronous copy/LZ4 work
+  before deciding the current pack is isolated.
+- **Retention deadline:** learned/admitted targets may shape aggregation, but
+  the ordinary absolute deadline remains authoritative. A sampled one-record
+  tail uses that same deadline; there is no short singleton timer, watermark or
+  completion-aware carry into the next closed-loop wave. Hard ordering
+  boundaries reset retained scheduling evidence.
+- **Planner:** minimize lower bytes first, bounded cold-read cost second and
+  extent count third. Only the adjacent lower-run writer may use the physical
+  cursor/larger-class tie-break after those objectives are exactly tied.
+  Default mode never adds padding bytes merely to improve alignment.
+- **Scratch:** do not clear full 4/8/16KiB or 256KiB buffers when authoritative
+  bytes will be overwritten. Initialize exact headers/descriptors/payloads and
+  only the unused gap that can actually reach lower media. Tests should poison
+  scratch so correctness cannot depend on incidental zeroing.
+- **Zero elision:** scan the complete 4KiB page byte-exactly. Portable wide
+  loads use `memcpy`; do not overread, allocate or cast an unaligned byte
+  buffer to a wider pointer.
+- **Metadata residency:** the 512-entry metadata cache remains bounded and holds
+  validated metadata only, never payload authority. Mutation fences invalidate
+  residency before authority changes.
+- **Preparation ownership:** async preparation uses one unbound producer lane.
+  The ordered owner may steal only an unclaimed next preparation entry while
+  holding the admission lock. Producer and ordered compression use separate
+  input/LZ4 scratch and single-writer timing state. Prepared-array slots belong
+  only to producer-prepared entries.
+- **GC destination probing:** preserve the authority's circular
+  `next_segment_probe`; collection must not restart at segment zero. A
+  destination remains reusable only after the existing deadness, mapping and
+  role checks succeed.
+- **Diagnostics:** PACK_READY causes, tail samples, ready-wait counters and
+  similar telemetry are observational unless a separately qualified policy
+  explicitly consumes them. Adding a counter is not permission to change a
+  scheduling decision.
 
-### Bulk scratch initialization
+### Settled implementation policies
 
-The grouped lower-write path must not clear the full 256KiB scratch buffer on
-every run. Compressed extents initialize their exact extent image and RAW
-entries overwrite their complete 4KiB block. Only alignment holes that are
-actually submitted by explicit padding mode are zero-filled, and only for the
-exact gap bytes. This keeps the no-padding path free of unrelated memory
-bandwidth while preserving deterministic lower-media contents.
+Use the ROADMAP ID as the authoritative decision record. Do not reintroduce
+these mechanisms as dormant knobs merely to make them easy to benchmark again.
 
+| Policy family | Current rule | Reopen condition |
+|---|---|---|
+| Admission delay / microsecond grace timer (ID30) | Removed; no future-arrival wait. | New measured workload plus an ordering-safe bounded hypothesis. |
+| Deferred-singleton short cutoff (ID53) | Rejected/reverted; ordinary deadline only. | Evidence disproves the feedback artifact that caused the regression. |
+| K=1-busy zero-tail preservation (ID57) | Rejected/reverted; do not carry stale wave evidence. | New ownership model proves wave separation. |
+| CPU-local/affinity preparation (ID7/32) | Rejected; keep unbound scheduling. | Trustworthy CPU attribution shows placement is the limiting factor. |
+| Multiple preparation workers (ID16/31) | One producer lane. | Sustained preparation backlog plus measured service opportunity. |
+| Lower-WRITE K>1 (ID38) | One slot; depth-two allocation/append path removed. | New device/workload proves ready-run pressure and justifies new ownership state. |
+| Full-buffer zero initialization | Avoided; initialize only bytes that can be submitted/read. | Only if a new representation introduces genuinely undefined submitted bytes. |
+| Final payload CRC removal (ID19) | Forbidden; retain the integrity boundary. | Equivalent fail-closed integrity mechanism. |
+| Same-extent standalone READ grouping (ID60) | Retired; use shared caches and ID63. | New layout/cache evidence shows a distinct request-saving opportunity. |
 
 Repository naming guards must not contain their own banned implementation names
-as literal searchable text. Express self-check patterns without embedding the
-forbidden token verbatim so the guard audits the tree rather than matching
-itself.
-
-
-The public engine surface contains only paths used by the current Device Mapper
-target. Native tests must not keep convenience wrappers alive; they can select
-the production batched writer's sequential fallback or bounded planner
-explicitly when qualifying those behaviors.
-
-
-The authority header exports only implemented, production-used operations.
-The current compressed read path is metadata peek plus
-`swapz_read_authoritative_peeked()`; the older reparsing read wrapper and
-unimplemented range-discard declaration are not retained for test convenience.
-
-
-Codec interfaces likewise remain product-facing. Tests may derive expected
-read-span geometry locally from decoded offsets, but that arithmetic is not a
-reason to export an otherwise unused codec helper.
-
-
-### Alignment-aware planner ties
-
-The extent planner minimizes lower bytes first, bounded cold-read cost second,
-and extent count third. If those objectives are exactly tied, prefer the larger
-power-of-two extent class first. This does not add a lower byte or relax read
-policy; it moves unavoidable allocator alignment before a run instead of
-between extents, allowing adjacent-only lower aggregation to issue fewer WRITE
-requests. Never trade extra padding bytes for this tie-break in the default
-mode.
-
-
-Alignment-aware tie-breaking is restricted to the adjacent lower-run writer.
-The public/sequential planner retains its previously qualified deterministic
-tie order, including verify-after-write and other non-bulk paths. A lower-run
-optimization must not perturb layouts in modes that cannot consume the
-resulting contiguity.
-
-### Retained accepted-burst tails
-
-A retained pack may remain open only for finite BIOs that are already accepted.
-At the tail of the worker-local queue, already-accepted work includes BIOs
-observed in `incoming` while holding `queue_lock`. The worker may append that
-accepted tail to its private local FIFO and continue in the same invocation,
-but only while the existing 64-BIO quantum has capacity. It must never sleep,
-spin or schedule a grace period waiting for a future arrival, and future
-arrivals never refresh the pinned retention budget.
-
-Because asynchronous preparation and synchronous copy/LZ4 work occur after an
-initial queue observation, pack-ready policy must refresh `incoming` after
-that work before deciding that the current pack is isolated. FIFO order,
-dependency fences and the one-completion-owner rule are unchanged.
-
-This is distinct from the rejected zero-delay first-pack recheck: that policy
-waited for a future scheduling turn and could lower byte efficiency. Draining
-BIOs that were already accepted adds no future-arrival wait and lets the
-existing no-padding batched writer combine their independent extents in one
-lower run when physical geometry permits.
-
-### Learned retained-singleton bypass
-
-Initial singleton retention remains intact. After two consecutive one-page
-deadlines reached with the worker and admission queue empty, the target may
-fast-close later isolated singleton windows because the full retention
-opportunity has twice produced no aggregation benefit. Any already-accepted
-companion or any multi-record window immediately clears this learned bypass.
-
-The bypass changes neither one-record lower-byte geometry nor completion
-ownership. PREFLUSH/FUA, dependency, publication, suspend/drain and fail-closed
-ordering remain unchanged.
-
-
-### Already-accepted burst deadline handling
-
-Retention bounds time available to collect companion writes, not time the sole
-ordered worker is synchronously servicing an unrelated committed read. A
-`deadline_before_bio` or `deadline_after_read` close must not split a window
-while the current worker snapshot still has accepted follow-up BIOs. On a
-successful independent-read bypass, advance `window_first_ns` by exactly that
-read's synchronous service interval before re-evaluating expiry. An older
-hrtimer may wake early and is harmless because the worker rechecks the shifted
-origin before closing or rearming.
-
-Future arrivals never refresh this budget. Dependencies, PREFLUSH/FUA,
-same-page conflicts, suspend/drain and fail-closed behavior retain their
-existing ordering gates.
-
-
-### Cursor-aware adjacent-run reconstruction
-
-The adjacent-only bulk writer may use the authority's current physical cursor
-only to choose among planner alternatives already tied on lower bytes, bounded
-cold-read cost and extent count. Keep logical page order, transaction staging
-order and publication order identical; do not physically reorder later planner
-groups ahead of an earlier group because a later lower/publication failure must
-still describe a true committed logical prefix. Among equivalent candidates,
-prefer zero alignment-hole placement first and the larger class only when hole
-cost is equal. Default mode still writes no padding bytes.
-
-### Metadata block LRU bound
-
-The compressed-read metadata LRU contains 512 fixed 4KiB block-zero slots,
-allocated once per target (2MiB payload storage plus bounded side arrays).
-Indices that scan or select cache slots must be at least 16 bits. The cache
-holds validated metadata only, never payload authority, and every existing
-write/GC/discard/barrier mutation fence continues to invalidate residency
-before authority changes.
-
-
-### Exact zero-page scan
-
-The zero-elision predicate may scan one complete 4KiB page in fixed 64-bit
-chunks, but it must remain byte-exact and safe for unaligned portable callers.
-Load each chunk through `memcpy` rather than casting a byte buffer to a wider
-pointer; do not overread the page, allocate memory, or weaken the rule that any
-single nonzero byte makes the page nonzero. This optimization changes CPU work
-only and never changes lower-I/O or mapping authority semantics.
-
-
-### Exact scratch initialization
-
-Extent construction must not clear the full 4/8/16KiB scratch image when every
-authoritative header, descriptor and payload byte will be overwritten. The
-codec clears only the final unused gap at seal time before lower submission, so
-no stale scratch byte can reach media. The selective read path likewise does
-not zero blocks it never inspects: block-zero metadata and every requested
-payload block are explicitly populated before validation. Full verify reads
-overwrite the complete compared extent. Native production-C tests poison
-scratch buffers so correctness cannot depend on incidental zero initialization.
-
-
-### Adaptive retained-burst width
-
-A momentarily empty `incoming` list is not sufficient evidence that a retained
-closed-loop write burst ended. The worker starts with a four-record close target
-and marks useful pack geometry without immediately closing it. A later BIO still
-wakes the worker immediately through normal admission; no microsecond grace
-timer, scheduler handoff, spin or sleep is added.
-
-After a successful pack-ready lower write, the worker scans at most
-`max_window` FIFO entries already present in `incoming` under `queue_lock`.
-Only a contiguous prefix of ordinary writes counts. That finite admitted tail
-raises the learned target and supplies a one-shot residual target. Future
-arrivals are never predicted or waited for. A smaller multi-record stream may
-shrink the learned target after one original absolute deadline. Singleton QD1
-adaptation remains separate. The retired one/two-record packed-burst tail
-shortcut must not coexist with this policy.
-
-
-The retained-burst pure policy helpers must avoid identifiers such as `current`
-that are macro names in Linux kernel headers. Pack-target closure in
-`swapz_accept_write()` uses the existing admission snapshot; absolute expiry
-remains enforced by the established process/worker deadline gates rather than
-introducing a second pre-definition expiry path.
-
-
-Kernel-header macro hygiene applies to every reference after a parameter rename;
-native and Kbuild warning builds must both compile the exact helper body.
-
-
-### Dry accepted-pack closure
-
-A learned retained-burst width is a coalescing hint, not permission to idle on
-an already useful packed window after all finite accepted work is exhausted.
-When the worker has formed a complete second pack and has refreshed both its
-private local FIFO and `incoming` to prove there is no accepted successor, it
-closes immediately through the normal pack-ready commit path. It must not spend
-the remaining absolute retention budget merely hoping a future BIO will satisfy
-a larger historical target.
-
-Admitted-tail learning scans the older worker-local FIFO before `incoming` and
-counts only one contiguous prefix of ordinary writes, capped by `max_window`.
-A fence or non-ordinary BIO ends that evidence. Downward learning from one
-deadline must not cross below the original four-record target: a transient
-two/three-record gap must not recreate the first-pack chopping that retention
-was introduced to avoid. An active packed chain is not evidence for shrinking.
-
-This policy changes neither lower-byte planning nor publication order. The
-accepted-burst read cap remains two, future arrivals never refresh the pinned
-deadline, and PREFLUSH/FUA, dependency, suspend/drain and fail-closed ownership
-are unchanged.
-
-
-### Service-proven dry retained closure
-
-A useful packed window must not bypass a larger learned burst target from inside
-write admission merely because `incoming` is momentarily empty. Admission may
-close at the effective learned or sampled-tail target only. The ordered worker
-may close below that target only after it has refreshed its private FIFO and
-`incoming` and the current retained chain/window has concrete synchronous
-service evidence: either an earlier packed commit in the same admitted chain or
-a successful independent read serviced while the write window was open.
-
-A sampled admitted tail is stronger evidence than dry closure and must be
-drained to its finite target without an accepted-pack shortcut. The worker-tail
-shortcut applies to either a first useful pack or a complete second pack after
-service evidence; it adds no sleep, spin, grace interval or future-arrival wait.
-PREFLUSH/FUA, dependency, publication, completion and fail-closed gates remain
-unchanged.
-
-
-### Ordered-worker preparation steal
-
-Asynchronous preparation remains a bounded producer/consumer optimization, not
-a publication owner. The ordered worker may remove its next FIFO BIO from
-`preparation_incoming` only while holding the shared admission lock and only
-if the producer has not already claimed that preparation entry. A claimed entry
-retains the original completion handoff; an unclaimed stolen entry is compressed
-inline by the ordered worker and is never waited on or producer-completed.
-
-Once stealing is possible, producer and ordered compression may overlap.
-Therefore they must have distinct input scratch and distinct LZ4 work memory.
-Producer and ordered timing accumulation must also remain single-writer and may
-be summed only for reporting. Prepared-array slot ownership applies
-only to producer-prepared entries; inline entries allocate no prepared page and
-must not release a slot they never acquired.
-
-
-### Circular GC destination probe
-
-Rotating GC destination selection must preserve the authority's circular
-`next_segment_probe`; collection must not reset the probe to segment zero.
-The dead-segment picker remains responsible for scanning from that cursor,
-skipping the open foreground segment, victim, foreground roles and any second
-reserve after one destination has been selected. Successful role handoff may
-advance the cursor according to the existing committed rotation rule, and any
-failed collection must restore the caller-saved foreground cursor and probe.
-
-This is a wear-distribution rule, not permission to reuse uncertain media.
-A destination still must be entirely non-authoritative and dead, GC still uses
-exactly one reserve per cycle, and a victim becomes reserve only after every
-mapping/refcount validation and successful lower relocation has completed.
-
-
-### Retained target closure and serviced-burst evidence
-
-Write admission may close PACK_READY only at the refreshed effective
-learned/admitted target and only when no already-accepted follower is visible.
-Below-target closure remains a serialized worker-tail decision after
-`local` and `incoming` have been refreshed. This keeps the target gate fast
-without treating a transient sub-target submission gap as proof that a burst
-ended.
-
-A one-shot `retained_tail_target` is sampled only after a real PACK_READY
-lower write. Pre-write sampling is forbidden because it observes userspace
-thread-submission skew before a lower-I/O service interval and can pin a QD8 or
-QD32 wave to a transient short prefix.
-
-An empty `swapz_flush_window()` call is not a committed window and must not
-erase retained-chain/tail evidence for ordinary READ/zero processing. Real
-ordering barriers still terminate that scheduling evidence. Successful
-retained READ/fence service may carry across intermediate retained work, but a
-PACK_READY close at a refreshed dry tail consumes that finite evidence so it
-cannot fragment later windows into repeated singleton PACK_READY closes.
-DUPLICATE/FULL closes are not dry-tail evidence consumers because the current
-WRITE itself continues after flushing the older batch.
-
-A serviced useful pack may close on a refreshed dry worker tail. A sub-pack
-1..3-record residue may do so only after successful retained READ service or a
-forced zero/duplicate/raw/read interruption in the same accepted burst. This
-exception must not make a prior PACK_READY write alone sufficient to cascade
-write-only QD8/QD32 into singleton closes. Publication, FUA/PREFLUSH,
-dependency, discard, shutdown, completion and fail-closed ownership are
-unchanged.
-
-### Sampled-single-tail PACK_READY deferral
-
-A post-PACK admitted-tail sample of exactly one WRITE is timing evidence, not
-packed geometry. It may grow `retained_burst_target`, but it must not set a
-one-shot `retained_tail_target == 1` or authorize an early one-record
-PACK_READY close. The ordered owner records this state with
-`retained_single_tail_deferred`.
-
-ID53 is rejected. A deferred singleton uses the same ordinary absolute
-first-record deadline as every other retained window. There is no shorter
-singleton deadline, deadline watermark, second timer, sleep, spin or
-future-arrival wait. While the deferral is active and `batch_count == 1`, both
-admission target closure and worker service-proven closure return false. A
-second admitted record resolves the companion; a real nonempty flush, hard
-boundary or true empty burst boundary clears the state through the existing
-lifecycle accounting.
-
-### Deferred-singleton lifecycle attribution
-
-ID50 policy changes are frozen while ID51 is active. Each transition into
-`retained_single_tail_deferred` increments exactly one deferral. That state must
-terminate exactly once as a companion WRITE, a one-page DEADLINE close, a
-one-page IDLE close, or an explicit other clear. A later tail sample that
-supersedes an unresolved singleton counts the previous lifecycle as other before
-starting a new one. Empty hard boundaries and true empty burst boundaries must
-also account before clearing state.
-
-At drained/quiescent measurement boundaries the cumulative and timed-delta
-conservation law is exact:
-`deferrals == companions + deadline + idle + other`. The deadline and idle
-subsets must not exceed their corresponding one-page close counters. Do not use
-these counters to change policy in the same source revision that introduces the
-measurement.
-
-### Deferred-singleton timing/service diagnostics
-
-ID52 must remain observational. Starting a sampled singleton records one
-monotonic timestamp and clears two per-lifecycle service flags. Ordered
-completion of an existing async lower-W run may set the lower-done flag;
-successful independent retained READ service may set the read-bypass flag.
-Neither event may close, extend or otherwise alter the retained window.
-
-Only companion and one-page deadline terminal outcomes receive the original
-<=250 us, 251-500 us, 501-1000 us and >1000 us histograms. The four companion
-bins must sum exactly to `single_tail_companions`; the four deadline bins must
-sum exactly to `win1_deadline_deferred_tail`. After ID53 rejection, companion
-observations in the aggregate >1000 us bin are also partitioned passively into
-1001-1250, 1251-1500, 1501-1750 and >1750 us; those four sub-bins must sum
-exactly to the aggregate >1000 us companion bin. None changes retention policy.
-Lower-done/read-bypass counters remain overlapping subsets; the both counter is
-a subset of each. Other and idle terminal outcomes reset observation state
-without being reclassified.
-
-### PACK_READY primary-cause attribution
-
-Every real `SWAPZ_CLOSE_PACK_READY` window has exactly one diagnostic primary
-cause captured immediately before the close: a nonzero
-`retained_tail_target`, the learned `retained_burst_target`, or
-service-proven dry closure below target. The cumulative primary counters must
-sum exactly to `close_pack_ready` at quiescent measurement boundaries.
-`pack_close_tail_target_le4` is a subset of the tail-target counter and records
-only closes whose actual window count is <=4. This attribution is passive: it
-must not alter any readiness predicate, target, timer, ownership or completion.
-
-ID55 further partitions only `SWAPZ_PACK_CLOSE_BURST_TARGET`. Snapshot the
-learned target and decision site immediately when the close is authorized, then
-at the real flush count exactly one admission/worker site, one learned-target
-bin (<=4/5-8/9-16/17-64), one actual-count bin using the same ranges, and whether
-count overshot target. Site totals, target bins and count bins must each
-conserve exactly to `pack_close_burst_target`. This is diagnostic state only;
-it must not alter `swapz_window_burst_close_ready()` or learned-target updates.
-
-ID56 is measurement only. Every first post-PACK_READY tail observation
-increments exactly one tail-size/state bucket: tail 0, 1 or 2+, crossed with
-detached `inflight_write.active` versus idle. These six buckets conserve to
-`pack_tail_samples`. Count a burst-target grow/shrink only when the existing
-helper actually changes the target.
-
-ID57 is rejected and reverted. Owner evidence showed that preserving a zero-tail
-sample and prior completed-chain width across K=1 completion can contaminate the
-next closed-loop wave, inflate the learned target beyond the active QD and arm
-service-proven dry closure from stale service evidence. Post-PACK tail sampling
-returns to the ID56 observational rule: every sample is consumed in its current
-admitted-wave context. PACK_READY is never suppressed merely because K=1 lower
-I/O is unfinished. Do not restore ID57 counters or policy without a new isolated
-hypothesis.
-
-### Whole-dead-segment lower DISCARD
-
-ID29 is an advisory media-reclamation optimization, never an authority
-transition. The authority may call one production hook only after a previously
-written 1MiB segment is proven wholly dead and immediately before foreground/GC
-reuse. A committed GC victim may be trimmed only after role rotation succeeds
-and it has become a dead reserve. Exact segment mapping counts and all 256
-physical live-record counts must be zero first.
-
-The Device Mapper hook runs on the serialized owner, rejects internal ownership
-inconsistency before reuse, and never trims the currently named foreground OPEN
-segment. It issues one segment-aligned lower DISCARD only when the backing queue
-advertises support. EOPNOTSUPP and real lower DISCARD errors are diagnostic and
-nonfatal because TRIM cannot create logical deadness; failed TRIM must not
-publish, free, or make any otherwise-live storage reusable.
-
-### Passive K=1 ready-wait evidence
-
-ID38 telemetry may observe a nonempty window entering the existing
-swapz_flush_window ownership boundary while the sole immutable lower run is
-active and its completion is not done. It records windows, records, max window,
-exact wall spent in wait_for_completion and the existing close reason.
-These counters must not wake workers, close windows, change timers, add a slot
-or participate in policy.
+as literal searchable text. The public engine, authority and codec surfaces
+remain product-facing; native tests must not keep otherwise-unused wrappers or
+helpers alive solely for test convenience.
 
 ### Bounded adjacent distinct-extent READ coalescing
 
