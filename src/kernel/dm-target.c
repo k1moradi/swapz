@@ -341,7 +341,6 @@ struct swapz_dm {
 	atomic_t lower_write_active;
 	atomic_t preparation_workers_active;
 	atomic_t preparation_workers_active_max;
-	atomic64_t preparation_parallel_starts;
 	/*
 	 * One opposite-end preparation token earned by ordered inline WRITE work.
 	 * For a retained window the token may outlive swapz_process() and bridge
@@ -1822,8 +1821,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 	int active, peak, observed;
 
 	active = atomic_inc_return(&ctx->preparation_workers_active);
-	if (active > 1)
-		atomic64_inc(&ctx->preparation_parallel_starts);
 	peak = atomic_read(&ctx->preparation_workers_active_max);
 	while (active > peak) {
 		observed = atomic_cmpxchg(&ctx->preparation_workers_active_max,
@@ -1839,7 +1836,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 		void *mapped_input = NULL;
 		u64 section_start;
 		bool tail_claim = false;
-		bool parallel_tail_claim = false;
 		bool lower_write_overlap;
 		u64 elapsed_ns;
 		int error;
@@ -1859,9 +1855,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 		}
 		/*
 		 * Active lower WRITE I/O remains a head-first overlap signal. When
-		 * it is absent, K=1 retains the historical one-credit tail policy.
-		 * Delta64 K>1 lanes may instead take true tails while preserving one
-		 * unclaimed FIFO head for the ordered publisher.
+		 * it is absent, the single producer retains the one-credit tail
+		 * policy while preserving one unclaimed FIFO head for the ordered
+		 * publisher.
 		 */
 		if (atomic_read(&ctx->lower_write_active)) {
 			atomic_set(&ctx->preparation_tail_credit, 0);
@@ -1870,21 +1866,14 @@ static void swapz_preparation_worker(struct work_struct *work)
 						 preparation_list);
 			ctx->preparation_producer_head_claims++;
 		} else {
-			parallel_tail_claim =
-				ctx->preparation_worker_count > 1U &&
-				ctx->preparation_queued >= SWAPZ_PREPARATION_TAIL_CLAIM_MIN &&
-				!list_is_singular(&ctx->preparation_incoming);
 			if (ctx->preparation_queued < SWAPZ_PREPARATION_TAIL_CLAIM_MIN ||
 			    list_is_singular(&ctx->preparation_incoming) ||
-			    (!parallel_tail_claim &&
-			     !atomic_xchg(&ctx->preparation_tail_credit, 0))) {
+			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				swapz_preparation_release_slot(
 					&ctx->preparation_free_mask, slot);
 				goto out;
 			}
-			if (parallel_tail_claim)
-				atomic_set(&ctx->preparation_tail_credit, 0);
 			entry = list_last_entry(&ctx->preparation_incoming,
 						struct swapz_bio_ref,
 						preparation_list);
@@ -1910,8 +1899,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 				complete(&entry->preparation_finished);
 				if (tail_claim &&
 				    !atomic_read(&ctx->lower_write_active) &&
-				    !atomic_read(&ctx->preparation_tail_credit) &&
-				    !parallel_tail_claim)
+				    !atomic_read(&ctx->preparation_tail_credit))
 					goto out;
 				continue;
 			}
@@ -1949,8 +1937,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		entry->preparation_error = 0;
 		complete(&entry->preparation_finished);
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
-		    !atomic_read(&ctx->preparation_tail_credit) &&
-		    !parallel_tail_claim)
+		    !atomic_read(&ctx->preparation_tail_credit))
 			goto out;
 	}
 out:
@@ -5472,7 +5459,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	atomic_set(&ctx->lower_write_active, 0);
 	atomic_set(&ctx->preparation_workers_active, 0);
 	atomic_set(&ctx->preparation_workers_active_max, 0);
-	atomic64_set(&ctx->preparation_parallel_starts, 0);
 	atomic_set(&ctx->preparation_tail_credit, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
@@ -6215,7 +6201,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       (unsigned int)atomic_read(&ctx->preparation_workers_active_max),
 		       prep.prepared_pages,
 		       SWAPZ_WRITE_PIPELINE_DEPTH, ctx->pipeline_active_max,
-		       (u64)atomic64_read(&ctx->preparation_parallel_starts), 0U,
+		       0ULL, 0U,
 		       prep.prepared_during_lower_write,
 		       prep.lower_write_overlap_ns,
 		       ctx->preparation_wave_kicks,

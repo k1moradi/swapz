@@ -549,8 +549,10 @@ Source coverage must require both the ordered `swapz` workqueue and the
 single-active and async preparation owns one producer lane regardless of
 delta64 policy. The retired `delta64_prepare_workers` runtime selector must
 remain absent after two-host K=2 evidence and earlier K=4 regressions closed
-the concurrency question. Predictor scratch allocation remains conditional on
-rescue being enabled. The lane owns private input/predictor/LZ4 scratch and
+the concurrency question. The retired K>1 parallel-tail branch and its live
+parallel-start atomic are removed; the historical status field remains fixed at
+zero for report compatibility. Predictor scratch allocation remains conditional
+on rescue being enabled. The lane owns private input/predictor/LZ4 scratch and
 single-writer diagnostics; FIFO admission, global packing, physical WRITE
 submission, authority publication and BIO completion remain serialized under
 the ordered owner.
