@@ -231,6 +231,7 @@ def timed_kernel_write(*, mode, target=8):
         "physical_write_reqs": 5,
         "lz4_acceleration": 1,
         "delta64_lz4_acceleration": 1,
+        "delta64_prepare_workers": 1,
         "write_pipeline_depth": 1,
         "pipeline_active_max": 1 if mode else 0,
         "k1_allow_after_read_bypass": 0,
