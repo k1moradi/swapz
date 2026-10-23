@@ -1,18 +1,116 @@
 {
 "benchmarks": {
+"delta64_prepare": {
+"overall": "NOT_RUN",
+"reason": "retired from routine qualification"
+},
+"delta64_prepare_sessions": [],
+"delta64_rescue": {
+"overall": "INCOMPLETE",
+"reason": "five counterbalanced matched rounds required"
+},
+"delta64_rescue_sessions": [],
+"k1_read_bypass": {
+"overall": "NOT_RUN",
+"reason": "refuted and retired"
+},
+"k1_read_bypass_sessions": [],
 "loaded_correctness": {
-"overall": "NOT_RUN"
+"alignment_hole_blocks_foreground": 0,
+"alignment_hole_blocks_gc": 0,
+"alloc_probe_full_scans": 80,
+"alloc_probe_segments": 1360,
+"alloc_probe_wall_ns": 105905,
+"discard_trim_immediate": 1,
+"discard_trim_pages": 256,
+"discard_trim_reuse_skips": 1,
+"discard_trim_sectors": 2048,
+"discard_trim_verified_pages": 4096,
+"flush_calls": 386,
+"gc_baseline_p99_ns": 116628,
+"gc_choose_calls": 20,
+"gc_choose_map_entries": 0,
+"gc_choose_segment_entries": 1280,
+"gc_choose_wall_ns": 20774,
+"gc_distinct_victims": 20,
+"gc_fraction_ppm": 3606,
+"gc_no_headroom_skips": 280,
+"gc_pages": 20,
+"gc_pressure_p99_ns": 232655,
+"gc_pressure_rounds": 5,
+"gc_read_bytes": 81920,
+"gc_read_reqs": 20,
+"gc_relocation_map_entries": 20,
+"gc_rotations": 20,
+"gc_segment_discard_sectors": 40960,
+"gc_segment_discards": 20,
+"gc_useful_write_wall_ns": 822024069,
+"gc_verified_pages": 4096,
+"gc_victim_max_evictions": 1,
+"gc_victim_min_evictions": 1,
+"gc_victims": 20,
+"gc_wall_ns": 2964636,
+"gc_write_bytes": 81920,
+"gc_write_reqs": 20,
+"overall": "PASS",
+"packed_placement_enabled": 1,
+"packed_placement_holes": 0,
+"packed_placement_run_splits": 0,
+"packed_placement_verified_pages": 128,
+"raw_pages": 64,
+"retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
+"retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
+"run_splits_by_hole": 0,
+"scope": "OWNED_RAM_NULL_BLK_SYNTHETIC_FAILURE_ONLY",
+"segment_discards_skipped_already_trimmed": 16,
+"segment_program_max": 2,
+"segment_program_min": 1,
+"segment_program_segments": 64,
+"segment_program_sum": 80,
+"segment_tail_waste_blocks_foreground": 0,
+"segment_tail_waste_blocks_gc": 0,
+"suspend_observed_open": 1,
+"suspend_retain_ms": 4,
+"suspend_verified_pages": 128,
+"zero_pages": 9
 },
 "lz4_acceleration": {
-"overall": "NOT_RUN"
+"overall": "NOT_QUALIFIED",
+"reason": "five counterbalanced 1/4 matched rounds required"
 },
 "lz4_acceleration_sessions": [],
-"sessions": [],
+"read_coalesce_ab": {
+"overall": "INCOMPLETE",
+"reason": "five counterbalanced matched rounds required"
+},
+"read_coalesce_ab_sessions": [],
+"read_coalesce_cap": {
+"overall": "INCOMPLETE",
+"reason": "sd_emulated: balanced 2/4/8 cap rounds missing"
+},
+"read_coalesce_cap_sessions": [],
+"sd_read_coalesce_ab": {
+"overall": "INCOMPLETE",
+"reason": "five counterbalanced matched rounds required"
+},
+"sd_read_coalesce_ab_sessions": [],
+"sessions": [
+{
+"arms": {},
+"async_prepare": 0,
+"device_model": null,
+"order": "unknown",
+"regime": "sd_emulated",
+"status": "INCOMPLETE"
+}
+],
 "verdicts": {
-"overall": "NOT_RUN"
+"overall": "INCOMPLETE",
+"reason": "sd_emulated: required counterbalanced sessions missing"
 },
 "write_saturation": {
-"overall": "NOT_RUN"
+"overall": "INCOMPLETE",
+"reason": "sd_emulated: write-only evidence shape mismatch"
 },
 "write_saturation_sessions": []
 },
@@ -67,24 +165,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 6841,
-"legacy_dead_probe_ns": 903290,
-"legacy_score_scan_ns": 7400876,
+"incremental_select_ns": 6942,
+"legacy_dead_probe_ns": 871704,
+"legacy_score_scan_ns": 7104322,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3746,
-"relocation_list_ns": 2483,
-"relocation_scan_ns": 1826428,
+"mapped_dead_probe_ns": 3848,
+"relocation_list_ns": 2899,
+"relocation_scan_ns": 1822235,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 25940,
-"legacy_dead_probe_ns": 3580249,
-"legacy_score_scan_ns": 29429935,
+"incremental_select_ns": 25936,
+"legacy_dead_probe_ns": 3503806,
+"legacy_score_scan_ns": 29599268,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 12714,
-"relocation_list_ns": 2654,
-"relocation_scan_ns": 7475197,
+"mapped_dead_probe_ns": 12720,
+"relocation_list_ns": 2776,
+"relocation_scan_ns": 7170944,
 "segments": 4096,
 "victim_records": 256
 }
@@ -94,14 +192,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1543,
+"inverse_ns_per_page": 1566,
 "name": "scalar",
-"transform_ns_per_page": 1627
+"transform_ns_per_page": 1601
 },
 {
-"inverse_ns_per_page": 1165,
+"inverse_ns_per_page": 1160,
 "name": "sse2",
-"transform_ns_per_page": 761
+"transform_ns_per_page": 797
 }
 ],
 "classifier": {
@@ -111,9 +209,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 587,
+"ns_per_page": 585,
 "sample_pairs": 32,
-"scalar_ns_per_page": 587,
+"scalar_ns_per_page": 585,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -128,7 +226,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 12958
+"wall_ns_per_page": 7786
 },
 {
 "acceleration": 2,
@@ -136,7 +234,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11825
+"wall_ns_per_page": 7213
 },
 {
 "acceleration": 3,
@@ -144,7 +242,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 8448
+"wall_ns_per_page": 6964
 },
 {
 "acceleration": 4,
@@ -152,7 +250,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 6838
+"wall_ns_per_page": 8600
 }
 ],
 "negative_pages": 256,
@@ -169,9 +267,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6524,
-"modeled_wall_ns_total": 3758336,
-"ns_per_saved_block": 72275,
+"modeled_wall_ns_per_page": 5820,
+"modeled_wall_ns_total": 3352576,
+"ns_per_saved_block": 64472,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -196,29 +294,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 959,
+"baseline_ns_per_page": 930,
 "order": "baseline_first",
-"unrolled_ns_per_page": 761
+"unrolled_ns_per_page": 766
 },
 {
-"baseline_ns_per_page": 926,
+"baseline_ns_per_page": 927,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 774
+"unrolled_ns_per_page": 781
 },
 {
-"baseline_ns_per_page": 925,
+"baseline_ns_per_page": 930,
 "order": "baseline_first",
-"unrolled_ns_per_page": 754
+"unrolled_ns_per_page": 768
 },
 {
-"baseline_ns_per_page": 917,
+"baseline_ns_per_page": 931,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 760
+"unrolled_ns_per_page": 775
 },
 {
-"baseline_ns_per_page": 914,
+"baseline_ns_per_page": 924,
 "order": "baseline_first",
-"unrolled_ns_per_page": 758
+"unrolled_ns_per_page": 777
 }
 ],
 "repeats_per_arm": 64,
@@ -267,14 +365,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 73755,
+"ns_per_saved_block": 65721,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 7298,
-"routed_cpu_ns_total": 4204067,
+"routed_cpu_ns_per_page": 6503,
+"routed_cpu_ns_total": 3746134,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -322,14 +420,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 74227,
+"ns_per_saved_block": 66160,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 7087,
-"routed_cpu_ns_total": 4082504,
+"routed_cpu_ns_per_page": 6317,
+"routed_cpu_ns_total": 3638800,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -377,14 +475,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72275,
+"ns_per_saved_block": 64472,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6524,
-"routed_cpu_ns_total": 3758336,
+"routed_cpu_ns_per_page": 5820,
+"routed_cpu_ns_total": 3352576,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -432,14 +530,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72275,
+"ns_per_saved_block": 64472,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6524,
-"routed_cpu_ns_total": 3758336,
+"routed_cpu_ns_per_page": 5820,
+"routed_cpu_ns_total": 3352576,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -487,14 +585,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72275,
+"ns_per_saved_block": 64472,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6524,
-"routed_cpu_ns_total": 3758336,
+"routed_cpu_ns_per_page": 5820,
+"routed_cpu_ns_total": 3352576,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -511,17 +609,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1165,
+"inverse_ns_per_page": 1160,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1543,
-"scalar_transform_ns_per_page": 1627,
-"second_lz4_ns_per_page": 12746,
+"scalar_inverse_ns_per_page": 1566,
+"scalar_transform_ns_per_page": 1601,
+"second_lz4_ns_per_page": 11129,
 "transform_backend": "sse2",
-"transform_ns_per_page": 761
+"transform_ns_per_page": 797
 }
 ]
 }
@@ -530,26 +628,58 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "3c229d8ef3b19679b9c1471f95b33eaec6ec3a62",
+"source_sha": "494152ba57ec1b669f6207718b398de9cd7302dc",
 "stages": [
 {
-"elapsed_s": 1.403,
+"elapsed_s": 1.452,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_benchmark_console_is_compact_and_keeps_sync_control",
-"elapsed_s": 32.634,
-"exit_code": 1,
-"failed_phase": "Native and rootless contracts",
+"elapsed_s": 37.471,
+"exit_code": 0,
 "name": "Native and rootless contracts",
+"status": "PASS"
+},
+{
+"elapsed_s": 9.997,
+"exit_code": 0,
+"name": "Kernel warnings W=1",
+"status": "PASS"
+},
+{
+"elapsed_s": 10.109,
+"exit_code": 0,
+"name": "Kernel warnings W=2",
+"status": "PASS"
+},
+{
+"diagnostic": "Child returned nonzero without a sanitized loaded diagnostic marker",
+"elapsed_s": 10.575,
+"exit_code": 1,
+"failed_phase": "owned RAM sd_emulated comparison 1/8 (sync)",
+"name": "Owned RAM smoke + mixed/QD pilot",
 "signals": [
+"PASS_DEFAULT_ASYNC_PREPARE",
+"PASS_DEFAULT_DELTA64_RESCUE",
 "PASS",
-"FAIL"
+"PASS_WINDOW_CLOSE_REASONS",
+"PASS_WINDOW_OPEN_AGE",
+"PASS_ZERO_WRITE_LOWER_IO",
+"PASS_ORACLE_LOWER_READ",
+"PASS_LOADED_ORACLE_PROFILE",
+"PASS_LOADED_LIVE_GC",
+"PASS_LOADED_GC_PRESSURE",
+"PASS_LOADED_DISCARD_TRIM",
+"PASS_LOADED_SUSPEND_DRAIN",
+"PASS_RETAINED_SYNTHETIC_WRITE_FAULT",
+"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT",
+"PASS_LOADED_PACKED_PLACEMENT",
+"PASS_LOADED_OWNED_NULLBLK_SMOKE"
 ],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "3c229d8ef3b19679b9c1471f95b33eaec6ec3a62"
+"tested_commit_sha": "494152ba57ec1b669f6207718b398de9cd7302dc"
 }
