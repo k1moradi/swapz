@@ -141,6 +141,21 @@ after a module reload. Paired synchronous controls must pass
 
 The retained production counters must describe active decisions only. Closed/rejected diagnostic counters are removed from production and report schemas.
 
+The human-readable console report must interpret loaded product tables against
+the raw/off control, not merely against another swapz setting. It must state the
+direction of useful throughput, latency and lower-device work, and distinguish
+a project-aligned direction from a trade-off or regression. Internal A/B
+controls remain useful for attribution, but beating sync or feature-off alone
+is not a product win when swapz still trails raw. Mean-value interpretations
+must identify themselves as directional; paired confidence intervals remain
+the statistical qualification.
+
+Timing labels must describe the measured scope rather than call order. When
+delta64 transform time and LZ4 compression time are separate columns, the
+compression column is `LZ4 ns`. A combined label may mention delta64+LZ4 only
+when one measurement includes both operations. The console must not use
+`LZ4-2` as a user-facing timing name.
+
 ## Evidence levels
 
 Source contracts show structure, not loaded semantics. Native C shows portable product logic, not Device Mapper runtime. W=1/W=2 shows compilation, not correctness. Owned RAM-backed loaded tests show real kernel BIO behavior on the test host, not physical-media benefit. Only separately authorized physical testing can establish behavior on a particular real device.

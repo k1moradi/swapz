@@ -4062,7 +4062,7 @@ TABLE_HEADER_LEGEND = {
     "minimum": "minimum score required for the control to pass",
     "pack eligible": "already-compressed pages with an exact uniform packing limit",
     "passed": "eligible pages meeting their configured route threshold",
-    "attempts": "full-page transform and second-LZ4 attempts",
+    "attempts": "full-page transform and delta64-candidate LZ4 attempts",
     "payload bytes": "encoded payload bytes avoided in the native model",
     "blocks saved": "physical blocks saved by the actual native window planner",
     "extents saved": "physical extents saved by the actual native window planner",
@@ -4073,9 +4073,9 @@ TABLE_HEADER_LEGEND = {
     "<=2024": "payloads at or below 2024 bytes",
     "blocks": "physical 4KiB blocks (signed values indicate savings)",
     "extents": "physical extents",
-    "xform ns": "native elapsed transform nanoseconds per page",
-    "inv ns": "native elapsed inverse-transform nanoseconds per page",
-    "LZ4-2 ns": "native elapsed second-LZ4 nanoseconds per page",
+    "xform ns": "native elapsed delta64 transform nanoseconds per page",
+    "inv ns": "native elapsed delta64 inverse-transform nanoseconds per page",
+    "LZ4 ns": "native elapsed LZ4 compression nanoseconds per transformed page; excludes delta64 transform",
     "backend": "implementation backend",
     "score": "candidate threshold or score",
     "neg call/eligible": "negative calls / eligible pages",
@@ -4222,7 +4222,7 @@ TABLE_HEADER_LEGEND = {
     "payload KiB": "encoded bytes avoided versus ordinary LZ4 or 4KiB RAW; not lower I/O",
     "RAW+ KiB": "encoded bytes avoided by RAW rescues, in KiB",
     "LZ4+ KiB": "encoded bytes avoided by ordinary LZ4 rescues, in KiB",
-    "rescue ms": "classifier, transform, second LZ4 and copy wall ms; not CPU time",
+    "rescue ms": "classifier, delta64 transform, candidate LZ4 and copy wall ms; not CPU time",
 }
 
 TABLE_HEADER_GOAL = {
@@ -4232,7 +4232,7 @@ TABLE_HEADER_GOAL = {
     "2x ns/page": "lower is faster",
     "xform ns": "lower is better for equivalent work",
     "inv ns": "lower is better for equivalent work",
-    "LZ4-2 ns": "lower is better for equivalent work",
+    "LZ4 ns": "lower is better for equivalent work",
     "neg call/eligible": "lower is better",
     "cpu/page ns": "lower is better",
     "ns/saved block": "lower is better",
@@ -4299,6 +4299,46 @@ def _print_table_note(label, message):
                          subsequent_indent="    "))
 
 
+def _percent_change(candidate, baseline):
+    if baseline in (None, 0) or candidate is None:
+        return None
+    return candidate / baseline - 1.0
+
+
+def _directional_project_state(changes):
+    """Classify mean directions only; confidence intervals still qualify claims."""
+    benefits = 0
+    regressions = 0
+    for change, lower_is_better in changes:
+        if change is None or change == 0:
+            continue
+        helpful = change < 0 if lower_is_better else change > 0
+        if helpful:
+            benefits += 1
+        else:
+            regressions += 1
+    if benefits and not regressions:
+        return "ALIGNED"
+    if benefits and regressions:
+        return "TRADE-OFF"
+    if regressions:
+        return "NOT ALIGNED"
+    return "NEUTRAL"
+
+
+def _ci_metric_preference(metric):
+    """Return higher/lower/control for product-facing confidence-interval rows."""
+    metric = metric.lower()
+    if "raw-control" in metric:
+        return "control"
+    if any(token in metric for token in ("p99", "lower b", "lower req",
+                                          "wall", "cpu")) or metric == "req":
+        return "lower"
+    if any(token in metric for token in ("throughput", "mb/s")) or metric == "w %":
+        return "higher"
+    return None
+
+
 def _table_interpretation(headers, rows):
     """Summarize table data without turning descriptive rows into a verdict."""
     header_index = {str(header): index for index, header in enumerate(headers)}
@@ -4345,83 +4385,185 @@ def _table_interpretation(headers, rows):
                 "Extent packing, padding, reads and GC determine actual lower I/O. "
                 "Rescue wall time includes preemption and overlaps other timing rows; "
                 "do not add it to LZ4 time or call it CPU cost.")
+    if all(name in header_index for name in ("read", "lower KiB", "req", "p99")):
+        by_read = {str(row[header_index["read"]]): row for row in rows}
+        summaries = []
+        project_changes = []
+        for label in ("seq", "rnd"):
+            raw_row = by_read.get(f"{label}-off")
+            swapz_row = by_read.get(f"{label}-async")
+            if raw_row is None or swapz_row is None:
+                continue
+            changes = []
+            for column, name in (("lower KiB", "lower READ bytes"),
+                                 ("req", "requests"), ("p99", "p99")):
+                raw_value = _table_number(raw_row[header_index[column]])
+                swapz_value = _table_number(swapz_row[header_index[column]])
+                change = _percent_change(swapz_value, raw_value)
+                if change is not None:
+                    changes.append(f"{name} {change * 100:+.1f}%")
+                    project_changes.append((change, True))
+            if changes:
+                summaries.append(f"{label} vs raw: " + ", ".join(changes))
+        if summaries:
+            state = _directional_project_state(project_changes)
+            return (f"Directional project view vs raw: {state}. " +
+                    "; ".join(summaries) +
+                    ". Lower backing bytes/requests support I/O efficiency and endurance; "
+                    "lower p99 supports latency. These are means; qualification still "
+                    "depends on matched evidence where available.")
     if "host busy %" in header_index:
         return ("Host activity includes the benchmark, kernel workers and background apps. "
                 "PSI measures CPU waiting, not its owner. These observations do not prove "
                 "an idle host or equivalent load across reports; no throughput correction is applied.")
 
-    # Paired confidence-interval tables can make a directional statement only
-    # when the full interval excludes zero.
+    # Paired confidence intervals qualify whether a directional product effect
+    # is repeatable. Interpret the sign using each metric's product objective.
     if all(name in header_index for name in ("metric", "mean", "low", "high")):
-        supported = []
+        benefits = []
+        regressions = []
+        changed = []
         uncertain = []
+        controls = []
         for row in rows:
             low = _table_number(row[header_index["low"]])
             high = _table_number(row[header_index["high"]])
             if low is None or high is None:
                 continue
             name = str(row[header_index["metric"]])
-            if low > 0:
-                supported.append(f"{name} positive")
-            elif high < 0:
-                supported.append(f"{name} negative")
-            else:
+            if "read" in header_index:
+                name = f"{row[header_index['read']]} {name}"
+            preference = _ci_metric_preference(name)
+            if low <= 0 <= high:
                 uncertain.append(name)
-        if supported or uncertain:
-            parts = []
-            if supported:
-                parts.append("95% intervals exclude zero for " + ", ".join(supported))
+                continue
+            direction = "positive" if low > 0 else "negative"
+            if preference == "control":
+                controls.append(f"{name} changed {direction}")
+            elif preference == "higher":
+                (benefits if low > 0 else regressions).append(name)
+            elif preference == "lower":
+                (benefits if high < 0 else regressions).append(name)
+            else:
+                changed.append(f"{name} {direction}")
+        if benefits or regressions or changed or uncertain or controls:
+            parts = ["Project evidence from 95% intervals"]
+            if benefits:
+                parts.append("benefits: " + ", ".join(benefits))
+            if regressions:
+                parts.append("regressions: " + ", ".join(regressions))
+            if controls:
+                parts.append("control drift: " + ", ".join(controls))
+            if changed:
+                parts.append("other repeatable changes: " + ", ".join(changed))
             if uncertain:
                 parts.append("overlap zero for " + ", ".join(uncertain))
-            return "; ".join(parts) + ". Direction alone does not mean benefit."
+            return "; ".join(parts) + "."
 
-    # The primary throughput table includes all three controls. Summarize
-    # useful throughput and physical WRITE changes, while explicitly noting
-    # that these are table means and not the paired inference.
+    # The primary loaded table answers the product question first: does swapz
+    # beat raw useful service while reducing lower-device work and preserving
+    # READ service? Sync remains a scheduling control, not the product baseline.
     if ("mode" in header_index and "W" in header_index and
             "off" in {str(row[header_index["mode"]]) for row in rows} and
             "async" in {str(row[header_index["mode"]]) for row in rows}):
         by_mode = {str(row[header_index["mode"]]): row for row in rows}
-        raw = _table_number(by_mode["off"][header_index["W"]])
-        asynchronous = _table_number(by_mode["async"][header_index["W"]])
-        sync = (_table_number(by_mode["sync"][header_index["W"]])
-                if "sync" in by_mode else None)
-        if raw is not None and asynchronous is not None and raw:
-            raw_delta = (asynchronous / raw - 1.0) * 100.0
-            summary = (f"Async useful WRITE throughput is {asynchronous:.2f} MB/s, "
-                       f"{raw_delta:+.1f}% versus raw")
-            if sync is not None and sync:
-                summary += f" and {(asynchronous / sync - 1.0) * 100.0:+.1f}% versus sync"
-            details = []
-            for column, label in (("lower W", "lower-WRITE throughput"),
-                                  ("W req", "lower-WRITE requests")):
+        raw_w = _table_number(by_mode["off"][header_index["W"]])
+        async_w = _table_number(by_mode["async"][header_index["W"]])
+        sync_w = (_table_number(by_mode["sync"][header_index["W"]])
+                  if "sync" in by_mode else None)
+        if raw_w is not None and async_w is not None and raw_w:
+            write_change = _percent_change(async_w, raw_w)
+            changes = [(write_change, False)]
+            details = [
+                f"Async useful WRITE throughput is {async_w:.2f} MB/s, "
+                f"{write_change * 100:+.1f}% versus raw"
+            ]
+            if sync_w:
+                details.append(f"{_percent_change(async_w, sync_w) * 100:+.1f}% versus sync")
+
+            if "lower W" in header_index:
+                raw_lower = _table_number(by_mode["off"][header_index["lower W"]])
+                async_lower = _table_number(by_mode["async"][header_index["lower W"]])
+                if raw_lower is not None and async_lower is not None and raw_lower:
+                    raw_bytes_per_useful = raw_lower / raw_w
+                    async_bytes_per_useful = async_lower / async_w
+                    change = _percent_change(async_bytes_per_useful,
+                                             raw_bytes_per_useful)
+                    changes.append((change, True))
+                    details.append("backing WRITE bytes/useful byte "
+                                   f"{change * 100:+.1f}% vs raw")
+
+            if "W req" in header_index:
+                raw_req = _table_number(by_mode["off"][header_index["W req"]])
+                async_req = _table_number(by_mode["async"][header_index["W req"]])
+                change = _percent_change(async_req, raw_req)
+                if change is not None:
+                    changes.append((change, True))
+                    details.append(f"lower WRITE requests {change * 100:+.1f}% vs raw")
+
+            for column, label, lower_is_better in (
+                    ("R", "mixed READ throughput", False),
+                    ("R p99", "mixed READ p99", True)):
                 if column not in header_index:
                     continue
                 raw_value = _table_number(by_mode["off"][header_index[column]])
                 async_value = _table_number(by_mode["async"][header_index[column]])
-                if raw_value:
-                    details.append(f"{label} {(async_value / raw_value - 1.0) * 100.0:+.1f}% vs raw")
-            if details:
-                summary += "; " + ", ".join(details)
-            return summary + ". Mean values only; use paired intervals for inference."
+                change = _percent_change(async_value, raw_value)
+                if change is not None:
+                    changes.append((change, lower_is_better))
+                    details.append(f"{label} {change * 100:+.1f}% vs raw")
 
-    # Give the binary merge toggle a direct before/after reading. Confidence
-    # and qualification remain in the paired interval table that follows.
+            state = _directional_project_state(changes)
+            return (f"Directional project view vs raw: {state}. " +
+                    "; ".join(details) +
+                    ". Reduced backing bytes per useful byte supports endurance and "
+                    "I/O efficiency; higher useful throughput and lower p99 support "
+                    "performance. Mean values only; paired intervals decide qualification.")
+
+    # Internal A/Bs are useful only if their direction serves product goals.
+    # Confidence and qualification remain in the paired interval table.
     if "merge" in header_index:
         by_merge = {str(row[header_index["merge"]]): row for row in rows}
         if "0" in by_merge and "1" in by_merge:
-            changes = []
-            for column in ("seq req", "seq p99", "rnd req", "rnd p99"):
+            summaries = []
+            project_changes = []
+            for column in ("seq MB/s", "seq req", "seq p99",
+                           "rnd MB/s", "rnd req", "rnd p99"):
                 if column not in header_index:
                     continue
                 before = _table_number(by_merge["0"][header_index[column]])
                 after = _table_number(by_merge["1"][header_index[column]])
-                if before:
-                    changes.append(f"{column} {(after / before - 1.0) * 100.0:+.1f}%")
-            if changes:
-                return ("Merge-on means versus merge-off: " + ", ".join(changes) +
-                        ". Use the paired interval below for evidence of a repeatable change.")
+                change = _percent_change(after, before)
+                if change is None:
+                    continue
+                lower_is_better = "req" in column or "p99" in column
+                project_changes.append((change, lower_is_better))
+                summaries.append(f"{column} {change * 100:+.1f}%")
+            if summaries:
+                state = _directional_project_state(project_changes)
+                return ("Merge-on means versus merge-off: " + ", ".join(summaries) +
+                        f". Directional project view: {state}; fewer requests/lower p99 "
+                        "and higher useful MB/s are helpful. Use the paired interval "
+                        "below for repeatable evidence.")
 
+    if all(name in header_index for name in ("QD", "raw", "sync", "async", "A/S")):
+        comparisons = []
+        project_changes = []
+        for row in rows:
+            raw_value = _table_number(row[header_index["raw"]])
+            async_value = _table_number(row[header_index["async"]])
+            change = _percent_change(async_value, raw_value)
+            if change is not None:
+                project_changes.append((change, False))
+                comparisons.append(f"QD{row[header_index['QD']]} {change * 100:+.1f}%")
+        if comparisons:
+            state = _directional_project_state(project_changes)
+            return (f"Directional performance view vs raw: {state}. Async swapz useful "
+                    "WRITE throughput change: " + ", ".join(comparisons) +
+                    ". A/S only measures preparation scheduling versus sync; it cannot "
+                    "turn a swapz result that still trails raw into a product win. "
+                    "This table does not contain raw lower-byte/request totals, so it "
+                    "does not by itself establish endurance benefit.")
     if "check" in header_index and "result" in header_index and rows:
         outcomes = [str(row[header_index["result"]]).upper() for row in rows]
         terminal_statuses = {"PASS", "FAIL", "BLOCKED", "INCOMPLETE", "NOT_RUN"}
@@ -4637,7 +4779,7 @@ def print_bench(result):
         print_table(
             "Predictive transform compression and planner savings — native corpus",
             ("transform", "adopt", "RAW+", "<=2024", "blocks", "extents",
-             "xform ns", "inv ns", "LZ4-2 ns"),
+             "xform ns", "inv ns", "LZ4 ns"),
             [(
                 row["name"],
                 row["adopted"],

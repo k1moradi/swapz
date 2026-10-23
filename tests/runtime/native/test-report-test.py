@@ -1576,6 +1576,40 @@ class ReportContract(unittest.TestCase):
         self.assertIn("not committed mappings", runner._table_interpretation(
             headers, [("async", "10", "5", "5", "3", "1", "2")]))
 
+    def test_product_interpretations_compare_against_raw(self):
+        headers = ("mode", "W", "lower W", "W req", "R", "R p99")
+        aligned = runner._table_interpretation(headers, [
+            ("off", "10", "10", "100", "5", "2"),
+            ("sync", "11", "7", "80", "5.2", "1.9"),
+            ("async", "12", "7", "70", "5.5", "1.8"),
+        ])
+        self.assertIn("Directional project view vs raw: ALIGNED", aligned)
+        self.assertIn("backing WRITE bytes/useful byte", aligned)
+        self.assertIn("lower WRITE requests", aligned)
+        tradeoff = runner._table_interpretation(headers, [
+            ("off", "10", "10", "100", "5", "2"),
+            ("sync", "10", "8", "90", "5", "2"),
+            ("async", "9", "6", "70", "5.2", "1.8"),
+        ])
+        self.assertIn("Directional project view vs raw: TRADE-OFF", tradeoff)
+
+        reads = runner._table_interpretation(
+            ("read", "lower KiB", "req", "p99"),
+            [("seq-off", "4096", "1024", "5"),
+             ("seq-async", "3000", "800", "4"),
+             ("rnd-off", "4096", "1024", "6"),
+             ("rnd-async", "3500", "900", "5.5")])
+        self.assertIn("Directional project view vs raw: ALIGNED", reads)
+        self.assertIn("lower READ bytes", reads)
+
+        sustained = runner._table_interpretation(
+            ("QD", "raw", "sync", "async", "A/S", "A req"),
+            [("4", "20", "15", "18", "+20%", "500"),
+             ("8", "30", "20", "25", "+25%", "400")])
+        self.assertIn("Directional performance view vs raw: NOT ALIGNED", sustained)
+        self.assertIn("cannot turn a swapz result that still trails raw into a product win",
+                      sustained)
+
     def test_benchmark_console_is_compact_and_keeps_sync_control(self):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
@@ -1705,6 +1739,12 @@ class ReportContract(unittest.TestCase):
         self.assertIn("elapsed-time model", rendered)
         self.assertIn("not a demonstrated speedup", rendered)
         self.assertIn("Delta64 selected backends", rendered)
+        self.assertIn("LZ4 ns", rendered)
+        self.assertNotIn("LZ4-2 ns", rendered)
+        self.assertIn("Directional project view vs raw", rendered)
+        self.assertIn("backing WRITE bytes/useful byte", rendered)
+        self.assertIn("Directional performance view vs raw", rendered)
+        self.assertIn("Project evidence from 95% intervals", rendered)
         self.assertNotIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)

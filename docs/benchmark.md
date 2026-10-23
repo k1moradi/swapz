@@ -10,6 +10,18 @@ Benchmark the one product, `swapz`, against an uncompressed `off` control using 
 
 A performance result is useful only when the final logical image is byte-exact and source/fixture/trace provenance matches. The north-star metrics are independent lower READ and WRITE bytes **and** requests for completed useful work, including GC and flush effects, with acceptable useful throughput, read p95/p99, CPU and RAM.
 
+Console interpretations must answer the product question before discussing an
+internal mechanism. For loaded results, compare swapz with the raw/off control
+on useful throughput, latency and lower-device work. Call out a directional
+project win only when the observed direction serves the product vision: more
+useful I/O and/or lower latency, or less lower-device traffic that supports
+endurance, without an opposing material performance direction. If benefits and
+regressions coexist, label the result a trade-off rather than a win. Internal
+sync/async or feature off/on comparisons explain mechanism; they do not turn a
+result that still trails raw into a product-level performance win. Mean-value
+interpretations are directional only; matched confidence intervals remain the
+qualification evidence.
+
 ## CPU and host-load context
 
 Codex, editors and other applications compete with the benchmark. Each timed
@@ -396,6 +408,10 @@ Current benchmark work must preserve these contracts:
   before ordinary LZ4; high-score pages may directly adopt a sufficiently small
   delta64+LZ4 result. Scalar and every compiled SIMD backend must remain
   byte-identical, and loaded wrapper-inclusive timing remains authoritative.
+  In console tables, a timing column that measures only compression of an
+  already transformed page is labeled `LZ4 ns`; use a combined delta64+LZ4
+  label only when the measurement actually includes both operations. Do not use
+  ordinal labels such as “LZ4-2”.
 - **Preparation:** async preparation owns one unbound producer lane regardless
   of delta64 policy. Predictor scratch allocation may remain rescue-dependent;
   lane count is not.
