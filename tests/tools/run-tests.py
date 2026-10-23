@@ -2861,6 +2861,8 @@ def parallel_read_ab_verdict(sessions):
         "parallel_read_adjacent_extent_pairs",
         "parallel_read_adjacent_extent_blocks",
         "parallel_read_adjacent_chain_3plus",
+        "parallel_read_adjacent_chain_extent_max",
+        "parallel_read_adjacent_chain_blocks_max",
         "parallel_read_coalesced_pairs",
         "parallel_read_coalesced_reqs_saved",
         "parallel_read_coalesced_blocks",
@@ -2896,9 +2898,10 @@ def parallel_read_ab_verdict(sessions):
                 return {"overall": "INCOMPLETE",
                         "reason": "independent READ fan-out mixed metrics missing"}
         mixed_kernel = arm.get("kernel_read_path")
-        if not isinstance(mixed_kernel, dict) or any(
-                type(mixed_kernel.get(name)) is not int or
-                mixed_kernel[name] < 0 for name in KERNEL_READ_FIELDS) or                 not read_metadata_counters_consistent(mixed_kernel):
+        if (not isinstance(mixed_kernel, dict) or
+                any(type(mixed_kernel.get(name)) is not int or
+                    mixed_kernel[name] < 0 for name in KERNEL_READ_FIELDS) or
+                not read_metadata_counters_consistent(mixed_kernel)):
             return {"overall": "INCOMPLETE",
                     "reason": "independent READ fan-out mixed telemetry missing"}
         if any(mixed_kernel[field] for field in coalesce_fields):
@@ -2914,12 +2917,15 @@ def parallel_read_ab_verdict(sessions):
                 mixed_kernel["parallel_read_async_slots"] < 2):
             return {"overall": "INCOMPLETE",
                     "reason": "fan-out on arm did not exercise mixed lower-READ concurrency"}
-        if not isinstance(arm.get("packed_close_delta"), int) or                 arm["packed_close_delta"] <= 0:
+        if (not isinstance(arm.get("packed_close_delta"), int) or
+                arm["packed_close_delta"] <= 0):
             return {"overall": "INCOMPLETE",
                     "reason": "independent READ fan-out packed population missing"}
         for mode in ("sequential", "seeded_random"):
             phase = arm["passes"].get(mode)
-            if not isinstance(phase, dict) or                     phase.get("logical_bytes") != 4194304 or                     phase.get("verified_pages") != 1024:
+            if (not isinstance(phase, dict) or
+                    phase.get("logical_bytes") != 4194304 or
+                    phase.get("verified_pages") != 1024):
                 return {"overall": "INCOMPLETE",
                         "reason": "independent READ fan-out packed verification incomplete"}
             if any(not isinstance(phase.get(key), (int, float)) or
@@ -2929,9 +2935,10 @@ def parallel_read_ab_verdict(sessions):
                 return {"overall": "INCOMPLETE",
                         "reason": "independent READ fan-out packed metrics missing"}
             kernel = phase.get("kernel_read_path")
-            if not isinstance(kernel, dict) or any(
-                    type(kernel.get(name)) is not int or kernel[name] < 0
-                    for name in KERNEL_READ_FIELDS) or                     not read_metadata_counters_consistent(kernel):
+            if (not isinstance(kernel, dict) or
+                    any(type(kernel.get(name)) is not int or kernel[name] < 0
+                        for name in KERNEL_READ_FIELDS) or
+                    not read_metadata_counters_consistent(kernel)):
                 return {"overall": "INCOMPLETE",
                         "reason": "independent READ fan-out packed telemetry missing"}
             if any(kernel[field] for field in coalesce_fields):
@@ -2943,8 +2950,11 @@ def parallel_read_ab_verdict(sessions):
                 return {"overall": "INCOMPLETE",
                         "reason": "packed fan-out off arm submitted asynchronous READ slots"}
 
-    if len({row["source_sha"] for row in sessions}) != 1 or             len({row["fixture_sha256"] for row in sessions}) != 1 or             len({row["trace_sha256"] for row in sessions}) != 1 or             len({row["arms"]["swapz"]["logical_image_sha256"]
-                 for row in sessions}) != 1:
+    if (len({row["source_sha"] for row in sessions}) != 1 or
+            len({row["fixture_sha256"] for row in sessions}) != 1 or
+            len({row["trace_sha256"] for row in sessions}) != 1 or
+            len({row["arms"]["swapz"]["logical_image_sha256"]
+                 for row in sessions}) != 1):
         return {"overall": "INCONCLUSIVE",
                 "reason": "independent READ fan-out provenance mismatch"}
 
