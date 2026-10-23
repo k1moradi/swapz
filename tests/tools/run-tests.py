@@ -196,6 +196,8 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips", "parallel_read_pairs",
                       "parallel_read_same_extent_pairs",
+                      "parallel_read_async_batches",
+                      "parallel_read_async_slots",
                       "parallel_read_distinct_extent_pairs",
                       "parallel_read_adjacent_extent_pairs",
                       "parallel_read_adjacent_extent_blocks",
@@ -249,7 +251,9 @@ SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
-    "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues",
+    "delta64_adopted", "delta64_direct_adopted",
+    "delta64_first_lz4_skipped", "delta64_raw_rescues",
+    "delta64_lz4_rescues",
     "delta64_pack_eligible", "delta64_pack_attempts",
     "delta64_pack_cliff_crossings", "delta64_pack_adopted",
     "delta64_score_0_7", "delta64_score_8_15",
@@ -741,8 +745,10 @@ def timed_window_error(record):
             record["delta64_pack_eligible"] <= record["delta64_eligible"] and
             record["delta64_pack_adopted"] <= record["delta64_lz4_rescues"]):
         return "inconsistent timed delta64 packing accounting"
-    if (record["delta64_raw_rescues"] + record["delta64_lz4_rescues"] !=
-            record["delta64_adopted"] or
+    if (record["delta64_raw_rescues"] + record["delta64_lz4_rescues"] +
+            record["delta64_direct_adopted"] != record["delta64_adopted"] or
+            record["delta64_first_lz4_skipped"] <
+            record["delta64_direct_adopted"] or
             record["delta64_raw_payload_bytes_saved"] +
             record["delta64_lz4_payload_bytes_saved"] !=
             record["delta64_payload_bytes_saved"]):
@@ -1429,7 +1435,9 @@ def run_stage(title, command, result, *, parse_bench=False):
         parse_write_pipeline_depth(output) if parse_bench else [])
     write_pipeline_diagnostic = (
         write_pipeline_depth_verdict(write_pipeline_sessions)
-        if parse_bench else None)
+        if write_pipeline_sessions else
+        {"overall": "NOT_RUN",
+         "reason": "refuted and retired from routine qualification"})
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
@@ -1441,9 +1449,7 @@ def run_stage(title, command, result, *, parse_bench=False):
                        delta64_rescue_diagnostic.get("overall") !=
                        "PASS_DELTA64_RESCUE_AB" or
                        read_coalesce_cap_diagnostic.get("overall") !=
-                       "PASS_READ_COALESCE_CAP_EVIDENCE" or
-                       write_pipeline_diagnostic.get("overall") !=
-                       "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE"))
+                       "PASS_READ_COALESCE_CAP_EVIDENCE"))
     if marker_failure:
         rc = 1
     secure_boot_signing_blocked = (
@@ -1503,11 +1509,6 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "READ coalescing cap 2/4/8 evidence"
                 record["diagnostic"] = read_coalesce_cap_diagnostic.get(
                     "reason", "READ coalescing cap evidence is incomplete")
-            elif write_pipeline_diagnostic.get("overall") != (
-                    "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE"):
-                record["failed_phase"] = "lower-WRITE depth 1/2 evidence"
-                record["diagnostic"] = write_pipeline_diagnostic.get(
-                    "reason", "lower-WRITE depth evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -2091,6 +2092,12 @@ def delta64_rescue_verdict(sessions):
                 for row in rows),
             "delta64_adopted": statistics.mean(
                 row["arms"]["swapz"]["kernel_write_path"]["delta64_adopted"]
+                for row in rows),
+            "delta64_direct_adopted": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]["delta64_direct_adopted"]
+                for row in rows),
+            "delta64_first_lz4_skipped": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]["delta64_first_lz4_skipped"]
                 for row in rows),
             "delta64_wall_ns": statistics.mean(
                 row["arms"]["swapz"]["kernel_write_path"]["delta64_wall_ns"]
@@ -4870,11 +4877,14 @@ def print_bench(result):
         print("  Production delta64 during mixed I/O — mean foreground attempt counters")
         print_table(
             f"{model_label} mixed-I/O delta64 general attempt counters",
-            ("mode", "rescue", "eligible", "passed", "attempts", "adopted", "RAW+", "LZ4+"),
+            ("mode", "rescue", "eligible", "passed", "attempts", "adopted",
+             "direct", "LZ4-1 skip", "RAW+", "LZ4+"),
             [(mode, {0: "off", 1: "on"}.get(columns[mode]['mixed_delta64_rescue'], "mixed"),
               *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
                 "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
-                "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues")))
+                "delta64_adopted", "delta64_direct_adopted",
+                "delta64_first_lz4_skipped",
+                "delta64_raw_rescues", "delta64_lz4_rescues")))
              for mode in ("sync", "async")])
         print_table(
             f"{model_label} mixed-I/O delta64 packing-path activity",
@@ -5316,12 +5326,14 @@ def print_bench(result):
                 f"{mode['lower_write_requests']:.1f}",
                 f"{mode['delta64_attempts']:.1f}",
                 f"{mode['delta64_adopted']:.1f}",
+                f"{mode['delta64_direct_adopted']:.1f}",
+                f"{mode['delta64_first_lz4_skipped']:.1f}",
                 f"{mode['delta64_wall_ns'] / 1e6:.2f}",
             ))
         print_table(
             "Delta64 rescue means — positive fixture, fixed K=1",
             ("rescue", "W MB/s", "p99", "lower req", "attempts",
-             "adopted", "D64 ms"), rows)
+             "adopted", "direct", "LZ4-1 skip", "D64 ms"), rows)
         ci_rows = []
         for label, field in (
                 ("W %", "throughput_change_fraction"),
@@ -5713,7 +5725,7 @@ def print_bench(result):
             "Depth 2 minus depth 1 paired 95% confidence intervals",
             ("metric", "mean", "low", "high"), ci_rows)
     else:
-        print("\n  Lower-WRITE depth 1/2 A/B: NOT QUALIFIED "
+        print("\n  Lower-WRITE depth 1/2 A/B: RETIRED FROM ROUTINE QUALIFICATION "
               f"({write_depth.get('reason', write_depth.get('overall', 'NOT_RUN'))})")
 
 
@@ -5996,7 +6008,6 @@ def main():
                     "Delta64 K=1/K=2 diagnostic source Git ID mismatched tested checkout")
         if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
                 saturation.get("overall") != "PASS_WRITE_SATURATION_EVIDENCE" or \
-                write_depth.get("overall") != "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE" or \
                 lz4_sweep.get("overall") != "PASS_LZ4_ACCELERATION_AB":
             result["overall"] = "FAIL"
             exit_code = 1

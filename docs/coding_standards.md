@@ -1216,3 +1216,19 @@ GC victim tie traversal and dead-segment allocation share the circular allocator
 probe only as a fairness cursor. Successful rotation must not reset that cursor
 to the victim index. This is logical allocator fairness and must not be
 described as physical flash wear leveling.
+
+
+### Predictor-first rescue and independent lower-READ fan-out
+
+With delta64 rescue enabled, the sampled classifier runs before ordinary LZ4.
+Score>=24 pages run delta64 plus the configured rescue LZ4 first. A candidate
+at or below 2024 bytes may be adopted directly, with explicit
+`delta64_direct_adopted` and `delta64_first_lz4_skipped` telemetry. Larger
+candidates fall back to ordinary LZ4 and retain the existing strict comparison;
+lower scores run ordinary LZ4 first and may enter only the packing-cliff route.
+
+Independent compressed READs may fan out across the preallocated private read
+slots. All missing lower ranges are submitted before the ordered worker joins
+them. Completion callbacks only record lower completion; they never publish
+shared cache state or complete upper BIOs. Shared cache absorption occurs only
+after ordered-worker validation and successful upper completion.
