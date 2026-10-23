@@ -181,6 +181,8 @@ class PublicMakeContract(unittest.TestCase):
                 (ROOT / "src/kernel/Makefile").read_text())
             (fixture / "src/kernel/VERSION").write_text(
                 (ROOT / "src/kernel/VERSION").read_text())
+            (fixture / "src/kernel/superblock.h").write_text(
+                (ROOT / "src/kernel/superblock.h").read_text())
             kernel_source = fixture / "src/kernel/dm-target.c"
             kernel_source.write_text("int fake_kernel_source = 1;\n")
             (fixture / "src/kernel/dummy.h").write_text(
@@ -971,9 +973,11 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("--write-only-qd", loaded)
         self.assertIn("--sustained-write", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
-        self.assertIn("START_WRITE_PIPELINE_DEPTH=", loaded)
-        self.assertIn("PASS_WRITE_PIPELINE_DEPTH=", loaded)
-        self.assertIn("--write-pipeline-depth", loaded)
+        self.assertNotIn("START_WRITE_PIPELINE_DEPTH=", loaded)
+        self.assertNotIn("PASS_WRITE_PIPELINE_DEPTH=", loaded)
+        self.assertNotIn("--write-pipeline-depth", loaded)
+        self.assertIn("def parse_write_pipeline_depth", reporter)
+        self.assertIn("PASS_WRITE_PIPELINE_DEPTH_EVIDENCE", reporter)
         self.assertIn("--delta64-lz4-acceleration 4", loaded)
         self.assertLess(loaded.index("tests/tools/deploy-nullblk.sh"),
                         loaded.index("tests/tools/benchmark-owned-pair.sh"))
