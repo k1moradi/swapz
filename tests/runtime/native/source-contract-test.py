@@ -2626,6 +2626,36 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("${TMPDIR:-/tmp}/swapz-deploy.", deploy)
         self.assertIn("${TMPDIR:-/tmp}/swapz-benchmark.", benchmark)
 
+    def test_id36_resource_pressure_is_bounded_and_owned(self):
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        pressure = (ROOT / "tests/tools/qualify-resource-pressure.sh").read_text()
+        helper = (ROOT / "tests/runtime/benchmark/resource-pressure.py").read_text()
+        rootless = (ROOT / "tests/tools/test-rootless.sh").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+
+        self.assertIn("qualify-resource-pressure.sh", loaded)
+        self.assertIn("--validated-source \"$tested_source\"", loaded)
+        self.assertIn("--shared-plan \"$shared_plan\"", loaded)
+        self.assertIn("CGROUP_ROOT=/sys/fs/cgroup", pressure)
+        self.assertIn("MEMORY_HIGH_BYTES=$((576 * 1024 * 1024))", pressure)
+        self.assertIn("MEMORY_MAX_BYTES=$((896 * 1024 * 1024))", pressure)
+        self.assertIn("memory.swap.max", pressure)
+        self.assertIn("cpu_workers=$((online_cpus * 2))", pressure)
+        self.assertIn("PRESSURE_MIB=576", pressure)
+        self.assertIn("PASS_ID36_RESOURCE_PRESSURE=", pressure)
+        self.assertIn("high_delta > 0", pressure)
+        self.assertIn("oom_delta == 0 && oom_kill_delta == 0", pressure)
+        self.assertIn("cpu_some_delta > 0", pressure)
+        self.assertIn("--async-prepare --shared-plan", pressure)
+        self.assertIn("--lower-mbps 80 --hw-queue-depth 64", pressure)
+        self.assertNotIn("swapon", pressure)
+        self.assertNotIn("allow_physical_backing", pressure)
+        self.assertIn("bytearray(args.memory_mib * MIB)", helper)
+        self.assertIn("multiprocessing.get_context(\"fork\")", helper)
+        self.assertIn("resource-pressure.py --help", rootless)
+        self.assertIn('"id36": re.compile(', runner)
+        self.assertIn("ID36 low-RAM/heavy-CPU evidence is incomplete", runner)
+
     def test_owned_nullblk_smoke_qualifies_retained_synthetic_faults(self):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         # These are deliberately pre-submission injections on the already
