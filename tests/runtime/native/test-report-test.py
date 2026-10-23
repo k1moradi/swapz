@@ -490,6 +490,9 @@ def arm(candidate, *, mode, regime):
         "packed_read": packed,
         "kernel_write_path": (standard_kernel_write(mode=mode, target=8)
                               if swapz else None),
+        "kernel_read_path": (
+            dict(packed["passes"]["sequential"]["kernel_read_path"])
+            if swapz else None),
     }
 
 
@@ -523,6 +526,60 @@ def parallel_arm(enabled, regime="ssd_emulated"):
                 "parallel_read_coalesce_skip_gap",
                 "parallel_read_coalesce_skip_other"):
             kernel[field] = 0
+    return record
+
+
+def fanout_arm(enabled):
+    record = parallel_arm(enabled, regime="ssd_emulated")
+    mixed_kernel = record["kernel_read_path"]
+    source_kernel = record["packed_read"]["passes"]["sequential"]["kernel_read_path"]
+    mixed_kernel.clear()
+    mixed_kernel.update(source_kernel)
+
+    # This final decision forces ID63 off. Preserve independent fan-out only.
+    coalesce_fields = (
+        "parallel_read_adjacent_extent_pairs",
+        "parallel_read_adjacent_extent_blocks",
+        "parallel_read_adjacent_chain_3plus",
+        "parallel_read_adjacent_chain_extent_max",
+        "parallel_read_adjacent_chain_blocks_max",
+        "parallel_read_coalesced_pairs",
+        "parallel_read_coalesced_reqs_saved",
+        "parallel_read_coalesced_blocks",
+        "parallel_read_coalesce_extra_blocks",
+        "parallel_read_coalesce_skip_cached",
+        "parallel_read_coalesce_skip_noncontig_slot",
+        "parallel_read_coalesce_skip_gap",
+        "parallel_read_coalesce_skip_other",
+    )
+    for kernel in [mixed_kernel] + [
+            phase["kernel_read_path"]
+            for phase in record["packed_read"]["passes"].values()]:
+        for field in coalesce_fields:
+            kernel[field] = 0
+
+    if enabled:
+        mixed_kernel["parallel_read_pairs"] = 96
+        mixed_kernel["parallel_read_same_extent_pairs"] = 0
+        mixed_kernel["parallel_read_async_batches"] = 48
+        mixed_kernel["parallel_read_async_slots"] = 144
+        mixed_kernel["parallel_read_distinct_extent_pairs"] = 96
+        record["throughput_mbps"]["logical_write_mbps"] = 25.0
+        record["throughput_mbps"]["logical_read_mbps"] = 7.8
+        record["read_p99_ns"] = 4_000_000
+        record["lower_io"]["lower_read_requests"] = 3
+        for phase in record["packed_read"]["passes"].values():
+            phase["useful_read_mbps"] *= 1.05
+            phase["read_p99_ms"] *= .95
+    else:
+        for field in ("parallel_read_pairs", "parallel_read_same_extent_pairs",
+                      "parallel_read_async_batches", "parallel_read_async_slots",
+                      "parallel_read_distinct_extent_pairs"):
+            mixed_kernel[field] = 0
+        record["throughput_mbps"]["logical_write_mbps"] = 24.0
+        record["throughput_mbps"]["logical_read_mbps"] = 7.0
+        record["read_p99_ns"] = 5_000_000
+        record["lower_io"]["lower_read_requests"] = 4
     return record
 
 
@@ -768,6 +825,23 @@ def synthetic_log():
         for record in ((swapz, raw) if index % 2 else (raw, swapz)):
             out.append(json.dumps(record))
         out.append(f"PASS_SD_READ_COALESCE_AB={enabled}")
+
+    spec = runner.MODEL_SPECS["ssd_emulated"]
+    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
+        out.append(f"START_PARALLEL_READ_AB={enabled}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+        raw = arm("off", mode=1, regime="ssd_emulated")
+        swapz = fanout_arm(enabled)
+        for record in ((swapz, raw) if index % 2 else (raw, swapz)):
+            out.append(json.dumps(record))
+        out.append(f"PASS_PARALLEL_READ_AB={enabled}")
+
     for regime in runner.MODEL_ORDER:
         policy_spec = runner.MODEL_SPECS[regime]
         for index, allow in enumerate(runner.CONFIRMATION_SEQUENCE):
@@ -1223,6 +1297,20 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             coalesce_diag["modes"]["1"]["sequential"][
                 "parallel_read_coalesce_skip_other"], 0)
+
+        parallel_read = runner.parse_parallel_read_ab(synthetic_log())
+        self.assertEqual([row["parallel_reads"] for row in parallel_read],
+                         list(runner.CONFIRMATION_SEQUENCE))
+        parallel_diag = runner.parallel_read_ab_verdict(parallel_read)
+        self.assertEqual(parallel_diag["overall"],
+                         "PASS_PARALLEL_READ_AB_EVIDENCE", parallel_diag)
+        self.assertEqual(parallel_diag["matched_pairs"], 5)
+        self.assertEqual(
+            parallel_diag["modes"]["0"]["mixed"]["async_batches"], 0)
+        self.assertGreater(
+            parallel_diag["modes"]["1"]["mixed"]["async_batches"], 0)
+        self.assertIn("write_mbps", parallel_diag["paired"]["mixed"])
+        self.assertIn("sequential", parallel_diag["paired"]["packed"])
 
         sd_coalesce = runner.parse_sd_read_coalesce_ab(synthetic_log())
         self.assertEqual([row["read_coalesce"] for row in sd_coalesce],
