@@ -1429,3 +1429,15 @@ benefit. Keep depth two as an explicit diagnostic for future physical media.
 Predictor-first delta64 telemetry must distinguish direct adoptions from
 baseline-measured RAW/LZ4 rescues. The rescue A/B continues to pin
 `delta64_lz4_acceleration=4` and K=1.
+
+
+Physical backing is outside the ordinary RAM-backed qualification matrix.
+Rootless qualification must verify that the administrative formatter refuses
+non-block-device inputs without modification, while source contracts verify
+the opt-in superblock gate, reserved data offset, and exclusion of block 0 from
+all data/discard paths. Exact-current-main must still pass ordinary `make test`
+before any physical-media evidence is considered.
+
+Capacity-exhaustion evidence must preserve committed reads: a write may return
+`-ENOSPC`, but `ctx->failed` must stay clear unless a separate integrity or
+lower-I/O error occurs.

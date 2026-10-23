@@ -67,6 +67,15 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertEqual(version_from_dkms.stdout, VERSION)
         self.assertEqual(subprocess.run([binary, "start", "/dev/sda"],
                          capture_output=True).returncode, 2)
+        # Rootless safety: the format command rejects a regular file and
+        # leaves its bytes untouched. No block-device formatting occurs here.
+        regular = self.home / "not-a-block-device"
+        regular.write_bytes(b"sentinel")
+        before = regular.read_bytes()
+        formatted = subprocess.run([binary, "format", regular],
+                                   capture_output=True)
+        self.assertEqual(formatted.returncode, 2)
+        self.assertEqual(regular.read_bytes(), before)
         self.assertNotEqual(self.invoke("install").returncode, 0)
         r = self.invoke("uninstall")
         self.assertEqual(r.returncode, 0, r.stderr)

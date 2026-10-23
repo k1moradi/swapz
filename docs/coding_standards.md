@@ -1232,3 +1232,16 @@ slots. All missing lower ranges are submitted before the ordered worker joins
 them. Completion callbacks only record lower completion; they never publish
 shared cache state or complete upper BIOs. Shared cache absorption occurs only
 after ordered-worker validation and successful upper completion.
+
+
+### Capacity exhaustion and physical-backing invariants
+
+`-ENOSPC` is a per-write capacity result, not an integrity failure. It must
+not set `ctx->failed`; already-published mappings remain readable. If a READ
+first drains an older window that exhausts capacity, the uncommitted writes
+fail while the READ continues against committed authority.
+
+Non-`null_blk` backing is disabled by default. When explicitly enabled it
+requires a valid exact-size SWAPZ authorization header in reserved block 0.
+All mapping data and segment discard ranges start after that reserved block.
+Fault-injection knobs are forbidden on physical backing.
