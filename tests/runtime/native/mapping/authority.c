@@ -412,6 +412,57 @@ static int test_packed_append_only_segment_edges(void)
 	return 0;
 }
 
+
+static int test_batch_tail_abort_preserves_older_snapshot(void)
+{
+	const swapz_u32 first_page[] = {0};
+	const swapz_u32 second_page[] = {1};
+	struct swapz_tx first, second;
+	unsigned int abandoned_before;
+
+	CHECK(init() == 0);
+	/* Production batching uses rotating/dead-segment allocation semantics. */
+	authority.reuse_dead_segments = 1;
+
+	CHECK(swapz_stage_batch(&authority, first_page, 1, 1, &first) == 0);
+	CHECK(first.start_block == 0 && first.sequence == 1);
+	CHECK(encode(&first) == 0);
+	memcpy(previous_extent, extent, SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_batch_pause(&authority, &first) == 0);
+	CHECK(!authority.in_flight && authority.batch_pending == 1 &&
+	      authority.batch_consumed == 0);
+
+	CHECK(swapz_stage_batch(&authority, second_page, 1, 1, &second) == 0);
+	CHECK(second.start_block == 1 && second.sequence == 2);
+	CHECK(encode(&second) == 0);
+	CHECK(swapz_batch_pause(&authority, &second) == 0);
+	CHECK(!authority.in_flight && authority.batch_pending == 2 &&
+	      authority.batch_first_sequence == 1 &&
+	      authority.batch_consumed == 0);
+
+	/* Only the newest verified snapshot may be cancelled. */
+	CHECK(swapz_batch_abort_tail(&authority, &first) == -ESTALE);
+	abandoned_before = authority.abandoned_blocks;
+	CHECK(swapz_batch_abort_tail(&authority, &second) == 0);
+	CHECK(authority.abandoned_blocks == abandoned_before + 1);
+	CHECK(authority.batch_pending == 1 &&
+	      authority.batch_first_sequence == 1 &&
+	      authority.batch_consumed == 0);
+
+	/* The older physical run remains replayable and publishes normally. */
+	CHECK(swapz_batch_resume(&authority, &first) == 0);
+	CHECK(authority.in_flight && authority.batch_replaying);
+	CHECK(swapz_finish(&authority, &first, previous_extent,
+			  SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+	CHECK(!authority.in_flight && !authority.batch_pending &&
+	      !authority.batch_replaying);
+	CHECK(maps[0].valid && maps[0].start_block == first.start_block &&
+	      maps[0].generation == 1);
+	CHECK(!maps[1].valid);
+	CHECK(live[first.start_block] == 1 && !live[second.start_block]);
+	return 0;
+}
+
 static int test_short_write_always_quarantines(void)
 {
 	const swapz_u32 pages[] = {9};
@@ -463,6 +514,7 @@ int main(void)
 	CHECK(test_generation_overflow_and_duplicate_rejections() == 0); passed++;
 	CHECK(test_allocator_reserve_exhaustion() == 0); passed++;
 	CHECK(test_packed_append_only_segment_edges() == 0); passed++;
+	CHECK(test_batch_tail_abort_preserves_older_snapshot() == 0); passed++;
 	CHECK(test_short_write_always_quarantines() == 0); passed++;
 	CHECK(test_old_liveness_corruption_fail_closed() == 0); passed++;
 	printf("SWAPZ_EXACT_AUTHORITY_TESTS_PASS=%d\n", passed);

@@ -75,9 +75,17 @@ allocation for a destination, publish relocation before lower completion, or
 continue after suspend/drain/failure has revoked ownership.
 
 K>1 lower-WRITE slots require immutable per-run ownership exactly as K=1 does.
-Adding a slot without measured ready-run pressure is forbidden. Same-page writes
-across runs require an explicit generation/order fence; publication remains
-serialized even if lower I/O is parallel.
+Adding a slot without measured ready-run pressure is forbidden. The bounded
+depth-2 diagnostic is permitted only because fast-QD32 ready-wait evidence
+established that pressure. Each slot owns disjoint packed bytes, transaction
+snapshots, BIO references and completion state. Same-page writes across runs
+require an explicit generation/order fence; authority publication and upper-BIO
+completion remain FIFO even if lower I/O completes out of order. A two-run
+authority group may not append after replay has consumed its prefix; failed
+second-run preparation/submission must roll back only its verified tail
+reservations. PREFLUSH/FUA/DISCARD, GC ownership boundaries, suspend, teardown
+and failure drain both slots in order. Production remains depth 1 until paired
+evidence explicitly promotes depth 2.
 
 Physical-device support is not a coding shortcut around current safety policy.
 No production/test flag may silently relax the RAM-backed owned-device gate.
@@ -487,9 +495,11 @@ or participate in policy.
 ID63 may operate only on the already-admitted independent READ prefix. It never
 waits for another BIO and never crosses a write, barrier or dependent read.
 Eligibility must first inspect the ordered owner's direct/LRU residency metadata
-without copying cached blocks into private slot scratch. Private slots are
-primed only after the exact missing ranges prove one zero-padding coalesced
-lower request.
+without copying cached blocks into private slot scratch. If the FIFO head is
+already satisfied by shared cache residency, reject in O(1) before the bounded
+candidate-chain scan; do not repeatedly walk the same 64-BIO prefix for cached
+siblings of one extent. Private slots are primed only after the exact missing
+ranges prove one zero-padding coalesced lower request.
 
 Eligibility is based on the exact lower blocks still missing for every grouped
 BIO, not merely full-extent adjacency. Each private extent's missing mask must
@@ -548,12 +558,14 @@ production code. `parallel_reads_enabled` remains in status for schema
 compatibility and must be zero; `read_worker_cpu_ns` must likewise remain
 zero.
 
-`swapz_try_parallel_read_batch()` is ID63-only. After the first immutable-read
-prefix scan, it must reject before slot preparation, a second FIFO walk,
-cache-LRU scans or cached-block memcpy unless read coalescing is enabled and the
-first two distinct extents are physically adjacent in the same segment. Any cached/noncontiguous/gapped missing range must return before private-slot
-priming and
-BIO ownership transfers. Standalone same-extent slot grouping is retired;
+`swapz_try_parallel_read_batch()` is ID63-only. The one allowed pre-scan cache
+probe is the O(1) FIFO-head exact-range check: a fully cached head must return
+immediately before the immutable-read prefix or candidate-chain scan. After the
+prefix scan, all other rejection paths must still return before private-slot
+priming and BIO ownership transfer; the bounded candidate may inspect shared
+cache metadata to derive exact missing ranges, but it must not copy cached
+blocks into slot scratch. Noncontiguous or gapped missing ranges remain
+ineligible. Standalone same-extent slot grouping is retired;
 ordinary `swapz_read()` already reuses the shared extent/metadata caches.
 For a successful ID63 pair, lower-I/O/decode telemetry is committed before upper
 BIO completion, but shared LRU cache absorption must occur only after every
@@ -571,7 +583,10 @@ dead benchmark sessions merely for historical telemetry.
 Whole-page delta64 is the only maintained predictive transform; the refuted
 CL-delta, byte-delta, delta32, reset-delta64 and xor64 experiments live only in
 Git history. The read-only module parameter `delta64_rescue` defaults to zero
-and is snapshotted into each target at construction. Both producer and ordered
+and is snapshotted into each target at construction. The rescue-only second LZ4
+pass uses the separate read-only `delta64_lz4_acceleration` parameter
+(default 1, bounded 1..4); changing it must not alter the ordinary first-pass
+`lz4_acceleration` policy. Both producer and ordered
 write paths must bypass the rescue call entirely when disabled; no classifier,
 rescue timer or rescue counter runs and no predictor scratch is allocated for
 either write or read slots. Ordinary LZ4 remains active. The codec and GC retain

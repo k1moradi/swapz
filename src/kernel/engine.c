@@ -1190,6 +1190,21 @@ static int swapz_bulk_abort(struct swapz_engine *e,
 	return 0;
 }
 
+static int swapz_bulk_abort_tail(struct swapz_engine *e,
+				       const struct swapz_io_run *run,
+				       swapz_u8 count)
+{
+	int error;
+
+	while (count) {
+		count--;
+		error = swapz_batch_abort_tail(e->authority, &run->txs[count]);
+		if (error)
+			return error;
+	}
+	return 0;
+}
+
 static int swapz_validate_batched_pages(struct swapz_engine *e,
 					const struct swapz_compressed_page *pages,
 					swapz_u8 count,
@@ -1233,6 +1248,7 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 {
 	swapz_u8 extent_count = 0, compressed_count = 0, raw_count = 0;
 	swapz_u8 entry = 0, group, staged = 0;
+	swapz_u8 initial_batch_pending;
 	swapz_u32 run_start = 0;
 	swapz_u16 run_blocks = 0;
 	swapz_u8 *run_bytes;
@@ -1251,6 +1267,7 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 					     &compressed_count, &raw_count);
 	if (error)
 		return error;
+	initial_batch_pending = e->authority->batch_pending;
 
 	run_bytes = run->bytes;
 	run_txs = run->txs;
@@ -1396,7 +1413,9 @@ abort_run:
 		if (staged) {
 			run->extent_count = staged;
 			{
-				int cleanup = swapz_bulk_abort(e, run, 0);
+				int cleanup = initial_batch_pending ?
+					swapz_bulk_abort_tail(e, run, staged) :
+					swapz_bulk_abort(e, run, 0);
 
 				if (cleanup)
 					return cleanup;
@@ -1413,6 +1432,15 @@ abort_run:
 	run->page_count = entry;
 	*prepared_pages = entry;
 	return 0;
+}
+
+int swapz_engine_abort_batched_run_tail(struct swapz_engine *e,
+				      const struct swapz_io_run *run)
+{
+	if (!e || !e->authority || !run || !run->txs ||
+	    !run->extent_count || run->extent_count > SWAPZ_MAX_RECORDS)
+		return -EINVAL;
+	return swapz_bulk_abort_tail(e, run, run->extent_count);
 }
 
 int swapz_engine_complete_batched_run(struct swapz_engine *e,

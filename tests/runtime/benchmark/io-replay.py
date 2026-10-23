@@ -1011,8 +1011,9 @@ KERNEL_WRITE_COUNTER_FIELDS = (
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",
     "delta64_prepare_active_max", "lz4_acceleration",
-    "k1_allow_after_read_bypass", "read_coalesce_max_blocks",
-    "invalidate_cache_on_write_admit")
+    "delta64_lz4_acceleration", "write_pipeline_depth",
+    "pipeline_active_max", "k1_allow_after_read_bypass",
+    "read_coalesce_max_blocks", "invalidate_cache_on_write_admit")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
@@ -1050,6 +1051,15 @@ def kernel_write_delta(before, after):
     if (before["lz4_acceleration"] != after["lz4_acceleration"] or
             not 1 <= after["lz4_acceleration"] <= 4):
         raise ValueError("invalid or changed swapz LZ4 acceleration policy")
+    if (before["delta64_lz4_acceleration"] !=
+            after["delta64_lz4_acceleration"] or
+            not 1 <= after["delta64_lz4_acceleration"] <= 4):
+        raise ValueError("invalid or changed swapz delta64 LZ4 acceleration")
+    if (before["write_pipeline_depth"] != after["write_pipeline_depth"] or
+            after["write_pipeline_depth"] not in (1, 2)):
+        raise ValueError("invalid or changed swapz WRITE pipeline depth")
+    if not 0 <= after["pipeline_active_max"] <= after["write_pipeline_depth"]:
+        raise ValueError("invalid swapz WRITE pipeline activity")
     if (before["delta64_prepare_workers"] != after["delta64_prepare_workers"] or
             not 0 <= after["delta64_prepare_workers"] <= 4):
         raise ValueError("invalid or changed swapz delta64 preparation width")

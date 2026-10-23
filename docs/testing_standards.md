@@ -178,7 +178,14 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 
 ## Deferred optimization evidence gates
 
-- **ID38 K>1:** keep passive counters. No second write slot is justified.
+- **ID38 lower-WRITE depth:** production remains depth 1. The standard loaded
+  matrix now includes five matched fast-QD32 depth-1/depth-2 rounds because the
+  idle-host QD32 run exposed repeated ready-window stalls behind the sole lower
+  WRITE. Depth 2 is evidence-only: it must use two immutable run owners,
+  activate two simultaneous lower WRITEs in the measured arm, preserve strict
+  FIFO authority publication, fence same-logical-page writes across slots and
+  drain both slots at barriers/suspend/failure. Configuration without observed
+  depth-2 activation is incomplete evidence, not a pass.
 - **ID39 helper concurrency:** refuted and removed from current source. Do not
   restore a helper workqueue merely to satisfy historical telemetry.
 - **ID60 same-extent grouping:** refuted and retired. Do not keep a dedicated
@@ -186,10 +193,14 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
   shared extent/metadata caches.
 - **ID63 adjacent READ coalescing:** production keeps `read_coalesce=1` by
   default. Retain five matched fast rounds and five matched serial-depth rounds.
-  The latest successful matrix reconfirms fast sequential request reduction
-  without a statistically established throughput/p99 loss and strong serial
-  request/throughput/p99 wins; exact-current-main confirmation remains required
-  after alpha.27's cache change. Every merge remains exact, same-segment,
+  The idle SSE2 matrix showed a fast sequential throughput loss despite request
+  reduction, while serial-depth service remained strongly positive. The next
+  exact-source run therefore qualifies the cached-head fast reject before any
+  policy change: a FIFO head already satisfied by shared cache residency must
+  return before the bounded 64-BIO candidate scan and private-slot preparation.
+  Selected-chain success ACKs remain fail-closed: all selected slot decode/CRC
+  work and the chain failure decision must finish before the first success ACK.
+  Every merge remains exact, same-segment,
   <=8 blocks total and zero-padding; `parallel_read_coalesce_extra_blocks`
   stays zero and defensive skip-other stays zero. Eligibility must use shared
   cache metadata without private-slot memcpy, and source contracts must prove
@@ -204,8 +215,12 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
   continue proving the temporary live-reference decrement is exactly restored
   before return/commit, including an error after a validated shared-extent page.
-- **ID67 predictive rescue:** rescue remains default-off. RAW or >2024-byte LZ4
-  baselines use threshold 24 and require a strictly smaller candidate. A
+- **ID67 predictive rescue:** rescue remains default-off. The second LZ4 pass
+  has a separate read-only `delta64_lz4_acceleration` control, default 1. The
+  standard rescue A/B fixes that control at 4 in both arms so rescue remains the
+  only changed policy while testing whether lower second-pass CPU cost closes
+  the idle-SSE2 service regression. RAW or >2024-byte LZ4 baselines use
+  threshold 24 and require a strictly smaller candidate. A
   baseline at or below 2024 bytes is eligible only when the production planner
   identifies the exact next uniform SWZ packing limit; that route uses threshold
   16 and the candidate must cross the packing cliff as well as remain strictly
@@ -275,28 +290,30 @@ outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 
 ## Open qualification gaps
 
-The next architecture experiment is an immutable ping-pong WRITE pipeline:
-while one sealed run is in lower I/O, a separate active collector may admit and
-prepare new writes. Per-page LZ4/CRC must happen during collection, not after
-freeze. A shared global accumulator/planner is retained; device parallelism is
-expressed as a bounded number of immutable in-flight runs rather than per-lane
-write accumulators.
+The current architecture experiment is the bounded immutable lower-WRITE
+pipeline. Production depth remains one; the standard evidence arm may submit a
+second sealed run only while the first run's authority snapshots are still
+unconsumed. Per-page LZ4/CRC happens during collection, not after freeze. Each
+submitted run owns disjoint packed bytes, transaction snapshots, upper BIO
+references and completion state until physical completion and FIFO authority
+publication. A shared serialized planner/authority remains the only publisher.
 
-Before asynchronous lower I/O can return from submission, every in-flight run
-must own its packed bytes, staged transaction state, upper BIO references,
-ordering/FUA state and completion result until lower completion and authority
-publication. Same-page writes across runs require generation reservation or an
-ordering fence. Completion remains fail-closed.
+Depth two must fence same-logical-page writes across slots, stay in the same
+unconsumed authority batch group, roll back a failed second preparation or
+submission from the verified tail only, and drain both slots for barriers,
+suspend, teardown and failure. Physical completion may occur out of order;
+mapping publication and upper-BIO completion may not. The standard five-pair
+fast-QD32 A/B is evidence collection, not promotion, and must observe
+`pipeline_active_max=2` in the depth-two arm.
 
-The first pipeline qualification uses one lower run outstanding plus one active
-collector. Higher lower-I/O depth is a later explicit K experiment. Generic
-ordinary-LZ4 preparation concurrency remains blocked by the prior shallow-backlog
-evidence. Delta64 rescue is the only preparation-concurrency exception, but its
-production-compatible preparation width remains K=1. Two-host paired evidence
-now refutes routine K=2 qualification: it produced no service gain on the older
-host and materially worsened p99 and preparation cost on the newer host. K=2/4
-remain bounded diagnostic-only widths for a specifically motivated future
-workload; neither belongs in the standard loaded matrix.
+Generic ordinary-LZ4 preparation concurrency remains blocked by the prior
+shallow-backlog evidence. Delta64 rescue is the only preparation-concurrency
+exception, but its production-compatible preparation width remains K=1.
+Two-host paired evidence refutes routine delta64 K=2 qualification: it produced
+no service gain on the older host and materially worsened p99 and preparation
+cost on the newer host. K=2/4 delta64 preparation widths remain private
+diagnostic-only controls for a specifically motivated future workload; neither
+belongs in the standard loaded matrix.
 
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted

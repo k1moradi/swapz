@@ -246,11 +246,14 @@ The alpha.24 policy change only enables the already implemented bounded
 `async_prepare` path by default. Do not change its scheduling gates, K=1
 ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
-- **ID38:** retain ready-wait windows/records/wall/cause. The next architecture
-  experiment may compare lower-WRITE submission depth 1 versus 2 using separate
-  immutable run ownership and strictly ordered publication; production remains
-  depth 1 until paired evidence closes the fast-mixed gap without p99 or
-  amplification regressions.
+- **ID38:** retain ready-wait windows/records/wall/cause for the production
+  depth-1 arm. A bounded diagnostic `write_pipeline_depth=1|2` is now staged
+  for five matched fast-QD32 rounds. Depth 2 owns separate immutable run
+  buffers/transactions/BIOs/completions, fences same-page cross-slot writes and
+  publishes authority strictly FIFO even when physical completion is out of
+  order. Production remains depth 1 until paired evidence shows a useful
+  service win without p99, lower-byte/request, correctness or failure-ordering
+  regression.
 - **ID65:** owner-qualify the synchronous read-path cleanup; do not restore or
   replace the rejected helper workqueue unless new measured evidence requires it.
 - **ID58/59:** keep representative-content collection offline.

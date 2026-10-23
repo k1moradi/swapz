@@ -211,21 +211,22 @@ for acceleration_mode in "${confirmation_modes[@]}"; do
     (( index += 1 ))
 done
 
-# Delta64 rescue policy confirmation at fixed K=1. Five counterbalanced
-# off/on pairs reuse the exact positive delta64 fixture and SSD RAM model so
-# the report can distinguish rescue value from preparation-width effects.
+# Delta64 rescue confirmation at fixed K=1 with second-LZ4 acceleration 4.
+# Five counterbalanced off/on pairs reuse the exact positive delta64 fixture
+# and SSD RAM model; the off arm also carries acceleration 4.
 index=0
 for delta64_rescue in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium
                --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
                --write-only-qd 32 --async-prepare)
-    # benchmark-owned-pair.sh consumes private suffixes from the tail in
-    # reverse parser order: rescue, then workers, then shared plan.
+    # benchmark-owned-pair.sh peels private suffixes from the tail:
+    # shared plan, workers, second-LZ4 acceleration, then rescue.
     if (( delta64_rescue )); then
         arguments+=(--delta64-rescue)
     fi
-    arguments+=(--delta64-prepare-workers 1
+    arguments+=(--delta64-lz4-acceleration 4
+               --delta64-prepare-workers 1
                --shared-plan "$shared_plan/delta64")
     if (( index % 2 )); then
         arguments+=(--swapz-first)
@@ -336,6 +337,27 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
+# ID38 bounded lower-WRITE ownership A/B. Both arms use the same sustained
+# fast-model QD32 write trace, K=1 preparation, ordinary LZ4, and delta64 off.
+# Only immutable physical submission depth varies; authority publication is FIFO.
+index=0
+for write_pipeline_bit in "${confirmation_modes[@]}"; do
+    write_pipeline_depth=$(( write_pipeline_bit + 1 ))
+    arguments=(--run-owned-ram-pair --profile medium
+               --retain-ms 2 --unpaced
+               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
+               --write-only-qd 32 --async-prepare
+               --write-pipeline-depth "$write_pipeline_depth"
+               --shared-plan "$shared_plan")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_WRITE_PIPELINE_DEPTH=%s\n' "$write_pipeline_depth"
+    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+    printf 'PASS_WRITE_PIPELINE_DEPTH=%s\n' "$write_pipeline_depth"
+    (( index += 1 ))
+done
+
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 K=1 read-bypass sessions, 10 paired LZ4 acceleration sessions, 10 paired delta64 rescue sessions, 10 paired delta64 preparation-width sessions, 20 ID63 toggle sessions, 30 ID63 cap sessions, and 40 write-only sessions completed.' \
-    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry bounded matched evidence; ID69 is now a loaded structural invariant.'
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 paired LZ4 acceleration sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 30 ID63 cap sessions, 40 sustained write-only sessions, and 10 lower-WRITE depth sessions completed.' \
+    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, delta64 second-LZ4, fast QD4/QD8/QD32, and lower-WRITE depth 1/2 carry bounded matched evidence; retired K1 read-bypass and delta64 preparation-width A/Bs stay out of routine qualification.'

@@ -237,6 +237,12 @@ int swapz_engine_complete_batched_run(
 				    const struct swapz_io_run *run,
 				    swapz_u16 completed_blocks, int io_error,
 				    swapz_u8 *committed_pages);
+/*
+ * Cancel a prepared run that is still the newest paused authority tail.
+ * Used only when a second lower-run submission fails before dm_io owns it.
+ */
+int swapz_engine_abort_batched_run_tail(struct swapz_engine *engine,
+				      const struct swapz_io_run *run);
 
 int swapz_engine_write_window_batched_read_cap(
 				   struct swapz_engine *engine,

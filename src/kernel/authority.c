@@ -973,6 +973,39 @@ int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
 	return 0;
 }
 
+int swapz_batch_abort_tail(struct swapz_authority *a,
+			   const struct swapz_tx *tx)
+{
+	swapz_u8 index;
+	swapz_u32 expected_sequence;
+
+	/*
+	 * Tail cancellation is deliberately narrower than replay/abort. It is
+	 * valid only before the oldest paused snapshot has been consumed, which
+	 * lets a failed second-run preparation roll back without publishing or
+	 * disturbing the older run.
+	 */
+	if (!a || !tx || a->in_flight || a->batch_replaying ||
+	    !a->batch_pending || a->batch_consumed)
+		return -EINVAL;
+	index = a->batch_pending - 1U;
+	expected_sequence = a->batch_first_sequence + index;
+	if (tx->sequence != expected_sequence ||
+	    tx->start_block / SWAPZ_SEGMENT_BLOCKS != a->batch_segment ||
+	    a->batch_hashes[index] !=
+		    swapz_batch_snapshot_crc32c(a, tx,
+						&a->batch_resume_crc_wall_ns))
+		return -ESTALE;
+	a->batch_hashes[index] = 0;
+	a->batch_pending--;
+	a->abandoned_blocks += tx->extent_blocks;
+	if (!a->batch_pending) {
+		a->batch_segment = ~(swapz_u32)0;
+		a->batch_consumed = 0;
+	}
+	return 0;
+}
+
 /* A saved snapshot can only be rearmed in exactly increasing staged
  * sequence order. Reusing a stage never fabricates physical completion.
  * The caller MUST subsequently finish/abort the rearmed transaction. */

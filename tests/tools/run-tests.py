@@ -284,8 +284,10 @@ KERNEL_WRITE_FIELDS = (
     "delta64_prepare_parallel_starts",
     "retained_burst_target", "delta64_rescue",
     "delta64_prepare_workers", "delta64_prepare_active_max",
-    "lz4_acceleration", "k1_allow_after_read_bypass",
-    "read_coalesce_max_blocks", "invalidate_cache_on_write_admit"
+    "lz4_acceleration", "delta64_lz4_acceleration",
+    "write_pipeline_depth", "pipeline_active_max",
+    "k1_allow_after_read_bypass", "read_coalesce_max_blocks",
+    "invalidate_cache_on_write_admit"
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
@@ -1423,6 +1425,11 @@ def run_stage(title, command, result, *, parse_bench=False):
     read_coalesce_cap_diagnostic = (
         read_coalesce_cap_ab_verdict(read_coalesce_cap_sessions)
         if parse_bench else None)
+    write_pipeline_sessions = (
+        parse_write_pipeline_depth(output) if parse_bench else [])
+    write_pipeline_diagnostic = (
+        write_pipeline_depth_verdict(write_pipeline_sessions)
+        if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
@@ -1434,7 +1441,9 @@ def run_stage(title, command, result, *, parse_bench=False):
                        delta64_rescue_diagnostic.get("overall") !=
                        "PASS_DELTA64_RESCUE_AB" or
                        read_coalesce_cap_diagnostic.get("overall") !=
-                       "PASS_READ_COALESCE_CAP_EVIDENCE"))
+                       "PASS_READ_COALESCE_CAP_EVIDENCE" or
+                       write_pipeline_diagnostic.get("overall") !=
+                       "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE"))
     if marker_failure:
         rc = 1
     secure_boot_signing_blocked = (
@@ -1494,6 +1503,11 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "READ coalescing cap 2/4/8 evidence"
                 record["diagnostic"] = read_coalesce_cap_diagnostic.get(
                     "reason", "READ coalescing cap evidence is incomplete")
+            elif write_pipeline_diagnostic.get("overall") != (
+                    "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE"):
+                record["failed_phase"] = "lower-WRITE depth 1/2 evidence"
+                record["diagnostic"] = write_pipeline_diagnostic.get(
+                    "reason", "lower-WRITE depth evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1534,6 +1548,10 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
+        result["benchmarks"]["write_pipeline_depth_sessions"] = (
+            write_pipeline_sessions)
+        result["benchmarks"]["write_pipeline_depth"] = (
+            write_pipeline_diagnostic)
     print(f"  {len(result['stages']):>2}/5  {title:<29} "
           f"{status:<8} {record['elapsed_s']:>8.2f}s", flush=True)
     if rc and "diagnostic" in record:
@@ -2007,6 +2025,9 @@ def delta64_rescue_verdict(sessions):
                     "reason": "delta64 rescue A/B: " + error}
         rescue = row["rescue"]
         if (kernel["delta64_rescue"] != rescue or
+                kernel["delta64_lz4_acceleration"] != 4 or
+                kernel["write_pipeline_depth"] != 1 or
+                kernel["pipeline_active_max"] > 1 or
                 kernel["delta64_prepare_workers"] != 1 or
                 kernel["delta64_prepare_active_max"] > 1 or
                 kernel["delta64_prepare_parallel_starts"]):
@@ -2103,7 +2124,7 @@ def delta64_rescue_verdict(sessions):
         "paired": {name: paired_ci95(values)
                    for name, values in changes.items()},
         "interpretation":
-            "SAME_SOURCE_K1_DELTA64_RESCUE_OFF_ON_POSITIVE_FIXTURE",
+            "SAME_SOURCE_K1_DELTA64_RESCUE_OFF_ON_POSITIVE_FIXTURE_SECOND_LZ4_ACCEL4",
     }
 
 
@@ -3298,7 +3319,11 @@ def write_saturation_verdict(sessions):
                 return {"overall": "INCOMPLETE",
                         "reason":
                             f"{regime}: write-only timed attribution missing"}
-            if timed["lz4_acceleration"] != 1 or timed["delta64_rescue"] != 0:
+            if (timed["lz4_acceleration"] != 1 or
+                    timed["delta64_lz4_acceleration"] != 1 or
+                    timed["write_pipeline_depth"] != 1 or
+                    timed["pipeline_active_max"] > 1 or
+                    timed["delta64_rescue"] != 0):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: standard write-only policy mismatch"}
             row["timed_window_delta"] = {
@@ -3474,6 +3499,194 @@ def write_saturation_verdict(sessions):
         "interpretation":
             "SYNTHETIC_RAM_SUSTAINED_QD4_QD8_QD32_CONFIRMATION_QD1_DIRECTIONAL",
     }
+
+
+def parse_write_pipeline_depth(output):
+    """Parse five matched fast-QD32 lower-WRITE depth 1/2 rounds."""
+    sessions, current = [], None
+    for line in output.splitlines():
+        line = line.strip()
+        match = re.fullmatch(r"START_WRITE_PIPELINE_DEPTH=(1|2)", line)
+        if match:
+            current = {
+                "write_pipeline_depth": int(match.group(1)),
+                "status": "INCOMPLETE", "order": "unknown",
+                "device_model": None, "arms": {},
+            }
+            sessions.append(current)
+            continue
+        if current is None:
+            continue
+        if line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            model = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
+                line)
+            if model:
+                current["device_model"] = {
+                    "cap_mib_s": int(model.group(1)),
+                    "completion_nsec": int(model.group(2)),
+                    "irqmode": int(model.group(3)),
+                    "queue_mode": int(model.group(4)),
+                    "submit_queues": int(model.group(5)),
+                    "hw_queue_depth": int(model.group(6)),
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") not in ("off", "swapz") or \
+                    obj.get("verdict") != "PASS":
+                continue
+            candidate = obj["candidate"]
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            current["arms"][candidate] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "replay_mode": obj.get("replay_mode"),
+                "write_mbps": rates.get("logical_write_mbps"),
+                "lower_write_bytes": lower.get("lower_write_bytes"),
+                "lower_write_requests": lower.get("lower_write_requests"),
+                "write_p99_ms": (obj.get("write_p99_ns") / 1e6
+                                 if type(obj.get("write_p99_ns")) in
+                                 (int, float) else None),
+                "kernel_write_path": obj.get("kernel_write_path"),
+            }
+        else:
+            done = re.fullmatch(r"PASS_WRITE_PIPELINE_DEPTH=(1|2)", line)
+            if done and int(done.group(1)) == current["write_pipeline_depth"] and \
+                    set(current["arms"]) == {"off", "swapz"}:
+                current["status"] = "PASS"
+                current = None
+    return sessions
+
+
+def write_pipeline_depth_verdict(sessions):
+    """Validate the depth-1/2 experiment without treating gain as a gate."""
+    try:
+        pairs = matched_value_pairs(
+            sessions, "write_pipeline_depth", 1, 2)
+    except ValueError as exc:
+        return {"overall": "INCOMPLETE", "reason": str(exc)}
+
+    expected = MODEL_SPECS["ssd_emulated"]
+    provenance = None
+    depth2_activated = False
+    for index, row in enumerate(sessions):
+        if row.get("status") != "PASS" or row.get("order") != (
+                "swapz-first" if index % 2 else "off-first"):
+            return {"overall": "INCOMPLETE",
+                    "reason": "lower-WRITE depth A/B order/status mismatch"}
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(
+                model.get(key) != expected[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "lower-WRITE depth A/B device model mismatch"}
+        arm, off = row["arms"]["swapz"], row["arms"]["off"]
+        kernel = arm.get("kernel_write_path")
+        error = timed_window_error(kernel)
+        if error:
+            return {"overall": "INCOMPLETE",
+                    "reason": "lower-WRITE depth A/B: " + error}
+        depth = row["write_pipeline_depth"]
+        if (kernel["write_pipeline_depth"] != depth or
+                kernel["pipeline_active_max"] > depth or
+                kernel["lz4_acceleration"] != 1 or
+                kernel["delta64_lz4_acceleration"] != 1 or
+                kernel["delta64_rescue"] != 0 or
+                kernel["delta64_prepare_workers"] != 1):
+            return {"overall": "INCOMPLETE",
+                    "reason": "lower-WRITE depth A/B policy mismatch"}
+        if depth == 2 and kernel["pipeline_active_max"] == 2:
+            depth2_activated = True
+        arm_prov = tuple(arm.get(key) for key in BENCHMARK_PROVENANCE_FIELDS)
+        off_prov = tuple(off.get(key) for key in BENCHMARK_PROVENANCE_FIELDS)
+        if (not isinstance(arm_prov[0], str) or
+                not re.fullmatch(r"[0-9a-f]{40}", arm_prov[0]) or
+                not isinstance(arm_prov[1], str) or
+                not re.fullmatch(r"[0-9a-f]{64}", arm_prov[1]) or
+                not isinstance(arm_prov[2], str) or
+                not re.fullmatch(r"[0-9a-f]{64}", arm_prov[2]) or
+                arm_prov != off_prov):
+            return {"overall": "INCONCLUSIVE",
+                    "reason": "lower-WRITE depth paired provenance mismatch"}
+        if provenance is None:
+            provenance = arm_prov
+        elif arm_prov != provenance:
+            return {"overall": "INCONCLUSIVE",
+                    "reason": "lower-WRITE depth workload differs across sessions"}
+        for candidate in (off, arm):
+            if candidate.get("replay_mode") != "persistent-write":
+                return {"overall": "INCOMPLETE",
+                        "reason": "lower-WRITE depth replay is not sustained"}
+            if (type(candidate.get("write_mbps")) not in (int, float) or
+                    candidate["write_mbps"] <= 0 or
+                    type(candidate.get("write_p99_ms")) not in (int, float) or
+                    candidate["write_p99_ms"] <= 0 or
+                    type(candidate.get("lower_write_bytes")) is not int or
+                    candidate["lower_write_bytes"] <= 0 or
+                    type(candidate.get("lower_write_requests")) is not int or
+                    candidate["lower_write_requests"] <= 0):
+                return {"overall": "INCOMPLETE",
+                        "reason": "lower-WRITE depth performance counters missing"}
+    if not depth2_activated:
+        return {"overall": "INCOMPLETE",
+                "reason": "depth=2 never reached two simultaneous lower WRITEs"}
+
+    modes = {}
+    for depth in (1, 2):
+        rows = [row for row in sessions if row["write_pipeline_depth"] == depth]
+        modes[str(depth)] = {
+            "observations": len(rows),
+            "write_mbps": statistics.mean(
+                row["arms"]["swapz"]["write_mbps"] for row in rows),
+            "write_p99_ms": statistics.mean(
+                row["arms"]["swapz"]["write_p99_ms"] for row in rows),
+            "lower_write_bytes": statistics.mean(
+                row["arms"]["swapz"]["lower_write_bytes"] for row in rows),
+            "lower_write_requests": statistics.mean(
+                row["arms"]["swapz"]["lower_write_requests"] for row in rows),
+            "pipeline_active_max": statistics.mean(
+                row["arms"]["swapz"]["kernel_write_path"]["pipeline_active_max"]
+                for row in rows),
+        }
+    changes = {name: [] for name in (
+        "throughput_change_fraction", "p99_change_fraction",
+        "lower_bytes_change_fraction", "lower_requests_change_fraction",
+        "raw_control_throughput_change_fraction")}
+    for pair in pairs:
+        one, two = pair[1], pair[2]
+        lo, hi = one["arms"]["swapz"], two["arms"]["swapz"]
+        changes["throughput_change_fraction"].append(
+            hi["write_mbps"] / lo["write_mbps"] - 1.0)
+        changes["p99_change_fraction"].append(
+            hi["write_p99_ms"] / lo["write_p99_ms"] - 1.0)
+        changes["lower_bytes_change_fraction"].append(
+            hi["lower_write_bytes"] / lo["lower_write_bytes"] - 1.0)
+        changes["lower_requests_change_fraction"].append(
+            hi["lower_write_requests"] / lo["lower_write_requests"] - 1.0)
+        changes["raw_control_throughput_change_fraction"].append(
+            two["arms"]["off"]["write_mbps"] /
+            one["arms"]["off"]["write_mbps"] - 1.0)
+    return {
+        "overall": "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE",
+        "scope": "PAIRED_SYNTHETIC_RAM_FAST_QD32_ONLY",
+        "confidence": "FIVE_PAIRED_ROUNDS_DEPTH1_DEPTH2",
+        "matched_pairs": 5,
+        "device_model": expected,
+        "modes": modes,
+        "paired": {name: paired_ci95(values)
+                   for name, values in changes.items()},
+        "interpretation":
+            "SAME_SOURCE_QD32_K1_PREPARATION_FIFO_PUBLICATION_DEPTH1_VS_DEPTH2",
+    }
+
 
 
 def mean(items, key):
@@ -5469,6 +5682,41 @@ def print_bench(result):
 
 
 
+    write_depth = result["benchmarks"].get("write_pipeline_depth", {})
+    if write_depth.get("overall") == "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE":
+        print("\n  Lower-WRITE submission depth 1 vs 2 — five matched fast QD32 rounds")
+        rows = []
+        for depth in ("1", "2"):
+            mode = write_depth["modes"][depth]
+            rows.append((
+                depth,
+                f"{mode['write_mbps']:.2f}",
+                f"{mode['write_p99_ms']:.2f}",
+                f"{mode['lower_write_requests']:.1f}",
+                f"{mode['pipeline_active_max']:.1f}",
+            ))
+        print_table(
+            "Bounded lower-WRITE depth means — SSD RAM model",
+            ("depth", "W MB/s", "p99", "lower req", "active max"), rows)
+        ci_rows = []
+        for label, field in (
+                ("W %", "throughput_change_fraction"),
+                ("p99 %", "p99_change_fraction"),
+                ("lower B %", "lower_bytes_change_fraction"),
+                ("lower req %", "lower_requests_change_fraction"),
+                ("raw-control W %", "raw_control_throughput_change_fraction")):
+            ci = write_depth["paired"][field]
+            ci_rows.append((label, f"{ci['mean'] * 100:+.1f}",
+                            f"{ci['low'] * 100:+.1f}",
+                            f"{ci['high'] * 100:+.1f}"))
+        print_table(
+            "Depth 2 minus depth 1 paired 95% confidence intervals",
+            ("metric", "mean", "low", "high"), ci_rows)
+    else:
+        print("\n  Lower-WRITE depth 1/2 A/B: NOT QUALIFIED "
+              f"({write_depth.get('reason', write_depth.get('overall', 'NOT_RUN'))})")
+
+
 
 def git_result(command, *, data=None, timeout=15, env=None):
     """Run noninteractive Git plumbing without exposing remote/credential stderr."""
@@ -5677,7 +5925,9 @@ def main():
                        "lz4_acceleration_sessions": [],
                        "lz4_acceleration": {"overall": "NOT_RUN"},
                        "write_saturation_sessions": [],
-                       "write_saturation": {"overall": "NOT_RUN"}},
+                       "write_saturation": {"overall": "NOT_RUN"},
+                       "write_pipeline_depth_sessions": [],
+                       "write_pipeline_depth": {"overall": "NOT_RUN"}},
         "overall": "INCOMPLETE"
     }
     make_cmd, parallelism = make_invocation()
@@ -5714,6 +5964,16 @@ def main():
                    for session in result["benchmarks"]["write_saturation_sessions"]):
                 saturation["overall"] = "INCONCLUSIVE"
                 saturation["reason"] = "Write-only evidence source Git ID mismatched tested checkout"
+        write_depth = result["benchmarks"]["write_pipeline_depth"]
+        if write_depth.get("overall") == "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE" and \
+                re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
+            if any(session.get("arms", {}).get(candidate, {}).get("source_sha") !=
+                   result["tested_commit_sha"]
+                   for session in result["benchmarks"]["write_pipeline_depth_sessions"]
+                   for candidate in ("off", "swapz")):
+                write_depth["overall"] = "INCONCLUSIVE"
+                write_depth["reason"] = (
+                    "Lower-WRITE depth A/B source Git ID mismatched tested checkout")
         lz4_sweep = result["benchmarks"]["lz4_acceleration"]
         if lz4_sweep.get("overall") == "PASS_LZ4_ACCELERATION_AB" and \
                 re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
@@ -5736,6 +5996,7 @@ def main():
                     "Delta64 K=1/K=2 diagnostic source Git ID mismatched tested checkout")
         if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
                 saturation.get("overall") != "PASS_WRITE_SATURATION_EVIDENCE" or \
+                write_depth.get("overall") != "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE" or \
                 lz4_sweep.get("overall") != "PASS_LZ4_ACCELERATION_AB":
             result["overall"] = "FAIL"
             exit_code = 1

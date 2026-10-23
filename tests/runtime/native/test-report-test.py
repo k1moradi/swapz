@@ -230,6 +230,9 @@ def timed_kernel_write(*, mode, target=8):
     record.update({
         "physical_write_reqs": 5,
         "lz4_acceleration": 1,
+        "delta64_lz4_acceleration": 1,
+        "write_pipeline_depth": 1,
+        "pipeline_active_max": 1 if mode else 0,
         "k1_allow_after_read_bypass": 0,
         "read_coalesce_max_blocks": 8,
         "invalidate_cache_on_write_admit": 0,
@@ -645,11 +648,26 @@ def delta64_rescue_arm(enabled):
         record = delta64_prepare_arm(1)
         record["throughput_mbps"]["logical_write_mbps"] = 20.0
         record["write_p99_ns"] = 2_300_000
-        return record
-    record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
-    record["kernel_write_path"]["delta64_prepare_workers"] = 1
+    else:
+        record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
+        record["kernel_write_path"]["delta64_prepare_workers"] = 1
+    record["kernel_write_path"]["delta64_lz4_acceleration"] = 4
     record["fixture_sha256"] = "e" * 64
     record["trace_sha256"] = "f" * 64
+    return record
+
+
+def write_pipeline_arm(depth):
+    record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
+    kernel = record["kernel_write_path"]
+    kernel["write_pipeline_depth"] = depth
+    kernel["pipeline_active_max"] = depth
+    if depth == 2:
+        record["throughput_mbps"]["logical_write_mbps"] *= 1.10
+        record["write_p99_ns"] = int(record["write_p99_ns"] * .90)
+        record["lower_io"]["lower_write_requests"] = 1500
+    record["fixture_sha256"] = "7" * 64
+    record["trace_sha256"] = "8" * 64
     return record
 
 
@@ -844,6 +862,24 @@ def synthetic_log():
                     f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
                 index += 1
         out.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
+    spec = runner.MODEL_SPECS["ssd_emulated"]
+    depth_sequence = [2 if bit else 1 for bit in runner.CONFIRMATION_SEQUENCE]
+    for index, depth in enumerate(depth_sequence):
+        out.append(f"START_WRITE_PIPELINE_DEPTH={depth}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+        off = write_arm("off", qd=32, regime="ssd_emulated", mode=1)
+        off["fixture_sha256"] = "7" * 64
+        off["trace_sha256"] = "8" * 64
+        swapz = write_pipeline_arm(depth)
+        for record in ((swapz, off) if index % 2 else (off, swapz)):
+            out.append(json.dumps(record))
+        out.append(f"PASS_WRITE_PIPELINE_DEPTH={depth}")
     return "\n".join(out) + "\n"
 
 
@@ -1210,6 +1246,19 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(rescue_diag["modes"]["0"]["delta64_attempts"], 0)
         self.assertGreater(rescue_diag["modes"]["1"]["delta64_attempts"], 0)
         self.assertIn("throughput_change_fraction", rescue_diag["paired"])
+        self.assertEqual(
+            rescue_diag["interpretation"],
+            "SAME_SOURCE_K1_DELTA64_RESCUE_OFF_ON_POSITIVE_FIXTURE_SECOND_LZ4_ACCEL4")
+
+        write_depth = runner.parse_write_pipeline_depth(synthetic_log())
+        self.assertEqual(
+            [row["write_pipeline_depth"] for row in write_depth],
+            [2 if bit else 1 for bit in runner.CONFIRMATION_SEQUENCE])
+        depth_diag = runner.write_pipeline_depth_verdict(write_depth)
+        self.assertEqual(depth_diag["overall"],
+                         "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE", depth_diag)
+        self.assertEqual(depth_diag["matched_pairs"], 5)
+        self.assertEqual(depth_diag["modes"]["2"]["pipeline_active_max"], 2)
 
         delta64_pilot = runner.parse_delta64_prepare_sessions(synthetic_log())
         expected_workers = [2 if bit else 1
@@ -1317,6 +1366,8 @@ class ReportContract(unittest.TestCase):
 
     def test_standard_write_only_policy_is_pinned(self):
         for field, value in (("lz4_acceleration", 2),
+                              ("delta64_lz4_acceleration", 2),
+                              ("write_pipeline_depth", 2),
                              ("delta64_rescue", 1)):
             sessions = runner.parse_write_saturation(synthetic_log())
             sessions[0]["arms"]["swapz"]["kernel_write_path"][field] = value

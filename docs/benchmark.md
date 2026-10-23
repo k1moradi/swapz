@@ -975,3 +975,11 @@ The SSE2 native stage also disassembles the exact compiled object and requires
 the rolling-predecessor shuffle plus register-only inverse shift. Timing remains
 reported rather than threshold-gated because CI host microarchitecture is not a
 stable performance oracle.
+
+
+### Current evidence cycle
+
+Delta64 rescue remains default-off. The next five-pair rescue A/B fixes
+`delta64_lz4_acceleration=4` in both arms. A separate fast-QD32 five-pair
+A/B compares lower-WRITE submission depth 1 and 2; depth 2 must actually reach
+`pipeline_active_max=2`, and production stays at depth 1 pending evidence.

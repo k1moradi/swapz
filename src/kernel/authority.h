@@ -264,6 +264,13 @@ int swapz_stage_batch(struct swapz_authority *authority,
 		    const swapz_u32 *logical_pages, swapz_u8 count,
 		    swapz_u8 blocks, struct swapz_tx *out);
 int swapz_batch_pause(struct swapz_authority *authority, const struct swapz_tx *tx);
+/*
+ * Drop only the newest paused snapshot before any replay has started.
+ * This is the fail-closed rollback primitive for a second prepared lower run:
+ * older snapshots remain pending and authoritative mappings stay unchanged.
+ */
+int swapz_batch_abort_tail(struct swapz_authority *authority,
+			  const struct swapz_tx *tx);
 int swapz_batch_resume(struct swapz_authority *authority, const struct swapz_tx *tx);
 /* Cancel an abandoned physical region; old mappings remain authoritative. */
 int swapz_abort(struct swapz_authority *authority, const struct swapz_tx *tx);

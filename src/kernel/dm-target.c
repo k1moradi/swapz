@@ -60,6 +60,7 @@
 	(SWAPZ_PREPARATION_TAIL_WAKE_MIN + 1U)
 #define SWAPZ_PREPARATION_TAIL_CLAIM_MIN 2U
 #define SWAPZ_MAX_PREPARATION_WORKERS 4U
+#define SWAPZ_MAX_WRITE_PIPELINE_DEPTH 2U
 /*
  * A separate bounded LZ4 producer may prepare future writes while the
  * existing ordered commit worker waits on lower dm_io. WRITE physical I/O
@@ -83,11 +84,22 @@ MODULE_PARM_DESC(delta64_prepare_workers,
 		 "Bounded delta64 preparation lanes 1..4; effective only with "
 		 "async_prepare=1 and delta64_rescue=1");
 
+static unsigned int swapz_delta64_lz4_acceleration = 1U;
+module_param_named(delta64_lz4_acceleration, swapz_delta64_lz4_acceleration,
+		   uint, 0444);
+MODULE_PARM_DESC(delta64_lz4_acceleration,
+		 "Second-pass LZ4 acceleration 1..4 used only by delta64 rescue");
+
 static unsigned int swapz_lz4_acceleration = 1U;
 module_param_named(lz4_acceleration, swapz_lz4_acceleration, uint, 0444);
 MODULE_PARM_DESC(lz4_acceleration,
-		 "Ordinary LZ4 acceleration 1..4 for planner-geometry qualification; "
-		 "delta64 rescue stays at 1");
+		 "Ordinary first-pass LZ4 acceleration 1..4");
+
+static unsigned int swapz_write_pipeline_depth = 1U;
+module_param_named(write_pipeline_depth, swapz_write_pipeline_depth, uint, 0444);
+MODULE_PARM_DESC(write_pipeline_depth,
+		 "Experimental immutable lower-WRITE submission depth 1..2; "
+		 "authority publication remains FIFO");
 
 static bool swapz_parallel_reads = true;
 module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);
@@ -149,7 +161,10 @@ struct swapz_prepared_page {
 	u8 bytes[SWAPZ_BLOCK_BYTES];
 } __aligned(64);
 
+struct swapz_dm;
+
 struct swapz_inflight_write {
+	struct swapz_dm *ctx;
 	struct swapz_io_run run;
 	struct completion lower_done;
 	struct bio *bios[SWAPZ_MAX_RECORDS];
@@ -161,9 +176,8 @@ struct swapz_inflight_write {
 	u64 lower_end_ns;
 	u64 commit_start_ns;
 	u64 prepare_nonio_ns;
+	swapz_u8 slot_index;
 };
-
-struct swapz_dm;
 
 struct swapz_preparation_lane {
 	struct work_struct work;
@@ -319,6 +333,8 @@ struct swapz_dm {
 	bool delta64_rescue_enabled;
 	bool invalidate_cache_on_write_admit;
 	swapz_u8 lz4_acceleration;
+	swapz_u8 delta64_lz4_acceleration;
+	swapz_u8 write_pipeline_depth;
 	struct workqueue_struct *preparation_workqueue;
 	struct swapz_preparation_lane *preparation_lanes;
 	swapz_u8 preparation_worker_count;
@@ -428,9 +444,18 @@ struct swapz_dm {
 	u64 segment_discards_skipped_already_trimmed;
 	swapz_u8 batch_count;
 	swapz_u8 max_window;
-	/* K=1 asynchronous lower slot. bulk_scratch/bulk_txs are immutable
-	 * while active; batch_bytes immediately becomes the next collector. */
-	struct swapz_inflight_write inflight_write;
+	/*
+	 * At most two immutable physical lower-WRITE owners. Slot zero reuses
+	 * engine.bulk_scratch/bulk_txs; slot one has disjoint storage. Only the
+	 * ordered worker publishes authority and upper BIO completions in FIFO.
+	 */
+	struct swapz_inflight_write
+		inflight_writes[SWAPZ_MAX_WRITE_PIPELINE_DEPTH];
+	swapz_u8 inflight_head;
+	swapz_u8 inflight_tail;
+	swapz_u8 inflight_count;
+	swapz_u8 inflight_group_submissions;
+	swapz_u8 pipeline_active_max;
 	u64 pipeline_async_runs;
 	u64 pipeline_completed_runs;
 	u64 pipeline_collected_pages;
@@ -448,7 +473,7 @@ struct swapz_dm {
 	u64 k1_ready_wait_deadline;
 	u64 k1_ready_wait_fence;
 	u64 k1_ready_wait_other;
-	/* K=1 slot occupancy from async submission through ordered publication. */
+	/* Sum of per-slot occupancy; depth=2 may exceed wall time by overlap. */
 	u64 pipeline_active_wall_ns;
 	/* Admission coalescing is optional and bounded by one timer expiry.
 	 * No write is published/ACKed until its actual lower I/O completes. */
@@ -818,24 +843,129 @@ static void swapz_queue_preparation_workers(struct swapz_dm *ctx)
 			   &ctx->preparation_lanes[lane].work);
 }
 
+static bool swapz_has_inflight(const struct swapz_dm *ctx)
+{
+	return READ_ONCE(ctx->inflight_count) != 0U;
+}
+
+static struct swapz_inflight_write *swapz_inflight_head_slot(struct swapz_dm *ctx)
+{
+	if (!swapz_has_inflight(ctx))
+		return NULL;
+	return &ctx->inflight_writes[ctx->inflight_head];
+}
+
+static struct swapz_inflight_write *swapz_inflight_tail_slot(struct swapz_dm *ctx)
+{
+	if (ctx->inflight_count >= ctx->write_pipeline_depth)
+		return NULL;
+	return &ctx->inflight_writes[ctx->inflight_tail];
+}
+
+static bool swapz_inflight_lower_pending(struct swapz_dm *ctx)
+{
+	swapz_u8 index;
+
+	for (index = 0; index < SWAPZ_MAX_WRITE_PIPELINE_DEPTH; ++index)
+		if (READ_ONCE(ctx->inflight_writes[index].active) &&
+		    !completion_done(&ctx->inflight_writes[index].lower_done))
+			return true;
+	return false;
+}
+
+static bool swapz_inflight_uses_segment(struct swapz_dm *ctx, swapz_u32 segment)
+{
+	swapz_u8 index;
+
+	for (index = 0; index < SWAPZ_MAX_WRITE_PIPELINE_DEPTH; ++index)
+		if (READ_ONCE(ctx->inflight_writes[index].active) &&
+		    ctx->inflight_writes[index].run.start_block /
+			    SWAPZ_SEGMENT_BLOCKS == segment)
+			return true;
+	return false;
+}
+
+static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
+					       swapz_u32 logical)
+{
+	swapz_u8 ring, extent, record, pending = 0;
+	swapz_u8 slot_index = ctx->inflight_head;
+
+	if (!swapz_has_inflight(ctx))
+		return false;
+	if (!ctx->inflight_count ||
+	    ctx->inflight_count > ctx->write_pipeline_depth ||
+	    ctx->inflight_count > SWAPZ_MAX_WRITE_PIPELINE_DEPTH)
+		return true;
+	for (ring = 0; ring < ctx->inflight_count; ++ring) {
+		struct swapz_inflight_write *inflight =
+			&ctx->inflight_writes[slot_index];
+		struct swapz_io_run *run = &inflight->run;
+
+		if (!READ_ONCE(inflight->active) || !run->txs ||
+		    !run->extent_count || run->extent_count > SWAPZ_MAX_RECORDS ||
+		    pending > SWAPZ_MAX_RECORDS - run->extent_count)
+			return true;
+		pending += run->extent_count;
+		for (extent = 0; extent < run->extent_count; ++extent) {
+			const struct swapz_tx *tx = &run->txs[extent];
+
+			if (!tx->count || tx->count > SWAPZ_MAX_RECORDS)
+				return true;
+			for (record = 0; record < tx->count; ++record)
+				if (tx->records[record].logical_page == logical)
+					return true;
+		}
+		slot_index = (slot_index + 1U) % SWAPZ_MAX_WRITE_PIPELINE_DEPTH;
+	}
+	return ctx->authority.batch_pending != pending;
+}
+
+static bool swapz_write_pipeline_can_append(struct swapz_dm *ctx,
+					     swapz_u8 count)
+{
+	swapz_u32 segment_end;
+	swapz_u8 index;
+
+	if (ctx->write_pipeline_depth < 2U || ctx->inflight_count != 1U ||
+	    ctx->inflight_group_submissions != 1U ||
+	    ctx->authority.in_flight || ctx->authority.batch_replaying ||
+	    ctx->authority.batch_consumed || !ctx->authority.batch_pending ||
+	    ctx->authority.batch_pending > SWAPZ_MAX_RECORDS - count ||
+	    ctx->authority.batch_segment >= ctx->segment_count ||
+	    ctx->authority.next_block / SWAPZ_SEGMENT_BLOCKS !=
+		    ctx->authority.batch_segment)
+		return false;
+	/*
+	 * Full-run headroom guarantees the second bounded planner cannot cross
+	 * the authority batch segment. This is intentionally conservative.
+	 */
+	segment_end = (ctx->authority.batch_segment + 1U) * SWAPZ_SEGMENT_BLOCKS;
+	if (ctx->authority.next_block > segment_end ||
+	    segment_end - ctx->authority.next_block < SWAPZ_BULK_BLOCKS)
+		return false;
+	for (index = 0; index < count; ++index)
+		if (swapz_inflight_run_touches_logical(
+			    ctx, ctx->planned[index].logical_page))
+			return false;
+	return true;
+}
+
 static void swapz_async_lower_write_done(unsigned long error, void *context)
 {
-	struct swapz_dm *ctx = context;
-	struct swapz_inflight_write *inflight = &ctx->inflight_write;
+	struct swapz_inflight_write *inflight = context;
+	struct swapz_dm *ctx = inflight->ctx;
 	unsigned long flags;
 
 	WRITE_ONCE(inflight->lower_error, error ? -EIO : 0);
 	WRITE_ONCE(inflight->lower_end_ns, ktime_get_ns());
-	/* End the preparation-overlap interval at actual lower completion,
-	 * not when the ordered worker later gets CPU to publish the run. */
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	ctx->prep_lower_write_end_queued += ctx->preparation_queued;
 	if (ctx->preparation_queued)
 		ctx->prep_lower_write_end_nonempty++;
-	atomic_set(&ctx->lower_write_active, 0);
+	atomic_dec(&ctx->lower_write_active);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	complete(&inflight->lower_done);
-	/* Publication/completion stays on the single ordered authority owner. */
 	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 }
 
@@ -852,9 +982,9 @@ static void swapz_mark_segments_dirty(struct swapz_dm *ctx,
 		WRITE_ONCE(ctx->segment_trimmed[segment], 0);
 }
 
-static int swapz_submit_inflight_write(struct swapz_dm *ctx)
+static int swapz_submit_inflight_write(struct swapz_dm *ctx,
+				       struct swapz_inflight_write *inflight)
 {
-	struct swapz_inflight_write *inflight = &ctx->inflight_write;
 	struct dm_io_region region;
 	struct dm_io_request req = {
 		.bi_opf = REQ_OP_WRITE | REQ_SWAP,
@@ -865,19 +995,19 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx)
 		},
 		.notify = {
 			.fn = swapz_async_lower_write_done,
-			.context = ctx,
+			.context = inflight,
 		},
 		.client = ctx->io_client,
 	};
 	unsigned long flags;
 	int error;
 
-	if (inflight->active || !inflight->run.blocks ||
+	if (!inflight || inflight != swapz_inflight_tail_slot(ctx) ||
+	    inflight->active || !inflight->run.blocks ||
 	    inflight->run.start_block >= ctx->physical_blocks ||
 	    inflight->run.blocks >
 		ctx->physical_blocks - inflight->run.start_block)
 		return -EINVAL;
-	/* Same fail-closed fault boundary as the synchronous adapter. */
 	if (ctx->write_fault_nth &&
 	    ++ctx->write_fault_calls == ctx->write_fault_nth) {
 		ctx->write_fault_injected++;
@@ -897,11 +1027,13 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx)
 	inflight->lower_error = 0;
 	inflight->lower_start_ns = ktime_get_ns();
 	inflight->lower_end_ns = 0;
-	/* Set active before dm_io: a very fast RAM completion may callback
-	 * before dm_io() itself returns. */
 	WRITE_ONCE(inflight->active, true);
+	ctx->inflight_count++;
+	ctx->inflight_group_submissions++;
+	ctx->inflight_tail =
+		(ctx->inflight_tail + 1U) % SWAPZ_MAX_WRITE_PIPELINE_DEPTH;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	atomic_set(&ctx->lower_write_active, 1);
+	atomic_inc(&ctx->lower_write_active);
 	ctx->prep_lower_write_samples++;
 	ctx->prep_lower_write_start_queued += ctx->preparation_queued;
 	if (ctx->preparation_queued)
@@ -911,33 +1043,40 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx)
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	error = dm_io(&req, 1, &region, NULL, IOPRIO_DEFAULT);
 	if (error) {
-		/* No asynchronous completion owns this request after a submission
-		 * failure. Close the diagnostic interval synchronously. */
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		ctx->prep_lower_write_end_queued += ctx->preparation_queued;
 		if (ctx->preparation_queued)
 			ctx->prep_lower_write_end_nonempty++;
-		atomic_set(&ctx->lower_write_active, 0);
+		atomic_dec(&ctx->lower_write_active);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		inflight->lower_end_ns = ktime_get_ns();
 		inflight->lower_error = error;
 		WRITE_ONCE(inflight->active, false);
+		ctx->inflight_tail = inflight->slot_index;
+		ctx->inflight_count--;
+		ctx->inflight_group_submissions--;
+		if (!ctx->inflight_count)
+			ctx->inflight_group_submissions = 0;
 		return error;
 	}
+	ctx->pipeline_active_max =
+		max_t(swapz_u8, ctx->pipeline_active_max, ctx->inflight_count);
 	ctx->pipeline_async_runs++;
 	return 0;
 }
 
 static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 {
-	struct swapz_inflight_write *inflight = &ctx->inflight_write;
+	struct swapz_inflight_write *inflight = swapz_inflight_head_slot(ctx);
 	u64 publish_before, publish_crc_before, complete_start, complete_elapsed;
 	u64 lower_end, lower_elapsed, commit_elapsed;
 	swapz_u8 committed = 0, index;
-	int error;
+	int lower_error, error;
 
-	if (!READ_ONCE(inflight->active))
+	if (!inflight)
 		return 0;
+	if (!READ_ONCE(inflight->active))
+		return -EUCLEAN;
 	if (!completion_done(&inflight->lower_done)) {
 		if (!wait)
 			return 0;
@@ -955,8 +1094,8 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		return -EUCLEAN;
 	lower_elapsed = lower_end - inflight->lower_start_ns;
 	ctx->lower_write_wall_ns += lower_elapsed;
-	error = READ_ONCE(inflight->lower_error);
-	if (!error) {
+	lower_error = READ_ONCE(inflight->lower_error);
+	if (!lower_error) {
 		ctx->physical_write_bytes +=
 			(u64)inflight->run.blocks * SWAPZ_BLOCK_BYTES;
 		ctx->physical_write_reqs++;
@@ -967,6 +1106,9 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		else
 			ctx->write_wait_gt_4ms++;
 	}
+	error = lower_error;
+	if (!error && ctx->failed)
+		error = ctx->last_error ? ctx->last_error : -EIO;
 	publish_before = ctx->engine.publish_wall_ns;
 	publish_crc_before = ctx->authority.publish_crc_wall_ns;
 	complete_start = ktime_get_ns();
@@ -989,13 +1131,17 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	ctx->window_commit_wall_ns += commit_elapsed;
 	ctx->window_commit_nonio_wall_ns +=
 		inflight->prepare_nonio_ns + complete_elapsed;
-
-	/* Authority and immutable run bytes are no longer needed before any
-	 * upper completion can admit dependent future I/O. Count the whole K=1
-	 * slot lifetime, including callback-to-publication scheduling delay. */
 	ctx->pipeline_active_wall_ns +=
 		swapz_elapsed_ns(inflight->lower_start_ns, ktime_get_ns());
+
 	WRITE_ONCE(inflight->active, false);
+	ctx->inflight_head =
+		(ctx->inflight_head + 1U) % SWAPZ_MAX_WRITE_PIPELINE_DEPTH;
+	ctx->inflight_count--;
+	if (!ctx->inflight_count) {
+		ctx->inflight_tail = ctx->inflight_head;
+		ctx->inflight_group_submissions = 0;
+	}
 	if (ctx->retained_single_tail_deferred)
 		ctx->single_tail_lower_done_seen = true;
 	if (error || committed != inflight->count) {
@@ -1017,6 +1163,25 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	ctx->pipeline_completed_runs++;
 	inflight->count = 0;
 	return 0;
+}
+
+static int swapz_finalize_all_inflight(struct swapz_dm *ctx, bool wait)
+{
+	int first_error = 0;
+
+	while (swapz_has_inflight(ctx)) {
+		struct swapz_inflight_write *head = swapz_inflight_head_slot(ctx);
+		int error;
+
+		if (!wait && (!head || !completion_done(&head->lower_done)))
+			break;
+		error = swapz_finalize_inflight_write(ctx, wait);
+		if (error && !first_error)
+			first_error = error;
+		if (!wait && error)
+			break;
+	}
+	return first_error;
 }
 
 /*
@@ -1226,8 +1391,7 @@ static int swapz_discard_dead_segment(void *opaque, swapz_u32 segment)
 	if ((a->batch_pending || a->batch_replaying) &&
 	    a->batch_segment == segment)
 		return -EBUSY;
-	if (READ_ONCE(ctx->inflight_write.active) &&
-	    ctx->inflight_write.run.start_block / SWAPZ_SEGMENT_BLOCKS == segment)
+	if (swapz_inflight_uses_segment(ctx, segment))
 		return -EBUSY;
 	/* Never send TRIM against the segment still named as foreground OPEN.
 	 * Reuse remains legal; this rare same-segment wrap simply skips TRIM. */
@@ -1411,6 +1575,7 @@ static void swapz_memcpy_accounted(void *destination, const void *source,
 static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 				 u8 *baseline_output, u8 *transform_scratch,
 				 u8 *candidate_output, void *lz4_workmem,
+				 swapz_u8 delta64_lz4_acceleration,
 				 u64 *lz4_wall_ns, swapz_u8 *encoding,
 				 struct swapz_delta64_stats *stats)
 {
@@ -1420,8 +1585,9 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 	int candidate, result = baseline_length;
 
 	if (!input || !baseline_output || !transform_scratch ||
-	    !candidate_output || !lz4_workmem || !lz4_wall_ns || !encoding ||
-	    !stats)
+	    !candidate_output || !lz4_workmem ||
+	    !delta64_lz4_acceleration || delta64_lz4_acceleration > 4U ||
+	    !lz4_wall_ns || !encoding || !stats)
 		return baseline_length;
 	*encoding = SWAPZ_ENCODING_LZ4;
 
@@ -1466,7 +1632,7 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 	section_start = ktime_get_ns();
 	candidate = LZ4_compress_fast(transform_scratch, candidate_output,
 				      SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED,
-				      1, lz4_workmem);
+				      delta64_lz4_acceleration, lz4_workmem);
 	*lz4_wall_ns += swapz_elapsed_ns(section_start, ktime_get_ns());
 	if (!swapz_delta64_candidate_smaller(baseline_length, candidate))
 		goto out;
@@ -1647,8 +1813,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 				lane->predictor_page,
 				prepared->length > 0 ? lane->input_page :
 						      prepared->bytes,
-				lane->lz4_workmem, &lane->lz4_wall_ns,
-				&prepared->encoding, &lane->delta64);
+				lane->lz4_workmem, ctx->delta64_lz4_acceleration,
+				&lane->lz4_wall_ns, &prepared->encoding,
+				&lane->delta64);
 		prepared->payload_crc32c_valid = false;
 		if (prepared->length > 0 && !prepared->zero) {
 			section_start = ktime_get_ns();
@@ -2240,48 +2407,18 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	bool deferred_single_tail = ctx->retained_single_tail_deferred;
 	bool async_submitted = false;
 	bool async_detach_ready;
+	bool append_second = false;
+	struct swapz_inflight_write *detached_inflight = NULL;
 	int error = 0;
 
-	/* A second close, barrier, read, zero/raw mutation, GC retry or shutdown
-	 * cannot stage against paused authority. Wait only at that real ownership
-	 * boundary; ordinary incoming WRITEs keep collecting while the run flies.
-	 * ID38 observes this existing wait only; it never changes close policy. */
-	if (READ_ONCE(ctx->inflight_write.active)) {
-		bool k1_ready_wait = count &&
-			!completion_done(&ctx->inflight_write.lower_done);
-		u64 wait_before = ctx->pipeline_finalize_wait_wall_ns;
-
-		error = swapz_finalize_inflight_write(ctx, true);
-		if (k1_ready_wait) {
-			u64 waited = ctx->pipeline_finalize_wait_wall_ns - wait_before;
-
-			ctx->k1_ready_wait_windows++;
-			ctx->k1_ready_wait_records += count;
-			ctx->k1_ready_wait_wall_ns += waited;
-			ctx->k1_ready_wait_max_records =
-				max_t(u64, ctx->k1_ready_wait_max_records, count);
-			switch (close_reason) {
-			case SWAPZ_CLOSE_PACK_READY:
-				ctx->k1_ready_wait_pack_ready++;
-				break;
-			case SWAPZ_CLOSE_FULL:
-				ctx->k1_ready_wait_full++;
-				break;
-			case SWAPZ_CLOSE_DEADLINE:
-				ctx->k1_ready_wait_deadline++;
-				break;
-			case SWAPZ_CLOSE_FUA:
-			case SWAPZ_CLOSE_PREFLUSH:
-			case SWAPZ_CLOSE_DISCARD:
-			case SWAPZ_CLOSE_SHUTDOWN:
-				ctx->k1_ready_wait_fence++;
-				break;
-			default:
-				ctx->k1_ready_wait_other++;
-				break;
-			}
-		}
-		if (error && !count)
+	/*
+	 * An empty flush cannot form another physical run. Preserve the original
+	 * drain boundary for empty barriers/reads; a nonempty write window decides
+	 * below whether the depth=2 diagnostic can safely append one more run.
+	 */
+	if (!count && swapz_has_inflight(ctx)) {
+		error = swapz_finalize_all_inflight(ctx, true);
+		if (error)
 			return error;
 	}
 	/*
@@ -2316,7 +2453,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 */
 	if (!count) {
 		if (hard_boundary) {
-			if (!READ_ONCE(ctx->inflight_write.active))
+			if (!swapz_has_inflight(ctx))
 				ctx->single_pack_deferred = false;
 			ctx->accepted_burst_pack_ready = false;
 			ctx->retained_tail_target = 0;
@@ -2480,21 +2617,69 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 */
 	if (async_detach_ready && ctx->retained_window_read_bypasses)
 		ctx->pipeline_read_bypass_skips++;
+
+	if (swapz_has_inflight(ctx)) {
+		struct swapz_inflight_write *head = swapz_inflight_head_slot(ctx);
+		bool k1_ready_wait = ctx->write_pipeline_depth == 1U && count &&
+			head && !completion_done(&head->lower_done);
+		u64 wait_before = ctx->pipeline_finalize_wait_wall_ns;
+
+		append_second = async_detach_ready &&
+			!ctx->retained_window_read_bypasses &&
+			swapz_write_pipeline_can_append(ctx, count);
+		if (!append_second)
+			error = swapz_finalize_all_inflight(ctx, true);
+		if (k1_ready_wait) {
+			u64 waited = ctx->pipeline_finalize_wait_wall_ns - wait_before;
+
+			ctx->k1_ready_wait_windows++;
+			ctx->k1_ready_wait_records += count;
+			ctx->k1_ready_wait_wall_ns += waited;
+			ctx->k1_ready_wait_max_records =
+				max_t(u64, ctx->k1_ready_wait_max_records, count);
+			switch (close_reason) {
+			case SWAPZ_CLOSE_PACK_READY:
+				ctx->k1_ready_wait_pack_ready++;
+				break;
+			case SWAPZ_CLOSE_FULL:
+				ctx->k1_ready_wait_full++;
+				break;
+			case SWAPZ_CLOSE_DEADLINE:
+				ctx->k1_ready_wait_deadline++;
+				break;
+			case SWAPZ_CLOSE_FUA:
+			case SWAPZ_CLOSE_PREFLUSH:
+			case SWAPZ_CLOSE_DISCARD:
+			case SWAPZ_CLOSE_SHUTDOWN:
+				ctx->k1_ready_wait_fence++;
+				break;
+			default:
+				ctx->k1_ready_wait_other++;
+				break;
+			}
+		}
+		if (error)
+			goto commit_done;
+	}
 	/*
 	 * Only a complete multi-record window with no hard immediate fence and no
 	 * read bypass is detached. If geometry yields only a prefix, complete that
 	 * prefix synchronously and keep the existing retry path for the remainder.
 	 */
 	if (async_detach_ready && !ctx->retained_window_read_bypasses) {
-		struct swapz_inflight_write *inflight = &ctx->inflight_write;
+		struct swapz_inflight_write *inflight =
+			swapz_inflight_tail_slot(ctx);
+		swapz_u8 prior_inflight_count = ctx->inflight_count;
 		swapz_u8 prepared = 0;
 		u64 plan_before = ctx->engine.plan_wall_ns;
 		u64 pack_before = ctx->engine.pack_wall_ns;
 		u64 prepare_start = ktime_get_ns();
 		u64 prepare_elapsed;
 
-		inflight->run.bytes = ctx->engine.bulk_scratch;
-		inflight->run.txs = ctx->engine.bulk_txs;
+		if (!inflight) {
+			error = -EUCLEAN;
+			goto commit_done;
+		}
 		inflight->commit_start_ns = prepare_start;
 		error = swapz_engine_prepare_batched_run(
 			&ctx->engine, ctx->planned, count, &inflight->run,
@@ -2507,18 +2692,29 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		if (!error && prepared == count) {
 			inflight->prepare_nonio_ns = prepare_elapsed;
 			inflight->count = count;
-			error = swapz_submit_inflight_write(ctx);
+			error = swapz_submit_inflight_write(ctx, inflight);
 			if (!error) {
 				committed = count; /* ownership detached, not ACKed */
 				async_submitted = true;
+				detached_inflight = inflight;
 			} else {
-				swapz_u8 aborted = 0;
 				u64 complete_start = ktime_get_ns();
-				int complete_error =
-					swapz_engine_complete_batched_run(
-						&ctx->engine, &inflight->run, 0,
-						error, &aborted);
+				int complete_error;
 
+				if (prior_inflight_count)
+					complete_error =
+						swapz_engine_abort_batched_run_tail(
+							&ctx->engine,
+							&inflight->run);
+				else {
+					swapz_u8 aborted = 0;
+
+					complete_error =
+						swapz_engine_complete_batched_run(
+							&ctx->engine,
+							&inflight->run, 0,
+							error, &aborted);
+				}
 				ctx->window_commit_nonio_wall_ns +=
 					prepare_elapsed +
 					swapz_elapsed_ns(complete_start,
@@ -2533,6 +2729,20 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			u64 complete_start;
 			int io_error;
 
+			if (prior_inflight_count) {
+				int older_error =
+					swapz_finalize_all_inflight(ctx, true);
+
+				if (older_error) {
+					swapz_u8 aborted = 0;
+					int cleanup = swapz_engine_complete_batched_run(
+						&ctx->engine, &inflight->run, 0,
+						older_error, &aborted);
+
+					error = cleanup ? cleanup : older_error;
+					goto commit_done;
+				}
+			}
 			ctx->engine.submitted_blocks += inflight->run.blocks;
 			io_error = swapz_lower_write_run(
 				ctx, inflight->run.start_block,
@@ -2549,6 +2759,14 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 				committed = published;
 				if (published != prepared)
 					error = -EUCLEAN;
+			}
+		}
+		if (error == -ENOSPC && prior_inflight_count) {
+			int older_error = swapz_finalize_all_inflight(ctx, true);
+
+			if (older_error) {
+				error = older_error;
+				goto commit_done;
 			}
 		}
 		if (error && error != -ENOSPC)
@@ -2619,8 +2837,8 @@ commit_done:
 		struct bio *bio = ctx->batch[ctx->planned_to_batch[index]].bio;
 
 		if (async_submitted) {
-			ctx->inflight_write.bios[index] = bio;
-			ctx->inflight_write.raw[index] = ctx->planned[index].raw;
+			detached_inflight->bios[index] = bio;
+			detached_inflight->raw[index] = ctx->planned[index].raw;
 		} else if (index < committed && !ctx->failed) {
 			ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 			if (ctx->planned[index].raw)
@@ -2891,8 +3109,7 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	 * actually declaring an empty post-PACK_READY tail before its detached
 	 * lower write and upper completions have finished.
 	 */
-	inflight = READ_ONCE(ctx->inflight_write.active) &&
-		!completion_done(&ctx->inflight_write.lower_done);
+	inflight = swapz_inflight_lower_pending(ctx);
 	/*
 	 * A zero tail while detached K=1 is still running is premature. Keep the
 	 * PACK_READY sample pending; completion requeues the ordered worker.
@@ -3090,7 +3307,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				length > 0 ? ctx->input_page :
 					ctx->batch_bytes +
 					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-				ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding,
+				ctx->lz4_workmem, ctx->delta64_lz4_acceleration,
+				&ctx->lz4_wall_ns, &encoding,
 				&ctx->ordered_delta64);
 		if (length > 0 && !inline_zero) {
 			section_start = ktime_get_ns();
@@ -3219,7 +3437,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			.raw = 1,
 		};
 		swapz_resolve_single_tail_companion(ctx);
-		if (READ_ONCE(ctx->inflight_write.active))
+		if (swapz_has_inflight(ctx))
 			ctx->pipeline_collected_pages++;
 		if (bio->bi_opf & REQ_FUA) {
 			ctx->next_window_close = SWAPZ_CLOSE_FUA;
@@ -3255,7 +3473,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	};
 	ctx->batch_count++;
 	swapz_resolve_single_tail_companion(ctx);
-	if (READ_ONCE(ctx->inflight_write.active))
+	if (swapz_has_inflight(ctx))
 		ctx->pipeline_collected_pages++;
 	/*
 	 * Compression/preparation can take long enough for another upper BIO
@@ -3577,36 +3795,10 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 
 static bool swapz_retention_expired(struct swapz_dm *ctx);
 
-static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
-					       swapz_u32 logical)
-{
-	struct swapz_inflight_write *inflight = &ctx->inflight_write;
-	struct swapz_io_run *run = &inflight->run;
-	swapz_u8 extent, record;
-
-	if (!READ_ONCE(inflight->active))
-		return false;
-	/* A malformed or mismatched paused snapshot is a fence, never a bypass. */
-	if (!run->txs || !run->extent_count ||
-	    run->extent_count > SWAPZ_MAX_RECORDS ||
-	    ctx->authority.batch_pending != run->extent_count)
-		return true;
-	for (extent = 0; extent < run->extent_count; ++extent) {
-		const struct swapz_tx *tx = &run->txs[extent];
-
-		if (!tx->count || tx->count > SWAPZ_MAX_RECORDS)
-			return true;
-		for (record = 0; record < tx->count; ++record)
-			if (tx->records[record].logical_page == logical)
-				return true;
-	}
-	return false;
-}
-
-static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
+static bool swapz_read_is_independentstatic bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
-	bool inflight_active = READ_ONCE(ctx->inflight_write.active);
+	bool inflight_active = swapz_has_inflight(ctx);
 	bool blocked = !READ_ONCE(ctx->accepting) || ctx->failed ||
 		ctx->authority.in_flight || ctx->authority.batch_replaying ||
 		(ctx->authority.batch_pending && !inflight_active) ||
@@ -3636,7 +3828,7 @@ static bool swapz_read_can_parallel(struct swapz_dm *ctx, struct bio *bio)
 	if (ctx->batch_count)
 		return swapz_read_is_independent(ctx, bio);
 	logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
-	inflight_active = READ_ONCE(ctx->inflight_write.active);
+	inflight_active = swapz_has_inflight(ctx);
 	blocked = !READ_ONCE(ctx->accepting) || ctx->failed ||
 		ctx->authority.in_flight || ctx->authority.batch_replaying ||
 		(ctx->authority.batch_pending && !inflight_active) ||
@@ -3763,7 +3955,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	struct swapz_bio_ref *entry;
 	swapz_u32 chain_starts[SWAPZ_PARALLEL_READ_SLOTS];
 	swapz_u32 execute_starts[SWAPZ_PARALLEL_READ_SLOTS];
-	swapz_u32 start0, start;
+	swapz_u32 start0, start, head_logical;
 	swapz_u8 chain_extents[SWAPZ_PARALLEL_READ_SLOTS];
 	swapz_u8 request_first[SWAPZ_PARALLEL_READ_SLOTS] = { 0 };
 	swapz_u8 request_blocks[SWAPZ_PARALLEL_READ_SLOTS] = { 0 };
@@ -3771,7 +3963,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	swapz_u8 execute_first[SWAPZ_PARALLEL_READ_SLOTS];
 	swapz_u8 execute_blocks[SWAPZ_PARALLEL_READ_SLOTS];
 	int range_errors[SWAPZ_PARALLEL_READ_SLOTS] = { 0 };
-	swapz_u8 blocks0, blocks;
+	swapz_u8 blocks0, blocks, head_first = 0, head_blocks = 0;
 	unsigned int prefix = 0, seen = 0, index, slot_index;
 	unsigned int chain_count, head_index = SWAPZ_PARALLEL_READ_SLOTS;
 	unsigned int chain_first, chain_last, execute_count, selected = 0;
@@ -3781,7 +3973,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	swapz_u32 combined_start, combined_end;
 	bool retained_bypass, any_same_extent = false;
 	u64 read_start_ns, read_end_ns;
-	int batch_error = 0;
+	int batch_error = 0, head_range_error;
 
 	*processed_out = 0;
 	if (!ctx->read_grouping_enabled || !ctx->read_slots ||
@@ -3790,6 +3982,20 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	entry = list_first_entry(local, struct swapz_bio_ref, list);
 	if (!swapz_parallel_read_extent(ctx, entry->bio, &start0, &blocks0))
 		return false;
+	/*
+	 * If the FIFO head's exact extent range is already resident, no lower
+	 * merge is possible for that BIO. Avoid rebuilding the same 64-BIO chain
+	 * for each cached sibling in a multi-record extent.
+	 */
+	head_logical =
+		(swapz_u32)(entry->bio->bi_iter.bi_sector / SWAPZ_SECTORS);
+	head_range_error = swapz_engine_required_read_range_cached(
+		&ctx->engine, &head_logical, 1U, start0, blocks0,
+		&head_first, &head_blocks);
+	if (!head_range_error && !head_blocks) {
+		ctx->parallel_read_coalesce_skip_cached++;
+		return false;
+	}
 	list_for_each_entry(entry, local, list) {
 		if (prefix >= remaining || !swapz_read_can_parallel(ctx, entry->bio))
 			break;
@@ -4260,13 +4466,21 @@ static void swapz_worker(struct work_struct *work)
 	u64 cpu_start_ns = swapz_worker_cpu_sample();
 
 	for (;;) {
-		if (READ_ONCE(ctx->inflight_write.active) &&
-		    completion_done(&ctx->inflight_write.lower_done)) {
-			int inflight_error = swapz_finalize_inflight_write(ctx, false);
+		while (swapz_has_inflight(ctx)) {
+			struct swapz_inflight_write *head =
+				swapz_inflight_head_slot(ctx);
+			int inflight_error;
 
-			if (inflight_error && ctx->batch_count) {
-				ctx->next_window_close = SWAPZ_CLOSE_OTHER;
-				swapz_flush_window(ctx);
+			if (!head || !completion_done(&head->lower_done))
+				break;
+			inflight_error = swapz_finalize_inflight_write(ctx, false);
+			if (inflight_error) {
+				swapz_finalize_all_inflight(ctx, true);
+				if (ctx->batch_count) {
+					ctx->next_window_close = SWAPZ_CLOSE_OTHER;
+					swapz_flush_window(ctx);
+				}
+				break;
 			}
 		}
 		remaining = SWAPZ_WORK_QUANTUM_BIOS;
@@ -4507,8 +4721,8 @@ static void swapz_worker(struct work_struct *work)
 			 * forced-fence service evidence leak into a later unrelated wave.
 			 */
 			if (!ctx->batch_count) {
-				if (!READ_ONCE(ctx->inflight_write.active))
-						ctx->retained_window_read_bypasses = 0;
+				if (!swapz_has_inflight(ctx))
+					ctx->retained_window_read_bypasses = 0;
 				ctx->retained_wave_interrupted = false;
 				ctx->retained_chain_completed = 0;
 				ctx->retained_tail_target = 0;
@@ -4713,8 +4927,12 @@ static void swapz_drain(struct dm_target *ti)
 	if (ctx->preparation_workqueue)
 		drain_workqueue(ctx->preparation_workqueue);
 	flush_delayed_work(&ctx->worker);
-	if (READ_ONCE(ctx->inflight_write.active)) {
-		wait_for_completion(&ctx->inflight_write.lower_done);
+	while (swapz_has_inflight(ctx)) {
+		struct swapz_inflight_write *head = swapz_inflight_head_slot(ctx);
+
+		if (!head)
+			break;
+		wait_for_completion(&head->lower_done);
 		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 		flush_delayed_work(&ctx->worker);
 	}
@@ -4731,7 +4949,7 @@ static void swapz_drain(struct dm_target *ti)
 	    (u64)atomic64_read(&ctx->preparation_free_mask) !=
 					SWAPZ_PREPARATION_FREE_MASK ||
 	    atomic_read(&ctx->preparation_workers_active) ||
-	    ctx->batch_count || READ_ONCE(ctx->inflight_write.active) ||
+	    ctx->batch_count || swapz_has_inflight(ctx) ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		DMERR("swapz drain invariant: accepted BIOs remain after draining");
@@ -4830,6 +5048,10 @@ static void swapz_free(struct swapz_dm *ctx)
 		}
 		kvfree(ctx->read_slots);
 	}
+	for (slot = 1; slot < SWAPZ_MAX_WRITE_PIPELINE_DEPTH; ++slot) {
+		vfree(ctx->inflight_writes[slot].run.bytes);
+		kvfree(ctx->inflight_writes[slot].run.txs);
+	}
 	vfree(ctx->engine.bulk_scratch);
 	kvfree(ctx->engine.bulk_txs);
 	kfree(ctx->lz4_workmem);
@@ -4896,6 +5118,16 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "delta64_prepare_workers must be in 1..4";
 		return -EINVAL;
 	}
+	if (!swapz_delta64_lz4_acceleration ||
+	    swapz_delta64_lz4_acceleration > 4U) {
+		ti->error = "delta64_lz4_acceleration must be in 1..4";
+		return -EINVAL;
+	}
+	if (!swapz_write_pipeline_depth ||
+	    swapz_write_pipeline_depth > SWAPZ_MAX_WRITE_PIPELINE_DEPTH) {
+		ti->error = "write_pipeline_depth must be in 1..2";
+		return -EINVAL;
+	}
 	if (swapz_read_coalesce_max_blocks < 2U ||
 	    swapz_read_coalesce_max_blocks > 2U * SWAPZ_MAX_BLOCKS) {
 		ti->error = "read_coalesce_max_blocks must be in 2..8";
@@ -4925,6 +5157,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		(ctx->delta64_rescue_enabled ?
 		 (swapz_u8)swapz_delta64_prepare_workers : 1U) : 0U;
 	ctx->lz4_acceleration = (swapz_u8)swapz_lz4_acceleration;
+	ctx->delta64_lz4_acceleration =
+		(swapz_u8)swapz_delta64_lz4_acceleration;
+	ctx->write_pipeline_depth = (swapz_u8)swapz_write_pipeline_depth;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
@@ -5116,6 +5351,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_txs = kvcalloc(SWAPZ_MAX_RECORDS,
 				       sizeof(*ctx->engine.bulk_txs),
 				       GFP_KERNEL);
+	if (ctx->write_pipeline_depth > 1U) {
+		ctx->inflight_writes[1].run.bytes =
+			vzalloc(SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES);
+		ctx->inflight_writes[1].run.txs =
+			kvcalloc(SWAPZ_MAX_RECORDS,
+				 sizeof(*ctx->engine.bulk_txs), GFP_KERNEL);
+	}
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
 	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
@@ -5127,6 +5369,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	     (!ctx->read_slots || !ctx->read_pages_store ||
 	      !ctx->read_coalesce_scratch)) ||
 	    !ctx->engine.bulk_scratch || !ctx->engine.bulk_txs ||
+	    (ctx->write_pipeline_depth > 1U &&
+	     (!ctx->inflight_writes[1].run.bytes ||
+	      !ctx->inflight_writes[1].run.txs)) ||
 	    !ctx->lz4_workmem) {
 		error = -ENOMEM;
 		goto fail;
@@ -5155,9 +5400,14 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			goto fail;
 		}
 	}
-	ctx->inflight_write.run.bytes = ctx->engine.bulk_scratch;
-	ctx->inflight_write.run.txs = ctx->engine.bulk_txs;
-	init_completion(&ctx->inflight_write.lower_done);
+	ctx->inflight_writes[0].run.bytes = ctx->engine.bulk_scratch;
+	ctx->inflight_writes[0].run.txs = ctx->engine.bulk_txs;
+	for (read_slot = 0; read_slot < SWAPZ_MAX_WRITE_PIPELINE_DEPTH;
+	     ++read_slot) {
+		ctx->inflight_writes[read_slot].ctx = ctx;
+		ctx->inflight_writes[read_slot].slot_index = read_slot;
+		init_completion(&ctx->inflight_writes[read_slot].lower_done);
+	}
 	ctx->io_client = dm_io_client_create();
 	if (IS_ERR(ctx->io_client)) {
 		error = PTR_ERR(ctx->io_client);
@@ -5322,7 +5572,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "physical_write=%llu physical_write_reqs=%llu "
 		       "physical_read=%llu physical_read_reqs=%llu "
 		       "compressed=%llu raw=%llu zero_elided=%llu discarded=%llu "
-		       "lz4_acceleration=%u lz4_attempts=%llu lz4_accepted_bytes=%llu "
+		       "lz4_acceleration=%u delta64_lz4_acceleration=%u "
+		       "lz4_attempts=%llu lz4_accepted_bytes=%llu "
 		       "lz4_size_le256=%llu lz4_size_257_1024=%llu "
 		       "lz4_size_1025_2048=%llu lz4_size_2049_3072=%llu "
 		       "lz4_size_3073_3568=%llu lz4_raw_fallback=%llu "
@@ -5407,6 +5658,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "retain_timer_arm_skips=%llu "
 		       "async_prepare=%u delta64_prepare_workers=%u "
 		       "delta64_prepare_active_max=%u delta64_prepare_pages=%llu "
+		       "write_pipeline_depth=%u pipeline_active_max=%u "
 		       "delta64_prepare_parallel_starts=%llu "
 		       "guard_inflight_zero_shrink=%u "
 		       "prep_lower_write_overlap_starts=%llu "
@@ -5514,7 +5766,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->physical_read_reqs, ctx->compressed_pages,
 		       ctx->raw_pages, ctx->zero_elided_pages,
 		       ctx->discard_pages,
-		       ctx->lz4_acceleration,
+		       ctx->lz4_acceleration, ctx->delta64_lz4_acceleration,
 		       ctx->lz4_attempts, ctx->lz4_accepted_bytes,
 		       ctx->lz4_size_bins[0], ctx->lz4_size_bins[1],
 		       ctx->lz4_size_bins[2], ctx->lz4_size_bins[3],
@@ -5642,6 +5894,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->async_prepare, ctx->preparation_worker_count,
 		       (unsigned int)atomic_read(&ctx->preparation_workers_active_max),
 		       prep.prepared_pages,
+		       ctx->write_pipeline_depth, ctx->pipeline_active_max,
 		       (u64)atomic64_read(&ctx->preparation_parallel_starts), 0U,
 		       prep.prepared_during_lower_write,
 		       prep.lower_write_overlap_ns,

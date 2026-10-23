@@ -230,6 +230,9 @@ class PublicMakeContract(unittest.TestCase):
                 record.update({
                     "physical_write_reqs": 5,
                     "lz4_acceleration": 1,
+                    "delta64_lz4_acceleration": 1,
+                    "write_pipeline_depth": 1,
+                    "pipeline_active_max": 1 if mode else 0,
                     "read_coalesce_max_blocks": 8,
                     "lz4_wall_ns": 20000000,
                     "ordered_lz4_wall_ns": 15000000,
@@ -593,8 +596,22 @@ class PublicMakeContract(unittest.TestCase):
                 else:
                     record = json.loads(mock_write_arm("swapz", 32, 1))
                     record["kernel_write_path"]["delta64_prepare_workers"] = 1
-                    record["fixture_sha256"] = "e" * 64
-                    record["trace_sha256"] = "f" * 64
+                record["kernel_write_path"]["delta64_lz4_acceleration"] = 4
+                record["fixture_sha256"] = "e" * 64
+                record["trace_sha256"] = "f" * 64
+                return json.dumps(record, sort_keys=True)
+
+            def mock_write_pipeline_arm(depth):
+                record = json.loads(mock_write_arm("swapz", 32, 1))
+                kernel = record["kernel_write_path"]
+                kernel["write_pipeline_depth"] = depth
+                kernel["pipeline_active_max"] = depth
+                if depth == 2:
+                    record["throughput_mbps"]["logical_write_mbps"] = 22.0
+                    record["write_p99_ns"] = 2700000
+                    record["lower_io"]["lower_write_requests"] = 4
+                record["fixture_sha256"] = "7" * 64
+                record["trace_sha256"] = "8" * 64
                 return json.dumps(record, sort_keys=True)
 
             def mock_k1_read_bypass_arm(allow):
@@ -786,6 +803,23 @@ class PublicMakeContract(unittest.TestCase):
                         ))
                         index += 1
                 records.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
+            depth_sequence = [
+                2 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
+            for index, depth in enumerate(depth_sequence):
+                off = json.loads(mock_write_arm("off", 32, 1))
+                off["fixture_sha256"] = "7" * 64
+                off["trace_sha256"] = "8" * 64
+                swapz = json.loads(mock_write_pipeline_arm(depth))
+                records.extend((
+                    f"START_WRITE_PIPELINE_DEPTH={depth}",
+                    "REPLAY_ORDER=swapz-first" if index % 2 else
+                    "REPLAY_ORDER=off-first",
+                    "PASS_RAM_MODEL_LOWER_MBPS=80 COMPLETION_NSEC=150000 "
+                    "IRQMODE=2 QUEUE_MODE=2 SUBMIT_QUEUES=1 HW_QUEUE_DEPTH=64",
+                    json.dumps(swapz if index % 2 else off, sort_keys=True),
+                    json.dumps(off if index % 2 else swapz, sort_keys=True),
+                    f"PASS_WRITE_PIPELINE_DEPTH={depth}",
+                ))
             script = ("#!/bin/bash\nset -eu\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"
@@ -936,6 +970,10 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("--write-only-qd", loaded)
         self.assertIn("--sustained-write", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
+        self.assertIn("START_WRITE_PIPELINE_DEPTH=", loaded)
+        self.assertIn("PASS_WRITE_PIPELINE_DEPTH=", loaded)
+        self.assertIn("--write-pipeline-depth", loaded)
+        self.assertIn("--delta64-lz4-acceleration 4", loaded)
         self.assertLess(loaded.index("tests/tools/deploy-nullblk.sh"),
                         loaded.index("tests/tools/benchmark-owned-pair.sh"))
         self.assertNotIn("swapon ", loaded)
