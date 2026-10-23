@@ -111,6 +111,16 @@ authorized safety/deployment gate and is not the next implementation task.
 
 ## Optimization evidence table
 
+**Three-host 2026-10-23 cleanup decision:** source `174d42eb7135` passed the
+complete owned-RAM matrix on AVX-512, ARM64/NEON and SSE2. Ordinary first-pass
+LZ4 acceleration selection, READ-coalescing cap selection, delta64 preparation
+width K=2/K=4 and lower-WRITE depth-two are closed experiments. Production keeps
+ordinary LZ4 acceleration 1, coalescing cap 8, delta64 preparation K=1 and
+lower-WRITE depth 1; their runtime selectors and routine A/Bs are removed. The
+current ordered-worker independent READ fan-out is distinct from the retired
+`swapz-read` helper and needs one isolated on/off evidence cycle before a
+keep/remove decision.
+
 Classes are evidence states: **(1)** tested-valid/keep, **(2)** tested-invalid
 because the implementation or metric cannot answer the intended question,
 **(3)** tested-invalid despite a sound experiment, **(4)** ready for a bounded

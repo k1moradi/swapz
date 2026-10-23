@@ -1067,6 +1067,9 @@ cap evidence is sufficient to fix the maximum coalesced span at eight blocks:
 8 materially improves serial sequential service versus 4 on all three hosts,
 while fast-model comparisons do not establish a smaller cap as better. The
 runtime cap selector and routine 2/4/8 sweep are retired.
+Rootless source/build contracts assert that retired production selectors and
+their routine loaded markers are absent, while fixed compatibility telemetry
+continues to report the selected production values.
 
 Every packed READ pass remains 4 MiB/1024 byte-exact verified pages. Reports
 must show sequential and seeded-random useful READ MB/s, p99, lower bytes and
