@@ -2755,6 +2755,289 @@ def read_coalesce_cap_ab_verdict(sessions):
     }
 
 
+def parse_parallel_read_ab(output):
+    """Parse the final five-pair fast-model independent READ fan-out decision."""
+    sessions, current = [], None
+    for line in output.splitlines():
+        line = line.strip()
+        match = re.fullmatch(r"START_PARALLEL_READ_AB=([01])", line)
+        if match:
+            current = {
+                "parallel_reads": int(match.group(1)),
+                "status": "INCOMPLETE", "order": "unknown",
+                "device_model": None, "arms": {},
+            }
+            sessions.append(current)
+            continue
+        if current is None:
+            continue
+        if line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            model = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) "
+                r"IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) "
+                r"HW_QUEUE_DEPTH=(\d+)", line)
+            if model:
+                current["device_model"] = {
+                    "cap_mib_s": int(model.group(1)),
+                    "completion_nsec": int(model.group(2)),
+                    "irqmode": int(model.group(3)),
+                    "queue_mode": int(model.group(4)),
+                    "submit_queues": int(model.group(5)),
+                    "hw_queue_depth": int(model.group(6)),
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            candidate = obj.get("candidate")
+            if candidate not in ("off", "swapz") or obj.get("verdict") != "PASS":
+                continue
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            packed = obj.get("packed_read") or {}
+            passes = {}
+            for mode in ("sequential", "seeded_random"):
+                phase = (packed.get("passes") or {}).get(mode) or {}
+                phase_lower = phase.get("lower_io") or {}
+                passes[mode] = {
+                    "logical_bytes": phase.get("logical_bytes"),
+                    "verified_pages": phase.get("verified_pages"),
+                    "verified_image_sha256": phase.get("verified_image_sha256"),
+                    "useful_read_mbps": phase.get("useful_read_mbps"),
+                    "read_p99_ms": phase.get("read_p99_ms"),
+                    "lower_read_bytes": phase_lower.get("lower_read_bytes"),
+                    "lower_read_requests": phase_lower.get("lower_read_requests"),
+                    "kernel_read_path": phase.get("kernel_read_path"),
+                }
+            current["arms"][candidate] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "input_write_mbps": rates.get("logical_write_mbps"),
+                "swap_in_read_mbps": rates.get("logical_read_mbps"),
+                "read_p99_ms": (obj.get("read_p99_ns") / 1e6
+                                if isinstance(obj.get("read_p99_ns"), (int, float))
+                                else None),
+                "lower_read_bytes": lower.get("lower_read_bytes"),
+                "lower_read_requests": lower.get("lower_read_requests"),
+                "kernel_read_path": obj.get("kernel_read_path"),
+                "logical_image_sha256": packed.get("logical_image_sha256"),
+                "packed_close_delta": packed.get("packed_close_delta"),
+                "passes": passes,
+            }
+        else:
+            done = re.fullmatch(r"PASS_PARALLEL_READ_AB=([01])", line)
+            if done and int(done.group(1)) == current["parallel_reads"]:
+                current["status"] = "PASS"
+                current = None
+    return sessions
+
+
+def parallel_read_ab_verdict(sessions):
+    """Validate isolated fan-out with ID63 disabled; report decision evidence only."""
+    try:
+        pairs = matched_binary_pairs(sessions, "parallel_reads")
+    except ValueError as exc:
+        return {"overall": "INCOMPLETE", "reason": str(exc)}
+    expected = MODEL_SPECS["ssd_emulated"]
+    coalesce_fields = (
+        "parallel_read_adjacent_extent_pairs",
+        "parallel_read_adjacent_extent_blocks",
+        "parallel_read_adjacent_chain_3plus",
+        "parallel_read_coalesced_pairs",
+        "parallel_read_coalesced_reqs_saved",
+        "parallel_read_coalesced_blocks",
+        "parallel_read_coalesce_extra_blocks",
+        "parallel_read_coalesce_skip_cached",
+        "parallel_read_coalesce_skip_noncontig_slot",
+        "parallel_read_coalesce_skip_gap",
+        "parallel_read_coalesce_skip_other",
+    )
+    for index, row in enumerate(sessions):
+        if row.get("status") != "PASS" or row.get("order") != (
+                "swapz-first" if index % 2 else "off-first"):
+            return {"overall": "INCOMPLETE",
+                    "reason": "independent READ fan-out order/status mismatch"}
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(
+                model.get(key) != expected[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "independent READ fan-out device model mismatch"}
+        if set(row.get("arms", {})) != {"off", "swapz"}:
+            return {"overall": "INCOMPLETE",
+                    "reason": "independent READ fan-out paired arms missing"}
+        provenance_error = paired_provenance_error(
+            row, "independent READ fan-out")
+        if provenance_error:
+            return provenance_error
+        arm = row["arms"]["swapz"]
+        for key in ("input_write_mbps", "swap_in_read_mbps", "read_p99_ms",
+                    "lower_read_bytes", "lower_read_requests"):
+            if not isinstance(arm.get(key), (int, float)) or arm[key] < 0:
+                return {"overall": "INCOMPLETE",
+                        "reason": "independent READ fan-out mixed metrics missing"}
+        mixed_kernel = arm.get("kernel_read_path")
+        if not isinstance(mixed_kernel, dict) or any(
+                type(mixed_kernel.get(name)) is not int or
+                mixed_kernel[name] < 0 for name in KERNEL_READ_FIELDS) or                 not read_metadata_counters_consistent(mixed_kernel):
+            return {"overall": "INCOMPLETE",
+                    "reason": "independent READ fan-out mixed telemetry missing"}
+        if any(mixed_kernel[field] for field in coalesce_fields):
+            return {"overall": "INCOMPLETE",
+                    "reason": "fan-out decision arm executed ID63 coalescing"}
+        if not row["parallel_reads"] and (
+                mixed_kernel["parallel_read_async_batches"] or
+                mixed_kernel["parallel_read_async_slots"]):
+            return {"overall": "INCOMPLETE",
+                    "reason": "fan-out off arm submitted asynchronous READ slots"}
+        if row["parallel_reads"] and (
+                mixed_kernel["parallel_read_async_batches"] <= 0 or
+                mixed_kernel["parallel_read_async_slots"] < 2):
+            return {"overall": "INCOMPLETE",
+                    "reason": "fan-out on arm did not exercise mixed lower-READ concurrency"}
+        if not isinstance(arm.get("packed_close_delta"), int) or                 arm["packed_close_delta"] <= 0:
+            return {"overall": "INCOMPLETE",
+                    "reason": "independent READ fan-out packed population missing"}
+        for mode in ("sequential", "seeded_random"):
+            phase = arm["passes"].get(mode)
+            if not isinstance(phase, dict) or                     phase.get("logical_bytes") != 4194304 or                     phase.get("verified_pages") != 1024:
+                return {"overall": "INCOMPLETE",
+                        "reason": "independent READ fan-out packed verification incomplete"}
+            if any(not isinstance(phase.get(key), (int, float)) or
+                   phase[key] < 0 for key in
+                   ("useful_read_mbps", "read_p99_ms",
+                    "lower_read_bytes", "lower_read_requests")):
+                return {"overall": "INCOMPLETE",
+                        "reason": "independent READ fan-out packed metrics missing"}
+            kernel = phase.get("kernel_read_path")
+            if not isinstance(kernel, dict) or any(
+                    type(kernel.get(name)) is not int or kernel[name] < 0
+                    for name in KERNEL_READ_FIELDS) or                     not read_metadata_counters_consistent(kernel):
+                return {"overall": "INCOMPLETE",
+                        "reason": "independent READ fan-out packed telemetry missing"}
+            if any(kernel[field] for field in coalesce_fields):
+                return {"overall": "INCOMPLETE",
+                        "reason": "packed fan-out decision arm executed ID63 coalescing"}
+            if not row["parallel_reads"] and (
+                    kernel["parallel_read_async_batches"] or
+                    kernel["parallel_read_async_slots"]):
+                return {"overall": "INCOMPLETE",
+                        "reason": "packed fan-out off arm submitted asynchronous READ slots"}
+
+    if len({row["source_sha"] for row in sessions}) != 1 or             len({row["fixture_sha256"] for row in sessions}) != 1 or             len({row["trace_sha256"] for row in sessions}) != 1 or             len({row["arms"]["swapz"]["logical_image_sha256"]
+                 for row in sessions}) != 1:
+        return {"overall": "INCONCLUSIVE",
+                "reason": "independent READ fan-out provenance mismatch"}
+
+    modes = {}
+    for enabled in (0, 1):
+        rows = [row["arms"]["swapz"] for row in sessions
+                if row["parallel_reads"] == enabled]
+        mixed = {
+            "write_mbps": statistics.mean(row["input_write_mbps"] for row in rows),
+            "read_mbps": statistics.mean(row["swap_in_read_mbps"] for row in rows),
+            "read_p99_ms": statistics.mean(row["read_p99_ms"] for row in rows),
+            "lower_read_bytes": statistics.mean(row["lower_read_bytes"] for row in rows),
+            "lower_read_requests": statistics.mean(
+                row["lower_read_requests"] for row in rows),
+            "async_batches": statistics.mean(
+                row["kernel_read_path"]["parallel_read_async_batches"]
+                for row in rows),
+            "async_slots": statistics.mean(
+                row["kernel_read_path"]["parallel_read_async_slots"]
+                for row in rows),
+        }
+        packed = {}
+        for mode in ("sequential", "seeded_random"):
+            phases = [row["passes"][mode] for row in rows]
+            packed[mode] = {
+                "useful_read_mbps": statistics.mean(
+                    phase["useful_read_mbps"] for phase in phases),
+                "read_p99_ms": statistics.mean(
+                    phase["read_p99_ms"] for phase in phases),
+                "lower_read_bytes": statistics.mean(
+                    phase["lower_read_bytes"] for phase in phases),
+                "lower_read_requests": statistics.mean(
+                    phase["lower_read_requests"] for phase in phases),
+                "async_batches": statistics.mean(
+                    phase["kernel_read_path"]["parallel_read_async_batches"]
+                    for phase in phases),
+                "async_slots": statistics.mean(
+                    phase["kernel_read_path"]["parallel_read_async_slots"]
+                    for phase in phases),
+            }
+        modes[str(enabled)] = {"mixed": mixed, "packed": packed}
+
+    paired = {"mixed": {}}
+    mixed_metrics = (
+        ("write_mbps", "input_write_mbps"),
+        ("read_mbps", "swap_in_read_mbps"),
+        ("read_p99_ms", "read_p99_ms"),
+        ("lower_read_bytes", "lower_read_bytes"),
+        ("lower_read_requests", "lower_read_requests"),
+    )
+    for output_name, source_name in mixed_metrics:
+        changes = []
+        for pair in pairs:
+            off = pair[0]["arms"]["swapz"][source_name]
+            on = pair[1]["arms"]["swapz"][source_name]
+            if not off:
+                return {"overall": "INCOMPLETE",
+                        "reason": "independent READ fan-out mixed zero denominator"}
+            changes.append(on / off - 1.0)
+        paired["mixed"][output_name] = paired_ci95(changes)
+
+    paired["packed"] = {}
+    for mode in ("sequential", "seeded_random"):
+        paired["packed"][mode] = {}
+        for output_name, source_name in (
+                ("read_mbps", "useful_read_mbps"),
+                ("read_p99_ms", "read_p99_ms"),
+                ("lower_read_bytes", "lower_read_bytes"),
+                ("lower_read_requests", "lower_read_requests")):
+            changes = []
+            for pair in pairs:
+                off = pair[0]["arms"]["swapz"]["passes"][mode][source_name]
+                on = pair[1]["arms"]["swapz"]["passes"][mode][source_name]
+                if not off:
+                    return {"overall": "INCOMPLETE",
+                            "reason": "independent READ fan-out packed zero denominator"}
+                changes.append(on / off - 1.0)
+            paired["packed"][mode][output_name] = paired_ci95(changes)
+
+    raw_control = {}
+    for metric, source_name in (
+            ("write_mbps", "input_write_mbps"),
+            ("read_mbps", "swap_in_read_mbps"),
+            ("read_p99_ms", "read_p99_ms")):
+        changes = []
+        for pair in pairs:
+            off = pair[0]["arms"]["off"][source_name]
+            on = pair[1]["arms"]["off"][source_name]
+            if not off:
+                return {"overall": "INCOMPLETE",
+                        "reason": "independent READ fan-out raw-control zero denominator"}
+            changes.append(on / off - 1.0)
+        raw_control[metric] = paired_ci95(changes)
+
+    return {
+        "overall": "PASS_PARALLEL_READ_AB_EVIDENCE",
+        "matched_pairs": 5,
+        "confidence": "PAIRED_95PCT_CI_REPORTED",
+        "device_model": expected,
+        "modes": modes,
+        "paired": paired,
+        "raw_control_paired": raw_control,
+        "interpretation":
+            "FINAL_SAME_SOURCE_INDEPENDENT_READ_FANOUT_DECISION_ID63_OFF_FAST_MODEL",
+    }
+
+
 def parse_read_coalesce_ab(output):
     """Parse five matched fast-model rounds varying only ID63 coalescing."""
     sessions, current = [], None
