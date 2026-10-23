@@ -423,6 +423,8 @@ class PublicMakeContract(unittest.TestCase):
                     "read_two_block_skips": 128,
                     "parallel_read_pairs": 128,
                     "parallel_read_same_extent_pairs": 64,
+                    "parallel_read_async_batches": 32,
+                    "parallel_read_async_slots": 64,
                     "parallel_read_distinct_extent_pairs": 64,
                     "parallel_read_adjacent_extent_pairs": 24,
                     "parallel_read_adjacent_extent_blocks": 144,
