@@ -243,14 +243,15 @@ static swapz_u16 swapz_probe_set(
 
     def test_lz4_foreground_size_histogram_is_attempt_side_only(self):
         accept = body("swapz_accept_write")
+        compressor = body("swapz_compress_page")
         status = body("swapz_status")
-        self.assertIn("length = LZ4_compress_fast(", accept)
+        self.assertIn("baseline = LZ4_compress_fast(input", compressor)
         self.assertIn("ctx->lz4_attempts++", accept)
         self.assertIn("ctx->lz4_size_bins[5]++", accept)
         self.assertIn("ctx->lz4_accepted_bytes += length", accept)
         for threshold in ("256", "1024", "2048", "3072"):
             self.assertIn(f"length <= {threshold}", accept)
-        self.assertLess(accept.index("length = LZ4_compress_fast("),
+        self.assertLess(accept.index("length = swapz_compress_page("),
                         accept.index("ctx->lz4_attempts++"))
         self.assertLess(accept.index("ctx->lz4_size_bins[5]++"),
                         accept.index("if (length <= 0 && bulk_raw_eligible)"))
@@ -2452,7 +2453,7 @@ static swapz_u16 swapz_probe_set(
                         producer.index("spin_lock_irqsave(&ctx->queue_lock, flags)"))
         self.assertLess(producer.index("swapz_preparation_claim_slot("),
                         producer.index("list_del_init(&entry->preparation_list)"))
-        self.assertIn("LZ4_compress_fast(", producer)
+        self.assertIn("prepared->length = swapz_compress_page(", producer)
         self.assertIn("lane->lz4_workmem", producer)
         self.assertIn("lane->input_page", producer)
         self.assertIn("lane->predictor_page", producer)
