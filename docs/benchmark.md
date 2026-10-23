@@ -116,43 +116,26 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
 The latest successful standard owner matrix tested source
-`5bf2c0a6f0384ccf3829dc02dc0e9b737c857e40`, passed all five stages, and
+`174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and
 published report-only commit
-`85aeac4cbb368bb4900cd94c9c73f46d952520ef`. This qualifies alpha.26's
-metadata-key deduplication, final producer drain and aligned preparation array
-on owned RAM-backed `null_blk`.
+`edab5b87344b33f95b2152dab5efbc39fdb0b1a0`. It qualifies that exact
+source on owned RAM-backed `null_blk`; current `main` has since advanced and
+requires a fresh complete owner run before current HEAD becomes the qualified
+baseline.
 
-The later owner run for `b7aae67fc230ceb4323e8be4c6f1ebf219cba405` stopped in
-native/rootless stage 2 before the loaded matrix because the source-contract
-parser did not recognize a new alpha.27 `swapz_u16` helper. Report
-`7faef62418e9563efde947cef432e63af1236629` is therefore a valid FAIL record,
-not performance evidence. Commits
-`55183d7c7d041c74068ed553ba42213fc44cf713` and
-`30ba10ce38ebae3da2e401bba15b1ca4178765c5` repair and pin the parser only;
-a fresh full owner run is still required for alpha.27.
+Five matched fast-model async/sync sustained-write pairs measured QD4 +1.66%
+throughput (95% CI [+0.33%,+3.00%]), QD8 +23.88%
+([+18.52%,+29.24%]), and QD32 +22.15% ([+15.65%,+28.65%]). QD8 lower
+WRITE requests fell 17.96% while bytes rose 0.54%; QD32 requests fell 9.96%
+while bytes were statistically neutral. Production lower-WRITE depth remains
+fixed at one.
 
-Against the preceding `9a802eff` report, fast random backing reads fell from
-3592 to 2993 KiB and 734.6 to 678 requests. Directory hit rate rose from 71.2%
-to 86.8%; random replacements fell from 309.4 to 134.4, sequential from 441 to
-43. These cross-run observations support the duplicate-key repair, while the
-remaining I/O difference from the older `5bdd040` baseline motivates a bounded
-two-choice cache experiment. Host load and post-write geometry prevent a clean
-causal attribution of the entire remaining difference to set conflicts.
-
-Five matched fast-model async/sync write pairs measured QD4 -0.4% (95% CI
-[-4.4%,+3.6%]), QD8 +28.7% ([+21.9%,+35.5%]), and QD32 +27.1%
-([+21.8%,+32.5%]). QD8 requests fell 23.7% and bytes rose 0.55%; QD32
-requests rose 17.7% and bytes 0.72%; all four intervals exclude zero.
-Fast mixed throughput +3.2% ([-1.9%,+8.4%]) is inconclusive versus sync.
-Rescue remains off with zero classifier/transform activity.
-
-Fast QD32 whole-host CPU activity averaged 42.2% sync versus 55.0% async;
-CPU PSI averaged 20.5% versus 27.0%. These include benchmark, kernel and
-background work such as Codex. They do not isolate swapz CPU or establish an
-idle-host control. Low-RAM/heavy-CPU, sustained churn, real kernel swap and
-physical-media qualification remain open. Steps 1/2 have their standard RAM
-qualification; Steps 3/4/5 (asynchronous TRIM, churn/WAF, map compaction) remain
-outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
+The same source passed the predictor-first positive delta64 A/B and the current
+ID63 confirmations. Rescue remains default-off pending representative content;
+READ coalescing remains default-on with an eight-block fixed cap. Loaded
+lifecycle evidence again exercised GC relocation, whole-segment DISCARD,
+packed placement and byte-exact readback. Low-RAM/heavy-CPU, representative
+long-run churn, real kernel swap and physical-media qualification remain open.
 
 ## Timed boundaries
 
@@ -236,15 +219,14 @@ useful service benefit. Production lower-WRITE depth is fixed at one, the
 runtime selector is retired, and the second-slot allocation/append path has
 been removed. Ready-wait counters remain passive evidence.
 
-**ID63 adjacent distinct-extent READ coalescing.** The latest successful owner
-matrix (`85aeac4`) reconfirms the promoted request benefit. Fast sequential
-lower requests improve 21.09% with 95% CI [18.54%,23.64%], while throughput
-(-1.11%, CI [-13.53%,+11.31%]) and p99 (-1.02%, CI [-6.26%,+4.21%]) do not show
-a significant loss. Serial-depth sequential requests improve 40.16%, throughput
-52.03%, and p99 36.28%, with all three paired intervals excluding zero.
-Production therefore keeps `read_coalesce=1` by default. Alpha.27 changed the
-metadata-cache implementation after this qualified source, so exact-current-main
-confirmation is still required.
+**ID63 adjacent distinct-extent READ coalescing.** The latest qualified source
+(`174d42eb7135...`) reconfirms the production mechanism. Fast sequential lower
+requests improve 17.53% and p99 5.43%, while the useful-throughput confidence
+interval overlaps zero. Serial-depth sequential requests improve 20.75%, p99
+12.24%, and throughput 16.61%, with all three intervals excluding zero.
+Production keeps `read_coalesce=1` and fixes the maximum coalesced span at
+eight blocks; exact-current-main confirmation is pending only because source has
+advanced after the qualified report.
 
 Passive evidence finds 162.4/207.0 sequential distinct pairs physically
 adjacent but only 2.6/392.2 random. The bounded active experiment is stricter:
@@ -308,13 +290,14 @@ comparison. Lower-score pages run ordinary LZ4 first and may use threshold 16
 only when the production planner identifies an exact lower SWZ packing limit
 that the candidate crosses. Rescue is default-off.
 
-Earlier loaded enabled-policy evidence observed eligible pages in all 14 mixed
-and 40 sustained-write sessions but zero classifier passes, transform attempts
-or adoptions while still accumulating classifier wall time. That result
-justified the default-off policy. The newer packing-aware route is materially
-different, but it has not yet passed a controlled loaded rescue-on/off A/B on
-representative positive content. The following historical/native controls
-continue to measure routing quality and backend cost. ID67a.3 uses
+Earlier loaded enabled-policy evidence observed eligible pages but zero
+classifier passes, transform attempts or adoptions, which justified the
+default-off policy. The current predictor-first route has since passed a
+controlled positive-fixture rescue A/B with 4096 direct adoptions, -27.04%
+lower WRITE bytes and +5.15% useful WRITE throughput. That is positive synthetic
+evidence rather than representative swap prevalence, so the default remains off.
+The following historical/native controls continue to measure routing quality
+and backend cost. ID67a.3 uses
 `anon-page-fixture.py` SHAKE-generated entropy, mixed and medium pages plus
 generated zero/repeated-word controls. The sampled delta64 signpost runs only
 after raw LZ4 leaves a page above the rescue threshold and never treats an
@@ -354,13 +337,11 @@ tested zero-false-call point and retains 52 of 65 ungated planner blocks saved
 plus 49 extents; thresholds 24/32 produce the same routed geometry. This is
 promising offline evidence, not owner-loaded or production evidence, and it
 still misses the provisional <60 ns/page target by 1 ns. The fixed 24-pair second stage is unrolled without changing sample positions.
-ID67a.4 adds explicit SIMD before the next owner run: SSE2 for old x86_64,
-AVX2 only when CPU capability and YMM xstate permit it, NEON for arm64
-kernel-mode FPSIMD, and portable C otherwise. Kernel call sites are static-call
-patched once at module init and SIMD code is isolated under kernel FPU build/
-state rules. The owner SSE2 machine proved the sparse classifier regresses under vector
-packing (231 ns versus 211 ns scalar), while full-page forward/inverse improve
-(429/550 ns versus 774/767 ns scalar). The classifier is therefore scalar-only.
+ID67a.4 introduced explicit SIMD with isolated kernel-FPU translation units and
+static-call dispatch. Current x86 production supports SSE2, AVX2 and AVX-512
+full-page transform/inverse backends; arm64 supports kernel-mode NEON, with
+portable C fallback. The owner SSE2 evidence showed the sparse classifier
+regresses under vector packing, so the classifier remains scalar-only.
 Transform and inverse remain separate static calls, but current x86 production
 dispatch selects the same qualified ISA tier for both: AVX-512 when AVX-512F
 and the required xstate are available, otherwise AVX2, otherwise SSE2, with
@@ -907,9 +888,9 @@ eligible for K=1 detach. No new status fields are added.
 
 ### ID73 CPU/cache evidence protocol
 
-The next qualification run must preserve the normal rootless/native and loaded
-matrix while adding the following evidence. The changes are intentionally
-measurement-driven; no result below is assumed before the run.
+ID73 is now a retained regression/qualification contract rather than an
+unrun promotion plan. The normal rootless/native and loaded matrix must preserve
+the following evidence whenever these paths change.
 
 For ordinary LZ4, native predictor qualification prints a
 `lz4_acceleration_sweep` for acceleration 1/2/3/4 on identical pages. Record
@@ -919,16 +900,11 @@ a larger payload is acceptable only if the same 4/8/16KiB geometry is retained
 and loaded lower I/O plus useful service improve. Delta64's second LZ4 remains
 acceleration 1 throughout this sweep.
 
-The loaded promotion test now narrows the decision to acceleration 1 versus
-4 on the 80 MiB/s, 0.15 ms, depth-64 RAM model. Native evidence already shows
-the monotonic CPU direction while preserving the same planner-block geometry,
-so loaded time is spent on five adjacent counterbalanced 1/4 pairs rather than
-one observation at every intermediate value. Keep `async_prepare=1`,
-`delta64_rescue=0`, source, fixture, trace and device geometry fixed. Report
-paired 95% confidence intervals for useful WRITE throughput, p99, lower WRITE
-bytes/requests, total/ordered/preparation LZ4 wall, raw-control throughput
-drift, and host CPU/PSI. The 14 mixed sessions and 40 sustained write-only
-sessions remain separate controls.
+Three-host loaded evidence closed the ordinary first-pass acceleration question:
+acceleration 4 reduced compression wall time but did not produce a repeatable
+service win. Production is fixed at acceleration one, and the runtime selector
+plus routine loaded 1/4 A/B are retired. The native 1/2/3/4 sweep remains a
+byte-exact codec/geometry regression check.
 
 For delta64, retain raw native backend transform/inverse ns/page and add loaded
 `delta64_transform_wall_ns / delta64_transform_calls`. The latter surrounds
@@ -964,9 +940,9 @@ authority/preflight CPU with identical published maps, lower I/O and GC
 accounting. Final payload CRC remains mandatory.
 
 For ID63, report passive 3+ chain candidate count and maximum full-extent
-chain/blocks beside the existing adjacent/coalesced pair counters. These are a
-conservative full-extent proxy using the existing 32KiB scratch; they authorize an active
-chain experiment only if 3+ opportunities are common enough to matter.
+chain/blocks beside active N-extent request savings. The passive counters remain
+a conservative opportunity proxy; production already supports exact 2..8-range
+chains inside the fixed 32KiB cap.
 
 The SSE2 native stage also disassembles the exact compiled object and requires
 the rolling-predecessor shuffle plus register-only inverse shift. Timing remains
