@@ -52,7 +52,7 @@ grep -qw cpu "$CGROUP_ROOT/cgroup.subtree_control" || {
     printf '%s\n' 'BLOCKED: ID36 parent cgroup has no delegated CPU controller' >&2
     exit 2
 }
-[[ -r $PRESSURE_SCRIPT && -x $PAIR ]] || {
+[[ -r $PRESSURE_SCRIPT && -r $PAIR ]] || {
     printf '%s\n' 'BLOCKED: ID36 helper files unavailable' >&2
     exit 2
 }
@@ -91,11 +91,12 @@ cleanup() {
         wait "$PRESSURE_PID" 2>/dev/null
     fi
     if [[ -d $CGROUP ]]; then
-        if [[ -f $CGROUP/cgroup.kill && -s $CGROUP/cgroup.procs ]]; then
+        if [[ -f $CGROUP/cgroup.kill &&
+              -n $(cat "$CGROUP/cgroup.procs" 2>/dev/null) ]]; then
             echo 1 > "$CGROUP/cgroup.kill" 2>/dev/null
         fi
         for _ in {1..40}; do
-            [[ ! -s $CGROUP/cgroup.procs ]] && break
+            [[ -z $(cat "$CGROUP/cgroup.procs" 2>/dev/null) ]] && break
             sleep 0.05
         done
         rmdir "$CGROUP" 2>/dev/null || result=1
