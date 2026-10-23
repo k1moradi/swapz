@@ -228,7 +228,7 @@ index=0
 for read_coalesce in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
-               --read-coalesce "$read_coalesce" --parallel-reads 1
+               --read-coalesce "$read_coalesce"
                --shared-plan "$shared_plan")
     if (( index % 2 )); then
         arguments+=(--swapz-first)
@@ -245,7 +245,7 @@ index=0
 for read_coalesce in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000
-               --read-coalesce "$read_coalesce" --parallel-reads 1
+               --read-coalesce "$read_coalesce"
                --shared-plan "$shared_plan")
     if (( index % 2 )); then
         arguments+=(--swapz-first)
