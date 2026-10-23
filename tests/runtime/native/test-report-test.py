@@ -777,6 +777,7 @@ def synthetic_log():
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
+           "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
            "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
@@ -2136,6 +2137,28 @@ class ReportContract(unittest.TestCase):
                               stage["failed_phase"])
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
+
+    def test_id36_resource_pressure_is_required_and_fail_closed(self):
+        evidence = runner.parse_loaded_correctness(synthetic_log())
+        self.assertEqual(evidence["overall"], "PASS", evidence)
+        self.assertEqual(evidence["id36_pressure_mib"], 576)
+        self.assertGreater(evidence["id36_memory_high_events"], 0)
+        self.assertGreater(evidence["id36_cpu_some_usec"], 0)
+
+        missing = synthetic_log().replace(
+            "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 "
+            "memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 "
+            "pressure_mib:576 oom:0 oom_kill:0\n", "", 1)
+        diagnostic = runner.parse_loaded_correctness(missing)
+        self.assertEqual(diagnostic["overall"], "INCOMPLETE")
+        self.assertIn("id36", diagnostic["reason"].lower())
+
+        oom = synthetic_log().replace(
+            "pressure_mib:576 oom:0 oom_kill:0",
+            "pressure_mib:576 oom:1 oom_kill:0", 1)
+        diagnostic = runner.parse_loaded_correctness(oom)
+        self.assertEqual(diagnostic["overall"], "INCOMPLETE")
+        self.assertIn("ID36", diagnostic["reason"])
 
     def test_parallel_read_diagnostic_failure_reports_its_own_reason(self):
         broken = synthetic_log().replace("PASS_PARALLEL_READ_AB=1\n", "", 1)
