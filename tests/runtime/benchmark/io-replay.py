@@ -1499,7 +1499,7 @@ def replay(args):
                                 lower_inflight_sampler.start()
                                 before = lower_stat(identity.get("owned_disk"))
                                 kernel_write_before = kernel_write_snapshot(path, identity)
-                        kernel_read_before = kernel_read_snapshot(path, identity)
+                                kernel_read_before = kernel_read_snapshot(path, identity)
                                 host_before = host_cpu_snapshot()
                                 cpu_before = process_cpu()
                                 measured_start_ns = lower_inflight_sampler.begin()
