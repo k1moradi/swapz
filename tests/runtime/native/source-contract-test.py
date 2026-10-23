@@ -169,6 +169,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("balance_segment_opens = swapz_logical_open_balance", DM)
 
     def test_codec_append_rejects_invalid_length_before_payload_hash(self):
+        validate = source_body("swapz_validate", CODEC)
+        self.assertIn("seen_slots[SWAPZ_MAX_RECORDS]", validate)
+        self.assertIn("seen_slots[index] = slot", validate)
+        self.assertNotIn("swapz_get_record(bytes, earlier", validate)
         append = source_body("swapz_append", CODEC)
         guard = append.index("length > SWAPZ_MAX_COMPRESSED")
         payload_hash = append.index("swapz_crc32c_bytes(payload, length)")
@@ -373,7 +377,13 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("zero_elided=%llu", status)
         # The predicate itself is exercised by an actual-C native test.
         engine = (ROOT / "src/kernel/engine.c").read_text()
-        self.assertIn("int swapz_page_is_zero(", engine)
+        zero_scan = source_body("swapz_page_is_zero", engine)
+        self.assertIn("4U * sizeof(unsigned long long)", zero_scan)
+        self.assertIn("word0 | word1 | word2 | word3", zero_scan)
+        self.assertIn("became_dead", accept)
+        self.assertIn("ctx->segment_mapped_pages[old_segment] == 1U", accept)
+        self.assertLess(accept.index("swapz_discard_page(&ctx->authority, logical)"),
+                        accept.index("swapz_discard_dead_segment(ctx, old_segment)"))
 
     def test_targeted_read_metadata_and_payload_diagnostics_are_success_only(self):
         engine = (ROOT / "src/kernel/engine.c").read_text()
@@ -1521,6 +1531,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PHASE_STEP 2U", predictor)
         self.assertIn("SWAPZ_PREDICTOR_SUBPAGE_LANES", predictor)
         self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PHASES", predictor)
+        self.assertIn("for (step = 1U; step < SWAPZ_PREDICTOR_SUBPAGE_LANES;",
+                      predictor)
+        self.assertNotIn("if (lane == subpage % SWAPZ_PREDICTOR_SUBPAGE_LANES)",
+                         predictor)
 
         self.assertIn("DEFINE_STATIC_CALL", dispatch)
         self.assertIn("static_call_update", dispatch)
@@ -2549,13 +2563,17 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("base += step0", predictor_sse2)
         self.assertNotIn("previous = prefix.u64[1]", predictor_sse2)
         self.assertIn("#ifndef __KERNEL__", predictor_sse2)
-        self.assertIn("swapz_predict_delta64_sse2_unrolled", predictor_sse2)
-        self.assertIn("2U * sizeof(swapz_u64x2)", predictor_sse2)
-        self.assertNotIn("swapz_predict_delta64_sse2_unrolled",
+        self.assertIn("swapz_predict_delta64_sse2_baseline", predictor_sse2)
+        sse2_forward = source_body("swapz_predict_delta64_sse2", predictor_sse2)
+        sse2_baseline = source_body(
+            "swapz_predict_delta64_sse2_baseline", predictor_sse2)
+        self.assertIn("2U * sizeof(swapz_u64x2)", sse2_forward)
+        self.assertNotIn("2U * sizeof(swapz_u64x2)", sse2_baseline)
+        self.assertNotIn("swapz_predict_delta64_sse2_baseline",
                          predictor_dispatch)
         self.assertIn("benchmark_sse2_forward_ab(count, sse2_forward_ab)",
                       predictor_qualification)
-        self.assertIn("SAME_HOST_NATIVE_ONLY_PRODUCTION_UNCHANGED",
+        self.assertIn("SAME_HOST_NATIVE_BASELINE_VS_PROMOTED_PRODUCTION",
                       predictor_qualification)
         self.assertNotIn(
             "input + offset - SWAPZ_PREDICTOR_U64_BYTES", predictor_sse2)
@@ -2614,6 +2632,12 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("&extent_count, 1, 1,", prepare)
         public_plan = source_body("swapz_engine_plan_bounded", engine)
         self.assertIn("extent_count, 0, 0, 0", public_plan)
+        planner = source_body("swapz_engine_plan_bounded_policy", engine)
+        self.assertIn("cached_takes[SWAPZ_MAX_RECORDS][3]", planner)
+        self.assertIn("swapz_u16 cached_reads[SWAPZ_MAX_RECORDS][3]", planner)
+        self.assertIn("cached_takes[index][class_index] = take", planner)
+        self.assertIn("take = cached_takes[position][class_index]", planner)
+        self.assertEqual(planner.count("swapz_fit_count("), 1)
 
         # Publication preflight is local/bounded and does not mutate+restore
         # global GC arrays or apply per-record GC transitions in phase 2.

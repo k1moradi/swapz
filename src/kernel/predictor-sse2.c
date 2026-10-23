@@ -11,49 +11,11 @@ swapz_u32 swapz_predict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output)
 	swapz_u32 offset = 2U * SWAPZ_PREDICTOR_U64_BYTES;
 
 	/*
-	 * Keep vector stores on 16-byte boundaries on Core-2-class x86. The
-	 * one scalar delta pays for eliminating a split vector store per pair.
+	 * Same format and aligned prologue as the qualified baseline. Process two
+	 * independent XMM pairs per iteration so load/shuffle/subtract work can
+	 * overlap while retaining only the preceding input pair as loop state.
+	 * Two same-host machines measured this exact form faster than the 1x loop.
 	 */
-	swapz_predictor_store64(output, previous);
-	swapz_predictor_store64(output + SWAPZ_PREDICTOR_U64_BYTES,
-			       value - previous);
-	memcpy(&previous_values, input, sizeof(previous_values));
-	for (; offset + sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
-	     offset += sizeof(swapz_u64x2)) {
-		swapz_u64x2 values, predecessors, delta;
-
-		/*
-		 * Retain the preceding input pair in-register. SHUFPD imm=1 forms
-		 * [previous.high, current.low], so every 16-byte result needs only
-		 * one new 16-byte input load instead of two overlapping loads.
-		 */
-		memcpy(&values, input + offset, sizeof(values));
-		predecessors = previous_values;
-		__asm__("shufpd $1, %1, %0"
-			: "+x"(predecessors)
-			: "x"(values));
-		delta = values - predecessors;
-		memcpy(output + offset, &delta, sizeof(delta));
-		previous_values = values;
-	}
-	return 0;
-}
-
-#ifndef __KERNEL__
-/*
- * Native A/B candidate only: leave the production SSE2 encoder unchanged.
- * Each pair has independent load/shuffle/subtract work and a shared retained
- * previous input vector. No encoded-format or alignment assumptions change.
- */
-swapz_u32 swapz_predict_delta64_sse2_unrolled(const swapz_u8 *input,
-					      swapz_u8 *output)
-{
-	unsigned long long previous = swapz_predictor_load64(input);
-	unsigned long long value = swapz_predictor_load64(
-		input + SWAPZ_PREDICTOR_U64_BYTES);
-	swapz_u64x2 previous_values;
-	swapz_u32 offset = 2U * SWAPZ_PREDICTOR_U64_BYTES;
-
 	swapz_predictor_store64(output, previous);
 	swapz_predictor_store64(output + SWAPZ_PREDICTOR_U64_BYTES,
 			       value - previous);
@@ -87,6 +49,40 @@ swapz_u32 swapz_predict_delta64_sse2_unrolled(const swapz_u8 *input,
 		predecessors = previous_values;
 		__asm__("shufpd $1, %1, %0"
 			: "+x"(predecessors) : "x"(values));
+		delta = values - predecessors;
+		memcpy(output + offset, &delta, sizeof(delta));
+		previous_values = values;
+	}
+	return 0;
+}
+
+#ifndef __KERNEL__
+/*
+ * Native-only pre-promotion baseline. Keeping the old 1x loop here preserves
+ * a same-host regression control without exposing it to kernel dispatch.
+ */
+swapz_u32 swapz_predict_delta64_sse2_baseline(const swapz_u8 *input,
+					      swapz_u8 *output)
+{
+	unsigned long long previous = swapz_predictor_load64(input);
+	unsigned long long value = swapz_predictor_load64(
+		input + SWAPZ_PREDICTOR_U64_BYTES);
+	swapz_u64x2 previous_values;
+	swapz_u32 offset = 2U * SWAPZ_PREDICTOR_U64_BYTES;
+
+	swapz_predictor_store64(output, previous);
+	swapz_predictor_store64(output + SWAPZ_PREDICTOR_U64_BYTES,
+			       value - previous);
+	memcpy(&previous_values, input, sizeof(previous_values));
+	for (; offset + sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
+	     offset += sizeof(swapz_u64x2)) {
+		swapz_u64x2 values, predecessors, delta;
+
+		memcpy(&values, input + offset, sizeof(values));
+		predecessors = previous_values;
+		__asm__("shufpd $1, %1, %0"
+			: "+x"(predecessors)
+			: "x"(values));
 		delta = values - predecessors;
 		memcpy(output + offset, &delta, sizeof(delta));
 		previous_values = values;

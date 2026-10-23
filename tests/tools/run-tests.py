@@ -401,13 +401,13 @@ def parse_predictor_evidence(output):
                 for row in backend_rows) or \
             len({row["name"] for row in backend_rows}) != len(backend_rows):
         return None
-    # SSE2 is native-only evidence; the production forward dispatch is fixed.
+    # SSE2 native A/B retains the pre-promotion 1x loop as a regression baseline.
     sse2_ab = record.get("sse2_forward_ab")
     has_sse2 = any(row["name"] == "sse2" for row in backend_rows)
     if has_sse2:
         if not isinstance(sse2_ab, dict) or \
                 sse2_ab.get("scope") != (
-                    "SAME_HOST_NATIVE_ONLY_PRODUCTION_UNCHANGED") or \
+                    "SAME_HOST_NATIVE_BASELINE_VS_PROMOTED_PRODUCTION") or \
                 sse2_ab.get("repeats_per_arm") != 64 or \
                 sse2_ab.get("pages") != (
                     record["negative_pages"] + record["structured_pages"]):
@@ -4333,8 +4333,7 @@ def print_bench(result):
                 for row in paired
             ])
             print_table(
-                "SSE2 forward 2x unroll A/B — native same-host corpus, "
-                "production unchanged",
+                "SSE2 forward 2x production vs legacy baseline — native same-host corpus",
                 ("pair", "order", "baseline ns/page", "2x ns/page"),
                 [(index + 1, row["order"], row["baseline_ns_per_page"],
                   row["unrolled_ns_per_page"])
@@ -4343,7 +4342,7 @@ def print_bench(result):
                   f"(n={ci['n']}, {sse2_ab['repeats_per_arm']} repeats/arm): "
                   f"{ci['mean'] * 100:+.1f}% "
                   f"[{ci['low'] * 100:+.1f}%, {ci['high'] * 100:+.1f}%]")
-            print("  Native-only evidence; not production promotion.")
+            print("  Native same-host regression evidence for the promoted SSE2 production loop.")
         print("  Sampled delta64 classifier — scalar; "
               f"{classifier['stage1_pairs']} -> {classifier['sample_pairs']} pairs; "
               f"{classifier['ns_per_page']} ns/eligible page")

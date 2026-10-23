@@ -111,7 +111,7 @@ def predictor_evidence():
              "inverse_ns_per_page": 600},
         ],
         "sse2_forward_ab": {
-            "scope": "SAME_HOST_NATIVE_ONLY_PRODUCTION_UNCHANGED",
+            "scope": "SAME_HOST_NATIVE_BASELINE_VS_PROMOTED_PRODUCTION",
             "pages": 576,
             "repeats_per_arm": 64,
             "pairs": [

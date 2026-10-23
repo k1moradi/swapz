@@ -878,9 +878,16 @@ static int benchmark_sse2_forward_ab(
 
 	if (!pairs || !count)
 		return -EINVAL;
-	/* Match every candidate page byte-for-byte against the scalar format. */
+	/*
+	 * Keep both arms byte-identical to scalar. The legacy 1x implementation
+	 * remains native-only; the 2x arm is now the production SSE2 function.
+	 */
 	for (index = 0; index < count; ++index) {
-		if (swapz_predict_delta64_sse2_unrolled(
+		if (swapz_predict_delta64_sse2_baseline(
+			    evidence_pages[index], transform_page) ||
+		    memcmp(transform_page, delta64_pages[index],
+			   SWAPZ_BLOCK_BYTES) ||
+		    swapz_predict_delta64_sse2(
 			    evidence_pages[index], transform_page) ||
 		    memcmp(transform_page, delta64_pages[index],
 			   SWAPZ_BLOCK_BYTES))
@@ -891,29 +898,31 @@ static int benchmark_sse2_forward_ab(
 
 		/*
 		 * Warm both arms on the same immutable corpus before each pair.
-		 * Alternate the timed order between rounds to limit drift bias.
+		 * Alternate timed order to limit drift bias. JSON keeps the historical
+		 * "unrolled" field name for report compatibility; it now means the
+		 * promoted production 2x implementation.
 		 */
 		for (index = 0; index < count; ++index) {
-			if (swapz_predict_delta64_sse2(
+			if (swapz_predict_delta64_sse2_baseline(
 				    evidence_pages[index], transform_page) ||
-			    swapz_predict_delta64_sse2_unrolled(
+			    swapz_predict_delta64_sse2(
 				    evidence_pages[index], transform_page))
 				return -EUCLEAN;
 		}
 		if (round & 1U) {
 			if (benchmark_sse2_forward_arm(
-				    swapz_predict_delta64_sse2_unrolled, count,
+				    swapz_predict_delta64_sse2, count,
 				    &pair->unrolled_ns_per_page) ||
 			    benchmark_sse2_forward_arm(
-				    swapz_predict_delta64_sse2, count,
+				    swapz_predict_delta64_sse2_baseline, count,
 				    &pair->baseline_ns_per_page))
 				return -EUCLEAN;
 		} else {
 			if (benchmark_sse2_forward_arm(
-				    swapz_predict_delta64_sse2, count,
+				    swapz_predict_delta64_sse2_baseline, count,
 				    &pair->baseline_ns_per_page) ||
 			    benchmark_sse2_forward_arm(
-				    swapz_predict_delta64_sse2_unrolled, count,
+				    swapz_predict_delta64_sse2, count,
 				    &pair->unrolled_ns_per_page))
 				return -EUCLEAN;
 		}
@@ -1309,7 +1318,7 @@ int main(int argc, char **argv)
 	}
 	printf("],\"sse2_forward_ab\":");
 #if defined(__x86_64__)
-	printf("{\"scope\":\"SAME_HOST_NATIVE_ONLY_PRODUCTION_UNCHANGED\","
+	printf("{\"scope\":\"SAME_HOST_NATIVE_BASELINE_VS_PROMOTED_PRODUCTION\","
 	       "\"pages\":%u,\"repeats_per_arm\":%u,\"pairs\":[",
 	       count, SSE2_FORWARD_AB_REPEATS);
 	for (transform_index = 0; transform_index < SSE2_FORWARD_AB_PAIRS;

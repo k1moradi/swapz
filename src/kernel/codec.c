@@ -243,6 +243,7 @@ int swapz_validate(const void *bytes, swapz_u32 bytes_total)
 {
 	struct swapz_header header;
 	struct swapz_record record;
+	swapz_u32 seen_slots[SWAPZ_MAX_RECORDS];
 	swapz_u32 saved_crc;
 	swapz_u32 metadata_end;
 	swapz_u32 computed_crc;
@@ -293,13 +294,10 @@ int swapz_validate(const void *bytes, swapz_u32 bytes_total)
 		    start + length != previous_end)
 			return -EUCLEAN;
 		previous_end = start;
-		for (earlier = 0; earlier < index; ++earlier) {
-			struct swapz_record existing;
-
-			swapz_get_record(bytes, earlier, &existing);
-			if (swapz_le32(existing.logical_page_le) == slot)
+		for (earlier = 0; earlier < index; ++earlier)
+			if (seen_slots[earlier] == slot)
 				return -EUCLEAN;
-		}
+		seen_slots[index] = slot;
 	}
 	return 0;
 }

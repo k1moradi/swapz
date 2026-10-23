@@ -3172,10 +3172,31 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	 */
 	if (length > 0 && length <= 64 &&
 	    (prepared_async ? entry->prepared_page->zero : inline_zero)) {
+		swapz_u32 old_segment = ~(swapz_u32)0;
+		bool became_dead = false;
+
 		ctx->next_window_close = SWAPZ_CLOSE_ZERO;
 		error = swapz_flush_window(ctx);
-		if (!error)
+		if (!error) {
+			const struct swapz_map *old = &ctx->maps[logical];
+
+			/*
+			 * Mirror upper DISCARD: after all older accepted writes are
+			 * committed, snapshot whether removing this mapping kills a
+			 * closed segment. The advisory TRIM occurs only after authority
+			 * has removed the final live mapping.
+			 */
+			if (old->valid && ctx->segment_mapped_pages) {
+				old_segment =
+					old->start_block / SWAPZ_SEGMENT_BLOCKS;
+				became_dead =
+					ctx->segment_mapped_pages[old_segment] == 1U;
+			}
 			error = swapz_discard_page(&ctx->authority, logical);
+		}
+		if (!error && became_dead &&
+		    old_segment != ctx->authority.open_segment)
+			error = swapz_discard_dead_segment(ctx, old_segment);
 		if (!error && (bio->bi_opf & REQ_FUA))
 			error = swapz_issue_flush(ctx);
 		if (error) {

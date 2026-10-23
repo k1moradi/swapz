@@ -56,18 +56,27 @@ static int swapz_page_valid(const struct swapz_compressed_page *page)
  * admission (<64B). A merely compressible/patterned page is NOT zero;
  * missing even a single nonzero byte would corrupt authoritative data.
  * Fixed-width memcpy keeps unaligned callers and the shared userspace build
- * defined while reducing the scan loop from 4096 byte tests to 512 words.
+ * defined; four words are folded before each branch without skipping bytes.
  */
 int swapz_page_is_zero(const swapz_u8 *page)
 {
-	unsigned long long word;
+	unsigned long long word0, word1, word2, word3;
 	swapz_u32 offset;
 
 	if (!page)
 		return 0;
-	for (offset = 0; offset < SWAPZ_BLOCK_BYTES; offset += sizeof(word)) {
-		memcpy(&word, page + offset, sizeof(word));
-		if (word)
+	/*
+	 * Exact zero detection remains fail-closed: inspect every byte, but fold
+	 * four fixed-width loads before branching. Unaligned callers remain
+	 * defined because every load is through memcpy.
+	 */
+	for (offset = 0; offset < SWAPZ_BLOCK_BYTES;
+	     offset += 4U * sizeof(unsigned long long)) {
+		memcpy(&word0, page + offset, sizeof(word0));
+		memcpy(&word1, page + offset + sizeof(word0), sizeof(word1));
+		memcpy(&word2, page + offset + 2U * sizeof(word0), sizeof(word2));
+		memcpy(&word3, page + offset + 3U * sizeof(word0), sizeof(word3));
+		if (word0 | word1 | word2 | word3)
 			return 0;
 	}
 	return 1;
@@ -130,6 +139,8 @@ static int swapz_engine_plan_bounded_policy(
 {
 	swapz_u32 costs[SWAPZ_MAX_RECORDS + 1U];
 	swapz_u32 reads[SWAPZ_MAX_RECORDS + 1U];
+	swapz_u16 cached_reads[SWAPZ_MAX_RECORDS][3];
+	swapz_u8 cached_takes[SWAPZ_MAX_RECORDS][3];
 	swapz_u8 batches[SWAPZ_MAX_RECORDS + 1U];
 	swapz_u8 selected_class[SWAPZ_MAX_RECORDS];
 	swapz_u8 selected_count[SWAPZ_MAX_RECORDS];
@@ -157,7 +168,7 @@ static int swapz_engine_plan_bounded_policy(
 		selected_count[index] = 0;
 		for (class_index = 0; class_index < 3; ++class_index) {
 			swapz_u8 blocks = (swapz_u8)(1U << class_index);
-			swapz_u32 local_read_blocks;
+			swapz_u32 local_read_blocks = 0;
 			swapz_u8 take = swapz_fit_count(pages, count, index, blocks,
 						   max_read_blocks,
 						   logical_pages_unique,
@@ -165,6 +176,8 @@ static int swapz_engine_plan_bounded_policy(
 			swapz_u32 candidate_bytes, candidate_reads;
 			swapz_u8 candidate_batches;
 
+			cached_takes[index][class_index] = take;
+			cached_reads[index][class_index] = local_read_blocks;
 			if (!take)
 				continue;
 			candidate_bytes = (swapz_u32)blocks * SWAPZ_BLOCK_BYTES +
@@ -217,11 +230,9 @@ static int swapz_engine_plan_bounded_policy(
 			chosen_count = 0;
 			for (class_index = 0; class_index < 3; ++class_index) {
 				swapz_u8 blocks = (swapz_u8)(1U << class_index);
-				swapz_u32 local_read_blocks;
-				swapz_u8 take = swapz_fit_count(pages, count, position,
-							   blocks, max_read_blocks,
-							   logical_pages_unique,
-							   &local_read_blocks);
+				swapz_u32 local_read_blocks =
+					cached_reads[position][class_index];
+				swapz_u8 take = cached_takes[position][class_index];
 				swapz_u32 candidate_bytes, candidate_reads;
 				swapz_u8 candidate_batches;
 				swapz_u32 hole;
