@@ -2409,7 +2409,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("if (!lower_end || lower_end < inflight->lower_start_ns)",
                       finalize)
         self.assertIn("lower_error = -EUCLEAN", finalize)
-        self.assertNotIn("return -EUCLEAN;", finalize)
+        timestamp_guard = finalize[
+            finalize.index("if (!lower_end || lower_end < inflight->lower_start_ns)"):
+            finalize.index("ctx->lower_write_wall_ns +=")]
+        self.assertNotIn("return", timestamp_guard)
         self.assertLess(
             finalize.index("if (!lower_end || lower_end < inflight->lower_start_ns)"),
             finalize.index("swapz_engine_complete_batched_run"))
