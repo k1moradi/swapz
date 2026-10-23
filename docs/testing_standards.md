@@ -140,54 +140,36 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 ## Current qualified baseline
 
 The latest successful standard owner matrix tested source
-`5bf2c0a6f0384ccf3829dc02dc0e9b737c857e40`, passed all five stages, and
+`174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and
 published report-only commit
-`85aeac4cbb368bb4900cd94c9c73f46d952520ef`. This qualifies alpha.26's
-metadata-key deduplication, final producer drain and aligned preparation array
-on owned RAM-backed `null_blk`.
+`edab5b87344b33f95b2152dab5efbc39fdb0b1a0`. It qualifies that exact source
+on owned RAM-backed `null_blk`. Current `main` has since advanced through
+settled source/test cleanup and therefore needs a fresh complete owner
+`make test` before current HEAD is the qualified baseline.
 
-The later owner run for `b7aae67fc230ceb4323e8be4c6f1ebf219cba405` failed in
-stage 2 before loaded qualification because the native source-contract parser
-did not recognize alpha.27's `swapz_u16` metadata-cache helper. Report-only
-commit `7faef62418e9563efde947cef432e63af1236629` correctly records overall
-FAIL and loaded `NOT_RUN`. Commits
-`55183d7c7d041c74068ed553ba42213fc44cf713` and
-`30ba10ce38ebae3da2e401bba15b1ca4178765c5` repair and pin only that parser
-defect; they do not promote alpha.27 without another complete owner `make test`.
+The same report passed the positive-content delta64 rescue A/B with 4096 direct
+adoptions/first-LZ4 skips, -27.04% lower WRITE bytes and +5.15% useful WRITE
+throughput; request and p99 intervals overlapped zero. Rescue remains default-
+off because representative swap-content prevalence is still unqualified.
 
-Against the preceding `9a802eff` report, fast random backing reads fell from
-3592 to 2993 KiB and 734.6 to 678 requests. Directory hit rate rose from 71.2%
-to 86.8%; random replacements fell from 309.4 to 134.4, sequential from 441 to
-43. These cross-run observations support the duplicate-key repair, while the
-remaining I/O difference from the older `5bdd040` baseline motivates a bounded
-two-choice cache experiment. Host load and post-write geometry prevent a clean
-causal attribution of the entire remaining difference to set conflicts.
+ID63 fast sequential confirmation reduced lower READ requests 17.53% and p99
+5.43%, while throughput overlapped zero. Serial-depth sequential confirmation
+reduced requests 20.75%, p99 12.24% and increased useful throughput 16.61%,
+all significant. The production coalesced span is fixed at eight blocks.
 
-Five matched fast-model async/sync write pairs measured QD4 -0.4% (95% CI
-[-4.4%,+3.6%]), QD8 +28.7% ([+21.9%,+35.5%]), and QD32 +27.1%
-([+21.8%,+32.5%]). QD8 requests fell 23.7% and bytes rose 0.55%; QD32
-requests rose 17.7% and bytes 0.72%; all four intervals exclude zero.
-Fast mixed throughput +3.2% ([-1.9%,+8.4%]) is inconclusive versus sync.
-Rescue remains off with zero classifier/transform activity.
-
-Fast QD32 whole-host CPU activity averaged 42.2% sync versus 55.0% async;
-CPU PSI averaged 20.5% versus 27.0%. These include benchmark, kernel and
-background work such as Codex. They do not isolate swapz CPU or establish an
-idle-host control. Low-RAM/heavy-CPU, sustained churn, real kernel swap and
-physical-media qualification remain open. Steps 1/2 have their standard RAM
-qualification; Steps 3/4/5 (asynchronous TRIM, churn/WAF, map compaction) remain
-outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
+Current source fixes ordinary LZ4 at acceleration one, async preparation at one
+producer lane regardless of delta64 policy, and lower-WRITE submission at one
+slot. The retired runtime selectors remain absent, and the depth-two allocation/
+append path is removed. Low-RAM/heavy-CPU, representative long-run churn,
+actual kernel swap and physical media remain open qualification gates.
 
 ## Deferred optimization evidence gates
 
-- **ID38 lower-WRITE depth:** production remains depth 1. The standard loaded
-  matrix now includes five matched fast-QD32 depth-1/depth-2 rounds because the
-  idle-host QD32 run exposed repeated ready-window stalls behind the sole lower
-  WRITE. Depth 2 is evidence-only: it must use two immutable run owners,
-  activate two simultaneous lower WRITEs in the measured arm, preserve strict
-  FIFO authority publication, fence same-logical-page writes across slots and
-  drain both slots at barriers/suspend/failure. Configuration without observed
-  depth-2 activation is incomplete evidence, not a pass.
+- **ID38 lower-WRITE depth:** closed for the current product. Repeated paired
+  depth-1/depth-2 evidence did not establish a useful service benefit.
+  Production is fixed at depth one; the runtime selector, second-slot allocation
+  and append path are removed. Any future K>1 study is a new architecture
+  experiment with immutable per-run ownership and FIFO publication gates.
 - **ID39 helper concurrency:** refuted and removed from current source. Do not
   restore a helper workqueue merely to satisfy historical telemetry.
 - **ID60 same-extent grouping:** refuted and retired. Do not keep a dedicated
@@ -556,19 +538,14 @@ must keep it absent.
 Source coverage must require both the ordered `swapz` workqueue and the
 `swapz-lz4` preparation workqueue to use
 `WQ_MEM_RECLAIM | WQ_UNBOUND`. The ordered authority workqueue remains
-single-active. Preparation remains one lane unless both async preparation and
-delta64 rescue are enabled; the read-only
-`delta64_prepare_workers=1|2|4` diagnostic parameter may then raise only
-preparation concurrency. Standard loaded qualification stays at K=1. K=2 and
-K=4 remain available only to private, explicitly motivated diagnostics after
-the two-host K=2 result and prior K=4 regressions; they are not routine evidence
-gates. Every lane must own private input/predictor/LZ4 scratch and single-writer
-diagnostics, while the existing 64-page prepared-payload mask is shared and
-bounded. Bound/affinity-pinned preparation remains rejected. FIFO admission,
-global packing, physical WRITE submission, authority publication and BIO
-completion remain serialized under the ordered owner. Private K>1 diagnostics
-must still prove real timed overlap and exact useful-work equality; K=1 must
-report no parallel starts.
+single-active and async preparation owns one producer lane regardless of
+delta64 policy. The retired `delta64_prepare_workers` runtime selector must
+remain absent after two-host K=2 evidence and earlier K=4 regressions closed
+the concurrency question. Predictor scratch allocation remains conditional on
+rescue being enabled. The lane owns private input/predictor/LZ4 scratch and
+single-writer diagnostics; FIFO admission, global packing, physical WRITE
+submission, authority publication and BIO completion remain serialized under
+the ordered owner.
 Synthetic delta64-positive records must keep score-band totals exactly equal to
 eligible pages; mocks may not bypass the production accounting invariants. The
 current positive control starts from an accepted >2024-byte LZ4 baseline, so
@@ -1300,17 +1277,17 @@ must assert `delta64_rescue=0`; all rescue counters and wall time stay zero.
 This describes the bypass, not classifier selectivity. Encoded reads retain
 inverse support and fail closed if their scratch is missing.
 
-The inherited opt-in classifier has two paths. RAW or >2024-byte LZ4 baselines
-keep threshold 24 and require a strictly smaller delta64 candidate. For an
-already-compressed baseline at or below 2024 bytes, the engine computes the
-next exact uniform-payload packing limit across 4/8/16KiB SWZ extents. Pages
-with such a lower limit may use threshold 16, but adoption also requires
-crossing that packing limit. Neither path runs while rescue is disabled.
-Source `9a802eff7d9d` is owner-qualified with rescue off and fixed-array
-preparation. Packing-aware rescue-on behavior still lacks loaded qualification;
-native structured pages remain opportunity evidence. Console legends must
-describe both eligibility paths, thresholds 24/16, all score bands and the
-uniform-cliff limit. Shared production-route screening evidence must be split
+The opt-in classifier has two production routes and runs before ordinary LZ4.
+Score >=24 pages try delta64 plus the rescue LZ4 first; candidates <=2024 bytes
+may be direct adoptions with no ordinary-LZ4 baseline, while larger candidates
+fall through to ordinary LZ4 and require a strict size win. Lower-score pages
+run ordinary LZ4 first; when the engine identifies a lower uniform-payload
+packing limit across 4/8/16KiB extents, threshold 16 may route a second-pass
+candidate that must cross that limit and remain strictly smaller. Neither route
+runs while rescue is disabled. Source
+`174d42eb7135899d4bc0acb22ea82f5be1317f5f` is owner-qualified with a
+positive-content rescue A/B; representative swap-content promotion remains
+open. Shared production-route screening evidence must be split
 across compact Markdown tables so every rendered console line remains below 96
 characters. Metadata payload-copy counters exclude cache insertion copies and
 directory lookup counts exclude scratch/extent-cache hits.

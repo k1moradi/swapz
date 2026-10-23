@@ -4,7 +4,7 @@
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
 
-swapz is an experimental Linux Device Mapper target that compresses and packs 4KiB logical pages into 4/8/16KiB SWZ physical extents. Each page uses LZ4. The experimental page-local delta64 rescue is off by default (`delta64_rescue=0`); an explicitly enabled target may try it for a large or RAW baseline and stores it only when strictly smaller. The project exists to reduce independently measured lower-device READ and WRITE bytes and requests for the same byte-exact logical workload without sacrificing mapping correctness, ordering, integrity, bounded resource use, or acceptable read latency.
+swapz is an experimental Linux Device Mapper target that compresses and packs 4KiB logical pages into 4/8/16KiB SWZ physical extents. Ordinary compression uses LZ4. The experimental page-local delta64 rescue is off by default (`delta64_rescue=0`); when explicitly enabled, a scalar sampled classifier runs before ordinary LZ4, high-score pages may run delta64 plus the rescue LZ4 first and directly adopt a sufficiently small candidate, and lower-score pages retain the ordinary-LZ4 packing-cliff route. The project exists to reduce independently measured lower-device READ and WRITE bytes and requests for the same byte-exact logical workload without sacrificing mapping correctness, ordering, integrity, bounded resource use, or acceptable read latency.
 
 There is one product. The active product source is under `src/`; test-only code is under `tests/`; maintained documentation is under `docs/`; packaging support is under `packaging/`. Historical implementations and rejected experiments belong in Git history, not dormant source trees.
 
@@ -51,33 +51,35 @@ establish an idle host or make an idle historical run directly comparable.
 
 ## Current evidence
 
-The latest standard owner matrix tested source
-`5bdd040334ee0739e1663e98eef4c875a1c4629a`, passed all five stages, and
+The latest successful standard owner matrix tested source
+`174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and
 published report-only commit
-`1df2e5a6d7c52682c2ac048310b0ed2f932a2791`. This qualifies the standard
-owned-RAM matrix for that source only. Later metadata-locality work and the
-reviewed preparation-array/default-off rescue changes remain owner-unqualified.
+`edab5b87344b33f95b2152dab5efbc39fdb0b1a0`. This qualifies the complete
+owned-RAM `null_blk` matrix for that exact source. Current `main` has since
+advanced through settled-control cleanup, so a fresh complete `make test` is
+required before current HEAD can be called the qualified baseline.
 
-Five matched fast-model write pairs measured async/sync throughput changes:
-QD4 +0.88% (95% CI [-0.59%,+2.34%]), QD8 +19.62%
-([+15.02%,+24.22%]), QD32 +26.37% ([+21.31%,+31.43%]). QD8 lower WRITE
-requests fell 16.19% while bytes rose 0.39%; QD32 requests rose 25.44% and
-bytes rose 0.70%. Those four I/O intervals exclude zero. Fast mixed async/sync
-throughput +1.27% ([-1.06%,+3.61%]) remains inconclusive.
+The qualified positive-fixture delta64 rescue A/B exercised 4096 direct
+predictor-first adoptions that skipped ordinary LZ4. Lower WRITE bytes fell
+27.04% and useful WRITE throughput rose 5.15%; lower-request and p99 intervals
+overlapped zero. This is controlled positive-content evidence, not
+representative swap evidence, so `delta64_rescue=0` remains the production
+default.
 
-All 14 mixed and 40 sustained-write sessions recorded zero delta64 classifier
-passes, attempts and adoptions. Classification still consumed measured wall
-time; it is not isolated CPU consumption. The reviewed policy therefore makes
-`delta64_rescue=0` the default and allocates predictor scratch only when opted
-in. The codec/GC encoding and native structured-corpus controls remain intact.
+Adjacent-range READ coalescing remains default-on. Fast sequential confirmation
+reduced lower READ requests 17.53% and p99 5.43%, while the useful-throughput
+interval overlapped zero. Serial-depth confirmation reduced requests 20.75%,
+reduced p99 12.24%, and increased useful throughput 16.61%, with all three
+intervals excluding zero. Production coalescing is fixed at an eight-block
+maximum span.
 
-Fast QD32 whole-host CPU activity averaged 38.8% sync versus 53.8% async;
-CPU PSI averaged 19.1% versus 25.9%. These include benchmark, kernel and
-background work such as Codex. No idle-host control or code-specific CPU
-attribution exists. Do not pool unlike host conditions or treat elapsed engine
-timings as CPU time. K=1, activation thresholds and packing geometry remain
-unchanged. Low-RAM/heavy-CPU, realistic churn, actual kernel swap and physical
-endurance remain open qualification gates.
+Current source fixes ordinary LZ4 at acceleration one, delta64 preparation at
+one producer lane, and lower-WRITE submission at one immutable run; the retired
+runtime tuning selectors are absent, and the old depth-two write allocation/
+append path has been removed. Loaded correctness still covers GC relocation,
+whole-segment discard, packed placement and byte-exact readback. Low-RAM/
+heavy-CPU behavior, realistic long-run churn, actual kernel swap, physical-media
+behavior and endurance remain open qualification gates.
 
 ## Documentation
 

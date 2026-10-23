@@ -14,7 +14,7 @@ Compression ratio, encoded-size diagrams, mock counters, green CI or a single sy
 
 There is one implementation and one public product identity. Production kernel code is C under `src/kernel/`; the administrative utility is under `src/userspace/`. SWZ is the current unversioned format name, not a product generation. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
-The format uses independently decodable 4KiB logical pages, LZ4 compression, optional page-local delta64 followed by LZ4 when that representation is smaller, whole-page RAW fallback, 4/8/16KiB extents, CRC/generation authority, bounded write windows, and serialized publication only after required lower I/O succeeds. Delta64 rescue is experimental and off by default; it requires explicit `delta64_rescue=1` at module load. Delta64 never carries state across logical pages or extents.
+The format uses independently decodable 4KiB logical pages, ordinary LZ4 compression, optional page-local delta64 plus LZ4 rescue, whole-page RAW fallback, 4/8/16KiB extents, CRC/generation authority, bounded write windows, and serialized publication only after required lower I/O succeeds. Delta64 rescue is experimental and off by default; when explicitly enabled, its scalar sampled classifier runs before ordinary LZ4 so high-score pages can try delta64 first, while lower-score pages retain the ordinary-LZ4 packing-cliff route. Delta64 never carries state across logical pages or extents.
 
 ## Non-negotiable correctness
 
@@ -30,12 +30,19 @@ Current official loaded qualification is restricted to newly created, positively
 
 Most development effort belongs in production kernel C: measured bottlenecks, completion/ordering bugs, layout decisions, read/write paths and GC. Python and shell exist only to qualify the product. Rejected experiments and historical compatibility systems should be removed after their conclusion is captured; Git history is the archive.
 
-The next performance problem is low/medium queue-depth efficiency under a trustworthy offered-load driver. The earlier write-only QD pilot used Python-dispatched full-QD waves; submission skew could overlap raw device latency while delaying swapz window formation, so those results are burst controls rather than sustained-QD evidence. Current qualification uses persistent lane-owned workers with no per-I/O main-thread dispatch. Optimize production C only after that corrected evidence and preserve all correctness gates.
+Current production policy keeps bounded asynchronous preparation enabled,
+lower-WRITE submission fixed at one immutable run, ordinary LZ4 fixed at
+acceleration one, delta64 preparation fixed at one producer lane, and exact
+adjacent READ coalescing bounded to eight 4KiB blocks. The earlier write-only
+wave driver remains historical burst evidence; current qualification uses
+persistent lane-owned workers with no per-I/O main-thread dispatch. The next
+qualification priorities are deliberate low-RAM/heavy-CPU pressure and
+realistic churn/GC/TRIM evidence, not dormant runtime concurrency knobs.
 
 Longer-horizon opportunities remain explicit rather than being forgotten:
-nonzero same-filled-page representation, exact-content deduplication, queued
-same-extent READ coalescing, background GC, and carefully gated K>1 lower-I/O
-parallelism. Each must first prove measurable opportunity and preserve the
-single authority/ordering model. Physical-device qualification remains a
-separately authorized future project, not an extension of the RAM-backed
-development harness.
+nonzero same-filled-page representation, exact-content deduplication,
+compound/folio input coverage, background GC if foreground evidence justifies
+it, and new concurrency experiments only when a fresh workload proves measured
+pressure. Each must preserve the single authority/ordering model. Physical-
+device qualification remains a separately authorized future project, not an
+extension of the RAM-backed development harness.

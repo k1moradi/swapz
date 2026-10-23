@@ -9,105 +9,60 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest successful standard owner matrix tested source
-`5bf2c0a6f0384ccf3829dc02dc0e9b737c857e40`, passed all five stages, and
+`174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and
 published report-only commit
-`85aeac4cbb368bb4900cd94c9c73f46d952520ef`. This qualifies alpha.26's
-metadata-key deduplication, final producer drain and aligned preparation array
-on owned RAM-backed `null_blk`.
+`edab5b87344b33f95b2152dab5efbc39fdb0b1a0`. It qualifies the complete
+owned-RAM `null_blk` matrix for that exact source. Current `main` has
+advanced through later source/test cleanup and therefore requires a fresh
+complete owner `make test` before current HEAD becomes the qualified baseline.
 
-The later owner run of `b7aae67fc230ceb4323e8be4c6f1ebf219cba405` failed in
-stage 2 before loaded benchmarking because the native source-contract helper
-did not recognize alpha.27's `swapz_u16` metadata-cache helper return type.
-Report-only commit `7faef62418e9563efde947cef432e63af1236629` records that
-FAIL with the loaded matrix `NOT_RUN`. Commits
-`55183d7c7d041c74068ed553ba42213fc44cf713` and
-`30ba10ce38ebae3da2e401bba15b1ca4178765c5` repair and pin only that test
-parser behavior; alpha.27 and subsequent current-main changes still require a
-complete owner `make test` before they become the qualified baseline.
+The positive-fixture delta64 A/B on the qualified source exercised 4096 direct
+predictor-first adoptions, reduced lower WRITE bytes 27.04%, and increased
+useful WRITE throughput 5.15%. Lower-request and p99 intervals overlapped zero.
+That proves the opt-in route on controlled positive content; it does not
+establish representative swap prevalence, so rescue remains default-off.
 
-Against the preceding `9a802eff` report, fast random backing reads fell from
-3592 to 2993 KiB and 734.6 to 678 requests. Directory hit rate rose from 71.2%
-to 86.8%; random replacements fell from 309.4 to 134.4, sequential from 441 to
-43. These cross-run observations support the duplicate-key repair, while the
-remaining I/O difference from the older `5bdd040` baseline motivates a bounded
-two-choice cache experiment. Host load and post-write geometry prevent a clean
-causal attribution of the entire remaining difference to set conflicts.
+ID63 is qualified with independent READ fan-out common to both A/B arms and an
+active 2..8-extent exact-range chain. Fast sequential coalescing reduced lower
+requests 17.53% and p99 5.43%, with throughput statistically unresolved.
+Serial-depth sequential requests fell 20.75%, p99 fell 12.24%, and throughput
+rose 16.61%, with all three intervals excluding zero. Multi-host cap evidence
+closed the span experiment at eight blocks.
 
-Five matched fast-model async/sync write pairs measured QD4 -0.4% (95% CI
-[-4.4%,+3.6%]), QD8 +28.7% ([+21.9%,+35.5%]), and QD32 +27.1%
-([+21.8%,+32.5%]). QD8 requests fell 23.7% and bytes rose 0.55%; QD32
-requests rose 17.7% and bytes 0.72%; all four intervals exclude zero.
-Fast mixed throughput +3.2% ([-1.9%,+8.4%]) is inconclusive versus sync.
-Rescue remains off with zero classifier/transform activity.
-
-Fast QD32 whole-host CPU activity averaged 42.2% sync versus 55.0% async;
-CPU PSI averaged 20.5% versus 27.0%. These include benchmark, kernel and
-background work such as Codex. They do not isolate swapz CPU or establish an
-idle-host control. Low-RAM/heavy-CPU, sustained churn, real kernel swap and
-physical-media qualification remain open. Steps 1/2 have their standard RAM
-qualification; Steps 3/4/5 (asynchronous TRIM, churn/WAF, map compaction) remain
-outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
+Current source has retired the ordinary-LZ4 acceleration selector, delta64
+preparation-width selector, read-coalescing cap selector and lower-WRITE depth
+selector. Production is fixed at LZ4 acceleration one, one preparation lane,
+an eight-block coalescing cap and one lower-WRITE slot; the depth-two allocation
+and append path is removed rather than retained as dormant diagnostic code.
 
 ## Current bottleneck ranking
 
-The next owner run must qualify alpha.27's two-choice metadata directory.
-The hypothesis is fewer distinct-key conflict evictions at fixed 512-slot RAM,
-with one-line primary hits and an eight-tag worst case. Keep write scheduling,
-K=1, delta64 and extent geometry fixed. Require exact readback and lifecycle
-success, and compare lower READ bytes/requests, primary/secondary hits,
-replacements, engine wall time, throughput/p99 and CPU/load context. No local
-compilation or tests were run. After this isolated cycle, return to Step 3's
-early asynchronous TRIM design review; no further pipeline policy is promoted.
-ID36 resource-pressure qualification remains a separate release requirement.
+First, run the complete owner `make test` on exact current `main`. Until
+that exact-source run passes, source `174d42eb7135...` remains the latest
+qualified baseline.
 
-Ordinary benchmark reports now observe host CPU activity and PSI at phase
-boundaries. These observations expose contention but do not supply an idle
-control or qualify deliberate resource pressure. Keep Codex-active and earlier
-idle-host evidence distinct when drawing performance conclusions.
+The first open release gate is deliberate low-RAM plus heavy-CPU pressure.
+Measure target creation, bounded allocations, preparation progress, useful
+throughput, p99, and teardown while memory and CPU are constrained. Ordinary
+host CPU/PSI observations from benchmark pairs do not substitute for this
+pressure experiment.
 
-Next, attribute QD32 request inflation using the existing matched per-session
-burst target, window bins, PACK_READY causes and producer counters. A correlation
-is a hypothesis for one controlled experiment, not permission to discard the
-measured deep-QD throughput gain. Retain the current K=1 activation thresholds.
+Next collect realistic churn/GC/TRIM evidence: about 70% logical occupancy, an
+explicit cold/hot split, and at least ten logical capacities of hot rewrites.
+Verify every live page and report foreground plus GC write amplification,
+victim live ratios, TRIM wall/latency, useful throughput/p99 and segment-open
+distribution. Only after that evidence should asynchronous TRIM be reconsidered.
 
-Realistic churn/GC/TRIM evidence follows: about 70% logical occupancy, an explicit
-cold/hot split, and at least ten logical capacities of hot rewrites. Verify all
-live pages, report foreground plus GC write amplification, victim live ratios,
-TRIM wall/latency, useful throughput/p99 and segment-open distribution. A run
-with zero GC victims cannot qualify GC amplification or stall behavior; specify
-and report placement/capacity pressure that actually exercises live victims.
-Only then decide whether asynchronous TRIM merits the added state machine.
-Fast and serial adjacent READ coalescing retain five matched rounds.
+Delta64 remains an opt-in evidence problem rather than a default-policy problem.
+The predictor-first positive fixture proves the implementation can save physical
+bytes and useful time, but representative swap content is still required before
+promotion. Reintroducing any retired concurrency/compression selector requires a
+new evidence-backed experiment.
 
-ID67 remains an opt-in production page-local rescue path. Raw LZ4 remains the first
-attempt. RAW or >2024-byte baselines use the scalar 8->32-pair classifier
-at threshold 24; smaller LZ4 packing candidates use threshold 16 and must
-cross their exact uniform packing limit before adoption. A selected page is transformed with the
-runtime SIMD/scalar delta64 backend, compressed a second time, and adopted only
-when the stored payload is strictly smaller than the raw-LZ4 baseline. SWZ
-records carry the encoding explicitly and reads invert delta64 after LZ4.
-Transforms never span logical pages or packed extents, preserving independent
-authority, selective reads, GC relocation and random-read units. Source
-`5bdd040` recorded zero classifier passes on its loaded fixture, but its fixed
-first-stage sample phase could miss structured pages behind repeated headers.
-That zero-call result does not establish that representative pages lack useful
-delta64 structure. The current correction rotates first-stage samples across
-all 128-byte lanes and 16-byte phases, adds deterministic classifier controls,
-and shares exact eligibility/adoption helpers between production and native
-qualification. This correction still needs the owner's exact-source run. Keep
-`delta64_rescue=0` until a corrected, representative rescue-on/off loaded A/B
-measures actual lower-WRITE bytes/requests, useful throughput, latency and rescue
-cost. Disabled targets continue to allocate no predictor scratch and perform
-no rescue classification or timing.
-
-ID61 remains an evidence problem: timed mixed I/O observed zero GC victims, so
-background GC is unjustified. First measure useful-I/O wall/p99 while foreground
-GC is forced under bounded RAM-backed capacity pressure and quantify the current
-full-map scan cost at realistic logical-page counts.
-
-ID43 compound/folio coverage and ID36 low-RAM/heavy-CPU qualification remain
-independent release work. ID62 physical-media admission remains a separately
-authorized safety/deployment gate and is not the next implementation task.
+Compound/folio BIO coverage remains independent release work. ID62 physical
+media stays blocked pending separate owner authorization, explicit device-loss
+acceptance, identity/alias checks, endurance/error metrics and independent
+safety review.
 
 ## Optimization evidence table
 
@@ -168,7 +123,7 @@ changes.
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Open release gate for the async default and any increase beyond K=1. Measure target-creation behavior and resource use under memory pressure and CPU oversubscription before release qualification. |
 | 37 | K=1 ping-pong WRITE pipeline | **1 standard owned-RAM matrix passed; release gate open** | Five matched fast sustained-write pairs show async/sync QD4 +0.52% CI [-6.90%,+7.95%], QD8 +30.21% [+26.03%,+34.39%], and QD32 +20.75% [+15.66%,+25.84%]. Keep K=1 and existing activation gates; fast mixed remains inconclusive. |
-| 38 | Shared accumulator with K>1 lower-write slots | **5 current opportunity too small** | Fast mixed measures 29.6 ready windows / 87.1 records / 3.58 ms total K=1 completion wait. Keep passive counters; do not add K=2 authority state. |
+| 38 | Shared accumulator with K>1 lower-write slots | **5 refuted / removed** | Repeated depth-1/depth-2 evidence did not establish a useful service benefit. Production is fixed at one slot, and the second-slot allocation/append path plus runtime selector are removed. Reopening K>1 requires a new workload and an explicit architecture experiment. |
 | 39 | Latency-first bounded parallel READ service | **5 refuted; helper removed from current source** | Owner evidence showed no standalone benefit. ID65 removes the `swapz-read` helper; the legacy `parallel_reads_enabled`/read-worker CPU status tokens remain zero for schema compatibility. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
@@ -193,11 +148,11 @@ changes.
 | 60 | Queued READ grouping within the same immutable extent | **5 refuted / retired** | Five matched hwq=1 rounds showed no request win and an unfavorable p99 direction; the qualified post-ID65 fast directional sample was also worse. Remove standalone slot grouping and its dedicated benchmark controls; ordinary reads keep the shared caches. |
 | 61 | Foreground GC scaling / background-GC question | **1 ID61b owner-qualified / keep; broader background-GC question remains open** | Report `85aeac4` proves the production survivor list in loaded GC: 20 relocated pages produced exactly 20 relocation-list visits, `gc_choose_map_entries=0`, 1,280 segment-score visits, 20 victims/rotations and byte-exact verification of all 4,096 pages. The same qualified report's native scaling measured full-map relocation at 1.215/4.901ms versus 0.00169/0.00196ms for the 256-survivor list at 1/4GiB-equivalent scale. Keep the per-segment list; realistic foreground-GC stall/headroom evidence remains separate. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
-| 63 | Physically adjacent distinct-extent READ coalescing | **1 owner-qualified / active default-on; exact-current-main rerun pending** | Latest successful report `85aeac4` reconfirms fast sequential lower requests -21.09% CI [-23.64%,-18.54%] while throughput -1.11% CI [-13.53%,+11.31%] and p99 -1.02% CI [-6.26%,+4.21%] both cross zero. Serial sequential requests improve -40.16% [-42.06%,-38.26%], throughput +52.03% [+46.23%,+57.83%], and p99 -36.28% [-43.57%,-28.99%]. Keep `read_coalesce=1` as production policy; rerun after alpha.27 because the READ cache changed after this qualified source. |
+| 63 | Physically adjacent distinct-extent READ coalescing | **1 owner-qualified / active default-on / cap fixed at 8 blocks** | Latest fast sequential confirmation reduces lower requests 17.53% and p99 5.43%, while throughput CI overlaps zero. Serial-depth sequential requests fall 20.75%, p99 12.24% and throughput rises 16.61%, all significant. Active chains combine 2..8 exact adjacent ranges with zero padding; the runtime cap selector is retired. |
 | 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Page-local delta64 rescue around LZ4 | **4 opt-in evidence; default-off owner-qualified** | Earlier loaded enabled-policy evidence saw eligible traffic in all 14 mixed and 40 sustained-write sessions but zero classifier passes, attempts or adoptions while still charging classifier wall time; that justified making rescue default-off. The current route keeps threshold 24 for RAW/>2024-byte baselines and adds a threshold-16 <=2024-byte path only when delta64 can cross the exact next SWZ packing limit. Keep codec/GC read support; the newer packing-aware route still needs representative content and a controlled loaded rescue-on/off comparison before promotion. |
+| 67 | Page-local delta64 rescue around LZ4 | **4 opt-in positive evidence; default off** | Predictor-first rescue is qualified on controlled positive content: 4,096/4,096 pages were direct adoptions, lower WRITE bytes fell 27.04%, and useful WRITE throughput rose 5.15%; request and p99 intervals crossed zero. Keep default-off until representative swap content demonstrates prevalence and end-to-end benefit. |
 | 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
 | 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
@@ -256,14 +211,10 @@ The alpha.24 policy change only enables the already implemented bounded
 `async_prepare` path by default. Do not change its scheduling gates, K=1
 ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
-- **ID38:** retain ready-wait windows/records/wall/cause for the production
-  depth-1 arm. A bounded diagnostic `write_pipeline_depth=1|2` is now staged
-  for five matched fast-QD32 rounds. Depth 2 owns separate immutable run
-  buffers/transactions/BIOs/completions, fences same-page cross-slot writes and
-  publishes authority strictly FIFO even when physical completion is out of
-  order. Production remains depth 1 until paired evidence shows a useful
-  service win without p99, lower-byte/request, correctness or failure-ordering
-  regression.
+- **ID38:** settled for the current product. Lower-WRITE depth is fixed at one;
+  the runtime selector, second-slot allocation/append path and routine depth-2
+  A/B are retired. Ready-wait telemetry remains passive evidence only. Any
+  future K>1 study is a new architecture experiment.
 - **ID65:** owner-qualify the synchronous read-path cleanup; do not restore or
   replace the rejected helper workqueue unless new measured evidence requires it.
 - **ID58/59:** keep representative-content collection offline.
@@ -413,14 +364,12 @@ SWZ geometry, authority ordering or the default compression policy.
   the existing full-page zero scan runs before delta64 rescue and payload CRC.
   A true zero becomes the same logical hole as before and no payload bytes are
   copied into the ordered batch.
-- **LZ4 acceleration evidence:** ordinary first-pass LZ4 exposes read-only
-  `lz4_acceleration=1..4`, default 1. The delta64 second LZ4 remains fixed at
-  1 because that path explicitly targets tight packing cliffs. Native
-  qualification still sweeps 1/2/3/4 for round-trip CPU/geometry evidence.
-  Loaded qualification now concentrates on five counterbalanced acceleration
-  1-versus-4 pairs because 4 has repeatedly been the native CPU winner while
-  retaining the same planner-block geometry. Promotion still requires neutral
-  lower-I/O geometry and paired useful-service/tail evidence.
+- **LZ4 acceleration evidence:** three-host loaded evidence closed the ordinary
+  first-pass acceleration experiment without a repeatable service win.
+  Production ordinary LZ4 is fixed at acceleration one and the runtime selector
+  plus routine loaded 1/4 A/B are retired. Native qualification still sweeps
+  1/2/3/4 as a byte-exact CPU/geometry regression check. Delta64's second LZ4
+  retains its separate opt-in acceleration control.
 - **ID63 bounded adjacent-range chain:** the active path now extends the
   qualified pair mechanism to 2..8 physically adjacent immutable extents when
   their exact missing ranges form one zero-padding lower read. The lower-read
@@ -434,16 +383,11 @@ SWZ geometry, authority ordering or the default compression policy.
   hundreds-of-nanoseconds range while total rescue work is tens of
   microseconds per page, so FPU-transition batching is deprioritized relative
   to compression and scheduling work.
-- **Bounded delta64 preparation parallelism:** production-compatible policy
-  remains `delta64_prepare_workers=1`. With both `async_prepare=1` and
-  `delta64_rescue=1`, the diagnostic parameter still accepts 2 or 4 unbound
-  lanes, with private per-lane scratch and diagnostics and one ordered
-  planner/publisher owner. Two-host paired evidence now closes the routine K=2
-  question: the older host showed no service gain, while the newer host showed
-  a p99 and preparation-cost regression. K=2 and K=4 are therefore removed
-  from the default qualification matrix and remain private diagnostic widths
-  only. Freed owner time should target lower-WRITE submission depth and
-  representative-content rescue evidence instead.
+- **Delta64 preparation width:** async preparation owns one producer lane
+  regardless of delta64 policy. Two-host K=1/K=2 evidence and earlier K=4
+  regressions closed the concurrency question; the runtime preparation-width
+  selector and routine K=2/K=4 qualification are retired. Predictor scratch
+  allocation remains conditional on rescue being enabled.
 - **Low-risk companion work:** validated extent-cache refreshes copy only
   missing blocks; slot priming never republishes provisional coalesced bytes;
   GC relocation reuses the payload CRC just verified by the read engine; the

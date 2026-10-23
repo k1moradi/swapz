@@ -189,22 +189,24 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Fast sequential adjacent-range READ coalescing reduced lower requests by
-27.33% (paired 95% CI [-32.01%,-22.64%]), but useful read throughput fell
-5.87% ([-9.92%,-1.83%]). Its p99 change of +7.25%
-([-5.20%,+19.69%]) remains unresolved. On the serial model, sequential
-requests fell 37.82%, throughput rose 47.26%, and p99 fell 21.93%; their
-respective intervals exclude zero. The fast random-read request change was
--0.12% ([-1.96%,+1.72%]), so the prior small random-read cost did not repeat
-significantly here. These observations warrant attribution before an active
-read-path change.
+On the latest qualified source, fast sequential adjacent-range READ coalescing
+reduced lower requests 17.53% (paired 95% CI [-19.71%,-15.35%]) and p99
+5.43% ([-9.70%,-1.16%]); useful throughput moved +8.48%
+([-2.78%,+19.74%]) and therefore remains statistically unresolved. Fast seeded
+random changes in requests, p99 and throughput all overlap zero.
 
-Loaded packed placement retained zero internal holes and zero hole-induced
-run splits; live GC exercised 20 victims/rotations and verified 4096 pages.
-The separate low-RAM/heavy-CPU release gate remains open. Next collect that
-resource-pressure evidence, attribute QD32 and fast-read costs, then measure
-realistic churn/GC/TRIM before deciding on asynchronous TRIM. Physical media,
-real swap semantics and endurance remain unqualified.
+On the serial-depth model, sequential requests fell 20.75%
+([-23.32%,-18.19%]), p99 fell 12.24% ([-21.69%,-2.78%]), and useful
+throughput rose 16.61% ([+13.78%,+19.43%]). All three intervals exclude zero.
+Cap evidence subsequently fixed the production coalesced span at eight blocks;
+the runtime cap selector is retired.
+
+Loaded packed placement retained zero internal holes and zero hole-induced run
+splits; live GC exercised 20 victims/rotations and verified 4096 pages. The
+separate low-RAM/heavy-CPU release gate remains open. Next collect that
+resource-pressure evidence and realistic churn/GC/TRIM before deciding on
+asynchronous TRIM. Physical media, real swap semantics and endurance remain
+unqualified.
 
 ## Confirmation gate
 
@@ -229,9 +231,10 @@ restored before either error return or commit.
 
 ## Deferred idea evidence
 
-**ID38 K>1.** Fast mixed records 30.5 ready windows / 88 records / 3.79 ms
-completion wait; the slow model records zero. Keep this passive. Do not expand
-authority/batch state for a theoretical sub-percent wall opportunity.
+**ID38 K>1.** Repeated paired depth-1/depth-2 evidence did not establish a
+useful service benefit. Production lower-WRITE depth is fixed at one, the
+runtime selector is retired, and the second-slot allocation/append path has
+been removed. Ready-wait counters remain passive evidence.
 
 **ID63 adjacent distinct-extent READ coalescing.** The latest successful owner
 matrix (`85aeac4`) reconfirms the promoted request benefit. Fast sequential
@@ -297,13 +300,13 @@ not NAND-wear evidence.
 ## ID67 predictor evidence and production route
 
 The native ID67 evidence remains the measurement basis for the opt-in
-page-local delta64 rescue. Production keeps raw LZ4 as the first attempt. RAW
-or >2024-byte baselines use the threshold-24 classifier and adopt only a
-strictly smaller delta64+LZ4 payload. Already-compressed baselines at or below
-2024 bytes are considered only when the production planner identifies an exact
-next uniform SWZ packing limit; that packing path uses threshold 16 and adoption
-must cross the identified packing cliff as well as remain strictly smaller.
-Rescue is default-off.
+page-local delta64 rescue, but production routing is predictor-first. The
+scalar classifier runs before ordinary LZ4. Score >=24 pages try delta64 plus
+the rescue LZ4 first; candidates <=2024 bytes may be adopted directly and skip
+ordinary LZ4, while larger candidates fall through to the strict ordinary-LZ4
+comparison. Lower-score pages run ordinary LZ4 first and may use threshold 16
+only when the production planner identifies an exact lower SWZ packing limit
+that the candidate crosses. Rescue is default-off.
 
 Earlier loaded enabled-policy evidence observed eligible pages in all 14 mixed
 and 40 sustained-write sessions but zero classifier passes, transform attempts
@@ -358,11 +361,10 @@ patched once at module init and SIMD code is isolated under kernel FPU build/
 state rules. The owner SSE2 machine proved the sparse classifier regresses under vector
 packing (231 ns versus 211 ns scalar), while full-page forward/inverse improve
 (429/550 ns versus 774/767 ns scalar). The classifier is therefore scalar-only.
-Transform and inverse dispatch independently. Current AVX2 CI batch evidence
-selects AVX2 forward (96 ns/page versus 112 SSE2 and 221 scalar) but scalar
-inverse (190 ns/page versus 312 SSE2 and 452 AVX2); the AVX2 production inverse
-therefore remains scalar. SSE2-only owner policy still awaits the next batched
-owner run. Qualification reports routed CPU ns/page and ns/saved-block. Native timing still excludes kernel_fpu_begin/end overhead, so loaded results
+Transform and inverse remain separate static calls, but current x86 production
+dispatch selects the same qualified ISA tier for both: AVX-512 when AVX-512F
+and the required xstate are available, otherwise AVX2, otherwise SSE2, with
+scalar fallback. arm64 selects kernel-mode NEON when available. Qualification reports routed CPU ns/page and ns/saved-block. Native timing still excludes kernel_fpu_begin/end overhead, so loaded results
 remain authoritative for end-to-end cost. SWZ now carries one explicit
 per-record delta64 encoding bit without enlarging the 16-byte record.
 
@@ -933,16 +935,11 @@ For delta64, retain raw native backend transform/inverse ns/page and add loaded
 the production dispatch and therefore includes x86 kernel-FPU transitions.
 Do not promote rescue from raw SSE2 timing alone.
 
-Delta64 preparation stays at `delta64_prepare_workers=1` in the standard
-loaded matrix. Five counterbalanced K=1/K=2 pairs on each of two hosts answered
-the concurrency question: the older host showed no service gain, while the
-newer host showed materially worse p99 and preparation cost at K=2. Routine
-qualification therefore no longer spends ten privileged sessions on this A/B.
-The read-only K=2/4 widths remain available through private benchmark plumbing
-only when a new workload specifically motivates reopening preparation
-parallelism. Such a diagnostic must still prove real timed overlap, exact
-attempt/adoption/payload equality, matched provenance and paired confidence
-intervals before any policy change.
+Delta64 preparation is fixed at one producer lane regardless of delta64
+policy. Five counterbalanced K=1/K=2 pairs on each of two hosts found no
+service gain on the older host and materially worse p99/preparation cost on the
+newer host; earlier K=4 evidence was also unfavorable. The runtime preparation-
+width selector and routine K=2/K=4 qualification are retired.
 
 For validated metadata-cache hits, compare `read_engine_nonio_wall_ns` with
 metadata-set hits/lookups, metadata-copy bytes, lower metadata/payload requests,
@@ -979,7 +976,9 @@ stable performance oracle.
 
 ### Current evidence cycle
 
-Delta64 rescue remains default-off. The next five-pair rescue A/B fixes
-`delta64_lz4_acceleration=4` in both arms. A separate fast-QD32 five-pair
-A/B compares lower-WRITE submission depth 1 and 2; depth 2 must actually reach
-`pipeline_active_max=2`, and production stays at depth 1 pending evidence.
+Delta64 rescue remains default-off despite the qualified positive-fixture A/B;
+representative swap content is the remaining promotion gate. Production
+ordinary LZ4 is fixed at acceleration one, delta64 preparation at one producer
+lane, lower-WRITE submission at one immutable slot, and ID63 coalescing at an
+eight-block cap. The depth-two path and the settled runtime selectors are
+retired from current source.

@@ -74,20 +74,18 @@ allocation authority. It may not consume the last reserve, race foreground
 allocation for a destination, publish relocation before lower completion, or
 continue after suspend/drain/failure has revoked ownership.
 
-K>1 lower-WRITE slots require immutable per-run ownership exactly as K=1 does.
-Adding a slot without measured ready-run pressure is forbidden. The bounded
-depth-2 diagnostic is permitted only because fast-QD32 ready-wait evidence
-established that pressure. Each slot owns disjoint packed bytes, transaction
-snapshots, BIO references and completion state. Ring indices wrap by the
-configured runtime `write_pipeline_depth`, not the compile-time slot-array
-capacity; depth 1 must therefore remain permanently on slot 0. Same-page writes
-across runs require an explicit generation/order fence; authority publication
-and upper-BIO completion remain FIFO even if lower I/O completes out of order. A two-run
-authority group may not append after replay has consumed its prefix; failed
-second-run preparation/submission must roll back only its verified tail
-reservations. PREFLUSH/FUA/DISCARD, GC ownership boundaries, suspend, teardown
-and failure drain both slots in order. Production remains depth 1 until paired
-evidence explicitly promotes depth 2.
+Production lower-WRITE submission depth is fixed at one. Repeated paired
+depth-1/depth-2 evidence did not establish a useful service benefit, so the
+runtime selector, second-slot allocation and second-run append path are removed.
+The sole active run retains immutable packed bytes, transaction snapshots, BIO
+references and completion state through definitive lower completion and
+serialized authority publication.
+
+Any future K>1 experiment is a new architecture change, not a dormant knob. It
+must restore disjoint immutable run ownership, same-page generation/order
+fences, FIFO authority publication and upper-BIO completion despite out-of-order
+physical completion, verified-tail-only rollback, and ordered drain across
+PREFLUSH/FUA/DISCARD, GC, suspend, teardown and failure.
 
 Physical-device support is not a coding shortcut around current safety policy.
 No production/test flag may silently relax the RAM-backed owned-device gate.
@@ -506,10 +504,10 @@ in O(1) before the bounded candidate-chain scan; do not repeatedly walk the same
 ranges prove one zero-padding coalesced lower request.
 
 Eligibility is based on the exact lower blocks still missing for every grouped
-BIO, not merely full-extent adjacency. Each private extent's missing mask must
-collapse to one contiguous range; both ranges must be nonempty, immediately
-adjacent, remain inside one 1MiB segment and total at most 8 blocks / 32KiB.
-Padding or gap reads are forbidden.
+BIO, not merely full-extent adjacency. Each selected private extent's missing
+mask must collapse to one nonempty contiguous range; 2..8 selected ranges must
+join immediately with no gap, remain inside one 1MiB segment and total at most
+8 blocks / 32KiB. Padding or gap reads are forbidden.
 
 One synchronous lower READ may fetch the combined span into preallocated
 scratch. Those bytes are seeded only into private slot residency and are marked
@@ -519,9 +517,9 @@ constituent record before that seed becomes ordinary cache residency. A lower
 I/O, metadata, generation, CRC, decode or upper-copy failure prevents shared
 cache absorption and fails closed under the existing batch contract.
 
-Actual merged pairs, requests saved, blocks fetched and extra blocks are
-separate monotonic counters. Requests saved equals merged pairs for this
-two-range design and extra blocks must stay zero.
+Actual combined batches, requests saved, blocks fetched and extra blocks are
+separate monotonic counters. An N-extent chain adds N-1 to
+`parallel_read_coalesced_reqs_saved`; extra blocks must stay zero.
 
 Passive rejection attribution is allowed only when ID63 is enabled and the two
 full extents are already physically adjacent under the same segment/size
@@ -598,12 +596,14 @@ delta64 encoding support; reads of an encoded record require their scratch and
 fail closed if it is missing. Only an explicitly enabled target may write new
 delta64 records. A default-off result is not a measured classifier rejection.
 
-When explicitly enabled, production tries raw LZ4 first. RAW or >2024-byte
-baselines use classifier threshold 24. The inherited packing-aware path may
-classify a smaller LZ4 baseline at threshold 16 only when another record can
-fit at a lower uniform payload limit in a maintained extent class; adoption
-must cross that limit as well as produce a strictly smaller payload. Both
-paths remain behind the default-off gate and need exact-source owner evidence.
+When explicitly enabled, the scalar sampled classifier runs before ordinary
+LZ4. Score >=24 pages run delta64 plus the rescue LZ4 first. A candidate at or
+below 2024 bytes may be adopted directly and skip ordinary LZ4; a larger
+high-score candidate falls through to ordinary LZ4 and is adopted only if
+strictly smaller. Lower-score pages run ordinary LZ4 first and may enter the
+threshold-16 packing-aware path only when the planner identifies an exact lower
+uniform payload limit in a maintained extent class; adoption must cross that
+limit and remain strictly smaller.
 Portable unsigned,
 memcpy-safe C delta64 is the mandatory correctness oracle and fallback.
 
@@ -646,12 +646,12 @@ The retained 64-byte cacheline constant is corpus geometry only, not a retired
 predictor model.
 
 The sparse 8->32 classifier is scalar-only and must never enter kernel FPU/SIMD
-state. Full-page transform and inverse dispatch are separate. Same-host batched
-x86 evidence selects AVX2 for the forward transform but scalar C for inverse on
-AVX2-capable CPUs; SSE2-only CPUs retain SSE2 transform/inverse pending their
-owner-machine batched comparison. Qualification continues to time scalar/SSE2/
-AVX2 (or scalar/NEON) independently so a later evidence change can alter one
-operation without coupling the others.
+state. Full-page transform and inverse remain separate static calls, but current
+x86 production policy selects the same qualified ISA tier for both: AVX-512
+when its CPU/xstate requirements are met, otherwise AVX2, otherwise SSE2, with
+scalar fallback. arm64 selects kernel-mode NEON when available. Qualification
+continues to time scalar and every compiled backend independently so a later
+evidence change can alter policy without weakening byte-exact equivalence.
 Thresholds are evidence, never kernel policy before measurement.
 
 Delta64 must round-trip exactly, and every selected hardware backend must match
@@ -1178,11 +1178,10 @@ count, and every active logical-page/generation record.
 
 ## LZ4, zero routing and delta64 microarchitecture
 
-Ordinary first-pass LZ4 may use the immutable per-target acceleration selected
-from 1..4; default 1 is the production policy until matched loaded evidence
-proves another setting improves useful service without worse physical geometry.
-The second LZ4 in delta64 rescue stays at acceleration 1 unless independently
-qualified because it exists specifically to cross packing thresholds.
+Ordinary first-pass LZ4 is fixed at acceleration one; the retired runtime
+selector must not be reintroduced without a new matched loaded experiment.
+Delta64's second LZ4 retains its separate read-only acceleration control because
+it is an opt-in rescue path with independently measured economics.
 
 The exact-zero scan is allowed only after ordinary LZ4 has produced the
 existing tiny-candidate admission. If the full 4KiB source page is zero, route
@@ -1204,11 +1203,11 @@ cost.
 
 ## Bounded read-chain and GC companion rules
 
-ID63 active coalescing remains a two-slot exact-missing-range mechanism. Passive
-3+ evidence may inspect only already-admitted independent READs and must remain
-bounded by the existing eight-block/32KiB scratch. Full-extent chain counters
-are conservative opportunity evidence, not proof that an active missing-range
-chain will save the same requests.
+ID63 active coalescing may combine 2..8 exact missing ranges from already-
+admitted independent READs when they form one same-segment zero-padding span.
+The hard cap remains eight blocks/32KiB. Passive full-extent chain counters are
+conservative opportunity evidence; active savings are recorded separately as
+N-1 requests for an N-extent successful chain.
 
 A successful authoritative read exposes the payload CRC it just verified so GC
 relocation can reuse that value for the unchanged payload bytes. Clear this
