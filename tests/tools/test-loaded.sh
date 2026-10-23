@@ -305,10 +305,17 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
+# ID36 release gate: constrain one production async pair to a cgroup-v2
+# memory.high/memory.max domain while oversubscribing CPU. The helper itself
+# owns only null_blk-backed resources and requires observable reclaim/throttle
+# and CPU PSI without any OOM event.
+run_privileged tests/tools/qualify-resource-pressure.sh \
+    --validated-source "$tested_source" --shared-plan "$shared_plan"
+
 # ID38 depth=2 remains a diagnostic module/benchmark control. Two idle-host
 # five-pair cycles found no useful-throughput or latency benefit. Production
 # remains depth=1 and routine qualification no longer spends ten sessions here.
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 10 final independent-READ fan-out sessions, and 40 sustained write-only sessions completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 10 final independent-READ fan-out sessions, 40 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, predictor-first delta64, final independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'
