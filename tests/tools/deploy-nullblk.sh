@@ -430,7 +430,7 @@ note "PASS_LOADED_COMPOUND_BIO=written_pages:256 verified_pages:256 failed:0"
 # logical stripe. With 64MiB physical backing and the authority's four 1MiB
 # reserve segments, dead-segment reuse alone cannot satisfy capacity pressure.
 note "START_LOADED_LIVE_GC"
-dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before GC phase"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove ordinary owned mapping before GC phase"
 OWN_DM=0
 UUID="SWAPZ-TEST-$TOKEN-gc"
 dmsetup create "$DMNAME" --uuid "$UUID" \
