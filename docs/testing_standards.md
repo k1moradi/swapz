@@ -873,7 +873,10 @@ not changed by this harness experiment. Rootless qualification must exercise
 both native mixed-wave and native persistent-write modes on regular files and
 prove the same immutable-plan/final-image contract. Native replay changes
 submission overhead only; the envelopes remain synthetic `null_blk` evidence
-and never become physical-media saturation claims.
+and never become physical-media saturation claims. Rootless Make-interface fixtures that synthesize these
+rows must emit the same marker on both raw/off and swapz arms; otherwise the
+fail-closed parser must reject the fixture exactly as it would reject stale
+loaded evidence.
 
 For an offered-QD-limited diagnostic, the analytical unmerged-4KiB latency
 ceiling uses

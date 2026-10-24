@@ -713,9 +713,11 @@ class PublicMakeContract(unittest.TestCase):
                     off = json.loads(mock_write_arm("off", 32, 0))
                     off["fixture_sha256"] = "b" * 64
                     off["trace_sha256"] = "c" * 64
+                    off["replay_engine"] = "native-c"
                     swapz = json.loads(mock_write_arm("swapz", 32, 0))
                     swapz["fixture_sha256"] = "b" * 64
                     swapz["trace_sha256"] = "c" * 64
+                    swapz["replay_engine"] = "native-c"
                     swapz["kernel_write_path"]["delta64_rescue"] = delta64_rescue
                     swapz["kernel_write_path"]["pipeline_post_lower_wall_ns"] = 1000
                     swapz["kernel_write_path"]["pipeline_active_wall_ns"] = 5000
