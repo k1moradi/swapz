@@ -73,7 +73,8 @@ def device_model_limits(spec, offered_qd=None):
     modern storage-envelope diagnostics pass QD32 explicitly.
     """
     cap_mbps = spec["cap_mib_s"] * (1 << 20) / 1_000_000.0
-    effective_depth = spec["hw_queue_depth"]
+    available_depth = spec["submit_queues"] * spec["hw_queue_depth"]
+    effective_depth = available_depth
     if offered_qd is not None:
         effective_depth = min(effective_depth, offered_qd)
     latency_mbps = (LOGICAL_BLOCK_BYTES * effective_depth *
@@ -311,6 +312,7 @@ KERNEL_WRITE_FIELDS = (
     "prep_lower_write_end_nonempty", "pipeline_async_runs",
     "pipeline_read_bypass_skips",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
+    "pipeline_post_lower_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms",
     "write_wait_gt4ms", "delta64_prepare_pages",
     "delta64_prepare_parallel_starts",
@@ -852,8 +854,10 @@ def timed_window_error(record):
             record["k1_ready_wait_records"] < record["k1_ready_wait_windows"] or
             record["k1_ready_wait_max_records"] > 64 or
             record["k1_ready_wait_wall_ns"] >
-            record["pipeline_finalize_wait_wall_ns"]):
-        return "timed K=1 ready-wait attribution is inconsistent"
+            record["pipeline_finalize_wait_wall_ns"] or
+            record["pipeline_post_lower_wall_ns"] >
+            record["pipeline_active_wall_ns"]):
+        return "timed K=1/post-lower attribution is inconsistent"
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),
@@ -1922,7 +1926,8 @@ def storage_envelope_verdict(sessions):
             "k1_ready_wait_windows": kernel.get("k1_ready_wait_windows"),
             "k1_ready_wait_max_records": kernel.get("k1_ready_wait_max_records"),
             "k1_ready_wait_fraction": wall_fraction("k1_ready_wait_wall_ns"),
-            "lower_write_active_fraction": wall_fraction("pipeline_active_wall_ns"),
+            "run_slot_active_fraction": wall_fraction("pipeline_active_wall_ns"),
+            "post_lower_hold_fraction": wall_fraction("pipeline_post_lower_wall_ns"),
             "preparation_wait_fraction": wall_fraction("prep_wait_wall_ns"),
             "commit_nonio_fraction": wall_fraction("window_commit_nonio_wall_ns"),
             "plan_fraction": wall_fraction("engine_plan_wall_ns"),
@@ -4394,7 +4399,8 @@ def benchmark_verdicts(sessions):
                         record[field] for record in diagnostics)
                 if name == "sync" and any(
                         record["pipeline_async_runs"] or
-                        record["pipeline_active_wall_ns"]
+                        record["pipeline_active_wall_ns"] or
+                        record["pipeline_post_lower_wall_ns"]
                         for record in diagnostics):
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: sync arm used async run occupancy"}
@@ -6786,7 +6792,8 @@ def print_bench(result):
             phase_rows.append((
                 row["envelope"],
                 row["delta64_rescue"],
-                pct("lower_write_active_fraction"),
+                pct("run_slot_active_fraction"),
+                pct("post_lower_hold_fraction"),
                 pct("k1_ready_wait_fraction"),
                 pct("preparation_wait_fraction"),
                 pct("commit_nonio_fraction"),
@@ -6803,11 +6810,12 @@ def print_bench(result):
               "low/negative values mean saved media work is not reaching useful service.")
         print_table(
             "Timed swapz WRITE-path occupancy versus replay wall",
-            ("model", "D64", "lower active", "K1 ready wait", "prep wait",
-             "commit nonio", "plan", "pack", "publish", "pub CRC"),
+            ("model", "D64", "slot active", "post-lower", "K1 ready wait",
+             "prep wait", "commit nonio", "plan", "pack", "publish", "pub CRC"),
             phase_rows)
-        print("  K1 ready-wait isolates a ready window blocked by the single immutable lower-WRITE slot; "
-              "prep wait isolates ordered-worker handoff starvation. Plan/pack/publish split serialized commit CPU.")
+        print("  post-lower isolates callback-to-publication slot hold; K1 ready-wait isolates a ready window "
+              "blocked by the single immutable lower-WRITE slot; prep wait isolates ordered-worker handoff "
+              "starvation. Plan/pack/publish split serialized commit CPU.")
     else:
         print("\n  Modern storage service-envelope evidence: "
               f"{storage.get('overall', 'NOT_RUN')} "

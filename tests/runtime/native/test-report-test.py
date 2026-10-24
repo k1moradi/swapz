@@ -294,6 +294,7 @@ def timed_kernel_write(*, mode, target=8):
         "pipeline_async_runs": 4 if mode else 0,
         "pipeline_read_bypass_skips": 3 if mode else 0,
         "pipeline_active_wall_ns": 800000000 if mode else 0,
+        "pipeline_post_lower_wall_ns": 8000000 if mode else 0,
         "pipeline_finalize_wait_wall_ns": 5000000 if mode else 0,
         "k1_ready_wait_windows": 2 if mode else 0,
         "k1_ready_wait_records": 12 if mode else 0,
@@ -1071,11 +1072,12 @@ class ReportContract(unittest.TestCase):
             spec = runner.STORAGE_ENVELOPE_SPECS[row["envelope"]]
             self.assertEqual(
                 row["device_limits"]["effective_queue_depth"],
-                min(32, spec["hw_queue_depth"]))
+                min(32, spec["submit_queues"] * spec["hw_queue_depth"]))
             self.assertAlmostEqual(row["byte_speedup"], 1.6)
             self.assertAlmostEqual(row["request_speedup"], 1.6)
             self.assertLess(
                 row["bandwidth_opportunity_capture_fraction"], 0.0)
+            self.assertAlmostEqual(row["post_lower_hold_fraction"], 0.004)
 
 
     def test_predictor_evidence_is_sanitized(self):

@@ -551,6 +551,10 @@ and publication. Whole callback entry/exit timing may be reported only as wall
 residency and must be labeled as such: ordered residency includes synchronous
 lower-I/O sleep and either callback can include scheduler delay. Diagnostic
 timing must never participate in ordering, timeout or scheduling policy.
+For asynchronous lower WRITEs, `pipeline_post_lower_wall_ns` may measure the
+interval from the recorded lower callback timestamp through ordered
+publication/release of the immutable run slot. It is attribution only and must
+not become a runtime branch, timeout, admission gate or publication shortcut.
 
 A precomputed payload CRC may cross from preparation into serialized packing
 only when it covers exactly the immutable compressed payload and length being

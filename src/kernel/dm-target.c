@@ -445,6 +445,9 @@ struct swapz_dm {
 	u64 pipeline_read_bypass_skips;
 	u64 pipeline_finalize_waits;
 	u64 pipeline_finalize_wait_wall_ns;
+	/* Time after an asynchronous lower WRITE callback until the ordered owner
+	 * finishes publication/abort and releases the immutable run slot. */
+	u64 pipeline_post_lower_wall_ns;
 	/* ID38 passive evidence: a nonempty ready window reached flush while
 	 * the sole immutable lower run was genuinely unfinished. */
 	u64 k1_ready_wait_windows;
@@ -1047,7 +1050,7 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 {
 	struct swapz_inflight_write *inflight = swapz_inflight_head_slot(ctx);
 	u64 publish_before, publish_crc_before, complete_start, complete_elapsed;
-	u64 lower_end, lower_elapsed, commit_elapsed;
+	u64 lower_end, lower_elapsed, commit_elapsed, finalize_end;
 	swapz_u8 committed = 0, index;
 	int lower_error, error;
 
@@ -1107,19 +1110,24 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		if (complete_error)
 			error = complete_error;
 	}
-	complete_elapsed = swapz_elapsed_ns(complete_start, ktime_get_ns());
+	finalize_end = ktime_get_ns();
+	complete_elapsed = swapz_elapsed_ns(complete_start, finalize_end);
 	ctx->engine_publish_wall_ns +=
 		ctx->engine.publish_wall_ns - publish_before;
 	if (ctx->authority.publish_crc_wall_ns >= publish_crc_before)
 		ctx->engine_publish_crc_wall_ns +=
 			ctx->authority.publish_crc_wall_ns - publish_crc_before;
 	commit_elapsed = swapz_elapsed_ns(inflight->commit_start_ns,
-					 ktime_get_ns());
+					 finalize_end);
 	ctx->window_commit_wall_ns += commit_elapsed;
 	ctx->window_commit_nonio_wall_ns +=
 		inflight->prepare_nonio_ns + complete_elapsed;
 	ctx->pipeline_active_wall_ns +=
-		swapz_elapsed_ns(inflight->lower_start_ns, ktime_get_ns());
+		swapz_elapsed_ns(inflight->lower_start_ns, finalize_end);
+	if (lower_end && lower_end >= inflight->lower_start_ns &&
+	    lower_end <= finalize_end)
+		ctx->pipeline_post_lower_wall_ns +=
+			swapz_elapsed_ns(lower_end, finalize_end);
 
 	WRITE_ONCE(inflight->active, false);
 	ctx->inflight_count--;
@@ -6032,6 +6040,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "k1_ready_wait_pack_ready=%llu k1_ready_wait_full=%llu "
 		       "k1_ready_wait_deadline=%llu k1_ready_wait_fence=%llu "
 		       "k1_ready_wait_other=%llu pipeline_active_wall_ns=%llu "
+		       "pipeline_post_lower_wall_ns=%llu "
 		       "prep_producer_head_claims=%llu prep_producer_tail_claims=%llu "
 		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
@@ -6276,6 +6285,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->k1_ready_wait_fence,
 		       ctx->k1_ready_wait_other,
 		       ctx->pipeline_active_wall_ns,
+		       ctx->pipeline_post_lower_wall_ns,
 		       ctx->preparation_producer_head_claims,
 		       ctx->preparation_producer_tail_claims,
 		       ctx->preparation_ordered_inline,

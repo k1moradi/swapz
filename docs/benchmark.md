@@ -135,7 +135,9 @@ Mandatory loaded benchmarking uses newly owned RAM-backed `null_blk` only:
 - faster model: 80 MiB/s lower cap, 0.15 ms completion delay, blk-mq with one
   submit queue and `hw_queue_depth=64`.
 
-These model latency/bandwidth behavior; they are not measurements of real SD cards or SSDs. Do not label them as physical-media results. The configured mbps value is a lower-device MiB/s cap, not a promise that unmerged 4KiB raw I/O reaches that rate. Historical qualification reports preserve the analytical 4KiB latency ceiling from the configured hardware depth. New directional storage-envelope diagnostics additionally cap that depth at the workload's offered QD, because a QD32 replay cannot consume 64 hardware slots. On the slow profile the 1ms/depth-1 ceiling is 4.096 MB/s even though the bulk cap is 10 MiB/s. These calculations are model attribution, not bulk calibration measurements. Every timed arm samples the positively identified lower device's block-layer READ/WRITE in-flight counters and reports sampled boundary depth, peak and time-weighted mean. swapz mixed arms also report K=1 immutable-run slot occupancy from async submission through ordered publication.
+These model latency/bandwidth behavior; they are not measurements of real SD cards or SSDs. Do not label them as physical-media results. The configured mbps value is a lower-device MiB/s cap, not a promise that unmerged 4KiB raw I/O reaches that rate. Historical qualification reports preserve the analytical 4KiB latency ceiling from the configured hardware depth. New directional storage-envelope diagnostics use the aggregate queue capacity
+`submit_queues * hw_queue_depth` and then cap it at the workload's offered QD,
+because a QD32 replay cannot consume more than 32 outstanding slots. On the slow profile the 1ms/depth-1 ceiling is 4.096 MB/s even though the bulk cap is 10 MiB/s. These calculations are model attribution, not bulk calibration measurements. Every timed arm samples the positively identified lower device's block-layer READ/WRITE in-flight counters and reports sampled boundary depth, peak and time-weighted mean. swapz mixed arms also report K=1 immutable-run slot occupancy from async submission through ordered publication.
 
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
@@ -149,7 +151,18 @@ The mixed QD32 matrix keeps four sessions on the slow model as a bounded directi
 Each envelope replays the same QD32 mixed workload with production asynchronous preparation and separately replays the positive delta64 write-only fixture. The report compares raw/off with swapz using lower-WRITE byte speedup, lower-WRITE request speedup and useful-WRITE speedup. It additionally reports
 `(useful_speedup - 1) / (lower_byte_speedup - 1)` as **bandwidth-opportunity capture** when lower bytes improve. This is diagnostic attribution, not a qualification score: a low or negative value means saved lower-device work is not reaching useful service.
 
-For bottleneck attribution, the same rows expose sampled lower-WRITE peak/mean depth plus timed swapz fractions for K=1 ready-window wait, ordered-worker preparation handoff wait, lower-WRITE slot occupancy, commit non-I/O, planner, pack, publication and final publication CRC. A nonzero K=1 ready-wait fraction is direct evidence that a ready immutable window was blocked behind the sole lower-WRITE slot. Preparation wait instead identifies producer/ordered-worker starvation. If neither is material while commit non-I/O dominates, investigate serialized authority/publication before widening lower-I/O depth.
+For bottleneck attribution, the same rows expose sampled lower-WRITE peak/mean
+depth plus timed swapz fractions for K=1 ready-window wait, ordered-worker
+preparation handoff wait, lower-WRITE slot occupancy,
+`pipeline_post_lower_wall_ns` (lower callback through ordered
+publication/release), commit non-I/O, planner, pack, publication and final
+publication CRC. A nonzero K=1 ready-wait fraction is direct evidence that a ready immutable
+window was blocked behind the sole lower-WRITE slot. A material post-lower
+fraction shows that the slot remained occupied after device completion while
+the ordered owner was scheduled and/or publishing. Preparation wait instead
+identifies producer/ordered-worker starvation. If ready-wait is small but
+post-lower or commit non-I/O dominates, investigate serialized
+authority/publication before widening lower-I/O depth.
 
 The latest successful standard owner matrix tested source
 `174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and

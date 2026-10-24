@@ -2436,6 +2436,8 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("% SWAPZ_WRITE_PIPELINE_DEPTH", submit)
         self.assertNotIn("% SWAPZ_WRITE_PIPELINE_DEPTH", finalize)
         self.assertIn("ctx->pipeline_active_wall_ns +=", finalize)
+        self.assertIn("ctx->pipeline_post_lower_wall_ns +=", finalize)
+        self.assertIn("pipeline_post_lower_wall_ns=%llu", status)
         self.assertIn("swapz_complete(inflight->bios[index]", finalize)
         self.assertNotIn("swapz_write_pipeline_can_append", DM)
         self.assertNotIn("append_second", flush)

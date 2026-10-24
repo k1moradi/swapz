@@ -844,15 +844,20 @@ comparison. These rows are directional bottleneck evidence and do not replace
 the matched fast-model qualification intervals.
 
 For an offered-QD-limited diagnostic, the analytical unmerged-4KiB latency
-ceiling uses `min(offered_qd, hw_queue_depth)`, not hardware depth alone.
+ceiling uses
+`min(offered_qd, submit_queues * hw_queue_depth)`, not hardware depth alone.
 Reports must retain lower-WRITE byte/request speedups, useful-WRITE speedup and
 bandwidth-opportunity capture `(useful_speedup - 1) / (byte_speedup - 1)`
 when byte speedup exceeds one. They must also retain sampled lower-WRITE
 peak/time-weighted depth and the timed swapz K=1 ready-window wait,
-preparation-handoff wait, lower-run occupancy, commit non-I/O, planner, pack,
-publication and final publication-CRC attribution. Those diagnostics decide
-which architecture question is eligible to reopen; they are not themselves a
-performance-promotion verdict.
+preparation-handoff wait, lower-run occupancy,
+`pipeline_post_lower_wall_ns` callback-to-publication/release hold, commit
+non-I/O, planner, pack, publication and final publication-CRC attribution. Those diagnostics decide which architecture question is eligible to reopen.
+Ready-window wait identifies a genuine K=1 successor blockage; post-lower hold
+identifies time after device completion before the sole immutable slot is
+released; preparation wait identifies producer/ordered handoff starvation.
+They are not themselves a performance-promotion verdict and must not alter
+runtime policy.
 
 Each timed benchmark arm samples only its positively identified owned lower
 device's `/sys/block/<disk>/inflight` counters. The sanitized report records the

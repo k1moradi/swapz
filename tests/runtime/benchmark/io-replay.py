@@ -1009,6 +1009,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "prep_lower_write_end_queued", "prep_lower_write_end_nonempty",
     "pipeline_async_runs", "pipeline_read_bypass_skips",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
+    "pipeline_post_lower_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms",
     "delta64_prepare_pages", "delta64_prepare_parallel_starts"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
@@ -1198,8 +1199,10 @@ def kernel_write_delta(before, after):
             (counters["k1_ready_wait_windows"] == 0 and
              counters["k1_ready_wait_max_records"] != 0) or
             counters["k1_ready_wait_wall_ns"] >
-            counters["pipeline_finalize_wait_wall_ns"]):
-        raise ValueError("inconsistent swapz K=1 ready-wait attribution")
+            counters["pipeline_finalize_wait_wall_ns"] or
+            counters["pipeline_post_lower_wall_ns"] >
+            counters["pipeline_active_wall_ns"]):
+        raise ValueError("inconsistent swapz K=1/post-lower attribution")
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),
