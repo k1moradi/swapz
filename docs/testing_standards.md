@@ -34,7 +34,7 @@ table and leave detailed trial history in Git/report commits.
 A complete run includes:
 
 1. Product/module/userspace/helper build.
-2. Direct production-C native tests plus source, build-interface, report and packaging contracts.
+2. Direct production-C native tests plus source, build-interface, report and packaging contracts. Harness scripts `tests/tools/deploy-nullblk.sh`, `packaging/package-dkms.sh`, and `tests/runtime/native/package-dkms-test.py` must retain executable mode (`0755`) so bounded runner contracts and direct invocation invariants hold.
 3. Kernel W=1 build.
 4. Kernel W=2 build.
 5. Owned RAM-backed `null_blk` correctness, lifecycle/fault checks, matched mixed benchmark evidence and bounded write-only QD evidence.
