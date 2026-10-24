@@ -1,22 +1,62 @@
 {
 "benchmarks": {
+"delta64_prepare": {
+"overall": "NOT_RUN",
+"reason": "retired from routine qualification"
+},
+"delta64_prepare_sessions": [],
+"delta64_rescue": {
+"overall": "INCOMPLETE",
+"reason": "five counterbalanced matched rounds required"
+},
+"delta64_rescue_sessions": [],
+"k1_read_bypass": {
+"overall": "NOT_RUN",
+"reason": "refuted and retired"
+},
+"k1_read_bypass_sessions": [],
 "loaded_correctness": {
-"overall": "NOT_RUN"
+"overall": "INCOMPLETE",
+"reason": "missing loaded correctness markers: discard_trim,packed_placement,suspend,write_fault,flush_fault,id36"
 },
 "lz4_acceleration": {
-"overall": "NOT_RUN"
+"overall": "NOT_RUN",
+"reason": "retired; ordinary LZ4 is fixed at acceleration 1"
 },
 "lz4_acceleration_sessions": [],
+"parallel_read_ab": {
+"overall": "NOT_RUN",
+"reason": "promoted fixed-on; routine fan-out A/B retired"
+},
+"parallel_read_ab_sessions": [],
+"read_coalesce_ab": {
+"overall": "INCOMPLETE",
+"reason": "five counterbalanced matched rounds required"
+},
+"read_coalesce_ab_sessions": [],
+"read_coalesce_cap": {
+"overall": "NOT_RUN",
+"reason": "retired; production coalescing cap is fixed at 8 blocks"
+},
+"read_coalesce_cap_sessions": [],
+"sd_read_coalesce_ab": {
+"overall": "INCOMPLETE",
+"reason": "five counterbalanced matched rounds required"
+},
+"sd_read_coalesce_ab_sessions": [],
 "sessions": [],
 "verdicts": {
-"overall": "NOT_RUN"
+"overall": "INCOMPLETE",
+"reason": "sd_emulated: required counterbalanced sessions missing"
 },
 "write_pipeline_depth": {
-"overall": "NOT_RUN"
+"overall": "NOT_RUN",
+"reason": "refuted and retired from routine qualification"
 },
 "write_pipeline_depth_sessions": [],
 "write_saturation": {
-"overall": "NOT_RUN"
+"overall": "INCOMPLETE",
+"reason": "sd_emulated: write-only evidence shape mismatch"
 },
 "write_saturation_sessions": []
 },
@@ -71,24 +111,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 708,
-"legacy_dead_probe_ns": 74417,
-"legacy_score_scan_ns": 481295,
+"incremental_select_ns": 584,
+"legacy_dead_probe_ns": 74334,
+"legacy_score_scan_ns": 454961,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 625,
-"relocation_list_ns": 333,
-"relocation_scan_ns": 96793,
+"mapped_dead_probe_ns": 708,
+"relocation_list_ns": 375,
+"relocation_scan_ns": 88042,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2833,
-"legacy_dead_probe_ns": 344668,
-"legacy_score_scan_ns": 1939262,
+"incremental_select_ns": 2625,
+"legacy_dead_probe_ns": 289626,
+"legacy_score_scan_ns": 1926053,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2209,
-"relocation_list_ns": 667,
-"relocation_scan_ns": 408252,
+"mapped_dead_probe_ns": 2084,
+"relocation_list_ns": 625,
+"relocation_scan_ns": 401336,
 "segments": 4096,
 "victim_records": 256
 }
@@ -98,14 +138,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 164,
+"inverse_ns_per_page": 158,
 "name": "scalar",
-"transform_ns_per_page": 153
+"transform_ns_per_page": 141
 },
 {
-"inverse_ns_per_page": 112,
+"inverse_ns_per_page": 113,
 "name": "neon",
-"transform_ns_per_page": 102
+"transform_ns_per_page": 101
 }
 ],
 "classifier": {
@@ -115,9 +155,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 40,
+"ns_per_page": 36,
 "sample_pairs": 32,
-"scalar_ns_per_page": 40,
+"scalar_ns_per_page": 36,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -132,7 +172,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1881
+"wall_ns_per_page": 1896
 },
 {
 "acceleration": 2,
@@ -140,7 +180,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1846
+"wall_ns_per_page": 1734
 },
 {
 "acceleration": 3,
@@ -148,7 +188,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1813
+"wall_ns_per_page": 1703
 },
 {
 "acceleration": 4,
@@ -156,7 +196,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1721
+"wall_ns_per_page": 1671
 }
 ],
 "negative_pages": 256,
@@ -173,9 +213,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1437,
-"modeled_wall_ns_total": 827904,
-"ns_per_saved_block": 15921,
+"modeled_wall_ns_per_page": 1406,
+"modeled_wall_ns_total": 809984,
+"ns_per_saved_block": 15576,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -240,14 +280,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16350,
+"ns_per_saved_block": 16000,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1618,
-"routed_cpu_ns_total": 931986,
+"routed_cpu_ns_per_page": 1583,
+"routed_cpu_ns_total": 912020,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -295,14 +335,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16429,
+"ns_per_saved_block": 16076,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1568,
-"routed_cpu_ns_total": 903600,
+"routed_cpu_ns_per_page": 1535,
+"routed_cpu_ns_total": 884192,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -350,14 +390,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15921,
+"ns_per_saved_block": 15576,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1437,
-"routed_cpu_ns_total": 827904,
+"routed_cpu_ns_per_page": 1406,
+"routed_cpu_ns_total": 809984,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -405,14 +445,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15921,
+"ns_per_saved_block": 15576,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1437,
-"routed_cpu_ns_total": 827904,
+"routed_cpu_ns_per_page": 1406,
+"routed_cpu_ns_total": 809984,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -460,14 +500,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15921,
+"ns_per_saved_block": 15576,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1437,
-"routed_cpu_ns_total": 827904,
+"routed_cpu_ns_per_page": 1406,
+"routed_cpu_ns_total": 809984,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -484,45 +524,74 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 112,
+"inverse_ns_per_page": 113,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 164,
-"scalar_transform_ns_per_page": 153,
-"second_lz4_ns_per_page": 3052,
+"scalar_inverse_ns_per_page": 158,
+"scalar_transform_ns_per_page": 141,
+"second_lz4_ns_per_page": 2991,
 "transform_backend": "neon",
-"transform_ns_per_page": 102
+"transform_ns_per_page": 101
 }
 ]
 }
 },
 "kernel_release": "7.0.0-38-generic",
-"overall": "FAIL",
+"overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "767fe3372042cd2ee418f347caa6689c4995cdba",
+"source_sha": "a62dcd7049116d06db228e3abf975f421e472f83",
 "stages": [
 {
-"elapsed_s": 0.42,
+"elapsed_s": 0.395,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_packaging_and_loaded_tests_are_bounded",
-"elapsed_s": 4.038,
-"exit_code": 1,
-"failed_phase": "Native and rootless contracts",
+"elapsed_s": 14.22,
+"exit_code": 0,
 "name": "Native and rootless contracts",
+"status": "PASS"
+},
+{
+"elapsed_s": 0.24,
+"exit_code": 0,
+"name": "Kernel warnings W=1",
+"status": "PASS"
+},
+{
+"elapsed_s": 0.271,
+"exit_code": 0,
+"name": "Kernel warnings W=2",
+"status": "PASS"
+},
+{
+"diagnostic": "Safety quarantine: owned device or swap identity could not be safely released",
+"elapsed_s": 7.64,
+"exit_code": 1,
+"failed_phase": "owned RAM live-GC pressure",
+"name": "Owned RAM smoke + mixed/QD pilot",
 "signals": [
+"PASS_DEFAULT_ASYNC_PREPARE",
+"PASS_DEFAULT_DELTA64_RESCUE",
 "PASS",
-"FAIL"
+"PASS_WINDOW_CLOSE_REASONS",
+"PASS_WINDOW_OPEN_AGE",
+"PASS_ZERO_WRITE_LOWER_IO",
+"PASS_ORACLE_LOWER_READ",
+"PASS_LOADED_ORACLE_PROFILE",
+"PASS_LOADED_COMPOUND_BIO",
+"PASS_LOADED_LIVE_GC",
+"PASS_LOADED_GC_PRESSURE",
+"BLOCKED",
+"QUARANTINED"
 ],
-"status": "FAIL"
+"status": "BLOCKED"
 }
 ],
-"tested_commit_sha": "767fe3372042cd2ee418f347caa6689c4995cdba"
+"tested_commit_sha": "a62dcd7049116d06db228e3abf975f421e472f83"
 }
