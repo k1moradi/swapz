@@ -6449,6 +6449,15 @@ def qualification_overall(exit_code, stages):
     return "FAIL"
 
 
+def required_benchmark_gates_pass(benchmarks):
+    """Only current, non-retired loaded evidence may gate qualification."""
+    return (
+        benchmarks["verdicts"].get("overall") == "PASS_BOUNDED_RAM_MATRIX" and
+        benchmarks["write_saturation"].get("overall") ==
+        "PASS_WRITE_SATURATION_EVIDENCE"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kdir", required=True)
@@ -6534,9 +6543,7 @@ def main():
                 delta64_ab["overall"] = "INCONCLUSIVE"
                 delta64_ab["reason"] = (
                     "Delta64 K=1/K=2 diagnostic source Git ID mismatched tested checkout")
-        if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
-                saturation.get("overall") != "PASS_WRITE_SATURATION_EVIDENCE" or \
-                lz4_sweep.get("overall") != "PASS_LZ4_ACCELERATION_AB":
+        if not required_benchmark_gates_pass(result["benchmarks"]):
             result["overall"] = "FAIL"
             exit_code = 1
     write_report(result)

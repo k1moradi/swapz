@@ -2641,6 +2641,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("${TMPDIR:-/tmp}/swapz-deploy.", deploy)
         self.assertIn("${TMPDIR:-/tmp}/swapz-benchmark.", benchmark)
 
+    def test_retired_lz4_ab_is_not_an_overall_gate(self):
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn("def required_benchmark_gates_pass(benchmarks):", runner)
+        self.assertIn('"PASS_BOUNDED_RAM_MATRIX"', runner)
+        self.assertIn('"PASS_WRITE_SATURATION_EVIDENCE"', runner)
+        self.assertNotIn(
+            'lz4_sweep.get("overall") != "PASS_LZ4_ACCELERATION_AB"',
+            runner)
+
     def test_id36_resource_pressure_is_bounded_and_owned(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         pressure = (ROOT / "tests/tools/qualify-resource-pressure.sh").read_text()

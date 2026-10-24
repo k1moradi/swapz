@@ -2066,6 +2066,22 @@ class ReportContract(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
 
+    def test_retired_lz4_ab_does_not_gate_overall_qualification(self):
+        benchmarks = {
+            "verdicts": {"overall": "PASS_BOUNDED_RAM_MATRIX"},
+            "write_saturation": {"overall": "PASS_WRITE_SATURATION_EVIDENCE"},
+            "lz4_acceleration": {
+                "overall": "NOT_RUN",
+                "reason": "retired; ordinary LZ4 is fixed at acceleration 1",
+            },
+        }
+        self.assertTrue(runner.required_benchmark_gates_pass(benchmarks))
+        benchmarks["verdicts"]["overall"] = "INCONCLUSIVE"
+        self.assertFalse(runner.required_benchmark_gates_pass(benchmarks))
+        benchmarks["verdicts"]["overall"] = "PASS_BOUNDED_RAM_MATRIX"
+        benchmarks["write_saturation"]["overall"] = "INCOMPLETE"
+        self.assertFalse(runner.required_benchmark_gates_pass(benchmarks))
+
     def test_overall_status_follows_stage_semantics_not_raw_exit_code(self):
         self.assertEqual(runner.qualification_overall(0, [{"status": "PASS"}]),
                          "PASS")
