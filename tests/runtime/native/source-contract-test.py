@@ -170,8 +170,7 @@ static swapz_u16 swapz_probe_set(
 
     def test_codec_append_rejects_invalid_length_before_payload_hash(self):
         validate = source_body("swapz_validate", CODEC)
-        self.assertIn("seen_slots[SWAPZ_MAX_RECORDS]", validate)
-        self.assertIn("seen_slots[index] = slot", validate)
+        self.assertIn("swapz_record_logical_le(bytes, earlier)", validate)
         self.assertNotIn("swapz_get_record(bytes, earlier", validate)
         append = source_body("swapz_append", CODEC)
         guard = append.index("length > SWAPZ_MAX_COMPRESSED")
