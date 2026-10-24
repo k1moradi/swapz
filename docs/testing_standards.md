@@ -370,6 +370,12 @@ Tests that omit bulk callbacks thereby exercise its production sequential
 fallback; no test-only write wrapper is part of the engine API.
 
 
+Post-oracle mapper teardown remains fail-closed but may use a bounded
+non-force `dmsetup remove --retry` when the correctness marker has already
+proved the phase. This exists only to tolerate a transient userspace/udev open;
+persistent opens still fail with before/after open-count diagnostics. `--force`
+remains forbidden.
+
 The owned benchmark table validator must match the current Device Mapper
 constructor exactly. Removed constructor fields are removed from replay parsing
 in the same change; stale positional compatibility parsing is forbidden because

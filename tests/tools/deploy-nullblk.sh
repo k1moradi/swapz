@@ -642,7 +642,13 @@ trim_reuse_delta=$((trim_skips_reuse - trim_skips_after))
 (( trim_reuse_delta >= 1 && $(status_u64 "$trim_after_reuse" failed) == 0 )) ||
     fail "later allocator reuse did not suppress prior discard-time TRIM"
 note "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 immediate_sectors:2048 reuse_skips:$trim_reuse_delta verified_pages:4096"
-dmsetup remove "$DMNAME" || fail "cannot remove discard-time TRIM mapping"
+trim_open_before_remove="$(dmsetup info -c --noheadings -o open "$DMNAME" 2>/dev/null |
+    tr -d '[:space:]')" || trim_open_before_remove=unknown
+if ! timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME"; then
+    trim_open_after_remove="$(dmsetup info -c --noheadings -o open "$DMNAME" 2>/dev/null |
+        tr -d '[:space:]')" || trim_open_after_remove=unknown
+    fail "cannot remove discard-time TRIM mapping open:$trim_open_before_remove->$trim_open_after_remove"
+fi
 OWN_DM=0
 
 # Retained lifecycle qualification. Use the maximum already-supported
