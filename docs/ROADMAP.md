@@ -10,8 +10,8 @@ This file contains only active work. Completed experiments and detailed historic
 
 The latest successful standard owner matrix tested source
 `ab56b41c35b8b2b78752598365bf9ad310c40c5e`, passed all five stages (including
-the ID36 low-RAM/heavy-CPU pressure gate and explicit compound/folio BIO
-qualification), and published report-only commit
+the ID36 low-RAM/heavy-CPU pressure gate and explicit segmented direct-I/O
+coverage), and published report-only commit
 `c8a67f451495c65f9bf72382f7169dc30e00be98`. It qualifies the complete
 owned-RAM `null_blk` matrix for that exact source. Evidence-monotonic
 publication is enforced so concurrent or delayed older test runs can never
@@ -39,9 +39,10 @@ and append path is removed rather than retained as dormant diagnostic code.
 ## Current bottleneck ranking
 
 The ID36 low-RAM/heavy-CPU pressure gate is qualified on the owner matrix
-(tested source `ab56b41c35b8`, 0 OOM, 15,031 memory.high events, 236.7s CPU PSI
-contention, report `c8a67f451495`). Explicit compound/folio multi-bvec BIO
-qualification (ID43) is covered and verified byte-exact on owned RAM.
+(tested source `ab56b41c35b8`, 0 OOM, 15,031 memory.high events, 236,695,801 µs
+(236.7s cumulative) CPU PSI contention, report `c8a67f451495`). Explicit
+multi-bvec and non-zero offset direct-I/O coverage is verified byte-exact on owned
+RAM, with true compound/folio observation counters pending (ID43 partially qualified).
 Publication monotonicity is enforced in the test runner.
 
 Next collect realistic churn/GC/TRIM evidence: about 70% logical occupancy, an
@@ -126,14 +127,14 @@ changes.
 | 33 | Linux kernel CRC32C primitive | **1** | Already implemented; keep architecture-selected kernel backend. |
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
-| 36 | Heavy-CPU plus low-RAM qualification | **1 qualified on owner matrix (source 78d5f2e)** | `make test` runs one production async fast-QD32 correctness/forward-progress pair with a fixed short mixed trace plus packed byte-exact readback inside a cgroup-v2 domain. Both 64MiB memory-backed null_blk devices are fully faulted before the benchmark process migrates into the ID36 cgroup. The pressure helper owns a 576MiB anonymous working set but initially faults 496MiB; the harness then sets `memory.high=ready memory.current + 64MiB`, keeps `memory.max=896MiB` and cgroup swap disabled, faults the final 80MiB, and requires a real memory-high event with zero OOM before releasing the pair. The full working set and 2x CPU oversubscription (cap 32) remain active through module insertion/target construction, replay and teardown; CPU-PSI evidence is measured from pair release. Pass requires byte-exact verification and ordinary teardown without OOM. Qualified on owner host with 0 OOM and 241.9ms CPU PSI. |
+| 36 | Heavy-CPU plus low-RAM qualification | **1 qualified on owner matrix (source ab56b41)** | `make test` runs one production async fast-QD32 correctness/forward-progress pair with a fixed short mixed trace plus packed byte-exact readback inside a cgroup-v2 domain. Both 64MiB memory-backed null_blk devices are fully faulted before the benchmark process migrates into the ID36 cgroup. The pressure helper owns a 576MiB anonymous working set but initially faults 496MiB; the harness then sets `memory.high=ready memory.current + 64MiB`, keeps `memory.max=896MiB` and cgroup swap disabled, faults the final 80MiB, and requires a real memory-high event with zero OOM before releasing the pair. The full working set and 2x CPU oversubscription (cap 32) remain active through module insertion/target construction, replay and teardown; CPU-PSI evidence is measured from pair release. Pass requires byte-exact verification and ordinary teardown without OOM. Qualified on owner host with 0 OOM, 15,031 memory.high events, and 236,695,801 µs (236.7s cumulative) CPU PSI contention (report `c8a67f451495`). |
 | 37 | K=1 ping-pong WRITE pipeline | **1 qualified / keep; release gate open** | Latest five-pair fast sustained-write evidence shows async/sync QD4 +1.66% CI [+0.33%,+3.00%], QD8 +23.88% [+18.52%,+29.24%], and QD32 +22.15% [+15.65%,+28.65%]. QD8 lower requests fall 17.96%; QD32 requests fall 9.96% while bytes are statistically neutral. Keep the fixed one-slot path and existing activation gates; low-RAM/heavy-CPU remains a release gate. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5 refuted / removed** | Repeated depth-1/depth-2 evidence did not establish a useful service benefit. Production is fixed at one slot, and the second-slot allocation/append path plus runtime selector are removed. Reopening K>1 requires a new workload and an explicit architecture experiment. |
 | 39 | Latency-first bounded parallel READ service | **1 promoted / selector and routine A/B retired** | The retired `swapz-read` helper workqueue remains absent. The final five-pair ARM64 fast-model decision at source `11fbc839...`, with ID63 off, showed fan-out +17.9% mixed WRITE/READ throughput (95% CI +17.2..+18.5), -48.7% mixed READ p99, +67.9% sequential READ throughput and +101.8% seeded-random READ throughput while raw-control drift overlapped zero. Keep ordered-worker private-slot fan-out fixed on; remove the `parallel_reads` module selector and routine ten-session A/B. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
-| 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **1 qualified / covered** | Explicit multi-bvec and non-zero bv_offset coverage qualified on owned RAM (`deploy-nullblk.sh`). Tests asymmetric 2-segment, 3-segment, 4-segment splits and page-straddling non-zero bv_offsets (512) across 256 written/verified byte-exact pages with cross-mode single-bvec reads and writes. Direct-LZ4 fast-path is bypassed for multi-segment BIOs and copy fallback operates byte-exact. Larger base PAGE_SIZE/native larger records remain architecture work. |
+| 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **4 partially qualified** | Vectored/base-page-offset path covered; actual compound/folio bvec observation pending. |
 | 44 | Exact per-segment authoritative mapping counts / GC map-scan elimination | **1** | Owner-qualified with 20 live victims/rotations and byte-exact 4096-page verification. Keep O(1) dead-segment/post-evacuation checks; victim scoring/evacuation reverse indexing remains a separate future optimization. |
 | 45 | 4-block extent payload block-residency cache | **1** | Owner-qualified; keep. Slow packed sequential p99 improved to 16.85 ms with 3056 KiB / 457.5 lower requests, and native C proves each block of a seven-record 16KiB extent is fetched at most once before invalidation. |
 | 46 | Timed-interval scheduling telemetry hygiene | **1 completed measurement** | Qualified. Mixed/write-only scheduling conclusions now use kernel snapshots strictly around measured waves; full-process prefill/warmup counters are not evidence. |
@@ -238,12 +239,11 @@ AVX-512 review/build evidence does not qualify runtime on this SSE2-only host.
    Standard owned-RAM qualification passed on the source and report named
    above. Keep K=1 and its existing activation gates, retain
    `async_prepare=0` as the sync control, and preserve the fast-mixed paired
-   intervals. The ID36 low-RAM/heavy-CPU gate still blocks release
-   qualification of the default-on path.
-3. Owner-qualify the implemented ID36 low-RAM/heavy-CPU gate first. Attribute
-   QD32 requests next, then collect realistic churn/GC/TRIM evidence before
-   choosing the asynchronous-TRIM implementation. The design below is a review
-   proposal.
+   intervals. The ID36 low-RAM/heavy-CPU gate is qualified on the owner
+   matrix (tested source `ab56b41c35b8`, report `c8a67f451495`).
+3. With ID36 qualified, attribute QD32 requests next, then collect realistic
+   churn/GC/TRIM evidence before choosing the asynchronous-TRIM implementation.
+   The design below is a review proposal.
 4. Terminal ID72 churn A/B completed: circular allocator fairness proved
    optimal (spread=4 across all runs, 0.00% spread reduction and +9.93% p99
    latency regression with least-open scanning); optional switch removed and

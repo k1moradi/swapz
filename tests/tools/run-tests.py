@@ -6699,6 +6699,9 @@ def publish(source_sha):
                                 source_sha, remote_tested)
                             if tested_ancestor is None:
                                 continue
+                            if tested_ancestor.returncode > 1:
+                                return ("GIT_SYNC_FAILED: git merge-base failed while "
+                                        "evaluating remote qualification evidence")
                             if not tested_ancestor.returncode:
                                 return (f"SKIPPED_GIT_SYNC: newer-source qualification "
                                         f"evidence already published ({remote_tested[:12]})")

@@ -81,6 +81,12 @@ against races.
 
 Cleanup never force-removes uncertain resources. If identity or teardown is ambiguous, quarantine and fail.
 
+Transient target teardown between benchmark or lifecycle phases (such as tearing down the target prior to live-GC evacuation and recreation in `deploy-nullblk.sh`) must similarly use bounded non-force `timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry` to safely absorb transient `systemd-udevd` probe activity without failing or hanging.
+
+### Direct-I/O and memory input qualification boundary (ID43)
+
+Direct-I/O tests covering segmented and offset user buffers (via `transfer_segmented()` and `series_segmented()` with `pwritev`/`preadv`) qualify user buffer alignment, non-zero `bv_offset` translation, and multi-segment BIO boundary handling through the Linux block layer. However, contiguous userspace iovecs backed by base 4KiB pages may be merged by the block layer into single contiguous bvecs. True qualification of compound or huge-page memory inputs (THP/hugetlb) requires kernel-level inspection counters (detecting multi-bvec BIOs and `folio_test_large()`/`PageCompound()` backing) and explicit large folio backing tests. Until such passive observation is proven on loaded hardware, ID43 remains partially qualified.
+
 ## Benchmark pairing and provenance
 
 The mandatory mixed matrix uses two RAM-only latency models: 10 MiB/s with 1 ms completion and 80 MiB/s with 0.15 ms completion. The slow model remains a bounded four-session directional control (two sync, two async). The fast model runs ten sessions in the fixed sequence `0,1,1,0,0,1,1,0,0,1`, which forms five adjacent counterbalanced sync/async matched rounds. The control candidate inside every session is `off`; the product candidate is `swapz`.
@@ -100,6 +106,10 @@ throughput controls because they isolate compression and asynchronous scheduling
 effects, but suppresses repetitive per-control diagnostics. Detailed cache,
 window and counter evidence remains in the single replace-in-place
 root `test_results.json` report.
+
+### Evidence-monotonic report publication
+
+Report publication must be strictly evidence-monotonic. When publishing `test_results.json` to `origin/main`, if `origin/main` has advanced while the test suite was running, the publisher fetches `origin/main` and inspects the remote `test_results.json`. If `origin/main` already carries qualification evidence from a tested commit that is an ancestor or newer descendant of the local tested source (`git merge-base --is-ancestor local_tested remote_tested`), publication is declined with `SKIPPED_GIT_SYNC` so that delayed or concurrent runs cannot overwrite newer qualification evidence with older results. Furthermore, the ancestor evaluation must fail closed: if `git merge-base` returns an error status (exit code > 1), publication halts with `GIT_SYNC_FAILED` rather than proceeding under uncertain ancestry.
 
 Every console table printed by the official `make test` reporter must have a
 clear, self-contained Markdown title immediately before an unindented
@@ -168,9 +178,10 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 ## Current qualified baseline
 
 The latest successful standard owner matrix tested source
-`174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and
-published report-only commit
-`edab5b87344b33f95b2152dab5efbc39fdb0b1a0`. It qualifies that exact source
+`ab56b41c35b8b2b78752598365bf9ad310c40c5e`, passed all five stages (including
+the ID36 low-RAM/heavy-CPU pressure gate and explicit segmented direct-I/O
+coverage), and published report-only commit
+`c8a67f451495c65f9bf72382f7169dc30e00be98`. It qualifies that exact source
 on owned RAM-backed `null_blk`. Current `main` has since advanced through
 settled source/test cleanup and therefore needs a fresh complete owner
 `make test` before current HEAD is the qualified baseline.
