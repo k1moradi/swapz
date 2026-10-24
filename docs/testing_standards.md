@@ -65,14 +65,19 @@ The deterministic lifecycle oracle must preserve exact readback, RAW fallback, z
 
 Retained-window suspend/resume must drain accepted ownership and verify all pages. Synthetic pre-submission WRITE and FLUSH injection must fail closed. These synthetic failures are not evidence for torn/device-originated errors.
 
-Before any owned RAM device is provisioned, loaded qualification may ordinarily
-unload a pre-existing `dm_swapz` module only when
-`/sys/module/dm_swapz/refcnt` is readable, numeric and exactly zero. This
-preflight never removes a Device Mapper mapping, never changes swap and never
-uses forced module removal. A positive, unreadable or changing reference count
-is BLOCKED. The final ordinary `rmmod` is still authoritative against races:
-if a user appears after the zero-refcount observation, removal fails and
-qualification stops.
+Before any new owned RAM device is provisioned, loaded qualification may
+ordinarily unload a pre-existing `dm_swapz` module when its readable numeric
+reference count is zero. A positive count is recoverable only for exactly one
+zero-open mapper with the private `swapz-demo-<token>` name, matching
+`SWAPZ-TEST-<same-token>[phase]` UUID, no mount/swap alias, and exactly one
+proven memory-backed `null_blk` dependency created under the
+`nullb-swapz-*` configfs namespace. That stale harness mapper may receive one
+bounded non-force `dmsetup remove --retry`; the lower itself is preserved.
+Multiple mappings, foreign identities, active opens, mounts, swap aliases,
+non-null_blk lowers, ambiguous configfs identity, or any removal race remain
+BLOCKED. Forced mapper/module removal is never permitted. After cleanup the
+reference count must be zero and ordinary `rmmod` remains authoritative
+against races.
 
 Cleanup never force-removes uncertain resources. If identity or teardown is ambiguous, quarantine and fail.
 

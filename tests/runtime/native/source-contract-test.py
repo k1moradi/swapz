@@ -2702,6 +2702,19 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('"id36": re.compile(', runner)
         self.assertIn("ID36 low-RAM/heavy-CPU evidence is incomplete", runner)
 
+    def test_loaded_preflight_recovers_only_proven_stale_owned_mapping(self):
+        preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text()
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        self.assertIn('(( ${#swapz_maps[@]} == 1 ))', preflight)
+        self.assertIn('^swapz-demo-([a-f0-9]{16})$', preflight)
+        self.assertIn('^SWAPZ-TEST-$token', preflight)
+        self.assertIn('opens == 0', preflight)
+        self.assertIn('memory_backed', preflight)
+        self.assertIn('dmsetup remove --retry "$owned_map"', preflight)
+        self.assertIn('timeout --signal=TERM --kill-after=2s 10s', preflight)
+        self.assertNotIn('dmsetup remove --force', preflight)
+        self.assertIn('dmsetup remove --retry "$DMNAME"', pair)
+
     def test_dkms_sandbox_does_not_depend_on_host_module_state(self):
         package = (ROOT / "packaging/package-dkms.sh").read_text()
         self.assertIn(

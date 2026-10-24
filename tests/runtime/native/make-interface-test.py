@@ -992,8 +992,11 @@ class PublicMakeContract(unittest.TestCase):
         for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
-        self.assertTrue(
-            (ROOT / "tests/tools/deploy-nullblk.sh").stat().st_mode & 0o100)
+        for executable in (
+                "tests/tools/deploy-nullblk.sh",
+                "packaging/package-dkms.sh",
+                "tests/runtime/native/package-dkms-test.py"):
+            self.assertTrue((ROOT / executable).stat().st_mode & 0o100)
         self.assertIn("sudo -n true", loaded)
         self.assertIn("sudo -n bash", loaded)
         self.assertIn("BLOCKED_LOADED_QUALIFICATION", loaded)
@@ -1005,7 +1008,13 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("(( refcount == 0 ))", preflight)
         self.assertIn("rmmod dm_swapz", preflight)
         self.assertIn("AUTO_REMOVED_IDLE_DM_SWAPZ=1", preflight)
+        self.assertIn("AUTO_REMOVED_STALE_OWNED_DM_SWAPZ=1", preflight)
+        self.assertIn("^swapz-demo-([a-f0-9]{16})$", preflight)
+        self.assertIn("^SWAPZ-TEST-$token", preflight)
+        self.assertIn("memory_backed", preflight)
+        self.assertIn('dmsetup remove --retry "$owned_map"', preflight)
         self.assertNotIn("rmmod -f", preflight)
+        self.assertNotIn("dmsetup remove --force", preflight)
         self.assertIn("--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000", loaded)
         self.assertIn("--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000", loaded)
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)

@@ -250,7 +250,7 @@ cleanup() {
     if (( OWN_DM && !QUARANTINE )); then
         if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
                   tr -d '[:space:]') == "$DMUUID" ]] &&
-            dmsetup remove "$DMNAME"; then
+            timeout --signal=TERM --kill-after=2s 10s                 dmsetup remove --retry "$DMNAME"; then
             OWN_DM=0
         else
             QUARANTINE=1
