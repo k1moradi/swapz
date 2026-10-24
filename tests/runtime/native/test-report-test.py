@@ -2316,6 +2316,15 @@ class ReportContract(unittest.TestCase):
         self.assertIn("suspend/drain", phase)
         self.assertIn("retained lifecycle bytes changed", reason)
 
+        discard_trim = (
+            "START_LOADED_OWNED_NULLBLK_SMOKE\n"
+            "START_LOADED_DISCARD_TRIM\n"
+            "FAIL: owned upper DISCARD failed\n"
+        )
+        phase, reason = runner.failure_context(discard_trim)
+        self.assertIn("discard-time TRIM reclamation", phase)
+        self.assertIn("owned upper DISCARD failed", reason)
+
         loaded_subphase = (
             "START_OWNED_RAM_REGIME=sd_emulated\n"
             "START_OWNED_RAM_PAIR_ASYNC_PREPARE=0\n"

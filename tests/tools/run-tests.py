@@ -1235,14 +1235,20 @@ def failure_context(output, *, loaded=True, default_phase=None):
         for line in output.splitlines():
             if line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "owned RAM kernel smoke"
+            elif line.startswith("START_LOADED_COMPOUND_BIO"):
+                phase = "owned RAM compound/segmented BIO observation"
             elif line.startswith("START_LOADED_LIVE_GC"):
                 phase = "owned RAM live-GC pressure"
+            elif line.startswith("START_LOADED_DISCARD_TRIM"):
+                phase = "owned RAM discard-time TRIM reclamation"
             elif line.startswith("START_LOADED_SUSPEND_DRAIN"):
                 phase = "owned RAM retained suspend/drain"
             elif line.startswith("START_LOADED_RETAINED_WRITE_FAULT"):
                 phase = "owned RAM retained synthetic WRITE fault"
             elif line.startswith("START_LOADED_RETAINED_FLUSH_FAULT"):
                 phase = "owned RAM retained synthetic FLUSH fault"
+            elif line.startswith("START_LOADED_PACKED_PLACEMENT"):
+                phase = "owned RAM packed placement verification"
             elif line.startswith("START_ID36_RESOURCE_PRESSURE="):
                 phase = "ID36 low-RAM/heavy-CPU pressure"
             elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):

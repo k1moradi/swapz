@@ -5193,7 +5193,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		bool bio_nonzero_off = false;
 		bool bio_compound = false;
 
-		if (count) {
+		if (count && (bio_op(bio) == REQ_OP_READ ||
+			      bio_op(bio) == REQ_OP_WRITE)) {
 			struct bio_vec vec;
 			struct bvec_iter iter;
 
@@ -5215,7 +5216,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		}
-		if (count) {
+		if (count && (bio_op(bio) == REQ_OP_READ ||
+			      bio_op(bio) == REQ_OP_WRITE)) {
 			if (bio_segs > 1) {
 				ctx->bio_segments_gt1++;
 				if (bio_segs > ctx->bio_segments_max)
