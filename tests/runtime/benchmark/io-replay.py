@@ -966,7 +966,8 @@ DEADLINE_CONTEXT_FIELDS = (
     "deadline_before_bio", "deadline_after_read",
     "deadline_worker_with_local", "deadline_worker_empty")
 PREPARATION_FIELDS = (
-    "prep_lower_write_overlap_starts", "prep_wave_kicks",
+    "prep_lower_write_overlap_starts", "prep_lower_read_overlap_starts",
+    "prep_wave_kicks",
     "prep_producer_head_claims", "prep_producer_tail_claims",
     "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
 WINDOW_INTERVAL_FIELDS = (
@@ -1004,7 +1005,8 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "ordered_worker_wall_ns", "prep_worker_wall_ns",
     "ordered_worker_cpu_ns", "prep_worker_cpu_ns", "read_worker_cpu_ns",
     "prep_wait_wall_ns",
-    "prep_lower_write_overlap_ns", "prep_lower_write_samples",
+    "prep_lower_write_overlap_ns", "prep_lower_read_overlap_ns",
+    "prep_lower_write_samples",
     "prep_lower_write_start_queued", "prep_lower_write_start_nonempty",
     "prep_lower_write_end_queued", "prep_lower_write_end_nonempty",
     "pipeline_async_runs", "pipeline_read_bypass_skips",

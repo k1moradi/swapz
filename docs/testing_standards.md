@@ -701,10 +701,12 @@ exercise this workqueue lifecycle; loaded suspend/teardown remains required.
 Low-depth asynchronous-preparation qualification must prove the idle producer
 gate in source: four unclaimed tails are required for an idle tail-credit wake,
 the pre-head wave starter requires five total queued preparations, and an idle
-producer tail claim requires two queued descriptors. Active lower WRITE overlap
-is exempt and may wake on one queued descriptor. No new status fields are
-required. Owner evidence must re-run the existing persistent-worker QD1/4/8/32
-matrix; the candidate is rejected if QD8/QD32 loses its confirmed advantage or
+producer tail claim requires two queued descriptors. Active lower WRITE **or
+READ** overlap is exempt and may wake on one queued descriptor because the
+ordered owner is blocked in lower-device service. Status must distinguish
+preparation started/elapsed during lower WRITE from lower READ overlap so mixed
+traffic can prove that the new opportunity is actually exercised. Owner
+evidence must re-run the existing persistent-worker QD1/4/8/32 matrix; the candidate is rejected if QD8/QD32 loses its confirmed advantage or
 if QD1/QD4 still pay material producer-wakeup cost.
 
 The retired dry-close timer answered its bounded scheduling question and is no
@@ -712,8 +714,10 @@ longer production telemetry. The active starvation probe is observational:
 `preparation_queued` counts unclaimed preparation descriptors exactly under
 `queue_lock`; every synchronous lower WRITE records queue depth and whether it
 is nonempty immediately before `dm_io()` and immediately after it returns.
-The probe must not grant credits, wake extra workers beyond the existing wake,
-extend retention or alter completion ownership.
+The lower-WRITE queue probe itself must not grant credits. Lower-READ overlap
+may wake the existing single preparation lane but must not increase preparation
+width, publish authority, submit WRITE I/O, extend retention, or alter upper
+completion ownership.
 
 Live-GC distribution attribution increments a per-segment eviction counter only
 after a successful committed victim rotation. Loaded qualification reports the
@@ -854,7 +858,8 @@ Reports must retain lower-WRITE byte/request speedups, useful-WRITE speedup and
 bandwidth-opportunity capture `(useful_speedup - 1) / (byte_speedup - 1)`
 when byte speedup exceeds one. They must also retain sampled lower-WRITE
 peak/time-weighted depth and the timed swapz K=1 ready-window wait,
-preparation-handoff wait, lower-run occupancy,
+preparation-handoff wait, lower-WRITE and lower-READ preparation overlap,
+lower-run occupancy,
 `pipeline_post_lower_wall_ns` callback-to-publication/release hold, commit
 non-I/O, planner, pack, publication and final publication-CRC attribution. Those diagnostics decide which architecture question is eligible to reopen.
 Ready-window wait identifies a genuine K=1 successor blockage; post-lower hold
@@ -1105,7 +1110,12 @@ the same measured C-counter record consumed by the report parser. The merge-off
 arm may therefore record those fan-out counters, generic parallel pairs and
 distinct-extent service, but every ID63 adjacency,
 coalesced-range and coalescing-skip counter must remain zero. The merge-on arm
-uses the identical fan-out fallback after any non-coalescible prefix. Three-host
+uses the identical fan-out fallback after any non-coalescible prefix. A
+coalescible adjacent subset is also required to fall back when it does not cover
+the complete bounded fan-out batch (up to eight distinct extents); this prevents
+synchronous ID63 service from stranding unrelated independent READs that the
+fixed-on fan-out path could otherwise submit together. A full eight-slot chain
+may leave additional local READs for the next bounded worker iteration. Three-host
 cap evidence is sufficient to fix the maximum coalesced span at eight blocks:
 8 materially improves serial sequential service versus 4 on all three hosts,
 while fast-model comparisons do not establish a smaller cap as better. The

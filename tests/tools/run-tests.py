@@ -262,7 +262,8 @@ def read_metadata_counters_consistent(record):
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 PREPARATION_FIELDS = (
-    "prep_lower_write_overlap_starts", "prep_wave_kicks",
+    "prep_lower_write_overlap_starts", "prep_lower_read_overlap_starts",
+    "prep_wave_kicks",
     "prep_producer_head_claims", "prep_producer_tail_claims",
     "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
 WINDOW_SIZE_FIELDS = (
@@ -307,7 +308,7 @@ KERNEL_WRITE_FIELDS = (
     "ordered_worker_wall_ns", "prep_worker_wall_ns",
     "ordered_worker_cpu_ns", "prep_worker_cpu_ns", "read_worker_cpu_ns",
     "prep_wait_wall_ns", "prep_lower_write_overlap_ns",
-    "prep_lower_write_samples", "prep_lower_write_start_queued",
+    "prep_lower_read_overlap_ns", "prep_lower_write_samples", "prep_lower_write_start_queued",
     "prep_lower_write_start_nonempty", "prep_lower_write_end_queued",
     "prep_lower_write_end_nonempty", "pipeline_async_runs",
     "pipeline_read_bypass_skips",
@@ -6156,7 +6157,8 @@ def print_bench(result):
             [
                 ("LZ4",
                  f"{asynchronous['mixed_lz4_wall_ns'] / 1e6:.1f}",
-                 f"{asynchronous['mixed_prep_lower_write_overlap_ns'] / 1e6:.1f} IO"),
+                 f"{asynchronous['mixed_prep_lower_write_overlap_ns'] / 1e6:.1f} W + "
+                 f"{asynchronous['mixed_prep_lower_read_overlap_ns'] / 1e6:.1f} R overlap"),
                 ("payload CRC prep",
                  f"{(asynchronous['mixed_prep_crc_wall_ns'] + asynchronous['mixed_ordered_crc_wall_ns']) / 1e6:.1f}",
                  f"{asynchronous['mixed_engine_prehashed_records']:.0f} packed"),
@@ -6208,8 +6210,10 @@ def print_bench(result):
                 ("direct LZ4 input",
                  f"{asynchronous['mixed_direct_lz4_input_pages']:.1f} pages"),
                 ("wave kicks", f"{prep['prep_wave_kicks']:.1f}"),
-                ("lower-IO prep starts",
+                ("lower-WRITE prep starts",
                  f"{prep['prep_lower_write_overlap_starts']:.1f}"),
+                ("lower-READ prep starts",
+                 f"{prep['prep_lower_read_overlap_starts']:.1f}"),
                 ("producer head/tail",
                  f"{prep['prep_producer_head_claims']:.1f}/"
                  f"{prep['prep_producer_tail_claims']:.1f}"),

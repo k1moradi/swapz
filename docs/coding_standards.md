@@ -422,10 +422,13 @@ preparation entry from the head. The asynchronous producer is pure preparation:
 it never publishes mappings, submits lower I/O, changes ordering, or completes
 upper BIOs.
 
-When synchronous lower WRITE I/O is active, the producer prepares from the
-head because the ordered worker is blocked and will need that entry first.
-Outside lower WRITE wait, tail preparation is credit-limited: each ordered
-inline WRITE may leave at most one unconsumed tail token. The token is earned
+When lower WRITE **or READ** I/O is active, the producer prepares from the
+head because the ordered worker is blocked in device service and cannot steal
+from `preparation_incoming`. READ overlap changes no authority: the producer
+still only snapshots/compresses immutable queued WRITE input and the ordered
+worker remains the sole planner/publisher/completion owner. Outside active
+lower I/O, tail preparation is credit-limited: each ordered inline WRITE may
+leave at most one unconsumed tail token. The token is earned
 only after the ordered worker atomically reserves its own FIFO head.
 
 For a retained window, an earned `preparation_tail_credit` may survive the end
@@ -447,8 +450,11 @@ when no eligible credited tail remains. A nonempty window close clears any
 unused token.
 
 A cold lone head has no token and therefore does not wake the producer.
-`->map` may wake parallel preparation only for active lower WRITE service or
-an already-earned atomic tail credit. It must not pre-screen that credit using
+`->map` may wake parallel preparation for active lower WRITE or READ service,
+or for an already-earned atomic tail credit. The lower-READ signal is a nested
+atomic count covering only real lower-read service; it must be balanced on
+every synchronous and bounded fan-out path so teardown can never inherit a
+false overlap state. It must not pre-screen that credit using
 instantaneous preparation-list topology, read worker-private `batch_count`, or
 depend on the instantaneous `ordered_worker_busy` interval. The producer
 rechecks list shape under the same `queue_lock` before consuming the token.
@@ -746,7 +752,12 @@ conflicts still fence through the serialized authority path.
 ID63 adjacent coalescing runs before independent fan-out. It may combine only
 requests already waiting in the admitted independent READ prefix, only when the
 exact missing ranges form one same-segment zero-padding span within the bounded
-scratch cap. Its disabled arm returns before ID63 cache probes, adjacency scans
+scratch cap, and only when that coalesced chain covers the complete **bounded
+fan-out batch** (up to the eight private distinct-extent slots). A smaller adjacent
+subset must fall through to the asynchronous private-slot path rather than
+synchronously blocking unrelated independent READs behind one merged request.
+A full eight-slot adjacent chain may execute while additional local READs remain
+for the next bounded worker iteration. Its disabled arm returns before ID63 cache probes, adjacency scans
 or coalescing counters; the subsequent independent fan-out path remains common
 to both arms.
 
