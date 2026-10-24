@@ -423,9 +423,12 @@ remains alive. A fixed poll-count loop is forbidden. The sampler must still
 observe `retain_timer_arms > windows`; historical timer activity is not a
 substitute for an actually open window. Synchronization waits are bounded and
 must terminate both helper processes before reporting failure so teardown
-cannot inherit a blocked FIFO reader. The maximum supported 4ms deadline can
-legitimately expire between that observation and the separate suspend request,
-so the oracle must not require a specific close-reason counter afterwards.
+cannot inherit a blocked FIFO reader. The concurrent lifecycle writer and subsequent
+byte-exact verification processes run with a bounded 30s timeout headroom across
+dmsetup suspend and resume operations, ensuring host scheduling load during post-compilation
+drain does not prematurely terminate the writer, and dumping writer stderr on unexpected exit.
+The maximum supported 4ms deadline can legitimately expire between that observation and the
+separate suspend request, so the oracle must not require a specific close-reason counter afterwards.
 Loaded failure reporting skips the generic cleanup epilogue so the preceding
 specific sanitized failure remains visible.
 

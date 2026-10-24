@@ -724,7 +724,7 @@ mkfifo "$lifecycle_ready" "$lifecycle_start" ||
 (
     lifecycle_start_token="$(cat "$lifecycle_start")" || exit 5
     [[ "$lifecycle_start_token" == START ]] || exit 6
-    exec timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
+    exec timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
         "/dev/mapper/$DMNAME" --write-series 128 2
 ) >"$SESSION/suspend-writer.log" 2>&1 &
 writer_pid=$!
@@ -781,8 +781,11 @@ SUSPENDED=1
 timeout --signal=TERM --kill-after=2s 10s dmsetup resume "$DMNAME" ||
     fail "owned retained mapping did not resume"
 SUSPENDED=0
-wait "$writer_pid" || fail "retained lifecycle writer failed across suspend/resume"
-timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
+wait "$writer_pid" || {
+    [[ -f "$SESSION/suspend-writer.log" ]] && cat "$SESSION/suspend-writer.log" >&2
+    fail "retained lifecycle writer failed across suspend/resume"
+}
+timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
     "/dev/mapper/$DMNAME" --verify-series 128 2 ||
     fail "retained lifecycle bytes changed across suspend/resume"
 suspend_after="$(dmsetup status "$DMNAME")"
