@@ -2607,6 +2607,180 @@ class ReportContract(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
 
+    def test_git_sync_declines_older_source_when_newer_evidence_published(self):
+        """Do not overwrite origin/main when it already carries newer qualification evidence."""
+        import subprocess
+        from unittest import mock
+
+        def git(*args, cwd, check=True):
+            return subprocess.run(["git", *args], cwd=cwd, check=check,
+                                  capture_output=True, text=True, timeout=12)
+
+        with tempfile.TemporaryDirectory(
+                prefix="report-monotonic-", dir=ROOT / "build/tests") as name:
+            sandbox = Path(name)
+            checkout, origin, peer = (
+                sandbox / "checkout", sandbox / "origin.git", sandbox / "peer")
+            checkout.mkdir()
+            git("init", "--bare", str(origin), cwd=sandbox)
+            git("init", cwd=checkout)
+            git("checkout", "-b", "main", cwd=checkout)
+            git("config", "user.name", "test-report CI", cwd=checkout)
+            git("config", "user.email", "test@example.invalid", cwd=checkout)
+            (checkout / "source.c").write_text("v1 source\n")
+            (checkout / runner.GIT_RESULT).write_text(
+                '{"overall":"NOT_RUN"}\n', encoding="utf-8")
+            git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
+            git("commit", "-m", "Older source C1", cwd=checkout)
+            c1_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
+            git("remote", "add", "origin", str(origin), cwd=checkout)
+            git("push", "origin", "main", cwd=checkout)
+
+            git("clone", "-b", "main", str(origin), str(peer), cwd=sandbox)
+            git("config", "user.name", "newer tester", cwd=peer)
+            git("config", "user.email", "tester@example.invalid", cwd=peer)
+            (peer / "source.c").write_text("v2 source\n")
+            git("add", "source.c", cwd=peer)
+            git("commit", "-m", "Newer source C2", cwd=peer)
+            c2_sha = git("rev-parse", "HEAD", cwd=peer).stdout.strip()
+
+            newer_report = {
+                "schema": "swapz-test-results-v1",
+                "source_sha": c2_sha,
+                "tested_commit_sha": c2_sha,
+                "overall": "PASS",
+            }
+            (peer / runner.GIT_RESULT).write_text(
+                json.dumps(newer_report) + "\n", encoding="utf-8")
+            git("add", runner.GIT_RESULT, cwd=peer)
+            git("commit", "-m", f"test: latest run for {c2_sha[:12]} [skip ci]",
+                cwd=peer)
+            peer_report_sha = git("rev-parse", "HEAD", cwd=peer).stdout.strip()
+            git("push", "origin", "main", cwd=peer)
+
+            old_root, old_report, old_git_result = (
+                runner.ROOT, runner.REPORT, runner.git_result)
+            runner.ROOT = checkout
+            runner.REPORT = checkout / runner.GIT_RESULT
+
+            def intercept(command, *, data=None, timeout=15, env=None):
+                if command == ["remote", "get-url", "--push", "origin"]:
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout=b"git@github.com:k1moradi/swapz.git",
+                        stderr=b"")
+                return old_git_result(command, data=data, timeout=timeout,
+                                      env=env)
+
+            try:
+                with mock.patch.object(runner, "git_result",
+                                       side_effect=intercept):
+                    older_report = {
+                        "schema": "swapz-test-results-v1",
+                        "source_sha": c1_sha,
+                        "tested_commit_sha": c1_sha,
+                        "overall": "PASS",
+                    }
+                    runner.write_report(older_report)
+                    notice = runner.publish(c1_sha)
+                    self.assertEqual(
+                        notice,
+                        f"SKIPPED_GIT_SYNC: newer-source qualification evidence "
+                        f"already published ({c2_sha[:12]})")
+
+                    remote_head = git("--git-dir", str(origin), "rev-parse",
+                                      "refs/heads/main",
+                                      cwd=sandbox).stdout.strip()
+                    self.assertEqual(remote_head, peer_report_sha)
+            finally:
+                runner.ROOT, runner.REPORT = old_root, old_report
+
+    def test_git_sync_allows_newer_source_over_older_evidence(self):
+        """Allow publishing newer qualification evidence over older published evidence."""
+        import subprocess
+        from unittest import mock
+
+        def git(*args, cwd, check=True):
+            return subprocess.run(["git", *args], cwd=cwd, check=check,
+                                  capture_output=True, text=True, timeout=12)
+
+        with tempfile.TemporaryDirectory(
+                prefix="report-monotonic-newer-", dir=ROOT / "build/tests") as name:
+            sandbox = Path(name)
+            checkout, origin, peer = (
+                sandbox / "checkout", sandbox / "origin.git", sandbox / "peer")
+            checkout.mkdir()
+            git("init", "--bare", str(origin), cwd=sandbox)
+            git("init", cwd=checkout)
+            git("checkout", "-b", "main", cwd=checkout)
+            git("config", "user.name", "test-report CI", cwd=checkout)
+            git("config", "user.email", "test@example.invalid", cwd=checkout)
+            (checkout / "source.c").write_text("v1 source\n")
+            older_report = {
+                "schema": "swapz-test-results-v1",
+                "source_sha": "0" * 40,
+                "tested_commit_sha": "0" * 40,
+                "overall": "PASS",
+            }
+            (checkout / runner.GIT_RESULT).write_text(
+                json.dumps(older_report) + "\n", encoding="utf-8")
+            git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
+            git("commit", "-m", "Older source C1 with old report", cwd=checkout)
+            c1_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
+            git("remote", "add", "origin", str(origin), cwd=checkout)
+            git("push", "origin", "main", cwd=checkout)
+
+            # Checkout advances to C2 (tested commit)
+            (checkout / "source.c").write_text("v2 source\n")
+            git("add", "source.c", cwd=checkout)
+            git("commit", "-m", "Newer source C2", cwd=checkout)
+            c2_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
+            git("push", "origin", "main", cwd=checkout)
+
+            # Peer clones and adds a concurrent docs commit C3 on top of C2
+            git("clone", "-b", "main", str(origin), str(peer), cwd=sandbox)
+            git("config", "user.name", "concurrent committer", cwd=peer)
+            git("config", "user.email", "committer@example.invalid", cwd=peer)
+            (peer / "README.md").write_text("concurrent doc\n")
+            git("add", "README.md", cwd=peer)
+            git("commit", "-m", "Concurrent doc commit C3", cwd=peer)
+            git("push", "origin", "main", cwd=peer)
+
+            old_root, old_report, old_git_result = (
+                runner.ROOT, runner.REPORT, runner.git_result)
+            runner.ROOT = checkout
+            runner.REPORT = checkout / runner.GIT_RESULT
+
+            def intercept(command, *, data=None, timeout=15, env=None):
+                if command == ["remote", "get-url", "--push", "origin"]:
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout=b"git@github.com:k1moradi/swapz.git",
+                        stderr=b"")
+                return old_git_result(command, data=data, timeout=timeout,
+                                      env=env)
+
+            try:
+                with mock.patch.object(runner, "git_result",
+                                       side_effect=intercept):
+                    newer_report = {
+                        "schema": "swapz-test-results-v1",
+                        "source_sha": c2_sha,
+                        "tested_commit_sha": c2_sha,
+                        "overall": "PASS",
+                    }
+                    runner.write_report(newer_report)
+                    notice = runner.publish(c2_sha)
+                    self.assertIn("SYNCED_GIT", notice)
+
+                    remote_report = json.loads(
+                        git("--git-dir", str(origin), "show",
+                            f"refs/heads/main:{runner.GIT_RESULT}",
+                            cwd=sandbox).stdout)
+                    self.assertEqual(remote_report["tested_commit_sha"], c2_sha)
+            finally:
+                runner.ROOT, runner.REPORT = old_root, old_report
+
     def test_git_sync_retries_transient_push_and_fetch_failure(self):
         """Retry transient publication failures even when main did not move."""
         import subprocess

@@ -9,12 +9,12 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest successful standard owner matrix tested source
-`174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and
-published report-only commit
-`edab5b87344b33f95b2152dab5efbc39fdb0b1a0`. It qualifies the complete
-owned-RAM `null_blk` matrix for that exact source. Current `main` has
-advanced through later source/test cleanup and therefore requires a fresh
-complete owner `make test` before current HEAD becomes the qualified baseline.
+`78d5f2e831f2d00629861260d7c24b560f53f6c4`, passed all five stages (including
+the ID36 low-RAM/heavy-CPU pressure gate), and published report-only commit
+`17f9215318cf3ea6722d7d5940989f660d70ebae`. It qualifies the complete
+owned-RAM `null_blk` matrix for that exact source. Evidence-monotonic
+publication is enforced so concurrent or delayed older test runs can never
+overwrite canonical qualification reports on main.
 
 The positive-fixture delta64 A/B on the qualified source exercised 4096 direct
 predictor-first adoptions, reduced lower WRITE bytes 27.04%, and increased
@@ -37,17 +37,10 @@ and append path is removed rather than retained as dormant diagnostic code.
 
 ## Current bottleneck ranking
 
-First, run the complete owner `make test` on exact current `main`. Until
-that exact-source run passes, source `174d42eb7135...` remains the latest
-qualified baseline.
-
-The first open release gate is deliberate low-RAM plus heavy-CPU pressure.
-The bounded cgroup-v2 ID36 test is now implemented in `make test`; owner
-qualification on the exact source is still required. It measures target
-creation/teardown and byte-exact async service after deterministically
-establishing memory.high reclaim/throttle pressure, then requires CPU PSI during
-the released pair without permitting OOM. Ordinary host CPU/PSI observations
-from benchmark pairs do not substitute for this pressure experiment.
+The ID36 low-RAM/heavy-CPU pressure gate is qualified on the owner matrix
+(tested source `78d5f2e831f2`, 0 OOM, 14,886 memory.high events, 241.9ms CPU PSI
+contention, report `17f9215318cf`). Bounded replay timeouts under pressure are
+scaled to 200s, and publication monotonicity is enforced in the test runner.
 
 Next collect realistic churn/GC/TRIM evidence: about 70% logical occupancy, an
 explicit cold/hot split, and at least ten logical capacities of hot rewrites.
@@ -131,7 +124,7 @@ changes.
 | 33 | Linux kernel CRC32C primitive | **1** | Already implemented; keep architecture-selected kernel backend. |
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
-| 36 | Heavy-CPU plus low-RAM qualification | **6 implemented gate; owner-loaded evidence pending** | `make test` runs one production async fast-QD32 correctness/forward-progress pair with a fixed short mixed trace plus packed byte-exact readback inside a cgroup-v2 domain. Both 64MiB memory-backed null_blk devices are fully faulted before the benchmark process migrates into the ID36 cgroup. The pressure helper owns a 576MiB anonymous working set but initially faults 496MiB; the harness then sets `memory.high=ready memory.current + 64MiB`, keeps `memory.max=896MiB` and cgroup swap disabled, faults the final 80MiB, and requires a real memory-high event with zero OOM before releasing the pair. The full working set and 2x CPU oversubscription (cap 32) remain active through module insertion/target construction, replay and teardown; CPU-PSI evidence is measured from pair release. Pass also requires byte-exact verification and ordinary teardown; performance is observational. This remains unqualified until the three owner hosts pass the exact source. |
+| 36 | Heavy-CPU plus low-RAM qualification | **1 qualified on owner matrix (source 78d5f2e)** | `make test` runs one production async fast-QD32 correctness/forward-progress pair with a fixed short mixed trace plus packed byte-exact readback inside a cgroup-v2 domain. Both 64MiB memory-backed null_blk devices are fully faulted before the benchmark process migrates into the ID36 cgroup. The pressure helper owns a 576MiB anonymous working set but initially faults 496MiB; the harness then sets `memory.high=ready memory.current + 64MiB`, keeps `memory.max=896MiB` and cgroup swap disabled, faults the final 80MiB, and requires a real memory-high event with zero OOM before releasing the pair. The full working set and 2x CPU oversubscription (cap 32) remain active through module insertion/target construction, replay and teardown; CPU-PSI evidence is measured from pair release. Pass requires byte-exact verification and ordinary teardown without OOM. Qualified on owner host with 0 OOM and 241.9ms CPU PSI. |
 | 37 | K=1 ping-pong WRITE pipeline | **1 qualified / keep; release gate open** | Latest five-pair fast sustained-write evidence shows async/sync QD4 +1.66% CI [+0.33%,+3.00%], QD8 +23.88% [+18.52%,+29.24%], and QD32 +22.15% [+15.65%,+28.65%]. QD8 lower requests fall 17.96%; QD32 requests fall 9.96% while bytes are statistically neutral. Keep the fixed one-slot path and existing activation gates; low-RAM/heavy-CPU remains a release gate. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5 refuted / removed** | Repeated depth-1/depth-2 evidence did not establish a useful service benefit. Production is fixed at one slot, and the second-slot allocation/append path plus runtime selector are removed. Reopening K>1 requires a new workload and an explicit architecture experiment. |
 | 39 | Latency-first bounded parallel READ service | **1 promoted / selector and routine A/B retired** | The retired `swapz-read` helper workqueue remains absent. The final five-pair ARM64 fast-model decision at source `11fbc839...`, with ID63 off, showed fan-out +17.9% mixed WRITE/READ throughput (95% CI +17.2..+18.5), -48.7% mixed READ p99, +67.9% sequential READ throughput and +101.8% seeded-random READ throughput while raw-control drift overlapped zero. Keep ordered-worker private-slot fan-out fixed on; remove the `parallel_reads` module selector and routine ten-session A/B. |

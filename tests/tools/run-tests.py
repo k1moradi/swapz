@@ -6684,6 +6684,26 @@ def publish(source_sha):
                 if ancestor.returncode:
                     return ("GIT_SYNC_FAILED: origin/main no longer descends "
                             "from the tested source; report remains local")
+                remote_blob = run("show", f"{remote_sha}:{GIT_RESULT}")
+                if remote_blob is not None and not remote_blob.returncode:
+                    try:
+                        remote_json = json.loads(
+                            remote_blob.stdout.decode("utf-8", "replace"))
+                        remote_tested = (remote_json.get("tested_commit_sha") or
+                                         remote_json.get("source_sha"))
+                        if isinstance(remote_tested, str) and \
+                                re.fullmatch(r"[0-9a-f]{40}", remote_tested) and \
+                                remote_tested != source_sha:
+                            tested_ancestor = run(
+                                "merge-base", "--is-ancestor",
+                                source_sha, remote_tested)
+                            if tested_ancestor is None:
+                                continue
+                            if not tested_ancestor.returncode:
+                                return (f"SKIPPED_GIT_SYNC: newer-source qualification "
+                                        f"evidence already published ({remote_tested[:12]})")
+                    except (ValueError, UnicodeDecodeError):
+                        pass
             retry_sha, error = build_report_commit(remote_sha)
             if error:
                 return error
