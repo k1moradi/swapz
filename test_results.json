@@ -111,24 +111,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 750,
-"legacy_dead_probe_ns": 80958,
-"legacy_score_scan_ns": 494917,
+"incremental_select_ns": 947,
+"legacy_dead_probe_ns": 128961,
+"legacy_score_scan_ns": 848916,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 417,
-"relocation_list_ns": 416,
-"relocation_scan_ns": 96333,
+"mapped_dead_probe_ns": 563,
+"relocation_list_ns": 508,
+"relocation_scan_ns": 260375,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2625,
-"legacy_dead_probe_ns": 303750,
-"legacy_score_scan_ns": 1905249,
+"incremental_select_ns": 3453,
+"legacy_dead_probe_ns": 506259,
+"legacy_score_scan_ns": 3672114,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 1208,
-"relocation_list_ns": 500,
-"relocation_scan_ns": 415124,
+"mapped_dead_probe_ns": 1987,
+"relocation_list_ns": 723,
+"relocation_scan_ns": 1796756,
 "segments": 4096,
 "victim_records": 256
 }
@@ -138,14 +138,24 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 164,
+"inverse_ns_per_page": 183,
 "name": "scalar",
-"transform_ns_per_page": 145
+"transform_ns_per_page": 245
 },
 {
-"inverse_ns_per_page": 115,
-"name": "neon",
-"transform_ns_per_page": 96
+"inverse_ns_per_page": 281,
+"name": "sse2",
+"transform_ns_per_page": 173
+},
+{
+"inverse_ns_per_page": 124,
+"name": "avx2",
+"transform_ns_per_page": 82
+},
+{
+"inverse_ns_per_page": 91,
+"name": "avx512",
+"transform_ns_per_page": 69
 }
 ],
 "classifier": {
@@ -155,9 +165,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 35,
+"ns_per_page": 82,
 "sample_pairs": 32,
-"scalar_ns_per_page": 35,
+"scalar_ns_per_page": 82,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -172,7 +182,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2028
+"wall_ns_per_page": 2373
 },
 {
 "acceleration": 2,
@@ -180,7 +190,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1819
+"wall_ns_per_page": 2207
 },
 {
 "acceleration": 3,
@@ -188,7 +198,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1771
+"wall_ns_per_page": 2105
 },
 {
 "acceleration": 4,
@@ -196,7 +206,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1795
+"wall_ns_per_page": 2087
 }
 ],
 "negative_pages": 256,
@@ -213,9 +223,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1424,
-"modeled_wall_ns_total": 820224,
-"ns_per_saved_block": 15773,
+"modeled_wall_ns_per_page": 1663,
+"modeled_wall_ns_total": 958208,
+"ns_per_saved_block": 18427,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -236,7 +246,38 @@
 }
 ],
 "scope": "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY",
-"sse2_forward_ab": null,
+"sse2_forward_ab": {
+"pages": 576,
+"pairs": [
+{
+"baseline_ns_per_page": 192,
+"order": "baseline_first",
+"unrolled_ns_per_page": 189
+},
+{
+"baseline_ns_per_page": 198,
+"order": "unrolled_first",
+"unrolled_ns_per_page": 190
+},
+{
+"baseline_ns_per_page": 206,
+"order": "baseline_first",
+"unrolled_ns_per_page": 196
+},
+{
+"baseline_ns_per_page": 203,
+"order": "unrolled_first",
+"unrolled_ns_per_page": 192
+},
+{
+"baseline_ns_per_page": 200,
+"order": "baseline_first",
+"unrolled_ns_per_page": 190
+}
+],
+"repeats_per_arm": 64,
+"scope": "SAME_HOST_NATIVE_BASELINE_VS_PROMOTED_PRODUCTION"
+},
 "structured_pages": 320,
 "thresholds": [
 {
@@ -280,14 +321,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16204,
+"ns_per_saved_block": 18882,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1603,
-"routed_cpu_ns_total": 923646,
+"routed_cpu_ns_per_page": 1868,
+"routed_cpu_ns_total": 1076315,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -335,14 +376,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16280,
+"ns_per_saved_block": 18983,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1554,
-"routed_cpu_ns_total": 895440,
+"routed_cpu_ns_per_page": 1812,
+"routed_cpu_ns_total": 1044104,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -390,14 +431,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15773,
+"ns_per_saved_block": 18427,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1424,
-"routed_cpu_ns_total": 820224,
+"routed_cpu_ns_per_page": 1663,
+"routed_cpu_ns_total": 958208,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -445,14 +486,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15773,
+"ns_per_saved_block": 18427,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1424,
-"routed_cpu_ns_total": 820224,
+"routed_cpu_ns_per_page": 1663,
+"routed_cpu_ns_total": 958208,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -500,14 +541,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15773,
+"ns_per_saved_block": 18427,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1424,
-"routed_cpu_ns_total": 820224,
+"routed_cpu_ns_per_page": 1663,
+"routed_cpu_ns_total": 958208,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -523,55 +564,55 @@
 "candidate_blocks": 192,
 "candidate_extents": 84,
 "cliff_2024": 160,
-"inverse_backend": "neon",
-"inverse_ns_per_page": 115,
+"inverse_backend": "avx512",
+"inverse_ns_per_page": 91,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 164,
-"scalar_transform_ns_per_page": 145,
-"second_lz4_ns_per_page": 3038,
-"transform_backend": "neon",
-"transform_ns_per_page": 96
+"scalar_inverse_ns_per_page": 183,
+"scalar_transform_ns_per_page": 245,
+"second_lz4_ns_per_page": 3510,
+"transform_backend": "avx512",
+"transform_ns_per_page": 69
 }
 ]
 }
 },
-"kernel_release": "7.0.0-38-generic",
+"kernel_release": "7.0.0-34-generic",
 "overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
 "source_sha": "edef211c5609caf8f46192ddb7d4c1a627a24ac7",
 "stages": [
 {
-"elapsed_s": 0.302,
+"elapsed_s": 0.511,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 7.31,
+"elapsed_s": 11.97,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.2,
+"elapsed_s": 0.459,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.224,
+"elapsed_s": 0.506,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
 "diagnostic": "BLOCKED: pre-existing dm_swapz module is busy; no cleanup attempted",
-"elapsed_s": 0.02,
+"elapsed_s": 0.033,
 "exit_code": 1,
 "failed_phase": "preflight / administrator authorization",
 "name": "Owned RAM smoke + mixed/QD pilot",
