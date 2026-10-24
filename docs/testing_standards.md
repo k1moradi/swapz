@@ -85,6 +85,8 @@ Cleanup never force-removes uncertain resources. If identity or teardown is ambi
 
 Transient target teardown between benchmark or lifecycle phases (such as tearing down the target prior to live-GC evacuation and recreation in `deploy-nullblk.sh`) must similarly settle `udevadm` and use bounded non-force `timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry` to safely absorb transient `systemd-udevd` probe activity without failing or hanging.
 
+Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
+
 ### Direct-I/O and memory input qualification boundary (ID43)
 
 Direct-I/O tests covering segmented and offset user buffers (via `transfer_segmented()` and `series_segmented()` with `pwritev`/`preadv`) qualify user buffer alignment, non-zero `bv_offset` translation, and multi-segment BIO boundary handling through the Linux block layer. In addition, explicit Transparent Huge Page (THP / `MADV_HUGEPAGE`) compound folio backing (via `series_thp()` with `--thp-write-series` and `--thp-verify-series`) exercises incoming direct I/O from 2MiB compound memory regions. Kernel-level passive inspection counters in `dm-target.c` observe:

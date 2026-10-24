@@ -1699,9 +1699,15 @@ def parse_sessions(output):
                     "input_write_mbps": rates.get("logical_write_mbps"),
                     "output_lower_write_mbps": rates.get("lower_write_mbps"),
                     "swap_in_read_mbps": rates.get("logical_read_mbps"),
-                    "swap_in_read_p95_ms": obj.get("read_p95_ns", 0) / 1e6,
-                    "swap_in_read_p99_ms": obj.get("read_p99_ns", 0) / 1e6,
-                    "write_p99_ms": obj.get("write_p99_ns", 0) / 1e6,
+                    "swap_in_read_p95_ms": (obj.get("read_p95_ns") / 1e6
+                                            if isinstance(obj.get("read_p95_ns"), (int, float))
+                                            else 0.0),
+                    "swap_in_read_p99_ms": (obj.get("read_p99_ns") / 1e6
+                                            if isinstance(obj.get("read_p99_ns"), (int, float))
+                                            else 0.0),
+                    "write_p99_ms": (obj.get("write_p99_ns") / 1e6
+                                     if isinstance(obj.get("write_p99_ns"), (int, float))
+                                     else 0.0),
                     "lower_write_bytes": lower.get("lower_write_bytes"),
                     "lower_write_requests": lower.get("lower_write_requests"),
                     "lower_read_bytes": lower.get("lower_read_bytes"),
@@ -1830,8 +1836,12 @@ def parse_storage_envelope_sessions(output):
             "lower_write_requests": lower.get("lower_write_requests"),
             "lower_read_bytes": lower.get("lower_read_bytes"),
             "lower_read_requests": lower.get("lower_read_requests"),
-            "write_p99_ms": obj.get("write_p99_ns", 0) / 1e6,
-            "read_p99_ms": obj.get("read_p99_ns", 0) / 1e6,
+            "write_p99_ms": (obj.get("write_p99_ns") / 1e6
+                             if isinstance(obj.get("write_p99_ns"), (int, float))
+                             else 0.0),
+            "read_p99_ms": (obj.get("read_p99_ns") / 1e6
+                            if isinstance(obj.get("read_p99_ns"), (int, float))
+                            else 0.0),
             "seconds": obj.get("seconds"),
             "lower_inflight": lower_inflight_record(obj),
             "kernel_write_path": obj.get("kernel_write_path"),
@@ -3824,7 +3834,9 @@ def parse_write_saturation(output):
                 "lower_write_requests": lower.get("lower_write_requests"),
                 "lower_read_bytes": lower.get("lower_read_bytes"),
                 "lower_read_requests": lower.get("lower_read_requests"),
-                "write_p99_ms": obj.get("write_p99_ns", 0) / 1e6,
+                "write_p99_ms": (obj.get("write_p99_ns") / 1e6
+                                 if isinstance(obj.get("write_p99_ns"), (int, float))
+                                 else 0.0),
                 "seconds": obj.get("seconds"),
                 "cpu_user_s": obj.get("mixed_replay_cpu_user_s"),
                 "cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
