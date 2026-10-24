@@ -26,6 +26,17 @@ Allocation and GC must never reuse a possibly live or partially written extent. 
 
 State a concrete production-C hypothesis before changing policy. Measure useful logical work and independent lower bytes/requests. Request reduction that loses useful throughput can still be useful diagnostic evidence, but is not a win by itself. Read p95/p99, CPU, RAM and GC are part of the result.
 
+The `make test` stdout report is a decision artifact, not a metric dump. Every
+table must print a concise **Evidence -> Goal implication -> Verdict** reasoning
+chain after its legend and numeric interpretation. Product-facing tables must
+connect useful READ/WRITE, latency and lower-device bytes/requests to the vision;
+internal/native/model tables must explicitly say when they are diagnostic or
+supporting only. Lower WRITE bytes/requests are the host-I/O endurance proxy.
+Lower READ traffic is an efficiency/performance result, and logical segment-open
+spread is allocator fairness; neither may be mislabeled as physical NAND wear
+evidence. A trade-off or confidence interval crossing zero must remain visibly
+unresolved rather than being summarized as a win.
+
 Remove diagnostic branches and counters after they answer their question. A rejected experiment must not keep consuming hot-path CPU or schema surface.
 
 A benchmark labeled sustained QD must pre-create its worker set before the

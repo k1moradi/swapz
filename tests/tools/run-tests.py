@@ -4548,6 +4548,19 @@ TABLE_HEADER_LEGEND = {
     "RAW+ KiB": "encoded bytes avoided by RAW rescues, in KiB",
     "LZ4+ KiB": "encoded bytes avoided by ordinary LZ4 rescues, in KiB",
     "rescue ms": "classifier, delta64 transform, candidate LZ4 and copy wall ms; not CPU time",
+    "swap W": "useful swapz WRITE throughput in decimal MB/s",
+    "W MB/s": "useful logical WRITE throughput in decimal MB/s",
+    "seq MB/s": "useful sequential READ throughput in decimal MB/s",
+    "rnd MB/s": "useful seeded-random READ throughput in decimal MB/s",
+    "lower req": "backing-device request count",
+    "LZ4 ms": "measured LZ4 wall time in the interval",
+    "PSI some %": "CPU pressure-stall some fraction during the measured interval",
+    "D64 ms": "delta64 route wall time in the measured interval",
+    "prep LZ4 ms": "preparation-worker LZ4 wall time in the measured interval",
+    "parallel": "parallel preparation starts",
+    "depth": "configured lower-WRITE submission depth",
+    "active max": "maximum simultaneously active lower-WRITE runs",
+    "K": "preparation width",
 }
 
 TABLE_HEADER_GOAL = {
@@ -4607,6 +4620,15 @@ TABLE_HEADER_GOAL = {
     "A/S": "higher is better when other acceptance gates hold",
     "A req": "lower is better",
     "rescue ms": "lower is better for equivalent rescue outcome",
+    "swap W": "higher is better",
+    "W MB/s": "higher is better",
+    "seq MB/s": "higher is better",
+    "rnd MB/s": "higher is better",
+    "lower req": "lower is better",
+    "LZ4 ms": "lower is better for equivalent outcome",
+    "PSI some %": "lower is better for equivalent useful work",
+    "D64 ms": "lower is better for equivalent outcome",
+    "prep LZ4 ms": "lower is better for equivalent outcome",
 }
 
 
@@ -4735,8 +4757,9 @@ def _table_interpretation(headers, rows):
             state = _directional_project_state(project_changes)
             return (f"Directional project view vs raw: {state}. " +
                     "; ".join(summaries) +
-                    ". Lower backing bytes/requests support I/O efficiency and endurance; "
-                    "lower p99 supports latency. These are means; qualification still "
+                    ". Lower READ bytes/requests support swap-in I/O efficiency; they are not a "
+                    "write-endurance claim. Lower p99 supports latency. These are means; "
+                    "qualification still "
                     "depends on matched evidence where available.")
     if "host busy %" in header_index:
         return ("Host activity includes the benchmark, kernel workers and background apps. "
@@ -4842,9 +4865,10 @@ def _table_interpretation(headers, rows):
             state = _directional_project_state(changes)
             return (f"Directional project view vs raw: {state}. " +
                     "; ".join(details) +
-                    ". Reduced backing bytes per useful byte supports endurance and "
-                    "I/O efficiency; higher useful throughput and lower p99 support "
-                    "performance. Mean values only; paired intervals decide qualification.")
+                    ". Reduced lower-WRITE bytes per useful byte supports I/O efficiency and the "
+                    "host-write endurance proxy; it is not physical NAND lifetime proof. "
+                    "Higher useful throughput and lower p99 support performance. Mean values "
+                    "only; paired intervals decide qualification.")
 
     # Internal A/Bs are useful only if their direction serves product goals.
     # Confidence and qualification remain in the paired interval table.
@@ -5065,8 +5089,260 @@ def _table_interpretation(headers, rows):
             "a check result or evidence limit.")
 
 
+def _table_mean_comparison_state(headers, rows, key, baseline, candidate, metrics):
+    """Classify a two-setting means table using only product-facing metrics."""
+    header_index = {str(header): index for index, header in enumerate(headers)}
+    if key not in header_index:
+        return None, []
+    by_setting = {str(row[header_index[key]]): row for row in rows}
+    if baseline not in by_setting or candidate not in by_setting:
+        return None, []
+    changes = []
+    details = []
+    for column, label, lower_is_better in metrics:
+        if column not in header_index:
+            continue
+        before = _table_number(by_setting[baseline][header_index[column]])
+        after = _table_number(by_setting[candidate][header_index[column]])
+        change = _percent_change(after, before)
+        if change is None:
+            continue
+        changes.append((change, lower_is_better))
+        details.append(f"{label} {change * 100:+.1f}%")
+    return (_directional_project_state(changes) if changes else None), details
+
+
+def _table_project_reasoning(title, headers, rows, interpretation):
+    """Connect each table to the project decision chain without overclaiming."""
+    lower_title = title.lower()
+    header_index = {str(header): index for index, header in enumerate(headers)}
+
+    if not rows:
+        return ("Evidence: no rows were reported -> Goal implication: there is no evidence "
+                "for correctness, useful service, lower I/O or resource cost -> "
+                "Verdict: INCOMPLETE.")
+
+    if lower_title.startswith("loaded correctness, lifecycle"):
+        return ("Evidence: this table is emitted only after loaded correctness, GC, reclaim, "
+                "fault-injection and teardown qualification passes -> Goal implication: "
+                "performance evidence is admissible only because byte-exact/fail-closed "
+                "behavior held; segment-open spread is logical allocator fairness -> "
+                "Verdict: CORRECTNESS ALIGNED, while physical-media endurance remains unproven.")
+
+    if lower_title.startswith("qualification scope and evidence limitations"):
+        return ("Evidence: qualification is RAM-backed and the listed scope limits still "
+                "apply -> Goal implication: lower-WRITE bytes/requests are a host-I/O "
+                "endurance proxy and logical segment-open spread is allocator fairness, "
+                "not NAND P/E evidence -> Verdict: CLAIM BOUNDARY; do not promote physical "
+                "wear or real-swap conclusions from this run.")
+
+    if "mixed-i/o qualification criteria" in lower_title:
+        return ("Evidence: the rows separately summarize swapz-vs-raw service, async-vs-sync "
+                "mechanism, lower-WRITE savings and packed READ service -> Goal implication: "
+                "a project win needs correctness plus useful service and lower-device work; "
+                "async-vs-sync alone cannot establish that -> Verdict: GATE SUMMARY; read all "
+                "criteria together rather than collapsing them into one mechanism result.")
+
+    directional = re.search(
+        r"Directional (?:project|performance) view(?: vs raw)?: "
+        r"(ALIGNED|TRADE-OFF|NOT ALIGNED|NEUTRAL)",
+        interpretation)
+    if directional:
+        state = directional.group(1)
+        if all(name in header_index for name in ("read", "lower KiB", "req", "p99")):
+            implication = (
+                "lower READ bytes/requests and acceptable READ latency improve swap-in "
+                "efficiency/performance; READ traffic alone is not the write-endurance proxy")
+        elif all(name in header_index for name in ("mode", "W", "lower W", "W req")):
+            implication = (
+                "useful WRITE/READ service and lower-WRITE work jointly test performance "
+                "and the host-write endurance proxy")
+        elif "merge" in header_index or "fanout" in header_index:
+            implication = (
+                "higher useful READ service with fewer lower READ requests/lower p99 is "
+                "aligned with swap-in performance and I/O efficiency")
+        else:
+            implication = (
+                "higher useful service is favorable, but lower-WRITE bytes/requests must "
+                "be shown separately before claiming the endurance proxy")
+        if state == "ALIGNED":
+            conclusion = "the measured mean directions support the relevant project goals"
+        elif state == "TRADE-OFF":
+            conclusion = "some project metrics improve while others regress, so there is no unqualified win"
+        elif state == "NOT ALIGNED":
+            conclusion = "the measured direction does not satisfy the project goal in this table"
+        else:
+            conclusion = "no directional project change is visible in this table"
+        return (f"Evidence: {state} mean direction -> Goal implication: {implication} -> "
+                f"Verdict: {state}; {conclusion}. Paired evidence still decides repeatability.")
+
+    if all(name in header_index for name in ("metric", "mean", "low", "high")):
+        if "raw-control" in lower_title:
+            stable = []
+            drift = []
+            for row in rows:
+                low = _table_number(row[header_index["low"]])
+                high = _table_number(row[header_index["high"]])
+                if low is None or high is None:
+                    continue
+                name = str(row[header_index["metric"]])
+                (stable if low <= 0 <= high else drift).append(name)
+            if drift:
+                return ("Evidence: raw-control confidence intervals exclude zero for " +
+                        ", ".join(drift) +
+                        " -> Goal implication: background/host drift can confound the feature "
+                        "comparison -> Verdict: CONTROL DRIFT; do not attribute the paired "
+                        "difference solely to swapz.")
+            return ("Evidence: raw-control confidence intervals overlap zero" +
+                    (f" for {', '.join(stable)}" if stable else "") +
+                    " -> Goal implication: no repeatable raw-control drift is established -> "
+                    "Verdict: CONTROL STABLE for the measured metrics.")
+
+        benefits = []
+        regressions = []
+        uncertain = []
+        classified = 0
+        for row in rows:
+            low = _table_number(row[header_index["low"]])
+            high = _table_number(row[header_index["high"]])
+            if low is None or high is None:
+                continue
+            name = str(row[header_index["metric"]])
+            if "read" in header_index:
+                name = f"{row[header_index['read']]} {name}"
+            preference = _ci_metric_preference(name)
+            if preference not in ("higher", "lower"):
+                continue
+            classified += 1
+            if low <= 0 <= high:
+                uncertain.append(name)
+            elif ((preference == "higher" and low > 0) or
+                  (preference == "lower" and high < 0)):
+                benefits.append(name)
+            else:
+                regressions.append(name)
+        if classified:
+            if benefits and regressions:
+                verdict = "TRADE-OFF"
+            elif regressions:
+                verdict = "NOT ALIGNED"
+            elif benefits and uncertain:
+                verdict = "PARTIALLY ALIGNED"
+            elif benefits:
+                verdict = "ALIGNED"
+            else:
+                verdict = "INCONCLUSIVE"
+            evidence = []
+            if benefits:
+                evidence.append("favorable: " + ", ".join(benefits))
+            if regressions:
+                evidence.append("regressing: " + ", ".join(regressions))
+            if uncertain:
+                evidence.append("CI overlaps zero: " + ", ".join(uncertain))
+            return ("Evidence: " + "; ".join(evidence) +
+                    " -> Goal implication: only repeatable favorable changes in useful "
+                    "service, latency or lower I/O support an optimization; zero-overlap "
+                    "metrics remain undecided -> Verdict: " + verdict + ".")
+        return ("Evidence: these confidence intervals cover internal attribution rather "
+                "than a project-facing service/lower-I/O metric -> Goal implication: they "
+                "can explain a mechanism but cannot qualify an optimization -> "
+                "Verdict: DIAGNOSTIC ONLY.")
+
+    comparisons = (
+        ("loaded lz4 acceleration means", "accel", "1", "4",
+         (("swap W", "useful WRITE", False), ("p99", "WRITE p99", True),
+          ("lower KiB", "lower WRITE bytes", True), ("lower req", "lower WRITE requests", True)),
+         "acceleration=4 versus production acceleration=1"),
+        ("delta64 rescue means", "rescue", "0", "1",
+         (("W MB/s", "useful WRITE", False), ("p99", "WRITE p99", True),
+          ("lower req", "lower WRITE requests", True)),
+         "rescue on versus off"),
+        ("delta64 preparation means", "K", "1", "2",
+         (("W MB/s", "useful WRITE", False), ("p99", "WRITE p99", True),
+          ("lower req", "lower WRITE requests", True)),
+         "K=2 versus K=1"),
+        ("independent read fan-out means", "fanout", "0", "1",
+         (("W", "mixed WRITE", False), ("R", "mixed READ", False),
+          ("R p99", "READ p99", True), ("R req", "lower READ requests", True)),
+         "fan-out on versus off"),
+        ("bounded lower-write depth means", "depth", "1", "2",
+         (("W MB/s", "useful WRITE", False), ("p99", "WRITE p99", True),
+          ("lower req", "lower WRITE requests", True)),
+         "depth 2 versus depth 1"),
+    )
+    for marker, key, baseline, candidate, metrics, label in comparisons:
+        if marker not in lower_title:
+            continue
+        state, details = _table_mean_comparison_state(
+            headers, rows, key, baseline, candidate, metrics)
+        if state is None:
+            break
+        return (f"Evidence: {label}: " + ", ".join(details) +
+                f" -> Goal implication: useful service should rise while latency and lower "
+                f"I/O stay flat or improve; lower WRITE work is the host-write endurance "
+                f"proxy when present -> Verdict: {state} on means; the paired confidence "
+                f"interval table decides promotion.")
+
+    if "host cpu and load context" in lower_title:
+        return ("Evidence: host CPU/PSI includes swapz, replay and unrelated background work "
+                "-> Goal implication: CPU pressure must remain acceptable, but this table "
+                "cannot attribute cost to swapz or prove an I/O win -> Verdict: RESOURCE "
+                "CONTEXT ONLY; use product-facing service/lower-I/O tables for the decision.")
+
+    if ("native" in lower_title or "simulated" in lower_title or
+            "trace workload" in lower_title):
+        return ("Evidence: this is native/offline/model evidence rather than loaded swapz "
+                "service -> Goal implication: it can identify compression, packing, CPU or "
+                "allocator opportunity, but cannot prove useful READ/WRITE performance or "
+                "lower-device traffic -> Verdict: SUPPORTING ONLY; require loaded "
+                "byte-exact evidence before changing production policy.")
+
+    if "synthetic lower-device model limits" in lower_title:
+        return ("Evidence: the table describes the synthetic device ceiling and raw control "
+                "throughput -> Goal implication: it explains whether latency or bandwidth "
+                "limits the experiment, not whether swapz is better -> Verdict: MODEL "
+                "CONTEXT ONLY.")
+
+    diagnostic_markers = (
+        "general attempt counters", "packing-path activity",
+        "classifier score distribution", "payload savings and rescue wall time",
+        "engine wall-time attribution", "metadata-cache locality",
+        "lower-queue and k=1 run-slot occupancy", "retained-window size",
+        "pack_ready close causes", "burst-close site", "post-pack tail",
+        "burst-target shrink", "async pipeline wall-time attribution",
+        "asynchronous-preparation scheduling signals",
+        "asynchronous-preparation activity", "retained-window geometry",
+        "merged-range read accounting", "reasons eligible adjacent reads",
+        "merged-range read attribution",
+    )
+    if any(marker in lower_title for marker in diagnostic_markers):
+        return ("Evidence: this table describes an internal mechanism or bottleneck -> "
+                "Goal implication: it can explain why a product-facing result moved, but "
+                "without its own raw/off useful-service and lower-I/O comparison it cannot "
+                "establish a performance or endurance-proxy win -> Verdict: DIAGNOSTIC ONLY.")
+
+    if "check" in header_index and "result" in header_index:
+        return ("Evidence: the table reports explicit check outcomes -> Goal implication: "
+                "failed or blocked correctness/safety checks invalidate performance claims; "
+                "passing component checks make later performance evidence admissible -> "
+                "Verdict: CHECK SUMMARY; use the named outcomes rather than inferring a "
+                "different optimization result.")
+
+    if any(name in TABLE_HEADER_GOAL for name in headers):
+        return ("Evidence: the Legend states the preferred direction for the measured "
+                "metrics -> Goal implication: a favorable component matters only when "
+                "correctness holds and no material opposing service/lower-I/O metric "
+                "regresses -> Verdict: COMPONENT EVIDENCE; combine it with the nearest "
+                "product-facing table before changing swapz.")
+
+    return ("Evidence: this table is descriptive/status evidence -> Goal implication: it "
+            "does not directly compare useful service and lower-device work against the "
+            "appropriate control -> Verdict: CONTEXT ONLY; no optimization claim follows "
+            "from this table alone.")
+
+
 def print_table(title, headers, rows):
-    """Print a titled GFM table, legend, interpretation, then a horizontal rule."""
+    """Print a GFM table plus evidence, goal implication, and decision chain."""
     text_headers = [str(header) for header in headers]
     text_rows = [[str(value) for value in row] for row in rows]
     # GFM requires at least three dashes after an alignment colon. Keep
@@ -5093,12 +5369,27 @@ def print_table(title, headers, rows):
         (f" [{TABLE_HEADER_GOAL[header]}]" if header in TABLE_HEADER_GOAL else "")
         for header in text_headers)
     _print_table_note("Legend", legend)
-    _print_table_note("Interpretation",
-                      _table_interpretation(text_headers, text_rows))
+    interpretation = _table_interpretation(text_headers, text_rows)
+    _print_table_note("Interpretation", interpretation)
+    _print_table_note(
+        "Project reasoning",
+        _table_project_reasoning(title, text_headers, text_rows, interpretation))
     print("---")
 
 
 def print_bench(result):
+    print("\n  Project decision rule")
+    _print_table_note(
+        "Goal chain",
+        "Correctness/fail-closed behavior must hold -> compare the same useful workload "
+        "against the proper control -> prefer higher useful READ/WRITE and acceptable "
+        "latency with fewer lower-device bytes/requests -> accept only with bounded "
+        "CPU, RAM and GC cost.")
+    _print_table_note(
+        "Endurance scope",
+        "Lower WRITE bytes/requests are the host-I/O endurance proxy. Circular segment "
+        "opening should avoid pathological logical allocator concentration, but logical "
+        "open spread is not NAND P/E or physical wear-leveling evidence.")
     predictor = result.get("evidence", {}).get("predictor")
     if isinstance(predictor, dict):
         print("\n  Predictive-compression screening — native corpus; not loaded attribution")

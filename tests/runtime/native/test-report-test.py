@@ -1700,6 +1700,42 @@ class ReportContract(unittest.TestCase):
         self.assertIn("cannot turn a swapz result that still trails raw into a product win",
                       sustained)
 
+        aligned_reasoning = runner._table_project_reasoning(
+            "Fast QD32 mixed I/O throughput and latency",
+            headers,
+            [("off", "10", "10", "100", "5", "2"),
+             ("sync", "11", "7", "80", "5.2", "1.9"),
+             ("async", "12", "7", "70", "5.5", "1.8")],
+            aligned)
+        self.assertIn("Verdict: ALIGNED", aligned_reasoning)
+        self.assertIn("host-write endurance proxy", aligned_reasoning)
+
+        native_reasoning = runner._table_project_reasoning(
+            "Ordinary LZ4 acceleration CPU and planner geometry — native corpus",
+            ("accel", "ns/page"), [("1", "2400"), ("4", "2100")],
+            "Acceleration 4 is faster natively.")
+        self.assertIn("Verdict: SUPPORTING ONLY", native_reasoning)
+
+        diagnostic_reasoning = runner._table_project_reasoning(
+            "Fast mixed-I/O async pipeline wall-time attribution",
+            ("stage", "busy ms"), [("LZ4", "5.0")],
+            "LZ4=5 ms.")
+        self.assertIn("Verdict: DIAGNOSTIC ONLY", diagnostic_reasoning)
+
+        ci_reasoning = runner._table_project_reasoning(
+            "Candidate paired 95% confidence intervals",
+            ("metric", "mean", "low", "high"),
+            [("W %", "+5", "+1", "+9"),
+             ("lower req %", "-4", "-8", "-1")],
+            "Project evidence from 95% intervals.")
+        self.assertIn("Verdict: ALIGNED", ci_reasoning)
+
+        limits_reasoning = runner._table_project_reasoning(
+            "Qualification scope and evidence limitations",
+            ("scope", "value"), [("media", "synthetic RAM only")],
+            "Synthetic RAM only.")
+        self.assertIn("Verdict: CLAIM BOUNDARY", limits_reasoning)
+
     def test_benchmark_console_is_compact_and_keeps_sync_control(self):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
@@ -1889,6 +1925,10 @@ class ReportContract(unittest.TestCase):
         self.assertGreater(len(table_starts), 10)
         self.assertEqual(rendered.count("  Legend:"), len(table_starts))
         self.assertEqual(rendered.count("  Interpretation:"), len(table_starts))
+        self.assertEqual(rendered.count("  Project reasoning:"), len(table_starts))
+        self.assertIn("  Goal chain:", rendered)
+        self.assertIn("  Endurance scope:", rendered)
+        self.assertIn("host-I/O endurance proxy", rendered)
         self.assertEqual(
             sum(line.startswith("**") and line.endswith("**") for line in lines),
             len(table_starts))
@@ -1926,6 +1966,17 @@ class ReportContract(unittest.TestCase):
             index += 1
             while index < len(lines) and lines[index].startswith("    "):
                 index += 1
+            self.assertLess(index, len(lines))
+            self.assertTrue(lines[index].startswith("  Project reasoning:"))
+            reasoning_lines = [lines[index]]
+            index += 1
+            while index < len(lines) and lines[index].startswith("    "):
+                reasoning_lines.append(lines[index])
+                index += 1
+            reasoning_text = " ".join(line.strip() for line in reasoning_lines)
+            self.assertIn("Evidence:", reasoning_text)
+            self.assertIn("Goal implication:", reasoning_text)
+            self.assertIn("Verdict:", reasoning_text)
             self.assertLess(index, len(lines))
             self.assertEqual(lines[index], "---")
         self.assertNotRegex(rendered, r"(?m)^  \|")

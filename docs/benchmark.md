@@ -14,13 +14,25 @@ Console interpretations must answer the product question before discussing an
 internal mechanism. For loaded results, compare swapz with the raw/off control
 on useful throughput, latency and lower-device work. Call out a directional
 project win only when the observed direction serves the product vision: more
-useful I/O and/or lower latency, or less lower-device traffic that supports
-endurance, without an opposing material performance direction. If benefits and
-regressions coexist, label the result a trade-off rather than a win. Internal
+useful I/O and/or lower latency, or less lower-device traffic. Lower WRITE
+bytes/requests are the host-I/O endurance proxy; lower READ traffic primarily
+supports swap-in efficiency. Neither is direct NAND lifetime evidence. If
+benefits and regressions coexist, label the result a trade-off rather than a
+win. Internal
 sync/async or feature off/on comparisons explain mechanism; they do not turn a
 result that still trails raw into a product-level performance win. Mean-value
 interpretations are directional only; matched confidence intervals remain the
 qualification evidence.
+
+Every stdout table must finish with three compact explanatory layers: a column
+legend, an interpretation of the observed values, and a **Project reasoning**
+chain in the explicit form **Evidence -> Goal implication -> Verdict**. The last
+line must say whether the table is aligned, a trade-off, not aligned,
+inconclusive, supporting-only, diagnostic-only, model context, or a claim
+boundary. Mechanism/native/model tables must state that they cannot independently
+qualify a production optimization. Logical segment-open spread is allocator
+fairness evidence only; it must never be presented as NAND P/E or physical wear
+leveling.
 
 ## CPU and host-load context
 
