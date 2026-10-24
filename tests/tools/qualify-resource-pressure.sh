@@ -160,20 +160,13 @@ oom_before="$(event_value oom)"
 oom_kill_before="$(event_value oom_kill)"
 cpu_some_before="$(cpu_some_total)"
 
-# Start the owned pair in the constrained cgroup first, but stop it at a
-# private barrier after both null_blk devices have been fully faulted. Target
-# construction still happens only after pressure becomes active.
-bash -c '
-    set -e
-    cgroup=$1
-    pair_ready=$2
-    pair_go=$3
-    shift 3
-    echo $$ > "$cgroup/cgroup.procs"
-    export SWAPZ_ID36_PAIR_READY="$pair_ready"
-    export SWAPZ_ID36_PAIR_GO="$pair_go"
-    exec "$@"
-' _ "$CGROUP" "$PAIR_READY" "$PAIR_GO" \
+# Fault both memory-backed lowers before the pair enters ID36. The pair moves
+# itself into the cgroup after prewarm and waits at the private barrier, so the
+# lower backing pages do not consume the cgroup's pressure budget while module
+# load, target construction, replay and teardown still run under ID36.
+SWAPZ_ID36_PAIR_READY="$PAIR_READY" \
+SWAPZ_ID36_PAIR_GO="$PAIR_GO" \
+SWAPZ_ID36_CGROUP="$CGROUP" \
     timeout --signal=TERM --kill-after=10s 300s \
     bash "$PAIR" --validated-source "$VALIDATED_SOURCE" \
     --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced \
@@ -195,6 +188,17 @@ done
     printf '%s\n' 'FAIL: ID36 owned-RAM pair did not reach null_blk prewarm barrier' >&2
     exit 1
 }
+pair_cgroup_pid="$(awk -F= '$1 == "pid" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PAIR_READY")"
+[[ $pair_cgroup_pid =~ ^[1-9][0-9]*$ ]] || {
+    cat "$PAIR_LOG" >&2
+    printf '%s\n' 'FAIL: ID36 pair readiness did not report migrated PID' >&2
+    exit 1
+}
+grep -Fxq "$pair_cgroup_pid" "$CGROUP/cgroup.procs" || {
+    cat "$PAIR_LOG" >&2
+    printf '%s\n' 'FAIL: ID36 pair did not enter pressure cgroup after prewarm' >&2
+    exit 1
+}
 
 bash -c '
     set -e
@@ -207,7 +211,7 @@ bash -c '
     --ready-file "$READY" --stop-file "$STOP" >"$PRESSURE_LOG" 2>&1 &
 PRESSURE_PID=$!
 
-for _ in {1..400}; do
+for _ in {1..800}; do
     [[ -s $READY ]] && break
     kill -0 "$PRESSURE_PID" 2>/dev/null || {
         cat "$PRESSURE_LOG" >&2

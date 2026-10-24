@@ -32,6 +32,7 @@ PACKED_READ=1
 RESOURCE_PRESSURE_SHORT=0
 ID36_PAIR_READY="${SWAPZ_ID36_PAIR_READY:-}"
 ID36_PAIR_GO="${SWAPZ_ID36_PAIR_GO:-}"
+ID36_CGROUP="${SWAPZ_ID36_CGROUP:-}"
 LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
@@ -422,12 +423,24 @@ if (( RESOURCE_PRESSURE_SHORT )); then
        $ID36_PAIR_GO == "$id36_pair_dir/pair.go" &&
        -d $id36_pair_dir && ! -L $id36_pair_dir ]] ||
         fail 'ID36 start barrier is not an owned private directory'
+    [[ -n $ID36_CGROUP &&
+       $ID36_CGROUP == /sys/fs/cgroup/swapz-id36-* &&
+       -d $ID36_CGROUP && ! -L $ID36_CGROUP &&
+       -w $ID36_CGROUP/cgroup.procs ]] ||
+        fail 'ID36 cgroup handoff is not an owned writable cgroup'
     for lower in "${LOWERS[@]}"; do
         dd if=/dev/zero of="$lower" bs=1M count=64 oflag=direct status=none ||
             fail 'ID36 null_blk backing prewarm failed'
     done
     note 'PASS_ID36_NULLBLK_PREWARM=devices:2 bytes:134217728'
-    printf '%s\n' ready > "$ID36_PAIR_READY"
+    # Allocate/fault the lower backing before entering the constrained cgroup.
+    # All later target construction, replay and teardown inherit this cgroup.
+    printf '%s\n' "$$" > "$ID36_CGROUP/cgroup.procs" ||
+        fail 'ID36 pair could not enter pressure cgroup'
+    grep -Fxq "$$" "$ID36_CGROUP/cgroup.procs" ||
+        fail 'ID36 pair cgroup migration was not observable'
+    note "PASS_ID36_PAIR_CGROUP=pid:$$"
+    printf 'pid=%s\n' "$$" > "$ID36_PAIR_READY"
     for _ in {1..600}; do
         [[ -e $ID36_PAIR_GO ]] && break
         sleep 0.05
