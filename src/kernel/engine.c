@@ -84,9 +84,9 @@ int swapz_page_is_zero(const swapz_u8 *page)
 
 /* How many *ordered* records fit the size class, without duplicate slots. */
 static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
-			   swapz_u8 count, swapz_u8 start, swapz_u8 blocks,
-			   swapz_u8 max_read_blocks, int logical_pages_unique,
-			   swapz_u32 *read_blocks)
+				swapz_u8 count, swapz_u8 start, swapz_u8 blocks,
+				swapz_u8 max_read_blocks, int logical_pages_unique,
+				swapz_u32 *read_blocks)
 {
 	swapz_u32 payload_start = (swapz_u32)blocks << SWAPZ_BLOCK_SHIFT;
 	swapz_u8 included = 0;
@@ -115,11 +115,6 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 		first = offset >> SWAPZ_BLOCK_SHIFT;
 		last = (payload_start - 1U) >> SWAPZ_BLOCK_SHIFT;
 		record_reads = last - first + 1U + (first ? 1U : 0U);
-		/*
-		 * Full logical record must fit both geometry and read budget.
-		 * Because we preserve arrival order, we cannot skip this record
-		 * and pick a later one without making an explicit new extent.
-		 */
 		if (max_read_blocks && record_reads > max_read_blocks)
 			break;
 		*read_blocks += record_reads;
@@ -170,9 +165,9 @@ static int swapz_engine_plan_bounded_policy(
 			swapz_u8 blocks = (swapz_u8)(1U << class_index);
 			swapz_u32 local_read_blocks = 0;
 			swapz_u8 take = swapz_fit_count(pages, count, index, blocks,
-						   max_read_blocks,
-						   logical_pages_unique,
-						   &local_read_blocks);
+							max_read_blocks,
+							logical_pages_unique,
+							&local_read_blocks);
 			swapz_u32 candidate_bytes, candidate_reads;
 			swapz_u8 candidate_batches;
 
@@ -322,9 +317,29 @@ swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length)
 	return (swapz_u16)best;
 }
 
+static unsigned long long swapz_segment_range_mask(swapz_u32 start_block,
+						   swapz_u16 blocks)
+{
+	swapz_u32 first_block = start_block >= SWAPZ_MAX_BLOCKS - 1U ?
+		start_block - (SWAPZ_MAX_BLOCKS - 1U) : 0U;
+	swapz_u32 end_block = start_block > ~(swapz_u32)0 - (blocks - 1U) ?
+		~(swapz_u32)0 : start_block + (blocks - 1U);
+	swapz_u32 first_seg = first_block / SWAPZ_SEGMENT_BLOCKS;
+	swapz_u32 last_seg = end_block / SWAPZ_SEGMENT_BLOCKS;
+	unsigned long long mask = 0;
+	swapz_u32 seg;
+
+	if (last_seg - first_seg >= 64U)
+		return ~0ULL;
+	for (seg = first_seg; seg <= last_seg; ++seg)
+		mask |= 1ULL << (seg & 63U);
+	return mask;
+}
+
 static void swapz_read_metadata_advance_epoch(struct swapz_engine *engine)
 {
 	engine->read_metadata_epoch++;
+	engine->read_metadata_segment_mask = 0;
 	if (!engine->read_metadata_epoch) {
 		memset(engine->read_metadata_tags, 0,
 		       sizeof(engine->read_metadata_tags));
@@ -485,6 +500,8 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 	engine->read_metadata_tags[slot].extent_blocks = extent_blocks;
 	engine->read_metadata_tags[slot].age = engine->read_metadata_lru_clock;
 	engine->read_metadata_tags[slot].epoch = engine->read_metadata_epoch;
+	engine->read_metadata_segment_mask |=
+		1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U);
 }
 
 static int swapz_read_extent_lru_lookup(const struct swapz_engine *engine,
@@ -560,6 +577,8 @@ static void swapz_read_extent_lru_commit(struct swapz_engine *engine,
 	engine->read_extent_lru_block_masks[slot] |= block_mask;
 	engine->read_extent_lru_ages[slot] = engine->read_extent_lru_clock;
 	engine->read_extent_lru_valid[slot] = 1;
+	engine->read_extent_segment_mask |=
+		1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U);
 }
 
 void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
@@ -570,6 +589,7 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 		engine->read_cached_block_mask = 0;
 		engine->read_coalesced_block_mask = 0;
 		engine->read_validated_payload_crc32c = 0;
+		engine->read_extent_segment_mask = 0;
 		/*
 		 * clock==0 is the canonical empty metadata-cache state. A mutation
 		 * advances one epoch instead of clearing 512 validity bytes, so stale
@@ -604,6 +624,7 @@ void swapz_engine_invalidate_read_range(struct swapz_engine *engine,
 					swapz_u16 blocks)
 {
 	swapz_u16 index;
+	unsigned long long range_mask;
 
 	if (!engine)
 		return;
@@ -621,29 +642,49 @@ void swapz_engine_invalidate_read_range(struct swapz_engine *engine,
 		engine->read_cached_block_mask = 0;
 		engine->read_coalesced_block_mask = 0;
 	}
-	if (engine->read_extent_lru_clock) {
+	range_mask = swapz_segment_range_mask(start_block, blocks);
+	if (engine->read_extent_lru_clock &&
+	    (engine->read_extent_segment_mask & range_mask)) {
+		unsigned long long new_mask = 0;
+
 		for (index = 0; index < SWAPZ_READ_EXTENT_CACHE_ENTRIES; ++index) {
-			if (engine->read_extent_lru_valid[index] &&
-			    swapz_ranges_overlap(
-				    engine->read_extent_lru_start_blocks[index],
-				    engine->read_extent_lru_extent_blocks[index],
-				    start_block, blocks)) {
-				engine->read_extent_lru_valid[index] = 0;
-				engine->read_extent_lru_block_masks[index] = 0;
+			if (engine->read_extent_lru_valid[index]) {
+				if (swapz_ranges_overlap(
+					    engine->read_extent_lru_start_blocks[index],
+					    engine->read_extent_lru_extent_blocks[index],
+					    start_block, blocks)) {
+					engine->read_extent_lru_valid[index] = 0;
+					engine->read_extent_lru_block_masks[index] = 0;
+				} else {
+					new_mask |= 1ULL <<
+						((engine->read_extent_lru_start_blocks[index] /
+						  SWAPZ_SEGMENT_BLOCKS) & 63U);
+				}
 			}
 		}
+		engine->read_extent_segment_mask = new_mask;
 	}
-	if (engine->read_metadata_lru_clock && engine->read_metadata_epoch) {
+	if (engine->read_metadata_lru_clock && engine->read_metadata_epoch &&
+	    (engine->read_metadata_segment_mask & range_mask)) {
+		unsigned long long new_mask = 0;
+
 		for (index = 0; index < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++index) {
 			struct swapz_read_metadata_tag *tag =
 				&engine->read_metadata_tags[index];
 
-			if (tag->epoch == engine->read_metadata_epoch &&
-			    swapz_ranges_overlap(tag->start_block,
-						 tag->extent_blocks,
-						 start_block, blocks))
-				tag->epoch = 0;
+			if (tag->epoch == engine->read_metadata_epoch) {
+				if (swapz_ranges_overlap(tag->start_block,
+							 tag->extent_blocks,
+							 start_block, blocks)) {
+					tag->epoch = 0;
+				} else {
+					new_mask |= 1ULL <<
+						((tag->start_block /
+						  SWAPZ_SEGMENT_BLOCKS) & 63U);
+				}
+			}
 		}
+		engine->read_metadata_segment_mask = new_mask;
 	}
 }
 

@@ -23,7 +23,7 @@ int swapz_page_is_zero(const swapz_u8 *page);
 struct swapz_io {
 	void *opaque;
 	int (*write_extent)(void *opaque, swapz_u32 start_block, swapz_u8 blocks,
-			    const swapz_u8 *bytes, swapz_u8 *completed_blocks);
+			     const swapz_u8 *bytes, swapz_u8 *completed_blocks);
 	/* Optional single synchronous lower write for a 1..64-block
 	 * concatenation of individually valid SWZ extents and raw blocks.
 	 * The authority publishes NONE before this callback has returned
@@ -31,7 +31,7 @@ struct swapz_io {
 	int (*write_run)(void *opaque, swapz_u32 start_block, swapz_u16 blocks,
 			 const swapz_u8 *bytes, swapz_u16 *completed_blocks);
 	int (*read_blocks)(void *opaque, swapz_u32 start_block, swapz_u8 blocks,
-			   swapz_u8 *destination);
+			    swapz_u8 *destination);
 };
 
 struct swapz_read_metadata_tag {
@@ -174,6 +174,7 @@ struct swapz_engine {
 	swapz_u32 read_metadata_epoch;
 	swapz_u32 read_metadata_lru_clock;
 	swapz_u32 read_metadata_lru_hits;
+	unsigned long long read_metadata_segment_mask;
 	unsigned long long read_metadata_set_lookups;
 	unsigned long long read_metadata_set_hits;
 	unsigned long long read_metadata_primary_hits;
@@ -193,6 +194,7 @@ struct swapz_engine {
 	swapz_u8 read_extent_lru_block_masks[SWAPZ_READ_EXTENT_CACHE_ENTRIES];
 	swapz_u8 read_extent_lru_valid[SWAPZ_READ_EXTENT_CACHE_ENTRIES];
 	swapz_u32 read_extent_lru_clock;
+	unsigned long long read_extent_segment_mask;
 	/* Lower callbacks, not block-queue requests; byte deltas are independent. */
 	swapz_u32 read_full_extent_requests;
 	swapz_u32 read_full_extent_cache_hits;
@@ -203,9 +205,9 @@ struct swapz_engine {
 
 /* CPU-only finite-window selection, 4/8/16KiB; output classes 1/2/4. */
 int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
-			    swapz_u8 count, swapz_u8 max_read_blocks,
-			    swapz_u8 *classes, swapz_u8 *records_per_extent,
-			    swapz_u8 *extent_count);
+			     swapz_u8 count, swapz_u8 max_read_blocks,
+			     swapz_u8 *classes, swapz_u8 *records_per_extent,
+			     swapz_u8 *extent_count);
 /* Largest lower uniform-payload threshold that can add one more record to a
  * 4/8/16KiB SWZ extent. Zero means no useful lower cliff within 64 records. */
 swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length);
@@ -227,11 +229,11 @@ swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length);
  * completion result. A failed/uncertain run quarantines every reservation.
  */
 int swapz_engine_prepare_batched_run(
-				   struct swapz_engine *engine,
-				   const struct swapz_compressed_page *pages,
-				   swapz_u8 count, struct swapz_io_run *run,
-				   swapz_u8 *prepared_pages,
-				   swapz_u8 plan_read_blocks);
+				    struct swapz_engine *engine,
+				    const struct swapz_compressed_page *pages,
+				    swapz_u8 count, struct swapz_io_run *run,
+				    swapz_u8 *prepared_pages,
+				    swapz_u8 plan_read_blocks);
 int swapz_engine_complete_batched_run(
 				    struct swapz_engine *engine,
 				    const struct swapz_io_run *run,
@@ -245,24 +247,24 @@ int swapz_engine_abort_batched_run_tail(struct swapz_engine *engine,
 				      const struct swapz_io_run *run);
 
 int swapz_engine_write_window_batched_read_cap(
-				   struct swapz_engine *engine,
-				   const struct swapz_compressed_page *pages,
-				   swapz_u8 count, swapz_u8 *committed_pages,
-				   swapz_u8 plan_read_blocks);
+				    struct swapz_engine *engine,
+				    const struct swapz_compressed_page *pages,
+				    swapz_u8 count, swapz_u8 *committed_pages,
+				    swapz_u8 plan_read_blocks);
 int swapz_engine_write_window_batched(struct swapz_engine *engine,
-				   const struct swapz_compressed_page *pages,
-				   swapz_u8 count, swapz_u8 *committed_pages);
+				    const struct swapz_compressed_page *pages,
+				    swapz_u8 count, swapz_u8 *committed_pages);
 /* Caller-owned and serialized: invalidate before writes, discards and barriers.
  * Never invalidate from a concurrent preparation producer. */
 void swapz_engine_invalidate_read_cache(struct swapz_engine *engine);
 void swapz_engine_invalidate_read_range(struct swapz_engine *engine,
-					swapz_u32 start_block,
-					swapz_u16 blocks);
+				     swapz_u32 start_block,
+				     swapz_u16 blocks);
 /* Serialized owner transfers diagnostic read counters from a private read
  * engine after its bounded concurrent operation has joined. Cache residency
  * and authority pointers are intentionally not transferred. */
 void swapz_engine_merge_read_telemetry(struct swapz_engine *destination,
-				       struct swapz_engine *source);
+					struct swapz_engine *source);
 /* Ordered-owner cache synchronization for private read engines. Neither helper
  * performs lower I/O or changes mapping authority. */
 void swapz_engine_prime_read_slot(const struct swapz_engine *master,
@@ -284,55 +286,55 @@ void swapz_engine_absorb_read_slot(struct swapz_engine *master,
  * before shared cache publication.
  */
 int swapz_engine_required_read_range(
-				   const struct swapz_engine *engine,
-				   const swapz_u32 *logical_pages,
-				   swapz_u8 count,
-				   swapz_u32 start_block,
-				   swapz_u8 extent_blocks,
-				   swapz_u8 *first_block,
-				   swapz_u8 *blocks);
+				    const struct swapz_engine *engine,
+				    const swapz_u32 *logical_pages,
+				    swapz_u8 count,
+				    swapz_u32 start_block,
+				    swapz_u8 extent_blocks,
+				    swapz_u8 *first_block,
+				    swapz_u8 *blocks);
 int swapz_engine_required_read_range_cached(
-				   const struct swapz_engine *engine,
-				   const swapz_u32 *logical_pages,
-				   swapz_u8 count,
-				   swapz_u32 start_block,
-				   swapz_u8 extent_blocks,
-				   swapz_u8 *first_block,
-				   swapz_u8 *blocks);
+				    const struct swapz_engine *engine,
+				    const swapz_u32 *logical_pages,
+				    swapz_u8 count,
+				    swapz_u32 start_block,
+				    swapz_u8 extent_blocks,
+				    swapz_u8 *first_block,
+				    swapz_u8 *blocks);
 int swapz_engine_coalesced_span(
-				   swapz_u32 start0, swapz_u8 extent0,
-				   swapz_u8 first0, swapz_u8 blocks0,
-				   swapz_u32 start1, swapz_u8 extent1,
-				   swapz_u8 first1, swapz_u8 blocks1,
-				   swapz_u32 *combined_start,
-				   swapz_u8 *combined_blocks);
+				    swapz_u32 start0, swapz_u8 extent0,
+				    swapz_u8 first0, swapz_u8 blocks0,
+				    swapz_u32 start1, swapz_u8 extent1,
+				    swapz_u8 first1, swapz_u8 blocks1,
+				    swapz_u32 *combined_start,
+				    swapz_u8 *combined_blocks);
 int swapz_engine_seed_read_range(struct swapz_engine *engine,
-				 swapz_u32 start_block,
-				 swapz_u8 extent_blocks,
-				 swapz_u8 first_block,
-				 swapz_u8 blocks);
+				  swapz_u32 start_block,
+				  swapz_u8 extent_blocks,
+				  swapz_u8 first_block,
+				  swapz_u8 blocks);
 
 int swapz_engine_coalesce_read_chain(
-				   struct swapz_engine *const *engines,
-				   const swapz_u32 *start_blocks,
-				   const swapz_u8 *extent_blocks,
-				   const swapz_u8 *first_blocks,
-				   const swapz_u8 *blocks,
-				   swapz_u8 count,
-				   swapz_u8 *scratch,
-				   swapz_u8 scratch_blocks);
+				    struct swapz_engine *const *engines,
+				    const swapz_u32 *start_blocks,
+				    const swapz_u8 *extent_blocks,
+				    const swapz_u8 *first_blocks,
+				    const swapz_u8 *blocks,
+				    swapz_u8 count,
+				    swapz_u8 *scratch,
+				    swapz_u8 scratch_blocks);
 int swapz_engine_coalesce_read_pair(
-				   struct swapz_engine *first,
-				   struct swapz_engine *second,
-				   swapz_u32 start0, swapz_u8 extent0,
-				   swapz_u8 first0, swapz_u8 blocks0,
-				   swapz_u32 start1, swapz_u8 extent1,
-				   swapz_u8 first1, swapz_u8 blocks1,
-				   swapz_u8 *scratch,
-				   swapz_u8 scratch_blocks);
+				    struct swapz_engine *first,
+				    struct swapz_engine *second,
+				    swapz_u32 start0, swapz_u8 extent0,
+				    swapz_u8 first0, swapz_u8 blocks0,
+				    swapz_u32 start1, swapz_u8 extent1,
+				    swapz_u8 first1, swapz_u8 blocks1,
+				    swapz_u8 *scratch,
+				    swapz_u8 scratch_blocks);
 /* Targeted read: metadata 4KiB plus only the required payload 4KiB blocks. */
 int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
-			 swapz_u8 *payload, swapz_u16 payload_capacity,
-			 swapz_u16 *payload_length);
+			  swapz_u8 *payload, swapz_u16 payload_capacity,
+			  swapz_u16 *payload_length);
 
 #endif

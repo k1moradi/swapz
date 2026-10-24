@@ -10,6 +10,11 @@
 #include <errno.h>
 #include <stddef.h>
 #include <string.h>
+#if defined(__x86_64__) && defined(__SSE4_2__)
+#include <nmmintrin.h>
+#elif defined(__aarch64__) && defined(__ARM_FEATURE_CRC32)
+#include <arm_acle.h>
+#endif
 #endif
 
 /*
@@ -46,6 +51,38 @@ static swapz_u32 swapz_crc32c_state(swapz_u32 state, const void *data,
 {
 #ifdef __KERNEL__
 	return crc32c(state, data, length);
+#elif defined(__aarch64__) && defined(__ARM_FEATURE_CRC32)
+	const swapz_u8 *ptr = data;
+
+	while (length >= 8U) {
+		unsigned long long val;
+		memcpy(&val, ptr, sizeof(val));
+		state = __crc32cd(state, val);
+		ptr += 8U;
+		length -= 8U;
+	}
+	while (length > 0U) {
+		state = __crc32cb(state, *ptr);
+		ptr++;
+		length--;
+	}
+	return state;
+#elif defined(__x86_64__) && defined(__SSE4_2__)
+	const swapz_u8 *ptr = data;
+
+	while (length >= 8U) {
+		unsigned long long val;
+		memcpy(&val, ptr, sizeof(val));
+		state = (swapz_u32)_mm_crc32_u64(state, val);
+		ptr += 8U;
+		length -= 8U;
+	}
+	while (length > 0U) {
+		state = _mm_crc32_u8(state, *ptr);
+		ptr++;
+		length--;
+	}
+	return state;
 #else
 	/*
 	 * 16-entry (64-byte = single cache line) Castagnoli CRC32C nibble

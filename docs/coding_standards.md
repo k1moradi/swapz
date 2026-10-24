@@ -114,15 +114,16 @@ belong in the ROADMAP decision table and Git history.
   64-BIO quantum. Refresh accepted queue state after synchronous copy/LZ4 work
   before deciding the current pack is isolated.
 - **Retention deadline:** learned/admitted targets may shape aggregation, but
-  the ordinary absolute deadline remains authoritative. The retention duration
-  dynamically scales with observed backing device latency:
-  $\text{effective\_retain\_ns} = \min(\text{retain\_ms} \times 1\text{ms},\; \max(30{,}000\text{ ns},\; 4 \times \text{observed\_lower\_latency\_ns}))$.
-  When the incoming queue is drained, lower media has no in-flight I/O, and at least
-  one useful multi-page pack is already staged ($\ge 2$ records), the worker flushes
-  immediately rather than idling the backing device. A sampled one-record
-  tail uses that same deadline; there is no short singleton timer, watermark or
-  completion-aware carry into the next closed-loop wave. Hard ordering
-  boundaries reset retained scheduling evidence.
+  the ordinary absolute deadline remains authoritative ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$).
+  Timing diagnostics must never become scheduling or timeout policy without a
+  separately qualified experiment. A deferred sampled singleton uses that same
+  deadline; there is no short singleton timer, watermark or dynamic device scaling.
+  Hard ordering boundaries reset retained scheduling evidence.
+- **In-flight write reaping:** completed detached $K=1$ lower writes are reaped
+  opportunistically inside the worker loop so upper BIOs receive `bio_endio()`
+  immediately without waiting for the full 64-BIO quantum or retention expiration.
+  Tail sampling is gated on `swapz_has_inflight(ctx)` so unfinalized completions
+  never produce false empty-tail measurements.
 - **Planner:** minimize lower bytes first, bounded cold-read cost second and
   extent count third. Only the adjacent lower-run writer may use the physical
   cursor/larger-class tie-break after those objectives are exactly tied.

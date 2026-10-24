@@ -93,14 +93,14 @@ static inline int swapz_window_single_pack_ready(
 {
 	if (count == 2U)
 		return swapz_window_extent_fits(pending, count, retain_ms,
-					     read_budget, 1U);
+						 read_budget, 1U);
 	if (count == 3U) {
 		/* A two-record 4KiB first pack was already counted at count=2. */
 		if (swapz_window_extent_fits(pending, 2U, retain_ms,
-					   read_budget, 1U))
+						 read_budget, 1U))
 			return 0;
 		return swapz_window_extent_fits(pending, count, retain_ms,
-					     read_budget, 2U);
+						 read_budget, 2U);
 	}
 	return 0;
 }
@@ -111,10 +111,10 @@ static inline int swapz_window_pack_ready(
 {
 	if (count == 4U)
 		return swapz_window_extent_fits(pending, count, retain_ms,
-					     read_budget, 2U);
+						 read_budget, 2U);
 	if (count == 6U)
 		return swapz_window_extent_fits(pending, count, retain_ms,
-					     read_budget, 4U);
+						 read_budget, 4U);
 	return 0;
 }
 
@@ -234,28 +234,18 @@ static inline int swapz_window_timer_enabled(swapz_u8 retain_ms)
 }
 
 /*
- * The first accepted record pins one ordinary absolute retention deadline,
- * dynamically scaled by measured backing device latency when available.
+ * The first accepted record pins one ordinary absolute retention deadline.
  * Deferred sampled singletons use this same deadline; no shorter active
  * singleton deadline is permitted after the rejected ID53 experiment.
  */
 static inline unsigned long long swapz_window_retention_deadline_ns(
-		unsigned long long first_ns, swapz_u8 retain_ms,
-		unsigned long long observed_lat_ns)
+		unsigned long long first_ns, swapz_u8 retain_ms)
 {
 	unsigned long long duration;
-	unsigned long long scaled_ns;
 
 	if (!retain_ms || !first_ns)
 		return 0;
 	duration = (unsigned long long)retain_ms * 1000000ULL;
-	if (observed_lat_ns) {
-		scaled_ns = 4ULL * observed_lat_ns;
-		if (scaled_ns < 30000ULL)
-			scaled_ns = 30000ULL;
-		if (scaled_ns < duration)
-			duration = scaled_ns;
-	}
 	return first_ns > ~0ULL - duration ? ~0ULL : first_ns + duration;
 }
 
@@ -281,7 +271,7 @@ static inline int swapz_retention_timer_needs_arm(swapz_u8 retain_ms, int queued
  * cycles, host device saturation, or upper BIO queueing/retention wait.
  */
 static inline unsigned long long swapz_elapsed_ns(unsigned long long start_ns,
-						unsigned long long end_ns)
+						 unsigned long long end_ns)
 {
 	return end_ns >= start_ns ? end_ns - start_ns : 0;
 }

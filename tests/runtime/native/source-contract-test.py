@@ -2034,7 +2034,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->pack_close_burst_count_le4++", flush)
         self.assertIn("ctx->pack_close_burst_overshoot++", flush)
         sample = body("swapz_sample_pack_tail_locked")
-        self.assertIn("swapz_inflight_lower_pending(ctx)", sample)
+        self.assertIn("swapz_has_inflight(ctx)", sample)
         self.assertNotIn("ctx->inflight_write", sample)
         self.assertLess(sample.index("if (inflight)"),
                         sample.index("ctx->pack_tail_samples++"))

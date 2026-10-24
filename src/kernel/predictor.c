@@ -27,7 +27,7 @@ static swapz_u32 swapz_predict_delta64_pair_score_scalar(const swapz_u8 *input)
 }
 
 static swapz_u32 swapz_predict_delta64_sample_offset(swapz_u32 subpage,
-						       swapz_u32 lane)
+						     swapz_u32 lane)
 {
 	swapz_u32 phase = (subpage + SWAPZ_PREDICTOR_SAMPLE_PHASE_STEP * lane) %
 		SWAPZ_PREDICTOR_SAMPLE_PHASES;
@@ -47,25 +47,20 @@ swapz_u32 swapz_predict_delta64_sample_score_scalar(const swapz_u8 *input)
 	 * region allowed repeated headers to hide structured values elsewhere.
 	 */
 	for (subpage = 0; subpage <
-	     SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage) {
+	      SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage) {
 		lane = subpage % SWAPZ_PREDICTOR_SUBPAGE_LANES;
 		score += swapz_predict_delta64_pair_score_scalar(
 			input + swapz_predict_delta64_sample_offset(subpage, lane));
 	}
 	if (score < SWAPZ_PREDICTOR_STAGE1_MIN_SCORE)
 		return 0;
-	/*
-	 * Visit the three remaining lanes by rotating from the stage-1 lane.
-	 * This preserves the exact sampled set and integer score while removing
-	 * the per-lane skip branch from the hot classifier path.
-	 */
 	for (subpage = 0; subpage <
-	     SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage)
+	      SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage)
 		for (step = 1U; step < SWAPZ_PREDICTOR_SUBPAGE_LANES; ++step) {
 			lane = (subpage + step) % SWAPZ_PREDICTOR_SUBPAGE_LANES;
 			score += swapz_predict_delta64_pair_score_scalar(
 				input + swapz_predict_delta64_sample_offset(subpage,
-								   lane));
+									    lane));
 		}
 	return score;
 }
