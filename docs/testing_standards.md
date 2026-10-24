@@ -1112,9 +1112,12 @@ distinct-extent service, but every ID63 adjacency,
 coalesced-range and coalescing-skip counter must remain zero. The merge-on arm
 uses the identical fan-out fallback after any non-coalescible prefix. A
 coalescible adjacent subset is also required to fall back when it does not cover
-the complete bounded fan-out batch (up to eight distinct extents); this prevents
-synchronous ID63 service from stranding unrelated independent READs that the
-fixed-on fan-out path could otherwise submit together. A full eight-slot chain
+the complete bounded fan-out batch (up to eight distinct extents, or reaching
+the eight-block scratch cap); this prevents synchronous ID63 service from
+stranding unrelated independent READs that the fixed-on fan-out path could
+otherwise submit together. A merged span retaining at least two adjacent
+extents remains eligible when partial cache residency covers companion extents.
+A full eight-slot chain
 may leave additional local READs for the next bounded worker iteration. Three-host
 cap evidence is sufficient to fix the maximum coalesced span at eight blocks:
 8 materially improves serial sequential service versus 4 on all three hosts,

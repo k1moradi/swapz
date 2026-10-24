@@ -753,10 +753,12 @@ ID63 adjacent coalescing runs before independent fan-out. It may combine only
 requests already waiting in the admitted independent READ prefix, only when the
 exact missing ranges form one same-segment zero-padding span within the bounded
 scratch cap, and only when that coalesced chain covers the complete **bounded
-fan-out batch** (up to the eight private distinct-extent slots). A smaller adjacent
-subset must fall through to the asynchronous private-slot path rather than
-synchronously blocking unrelated independent READs behind one merged request.
-A full eight-slot adjacent chain may execute while additional local READs remain
+fan-out batch** (up to the eight private distinct-extent slots, or reaching the
+eight-block scratch cap). A smaller adjacent subset must fall through to the
+asynchronous private-slot path rather than synchronously blocking unrelated
+independent READs behind one merged request; a merged span retaining at least
+two adjacent extents remains eligible when cache residency covers part of the
+chain. A full eight-slot adjacent chain may execute while additional local READs remain
 for the next bounded worker iteration. Its disabled arm returns before ID63 cache probes, adjacency scans
 or coalescing counters; the subsequent independent fan-out path remains common
 to both arms.

@@ -4455,10 +4455,12 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	 * Do not synchronously coalesce a small adjacent subset while unrelated
 	 * independent READs from the same admitted prefix wait unsubmitted. When
 	 * the chain does not cover the whole parallel prefix, fall back to the
-	 * asynchronous private-slot path so device queue parallelism wins.
+	 * asynchronous private-slot path so device queue parallelism wins. A chain
+	 * reaching the maximum coalesced block cap is already full.
 	 */
 	if (covered_prefix != prefix &&
-	    chain_count < SWAPZ_PARALLEL_READ_SLOTS)
+	    chain_count < SWAPZ_PARALLEL_READ_SLOTS &&
+	    candidate_blocks < SWAPZ_READ_COALESCE_MAX_BLOCKS)
 		return false;
 
 	for (slot_index = 0; slot_index < chain_count; ++slot_index) {
@@ -4517,9 +4519,12 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	 * If cache residency or a gap shrinks the merged span below the candidate
 	 * fan-out batch, let the asynchronous path submit all independent missing
 	 * ranges together instead of blocking them behind a partial sync merge.
+	 * A merged span retaining at least two adjacent extents remains eligible.
 	 */
-	if (execute_count != chain_count)
-		return false;
+	if (execute_count != chain_count) {
+		if (execute_count < 2U)
+			return false;
+	}
 	for (slot_index = chain_first; slot_index <= chain_last; ++slot_index) {
 		struct swapz_read_slot *slot = &ctx->read_slots[slot_index];
 		unsigned int execute_index = slot_index - chain_first;
