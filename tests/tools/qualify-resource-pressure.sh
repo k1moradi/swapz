@@ -25,6 +25,9 @@ fi
 
 CGROUP_ROOT=/sys/fs/cgroup
 PRESSURE_MIB=576
+PRESSURE_RAMP_MIB=80
+READY_PRESSURE_MIB=$((PRESSURE_MIB - PRESSURE_RAMP_MIB))
+PRESSURE_RAMP_BYTES=$((PRESSURE_RAMP_MIB * 1024 * 1024))
 MEMORY_HEADROOM_BYTES=$((64 * 1024 * 1024))
 MEMORY_MAX_BYTES=$((896 * 1024 * 1024))
 PAIR_OUTER_SECONDS=420
@@ -72,6 +75,8 @@ token="$(od -An -N8 -tx1 /dev/urandom | tr -d '[:space:]')"
 CGROUP="$CGROUP_ROOT/swapz-id36-$token"
 SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-id36.XXXXXXXX")"
 READY="$SESSION/pressure.ready"
+PRESSURE_ACTIVATE="$SESSION/pressure.activate"
+PRESSURE_ACTIVE="$SESSION/pressure.active"
 STOP="$SESSION/pressure.stop"
 PAIR_READY="$SESSION/pair.ready"
 PAIR_GO="$SESSION/pair.go"
@@ -208,8 +213,10 @@ bash -c '
     echo $$ > "$cgroup/cgroup.procs"
     exec "$@"
 ' _ "$CGROUP" python3 -B "$PRESSURE_SCRIPT" \
-    --memory-mib "$PRESSURE_MIB" --cpu-workers "$cpu_workers" \
-    --ready-file "$READY" --stop-file "$STOP" >"$PRESSURE_LOG" 2>&1 &
+    --memory-mib "$PRESSURE_MIB" --ready-memory-mib "$READY_PRESSURE_MIB" \
+    --cpu-workers "$cpu_workers" --ready-file "$READY" \
+    --activate-file "$PRESSURE_ACTIVATE" --active-file "$PRESSURE_ACTIVE" \
+    --stop-file "$STOP" >"$PRESSURE_LOG" 2>&1 &
 PRESSURE_PID=$!
 
 for _ in {1..800}; do
@@ -228,8 +235,9 @@ done
 
 pressure_current="$(cat "$CGROUP/memory.current")"
 [[ $pressure_current =~ ^[0-9]+$ &&
-   $pressure_current -ge $((PRESSURE_MIB * 1024 * 1024)) ]] || {
-    printf 'FAIL: ID36 resident pressure too small: %s bytes\n' "$pressure_current" >&2
+   $pressure_current -ge $((READY_PRESSURE_MIB * 1024 * 1024)) ]] || {
+    printf 'FAIL: ID36 ready-stage resident pressure too small: %s bytes\n' \
+        "$pressure_current" >&2
     exit 1
 }
 oom_ready="$(event_value oom)"
@@ -249,18 +257,61 @@ MEMORY_HIGH_BYTES=$((pressure_current + MEMORY_HEADROOM_BYTES))
         "$pressure_current" >&2
     exit 1
 }
+(( pressure_current + PRESSURE_RAMP_BYTES < MEMORY_MAX_BYTES )) || {
+    printf 'BLOCKED: ID36 staged pressure would exceed memory.max safety bound: %s bytes\n' \
+        "$pressure_current" >&2
+    exit 2
+}
+(( PRESSURE_RAMP_BYTES > MEMORY_HEADROOM_BYTES )) || {
+    printf '%s\n' 'FAIL: ID36 staged pressure must cross the memory.high headroom' >&2
+    exit 1
+}
 echo "$MEMORY_HIGH_BYTES" > "$CGROUP/memory.high"
 
-# Start evidence only after the resident baseline and real high watermark are
-# established; helper startup cannot satisfy the qualification gate.
+# Establish high-pressure evidence deliberately before releasing the benchmark.
+# The final anonymous working set remains 576 MiB; only its last 80 MiB is
+# faulted after memory.high is installed. This proves the cgroup is actually
+# reclaiming/throttling without depending on incidental replay allocations.
 high_before="$(event_value high)"
 oom_before="$(event_value oom)"
 oom_kill_before="$(event_value oom_kill)"
-cpu_some_before="$(cpu_some_total)"
 
-printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%s cpu_workers:%s ready_bytes:%s headroom_bytes:%s\n' \
+printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%s cpu_workers:%s ready_bytes:%s headroom_bytes:%s ready_pressure_mib:%s ramp_mib:%s\n' \
     "$MEMORY_HIGH_BYTES" "$MEMORY_MAX_BYTES" "$PRESSURE_MIB" "$cpu_workers" \
-    "$pressure_current" "$MEMORY_HEADROOM_BYTES"
+    "$pressure_current" "$MEMORY_HEADROOM_BYTES" "$READY_PRESSURE_MIB" \
+    "$PRESSURE_RAMP_MIB"
+
+: > "$PRESSURE_ACTIVATE"
+for _ in {1..800}; do
+    [[ -s $PRESSURE_ACTIVE ]] && break
+    kill -0 "$PRESSURE_PID" 2>/dev/null || {
+        cat "$PRESSURE_LOG" >&2
+        printf '%s\n' 'FAIL: ID36 pressure helper exited during staged activation' >&2
+        exit 1
+    }
+    sleep 0.05
+done
+[[ -s $PRESSURE_ACTIVE ]] || {
+    printf '%s\n' 'FAIL: ID36 pressure helper did not complete staged activation' >&2
+    exit 1
+}
+
+high_active="$(event_value high)"
+oom_active="$(event_value oom)"
+oom_kill_active="$(event_value oom_kill)"
+(( high_active > high_before )) || {
+    printf '%s\n' 'FAIL: ID36 controlled pressure ramp did not trigger memory.high' >&2
+    exit 1
+}
+(( oom_active == oom_before && oom_kill_active == oom_kill_before )) || {
+    printf 'FAIL: ID36 staged pressure encountered OOM events oom:%s oom_kill:%s\n' \
+        "$((oom_active - oom_before))" "$((oom_kill_active - oom_kill_before))" >&2
+    exit 1
+}
+
+# CPU PSI qualification is scoped to the actual released pair, while the
+# already-proven memory.high event remains part of the same bounded ID36 run.
+cpu_some_before="$(cpu_some_total)"
 : > "$PAIR_GO"
 set +e
 wait "$PAIR_PID"

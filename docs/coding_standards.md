@@ -359,6 +359,26 @@ temporary accounting pass performs no lower I/O and no mapping/generation
 mutation; malformed start/class/liveness or generation overflow fails closed.
 The subsequent `swapz_discard_page()` loop remains the sole commit path.
 
+### ID36 deterministic resource-pressure qualification
+
+The owner-only ID36 gate must establish pressure rather than assume benchmark
+allocations will cross a watermark. Both owned 64MiB RAM-backed null_blk devices
+are fully faulted before the pair migrates into the cgroup. The pressure helper
+uses a lazily faulted anonymous mapping with a final 576MiB working set: fault
+496MiB first, sample the ready-state `memory.current`, then install
+`memory.high = ready memory.current + 64MiB`. Only after that boundary exists
+may the helper fault the remaining 80MiB. The harness must observe a positive
+`memory.events high` delta and zero OOM/OOM-kill before releasing the pair.
+
+Keep `memory.max=896MiB`, disable cgroup swap when the controller exposes that
+knob, and refuse the run when the staged final charge would violate the bounded
+maximum. The final working set remains active for target construction, replay,
+packed byte-exact readback and teardown. Two-times online-CPU integer burners,
+capped at 32 and never below two, remain active throughout; CPU-PSI evidence is
+sampled from pair release so setup activity cannot satisfy the CPU gate.
+Pressure establishment is qualification setup, not useful-work performance
+evidence, and may not weaken ordinary byte-exact/OOM/teardown requirements.
+
 ### Foreground GC pressure and scaling telemetry
 
 ID61 evidence must observe the existing serialized collector without changing

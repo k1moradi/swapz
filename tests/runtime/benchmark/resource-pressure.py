@@ -2,6 +2,7 @@
 """Bounded anonymous-memory and CPU pressure for the owned ID36 qualification."""
 
 import argparse
+import mmap
 import multiprocessing
 import os
 from pathlib import Path
@@ -28,13 +29,29 @@ def cpu_burn(stop_event):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--memory-mib", type=int, required=True)
+    parser.add_argument("--ready-memory-mib", type=int)
     parser.add_argument("--cpu-workers", type=int, required=True)
     parser.add_argument("--ready-file", type=Path, required=True)
+    parser.add_argument("--activate-file", type=Path)
+    parser.add_argument("--active-file", type=Path)
     parser.add_argument("--stop-file", type=Path, required=True)
     args = parser.parse_args()
 
     if not 64 <= args.memory_mib <= 768:
         print("FAIL: ID36 memory pressure must be 64..768 MiB", file=sys.stderr)
+        return 2
+    ready_memory_mib = (
+        args.memory_mib if args.ready_memory_mib is None
+        else args.ready_memory_mib
+    )
+    if not 64 <= ready_memory_mib <= args.memory_mib:
+        print("FAIL: ID36 ready memory must be 64..final memory MiB",
+              file=sys.stderr)
+        return 2
+    staged = ready_memory_mib < args.memory_mib
+    if staged and (args.activate_file is None or args.active_file is None):
+        print("FAIL: ID36 staged pressure requires activate/active files",
+              file=sys.stderr)
         return 2
     if not 1 <= args.cpu_workers <= 32:
         print("FAIL: ID36 CPU worker count must be 1..32", file=sys.stderr)
@@ -61,16 +78,24 @@ def main():
     for worker in workers:
         worker.start()
 
+    pressure = None
     try:
         try:
-            pressure = bytearray(args.memory_mib * MIB)
-        except MemoryError:
-            print("FAIL: ID36 pressure allocation failed", file=sys.stderr)
+            # Keep the unfaulted tail genuinely uncharged so the controller can
+            # install memory.high between the ready baseline and the final
+            # working set. bytearray(size) may eagerly zero pages and therefore
+            # cannot provide this two-stage residency boundary reliably.
+            pressure = mmap.mmap(
+                -1, args.memory_mib * MIB,
+                flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS,
+                prot=mmap.PROT_READ | mmap.PROT_WRITE,
+            )
+        except (BufferError, OSError, ValueError):
+            print("FAIL: ID36 pressure mapping failed", file=sys.stderr)
             return 1
 
-        # Fault every page before declaring readiness. This prevents a large
-        # virtual mapping from being mislabeled as resident low-memory pressure.
-        for offset in range(0, len(pressure), PAGE_BYTES):
+        ready_bytes = ready_memory_mib * MIB
+        for offset in range(0, ready_bytes, PAGE_BYTES):
             pressure[offset] = (offset // PAGE_BYTES) & 0xFF
 
         if any(not worker.is_alive() for worker in workers):
@@ -79,9 +104,34 @@ def main():
             return 1
 
         args.ready_file.write_text(
-            f"memory_mib={args.memory_mib} cpu_workers={args.cpu_workers}\n",
+            f"memory_mib={args.memory_mib} "
+            f"ready_memory_mib={ready_memory_mib} "
+            f"cpu_workers={args.cpu_workers}\n",
             encoding="ascii",
         )
+
+        if staged:
+            while (not stopping and not args.stop_file.exists() and
+                   not args.activate_file.exists()):
+                if any(not worker.is_alive() for worker in workers):
+                    print("FAIL: ID36 CPU pressure worker exited before activation",
+                          file=sys.stderr)
+                    return 1
+                time.sleep(0.01)
+            if stopping or args.stop_file.exists():
+                return 0
+
+            # The controller has installed memory.high at the ready-state charge.
+            # Fault the remaining bounded tail now so crossing the high watermark
+            # is deliberate and independent of benchmark allocation behavior.
+            for offset in range(ready_bytes, len(pressure), PAGE_BYTES):
+                pressure[offset] = (offset // PAGE_BYTES) & 0xFF
+
+            args.active_file.write_text(
+                f"memory_mib={args.memory_mib} "
+                f"ready_memory_mib={ready_memory_mib}\n",
+                encoding="ascii",
+            )
 
         sweep = 0
         while not stopping and not args.stop_file.exists():
@@ -104,6 +154,8 @@ def main():
                 worker.terminate()
         for worker in workers:
             worker.join(timeout=2.0)
+        if pressure is not None:
+            pressure.close()
 
     return 0
 
