@@ -169,6 +169,7 @@ struct swapz_preparation_lane {
 	u64 copy_wall_ns;
 	u64 copy_bytes;
 	u64 direct_lz4_pages;
+	u64 copy_fallback_pages;
 	u64 crc_wall_ns;
 	u64 worker_wall_ns;
 	u64 worker_cpu_ns;
@@ -183,6 +184,7 @@ struct swapz_preparation_totals {
 	u64 copy_wall_ns;
 	u64 copy_bytes;
 	u64 direct_lz4_pages;
+	u64 copy_fallback_pages;
 	u64 crc_wall_ns;
 	u64 worker_wall_ns;
 	u64 worker_cpu_ns;
@@ -658,6 +660,12 @@ struct swapz_dm {
 	u64 ordered_write_copy_wall_ns;
 	u64 ordered_write_copy_bytes;
 	u64 ordered_direct_lz4_pages;
+	u64 ordered_copy_fallback_pages;
+	/* Upper BIO shape and memory-input observation counters (ID43). */
+	u64 bio_segments_gt1;
+	u32 bio_segments_max;
+	u64 bio_nonzero_offset;
+	u64 bio_compound_folio_pages;
 	u64 read_copy_wall_ns;
 	u64 read_copy_bytes;
 	u64 window_sort_wall_ns;
@@ -758,6 +766,7 @@ static void swapz_preparation_totals_snapshot(
 		total->copy_wall_ns += READ_ONCE(lane->copy_wall_ns);
 		total->copy_bytes += READ_ONCE(lane->copy_bytes);
 		total->direct_lz4_pages += READ_ONCE(lane->direct_lz4_pages);
+		total->copy_fallback_pages += READ_ONCE(lane->copy_fallback_pages);
 		total->crc_wall_ns += READ_ONCE(lane->crc_wall_ns);
 		total->worker_wall_ns += READ_ONCE(lane->worker_wall_ns);
 		total->worker_cpu_ns += READ_ONCE(lane->worker_cpu_ns);
@@ -1893,6 +1902,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		if (input) {
 			lane->direct_lz4_pages++;
 		} else {
+			lane->copy_fallback_pages++;
 			error = swapz_copy_bio_accounted(entry->bio, lane->input_page,
 						 false, &lane->copy_wall_ns,
 						 &lane->copy_bytes);
@@ -3371,6 +3381,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		if (input) {
 			ctx->ordered_direct_lz4_pages++;
 		} else {
+			ctx->ordered_copy_fallback_pages++;
 			error = swapz_copy_bio_accounted(
 				bio, ctx->input_page, false,
 				&ctx->ordered_write_copy_wall_ns,
@@ -5177,14 +5188,46 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
 		init_completion(&entry->preparation_finished);
 	entry->bio = bio;
-	spin_lock_irqsave(&ctx->queue_lock, flags);
-	/*
-	 * Admission and shutdown share queue_lock: presuspend cannot finish
-	 * draining while a previously admitted BIO is added after the drain.
-	 */
-	if (!ctx->accepting) {
-		spin_unlock_irqrestore(&ctx->queue_lock, flags);
-		return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+	{
+		unsigned int bio_segs = 0;
+		bool bio_nonzero_off = false;
+		bool bio_compound = false;
+
+		if (count) {
+			struct bio_vec vec;
+			struct bvec_iter iter;
+
+			bio_for_each_segment(vec, bio, iter) {
+				bio_segs++;
+				if (vec.bv_offset != 0)
+					bio_nonzero_off = true;
+				if (vec.bv_page && (PageCompound(vec.bv_page) ||
+						    folio_test_large(page_folio(vec.bv_page))))
+					bio_compound = true;
+			}
+		}
+		spin_lock_irqsave(&ctx->queue_lock, flags);
+		/*
+		 * Admission and shutdown share queue_lock: presuspend cannot finish
+		 * draining while a previously admitted BIO is added after the drain.
+		 */
+		if (!ctx->accepting) {
+			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+		}
+		if (count) {
+			if (bio_segs > 1) {
+				ctx->bio_segments_gt1++;
+				if (bio_segs > ctx->bio_segments_max)
+					ctx->bio_segments_max = bio_segs;
+			} else if (bio_segs == 1 && ctx->bio_segments_max == 0) {
+				ctx->bio_segments_max = 1;
+			}
+			if (bio_nonzero_off)
+				ctx->bio_nonzero_offset++;
+			if (bio_compound)
+				ctx->bio_compound_folio_pages++;
+		}
 	}
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
@@ -6349,9 +6392,15 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		/* Retired compatibility token: the read-bypass detach override is gone. */
 		DMEMIT(" k1_allow_after_read_bypass=0 "
 		       "read_coalesce_max_blocks=%u "
-		       "invalidate_cache_on_write_admit=%u",
+		       "invalidate_cache_on_write_admit=%u "
+		       "bio_segments_gt1=%llu bio_segments_max=%u "
+		       "bio_nonzero_offset=%llu bio_compound_folio_pages=%llu "
+		       "bio_copy_fallback_pages=%llu",
 		       SWAPZ_READ_COALESCE_MAX_BLOCKS,
-		       ctx->invalidate_cache_on_write_admit);
+		       ctx->invalidate_cache_on_write_admit,
+		       ctx->bio_segments_gt1, ctx->bio_segments_max,
+		       ctx->bio_nonzero_offset, ctx->bio_compound_folio_pages,
+		       ctx->ordered_copy_fallback_pages + prep.copy_fallback_pages);
 		/* These independent single-writer values are diagnostic while busy;
 		 * qualification snapshots only at drained measurement boundaries. */
 		DMEMIT(" delta64_rescue=%u delta64_eligible=%llu "

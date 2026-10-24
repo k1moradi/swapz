@@ -95,7 +95,7 @@ cleanup() {
 	fi
 	if (( OWN_DM && !QUARANTINE )); then
 		if [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null | tr -d '[:space:]')" == "$UUID" ]]; then
-			dmsetup remove "$DMNAME"
+			timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME"
 			if [[ $? == 0 ]]; then
 				OWN_DM=0
 			else
@@ -401,8 +401,8 @@ flush_injected="$(status_delta flush_injected)"
 note "PASS_LOADED_ORACLE_PROFILE=raw_pages:$raw_writes zero_pages:$zero_writes flush_calls:$flush_calls"
 
 # Compound/folio multi-bvec and non-zero bv_offset BIO qualification.
-# Tests asymmetric multi-segment bvecs, 3-segment and 4-segment splits, and
-# page-straddling non-zero bv_offsets with both segmented and single-bvec reads/writes.
+# Tests asymmetric multi-segment bvecs, 3-segment and 4-segment splits,
+# page-straddling non-zero bv_offsets, and explicit THP compound folio backing.
 note "START_LOADED_COMPOUND_BIO"
 timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
     "/dev/mapper/$DMNAME" --segmented-write-series 128 5 || \
@@ -419,10 +419,26 @@ timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
 timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
     "/dev/mapper/$DMNAME" --segmented-verify-series 128 6 || \
     fail "segmented multi-bvec cross-read of single-bvec writes failed"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --thp-write-series 128 7 || \
+    fail "THP compound-folio write series failed"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --thp-verify-series 128 7 || \
+    fail "THP compound-folio verify series failed"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --verify-series 128 7 || \
+    fail "single-bvec cross-read of THP writes failed"
 compound_status="$(dmsetup status "$DMNAME")"
-(( $(status_u64 "$compound_status" failed) == 0 )) || \
-    fail "compound/segmented BIO test left DM target in failed state"
-note "PASS_LOADED_COMPOUND_BIO=written_pages:256 verified_pages:256 failed:0"
+segs_gt1="$(status_u64 "$compound_status" bio_segments_gt1)" || fail "missing bio_segments_gt1"
+segs_max="$(status_u64 "$compound_status" bio_segments_max)" || fail "missing bio_segments_max"
+nonzero_off="$(status_u64 "$compound_status" bio_nonzero_offset)" || fail "missing bio_nonzero_offset"
+compound_pages="$(status_u64 "$compound_status" bio_compound_folio_pages)" || fail "missing bio_compound_folio_pages"
+copy_fallbacks="$(status_u64 "$compound_status" bio_copy_fallback_pages)" || fail "missing bio_copy_fallback_pages"
+(( $(status_u64 "$compound_status" failed) == 0 &&
+   segs_gt1 > 0 && segs_max >= 2 && nonzero_off > 0 &&
+   compound_pages >= 128 && copy_fallbacks > 0 )) || \
+    fail "compound/segmented BIO observation counters invariant mismatch: segs_gt1=$segs_gt1 segs_max=$segs_max nonzero_off=$nonzero_off compound=$compound_pages copy_fallbacks=$copy_fallbacks"
+note "PASS_LOADED_COMPOUND_BIO=written_pages:384 verified_pages:384 segs_gt1:$segs_gt1 segs_max:$segs_max nonzero_off:$nonzero_off compound_pages:$compound_pages copy_fallbacks:$copy_fallbacks failed:0"
 
 # Force real loaded GC before lifecycle/fault phases. Recreate authority on
 # the same positively identified RAM lower, then write five logical generations
@@ -606,7 +622,7 @@ note "LIVE_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns ba
     fail "loaded live-GC did not prove repeated distributed live evacuation and rotation"
 note "PASS_LOADED_LIVE_GC=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs distinct:$gc_distinct victim_min:$gc_victim_min victim_max:$gc_victim_max last:$gc_victim->$gc_destination discards:$gc_discards_completed discard_sectors:$gc_discard_sectors discard_unsupported:$gc_discards_unsupported discard_failed:$gc_discards_failed verified_pages:4096"
 note "PASS_LOADED_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns baseline_p99_ns:$gc_baseline_p99_ns pressure_p99_ns:$gc_pressure_p99_ns gc_wall_ns:$gc_wall_ns gc_fraction_ppm:$gc_fraction_ppm choose_wall_ns:$gc_choose_wall_ns choose_calls:$gc_choose_calls choose_map_entries:$gc_choose_map_entries choose_segment_entries:$gc_choose_segment_entries relocation_map_entries:$gc_relocation_map_entries no_headroom_skips:$gc_no_headroom alignment_hole_fg:$alignment_hole_fg alignment_hole_gc:$alignment_hole_gc tail_waste_fg:$tail_waste_fg tail_waste_gc:$tail_waste_gc run_splits_by_hole:$run_splits_by_hole alloc_probe_segments:$alloc_probe_segments alloc_probe_full_scans:$alloc_probe_full_scans alloc_probe_wall_ns:$alloc_probe_wall_ns trim_skipped:$gc_discard_skipped segment_program_min:$segment_program_min segment_program_sum:$segment_program_sum segment_program_max:$segment_program_max segment_program_segments:$segment_program_segments"
-dmsetup remove "$DMNAME" || fail "cannot remove live-GC qualification mapping"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove live-GC qualification mapping"
 OWN_DM=0
 
 # ID70c: upper DISCARD is already serialized by the ordered worker. Prove that
@@ -780,7 +796,7 @@ lifecycle_failed="$(status_u64 "$suspend_after" failed)" ||
 # retained window was observed, suspend/resume completed, every accepted write
 # completed exactly once, and all 128 pages verify byte-exact afterwards.
 note "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:$open_window verified_pages:128"
-dmsetup remove "$DMNAME" || fail "cannot remove retained suspend mapping"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove retained suspend mapping"
 OWN_DM=0
 
 # Retained-policy synthetic WRITE failure qualification. Reuse only this
@@ -815,7 +831,7 @@ read -r -a write_fault_lower_after < "/sys/block/$DISK/stat"
     fail "pre-submission WRITE fault reached the owned lower device"
 note "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0"
 
-dmsetup remove "$DMNAME" || fail "cannot remove retained WRITE-fault mapping"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove retained WRITE-fault mapping"
 OWN_DM=0
 
 # Retained-policy synthetic FLUSH failure qualification. The data WRITE must
@@ -850,7 +866,7 @@ read -r -a flush_fault_lower_after < "/sys/block/$DISK/stat"
     fail "retained FLUSH-fault setup did not first complete a lower data WRITE"
 note "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1"
 
-dmsetup remove "$DMNAME" || fail "cannot remove retained FLUSH-fault mapping"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove retained FLUSH-fault mapping"
 OWN_DM=0
 
 # ID69 packed placement is canonical. Reload the already-owned module without
@@ -889,5 +905,5 @@ packed_failed="$(status_u64 "$packed_after" failed)" ||
    packed_holes == 0 && packed_splits == 0 && packed_failed == 0 )) ||
     fail "packed-placement smoke violated the zero-internal-hole invariant"
 note "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:$packed_holes run_splits:$packed_splits failed:$packed_failed"
-dmsetup remove "$DMNAME" || fail "cannot remove packed-placement mapping"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove packed-placement mapping"
 OWN_DM=0

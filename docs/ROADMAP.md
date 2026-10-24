@@ -41,8 +41,8 @@ and append path is removed rather than retained as dormant diagnostic code.
 The ID36 low-RAM/heavy-CPU pressure gate is qualified on the owner matrix
 (tested source `ab56b41c35b8`, 0 OOM, 15,031 memory.high events, 236,695,801 µs
 (236.7s cumulative) CPU PSI contention, report `c8a67f451495`). Explicit
-multi-bvec and non-zero offset direct-I/O coverage is verified byte-exact on owned
-RAM, with true compound/folio observation counters pending (ID43 partially qualified).
+multi-bvec, non-zero offset, and THP compound folio backing are verified
+byte-exact on owned RAM with active kernel observation counters (ID43).
 Publication monotonicity is enforced in the test runner.
 
 Next collect realistic churn/GC/TRIM evidence: about 70% logical occupancy, an
@@ -134,7 +134,7 @@ changes.
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
-| 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **4 partially qualified** | Vectored/base-page-offset path covered; actual compound/folio bvec observation pending. |
+| 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **1 qualified / covered** | Explicit multi-bvec, non-zero bv_offset, and THP compound folio backing qualified on owned RAM with kernel observation counters (`bio_segments_gt1`, `bio_segments_max`, `bio_nonzero_offset`, `bio_compound_folio_pages >= 128`, `bio_copy_fallback_pages`). Byte-exact across segmented, THP, and cross-mode reads/writes with zero failures. Larger base PAGE_SIZE/native larger records remain architecture work. |
 | 44 | Exact per-segment authoritative mapping counts / GC map-scan elimination | **1** | Owner-qualified with 20 live victims/rotations and byte-exact 4096-page verification. Keep O(1) dead-segment/post-evacuation checks; victim scoring/evacuation reverse indexing remains a separate future optimization. |
 | 45 | 4-block extent payload block-residency cache | **1** | Owner-qualified; keep. Slow packed sequential p99 improved to 16.85 ms with 3056 KiB / 457.5 lower requests, and native C proves each block of a seven-record 16KiB extent is fetched at most once before invalidation. |
 | 46 | Timed-interval scheduling telemetry hygiene | **1 completed measurement** | Qualified. Mixed/write-only scheduling conclusions now use kernel snapshots strictly around measured waves; full-process prefill/warmup counters are not evidence. |

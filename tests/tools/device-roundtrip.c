@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <time.h>
@@ -245,6 +246,52 @@ static int series(int fd, unsigned char *buf, unsigned char *expected,
 			return -1;
 		}
 	}
+	return 0;
+}
+
+#ifndef MADV_HUGEPAGE
+#define MADV_HUGEPAGE 14
+#endif
+
+static int series_thp(int fd, unsigned char *expected,
+		      unsigned int count, unsigned int round,
+		      int write_data)
+{
+	size_t thp_size = 2U * 1024U * 1024U;
+	unsigned char *thp_buf;
+	unsigned int i;
+
+	thp_buf = mmap(NULL, thp_size, PROT_READ | PROT_WRITE,
+		       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (thp_buf == MAP_FAILED) {
+		perror("mmap THP buffer");
+		return -1;
+	}
+	madvise(thp_buf, thp_size, MADV_HUGEPAGE);
+	memset(thp_buf, 0, thp_size);
+
+	for (i = 0; i < count; ++i) {
+		unsigned char *page_ptr = thp_buf + ((size_t)(i % 512U) * PAGE);
+
+		pattern(expected, i, round);
+		if (write_data) {
+			memcpy(page_ptr, expected, PAGE);
+			if (transfer(fd, page_ptr, i, 1)) {
+				munmap(thp_buf, thp_size);
+				return -1;
+			}
+		} else {
+			if (transfer(fd, page_ptr, i, 0) ||
+			    memcmp(page_ptr, expected, PAGE)) {
+				fprintf(stderr,
+					"FAIL byte-exact THP page=%u round=%u\n",
+					i, round);
+				munmap(thp_buf, thp_size);
+				return -1;
+			}
+		}
+	}
+	munmap(thp_buf, thp_size);
 	return 0;
 }
 
@@ -516,7 +563,7 @@ int main(int argc, char **argv)
 	unsigned char *buf = NULL, *expected = NULL;
 	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
 	int raw_series = 0, discard_pages = 0, gc_mode = 0, churn_mode = 0;
-	int segmented_series_mode = 0;
+	int segmented_series_mode = 0, thp_series_mode = 0;
 	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
 
@@ -562,6 +609,11 @@ int main(int argc, char **argv)
 			segmented_series_mode = 1;
 		} else if (!strcmp(argv[2], "--segmented-verify-series")) {
 			segmented_series_mode = 1;
+		} else if (!strcmp(argv[2], "--thp-write-series")) {
+			write_series = 1;
+			thp_series_mode = 1;
+		} else if (!strcmp(argv[2], "--thp-verify-series")) {
+			thp_series_mode = 1;
 		} else if (!strcmp(argv[2], "--discard-pages")) {
 			discard_pages = 1;
 		} else if (strcmp(argv[2], "--verify-series")) {
@@ -632,6 +684,11 @@ int main(int argc, char **argv)
 					     write_series))
 				goto out;
 			printf("PASS: owned swapz direct segmented %s series count=%u round=%u\n",
+			       write_series ? "write" : "verify", count, round);
+		} else if (thp_series_mode) {
+			if (series_thp(fd, expected, count, round, write_series))
+				goto out;
+			printf("PASS: owned swapz direct THP compound-folio %s series count=%u round=%u\n",
 			       write_series ? "write" : "verify", count, round);
 		} else {
 			if (series(fd, buf, expected, count, round,

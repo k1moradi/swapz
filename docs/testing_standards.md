@@ -85,7 +85,14 @@ Transient target teardown between benchmark or lifecycle phases (such as tearing
 
 ### Direct-I/O and memory input qualification boundary (ID43)
 
-Direct-I/O tests covering segmented and offset user buffers (via `transfer_segmented()` and `series_segmented()` with `pwritev`/`preadv`) qualify user buffer alignment, non-zero `bv_offset` translation, and multi-segment BIO boundary handling through the Linux block layer. However, contiguous userspace iovecs backed by base 4KiB pages may be merged by the block layer into single contiguous bvecs. True qualification of compound or huge-page memory inputs (THP/hugetlb) requires kernel-level inspection counters (detecting multi-bvec BIOs and `folio_test_large()`/`PageCompound()` backing) and explicit large folio backing tests. Until such passive observation is proven on loaded hardware, ID43 remains partially qualified.
+Direct-I/O tests covering segmented and offset user buffers (via `transfer_segmented()` and `series_segmented()` with `pwritev`/`preadv`) qualify user buffer alignment, non-zero `bv_offset` translation, and multi-segment BIO boundary handling through the Linux block layer. In addition, explicit Transparent Huge Page (THP / `MADV_HUGEPAGE`) compound folio backing (via `series_thp()` with `--thp-write-series` and `--thp-verify-series`) exercises incoming direct I/O from 2MiB compound memory regions. Kernel-level passive inspection counters in `dm-target.c` observe:
+- `bio_segments_gt1`: admitted BIOs spanning multiple bvec segments.
+- `bio_segments_max`: maximum segment count observed on an admitted BIO.
+- `bio_nonzero_offset`: admitted BIOs with non-zero within-page `bv_offset`.
+- `bio_compound_folio_pages`: admitted BIOs whose backing memory is a compound folio (`PageCompound()` or `folio_test_large(page_folio())`).
+- `bio_copy_fallback_pages`: write pages where direct LZ4 mapping was safely bypassed in favor of accounted copy fallback.
+
+Loaded qualification on owned RAM asserts `segs_gt1 > 0`, `segs_max >= 2`, `nonzero_off > 0`, `compound_pages >= 128`, and `copy_fallbacks > 0`, while preserving byte-exact verification across all segmented, THP, and cross-mode reads and writes with zero DM target failures.
 
 ## Benchmark pairing and provenance
 
