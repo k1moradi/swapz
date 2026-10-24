@@ -48,7 +48,7 @@ marker=".swapz-owned"
    ! -L "$cli_dir" && ! -L "$helper_dir" ]] || {
   echo "BLOCKED: symlinked package prefix" >&2; exit 1;
 }
-if [[ "$action" == uninstall ]] &&
+if [[ -z "$test_root" && "$action" == uninstall ]] &&
    [[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]; then
   echo "BLOCKED: loaded module; refusing DKMS removal" >&2; exit 1;
 fi

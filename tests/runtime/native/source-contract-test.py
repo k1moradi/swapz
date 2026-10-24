@@ -2702,6 +2702,18 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('"id36": re.compile(', runner)
         self.assertIn("ID36 low-RAM/heavy-CPU evidence is incomplete", runner)
 
+    def test_dkms_sandbox_does_not_depend_on_host_module_state(self):
+        package = (ROOT / "packaging/package-dkms.sh").read_text()
+        self.assertIn(
+            'if [[ -z "$test_root" && "$action" == uninstall ]] &&',
+            package)
+        self.assertIn(
+            '[[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]',
+            package)
+        self.assertIn(
+            'BLOCKED: loaded module; refusing DKMS removal',
+            package)
+
     def test_owned_nullblk_smoke_qualifies_retained_synthetic_faults(self):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         # These are deliberately pre-submission injections on the already

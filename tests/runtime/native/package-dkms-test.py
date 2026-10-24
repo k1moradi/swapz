@@ -99,6 +99,9 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertEqual(run.stdout, "3.0.0-alpha.99")
 
     def test_tamper_and_dkms_failure_keep_owned_files(self):
+        # SWAPZ_PACKAGE_TEST_ROOT is a hermetic fake-DKMS sandbox. A real
+        # dm_swapz left loaded by an earlier privileged qualification must not
+        # change this rootless package lifecycle.
         self.assertEqual(self.invoke("install").returncode, 0)
         binary = self.prefix / "sbin/swapzctl"
         original = binary.read_bytes()
