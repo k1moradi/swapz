@@ -1108,7 +1108,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             runner.STORAGE_ENVELOPE_SPECS["nvme_gen4"]["submit_queues"], 4)
         self.assertEqual(
-            runner.STORAGE_ENVELOPE_SPECS["nvme_gen5"]["submit_queues"], 8)
+            runner.STORAGE_ENVELOPE_SPECS["nvme_gen5"]["submit_queues"], 4)
         nvme_limits = runner.device_model_limits(
             runner.STORAGE_ENVELOPE_SPECS["nvme_gen5"], offered_qd=32)
         self.assertEqual(nvme_limits["effective_queue_depth"], 32)

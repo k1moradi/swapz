@@ -845,7 +845,7 @@ A separate directional QD32 service-envelope sweep must additionally run exact,
 allowlisted null_blk tuples for modern SD (100 MiB/s, 500000 ns, submit_queues=1,
 hwq=4), SATA SSD (500 MiB/s, 100000 ns, submit_queues=1, hwq=32), Gen4 NVMe
 (6500 MiB/s, 25000 ns, submit_queues=4, hwq=64) and Gen5 NVMe (12000 MiB/s,
-14000 ns, submit_queues=8, hwq=64). Arbitrary cap/latency/queue combinations
+14000 ns, submit_queues=4, hwq=64). Arbitrary cap/latency/queue combinations
 must still be rejected before privilege. Each envelope runs one production
 async mixed off/swapz comparison and one positive-delta64 write-only off/swapz
 comparison. These rows are directional bottleneck evidence and do not replace

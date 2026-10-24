@@ -119,7 +119,7 @@ if [[ $# -ge 3 && ${@: -2:1} == --lower-mbps &&
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 case "$LOWER_MBPS:$COMPLETION_NSEC:$SUBMIT_QUEUES:$HW_QUEUE_DEPTH" in
-    10:1000000:1:1|80:150000:1:64|100:500000:1:4|500:100000:1:32|6500:25000:4:64|12000:14000:8:64) ;;
+    10:1000000:1:1|80:150000:1:64|100:500000:1:4|500:100000:1:32|6500:25000:4:64|12000:14000:4:64) ;;
     *) echo 'BLOCKED: unsupported owned-RAM storage service envelope' >&2; exit 2 ;;
 esac
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then

@@ -11,7 +11,38 @@ for cmd in rmmod dmsetup timeout awk sed tr findmnt cat; do
 done
 [[ $(id -u) == 0 ]] || fail "root required for loaded preflight"
 
+clean_orphaned_nullb() {
+    local cfgbase=/sys/kernel/config/nullb
+    [[ -d $cfgbase ]] || return 0
+    local cfg name idx dev_disk dev_path holders
+    shopt -s nullglob
+    for cfg in "$cfgbase"/nullb-swapz-*; do
+        [[ -d $cfg ]] || continue
+        name="${cfg##*/}"
+        [[ $name =~ ^nullb-swapz-[a-f0-9]{16}$ ]] || continue
+        [[ -r $cfg/memory_backed && "$(cat "$cfg/memory_backed" 2>/dev/null)" == 1 ]] || continue
+        idx="$(cat "$cfg/index" 2>/dev/null || true)"
+        if [[ $idx =~ ^[0-9]+$ ]]; then
+            dev_disk="nullb$idx"
+            dev_path="/dev/$dev_disk"
+            if [[ -d "/sys/block/$dev_disk/holders" ]]; then
+                holders="$(ls -A "/sys/block/$dev_disk/holders" 2>/dev/null || true)"
+                [[ -z "$holders" ]] || continue
+            fi
+            [[ -z "$(findmnt -rn -S "$dev_path" 2>/dev/null || true)" ]] || continue
+            if awk -v path="$dev_path" 'NR > 1 && $1 == path { found=1 } END { exit found ? 0 : 1 }' /proc/swaps 2>/dev/null; then
+                continue
+            fi
+        fi
+        echo 0 > "$cfg/power" 2>/dev/null || true
+        rmdir "$cfg" 2>/dev/null || true
+        note "AUTO_REMOVED_ORPHANED_NULLB=$name"
+    done
+    shopt -u nullglob
+}
+
 if [[ ! -d /sys/module/dm_swapz ]]; then
+    clean_orphaned_nullb
     note "LOADED_PREFLIGHT_DM_SWAPZ=absent"
     exit 0
 fi
@@ -37,6 +68,7 @@ remove_idle_module() {
 refcount="$(read_refcount)"
 if (( refcount == 0 )); then
     remove_idle_module
+    clean_orphaned_nullb
     note "AUTO_REMOVED_IDLE_DM_SWAPZ=1"
     exit 0
 fi
@@ -151,5 +183,10 @@ timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$owned_map" ||
 refcount="$(read_refcount)"
 (( refcount == 0 )) ||
     fail "dm_swapz still has references after stale harness mapping removal"
+if [[ -n $owned_config && -d $owned_config ]]; then
+    echo 0 > "$owned_config/power" 2>/dev/null || true
+    rmdir "$owned_config" 2>/dev/null || true
+fi
 remove_idle_module
+clean_orphaned_nullb
 note "AUTO_REMOVED_STALE_OWNED_DM_SWAPZ=1"

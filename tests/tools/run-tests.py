@@ -46,7 +46,7 @@ STORAGE_ENVELOPE_SPECS = {
                   "queue_mode": 2, "submit_queues": 4, "hw_queue_depth": 64,
                   "purpose": "SYNTHETIC_GEN4_NVME_SERVICE_ENVELOPE"},
     "nvme_gen5": {"cap_mib_s": 12000, "completion_nsec": 14000, "irqmode": 2,
-                  "queue_mode": 2, "submit_queues": 8, "hw_queue_depth": 64,
+                  "queue_mode": 2, "submit_queues": 4, "hw_queue_depth": 64,
                   "purpose": "SYNTHETIC_GEN5_NVME_SERVICE_ENVELOPE"},
 }
 STORAGE_ENVELOPE_ORDER = tuple(STORAGE_ENVELOPE_SPECS)

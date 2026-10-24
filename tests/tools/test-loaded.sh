@@ -217,7 +217,7 @@ for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5; do
                         --hw-queue-depth 64 --completion-nsec 25000)
             ;;
         nvme_gen5)
-            model_args=(--lower-mbps 12000 --submit-queues 8
+            model_args=(--lower-mbps 12000 --submit-queues 4
                         --hw-queue-depth 64 --completion-nsec 14000)
             ;;
         *) echo 'BLOCKED: unsupported storage service envelope' >&2; exit 2 ;;

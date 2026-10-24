@@ -146,7 +146,7 @@ The mixed QD32 matrix keeps four sessions on the slow model as a bounded directi
 - modern-SD envelope: 100 MiB/s, 0.5 ms completion, one submit queue, hwq 4;
 - SATA-SSD envelope: 500 MiB/s, 0.1 ms completion, one submit queue, hwq 32;
 - Gen4-NVMe envelope: 6500 MiB/s, 25 us completion, four submit queues, hwq 64;
-- Gen5-NVMe envelope: 12000 MiB/s, 14 us completion, eight submit queues, hwq 64.
+- Gen5-NVMe envelope: 12000 MiB/s, 14 us completion, four submit queues, hwq 64.
 
 Each envelope replays the same QD32 mixed workload with production asynchronous preparation and separately replays the positive delta64 write-only fixture. The report compares raw/off with swapz using lower-WRITE byte speedup, lower-WRITE request speedup and useful-WRITE speedup. It additionally reports
 `(useful_speedup - 1) / (lower_byte_speedup - 1)` as **bandwidth-opportunity capture** when lower bytes improve. This is diagnostic attribution, not a qualification score: a low or negative value means saved lower-device work is not reaching useful service.
