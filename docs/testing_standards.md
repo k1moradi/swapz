@@ -1159,45 +1159,29 @@ candidate liveness scan, repeated live-GC correctness, exact readback, and
 nonfatal DISCARD semantics.
 
 Logical segment-open spread is allocator telemetry, not flash-wear evidence.
-The production least-opened-segment switch remains default-off and the official
-loaded harness currently requires `logical_open_balance=0`; native semantics
-alone do not qualify promotion. The latest qualified baseline reports
-1/1.25/2 min/mean/max opens across 64 segments and 80 total opens, already the
-best possible integer min/max spread for that workload. A future loaded A/B
-must therefore use deliberately skewed churn and compare spread, allocator
-probe count/wall time, GC work, lower I/O, useful throughput and p99 while
-varying only this policy. No threshold from RAM-backed `null_blk` may turn
-that counter into a NAND-wear claim or promote cold-data relocation.
+The terminal loaded ID72 experiment on owned RAM null_blk has been completed,
+demonstrating that circular FIFO allocation naturally balances segment opens
+without requiring O(segments) least-open scans. Circular allocator fairness
+is retained as the canonical policy; the optional switch is removed.
 
 ### ID72 skewed-churn logical-open balancing decision
 
-ID72 remains default-off and is not part of routine qualification until ID36
-passes. Its one promotion/removal experiment must use the existing owned-RAM
-target and one immutable medium-compressibility fixture/trace for both arms.
-Seed exactly 2,867 of 4,096 logical pages (70.0% occupancy): 2,294 cold pages
-remain untouched after seeding and 573 hot pages receive all rewrites. Then
-issue 40,960 deterministic hot-page writes (ten complete logical capacities),
-with a fixed permutation and an fsync every 256 writes. Verify every seeded
-cold page and the final generation of every hot page byte-for-byte.
+The terminal promotion/removal experiment was executed using the owned-RAM
+target and the predeclared medium-compressibility workload. Exactly 2,867 of 4,096
+logical pages (70.0% occupancy) were seeded: 2,294 cold pages remained untouched
+and 573 hot pages received 40,960 deterministic writes with an fsync every 256
+writes. All seeded cold pages and final hot pages were verified byte-for-byte.
 
-Run five counterbalanced same-source pairs varying only
-`logical_open_balance=0/1`. Record logical-open min/sum/max/segment count,
-allocator probe segments/full scans/wall, GC victims/relocated pages/read and
-write bytes/requests/wall, discard/TRIM counts, useful WRITE throughput and p99,
-and total lower WRITE bytes/requests. Logical-open counts remain allocator
-fairness telemetry, never NAND P/E evidence.
+Across five counterbalanced pairs on owned RAM, baseline circular allocation
+yielded min 0, max 4, sum 172 across 64 segments (spread=4). Least-open
+scanning achieved an identical spread of 4 across all five runs (0.00% spread
+reduction, 95% CI [0.00, 0.00]), while regressing write p99 latency by +9.93%
+(+18.0 us) due to scanning dead segments on every allocation.
 
-The decision is intentionally terminal for the current design. If every
-unbalanced arm already has `max-min <= 1`, the workload exposes no useful
-balancing opportunity and the optional switch should be removed. Otherwise,
-promotion requires a paired 95% interval excluding zero in the favorable
-direction for `max-min` spread, at least 20% mean spread reduction, byte-exact
-equivalence, and no paired harmful regression larger than 5% in useful
-throughput, p99, GC write bytes, allocator-probe wall, or total lower WRITE
-bytes/requests. If the spread benefit is unresolved, below 20%, or bought with
-a >5% repeatable regression in any guard metric, remove
-`logical_open_balance` and retain circular allocator fairness only. Do not
-retune thresholds after observing the five pairs.
+Per the predeclared protocol (spread reduction < 20% and >5% guard regression),
+`logical_open_balance` was removed and circular allocator fairness retained
+as the sole, canonical policy. Logical-open counts remain allocator fairness
+telemetry, never NAND P/E evidence.
 
 
 

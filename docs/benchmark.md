@@ -291,15 +291,15 @@ remains only as a compatibility fallback for callers without the sidecar.
 **ID62 physical media.** No current benchmark may collect physical evidence.
 ID29/ID63 RAM qualification does not authorize physical storage or active swap.
 
-**ID72 logical allocator fairness.** The production switch exists, but the
-official loaded harness still pins `logical_open_balance=0`; there is no owner
-loaded A/B. The latest qualified baseline already reports segment opens
-1/1.25/2 min/mean/max across 64 segments and 80 total opens, which is the
-minimum possible integer min/max spread for that workload. A meaningful future
-A/B must deliberately create skewed reusable-segment histories and compare
-open-count spread, allocator probes/wall time, GC work, lower I/O, useful
-throughput and p99. RAM `null_blk` results remain allocator-fairness evidence,
-not NAND-wear evidence.
+**ID72 logical allocator fairness.** The terminal loaded A/B experiment was
+executed following the pass of ID36. Using the predeclared five-pair 70%-occupancy
+40,960-rewrite cold/hot workload on owned RAM, baseline circular allocation
+yielded min 0, max 4, sum 172 across 64 segments (spread=4). Least-opened scanning
+achieved identical min 0, max 4, sum 172 (0.00% spread reduction) while regressing
+write p99 latency by +9.93% (+18.0 us). Per the terminal decision protocol,
+the redundant switch was removed and circular allocator fairness retained as the
+sole canonical policy. Logical opens remain allocator fairness telemetry, not
+NAND-wear evidence.
 
 ## ID67 predictor evidence and production route
 

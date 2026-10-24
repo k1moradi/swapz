@@ -167,7 +167,7 @@ changes.
 | 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
 | 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
-| 72 | Physical wear / logical allocator fairness | **4 production switch/native semantics implemented; terminal loaded A/B designed** | Optional `logical_open_balance=1` remains default-off. After ID36 passes, run the predeclared five-pair 70%-occupied cold/hot workload: 2,294 cold + 573 hot pages and 40,960 deterministic hot rewrites. If baseline spread is already <=1, remove the switch. Otherwise promotion requires >=20% mean `max-min` spread reduction with a favorable paired 95% interval and no >5% repeatable regression in service, GC/probe cost or lower WRITE work. Logical opens are allocator fairness telemetry, not NAND P/E cycles. |
+| 72 | Physical wear / logical allocator fairness | **1 terminal A/B completed; switch removed, circular fairness retained** | Five-pair 70%-occupancy 40,960-rewrite loaded benchmark on owned RAM proved circular probing naturally distributes opens evenly across dead segments (min 0, max 4, sum 172 in all runs; spread 4). Least-open scanning achieved 0.00% spread reduction while regressing write p99 latency by +9.93% (+18.0 us). Per the predeclared terminal protocol, the optional switch was removed and circular allocator fairness was retained as the sole canonical policy. Logical opens remain allocator fairness telemetry, never NAND P/E cycles. |
 | 73 | Flexible/larger extent study | **5 larger/irregular classes deprioritized** | Report 711ceaad shows packed 1/2/4 captures the dominant geometry gain. A 3-block class saves only 2/2,089 blocks; 32/64KiB maxima save 14/22 more blocks while cold-read cost rises 1.47->1.53/1.55. Keep SWZ 1/2/4 classes unchanged unless a broader representative corpus materially overturns this result. |
 
 
@@ -249,8 +249,10 @@ AVX-512 review/build evidence does not qualify runtime on this SSE2-only host.
    QD32 requests next, then collect realistic churn/GC/TRIM evidence before
    choosing the asynchronous-TRIM implementation. The design below is a review
    proposal.
-4. Keep `logical_open_balance=0` until the churn A/B establishes allocator
-   spread and probe/GC cost. Logical opens remain distinct from NAND wear.
+4. Terminal ID72 churn A/B completed: circular allocator fairness proved
+   optimal (spread=4 across all runs, 0.00% spread reduction and +9.93% p99
+   latency regression with least-open scanning); optional switch removed and
+   circular allocator fairness retained. Logical opens remain distinct from NAND wear.
 5. Keep SWZ 1/2/4 classes, K=1 scheduling and ID63 completion semantics
    unchanged. Do not implement the currently weak 3/8/16-block class ideas.
 6. Fully qualify the production ID67 route, including byte-exact delta64 reads,

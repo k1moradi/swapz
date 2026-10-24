@@ -104,10 +104,6 @@ MODULE_PARM_DESC(invalidate_cache_on_write_admit,
 		 "A/B only: restore pre-2e309ec read-cache invalidation at "
 		 "ordinary WRITE admission; default off");
 
-static bool swapz_logical_open_balance;
-module_param_named(logical_open_balance, swapz_logical_open_balance, bool, 0444);
-MODULE_PARM_DESC(logical_open_balance,
-		 "A/B least-opened logical segment selection; not NAND-wear policy");
 
 struct swapz_delta64_stats {
 	u64 eligible;
@@ -2164,7 +2160,7 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 {
 	swapz_u32 scan, segment, selected = ~(swapz_u32)0;
 	swapz_u32 start_probe = ctx->authority.next_segment_probe;
-	swapz_u32 best = ~(swapz_u32)0, best_programs = ~(swapz_u32)0;
+	swapz_u32 best = ~(swapz_u32)0;
 	swapz_u16 best_count = ~(swapz_u16)0;
 
 	ctx->gc_choose_calls++;
@@ -2180,7 +2176,7 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 		segment = (start_probe + scan) % ctx->segment_count;
 		mapped = ctx->segment_mapped_pages[segment];
 		swapz_u16 count;
-		swapz_u32 score, programs;
+		swapz_u32 score;
 
 		ctx->gc_choose_segment_entries++;
 		if (mapped > (swapz_u32)(swapz_u16)~0U)
@@ -2215,15 +2211,9 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 			score = ctx->gc_io_scores[segment];
 			break;
 		}
-		programs = ctx->segment_program_counts ?
-			ctx->segment_program_counts[segment] : 0;
-		if (swapz_gc_prefer(score, count, best, best_count) ||
-		    (ctx->authority.balance_segment_opens &&
-		     score == best && count == best_count &&
-		     programs < best_programs)) {
+		if (swapz_gc_prefer(score, count, best, best_count)) {
 			best = score;
 			best_count = count;
-			best_programs = programs;
 			selected = segment;
 		}
 	}
@@ -5646,7 +5636,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Cannot initialize exact segment page lists";
 		goto fail;
 	}
-	ctx->authority.balance_segment_opens = swapz_logical_open_balance;
 	error = swapz_enable_segment_gc_accounting(&ctx->authority,
 					      ctx->gc_scores,
 					      ctx->gc_io_scores,
@@ -6140,7 +6129,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->flush_meter.failures, ctx->flush_meter.injected,
 		       ctx->flush_meter.fail_nth,
 		       1U,
-		       ctx->authority.balance_segment_opens,
+		       0U,
 		       ctx->engine.bulk_enabled,
 		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
 		       ctx->engine.bulk_padding_blocks,

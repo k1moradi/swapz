@@ -114,8 +114,6 @@ struct swapz_authority {
 	swapz_u32 *segment_last_page;
 	swapz_u32 *page_prev_in_segment;
 	swapz_u32 *page_next_in_segment;
-	/* Optional allocator-fairness A/B; logical opens are NOT NAND wear. */
-	swapz_u8 balance_segment_opens;
 	/* Optional per-segment GC scores maintained with map publication. */
 	swapz_u32 *segment_gc_live_bytes;
 	swapz_u32 *segment_gc_io_cost;

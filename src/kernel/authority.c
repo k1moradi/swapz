@@ -467,31 +467,6 @@ static int swapz_pick_dead_segment(struct swapz_authority *a)
 
 	if (!count)
 		return swapz_finish_alloc_probe(a, probe_start, -ENOSPC);
-	if (a->balance_segment_opens && a->segment_mapped_pages &&
-	    a->segment_program_counts) {
-		swapz_u32 selected = ~(swapz_u32)0;
-		swapz_u32 best = ~(swapz_u32)0;
-
-		for (scan = 0; scan < count; ++scan) {
-			swapz_u32 segment =
-				(a->next_segment_probe + scan) % count;
-			swapz_u32 programs;
-
-			a->alloc_probe_segments++;
-			if (!swapz_dead_segment_eligible(a, segment))
-				continue;
-			programs = a->segment_program_counts[segment];
-			if (programs < best) {
-				selected = segment;
-				best = programs;
-				if (!programs)
-					break;
-			}
-		}
-		if (selected == ~(swapz_u32)0)
-			return swapz_finish_alloc_probe(a, probe_start, -ENOSPC);
-		return swapz_claim_dead_segment(a, selected, probe_start);
-	}
 	for (scan = 0; scan < count; ++scan) {
 		swapz_u32 segment = (a->next_segment_probe + scan) % count;
 		int result;

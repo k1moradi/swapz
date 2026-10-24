@@ -59,7 +59,7 @@ static int setup(void)
 	return rc;
 }
 
-static int setup_indexed(swapz_u32 physical_blocks, int balance)
+static int setup_indexed(swapz_u32 physical_blocks)
 {
 	swapz_u32 segments = physical_blocks / SWAPZ_SEGMENT_BLOCKS;
 	int rc;
@@ -85,7 +85,6 @@ static int setup_indexed(swapz_u32 physical_blocks, int balance)
 	recycle_hook_last_segment = ~(swapz_u32)0;
 	recycle_hook_error = 0;
 	a.reuse_dead_segments = 1;
-	a.balance_segment_opens = balance;
 	a.dead_segment_recycle = recycle_hook;
 	a.dead_segment_recycle_opaque = &a;
 	return 0;
@@ -217,7 +216,7 @@ static int test_segment_page_lists_track_authority(void)
 {
 	const swapz_u32 none = ~(swapz_u32)0;
 
-	CHECK(setup_indexed(768, 0) == 0);
+	CHECK(setup_indexed(768) == 0);
 	CHECK(first_page[0] == none && last_page[0] == none);
 	CHECK(write_page(0) == 0);
 	CHECK(write_page(1) == 0);
@@ -254,44 +253,52 @@ static int test_segment_page_lists_track_authority(void)
 	return 0;
 }
 
-static int test_logical_open_balance_prefers_least_opened_dead_segment(void)
+static int test_circular_allocator_fairness_probes_sequentially(void)
 {
 	struct swapz_tx tx;
 	swapz_u32 logical = 0;
 
-	CHECK(setup_indexed(1280, 1) == 0);
+	CHECK(setup_indexed(1280) == 0);
 	/* 32 logical pages => two reserve segments, three foreground segments. */
 	CHECK(roles[0] == 1 && roles[1] == 1 && roles[2] == 1);
-	program_counts[0] = 5;
-	program_counts[1] = 2;
-	program_counts[2] = 0;
 	a.next_segment_probe = 0;
-	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
-	CHECK(tx.start_block == 2U * SWAPZ_SEGMENT_BLOCKS);
-	CHECK(a.open_segment == 2 && program_counts[2] == 1);
-	CHECK(swapz_abort(&a, &tx) == 0);
 
-	CHECK(setup_indexed(1280, 1) == 0);
-	program_counts[0] = 5;
-	program_counts[1] = 2;
-	program_counts[2] = 3;
-	a.next_segment_probe = 0;
+	/* Probe 1 claims segment 0 and advances next_segment_probe to 1 */
+	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == 0U);
+	CHECK(a.open_segment == 0 && a.next_segment_probe == 1);
+	CHECK(swapz_abort(&a, &tx) == 0);
+	a.open_segment = ~(swapz_u32)0;
+
+	/* Probe 2 claims segment 1 and advances next_segment_probe to 2 */
 	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
 	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS);
-	CHECK(a.open_segment == 1 && program_counts[1] == 3);
+	CHECK(a.open_segment == 1 && a.next_segment_probe == 2);
+	CHECK(swapz_abort(&a, &tx) == 0);
+	a.open_segment = ~(swapz_u32)0;
+
+	/* Probe 3 claims segment 2 and sets next_segment_probe to 3 */
+	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == 2U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(a.open_segment == 2 && a.next_segment_probe == 3);
+	CHECK(swapz_abort(&a, &tx) == 0);
+	a.open_segment = ~(swapz_u32)0;
+
+	/* Probe 4 skips reserve segments 3 and 4, wrapping back to claim segment 0 */
+	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == 0U);
+	CHECK(a.open_segment == 0 && a.next_segment_probe == 1);
 	CHECK(swapz_abort(&a, &tx) == 0);
 	return 0;
 }
 
-static int test_logical_open_balance_applies_to_gc_destination(void)
+static int test_circular_allocator_fairness_applies_to_gc_destination(void)
 {
-	CHECK(setup_indexed(1280, 1) == 0);
-	program_counts[3] = 4;
-	program_counts[4] = 0;
+	CHECK(setup_indexed(1280) == 0);
 	a.next_segment_probe = 3;
 	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
-	CHECK(a.gc_destination == 4);
-	CHECK(a.open_segment == 4 && program_counts[4] == 1);
+	CHECK(a.gc_destination == 3 && a.open_segment == 3);
+	CHECK(a.next_segment_probe == 4);
 	return 0;
 }
 
@@ -305,8 +312,8 @@ int main(void)
 	CHECK(test_corrupted_liveness_never_reclaims_live_map() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
 	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
-	CHECK(test_logical_open_balance_prefers_least_opened_dead_segment() == 0); passed++;
-	CHECK(test_logical_open_balance_applies_to_gc_destination() == 0); passed++;
+	CHECK(test_circular_allocator_fairness_probes_sequentially() == 0); passed++;
+	CHECK(test_circular_allocator_fairness_applies_to_gc_destination() == 0); passed++;
 	printf("SWAPZ_DEAD_SEGMENT_REUSE_TESTS_PASS=%d\n", passed);
 	return 0;
 }
