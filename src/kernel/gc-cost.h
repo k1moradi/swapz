@@ -25,6 +25,22 @@ static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 }
 
 /*
+ * Fast-path helper when swapz_gc_live_byte_cost(m) has already been computed
+ * by the caller, avoiding a duplicate validation and length calculation.
+ */
+static inline swapz_u32 swapz_gc_estimated_io_cost_with_bytes(
+	const struct swapz_map *m, swapz_u32 bytes)
+{
+	swapz_u32 reads;
+
+	if (!bytes || (m->extent_blocks != 1 && m->extent_blocks != 2 &&
+		       m->extent_blocks != 4))
+		return 0;
+	reads = m->extent_blocks == 4 ? 3 : m->extent_blocks;
+	return bytes + reads * SWAPZ_BLOCK_BYTES;
+}
+
+/*
  * Conservative host I/O-cost estimate for a single authoritative record.
  * A GC move MUST issue a selective lower read of the source before writing
  * the destination. A packed SWZ extent may take more than one block to
@@ -39,14 +55,8 @@ static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
  */
 static inline swapz_u32 swapz_gc_estimated_io_cost(const struct swapz_map *m)
 {
-	swapz_u32 bytes = swapz_gc_live_byte_cost(m);
-	swapz_u32 reads;
-
-	if (!bytes || (m->extent_blocks != 1 && m->extent_blocks != 2 &&
-		       m->extent_blocks != 4))
-		return 0;
-	reads = m->extent_blocks == 4 ? 3 : m->extent_blocks;
-	return bytes + reads * SWAPZ_BLOCK_BYTES;
+	return swapz_gc_estimated_io_cost_with_bytes(
+		m, swapz_gc_live_byte_cost(m));
 }
 
 /*
@@ -80,7 +90,9 @@ static inline int swapz_gc_has_possible_headroom(swapz_u32 live_bytes)
  * solely to reject victims with a provably full GC destination before
  * performing potentially 2MiB of wasted relocation I/O.
  */
-#define SWAPZ_GC_UNSHAREABLE_MIN_LENGTH 	((SWAPZ_MAX_EXTENT_BYTES - sizeof(struct swapz_header) - 	  5U * sizeof(struct swapz_record)) / 5U + 1U)
+#define SWAPZ_GC_UNSHAREABLE_MIN_LENGTH \
+	((SWAPZ_MAX_EXTENT_BYTES - sizeof(struct swapz_header) - \
+	  5U * sizeof(struct swapz_record)) / 5U + 1U)
 
 static inline swapz_u8 swapz_gc_min_live_blocks(const struct swapz_map *m)
 {
@@ -94,7 +106,7 @@ static inline swapz_u8 swapz_gc_min_live_blocks(const struct swapz_map *m)
 }
 
 static inline int swapz_gc_candidate_can_free_block(swapz_u32 live_bytes,
-						  swapz_u16 min_live_blocks)
+						    swapz_u16 min_live_blocks)
 {
 	return swapz_gc_has_possible_headroom(live_bytes) &&
 	       min_live_blocks < SWAPZ_SEGMENT_BLOCKS;
@@ -103,7 +115,7 @@ static inline int swapz_gc_candidate_can_free_block(swapz_u32 live_bytes,
 /* For the selected policy choose lower relocation cost, then fewer
  * records. Stable segment scan order breaks remaining ties. */
 static inline int swapz_gc_prefer(swapz_u32 score, swapz_u16 count,
-			       swapz_u32 best, swapz_u16 best_count)
+				  swapz_u32 best, swapz_u16 best_count)
 {
 	return count && (score < best ||
 			 (score == best && count < best_count));

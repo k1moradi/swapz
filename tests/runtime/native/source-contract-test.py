@@ -2078,7 +2078,7 @@ static swapz_u16 swapz_probe_set(
         status = body("swapz_status")
         self.assertIn("a->dead_segment_recycle", authority)
         self.assertLess(authority.index("if (used && a->dead_segment_recycle)"),
-                        authority.index("memset(a->live_records + start"))
+                        authority.index("memset(a->extent_classes + start"))
         self.assertIn("swapz_gc_commit_rotation(a, victim)", gc)
         self.assertLess(gc.index("swapz_gc_commit_rotation(a, victim)"),
                         gc.index("swapz_discard_dead_segment(ctx, victim)"))
