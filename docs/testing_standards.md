@@ -402,16 +402,21 @@ healthy product arm. Benchmark diagnostics and errors use the product name
 
 The retained suspend/resume oracle gates on observing an open retained window,
 successful suspend/resume, a nonfailed target, and byte-exact verification of
-all accepted pages. The bounded private writer starts first; the status sampler
-then polls without an added sleep for exactly as long as that writer process
-remains alive. A fixed poll-count loop is forbidden because it can exhaust
-before the child is scheduled and falsely miss the first 4ms retention
-opportunity. The sampler must still observe `retain_timer_arms > windows`;
-historical timer activity is not a substitute for an actually open window. The
-maximum supported 4ms deadline can legitimately expire between that observation
-and the separate suspend request, so the oracle must not require a specific
-close-reason counter afterwards. Loaded failure reporting skips the generic
-cleanup epilogue so the preceding specific sanitized failure remains visible.
+all accepted pages. The bounded private writer must remain blocked on a private
+start gate until the status sampler has completed one valid status read and
+announced readiness. Only then may the writer be released. This sampler-first
+handshake prevents a fast child from consuming the initial 4ms retention
+opportunity before the separately scheduled observer runs. After release, the
+sampler polls without an added sleep for exactly as long as that writer process
+remains alive. A fixed poll-count loop is forbidden. The sampler must still
+observe `retain_timer_arms > windows`; historical timer activity is not a
+substitute for an actually open window. Synchronization waits are bounded and
+must terminate both helper processes before reporting failure so teardown
+cannot inherit a blocked FIFO reader. The maximum supported 4ms deadline can
+legitimately expire between that observation and the separate suspend request,
+so the oracle must not require a specific close-reason counter afterwards.
+Loaded failure reporting skips the generic cleanup epilogue so the preceding
+specific sanitized failure remains visible.
 
 
 Production-C differential tests for the lower-run writer must not freeze an
@@ -751,6 +756,14 @@ retries transient fetch/push failures even when origin/main did not move. If it
 did move, `merge-base --is-ancestor` must prove the tested code revision
 remains in current main history before a report-only child of that fetched head
 is attempted. Rewritten/diverged history or exhausted retries fail closed.
+
+Native report-publication tests that create temporary Git repositories must use
+`git init --object-format=sha1` (and the equivalent explicit SHA-1 form for
+bare origins). The GitHub repository and current report/provenance schema use
+40-hex SHA-1 object IDs, so test sandboxes must not inherit an operator's
+`init.defaultObjectFormat` or `GIT_DEFAULT_HASH`. Supporting SHA-256
+repositories is a deliberate report-schema migration, not a fixture-side
+autodetection change.
 
 ### Generated report versus tracked source cleanliness
 

@@ -692,23 +692,36 @@ suspend_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$suspend_before" retain_ms) == 4 &&
    $(status_u64 "$suspend_before" failed) == 0 )) ||
     fail "retained suspend mapping policy mismatch"
-# Launch the bounded private writer first, then sample for exactly as long as
-# that writer remains alive. A fixed poll count can exhaust before the child is
-# scheduled and falsely miss the first 4ms retained window. Poll without sleep
-# so adaptive singleton fast-close cannot hide the initial full-retention
-# opportunity; timer_arms > windows still proves a window is open NOW rather
-# than merely proving historical timer activity.
+# Arm the status sampler before releasing the bounded private writer. Starting
+# the writer first can let a fast child consume the initial 4ms retained window
+# before the separately scheduled sampler runs. The writer therefore blocks on
+# a private FIFO until the sampler has completed one valid status read and
+# announced READY. Poll without sleep so adaptive singleton fast-close cannot
+# hide the initial full-retention opportunity; timer_arms > windows still
+# proves a window is open NOW rather than historical timer activity.
 lifecycle_probe="$SESSION/retained-open-probe"
+lifecycle_ready="$SESSION/retained-probe-ready"
+lifecycle_start="$SESSION/retained-writer-start"
 : >"$lifecycle_probe"
-timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
-    "/dev/mapper/$DMNAME" --write-series 128 2 \
-    >"$SESSION/suspend-writer.log" 2>&1 &
+mkfifo "$lifecycle_ready" "$lifecycle_start" ||
+    fail "cannot create retained lifecycle synchronization FIFOs"
+(
+    lifecycle_start_token="$(cat "$lifecycle_start")" || exit 5
+    [[ "$lifecycle_start_token" == START ]] || exit 6
+    exec timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
+        "/dev/mapper/$DMNAME" --write-series 128 2
+) >"$SESSION/suspend-writer.log" 2>&1 &
 writer_pid=$!
 (
+    ready_sent=0
     while kill -0 "$writer_pid" 2>/dev/null; do
         lifecycle_status="$(dmsetup status "$DMNAME")" || exit 2
         timer_arms="$(status_u64 "$lifecycle_status" retain_timer_arms)" || exit 3
         lifecycle_windows="$(status_u64 "$lifecycle_status" windows)" || exit 4
+        if (( !ready_sent )); then
+            printf 'READY\n' >"$lifecycle_ready" || exit 5
+            ready_sent=1
+        fi
         if (( timer_arms > lifecycle_windows )); then
             printf 'OPEN\n' >"$lifecycle_probe"
             exit 0
@@ -717,6 +730,25 @@ writer_pid=$!
     exit 1
 ) &
 probe_pid=$!
+probe_ready="$(timeout --signal=TERM --kill-after=1s 5s cat "$lifecycle_ready")" || {
+    kill "$probe_pid" "$writer_pid" 2>/dev/null || true
+    wait "$probe_pid" "$writer_pid" 2>/dev/null || true
+    fail "retained lifecycle sampler did not become ready"
+}
+if [[ "$probe_ready" != READY ]] ||
+   ! kill -0 "$probe_pid" 2>/dev/null ||
+   ! kill -0 "$writer_pid" 2>/dev/null; then
+    kill "$probe_pid" "$writer_pid" 2>/dev/null || true
+    wait "$probe_pid" "$writer_pid" 2>/dev/null || true
+    fail "retained lifecycle synchronization failed before writer release"
+fi
+if ! timeout --signal=TERM --kill-after=1s 5s sh -c \
+    'printf "START\\n" >"$1"' sh "$lifecycle_start"; then
+    kill "$probe_pid" "$writer_pid" 2>/dev/null || true
+    wait "$probe_pid" "$writer_pid" 2>/dev/null || true
+    fail "retained lifecycle writer release failed"
+fi
+rm -f "$lifecycle_ready" "$lifecycle_start"
 probe_rc=0
 wait "$probe_pid" || probe_rc=$?
 open_window=0

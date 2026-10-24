@@ -2399,8 +2399,8 @@ class ReportContract(unittest.TestCase):
             sandbox = Path(name)
             checkout, origin = sandbox / "checkout", sandbox / "origin.git"
             checkout.mkdir()
-            git("init", "--bare", str(origin), cwd=sandbox)
-            git("init", cwd=checkout)
+            git("init", "--object-format=sha1", "--bare", str(origin), cwd=sandbox)
+            git("init", "--object-format=sha1", cwd=checkout)
             git("checkout", "-b", "main", cwd=checkout)
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
@@ -2496,7 +2496,7 @@ class ReportContract(unittest.TestCase):
         with tempfile.TemporaryDirectory(
                 prefix="report-chain-", dir=ROOT / "build/tests") as name:
             checkout = Path(name)
-            git("init", cwd=checkout)
+            git("init", "--object-format=sha1", cwd=checkout)
             git("checkout", "-b", "main", cwd=checkout)
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
@@ -2537,8 +2537,8 @@ class ReportContract(unittest.TestCase):
             checkout, origin, peer = (
                 sandbox / "checkout", sandbox / "origin.git", sandbox / "peer")
             checkout.mkdir()
-            git("init", "--bare", str(origin), cwd=sandbox)
-            git("init", cwd=checkout)
+            git("init", "--object-format=sha1", "--bare", str(origin), cwd=sandbox)
+            git("init", "--object-format=sha1", cwd=checkout)
             git("checkout", "-b", "main", cwd=checkout)
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
@@ -2622,8 +2622,8 @@ class ReportContract(unittest.TestCase):
             checkout, origin, peer = (
                 sandbox / "checkout", sandbox / "origin.git", sandbox / "peer")
             checkout.mkdir()
-            git("init", "--bare", str(origin), cwd=sandbox)
-            git("init", cwd=checkout)
+            git("init", "--object-format=sha1", "--bare", str(origin), cwd=sandbox)
+            git("init", "--object-format=sha1", cwd=checkout)
             git("checkout", "-b", "main", cwd=checkout)
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
@@ -2710,8 +2710,8 @@ class ReportContract(unittest.TestCase):
             checkout, origin, peer = (
                 sandbox / "checkout", sandbox / "origin.git", sandbox / "peer")
             checkout.mkdir()
-            git("init", "--bare", str(origin), cwd=sandbox)
-            git("init", cwd=checkout)
+            git("init", "--object-format=sha1", "--bare", str(origin), cwd=sandbox)
+            git("init", "--object-format=sha1", cwd=checkout)
             git("checkout", "-b", "main", cwd=checkout)
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
@@ -2797,8 +2797,8 @@ class ReportContract(unittest.TestCase):
             checkout, origin, peer = (
                 sandbox / "checkout", sandbox / "origin.git", sandbox / "peer")
             checkout.mkdir()
-            git("init", "--bare", str(origin), cwd=sandbox)
-            git("init", cwd=checkout)
+            git("init", "--object-format=sha1", "--bare", str(origin), cwd=sandbox)
+            git("init", "--object-format=sha1", cwd=checkout)
             git("checkout", "-b", "main", cwd=checkout)
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
@@ -2887,8 +2887,8 @@ class ReportContract(unittest.TestCase):
             sandbox = Path(name)
             checkout, origin = sandbox / "checkout", sandbox / "origin.git"
             checkout.mkdir()
-            git("init", "--bare", str(origin), cwd=sandbox)
-            git("init", cwd=checkout)
+            git("init", "--object-format=sha1", "--bare", str(origin), cwd=sandbox)
+            git("init", "--object-format=sha1", cwd=checkout)
             git("checkout", "-b", "main", cwd=checkout)
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
