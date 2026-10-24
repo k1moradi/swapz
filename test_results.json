@@ -116,24 +116,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 667,
-"legacy_dead_probe_ns": 75749,
-"legacy_score_scan_ns": 468782,
+"incremental_select_ns": 708,
+"legacy_dead_probe_ns": 109542,
+"legacy_score_scan_ns": 483084,
 "logical_pages": 262144,
 "mapped_dead_probe_ns": 625,
-"relocation_list_ns": 417,
-"relocation_scan_ns": 88748,
+"relocation_list_ns": 542,
+"relocation_scan_ns": 106417,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2542,
-"legacy_dead_probe_ns": 287119,
-"legacy_score_scan_ns": 1805755,
+"incremental_select_ns": 3042,
+"legacy_dead_probe_ns": 346625,
+"legacy_score_scan_ns": 2342211,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 1208,
-"relocation_list_ns": 542,
-"relocation_scan_ns": 385742,
+"mapped_dead_probe_ns": 2208,
+"relocation_list_ns": 750,
+"relocation_scan_ns": 491918,
 "segments": 4096,
 "victim_records": 256
 }
@@ -145,12 +145,12 @@
 {
 "inverse_ns_per_page": 155,
 "name": "scalar",
-"transform_ns_per_page": 137
+"transform_ns_per_page": 147
 },
 {
-"inverse_ns_per_page": 108,
+"inverse_ns_per_page": 118,
 "name": "neon",
-"transform_ns_per_page": 95
+"transform_ns_per_page": 98
 }
 ],
 "classifier": {
@@ -160,9 +160,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 38,
+"ns_per_page": 34,
 "sample_pairs": 32,
-"scalar_ns_per_page": 38,
+"scalar_ns_per_page": 34,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -177,7 +177,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1820
+"wall_ns_per_page": 2032
 },
 {
 "acceleration": 2,
@@ -185,7 +185,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1733
+"wall_ns_per_page": 1848
 },
 {
 "acceleration": 3,
@@ -193,7 +193,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1692
+"wall_ns_per_page": 1743
 },
 {
 "acceleration": 4,
@@ -201,7 +201,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1646
+"wall_ns_per_page": 1775
 }
 ],
 "negative_pages": 256,
@@ -218,9 +218,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1360,
-"modeled_wall_ns_total": 783872,
-"ns_per_saved_block": 15074,
+"modeled_wall_ns_per_page": 1491,
+"modeled_wall_ns_total": 858880,
+"ns_per_saved_block": 16516,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -285,14 +285,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15480,
+"ns_per_saved_block": 16971,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1531,
-"routed_cpu_ns_total": 882410,
+"routed_cpu_ns_per_page": 1679,
+"routed_cpu_ns_total": 967351,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -340,14 +340,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15555,
+"ns_per_saved_block": 17050,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1485,
-"routed_cpu_ns_total": 855536,
+"routed_cpu_ns_per_page": 1628,
+"routed_cpu_ns_total": 937768,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -395,14 +395,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15074,
+"ns_per_saved_block": 16516,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1360,
-"routed_cpu_ns_total": 783872,
+"routed_cpu_ns_per_page": 1491,
+"routed_cpu_ns_total": 858880,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -450,14 +450,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15074,
+"ns_per_saved_block": 16516,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1360,
-"routed_cpu_ns_total": 783872,
+"routed_cpu_ns_per_page": 1491,
+"routed_cpu_ns_total": 858880,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -505,14 +505,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15074,
+"ns_per_saved_block": 16516,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1360,
-"routed_cpu_ns_total": 783872,
+"routed_cpu_ns_per_page": 1491,
+"routed_cpu_ns_total": 858880,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -529,17 +529,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 108,
+"inverse_ns_per_page": 118,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
 "scalar_inverse_ns_per_page": 155,
-"scalar_transform_ns_per_page": 137,
-"second_lz4_ns_per_page": 2891,
+"scalar_transform_ns_per_page": 147,
+"second_lz4_ns_per_page": 3189,
 "transform_backend": "neon",
-"transform_ns_per_page": 95
+"transform_ns_per_page": 98
 }
 ]
 }
@@ -551,32 +551,32 @@
 "source_sha": "54bb170adfb4618745d54fd67f90094e17f02c4b",
 "stages": [
 {
-"elapsed_s": 0.354,
+"elapsed_s": 0.432,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 14.932,
+"elapsed_s": 16.062,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.222,
+"elapsed_s": 0.256,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.281,
+"elapsed_s": 0.299,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
 "diagnostic": "BLOCKED: retained lifecycle writer failed across suspend/resume",
-"elapsed_s": 3.477,
+"elapsed_s": 3.577,
 "exit_code": 1,
 "failed_phase": "owned RAM retained suspend/drain",
 "name": "Owned RAM smoke + mixed/QD pilot",
