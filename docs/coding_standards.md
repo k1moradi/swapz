@@ -114,7 +114,12 @@ belong in the ROADMAP decision table and Git history.
   64-BIO quantum. Refresh accepted queue state after synchronous copy/LZ4 work
   before deciding the current pack is isolated.
 - **Retention deadline:** learned/admitted targets may shape aggregation, but
-  the ordinary absolute deadline remains authoritative. A sampled one-record
+  the ordinary absolute deadline remains authoritative. The retention duration
+  dynamically scales with observed backing device latency:
+  $\text{effective\_retain\_ns} = \min(\text{retain\_ms} \times 1\text{ms},\; \max(30{,}000\text{ ns},\; 4 \times \text{observed\_lower\_latency\_ns}))$.
+  When the incoming queue is drained, lower media has no in-flight I/O, and at least
+  one useful multi-page pack is already staged ($\ge 2$ records), the worker flushes
+  immediately rather than idling the backing device. A sampled one-record
   tail uses that same deadline; there is no short singleton timer, watermark or
   completion-aware carry into the next closed-loop wave. Hard ordering
   boundaries reset retained scheduling evidence.
@@ -232,7 +237,12 @@ Do not call an unexported scheduler helper merely to sharpen this measurement.
 The read-only `parallel_reads` and `read_coalesce` module parameters remain
 evidence controls, not runtime auto-tuning policy. `parallel_reads=1` enables
 the bounded grouping machinery; `read_coalesce=1` additionally permits exact
-ID63 adjacent missing-range coalescing. They do not enable helper concurrency.
+ID63 adjacent missing-range coalescing. When hardware queue depth exceeds 1
+and observed backing latency is low ($< 120\text{ }\mu\text{s}$), read coalescing
+yields to concurrent multi-slot asynchronous fan-out to prevent head-of-line
+serialization on fast NVMe/SATA storage, while preserving exact adjacent
+coalescing on high-latency or depth-1 serial media. They do not enable helper
+concurrency.
 
 The rejected ID39 `swapz-read` workqueue, per-slot work/completion objects,
 queue/wait/flush dispatch and helper CPU accounting are not part of current

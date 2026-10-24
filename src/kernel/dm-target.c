@@ -14,6 +14,7 @@
 #define DM_MSG_PREFIX "swapz"
 #include <linux/bio.h>
 #include <linux/blkdev.h>
+#include <linux/blk-mq.h>
 #include <linux/cache.h>
 #include <linux/device-mapper.h>
 #include <linux/dm-io.h>
@@ -379,6 +380,9 @@ struct swapz_dm {
 	swapz_u32 data_start_block;
 	bool physical_backing;
 	u64 backing_device_bytes;
+	u32 backing_hw_queue_depth;
+	u32 backing_nr_hw_queues;
+	u64 observed_lower_latency_ns;
 	swapz_u32 logical_pages;
 
 	/* Serialized, entirely preallocated normal reclaim path. */
@@ -1139,6 +1143,11 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	}
 	ctx->lower_write_wall_ns += lower_elapsed;
 	if (!lower_error) {
+		if (lower_elapsed) {
+			ctx->observed_lower_latency_ns = ctx->observed_lower_latency_ns ?
+				((ctx->observed_lower_latency_ns * 7ULL + lower_elapsed) >> 3) :
+				lower_elapsed;
+		}
 		ctx->physical_write_bytes +=
 			(u64)inflight->run.blocks * SWAPZ_BLOCK_BYTES;
 		ctx->physical_write_reqs++;
@@ -1320,6 +1329,11 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 		ctx->lower_write_wall_ns += elapsed_ns;
 	if (error || bitmap)
 		return error ? error : -EIO;
+	if (elapsed_ns) {
+		ctx->observed_lower_latency_ns = ctx->observed_lower_latency_ns ?
+			((ctx->observed_lower_latency_ns * 7ULL + elapsed_ns) >> 3) :
+			elapsed_ns;
+	}
 	/* Count SUCCESSFUL dm_io callbacks, not attempted or error-injected
 	 * requests. Each accepted lower write is in exactly one wait bin. */
 	if (op == REQ_OP_WRITE) {
@@ -1523,6 +1537,11 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	slot->lower_read_wall_ns += elapsed_ns;
 	if (error || bitmap)
 		return error ? error : -EIO;
+	if (elapsed_ns) {
+		ctx->observed_lower_latency_ns = ctx->observed_lower_latency_ns ?
+			((ctx->observed_lower_latency_ns * 7ULL + elapsed_ns) >> 3) :
+			elapsed_ns;
+	}
 	slot->physical_read_bytes += (u64)blocks * SWAPZ_BLOCK_BYTES;
 	slot->physical_read_reqs++;
 	return 0;
@@ -4403,8 +4422,11 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	/*
 	 * The disabled arm is the performance control: it must not execute any
 	 * ID63 cache probe, candidate scan, private-slot preparation or counters.
+	 * Fast multi-queue media yields to concurrent slot fan-out instead.
 	 */
 	if (!ctx->read_grouping_enabled || !ctx->read_coalescing_enabled ||
+	    (ctx->backing_hw_queue_depth > 1 && ctx->observed_lower_latency_ns &&
+	     ctx->observed_lower_latency_ns < 120000ULL) ||
 	    !ctx->read_slots || !ctx->read_pages_store ||
 	    remaining < 2U || list_empty(local))
 		return false;
@@ -4869,7 +4891,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 static u64 swapz_retention_deadline_ns(struct swapz_dm *ctx)
 {
 	return swapz_window_retention_deadline_ns(
-		ctx->window_first_ns, ctx->retain_ms);
+		ctx->window_first_ns, ctx->retain_ms,
+		ctx->observed_lower_latency_ns);
 }
 
 static bool swapz_retention_expired(struct swapz_dm *ctx)
@@ -5199,6 +5222,34 @@ static void swapz_worker(struct work_struct *work)
 			    ctx->retain_ms && !swapz_retention_expired(ctx)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
+				swapz_flush_window(ctx);
+				swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->ordered_worker_cpu_ns,
+						 cpu_start_ns);
+				return;
+			}
+			if (ctx->accepting && !ctx->failed &&
+			    !swapz_has_inflight(ctx) && ctx->batch_count >= 2U &&
+			    ctx->single_pack_deferred) {
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				ctx->next_pack_close_cause =
+					swapz_service_proven_dry_pack(ctx) ?
+					SWAPZ_PACK_CLOSE_SERVICE_DRY :
+					(ctx->retained_tail_target ?
+					 SWAPZ_PACK_CLOSE_TAIL_TARGET :
+					 SWAPZ_PACK_CLOSE_BURST_TARGET);
+				if (ctx->next_pack_close_cause ==
+				    SWAPZ_PACK_CLOSE_BURST_TARGET) {
+					ctx->next_burst_close_site =
+						SWAPZ_BURST_CLOSE_WORKER;
+					ctx->next_burst_close_target =
+						ctx->retained_burst_target;
+				}
+				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
+				ctx->packed_early_commits++;
+				if (ctx->accepted_burst_pack_ready)
+					ctx->accepted_burst_tail_flushes++;
 				swapz_flush_window(ctx);
 				swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
 						 wall_start_ns,
@@ -5559,6 +5610,7 @@ static void swapz_dtr(struct dm_target *ti)
 static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct swapz_dm *ctx;
+	struct request_queue *q;
 	u64 logical, physical, total_blocks, device_bytes;
 	bool is_nullb;
 	u32 budget = 0, window = SWAPZ_MAX_RECORDS, verify = 0;
@@ -5672,6 +5724,15 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	device_bytes = (u64)bdev_nr_sectors(ctx->backing->bdev) << SECTOR_SHIFT;
 	ctx->backing_device_bytes = device_bytes;
+	q = bdev_get_queue(ctx->backing->bdev);
+	if (q) {
+		ctx->backing_hw_queue_depth = (q->tag_set && q->tag_set->queue_depth) ?
+			q->tag_set->queue_depth : (q->queue_depth ? q->queue_depth : 1);
+		ctx->backing_nr_hw_queues = q->nr_hw_queues ? q->nr_hw_queues : 1;
+	} else {
+		ctx->backing_hw_queue_depth = 1;
+		ctx->backing_nr_hw_queues = 1;
+	}
 	if (is_nullb) {
 		ctx->data_start_block = 0;
 		ctx->physical_backing = false;

@@ -297,10 +297,18 @@ static int test_ordinary_retention_deadline_is_pinned(void)
 {
 	const unsigned long long first = 1000000ULL;
 
-	CHECK(swapz_window_retention_deadline_ns(first, 2) == 3000000ULL);
+	CHECK(swapz_window_retention_deadline_ns(first, 2, 0) == 3000000ULL);
 	CHECK(!swapz_window_deadline_expired(3000000ULL, 2999999ULL));
 	CHECK(swapz_window_deadline_expired(3000000ULL, 3000000ULL));
-	CHECK(swapz_window_retention_deadline_ns(first, 0) == 0);
+	CHECK(swapz_window_retention_deadline_ns(first, 0, 0) == 0);
+	/* 500us observed latency -> 4 * 500us = 2ms (matches 2ms retain_ms) */
+	CHECK(swapz_window_retention_deadline_ns(first, 2, 500000ULL) == 3000000ULL);
+	/* 25us observed latency (NVMe Gen4) -> 4 * 25us = 100us */
+	CHECK(swapz_window_retention_deadline_ns(first, 2, 25000ULL) == 1100000ULL);
+	/* 5us observed latency -> clamped to 30us floor */
+	CHECK(swapz_window_retention_deadline_ns(first, 2, 5000ULL) == 1030000ULL);
+	/* 1000us observed latency (1ms) -> 4 * 1ms = 4ms > 2ms (capped by retain_ms) */
+	CHECK(swapz_window_retention_deadline_ns(first, 2, 1000000ULL) == 3000000ULL);
 	return 0;
 }
 
