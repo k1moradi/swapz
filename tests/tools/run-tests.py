@@ -1844,6 +1844,7 @@ def parse_storage_envelope_sessions(output):
                             if isinstance(obj.get("read_p99_ns"), (int, float))
                             else 0.0),
             "seconds": obj.get("seconds"),
+            "replay_engine": obj.get("replay_engine"),
             "lower_inflight": lower_inflight_record(obj),
             "kernel_write_path": obj.get("kernel_write_path"),
         }
@@ -1878,6 +1879,10 @@ def storage_envelope_verdict(sessions):
             return {"overall": "INCOMPLETE",
                     "reason": f"{envelope} missing raw/off or swapz arm"}
         off, swapz = arms["off"], arms["swapz"]
+        if (off.get("replay_engine") != "native-c" or
+                swapz.get("replay_engine") != "native-c"):
+            return {"overall": "INCONCLUSIVE",
+                    "reason": f"{envelope} did not use the native replay engine"}
         if (off.get("source_sha") != swapz.get("source_sha") or
                 off.get("fixture_sha256") != swapz.get("fixture_sha256") or
                 off.get("trace_sha256") != swapz.get("trace_sha256")):
@@ -1928,6 +1933,7 @@ def storage_envelope_verdict(sessions):
             "offered_qd": 32,
             "device_model": model,
             "device_limits": device_model_limits(expected_model, offered_qd=32),
+            "replay_engine": swapz.get("replay_engine"),
             "byte_speedup": byte_speedup,
             "request_speedup": request_speedup,
             "useful_write_speedup": useful_speedup,
@@ -6793,6 +6799,7 @@ def print_bench(result):
             rows.append((
                 row["envelope"],
                 row["delta64_rescue"],
+                row["replay_engine"],
                 f"{row['byte_speedup']:.2f}x",
                 f"{row['request_speedup']:.2f}x",
                 f"{row['useful_write_speedup']:.2f}x",
@@ -6820,8 +6827,8 @@ def print_bench(result):
             ))
         print_table(
             "Saved lower work versus useful WRITE service",
-            ("model", "D64", "byte x", "req x", "useful x", "capture",
-             "W peak", "W mean"), rows)
+            ("model", "D64", "engine", "byte x", "req x", "useful x",
+             "capture", "W peak", "W mean"), rows)
         print("  capture=(useful speedup-1)/(lower-WRITE byte speedup-1); "
               "low/negative values mean saved media work is not reaching useful service.")
         print_table(

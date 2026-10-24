@@ -148,7 +148,9 @@ The mixed QD32 matrix keeps four sessions on the slow model as a bounded directi
 - Gen4-NVMe envelope: 6500 MiB/s, 25 us completion, four submit queues, hwq 64;
 - Gen5-NVMe envelope: 12000 MiB/s, 14 us completion, four submit queues, hwq 64.
 
-Each envelope replays the same QD32 mixed workload with production asynchronous preparation and separately replays the positive delta64 write-only fixture. The report compares raw/off with swapz using lower-WRITE byte speedup, lower-WRITE request speedup and useful-WRITE speedup. It additionally reports
+Each envelope replays the same QD32 mixed workload with production asynchronous preparation and separately replays the positive delta64 write-only fixture. The four modern envelopes use the internal native-C replay helper for both arms so Python Future/GIL scheduling cannot be the dominant timed submitter. Python still owns device safety, immutable-plan validation, provenance, boundary snapshots and the final byte-exact oracle; the helper only inherits the already-open validated target/fixture descriptors and executes the timed I/O. The historical 10/80 MiB/s matrix continues to use the prior Python replay for baseline continuity.
+
+The report compares raw/off with swapz using lower-WRITE byte speedup, lower-WRITE request speedup and useful-WRITE speedup. It additionally reports
 `(useful_speedup - 1) / (lower_byte_speedup - 1)` as **bandwidth-opportunity capture** when lower bytes improve. This is diagnostic attribution, not a qualification score: a low or negative value means saved lower-device work is not reaching useful service.
 
 For bottleneck attribution, the same rows expose sampled lower-WRITE peak/mean
@@ -190,7 +192,9 @@ long-run churn, real kernel swap and physical-media qualification remain open.
 
 Exclude fixture generation, device provisioning, worker allocation, buffer setup and warmup from measured logical throughput. Include the measured I/O and required final drain/fsync. For sustained write-only runs, start lower-I/O/kernel snapshots before releasing the persistent workers' measured start gate. Lower-sector/request deltas cover the same interval.
 
-Report replay-process CPU separately from kernel callback wall residency.
+For the modern-envelope native engine, pre-create all QD worker threads and complete warmup before the READY/GO gate. The parent captures lower/kernel/host boundaries before GO; the helper times from immediately before releasing that gate through the required final `fsync`. Native helper startup, trace staging and latency-result serialization are excluded. Mixed traces retain one barrier per immutable QD wave; write-only traces retain persistent disjoint ordered lanes with no per-I/O Future submission. Timed READs remain byte-verified before their lane can advance.
+
+Report replay-process CPU separately from kernel callback wall residency. For native-envelope rows this is the helper process CPU rather than the Python orchestrator;
 Callback wall is not CPU time: ordered callback wall includes synchronous
 lower-I/O sleep and callback wall may include scheduler delay. ID24 additionally
 reports scheduler-accounted sampled worker CPU from

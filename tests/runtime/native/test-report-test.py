@@ -751,6 +751,7 @@ def storage_envelope_arm(candidate, *, envelope, delta64_rescue):
         "source_sha": "a" * 40,
         "fixture_sha256": "b" * 64,
         "trace_sha256": "c" * 64,
+        "replay_engine": "native-c",
         "seconds": 2.0,
         "throughput_mbps": {
             "logical_write_mbps": swapz_rate if swapz else raw,
@@ -1128,6 +1129,8 @@ class ReportContract(unittest.TestCase):
             for rescue in (0, 1):
                 raw = arm("off", mode=1, regime="ssd_emulated")
                 swapz = arm("swapz", mode=1, regime="ssd_emulated")
+                raw["replay_engine"] = "native-c"
+                swapz["replay_engine"] = "native-c"
                 swapz["kernel_write_path"]["delta64_rescue"] = rescue
                 lines.extend((
                     f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={rescue}",
@@ -1156,6 +1159,15 @@ class ReportContract(unittest.TestCase):
             self.assertLess(
                 row["bandwidth_opportunity_capture_fraction"], 0.0)
             self.assertAlmostEqual(row["post_lower_hold_fraction"], 0.004)
+            self.assertEqual(row["replay_engine"], "native-c")
+
+        bad = [dict(session) for session in sessions]
+        bad[0] = dict(bad[0], arms={
+            name: dict(arm_record) for name, arm_record in bad[0]["arms"].items()
+        })
+        bad[0]["arms"]["off"]["replay_engine"] = "python-threaded"
+        self.assertEqual(
+            runner.storage_envelope_verdict(bad)["overall"], "INCONCLUSIVE")
 
 
     def test_predictor_evidence_is_sanitized(self):

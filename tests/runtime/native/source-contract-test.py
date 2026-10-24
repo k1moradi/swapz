@@ -3104,6 +3104,28 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("PASS_LZ4_ACCELERATION_AB", runner)
         self.assertIn('matched_value_pairs(\n            sessions, "lz4_acceleration", 1, 4)', runner)
 
+    def test_modern_storage_envelopes_use_native_replay_helper(self):
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        helper = (ROOT / "tests/runtime/benchmark/io-replay-native.c").read_text()
+        suites = (ROOT / "tests/suites/Makefile").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+
+        self.assertIn("NATIVE_REPLAY=1", pair)
+        self.assertIn('REPLAY_ARGS+=(--native-replay)', pair)
+        self.assertIn("build/tests/native/io-replay-native", pair)
+        self.assertIn('"replay_engine": "native-c" if args.native_replay', replay)
+        self.assertIn("pass_fds=(fd, fixture_fd, plan.fileno(), result.fileno())",
+                      replay)
+        self.assertIn("native replay is restricted to unpaced qualification",
+                      replay)
+        self.assertIn("PR_SET_PDEATHSIG", helper)
+        self.assertIn("pthread_barrier_wait(&ctx->wave_barrier)", helper)
+        self.assertIn("fsync(ctx.device_fd)", helper)
+        self.assertIn("io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c",
+                      suites)
+        self.assertIn('off.get("replay_engine") != "native-c"', runner)
+
     def test_map_and_teardown_are_owned(self):
         admitted = body("swapz_map")
         drained = body("swapz_drain")

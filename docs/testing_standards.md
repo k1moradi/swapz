@@ -851,6 +851,30 @@ async mixed off/swapz comparison and one positive-delta64 write-only off/swapz
 comparison. These rows are directional bottleneck evidence and do not replace
 the matched fast-model qualification intervals.
 
+The four modern service envelopes must use the test-only native-C replay
+engine for both raw/off and swapz arms. Python remains the safety/orchestration
+authority: it validates the immutable trace, opens and positively identifies the
+owned target, captures lower/kernel/host boundary counters, and performs the
+final byte-exact image oracle. The native helper inherits only those already
+validated target and fixture file descriptors; it must not discover, open or
+authorize a block device itself. It pre-creates exactly QD worker threads,
+finishes warmup before a READY/GO measurement gate, preserves the existing
+fixed-wave ordering for mixed traces and disjoint ordered lane ownership for
+persistent write-only traces, verifies every timed READ before lane reuse, and
+includes the required final `fsync` in measured wall time. Helper/thread
+startup, trace staging and latency-result serialization remain outside the
+timed interval. The helper is an internal test binary under `build/tests/`;
+it creates no new public test command.
+
+Modern-envelope report parsing must require `replay_engine=native-c` for both
+arms and reject silent fallback to Python. The historical 10/80 MiB/s
+qualification remains on the existing Python replay so its matched baseline is
+not changed by this harness experiment. Rootless qualification must exercise
+both native mixed-wave and native persistent-write modes on regular files and
+prove the same immutable-plan/final-image contract. Native replay changes
+submission overhead only; the envelopes remain synthetic `null_blk` evidence
+and never become physical-media saturation claims.
+
 For an offered-QD-limited diagnostic, the analytical unmerged-4KiB latency
 ceiling uses
 `min(offered_qd, submit_queues * hw_queue_depth)`, not hardware depth alone.
@@ -949,7 +973,9 @@ Native report-contract fixtures must emit the complete configured storage-model
 identity accepted by the production parser. Mixed and write-only synthetic logs
 therefore carry queue mode, submission-queue count and hardware queue depth as
 well as bandwidth, completion delay and IRQ mode, and their expected
-`device_model` dictionaries compare all six fields.
+`device_model` dictionaries compare all six fields. Modern service-envelope
+fixtures also carry `replay_engine=native-c`; a missing or different engine
+makes the directional envelope matrix inconclusive.
 
 
 ### Timed scheduling attribution

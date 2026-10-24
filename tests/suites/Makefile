@@ -2,6 +2,7 @@
 ROOT := $(abspath $(CURDIR)/../..)
 OUT := $(ROOT)/build/tests/native
 NATIVE := $(ROOT)/tests/runtime/native
+BENCHMARK := $(ROOT)/tests/runtime/benchmark
 KERNEL := $(ROOT)/src/kernel
 CODEC := $(KERNEL)/codec.c
 AUTH := $(KERNEL)/authority.c
@@ -14,9 +15,11 @@ CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 endif
 CPPFLAGS += -I$(KERNEL)
 
-.PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor clean
-PROGRAMS := codec-roundtrip extent-geometry zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots
+.PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor test-replay-helper clean
+PROGRAMS := io-replay-native codec-roundtrip extent-geometry zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots
 
+io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
+io-replay-native_LDLIBS := -pthread
 codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
 extent-geometry_SRC := $(NATIVE)/codec/extent-geometry.c
 extent-geometry_HDR := $(KERNEL)/codec.h $(KERNEL)/authority.h
@@ -114,7 +117,10 @@ test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-scan-sca
 test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots
 	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"; "$(OUT)/preparation-slots"
 
-test-all: test-codec test-predictor test-mapping test-gc test-lower-io
+test-replay-helper: $(OUT)/io-replay-native
+	@test -x "$(OUT)/io-replay-native"
+
+test-all: test-codec test-predictor test-mapping test-gc test-lower-io test-replay-helper
 
 clean:
 	@rm -f $(addprefix $(OUT)/,$(PROGRAMS)) $(OUT)/predictor-qualification \

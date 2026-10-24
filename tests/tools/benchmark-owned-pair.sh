@@ -39,6 +39,7 @@ IRQMODE=1
 QUEUE_MODE=2
 SUBMIT_QUEUES=1
 HW_QUEUE_DEPTH=0
+NATIVE_REPLAY=0
 REPLAY_SWAPZ_FIRST=0
 # The final internal suffix controls safe replay order only.
 if [[ $# -gt 1 && ${!#} == --swapz-first ]]; then
@@ -119,9 +120,16 @@ if [[ $# -ge 3 && ${@: -2:1} == --lower-mbps &&
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 case "$LOWER_MBPS:$COMPLETION_NSEC:$SUBMIT_QUEUES:$HW_QUEUE_DEPTH" in
-    10:1000000:1:1|80:150000:1:64|100:500000:1:4|500:100000:1:32|6500:25000:4:64|12000:14000:4:64) ;;
+    10:1000000:1:1|80:150000:1:64) ;;
+    100:500000:1:4|500:100000:1:32|6500:25000:4:64|12000:14000:4:64)
+        NATIVE_REPLAY=1
+        ;;
     *) echo 'BLOCKED: unsupported owned-RAM storage service envelope' >&2; exit 2 ;;
 esac
+if (( NATIVE_REPLAY )) && [[ ! -x build/tests/native/io-replay-native ]]; then
+    echo 'BLOCKED: native replay helper missing from the validated build' >&2
+    exit 2
+fi
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then
     :
 elif [[ $# == 3 && $1 == --run-owned-ram-pair &&
@@ -593,6 +601,13 @@ fi
 note "SWAPZ_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
 PACKED_ARGS=()
 (( PACKED_READ )) && PACKED_ARGS+=(--packed-read)
+REPLAY_ARGS=()
+if (( NATIVE_REPLAY )); then
+    REPLAY_ARGS+=(--native-replay)
+    note 'REPLAY_ENGINE=native-c'
+else
+    note 'REPLAY_ENGINE=python-threaded'
+fi
 REPLAY_TIMEOUT=120s
 if (( RESOURCE_PRESSURE_SHORT )); then
     REPLAY_TIMEOUT=280s
@@ -607,7 +622,7 @@ replay_off() {
         --manifest "$SESSION/plan/manifest.json" \
         --candidate off --source-sha "$SOURCE" \
         --device "${LOWERS[0]}" --result "$SESSION/off.json" \
-        "${PACKED_ARGS[@]}" \
+        "${PACKED_ARGS[@]}" "${REPLAY_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[0]}" \
         --expected-dev "${DEVS[0]}" --expected-lower-dev "${DEVS[0]}"; then
         return 0
@@ -628,7 +643,7 @@ replay_swapz() {
         --manifest "$SESSION/plan/manifest.json" \
         --candidate swapz --source-sha "$SOURCE" \
         --device "/dev/mapper/$DMNAME" --result "$SESSION/swapz.json" \
-        "${PACKED_ARGS[@]}" \
+        "${PACKED_ARGS[@]}" "${REPLAY_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[1]}" \
         --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
         --expected-dm-uuid "$DMUUID"; then

@@ -1081,6 +1081,57 @@ class PairReplayContract(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mod.check_device(a, 8)
 
+    def test_native_replay_preserves_rootless_oracle(self):
+        helper = SCRIPT.parents[3] / "build/tests/native/io-replay-native"
+        self.assertTrue(helper.is_file())
+        self.assertTrue(os.access(helper, os.X_OK))
+        for sustained in (False, True):
+            with self.subTest(sustained=sustained), \
+                    tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                fixture = root / "fixture.bin"
+                fixture.write_bytes(b"".join(bytes([i + 1]) * PAGE
+                                             for i in range(16)))
+                plan = root / "plan"
+                prepare = [
+                    "prepare", "--fixture", fixture, "--output-dir", plan,
+                    "--qd", 4, "--logical-pages", 64, "--writer-pages", 16,
+                    "--reader-start", 32, "--reader-pages", 16,
+                    "--warmup-ops", 8, "--measure-ops", 32, "--iops", 0,
+                    "--read-pct", 0 if sustained else 50,
+                ]
+                if sustained:
+                    prepare.append("--sustained-write")
+                self.run_cmd(*prepare)
+                reports = []
+                for candidate in ("off", "swapz"):
+                    device = root / f"swapz-replay-native-{candidate}.bin"
+                    with device.open("wb") as handle:
+                        handle.truncate(64 * PAGE)
+                    result = root / f"{candidate}.json"
+                    self.run_cmd(
+                        "run", "--fixture", fixture,
+                        "--trace", plan / "trace.jsonl",
+                        "--manifest", plan / "manifest.json",
+                        "--device", device, "--candidate", candidate,
+                        "--source-sha", "rootless-no-module",
+                        "--regular-file-test", "--native-replay",
+                        "--result", result)
+                    record = json.loads(result.read_text())
+                    self.assertEqual(record["replay_engine"], "native-c")
+                    self.assertEqual(
+                        record["verified_post_sha256"],
+                        record["expected_post_sha256"])
+                    self.assertEqual(record["write_ops"] + record["read_ops"], 32)
+                    self.assertGreater(record["seconds"], 0)
+                    self.assertIn("native", record["mixed_timed_scope"])
+                    reports.append(result)
+                compared = json.loads(
+                    self.run_cmd("compare", "--reports", *reports).stdout)
+                self.assertEqual(compared["replay_engine"], "native-c")
+                self.assertEqual(
+                    compared["verdict"], "PASS_IDENTICAL_LOGICAL_INPUT")
+
     def test_sustained_write_uses_persistent_lane_owned_streams(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
