@@ -2462,6 +2462,16 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("bio_for_each_segment(vec, bio, iter)", direct)
         self.assertNotIn("nth_page(", direct)
 
+    def test_compound_and_segmented_bio_qualification_is_contract_covered(self):
+        oracle = (ROOT / "tests/tools/device-roundtrip.c").read_text()
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        self.assertIn("--segmented-write-series", oracle)
+        self.assertIn("--segmented-verify-series", oracle)
+        self.assertIn("START_LOADED_COMPOUND_BIO", deploy)
+        self.assertIn("PASS_LOADED_COMPOUND_BIO=", deploy)
+        self.assertIn("transfer_segmented", oracle)
+        self.assertIn("series_segmented", oracle)
+
     def test_async_lz4_preparation_overlaps_lower_io_without_publication(self):
         producer = body("swapz_preparation_worker")
         queue_helper = body("swapz_queue_preparation_workers")

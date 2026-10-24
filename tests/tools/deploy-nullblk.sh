@@ -400,6 +400,30 @@ flush_injected="$(status_delta flush_injected)"
     fail "loaded oracle flush/barrier accounting changed"
 note "PASS_LOADED_ORACLE_PROFILE=raw_pages:$raw_writes zero_pages:$zero_writes flush_calls:$flush_calls"
 
+# Compound/folio multi-bvec and non-zero bv_offset BIO qualification.
+# Tests asymmetric multi-segment bvecs, 3-segment and 4-segment splits, and
+# page-straddling non-zero bv_offsets with both segmented and single-bvec reads/writes.
+note "START_LOADED_COMPOUND_BIO"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --segmented-write-series 128 5 || \
+    fail "segmented multi-bvec write failed"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --segmented-verify-series 128 5 || \
+    fail "segmented multi-bvec verify failed"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --verify-series 128 5 || \
+    fail "single-bvec cross-read of segmented writes failed"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --write-series 128 6 || \
+    fail "single-bvec write before segmented read failed"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --segmented-verify-series 128 6 || \
+    fail "segmented multi-bvec cross-read of single-bvec writes failed"
+compound_status="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$compound_status" failed) == 0 )) || \
+    fail "compound/segmented BIO test left DM target in failed state"
+note "PASS_LOADED_COMPOUND_BIO=written_pages:256 verified_pages:256 failed:0"
+
 # Force real loaded GC before lifecycle/fault phases. Recreate authority on
 # the same positively identified RAM lower, then write five logical generations
 # while cumulatively preserving one page from every prior generation per 1MiB

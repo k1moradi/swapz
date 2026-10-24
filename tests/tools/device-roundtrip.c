@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -133,6 +134,72 @@ static int transfer(int fd, void *buffer, unsigned int page, int write_data)
 	return 0;
 }
 
+static int transfer_segmented(int fd, unsigned char *buffer, unsigned int page,
+			      int write_data)
+{
+	struct iovec iov[4];
+	int iovcnt;
+	ssize_t count;
+	off_t pos = (off_t)page * PAGE;
+	unsigned int mode = page % 5U;
+
+	switch (mode) {
+	case 0:
+		iov[0].iov_base = buffer;
+		iov[0].iov_len = 2048;
+		iov[1].iov_base = buffer + 2048;
+		iov[1].iov_len = 2048;
+		iovcnt = 2;
+		break;
+	case 1:
+		iov[0].iov_base = buffer;
+		iov[0].iov_len = 1024;
+		iov[1].iov_base = buffer + 1024;
+		iov[1].iov_len = 3072;
+		iovcnt = 2;
+		break;
+	case 2:
+		iov[0].iov_base = buffer;
+		iov[0].iov_len = 512;
+		iov[1].iov_base = buffer + 512;
+		iov[1].iov_len = 1536;
+		iov[2].iov_base = buffer + 2048;
+		iov[2].iov_len = 2048;
+		iovcnt = 3;
+		break;
+	case 3:
+		iov[0].iov_base = buffer;
+		iov[0].iov_len = 1024;
+		iov[1].iov_base = buffer + 1024;
+		iov[1].iov_len = 1024;
+		iov[2].iov_base = buffer + 2048;
+		iov[2].iov_len = 1024;
+		iov[3].iov_base = buffer + 3072;
+		iov[3].iov_len = 1024;
+		iovcnt = 4;
+		break;
+	default:
+		/* Non-zero bv_offset within page: buffer + 512 */
+		iov[0].iov_base = buffer + 512;
+		iov[0].iov_len = 3584;
+		iov[1].iov_base = buffer + 4096;
+		iov[1].iov_len = 512;
+		iovcnt = 2;
+		break;
+	}
+
+	do {
+		count = write_data ? pwritev(fd, iov, iovcnt, pos)
+				   : preadv(fd, iov, iovcnt, pos);
+	} while (count == -1 && errno == EINTR);
+	if (count != PAGE) {
+		fprintf(stderr, "FAIL %s-segmented page=%u n=%zd errno=%d\n",
+			write_data ? "write" : "read", page, count, errno);
+		return -1;
+	}
+	return 0;
+}
+
 static int parse_uint(const char *text, unsigned int maximum,
 		      unsigned int *value)
 {
@@ -176,6 +243,48 @@ static int series(int fd, unsigned char *buf, unsigned char *expected,
 			fprintf(stderr, "FAIL byte-exact page=%u round=%u\n",
 				i, round);
 			return -1;
+		}
+	}
+	return 0;
+}
+
+static int series_segmented(int fd, unsigned char *buf, unsigned char *expected,
+			    unsigned int count, unsigned int round,
+			    int write_data)
+{
+	unsigned int i;
+
+	for (i = 0; i < count; ++i) {
+		unsigned int mode = i % 5U;
+
+		pattern(expected, i, round);
+		if (write_data) {
+			if (mode == 4) {
+				memcpy(buf + 512, expected, 3584);
+				memcpy(buf + 4096, expected + 3584, 512);
+				if (transfer_segmented(fd, buf, i, 1))
+					return -1;
+			} else {
+				if (transfer_segmented(fd, expected, i, 1))
+					return -1;
+			}
+		} else {
+			if (transfer_segmented(fd, buf, i, 0))
+				return -1;
+			if (mode == 4) {
+				if (memcmp(buf + 512, expected, 3584) ||
+				    memcmp(buf + 4096, expected + 3584, 512)) {
+					fprintf(stderr,
+						"FAIL byte-exact segmented page=%u round=%u\n",
+						i, round);
+					return -1;
+				}
+			} else if (memcmp(buf, expected, PAGE)) {
+				fprintf(stderr,
+					"FAIL byte-exact segmented page=%u round=%u\n",
+					i, round);
+				return -1;
+			}
 		}
 	}
 	return 0;
@@ -407,6 +516,7 @@ int main(int argc, char **argv)
 	unsigned char *buf = NULL, *expected = NULL;
 	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
 	int raw_series = 0, discard_pages = 0, gc_mode = 0, churn_mode = 0;
+	int segmented_series_mode = 0;
 	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
 
@@ -447,6 +557,11 @@ int main(int argc, char **argv)
 			raw_series = 1;
 		} else if (!strcmp(argv[2], "--raw-verify-series")) {
 			raw_series = 1;
+		} else if (!strcmp(argv[2], "--segmented-write-series")) {
+			write_series = 1;
+			segmented_series_mode = 1;
+		} else if (!strcmp(argv[2], "--segmented-verify-series")) {
+			segmented_series_mode = 1;
 		} else if (!strcmp(argv[2], "--discard-pages")) {
 			discard_pages = 1;
 		} else if (strcmp(argv[2], "--verify-series")) {
@@ -470,8 +585,8 @@ int main(int argc, char **argv)
 		 * eligible for retention rather than closing through FUA. */
 		open_flags &= ~O_SYNC;
 	}
-	if (posix_memalign((void **)&buf, PAGE, PAGE) ||
-	    posix_memalign((void **)&expected, PAGE, PAGE)) {
+	if (posix_memalign((void **)&buf, PAGE, PAGE * 2) ||
+	    posix_memalign((void **)&expected, PAGE, PAGE * 2)) {
 		fprintf(stderr, "FAIL allocating aligned test buffers\n");
 		goto out;
 	}
@@ -512,6 +627,12 @@ int main(int argc, char **argv)
 			}
 			printf("PASS: owned swapz discard start=%u count=%u\n",
 			       round, count);
+		} else if (segmented_series_mode) {
+			if (series_segmented(fd, buf, expected, count, round,
+					     write_series))
+				goto out;
+			printf("PASS: owned swapz direct segmented %s series count=%u round=%u\n",
+			       write_series ? "write" : "verify", count, round);
 		} else {
 			if (series(fd, buf, expected, count, round,
 				   write_series, raw_series))
