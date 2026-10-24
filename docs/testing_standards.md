@@ -975,13 +975,16 @@ RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
 weakened.
 
 The owned pair first creates and fully faults both 64MiB memory-backed
-`null_blk` devices, then stops at a private barrier. Only then does the
-pressure helper fault its anonymous resident set and start niceness-10 CPU
-burners. The barrier releases after pressure is observable, so module insertion,
-target construction and replay still execute under reclaim/CPU contention
-without making lazy null_blk page allocation the test subject. The pressure
-helper must reach readiness with at least the requested resident memory charged
-to the cgroup and remain alive through benchmark teardown. Qualification
+`null_blk` devices outside the ID36 cgroup. It then migrates its benchmark
+process into the cgroup, proves that membership, and stops at a private barrier.
+Only then does the pressure helper fault its anonymous resident set and start
+niceness-10 CPU burners in the same cgroup. The backing pages therefore do not
+consume the cgroup's 576MiB pressure budget, while the barrier still guarantees
+that module insertion, target construction, replay and teardown execute under
+reclaim/CPU contention. Lazy null_blk page allocation is not the test subject.
+The pressure helper must reach readiness with at least the requested resident
+memory charged to the cgroup and remain alive through benchmark teardown.
+Qualification
 requires a positive `memory.events high` delta, positive CPU PSI `some total`
 delta, zero `oom` and `oom_kill` deltas, and the normal owned-pair byte-exact
 verification/teardown to pass with `async_prepare=1`.
