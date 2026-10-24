@@ -570,7 +570,12 @@ descriptions before hashing or copying caller memory. In particular,
 calling the payload CRC helper; an invalid length is not permission to read
 that many bytes from the caller. The prehashed append path retains the same
 authoritative mutation-time validation. Sanitizer qualification plus a
-source-order contract pins this fail-before-read rule.
+source-order contract pins this fail-before-read rule. Descriptors and headers
+must avoid redundant stack buffer copies on hot lookup/verification paths:
+extent record counts are read directly at offset without header copies,
+duplicate logical slot scans inspect 32-bit little-endian slots in-place
+without stack array allocation, and record decoding constructs the decoded
+view in a single store.
 
 
 ### Immutable lower-write run ownership
