@@ -587,6 +587,66 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 	}
 }
 
+static int swapz_ranges_overlap(swapz_u32 start0, swapz_u32 blocks0,
+				swapz_u32 start1, swapz_u32 blocks1)
+{
+	swapz_u32 end0, end1;
+
+	if (!blocks0 || !blocks1)
+		return 0;
+	end0 = start0 > ~(swapz_u32)0 - blocks0 ? ~(swapz_u32)0 : start0 + blocks0;
+	end1 = start1 > ~(swapz_u32)0 - blocks1 ? ~(swapz_u32)0 : start1 + blocks1;
+	return start0 < end1 && start1 < end0;
+}
+
+void swapz_engine_invalidate_read_range(struct swapz_engine *engine,
+					swapz_u32 start_block,
+					swapz_u16 blocks)
+{
+	swapz_u16 index;
+
+	if (!engine)
+		return;
+	if (!blocks) {
+		swapz_engine_invalidate_read_cache(engine);
+		return;
+	}
+	engine->read_validated_payload_crc32c = 0;
+	if (engine->read_cache_valid &&
+	    swapz_ranges_overlap(engine->read_cached_start_block,
+				 engine->read_cached_extent_blocks,
+				 start_block, blocks)) {
+		engine->read_cache_valid = 0;
+		engine->read_cached_full = 0;
+		engine->read_cached_block_mask = 0;
+		engine->read_coalesced_block_mask = 0;
+	}
+	if (engine->read_extent_lru_clock) {
+		for (index = 0; index < SWAPZ_READ_EXTENT_CACHE_ENTRIES; ++index) {
+			if (engine->read_extent_lru_valid[index] &&
+			    swapz_ranges_overlap(
+				    engine->read_extent_lru_start_blocks[index],
+				    engine->read_extent_lru_extent_blocks[index],
+				    start_block, blocks)) {
+				engine->read_extent_lru_valid[index] = 0;
+				engine->read_extent_lru_block_masks[index] = 0;
+			}
+		}
+	}
+	if (engine->read_metadata_lru_clock && engine->read_metadata_epoch) {
+		for (index = 0; index < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++index) {
+			struct swapz_read_metadata_tag *tag =
+				&engine->read_metadata_tags[index];
+
+			if (tag->epoch == engine->read_metadata_epoch &&
+			    swapz_ranges_overlap(tag->start_block,
+						 tag->extent_blocks,
+						 start_block, blocks))
+				tag->epoch = 0;
+		}
+	}
+}
+
 void swapz_engine_merge_read_telemetry(struct swapz_engine *destination,
 				       struct swapz_engine *source)
 {
@@ -1289,7 +1349,6 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 	memset(run, 0, sizeof(*run));
 	run->bytes = run_bytes;
 	run->txs = run_txs;
-	swapz_engine_invalidate_read_cache(e);
 
 	if (compressed_count) {
 		phase_start = swapz_engine_now_ns();
@@ -1427,6 +1486,7 @@ abort_current:
 abort_run:
 		if (staged) {
 			run->extent_count = staged;
+			swapz_engine_invalidate_read_range(e, run_start, run_blocks);
 			{
 				int cleanup = initial_batch_pending ?
 					swapz_bulk_abort_tail(e, run, staged) :
@@ -1441,6 +1501,7 @@ abort_run:
 
 	if (!staged || !entry || !run_blocks)
 		return -EUCLEAN;
+	swapz_engine_invalidate_read_range(e, run_start, run_blocks);
 	run->start_block = run_start;
 	run->blocks = run_blocks;
 	run->extent_count = staged;

@@ -513,8 +513,8 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("memset(engine->read_metadata_tags", invalidate)
         self.assertIn("engine->read_cache_valid = 0", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(engine)", engine)
-        self.assertIn("swapz_engine_invalidate_read_cache(e)", engine)
-        self.assertIn("swapz_invalidate_read_caches(ctx)", body("swapz_lower"))
+        self.assertIn("swapz_engine_invalidate_read_range(e,", engine)
+        self.assertIn("swapz_invalidate_read_caches_range(ctx,", body("swapz_lower"))
         self.assertIn("swapz_invalidate_read_caches(ctx)", body("swapz_process"))
         self.assertIn("ctx->engine.read_metadata_cache =",
                       body("swapz_ctr"))
@@ -836,8 +836,8 @@ static swapz_u16 swapz_probe_set(
             "op == REQ_OP_WRITE && ctx->invalidate_cache_on_write_admit",
             process)
         self.assertIn("REQ_PREFLUSH | REQ_FUA", process)
-        self.assertIn("swapz_invalidate_read_caches(ctx)", lower)
-        self.assertIn("swapz_invalidate_read_caches(ctx)", submit)
+        self.assertIn("swapz_invalidate_read_caches_range(ctx,", lower)
+        self.assertIn("swapz_invalidate_read_caches_range(ctx,", submit)
 
     def test_authority_snapshot_copies_only_active_transaction_prefix(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()
@@ -1613,8 +1613,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("missing_slots < 2U", concurrent)
         self.assertNotIn("parallel_reads_enabled", concurrent)
         self.assertNotIn("!ctx->read_coalescing_enabled", concurrent)
-        self.assertIn("ctx->retain_ms && ctx->batch_count &&", concurrent)
+        self.assertIn("ctx->retain_ms &&", concurrent)
         self.assertIn("swapz_plain_retained_write(bio)", concurrent)
+        self.assertIn("(ctx->batch_count || skipped_write_count) && ctx->retain_ms", concurrent)
         self.assertIn("swapz_lower_read_overlap_begin(ctx)", concurrent)
         self.assertIn("swapz_lower_read_overlap_end(ctx)", concurrent)
         self.assertIn("skipped_writes[SWAPZ_MAX_RECORDS]", concurrent)
@@ -1839,7 +1840,7 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("ctx->burst_shrink_inflight_zero_skips++", worker)
         self.assertNotIn("ctx->last_pack_tail_zero_inflight", DM)
         self.assertNotIn("ctx->burst_shrink_after_inflight_zero++", worker)
-        self.assertIn("if (!tail && inflight)", body("swapz_sample_pack_tail_locked"))
+        self.assertIn("if (inflight)", body("swapz_sample_pack_tail_locked"))
         self.assertIn("guard_inflight_zero_shrink=%u", status)
         self.assertIn("burst_shrink_inflight_zero_skips=%llu", status)
         self.assertIn("burst_shrink_after_inflight_zero=%llu", status)
@@ -2035,7 +2036,7 @@ static swapz_u16 swapz_probe_set(
         sample = body("swapz_sample_pack_tail_locked")
         self.assertIn("swapz_inflight_lower_pending(ctx)", sample)
         self.assertNotIn("ctx->inflight_write", sample)
-        self.assertLess(sample.index("if (!tail && inflight)"),
+        self.assertLess(sample.index("if (inflight)"),
                         sample.index("ctx->pack_tail_samples++"))
         self.assertIn("ctx->pack_tail_samples++", sample)
         for field in ("pack_tail_zero_idle", "pack_tail_one_inflight",

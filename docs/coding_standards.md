@@ -765,11 +765,18 @@ to both arms.
 
 The master engine owns the 512-entry metadata LRU and 16-entry immutable
 extent-residency cache. Private slot state is primed from master residency and
-never publishes authority independently. Every write/GC/discard/barrier
-mutation fence invalidates master and private residency before authority
-changes. Teardown drains the ordered worker after all submitted slot completions
-have been joined. Useful READ throughput, p99 and independently measured lower
-bytes/requests are all required evidence.
+never publishes authority independently. Lower writes invalidate master and
+private residency across the exact physical block range being overwritten
+(`swapz_engine_invalidate_read_range`); full cache invalidation occurs on
+REQ_OP_DISCARD, segment recycling, flush/FUA barriers, verify-after-write mode,
+or when `invalidate_cache_on_write_admit` is enabled. Post-`PACK_READY` tail
+sampling and early window closure wait until detached in-flight K=1 lower writes
+have completed to avoid premature single-tail deferrals and blocking stalls.
+Independent READs may skip uncommitted plain retained WRITEs across the admitted
+FIFO prefix, crediting read-bypass service evidence to the window those writes
+subsequently form. Teardown drains the ordered worker after all submitted slot
+completions have been joined. Useful READ throughput, p99 and independently
+measured lower bytes/requests are all required evidence.
 
 ### Incremental GC victim accounting
 

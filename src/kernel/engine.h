@@ -255,6 +255,9 @@ int swapz_engine_write_window_batched(struct swapz_engine *engine,
 /* Caller-owned and serialized: invalidate before writes, discards and barriers.
  * Never invalidate from a concurrent preparation producer. */
 void swapz_engine_invalidate_read_cache(struct swapz_engine *engine);
+void swapz_engine_invalidate_read_range(struct swapz_engine *engine,
+					swapz_u32 start_block,
+					swapz_u16 blocks);
 /* Serialized owner transfers diagnostic read counters from a private read
  * engine after its bounded concurrent operation has joined. Cache residency
  * and authority pointers are intentionally not transferred. */

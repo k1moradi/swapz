@@ -881,6 +881,25 @@ static void swapz_invalidate_read_caches(struct swapz_dm *ctx)
 		swapz_engine_invalidate_read_cache(&ctx->read_slots[slot].engine);
 }
 
+static void swapz_invalidate_read_caches_range(struct swapz_dm *ctx,
+					       swapz_u32 block,
+					       swapz_u16 blocks)
+{
+	swapz_u8 slot;
+
+	if (ctx->invalidate_cache_on_write_admit ||
+	    ctx->engine.verify_after_write) {
+		swapz_invalidate_read_caches(ctx);
+		return;
+	}
+	swapz_engine_invalidate_read_range(&ctx->engine, block, blocks);
+	if (!ctx->read_slots)
+		return;
+	for (slot = 0; slot < SWAPZ_PARALLEL_READ_SLOTS; ++slot)
+		swapz_engine_invalidate_read_range(
+			&ctx->read_slots[slot].engine, block, blocks);
+}
+
 static void swapz_queue_preparation_workers(struct swapz_dm *ctx)
 {
 	swapz_u8 lane;
@@ -1035,7 +1054,8 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	}
 	swapz_mark_segments_dirty(ctx, inflight->run.start_block,
 				 inflight->run.blocks);
-	swapz_invalidate_read_caches(ctx);
+	swapz_invalidate_read_caches_range(ctx, inflight->run.start_block,
+					   inflight->run.blocks);
 	ctx->lower_write_submitted_bytes +=
 		(u64)inflight->run.blocks * SWAPZ_BLOCK_BYTES;
 	ctx->lower_write_submitted_reqs++;
@@ -1250,7 +1270,7 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	/* Cover direct RAW writes and GC relocation as well as engine writes.
 	 * The synchronous lower worker exclusively owns read_scratch. */
 	if (op == REQ_OP_WRITE)
-		swapz_invalidate_read_caches(ctx);
+		swapz_invalidate_read_caches_range(ctx, block, blocks);
 	if (op == REQ_OP_READ) {
 		ctx->lower_read_submitted_bytes +=
 			(u64)blocks * SWAPZ_BLOCK_BYTES;
@@ -1430,6 +1450,8 @@ static int swapz_discard_dead_segment(void *opaque, swapz_u32 segment)
 		if (a->live_records[block])
 			return -EUCLEAN;
 
+	swapz_invalidate_read_caches_range(
+		ctx, segment * SWAPZ_SEGMENT_BLOCKS, SWAPZ_SEGMENT_BLOCKS);
 	ctx->segment_discards_eligible++;
 	if (ctx->segment_trimmed && READ_ONCE(ctx->segment_trimmed[segment])) {
 		ctx->segment_discards_skipped_already_trimmed++;
@@ -3268,10 +3290,12 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	 */
 	inflight = swapz_inflight_lower_pending(ctx);
 	/*
-	 * A zero tail while detached K=1 is still running is premature. Keep the
-	 * PACK_READY sample pending; completion requeues the ordered worker.
+	 * Any tail while detached K=1 is still running is premature: upper
+	 * completions have not been delivered yet and cannot have yielded their
+	 * next full wave. Keep the PACK_READY sample pending; completion
+	 * requeues the ordered worker.
 	 */
-	if (!tail && inflight)
+	if (inflight)
 		return;
 	ctx->pack_tail_samples++;
 	if (!tail) {
@@ -3648,7 +3672,9 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		 * worker-tail decision after local+incoming have been refreshed.
 		 */
 		if (swapz_retained_target_close_ready(ctx) &&
-		    !ctx->worker_has_immediate_followup) {
+		    !ctx->worker_has_immediate_followup &&
+		    !(SWAPZ_WRITE_PIPELINE_DEPTH == 1U &&
+		      swapz_inflight_lower_pending(ctx))) {
 			ctx->next_pack_close_cause = ctx->retained_tail_target ?
 				SWAPZ_PACK_CLOSE_TAIL_TARGET :
 				SWAPZ_PACK_CLOSE_BURST_TARGET;
@@ -4148,7 +4174,7 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 		scanned++;
 		entry = list_entry(position, struct swapz_bio_ref, list);
 		bio = entry->bio;
-		if (ctx->retain_ms && ctx->batch_count &&
+		if (ctx->retain_ms &&
 		    swapz_plain_retained_write(bio)) {
 			if (skipped_write_count >= SWAPZ_MAX_RECORDS)
 				break;
@@ -4229,7 +4255,7 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 	ctx->worker_has_immediate_followup = !list_empty(local);
 	if (ctx->async_prepare)
 		atomic_set(&ctx->preparation_tail_credit, 0);
-	retained_bypass = ctx->batch_count && ctx->retain_ms;
+	retained_bypass = (ctx->batch_count || skipped_write_count) && ctx->retain_ms;
 	read_start_ns = ktime_get_ns();
 	swapz_lower_read_overlap_begin(ctx);
 
@@ -5020,6 +5046,13 @@ static void swapz_worker(struct work_struct *work)
 				if (!list_empty(&ctx->incoming)) {
 					list_splice_tail_init(&ctx->incoming, &local);
 					ctx->worker_has_immediate_followup = true;
+					if (ctx->async_prepare &&
+					    ctx->preparation_queued >=
+						SWAPZ_PREPARATION_TAIL_WAKE_MIN) {
+						atomic_set(&ctx->preparation_tail_credit, 1);
+						ctx->preparation_wave_kicks++;
+						swapz_queue_preparation_workers(ctx);
+					}
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				if (ctx->worker_has_immediate_followup) {
@@ -5029,6 +5062,8 @@ static void swapz_worker(struct work_struct *work)
 			}
 			if (swapz_retained_pack_close_ready(ctx) &&
 			    !ctx->worker_has_immediate_followup &&
+			    !(SWAPZ_WRITE_PIPELINE_DEPTH == 1U &&
+			      swapz_inflight_lower_pending(ctx)) &&
 			    ctx->batch_count && !ctx->failed &&
 			    READ_ONCE(ctx->accepting) &&
 			    !swapz_retention_expired(ctx)) {
