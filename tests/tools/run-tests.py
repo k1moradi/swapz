@@ -31,6 +31,25 @@ MODEL_SPECS = {
                      "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY_QUEUED_DEPTH64"},
 }
 MODEL_ORDER = tuple(MODEL_SPECS)
+# Directional service envelopes answer a different question from the retained
+# slow/fast qualification pair: where does saved lower I/O stop translating
+# into useful service as storage latency falls and queue capability rises?
+# They remain null_blk models, never physical-device claims.
+STORAGE_ENVELOPE_SPECS = {
+    "sd_card": {"cap_mib_s": 100, "completion_nsec": 500000, "irqmode": 2,
+                "queue_mode": 2, "submit_queues": 1, "hw_queue_depth": 4,
+                "purpose": "SYNTHETIC_MODERN_SD_SERVICE_ENVELOPE"},
+    "sata_ssd": {"cap_mib_s": 500, "completion_nsec": 100000, "irqmode": 2,
+                 "queue_mode": 2, "submit_queues": 1, "hw_queue_depth": 32,
+                 "purpose": "SYNTHETIC_MODERN_SATA_SERVICE_ENVELOPE"},
+    "nvme_gen4": {"cap_mib_s": 6500, "completion_nsec": 25000, "irqmode": 2,
+                  "queue_mode": 2, "submit_queues": 4, "hw_queue_depth": 64,
+                  "purpose": "SYNTHETIC_GEN4_NVME_SERVICE_ENVELOPE"},
+    "nvme_gen5": {"cap_mib_s": 12000, "completion_nsec": 14000, "irqmode": 2,
+                  "queue_mode": 2, "submit_queues": 8, "hw_queue_depth": 64,
+                  "purpose": "SYNTHETIC_GEN5_NVME_SERVICE_ENVELOPE"},
+}
+STORAGE_ENVELOPE_ORDER = tuple(STORAGE_ENVELOPE_SPECS)
 # Five adjacent matched rounds with mode order alternated between rounds.
 CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)
 # Five balanced three-arm rounds. Each consecutive triplet contains 2/4/8
@@ -46,13 +65,22 @@ PAIRED_CI95_T_N5 = 2.7764451051977987
 LOGICAL_BLOCK_BYTES = 4096
 
 
-def device_model_limits(spec):
-    """Analytical null_blk cap and unmerged 4KiB latency ceiling."""
+def device_model_limits(spec, offered_qd=None):
+    """Analytical null_blk cap and unmerged 4KiB latency ceiling.
+
+    A workload cannot consume hardware depth that it does not offer. Historical
+    qualification calls omit offered_qd to preserve the existing model record;
+    modern storage-envelope diagnostics pass QD32 explicitly.
+    """
     cap_mbps = spec["cap_mib_s"] * (1 << 20) / 1_000_000.0
-    latency_mbps = (LOGICAL_BLOCK_BYTES * spec["hw_queue_depth"] *
+    effective_depth = spec["hw_queue_depth"]
+    if offered_qd is not None:
+        effective_depth = min(effective_depth, offered_qd)
+    latency_mbps = (LOGICAL_BLOCK_BYTES * effective_depth *
                     1_000_000_000.0 / spec["completion_nsec"] / 1_000_000.0)
     return {
         "cap_decimal_mbps": cap_mbps,
+        "effective_queue_depth": effective_depth,
         "unmerged_4k_latency_ceiling_mbps": latency_mbps,
         "effective_4k_model_ceiling_mbps": min(cap_mbps, latency_mbps),
     }
@@ -1251,6 +1279,11 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = "owned RAM packed placement verification"
             elif line.startswith("START_ID36_RESOURCE_PRESSURE="):
                 phase = "ID36 low-RAM/heavy-CPU pressure"
+            elif (match := re.fullmatch(
+                    r"START_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5) "
+                    r"DELTA64_RESCUE=(0|1)", line)):
+                mode = "delta64-positive write" if match.group(2) == "1" else "mixed"
+                phase = f"{match.group(1)} synthetic service envelope ({mode})"
             elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "shared fixture allocation and workload generation"
             elif line.startswith("START_OWNED_RAM_REGIME="):
@@ -1474,6 +1507,12 @@ def run_stage(title, command, result, *, parse_bench=False):
         if write_pipeline_sessions else
         {"overall": "NOT_RUN",
          "reason": "refuted and retired from routine qualification"})
+    storage_envelope_sessions = (
+        parse_storage_envelope_sessions(output) if parse_bench else [])
+    storage_envelope_diagnostic = (
+        storage_envelope_verdict(storage_envelope_sessions)
+        if storage_envelope_sessions else
+        {"overall": "NOT_RUN", "reason": "storage-envelope sweep not executed"})
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
@@ -1481,7 +1520,9 @@ def run_stage(title, command, result, *, parse_bench=False):
                        sd_coalesce_diagnostic.get("overall") !=
                        "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
                        delta64_rescue_diagnostic.get("overall") !=
-                       "PASS_DELTA64_RESCUE_AB"))
+                       "PASS_DELTA64_RESCUE_AB" or
+                       storage_envelope_diagnostic.get("overall") !=
+                       "PASS_DIRECTIONAL_STORAGE_ENVELOPES"))
     if marker_failure:
         rc = 1
     secure_boot_signing_blocked = (
@@ -1531,6 +1572,11 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "delta64 rescue off/on A/B"
                 record["diagnostic"] = delta64_rescue_diagnostic.get(
                     "reason", "paired delta64 rescue evidence is incomplete")
+            elif storage_envelope_diagnostic.get("overall") != (
+                    "PASS_DIRECTIONAL_STORAGE_ENVELOPES"):
+                record["failed_phase"] = "modern storage service-envelope evidence"
+                record["diagnostic"] = storage_envelope_diagnostic.get(
+                    "reason", "storage-envelope evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1577,6 +1623,9 @@ def run_stage(title, command, result, *, parse_bench=False):
             write_pipeline_sessions)
         result["benchmarks"]["write_pipeline_depth"] = (
             write_pipeline_diagnostic)
+        result["benchmarks"]["storage_envelope_sessions"] = (
+            storage_envelope_sessions)
+        result["benchmarks"]["storage_envelopes"] = storage_envelope_diagnostic
     print(f"  {len(result['stages']):>2}/5  {title:<29} "
           f"{status:<8} {record['elapsed_s']:>8.2f}s", flush=True)
     if rc and "diagnostic" in record:
@@ -1703,6 +1752,198 @@ def parse_sessions(output):
                     current["trace_sha256"] = obj["trace_sha256"]
     return sessions
 
+
+
+
+def parse_storage_envelope_sessions(output):
+    """Parse directional modern-storage off/swapz pairs without host identity."""
+    sessions, current = [], None
+    start_re = re.compile(
+        r"START_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5) "
+        r"DELTA64_RESCUE=(0|1)")
+    pass_re = re.compile(
+        r"PASS_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5) "
+        r"DELTA64_RESCUE=(0|1)")
+    model_re = re.compile(
+        r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) "
+        r"IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) "
+        r"HW_QUEUE_DEPTH=(\d+)")
+    for raw in output.splitlines():
+        line = raw.strip()
+        match = start_re.fullmatch(line)
+        if match:
+            current = {
+                "envelope": match.group(1),
+                "delta64_rescue": int(match.group(2)),
+                "offered_qd": 32,
+                "status": "INCOMPLETE",
+                "device_model": None,
+                "arms": {},
+            }
+            sessions.append(current)
+            continue
+        match = pass_re.fullmatch(line)
+        if match:
+            if current is not None and (
+                    current["envelope"] == match.group(1) and
+                    current["delta64_rescue"] == int(match.group(2))):
+                current["status"] = "PASS"
+            current = None
+            continue
+        if current is None:
+            continue
+        match = model_re.fullmatch(line)
+        if match:
+            current["device_model"] = {
+                "cap_mib_s": int(match.group(1)),
+                "completion_nsec": int(match.group(2)),
+                "irqmode": int(match.group(3)),
+                "queue_mode": int(match.group(4)),
+                "submit_queues": int(match.group(5)),
+                "hw_queue_depth": int(match.group(6)),
+                "purpose": STORAGE_ENVELOPE_SPECS[
+                    current["envelope"]]["purpose"],
+            }
+            continue
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        candidate = obj.get("candidate")
+        if candidate not in ("off", "swapz") or obj.get("verdict") != "PASS":
+            continue
+        rates = obj.get("throughput_mbps") or {}
+        lower = obj.get("lower_io") or {}
+        current["arms"][candidate] = {
+            "source_sha": obj.get("source_sha"),
+            "fixture_sha256": obj.get("fixture_sha256"),
+            "trace_sha256": obj.get("trace_sha256"),
+            "input_write_mbps": rates.get("logical_write_mbps"),
+            "input_read_mbps": rates.get("logical_read_mbps"),
+            "lower_write_bytes": lower.get("lower_write_bytes"),
+            "lower_write_requests": lower.get("lower_write_requests"),
+            "lower_read_bytes": lower.get("lower_read_bytes"),
+            "lower_read_requests": lower.get("lower_read_requests"),
+            "write_p99_ms": obj.get("write_p99_ns", 0) / 1e6,
+            "read_p99_ms": obj.get("read_p99_ns", 0) / 1e6,
+            "seconds": obj.get("seconds"),
+            "lower_inflight": lower_inflight_record(obj),
+            "kernel_write_path": obj.get("kernel_write_path"),
+        }
+    return sessions
+
+
+def storage_envelope_verdict(sessions):
+    expected = {(name, rescue) for name in STORAGE_ENVELOPE_ORDER
+                for rescue in (0, 1)}
+    if len(sessions) != len(expected):
+        return {"overall": "INCOMPLETE",
+                "reason": "eight directional storage-envelope sessions required"}
+    observed = {(row.get("envelope"), row.get("delta64_rescue"))
+                for row in sessions}
+    if observed != expected or len(observed) != len(sessions):
+        return {"overall": "INCONCLUSIVE",
+                "reason": "storage-envelope model/rescue matrix mismatch"}
+
+    rows = []
+    for session in sessions:
+        envelope = session["envelope"]
+        expected_model = STORAGE_ENVELOPE_SPECS[envelope]
+        model = session.get("device_model") or {}
+        if (session.get("status") != "PASS" or
+                any(model.get(key) != expected_model[key] for key in (
+                    "cap_mib_s", "completion_nsec", "irqmode", "queue_mode",
+                    "submit_queues", "hw_queue_depth"))):
+            return {"overall": "INCONCLUSIVE",
+                    "reason": f"{envelope} service envelope was incomplete or changed"}
+        arms = session.get("arms") or {}
+        if set(arms) != {"off", "swapz"}:
+            return {"overall": "INCOMPLETE",
+                    "reason": f"{envelope} missing raw/off or swapz arm"}
+        off, swapz = arms["off"], arms["swapz"]
+        if (off.get("source_sha") != swapz.get("source_sha") or
+                off.get("fixture_sha256") != swapz.get("fixture_sha256") or
+                off.get("trace_sha256") != swapz.get("trace_sha256")):
+            return {"overall": "INCONCLUSIVE",
+                    "reason": f"{envelope} did not compare identical source/work"}
+        kernel = swapz.get("kernel_write_path") or {}
+        if kernel.get("delta64_rescue") != session["delta64_rescue"]:
+            return {"overall": "INCONCLUSIVE",
+                    "reason": f"{envelope} delta64 policy did not match marker"}
+        numeric = (
+            off.get("input_write_mbps"), swapz.get("input_write_mbps"),
+            off.get("lower_write_bytes"), swapz.get("lower_write_bytes"),
+            off.get("lower_write_requests"), swapz.get("lower_write_requests"),
+            swapz.get("seconds"),
+        )
+        if any(type(value) not in (int, float) or not math.isfinite(value) or
+               value <= 0 for value in numeric):
+            return {"overall": "INCONCLUSIVE",
+                    "reason": f"{envelope} missing positive throughput/lower-I/O evidence"}
+
+        byte_speedup = off["lower_write_bytes"] / swapz["lower_write_bytes"]
+        request_speedup = (
+            off["lower_write_requests"] / swapz["lower_write_requests"])
+        useful_speedup = swapz["input_write_mbps"] / off["input_write_mbps"]
+        capture = ((useful_speedup - 1.0) / (byte_speedup - 1.0)
+                   if byte_speedup > 1.0 else None)
+        inflight = swapz.get("lower_inflight") or {}
+        elapsed_ns = swapz["seconds"] * 1e9
+
+        def wall_fraction(field):
+            value = kernel.get(field)
+            return (value / elapsed_ns
+                    if type(value) in (int, float) and value >= 0 else None)
+
+        samples = kernel.get("prep_lower_write_samples")
+        start_queued = kernel.get("prep_lower_write_start_queued")
+        end_queued = kernel.get("prep_lower_write_end_queued")
+        start_nonempty = kernel.get("prep_lower_write_start_nonempty")
+        end_nonempty = kernel.get("prep_lower_write_end_nonempty")
+        if not all(type(value) is int and value >= 0 for value in (
+                samples, start_queued, end_queued, start_nonempty,
+                end_nonempty)):
+            samples = start_queued = end_queued = start_nonempty = end_nonempty = 0
+
+        rows.append({
+            "envelope": envelope,
+            "delta64_rescue": session["delta64_rescue"],
+            "offered_qd": 32,
+            "device_model": model,
+            "device_limits": device_model_limits(expected_model, offered_qd=32),
+            "byte_speedup": byte_speedup,
+            "request_speedup": request_speedup,
+            "useful_write_speedup": useful_speedup,
+            "bandwidth_opportunity_capture_fraction": capture,
+            "swapz_write_depth_peak": inflight.get("write_peak"),
+            "swapz_write_depth_mean": inflight.get("write_time_weighted"),
+            "k1_ready_wait_windows": kernel.get("k1_ready_wait_windows"),
+            "k1_ready_wait_max_records": kernel.get("k1_ready_wait_max_records"),
+            "k1_ready_wait_fraction": wall_fraction("k1_ready_wait_wall_ns"),
+            "lower_write_active_fraction": wall_fraction("pipeline_active_wall_ns"),
+            "preparation_wait_fraction": wall_fraction("prep_wait_wall_ns"),
+            "commit_nonio_fraction": wall_fraction("window_commit_nonio_wall_ns"),
+            "plan_fraction": wall_fraction("engine_plan_wall_ns"),
+            "pack_fraction": wall_fraction("engine_pack_wall_ns"),
+            "publish_fraction": wall_fraction("engine_publish_wall_ns"),
+            "publish_crc_fraction": wall_fraction("engine_publish_crc_wall_ns"),
+            "prep_queue_start_mean": (start_queued / samples if samples else 0.0),
+            "prep_queue_end_mean": (end_queued / samples if samples else 0.0),
+            "prep_queue_start_nonempty_fraction": (
+                start_nonempty / samples if samples else 0.0),
+            "prep_queue_end_nonempty_fraction": (
+                end_nonempty / samples if samples else 0.0),
+        })
+    rows.sort(key=lambda row: (
+        STORAGE_ENVELOPE_ORDER.index(row["envelope"]),
+        row["delta64_rescue"]))
+    return {
+        "overall": "PASS_DIRECTIONAL_STORAGE_ENVELOPES",
+        "scope": "SYNTHETIC_NULL_BLK_DIRECTIONAL_NOT_PHYSICAL_MEDIA",
+        "rows": rows,
+    }
 
 
 def parse_lz4_acceleration(output):
@@ -6519,6 +6760,60 @@ def print_bench(result):
 
 
 
+    storage = result["benchmarks"].get("storage_envelopes", {})
+    if storage.get("overall") == "PASS_DIRECTIONAL_STORAGE_ENVELOPES":
+        print("\n  MODERN STORAGE SERVICE ENVELOPES — directional synthetic null_blk")
+        print("  QD32 offered load; these are service envelopes, not measurements of physical media.")
+        rows = []
+        phase_rows = []
+        for row in storage["rows"]:
+            capture = row["bandwidth_opportunity_capture_fraction"]
+            rows.append((
+                row["envelope"],
+                row["delta64_rescue"],
+                f"{row['byte_speedup']:.2f}x",
+                f"{row['request_speedup']:.2f}x",
+                f"{row['useful_write_speedup']:.2f}x",
+                "n/a" if capture is None else f"{capture * 100:+.1f}%",
+                row["swapz_write_depth_peak"],
+                (f"{row['swapz_write_depth_mean']:.2f}"
+                 if isinstance(row["swapz_write_depth_mean"], (int, float))
+                 else "n/a"),
+            ))
+            def pct(name):
+                value = row.get(name)
+                return ("n/a" if value is None else f"{value * 100:.1f}%")
+            phase_rows.append((
+                row["envelope"],
+                row["delta64_rescue"],
+                pct("lower_write_active_fraction"),
+                pct("k1_ready_wait_fraction"),
+                pct("preparation_wait_fraction"),
+                pct("commit_nonio_fraction"),
+                pct("plan_fraction"),
+                pct("pack_fraction"),
+                pct("publish_fraction"),
+                pct("publish_crc_fraction"),
+            ))
+        print_table(
+            "Saved lower work versus useful WRITE service",
+            ("model", "D64", "byte x", "req x", "useful x", "capture",
+             "W peak", "W mean"), rows)
+        print("  capture=(useful speedup-1)/(lower-WRITE byte speedup-1); "
+              "low/negative values mean saved media work is not reaching useful service.")
+        print_table(
+            "Timed swapz WRITE-path occupancy versus replay wall",
+            ("model", "D64", "lower active", "K1 ready wait", "prep wait",
+             "commit nonio", "plan", "pack", "publish", "pub CRC"),
+            phase_rows)
+        print("  K1 ready-wait isolates a ready window blocked by the single immutable lower-WRITE slot; "
+              "prep wait isolates ordered-worker handoff starvation. Plan/pack/publish split serialized commit CPU.")
+    else:
+        print("\n  Modern storage service-envelope evidence: "
+              f"{storage.get('overall', 'NOT_RUN')} "
+              f"({storage.get('reason', 'directional sweep unavailable')})")
+
+
     write_depth = result["benchmarks"].get("write_pipeline_depth", {})
     if write_depth.get("overall") == "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE":
         print("\n  Lower-WRITE submission depth 1 vs 2 — five matched fast QD32 rounds")
@@ -6796,7 +7091,9 @@ def main():
                        "write_saturation_sessions": [],
                        "write_saturation": {"overall": "NOT_RUN"},
                        "write_pipeline_depth_sessions": [],
-                       "write_pipeline_depth": {"overall": "NOT_RUN"}},
+                       "write_pipeline_depth": {"overall": "NOT_RUN"},
+                       "storage_envelope_sessions": [],
+                       "storage_envelopes": {"overall": "NOT_RUN"}},
         "overall": "INCOMPLETE"
     }
     make_cmd, parallelism = make_invocation()

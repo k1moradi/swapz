@@ -196,6 +196,54 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
+# Directional storage-service envelope sweep. These remain synthetic null_blk
+# models, not claims about a specific physical product. Each envelope runs the
+# same immutable mixed workload with production async preparation, then the
+# positive delta64 write-only fixture so reports can distinguish lower-byte
+# opportunity from CPU/serialization capture. QD32 is the offered concurrency;
+# the reporter therefore caps analytical 4KiB latency service at min(QD32, hwq).
+for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5; do
+    case "$envelope" in
+        sd_card)
+            model_args=(--lower-mbps 100 --submit-queues 1
+                        --hw-queue-depth 4 --completion-nsec 500000)
+            ;;
+        sata_ssd)
+            model_args=(--lower-mbps 500 --submit-queues 1
+                        --hw-queue-depth 32 --completion-nsec 100000)
+            ;;
+        nvme_gen4)
+            model_args=(--lower-mbps 6500 --submit-queues 4
+                        --hw-queue-depth 64 --completion-nsec 25000)
+            ;;
+        nvme_gen5)
+            model_args=(--lower-mbps 12000 --submit-queues 8
+                        --hw-queue-depth 64 --completion-nsec 14000)
+            ;;
+        *) echo 'BLOCKED: unsupported storage service envelope' >&2; exit 2 ;;
+    esac
+    for delta64_rescue in 0 1; do
+        arguments=(--run-owned-ram-pair --profile medium
+                   --retain-ms 2 --unpaced "${model_args[@]}")
+        if (( delta64_rescue )); then
+            # Suffix order mirrors benchmark-owned-pair.sh's bounded parser:
+            # shared plan, delta acceleration, rescue, async, write-only,
+            # completion, hwq, submit queues, then lower MiB/s.
+            arguments+=(--write-only-qd 32 --async-prepare
+                        --delta64-rescue --delta64-lz4-acceleration 4
+                        --shared-plan "$shared_plan/delta64")
+        else
+            arguments+=(--async-prepare --shared-plan "$shared_plan")
+        fi
+        printf 'START_STORAGE_ENVELOPE=%s DELTA64_RESCUE=%s\n' \
+            "$envelope" "$delta64_rescue"
+        run_privileged tests/tools/benchmark-owned-pair.sh \
+            --validated-source "$tested_source" "${arguments[@]}"
+        printf 'PASS_STORAGE_ENVELOPE=%s DELTA64_RESCUE=%s\n' \
+            "$envelope" "$delta64_rescue"
+    done
+done
+
 # Delta64 rescue confirmation at fixed K=1 with second-LZ4 acceleration 4.
 # Five counterbalanced off/on pairs reuse the exact positive delta64 fixture
 # and SSD RAM model; the off arm also carries acceleration 4.
@@ -311,5 +359,5 @@ run_privileged tests/tools/qualify-resource-pressure.sh \
 # remains depth=1 and routine qualification no longer spends ten sessions here.
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 40 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 8 directional modern-storage envelope sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 40 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, predictor-first delta64, promoted independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'

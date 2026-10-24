@@ -832,6 +832,28 @@ records these values with bandwidth and timer latency; mismatch is incomplete.
 Loaded correctness smoke also uses depth 1. These are synthetic queue models,
 not literal SD/HDD/SSD/NVMe protocol emulation.
 
+Routine qualification preserves those two historical profiles for continuity.
+A separate directional QD32 service-envelope sweep must additionally run exact,
+allowlisted null_blk tuples for modern SD (100 MiB/s, 500000 ns, submit_queues=1,
+hwq=4), SATA SSD (500 MiB/s, 100000 ns, submit_queues=1, hwq=32), Gen4 NVMe
+(6500 MiB/s, 25000 ns, submit_queues=4, hwq=64) and Gen5 NVMe (12000 MiB/s,
+14000 ns, submit_queues=8, hwq=64). Arbitrary cap/latency/queue combinations
+must still be rejected before privilege. Each envelope runs one production
+async mixed off/swapz comparison and one positive-delta64 write-only off/swapz
+comparison. These rows are directional bottleneck evidence and do not replace
+the matched fast-model qualification intervals.
+
+For an offered-QD-limited diagnostic, the analytical unmerged-4KiB latency
+ceiling uses `min(offered_qd, hw_queue_depth)`, not hardware depth alone.
+Reports must retain lower-WRITE byte/request speedups, useful-WRITE speedup and
+bandwidth-opportunity capture `(useful_speedup - 1) / (byte_speedup - 1)`
+when byte speedup exceeds one. They must also retain sampled lower-WRITE
+peak/time-weighted depth and the timed swapz K=1 ready-window wait,
+preparation-handoff wait, lower-run occupancy, commit non-I/O, planner, pack,
+publication and final publication-CRC attribution. Those diagnostics decide
+which architecture question is eligible to reopen; they are not themselves a
+performance-promotion verdict.
+
 Each timed benchmark arm samples only its positively identified owned lower
 device's `/sys/block/<disk>/inflight` counters. The sanitized report records the
 target sampling interval, achieved sample count, initial/last sampled

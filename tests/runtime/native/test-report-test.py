@@ -1018,7 +1018,21 @@ class ReportContract(unittest.TestCase):
             self.assertIn(gate, source)
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
+        self.assertIn("for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5", loaded)
+        self.assertIn("START_STORAGE_ENVELOPE=", loaded)
+        self.assertIn("--submit-queues", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
+        self.assertEqual(
+            runner.STORAGE_ENVELOPE_SPECS["sd_card"]["cap_mib_s"], 100)
+        self.assertEqual(
+            runner.STORAGE_ENVELOPE_SPECS["sata_ssd"]["cap_mib_s"], 500)
+        self.assertEqual(
+            runner.STORAGE_ENVELOPE_SPECS["nvme_gen4"]["submit_queues"], 4)
+        self.assertEqual(
+            runner.STORAGE_ENVELOPE_SPECS["nvme_gen5"]["submit_queues"], 8)
+        nvme_limits = runner.device_model_limits(
+            runner.STORAGE_ENVELOPE_SPECS["nvme_gen5"], offered_qd=32)
+        self.assertEqual(nvme_limits["effective_queue_depth"], 32)
         self.assertNotIn("START_PARALLEL_READ_AB=", loaded)
         self.assertNotIn("PASS_PARALLEL_READ_AB=", loaded)
         self.assertNotIn("START_SD_READ_GROUPING_AB=", loaded)
@@ -1027,6 +1041,42 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("swapon ", loaded)
         self.assertNotIn("swapoff ", loaded)
         self.assertNotIn("/dev/sdb", loaded)
+
+    def test_storage_envelopes_report_capture_and_qd_limited_ceiling(self):
+        lines = []
+        for envelope in runner.STORAGE_ENVELOPE_ORDER:
+            spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
+            for rescue in (0, 1):
+                raw = arm("off", mode=1, regime="ssd_emulated")
+                swapz = arm("swapz", mode=1, regime="ssd_emulated")
+                swapz["kernel_write_path"]["delta64_rescue"] = rescue
+                lines.extend((
+                    f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={rescue}",
+                    "PASS_RAM_MODEL_LOWER_MBPS="
+                    f"{spec['cap_mib_s']} COMPLETION_NSEC={spec['completion_nsec']} "
+                    f"IRQMODE={spec['irqmode']} QUEUE_MODE={spec['queue_mode']} "
+                    f"SUBMIT_QUEUES={spec['submit_queues']} "
+                    f"HW_QUEUE_DEPTH={spec['hw_queue_depth']}",
+                    json.dumps(raw),
+                    json.dumps(swapz),
+                    f"PASS_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={rescue}",
+                ))
+        sessions = runner.parse_storage_envelope_sessions("\n".join(lines))
+        self.assertEqual(len(sessions), 8)
+        verdict = runner.storage_envelope_verdict(sessions)
+        self.assertEqual(
+            verdict["overall"], "PASS_DIRECTIONAL_STORAGE_ENVELOPES")
+        self.assertEqual(len(verdict["rows"]), 8)
+        for row in verdict["rows"]:
+            spec = runner.STORAGE_ENVELOPE_SPECS[row["envelope"]]
+            self.assertEqual(
+                row["device_limits"]["effective_queue_depth"],
+                min(32, spec["hw_queue_depth"]))
+            self.assertAlmostEqual(row["byte_speedup"], 1.6)
+            self.assertAlmostEqual(row["request_speedup"], 1.6)
+            self.assertLess(
+                row["bandwidth_opportunity_capture_fraction"], 0.0)
+
 
     def test_predictor_evidence_is_sanitized(self):
         raw = predictor_evidence()

@@ -1726,13 +1726,28 @@ def compare(args):
         # gate, never proof that matching rates imply matching BIO arrivals.
         mismatch = abs(achieved[0] - achieved[1]) / max(achieved)
         output["achieved_iops_difference_fraction"] = mismatch
-        output["logical_write_mbps_ratio_swapz_to_off"] = (
+        logical_write_ratio = (
             throughput[1]["logical_write_mbps"] / throughput[0]["logical_write_mbps"]
             if throughput[0]["logical_write_mbps"] > 0 else None
         )
+        output["logical_write_mbps_ratio_swapz_to_off"] = logical_write_ratio
         output["lower_write_mbps_ratio_swapz_to_off"] = (
             throughput[1]["lower_write_mbps"] / throughput[0]["lower_write_mbps"]
             if throughput[0]["lower_write_mbps"] > 0 else None
+        )
+        off_write_requests = first["lower_io"]["lower_write_requests"]
+        swapz_write_requests = second["lower_io"]["lower_write_requests"]
+        byte_speedup = off_bytes / swapz_bytes if swapz_bytes else None
+        request_speedup = (
+            off_write_requests / swapz_write_requests
+            if swapz_write_requests else None
+        )
+        output["lower_write_byte_reduction_speedup"] = byte_speedup
+        output["lower_write_request_reduction_speedup"] = request_speedup
+        output["write_bandwidth_opportunity_capture_fraction"] = (
+            (logical_write_ratio - 1.0) / (byte_speedup - 1.0)
+            if logical_write_ratio is not None and byte_speedup is not None and
+            byte_speedup > 1.0 else None
         )
         if first["iops_requested"] == 0:
             # Differing achieved throughput is the observation, not a
