@@ -9,9 +9,10 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest successful standard owner matrix tested source
-`78d5f2e831f2d00629861260d7c24b560f53f6c4`, passed all five stages (including
-the ID36 low-RAM/heavy-CPU pressure gate), and published report-only commit
-`17f9215318cf3ea6722d7d5940989f660d70ebae`. It qualifies the complete
+`ab56b41c35b8b2b78752598365bf9ad310c40c5e`, passed all five stages (including
+the ID36 low-RAM/heavy-CPU pressure gate and explicit compound/folio BIO
+qualification), and published report-only commit
+`c8a67f451495c65f9bf72382f7169dc30e00be98`. It qualifies the complete
 owned-RAM `null_blk` matrix for that exact source. Evidence-monotonic
 publication is enforced so concurrent or delayed older test runs can never
 overwrite canonical qualification reports on main.
@@ -38,9 +39,10 @@ and append path is removed rather than retained as dormant diagnostic code.
 ## Current bottleneck ranking
 
 The ID36 low-RAM/heavy-CPU pressure gate is qualified on the owner matrix
-(tested source `78d5f2e831f2`, 0 OOM, 14,886 memory.high events, 241.9ms CPU PSI
-contention, report `17f9215318cf`). Bounded replay timeouts under pressure are
-scaled to 200s, and publication monotonicity is enforced in the test runner.
+(tested source `ab56b41c35b8`, 0 OOM, 15,031 memory.high events, 236.7s CPU PSI
+contention, report `c8a67f451495`). Explicit compound/folio multi-bvec BIO
+qualification (ID43) is covered and verified byte-exact on owned RAM.
+Publication monotonicity is enforced in the test runner.
 
 Next collect realistic churn/GC/TRIM evidence: about 70% logical occupancy, an
 explicit cold/hot split, and at least ten logical capacities of hot rewrites.
