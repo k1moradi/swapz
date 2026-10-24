@@ -642,6 +642,9 @@ void swapz_engine_invalidate_read_range(struct swapz_engine *engine,
 		engine->read_cached_block_mask = 0;
 		engine->read_coalesced_block_mask = 0;
 	}
+	if (!engine->read_extent_lru_clock &&
+	    (!engine->read_metadata_lru_clock || !engine->read_metadata_epoch))
+		return;
 	range_mask = swapz_segment_range_mask(start_block, blocks);
 	if (engine->read_extent_lru_clock &&
 	    (engine->read_extent_segment_mask & range_mask)) {
@@ -863,9 +866,9 @@ static int swapz_engine_required_read_range_resident(
 			map->payload_offset)
 			return -ESTALE;
 		required |= 1U;
-		payload_first = map->payload_offset / SWAPZ_BLOCK_BYTES;
+		payload_first = map->payload_offset >> SWAPZ_BLOCK_SHIFT;
 		payload_last = ((swapz_u32)map->payload_offset +
-				map->payload_length - 1U) / SWAPZ_BLOCK_BYTES;
+				map->payload_length - 1U) >> SWAPZ_BLOCK_SHIFT;
 		for (block = payload_first; block <= payload_last; ++block)
 			required |= (swapz_u8)(1U << block);
 	}
@@ -1859,9 +1862,9 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	    peek.payload_length != observed.payload_length ||
 	    peek.payload_offset != observed.payload_offset)
 		return -EUCLEAN;
-	payload_first = peek.payload_offset / SWAPZ_BLOCK_BYTES;
+	payload_first = peek.payload_offset >> SWAPZ_BLOCK_SHIFT;
 	payload_last = ((swapz_u32)peek.payload_offset +
-		peek.payload_length - 1U) / SWAPZ_BLOCK_BYTES;
+		peek.payload_length - 1U) >> SWAPZ_BLOCK_SHIFT;
 	if (metadata != engine->read_scratch && payload_first == 0) {
 		swapz_u32 metadata_payload_bytes = SWAPZ_BLOCK_BYTES - peek.payload_offset;
 		if (metadata_payload_bytes > peek.payload_length)

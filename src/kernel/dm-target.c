@@ -2072,15 +2072,20 @@ out:
 static void swapz_order_window_greedy(struct swapz_dm *ctx)
 {
 	swapz_u8 position = 0;
+	swapz_u8 first_unused = 0;
 
-	memset(ctx->used, 0, sizeof(ctx->used));
+	memset(ctx->used, 0, ctx->batch_count);
 	while (position < ctx->batch_count) {
 		int largest = -1, partner = -1;
 		int best_slack = INT_MAX;
 		int min_length = INT_MAX;
 		swapz_u8 i;
 
-		for (i = 0; i < ctx->batch_count; ++i) {
+		while (first_unused < ctx->batch_count &&
+		       (ctx->used[first_unused] || ctx->batch[first_unused].raw))
+			first_unused++;
+
+		for (i = first_unused; i < ctx->batch_count; ++i) {
 			if (!ctx->used[i] && !ctx->batch[i].raw) {
 				if (largest < 0 ||
 				    ctx->batch[i].length > ctx->batch[largest].length)
@@ -2098,7 +2103,7 @@ static void swapz_order_window_greedy(struct swapz_dm *ctx)
 
 		/* SWZ metadata: header(16) + two descriptors(32). */
 		if (SWAPZ_BLOCK_BYTES - 48 - ctx->batch[largest].length >= min_length) {
-			for (i = 0; i < ctx->batch_count; ++i) {
+			for (i = first_unused; i < ctx->batch_count; ++i) {
 				int remaining;
 
 				if (ctx->used[i] || ctx->batch[i].raw)
@@ -2171,18 +2176,22 @@ static void swapz_order_window(struct swapz_dm *ctx)
 static void swapz_gc_sort(struct swapz_dm *ctx)
 {
 	swapz_u8 position = 0, i;
+	swapz_u8 first_unused = 0;
 
 	if (swapz_window_uniform_compressed(ctx->gc_pending, ctx->gc_count)) {
 		for (position = 0; position < ctx->gc_count; ++position)
 			ctx->gc_to_pending[position] = position;
 		goto materialize;
 	}
-	memset(ctx->gc_used, 0, sizeof(ctx->gc_used));
+	memset(ctx->gc_used, 0, ctx->gc_count);
 	while (position < ctx->gc_count) {
 		int largest = -1, partner = -1, slack_best = INT_MAX;
 		int min_length = INT_MAX;
 
-		for (i = 0; i < ctx->gc_count; ++i) {
+		while (first_unused < ctx->gc_count && ctx->gc_used[first_unused])
+			first_unused++;
+
+		for (i = first_unused; i < ctx->gc_count; ++i) {
 			if (!ctx->gc_used[i]) {
 				if (largest < 0 || ctx->gc_pending[i].length >
 				    ctx->gc_pending[largest].length)
@@ -2196,7 +2205,7 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 		ctx->gc_used[largest] = 1;
 		ctx->gc_to_pending[position++] = largest;
 		if (SWAPZ_BLOCK_BYTES - 48 - ctx->gc_pending[largest].length >= min_length) {
-			for (i = 0; i < ctx->gc_count; ++i) {
+			for (i = first_unused; i < ctx->gc_count; ++i) {
 				int slack;
 
 				if (ctx->gc_used[i])

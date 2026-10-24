@@ -543,6 +543,14 @@ metadata insertion must still clear all valid slots and reset the clock.
 This optimization does not weaken physical-reuse safety or make cached
 metadata survive a write, discard, GC mutation or barrier. It only makes
 back-to-back invalidation calls idempotent in cost as well as semantics.
+Range invalidation (`swapz_engine_invalidate_read_range`) must similarly return
+before computing segment bitmasks when both extent-LRU and metadata-LRU clocks
+are already zero.
+
+Greedy window ordering (`swapz_order_window_greedy` and `swapz_gc_sort`)
+clears only the active batch/GC count of tracking bytes and advances a
+`first_unused` lower bound across iterations, preserving the exact stable
+largest-plus-best-fit pairing while skipping already consumed slots.
 
 
 ### Nonblocking preparation-slot reservation
