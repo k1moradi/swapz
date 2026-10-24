@@ -68,12 +68,14 @@ Retained-window suspend/resume must drain accepted ownership and verify all page
 Before any new owned RAM device is provisioned, loaded qualification may
 ordinarily unload a pre-existing `dm_swapz` module when its readable numeric
 reference count is zero. A positive count is recoverable only for exactly one
-zero-open mapper with the private `swapz-demo-<token>` name, matching
+mapper with the private `swapz-demo-<token>` name, matching
 `SWAPZ-TEST-<same-token>[phase]` UUID, no mount/swap alias, and exactly one
 proven memory-backed `null_blk` dependency created under the
-`nullb-swapz-*` configfs namespace. That stale harness mapper may receive one
+`nullb-swapz-*` configfs namespace. When a stale mapper has transient opens,
+preflight boundedly settles `udevadm` and terminates lingering userspace test
+processes before asserting zero opens; that stale harness mapper then receives one
 bounded non-force `dmsetup remove --retry`; the lower itself is preserved.
-Multiple mappings, foreign identities, active opens, mounts, swap aliases,
+Multiple mappings, foreign identities, active opens that cannot be closed, mounts, swap aliases,
 non-null_blk lowers, ambiguous configfs identity, or any removal race remain
 BLOCKED. Forced mapper/module removal is never permitted. After cleanup the
 reference count must be zero and ordinary `rmmod` remains authoritative
@@ -81,7 +83,7 @@ against races.
 
 Cleanup never force-removes uncertain resources. If identity or teardown is ambiguous, quarantine and fail.
 
-Transient target teardown between benchmark or lifecycle phases (such as tearing down the target prior to live-GC evacuation and recreation in `deploy-nullblk.sh`) must similarly use bounded non-force `timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry` to safely absorb transient `systemd-udevd` probe activity without failing or hanging.
+Transient target teardown between benchmark or lifecycle phases (such as tearing down the target prior to live-GC evacuation and recreation in `deploy-nullblk.sh`) must similarly settle `udevadm` and use bounded non-force `timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry` to safely absorb transient `systemd-udevd` probe activity without failing or hanging.
 
 ### Direct-I/O and memory input qualification boundary (ID43)
 
@@ -1037,7 +1039,9 @@ and the normal packed byte-exact readback inside a dedicated cgroup-v2 domain,
 while a separate helper faults 576 MiB of anonymous memory and runs twice the
 online CPU count of integer burners, capped at 32. The shorter trace preserves
 mixed QD32 concurrency while preventing arbitrary benchmark-duration timeouts
-from being mistaken for a forward-progress failure. The cgroup sets
+from being mistaken for a forward-progress failure; the per-candidate replay
+timeout under `--resource-pressure-short` is bounded at 280s (within the 420s outer
+cgroup barrier) to absorb scheduling delays without false-positive timeouts. The cgroup sets
 `memory.max=896MiB` and `memory.swap.max=0` when supported. The helper first
 establishes the resident baseline without memory.high throttling; immediately
 before releasing the benchmark, `memory.high` becomes the measured ready-state

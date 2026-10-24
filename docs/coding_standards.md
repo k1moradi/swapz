@@ -131,7 +131,9 @@ belong in the ROADMAP decision table and Git history.
   buffer to a wider pointer.
 - **Metadata residency:** the 512-entry metadata cache remains bounded and holds
   validated metadata only, never payload authority. Mutation fences invalidate
-  residency before authority changes.
+  residency before authority changes. Set lookups cache the active epoch locally
+  and avoid redundant engine field traversal. Extent geometry calculations and
+  fitting use constant block-shift powers (`SWAPZ_BLOCK_SHIFT`) rather than integer division.
 - **Preparation ownership:** async preparation uses one unbound producer lane.
   The ordered owner may steal only an unclaimed next preparation entry while
   holding the admission lock. Producer and ordered compression use separate

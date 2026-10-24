@@ -88,7 +88,7 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 			   swapz_u8 max_read_blocks, int logical_pages_unique,
 			   swapz_u32 *read_blocks)
 {
-	swapz_u32 payload_start = (swapz_u32)blocks * SWAPZ_BLOCK_BYTES;
+	swapz_u32 payload_start = (swapz_u32)blocks << SWAPZ_BLOCK_SHIFT;
 	swapz_u8 included = 0;
 	swapz_u8 index;
 
@@ -112,8 +112,8 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 			     ((swapz_u32)included + 1U) *
 			     sizeof(struct swapz_record))
 			break;
-		first = offset / SWAPZ_BLOCK_BYTES;
-		last = (payload_start - 1U) / SWAPZ_BLOCK_BYTES;
+		first = offset >> SWAPZ_BLOCK_SHIFT;
+		last = (payload_start - 1U) >> SWAPZ_BLOCK_SHIFT;
 		record_reads = last - first + 1U + (first ? 1U : 0U);
 		/*
 		 * Full logical record must fit both geometry and read budget.
@@ -367,7 +367,7 @@ static int swapz_read_metadata_set_lookup(const struct swapz_engine *engine,
 	swapz_u16 primary, set, base, way, slot, choice;
 	if (probes)
 		*probes = 0;
-	if (!engine || !engine->read_metadata_cache)
+	if (!engine || !engine->read_metadata_cache || !engine->read_metadata_epoch)
 		return -1;
 	primary = swapz_read_metadata_set(start_block, extent_blocks);
 	for (choice = 0; choice < SWAPZ_READ_METADATA_CACHE_CHOICES; ++choice) {
@@ -381,8 +381,7 @@ static int swapz_read_metadata_set_lookup(const struct swapz_engine *engine,
 			tag = &engine->read_metadata_tags[slot];
 			if (probes)
 				(*probes)++;
-			if (engine->read_metadata_epoch &&
-			    tag->epoch == engine->read_metadata_epoch &&
+			if (tag->epoch == engine->read_metadata_epoch &&
 			    tag->start_block == start_block &&
 			    tag->extent_blocks == extent_blocks)
 				return slot;

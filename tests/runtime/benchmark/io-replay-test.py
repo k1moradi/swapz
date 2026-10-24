@@ -630,7 +630,7 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "burst-shrink"):
             module.kernel_write_delta(
                 before, dict(after, burst_shrink_after_inflight_zero=0))
-        with self.assertRaisesRegex(ValueError, "K=1 ready-wait"):
+        with self.assertRaisesRegex(ValueError, "K=1/post-lower"):
             module.kernel_write_delta(
                 before, dict(after, k1_ready_wait_full=2))
         with self.assertRaisesRegex(ValueError, "upper-tail"):

@@ -255,6 +255,7 @@ cleanup() {
         note 'QUARANTINED: host swap changed during owned pair'
     fi
     if (( OWN_DM && !QUARANTINE )); then
+        command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=3 2>/dev/null || true
         if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
                   tr -d '[:space:]') == "$DMUUID" ]] &&
             timeout --signal=TERM --kill-after=2s 10s                 dmsetup remove --retry "$DMNAME"; then
@@ -594,7 +595,7 @@ PACKED_ARGS=()
 (( PACKED_READ )) && PACKED_ARGS+=(--packed-read)
 REPLAY_TIMEOUT=120s
 if (( RESOURCE_PRESSURE_SHORT )); then
-    REPLAY_TIMEOUT=200s
+    REPLAY_TIMEOUT=280s
 fi
 replay_off() {
     local rc

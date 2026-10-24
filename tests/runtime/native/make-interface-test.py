@@ -707,6 +707,29 @@ class PublicMakeContract(unittest.TestCase):
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
+            for envelope in runner_contract.STORAGE_ENVELOPE_ORDER:
+                env_spec = runner_contract.STORAGE_ENVELOPE_SPECS[envelope]
+                for delta64_rescue in (0, 1):
+                    off = json.loads(mock_write_arm("off", 32, 0))
+                    off["fixture_sha256"] = "b" * 64
+                    off["trace_sha256"] = "c" * 64
+                    swapz = json.loads(mock_write_arm("swapz", 32, 0))
+                    swapz["fixture_sha256"] = "b" * 64
+                    swapz["trace_sha256"] = "c" * 64
+                    swapz["kernel_write_path"]["delta64_rescue"] = delta64_rescue
+                    swapz["kernel_write_path"]["pipeline_post_lower_wall_ns"] = 1000
+                    swapz["kernel_write_path"]["pipeline_active_wall_ns"] = 5000
+                    records.extend((
+                        f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={delta64_rescue}",
+                        "REPLAY_ORDER=off-first",
+                        f"PASS_RAM_MODEL_LOWER_MBPS={env_spec['cap_mib_s']} "
+                        f"COMPLETION_NSEC={env_spec['completion_nsec']} IRQMODE={env_spec['irqmode']} "
+                        f"QUEUE_MODE={env_spec['queue_mode']} SUBMIT_QUEUES={env_spec['submit_queues']} "
+                        f"HW_QUEUE_DEPTH={env_spec['hw_queue_depth']}",
+                        json.dumps(off, sort_keys=True),
+                        json.dumps(swapz, sort_keys=True),
+                        f"PASS_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={delta64_rescue}",
+                    ))
             lz4_sequence = [
                 4 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
             for index, acceleration in enumerate(lz4_sequence):

@@ -60,18 +60,45 @@ uuid="$(dmsetup info -c --noheadings -o uuid "$owned_map" 2>/dev/null |
     fail "cannot read pre-existing dm_swapz mapping UUID"
 [[ $uuid =~ ^SWAPZ-TEST-$token(-(gc|discardtrim|suspend|writefault|flushfault|packed))?$ ]] ||
     fail "pre-existing dm_swapz mapping UUID is not harness-owned; no cleanup attempted"
-opens="$(dmsetup info -c --noheadings -o open "$owned_map" 2>/dev/null |
-    tr -d '[:space:]')" ||
-    fail "cannot read pre-existing dm_swapz open count"
-[[ $opens =~ ^(0|[1-9][0-9]*)$ && $opens == 0 ]] ||
-    fail "pre-existing harness dm_swapz mapping is open; no cleanup attempted"
-
 mapper="/dev/mapper/$owned_map"
 [[ -z "$(findmnt -rn -S "$mapper" 2>/dev/null)" ]] ||
     fail "pre-existing harness dm_swapz mapping is mounted; no cleanup attempted"
 if awk -v path="$mapper" 'NR > 1 && $1 == path { found=1 } END { exit found ? 0 : 1 }' /proc/swaps; then
     fail "pre-existing harness dm_swapz mapping is active swap; no cleanup attempted"
 fi
+
+read_opens() {
+    local val
+    val="$(dmsetup info -c --noheadings -o open "$owned_map" 2>/dev/null |
+        tr -d '[:space:]')" || return 1
+    [[ $val =~ ^(0|[1-9][0-9]*)$ ]] || return 1
+    printf '%s\n' "$val"
+}
+
+opens="$(read_opens 2>/dev/null || true)"
+if [[ $opens =~ ^[1-9][0-9]*$ ]]; then
+    command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=3 2>/dev/null || true
+    for _ in {1..15}; do
+        opens="$(read_opens 2>/dev/null || echo "$opens")"
+        [[ $opens == 0 ]] && break
+        sleep 0.2
+    done
+fi
+
+if [[ $opens =~ ^[1-9][0-9]*$ ]] && command -v fuser >/dev/null 2>&1; then
+    fuser -k -TERM "$mapper" >/dev/null 2>&1 || true
+    sleep 0.5
+    opens="$(read_opens 2>/dev/null || echo "$opens")"
+    if [[ $opens =~ ^[1-9][0-9]*$ ]]; then
+        fuser -k -KILL "$mapper" >/dev/null 2>&1 || true
+        sleep 0.5
+        command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=3 2>/dev/null || true
+        opens="$(read_opens 2>/dev/null || echo "$opens")"
+    fi
+fi
+
+[[ $opens =~ ^(0|[1-9][0-9]*)$ && $opens == 0 ]] ||
+    fail "pre-existing harness dm_swapz mapping is open; no cleanup attempted"
 
 deps="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
     fail "cannot read pre-existing dm_swapz dependency"

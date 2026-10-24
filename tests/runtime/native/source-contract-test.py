@@ -2647,7 +2647,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("async_prepare=1([[:space:]]|$)", deploy)
         self.assertIn('status_u64 "$packed_before" async_prepare', deploy)
         self.assertGreaterEqual(deploy.count('insmod "$MODULE"'), 2)
-        self.assertIn("10:1000000:1|80:150000:64", benchmark)
+        self.assertIn("10:1000000:1:1|80:150000:1:64", benchmark)
 
     def test_loaded_privilege_boundary_preserves_git_metadata(self):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()

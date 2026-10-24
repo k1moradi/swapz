@@ -735,6 +735,67 @@ def write_pipeline_arm(depth):
     return record
 
 
+def storage_envelope_arm(candidate, *, envelope, delta64_rescue):
+    swapz = candidate == "swapz"
+    spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
+    cap = spec["cap_mib_s"]
+    raw = min(cap, 50.0)
+    swapz_rate = raw * (1.1 if delta64_rescue else 1.05)
+    logical = 4096 * 4096
+    lower = int(logical / 1.5) if swapz else logical
+    record = {
+        "candidate": candidate,
+        "verdict": "PASS",
+        "source_sha": "a" * 40,
+        "fixture_sha256": "b" * 64,
+        "trace_sha256": "c" * 64,
+        "seconds": 2.0,
+        "throughput_mbps": {
+            "logical_write_mbps": swapz_rate if swapz else raw,
+            "logical_read_mbps": 0.0,
+            "logical_write_bytes": logical,
+            "logical_read_bytes": 0,
+        },
+        "lower_io": {
+            "lower_write_bytes": lower,
+            "lower_write_requests": 1500 if swapz else 4096,
+            "lower_read_bytes": 0,
+            "lower_read_requests": 0,
+        },
+        "lower_inflight": {
+            "write_peak": 4,
+            "write_time_weighted": 2.5,
+        },
+        "write_p99_ns": 2000000,
+    }
+    if swapz:
+        record["kernel_write_path"] = {
+            field: 0 for field in runner.KERNEL_WRITE_FIELDS
+        }
+        record["kernel_write_path"].update({
+            "delta64_rescue": delta64_rescue,
+            "prep_lower_write_samples": 10,
+            "prep_lower_write_start_queued": 2,
+            "prep_lower_write_end_queued": 2,
+            "prep_lower_write_start_nonempty": 3,
+            "prep_lower_write_end_nonempty": 3,
+            "k1_ready_wait_windows": 1,
+            "k1_ready_wait_records": 1,
+            "k1_ready_wait_max_records": 1,
+            "k1_ready_wait_wall_ns": 1000,
+            "pipeline_finalize_wait_wall_ns": 2000,
+            "pipeline_active_wall_ns": 5000,
+            "pipeline_post_lower_wall_ns": 1000,
+            "prep_wait_wall_ns": 500,
+            "window_commit_nonio_wall_ns": 500,
+            "engine_plan_wall_ns": 500,
+            "pack_wall_ns": 500,
+            "publish_wall_ns": 500,
+            "publish_crc32c_wall_ns": 500,
+        })
+    return record
+
+
 def lz4_acceleration_log():
     out = []
     spec = runner.MODEL_SPECS["ssd_emulated"]
@@ -797,6 +858,21 @@ def synthetic_log():
                 out.append("PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=42")
             out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
+    for envelope in runner.STORAGE_ENVELOPE_ORDER:
+        envelope_spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
+        for delta64_rescue in (0, 1):
+            out.append(f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={delta64_rescue}")
+            out.append("REPLAY_ORDER=off-first")
+            out.append(
+                "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+                "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+                "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+                "HW_QUEUE_DEPTH={hw_queue_depth}".format(**envelope_spec))
+            off = storage_envelope_arm("off", envelope=envelope, delta64_rescue=delta64_rescue)
+            swapz = storage_envelope_arm("swapz", envelope=envelope, delta64_rescue=delta64_rescue)
+            out.append(json.dumps(off))
+            out.append(json.dumps(swapz))
+            out.append(f"PASS_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={delta64_rescue}")
     out.extend(lz4_acceleration_log())
     for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
         out.append(f"START_READ_COALESCE_AB={enabled}")
