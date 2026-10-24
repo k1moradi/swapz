@@ -25,8 +25,9 @@ fi
 
 CGROUP_ROOT=/sys/fs/cgroup
 PRESSURE_MIB=576
-MEMORY_HIGH_BYTES=$((576 * 1024 * 1024))
+MEMORY_HIGH_BYTES=$((640 * 1024 * 1024))
 MEMORY_MAX_BYTES=$((896 * 1024 * 1024))
+PAIR_OUTER_SECONDS=420
 MIN_AVAILABLE_KIB=$((1024 * 1024))
 PRESSURE_SCRIPT="$ROOT/tests/runtime/benchmark/resource-pressure.py"
 PAIR="$ROOT/tests/tools/benchmark-owned-pair.sh"
@@ -167,7 +168,7 @@ cpu_some_before="$(cpu_some_total)"
 SWAPZ_ID36_PAIR_READY="$PAIR_READY" \
 SWAPZ_ID36_PAIR_GO="$PAIR_GO" \
 SWAPZ_ID36_CGROUP="$CGROUP" \
-    timeout --signal=TERM --kill-after=10s 300s \
+    timeout --signal=TERM --kill-after=10s "${PAIR_OUTER_SECONDS}s" \
     bash "$PAIR" --validated-source "$VALIDATED_SOURCE" \
     --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced \
     --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000 \

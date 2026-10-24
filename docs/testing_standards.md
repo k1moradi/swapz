@@ -974,7 +974,7 @@ and the normal packed byte-exact readback inside a dedicated cgroup-v2 domain,
 while a separate helper faults 576 MiB of anonymous memory and runs twice the
 online CPU count of integer burners, capped at 32. The shorter trace preserves
 mixed QD32 concurrency while preventing arbitrary benchmark-duration timeouts
-from being mistaken for a forward-progress failure. The cgroup sets `memory.high=576MiB`,
+from being mistaken for a forward-progress failure. The cgroup sets `memory.high=640MiB`,
 `memory.max=896MiB` and `memory.swap.max=0` when supported. The host must
 have at least 1 GiB MemAvailable before this destructive-to-performance but
 RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
@@ -985,7 +985,10 @@ The owned pair first creates and fully faults both 64MiB memory-backed
 process into the cgroup, proves that membership, and stops at a private barrier.
 Only then does the pressure helper fault its anonymous resident set and start
 niceness-10 CPU burners in the same cgroup. The backing pages therefore do not
-consume the cgroup's 576MiB pressure budget, while the barrier still guarantees
+consume the cgroup's pressure budget. The 576MiB resident helper sits below the
+640MiB high watermark, leaving 64MiB of bounded working headroom for the replay
+process and target metadata while still requiring positive `memory.events high`
+evidence. The barrier still guarantees
 that module insertion, target construction, replay and teardown execute under
 reclaim/CPU contention. Lazy null_blk page allocation is not the test subject.
 The pressure helper must reach readiness with at least the requested resident

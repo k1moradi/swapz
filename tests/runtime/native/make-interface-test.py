@@ -992,6 +992,8 @@ class PublicMakeContract(unittest.TestCase):
         for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        self.assertTrue(
+            (ROOT / "tests/tools/deploy-nullblk.sh").stat().st_mode & 0o100)
         self.assertIn("sudo -n true", loaded)
         self.assertIn("sudo -n bash", loaded)
         self.assertIn("BLOCKED_LOADED_QUALIFICATION", loaded)

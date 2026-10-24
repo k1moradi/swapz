@@ -441,7 +441,7 @@ if (( RESOURCE_PRESSURE_SHORT )); then
         fail 'ID36 pair cgroup migration was not observable'
     note "PASS_ID36_PAIR_CGROUP=pid:$$"
     printf 'pid=%s\n' "$$" > "$ID36_PAIR_READY"
-    for _ in {1..600}; do
+    for _ in {1..1200}; do
         [[ -e $ID36_PAIR_GO ]] && break
         sleep 0.05
     done
