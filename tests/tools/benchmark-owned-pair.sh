@@ -585,10 +585,14 @@ fi
 note "SWAPZ_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
 PACKED_ARGS=()
 (( PACKED_READ )) && PACKED_ARGS+=(--packed-read)
+REPLAY_TIMEOUT=120s
+if (( RESOURCE_PRESSURE_SHORT )); then
+    REPLAY_TIMEOUT=200s
+fi
 replay_off() {
     local rc
 
-    if timeout --signal=TERM --kill-after=5s 120s python3 -B \
+    if timeout --signal=TERM --kill-after=5s "$REPLAY_TIMEOUT" python3 -B \
         tests/runtime/benchmark/io-replay.py run \
         --fixture "$SESSION/fixture.bin" \
         --trace "$SESSION/plan/trace.jsonl" \
@@ -609,7 +613,7 @@ replay_off() {
 replay_swapz() {
     local rc
 
-    if timeout --signal=TERM --kill-after=5s 120s python3 -B \
+    if timeout --signal=TERM --kill-after=5s "$REPLAY_TIMEOUT" python3 -B \
         tests/runtime/benchmark/io-replay.py run \
         --fixture "$SESSION/fixture.bin" \
         --trace "$SESSION/plan/trace.jsonl" \
