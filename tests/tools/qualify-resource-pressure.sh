@@ -25,7 +25,7 @@ fi
 
 CGROUP_ROOT=/sys/fs/cgroup
 PRESSURE_MIB=576
-MEMORY_HIGH_BYTES=$((640 * 1024 * 1024))
+MEMORY_HEADROOM_BYTES=$((64 * 1024 * 1024))
 MEMORY_MAX_BYTES=$((896 * 1024 * 1024))
 PAIR_OUTER_SECONDS=420
 MIN_AVAILABLE_KIB=$((1024 * 1024))
@@ -129,7 +129,9 @@ for control in memory.max memory.high memory.current memory.events cpu.pressure 
 done
 
 echo "$MEMORY_MAX_BYTES" > "$CGROUP/memory.max"
-echo "$MEMORY_HIGH_BYTES" > "$CGROUP/memory.high"
+# Establish the resident helper baseline before applying the real high
+# watermark. The workload-scoped boundary is installed just before release.
+echo "$MEMORY_MAX_BYTES" > "$CGROUP/memory.high"
 if [[ -e $CGROUP/memory.swap.max ]]; then
     echo 0 > "$CGROUP/memory.swap.max"
 fi
@@ -156,10 +158,8 @@ cpu_some_total() {
     } END { if (!found) print 0 }' "$CGROUP/cpu.pressure"
 }
 
-high_before="$(event_value high)"
-oom_before="$(event_value oom)"
-oom_kill_before="$(event_value oom_kill)"
-cpu_some_before="$(cpu_some_total)"
+oom_start="$(event_value oom)"
+oom_kill_start="$(event_value oom_kill)"
 
 # Fault both memory-backed lowers before the pair enters ID36. The pair moves
 # itself into the cgroup after prewarm and waits at the private barrier, so the
@@ -232,9 +232,35 @@ pressure_current="$(cat "$CGROUP/memory.current")"
     printf 'FAIL: ID36 resident pressure too small: %s bytes\n' "$pressure_current" >&2
     exit 1
 }
+oom_ready="$(event_value oom)"
+oom_kill_ready="$(event_value oom_kill)"
+(( oom_ready == oom_start && oom_kill_ready == oom_kill_start )) || {
+    printf 'FAIL: ID36 pressure startup encountered OOM events oom:%s oom_kill:%s\n' \
+        "$((oom_ready - oom_start))" "$((oom_kill_ready - oom_kill_start))" >&2
+    exit 1
+}
 
-printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%s cpu_workers:%s\n' \
-    "$MEMORY_HIGH_BYTES" "$MEMORY_MAX_BYTES" "$PRESSURE_MIB" "$cpu_workers"
+# Base memory.high on the actual ready-state charge, which already includes
+# pair/helper/worker overhead. Exactly 64 MiB remains for target construction
+# and replay before reclaim/throttling begins.
+MEMORY_HIGH_BYTES=$((pressure_current + MEMORY_HEADROOM_BYTES))
+(( MEMORY_HIGH_BYTES < MEMORY_MAX_BYTES )) || {
+    printf 'FAIL: ID36 ready-state charge leaves no bounded memory.high headroom: %s bytes\n' \
+        "$pressure_current" >&2
+    exit 1
+}
+echo "$MEMORY_HIGH_BYTES" > "$CGROUP/memory.high"
+
+# Start evidence only after the resident baseline and real high watermark are
+# established; helper startup cannot satisfy the qualification gate.
+high_before="$(event_value high)"
+oom_before="$(event_value oom)"
+oom_kill_before="$(event_value oom_kill)"
+cpu_some_before="$(cpu_some_total)"
+
+printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%s cpu_workers:%s ready_bytes:%s headroom_bytes:%s\n' \
+    "$MEMORY_HIGH_BYTES" "$MEMORY_MAX_BYTES" "$PRESSURE_MIB" "$cpu_workers" \
+    "$pressure_current" "$MEMORY_HEADROOM_BYTES"
 : > "$PAIR_GO"
 set +e
 wait "$PAIR_PID"
@@ -248,6 +274,10 @@ oom_after="$(event_value oom)"
 oom_kill_after="$(event_value oom_kill)"
 cpu_some_after="$(cpu_some_total)"
 peak_bytes="$(cat "$CGROUP/memory.peak" 2>/dev/null || printf '%s' "$pressure_current")"
+current_after="$(cat "$CGROUP/memory.current" 2>/dev/null || printf '%s' 0)"
+last_phase="$(grep -E '^BENCH_IO_PHASE=(off|swapz):(prefill|mixed|packed_read)$' "$PAIR_LOG" |
+    tail -n 1 | cut -d= -f2- || true)"
+[[ -n $last_phase ]] || last_phase=none
 
 high_delta=$((high_after - high_before))
 oom_delta=$((oom_after - oom_before))
@@ -259,7 +289,9 @@ if (( pair_rc != 0 )); then
         printf 'FAIL: ID36 cgroup OOM during owned-RAM pair oom:%s oom_kill:%s\n' \
             "$oom_delta" "$oom_kill_delta" >&2
     elif (( pair_rc == 124 || pair_rc == 137 )); then
-        printf 'FAIL: ID36 outer owned-RAM pair timeout rc:%s\n' "$pair_rc" >&2
+        printf 'FAIL: ID36 outer owned-RAM pair timeout rc:%s phase:%s high:%s peak:%s current:%s cpu_psi_usec:%s\n' \
+            "$pair_rc" "$last_phase" "$high_delta" "$peak_bytes" \
+            "$current_after" "$cpu_some_delta" >&2
     elif grep -q 'uncompressed replay exceeded bounded timeout' "$PAIR_LOG"; then
         printf '%s\n' 'FAIL: ID36 uncompressed replay exceeded its bounded timeout under pressure' >&2
     elif grep -q 'swapz replay exceeded bounded timeout' "$PAIR_LOG"; then

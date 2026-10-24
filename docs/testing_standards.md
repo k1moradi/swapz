@@ -979,8 +979,11 @@ and the normal packed byte-exact readback inside a dedicated cgroup-v2 domain,
 while a separate helper faults 576 MiB of anonymous memory and runs twice the
 online CPU count of integer burners, capped at 32. The shorter trace preserves
 mixed QD32 concurrency while preventing arbitrary benchmark-duration timeouts
-from being mistaken for a forward-progress failure. The cgroup sets `memory.high=640MiB`,
-`memory.max=896MiB` and `memory.swap.max=0` when supported. The host must
+from being mistaken for a forward-progress failure. The cgroup sets
+`memory.max=896MiB` and `memory.swap.max=0` when supported. The helper first
+establishes the resident baseline without memory.high throttling; immediately
+before releasing the benchmark, `memory.high` becomes the measured ready-state
+`memory.current` plus 64MiB. The host must
 have at least 1 GiB MemAvailable before this destructive-to-performance but
 RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
 weakened.
@@ -988,12 +991,15 @@ weakened.
 The owned pair first creates and fully faults both 64MiB memory-backed
 `null_blk` devices outside the ID36 cgroup. It then migrates its benchmark
 process into the cgroup, proves that membership, and stops at a private barrier.
-Only then does the pressure helper fault its anonymous resident set and start
-niceness-10 CPU burners in the same cgroup. The backing pages therefore do not
-consume the cgroup's pressure budget. The 576MiB resident helper sits below the
-640MiB high watermark, leaving 64MiB of bounded working headroom for the replay
-process and target metadata while still requiring positive `memory.events high`
-evidence. The barrier still guarantees
+Only then does the pressure helper start niceness-10 CPU burners and fault its
+anonymous resident set in the same cgroup. The burners are forked before the
+576MiB mapping is created, so they do not inherit that mapping's COW page-table
+footprint. The backing pages therefore do not consume the cgroup's pressure
+budget. After readiness, the qualifier measures the complete cgroup charge and
+adds exactly 64MiB of working headroom for target/replay memory. Evidence
+counters are baselined only after that high watermark is installed, so helper
+startup cannot satisfy the required positive `memory.events high` delta. The
+barrier still guarantees
 that module insertion, target construction, replay and teardown execute under
 reclaim/CPU contention. Lazy null_blk page allocation is not the test subject.
 The pressure helper must reach readiness with at least the requested resident

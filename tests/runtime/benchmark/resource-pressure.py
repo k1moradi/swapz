@@ -49,17 +49,9 @@ def main():
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
-    try:
-        pressure = bytearray(args.memory_mib * MIB)
-    except MemoryError:
-        print("FAIL: ID36 pressure allocation failed", file=sys.stderr)
-        return 1
-
-    # Fault every page before declaring readiness. This prevents a large virtual
-    # mapping from being mislabeled as resident low-memory pressure.
-    for offset in range(0, len(pressure), PAGE_BYTES):
-        pressure[offset] = (offset // PAGE_BYTES) & 0xFF
-
+    # Fork CPU burners before the large resident mapping exists. Otherwise each
+    # burner inherits the faulted mapping's COW page tables and consumes memory
+    # that was intended as benchmark working headroom.
     context = multiprocessing.get_context("fork")
     stop_event = context.Event()
     workers = [
@@ -69,12 +61,28 @@ def main():
     for worker in workers:
         worker.start()
 
-    args.ready_file.write_text(
-        f"memory_mib={args.memory_mib} cpu_workers={args.cpu_workers}\n",
-        encoding="ascii",
-    )
-
     try:
+        try:
+            pressure = bytearray(args.memory_mib * MIB)
+        except MemoryError:
+            print("FAIL: ID36 pressure allocation failed", file=sys.stderr)
+            return 1
+
+        # Fault every page before declaring readiness. This prevents a large
+        # virtual mapping from being mislabeled as resident low-memory pressure.
+        for offset in range(0, len(pressure), PAGE_BYTES):
+            pressure[offset] = (offset // PAGE_BYTES) & 0xFF
+
+        if any(not worker.is_alive() for worker in workers):
+            print("FAIL: ID36 CPU pressure worker exited before readiness",
+                  file=sys.stderr)
+            return 1
+
+        args.ready_file.write_text(
+            f"memory_mib={args.memory_mib} cpu_workers={args.cpu_workers}\n",
+            encoding="ascii",
+        )
+
         sweep = 0
         while not stopping and not args.stop_file.exists():
             if any(not worker.is_alive() for worker in workers):
