@@ -3068,6 +3068,7 @@ static swapz_u16 swapz_probe_set(
                         admitted.index("list_add_tail(&entry->list"))
         self.assertLess(admitted.index("queue_delayed_work(ctx->workqueue"),
                         admitted.index("spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\treturn DM_MAPIO_SUBMITTED"))
+        self.assertIn("return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;", admitted)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", admitted)
         self.assertIn("flush_delayed_work(&ctx->worker)", drained)
         self.assertLess(drained.index("WRITE_ONCE(ctx->accepting, false)"),

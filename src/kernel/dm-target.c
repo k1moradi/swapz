@@ -5156,7 +5156,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	sector_t count = bio_sectors(bio);
 
 	if (!READ_ONCE(ctx->accepting))
-		return DM_MAPIO_KILL;
+		return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 	if (bio_op(bio) == REQ_OP_READ || bio_op(bio) == REQ_OP_WRITE) {
 		if ((bio_op(bio) == REQ_OP_WRITE && !count &&
 		     (bio->bi_opf & REQ_PREFLUSH))) {
@@ -5194,7 +5194,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	 */
 	if (!ctx->accepting) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
-		return DM_MAPIO_KILL;
+		return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 	}
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {

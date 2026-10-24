@@ -617,8 +617,10 @@ manufacture overlap.
 
 Presuspend closes admission before waiting for an external lower completion,
 then wakes/drains the ordered worker so every paused transaction is published
-or aborted before teardown. The target drain invariant includes the asynchronous
-run-active bit in addition to batch and authority state.
+or aborted before teardown. While admission is closed during suspend/drain,
+incoming requests are requeued with `DM_MAPIO_REQUEUE` (or killed with
+`DM_MAPIO_KILL` if the target is failed). The target drain invariant includes
+the asynchronous run-active bit in addition to batch and authority state.
 
 
 ### Paused-run read independence
