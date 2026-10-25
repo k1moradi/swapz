@@ -16,6 +16,7 @@
 #include <linux/blkdev.h>
 #include <linux/cache.h>
 #include <linux/device-mapper.h>
+#include <linux/delay.h>
 #include <linux/dm-io.h>
 #include <linux/highmem.h>
 #include <linux/hrtimer.h>
@@ -365,6 +366,10 @@ struct swapz_dm {
 	/* Callback only queues the serialized worker; it never owns BIOs. */
 	struct hrtimer retention_timer;
 	spinlock_t queue_lock;
+	spinlock_t drain_completed_lock;
+	struct bio_list drain_completed_bios;
+	struct work_struct drain_endio_work;
+	bool drain_active;
 	struct list_head incoming;
 	bool accepting;
 	bool failed;
@@ -809,11 +814,41 @@ static void swapz_release_prepared(struct bio *bio)
 				       (unsigned int)slot);
 }
 
+static void swapz_drain_endio_work(struct work_struct *work)
+{
+	struct swapz_dm *ctx =
+		container_of(work, struct swapz_dm, drain_endio_work);
+	struct bio *bio;
+	unsigned long flags;
+
+	/* Allow presuspend to return to DM core so DMF_BLOCK_IO_FOR_SUSPEND is
+	 * set and memory-barrier synchronized before upper writers wake up. */
+	usleep_range(100, 250);
+	for (;;) {
+		spin_lock_irqsave(&ctx->drain_completed_lock, flags);
+		bio = bio_list_pop(&ctx->drain_completed_bios);
+		spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
+		if (!bio)
+			break;
+		bio_endio(bio);
+	}
+}
+
 static void swapz_complete(struct bio *bio, int error)
 {
+	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	struct swapz_dm *ctx = entry ? entry->preparation_ctx : NULL;
+	unsigned long flags;
+
 	swapz_release_prepared(bio);
 	if (error)
 		bio->bi_status = errno_to_blk_status(error);
+	if (ctx && READ_ONCE(ctx->drain_active)) {
+		spin_lock_irqsave(&ctx->drain_completed_lock, flags);
+		bio_list_add(&ctx->drain_completed_bios, bio);
+		spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
+		return;
+	}
 	bio_endio(bio);
 }
 
@@ -5509,12 +5544,12 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 static void swapz_drain(struct dm_target *ti)
 {
 	struct swapz_dm *ctx = ti->private;
-
 	unsigned long flags;
 
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	WRITE_ONCE(ctx->drain_active, true);
 	/* The callback takes queue_lock. Close admission first, then cancel
 	 * outside that lock before waiting for any worker or freeing it. */
 	hrtimer_cancel(&ctx->retention_timer);
@@ -5573,6 +5608,8 @@ static void swapz_drain(struct dm_target *ti)
 		if (error)
 			swapz_fail(ctx, error);
 	}
+	WRITE_ONCE(ctx->drain_active, false);
+	schedule_work(&ctx->drain_endio_work);
 }
 
 static void swapz_resume(struct dm_target *ti)
@@ -5588,11 +5625,23 @@ static void swapz_resume(struct dm_target *ti)
 
 static void swapz_free(struct swapz_dm *ctx)
 {
+	struct bio *bio;
+	unsigned long flags;
 	swapz_u8 slot, prep_lane;
 
 	if (!ctx)
 		return;
 	hrtimer_cancel(&ctx->retention_timer);
+	cancel_work_sync(&ctx->drain_endio_work);
+	for (;;) {
+		spin_lock_irqsave(&ctx->drain_completed_lock, flags);
+		bio = bio_list_pop(&ctx->drain_completed_bios);
+		spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
+		if (!bio)
+			break;
+		bio->bi_status = BLK_STS_IOERR;
+		bio_endio(bio);
+	}
 	if (ctx->workqueue) {
 		/* The constructor-failure path has no accepted BIOs.
 		 * The live teardown path already closed admission and drained
@@ -5746,6 +5795,10 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->delta64_lz4_acceleration =
 		(swapz_u8)swapz_delta64_lz4_acceleration;
 	spin_lock_init(&ctx->queue_lock);
+	spin_lock_init(&ctx->drain_completed_lock);
+	bio_list_init(&ctx->drain_completed_bios);
+	INIT_WORK(&ctx->drain_endio_work, swapz_drain_endio_work);
+	ctx->drain_active = false;
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);

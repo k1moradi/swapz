@@ -715,8 +715,15 @@ Presuspend closes admission before waiting for an external lower completion,
 then wakes/drains the ordered worker so every paused transaction is published
 or aborted before teardown. While admission is closed during suspend/drain,
 incoming requests are requeued with `DM_MAPIO_REQUEUE` (or killed with
-`DM_MAPIO_KILL` if the target is failed). The target drain invariant includes
-the asynchronous run-active bit in addition to batch and authority state.
+`DM_MAPIO_KILL` if the target is failed). To prevent synchronous upper-layer
+writers from waking up and submitting subsequent writes before DM core finishes
+presuspend and sets `DMF_BLOCK_IO_FOR_SUSPEND`, completions processed while
+drain is active are buffered onto `drain_completed_bios`. After draining queues
+and issuing the physical flush, `swapz_drain` schedules `drain_endio_work` to
+release buffered completions after allowing presuspend to return to DM core,
+ensuring subsequent requests are deferred by DM core rather than hitting closed
+admission. The target drain invariant includes the asynchronous run-active bit
+in addition to batch and authority state.
 
 
 ### Paused-run read independence
