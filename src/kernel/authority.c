@@ -1384,7 +1384,8 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			new_gc_min_live_blocks += candidate_min_blocks;
 		}
 		if (!old->valid) {
-			if (swapz_page_list_validate_entry_cached(a, logical, 1)) {
+			if (page_lists_enabled &&
+			    swapz_page_list_validate_entry_cached(a, logical, 1)) {
 				error = -EUCLEAN;
 				goto fail;
 			}

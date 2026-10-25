@@ -1787,7 +1787,7 @@ static int swapz_compress_page(struct swapz_dm *ctx, const u8 *input,
 {
 	struct swapz_delta64_route route;
 	swapz_u32 score = 0;
-	u64 start, now, elapsed, rescue_wall = 0, saved;
+	u64 start, now = 0, elapsed, rescue_wall = 0, saved;
 	int baseline, candidate = 0;
 	bool high_score = false;
 
@@ -1858,7 +1858,7 @@ static int swapz_compress_page(struct swapz_dm *ctx, const u8 *input,
 	}
 
 ordinary:
-	start = ktime_get_ns();
+	start = (ctx->delta64_rescue_enabled && now) ? now : ktime_get_ns();
 	baseline = LZ4_compress_fast(input, output, SWAPZ_BLOCK_BYTES,
 				     SWAPZ_MAX_COMPRESSED, SWAPZ_ORDINARY_LZ4_ACCELERATION,
 				     lz4_workmem);
@@ -2087,15 +2087,19 @@ static void swapz_preparation_worker(struct work_struct *work)
 			&lane->lz4_wall_ns, &prepared->encoding,
 			&lane->delta64, &prepared->zero);
 		if (section_start) {
-			elapsed_ns = swapz_elapsed_ns(section_start, ktime_get_ns());
+			u64 now_ns = ktime_get_ns();
+
+			elapsed_ns = swapz_elapsed_ns(section_start, now_ns);
 			if (lower_write_overlap && atomic_read(&ctx->lower_write_active))
 				lane->lower_write_overlap_ns += elapsed_ns;
 			if (lower_read_overlap && atomic_read(&ctx->lower_read_active))
 				lane->lower_read_overlap_ns += elapsed_ns;
+			section_start = now_ns;
 		}
 		prepared->payload_crc32c_valid = false;
 		if (prepared->length > 0 && !prepared->zero) {
-			section_start = ktime_get_ns();
+			if (!section_start)
+				section_start = ktime_get_ns();
 			prepared->payload_crc32c =
 				swapz_crc32c_bytes(prepared->bytes, prepared->length);
 			lane->crc_wall_ns +=
@@ -3846,15 +3850,15 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 		error = swapz_engine_read_page(&ctx->engine, logical,
 				ctx->read_compressed, SWAPZ_BLOCK_BYTES,
 				&payload_bytes);
+		section_start = ktime_get_ns();
 		read_engine_elapsed =
-			swapz_elapsed_ns(read_engine_start, ktime_get_ns());
+			swapz_elapsed_ns(read_engine_start, section_start);
 		lower_read_elapsed = ctx->lower_read_wall_ns - lower_read_before;
 		if (read_engine_elapsed >= lower_read_elapsed)
 			ctx->read_engine_nonio_wall_ns +=
 				read_engine_elapsed - lower_read_elapsed;
 		if (error)
 			return error;
-		section_start = ktime_get_ns();
 		if (swapz_map_encoding(map) == SWAPZ_ENCODING_DELTA64) {
 			if (!ctx->predictor_page)
 				return -EUCLEAN;
@@ -3936,13 +3940,13 @@ static int swapz_read_slot_run(struct swapz_read_slot *slot)
 		error = swapz_engine_read_page(&slot->engine, logical,
 				slot->read_compressed, SWAPZ_BLOCK_BYTES,
 				&payload_bytes);
-		engine_elapsed = swapz_elapsed_ns(engine_start, ktime_get_ns());
+		section_start = ktime_get_ns();
+		engine_elapsed = swapz_elapsed_ns(engine_start, section_start);
 		lower_elapsed = slot->lower_read_wall_ns - lower_before;
 		if (engine_elapsed >= lower_elapsed)
 			slot->read_engine_nonio_wall_ns += engine_elapsed - lower_elapsed;
 		if (error)
 			return error;
-		section_start = ktime_get_ns();
 		if (swapz_map_encoding(map) == SWAPZ_ENCODING_DELTA64) {
 			if (!slot->predictor_page)
 				return -EUCLEAN;
@@ -4233,6 +4237,8 @@ static unsigned int swapz_adjacent_extent_chain_candidate(
 		unsigned int chain_count = 0, next = index;
 		bool contains_required = false;
 
+		if (starts[index] > required_start)
+			break;
 		while (next < unique && starts[next] == next_start &&
 		       starts[next] / SWAPZ_SEGMENT_BLOCKS == segment &&
 		       chain_blocks + extents[next] <=
@@ -4252,7 +4258,7 @@ static unsigned int swapz_adjacent_extent_chain_candidate(
 			best_blocks = chain_blocks;
 		}
 	}
-	if (best_extents > SWAPZ_PARALLEL_READ_SLOTS)
+	if (best_extents < 2U || best_extents > SWAPZ_PARALLEL_READ_SLOTS)
 		return 0;
 	for (index = 0; index < best_extents; ++index) {
 		chain_starts[index] = starts[best_index + index];
@@ -4551,7 +4557,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	 */
 	if (!ctx->read_grouping_enabled || !ctx->read_coalescing_enabled ||
 	    !ctx->read_slots || !ctx->read_pages_store ||
-	    remaining < 2U || list_empty(local))
+	    remaining < 2U || list_empty(local) || list_is_singular(local))
 		return false;
 	entry = list_first_entry(local, struct swapz_bio_ref, list);
 	if (!swapz_parallel_read_extent(ctx, entry->bio, &start0, &blocks0))
@@ -4571,7 +4577,8 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		return false;
 	}
 	list_for_each_entry(entry, local, list) {
-		if (prefix >= remaining || !swapz_read_can_parallel(ctx, entry->bio))
+		if (prefix >= remaining ||
+		    (prefix && !swapz_read_can_parallel(ctx, entry->bio)))
 			break;
 		prefix++;
 	}
@@ -6177,6 +6184,12 @@ static void swapz_gc_victim_distribution(const struct swapz_dm *ctx,
 	swapz_u32 segment;
 	swapz_u32 seen = 0, min_count = U32_MAX, max_count = 0;
 
+	if (!ctx->gc_role_rotations) {
+		*distinct = 0;
+		*minimum = 0;
+		*maximum = 0;
+		return;
+	}
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
 		swapz_u32 count = ctx->gc_segment_evictions[segment];
 
@@ -6224,18 +6237,18 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 	unsigned int sz = 0;
 
 	(void)flags;
-	swapz_preparation_totals_snapshot(ctx, &prep);
-	swapz_gc_victim_distribution(ctx, &gc_distinct_victims,
-				     &gc_victim_min_evictions,
-				     &gc_victim_max_evictions);
-	swapz_segment_program_distribution(ctx, &segment_program_min,
-					   &segment_program_sum,
-					   &segment_program_max);
-	engine_publish_auth_wall_ns =
-		ctx->engine_publish_wall_ns >= ctx->engine_publish_crc_wall_ns ?
-		ctx->engine_publish_wall_ns - ctx->engine_publish_crc_wall_ns : 0;
 	switch (type) {
 	case STATUSTYPE_INFO:
+		swapz_preparation_totals_snapshot(ctx, &prep);
+		swapz_gc_victim_distribution(ctx, &gc_distinct_victims,
+					     &gc_victim_min_evictions,
+					     &gc_victim_max_evictions);
+		swapz_segment_program_distribution(ctx, &segment_program_min,
+						   &segment_program_sum,
+						   &segment_program_max);
+		engine_publish_auth_wall_ns =
+			ctx->engine_publish_wall_ns >= ctx->engine_publish_crc_wall_ns ?
+			ctx->engine_publish_wall_ns - ctx->engine_publish_crc_wall_ns : 0;
 		DMEMIT("version=%s mode=alpha-live-gc logical_write=%llu logical_read=%llu "
 		       "physical_write=%llu physical_write_reqs=%llu "
 		       "physical_read=%llu physical_read_reqs=%llu "

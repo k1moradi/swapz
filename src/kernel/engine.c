@@ -94,9 +94,12 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 
 	*read_blocks = 0;
 	if (blocks == 1U) {
+		swapz_u32 remaining = SWAPZ_BLOCK_BYTES -
+			sizeof(struct swapz_header);
+
 		for (index = start; index < count; ++index) {
 			swapz_u8 earlier;
-			swapz_u32 offset;
+			swapz_u32 need;
 			const struct swapz_compressed_page *page = &pages[index];
 
 			if (included == SWAPZ_MAX_RECORDS)
@@ -105,20 +108,19 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 				for (earlier = start; earlier < index; ++earlier)
 					if (page->logical_page == pages[earlier].logical_page)
 						goto out_one_block;
-			if (payload_start < page->length)
+			need = (swapz_u32)page->length +
+				sizeof(struct swapz_record);
+			if (remaining < need)
 				break;
-			offset = payload_start - page->length;
-			if (offset < sizeof(struct swapz_header) +
-				     ((swapz_u32)included + 1U) *
-				     sizeof(struct swapz_record))
-				break;
-			payload_start = offset;
+			remaining -= need;
 			included++;
 		}
 out_one_block:
 		*read_blocks = included;
 		return included;
 	}
+	if (max_read_blocks == 1U)
+		return 0;
 	for (index = start; index < count; ++index) {
 		swapz_u8 earlier;
 		swapz_u32 offset;
@@ -173,14 +175,13 @@ static int swapz_engine_plan_bounded_policy(
 	    !count || count > SWAPZ_MAX_RECORDS || max_read_blocks > 3U)
 		return -EINVAL;
 	*extent_count = 0;
-	for (index = 0; index < count; ++index) {
-		if (!swapz_page_valid(&pages[index]))
-			return -EOPNOTSUPP; /* raw fallback belongs to later I/O path */
-	}
 	if (!logical_pages_unique) {
 		int unique = 1;
 		int earlier;
 
+		for (index = 0; index < count; ++index)
+			if (!swapz_page_valid(&pages[index]))
+				return -EOPNOTSUPP; /* raw fallback belongs to later I/O path */
 		for (index = 1; index < count && unique; ++index) {
 			for (earlier = 0; earlier < index; ++earlier) {
 				if (pages[index].logical_page ==
@@ -244,13 +245,17 @@ static int swapz_engine_plan_bounded_policy(
 				selected_class[index] = blocks;
 				selected_count[index] = take;
 			}
-			if (take == (swapz_u8)(count - (swapz_u8)index)) {
+			if (take == (swapz_u8)(count - (swapz_u8)index) ||
+			    (class_index == 0 && max_read_blocks == 1U)) {
 				if (class_index == 0) {
 					cached_takes[index][1] = 0;
 					cached_reads[index][1] = 0;
+					cached_takes[index][2] = 0;
+					cached_reads[index][2] = 0;
+				} else if (class_index == 1) {
+					cached_takes[index][2] = 0;
+					cached_reads[index][2] = 0;
 				}
-				cached_takes[index][2] = 0;
-				cached_reads[index][2] = 0;
 				break;
 			}
 		}
@@ -570,7 +575,8 @@ static int swapz_read_extent_lru_lookup(const struct swapz_engine *engine,
 {
 	swapz_u8 index;
 
-	if (!engine->read_extent_cache || !engine->read_extent_lru_clock ||
+	if (extent_blocks <= 1U ||
+	    !engine->read_extent_cache || !engine->read_extent_lru_clock ||
 	    !(engine->read_extent_segment_mask &
 	      (1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U))))
 		return -1;
@@ -814,7 +820,8 @@ void swapz_engine_prime_read_slot(const struct swapz_engine *master,
 				       (size_t)block * SWAPZ_BLOCK_BYTES,
 				       SWAPZ_BLOCK_BYTES);
 	}
-	cache_slot = master->read_extent_lru_clock ?
+	cache_slot = (master->read_extent_lru_clock && extent_blocks > 1U &&
+		      mask != (swapz_u8)((1U << extent_blocks) - 1U)) ?
 		swapz_read_extent_lru_lookup(master, start_block, extent_blocks) : -1;
 	if (cache_slot >= 0) {
 		swapz_u8 extent_mask = master->read_extent_lru_block_masks[cache_slot];
@@ -913,30 +920,33 @@ static int swapz_engine_required_read_range_resident(
 	    extent_blocks > engine->authority->physical_blocks - start_block)
 		return -EINVAL;
 	resident &= (swapz_u8)((1U << extent_blocks) - 1U);
-	for (index = 0; index < count; ++index) {
-		const struct swapz_map *map;
-		swapz_u32 logical = logical_pages[index];
-		swapz_u32 payload_first, payload_last, block;
+	{
+		const struct swapz_authority *a = engine->authority;
+		const swapz_u32 extent_bytes =
+			(swapz_u32)extent_blocks << SWAPZ_BLOCK_SHIFT;
 
-		if (logical >= engine->authority->logical_pages)
-			return -ERANGE;
-		map = &engine->authority->maps[logical];
-		if (!map->valid || map->raw ||
-		    map->start_block != start_block ||
-		    map->extent_blocks != extent_blocks ||
-		    !map->payload_length ||
-		    map->payload_offset >=
-			(swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES ||
-		    map->payload_length >
-			(swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES -
-			map->payload_offset)
-			return -ESTALE;
-		required |= 1U;
-		payload_first = map->payload_offset >> SWAPZ_BLOCK_SHIFT;
-		payload_last = ((swapz_u32)map->payload_offset +
-				map->payload_length - 1U) >> SWAPZ_BLOCK_SHIFT;
-		for (block = payload_first; block <= payload_last; ++block)
-			required |= (swapz_u8)(1U << block);
+		for (index = 0; index < count; ++index) {
+			const struct swapz_map *map;
+			swapz_u32 logical = logical_pages[index];
+			swapz_u32 payload_first, payload_last;
+
+			if (logical >= a->logical_pages)
+				return -ERANGE;
+			map = &a->maps[logical];
+			if (!map->valid || map->raw ||
+			    map->start_block != start_block ||
+			    map->extent_blocks != extent_blocks ||
+			    !map->payload_length ||
+			    map->payload_offset >= extent_bytes ||
+			    map->payload_length >
+			    extent_bytes - map->payload_offset)
+				return -ESTALE;
+			payload_first = map->payload_offset >> SWAPZ_BLOCK_SHIFT;
+			payload_last = ((swapz_u32)map->payload_offset +
+					map->payload_length - 1U) >> SWAPZ_BLOCK_SHIFT;
+			required |= (swapz_u8)(1U | (1U << payload_first) |
+					       (1U << payload_last));
+		}
 	}
 	missing = required & (swapz_u8)~resident;
 	if (!missing) {
@@ -997,7 +1007,8 @@ int swapz_engine_required_read_range_cached(
 	    engine->read_cached_extent_blocks == extent_blocks)
 		resident |= engine->read_cached_block_mask &
 			(swapz_u8)~engine->read_coalesced_block_mask;
-	if (engine->read_extent_lru_clock)
+	if (engine->read_extent_lru_clock && extent_blocks > 1U &&
+	    resident != (swapz_u8)((1U << extent_blocks) - 1U))
 		cache_slot = swapz_read_extent_lru_lookup(
 			engine, start_block, extent_blocks);
 	if (cache_slot >= 0)
@@ -1166,12 +1177,17 @@ int swapz_engine_coalesce_read_chain(
 	for (step = 0; step < count; ++step) {
 		int found = -1;
 
-		for (index = 0; index < count; ++index)
-			if (!(used & (1U << index)) &&
-			    physical_starts[index] == combined_end) {
-				found = index;
-				break;
-			}
+		if (!(used & (1U << step)) &&
+		    physical_starts[step] == combined_end) {
+			found = step;
+		} else {
+			for (index = 0; index < count; ++index)
+				if (!(used & (1U << index)) &&
+				    physical_starts[index] == combined_end) {
+					found = index;
+					break;
+				}
+		}
 		if (found < 0)
 			return -EOPNOTSUPP;
 		used |= (swapz_u16)(1U << found);
@@ -1438,8 +1454,6 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 	swapz_u8 initial_batch_pending;
 	swapz_u32 run_start = 0;
 	swapz_u16 run_blocks = 0;
-	swapz_u8 *run_bytes;
-	struct swapz_tx *run_txs;
 	unsigned long long phase_start;
 	int error;
 
@@ -1456,11 +1470,10 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 		return error;
 	initial_batch_pending = e->authority->batch_pending;
 
-	run_bytes = run->bytes;
-	run_txs = run->txs;
-	memset(run, 0, sizeof(*run));
-	run->bytes = run_bytes;
-	run->txs = run_txs;
+	run->start_block = 0;
+	run->blocks = 0;
+	run->extent_count = 0;
+	run->page_count = 0;
 
 	if (compressed_count) {
 		phase_start = swapz_engine_now_ns();
@@ -2009,12 +2022,9 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	/* Seeded combined-read blocks become reusable cache only after this
 	 * record validates its immutable metadata/generation/payload CRC. */
 	{
-		swapz_u8 validated = 1U;
-		swapz_u32 validated_block;
+		swapz_u8 validated = (swapz_u8)(1U | (1U << payload_first) |
+						(1U << payload_last));
 
-		for (validated_block = payload_first;
-		     validated_block <= payload_last; ++validated_block)
-			validated |= (swapz_u8)(1U << validated_block);
 		engine->read_coalesced_block_mask =
 			coalesced_mask & (swapz_u8)~validated;
 	}

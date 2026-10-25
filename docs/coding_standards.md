@@ -573,10 +573,13 @@ chosen_class <= SWAPZ_SEGMENT_BLOCKS`).
 When a 1-block or 2-block extent at `index` already fits all remaining records
 in the window (`take == count - index`), larger extent classes at that position
 are strictly byte-dominated and skipped. `swapz_fit_count()` also uses a direct
-one-block fast path (`*read_blocks = included`) when `blocks == 1U`, and
-`swapz_engine_plan_bounded_policy()` pre-checks batch-wide page uniqueness once
-when `logical_pages_unique == 0` so duplicate-free windows skip repeated inner
-uniqueness scans.
+one-block fast path (`*read_blocks = included`) when `blocks == 1U`, rejects
+`blocks > 1U` immediately when `max_read_blocks == 1U`, and
+`swapz_engine_plan_bounded_policy()` pre-checks batch-wide page validity and
+uniqueness once when `logical_pages_unique == 0` so pre-validated or
+duplicate-free windows skip repeated inner scans.
+`swapz_engine_prepare_batched_run()` resets scalar run header fields without
+clearing the 64-entry per-extent arrays that are populated up to `extent_count`.
 In `swapz_try_concurrent_read_slots()`, missing-range eligibility is checked
 against shared cache metadata (`swapz_engine_required_read_range_cached`)
 before priming private slot scratch (`swapz_engine_prime_read_slot`) so
@@ -589,6 +592,8 @@ Passive metadata-cache probes in `swapz_engine_prime_read_slot()` and
 `swapz_engine_required_read_range_cached()` check `read_metadata_segment_mask`
 before probing set tags, and `swapz_read_extent_lru_commit()` reuses the
 already-resolved `extent_lru_slot` from `swapz_engine_read_page()`.
+`swapz_read_extent_lru_lookup()` also rejects 1-block extents in O(1) because
+`read_extent_cache` stores only multi-block (`extent_blocks > 1`) extents.
 Adjacent read batching (`swapz_try_parallel_read_batch` and
 `swapz_adjacent_extent_chain_candidate`) inspects mapped extents directly
 via `swapz_parallel_read_extent_mapped` on the admitted prefix, avoiding
