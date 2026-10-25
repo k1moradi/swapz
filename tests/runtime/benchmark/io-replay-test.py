@@ -84,13 +84,15 @@ class PairReplayContract(unittest.TestCase):
                 with device.open("wb") as fd:
                     fd.truncate(1024 * PAGE)
                 result = root / f"{candidate}.json"
+                packed_mode = (["--allocation-bounded-packed-read"]
+                               if candidate == "swapz" else [])
                 run = self.run_cmd("run", "--fixture", fixture,
                                    "--trace", plan / "trace.jsonl",
                                    "--manifest", plan / "manifest.json",
                                    "--device", device, "--candidate", candidate,
                                    "--source-sha", "rootless-no-module",
                                    "--regular-file-test", "--packed-read",
-                                   "--result", result)
+                                   *packed_mode, "--result", result)
                 for subphase in ("prefill", "mixed", "packed_read"):
                     self.assertIn(f"BENCH_IO_PHASE={candidate}:{subphase}",
                                   run.stderr)
@@ -111,6 +113,12 @@ class PairReplayContract(unittest.TestCase):
                     self.assertGreater(phase["seconds"], 0)
                     self.assertIsNone(phase["kernel_read_path"])
                     self.assertIn("buffers and worker setup excluded", phase["timed_scope"])
+                    if candidate == "swapz":
+                        self.assertIn("allocation-bounded ID36 path",
+                                      phase["timed_scope"])
+                    else:
+                        self.assertNotIn("allocation-bounded ID36 path",
+                                         phase["timed_scope"])
                     self.assertGreater(phase["useful_read_mbps"], 0)
                     self.assertGreaterEqual(phase["replay_cpu_user_s"], 0)
                     self.assertIn(phase["host_cpu"]["status"],

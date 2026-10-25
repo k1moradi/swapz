@@ -1354,7 +1354,7 @@ def kernel_write_delta(before, after):
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
-                          pool=None):
+                          pool=None, allocation_bounded=False):
     """Verify real 4MiB sequential/random reads after concurrent packed writes."""
     if logical_pages != 1024 or qd != 32:
         raise ValueError("packed read requires 4MiB logical and QD32")
@@ -1367,52 +1367,117 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
     measured = {}
     own_pool = pool is None
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=qd) if own_pool else pool
+    persistent_jobs = []
+    packed_start = None
+    packed_done = None
+    packed_command = [0]
+    lane_pages = [0] * qd
+    lane_elapsed = [0] * qd
+    lane_errors = [None] * qd
+    PACKED_STOP = 0
+    PACKED_WRITE = 1
+    PACKED_READ = 2
+
+    def read_one(page, slot):
+        start_ns = time.monotonic_ns()
+        count = os.preadv(fd, read_iovs[slot], page * PAGE)
+        elapsed_ns = time.monotonic_ns() - start_ns
+        # Correctness checking occurs AFTER the individual I/O latency sample,
+        # before buffers can be recycled.
+        if count != PAGE or views[slot] != chunks[page % len(chunks)]:
+            raise OSError("short or mismatched packed swap-in page")
+        return elapsed_ns
+
+    def persistent_lane_worker(lane):
+        while True:
+            packed_start.wait()
+            command = packed_command[0]
+            if command == PACKED_STOP:
+                packed_done.wait()
+                return
+            try:
+                page = lane_pages[lane]
+                if command == PACKED_WRITE:
+                    full_write(fd, page, chunks[page % len(chunks)])
+                elif command == PACKED_READ:
+                    lane_elapsed[lane] = read_one(page, lane)
+                else:
+                    raise ValueError("invalid allocation-bounded packed command")
+            except BaseException as exc:
+                lane_errors[lane] = exc
+            packed_done.wait()
+
+    def run_persistent_wave(command, pages, base, durations=None):
+        packed_command[0] = command
+        for lane in range(qd):
+            lane_pages[lane] = base + lane if pages is None else pages[base + lane]
+            lane_errors[lane] = None
+        packed_start.wait()
+        packed_done.wait()
+        for error in lane_errors:
+            if error is not None:
+                raise error
+        if durations is not None:
+            for lane in range(qd):
+                durations[base + lane] = lane_elapsed[lane]
+
     try:
+        if allocation_bounded:
+            # ID36 deliberately runs above memory.high. Create exactly one
+            # long-lived Future per lane so packed population/readback cannot
+            # allocate a Future/WorkItem/list for every 4KiB I/O.
+            packed_start = threading.Barrier(qd + 1)
+            packed_done = threading.Barrier(qd + 1)
+            persistent_jobs = [
+                pool.submit(persistent_lane_worker, lane) for lane in range(qd)
+            ]
+
         before = packed_closes(path, identity)
         for base in range(0, logical_pages, qd):
-            jobs = [pool.submit(full_write, fd, page,
-                                chunks[page % len(chunks)])
-                    for page in range(base, base + qd)]
-            for job in jobs:
-                job.result()
+            if allocation_bounded:
+                run_persistent_wave(PACKED_WRITE, None, base)
+            else:
+                jobs = [pool.submit(full_write, fd, page,
+                                    chunks[page % len(chunks)])
+                        for page in range(base, base + qd)]
+                for job in jobs:
+                    job.result()
         os.fsync(fd)
         after = packed_closes(path, identity)
         packed_delta = after - before if before is not None else None
         if packed_delta is not None and packed_delta <= 0:
             raise ValueError("no packed close during concurrent read-set population")
 
-        image_sha = sha(b"".join(chunks[i % len(chunks)]
-                                for i in range(logical_pages)))
-        orders = {"sequential": list(range(logical_pages)),
-                  "seeded_random": random.Random(0x51A0A9).sample(
-                      range(logical_pages), logical_pages)}
-
-        def read_one(page, slot):
-            start_ns = time.monotonic_ns()
-            count = os.preadv(fd, read_iovs[slot], page * PAGE)
-            elapsed_ns = time.monotonic_ns() - start_ns
-            # Correctness checking occurs AFTER the individual I/O
-            # latency sample, before buffers can be recycled.
-            if count != PAGE or views[slot] != chunks[page % len(chunks)]:
-                raise OSError("short or mismatched packed swap-in page")
-            return elapsed_ns
+        # Do not construct a temporary 4MiB bytes object while ID36 is above
+        # memory.high. Streaming produces the identical oracle digest.
+        image_hash = hashlib.sha256()
+        for page in range(logical_pages):
+            image_hash.update(chunks[page % len(chunks)])
+        image_sha = image_hash.hexdigest()
+        orders = (("sequential", range(logical_pages)),
+                  ("seeded_random", random.Random(0x51A0A9).sample(
+                      range(logical_pages), logical_pages)))
 
         gc_was_enabled = gc.isenabled()
         if gc_was_enabled:
             gc.disable()
         try:
-            for mode, pages in orders.items():
+            for mode, pages in orders:
+                durations = [0] * logical_pages if allocation_bounded else []
                 kernel_before = kernel_read_snapshot(path, identity)
                 lower_before = lower_stat(identity.get("owned_disk"))
                 host_before = host_cpu_snapshot()
                 cpu_before = process_cpu()
                 start_ns = time.monotonic_ns()
-                durations = []
                 for base in range(0, logical_pages, qd):
-                    wave = pages[base:base + qd]
-                    jobs = [pool.submit(read_one, page, slot)
-                            for slot, page in enumerate(wave)]
-                    durations.extend(job.result() for job in jobs)
+                    if allocation_bounded:
+                        run_persistent_wave(
+                            PACKED_READ, pages, base, durations=durations)
+                    else:
+                        wave = pages[base:base + qd]
+                        jobs = [pool.submit(read_one, page, slot)
+                                for slot, page in enumerate(wave)]
+                        durations.extend(job.result() for job in jobs)
                 duration = (time.monotonic_ns() - start_ns) / 1e9
                 cpu_after = process_cpu()
                 host_after = host_cpu_snapshot()
@@ -1434,20 +1499,33 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
                     "replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
                     "replay_peak_rss_kb": cpu_after[2],
                     "host_cpu": host_cpu_delta(host_before, host_after),
-                    "timed_scope": "QD32 read submission and completion; buffers and worker setup excluded",
+                    "timed_scope": (
+                        "QD32 persistent lane read submission and completion; "
+                        "buffers and worker setup excluded; allocation-bounded ID36 path"
+                        if allocation_bounded else
+                        "QD32 read submission and completion; buffers and worker setup excluded"
+                    ),
                 }
         finally:
             if gc_was_enabled:
                 gc.enable()
     finally:
         try:
-            for view in views:
-                view.release()
-            for buffer in buffers:
-                buffer.close()
+            if persistent_jobs:
+                packed_command[0] = PACKED_STOP
+                packed_start.wait()
+                packed_done.wait()
+                for job in persistent_jobs:
+                    job.result()
         finally:
-            if own_pool:
-                pool.shutdown(wait=True)
+            try:
+                for view in views:
+                    view.release()
+                for buffer in buffers:
+                    buffer.close()
+            finally:
+                if own_pool:
+                    pool.shutdown(wait=True)
     return {
         "qualification": ("OWNED_PACK_READY_AND_VERIFIED_4MIB_READ"
                           if packed_delta is not None else
@@ -1704,7 +1782,8 @@ def replay(args):
                           file=sys.stderr, flush=True)
                 packed_read = (measure_packed_swapin(
                     fd, path, identity, chunks, mf["logical_pages"], mf["qd"],
-                    pool=pool)
+                    pool=pool,
+                    allocation_bounded=args.allocation_bounded_packed_read)
                     if args.packed_read else None)
             finally:
                 if pool is not None:
@@ -1970,6 +2049,8 @@ def main():
     run.add_argument("--result", required=True)
     run.add_argument("--regular-file-test", action="store_true")
     run.add_argument("--packed-read", action="store_true")
+    run.add_argument("--allocation-bounded-packed-read", action="store_true",
+                     help=argparse.SUPPRESS)
     run.add_argument("--native-replay", action="store_true",
                      help="private pre-created native worker replay for modern envelopes")
     run.add_argument("--owned-nullblk-name")

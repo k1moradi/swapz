@@ -1126,8 +1126,12 @@ while a separate helper faults 576 MiB of anonymous memory and runs twice the
 online CPU count of integer burners, capped at 32. The shorter trace preserves
 mixed QD32 concurrency while preventing arbitrary benchmark-duration timeouts
 from being mistaken for a forward-progress failure; the per-candidate replay
-timeout under `--resource-pressure-short` is bounded at 280s (within the 420s outer
-cgroup barrier) to absorb scheduling delays without false-positive timeouts. The cgroup sets
+timeout under `--resource-pressure-short` remains bounded at 280s (within the
+unchanged 420s outer cgroup barrier). The pressure-only packed-read verifier uses
+32 persistent lane jobs and reusable barriers/results for population plus both
+4MiB read orders, eliminating per-I/O Future/work-item allocation while keeping
+QD32, byte-exact verification, p99 and lower-I/O boundaries unchanged. The
+ordinary benchmark path is not switched to this replay mode. The cgroup sets
 `memory.max=896MiB` and `memory.swap.max=0` when supported. The helper first
 establishes the resident baseline without memory.high throttling; immediately
 before releasing the benchmark, `memory.high` becomes the measured ready-state

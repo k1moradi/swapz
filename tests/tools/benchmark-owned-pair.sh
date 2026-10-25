@@ -611,6 +611,7 @@ fi
 REPLAY_TIMEOUT=120s
 if (( RESOURCE_PRESSURE_SHORT )); then
     REPLAY_TIMEOUT=280s
+    REPLAY_ARGS+=(--allocation-bounded-packed-read)
 fi
 replay_off() {
     local rc

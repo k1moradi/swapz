@@ -412,7 +412,13 @@ timeouts, the harness shares a single persistent `ThreadPoolExecutor` across
 both the mixed workload and packed read-set verification, pre-allocates I/O
 vectors (`read_iovs`, `mixed_iovs`), uses direct buffer writes (`os.pwrite()`),
 avoids per-sample regex parsing in the background telemetry sampler, and
-disables cyclic garbage collection during timed measurement loops.
+disables cyclic garbage collection during timed measurement loops. The private
+ID36 packed-read path must additionally submit exactly one long-lived job per
+QD lane and reuse barriers/result slots across population, sequential and
+seeded-random waves; it must not allocate a `Future`/work item/list per 4KiB
+I/O or construct a temporary 4MiB joined oracle. Ordinary non-pressure
+benchmark submission remains unchanged so this harness fix cannot masquerade
+as a production performance change.
 
 ### Foreground GC pressure and scaling telemetry
 

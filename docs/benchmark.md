@@ -194,6 +194,14 @@ Exclude fixture generation, device provisioning, worker allocation, buffer setup
 
 For the modern-envelope native engine, pre-create all QD worker threads and complete warmup before the READY/GO gate. The parent captures lower/kernel/host boundaries before GO; the helper times from immediately before releasing that gate through the required final `fsync`. Native helper startup, trace staging and latency-result serialization are excluded. Mixed traces retain one barrier per immutable QD wave; write-only traces retain persistent disjoint ordered lanes with no per-I/O Future submission. Timed READs remain byte-verified before their lane can advance.
 
+ID36's pressure-only Python packed-read verifier likewise uses one persistent
+job per QD32 lane with reusable barriers and result slots for read-set
+population, sequential verification and seeded-random verification. This is a
+qualification-harness allocation bound, not a new performance replay engine:
+the ordinary 10/80 MiB/s benchmark path retains its historical per-wave
+submission for comparability. The ID36 timeout and memory/CPU pressure settings
+remain unchanged.
+
 Report replay-process CPU separately from kernel callback wall residency. For native-envelope rows this is the helper process CPU rather than the Python orchestrator;
 Callback wall is not CPU time: ordered callback wall includes synchronous
 lower-I/O sleep and callback wall may include scheduler delay. ID24 additionally
