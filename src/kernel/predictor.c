@@ -29,8 +29,8 @@ static swapz_u32 swapz_predict_delta64_pair_score_scalar(const swapz_u8 *input)
 static swapz_u32 swapz_predict_delta64_sample_offset(swapz_u32 subpage,
 						     swapz_u32 lane)
 {
-	swapz_u32 phase = (subpage + SWAPZ_PREDICTOR_SAMPLE_PHASE_STEP * lane) %
-		SWAPZ_PREDICTOR_SAMPLE_PHASES;
+	swapz_u32 phase = (subpage + SWAPZ_PREDICTOR_SAMPLE_PHASE_STEP * lane) &
+		(SWAPZ_PREDICTOR_SAMPLE_PHASES - 1U);
 
 	return subpage * SWAPZ_PREDICTOR_SUBPAGE_BYTES +
 		lane * SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES +
@@ -48,7 +48,7 @@ swapz_u32 swapz_predict_delta64_sample_score_scalar(const swapz_u8 *input)
 	 */
 	for (subpage = 0; subpage <
 	      SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage) {
-		lane = subpage % SWAPZ_PREDICTOR_SUBPAGE_LANES;
+		lane = subpage & (SWAPZ_PREDICTOR_SUBPAGE_LANES - 1U);
 		score += swapz_predict_delta64_pair_score_scalar(
 			input + swapz_predict_delta64_sample_offset(subpage, lane));
 	}
@@ -57,7 +57,7 @@ swapz_u32 swapz_predict_delta64_sample_score_scalar(const swapz_u8 *input)
 	for (subpage = 0; subpage <
 	      SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_SUBPAGE_BYTES; ++subpage)
 		for (step = 1U; step < SWAPZ_PREDICTOR_SUBPAGE_LANES; ++step) {
-			lane = (subpage + step) % SWAPZ_PREDICTOR_SUBPAGE_LANES;
+			lane = (subpage + step) & (SWAPZ_PREDICTOR_SUBPAGE_LANES - 1U);
 			score += swapz_predict_delta64_pair_score_scalar(
 				input + swapz_predict_delta64_sample_offset(subpage,
 									    lane));

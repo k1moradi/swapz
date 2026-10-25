@@ -1840,6 +1840,16 @@ ordinary:
 	if (high_score) {
 		if (!candidate || !swapz_delta64_route_init(baseline, &route))
 			goto out;
+	} else if (score < SWAPZ_PREDICTOR_PACK_THRESHOLD) {
+		if (baseline > (int)SWAPZ_BLOCK_BYTES ||
+		    (baseline > 0 && baseline < 48))
+			goto out;
+		stats->eligible++;
+		if (baseline > 0 &&
+		    baseline <= (int)SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH)
+			stats->pack_eligible++;
+		swapz_delta64_note_score(stats, score);
+		goto out;
 	} else {
 		if (!swapz_delta64_route_init(baseline, &route))
 			goto out;
@@ -2098,10 +2108,14 @@ static void swapz_order_window_greedy(struct swapz_dm *ctx)
 		for (i = first_unused; i < ctx->batch_count; ++i) {
 			if (!ctx->used[i] && !ctx->batch[i].raw) {
 				if (largest < 0 ||
-				    ctx->batch[i].length > ctx->batch[largest].length)
+				    ctx->batch[i].length > ctx->batch[largest].length) {
+					if (largest >= 0 &&
+					    ctx->batch[largest].length < min_length)
+						min_length = ctx->batch[largest].length;
 					largest = i;
-				if (ctx->batch[i].length < min_length)
+				} else if (ctx->batch[i].length < min_length) {
 					min_length = ctx->batch[i].length;
+				}
 			}
 		}
 		/* All raw pages go after the compressed DP-planned prefix so
@@ -2204,10 +2218,14 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 		for (i = first_unused; i < ctx->gc_count; ++i) {
 			if (!ctx->gc_used[i]) {
 				if (largest < 0 || ctx->gc_pending[i].length >
-				    ctx->gc_pending[largest].length)
+				    ctx->gc_pending[largest].length) {
+					if (largest >= 0 &&
+					    ctx->gc_pending[largest].length < min_length)
+						min_length = ctx->gc_pending[largest].length;
 					largest = i;
-				if (ctx->gc_pending[i].length < min_length)
+				} else if (ctx->gc_pending[i].length < min_length) {
 					min_length = ctx->gc_pending[i].length;
+				}
 			}
 		}
 		if (largest < 0)
@@ -4035,7 +4053,8 @@ static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	bool inflight_active = swapz_has_inflight(ctx);
-	bool blocked = !READ_ONCE(ctx->accepting) || ctx->failed ||
+	bool blocked = !ctx->retain_ms || !ctx->batch_count ||
+		!READ_ONCE(ctx->accepting) || ctx->failed ||
 		ctx->authority.in_flight || ctx->authority.batch_replaying ||
 		(ctx->authority.batch_pending && !inflight_active) ||
 		(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
@@ -4119,6 +4138,7 @@ static unsigned int swapz_adjacent_extent_chain_candidate(
 	struct swapz_bio_ref *entry;
 	swapz_u32 starts[SWAPZ_MAX_RECORDS];
 	swapz_u8 extents[SWAPZ_MAX_RECORDS];
+	swapz_u32 required_segment = required_start / SWAPZ_SEGMENT_BLOCKS;
 	unsigned int seen = 0, unique = 0, best_index = 0;
 	unsigned int best_extents = 0, index;
 	swapz_u16 best_blocks = 0;
@@ -4134,6 +4154,10 @@ static unsigned int swapz_adjacent_extent_chain_candidate(
 		if (seen++ >= prefix)
 			break;
 		if (!swapz_parallel_read_extent_mapped(ctx, entry->bio, &start, &blocks))
+			continue;
+		if (start / SWAPZ_SEGMENT_BLOCKS != required_segment ||
+		    start + SWAPZ_READ_COALESCE_MAX_BLOCKS <= required_start ||
+		    required_start + SWAPZ_READ_COALESCE_MAX_BLOCKS <= start)
 			continue;
 		for (position = 0; position < unique; ++position) {
 			if (starts[position] == start || starts[position] > start)
@@ -4151,6 +4175,8 @@ static unsigned int swapz_adjacent_extent_chain_candidate(
 		extents[position] = blocks;
 		unique++;
 	}
+	if (unique < 2U)
+		return 0;
 	for (index = 0; index < unique; ++index) {
 		swapz_u32 next_start = starts[index];
 		swapz_u32 segment = starts[index] / SWAPZ_SEGMENT_BLOCKS;

@@ -177,6 +177,21 @@ static int swapz_engine_plan_bounded_policy(
 		if (!swapz_page_valid(&pages[index]))
 			return -EOPNOTSUPP; /* raw fallback belongs to later I/O path */
 	}
+	if (!logical_pages_unique) {
+		int unique = 1;
+		int earlier;
+
+		for (index = 1; index < count && unique; ++index) {
+			for (earlier = 0; earlier < index; ++earlier) {
+				if (pages[index].logical_page ==
+				    pages[earlier].logical_page) {
+					unique = 0;
+					break;
+				}
+			}
+		}
+		logical_pages_unique = unique;
+	}
 	costs[count] = 0;
 	reads[count] = 0;
 	batches[count] = 0;
@@ -229,11 +244,12 @@ static int swapz_engine_plan_bounded_policy(
 				selected_class[index] = blocks;
 				selected_count[index] = take;
 			}
-			if (class_index == 0 &&
-			    take == (swapz_u8)(count - (swapz_u8)index)) {
-				cached_takes[index][1] = 0;
+			if (take == (swapz_u8)(count - (swapz_u8)index)) {
+				if (class_index == 0) {
+					cached_takes[index][1] = 0;
+					cached_reads[index][1] = 0;
+				}
 				cached_takes[index][2] = 0;
-				cached_reads[index][1] = 0;
 				cached_reads[index][2] = 0;
 				break;
 			}
@@ -329,7 +345,7 @@ swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length)
 	swapz_u32 best = 0;
 	swapz_u8 blocks;
 
-	if (!length || length > SWAPZ_MAX_COMPRESSED)
+	if (length < 48U || length > SWAPZ_MAX_COMPRESSED)
 		return 0;
 	for (blocks = 1; blocks <= SWAPZ_MAX_BLOCKS; blocks <<= 1) {
 		swapz_u32 available =
@@ -561,18 +577,17 @@ static int swapz_read_extent_lru_lookup(const struct swapz_engine *engine,
 static void swapz_read_extent_lru_commit(struct swapz_engine *engine,
 					 swapz_u32 start_block,
 					 swapz_u8 extent_blocks,
+					 int hit_slot,
 					 swapz_u8 block_mask,
 					 const swapz_u8 *bytes)
 {
 	swapz_u32 oldest_age = ~(swapz_u32)0;
 	swapz_u8 index, slot = 0, block, copy_mask;
-	int hit_slot, have_slot = 0;
+	int have_slot = 0;
 
 	if (!engine->read_extent_cache || !bytes || !block_mask ||
 	    !extent_blocks || extent_blocks > SWAPZ_MAX_BLOCKS)
 		return;
-	hit_slot = swapz_read_extent_lru_lookup(engine, start_block,
-						   extent_blocks);
 	engine->read_extent_lru_clock++;
 	if (!engine->read_extent_lru_clock) {
 		memset(engine->read_extent_lru_valid, 0,
@@ -763,7 +778,7 @@ void swapz_engine_prime_read_slot(const struct swapz_engine *master,
 				  swapz_u32 start_block,
 				  swapz_u8 extent_blocks)
 {
-	swapz_u8 mask = 0, block, metadata_probes = 0;
+	swapz_u8 mask = 0, block;
 	int cache_slot, metadata_slot;
 
 	if (!master || !slot || !slot->read_scratch || !extent_blocks ||
@@ -808,10 +823,11 @@ void swapz_engine_prime_read_slot(const struct swapz_engine *master,
 		mask |= extent_mask;
 	}
 	if (!(mask & 1U)) {
-		metadata_slot = master->read_metadata_lru_clock ?
+		metadata_slot = (master->read_metadata_lru_clock &&
+			(master->read_metadata_segment_mask &
+			 (1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U)))) ?
 			swapz_read_metadata_set_lookup(master, start_block,
-						       extent_blocks,
-						       &metadata_probes) : -1;
+						       extent_blocks, NULL) : -1;
 		if (metadata_slot >= 0) {
 			memcpy(slot->read_scratch,
 			       master->read_metadata_cache +
@@ -849,6 +865,9 @@ void swapz_engine_absorb_read_slot(struct swapz_engine *master,
 		swapz_read_extent_lru_commit(master,
 			slot->read_cached_start_block,
 			slot->read_cached_extent_blocks,
+			swapz_read_extent_lru_lookup(
+				master, slot->read_cached_start_block,
+				slot->read_cached_extent_blocks),
 			slot->read_cached_block_mask, slot->read_scratch);
 	if (!(slot->read_cached_block_mask & 1U))
 		return;
@@ -975,10 +994,11 @@ int swapz_engine_required_read_range_cached(
 			engine, start_block, extent_blocks);
 	if (cache_slot >= 0)
 		resident |= engine->read_extent_lru_block_masks[cache_slot];
-	if (!(resident & 1U) && engine->read_metadata_lru_clock) {
-		swapz_u8 metadata_probes = 0;
+	if (!(resident & 1U) && engine->read_metadata_lru_clock &&
+	    (engine->read_metadata_segment_mask &
+	     (1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U)))) {
 		metadata_slot = swapz_read_metadata_set_lookup(
-			engine, start_block, extent_blocks, &metadata_probes);
+			engine, start_block, extent_blocks, NULL);
 	}
 	if (metadata_slot >= 0)
 		resident |= 1U;
@@ -1999,6 +2019,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	    observed.extent_blocks > 1 && reusable_mask)
 		swapz_read_extent_lru_commit(engine, observed.start_block,
 					     observed.extent_blocks,
+					     extent_lru_slot,
 					     reusable_mask, engine->read_scratch);
 	return 0;
 }

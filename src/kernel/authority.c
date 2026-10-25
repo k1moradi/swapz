@@ -1239,9 +1239,9 @@ swapz_finish_extent_delta_get(struct swapz_authority *a, swapz_u8 *count,
 			return &a->finish_extent_deltas[index];
 	if (*count >= SWAPZ_MAX_RECORDS)
 		return NULL;
-	memset(&a->finish_extent_deltas[*count], 0,
-	       sizeof(a->finish_extent_deltas[*count]));
-	a->finish_extent_deltas[*count].start_block = start_block;
+	a->finish_extent_deltas[*count] = (struct swapz_finish_extent_delta){
+		.start_block = start_block,
+	};
 	return &a->finish_extent_deltas[(*count)++];
 }
 
@@ -1260,9 +1260,9 @@ swapz_finish_segment_delta_get(struct swapz_authority *a, swapz_u8 *count,
 		return NULL;
 	if (is_new)
 		*is_new = 1;
-	memset(&a->finish_segment_deltas[*count], 0,
-	       sizeof(a->finish_segment_deltas[*count]));
-	a->finish_segment_deltas[*count].segment = segment;
+	a->finish_segment_deltas[*count] = (struct swapz_finish_segment_delta){
+		.segment = segment,
+	};
 	return &a->finish_segment_deltas[(*count)++];
 }
 
@@ -1271,9 +1271,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		 swapz_u8 completed_blocks, int io_error)
 {
 	const swapz_u8 *image = extent;
-	swapz_u16 payload_lengths[SWAPZ_MAX_RECORDS] = { 0 };
-	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS] = { 0 };
-	swapz_u8 payload_encodings[SWAPZ_MAX_RECORDS] = { 0 };
+	swapz_u16 payload_lengths[SWAPZ_MAX_RECORDS];
+	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS];
+	swapz_u8 payload_encodings[SWAPZ_MAX_RECORDS];
 	swapz_u32 new_segment;
 	swapz_u32 new_record_read_penalty;
 	swapz_u32 new_gc_live_bytes = 0, new_gc_io_cost = 0;
@@ -1483,46 +1483,45 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = -EUCLEAN;
 		goto fail;
 	}
-	if (a->segment_mapped_pages) {
-		swapz_u32 mapped_base = a->segment_mapped_pages[new_segment];
+	if (a->segment_mapped_pages || gc_enabled) {
+		const struct swapz_finish_segment_delta *new_seg_delta = NULL;
 		swapz_u8 delta_index;
 
 		for (delta_index = 0; delta_index < segment_delta_count;
 		     ++delta_index)
 			if (a->finish_segment_deltas[delta_index].segment ==
 			    new_segment) {
-				mapped_base -=
-					a->finish_segment_deltas[delta_index].mapped_pages;
+				new_seg_delta =
+					&a->finish_segment_deltas[delta_index];
 				break;
 			}
-		if ((swapz_u32)tx->count > ~(swapz_u32)0 - mapped_base) {
-			error = -EOVERFLOW;
-			goto fail;
+		if (a->segment_mapped_pages) {
+			swapz_u32 mapped_base =
+				a->segment_mapped_pages[new_segment] -
+				(new_seg_delta ? new_seg_delta->mapped_pages : 0U);
+
+			if ((swapz_u32)tx->count > ~(swapz_u32)0 - mapped_base) {
+				error = -EOVERFLOW;
+				goto fail;
+			}
 		}
-	}
-	if (gc_enabled) {
-		swapz_u32 live_base = a->segment_gc_live_bytes[new_segment];
-		swapz_u32 io_base = a->segment_gc_io_cost[new_segment];
-		swapz_u16 min_base = a->segment_gc_min_live_blocks[new_segment];
-		swapz_u8 delta_index;
+		if (gc_enabled) {
+			swapz_u32 live_base =
+				a->segment_gc_live_bytes[new_segment] -
+				(new_seg_delta ? new_seg_delta->live_bytes : 0U);
+			swapz_u32 io_base =
+				a->segment_gc_io_cost[new_segment] -
+				(new_seg_delta ? new_seg_delta->io_cost : 0U);
+			swapz_u16 min_base =
+				a->segment_gc_min_live_blocks[new_segment] -
+				(new_seg_delta ? new_seg_delta->min_live_blocks : 0U);
 
-		for (delta_index = 0; delta_index < segment_delta_count;
-		     ++delta_index)
-			if (a->finish_segment_deltas[delta_index].segment ==
-			    new_segment) {
-				live_base -=
-					a->finish_segment_deltas[delta_index].live_bytes;
-				io_base -=
-					a->finish_segment_deltas[delta_index].io_cost;
-				min_base -=
-					a->finish_segment_deltas[delta_index].min_live_blocks;
-				break;
+			if (live_base > ~(swapz_u32)0 - new_gc_live_bytes ||
+			    io_base > ~(swapz_u32)0 - new_gc_io_cost ||
+			    min_base > (swapz_u16)~0U - new_gc_min_live_blocks) {
+				error = -EOVERFLOW;
+				goto fail;
 			}
-		if (live_base > ~(swapz_u32)0 - new_gc_live_bytes ||
-		    io_base > ~(swapz_u32)0 - new_gc_io_cost ||
-		    min_base > (swapz_u16)~0U - new_gc_min_live_blocks) {
-			error = -EOVERFLOW;
-			goto fail;
 		}
 	}
 	if (a->live_records[tx->start_block] ||

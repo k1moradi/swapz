@@ -552,24 +552,34 @@ Extent-LRU lookups (`swapz_read_extent_lru_lookup`) must likewise check
 
 Greedy window ordering (`swapz_order_window_greedy` and `swapz_gc_sort`)
 clears only the active batch/GC count of tracking bytes and advances a
-`first_unused` lower bound across iterations, preserving the exact stable
-largest-plus-best-fit pairing while skipping already consumed slots.
+`first_unused` lower bound across iterations while tracking `min_length`
+across candidate partners other than `largest`, preserving the exact stable
+largest-plus-best-fit pairing while skipping unreachable partner scans.
 Bounded DP planning (`swapz_engine_plan_bounded_policy`) skips redundant
 forward tie-break reconstruction when the backward-selected extent class does
 not cross a segment boundary (`(alignment_cursor % SWAPZ_SEGMENT_BLOCKS) +
 chosen_class <= SWAPZ_SEGMENT_BLOCKS`).
-When a 1-block (4KiB) extent at `index` already fits all remaining records in
-the window (`take == count - index`), larger extent classes at that position
+When a 1-block or 2-block extent at `index` already fits all remaining records
+in the window (`take == count - index`), larger extent classes at that position
 are strictly byte-dominated and skipped. `swapz_fit_count()` also uses a direct
-one-block fast path (`*read_blocks = included`) when `blocks == 1U`.
+one-block fast path (`*read_blocks = included`) when `blocks == 1U`, and
+`swapz_engine_plan_bounded_policy()` pre-checks batch-wide page uniqueness once
+when `logical_pages_unique == 0` so duplicate-free windows skip repeated inner
+uniqueness scans.
 In `swapz_try_concurrent_read_slots()`, missing-range eligibility is checked
 against shared cache metadata (`swapz_engine_required_read_range_cached`)
 before priming private slot scratch (`swapz_engine_prime_read_slot`) so
 rejected `<2`-slot read prefixes perform no scratch copies.
+Passive metadata-cache probes in `swapz_engine_prime_read_slot()` and
+`swapz_engine_required_read_range_cached()` check `read_metadata_segment_mask`
+before probing set tags, and `swapz_read_extent_lru_commit()` reuses the
+already-resolved `extent_lru_slot` from `swapz_engine_read_page()`.
 Adjacent read batching (`swapz_try_parallel_read_batch` and
 `swapz_adjacent_extent_chain_candidate`) inspects mapped extents directly
 via `swapz_parallel_read_extent_mapped` on the admitted prefix, avoiding
-duplicate dependency scans on already verified BIOs.
+duplicate dependency scans on already verified BIOs, and filters candidate
+extents to the FIFO head's segment and `SWAPZ_READ_COALESCE_MAX_BLOCKS`
+neighborhood before sorting.
 
 
 ### Nonblocking preparation-slot reservation
