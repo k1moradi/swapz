@@ -509,40 +509,35 @@ while `engine_pack_wall_ns` and
 attribution metrics for the expected gain.
 
 
-The qualified post-ID77 baseline is report `6c7d645924cd` on exact source
-`8a6dd2a` (ARM64/NEON). ID77 successfully moved PACK_READY ownership to the
-worker: admission burst closes are zero, fast async-minus-sync lower-WRITE
-request excess is +31.6 with a 95% CI that now crosses zero (-10.3..+73.5), and
-the useful-WRITE delta is -3.13% with CI -11.61..+5.35%. Fast QD8/QD32
-async-over-sync gains remain +74.6% and +14.9%.
+Report `98db4b028f41` qualifies exact source `b389204` on ARM64/NEON and
+splits the ID78 evidence. The completion-state repair succeeds in fast mixed
+I/O: async post-PACK sampling rises from 131.4/660.2 PACK_READY closes on the
+qualified `8a6dd2a` baseline to 617.4/617.4, async-minus-sync lower-WRITE
+requests improve from +31.6 (CI crossing zero) to -12.6 with a 95% CI of
+-23.6..-1.6, and async useful WRITE reaches 60.43 MB/s (-3.9% versus raw,
++0.7% versus sync). Preserve the in-flight quiescent guard and completion-aware
+bounded `batch_count + local + incoming` sample.
 
-The same report exposes ID78's distinct completion-state defect. Fast mixed
-sync records about 646.8 post-PACK tail samples for 646.8 PACK_READY closes,
-while async records only 131.4 samples for 660.2 closes. Async-minus-sync
-tail-target closes are -47.2 (95% CI -65.2..-29.2) while burst-target closes
-are +49.8 (+32.7..+66.9). Source inspection shows that an empty-batch worker
-pass can clear `pack_close_pending_tail_sample` and
-`retained_chain_completed` while detached K=1 is still in flight, and the
-sampler counts local/incoming followers but not followers already admitted
-into `batch[]` during that lower WRITE.
+The same run refutes the bundled four-record 16KiB first-pack rule. With
+`SWAPZ_MAX_COMPRESSED`, any four non-RAW compressed records fit the existing
+4-block class, so the rule is not selective geometry: it makes first-pack state
+true at the learned floor of four and closes below the `count > 4U` asynchronous
+detach threshold. Fast write-only QD8 async/sync falls from +74.6% on
+`8a6dd2a` to +2.2% (95% CI -3.1..+7.5) and QD32 from +14.9% to +0.7%
+(-0.2..+1.5). D64-on modern-envelope useful service also falls to 2.86x on
+modern-SD, 0.21x on SATA, 0.08x on Gen4 and 0.06x on Gen5 despite approximately
+50% lower WRITE bytes. The four-record first-pack branch is therefore removed;
+the existing 4-block extent class itself remains unchanged.
 
-ID78 preserves pending post-PACK state until K=1 finalization and samples the
-bounded accepted tail before consuming followers:
-`batch_count + local + incoming`, capped by the remaining 64-record room.
-It also recognizes a four-record compressed prefix that did not fit the
-earlier 1-block/2-block first-pack classes but fits the existing 4-block/16KiB
-extent. This is not a new extent class, timeout, future-arrival wait, K>1
-lower-WRITE slot or preparation lane.
-
-The product baseline remains demanding. D64-off useful-WRITE speedup versus
-same-run raw is 2.26x on modern-SD, 0.408x on SATA, 0.409x on Gen4 and 0.451x
-on Gen5; D64-on is 5.03x, 0.383x, 0.163x and 0.146x respectively. Fast
-write-only QD4 is still -33.7% versus raw, while QD8/QD32 are +13.7%/+37.4%.
-ID78 promotion therefore requires product-facing improvement, not merely
-counter repair: tail-sample conservation and burst/request fragmentation must
-improve without useful WRITE/READ or p99 loss, QD8/QD32 gains and slow/SD wins
-must survive, and every modern-envelope claim must use its same-run raw
-control. The ordinary retention deadline remains authoritative.
+Qualification of the split is product-facing. It must keep `b389204`'s fast
+mixed tail conservation, significant async lower-request reduction, useful
+WRITE/READ service and p99 direction while restoring the deep-QD behavior lost
+by the four-record rule. Use `8a6dd2a` as the QD8/QD32 reference (+74.6% and
++14.9% async/sync) and `b389204` as the completion-state reference. Slow/SD
+wins and lower-byte/request savings must remain intact, and every modern
+envelope must be judged against its same-run raw control. The ordinary
+retention deadline, K=1 lower-WRITE slot, one preparation lane, ID63 policy and
+SWZ 1/2/4 extent classes remain fixed.
 
 Configured modern-storage caps remain service-model inputs, not proof that the
 host attained that media class. Compare each swapz row to its same-run raw

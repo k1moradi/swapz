@@ -102,21 +102,6 @@ static inline int swapz_window_single_pack_ready(
 		return swapz_window_extent_fits(pending, count, retain_ms,
 						 read_budget, 2U);
 	}
-	if (count == 4U) {
-		/*
-		 * Larger compressed records may not form a 4/8KiB first pack,
-		 * but four valid compressed records always have a bounded 16KiB
-		 * extent opportunity. This is the initial learned burst floor and
-		 * can reduce lower requests even when it does not reduce blocks.
-		 */
-		if (swapz_window_extent_fits(pending, 2U, retain_ms,
-						 read_budget, 1U) ||
-		    swapz_window_extent_fits(pending, 3U, retain_ms,
-						 read_budget, 2U))
-			return 0;
-		return swapz_window_extent_fits(pending, count, retain_ms,
-						 read_budget, 4U);
-	}
 	return 0;
 }
 

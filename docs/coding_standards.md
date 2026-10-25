@@ -503,12 +503,15 @@ PACK_READY closure is worker-tail owned. `swapz_accept_write()` may record
 finite pack geometry in `single_pack_deferred` and
 `accepted_burst_pack_ready`, but it must not flush a PACK_READY window.
 The serialized worker closes burst-target, sampled-tail and service-proven-dry
-windows only after refreshing its local and incoming accepted FIFO state. A
-two-record 4KiB or three-record 8KiB first pack still waits for a second accepted
-pack at the initial floor. Four valid compressed records that did not form either
-smaller first pack may establish a 16KiB first-pack opportunity at the existing
-four-record learned floor; this changes neither SWZ extent classes nor the
-authoritative retention deadline.
+windows only after refreshing its local and incoming accepted FIFO state. At the
+initial four-record learned burst floor, only the selective two-record 4KiB or
+three-record 8KiB geometry may establish a first pack; that first pack still
+waits for a second accepted pack or an explicit sampled tail. Do not treat four
+non-RAW compressed records fitting the existing 16KiB class as first-pack
+evidence: `SWAPZ_MAX_COMPRESSED` makes that predicate effectively
+tautological, so it closes at count four below the `count > 4U` K=1
+asynchronous-detachment threshold. This restriction changes neither SWZ extent
+classes nor the authoritative retention deadline.
 
 If a ready window was held back only because the immutable K=1 lower WRITE was
 still pending, the completion wake must finalize that run and deliver its upper

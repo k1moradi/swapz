@@ -546,12 +546,15 @@ rather than preserve it as a compatibility alias. A detached PACK_READY sample
 must remain pending while K=1 is in flight; quiescent-state reset is legal only
 when both the retained batch and in-flight run are empty. After K=1 completion,
 the worker must sample before consuming the next FIFO and count
-`batch_count + local + incoming` within the remaining 64-record room. Native
-window-policy tests must cover a four-record compressed prefix that fails the
-1/2-block first-pack tests but fits one 4-block/16KiB extent, including RAW,
-disabled-retention and read-budget rejection. The worker then restores
-unfinished local work to the accepted FIFO and re-evaluates PACK_READY before
-the retention timer can be armed.
+`batch_count + local + incoming` within the remaining 64-record room. First-pack
+source coverage must permit only the selective two-record/one-block and
+three-record/two-block cases and must reject any `count == 4U` first-pack
+branch. Native window-policy tests must prove that four 3000-byte compressed
+records remain ineligible as a first pack even though they fit the existing
+4-block/16KiB extent class; ordinary count-four second-pack geometry remains a
+separate `swapz_window_pack_ready()` case. The worker then restores unfinished
+local work to the accepted FIFO and re-evaluates PACK_READY before the retention
+timer can be armed.
 
 These scheduling rules are architecture-neutral. The public `make test`
 matrix must continue to build and qualify the existing predictor backends:
