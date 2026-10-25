@@ -3049,10 +3049,14 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("swapz_gc_account_transition_apply", finish)
         self.assertNotIn("swapz_gc_account_costs(a, old", finish)
         self.assertIn("swapz_gc_live_byte_cost(old)", finish)
-        extent_delta = source_body("swapz_finish_extent_delta_get", authority)
-        segment_delta = source_body("swapz_finish_segment_delta_get", authority)
-        self.assertIn("for (index = *count; index > 0; --index)", extent_delta)
-        self.assertIn("for (index = *count; index > 0; --index)", segment_delta)
+        self.assertEqual(
+            authority.count("for (index = *count; index > 0; --index)"), 2)
+        self.assertIn(
+            "finish_extent_deltas[index - 1U].start_block == start_block",
+            authority)
+        self.assertIn(
+            "finish_segment_deltas[index - 1U].segment == segment",
+            authority)
 
         # Cheap rejection must remain fail-closed: map/type checks may precede
         # dependency scans, but every mapped candidate still scans dependencies.

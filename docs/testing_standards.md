@@ -1510,10 +1510,11 @@ sequence is checked before payload lower I/O; provisional coalesced blocks
 cannot be published as validated cache; publication preflight contains no
 global GC mutate/restore loop; and paused-batch hashing covers the active
 transaction prefix.
-Source-contract body extraction must recognize the kernel fixed-width helper
-return types used by production hot paths, including `swapz_u8`; contracts
-should follow the current semantic owner rather than preserve retired source
-spellings.
+Source-contract body extraction must recognize the kernel fixed-width scalar
+return types used by production hot paths, including `swapz_u8`; pointer-return
+helpers may be asserted from their bounded source structure rather than
+expanding a scalar-body parser. Contracts should follow the current semantic
+owner rather than preserve retired source spellings.
 
 The ID73 scalar hot-path follow-up is semantics-preserving qualification, not a
 new runtime policy. Direct production-C/native tests must continue to cover all
