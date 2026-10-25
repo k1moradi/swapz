@@ -2893,6 +2893,7 @@ static swapz_u16 swapz_probe_set(
         engine_h = (ROOT / "src/kernel/engine.h").read_text()
         authority = (ROOT / "src/kernel/authority.c").read_text()
         authority_h = (ROOT / "src/kernel/authority.h").read_text()
+        codec = (ROOT / "src/kernel/codec.c").read_text()
         predictor_sse2 = (ROOT / "src/kernel/predictor-sse2.c").read_text()
         predictor_qualification = (
             ROOT / "tests/runtime/native/codec/predictor-qualification.c"
@@ -2906,6 +2907,9 @@ static swapz_u16 swapz_probe_set(
         gc_choose = body("swapz_gc_choose_victim")
         gc_sort = body("swapz_gc_sort")
         gc_commit = source_body("swapz_gc_commit_rotation", authority)
+        inflight_touch = body("swapz_inflight_run_touches_logical")
+        parallel_extent = body("swapz_parallel_read_extent")
+        validate = source_body("swapz_validate", codec)
 
         predictor_avx2 = (
             ROOT / "src/kernel/predictor-avx2.c"
@@ -3021,6 +3025,16 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("cached_takes[index][class_index] = take", planner)
         self.assertIn("take = cached_takes[position][class_index]", planner)
         self.assertEqual(planner.count("swapz_fit_count("), 1)
+        fit = source_body("swapz_fit_count", engine)
+        self.assertIn("if (blocks == 2U)", fit)
+        self.assertIn("1U + (payload_start > SWAPZ_BLOCK_BYTES)", fit)
+        self.assertIn(
+            "take == cached_takes[index][class_index - 1U]", planner)
+        batched_write = source_body(
+            "swapz_engine_write_window_batched_read_cap", engine)
+        self.assertIn("run.bytes = e->bulk_scratch", batched_write)
+        self.assertIn("for (index = count; index > 0; --index)", batched_write)
+        self.assertNotIn("run = (struct swapz_io_run)", batched_write)
 
         # Publication preflight is local/bounded and does not mutate+restore
         # global GC arrays or apply per-record GC transitions in phase 2.
@@ -3030,6 +3044,32 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_finish_extent_delta_get", finish)
         self.assertIn("swapz_finish_segment_delta_get", finish)
         self.assertNotIn("swapz_gc_account_transition_apply", finish)
+        self.assertNotIn("swapz_gc_account_costs(a, old", finish)
+        self.assertIn("swapz_gc_live_byte_cost(old)", finish)
+        extent_delta = source_body("swapz_finish_extent_delta_get", authority)
+        segment_delta = source_body("swapz_finish_segment_delta_get", authority)
+        self.assertIn("for (index = *count; index > 0; --index)", extent_delta)
+        self.assertIn("for (index = *count; index > 0; --index)", segment_delta)
+
+        # Cheap rejection must remain fail-closed: map/type checks may precede
+        # dependency scans, but every mapped candidate still scans dependencies.
+        self.assertLess(parallel_extent.index("bio_op(bio) != REQ_OP_READ"),
+                        parallel_extent.index("swapz_read_can_parallel"))
+        self.assertLess(parallel_extent.index("swapz_parallel_read_extent_mapped"),
+                        parallel_extent.index("swapz_read_can_parallel"))
+        self.assertIn(
+            "ctx->authority.batch_pending != run->extent_count",
+            inflight_touch)
+        self.assertIn("return false;", inflight_touch)
+        self.assertIn("if (!cached_metadata && engine->read_metadata_cache)", read)
+        self.assertIn("if (engine->read_metadata_cache)", read)
+
+        # Packed payloads are stored back-to-back from bytes_total downward.
+        # Exact adjacency plus bounded 16-bit fields makes the removed explicit
+        # bytes_total subtraction checks redundant without weakening validation.
+        self.assertIn("start + length != previous_end", validate)
+        self.assertNotIn("start > bytes_total", validate)
+        self.assertNotIn("length > bytes_total - start", validate)
 
         # First-pass LZ4 can be qualified at 1/2/3/4 without changing the
         # delta64 rescue LZ4 setting. Zero recognition stays inside the shared

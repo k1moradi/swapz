@@ -381,11 +381,10 @@ int swapz_validate(const void *bytes, swapz_u32 bytes_total)
 		start = swapz_le16(record.payload_offset_le);
 		length = swapz_le16(record.payload_length_le) &
 			SWAPZ_RECORD_LENGTH_MASK;
-		if (!record.generation_le ||
+		if (start + length != previous_end ||
+		    !record.generation_le ||
 		    !length || length > SWAPZ_MAX_COMPRESSED ||
-		    start < metadata_end ||
-		    start > bytes_total || length > bytes_total - start ||
-		    start + length != previous_end)
+		    start < metadata_end)
 			return -EUCLEAN;
 		previous_end = start;
 		for (earlier = 0; earlier < index; ++earlier)

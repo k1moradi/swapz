@@ -1511,6 +1511,18 @@ cannot be published as validated cache; publication preflight contains no
 global GC mutate/restore loop; and paused-batch hashing covers the active
 transaction prefix.
 
+The ID73 scalar hot-path follow-up is semantics-preserving qualification, not a
+new runtime policy. Direct production-C/native tests must continue to cover all
+1/2/4-block planner outputs, duplicate-page rejection, RAW/compressed batched
+fallbacks, malformed SWZ descriptors, publication accounting failures, GC
+sidecars and private READ slots. Source contracts pin the two-block fit shortcut,
+equal-take class pruning, deferred RAW pre-scan, reverse bounded publication
+delta lookup, mapped-READ O(1) precheck, metadata-cache null guards and the
+monotonic payload-bound validator. W=1/W=2 builds remain mandatory. Because
+these paths are architecture-neutral C, every supported host runs the same
+`make test` interface; architecture-specific SIMD qualification remains
+unchanged.
+
 Loaded drained status snapshots must include `lz4_acceleration`,
 `delta64_transform_calls`, `delta64_transform_wall_ns`, and the passive
 `parallel_read_adjacent_chain_3plus`,

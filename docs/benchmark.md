@@ -487,6 +487,16 @@ Current benchmark work must preserve these contracts:
 
 ### Current evidence cycle
 
+The ID73 scalar hot-path follow-up uses source `9202ce7` as its pre-change
+comparison point. It is expected to reduce planner, publication and read-engine
+non-I/O CPU work without changing logical work or lower-I/O geometry. Promotion
+requires an exact-source `make test`: compare useful throughput/read p99 and
+independent lower bytes/requests first, then use planner wall, publication
+non-I/O/CRC split, read-engine non-I/O, host CPU/PSI and GC attribution to
+explain any change. A lower internal phase timer alone is supporting evidence,
+not a product win; unchanged lower-I/O counters are expected for this
+semantics-preserving increment.
+
 Delta64 rescue remains default-off despite the qualified positive-fixture A/B;
 representative swap content is the remaining promotion gate. Production
 ordinary LZ4 is fixed at acceleration one, delta64 preparation at one producer

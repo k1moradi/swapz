@@ -406,6 +406,15 @@ SWZ geometry, authority ordering or the default compression policy.
   no longer rewinds the allocator's circular probe, and equal-cost victim scans
   begin from that probe. These are allocator-fairness changes, not NAND wear
   claims.
+- **Scalar hot-path follow-up:** bounded planner fit/candidate evaluation,
+  batched-run setup, publication preflight, READ eligibility, metadata lookup
+  and SWZ descriptor validation avoid redundant scans/branches after the same
+  operation has already proved the required invariant. This changes no SWZ
+  bytes, extent classes, scheduling policy, lower-I/O depth, authority order or
+  cache capacity. Treat it as CPU-work reduction only: exact-source
+  qualification must preserve byte-exact output and lower bytes/requests, and
+  any performance claim must compare useful service plus planner/publish/read
+  non-I/O attribution against the pre-change `9202ce7` baseline.
 
 Acceptance is byte-exact native correctness, sanitizer cleanliness, x86 SSE2
 instruction-shape checks, W=1/W=2 kernel builds, and the existing owner-only

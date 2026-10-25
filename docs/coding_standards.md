@@ -574,12 +574,18 @@ When a 1-block or 2-block extent at `index` already fits all remaining records
 in the window (`take == count - index`), larger extent classes at that position
 are strictly byte-dominated and skipped. `swapz_fit_count()` also uses a direct
 one-block fast path (`*read_blocks = included`) when `blocks == 1U`, rejects
-`blocks > 1U` immediately when `max_read_blocks == 1U`, and
+`blocks > 1U` immediately when `max_read_blocks == 1U`, and uses a dedicated
+two-block fast path (`1U + (payload_start > SWAPZ_BLOCK_BYTES)`) with
+single-subtraction `remaining` capacity tracking across multi-block classes.
 `swapz_engine_plan_bounded_policy()` pre-checks batch-wide page validity and
 uniqueness once when `logical_pages_unique == 0` so pre-validated or
-duplicate-free windows skip repeated inner scans.
+duplicate-free windows skip repeated inner scans, and skips larger extent
+classes whose `take` equals the immediately smaller class.
 `swapz_engine_prepare_batched_run()` resets scalar run header fields without
-clearing the 64-entry per-extent arrays that are populated up to `extent_count`.
+clearing the 64-entry per-extent arrays that are populated up to `extent_count`,
+and `swapz_engine_write_window_batched_read_cap()` skips the pre-validation
+raw-page scan on normal multi-page bulk runs while initializing only `run.bytes`
+and `run.txs`.
 In `swapz_try_concurrent_read_slots()`, missing-range eligibility is checked
 against shared cache metadata (`swapz_engine_required_read_range_cached`)
 before priming private slot scratch (`swapz_engine_prime_read_slot`) so
@@ -969,6 +975,21 @@ The generic bounded planner must remain defensive against duplicate logical
 pages. A private caller may bypass the inner duplicate search only immediately
 after one complete bounded-batch uniqueness validation and without allowing an
 intervening mutation of the page list.
+
+CPU-only hot-path shortcuts may reuse facts already proved in the same
+serialized operation, but they must not remove a fail-closed boundary. In
+`swapz_finish()`, an old authoritative map may feed GC byte/I/O/min-block cost
+directly only after its physical range, extent class, segment and sidecar
+preconditions have already been checked; bounded extent/segment delta lookups
+may search newest-to-oldest without changing append or apply order. READ
+eligibility may reject non-READ, barrier, unmapped and RAW BIOs from the O(1)
+authoritative map before the more expensive collected/in-flight dependency
+scan, but every mapped candidate must still run that dependency scan before
+fan-out. Metadata set lookup may cache the immutable epoch/tag base in locals
+for one probe. `swapz_validate()` may rely on the monotonically decreasing
+packed-payload end relation only while offsets/lengths remain 16-bit decoded
+values, positive length and maximum compressed-length checks remain intact,
+and exact adjacency to `previous_end` is still required.
 
 `swapz_finish()` publication preflight is serialized and uses only
 authority-owned, fixed-size scratch. Aggregate old-extent reference removals,

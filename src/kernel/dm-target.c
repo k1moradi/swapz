@@ -1009,10 +1009,11 @@ static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
 		return false;
 	if (ctx->inflight_count != SWAPZ_WRITE_PIPELINE_DEPTH ||
 	    !READ_ONCE(inflight->active) || !run->txs ||
-	    !run->extent_count || run->extent_count > SWAPZ_MAX_RECORDS)
+	    !run->extent_count || run->extent_count > SWAPZ_MAX_RECORDS ||
+	    ctx->authority.batch_pending != run->extent_count)
 		return true;
 	pending = run->extent_count;
-	for (extent = 0; extent < run->extent_count; ++extent) {
+	for (extent = 0; extent < pending; ++extent) {
 		const struct swapz_tx *tx = &run->txs[extent];
 
 		if (!tx->count || tx->count > SWAPZ_MAX_RECORDS)
@@ -1021,7 +1022,7 @@ static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
 			if (tx->records[record].logical_page == logical)
 				return true;
 	}
-	return ctx->authority.batch_pending != pending;
+	return false;
 }
 
 static void swapz_async_lower_write_done(unsigned long error, void *context)
@@ -2170,17 +2171,21 @@ static void swapz_order_window_greedy(struct swapz_dm *ctx)
 		if (largest < 0)
 			break;
 		ctx->used[largest] = 1;
+		if (largest == (int)first_unused)
+			first_unused++;
 		ctx->planned_to_batch[position++] = (u8)largest;
 
 		/* SWZ metadata: header(16) + two descriptors(32). */
 		if (SWAPZ_BLOCK_BYTES - 48 - ctx->batch[largest].length >= min_length) {
+			const int budget = (int)SWAPZ_BLOCK_BYTES - 48 -
+				(int)ctx->batch[largest].length;
+
 			for (i = first_unused; i < ctx->batch_count; ++i) {
 				int remaining;
 
 				if (ctx->used[i] || ctx->batch[i].raw)
 					continue;
-				remaining = SWAPZ_BLOCK_BYTES - 48 -
-					ctx->batch[largest].length - ctx->batch[i].length;
+				remaining = budget - (int)ctx->batch[i].length;
 				if (remaining >= 0 && remaining < best_slack) {
 					best_slack = remaining;
 					partner = i;
@@ -2278,16 +2283,19 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 		if (largest < 0)
 			break;
 		ctx->gc_used[largest] = 1;
+		if (largest == (int)first_unused)
+			first_unused++;
 		ctx->gc_to_pending[position++] = largest;
 		if (SWAPZ_BLOCK_BYTES - 48 - ctx->gc_pending[largest].length >= min_length) {
+			const int budget = (int)SWAPZ_BLOCK_BYTES - 48 -
+				(int)ctx->gc_pending[largest].length;
+
 			for (i = first_unused; i < ctx->gc_count; ++i) {
 				int slack;
 
 				if (ctx->gc_used[i])
 					continue;
-				slack = SWAPZ_BLOCK_BYTES - 48 -
-					ctx->gc_pending[largest].length -
-					ctx->gc_pending[i].length;
+				slack = budget - (int)ctx->gc_pending[i].length;
 				if (slack >= 0 && slack < slack_best) {
 					slack_best = slack;
 					partner = i;
@@ -3780,15 +3788,15 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		ctx->next_window_close = SWAPZ_CLOSE_FUA;
 		swapz_flush_window(ctx);
 	} else {
-		if (swapz_window_single_pack_ready(ctx->batch, ctx->batch_count,
-				ctx->retain_ms, ctx->engine.max_read_blocks_per_record) &&
-		    !ctx->single_pack_deferred) {
+		if (!ctx->single_pack_deferred &&
+		    swapz_window_single_pack_ready(ctx->batch, ctx->batch_count,
+				ctx->retain_ms, ctx->engine.max_read_blocks_per_record)) {
 			ctx->single_pack_deferred = true;
 			ctx->single_pack_deferrals++;
 		}
-		if (swapz_window_pack_ready(ctx->batch, ctx->batch_count,
-				ctx->retain_ms, ctx->engine.max_read_blocks_per_record) &&
-		    !ctx->accepted_burst_pack_ready) {
+		if (!ctx->accepted_burst_pack_ready &&
+		    swapz_window_pack_ready(ctx->batch, ctx->batch_count,
+				ctx->retain_ms, ctx->engine.max_read_blocks_per_record)) {
 			ctx->accepted_burst_pack_ready = true;
 			ctx->accepted_burst_extensions++;
 		}
@@ -4167,10 +4175,12 @@ static bool swapz_parallel_read_extent(struct swapz_dm *ctx,
 				       swapz_u32 *start_block,
 				       swapz_u8 *extent_blocks)
 {
-	if (!swapz_read_can_parallel(ctx, bio))
+	if (bio_op(bio) != REQ_OP_READ ||
+	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
+	    !swapz_parallel_read_extent_mapped(ctx, bio, start_block,
+					       extent_blocks))
 		return false;
-	return swapz_parallel_read_extent_mapped(ctx, bio, start_block,
-						 extent_blocks);
+	return swapz_read_can_parallel(ctx, bio);
 }
 
 /*

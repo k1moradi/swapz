@@ -1234,9 +1234,9 @@ swapz_finish_extent_delta_get(struct swapz_authority *a, swapz_u8 *count,
 {
 	swapz_u8 index;
 
-	for (index = 0; index < *count; ++index)
-		if (a->finish_extent_deltas[index].start_block == start_block)
-			return &a->finish_extent_deltas[index];
+	for (index = *count; index > 0; --index)
+		if (a->finish_extent_deltas[index - 1U].start_block == start_block)
+			return &a->finish_extent_deltas[index - 1U];
 	if (*count >= SWAPZ_MAX_RECORDS)
 		return NULL;
 	a->finish_extent_deltas[*count] = (struct swapz_finish_extent_delta){
@@ -1253,9 +1253,9 @@ swapz_finish_segment_delta_get(struct swapz_authority *a, swapz_u8 *count,
 
 	if (is_new)
 		*is_new = 0;
-	for (index = 0; index < *count; ++index)
-		if (a->finish_segment_deltas[index].segment == segment)
-			return &a->finish_segment_deltas[index];
+	for (index = *count; index > 0; --index)
+		if (a->finish_segment_deltas[index - 1U].segment == segment)
+			return &a->finish_segment_deltas[index - 1U];
 	if (*count >= SWAPZ_MAX_RECORDS)
 		return NULL;
 	if (is_new)
@@ -1449,16 +1449,20 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			}
 		}
 		if (gc_enabled) {
-			swapz_u32 cost_segment, live_bytes, io_cost;
+			swapz_u32 live_bytes = swapz_gc_live_byte_cost(old);
+			swapz_u32 io_cost;
 			swapz_u16 min_live_blocks;
 
-			error = swapz_gc_account_costs(a, old, &cost_segment,
-						       &live_bytes, &io_cost,
-						       &min_live_blocks);
-			if (error)
+			if (!live_bytes) {
+				error = -EUCLEAN;
 				goto fail;
-			if (cost_segment != old_segment ||
-			    segment_delta->live_bytes >
+			}
+			io_cost = live_bytes +
+				((old->extent_blocks == 4U ?
+				  3U : (swapz_u32)old->extent_blocks) <<
+				 SWAPZ_BLOCK_SHIFT);
+			min_live_blocks = swapz_gc_min_live_blocks(old);
+			if (segment_delta->live_bytes >
 			    ~(swapz_u32)0 - live_bytes ||
 			    segment_delta->io_cost > ~(swapz_u32)0 - io_cost ||
 			    segment_delta->min_live_blocks >
@@ -1480,7 +1484,8 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			}
 		}
 	}
-	if (swapz_page_list_validate_segment(a, new_segment)) {
+	if (page_lists_enabled &&
+	    swapz_page_list_validate_segment(a, new_segment)) {
 		error = -EUCLEAN;
 		goto fail;
 	}
@@ -1567,8 +1572,6 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	for (index = 0; index < tx->count; ++index) {
 		swapz_u32 logical = tx->records[index].logical_page;
 		struct swapz_map *entry = &a->maps[logical];
-		swapz_u32 old_segment = entry->valid ?
-			entry->start_block / SWAPZ_SEGMENT_BLOCKS : 0;
 		struct swapz_map new_map = {
 			.start_block = tx->start_block,
 			.sequence = tx->sequence,
@@ -1584,7 +1587,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		if (page_lists_enabled) {
 			if (entry->valid)
 				swapz_page_list_unlink_unchecked(
-					a, logical, old_segment);
+					a, logical,
+					entry->start_block /
+					SWAPZ_SEGMENT_BLOCKS);
 			swapz_page_list_append_unchecked(a, logical, new_segment);
 		}
 		*entry = new_map;
