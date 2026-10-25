@@ -541,9 +541,11 @@ sequence.
 Retained-target qualification requires source coverage for the single
 worker-tail PACK_READY owner. Admission may update
 `accepted_burst_pack_ready` and sampled-geometry state, but must not emit
-PACK_READY. After K=1 completion, the worker must finalize the immutable run,
-sample any pending post-PACK tail, restore unfinished local work to the accepted
-FIFO, and re-evaluate PACK_READY before the retention timer can be armed.
+PACK_READY. Source contracts must remove the retired admission-close helper
+rather than preserve it as a compatibility alias. After K=1 completion, the
+worker must finalize the immutable run, sample any pending post-PACK tail,
+restore unfinished local work to the accepted FIFO, and re-evaluate PACK_READY
+before the retention timer can be armed.
 
 Tail learning must be gated exclusively by
 `pack_close_pending_tail_sample`; pre-PACK sampling from a deferred first

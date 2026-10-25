@@ -1203,11 +1203,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
         self.assertIn("swapz_window_shrink_burst_target(", worker)
         self.assertIn("!ctx->retained_chain_completed", worker)
-        target_ready = body("swapz_retained_target_close_ready")
         close_ready = body("swapz_retained_pack_close_ready")
         service_dry = body("swapz_service_proven_dry_pack")
-        self.assertIn("ctx->retained_single_tail_deferred && ctx->batch_count == 1U",
-                      target_ready)
+        self.assertNotIn("swapz_retained_target_close_ready", DM)
         self.assertIn("ctx->retained_single_tail_deferred && ctx->batch_count == 1U",
                       close_ready)
         self.assertIn("swapz_service_proven_dry_pack(ctx)", close_ready)
