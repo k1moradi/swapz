@@ -991,6 +991,29 @@ packed-payload end relation only while offsets/lengths remain 16-bit decoded
 values, positive length and maximum compressed-length checks remain intact,
 and exact adjacency to `previous_end` is still required.
 
+Publication may authenticate an immutable SWZ extent's header and descriptor
+bytes once with `swapz_validate_metadata_crc()`, then fold descriptor
+adjacency and transaction identity into the existing `swapz_finish()` Phase 1
+walk. Public `swapz_validate()` remains the complete standalone validator and
+must retain duplicate-logical detection. Publication may omit that quadratic
+duplicate scan only because every decoded logical/generation pair is compared
+positionally with the already-authenticated, duplicate-free transaction.
+
+The batched engine may reuse its one window-wide uniqueness proof through
+`swapz_stage_batch_unique()` and the unique prehashed codec append. The stage
+fast path skips only the repeated duplicate search: logical range and generation
+overflow checks remain active before map access. The codec fast path skips only
+the builder's prior-record logical scan; payload pointer/length, encoding,
+generation, builder capacity and serialization checks remain unchanged.
+
+After `swapz_batch_resume()` verifies the paused transaction CRC, sequence,
+range and current generations and copies the active prefix into
+`authority->active_tx`, completion may pass that authority-owned pointer to
+finish/abort identity checks. `swapz_is_active()` may self-accept only that
+exact pointer after all scalar active fields, class and count checks succeed.
+Every external caller-owned transaction pointer must still compare every active
+record against the immutable authority snapshot.
+
 `swapz_finish()` publication preflight is serialized and uses only
 authority-owned, fixed-size scratch. Aggregate old-extent reference removals,
 per-segment mapped removals and GC score deltas without mutating global

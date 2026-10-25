@@ -497,6 +497,17 @@ explain any change. A lower internal phase timer alone is supporting evidence,
 not a product win; unchanged lower-I/O counters are expected for this
 semantics-preserving increment.
 
+The structural ID73 follow-up uses `329a10c` as its immediate comparison
+point. The native authority-throughput evidence includes two same-host
+micro-pairs: full 64-record validation versus metadata-CRC-only validation, and
+checked 64-record append versus the caller-proven-unique append used by the
+batched engine. Report both absolute ns/call or ns/extent and their relative
+difference, but label them supporting CPU evidence only. The owner loaded
+matrix remains decisive: geometry/lower bytes and requests must stay invariant,
+while `engine_pack_wall_ns` and
+`engine_publish_wall_ns - engine_publish_crc_wall_ns` are the primary
+attribution metrics for the expected gain.
+
 Delta64 rescue remains default-off despite the qualified positive-fixture A/B;
 representative swap content is the remaining promotion gate. Production
 ordinary LZ4 is fixed at acceleration one, delta64 preparation at one producer

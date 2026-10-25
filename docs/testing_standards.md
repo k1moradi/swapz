@@ -1528,6 +1528,29 @@ these paths are architecture-neutral C, every supported host runs the same
 `make test` interface; architecture-specific SIMD qualification remains
 unchanged.
 
+The next ID73 structural pass must keep public generic defenses while proving
+the production-only proof reuse. Native publication coverage must construct a
+metadata-CRC-valid extent containing duplicate logical descriptors through the
+unique append helper and prove both public `swapz_validate()` and
+`swapz_finish()` reject it without publishing any mapping. Batched aggregation
+must continue to prove duplicate windows fall back to the sequential checked
+path, failed/short lower runs publish nothing, and successful replay remains
+byte-exact.
+
+Source contracts must pin that `swapz_finish()` calls
+`swapz_validate_metadata_crc()` rather than the full validator, checks exact
+payload adjacency in Phase 1, and still compares every descriptor to the
+staged transaction. They must pin that unique staging retains logical-range and
+generation-overflow checks, and that the authority-owned active-transaction
+pointer is used only after `swapz_batch_resume()`. External transaction
+mutation tests remain mandatory and must continue to return `-ESTALE`.
+
+The existing native authority-throughput test also reports same-host supporting
+microbenchmarks for a 64-record full validator versus metadata-CRC validation,
+and checked versus caller-proven-unique 64-record append. These measurements
+are CPU diagnostics only; they do not replace loaded, matched lower-I/O,
+throughput, tail-latency, CPU/PSI and byte-exact qualification.
+
 Loaded drained status snapshots must include `lz4_acceleration`,
 `delta64_transform_calls`, `delta64_transform_wall_ns`, and the passive
 `parallel_read_adjacent_chain_3plus`,

@@ -25,19 +25,42 @@ static unsigned long long swapz_engine_elapsed_ns(unsigned long long start,
 	return end >= start ? end - start : 0;
 }
 
+static int swapz_page_valid(const struct swapz_compressed_page *page);
+
 static int swapz_append_page(struct swapz_engine *engine,
 			    struct swapz_builder *builder,
 			    const struct swapz_compressed_page *page,
-			    swapz_u32 generation)
+			    swapz_u32 generation, int logical_page_unique)
 {
 	int error;
 
-	if (!page->payload_crc32c_valid)
-		return swapz_append_encoded(builder, page->logical_page, generation,
-				    page->payload, page->length, page->encoding);
-	error = swapz_append_prehashed_encoded(builder, page->logical_page,
-				      generation, page->payload, page->length,
-				      page->payload_crc32c, page->encoding);
+	if (!page->payload_crc32c_valid) {
+		if (!logical_page_unique)
+			return swapz_append_encoded(
+				builder, page->logical_page, generation,
+				page->payload, page->length, page->encoding);
+		/*
+		 * Hash only after the same cheap safety checks the generic
+		 * encoded append performs before touching caller payload.
+		 */
+		if (!swapz_page_valid(page) || !generation)
+			return -EINVAL;
+		return swapz_append_prehashed_encoded_unique(
+			builder, page->logical_page, generation,
+			page->payload, page->length,
+			swapz_crc32c_bytes(page->payload, page->length),
+			page->encoding);
+	}
+	if (logical_page_unique)
+		error = swapz_append_prehashed_encoded_unique(
+			builder, page->logical_page, generation,
+			page->payload, page->length, page->payload_crc32c,
+			page->encoding);
+	else
+		error = swapz_append_prehashed_encoded(
+			builder, page->logical_page, generation,
+			page->payload, page->length, page->payload_crc32c,
+			page->encoding);
 	if (!error)
 		engine->prehashed_records++;
 	return error;
@@ -1333,7 +1356,7 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 			const struct swapz_compressed_page *page = &pages[entry + j];
 
 			error = swapz_append_page(engine, &builder, page,
-					       tx->records[j].generation);
+					       tx->records[j].generation, 0);
 			if (error) {
 				engine->pack_wall_ns += swapz_engine_elapsed_ns(
 					phase_start, swapz_engine_now_ns());
@@ -1555,8 +1578,8 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 		tx = &run->txs[staged];
 		for (j = 0; j < take; ++j)
 			e->logical_scratch[j] = pages[entry + j].logical_page;
-		error = swapz_stage_batch(e->authority, e->logical_scratch,
-					 take, blocks, tx);
+		error = swapz_stage_batch_unique(e->authority, e->logical_scratch,
+						take, blocks, tx);
 		if (error) {
 			/*
 			 * If a valid prefix is already staged, preserve the old
@@ -1611,7 +1634,7 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 
 					error = swapz_append_page(
 						e, &builder, p,
-						tx->records[j].generation);
+						tx->records[j].generation, 1);
 					if (error) {
 						e->pack_wall_ns +=
 							swapz_engine_elapsed_ns(
@@ -1713,6 +1736,7 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 	publish_start = swapz_engine_now_ns();
 	for (i = 0; i < run->extent_count; ++i) {
 		const struct swapz_tx *tx = &run->txs[i];
+		const struct swapz_tx *active_tx;
 		swapz_u16 offset = run->offsets[i];
 
 		error = swapz_batch_resume(e->authority, tx);
@@ -1725,17 +1749,24 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 			cleanup = swapz_bulk_abort(e, run, i);
 			return cleanup ? cleanup : error;
 		}
+		/*
+		 * batch_resume() authenticated tx against its paused CRC and copied
+		 * the active prefix. Finish through that authority-owned handle so
+		 * swapz_is_active() does not compare the copy back to its source.
+		 */
+		active_tx = &e->authority->active_tx;
 		if (run->raw[i])
 			error = swapz_finish_raw(
-				e->authority, tx,
+				e->authority, active_tx,
 				run->bytes + (size_t)offset * SWAPZ_BLOCK_BYTES,
-				tx->extent_blocks, 0);
+				active_tx->extent_blocks, 0);
 		else
 			error = swapz_finish(
-				e->authority, tx,
+				e->authority, active_tx,
 				run->bytes + (size_t)offset * SWAPZ_BLOCK_BYTES,
-				(swapz_u32)tx->extent_blocks * SWAPZ_BLOCK_BYTES,
-				tx->extent_blocks, 0);
+				(swapz_u32)active_tx->extent_blocks *
+					SWAPZ_BLOCK_BYTES,
+				active_tx->extent_blocks, 0);
 		publish_now = swapz_engine_now_ns();
 		e->publish_wall_ns += swapz_engine_elapsed_ns(
 			publish_start, publish_now);

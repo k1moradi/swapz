@@ -116,6 +116,44 @@ static int test_last_sibling_mutation_is_all_or_nothing(void)
 	return 0;
 }
 
+static int test_duplicate_media_descriptor_fails_closed(void)
+{
+	const swapz_u32 pages[] = {0, 1};
+	struct swapz_tx tx;
+	struct swapz_builder b;
+	struct swapz_map before[LOGICAL];
+	swapz_u32 payload_crc;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&a, pages, 2, 2, &tx) == 0);
+	memset(compressed, 0x6c, sizeof(compressed));
+	payload_crc = swapz_crc32c_bytes(compressed, sizeof(compressed));
+	CHECK(swapz_begin(&b, bytes, 2U * SWAPZ_BLOCK_BYTES, tx.sequence) == 0);
+	/*
+	 * The unique append helper intentionally trusts its caller's window-wide
+	 * uniqueness proof. Violate that private precondition here to prove both
+	 * the public validator and publication's tx identity check still fail
+	 * closed rather than accepting two descriptors for logical page zero.
+	 */
+	CHECK(swapz_append_prehashed_encoded_unique(
+		&b, tx.records[0].logical_page, tx.records[0].generation,
+		compressed, sizeof(compressed), payload_crc,
+		SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_append_prehashed_encoded_unique(
+		&b, tx.records[0].logical_page, tx.records[1].generation,
+		compressed, sizeof(compressed), payload_crc,
+		SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_seal(&b) == 0);
+	CHECK(swapz_validate(bytes, 2U * SWAPZ_BLOCK_BYTES) == -EUCLEAN);
+	memcpy(before, maps, sizeof(before));
+	CHECK(swapz_finish(&a, &tx, bytes, 2U * SWAPZ_BLOCK_BYTES, 2, 0) ==
+	      -EUCLEAN);
+	CHECK(!a.in_flight && a.abandoned_blocks == 2);
+	CHECK(memcmp(before, maps, sizeof(before)) == 0);
+	CHECK(!live[tx.start_block]);
+	return 0;
+}
+
 static int test_mutated_replacement_preserves_prior_authority(void)
 {
 	const swapz_u32 pages[] = {0};
@@ -149,6 +187,7 @@ int main(void)
 	CHECK(test_page_identity_mutation() == 0); passed++;
 	CHECK(test_generation_identity_mutation() == 0); passed++;
 	CHECK(test_last_sibling_mutation_is_all_or_nothing() == 0); passed++;
+	CHECK(test_duplicate_media_descriptor_fails_closed() == 0); passed++;
 	CHECK(test_mutated_replacement_preserves_prior_authority() == 0); passed++;
 	printf("SWAPZ_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=%d\n", passed);
 	return 0;

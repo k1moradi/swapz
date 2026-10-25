@@ -2901,6 +2901,9 @@ static swapz_u16 swapz_probe_set(
         predictor_qualification = (
             ROOT / "tests/runtime/native/codec/predictor-qualification.c"
         ).read_text()
+        authority_benchmark = (
+            ROOT / "tests/runtime/native/mapping/authority-throughput.c"
+        ).read_text()
         producer = body("swapz_preparation_worker")
         accept = body("swapz_accept_write")
         compressor = body("swapz_compress_page")
@@ -2913,6 +2916,12 @@ static swapz_u16 swapz_probe_set(
         inflight_touch = body("swapz_inflight_run_touches_logical")
         parallel_extent = body("swapz_parallel_read_extent")
         validate = source_body("swapz_validate", codec)
+        metadata_validate = source_body("swapz_validate_metadata_crc", codec)
+        append_crc = source_body("swapz_append_crc", codec)
+        append_page = source_body("swapz_append_page", engine)
+        stage_policy = source_body("swapz_stage_policy", authority)
+        active = source_body("swapz_is_active", authority)
+        complete_run = source_body("swapz_engine_complete_batched_run", engine)
 
         predictor_avx2 = (
             ROOT / "src/kernel/predictor-avx2.c"
@@ -3077,6 +3086,37 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("start + length != previous_end", validate)
         self.assertNotIn("start > bytes_total", validate)
         self.assertNotIn("length > bytes_total - start", validate)
+
+        # Publication authenticates header/descriptor bytes once, then folds
+        # descriptor adjacency/identity into the existing authoritative pass.
+        self.assertIn("swapz_validate_metadata_crc(image", finish)
+        self.assertNotIn("swapz_validate(image", finish)
+        self.assertIn("decoded.payload_offset < metadata_end", finish)
+        self.assertIn("previous_end = decoded.payload_offset", finish)
+        self.assertIn("swapz_record_logical_le", validate)
+        self.assertNotIn("swapz_record_logical_le", metadata_validate)
+
+        # Window-wide uniqueness may skip only redundant quadratic scans.
+        # Generic codec/stage entry points retain duplicate defense, while
+        # range/generation checks remain in the unique staging policy.
+        self.assertIn("if (!logical_page_unique)", append_crc)
+        self.assertIn("swapz_append_prehashed_encoded_unique", append_page)
+        self.assertIn("swapz_stage_batch_unique", prepare)
+        self.assertIn("page >= a->logical_pages", stage_policy)
+        self.assertIn("generation == ~(swapz_u32)0", stage_policy)
+        self.assertIn("if (!logical_pages_unique)", stage_policy)
+
+        # A resumed batch may finish through only the authenticated
+        # authority-owned snapshot; external handles still compare records.
+        self.assertIn("tx == &a->active_tx", active)
+        self.assertIn("active_tx = &e->authority->active_tx", complete_run)
+        self.assertLess(complete_run.index("swapz_batch_resume"),
+                        complete_run.index("active_tx = &e->authority->active_tx"))
+        self.assertIn("e->authority, active_tx", complete_run)
+        self.assertIn(r'\"validate64_full\"', authority_benchmark)
+        self.assertIn(r'\"validate64_metadata_crc\"', authority_benchmark)
+        self.assertIn(r'\"append64_checked\"', authority_benchmark)
+        self.assertIn(r'\"append64_unique\"', authority_benchmark)
 
         # First-pass LZ4 can be qualified at 1/2/3/4 without changing the
         # delta64 rescue LZ4 setting. Zero recognition stays inside the shared

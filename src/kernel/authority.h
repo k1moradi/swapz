@@ -261,6 +261,11 @@ int swapz_finish(struct swapz_authority *authority, const struct swapz_tx *tx,
 int swapz_stage_batch(struct swapz_authority *authority,
 		    const swapz_u32 *logical_pages, swapz_u8 count,
 		    swapz_u8 blocks, struct swapz_tx *out);
+/* Private production batch fast path after one complete window-wide
+ * uniqueness proof. Range and generation checks remain fail-closed. */
+int swapz_stage_batch_unique(struct swapz_authority *authority,
+			   const swapz_u32 *logical_pages, swapz_u8 count,
+			   swapz_u8 blocks, struct swapz_tx *out);
 int swapz_batch_pause(struct swapz_authority *authority, const struct swapz_tx *tx);
 /*
  * Drop only the newest paused snapshot before any replay has started.

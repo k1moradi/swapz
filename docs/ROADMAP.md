@@ -415,6 +415,15 @@ SWZ geometry, authority ordering or the default compression policy.
   qualification must preserve byte-exact output and lower bytes/requests, and
   any performance claim must compare useful service plus planner/publish/read
   non-I/O attribution against the pre-change `9202ce7` baseline.
+- **Structural proof reuse:** after the scalar pass is qualified, publication
+  authenticates metadata CRC once and folds descriptor adjacency/transaction
+  identity into the existing Phase 1 walk; batched staging/appending reuse the
+  window-wide uniqueness proof for their quadratic scans; and replay completion
+  finishes through the CRC-authenticated authority-owned active transaction.
+  Public validators/staging remain defensive. This remains CPU-only evidence:
+  use `329a10c` as the immediate pre-change baseline, preserve exact geometry
+  and lower-I/O invariants, and require owner `make test` before any
+  performance promotion.
 
 Acceptance is byte-exact native correctness, sanitizer cleanliness, x86 SSE2
 instruction-shape checks, W=1/W=2 kernel builds, and the existing owner-only

@@ -199,7 +199,8 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 static int swapz_append_crc(struct swapz_builder *builder,
 			    swapz_u32 logical_page, swapz_u32 generation,
 			    const void *payload, swapz_u16 length,
-			    swapz_u32 payload_crc32c, swapz_u8 encoding)
+			    swapz_u32 payload_crc32c, swapz_u8 encoding,
+			    int logical_page_unique)
 {
 	struct swapz_record record;
 	swapz_u32 logical_page_le;
@@ -222,12 +223,13 @@ static int swapz_append_crc(struct swapz_builder *builder,
 		return -ENOSPC;
 
 	logical_page_le = swapz_le32(logical_page);
-	/* One authoritative record per logical slot in any single extent. */
-	for (index = 0; index < builder->count; ++index) {
-		if (swapz_record_logical_le(builder->bytes, index) ==
-		    logical_page_le)
-			return -EEXIST;
-	}
+	/* Generic callers remain defensive. The production batched engine may
+	 * skip only this quadratic scan after proving window-wide uniqueness. */
+	if (!logical_page_unique)
+		for (index = 0; index < builder->count; ++index)
+			if (swapz_record_logical_le(builder->bytes, index) ==
+			    logical_page_le)
+				return -EEXIST;
 
 	offset = builder->payload_start - length;
 	record = (struct swapz_record){
@@ -252,7 +254,7 @@ int swapz_append_prehashed(struct swapz_builder *builder,
 			   swapz_u32 payload_crc32c)
 {
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, payload_crc32c, SWAPZ_ENCODING_LZ4);
+				length, payload_crc32c, SWAPZ_ENCODING_LZ4, 0);
 }
 
 int swapz_append_prehashed_encoded(struct swapz_builder *builder,
@@ -261,7 +263,16 @@ int swapz_append_prehashed_encoded(struct swapz_builder *builder,
 				   swapz_u32 payload_crc32c, swapz_u8 encoding)
 {
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, payload_crc32c, encoding);
+				length, payload_crc32c, encoding, 0);
+}
+
+int swapz_append_prehashed_encoded_unique(struct swapz_builder *builder,
+				   swapz_u32 logical_page, swapz_u32 generation,
+				   const void *payload, swapz_u16 length,
+				   swapz_u32 payload_crc32c, swapz_u8 encoding)
+{
+	return swapz_append_crc(builder, logical_page, generation, payload,
+				length, payload_crc32c, encoding, 1);
 }
 
 int swapz_append_encoded(struct swapz_builder *builder,
@@ -277,7 +288,7 @@ int swapz_append_encoded(struct swapz_builder *builder,
 		return -EINVAL;
 	return swapz_append_crc(builder, logical_page, generation, payload,
 				length, swapz_crc32c_bytes(payload, length),
-				encoding);
+				encoding, 0);
 }
 
 int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
@@ -297,7 +308,7 @@ int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 
 	return swapz_append_crc(builder, logical_page, generation, payload,
 				length, swapz_crc32c_bytes(payload, length),
-				SWAPZ_ENCODING_LZ4);
+				SWAPZ_ENCODING_LZ4, 0);
 }
 
 int swapz_seal(struct swapz_builder *builder)
@@ -337,16 +348,13 @@ int swapz_seal(struct swapz_builder *builder)
 	return 0;
 }
 
-int swapz_validate(const void *bytes, swapz_u32 bytes_total)
+int swapz_validate_metadata_crc(const void *bytes, swapz_u32 bytes_total)
 {
 	struct swapz_header header;
-	struct swapz_record record;
 	swapz_u32 saved_crc;
 	swapz_u32 metadata_end;
 	swapz_u32 computed_crc;
-	swapz_u32 previous_end = bytes_total;
 	swapz_u32 crc_state;
-	swapz_u8 index;
 
 	if (!bytes || !swapz_valid_extent_bytes(bytes_total))
 		return -EINVAL;
@@ -370,10 +378,26 @@ int swapz_validate(const void *bytes, swapz_u32 bytes_total)
 				       (const swapz_u8 *)bytes + sizeof(header),
 				       metadata_end - sizeof(header));
 	computed_crc = ~crc_state;
-	if (saved_crc != computed_crc)
-		return -EBADMSG;
+	return saved_crc == computed_crc ? 0 : -EBADMSG;
+}
 
-	for (index = 0; index < header.record_count; ++index) {
+int swapz_validate(const void *bytes, swapz_u32 bytes_total)
+{
+	struct swapz_record record;
+	swapz_u32 metadata_end;
+	swapz_u32 previous_end = bytes_total;
+	swapz_u8 record_count;
+	swapz_u8 index;
+	int error;
+
+	error = swapz_validate_metadata_crc(bytes, bytes_total);
+	if (error)
+		return error;
+	record_count = swapz_get_record_count(bytes);
+	metadata_end = sizeof(struct swapz_header) +
+		(swapz_u32)record_count * sizeof(struct swapz_record);
+
+	for (index = 0; index < record_count; ++index) {
 		swapz_u32 start, length;
 		swapz_u8 earlier;
 

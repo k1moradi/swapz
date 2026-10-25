@@ -687,8 +687,10 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 	return 0;
 }
 
-int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
-		swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out)
+static int swapz_stage_policy(struct swapz_authority *a,
+			      const swapz_u32 *pages, swapz_u8 count,
+			      swapz_u8 blocks, struct swapz_tx *out,
+			      int logical_pages_unique)
 {
 	swapz_u32 limit, start, tail_waste = 0;
 	swapz_u8 index;
@@ -726,10 +728,10 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 			return -ERANGE;
 		if (a->maps[page].generation == ~(swapz_u32)0)
 			return -EOVERFLOW;
-		for (earlier = 0; earlier < index; ++earlier) {
-			if (pages[earlier] == page)
-				return -EEXIST;
-		}
+		if (!logical_pages_unique)
+			for (earlier = 0; earlier < index; ++earlier)
+				if (pages[earlier] == page)
+					return -EEXIST;
 	}
 
 	if (!a->reuse_dead_segments) {
@@ -853,6 +855,12 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 	return 0;
 }
 
+int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
+		swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out)
+{
+	return swapz_stage_policy(a, pages, count, blocks, out, 0);
+}
+
 static int swapz_is_active(const struct swapz_authority *a,
 			   const struct swapz_tx *tx)
 {
@@ -871,8 +879,14 @@ static int swapz_is_active(const struct swapz_authority *a,
 	    !tx->count || tx->count > SWAPZ_MAX_RECORDS)
 		return 0;
 
+	/* batch_resume() has already authenticated and copied this exact
+	 * authority-owned snapshot. External caller handles still require the
+	 * full record-by-record identity comparison below. */
+	if (tx == &a->active_tx)
+		return 1;
+
 	/* Compare fields, not padding, and NEVER trust a caller-mutated
-	 * tx record in either finish or abort before this full identity check.
+	 * transaction record before the authority-owned identity check.
 	 * A rejected forged handle leaves the original transaction in flight.
 	 */
 	for (index = 0; index < tx->count; ++index) {
@@ -904,7 +918,21 @@ int swapz_stage_batch(struct swapz_authority *a, const swapz_u32 *pages,
 	if (!a || a->batch_stage_allowed || a->batch_replaying)
 		return -EBUSY;
 	a->batch_stage_allowed = 1;
-	error = swapz_stage(a, pages, count, blocks, tx);
+	error = swapz_stage_policy(a, pages, count, blocks, tx, 0);
+	a->batch_stage_allowed = 0;
+	return error;
+}
+
+int swapz_stage_batch_unique(struct swapz_authority *a,
+			     const swapz_u32 *pages, swapz_u8 count,
+			     swapz_u8 blocks, struct swapz_tx *tx)
+{
+	int error;
+
+	if (!a || a->batch_stage_allowed || a->batch_replaying)
+		return -EBUSY;
+	a->batch_stage_allowed = 1;
+	error = swapz_stage_policy(a, pages, count, blocks, tx, 1);
 	a->batch_stage_allowed = 0;
 	return error;
 }
@@ -1275,6 +1303,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS];
 	swapz_u8 payload_encodings[SWAPZ_MAX_RECORDS];
 	swapz_u32 new_segment;
+	swapz_u32 metadata_end, previous_end;
 	swapz_u32 new_record_read_penalty;
 	swapz_u32 new_gc_live_bytes = 0, new_gc_io_cost = 0;
 	swapz_u16 new_gc_min_live_blocks = 0;
@@ -1291,7 +1320,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = io_error < 0 ? io_error : -EIO;
 		goto fail;
 	}
-	error = swapz_validate(image, bytes_total);
+	error = swapz_validate_metadata_crc(image, bytes_total);
 	if (error)
 		goto fail;
 	new_segment = tx->start_block / SWAPZ_SEGMENT_BLOCKS;
@@ -1312,6 +1341,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = -EUCLEAN;
 		goto fail;
 	}
+	metadata_end = sizeof(struct swapz_header) +
+		(swapz_u32)tx->count * sizeof(struct swapz_record);
+	previous_end = bytes_total;
 	new_record_read_penalty =
 		(tx->extent_blocks == 4U ? 3U : (swapz_u32)tx->extent_blocks) *
 		SWAPZ_BLOCK_BYTES;
@@ -1336,6 +1368,13 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 							  &decoded, &payload);
 		if (error)
 			goto fail;
+		if (decoded.payload_offset < metadata_end ||
+		    (swapz_u32)decoded.payload_offset + decoded.payload_length !=
+			    previous_end) {
+			error = -EUCLEAN;
+			goto fail;
+		}
+		previous_end = decoded.payload_offset;
 		if (swapz_publish_crc32c(a, payload, decoded.payload_length) !=
 		    decoded.payload_crc32c) {
 			error = -EBADMSG;

@@ -88,7 +88,18 @@ int swapz_append_prehashed_encoded(struct swapz_builder *builder,
 		       swapz_u32 logical_page, swapz_u32 generation,
 		       const void *payload, swapz_u16 length,
 		       swapz_u32 payload_crc32c, swapz_u8 encoding);
+/* Internal production fast path: the caller has already proved this logical
+ * page is unique across the builder's immutable batch. All other validation,
+ * capacity checks and payload writes remain identical to the generic append. */
+int swapz_append_prehashed_encoded_unique(struct swapz_builder *builder,
+		       swapz_u32 logical_page, swapz_u32 generation,
+		       const void *payload, swapz_u16 length,
+		       swapz_u32 payload_crc32c, swapz_u8 encoding);
 int swapz_seal(struct swapz_builder *builder);
+/* Validate extent/header identity plus the metadata CRC only. Descriptor
+ * semantic checks remain the caller's responsibility unless swapz_validate()
+ * is used. This exists for publication paths that already walk every record. */
+int swapz_validate_metadata_crc(const void *bytes, swapz_u32 bytes_total);
 int swapz_validate(const void *bytes, swapz_u32 bytes_total);
 /*
  * Reads/verifies ONLY metadata (block zero contains at most 1040 metadata
@@ -98,10 +109,10 @@ int swapz_peek(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	     struct swapz_decoded *out);
 int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	       struct swapz_decoded *out, const swapz_u8 **payload);
-/* Caller must have already completed swapz_validate() on this immutable image.
- * Descriptor lookup retains defensive bounds checks but deliberately does not
- * hash the payload. It exists so authority publication can time ONLY the final
- * payload CRC without weakening the public validated lookup contract. */
+/* Caller must have authenticated immutable metadata with swapz_validate() or
+ * swapz_validate_metadata_crc(). Descriptor lookup retains defensive bounds
+ * checks but deliberately does not hash the payload. A metadata-CRC-only
+ * caller must still enforce descriptor ordering/identity itself. */
 int swapz_lookup_validated_descriptor(const void *bytes, swapz_u32 bytes_total,
 				    swapz_u8 index, struct swapz_decoded *out,
 				    const swapz_u8 **payload);
