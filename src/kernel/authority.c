@@ -1580,7 +1580,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			.valid = 1,
 		};
 
-		if (swapz_segment_page_lists_enabled(a)) {
+		if (page_lists_enabled) {
 			if (entry->valid)
 				swapz_page_list_unlink_unchecked(
 					a, logical, old_segment);

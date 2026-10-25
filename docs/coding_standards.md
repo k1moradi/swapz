@@ -581,6 +581,10 @@ In `swapz_try_concurrent_read_slots()`, missing-range eligibility is checked
 against shared cache metadata (`swapz_engine_required_read_range_cached`)
 before priming private slot scratch (`swapz_engine_prime_read_slot`) so
 rejected `<2`-slot read prefixes perform no scratch copies.
+Singular worker-local queues (`list_is_singular(local)`) return immediately
+before slot preparation, and `swapz_merge_read_slot()` clears private slot
+`read_cache_valid` residency after absorption so subsequent write range
+invalidations skip overlap checks on idle read slots.
 Passive metadata-cache probes in `swapz_engine_prime_read_slot()` and
 `swapz_engine_required_read_range_cached()` check `read_metadata_segment_mask`
 before probing set tags, and `swapz_read_extent_lru_commit()` reuses the
@@ -730,8 +734,10 @@ incoming requests are requeued with `DM_MAPIO_REQUEUE` (or killed with
 writers from waking up and submitting subsequent writes before DM core finishes
 presuspend and sets `DMF_BLOCK_IO_FOR_SUSPEND`, completions processed while
 drain is active are buffered onto `drain_completed_bios`. After draining queues
-and issuing the physical flush, `swapz_drain` schedules `drain_endio_work` to
-release buffered completions after allowing presuspend to return to DM core,
+and issuing the physical flush, `swapz_drain` schedules `drain_endio_work` when
+`drain_completed_bios` is non-empty to release buffered completions after
+allowing presuspend to return to DM core, and `swapz_free()` drains any
+remaining buffered completions while preserving each BIO's recorded status,
 ensuring subsequent requests are deferred by DM core rather than hitting closed
 admission. The target drain invariant includes the asynchronous run-active bit
 in addition to batch and authority state.

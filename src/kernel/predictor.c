@@ -15,10 +15,12 @@
 static const char *swapz_transform_backend = "scalar";
 static const char *swapz_inverse_backend = "scalar";
 
-static swapz_u32 swapz_predict_delta64_pair_score_scalar(const swapz_u8 *input)
+static inline swapz_u32 swapz_predict_delta64_pair_score_scalar(const swapz_u8 *input)
 {
 	unsigned long long previous = swapz_predictor_load64(input);
 	unsigned long long value = swapz_predictor_load64(input + SWAPZ_PREDICTOR_U64_BYTES);
+	if (value == previous)
+		return 0U;
 	if (swapz_predictor_small_nonzero_delta64(value, previous))
 		return 2U;
 	return swapz_predictor_small_nonzero_delta32((swapz_u32)value, (swapz_u32)previous) +
@@ -26,8 +28,8 @@ static swapz_u32 swapz_predict_delta64_pair_score_scalar(const swapz_u8 *input)
 						      (swapz_u32)(previous >> 32));
 }
 
-static swapz_u32 swapz_predict_delta64_sample_offset(swapz_u32 subpage,
-						     swapz_u32 lane)
+static inline swapz_u32 swapz_predict_delta64_sample_offset(swapz_u32 subpage,
+							    swapz_u32 lane)
 {
 	swapz_u32 phase = (subpage + SWAPZ_PREDICTOR_SAMPLE_PHASE_STEP * lane) &
 		(SWAPZ_PREDICTOR_SAMPLE_PHASES - 1U);

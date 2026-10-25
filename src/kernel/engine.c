@@ -343,22 +343,23 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length)
 {
 	swapz_u32 best = 0;
+	swapz_u32 stride;
 	swapz_u8 blocks;
 
 	if (length < 48U || length > SWAPZ_MAX_COMPRESSED)
 		return 0;
+	stride = (swapz_u32)length + sizeof(struct swapz_record);
 	for (blocks = 1; blocks <= SWAPZ_MAX_BLOCKS; blocks <<= 1) {
 		swapz_u32 available =
 			(swapz_u32)blocks * SWAPZ_BLOCK_BYTES -
 			sizeof(struct swapz_header);
-		swapz_u32 records =
-			available / ((swapz_u32)length + sizeof(struct swapz_record)) + 1U;
+		swapz_u32 records = available / stride + 1U;
 		swapz_u32 limit;
 
 		if (records < 2U)
 			records = 2U;
 		if (records > SWAPZ_MAX_RECORDS)
-			continue;
+			break;
 		limit = available / records;
 		if (limit <= sizeof(struct swapz_record))
 			continue;
@@ -432,6 +433,8 @@ static int swapz_read_metadata_set_lookup(const struct swapz_engine *engine,
 					 swapz_u8 *probes)
 {
 	swapz_u16 primary, set, base, way, slot, choice;
+	swapz_u8 local_probes = 0;
+
 	if (probes)
 		*probes = 0;
 	if (!engine || !engine->read_metadata_cache || !engine->read_metadata_epoch)
@@ -446,14 +449,18 @@ static int swapz_read_metadata_set_lookup(const struct swapz_engine *engine,
 
 			slot = base + way;
 			tag = &engine->read_metadata_tags[slot];
-			if (probes)
-				(*probes)++;
+			local_probes++;
 			if (tag->epoch == engine->read_metadata_epoch &&
 			    tag->start_block == start_block &&
-			    tag->extent_blocks == extent_blocks)
+			    tag->extent_blocks == extent_blocks) {
+				if (probes)
+					*probes = local_probes;
 				return slot;
+			}
 		}
 	}
+	if (probes)
+		*probes = local_probes;
 	return -1;
 }
 
@@ -484,6 +491,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 					const swapz_u8 *metadata)
 {
 	swapz_u32 oldest_age = ~(swapz_u32)0;
+	swapz_u32 epoch;
 	swapz_u16 primary, set, base, way, choice, slot = 0;
 	int have_slot = 0, have_invalid = 0;
 
@@ -497,6 +505,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 		engine->read_metadata_lru_clock = 1;
 		hit_slot = -1;
 	}
+	epoch = engine->read_metadata_epoch;
 	if (hit_slot >= 0) {
 		slot = (swapz_u16)hit_slot;
 		have_slot = 1;
@@ -513,7 +522,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 				tag = &engine->read_metadata_tags[candidate];
 				/* Scratch/extent hits skip lookup. Deduplicate across
 				 * both sets before using even an invalid primary way. */
-				if (tag->epoch == engine->read_metadata_epoch &&
+				if (tag->epoch == epoch &&
 				    tag->start_block == start_block &&
 				    tag->extent_blocks == extent_blocks) {
 					hit_slot = candidate;
@@ -521,7 +530,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 					have_slot = 1;
 					break;
 				}
-				if (tag->epoch != engine->read_metadata_epoch) {
+				if (tag->epoch != epoch) {
 					if (!have_invalid) {
 						slot = candidate;
 						have_slot = 1;
@@ -539,8 +548,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 				break;
 		}
 		if (hit_slot < 0 && have_slot &&
-		    engine->read_metadata_tags[slot].epoch ==
-			engine->read_metadata_epoch)
+		    engine->read_metadata_tags[slot].epoch == epoch)
 			engine->read_metadata_set_replacements++;
 	}
 	if (!have_slot)
@@ -551,7 +559,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 	engine->read_metadata_tags[slot].start_block = start_block;
 	engine->read_metadata_tags[slot].extent_blocks = extent_blocks;
 	engine->read_metadata_tags[slot].age = engine->read_metadata_lru_clock;
-	engine->read_metadata_tags[slot].epoch = engine->read_metadata_epoch;
+	engine->read_metadata_tags[slot].epoch = epoch;
 	engine->read_metadata_segment_mask |=
 		1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U);
 }
@@ -1628,6 +1636,7 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 				    swapz_u16 completed_blocks, int io_error,
 				    swapz_u8 *committed_pages)
 {
+	unsigned long long publish_start, publish_now;
 	swapz_u8 i, raw_entries = 0;
 	int error = io_error;
 
@@ -1651,17 +1660,18 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 	e->completed_blocks += completed_blocks;
 	e->bulk_writes++;
 	e->bulk_extents += run->extent_count;
+	publish_start = swapz_engine_now_ns();
 	for (i = 0; i < run->extent_count; ++i) {
 		const struct swapz_tx *tx = &run->txs[i];
 		swapz_u16 offset = run->offsets[i];
-		unsigned long long publish_start = swapz_engine_now_ns();
 
 		error = swapz_batch_resume(e->authority, tx);
 		if (error) {
 			int cleanup;
 
+			publish_now = swapz_engine_now_ns();
 			e->publish_wall_ns += swapz_engine_elapsed_ns(
-				publish_start, swapz_engine_now_ns());
+				publish_start, publish_now);
 			cleanup = swapz_bulk_abort(e, run, i);
 			return cleanup ? cleanup : error;
 		}
@@ -1676,8 +1686,10 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 				run->bytes + (size_t)offset * SWAPZ_BLOCK_BYTES,
 				(swapz_u32)tx->extent_blocks * SWAPZ_BLOCK_BYTES,
 				tx->extent_blocks, 0);
+		publish_now = swapz_engine_now_ns();
 		e->publish_wall_ns += swapz_engine_elapsed_ns(
-			publish_start, swapz_engine_now_ns());
+			publish_start, publish_now);
+		publish_start = publish_now;
 		if (error) {
 			int cleanup = swapz_bulk_abort(e, run, i + 1);
 
@@ -1727,9 +1739,10 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 	    !e->io.write_run || e->verify_after_write)
 		return -EOPNOTSUPP;
 
-	memset(&run, 0, sizeof(run));
-	run.bytes = e->bulk_scratch;
-	run.txs = e->bulk_txs;
+	run = (struct swapz_io_run){
+		.bytes = e->bulk_scratch,
+		.txs = e->bulk_txs,
+	};
 	while (total < count) {
 		swapz_u8 prepared = 0, published = 0;
 		swapz_u16 completed = 0;

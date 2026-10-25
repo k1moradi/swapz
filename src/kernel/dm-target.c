@@ -818,20 +818,19 @@ static void swapz_drain_endio_work(struct work_struct *work)
 {
 	struct swapz_dm *ctx =
 		container_of(work, struct swapz_dm, drain_endio_work);
+	struct bio_list completed = BIO_EMPTY_LIST;
 	struct bio *bio;
 	unsigned long flags;
 
 	/* Allow presuspend to return to DM core so DMF_BLOCK_IO_FOR_SUSPEND is
 	 * set and memory-barrier synchronized before upper writers wake up. */
 	usleep_range(100, 250);
-	for (;;) {
-		spin_lock_irqsave(&ctx->drain_completed_lock, flags);
-		bio = bio_list_pop(&ctx->drain_completed_bios);
-		spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
-		if (!bio)
-			break;
+	spin_lock_irqsave(&ctx->drain_completed_lock, flags);
+	bio_list_merge(&completed, &ctx->drain_completed_bios);
+	bio_list_init(&ctx->drain_completed_bios);
+	spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
+	while ((bio = bio_list_pop(&completed)) != NULL)
 		bio_endio(bio);
-	}
 }
 
 static void swapz_complete(struct bio *bio, int error)
@@ -1053,7 +1052,8 @@ static void swapz_mark_segments_dirty(struct swapz_dm *ctx,
 	segment = block / SWAPZ_SEGMENT_BLOCKS;
 	last_segment = (block + blocks - 1U) / SWAPZ_SEGMENT_BLOCKS;
 	for (; segment <= last_segment; ++segment)
-		WRITE_ONCE(ctx->segment_trimmed[segment], 0);
+		if (READ_ONCE(ctx->segment_trimmed[segment]))
+			WRITE_ONCE(ctx->segment_trimmed[segment], 0);
 }
 
 static int swapz_submit_inflight_write(struct swapz_dm *ctx,
@@ -1873,7 +1873,8 @@ ordinary:
 		return baseline;
 
 	if (high_score) {
-		if (!candidate || !swapz_delta64_route_init(baseline, &route))
+		if (!swapz_delta64_candidate_smaller(baseline, candidate) ||
+		    !swapz_delta64_route_init(baseline, &route))
 			goto out;
 	} else if (score < SWAPZ_PREDICTOR_PACK_THRESHOLD) {
 		if (baseline > (int)SWAPZ_BLOCK_BYTES ||
@@ -1884,6 +1885,13 @@ ordinary:
 		    baseline <= (int)SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH)
 			stats->pack_eligible++;
 		swapz_delta64_note_score(stats, score);
+		goto out;
+	} else if (baseline <= 0 ||
+		   baseline > (int)SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH) {
+		if (baseline <= (int)SWAPZ_BLOCK_BYTES) {
+			stats->eligible++;
+			swapz_delta64_note_score(stats, score);
+		}
 		goto out;
 	} else {
 		if (!swapz_delta64_route_init(baseline, &route))
@@ -3980,6 +3988,10 @@ static void swapz_merge_read_slot(struct swapz_dm *ctx,
 	slot->lower_read_wall_ns = 0;
 	slot->read_engine_nonio_wall_ns = 0;
 	slot->decode_wall_ns = 0;
+	slot->engine.read_cache_valid = 0;
+	slot->engine.read_cached_full = 0;
+	slot->engine.read_cached_block_mask = 0;
+	slot->engine.read_coalesced_block_mask = 0;
 }
 
 static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
@@ -4093,7 +4105,8 @@ static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 		ctx->authority.in_flight || ctx->authority.batch_replaying ||
 		(ctx->authority.batch_pending && !inflight_active) ||
 		(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
-		swapz_inflight_run_touches_logical(ctx, logical);
+		(inflight_active &&
+		 swapz_inflight_run_touches_logical(ctx, logical));
 
 	/*
 	 * A K=1 lower run has reserved unpublished generations, but its committed
@@ -4122,7 +4135,8 @@ static bool swapz_read_can_parallel(struct swapz_dm *ctx, struct bio *bio)
 	blocked = !READ_ONCE(ctx->accepting) || ctx->failed ||
 		ctx->authority.in_flight || ctx->authority.batch_replaying ||
 		(ctx->authority.batch_pending && !inflight_active) ||
-		swapz_inflight_run_touches_logical(ctx, logical);
+		(inflight_active &&
+		 swapz_inflight_run_touches_logical(ctx, logical));
 	return !blocked;
 }
 
@@ -4284,7 +4298,7 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 	 * WRITE in this local FIFO prefix.
 	 */
 	if (!ctx->read_slots || !ctx->read_pages_store ||
-	    remaining < 2U || list_empty(local))
+	    remaining < 2U || list_empty(local) || list_is_singular(local))
 		return false;
 
 	entry = list_first_entry(local, struct swapz_bio_ref, list);
@@ -5545,6 +5559,7 @@ static void swapz_drain(struct dm_target *ti)
 {
 	struct swapz_dm *ctx = ti->private;
 	unsigned long flags;
+	bool has_drain_bios;
 
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
@@ -5609,7 +5624,11 @@ static void swapz_drain(struct dm_target *ti)
 			swapz_fail(ctx, error);
 	}
 	WRITE_ONCE(ctx->drain_active, false);
-	schedule_work(&ctx->drain_endio_work);
+	spin_lock_irqsave(&ctx->drain_completed_lock, flags);
+	has_drain_bios = !bio_list_empty(&ctx->drain_completed_bios);
+	spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
+	if (has_drain_bios)
+		schedule_work(&ctx->drain_endio_work);
 }
 
 static void swapz_resume(struct dm_target *ti)
@@ -5625,6 +5644,7 @@ static void swapz_resume(struct dm_target *ti)
 
 static void swapz_free(struct swapz_dm *ctx)
 {
+	struct bio_list completed = BIO_EMPTY_LIST;
 	struct bio *bio;
 	unsigned long flags;
 	swapz_u8 slot, prep_lane;
@@ -5633,15 +5653,12 @@ static void swapz_free(struct swapz_dm *ctx)
 		return;
 	hrtimer_cancel(&ctx->retention_timer);
 	cancel_work_sync(&ctx->drain_endio_work);
-	for (;;) {
-		spin_lock_irqsave(&ctx->drain_completed_lock, flags);
-		bio = bio_list_pop(&ctx->drain_completed_bios);
-		spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
-		if (!bio)
-			break;
-		bio->bi_status = BLK_STS_IOERR;
+	spin_lock_irqsave(&ctx->drain_completed_lock, flags);
+	bio_list_merge(&completed, &ctx->drain_completed_bios);
+	bio_list_init(&ctx->drain_completed_bios);
+	spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
+	while ((bio = bio_list_pop(&completed)) != NULL)
 		bio_endio(bio);
-	}
 	if (ctx->workqueue) {
 		/* The constructor-failure path has no accepted BIOs.
 		 * The live teardown path already closed admission and drained
