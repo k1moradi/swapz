@@ -1191,8 +1191,8 @@ static swapz_u16 swapz_probe_set(
                         sample.index("list_for_each_entry(entry, &ctx->incoming, list)"))
         self.assertIn("swapz_plain_retained_write(entry->bio)", sample)
         self.assertIn("if (!ctx->pack_close_pending_tail_sample)", sample)
-        self.assertIn("inflight = swapz_has_inflight(ctx)", sample)
-        self.assertLess(sample.index("if (inflight)"),
+        self.assertIn("if (swapz_has_inflight(ctx))", sample)
+        self.assertLess(sample.index("if (swapz_has_inflight(ctx))"),
                         sample.index("room = ctx->retained_chain_completed"))
         self.assertIn("staged_tail = min_t(swapz_u8, ctx->batch_count, room)", sample)
         self.assertLess(sample.index("staged_tail = min_t(swapz_u8, ctx->batch_count, room)"),
@@ -1208,7 +1208,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->single_tail_deferrals++", sample)
         self.assertIn("ctx->retained_single_tail_deferred = true", sample)
         self.assertIn("ctx->single_tail_other_clears++", sample)
-        self.assertIn("ctx->retained_tail_target = tail", sample)
+        self.assertIn("ctx->retained_tail_target = close_target", sample)
         self.assertIn("ctx->retained_single_tail_deferred = false", sample)
         self.assertNotIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
         self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
@@ -1870,7 +1870,8 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("ctx->burst_shrink_inflight_zero_skips++", worker)
         self.assertNotIn("ctx->last_pack_tail_zero_inflight", DM)
         self.assertNotIn("ctx->burst_shrink_after_inflight_zero++", worker)
-        self.assertIn("if (inflight)", body("swapz_sample_pack_tail_locked"))
+        self.assertIn("if (swapz_has_inflight(ctx))",
+                      body("swapz_sample_pack_tail_locked"))
         self.assertIn("guard_inflight_zero_shrink=%u", status)
         self.assertIn("burst_shrink_inflight_zero_skips=%llu", status)
         self.assertIn("burst_shrink_after_inflight_zero=%llu", status)
@@ -2092,13 +2093,14 @@ static swapz_u16 swapz_probe_set(
         sample = body("swapz_sample_pack_tail_locked")
         self.assertIn("swapz_has_inflight(ctx)", sample)
         self.assertNotIn("ctx->inflight_write", sample)
-        self.assertLess(sample.index("if (inflight)"),
+        self.assertLess(sample.index("if (swapz_has_inflight(ctx))"),
                         sample.index("ctx->pack_tail_samples++"))
         self.assertIn("ctx->pack_tail_samples++", sample)
-        for field in ("pack_tail_zero_idle", "pack_tail_one_inflight",
-                      "pack_tail_one_idle", "pack_tail_many_inflight",
+        for field in ("pack_tail_zero_idle", "pack_tail_one_idle",
                       "pack_tail_many_idle", "burst_target_grows"):
             self.assertIn("ctx->" + field + "++", sample)
+        for field in ("pack_tail_one_inflight", "pack_tail_many_inflight"):
+            self.assertNotIn("ctx->" + field + "++", sample)
         self.assertNotIn("ctx->pack_tail_zero_inflight++", sample)
         self.assertNotIn("swapz_window_guard_burst_target_shrink(", worker)
         self.assertNotIn("ctx->burst_shrink_inflight_zero_skips++", worker)
