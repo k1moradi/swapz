@@ -3341,8 +3341,25 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	 */
 	if (!ctx->pack_close_pending_tail_sample)
 		return;
+	/*
+	 * A detached K=1 PACK_READY close has not reached a stable tail until
+	 * its lower run is finalized and its upper BIO completions are delivered.
+	 * Preserve the sample across interim worker passes.
+	 */
+	inflight = swapz_has_inflight(ctx);
+	if (inflight)
+		return;
 	room = ctx->retained_chain_completed < ctx->max_window ?
 		ctx->max_window - ctx->retained_chain_completed : 0;
+	/*
+	 * Async detachment lets the ordered worker admit followers into batch[]
+	 * while the older lower run is in flight. Those already-accepted records
+	 * are part of the post-PACK tail just like local/incoming followers.
+	 */
+	if (ctx->batch_count && room) {
+		tail = min_t(swapz_u8, ctx->batch_count, room);
+		room -= tail;
+	}
 	/*
 	 * local is older than incoming. Count the complete already-admitted FIFO
 	 * prefix in that order so asynchronous preparation cannot hide residual
@@ -3368,21 +3385,6 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			room--;
 		}
 	}
-	/*
-	 * ID56 is observation only. In particular, do not defer/consume a sample
-	 * differently based on K=1 state here: first measure whether async is
-	 * actually declaring an empty post-PACK_READY tail before its detached
-	 * lower write and upper completions have finished.
-	 */
-	inflight = swapz_has_inflight(ctx);
-	/*
-	 * Any tail while detached K=1 is still unfinalized is premature: upper
-	 * BIO completions have not been delivered via bio_endio() yet and cannot
-	 * have yielded their next wave. Keep the PACK_READY sample pending until
-	 * swapz_finalize_inflight_write() has completed the upper BIOs.
-	 */
-	if (inflight)
-		return;
 	ctx->pack_tail_samples++;
 	if (!tail) {
 		/*
@@ -5037,6 +5039,12 @@ static void swapz_worker(struct work_struct *work)
 		}
 		remaining = SWAPZ_WORK_QUANTUM_BIOS;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
+		/*
+		 * A completion finalized at the top of this pass must sample the
+		 * entire already-accepted tail before incoming BIOs are spliced and
+		 * consumed into the next batch.
+		 */
+		swapz_sample_pack_tail_locked(ctx, &local);
 		list_splice_init(&ctx->incoming, &local);
 		/*
 		 * An idle producer starts only when the accepted wave contains the
@@ -5144,10 +5152,20 @@ static void swapz_worker(struct work_struct *work)
 		processed_bio:
 			if (swapz_has_inflight(ctx) &&
 			    !swapz_inflight_lower_pending(ctx)) {
-				if (swapz_finalize_inflight_write(ctx, false) &&
-				    ctx->batch_count) {
+				int inflight_error =
+					swapz_finalize_inflight_write(ctx, false);
+
+				if (inflight_error && ctx->batch_count) {
 					ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 					swapz_flush_window(ctx);
+				} else if (!inflight_error) {
+					/*
+					 * Do not consume the remaining local FIFO before
+					 * recording followers accumulated during K=1 I/O.
+					 */
+					spin_lock_irqsave(&ctx->queue_lock, flags);
+					swapz_sample_pack_tail_locked(ctx, &local);
+					spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				}
 			}
 
@@ -5288,9 +5306,8 @@ static void swapz_worker(struct work_struct *work)
 			 * invocation has reached a real burst boundary. Do not let read or
 			 * forced-fence service evidence leak into a later unrelated wave.
 			 */
-			if (!ctx->batch_count) {
-				if (!swapz_has_inflight(ctx))
-					ctx->retained_window_read_bypasses = 0;
+			if (!ctx->batch_count && !swapz_has_inflight(ctx)) {
+				ctx->retained_window_read_bypasses = 0;
 				ctx->retained_wave_interrupted = false;
 				ctx->retained_chain_completed = 0;
 				ctx->retained_tail_target = 0;

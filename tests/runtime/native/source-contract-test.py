@@ -1191,6 +1191,12 @@ static swapz_u16 swapz_probe_set(
                         sample.index("list_for_each_entry(entry, &ctx->incoming, list)"))
         self.assertIn("swapz_plain_retained_write(entry->bio)", sample)
         self.assertIn("if (!ctx->pack_close_pending_tail_sample)", sample)
+        self.assertIn("inflight = swapz_has_inflight(ctx)", sample)
+        self.assertLess(sample.index("if (inflight)"),
+                        sample.index("room = ctx->retained_chain_completed"))
+        self.assertIn("tail = min_t(swapz_u8, ctx->batch_count, room)", sample)
+        self.assertLess(sample.index("tail = min_t(swapz_u8, ctx->batch_count, room)"),
+                        sample.index("list_for_each_entry(entry, local, list)"))
         self.assertNotIn("base_completed", sample)
         self.assertIn("if (tail == 1U)", sample)
         self.assertIn("ctx->retained_tail_target = 0", sample)
@@ -1201,6 +1207,22 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_single_tail_deferred = false", sample)
         self.assertNotIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
         self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
+        top_finalize = worker.index("while (swapz_has_inflight(ctx))")
+        top_sample = worker.index("swapz_sample_pack_tail_locked(ctx, &local)",
+                                  top_finalize)
+        top_splice = worker.index("list_splice_init(&ctx->incoming, &local)",
+                                  top_sample)
+        self.assertLess(top_sample, top_splice)
+        processed = worker.index("processed_bio:")
+        processed_finalize = worker.index(
+            "swapz_finalize_inflight_write(ctx, false)", processed)
+        processed_sample = worker.index(
+            "swapz_sample_pack_tail_locked(ctx, &local)", processed_finalize)
+        processed_tail = worker.index(
+            "if (remaining > 1U && list_empty(&local))", processed_sample)
+        self.assertLess(processed_finalize, processed_sample)
+        self.assertLess(processed_sample, processed_tail)
+        self.assertIn("if (!ctx->batch_count && !swapz_has_inflight(ctx))", worker)
         self.assertIn("swapz_window_shrink_burst_target(", worker)
         self.assertIn("!ctx->retained_chain_completed", worker)
         close_ready = body("swapz_retained_pack_close_ready")
@@ -1923,6 +1945,9 @@ static swapz_u16 swapz_probe_set(
             self.assertIn("count == %dU" % count, policy)
         self.assertIn("static inline int swapz_window_single_pack_ready(", policy)
         self.assertIn("static inline int swapz_window_pack_ready(", policy)
+        single = source_body("swapz_window_single_pack_ready", policy)
+        self.assertIn("count == 4U", single)
+        self.assertIn("read_budget, 4U", single)
         self.assertIn("swapz_window_extent_fits(", policy)
         self.assertIn("!retain_ms || read_budget || !pending", policy)
         self.assertIn("extent_blocks * SWAPZ_BLOCK_BYTES", policy)

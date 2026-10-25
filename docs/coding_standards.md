@@ -503,17 +503,25 @@ PACK_READY closure is worker-tail owned. `swapz_accept_write()` may record
 finite pack geometry in `single_pack_deferred` and
 `accepted_burst_pack_ready`, but it must not flush a PACK_READY window.
 The serialized worker closes burst-target, sampled-tail and service-proven-dry
-windows only after refreshing its local and incoming accepted FIFO state. At the
-initial four-record learned burst floor, a first pack alone is not enough:
-require a complete second accepted pack or an explicit sampled tail.
+windows only after refreshing its local and incoming accepted FIFO state. A
+two-record 4KiB or three-record 8KiB first pack still waits for a second accepted
+pack at the initial floor. Four valid compressed records that did not form either
+smaller first pack may establish a 16KiB first-pack opportunity at the existing
+four-record learned floor; this changes neither SWZ extent classes nor the
+authoritative retention deadline.
 
 If a ready window was held back only because the immutable K=1 lower WRITE was
-still pending, the completion wake must finalize that run, deliver its upper
-BIO completions, sample any pending post-PACK tail under `queue_lock`, and
-re-evaluate PACK_READY before arming the ordinary retention timer. The dry-FIFO
-decision is made under `queue_lock`; BIOs admitted after that decision belong
-to the next wave. This is finite accepted-work scheduling, not a grace wait,
-device-latency heuristic, or change to the authoritative retention deadline.
+still pending, the completion wake must finalize that run and deliver its upper
+BIO completions before consuming the next accepted FIFO. A pending post-PACK
+sample must survive every interim worker pass while K=1 is in flight. Once
+finalized, its tail is the bounded accepted prefix already collected in
+`batch[]` plus the plain retained-WRITE prefix in worker-local and `incoming`
+queues, sampled under `queue_lock` before those followers are consumed.
+PACK_READY is then re-evaluated before arming the ordinary retention timer. The
+dry-FIFO decision is made under `queue_lock`; BIOs admitted after that decision
+belong to the next wave. This is finite accepted-work scheduling, not a grace
+wait, device-latency heuristic, or change to the authoritative retention
+deadline.
 
 For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
 with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan

@@ -125,6 +125,25 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 	CHECK(!swapz_window_pack_ready(batch, 3, 2, 0));
 	CHECK(swapz_window_pack_ready(batch, 6, 2, 0));
 
+	/*
+	 * Four larger compressed records do not form the earlier 4/8KiB first
+	 * pack and do not fit the 8KiB second-pack predicate, but together they
+	 * are a valid 16KiB first extent at the learned four-record floor.
+	 */
+	for (i = 0; i < 5; ++i)
+		batch[i].length = 3000;
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(!swapz_window_single_pack_ready(batch, 3, 2, 0));
+	CHECK(swapz_window_single_pack_ready(batch, 4, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 4, 2, 0));
+	/* Admission is sequential, so count=5 is never the first discovery. */
+	CHECK(!swapz_window_single_pack_ready(batch, 5, 2, 0));
+	batch[0].raw = 1;
+	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 0));
+	batch[0].raw = 0;
+	CHECK(!swapz_window_single_pack_ready(batch, 4, 0, 0));
+	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 1));
+
 	/* Exact 4KiB two-record pack is deferred; two such packs close
 	 * together at the exact 8KiB four-record metadata limit. */
 	for (i = 0; i < 4; ++i)

@@ -542,10 +542,22 @@ Retained-target qualification requires source coverage for the single
 worker-tail PACK_READY owner. Admission may update
 `accepted_burst_pack_ready` and sampled-geometry state, but must not emit
 PACK_READY. Source contracts must remove the retired admission-close helper
-rather than preserve it as a compatibility alias. After K=1 completion, the
-worker must finalize the immutable run, sample any pending post-PACK tail,
-restore unfinished local work to the accepted FIFO, and re-evaluate PACK_READY
-before the retention timer can be armed.
+rather than preserve it as a compatibility alias. A detached PACK_READY sample
+must remain pending while K=1 is in flight; quiescent-state reset is legal only
+when both the retained batch and in-flight run are empty. After K=1 completion,
+the worker must sample before consuming the next FIFO and count
+`batch_count + local + incoming` within the remaining 64-record room. Native
+window-policy tests must cover a four-record compressed prefix that fails the
+1/2-block first-pack tests but fits one 4-block/16KiB extent, including RAW,
+disabled-retention and read-budget rejection. The worker then restores
+unfinished local work to the accepted FIFO and re-evaluates PACK_READY before
+the retention timer can be armed.
+
+These scheduling rules are architecture-neutral. The public `make test`
+matrix must continue to build and qualify the existing predictor backends:
+SSE2/AVX2/AVX512 objects on x86_64 and NEON on arm64, with runtime execution
+only on hosts advertising the required ISA. A scheduling change is not allowed
+to weaken or bypass those existing backend checks.
 
 Tail learning must be gated exclusively by
 `pack_close_pending_tail_sample`; pre-PACK sampling from a deferred first

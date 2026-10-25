@@ -509,34 +509,40 @@ while `engine_pack_wall_ns` and
 attribution metrics for the expected gain.
 
 
-The current mixed-I/O scheduling successor uses qualified source `5f92ea3`
-as its exact pre-change baseline. The earlier lower-READ preparation cleanup
-reduced the fast async-minus-sync lower-WRITE request excess from +319.8 to
-+45.6 requests, but the remaining five matched pairs still exclude zero
-([+13.9,+77.3]). Async useful-WRITE throughput is -4.86% versus sync
-(95% CI [-8.63%,-1.10%]). Burst-target closes are +296.0
-([+228.7,+363.3]); +286.4 of those are admission-site closes
-([+218.9,+353.9]), while service-dry closes are -240.8.
+The qualified post-ID77 baseline is report `6c7d645924cd` on exact source
+`8a6dd2a` (ARM64/NEON). ID77 successfully moved PACK_READY ownership to the
+worker: admission burst closes are zero, fast async-minus-sync lower-WRITE
+request excess is +31.6 with a 95% CI that now crosses zero (-10.3..+73.5), and
+the useful-WRITE delta is -3.13% with CI -11.61..+5.35%. Fast QD8/QD32
+async-over-sync gains remain +74.6% and +14.9%.
 
-ID77 changes only PACK_READY scheduling ownership. Admission continues to
-record finite pack geometry but no longer flushes PACK_READY. The worker makes
-all burst/tail/service-dry close decisions after accepted-tail refresh. When a
-ready window was blocked by pending K=1 lower I/O, its completion wake
-finalizes the immutable run, samples the pending post-PACK tail under
-`queue_lock`, and re-evaluates the ready window before `retention_timer`
-can strand it. The ordinary retention deadline, K=1 depth, preparation lane
-count, ID63 policy, SWZ bytes and authority/publication rules are unchanged.
+The same report exposes ID78's distinct completion-state defect. Fast mixed
+sync records about 646.8 post-PACK tail samples for 646.8 PACK_READY closes,
+while async records only 131.4 samples for 660.2 closes. Async-minus-sync
+tail-target closes are -47.2 (95% CI -65.2..-29.2) while burst-target closes
+are +49.8 (+32.7..+66.9). Source inspection shows that an empty-batch worker
+pass can clear `pack_close_pending_tail_sample` and
+`retained_chain_completed` while detached K=1 is still in flight, and the
+sampler counts local/incoming followers but not followers already admitted
+into `batch[]` during that lower WRITE.
 
-Promotion is loaded and product-facing: `pack_close_burst_admission` must be
-zero, fast mixed lower-WRITE request fragmentation must materially improve
-without useful WRITE/READ or p99 loss, and the established fast write-only
-QD8/QD32 async-over-sync gains must remain. Lower bytes/requests, byte-exact
-reconstruction, host CPU/PSI and window geometry remain mandatory. The modern
-service envelopes are directional confirmation: the `5f92ea3` D64-off
-baseline reaches 2.30x raw on modern-SD but only 0.378x on SATA, 0.410x on
-Gen4 and 0.455x on Gen5, with K=1 ready-wait at zero. A successor improvement
-must be measured against each same-run raw control; eliminating a hypothesized
-retention stall is not itself a performance win.
+ID78 preserves pending post-PACK state until K=1 finalization and samples the
+bounded accepted tail before consuming followers:
+`batch_count + local + incoming`, capped by the remaining 64-record room.
+It also recognizes a four-record compressed prefix that did not fit the
+earlier 1-block/2-block first-pack classes but fits the existing 4-block/16KiB
+extent. This is not a new extent class, timeout, future-arrival wait, K>1
+lower-WRITE slot or preparation lane.
+
+The product baseline remains demanding. D64-off useful-WRITE speedup versus
+same-run raw is 2.26x on modern-SD, 0.408x on SATA, 0.409x on Gen4 and 0.451x
+on Gen5; D64-on is 5.03x, 0.383x, 0.163x and 0.146x respectively. Fast
+write-only QD4 is still -33.7% versus raw, while QD8/QD32 are +13.7%/+37.4%.
+ID78 promotion therefore requires product-facing improvement, not merely
+counter repair: tail-sample conservation and burst/request fragmentation must
+improve without useful WRITE/READ or p99 loss, QD8/QD32 gains and slow/SD wins
+must survive, and every modern-envelope claim must use its same-run raw
+control. The ordinary retention deadline remains authoritative.
 
 Configured modern-storage caps remain service-model inputs, not proof that the
 host attained that media class. Compare each swapz row to its same-run raw
