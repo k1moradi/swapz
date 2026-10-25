@@ -2093,6 +2093,8 @@ static swapz_u16 swapz_probe_set(
         sample = body("swapz_sample_pack_tail_locked")
         self.assertIn("swapz_has_inflight(ctx)", sample)
         self.assertNotIn("ctx->inflight_write", sample)
+        # Sampling is completion-only: the direct K1 guard returns before
+        # accounting, so the historical inflight sample buckets stay passive.
         self.assertLess(sample.index("if (swapz_has_inflight(ctx))"),
                         sample.index("ctx->pack_tail_samples++"))
         self.assertIn("ctx->pack_tail_samples++", sample)

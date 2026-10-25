@@ -571,7 +571,12 @@ to weaken or bypass those existing backend checks.
 
 Tail learning must be gated exclusively by
 `pack_close_pending_tail_sample`; pre-PACK sampling from a deferred first
-pack is forbidden. Source coverage must also prove the zero-count flush return
+pack is forbidden. The sampler is completion-only: it returns directly while
+K=1 exists, so the historical one/many-inflight sample buckets remain
+compatibility telemetry and must not regain active increments. Source
+contracts should require the direct `swapz_has_inflight(ctx)` guard rather
+than preserving a dead local alias or unreachable branches. Source coverage
+must also prove the zero-count flush return
 precedes retained-state clearing, normal and independent retained READs refresh
 accepted followers after synchronous service, and tiny dry-residue closure is
 gated by read/fence evidence rather than a prior packed chain alone. After a
