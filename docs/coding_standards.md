@@ -403,6 +403,17 @@ sampled from pair release so setup activity cannot satisfy the CPU gate.
 Pressure establishment is qualification setup, not useful-work performance
 evidence, and may not weaken ordinary byte-exact/OOM/teardown requirements.
 
+Replay harnesses (`io-replay.py`) running inside the pressurized cgroup must
+avoid heap allocation churn in hot loops. Because the cgroup is deliberately
+held above `memory.high`, thread allocations can trigger kernel throttling
+via `mem_cgroup_handle_over_high()` (up to 2.0s penalty). To ensure reliable
+completion within the immutable `PAIR_OUTER_SECONDS=420` budget without false
+timeouts, the harness shares a single persistent `ThreadPoolExecutor` across
+both the mixed workload and packed read-set verification, pre-allocates I/O
+vectors (`read_iovs`, `mixed_iovs`), uses direct buffer writes (`os.pwrite()`),
+avoids per-sample regex parsing in the background telemetry sampler, and
+disables cyclic garbage collection during timed measurement loops.
+
 ### Foreground GC pressure and scaling telemetry
 
 ID61 evidence must observe the existing serialized collector without changing
@@ -1014,6 +1025,9 @@ at or below 2024 bytes may be adopted directly, with explicit
 `delta64_direct_adopted` and `delta64_first_lz4_skipped` telemetry. Larger
 candidates fall back to ordinary LZ4 and retain the existing strict comparison;
 lower scores run ordinary LZ4 first and may enter only the packing-cliff route.
+The telemetry counters maintain a strict mutually exclusive partition where
+`delta64_raw_rescues + delta64_lz4_rescues + delta64_direct_adopted == delta64_adopted`;
+direct adoption deliberately bypasses baseline LZ4 and must not increment `lz4_rescues`.
 
 Independent compressed READs may fan out across the preallocated private read
 slots. All missing lower ranges are submitted before the ordered worker joins

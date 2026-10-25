@@ -8,6 +8,7 @@ Both arms consume the identical fixture and ordered logical I/O trace.
 """
 import argparse
 import concurrent.futures
+import gc
 import hashlib
 import json
 import mmap
@@ -548,11 +549,9 @@ class LowerInflightSampler:
     @staticmethod
     def _parse(text):
         fields = text.split()
-        if len(fields) != 2 or any(
-                re.fullmatch(r"(0|[1-9][0-9]*)", field) is None
-                for field in fields):
+        if len(fields) != 2 or not (fields[0].isdigit() and fields[1].isdigit()):
             raise ValueError("invalid lower inflight counters")
-        return tuple(map(int, fields))
+        return int(fields[0]), int(fields[1])
 
     @classmethod
     def _read_fd(cls, fd):
@@ -753,7 +752,7 @@ def measured_throughput(report, require_lower=False):
 
 
 def full_write(fd, page, buf):
-    n = os.pwritev(fd, [buf], page * PAGE)
+    n = os.pwrite(fd, buf, page * PAGE)
     if n != PAGE:
         raise OSError("short lower write")
 
@@ -1354,56 +1353,54 @@ def kernel_write_delta(before, after):
         raise ValueError("inconsistent swapz lower-write queue attribution")
     return counters
 
-def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
+def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
+                          pool=None):
     """Verify real 4MiB sequential/random reads after concurrent packed writes."""
     if logical_pages != 1024 or qd != 32:
         raise ValueError("packed read requires 4MiB logical and QD32")
-    before = packed_closes(path, identity)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=qd) as pool:
+    # Allocate buffers and start worker threads BEFORE any timed read.
+    # A previous benchmark included fresh mmap, worker startup and worker
+    # pool destruction in its read latency/throughput measurements.
+    buffers = [mmap.mmap(-1, PAGE) for _ in range(qd)]
+    views = [memoryview(buf) for buf in buffers]
+    read_iovs = [[view] for view in views]
+    measured = {}
+    own_pool = pool is None
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=qd) if own_pool else pool
+    try:
+        before = packed_closes(path, identity)
         for base in range(0, logical_pages, qd):
             jobs = [pool.submit(full_write, fd, page,
                                 chunks[page % len(chunks)])
                     for page in range(base, base + qd)]
             for job in jobs:
                 job.result()
-    os.fsync(fd)
-    after = packed_closes(path, identity)
-    packed_delta = after - before if before is not None else None
-    if packed_delta is not None and packed_delta <= 0:
-        raise ValueError("no packed close during concurrent read-set population")
+        os.fsync(fd)
+        after = packed_closes(path, identity)
+        packed_delta = after - before if before is not None else None
+        if packed_delta is not None and packed_delta <= 0:
+            raise ValueError("no packed close during concurrent read-set population")
 
-    image_sha = sha(b"".join(chunks[i % len(chunks)]
-                            for i in range(logical_pages)))
-    orders = {"sequential": list(range(logical_pages)),
-              "seeded_random": random.Random(0x51A0A9).sample(
-                  range(logical_pages), logical_pages)}
-    # Allocate buffers and start worker threads BEFORE any timed read.
-    # A previous benchmark included fresh mmap, worker startup and worker
-    # pool destruction in its read latency/throughput measurements.
-    buffers = [mmap.mmap(-1, PAGE) for _ in range(qd)]
-    views = [memoryview(buf) for buf in buffers]
-    measured = {}
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=qd) as pool:
-            # Complete one no-I/O task per worker before first stopwatch.
-            # Use a barrier so 32 concurrent kernel-request workers exist
-            # before either arm's first measured read is submitted.
-            barrier = threading.Barrier(qd + 1)
-            jobs = [pool.submit(barrier.wait) for _ in range(qd)]
-            barrier.wait(timeout=10)
-            for job in jobs:
-                job.result(timeout=10)
+        image_sha = sha(b"".join(chunks[i % len(chunks)]
+                                for i in range(logical_pages)))
+        orders = {"sequential": list(range(logical_pages)),
+                  "seeded_random": random.Random(0x51A0A9).sample(
+                      range(logical_pages), logical_pages)}
 
-            def read_one(page, slot):
-                start_ns = time.monotonic_ns()
-                count = os.preadv(fd, [views[slot]], page * PAGE)
-                elapsed_ns = time.monotonic_ns() - start_ns
-                # Correctness checking occurs AFTER the individual I/O
-                # latency sample, before buffers can be recycled.
-                if count != PAGE or views[slot] != chunks[page % len(chunks)]:
-                    raise OSError("short or mismatched packed swap-in page")
-                return elapsed_ns
+        def read_one(page, slot):
+            start_ns = time.monotonic_ns()
+            count = os.preadv(fd, read_iovs[slot], page * PAGE)
+            elapsed_ns = time.monotonic_ns() - start_ns
+            # Correctness checking occurs AFTER the individual I/O
+            # latency sample, before buffers can be recycled.
+            if count != PAGE or views[slot] != chunks[page % len(chunks)]:
+                raise OSError("short or mismatched packed swap-in page")
+            return elapsed_ns
 
+        gc_was_enabled = gc.isenabled()
+        if gc_was_enabled:
+            gc.disable()
+        try:
             for mode, pages in orders.items():
                 kernel_before = kernel_read_snapshot(path, identity)
                 lower_before = lower_stat(identity.get("owned_disk"))
@@ -1416,8 +1413,6 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
                     jobs = [pool.submit(read_one, page, slot)
                             for slot, page in enumerate(wave)]
                     durations.extend(job.result() for job in jobs)
-                # Stop before teardown, CPU sampling, lower stat capture
-                # and the digest/report calculation.
                 duration = (time.monotonic_ns() - start_ns) / 1e9
                 cpu_after = process_cpu()
                 host_after = host_cpu_snapshot()
@@ -1441,11 +1436,18 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
                     "host_cpu": host_cpu_delta(host_before, host_after),
                     "timed_scope": "QD32 read submission and completion; buffers and worker setup excluded",
                 }
+        finally:
+            if gc_was_enabled:
+                gc.enable()
     finally:
-        for view in views:
-            view.release()
-        for buffer in buffers:
-            buffer.close()
+        try:
+            for view in views:
+                view.release()
+            for buffer in buffers:
+                buffer.close()
+        finally:
+            if own_pool:
+                pool.shutdown(wait=True)
     return {
         "qualification": ("OWNED_PACK_READY_AND_VERIFIED_4MIB_READ"
                           if packed_delta is not None else
@@ -1484,6 +1486,7 @@ def replay(args):
         if h.hexdigest() != mf["write_payload_stream_sha256"]:
             raise ValueError("write bytes differ from manifest's canonical stream")
         print(f"BENCH_IO_PHASE={args.candidate}:prefill", file=sys.stderr, flush=True)
+        t_phase_start = time.monotonic()
         fd = os.open(path, flags)
         try:
             # Trust the opened descriptor, not just the preflight pathname.
@@ -1516,6 +1519,7 @@ def replay(args):
                 scratch.release()
                 bufmap.close()
 
+            t_prefill_done = time.monotonic()
             print(f"BENCH_IO_PHASE={args.candidate}:mixed", file=sys.stderr, flush=True)
             # Allocate reusable QD-slot read buffers before warmup and
             # measurement. Mixed workloads retain explicit QD waves.
@@ -1525,176 +1529,186 @@ def replay(args):
             replay_waves = [trace[i:i + mf["qd"]]
                             for i in range(0, len(trace), mf["qd"])]
             native_elapsed_s = None
-            if args.native_replay:
-                native = run_native_replay(
-                    fd, source.fileno(), trace, mf, path, identity)
-                samples = native["samples"]
-                measured_start_ns = native["measured_start_ns"]
-                measured_end_ns = native["measured_end_ns"]
-                cpu_before = native["cpu_before"]
-                cpu_after = native["cpu_after"]
-                host_before = native["host_before"]
-                host_after = native["host_after"]
-                before = native["before"]
-                after = native["after"]
-                kernel_write_before = native["kernel_write_before"]
-                kernel_write_after = native["kernel_write_after"]
-                kernel_read_before = native["kernel_read_before"]
-                kernel_read_after = native["kernel_read_after"]
-                lower_inflight = native["lower_inflight"]
-                native_elapsed_s = native["seconds"]
-            else:
-                mixed_buffers = [mmap.mmap(-1, PAGE) for _ in range(mf["qd"])]
-                mixed_views = [memoryview(buf) for buf in mixed_buffers]
-                samples = {"W": [], "R": []}
-                measured_start_ns = None
-                measured_end_ns = None
-                cpu_before = None
-                cpu_after = None
-                host_before = None
-                host_after = None
-                before = None
-                after = None
-                kernel_write_before = None
-                kernel_write_after = None
-                kernel_read_before = None
-                kernel_read_after = None
-                lower_inflight = None
-                lower_inflight_sampler = LowerInflightSampler(
-                    identity.get("owned_disk"))
-                try:
-                    def execute(item, slot):
-                        start = time.monotonic_ns()
-                        if item["op"] == "W":
-                            count = os.pwritev(fd, [chunks[item["fixture"]]],
-                                               item["page"] * PAGE)
-                        else:
-                            count = os.preadv(fd, [mixed_views[slot]],
-                                              item["page"] * PAGE)
-                        elapsed = time.monotonic_ns() - start
-                        # Never include Python byte-oracle checking in the
-                        # individual I/O latency measurement. Still fail the
-                        # operation BEFORE the wave and buffer slot can advance.
-                        if count != PAGE or (item["op"] == "R" and
-                                mixed_views[slot] != chunks[item["fixture"]]):
-                            raise OSError("short or mismatched timed logical I/O")
-                        return elapsed
+            pool = None
+            if not args.native_replay:
+                pool = concurrent.futures.ThreadPoolExecutor(max_workers=mf["qd"])
+            try:
+                if args.native_replay:
+                    native = run_native_replay(
+                        fd, source.fileno(), trace, mf, path, identity)
+                    samples = native["samples"]
+                    measured_start_ns = native["measured_start_ns"]
+                    measured_end_ns = native["measured_end_ns"]
+                    cpu_before = native["cpu_before"]
+                    cpu_after = native["cpu_after"]
+                    host_before = native["host_before"]
+                    host_after = native["host_after"]
+                    before = native["before"]
+                    after = native["after"]
+                    kernel_write_before = native["kernel_write_before"]
+                    kernel_write_after = native["kernel_write_after"]
+                    kernel_read_before = native["kernel_read_before"]
+                    kernel_read_after = native["kernel_read_after"]
+                    lower_inflight = native["lower_inflight"]
+                    native_elapsed_s = native["seconds"]
+                else:
+                    mixed_buffers = [mmap.mmap(-1, PAGE) for _ in range(mf["qd"])]
+                    mixed_views = [memoryview(buf) for buf in mixed_buffers]
+                    mixed_iovs = [[view] for view in mixed_views]
+                    samples = {"W": [], "R": []}
+                    measured_start_ns = None
+                    measured_end_ns = None
+                    cpu_before = None
+                    cpu_after = None
+                    host_before = None
+                    host_after = None
+                    before = None
+                    after = None
+                    kernel_write_before = None
+                    kernel_write_after = None
+                    kernel_read_before = None
+                    kernel_read_after = None
+                    lower_inflight = None
+                    lower_inflight_sampler = LowerInflightSampler(
+                        identity.get("owned_disk"))
+                    try:
+                        def execute(item, slot):
+                            start = time.monotonic_ns()
+                            if item["op"] == "W":
+                                count = os.pwrite(fd, chunks[item["fixture"]],
+                                                  item["page"] * PAGE)
+                            else:
+                                count = os.preadv(fd, mixed_iovs[slot],
+                                                  item["page"] * PAGE)
+                            elapsed = time.monotonic_ns() - start
+                            # Never include Python byte-oracle checking in the
+                            # individual I/O latency measurement. Still fail the
+                            # operation BEFORE the wave and buffer slot can advance.
+                            if count != PAGE or (item["op"] == "R" and
+                                    mixed_views[slot] != chunks[item["fixture"]]):
+                                raise OSError("short or mismatched timed logical I/O")
+                            return elapsed
 
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=mf["qd"]) as pool:
-                        barrier = threading.Barrier(mf["qd"] + 1)
-                        jobs = [pool.submit(barrier.wait) for _ in range(mf["qd"])]
-                        barrier.wait(timeout=10)
-                        for job in jobs:
-                            job.result(timeout=10)
-                        if replay_mode == "persistent-write":
-                            lane_events = [[] for _ in range(mf["qd"])]
-                            for item in trace:
-                                lane_events[item["lane"]].append(item)
-                            ready = threading.Barrier(mf["qd"] + 1)
-                            start_gate = threading.Barrier(mf["qd"] + 1)
+                        gc_was_enabled = gc.isenabled()
+                        if gc_was_enabled:
+                            gc.disable()
+                        try:
+                            if replay_mode == "persistent-write":
+                                lane_events = [[] for _ in range(mf["qd"])]
+                                for item in trace:
+                                    lane_events[item["lane"]].append(item)
+                                ready = threading.Barrier(mf["qd"] + 1)
+                                start_gate = threading.Barrier(mf["qd"] + 1)
 
-                            def persistent_write_worker(lane):
-                                durations = []
+                                def persistent_write_worker(lane):
+                                    durations = []
+                                    try:
+                                        for item in lane_events[lane]:
+                                            if item["phase"] == "warmup":
+                                                execute(item, lane)
+                                        ready.wait(timeout=30)
+                                        start_gate.wait(timeout=30)
+                                        for item in lane_events[lane]:
+                                            if item["phase"] == "measure":
+                                                durations.append(execute(item, lane))
+                                        return durations
+                                    except Exception:
+                                        ready.abort()
+                                        start_gate.abort()
+                                        raise
+
+                                persistent_jobs = [
+                                    pool.submit(persistent_write_worker, lane)
+                                    for lane in range(mf["qd"])
+                                ]
                                 try:
-                                    for item in lane_events[lane]:
-                                        if item["phase"] == "warmup":
-                                            execute(item, lane)
                                     ready.wait(timeout=30)
+                                except threading.BrokenBarrierError as exc:
+                                    for job in persistent_jobs:
+                                        if job.done():
+                                            job.result()
+                                    raise ValueError(
+                                        "persistent write workers failed before measurement"
+                                    ) from exc
+                                lower_inflight_sampler.start()
+                                before = lower_stat(identity.get("owned_disk"))
+                                kernel_write_before = kernel_write_snapshot(path, identity)
+                                kernel_read_before = kernel_read_snapshot(path, identity)
+                                host_before = host_cpu_snapshot()
+                                cpu_before = process_cpu()
+                                measured_start_ns = lower_inflight_sampler.begin()
+                                try:
                                     start_gate.wait(timeout=30)
-                                    for item in lane_events[lane]:
-                                        if item["phase"] == "measure":
-                                            durations.append(execute(item, lane))
-                                    return durations
-                                except Exception:
-                                    ready.abort()
-                                    start_gate.abort()
-                                    raise
-
-                            persistent_jobs = [
-                                pool.submit(persistent_write_worker, lane)
-                                for lane in range(mf["qd"])
-                            ]
-                            try:
-                                ready.wait(timeout=30)
-                            except threading.BrokenBarrierError as exc:
+                                except threading.BrokenBarrierError as exc:
+                                    raise ValueError(
+                                        "persistent write workers failed at measurement start"
+                                    ) from exc
                                 for job in persistent_jobs:
-                                    if job.done():
-                                        job.result()
-                                raise ValueError(
-                                    "persistent write workers failed before measurement"
-                                ) from exc
-                            lower_inflight_sampler.start()
-                            before = lower_stat(identity.get("owned_disk"))
-                            kernel_write_before = kernel_write_snapshot(path, identity)
-                            kernel_read_before = kernel_read_snapshot(path, identity)
-                            host_before = host_cpu_snapshot()
-                            cpu_before = process_cpu()
-                            measured_start_ns = lower_inflight_sampler.begin()
-                            try:
-                                start_gate.wait(timeout=30)
-                            except threading.BrokenBarrierError as exc:
-                                raise ValueError(
-                                    "persistent write workers failed at measurement start"
-                                ) from exc
-                            for job in persistent_jobs:
-                                samples["W"].extend(job.result())
-                        else:
-                            for wave in replay_waves:
-                                if wave[0]["phase"] == "measure" and measured_start_ns is None:
-                                    lower_inflight_sampler.start()
-                                    before = lower_stat(identity.get("owned_disk"))
-                                    kernel_write_before = kernel_write_snapshot(path, identity)
-                                    kernel_read_before = kernel_read_snapshot(path, identity)
-                                    host_before = host_cpu_snapshot()
-                                    cpu_before = process_cpu()
-                                    measured_start_ns = lower_inflight_sampler.begin()
-                                if mf["iops"] and wave[0]["phase"] == "measure":
-                                    due = (measured_start_ns +
-                                           (wave[0]["seq"] - mf["warmup_ops"]) *
-                                           1000000000 // mf["iops"])
-                                    remain = due - time.monotonic_ns()
-                                    if remain > 0:
-                                        time.sleep(remain / 1e9)
-                                futures = [pool.submit(execute, item, slot)
-                                           for slot, item in enumerate(wave)]
-                                for item, future in zip(wave, futures):
-                                    elapsed = future.result()
-                                    if item["phase"] == "measure":
-                                        samples[item["op"]].append(elapsed)
-                        # Acknowledged write completion requires final drain.
-                        # Buffer and executor teardown are not part of the clock.
-                        os.fsync(fd)
+                                    samples["W"].extend(job.result())
+                            else:
+                                for wave in replay_waves:
+                                    if wave[0]["phase"] == "measure" and measured_start_ns is None:
+                                        lower_inflight_sampler.start()
+                                        before = lower_stat(identity.get("owned_disk"))
+                                        kernel_write_before = kernel_write_snapshot(path, identity)
+                                        kernel_read_before = kernel_read_snapshot(path, identity)
+                                        host_before = host_cpu_snapshot()
+                                        cpu_before = process_cpu()
+                                        measured_start_ns = lower_inflight_sampler.begin()
+                                    if mf["iops"] and wave[0]["phase"] == "measure":
+                                        due = (measured_start_ns +
+                                               (wave[0]["seq"] - mf["warmup_ops"]) *
+                                               1000000000 // mf["iops"])
+                                        remain = due - time.monotonic_ns()
+                                        if remain > 0:
+                                            time.sleep(remain / 1e9)
+                                    futures = [pool.submit(execute, item, slot)
+                                               for slot, item in enumerate(wave)]
+                                    for item, future in zip(wave, futures):
+                                        elapsed = future.result()
+                                        if item["phase"] == "measure":
+                                            samples[item["op"]].append(elapsed)
+                                # Acknowledged write completion requires final drain.
+                                # Buffer and executor teardown are not part of the clock.
+                                os.fsync(fd)
+                        finally:
+                            if gc_was_enabled:
+                                gc.enable()
                         measured_end_ns, lower_inflight = lower_inflight_sampler.finish()
                         cpu_after = process_cpu()
                         host_after = host_cpu_snapshot()
                         after = lower_stat(identity.get("owned_disk"))
                         kernel_write_after = kernel_write_snapshot(path, identity)
                         kernel_read_after = kernel_read_snapshot(path, identity)
-                finally:
-                    lower_inflight_sampler.close()
-                    for view in mixed_views:
-                        view.release()
-                    for buffer in mixed_buffers:
-                        buffer.close()
+                    finally:
+                        lower_inflight_sampler.close()
+                        for view in mixed_views:
+                            view.release()
+                        for buffer in mixed_buffers:
+                            buffer.close()
 
-            post_hash = hashlib.sha256()
-            buffer = mmap.mmap(-1, PAGE)
-            scratch = memoryview(buffer)
-            try:
-                for page, fi in enumerate(final_map):
-                    full_read(fd, page, scratch, chunks[fi])
-                    post_hash.update(scratch)
+                post_hash = hashlib.sha256()
+                buffer = mmap.mmap(-1, PAGE)
+                scratch = memoryview(buffer)
+                try:
+                    for page, fi in enumerate(final_map):
+                        full_read(fd, page, scratch, chunks[fi])
+                        post_hash.update(scratch)
+                finally:
+                    scratch.release()
+                    buffer.close()
+                if post_hash.hexdigest() != mf["expected_post_sha256"]:
+                    raise ValueError("final image SHA differs from trace oracle")
+                if args.packed_read:
+                    print(f"BENCH_IO_PHASE={args.candidate}:packed_read",
+                          file=sys.stderr, flush=True)
+                packed_read = (measure_packed_swapin(
+                    fd, path, identity, chunks, mf["logical_pages"], mf["qd"],
+                    pool=pool)
+                    if args.packed_read else None)
             finally:
-                scratch.release()
-                buffer.close()
-            if post_hash.hexdigest() != mf["expected_post_sha256"]:
-                raise ValueError("final image SHA differs from trace oracle")
-            if args.packed_read:
-                print(f"BENCH_IO_PHASE={args.candidate}:packed_read",
-                      file=sys.stderr, flush=True)
-            packed_read = (measure_packed_swapin(
-                fd, path, identity, chunks, mf["logical_pages"], mf["qd"])
-                if args.packed_read else None)
+                if pool is not None:
+                    pool.shutdown(wait=True)
         finally:
             os.close(fd)
         for chunk in chunks:
