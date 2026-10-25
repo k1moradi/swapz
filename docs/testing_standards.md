@@ -1544,6 +1544,9 @@ staged transaction. They must pin that unique staging retains logical-range and
 generation-overflow checks, and that the authority-owned active-transaction
 pointer is used only after `swapz_batch_resume()`. External transaction
 mutation tests remain mandatory and must continue to return `-ESTALE`.
+When a public wrapper delegates to a private production policy helper, source
+contracts for allocator/transaction invariants must inspect the helper that owns
+the behavior rather than require the old wrapper body spelling.
 
 The existing native authority-throughput test also reports same-host supporting
 microbenchmarks for a 64-record full validator versus metadata-CRC validation,

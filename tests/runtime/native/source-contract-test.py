@@ -126,7 +126,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off)", claim)
         self.assertIn("swapz_page_list_validate_segment(a, segment)", claim)
         self.assertIn("a->segment_program_counts[segment]++", claim)
-        stage = source_body("swapz_stage", AUTH)
+        stage = source_body("swapz_stage_policy", AUTH)
         self.assertIn("tail_waste = SWAPZ_SEGMENT_BLOCKS -", stage)
         self.assertLess(stage.index("tail_waste = SWAPZ_SEGMENT_BLOCKS -"),
                         stage.index("error = swapz_pick_dead_segment(a)"))
@@ -788,7 +788,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("(e->bulk_enabled == 1 && placed != run_end)", prepare)
         self.assertIn("tx->start_block != run_start + run_blocks", prepare)
         self.assertNotIn("e->run_splits_by_hole++", prepare)
-        self.assertIn("swapz_stage_batch(e->authority", prepare)
+        self.assertIn("swapz_stage_batch_unique(e->authority", prepare)
         self.assertIn("batch_hashes", authority)
         self.assertIn("batch_stage_allowed", authority)
         self.assertIn("a->batch_pending", source_body("swapz_gc_commit_rotation", authority))
@@ -843,7 +843,7 @@ static swapz_u16 swapz_probe_set(
 
     def test_authority_snapshot_copies_only_active_transaction_prefix(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()
-        stage = source_body("swapz_stage", authority)
+        stage = source_body("swapz_stage_policy", authority)
         pause = source_body("swapz_batch_pause", authority)
         resume = source_body("swapz_batch_resume", authority)
         forget = source_body("swapz_forget_active", authority)
