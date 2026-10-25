@@ -505,14 +505,13 @@ must be updated in the same test change; do not keep stale call syntax as a
 compatibility alias.
 
 
-Service-proven retained closure qualification must distinguish the write
-admission decision from the worker-tail decision. Source coverage requires
-admission to ignore the accepted-second-pack shortcut below the effective
-target, while the worker-tail path may use it only after refreshed queue state,
-no active sampled tail, and prior packed-chain or independent-read service
-evidence. A successful independent read while a retained write window is open
-must be boundedly attributed to that window and cleared when the nonempty
-window commits.
+Service-proven retained closure qualification has one PACK_READY owner: the
+serialized worker. Source coverage requires `swapz_accept_write()` to record
+pack geometry without emitting PACK_READY, while the worker may close only
+after refreshed local/incoming queue state, pending post-PACK tail sampling,
+and the existing burst/tail/service evidence. A successful independent read
+while a retained write window is open must be boundedly attributed to that
+window and cleared when the nonempty window commits.
 
 
 Ordered-worker preparation-steal qualification must preserve the producer's
@@ -539,10 +538,12 @@ readback and role safety without freezing the retired segment-zero restart
 sequence.
 
 
-Retained-target qualification requires source coverage for both closure owners:
-write admission may emit PACK_READY only through the effective target helper
-after refreshing accepted followers, while below-target service-proven closure
-must remain in the worker after local/incoming refresh.
+Retained-target qualification requires source coverage for the single
+worker-tail PACK_READY owner. Admission may update
+`accepted_burst_pack_ready` and sampled-geometry state, but must not emit
+PACK_READY. After K=1 completion, the worker must finalize the immutable run,
+sample any pending post-PACK tail, restore unfinished local work to the accepted
+FIFO, and re-evaluate PACK_READY before the retention timer can be armed.
 
 Tail learning must be gated exclusively by
 `pack_close_pending_tail_sample`; pre-PACK sampling from a deferred first
@@ -723,18 +724,26 @@ bounded read fan-out/coalescing and may contribute ordinary ordered-service tail
 credit, but they must not directly wake the preparation lane, publish authority,
 submit WRITE I/O, extend retention, or alter upper completion ownership.
 
-Native `window-policy` coverage must prove that an admission-site close at the
-initial four-record burst floor is rejected when only the first pack is known,
-and becomes eligible only after a complete second pack or an explicit sampled
-tail. Source contracts for the ID63 fan-out owner must also reject the retired
-lower-READ preparation-overlap helpers rather than preserving stale helper-name
-expectations. Loaded qualification must then compare fast mixed async versus sync: the
-candidate must remove the prior statistically significant excess lower-WRITE
-request count without materially regressing useful WRITE/READ throughput or
-p99. The same run must retain the established fast write-only QD8/QD32 async
-benefit. These scheduling rules are architecture-neutral; every supported host
-continues to use the single public `make test` command and its existing
-architecture-specific SIMD qualification.
+Native `window-policy` coverage keeps the finite burst/tail readiness rules,
+while source contracts prove admission no longer owns PACK_READY and the
+post-K1 worker path samples the pending tail before re-evaluating a dry accepted
+FIFO and before arming `retention_timer`. The compatibility
+`pack_close_burst_admission` counter remains parseable during this evidence
+cycle but must be exactly zero for every current swapz timed arm.
+
+Loaded qualification compares fast mixed async versus sync against the
+`5f92ea3` baseline: the candidate must materially reduce the prior +45.6
+lower-WRITE-request excess (95% CI +13.9..+77.3), remove admission-site burst
+closes, and eliminate avoidable worker-empty deadline closes without materially
+regressing useful WRITE/READ throughput or p99. The same run must retain the
+established fast write-only QD8/QD32 async benefit. Modern-SD/SATA/Gen4/Gen5
+rows remain directional product evidence and must report whether useful service
+improves while lower bytes/requests remain favorable.
+
+These scheduling rules are architecture-neutral. The single public `make test`
+command remains unchanged on SSE2, AVX2, AVX-512 and NEON hosts; existing
+architecture-specific SIMD byte-equivalence, instruction-shape and runtime
+timing qualification remains mandatory and is not bypassed by this change.
 
 Live-GC distribution attribution increments a per-segment eviction counter only
 after a successful committed victim rotation. Loaded qualification reports the

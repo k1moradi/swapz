@@ -3444,16 +3444,6 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
  * discover already-accepted work. A sampled tail is stronger evidence and
  * must still drain to its one-shot target.
  */
-static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
-{
-	if (ctx->retained_single_tail_deferred && ctx->batch_count == 1U)
-		return false;
-	return swapz_window_admission_burst_close_ready(
-		ctx->single_pack_deferred, ctx->accepted_burst_pack_ready,
-		ctx->batch_count, ctx->retained_burst_target,
-		ctx->retained_tail_target);
-}
-
 static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 {
 	return !ctx->retained_tail_target && ctx->batch_count &&
@@ -3477,6 +3467,38 @@ static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
 		ctx->single_pack_deferred, service_proven_dry_pack,
 		ctx->batch_count, ctx->retained_burst_target,
 		ctx->retained_tail_target);
+}
+
+static bool swapz_retention_expired(struct swapz_dm *ctx);
+
+static bool swapz_worker_pack_close_ready(struct swapz_dm *ctx)
+{
+	return swapz_retained_pack_close_ready(ctx) &&
+		!ctx->worker_has_immediate_followup &&
+		!(SWAPZ_WRITE_PIPELINE_DEPTH == 1U &&
+		  swapz_inflight_lower_pending(ctx)) &&
+		ctx->batch_count && !ctx->failed &&
+		READ_ONCE(ctx->accepting) &&
+		!swapz_retention_expired(ctx);
+}
+
+static void swapz_close_worker_pack(struct swapz_dm *ctx)
+{
+	ctx->next_pack_close_cause =
+		swapz_service_proven_dry_pack(ctx) ?
+		SWAPZ_PACK_CLOSE_SERVICE_DRY :
+		(ctx->retained_tail_target ?
+		 SWAPZ_PACK_CLOSE_TAIL_TARGET :
+		 SWAPZ_PACK_CLOSE_BURST_TARGET);
+	if (ctx->next_pack_close_cause == SWAPZ_PACK_CLOSE_BURST_TARGET) {
+		ctx->next_burst_close_site = SWAPZ_BURST_CLOSE_WORKER;
+		ctx->next_burst_close_target = ctx->retained_burst_target;
+	}
+	ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
+	ctx->packed_early_commits++;
+	if (ctx->accepted_burst_pack_ready)
+		ctx->accepted_burst_tail_flushes++;
+	swapz_flush_window(ctx);
 }
 
 static void swapz_resolve_single_tail_companion(struct swapz_dm *ctx)
@@ -3753,30 +3775,10 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			ctx->accepted_burst_extensions++;
 		}
 		/*
-		 * Target closure is safe in admission only after refreshing the
-		 * accepted queue above. Below-target service-proven closure remains a
-		 * worker-tail decision after local+incoming have been refreshed.
+		 * PACK_READY is worker-tail owned. Admission records only finite
+		 * pack geometry; the worker must first reap completed K=1 work,
+		 * sample any pending post-PACK tail, and refresh accepted followers.
 		 */
-		if (swapz_retained_target_close_ready(ctx) &&
-		    !ctx->worker_has_immediate_followup &&
-		    !(SWAPZ_WRITE_PIPELINE_DEPTH == 1U &&
-		      swapz_inflight_lower_pending(ctx))) {
-			ctx->next_pack_close_cause = ctx->retained_tail_target ?
-				SWAPZ_PACK_CLOSE_TAIL_TARGET :
-				SWAPZ_PACK_CLOSE_BURST_TARGET;
-			if (ctx->next_pack_close_cause ==
-			    SWAPZ_PACK_CLOSE_BURST_TARGET) {
-				ctx->next_burst_close_site =
-					SWAPZ_BURST_CLOSE_ADMISSION;
-				ctx->next_burst_close_target =
-					ctx->retained_burst_target;
-			}
-			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
-			ctx->packed_early_commits++;
-			if (ctx->accepted_burst_pack_ready)
-				ctx->accepted_burst_tail_flushes++;
-			swapz_flush_window(ctx);
-		}
 	}
 	return 0;
 }
@@ -5180,32 +5182,8 @@ static void swapz_worker(struct work_struct *work)
 					ctx->singleton_fast_close = false;
 				}
 			}
-			if (swapz_retained_pack_close_ready(ctx) &&
-			    !ctx->worker_has_immediate_followup &&
-			    !(SWAPZ_WRITE_PIPELINE_DEPTH == 1U &&
-			      swapz_inflight_lower_pending(ctx)) &&
-			    ctx->batch_count && !ctx->failed &&
-			    READ_ONCE(ctx->accepting) &&
-			    !swapz_retention_expired(ctx)) {
-				ctx->next_pack_close_cause =
-					swapz_service_proven_dry_pack(ctx) ?
-					SWAPZ_PACK_CLOSE_SERVICE_DRY :
-					(ctx->retained_tail_target ?
-					 SWAPZ_PACK_CLOSE_TAIL_TARGET :
-					 SWAPZ_PACK_CLOSE_BURST_TARGET);
-				if (ctx->next_pack_close_cause ==
-				    SWAPZ_PACK_CLOSE_BURST_TARGET) {
-					ctx->next_burst_close_site =
-						SWAPZ_BURST_CLOSE_WORKER;
-					ctx->next_burst_close_target =
-						ctx->retained_burst_target;
-				}
-				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
-				ctx->packed_early_commits++;
-				if (ctx->accepted_burst_pack_ready)
-					ctx->accepted_burst_tail_flushes++;
-				swapz_flush_window(ctx);
-			}
+			if (swapz_worker_pack_close_ready(ctx))
+				swapz_close_worker_pack(ctx);
 			ctx->worker_has_immediate_followup = false;
 			if (!(remaining & 7U))
 				cond_resched();
@@ -5291,6 +5269,19 @@ static void swapz_worker(struct work_struct *work)
 		swapz_sample_pack_tail_locked(ctx, &local);
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
+		if (list_empty(&ctx->incoming) &&
+		    swapz_worker_pack_close_ready(ctx)) {
+			/*
+			 * The accepted FIFO is dry under queue_lock after K=1
+			 * finalization and tail sampling. A BIO admitted after this
+			 * decision belongs to the next wave; never wait for it, but do
+			 * not strand this already-ready window on retention_timer.
+			 */
+			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			swapz_close_worker_pack(ctx);
+			ctx->worker_has_immediate_followup = false;
+			continue;
+		}
 		if (list_empty(&ctx->incoming)) {
 			/*
 			 * With no pending retained window and no accepted FIFO work, this

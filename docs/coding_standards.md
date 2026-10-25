@@ -499,12 +499,21 @@ processing also records wall time with synchronous lower-I/O wait subtracted.
 Do not infer copy/CRC/packing cost from userspace elapsed time, and do not add
 overlapping wall counters together.
 
-Admission-side PACK_READY closure is allowed only from finite accepted evidence.
-At the initial four-record learned burst floor, a first pack alone may not close
-inside `swapz_accept_write()`: require either `accepted_burst_pack_ready` (a
-complete second pack) or an explicit `retained_tail_target`. Larger learned
-targets keep their existing finite-work rule. Service-proven dry closure remains
-a worker-tail decision after local and incoming queues have been refreshed.
+PACK_READY closure is worker-tail owned. `swapz_accept_write()` may record
+finite pack geometry in `single_pack_deferred` and
+`accepted_burst_pack_ready`, but it must not flush a PACK_READY window.
+The serialized worker closes burst-target, sampled-tail and service-proven-dry
+windows only after refreshing its local and incoming accepted FIFO state. At the
+initial four-record learned burst floor, a first pack alone is not enough:
+require a complete second accepted pack or an explicit sampled tail.
+
+If a ready window was held back only because the immutable K=1 lower WRITE was
+still pending, the completion wake must finalize that run, deliver its upper
+BIO completions, sample any pending post-PACK tail under `queue_lock`, and
+re-evaluate PACK_READY before arming the ordinary retention timer. The dry-FIFO
+decision is made under `queue_lock`; BIOs admitted after that decision belong
+to the next wave. This is finite accepted-work scheduling, not a grace wait,
+device-latency heuristic, or change to the authoritative retention deadline.
 
 For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
 with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan

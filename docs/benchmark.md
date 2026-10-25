@@ -509,26 +509,34 @@ while `engine_pack_wall_ns` and
 attribution metrics for the expected gain.
 
 
-The mixed-I/O scheduling follow-up uses owner report `aa5237c` / tested source
-`329a10c` as its pre-change loaded baseline. Fast mixed async versus sync
-recorded 7,248 lower-READ preparation starts, +319.8 lower-WRITE requests
-(95% CI +109.5..+530.1), +232.2 burst-target closes (+182.3..+282.1), and a
--8.6% useful-WRITE mean whose confidence interval crossed zero. The candidate
-removes lower-READ producer wake/head claiming and prevents an admission-side
-close at the initial four-record learned floor until a complete second pack or
-an explicit sampled tail exists. Compatibility lower-READ preparation tokens
-remain in status/report schemas but must be exactly zero.
+The current mixed-I/O scheduling successor uses qualified source `5f92ea3`
+as its exact pre-change baseline. The earlier lower-READ preparation cleanup
+reduced the fast async-minus-sync lower-WRITE request excess from +319.8 to
++45.6 requests, but the remaining five matched pairs still exclude zero
+([+13.9,+77.3]). Async useful-WRITE throughput is -4.86% versus sync
+(95% CI [-8.63%,-1.10%]). Burst-target closes are +296.0
+([+228.7,+363.3]); +286.4 of those are admission-site closes
+([+218.9,+353.9]), while service-dry closes are -240.8.
 
-Promotion is loaded and product-facing: fast mixed lower-WRITE request
-fragmentation must materially improve without a useful WRITE/READ or p99 loss,
-and the established fast write-only QD8/QD32 async-over-sync gains must remain.
-Lower bytes/requests, byte-exact reconstruction, host CPU/PSI and window
-geometry remain mandatory. Internal wake/close counters explain the result but
-cannot promote it by themselves. Because current main also contains the
-structural ID73 proof-reuse changes after `329a10c`, a successor owner run
-measures the combined product delta unless `b6ed68c` is separately qualified
-on the same host; do not attribute a combined throughput change solely to one
-mechanism.
+ID77 changes only PACK_READY scheduling ownership. Admission continues to
+record finite pack geometry but no longer flushes PACK_READY. The worker makes
+all burst/tail/service-dry close decisions after accepted-tail refresh. When a
+ready window was blocked by pending K=1 lower I/O, its completion wake
+finalizes the immutable run, samples the pending post-PACK tail under
+`queue_lock`, and re-evaluates the ready window before `retention_timer`
+can strand it. The ordinary retention deadline, K=1 depth, preparation lane
+count, ID63 policy, SWZ bytes and authority/publication rules are unchanged.
+
+Promotion is loaded and product-facing: `pack_close_burst_admission` must be
+zero, fast mixed lower-WRITE request fragmentation must materially improve
+without useful WRITE/READ or p99 loss, and the established fast write-only
+QD8/QD32 async-over-sync gains must remain. Lower bytes/requests, byte-exact
+reconstruction, host CPU/PSI and window geometry remain mandatory. The modern
+service envelopes are directional confirmation: the `5f92ea3` D64-off
+baseline reaches 2.30x raw on modern-SD but only 0.378x on SATA, 0.410x on
+Gen4 and 0.455x on Gen5, with K=1 ready-wait at zero. A successor improvement
+must be measured against each same-run raw control; eliminating a hypothesized
+retention stall is not itself a performance win.
 
 Configured modern-storage caps remain service-model inputs, not proof that the
 host attained that media class. Compare each swapz row to its same-run raw
