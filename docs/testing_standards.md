@@ -726,7 +726,9 @@ submit WRITE I/O, extend retention, or alter upper completion ownership.
 Native `window-policy` coverage must prove that an admission-site close at the
 initial four-record burst floor is rejected when only the first pack is known,
 and becomes eligible only after a complete second pack or an explicit sampled
-tail. Loaded qualification must then compare fast mixed async versus sync: the
+tail. Source contracts for the ID63 fan-out owner must also reject the retired
+lower-READ preparation-overlap helpers rather than preserving stale helper-name
+expectations. Loaded qualification must then compare fast mixed async versus sync: the
 candidate must remove the prior statistically significant excess lower-WRITE
 request count without materially regressing useful WRITE/READ throughput or
 p99. The same run must retain the established fast write-only QD8/QD32 async
