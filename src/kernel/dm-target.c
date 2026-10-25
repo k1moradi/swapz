@@ -1752,7 +1752,7 @@ static int swapz_compress_page(struct swapz_dm *ctx, const u8 *input,
 {
 	struct swapz_delta64_route route;
 	swapz_u32 score = 0;
-	u64 start, elapsed, rescue_wall = 0, saved;
+	u64 start, now, elapsed, rescue_wall = 0, saved;
 	int baseline, candidate = 0;
 	bool high_score = false;
 
@@ -1767,31 +1767,35 @@ static int swapz_compress_page(struct swapz_dm *ctx, const u8 *input,
 			return -EINVAL;
 		start = ktime_get_ns();
 		score = swapz_predict_delta64_sample_score(input);
-		rescue_wall += swapz_elapsed_ns(start, ktime_get_ns());
+		now = ktime_get_ns();
+		rescue_wall += swapz_elapsed_ns(start, now);
 		high_score = score >= SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD;
 		if (high_score) {
 			stats->eligible++;
 			swapz_delta64_note_score(stats, score);
 			stats->classifier_pass++;
 			stats->attempts++;
-			start = ktime_get_ns();
+			start = now;
 			if (swapz_predict_delta64(input, transform_scratch)) {
-				elapsed = swapz_elapsed_ns(start, ktime_get_ns());
+				now = ktime_get_ns();
+				elapsed = swapz_elapsed_ns(start, now);
 				stats->transform_wall_ns += elapsed;
 				stats->transform_calls++;
 				rescue_wall += elapsed;
 				goto ordinary;
 			}
-			elapsed = swapz_elapsed_ns(start, ktime_get_ns());
+			now = ktime_get_ns();
+			elapsed = swapz_elapsed_ns(start, now);
 			stats->transform_wall_ns += elapsed;
 			stats->transform_calls++;
 			rescue_wall += elapsed;
-			start = ktime_get_ns();
+			start = now;
 			candidate = LZ4_compress_fast(
 				transform_scratch, output, SWAPZ_BLOCK_BYTES,
 				SWAPZ_MAX_COMPRESSED, ctx->delta64_lz4_acceleration,
 				lz4_workmem);
-			elapsed = swapz_elapsed_ns(start, ktime_get_ns());
+			now = ktime_get_ns();
+			elapsed = swapz_elapsed_ns(start, now);
 			*lz4_wall_ns += elapsed;
 			rescue_wall += elapsed;
 			if (candidate > 0 &&
@@ -1851,22 +1855,25 @@ ordinary:
 			stats->pack_attempts++;
 		start = ktime_get_ns();
 		if (swapz_predict_delta64(input, transform_scratch)) {
-			elapsed = swapz_elapsed_ns(start, ktime_get_ns());
+			now = ktime_get_ns();
+			elapsed = swapz_elapsed_ns(start, now);
 			stats->transform_wall_ns += elapsed;
 			stats->transform_calls++;
 			rescue_wall += elapsed;
 			goto out;
 		}
-		elapsed = swapz_elapsed_ns(start, ktime_get_ns());
+		now = ktime_get_ns();
+		elapsed = swapz_elapsed_ns(start, now);
 		stats->transform_wall_ns += elapsed;
 		stats->transform_calls++;
 		rescue_wall += elapsed;
-		start = ktime_get_ns();
+		start = now;
 		candidate = LZ4_compress_fast(
 			transform_scratch, candidate_output, SWAPZ_BLOCK_BYTES,
 			SWAPZ_MAX_COMPRESSED, ctx->delta64_lz4_acceleration,
 			lz4_workmem);
-		elapsed = swapz_elapsed_ns(start, ktime_get_ns());
+		now = ktime_get_ns();
+		elapsed = swapz_elapsed_ns(start, now);
 		*lz4_wall_ns += elapsed;
 		rescue_wall += elapsed;
 	}
@@ -2013,23 +2020,26 @@ static void swapz_preparation_worker(struct work_struct *work)
 			}
 			input = lane->input_page;
 		}
-		section_start = ktime_get_ns();
 		lower_write_overlap = atomic_read(&ctx->lower_write_active);
 		lower_read_overlap = atomic_read(&ctx->lower_read_active);
 		if (lower_write_overlap)
 			lane->prepared_during_lower_write++;
 		if (lower_read_overlap)
 			lane->prepared_during_lower_read++;
+		section_start = (lower_write_overlap || lower_read_overlap) ?
+			ktime_get_ns() : 0;
 		prepared->length = swapz_compress_page(
 			ctx, input, prepared->bytes, lane->predictor_page,
 			lane->delta64_candidate_page, lane->lz4_workmem,
 			&lane->lz4_wall_ns, &prepared->encoding,
 			&lane->delta64, &prepared->zero);
-		elapsed_ns = swapz_elapsed_ns(section_start, ktime_get_ns());
-		if (lower_write_overlap && atomic_read(&ctx->lower_write_active))
-			lane->lower_write_overlap_ns += elapsed_ns;
-		if (lower_read_overlap && atomic_read(&ctx->lower_read_active))
-			lane->lower_read_overlap_ns += elapsed_ns;
+		if (section_start) {
+			elapsed_ns = swapz_elapsed_ns(section_start, ktime_get_ns());
+			if (lower_write_overlap && atomic_read(&ctx->lower_write_active))
+				lane->lower_write_overlap_ns += elapsed_ns;
+			if (lower_read_overlap && atomic_read(&ctx->lower_read_active))
+				lane->lower_read_overlap_ns += elapsed_ns;
+		}
 		prepared->payload_crc32c_valid = false;
 		if (prepared->length > 0 && !prepared->zero) {
 			section_start = ktime_get_ns();
@@ -4288,10 +4298,8 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 		slot->read_pages = ctx->read_pages_store +
 			(size_t)output_pages * SWAPZ_BLOCK_BYTES;
 		output_pages += slot->bio_count;
-		swapz_engine_prime_read_slot(&ctx->engine, &slot->engine,
-					     starts[slot_index], extents[slot_index]);
-		error = swapz_engine_required_read_range(
-			&slot->engine, slot->logical_pages, slot->bio_count,
+		error = swapz_engine_required_read_range_cached(
+			&ctx->engine, slot->logical_pages, slot->bio_count,
 			starts[slot_index], extents[slot_index],
 			&first[slot_index], &blocks[slot_index]);
 		if (error)
@@ -4305,6 +4313,8 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 	for (slot_index = 0; slot_index < slot_count; ++slot_index) {
 		struct swapz_read_slot *slot = &ctx->read_slots[slot_index];
 
+		swapz_engine_prime_read_slot(&ctx->engine, &slot->engine,
+					     starts[slot_index], extents[slot_index]);
 		for (index = 0; index < slot->bio_count; ++index) {
 			entry = dm_per_bio_data(slot->bios[index], sizeof(*entry));
 			list_del_init(&entry->list);
@@ -5392,8 +5402,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 				if (likely(bv.bv_len == SWAPZ_BLOCK_BYTES)) {
 					bio_segs = 1;
 					bio_nonzero_off = (bv.bv_offset != 0);
-					if (bv.bv_page && (PageCompound(bv.bv_page) ||
-							    folio_test_large(page_folio(bv.bv_page))))
+					if (bv.bv_page && PageCompound(bv.bv_page))
 						bio_compound = true;
 					goto segs_done;
 				}

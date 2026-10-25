@@ -558,6 +558,14 @@ Bounded DP planning (`swapz_engine_plan_bounded_policy`) skips redundant
 forward tie-break reconstruction when the backward-selected extent class does
 not cross a segment boundary (`(alignment_cursor % SWAPZ_SEGMENT_BLOCKS) +
 chosen_class <= SWAPZ_SEGMENT_BLOCKS`).
+When a 1-block (4KiB) extent at `index` already fits all remaining records in
+the window (`take == count - index`), larger extent classes at that position
+are strictly byte-dominated and skipped. `swapz_fit_count()` also uses a direct
+one-block fast path (`*read_blocks = included`) when `blocks == 1U`.
+In `swapz_try_concurrent_read_slots()`, missing-range eligibility is checked
+against shared cache metadata (`swapz_engine_required_read_range_cached`)
+before priming private slot scratch (`swapz_engine_prime_read_slot`) so
+rejected `<2`-slot read prefixes perform no scratch copies.
 Adjacent read batching (`swapz_try_parallel_read_batch` and
 `swapz_adjacent_extent_chain_candidate`) inspects mapped extents directly
 via `swapz_parallel_read_extent_mapped` on the admitted prefix, avoiding

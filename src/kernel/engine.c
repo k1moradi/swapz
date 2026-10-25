@@ -93,6 +93,32 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 	swapz_u8 index;
 
 	*read_blocks = 0;
+	if (blocks == 1U) {
+		for (index = start; index < count; ++index) {
+			swapz_u8 earlier;
+			swapz_u32 offset;
+			const struct swapz_compressed_page *page = &pages[index];
+
+			if (included == SWAPZ_MAX_RECORDS)
+				break;
+			if (!logical_pages_unique)
+				for (earlier = start; earlier < index; ++earlier)
+					if (page->logical_page == pages[earlier].logical_page)
+						goto out_one_block;
+			if (payload_start < page->length)
+				break;
+			offset = payload_start - page->length;
+			if (offset < sizeof(struct swapz_header) +
+				     ((swapz_u32)included + 1U) *
+				     sizeof(struct swapz_record))
+				break;
+			payload_start = offset;
+			included++;
+		}
+out_one_block:
+		*read_blocks = included;
+		return included;
+	}
 	for (index = start; index < count; ++index) {
 		swapz_u8 earlier;
 		swapz_u32 offset;
@@ -202,6 +228,14 @@ static int swapz_engine_plan_bounded_policy(
 				batches[index] = candidate_batches;
 				selected_class[index] = blocks;
 				selected_count[index] = take;
+			}
+			if (class_index == 0 &&
+			    take == (swapz_u8)(count - (swapz_u8)index)) {
+				cached_takes[index][1] = 0;
+				cached_takes[index][2] = 0;
+				cached_reads[index][1] = 0;
+				cached_reads[index][2] = 0;
+				break;
 			}
 		}
 		if (!selected_count[index])
@@ -934,7 +968,8 @@ int swapz_engine_required_read_range_cached(
 	if (engine->read_cache_valid &&
 	    engine->read_cached_start_block == start_block &&
 	    engine->read_cached_extent_blocks == extent_blocks)
-		resident |= engine->read_cached_block_mask;
+		resident |= engine->read_cached_block_mask &
+			(swapz_u8)~engine->read_coalesced_block_mask;
 	if (engine->read_extent_lru_clock)
 		cache_slot = swapz_read_extent_lru_lookup(
 			engine, start_block, extent_blocks);
