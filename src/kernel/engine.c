@@ -217,7 +217,9 @@ static int swapz_engine_plan_bounded_policy(
 		 * live allocator cursor, so logical/staging/publication order stays
 		 * unchanged and a later failure still describes a true prefix.
 		 */
-		if (prefer_large_ties) {
+		if (prefer_large_ties &&
+		    (alignment_cursor % SWAPZ_SEGMENT_BLOCKS) + chosen_class >
+			    SWAPZ_SEGMENT_BLOCKS) {
 			swapz_u32 best_hole = ~(swapz_u32)0;
 			swapz_u8 class_index;
 
@@ -510,7 +512,9 @@ static int swapz_read_extent_lru_lookup(const struct swapz_engine *engine,
 {
 	swapz_u8 index;
 
-	if (!engine->read_extent_cache)
+	if (!engine->read_extent_cache || !engine->read_extent_lru_clock ||
+	    !(engine->read_extent_segment_mask &
+	      (1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U))))
 		return -1;
 	for (index = 0; index < SWAPZ_READ_EXTENT_CACHE_ENTRIES; ++index)
 		if (engine->read_extent_lru_valid[index] &&
@@ -539,6 +543,7 @@ static void swapz_read_extent_lru_commit(struct swapz_engine *engine,
 	if (!engine->read_extent_lru_clock) {
 		memset(engine->read_extent_lru_valid, 0,
 		       sizeof(engine->read_extent_lru_valid));
+		engine->read_extent_segment_mask = 0;
 		engine->read_extent_lru_clock = 1;
 		hit_slot = -1;
 	}

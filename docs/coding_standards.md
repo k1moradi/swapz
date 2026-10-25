@@ -546,11 +546,22 @@ back-to-back invalidation calls idempotent in cost as well as semantics.
 Range invalidation (`swapz_engine_invalidate_read_range`) must similarly return
 before computing segment bitmasks when both extent-LRU and metadata-LRU clocks
 are already zero.
+Extent-LRU lookups (`swapz_read_extent_lru_lookup`) must likewise check
+`read_extent_lru_clock` and `read_extent_segment_mask` before scanning the
+16-entry residency array.
 
 Greedy window ordering (`swapz_order_window_greedy` and `swapz_gc_sort`)
 clears only the active batch/GC count of tracking bytes and advances a
 `first_unused` lower bound across iterations, preserving the exact stable
 largest-plus-best-fit pairing while skipping already consumed slots.
+Bounded DP planning (`swapz_engine_plan_bounded_policy`) skips redundant
+forward tie-break reconstruction when the backward-selected extent class does
+not cross a segment boundary (`(alignment_cursor % SWAPZ_SEGMENT_BLOCKS) +
+chosen_class <= SWAPZ_SEGMENT_BLOCKS`).
+Adjacent read batching (`swapz_try_parallel_read_batch` and
+`swapz_adjacent_extent_chain_candidate`) inspects mapped extents directly
+via `swapz_parallel_read_extent_mapped` on the admitted prefix, avoiding
+duplicate dependency scans on already verified BIOs.
 
 
 ### Nonblocking preparation-slot reservation

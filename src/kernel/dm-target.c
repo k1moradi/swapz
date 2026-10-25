@@ -4062,16 +4062,14 @@ static bool swapz_read_can_parallel(struct swapz_dm *ctx, struct bio *bio)
 	return !blocked;
 }
 
-static bool swapz_parallel_read_extent(struct swapz_dm *ctx,
-				       struct bio *bio,
-				       swapz_u32 *start_block,
-				       swapz_u8 *extent_blocks)
+static bool swapz_parallel_read_extent_mapped(struct swapz_dm *ctx,
+					      struct bio *bio,
+					      swapz_u32 *start_block,
+					      swapz_u8 *extent_blocks)
 {
 	swapz_u32 logical;
 	const struct swapz_map *map;
 
-	if (!swapz_read_can_parallel(ctx, bio))
-		return false;
 	logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	map = &ctx->maps[logical];
 	if (!map->valid || map->raw || !map->extent_blocks ||
@@ -4080,6 +4078,17 @@ static bool swapz_parallel_read_extent(struct swapz_dm *ctx,
 	*start_block = map->start_block;
 	*extent_blocks = map->extent_blocks;
 	return true;
+}
+
+static bool swapz_parallel_read_extent(struct swapz_dm *ctx,
+				       struct bio *bio,
+				       swapz_u32 *start_block,
+				       swapz_u8 *extent_blocks)
+{
+	if (!swapz_read_can_parallel(ctx, bio))
+		return false;
+	return swapz_parallel_read_extent_mapped(ctx, bio, start_block,
+						 extent_blocks);
 }
 
 /*
@@ -4114,7 +4123,7 @@ static unsigned int swapz_adjacent_extent_chain_candidate(
 
 		if (seen++ >= prefix)
 			break;
-		if (!swapz_parallel_read_extent(ctx, entry->bio, &start, &blocks))
+		if (!swapz_parallel_read_extent_mapped(ctx, entry->bio, &start, &blocks))
 			continue;
 		for (position = 0; position < unique; ++position) {
 			if (starts[position] == start || starts[position] > start)
@@ -4511,7 +4520,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	list_for_each_entry(entry, local, list) {
 		if (seen++ >= prefix)
 			break;
-		if (!swapz_parallel_read_extent(ctx, entry->bio, &start, &blocks))
+		if (!swapz_parallel_read_extent_mapped(ctx, entry->bio, &start, &blocks))
 			continue;
 		for (slot_index = 0; slot_index < chain_count; ++slot_index)
 			if (chain_starts[slot_index] == start &&
