@@ -36,7 +36,7 @@ def body(symbol: str) -> str:
 
 
 def source_body(symbol: str, source: str) -> str:
-    match = re.search(r"(?:static\s+)?(?:int|void|swapz_u16|swapz_u32)\s+" + re.escape(symbol) +
+    match = re.search(r"(?:static\s+)?(?:int|void|swapz_u8|swapz_u16|swapz_u32)\s+" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", source, re.S)
     if not match:
         raise AssertionError(f"Missing source symbol {symbol}")
@@ -503,7 +503,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("struct swapz_read_metadata_tag", header)
         self.assertIn("read_metadata_tags[SWAPZ_READ_METADATA_CACHE_ENTRIES]", header)
         self.assertIn("__attribute__((aligned(64)))", header)
-        self.assertIn("tag->epoch == engine->read_metadata_epoch", set_lookup)
+        self.assertIn("epoch = engine->read_metadata_epoch", set_lookup)
+        self.assertIn("tag = &tags[slot]", set_lookup)
+        self.assertIn("tag->epoch == epoch", set_lookup)
         self.assertIn("tag->age < oldest_age", lru_commit)
         self.assertIn("engine->read_metadata_cache +", engine)
         self.assertNotIn("read_metadata_lru_valid", engine)
@@ -2280,7 +2282,8 @@ static swapz_u16 swapz_probe_set(
             self.assertIn(fence, independent)
         self.assertIn("ctx->authority.batch_pending && !inflight_active", independent)
         run_fence = body("swapz_inflight_run_touches_logical")
-        self.assertIn("ctx->authority.batch_pending != pending", run_fence)
+        self.assertIn(
+            "ctx->authority.batch_pending != run->extent_count", run_fence)
         self.assertIn("struct swapz_inflight_write *inflight = &ctx->inflight_write",
                       run_fence)
         self.assertNotIn("slot_index", run_fence)
