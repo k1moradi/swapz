@@ -704,23 +704,35 @@ exercise this workqueue lifecycle; loaded suspend/teardown remains required.
 Low-depth asynchronous-preparation qualification must prove the idle producer
 gate in source: four unclaimed tails are required for an idle tail-credit wake,
 the pre-head wave starter requires five total queued preparations, and an idle
-producer tail claim requires two queued descriptors. Active lower WRITE **or
-READ** overlap is exempt and may wake on one queued descriptor because the
-ordered owner is blocked in lower-device service. Status must distinguish
-preparation started/elapsed during lower WRITE from lower READ overlap so mixed
-traffic can prove that the new opportunity is actually exercised. Owner
-evidence must re-run the existing persistent-worker QD1/4/8/32 matrix; the candidate is rejected if QD8/QD32 loses its confirmed advantage or
-if QD1/QD4 still pay material producer-wakeup cost.
+producer tail claim requires two queued descriptors. Active lower WRITE overlap
+alone may wake on one queued descriptor because the ordered owner is blocked in
+lower-device service. Lower READ service must not wake or switch the producer
+to head-first claiming. The compatibility status fields
+`prep_lower_read_overlap_starts` and `prep_lower_read_overlap_ns` must remain
+parseable and exactly zero. Owner evidence must re-run the existing
+persistent-worker QD1/4/8/32 matrix; reject the candidate if QD8/QD32 loses its
+confirmed async advantage or if QD1/QD4 pay material producer-wakeup cost.
 
 The retired dry-close timer answered its bounded scheduling question and is no
 longer production telemetry. The active starvation probe is observational:
 `preparation_queued` counts unclaimed preparation descriptors exactly under
 `queue_lock`; every synchronous lower WRITE records queue depth and whether it
 is nonempty immediately before `dm_io()` and immediately after it returns.
-The lower-WRITE queue probe itself must not grant credits. Lower-READ overlap
-may wake the existing single preparation lane but must not increase preparation
-width, publish authority, submit WRITE I/O, extend retention, or alter upper
-completion ownership.
+The lower-WRITE queue probe itself must not grant credits. Lower READs may use
+bounded read fan-out/coalescing and may contribute ordinary ordered-service tail
+credit, but they must not directly wake the preparation lane, publish authority,
+submit WRITE I/O, extend retention, or alter upper completion ownership.
+
+Native `window-policy` coverage must prove that an admission-site close at the
+initial four-record burst floor is rejected when only the first pack is known,
+and becomes eligible only after a complete second pack or an explicit sampled
+tail. Loaded qualification must then compare fast mixed async versus sync: the
+candidate must remove the prior statistically significant excess lower-WRITE
+request count without materially regressing useful WRITE/READ throughput or
+p99. The same run must retain the established fast write-only QD8/QD32 async
+benefit. These scheduling rules are architecture-neutral; every supported host
+continues to use the single public `make test` command and its existing
+architecture-specific SIMD qualification.
 
 Live-GC distribution attribution increments a per-segment eviction counter only
 after a successful committed victim rotation. Loaded qualification reports the

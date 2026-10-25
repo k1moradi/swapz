@@ -167,7 +167,6 @@ struct swapz_preparation_lane {
 	struct swapz_delta64_stats delta64;
 	u64 lz4_wall_ns;
 	u64 lower_write_overlap_ns;
-	u64 lower_read_overlap_ns;
 	u64 copy_wall_ns;
 	u64 copy_bytes;
 	u64 direct_lz4_pages;
@@ -176,7 +175,6 @@ struct swapz_preparation_lane {
 	u64 worker_wall_ns;
 	u64 worker_cpu_ns;
 	u64 prepared_during_lower_write;
-	u64 prepared_during_lower_read;
 	u64 prepared_pages;
 };
 
@@ -184,7 +182,6 @@ struct swapz_preparation_totals {
 	struct swapz_delta64_stats delta64;
 	u64 lz4_wall_ns;
 	u64 lower_write_overlap_ns;
-	u64 lower_read_overlap_ns;
 	u64 copy_wall_ns;
 	u64 copy_bytes;
 	u64 direct_lz4_pages;
@@ -193,7 +190,6 @@ struct swapz_preparation_totals {
 	u64 worker_wall_ns;
 	u64 worker_cpu_ns;
 	u64 prepared_during_lower_write;
-	u64 prepared_during_lower_read;
 	u64 prepared_pages;
 };
 
@@ -336,10 +332,6 @@ struct swapz_dm {
 	/* Each producer lane owns input/predictor/LZ4 scratch and diagnostics.
 	 * The ordered worker remains the sole planner/publisher/ACK owner. */
 	atomic_t lower_write_active;
-	/* Count active lower READ service while the ordered worker cannot consume
-	 * preparation_incoming. Producers may prepare only immutable WRITE input;
-	 * they still never publish mappings or complete upper BIOs. */
-	atomic_t lower_read_active;
 	atomic_t preparation_workers_active;
 	atomic_t preparation_workers_active_max;
 	/*
@@ -779,7 +771,6 @@ static void swapz_preparation_totals_snapshot(
 		swapz_delta64_stats_add(&total->delta64, &lane->delta64);
 		total->lz4_wall_ns += READ_ONCE(lane->lz4_wall_ns);
 		total->lower_write_overlap_ns += READ_ONCE(lane->lower_write_overlap_ns);
-		total->lower_read_overlap_ns += READ_ONCE(lane->lower_read_overlap_ns);
 		total->copy_wall_ns += READ_ONCE(lane->copy_wall_ns);
 		total->copy_bytes += READ_ONCE(lane->copy_bytes);
 		total->direct_lz4_pages += READ_ONCE(lane->direct_lz4_pages);
@@ -789,8 +780,6 @@ static void swapz_preparation_totals_snapshot(
 		total->worker_cpu_ns += READ_ONCE(lane->worker_cpu_ns);
 		total->prepared_during_lower_write +=
 			READ_ONCE(lane->prepared_during_lower_write);
-		total->prepared_during_lower_read +=
-			READ_ONCE(lane->prepared_during_lower_read);
 		total->prepared_pages += READ_ONCE(lane->prepared_pages);
 	}
 }
@@ -943,28 +932,6 @@ static void swapz_queue_preparation_workers(struct swapz_dm *ctx)
 	for (lane = 0; lane < ctx->preparation_worker_count; ++lane)
 		queue_work(ctx->preparation_workqueue,
 			   &ctx->preparation_lanes[lane].work);
-}
-
-/*
- * A lower READ is useful preparation overlap just like a detached lower WRITE:
- * the ordered owner cannot consume preparation_incoming while it waits for the
- * device, but the producer may safely compress immutable queued WRITE input.
- * Keep this as an exact nested count so map-time arrivals can wake the producer
- * throughout a multi-request READ batch.
- */
-static void swapz_lower_read_overlap_begin(struct swapz_dm *ctx)
-{
-	if (!ctx->async_prepare)
-		return;
-	atomic_inc(&ctx->lower_read_active);
-	if (READ_ONCE(ctx->preparation_queued))
-		swapz_queue_preparation_workers(ctx);
-}
-
-static void swapz_lower_read_overlap_end(struct swapz_dm *ctx)
-{
-	if (ctx->async_prepare)
-		atomic_dec(&ctx->lower_read_active);
 }
 
 static bool swapz_has_inflight(const struct swapz_dm *ctx)
@@ -1334,8 +1301,6 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 			swapz_queue_preparation_workers(ctx);
 		spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
 	}
-	if (op == REQ_OP_READ)
-		swapz_lower_read_overlap_begin(ctx);
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
 	if (op == REQ_OP_WRITE) {
 		unsigned long irq_flags;
@@ -1346,8 +1311,6 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 			ctx->prep_lower_write_end_nonempty++;
 		atomic_set(&ctx->lower_write_active, 0);
 		spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
-	} else if (op == REQ_OP_READ) {
-		swapz_lower_read_overlap_end(ctx);
 	}
 	elapsed_ns = swapz_elapsed_ns(section_start, ktime_get_ns());
 	if (op == REQ_OP_READ)
@@ -1552,9 +1515,7 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	slot->lower_read_submitted_bytes += (u64)blocks * SWAPZ_BLOCK_BYTES;
 	slot->lower_read_submitted_reqs++;
 	start_ns = ktime_get_ns();
-	swapz_lower_read_overlap_begin(ctx);
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
-	swapz_lower_read_overlap_end(ctx);
 	elapsed_ns = swapz_elapsed_ns(start_ns, ktime_get_ns());
 	slot->lower_read_wall_ns += elapsed_ns;
 	if (error || bitmap)
@@ -2002,7 +1963,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 		u64 section_start;
 		bool tail_claim = false;
 		bool lower_write_overlap;
-		bool lower_read_overlap;
 		u64 elapsed_ns;
 		int error;
 		int slot;
@@ -2020,13 +1980,13 @@ static void swapz_preparation_worker(struct work_struct *work)
 			goto out;
 		}
 		/*
-		 * Active lower I/O is a head-first overlap signal. A lower READ is
-		 * equally useful: the ordered owner is blocked in device service and
-		 * cannot steal from preparation_incoming. When no lower I/O is active,
+		 * Only active lower WRITE service is a head-first overlap signal.
+		 * Lower READs deliberately do not drain the queued WRITE head: on
+		 * mixed traffic that can outrun replenishment and fragment retained
+		 * windows before accepted followers arrive. Outside lower WRITE I/O,
 		 * retain the one-credit tail policy and one unclaimed FIFO head.
 		 */
-		if (atomic_read(&ctx->lower_write_active) ||
-		    atomic_read(&ctx->lower_read_active)) {
+		if (atomic_read(&ctx->lower_write_active)) {
 			atomic_set(&ctx->preparation_tail_credit, 0);
 			entry = list_first_entry(&ctx->preparation_incoming,
 						 struct swapz_bio_ref,
@@ -2067,7 +2027,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 				complete(&entry->preparation_finished);
 				if (tail_claim &&
 				    !atomic_read(&ctx->lower_write_active) &&
-				    !atomic_read(&ctx->lower_read_active) &&
 				    !atomic_read(&ctx->preparation_tail_credit))
 					goto out;
 				continue;
@@ -2075,13 +2034,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 			input = lane->input_page;
 		}
 		lower_write_overlap = atomic_read(&ctx->lower_write_active);
-		lower_read_overlap = atomic_read(&ctx->lower_read_active);
 		if (lower_write_overlap)
 			lane->prepared_during_lower_write++;
-		if (lower_read_overlap)
-			lane->prepared_during_lower_read++;
-		section_start = (lower_write_overlap || lower_read_overlap) ?
-			ktime_get_ns() : 0;
+		section_start = lower_write_overlap ? ktime_get_ns() : 0;
 		prepared->length = swapz_compress_page(
 			ctx, input, prepared->bytes, lane->predictor_page,
 			lane->delta64_candidate_page, lane->lz4_workmem,
@@ -2093,8 +2048,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 			elapsed_ns = swapz_elapsed_ns(section_start, now_ns);
 			if (lower_write_overlap && atomic_read(&ctx->lower_write_active))
 				lane->lower_write_overlap_ns += elapsed_ns;
-			if (lower_read_overlap && atomic_read(&ctx->lower_read_active))
-				lane->lower_read_overlap_ns += elapsed_ns;
 			section_start = now_ns;
 		}
 		prepared->payload_crc32c_valid = false;
@@ -2118,7 +2071,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 		entry->preparation_error = 0;
 		complete(&entry->preparation_finished);
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
-		    !atomic_read(&ctx->lower_read_active) &&
 		    !atomic_read(&ctx->preparation_tail_credit))
 			goto out;
 	}
@@ -3496,8 +3448,8 @@ static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
 {
 	if (ctx->retained_single_tail_deferred && ctx->batch_count == 1U)
 		return false;
-	return swapz_window_burst_close_ready(
-		ctx->single_pack_deferred, 0,
+	return swapz_window_admission_burst_close_ready(
+		ctx->single_pack_deferred, ctx->accepted_burst_pack_ready,
 		ctx->batch_count, ctx->retained_burst_target,
 		ctx->retained_tail_target);
 }
@@ -4418,7 +4370,6 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 		atomic_set(&ctx->preparation_tail_credit, 0);
 	retained_bypass = (ctx->batch_count || skipped_write_count) && ctx->retain_ms;
 	read_start_ns = ktime_get_ns();
-	swapz_lower_read_overlap_begin(ctx);
 
 	/* Submit every independent missing range before joining any slot. */
 	for (slot_index = 0; slot_index < slot_count; ++slot_index) {
@@ -4444,7 +4395,6 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 		if (error && !batch_error)
 			batch_error = error;
 	}
-	swapz_lower_read_overlap_end(ctx);
 	if (!batch_error)
 		ctx->parallel_read_async_batches++;
 
@@ -5146,7 +5096,6 @@ static void swapz_worker(struct work_struct *work)
 					atomic_set(&ctx->preparation_tail_credit, 1);
 					if (!list_empty(&ctx->preparation_incoming) &&
 					    (atomic_read(&ctx->lower_write_active) ||
-					     atomic_read(&ctx->lower_read_active) ||
 					     ctx->preparation_queued >=
 						SWAPZ_PREPARATION_TAIL_WAKE_MIN))
 						swapz_queue_preparation_workers(ctx);
@@ -5542,15 +5491,14 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		 * A cold lone head belongs to the ordered worker first. A retained
 		 * inline WRITE may leave one earned tail token alive after that worker
 		 * goes idle; the next admitted companion can therefore wake the
-		 * producer without reading worker-owned batch_count. Real lower
-		 * READ or WRITE service remains the independent head-first overlap
-		 * signal.
+		 * producer without reading worker-owned batch_count. Real lower WRITE
+		 * service remains the independent head-first overlap signal; lower
+		 * READ service is intentionally not a producer trigger.
 		 */
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);
 		ctx->preparation_queued++;
 		if (atomic_read(&ctx->lower_write_active) ||
-		    atomic_read(&ctx->lower_read_active) ||
 		    (atomic_read(&ctx->preparation_tail_credit) &&
 		     ctx->preparation_queued >= SWAPZ_PREPARATION_TAIL_WAKE_MIN))
 			swapz_queue_preparation_workers(ctx);
@@ -5839,7 +5787,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	atomic64_set(&ctx->preparation_free_mask,
 		     (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic_set(&ctx->lower_write_active, 0);
-	atomic_set(&ctx->lower_read_active, 0);
 	atomic_set(&ctx->preparation_workers_active, 0);
 	atomic_set(&ctx->preparation_workers_active_max, 0);
 	atomic_set(&ctx->preparation_tail_credit, 0);
@@ -6593,8 +6540,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       0ULL, 0U,
 		       prep.prepared_during_lower_write,
 		       prep.lower_write_overlap_ns,
-		       prep.prepared_during_lower_read,
-		       prep.lower_read_overlap_ns,
+		       0ULL, 0ULL,
 		       ctx->preparation_wave_kicks,
 		       ctx->prep_lower_write_samples,
 		       ctx->prep_lower_write_start_queued,

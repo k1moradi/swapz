@@ -193,6 +193,26 @@ static inline int swapz_window_burst_close_ready(
 }
 
 /*
+ * Admission happens before the worker-tail queue splice. At the initial
+ * four-record learned floor, a first pack alone is not enough evidence to
+ * close: require either a complete second pack already accepted or an explicit
+ * post-PACK sampled tail. Larger learned targets retain the existing finite
+ * accepted-work rule.
+ */
+static inline int swapz_window_admission_burst_close_ready(
+		int first_pack_seen, int accepted_pack_ready, swapz_u8 count,
+		swapz_u8 learned_target, swapz_u8 admitted_tail_target)
+{
+	if (!admitted_tail_target && !accepted_pack_ready &&
+	    learned_target <= 4U)
+		return 0;
+	return swapz_window_burst_close_ready(
+		first_pack_seen, 0, count, learned_target,
+		admitted_tail_target);
+}
+
+
+/*
  * Equal-length accepted compressed records retain their exact input order
  * under the production greedy ordering: largest is always the earliest
  * remaining record and, when a 4KiB complement exists, the chosen partner

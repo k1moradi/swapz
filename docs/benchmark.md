@@ -508,6 +508,41 @@ while `engine_pack_wall_ns` and
 `engine_publish_wall_ns - engine_publish_crc_wall_ns` are the primary
 attribution metrics for the expected gain.
 
+
+The mixed-I/O scheduling follow-up uses owner report `aa5237c` / tested source
+`329a10c` as its pre-change loaded baseline. Fast mixed async versus sync
+recorded 7,248 lower-READ preparation starts, +319.8 lower-WRITE requests
+(95% CI +109.5..+530.1), +232.2 burst-target closes (+182.3..+282.1), and a
+-8.6% useful-WRITE mean whose confidence interval crossed zero. The candidate
+removes lower-READ producer wake/head claiming and prevents an admission-side
+close at the initial four-record learned floor until a complete second pack or
+an explicit sampled tail exists. Compatibility lower-READ preparation tokens
+remain in status/report schemas but must be exactly zero.
+
+Promotion is loaded and product-facing: fast mixed lower-WRITE request
+fragmentation must materially improve without a useful WRITE/READ or p99 loss,
+and the established fast write-only QD8/QD32 async-over-sync gains must remain.
+Lower bytes/requests, byte-exact reconstruction, host CPU/PSI and window
+geometry remain mandatory. Internal wake/close counters explain the result but
+cannot promote it by themselves. Because current main also contains the
+structural ID73 proof-reuse changes after `329a10c`, a successor owner run
+measures the combined product delta unless `b6ed68c` is separately qualified
+on the same host; do not attribute a combined throughput change solely to one
+mechanism.
+
+Configured modern-storage caps remain service-model inputs, not proof that the
+host attained that media class. Compare each swapz row to its same-run raw
+control and report attained raw throughput/queue depth. A host whose RAM/CPU
+cannot drive a configured Gen4/Gen5 cap may still provide low-latency/deep-queue
+stress evidence, but not a physical Gen4/Gen5 throughput claim.
+
+The prepared-buffer copy-elision idea remains a separate ownership experiment.
+Do not keep producer slots live across a packed lower WRITE merely to avoid the
+`prepared_page -> batch_bytes` copy without first proving bounded producer
+capacity, suspend/drain safety, immutable lower-run lifetime and no completion
+ownership cycle. Final publication payload CRC remains a settled integrity
+boundary and is not part of that experiment.
+
 Delta64 rescue remains default-off despite the qualified positive-fixture A/B;
 representative swap content is the remaining promotion gate. Production
 ordinary LZ4 is fixed at acceleration one, delta64 preparation at one producer

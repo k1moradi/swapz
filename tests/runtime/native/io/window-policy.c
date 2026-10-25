@@ -225,6 +225,17 @@ static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 	return 0;
 }
 
+
+static int test_admission_burst_close_requires_serviced_pack_or_tail(void)
+{
+	CHECK(!swapz_window_admission_burst_close_ready(1, 0, 4, 4, 0));
+	CHECK(swapz_window_admission_burst_close_ready(1, 1, 4, 4, 0));
+	CHECK(swapz_window_admission_burst_close_ready(0, 0, 2, 4, 2));
+	CHECK(!swapz_window_admission_burst_close_ready(1, 0, 7, 8, 0));
+	CHECK(swapz_window_admission_burst_close_ready(1, 0, 8, 8, 0));
+	return 0;
+}
+
 static int test_uniform_compressed_identity_sort_safety(void)
 {
 	struct swapz_pending_bio batch[SWAPZ_MAX_RECORDS] = { 0 };
@@ -393,6 +404,7 @@ int main(void)
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
+	CHECK(test_admission_burst_close_requires_serviced_pack_or_tail() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_ordinary_retention_deadline_is_pinned() == 0); passed++;

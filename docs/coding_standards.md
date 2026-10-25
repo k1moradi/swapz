@@ -444,14 +444,15 @@ preparation entry from the head. The asynchronous producer is pure preparation:
 it never publishes mappings, submits lower I/O, changes ordering, or completes
 upper BIOs.
 
-When lower WRITE **or READ** I/O is active, the producer prepares from the
-head because the ordered worker is blocked in device service and cannot steal
-from `preparation_incoming`. READ overlap changes no authority: the producer
-still only snapshots/compresses immutable queued WRITE input and the ordered
-worker remains the sole planner/publisher/completion owner. Outside active
-lower I/O, tail preparation is credit-limited: each ordered inline WRITE may
-leave at most one unconsumed tail token. The token is earned
-only after the ordered worker atomically reserves its own FIFO head.
+When lower WRITE I/O is active, the producer prepares from the head because the
+ordered worker is blocked in device service and cannot steal from
+`preparation_incoming`. Lower READ service is deliberately not a producer wake
+or head-claim signal: the qualified mixed-I/O evidence showed that rapidly
+preparing the small interleaved WRITE queue can outrun accepted-work
+replenishment and fragment retained windows. Outside active lower WRITE I/O,
+tail preparation is credit-limited: each ordered inline WRITE may leave at most
+one unconsumed tail token. The token is earned only after the ordered worker
+atomically reserves its own FIFO head.
 
 For a retained window, an earned `preparation_tail_credit` may survive the end
 of that individual `swapz_process()` call. This bridges the admission gap
@@ -472,16 +473,17 @@ when no eligible credited tail remains. A nonempty window close clears any
 unused token.
 
 A cold lone head has no token and therefore does not wake the producer.
-`->map` may wake parallel preparation for active lower WRITE or READ service,
-or for an already-earned atomic tail credit. The lower-READ signal is a nested
-atomic count covering only real lower-read service; it must be balanced on
-every synchronous and bounded fan-out path so teardown can never inherit a
-false overlap state. It must not pre-screen that credit using
+`->map` may wake parallel preparation for active lower WRITE service or for an
+already-earned atomic tail credit. Lower READ service must not switch the
+producer to head-first claiming. The legacy
+`prep_lower_read_overlap_starts`/`prep_lower_read_overlap_ns` status tokens stay
+present and fixed at zero so `make test` report parsing remains stable across
+qualified sources. Wake decisions must not pre-screen a credit using
 instantaneous preparation-list topology, read worker-private `batch_count`, or
 depend on the instantaneous `ordered_worker_busy` interval. The producer
 rechecks list shape under the same `queue_lock` before consuming the token.
-READ/barrier execution may still grant one bounded token while it owns ordered
-service time.
+READ/barrier execution may still grant one bounded tail token while it owns
+ordered service time.
 
 The ordered Device Mapper worker and LZ4 preparation worker both use
 serialized `WQ_MEM_RECLAIM | WQ_UNBOUND` workqueues. The CPU-local preparation
@@ -496,6 +498,13 @@ copies are timed and byte-counted separately from LZ4. Engine write/read
 processing also records wall time with synchronous lower-I/O wait subtracted.
 Do not infer copy/CRC/packing cost from userspace elapsed time, and do not add
 overlapping wall counters together.
+
+Admission-side PACK_READY closure is allowed only from finite accepted evidence.
+At the initial four-record learned burst floor, a first pack alone may not close
+inside `swapz_accept_write()`: require either `accepted_burst_pack_ready` (a
+complete second pack) or an explicit `retained_tail_target`. Larger learned
+targets keep their existing finite-work rule. Service-proven dry closure remains
+a worker-tail decision after local and incoming queues have been refreshed.
 
 For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
 with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan
