@@ -149,6 +149,35 @@ static inline swapz_u8 swapz_window_grow_burst_target(
 		current_target = (swapz_u8)observed;
 	return current_target;
 }
+/*
+ * A prefix already staged in batch[] when K=1 finishes was admitted before
+ * the older upper BIOs were released. It is stable evidence of the same burst
+ * width, but cannot by itself prove that the burst ended: those just-completed
+ * writers may immediately submit their next BIOs.
+ *
+ * Queued local/incoming work ends that completion gap. When a staged prefix
+ * exists, learn from the staged prefix and let the learned target govern the
+ * next close. Without a staged prefix, preserve the original queued-tail
+ * semantics.
+ */
+static inline swapz_u8 swapz_window_post_pack_learning_tail(
+		swapz_u8 staged_tail, swapz_u8 queued_tail)
+{
+	return staged_tail ? staged_tail : queued_tail;
+}
+
+static inline swapz_u8 swapz_window_post_pack_close_target(
+		swapz_u8 staged_tail, swapz_u8 queued_tail)
+{
+	return staged_tail ? 0U : queued_tail;
+}
+
+static inline int swapz_window_post_pack_sample_ready(
+		swapz_u8 staged_tail, swapz_u8 queued_tail)
+{
+	return !staged_tail || queued_tail;
+}
+
 static inline swapz_u8 swapz_window_shrink_burst_target(
 		swapz_u8 current_target, swapz_u8 observed)
 {

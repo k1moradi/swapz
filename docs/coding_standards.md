@@ -517,14 +517,16 @@ If a ready window was held back only because the immutable K=1 lower WRITE was
 still pending, the completion wake must finalize that run and deliver its upper
 BIO completions before consuming the next accepted FIFO. A pending post-PACK
 sample must survive every interim worker pass while K=1 is in flight. Once
-finalized, its tail is the bounded accepted prefix already collected in
-`batch[]` plus the plain retained-WRITE prefix in worker-local and `incoming`
-queues, sampled under `queue_lock` before those followers are consumed.
-PACK_READY is then re-evaluated before arming the ordinary retention timer. The
-dry-FIFO decision is made under `queue_lock`; BIOs admitted after that decision
-belong to the next wave. This is finite accepted-work scheduling, not a grace
-wait, device-latency heuristic, or change to the authoritative retention
-deadline.
+finalized, sampling distinguishes records already staged in `batch[]` before
+completion from plain retained-WRITE followers still queued in worker-local or
+`incoming` state. A staged prefix is burst-width evidence but is not by itself
+a terminal tail: the just-completed upper BIOs have only then been released and
+may immediately resubmit. While such a staged-only sample is unresolved, it
+must not authorize PACK_READY. Queued accepted followers resolve that completion
+gap; learning uses the staged prefix when present, while a sampled close target
+is used only when no staged prefix exists. If no follower arrives, the ordinary
+absolute retention deadline remains authoritative. This adds no grace wait,
+device-latency heuristic, K>1 slot or timeout scaling.
 
 For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
 with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan

@@ -539,6 +539,18 @@ envelope must be judged against its same-run raw control. The ordinary
 retention deadline, K=1 lower-WRITE slot, one preparation lane, ID63 policy and
 SWZ 1/2/4 extent classes remain fixed.
 
+The subsequent owner run on source `443c1e2` is partial because ID36 later
+timed out, but its already-completed sustained-QD rows falsify the narrower
+four-record-only diagnosis. Fast QD8 still reports learned target 22, 317.6
+3-4-record windows, 47.8 deadline closes and async/sync -1.2% (95% CI
+-4.9..+2.6); serial QD8 reaches target 37. The remaining defect is the
+completion gap itself: `batch[]` records staged before K=1 completion must
+contribute to learned burst width without being reinterpreted as an immediately
+closeable terminal tail before the completed writers can resubmit. The current
+fix therefore separates staged and queued followers and blocks PACK_READY while
+a staged-only post-K1 sample remains unresolved. This uses only the existing
+absolute retention deadline and does not introduce a future-arrival grace wait.
+
 Configured modern-storage caps remain service-model inputs, not proof that the
 host attained that media class. Compare each swapz row to its same-run raw
 control and report attained raw throughput/queue depth. A host whose RAM/CPU

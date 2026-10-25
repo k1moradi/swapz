@@ -3329,10 +3329,13 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 					  struct list_head *local)
 {
 	struct swapz_bio_ref *entry;
-	swapz_u8 tail = 0;
+	swapz_u8 staged_tail = 0;
+	swapz_u8 queued_tail = 0;
+	swapz_u8 learning_tail;
+	swapz_u8 close_target;
+	swapz_u8 tail;
 	swapz_u8 room;
 	bool prefix_open = true;
-	bool inflight;
 
 	/*
 	 * Sample only after a real PACK_READY lower write. Sampling before the
@@ -3346,24 +3349,25 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	 * its lower run is finalized and its upper BIO completions are delivered.
 	 * Preserve the sample across interim worker passes.
 	 */
-	inflight = swapz_has_inflight(ctx);
-	if (inflight)
+	if (swapz_has_inflight(ctx))
 		return;
 	room = ctx->retained_chain_completed < ctx->max_window ?
 		ctx->max_window - ctx->retained_chain_completed : 0;
 	/*
-	 * Async detachment lets the ordered worker admit followers into batch[]
-	 * while the older lower run is in flight. Those already-accepted records
-	 * are part of the post-PACK tail just like local/incoming followers.
+	 * Followers already in batch[] were admitted while the older K=1 run was
+	 * still in flight. They are stable evidence of the same burst width, but
+	 * not by themselves proof of a terminal tail: bio_endio() has only just
+	 * released the older writers, which may immediately submit again.
 	 */
 	if (ctx->batch_count && room) {
-		tail = min_t(swapz_u8, ctx->batch_count, room);
-		room -= tail;
+		staged_tail = min_t(swapz_u8, ctx->batch_count, room);
+		room -= staged_tail;
 	}
 	/*
-	 * local is older than incoming. Count the complete already-admitted FIFO
-	 * prefix in that order so asynchronous preparation cannot hide residual
-	 * burst width merely because the worker spliced it out of incoming.
+	 * local is older than incoming. Count the complete plain-WRITE prefix in
+	 * that order. These queued followers prove that the post-completion
+	 * admission gap has ended; they are intentionally kept distinct from the
+	 * pre-completion batch[] prefix.
 	 */
 	if (local) {
 		list_for_each_entry(entry, local, list) {
@@ -3373,7 +3377,7 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 				prefix_open = false;
 				break;
 			}
-			tail++;
+			queued_tail++;
 			room--;
 		}
 	}
@@ -3381,27 +3385,32 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 		list_for_each_entry(entry, &ctx->incoming, list) {
 			if (!room || !swapz_plain_retained_write(entry->bio))
 				break;
-			tail++;
+			queued_tail++;
 			room--;
 		}
 	}
+	/*
+	 * A staged-only prefix is the completion gap that previously made QD8
+	 * self-close at a partial batch and grow an impossible learned target.
+	 * Keep the sample pending until accepted queued work appears. The existing
+	 * absolute retention deadline remains the only bound; no grace is added.
+	 */
+	if (!swapz_window_post_pack_sample_ready(staged_tail, queued_tail))
+		return;
+
+	tail = staged_tail + queued_tail;
+	learning_tail = swapz_window_post_pack_learning_tail(
+		staged_tail, queued_tail);
+	close_target = swapz_window_post_pack_close_target(
+		staged_tail, queued_tail);
 	ctx->pack_tail_samples++;
-	if (!tail) {
-		/*
-		 * A zero tail while detached K=1 is incomplete returned above, so
-		 * every counted zero is completion-aware idle evidence.
-		 */
+	if (!tail)
 		ctx->pack_tail_zero_idle++;
-	} else if (tail == 1U) {
-		if (inflight)
-			ctx->pack_tail_one_inflight++;
-		else
-			ctx->pack_tail_one_idle++;
-	} else if (inflight) {
-		ctx->pack_tail_many_inflight++;
-	} else {
+	else if (tail == 1U)
+		ctx->pack_tail_one_idle++;
+	else
 		ctx->pack_tail_many_idle++;
-	}
+
 	/* A later sample supersedes any still-open deferred singleton. Account
 	 * that old lifecycle before starting a new one so cumulative counters
 	 * conserve exactly at quiescent boundaries. */
@@ -3415,7 +3424,7 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 
 		ctx->retained_burst_target = swapz_window_grow_burst_target(
 			ctx->retained_burst_target, ctx->retained_chain_completed,
-			tail, ctx->max_window);
+			learning_tail, ctx->max_window);
 		if (ctx->retained_burst_target != old_target)
 			ctx->burst_target_grows++;
 		if (tail == 1U) {
@@ -3426,7 +3435,7 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			ctx->single_tail_read_bypass_seen = false;
 			ctx->retained_single_tail_deferred = true;
 		} else {
-			ctx->retained_tail_target = tail;
+			ctx->retained_tail_target = close_target;
 		}
 	} else {
 		ctx->retained_chain_completed = 0;
@@ -3462,6 +3471,13 @@ static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
 {
 	bool service_proven_dry_pack;
 
+	/*
+	 * A staged-only post-K1 prefix is not a proven terminal tail. Accepted
+	 * followers may resolve the pending sample; otherwise only the existing
+	 * absolute retention deadline may close the partial batch.
+	 */
+	if (ctx->pack_close_pending_tail_sample)
+		return false;
 	if (ctx->retained_single_tail_deferred && ctx->batch_count == 1U)
 		return false;
 	service_proven_dry_pack = swapz_service_proven_dry_pack(ctx);

@@ -545,9 +545,16 @@ PACK_READY. Source contracts must remove the retired admission-close helper
 rather than preserve it as a compatibility alias. A detached PACK_READY sample
 must remain pending while K=1 is in flight; quiescent-state reset is legal only
 when both the retained batch and in-flight run are empty. After K=1 completion,
-the worker must sample before consuming the next FIFO and count
-`batch_count + local + incoming` within the remaining 64-record room. First-pack
-source coverage must permit only the selective two-record/one-block and
+the worker must sample before consuming the next FIFO and distinguish the
+already-staged `batch_count` prefix from queued `local + incoming` followers
+within the remaining 64-record room. A staged-only prefix must leave the sample
+pending and suppress PACK_READY until queued accepted work resolves the
+completion gap or the existing absolute deadline closes the batch. When staged
+and queued work coexist, burst learning uses the staged prefix and does not
+install a smaller sampled-tail close target; without staged work, the queued
+tail keeps the prior semantics. Native tests must cover staged-only 2+0,
+staged-plus-queued 2+6 and queued-only 0+6 cases. First-pack source coverage
+must permit only the selective two-record/one-block and
 three-record/two-block cases and must reject any `count == 4U` first-pack
 branch. Native window-policy tests must prove that four 3000-byte compressed
 records remain ineligible as a first pack even though they fit the existing

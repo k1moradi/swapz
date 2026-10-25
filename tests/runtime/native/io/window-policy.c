@@ -222,6 +222,20 @@ static int test_retained_burst_target_adapts_from_finite_evidence(void)
 	CHECK(swapz_window_shrink_burst_target(4, 1) == 4);
 	return 0;
 }
+static int test_post_pack_staged_tail_does_not_self_close(void)
+{
+	CHECK(!swapz_window_post_pack_sample_ready(2, 0));
+	CHECK(swapz_window_post_pack_sample_ready(2, 1));
+	CHECK(swapz_window_post_pack_sample_ready(0, 0));
+	CHECK(swapz_window_post_pack_learning_tail(2, 0) == 2);
+	CHECK(swapz_window_post_pack_learning_tail(2, 6) == 2);
+	CHECK(swapz_window_post_pack_learning_tail(0, 6) == 6);
+	CHECK(swapz_window_post_pack_close_target(2, 0) == 0);
+	CHECK(swapz_window_post_pack_close_target(2, 6) == 0);
+	CHECK(swapz_window_post_pack_close_target(0, 6) == 6);
+	return 0;
+}
+
 static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 {
 	CHECK(!swapz_window_burst_close_ready(0, 0, 3, 4, 0));
@@ -408,6 +422,7 @@ int main(void)
 	CHECK(test_pack_ready_small_and_medium_exact_geometry() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
+	CHECK(test_post_pack_staged_tail_does_not_self_close() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;

@@ -1194,9 +1194,14 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("inflight = swapz_has_inflight(ctx)", sample)
         self.assertLess(sample.index("if (inflight)"),
                         sample.index("room = ctx->retained_chain_completed"))
-        self.assertIn("tail = min_t(swapz_u8, ctx->batch_count, room)", sample)
-        self.assertLess(sample.index("tail = min_t(swapz_u8, ctx->batch_count, room)"),
+        self.assertIn("staged_tail = min_t(swapz_u8, ctx->batch_count, room)", sample)
+        self.assertLess(sample.index("staged_tail = min_t(swapz_u8, ctx->batch_count, room)"),
                         sample.index("list_for_each_entry(entry, local, list)"))
+        self.assertIn("queued_tail++", sample)
+        self.assertIn("swapz_window_post_pack_sample_ready(staged_tail, queued_tail)",
+                      sample)
+        self.assertIn("swapz_window_post_pack_learning_tail(", sample)
+        self.assertIn("swapz_window_post_pack_close_target(", sample)
         self.assertNotIn("base_completed", sample)
         self.assertIn("if (tail == 1U)", sample)
         self.assertIn("ctx->retained_tail_target = 0", sample)
@@ -1228,6 +1233,9 @@ static swapz_u16 swapz_probe_set(
         close_ready = body("swapz_retained_pack_close_ready")
         service_dry = body("swapz_service_proven_dry_pack")
         self.assertNotIn("swapz_retained_target_close_ready", DM)
+        self.assertIn("if (ctx->pack_close_pending_tail_sample)", close_ready)
+        self.assertLess(close_ready.index("if (ctx->pack_close_pending_tail_sample)"),
+                        close_ready.index("swapz_service_proven_dry_pack(ctx)"))
         self.assertIn("ctx->retained_single_tail_deferred && ctx->batch_count == 1U",
                       close_ready)
         self.assertIn("swapz_service_proven_dry_pack(ctx)", close_ready)
