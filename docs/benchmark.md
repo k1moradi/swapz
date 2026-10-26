@@ -673,7 +673,7 @@ designed to convert part of that deadline/scheduler gap into immediate
 eight-record lower service. Because deadline-reaching age is not pure idle time,
 do not predict an exact speedup from count*2ms. If roughly one-half to
 three-quarters of the previously deadline-reaching age proves removable idle
-time, the fixed-trace arithmetic corresponds to roughly 1.3--2.0x current
+time, the fixed-trace arithmetic corresponds to roughly 1.5--2.0x current
 fast-mixed useful service before accounting for the extra RAW lower bytes; this
 is a decision hypothesis, not a qualification result. A larger gain is possible
 only if nearly all of that age was avoidable idle time.
