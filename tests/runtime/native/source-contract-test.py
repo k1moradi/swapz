@@ -2900,6 +2900,7 @@ static swapz_u16 swapz_probe_set(
     def test_loaded_preflight_recovers_only_proven_stale_owned_mapping(self):
         preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         self.assertIn('(( ${#swapz_maps[@]} == 1 ))', preflight)
         self.assertIn('^swapz-demo-([a-f0-9]{16})$', preflight)
         self.assertIn('^SWAPZ-TEST-$token', preflight)
