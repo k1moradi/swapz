@@ -828,6 +828,62 @@ admission. The target drain invariant includes the asynchronous run-active bit
 in addition to batch and authority state.
 
 
+### Work-conserving opportunistic representation
+
+A fast-media scheduling experiment may treat compression as speculative
+preparation rather than a mandatory gate to lower submission. The lower path is
+work-conserving only when accepted independent WRITE work exists, no ordering or
+capacity fence prevents progress, and the target does not leave its lower-WRITE
+service idle solely because an optional LZ4/delta64 result is unfinished.
+
+The existing SWZ representation is sufficient: a batched immutable run may
+contain a compressed prefix followed by whole-page RAW 4KiB extents. The
+current planner already orders RAW pages after compressed records and publishes
+both through the same paused-transaction completion path. An opportunistic
+candidate must not add an on-disk type, extent class, alternate authority state
+machine or separate completion owner.
+
+Representation selection is terminal for that accepted generation. If a
+compressed result is ready when the ordered owner seals the run, it may be used.
+If preparation is not ready and lower service would otherwise go idle, the
+ordered owner may select RAW after making an immutable 4KiB staging copy.
+Once RAW has been selected for that generation, a later compression result is
+discarded and may never replace or republish the committed RAW generation.
+Zero elision is likewise optional optimization: a page dispatched RAW before
+zero detection completes remains a correct RAW page.
+
+A producer-owned BIO cannot be completed while a preparation worker can still
+dereference its per-BIO state. A candidate that selects RAW while compression
+is in flight must therefore either (a) keep the upper BIO and its per-BIO data
+alive until the producer drops its reference, or (b) move preparation onto an
+independently owned preallocated job/snapshot before allowing upper completion.
+No cancellation design may create a second BIO completion owner, reuse a
+preparation slot before its last reader exits, or make suspend/drain depend on
+an unbounded worker cancellation.
+
+Do not make RAW fallback unconditional. A lone QD1 write may still be prepared
+inline when there is no accepted backlog to overlap, because otherwise every
+closed-loop slow-media write would become RAW. The work-conserving trigger is
+service pressure: accepted work exists, the lower write slot is idle, and no
+sealed/ready compressed run can be dispatched immediately. Under physical
+capacity/reserve pressure, RAW may also be disallowed when its larger one-block
+representation cannot be safely staged; capacity correctness takes precedence
+over device utilization.
+
+More run buffers are not a substitute for this rule. Additional immutable
+lower-WRITE slots are justified only after a work-conserving K=1 implementation
+shows nonzero ready-run wait: a complete next run repeatedly exists while the
+sole lower-WRITE slot is still busy. Until then, increase representation
+readiness and remove idle gaps rather than increasing K.
+
+Mandatory attribution for this experiment includes: accepted-work/no-lower-I/O
+idle wall, compressed-ready-at-dispatch pages, RAW-selected-because-not-ready
+pages, ordinary incompressible RAW pages, preparation results discarded after
+RAW selection, lower-WRITE active fraction, ready-run wait, lower bytes/requests
+and useful throughput/p99. These counters are observational and may not alter
+selection.
+
+
 ### Paused-run read independence
 
 A paused immutable lower-WRITE group must not globally fence unrelated READs.

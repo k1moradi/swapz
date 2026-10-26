@@ -456,6 +456,7 @@ they affect how new measurements are designed:
 | Topic | Settled conclusion | Reopen only when |
 |---|---|---|
 | Retained-window deadline duration | Slow-media retention remains useful, but current Gen4/Gen5 envelope evidence reopens the 2 ms duration for fast media. Measure exact idle-wait first; do not add another grace/recheck timer. | Exact retained idle-wait shows the current deadline materially dominates wall time while already-accepted batching and lower-byte savings can be preserved with a shorter fast-media budget or accepted-work-only close. |
+| Opportunistic compressed/RAW dispatch | Compression is an optimization, not a mandatory lower-service gate. Existing mixed runs already support compressed extents followed by RAW 4KiB extents. | Accepted work exists while lower WRITE is idle and optional preparation is not ready; a same-source candidate reduces that idle wall and improves useful service without unacceptable slow-media/lower-I/O regression. |
 | Deferred singleton age cutoff (ID53) | Rejected and reverted; keep the ordinary deadline. | New evidence invalidates the feedback/artifact mechanism recorded under ID53. |
 | Completion-aware zero-tail preservation (ID57) | Rejected and reverted; it contaminated later closed-loop waves. | A new state model can prove wave ownership without stale service evidence. |
 | CPU-local/bound preparation | Rejected: better overlap did not improve useful service. Keep unbound scheduling. | Trustworthy CPU attribution plus a new workload shows placement, not queue/service geometry, is limiting. |
@@ -488,7 +489,18 @@ Current benchmark work must preserve these contracts:
   ordinal labels such as “LZ4-2”.
 - **Preparation:** async preparation owns one unbound producer lane regardless
   of delta64 policy. Predictor scratch allocation may remain rescue-dependent;
-  lane count is not.
+  lane count is not. For an ID83 work-conserving candidate, preparation is
+  speculative: report whether each dispatched page was compressed-ready,
+  ordinary incompressible RAW, or RAW-selected because preparation was not
+  ready. The ordered owner must not wait solely for optional preparation when
+  accepted backlog exists and lower WRITE service would otherwise be idle.
+- **Work-conserving lower service:** report exact accepted-work/no-lower-WRITE
+  idle nanoseconds, idle episodes, lower-WRITE active fraction, ready-run wait,
+  RAW-not-ready fallbacks and discarded late-preparation results. A candidate
+  succeeds by converting idle wall into useful service, not by maximizing
+  compression ratio. Same-source slow/SD rows must retain their established
+  benefit; fast rows may spend additional lower bytes/requests only when useful
+  throughput or p99 materially improves.
 - **Independent READ fan-out:** fixed-on production infrastructure. The final
   five-pair fast-model decision at `11fbc839...` established repeatable mixed
   throughput/tail-latency and packed sequential/random READ gains with ID63

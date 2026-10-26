@@ -73,8 +73,16 @@ those closes prove at least 352 ms of aggregate deadline-reaching window age.
 This age is not pure idle sleep: preparation, scheduling and I/O can occur while
 a window is open. Exact retained idle-wait therefore needs its own counter, but
 the scale is large enough to make retention/wakeup attribution the next
-fast-media measurement. K=1 ready-wait remains zero. This reopens only the
-fast-media retention-duration question: do not widen lower-WRITE depth first.
+fast-media measurement. K=1 ready-wait remains zero.
+
+ID83 turns that observation into the preferred architecture direction:
+compression/packing are speculative while lower I/O is busy, and lower-idle
+dispatch is work-conserving. The current engine already supports mixed immutable
+runs with compressed extents followed by RAW 4KiB extents, so a candidate can
+trade representation quality for immediate service without changing SWZ or
+mapping authority. This is preferable to adding buffers first: more buffers do
+not help if the scheduler still waits for an ideal representation. K>1 remains
+closed until a work-conserving K=1 produces actual ready-run wait.
 
 The next bounded experiment is therefore an ID79 causality A/B, followed by a
 fast-media retention/wakeup experiment, not another
@@ -217,6 +225,7 @@ changes.
 | 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; restored pre-ID80 policy requalified** | Report `71251ba9232e` refuted ID80's static `count > 4U` gate with fast QD8 async/sync -9.1% (95% CI -15.1..-3.1). Current report `dc78c9bbffbd` on source `0155a09a0f2e` passes all five stages with the actual pre-ID80 predicate `count > 4U || preparation_queued > 0`; sustained QD4/QD8/QD32 async/sync throughput is +3.94% / +0.95% / +0.94%, with all three intervals overlapping zero. Keep ID80 removed and retain no dormant selector. |
 | 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed; rollback lifecycle requalified** | Exact source `26a045c80b56` passed build/native/W=1/W=2, then BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`); no benchmark result from that source is valid. The bundled candidate also replaced the true pre-ID80 detach predicate with unqualified `count > 1U`. Current source `0155a09a0f2e` removes the whole bundle and passes retained suspend/drain plus the complete owner matrix in report `dc78c9bbffbd`. This proves the rollback is healthy but does not identify which ID81 sub-change caused the lifecycle failure; do not split or revive those changes without independent evidence. |
 | 82 | Fast-media retained deadline and wakeup overhead | **4 evidence-backed candidate; measurement first** | Current exact source `0155a09a0f2e` shows Gen4 mixed 591.3 ms with 197 worker-empty deadline closes, 33.9 ms lower-WRITE service, 37.3 ms ordered-worker CPU and zero K=1 ready waits; Gen5 is 522.5 ms / 176 deadlines / 23.8 ms lower-WRITE / 32.3 ms worker CPU. At retain_ms=2, count*deadline proves at least 394/352 ms of aggregate deadline-reaching window age; it is not a pure-idle measurement. First add exact retained idle-wait and worker-wake attribution; then test a fast-media microsecond-scale or accepted-work-only closure policy without changing K=1, SWZ, ID63 or authority ownership. Reject if SD gains, lower-byte savings, lifecycle safety or mixed p99 regress materially. |
+| 83 | Work-conserving opportunistic compressed/RAW dispatch | **4 recommended architecture candidate; no format change** | Make representation optional at dispatch: while lower I/O is active, prepare/compress future accepted writes; when the K=1 lower slot becomes idle, submit the best already-ready representation instead of waiting solely for optional compression. The existing batched engine already accepts a compressed prefix plus RAW 4KiB tail in one immutable run, so SWZ does not change. Preserve inline preparation for lone/no-backlog QD1 work, barriers and capacity pressure; under backlog, a producer-owned not-ready page may be sealed RAW with exact lifetime/cancellation ownership. Measure accepted-work idle wall, ready-at-dispatch, RAW-not-ready fallback, discarded late prep, useful service/p99 and lower bytes/requests. More buffers/K>1 are successors only if a work-conserving K=1 then shows material ready-run wait. |
 
 ## What the pinned queue experiment establishes
 
@@ -286,28 +295,31 @@ Current exact source `0155a09a0f2e` is owner-qualified by report
 1. Keep ID78's completion-state repair, ID79's exact-range read-cache
    invalidation, the restored pre-ID80 detachment rule, K=1 lower-WRITE
    ownership, one preparation lane, ID63 and SWZ 1/2/4 extents.
-2. Run one isolated ID79 causality A/B before another retained-window policy
-   experiment. A is current `0155a09`; B reverts only the planned one-record
-   invalidation to the old full fence. Use the same official `make test` and
-   compare fast synchronous mixed lower READ requests, total/one-page windows,
-   deadline and PACK_READY causes, lower WRITE requests, useful W/R and p99.
-   Remove B afterward; do not add a production selector or intentional delay.
-3. After ID79 isolation, qualify ID82 with passive exact attribution first:
-   retained idle-wait nanoseconds, worker wake attempts/effective wakes, worker
-   runs, and queue-empty exits. If measured idle wait is material, test one fast-media retention policy with a
-   microsecond-scale budget or accepted-work-only close. Keep K=1 and authority
-   ownership unchanged; do not use K>1 to hide timer/wakeup overhead.
-4. Then return to realistic churn/GC/TRIM evidence at roughly 70% occupancy
-   with a cold/hot split and at least ten logical capacities of hot rewrites.
-   Asynchronous TRIM remains deferred until that workload proves a material
-   synchronous-TRIM service bottleneck.
-5. Keep delta64 rescue default-off. The controlled positive fixture is now
-   strongly favorable; the next gate is representative-content prevalence and
-   matched end-to-end benefit, not another classifier micro-optimization.
-6. Keep packed-placement retirement, circular allocator fairness, ordinary LZ4
-   acceleration one, the eight-block READ-coalescing cap and the removed
-   depth-two WRITE path unchanged.
-7. Keep ID62 blocked. Physical-device testing remains separately unauthorized
+2. Implement passive ID82/ID83 attribution first: exact accepted-work/no-lower-
+   WRITE idle wall, worker wake effectiveness, compressed-ready-at-dispatch,
+   RAW-not-ready fallback opportunities and ready-run wait. These counters must
+   not change scheduling.
+3. Then test one bounded ID83 work-conserving candidate. While lower WRITE I/O
+   is active, preserve speculative preparation. When K=1 becomes idle and
+   accepted backlog exists, seal already-ready compressed pages plus RAW for
+   not-ready pages rather than waiting solely for compression. Keep lone/no-
+   backlog QD1 inline preparation, barriers, same-page dependencies, capacity
+   gates and one completion owner. Use the existing compressed-prefix/RAW-tail
+   batched format; add no runtime selector or SWZ change.
+4. Treat the earlier ID79 full-invalidation A/B as supporting diagnosis rather
+   than a gate for ID83. Run it only if work-conserving evidence still needs to
+   separate cache-induced batching loss from scheduler idle time; never restore
+   global invalidation as production policy.
+5. More lower-WRITE buffers or K>1 remain deferred. Reopen only if ID83 makes
+   K=1 work-conserving and `k1_ready_wait_*` then shows complete ready runs
+   repeatedly blocked behind the active slot.
+6. After the fast-media dispatch question is resolved, return to realistic
+   churn/GC/TRIM evidence at roughly 70% occupancy with a cold/hot split and at
+   least ten logical capacities of hot rewrites.
+7. Keep delta64 rescue default-off; representative-content prevalence remains
+   its promotion gate. Keep packed placement, circular allocation, LZ4
+   acceleration one, ID63 and the removed depth-two path unchanged.
+8. Keep ID62 blocked. Physical-device testing remains separately unauthorized
    and requires its own owner approval and safety review.
 
 ## Deferred asynchronous segment TRIM design for review

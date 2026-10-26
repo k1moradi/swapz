@@ -35,9 +35,25 @@ lower-WRITE submission fixed at one immutable run, ordinary LZ4 fixed at
 acceleration one, delta64 preparation fixed at one producer lane, and exact
 adjacent READ coalescing bounded to eight 4KiB blocks. The earlier write-only
 wave driver remains historical burst evidence; current qualification uses
-persistent lane-owned workers with no per-I/O main-thread dispatch. The next
-qualification priorities are deliberate low-RAM/heavy-CPU pressure and
-realistic churn/GC/TRIM evidence, not dormant runtime concurrency knobs.
+persistent lane-owned workers with no per-I/O main-thread dispatch.
+
+The forward scheduling goal is **work-conserving lower service**. Compression,
+packing and delta64 are representation optimizations, not correctness
+prerequisites. When accepted independent WRITE data exists and a lower-WRITE
+dispatch opportunity would otherwise be idle, a future qualified scheduler may
+seal the best representation already available: compressed pages that are ready
+plus whole-page RAW fallback for preparation that is not ready. It must never
+wait solely to make a representation more compact when doing so loses more
+useful service than the saved lower I/O is worth. Slow media should naturally
+receive more completed compression because long lower service provides
+preparation overlap; fast media may trade some lower bytes for continuous
+service. This policy is not yet production-qualified and must preserve the
+single authority/ordering model, bounded memory, CRC/generation validation and
+the existing SWZ format.
+
+The next qualification priorities are work-conserving fast-media dispatch,
+realistic churn/GC/TRIM evidence and representative-content evidence, not
+dormant runtime concurrency knobs.
 
 Longer-horizon opportunities remain explicit rather than being forgotten:
 nonzero same-filled-page representation, exact-content deduplication,

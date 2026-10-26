@@ -757,6 +757,38 @@ this restored predicate, including retained suspend/drain (report
 suspend/drain lifecycle gate is rejected before any performance result is
 interpreted. No new timer, K>1 slot, preparation lane or SWZ class is permitted.
 
+Work-conserving representation qualification must distinguish ordinary RAW
+fallback caused by incompressibility from RAW selected because optional
+preparation was not ready at a lower-service opportunity. The candidate must
+report both counts plus compressed-ready-at-dispatch, discarded-late-preparation
+results, accepted-work/no-lower-WRITE idle wall and lower-WRITE active fraction.
+The accounting identity must prove that every accepted nonzero WRITE reaches
+exactly one terminal representation and exactly one upper completion.
+
+Native/source coverage for an in-flight RAW selection must prove the producer
+cannot dereference `dm_per_bio_data` after the upper BIO is released. If the
+candidate retains the BIO until preparation drops its reference, loaded
+qualification must measure that completion delay and cover suspend/drain with a
+producer still active after RAW lower submission. If it instead introduces a
+stable preparation job/snapshot, allocation is bounded and precreated, slot
+release is exactly once, and teardown drains every producer reference before
+freeing storage.
+
+The active mixed-run contract remains compressed-prefix then RAW-tail under the
+existing SWZ format. Byte-exact readback must cover all combinations: all
+compressed, all RAW, compressed+RAW in one lower run, RAW chosen while
+compression is still active, duplicate logical writes, PREFLUSH/FUA, same-page
+read-after-write, injected lower failure and ENOSPC/GC pressure. RAW selection
+may not bypass a barrier, same-page predecessor or capacity reservation.
+
+Product evidence must be Pareto-aware rather than require maximal compression.
+On slow/SD models, reject a candidate that materially loses established useful
+service or lower-I/O savings merely by converting prepared work to RAW. On
+SATA/NVMe models, some increase in lower bytes/requests is acceptable only when
+accepted-work idle wall falls and useful service/p99 materially improves versus
+the same-source current policy. K>1 remains closed unless ready-run wait becomes
+material after the K=1 scheduler is work-conserving.
+
 Source-contract maintenance must follow the same standards co-change rule as
 production implementation work. When an implementation invariant moves between
 owners (for example, PACK_READY closure from write admission to the serialized
