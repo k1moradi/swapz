@@ -533,6 +533,10 @@ duplicated tail in `source-contract-test.py`. The file is rebuilt from the
 known-good baseline with only the intended stale-recovery assertions, and
 rootless qualification now rejects multiple terminal test runners. The next
 owner run reached preflight but returned shell status 2 before any normal safety
-diagnostic. Preflight now traps unexpected command failures at the source and
-emits only numeric status plus source line, preserving the fail-closed ownership
-boundary while making the exact harness fault attributable on the next run.
+diagnostic. The stale-recovery path no longer depends on Bash extended-regex
+capture state for mapper/UUID/lower/open validation: it uses exact shell
+patterns, a guarded dependency parser, and separately checked canonical-device
+stats. This preserves the same positive-ownership boundary while converting
+malformed or unexpected state into explicit `BLOCKED:` results instead of an
+opaque shell-runtime status. The numeric internal-error trap remains as a
+last-resort diagnostic.

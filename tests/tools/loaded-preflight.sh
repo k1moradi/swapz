@@ -5,10 +5,26 @@ set -Eeuo pipefail
 
 fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
+is_uint() {
+    local value="$1"
+    [[ -n $value ]] || return 1
+    case "$value" in
+        *[!0-9]*) return 1 ;;
+    esac
+    return 0
+}
+is_hex16() {
+    local value="$1"
+    [[ ${#value} == 16 ]] || return 1
+    case "$value" in
+        *[!0-9a-f]*) return 1 ;;
+    esac
+    return 0
+}
 preflight_internal_error() {
     local rc="$1" line="$2"
     trap - ERR
-    if [[ $rc =~ ^[1-9][0-9]*$ && $line =~ ^[1-9][0-9]*$ ]]; then
+    if is_uint "$rc" && is_uint "$line" && [[ $rc != 0 && $line != 0 ]]; then
         printf 'FAIL: loaded preflight internal command failed status=%s line=%s\n' \
             "$rc" "$line" >&2
     else
@@ -101,14 +117,22 @@ fi
 (( ${#swapz_maps[@]} == 1 )) ||
     fail "pre-existing dm_swapz module is busy with non-unique mappings; no cleanup attempted"
 owned_map="${swapz_maps[0]}"
-[[ $owned_map =~ ^swapz-demo-([a-f0-9]{16})$ ]] ||
+case "$owned_map" in
+    swapz-demo-*) token="${owned_map#swapz-demo-}" ;;
+    *) fail "pre-existing dm_swapz mapping is not harness-owned; no cleanup attempted" ;;
+esac
+is_hex16 "$token" ||
     fail "pre-existing dm_swapz mapping is not harness-owned; no cleanup attempted"
-token="${BASH_REMATCH[1]}"
 uuid="$(dmsetup info -c --noheadings -o uuid "$owned_map" 2>/dev/null |
     tr -d '[:space:]')" ||
     fail "cannot read pre-existing dm_swapz mapping UUID"
-[[ $uuid =~ ^SWAPZ-TEST-$token(-(gc|discardtrim|suspend|writefault|flushfault|packed))?$ ]] ||
-    fail "pre-existing dm_swapz mapping UUID is not harness-owned; no cleanup attempted"
+case "$uuid" in
+    "SWAPZ-TEST-$token"|"SWAPZ-TEST-$token-gc"|
+    "SWAPZ-TEST-$token-discardtrim"|"SWAPZ-TEST-$token-suspend"|
+    "SWAPZ-TEST-$token-writefault"|"SWAPZ-TEST-$token-flushfault"|
+    "SWAPZ-TEST-$token-packed") ;;
+    *) fail "pre-existing dm_swapz mapping UUID is not harness-owned; no cleanup attempted" ;;
+esac
 mapper="/dev/mapper/$owned_map"
 [[ -z "$(findmnt -rn -S "$mapper" 2>/dev/null)" ]] ||
     fail "pre-existing harness dm_swapz mapping is mounted; no cleanup attempted"
@@ -120,41 +144,57 @@ read_opens() {
     local val
     val="$(dmsetup info -c --noheadings -o open "$owned_map" 2>/dev/null |
         tr -d '[:space:]')" || return 1
-    [[ $val =~ ^(0|[1-9][0-9]*)$ ]] || return 1
+    is_uint "$val" || return 1
     printf '%s\n' "$val"
 }
 
 deps="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
     fail "cannot read pre-existing dm_swapz dependency"
-if [[ $deps =~ ^[[:space:]]*1[[:space:]]+dependencies[[:space:]]*:[[:space:]]*\(([^()[:space:]]+)\)[[:space:]]*$ ]]; then
-    lower_name="${BASH_REMATCH[1]}"
-else
-    fail "pre-existing harness dm_swapz mapping does not have one lower dependency"
-fi
-[[ $lower_name =~ ^nullb([0-9]+)$ ||
-   $lower_name =~ ^nullb-swapz-[a-f0-9]{16}$ ]] ||
-    fail "pre-existing harness dm_swapz lower is not null_blk"
+lower_name="$(printf '%s\n' "$deps" | awk '
+    /^[[:space:]]*1[[:space:]]+dependencies[[:space:]]*:/ {
+        value = $0
+        sub(/^[^(]*\(/, "", value)
+        sub(/\)[[:space:]]*$/, "", value)
+        if (value != "" && value !~ /[()[:space:]]/) {
+            print value
+            found = 1
+        }
+    }
+    END { exit found ? 0 : 1 }
+')" || fail "pre-existing harness dm_swapz mapping does not have one lower dependency"
 
 cfgbase=/sys/kernel/config/nullb
 [[ -d $cfgbase ]] ||
     fail "pre-existing harness null_blk configfs is unavailable"
 owned_config=""
-if [[ $lower_name =~ ^nullb-swapz-[a-f0-9]{16}$ &&
-      -d $cfgbase/$lower_name ]]; then
-    owned_config="$cfgbase/$lower_name"
-elif [[ $lower_name =~ ^nullb([0-9]+)$ ]]; then
-    lower_index="${BASH_REMATCH[1]}"
-    matches=()
-    shopt -s nullglob
-    for config in "$cfgbase"/nullb-swapz-*; do
-        [[ -d $config && -r $config/index ]] || continue
-        [[ "$(cat "$config/index" 2>/dev/null)" == "$lower_index" ]] &&
-            matches+=("$config")
-    done
-    shopt -u nullglob
-    (( ${#matches[@]} == 1 )) &&
-        owned_config="${matches[0]}"
-fi
+lower_index=""
+case "$lower_name" in
+    nullb-swapz-*)
+        lower_token="${lower_name#nullb-swapz-}"
+        is_hex16 "$lower_token" ||
+            fail "pre-existing harness dm_swapz lower is not null_blk"
+        [[ -d $cfgbase/$lower_name ]] &&
+            owned_config="$cfgbase/$lower_name"
+        ;;
+    nullb*)
+        lower_index="${lower_name#nullb}"
+        is_uint "$lower_index" ||
+            fail "pre-existing harness dm_swapz lower is not null_blk"
+        matches=()
+        shopt -s nullglob
+        for config in "$cfgbase"/nullb-swapz-*; do
+            [[ -d $config && -r $config/index ]] || continue
+            [[ "$(cat "$config/index" 2>/dev/null)" == "$lower_index" ]] &&
+                matches+=("$config")
+        done
+        shopt -u nullglob
+        (( ${#matches[@]} == 1 )) &&
+            owned_config="${matches[0]}"
+        ;;
+    *)
+        fail "pre-existing harness dm_swapz lower is not null_blk"
+        ;;
+esac
 [[ -n $owned_config &&
    -r $owned_config/memory_backed &&
    -r $owned_config/power &&
@@ -175,8 +215,11 @@ fi
 mapper_node="$(readlink -f "$mapper" 2>/dev/null || true)"
 [[ -n $mapper_node && -b $mapper_node ]] ||
     fail "pre-existing harness dm_swapz canonical device is unavailable"
-[[ "$(stat -Lc '%t:%T' "$mapper" 2>/dev/null)" ==
-   "$(stat -Lc '%t:%T' "$mapper_node" 2>/dev/null)" ]] ||
+mapper_dev="$(stat -Lc '%t:%T' "$mapper" 2>/dev/null)" ||
+    fail "cannot stat pre-existing harness dm_swapz mapper"
+canonical_dev="$(stat -Lc '%t:%T' "$mapper_node" 2>/dev/null)" ||
+    fail "cannot stat pre-existing harness dm_swapz canonical device"
+[[ -n $mapper_dev && $mapper_dev == "$canonical_dev" ]] ||
     fail "pre-existing harness dm_swapz canonical device identity changed"
 
 wait_for_zero_opens() {
@@ -193,19 +236,19 @@ wait_for_zero_opens() {
 }
 
 opens="$(read_opens 2>/dev/null || true)"
-if [[ $opens =~ ^[1-9][0-9]*$ ]]; then
+if is_uint "$opens" && [[ $opens != 0 ]]; then
     wait_for_zero_opens || true
 fi
-if [[ $opens =~ ^[1-9][0-9]*$ ]] && command -v fuser >/dev/null 2>&1; then
+if is_uint "$opens" && [[ $opens != 0 ]] && command -v fuser >/dev/null 2>&1; then
     fuser -k -TERM "$mapper_node" >/dev/null 2>&1 || true
     wait_for_zero_opens || true
-    if [[ $opens =~ ^[1-9][0-9]*$ ]]; then
+    if is_uint "$opens" && [[ $opens != 0 ]]; then
         fuser -k -KILL "$mapper_node" >/dev/null 2>&1 || true
         wait_for_zero_opens || true
     fi
 fi
 
-[[ $opens =~ ^(0|[1-9][0-9]*)$ && $opens == 0 ]] ||
+is_uint "$opens" && [[ $opens == 0 ]] ||
     fail "proven-owned stale dm_swapz mapping remains open after bounded holder cleanup; reboot required before make test"
 
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$owned_map" ||

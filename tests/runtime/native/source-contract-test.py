@@ -2920,12 +2920,16 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("cannot enumerate pre-existing swapz mappings", preflight)
         self.assertIn("cannot parse pre-existing swapz mapping list", preflight)
         self.assertIn('(( ${#swapz_maps[@]} == 1 ))', preflight)
-        self.assertIn("BASH_REMATCH[1]", preflight)
-        self.assertNotIn("sed -nE", recovery)
-        self.assertIn('^swapz-demo-([a-f0-9]{16})$', preflight)
-        self.assertIn('^SWAPZ-TEST-$token', preflight)
+        self.assertIn('token="${owned_map#swapz-demo-}"', recovery)
+        self.assertIn('is_hex16 "$token"', recovery)
+        self.assertIn('"SWAPZ-TEST-$token-flushfault"', recovery)
+        self.assertNotIn("BASH_REMATCH", recovery)
+        self.assertIn("value !~ /[()[:space:]]/", recovery)
+        self.assertIn('lower_index="${lower_name#nullb}"', recovery)
         self.assertIn('opens == 0', preflight)
         self.assertIn('memory_backed', preflight)
+        self.assertIn("is_uint()", preflight)
+        self.assertIn("is_hex16()", preflight)
         self.assertIn("preflight_internal_error()", preflight)
         self.assertIn(
             "FAIL: loaded preflight internal command failed status=%s line=%s",
@@ -2938,7 +2942,9 @@ static swapz_u16 swapz_probe_set(
             preflight.index("trap 'rc=$?; preflight_internal_error"),
             preflight.index("clean_orphaned_nullb()"))
         self.assertIn('mapper_node="$(readlink -f "$mapper"', recovery)
-        self.assertIn("stat -Lc '%t:%T'", recovery)
+        self.assertIn('mapper_dev="$(stat -Lc', recovery)
+        self.assertIn('canonical_dev="$(stat -Lc', recovery)
+        self.assertIn('$mapper_dev == "$canonical_dev"', recovery)
         self.assertLess(
             recovery.index("canonical device identity changed"),
             recovery.index('fuser -k -TERM "$mapper_node"'))
