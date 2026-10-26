@@ -1200,6 +1200,8 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(sample.index("staged_tail = min_t(swapz_u8, ctx->batch_count, room)"),
                         sample.index("list_for_each_entry(entry, local, list)"))
         self.assertIn("queued_tail++", sample)
+        self.assertIn("ctx->retained_chain_completed,\n\t\t\tstaged_tail, ctx->max_window", sample)
+        self.assertNotIn("ctx->retained_chain_completed,\n\t\t\ttail, ctx->max_window", sample)
         self.assertNotIn("swapz_window_post_pack_sample_ready", policy)
         self.assertNotIn("swapz_window_post_pack_learning_tail", policy)
         self.assertNotIn("swapz_window_post_pack_close_target", policy)
