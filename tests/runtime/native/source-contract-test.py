@@ -2914,11 +2914,27 @@ static swapz_u16 swapz_probe_set(
         preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        recovery = preflight[preflight.index("mapfile -t swapz_maps"):]
         self.assertIn('(( ${#swapz_maps[@]} == 1 ))', preflight)
         self.assertIn('^swapz-demo-([a-f0-9]{16})$', preflight)
         self.assertIn('^SWAPZ-TEST-$token', preflight)
         self.assertIn('opens == 0', preflight)
         self.assertIn('memory_backed', preflight)
+        self.assertIn('mapper_node="$(readlink -f "$mapper"', recovery)
+        self.assertIn("stat -Lc '%t:%T'", recovery)
+        self.assertLess(
+            recovery.index("canonical device identity changed"),
+            recovery.index('fuser -k -TERM "$mapper_node"'))
+        self.assertIn('fuser -k -TERM "$mapper_node"', recovery)
+        self.assertIn('fuser -k -KILL "$mapper_node"', recovery)
+        self.assertIn("reboot required before make test", recovery)
+        self.assertLess(
+            recovery.index('[[ -n $owned_config &&'),
+            recovery.index('fuser -k -TERM "$mapper_node"'))
+        self.assertLess(
+            recovery.index('lower="/dev/$lower_name"'),
+            recovery.index('fuser -k -TERM "$mapper_node"'))
+        self.assertNotIn('fuser -k -TERM "$mapper"', recovery)
         self.assertIn('dmsetup remove --retry "$owned_map"', preflight)
         self.assertIn('timeout --signal=TERM --kill-after=2s 10s', preflight)
         self.assertIn("run_privileged_bounded()", loaded)

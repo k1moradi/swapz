@@ -517,4 +517,9 @@ those helpers through `bash` inside `timeout`, preserving the original helper
 contract while keeping the outer deadline. Live stage-5 output is also filtered
 to concise phase transitions and failure/block diagnostics; full raw evidence is
 still captured for the report instead of flooding the terminal with status and
-JSON records.
+JSON records. A later rerun after an async kernel stall exposed a third recovery
+issue: stale-open cleanup signaled holders before proving that the mapper's lower
+device was private harness RAM. Preflight now completes the exact mapper/UUID and
+memory-backed null_blk proof first, then targets only the canonical owned DM node.
+A holder that remains open after bounded TERM/KILL is reported as requiring a
+host reboot; force removal remains forbidden.

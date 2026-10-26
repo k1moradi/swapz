@@ -71,15 +71,22 @@ reference count is zero. A positive count is recoverable only for exactly one
 mapper with the private `swapz-demo-<token>` name, matching
 `SWAPZ-TEST-<same-token>[phase]` UUID, no mount/swap alias, and exactly one
 proven memory-backed `null_blk` dependency created under the
-`nullb-swapz-*` configfs namespace. When a stale mapper has transient opens,
-preflight boundedly settles `udevadm` and terminates lingering userspace test
-processes before asserting zero opens; that stale harness mapper then receives one
-bounded non-force `dmsetup remove --retry`; the lower itself is preserved.
-Multiple mappings, foreign identities, active opens that cannot be closed, mounts, swap aliases,
-non-null_blk lowers, ambiguous configfs identity, or any removal race remain
-BLOCKED. Forced mapper/module removal is never permitted. After cleanup the
-reference count must be zero and ordinary `rmmod` remains authoritative
-against races.
+`nullb-swapz-*` configfs namespace. The complete lower-device ownership proof,
+including mount/swap exclusion, must finish before preflight sends any signal to
+a mapper holder. When a stale mapper has transient opens, preflight boundedly
+settles `udevadm` and may terminate lingering userspace test processes only via
+the canonical block node of that already-proven private mapper. The canonical
+node must resolve to the same block-device identity as the private mapper before
+any holder signal is sent. After zero opens are established, that stale harness
+mapper then receives one bounded non-force
+`dmsetup remove --retry`; the lower itself is preserved. If TERM/KILL cannot
+drop a positive open count, treat the holder as potentially uninterruptible,
+report that a host reboot is required before the next `make test`, and leave
+the mapping untouched. Multiple mappings, foreign identities, active opens that
+cannot be closed, mounts, swap aliases, non-null_blk lowers, ambiguous configfs
+identity, or any removal race remain BLOCKED. Forced mapper/module removal is
+never permitted. After cleanup the reference count must be zero and ordinary
+`rmmod` remains authoritative against races.
 
 Cleanup never force-removes uncertain resources. If identity or teardown is ambiguous, quarantine and fail.
 

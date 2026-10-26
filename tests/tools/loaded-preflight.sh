@@ -6,7 +6,7 @@ set -Eeuo pipefail
 fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 
-for cmd in rmmod dmsetup timeout awk sed tr findmnt cat; do
+for cmd in rmmod dmsetup timeout awk sed tr findmnt cat readlink stat sleep; do
     command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "root required for loaded preflight"
@@ -107,31 +107,6 @@ read_opens() {
     printf '%s\n' "$val"
 }
 
-opens="$(read_opens 2>/dev/null || true)"
-if [[ $opens =~ ^[1-9][0-9]*$ ]]; then
-    command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=3 2>/dev/null || true
-    for _ in {1..15}; do
-        opens="$(read_opens 2>/dev/null || echo "$opens")"
-        [[ $opens == 0 ]] && break
-        sleep 0.2
-    done
-fi
-
-if [[ $opens =~ ^[1-9][0-9]*$ ]] && command -v fuser >/dev/null 2>&1; then
-    fuser -k -TERM "$mapper" >/dev/null 2>&1 || true
-    sleep 0.5
-    opens="$(read_opens 2>/dev/null || echo "$opens")"
-    if [[ $opens =~ ^[1-9][0-9]*$ ]]; then
-        fuser -k -KILL "$mapper" >/dev/null 2>&1 || true
-        sleep 0.5
-        command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=3 2>/dev/null || true
-        opens="$(read_opens 2>/dev/null || echo "$opens")"
-    fi
-fi
-
-[[ $opens =~ ^(0|[1-9][0-9]*)$ && $opens == 0 ]] ||
-    fail "pre-existing harness dm_swapz mapping is open; no cleanup attempted"
-
 deps="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
     fail "cannot read pre-existing dm_swapz dependency"
 lower_name="$(printf '%s\n' "$deps" |
@@ -175,6 +150,45 @@ lower="/dev/$lower_name"
 if awk -v path="$lower" 'NR > 1 && $1 == path { found=1 } END { exit found ? 0 : 1 }' /proc/swaps; then
     fail "pre-existing harness null_blk lower is active swap; no cleanup attempted"
 fi
+
+# Holder termination is allowed only after the mapper and its lower dependency
+# are both positively proven to be private harness RAM. Target the canonical
+# dm block node so stale replay processes cannot hide behind the mapper symlink.
+mapper_node="$(readlink -f "$mapper" 2>/dev/null || true)"
+[[ -n $mapper_node && -b $mapper_node ]] ||
+    fail "pre-existing harness dm_swapz canonical device is unavailable"
+[[ "$(stat -Lc '%t:%T' "$mapper" 2>/dev/null)" ==
+   "$(stat -Lc '%t:%T' "$mapper_node" 2>/dev/null)" ]] ||
+    fail "pre-existing harness dm_swapz canonical device identity changed"
+
+wait_for_zero_opens() {
+    local attempt
+
+    for (( attempt=0; attempt<30; ++attempt )); do
+        opens="$(read_opens 2>/dev/null || echo "$opens")"
+        [[ $opens == 0 ]] && return 0
+        command -v udevadm >/dev/null 2>&1 &&
+            udevadm settle --timeout=3 2>/dev/null || true
+        sleep 0.1
+    done
+    return 1
+}
+
+opens="$(read_opens 2>/dev/null || true)"
+if [[ $opens =~ ^[1-9][0-9]*$ ]]; then
+    wait_for_zero_opens || true
+fi
+if [[ $opens =~ ^[1-9][0-9]*$ ]] && command -v fuser >/dev/null 2>&1; then
+    fuser -k -TERM "$mapper_node" >/dev/null 2>&1 || true
+    wait_for_zero_opens || true
+    if [[ $opens =~ ^[1-9][0-9]*$ ]]; then
+        fuser -k -KILL "$mapper_node" >/dev/null 2>&1 || true
+        wait_for_zero_opens || true
+    fi
+fi
+
+[[ $opens =~ ^(0|[1-9][0-9]*)$ && $opens == 0 ]] ||
+    fail "proven-owned stale dm_swapz mapping remains open after bounded holder cleanup; reboot required before make test"
 
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$owned_map" ||
     fail "stale harness dm_swapz mapping could not be removed normally"
