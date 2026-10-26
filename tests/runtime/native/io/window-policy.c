@@ -225,6 +225,11 @@ static int test_pack_ready_uses_compressed_geometry_across_raw_slots(void)
 	 * recognition of two compressed records that exactly fit one block. */
 	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
+	/* RAW skipping must not recreate the refuted total-count-four first-pack
+	 * close below the K=1 asynchronous detach threshold. */
+	batch[3].length = 2712;
+	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 0));
+	batch[3].length = 2028;
 	/* Four compressed records plus one RAW record exactly fill the same 8KiB
 	 * compressed extent geometry used by a RAW-free four-record prefix. */
 	batch[1].length = 2028;
