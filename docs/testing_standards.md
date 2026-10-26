@@ -573,8 +573,10 @@ total count four still cannot establish a first pack; one RAW plus four
 compressed records can establish the 8KiB second pack; one RAW plus six
 compressed records can establish the 16KiB second pack; a newest RAW admission
 does not manufacture a transition; invalid compressed lengths, disabled
-retention and restricted read budgets still fail closed. The flush planner and
-on-disk extent classes remain unchanged. The worker then restores unfinished
+retention and restricted read budgets still fail closed. Source coverage must
+also require early compressed-count/extent-cap rejection and one direct
+first-two-compressed prefix scan rather than an O(n^2) total-prefix loop. The
+flush planner and on-disk extent classes remain unchanged. The worker then restores unfinished
 local work to the accepted FIFO and re-evaluates PACK_READY before the retention
 timer can be armed.
 
