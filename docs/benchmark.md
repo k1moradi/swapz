@@ -578,9 +578,10 @@ Staged-only work installs no immediate tail-close target. This
 removes the c07 pending-sample lockout without restoring premature staged-only
 self-closure. The same candidate evaluates early pack readiness over valid
 compressed records even when earlier RAW records share the bulk batch, matching
-the existing compressed-before-RAW flush order. It does not change SWZ, the
-ordinary deadline, K=1, preparation-lane count, ID63, or the 1/2/4-block extent
-classes.
+the existing compressed-before-RAW flush order. Total batch count four remains
+a negative first-pack guard, so RAW skipping cannot recreate the refuted
+below-detach close. It does not change SWZ, the ordinary deadline, K=1,
+preparation-lane count, ID63, or the 1/2/4-block extent classes.
 
 Qualification remains product-facing. On an ARM64/NEON owner run, compare fast
 mixed against `b389204` and the c07 regression control, and compare QD8/QD32
