@@ -207,6 +207,53 @@ static int test_pack_ready_rejects_raw_and_unfittable(void)
 	return 0;
 }
 
+static int test_pack_ready_uses_compressed_geometry_across_raw_slots(void)
+{
+	struct swapz_pending_bio batch[8] = { 0 };
+	unsigned int i;
+
+	batch[0].logical = 400;
+	batch[0].length = SWAPZ_BLOCK_BYTES;
+	batch[0].raw = 1;
+	for (i = 1; i < 8; ++i) {
+		batch[i].logical = 400 + i;
+		batch[i].length = 2028;
+	}
+	batch[1].length = 2024;
+	batch[2].length = 2024;
+	/* RAW remains part of the eventual lower run, but it must not poison
+	 * recognition of two compressed records that exactly fit one block. */
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
+	/* RAW skipping must not recreate the refuted total-count-four first-pack
+	 * close below the K=1 asynchronous detach threshold. */
+	batch[3].length = 2712;
+	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 0));
+	batch[3].length = 2028;
+	/* Four compressed records plus one RAW record exactly fill the same 8KiB
+	 * compressed extent geometry used by a RAW-free four-record prefix. */
+	batch[1].length = 2028;
+	batch[2].length = 2028;
+	CHECK(swapz_window_pack_ready(batch, 5, 2, 0));
+	/* A RAW newest admission cannot manufacture a fresh geometry transition. */
+	batch[5].length = SWAPZ_BLOCK_BYTES;
+	batch[5].raw = 1;
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
+	batch[5].raw = 0;
+	/* Six compressed records plus an earlier RAW record fit 16KiB exactly. */
+	for (i = 1; i <= 6; ++i)
+		batch[i].length = 2712;
+	CHECK(swapz_window_pack_ready(batch, 7, 2, 0));
+	/* Invalid compressed records still fail closed even when RAW is skipped. */
+	batch[3].length = 0;
+	CHECK(!swapz_window_pack_ready(batch, 7, 2, 0));
+	batch[3].length = SWAPZ_MAX_COMPRESSED + 1U;
+	CHECK(!swapz_window_pack_ready(batch, 7, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 7, 0, 0));
+	CHECK(!swapz_window_pack_ready(batch, 7, 2, 1));
+	return 0;
+}
+
 static int test_retained_burst_target_adapts_from_finite_evidence(void)
 {
 	swapz_u8 target = swapz_window_initial_burst_target(SWAPZ_MAX_RECORDS);
@@ -220,19 +267,6 @@ static int test_retained_burst_target_adapts_from_finite_evidence(void)
 	CHECK(swapz_window_shrink_burst_target(32, 3) == 32);
 	CHECK(swapz_window_shrink_burst_target(4, 3) == 4);
 	CHECK(swapz_window_shrink_burst_target(4, 1) == 4);
-	return 0;
-}
-static int test_post_pack_staged_tail_does_not_self_close(void)
-{
-	CHECK(!swapz_window_post_pack_sample_ready(2, 0));
-	CHECK(swapz_window_post_pack_sample_ready(2, 1));
-	CHECK(swapz_window_post_pack_sample_ready(0, 0));
-	CHECK(swapz_window_post_pack_learning_tail(2, 0) == 2);
-	CHECK(swapz_window_post_pack_learning_tail(2, 6) == 2);
-	CHECK(swapz_window_post_pack_learning_tail(0, 6) == 6);
-	CHECK(swapz_window_post_pack_close_target(2, 0) == 0);
-	CHECK(swapz_window_post_pack_close_target(2, 6) == 0);
-	CHECK(swapz_window_post_pack_close_target(0, 6) == 6);
 	return 0;
 }
 
@@ -421,8 +455,8 @@ int main(void)
 	CHECK(test_pack_ready_waits_for_second_medium_pack() == 0); passed++;
 	CHECK(test_pack_ready_small_and_medium_exact_geometry() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
+	CHECK(test_pack_ready_uses_compressed_geometry_across_raw_slots() == 0); passed++;
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
-	CHECK(test_post_pack_staged_tail_does_not_self_close() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;

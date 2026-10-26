@@ -379,7 +379,7 @@ cacheline-local mixed structured/high-entropy records.
 
 The evaluator now keeps only whole-page delta64. Retired comparator
 implementations are removed from current source; historical evidence remains in
-Git. The selected scalar/SSE2/AVX2/NEON path must match the portable scalar
+Git. The selected scalar/SSE2/AVX2/AVX512/NEON path must match the portable scalar
 classifier and transformed bytes before its measurement is accepted. It records
 transform/inverse/second-LZ4 time, adopted representations, RAW rescues and
 >2024 -> <=2024 crossings. The ID67a.3 delta64 signpost samples 8 page-wide
@@ -551,13 +551,45 @@ The subsequent owner run on source `443c1e2` is partial because ID36 later
 timed out, but its already-completed sustained-QD rows falsify the narrower
 four-record-only diagnosis. Fast QD8 still reports learned target 22, 317.6
 3-4-record windows, 47.8 deadline closes and async/sync -1.2% (95% CI
--4.9..+2.6); serial QD8 reaches target 37. The remaining defect is the
-completion gap itself: `batch[]` records staged before K=1 completion must
-contribute to learned burst width without being reinterpreted as an immediately
-closeable terminal tail before the completed writers can resubmit. The current
-fix therefore separates staged and queued followers and blocks PACK_READY while
-a staged-only post-K1 sample remains unresolved. This uses only the existing
-absolute retention deadline and does not introduce a future-arrival grace wait.
+-4.9..+2.6); serial QD8 reaches target 37. This established that the completion
+boundary, rather than the removed four-record shortcut alone, required further
+evidence.
+
+Report `c32e46b6f472` then fully qualifies exact ARM64/NEON source
+`c07edd913972` for correctness and resource pressure, but refutes the
+staged-only pending split as a performance repair. Fast write-only QD8
+async/sync is -8.1% (95% CI -18.1..+1.9) and QD32 is -16.3%
+(-18.6..-14.0); their deadline closes rise to 58.8 and 67.8. Fast mixed async
+falls to 53.56 MB/s (-14.8% versus raw, -6.8% versus sync), with the
+async-minus-sync throughput CI still crossing zero. The internal staged-tail
+counters moved in the intended direction, but the product-facing service did
+not, so the staged-only sample lockout is not retained as a qualified
+optimization.
+
+The next ID78 candidate keeps the completion-only K=1 guard but treats a
+PACK_READY completion as one completed closed-loop generation: its count
+replaces, rather than accumulates with, older PACK_READY generations whose
+upper BIOs have already been released. After finalization the bounded
+`batch_count + local + incoming` sample is consumed exactly once. Only the
+pre-completion `batch_count` prefix may raise the learned burst target; queued
+followers make the finite tail explicit but are excluded from burst learning
+because they may already include resubmissions from the just-completed writers.
+Staged-only work installs no immediate tail-close target. This
+removes the c07 pending-sample lockout without restoring premature staged-only
+self-closure. The same candidate evaluates early pack readiness over valid
+compressed records even when earlier RAW records share the bulk batch, matching
+the existing compressed-before-RAW flush order. Total batch count four remains
+a negative first-pack guard, so RAW skipping cannot recreate the refuted
+below-detach close. It does not change SWZ, the ordinary deadline, K=1,
+preparation-lane count, ID63, or the 1/2/4-block extent classes.
+
+Qualification remains product-facing. On an ARM64/NEON owner run, compare fast
+mixed against `b389204` and the c07 regression control, and compare QD8/QD32
+against `8a6dd2a`. A lower learned target or fewer deadlines is only
+attribution; promotion requires useful WRITE/READ, lower bytes/requests and p99
+to remain aligned. The same public `make test` must retain its existing
+SSE2/AVX2/AVX512 and NEON backend qualification on the architecture that
+supports each ISA.
 
 Configured modern-storage caps remain service-model inputs, not proof that the
 host attained that media class. Compare each swapz row to its same-run raw

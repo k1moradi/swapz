@@ -547,19 +547,36 @@ must remain pending while K=1 is in flight; quiescent-state reset is legal only
 when both the retained batch and in-flight run are empty. After K=1 completion,
 the worker must sample before consuming the next FIFO and distinguish the
 already-staged `batch_count` prefix from queued `local + incoming` followers
-within the remaining 64-record room. A staged-only prefix must leave the sample
-pending and suppress PACK_READY until queued accepted work resolves the
-completion gap or the existing absolute deadline closes the batch. When staged
-and queued work coexist, burst learning uses the staged prefix and does not
-install a smaller sampled-tail close target; without staged work, the queued
-tail keeps the prior semantics. Native tests must cover staged-only 2+0,
-staged-plus-queued 2+6 and queued-only 0+6 cases. First-pack source coverage
-must permit only the selective two-record/one-block and
-three-record/two-block cases and must reject any `count == 4U` first-pack
-branch. Native window-policy tests must prove that four 3000-byte compressed
-records remain ineligible as a first pack even though they fit the existing
-4-block/16KiB extent class; ordinary count-four second-pack geometry remains a
-separate `swapz_window_pack_ready()` case. The worker then restores unfinished
+within the remaining 64-record room.
+
+The completed contribution to burst learning after a PACK_READY lower run is
+the count from that one just-completed generation. It must not accumulate older
+PACK_READY generations whose upper BIOs have already been completed and may
+have re-entered the closed-loop workload. A non-PACK split piece may still add
+to the current generation until a PACK_READY boundary. The post-completion
+sample is then consumed exactly once: only the already-staged pre-completion
+prefix may raise the learned target. Queued `local + incoming` followers still
+make the finite sampled tail explicit, but must not be added to the completed
+generation because they may contain immediate resubmissions from those same
+writers. A staged-only tail installs no immediate `retained_tail_target`.
+A staged-only sample must not remain pending merely to suppress PACK_READY, so a
+valid service-dry or learned-target close can proceed without burning the
+absolute deadline.
+
+First-pack recognition remains selective two-compressed/one-block or
+three-compressed/two-block geometry; four ordinary compressed records fitting
+the 16KiB class must still not become a first-pack shortcut. Bulk RAW records
+are excluded from compressed-pack membership rather than poisoning all later
+compressed geometry. Native coverage must prove: one RAW plus two exact
+compressed records can establish the 4KiB first pack; RAW-assisted geometry at
+total count four still cannot establish a first pack; one RAW plus four
+compressed records can establish the 8KiB second pack; one RAW plus six
+compressed records can establish the 16KiB second pack; a newest RAW admission
+does not manufacture a transition; invalid compressed lengths, disabled
+retention and restricted read budgets still fail closed. Source coverage must
+also require early compressed-count/extent-cap rejection and one direct
+first-two-compressed prefix scan rather than an O(n^2) total-prefix loop. The
+flush planner and on-disk extent classes remain unchanged. The worker then restores unfinished
 local work to the accepted FIFO and re-evaluates PACK_READY before the retention
 timer can be armed.
 
@@ -585,14 +602,21 @@ must be consumed so it cannot authorize another dry-tail singleton close.
 Source coverage must preserve DUPLICATE continuation semantics because the
 current WRITE continues after that older batch is flushed.
 
-Loaded qualification must compare write-only QD8/QD32 window histograms and
-lower requests against the current deep-aggregation result (~520/~139 requests),
-and mixed QD32 `deadline_worker_empty` plus one-page deadline closes against
-the qualified accepted-wave baseline (~60.5 worker-empty closes on the faster
-model). Retained-chain and sampled-tail evidence may not survive a true worker-idle or
-hard ordering boundary. The learned singleton fast-close heuristic is separate:
-it intentionally survives ordinary IDLE/DEADLINE closes and is cleared by
-accepted concurrency or an explicit ordering boundary.
+Loaded qualification must use the exact-source owner `make test` matrix and
+judge product-facing service before internal attribution. On the same ARM64/NEON
+lineage, preserve the `b389204` completion-state result (fast mixed useful
+WRITE 60.43 MB/s, async/sync +0.7%, async-minus-sync lower-WRITE requests -12.6
+with 95% CI -23.6..-1.6) while recovering the `8a6dd2a` deep-QD direction
+(QD8 +74.6%, QD32 +14.9% async/sync). The fully qualified `c07edd9` result is
+the regression control: QD8 -8.1% (95% CI -18.1..+1.9), QD32 -16.3%
+(-18.6..-14.0), with 58.8/67.8 deadline closes. A candidate is not promoted
+because its learned target or deadline counters look cleaner; useful
+WRITE/READ, lower bytes/requests and p99 must jointly improve or remain within
+the predeclared acceptance envelope. Retained-chain and sampled-tail evidence
+may not survive a true worker-idle or hard ordering boundary. The learned
+singleton fast-close heuristic is separate: it intentionally survives ordinary
+IDLE/DEADLINE closes and is cleared by accepted concurrency or an explicit
+ordering boundary.
 
 Credited opposite-end preparation qualification requires source coverage that
 the producer selects the FIFO head only while `lower_write_active` is true.
