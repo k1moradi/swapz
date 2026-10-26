@@ -62,7 +62,20 @@ windows rise 678.4 -> 1074.8 and lower WRITE requests 708.0 -> 1102.6.
 Cross-report throughput remains host-load-sensitive, so these geometry deltas
 are a strong causality signal rather than a final throughput verdict.
 
-The next bounded experiment is therefore an ID79 causality A/B, not another
+The modern-storage envelope exposes a separate SSD-scale latency problem in the
+retention mechanism itself. On the current Gen4 mixed row, swapz takes
+591.3 ms with 197 worker-empty deadline closes while lower WRITE service totals
+33.9 ms and ordered-worker CPU totals 37.3 ms. At the configured 2 ms retained
+deadline, those 197 closes represent up to 394 ms of deliberate retention.
+Gen5 similarly takes 522.5 ms with 176 worker-empty deadlines, versus 23.8 ms
+lower WRITE service and 32.3 ms ordered-worker CPU; 176 full 2 ms waits are up
+to 352 ms. The count-times-deadline estimate is an upper bound rather than a
+measured wait sum, but its scale matches the unexplained wall gap and is much
+larger than K=1 ready-wait, which remains zero. This reopens only the
+fast-media retention-duration question: do not widen lower-WRITE depth first.
+
+The next bounded experiment is therefore an ID79 causality A/B, followed by a
+fast-media retention/wakeup experiment, not another
 retention heuristic. Keep current `0155a09` as A; make one temporary source
 revision that restores only the old planned one-record full invalidation while
 leaving the current scheduler, K=1 ownership and all other production bytes
@@ -201,6 +214,7 @@ changes.
 | 79 | Planned single-record exact read-cache invalidation | **1 owner-qualified READ-I/O win / keep; isolated causality A/B next** | Current report `dc78c9bbffbd` on exact source `0155a09a0f2e` retains the 9.0 fast mixed lower READ requests in both sync and async after ID80/ID81 removal. Versus qualified pre-ID79 `ab885372`, the fast synchronous metadata-set hit rate rises 42.94%->99.78% and lower READ requests 2328.4->9.0, while windows rise 694.8->1793.8 and lower WRITE requests 724.6->1818.2. The two production kernel trees are byte-identical outside `engine.c`, and their fast mixed fixture/trace/order match; cross-report throughput is still host-load-sensitive. Keep exact-range fencing in production, but run one temporary ID79-off source A/B to prove whether the lost lower-READ stall was accidentally providing WRITE batching. Do not retain a selector. |
 | 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; restored pre-ID80 policy requalified** | Report `71251ba9232e` refuted ID80's static `count > 4U` gate with fast QD8 async/sync -9.1% (95% CI -15.1..-3.1). Current report `dc78c9bbffbd` on source `0155a09a0f2e` passes all five stages with the actual pre-ID80 predicate `count > 4U || preparation_queued > 0`; sustained QD4/QD8/QD32 async/sync throughput is +3.94% / +0.95% / +0.94%, with all three intervals overlapping zero. Keep ID80 removed and retain no dormant selector. |
 | 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed; rollback lifecycle requalified** | Exact source `26a045c80b56` passed build/native/W=1/W=2, then BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`); no benchmark result from that source is valid. The bundled candidate also replaced the true pre-ID80 detach predicate with unqualified `count > 1U`. Current source `0155a09a0f2e` removes the whole bundle and passes retained suspend/drain plus the complete owner matrix in report `dc78c9bbffbd`. This proves the rollback is healthy but does not identify which ID81 sub-change caused the lifecycle failure; do not split or revive those changes without independent evidence. |
+| 82 | Fast-media retained deadline and wakeup overhead | **4 evidence-backed candidate; measurement first** | Current exact source `0155a09a0f2e` shows Gen4 mixed 591.3 ms with 197 worker-empty deadline closes, 33.9 ms lower-WRITE service, 37.3 ms ordered-worker CPU and zero K=1 ready waits; Gen5 is 522.5 ms / 176 deadlines / 23.8 ms lower-WRITE / 32.3 ms worker CPU. At retain_ms=2, count*deadline is an upper bound of 394/352 ms, large enough to explain most of the fast-media gap. First add exact retained idle-wait and worker-wake attribution; then test a fast-media microsecond-scale or accepted-work-only closure policy without changing K=1, SWZ, ID63 or authority ownership. Reject if SD gains, lower-byte savings, lifecycle safety or mixed p99 regress materially. |
 
 ## What the pinned queue experiment establishes
 
@@ -276,17 +290,23 @@ Current exact source `0155a09a0f2e` is owner-qualified by report
    compare fast synchronous mixed lower READ requests, total/one-page windows,
    deadline and PACK_READY causes, lower WRITE requests, useful W/R and p99.
    Remove B afterward; do not add a production selector or intentional delay.
-3. After ID79 isolation, return to realistic churn/GC/TRIM evidence at roughly
-   70% occupancy with a cold/hot split and at least ten logical capacities of
-   hot rewrites. Asynchronous TRIM remains deferred until that workload proves a
-   material synchronous-TRIM service bottleneck.
-4. Keep delta64 rescue default-off. The controlled positive fixture is now
+3. After ID79 isolation, qualify ID82 with passive exact attribution first:
+   retained idle-wait nanoseconds, worker wake attempts/effective wakes, worker
+   runs, and queue-empty exits. If the measured wait confirms the current
+   count*deadline bound, test one fast-media retention policy with a
+   microsecond-scale budget or accepted-work-only close. Keep K=1 and authority
+   ownership unchanged; do not use K>1 to hide timer/wakeup overhead.
+4. Then return to realistic churn/GC/TRIM evidence at roughly 70% occupancy
+   with a cold/hot split and at least ten logical capacities of hot rewrites.
+   Asynchronous TRIM remains deferred until that workload proves a material
+   synchronous-TRIM service bottleneck.
+5. Keep delta64 rescue default-off. The controlled positive fixture is now
    strongly favorable; the next gate is representative-content prevalence and
    matched end-to-end benefit, not another classifier micro-optimization.
-5. Keep packed-placement retirement, circular allocator fairness, ordinary LZ4
+6. Keep packed-placement retirement, circular allocator fairness, ordinary LZ4
    acceleration one, the eight-block READ-coalescing cap and the removed
    depth-two WRITE path unchanged.
-6. Keep ID62 blocked. Physical-device testing remains separately unauthorized
+7. Keep ID62 blocked. Physical-device testing remains separately unauthorized
    and requires its own owner approval and safety review.
 
 ## Deferred asynchronous segment TRIM design for review

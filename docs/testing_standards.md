@@ -205,9 +205,8 @@ published report-only commit
 `dc78c9bbffbd2e8178fea9df2ca66006855c22e5`. It qualifies that exact source
 on owned RAM-backed `null_blk`, including ID36 low-RAM/heavy-CPU pressure,
 segmented/compound direct I/O, retained suspend/drain, live GC, DISCARD/TRIM,
-packed placement and synthetic failure paths. `dc78c9bbffbd` is the canonical report commit for that tested source.
-Later documentation-only descendants do not change the qualified product/test
-bytes; they are not themselves a newly tested source.
+packed placement and synthetic failure paths. `main` currently points at that
+report-only commit.
 
 The same report passed the positive-content delta64 rescue A/B with 4096 direct
 adoptions/first-LZ4 skips, +26.87% useful WRITE throughput

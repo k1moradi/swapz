@@ -162,9 +162,16 @@ publication CRC. A nonzero K=1 ready-wait fraction is direct evidence that a rea
 window was blocked behind the sole lower-WRITE slot. A material post-lower
 fraction shows that the slot remained occupied after device completion while
 the ordered owner was scheduled and/or publishing. Preparation wait instead
-identifies producer/ordered-worker starvation. If ready-wait is small but
-post-lower or commit non-I/O dominates, investigate serialized
-authority/publication before widening lower-I/O depth.
+identifies producer/ordered-worker starvation. Modern fast-media rows must also
+compare wall time against worker-empty retained deadline closes. A 2 ms
+retention deadline is orders of magnitude above a 14--25 us modeled NVMe
+completion and can dominate wall time even when lower-I/O request reduction is
+excellent. Current Gen4/Gen5 mixed evidence records 197/176 worker-empty
+deadline closes with zero K=1 ready waits; count*2 ms is an upper bound of
+394/352 ms. Add exact retained idle-wait attribution before changing the
+deadline. If ready-wait is small but retention wait dominates, shorten or
+eliminate fast-media waiting before widening lower-I/O depth; if post-lower or
+commit non-I/O dominates instead, investigate serialized authority/publication.
 
 The latest successful standard owner matrix tested source
 `0155a09a0f2ef97daff68da045f615a04000ed02`, passed all five stages, and
@@ -447,7 +454,7 @@ they affect how new measurements are designed:
 
 | Topic | Settled conclusion | Reopen only when |
 |---|---|---|
-| Retained-window grace/recheck timers | Do not wait for future arrivals. Work only with already accepted BIOs and the ordinary bounded deadline. | A new workload shows current finite-accepted policy is the measured bottleneck and can be isolated without changing lower-byte geometry. |
+| Retained-window deadline duration | Slow-media retention remains useful, but current Gen4/Gen5 envelope evidence reopens the 2 ms duration for fast media. Measure exact idle-wait first; do not add another grace/recheck timer. | Exact retained idle-wait shows the current deadline materially dominates wall time while already-accepted batching and lower-byte savings can be preserved with a shorter fast-media budget or accepted-work-only close. |
 | Deferred singleton age cutoff (ID53) | Rejected and reverted; keep the ordinary deadline. | New evidence invalidates the feedback/artifact mechanism recorded under ID53. |
 | Completion-aware zero-tail preservation (ID57) | Rejected and reverted; it contaminated later closed-loop waves. | A new state model can prove wave ownership without stale service evidence. |
 | CPU-local/bound preparation | Rejected: better overlap did not improve useful service. Keep unbound scheduling. | Trustworthy CPU attribution plus a new workload shows placement, not queue/service geometry, is limiting. |
