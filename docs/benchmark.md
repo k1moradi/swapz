@@ -167,9 +167,10 @@ compare wall time against worker-empty retained deadline closes. A 2 ms
 retention deadline is orders of magnitude above a 14--25 us modeled NVMe
 completion and can dominate wall time even when lower-I/O request reduction is
 excellent. Current Gen4/Gen5 mixed evidence records 197/176 worker-empty
-deadline closes with zero K=1 ready waits; count*2 ms is an upper bound of
-394/352 ms. Add exact retained idle-wait attribution before changing the
-deadline. If ready-wait is small but retention wait dominates, shorten or
+deadline closes with zero K=1 ready waits; count*2 ms proves at least 394/352 ms
+of aggregate open-window age reached the deadline, but that age can include CPU
+and I/O and is not a pure-idle measurement. Add exact retained idle-wait
+attribution before changing the deadline. If ready-wait is small but retention wait dominates, shorten or
 eliminate fast-media waiting before widening lower-I/O depth; if post-lower or
 commit non-I/O dominates instead, investigate serialized authority/publication.
 
