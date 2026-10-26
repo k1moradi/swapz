@@ -21,7 +21,15 @@ env:
 
 jobs:
   exact-c:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +45,15 @@ jobs:
           python3 -B tests/runtime/native/source-contract-test.py -v
           git diff --check
   compile-only:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +94,7 @@ jobs:
       - name: Publish experimental swapz compile-only artifact
         uses: actions/upload-artifact@v4
         with:
-          name: swapz-module-${{ github.sha }}
+          name: swapz-module-${{ matrix.arch }}-${{ github.sha }}
           path: |
             build/kernel/experimental/dm-swapz.ko
             build/deploy/compiled-module-manifest.txt

@@ -1811,3 +1811,13 @@ Alpha.29 source qualification follows ownership after the refcount split:
 `swapz_release_prepared()` must clear the per-BIO pointer and delegate to
 `swapz_prepared_put()`; only the latter may derive the fixed slot index and
 return the final reference to the free mask.
+
+
+Rootless architecture coverage is continuous on both x86_64 and ARM64. The
+production-C workflow runs the same native suite on `ubuntu-24.04` and
+`ubuntu-24.04-arm`; x86 therefore compiles/exercises the SSE2, AVX2 and
+AVX-512 native predictor objects while ARM64 compiles/exercises NEON. The
+compile-only W=1/W=2/normal module build runs on both architectures as well.
+This CI matrix does not replace loaded owner qualification: the single public
+`make test` remains authoritative on the actual owner host and selects the
+same architecture-specific native backend from `uname -m`.

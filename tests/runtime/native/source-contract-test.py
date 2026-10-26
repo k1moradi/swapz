@@ -1864,6 +1864,9 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("objdump -d build/tests/native/predictor-sse2.o |",
                          rootless)
         self.assertIn("liblz4-dev", workflow)
+        self.assertIn("ubuntu-24.04-arm", workflow)
+        self.assertIn("arch: arm64", workflow)
+        self.assertIn("runs-on: ${{ matrix.runner }}", workflow)
 
         self.assertIn('#include "predictor.h"', DM)
         init_start = DM.index("static int __init swapz_dm_init")
