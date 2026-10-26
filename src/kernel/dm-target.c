@@ -166,7 +166,6 @@ struct swapz_inflight_write {
 struct swapz_preparation_lane {
 	struct work_struct work;
 	struct swapz_dm *ctx;
-	u8 *input_page;
 	u8 *predictor_page;
 	u8 *delta64_candidate_page;
 	void *lz4_workmem;
@@ -5850,7 +5849,6 @@ static void swapz_free(struct swapz_dm *ctx)
 	if (ctx->preparation_lanes) {
 		for (prep_lane = 0; prep_lane < ctx->preparation_worker_count;
 		     ++prep_lane) {
-			vfree(ctx->preparation_lanes[prep_lane].input_page);
 			kvfree(ctx->preparation_lanes[prep_lane].predictor_page);
 			kvfree(ctx->preparation_lanes[prep_lane].delta64_candidate_page);
 			kvfree(ctx->preparation_lanes[prep_lane].lz4_workmem);
@@ -6286,7 +6284,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 			lane->ctx = ctx;
 			INIT_WORK(&lane->work, swapz_preparation_worker);
-			lane->input_page = vzalloc(SWAPZ_BLOCK_BYTES);
 			if (ctx->delta64_rescue_enabled) {
 				lane->predictor_page =
 					kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
@@ -6294,8 +6291,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 					kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 			}
 			lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
-			if (!lane->input_page ||
-			    (ctx->delta64_rescue_enabled &&
+			if ((ctx->delta64_rescue_enabled &&
 			     (!lane->predictor_page || !lane->delta64_candidate_page)) ||
 			    !lane->lz4_workmem) {
 				error = -ENOMEM;

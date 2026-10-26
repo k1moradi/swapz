@@ -1292,3 +1292,10 @@ Producer and consumer each hold one reference to a prepared slot. Only the final
 drop returns the slot to the free mask, so an upper BIO may complete after RAW
 selection while the producer finishes against slot-owned memory. Producer BIO
 access must end before the snapshot completion.
+
+
+Alpha.29 does not retain the historical per-producer 4KiB input scratch.
+Producer copy fallback writes directly into the prepared slot's stable
+`raw_bytes` snapshot, and direct single-bvec input is copied there before the
+temporary mapping is released. This removes one redundant 4KiB allocation per
+preparation lane and preserves the one-snapshot ownership boundary.
