@@ -13,6 +13,11 @@ typedef struct { _Atomic int value; } atomic_t;
 
 static int atomic_read(atomic_t *value)
 {
+	return atomic_load_explicit(&value->value, memory_order_relaxed);
+}
+
+static int atomic_read_acquire(const atomic_t *value)
+{
 	return atomic_load_explicit(&value->value, memory_order_acquire);
 }
 

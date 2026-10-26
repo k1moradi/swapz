@@ -5208,8 +5208,6 @@ static void swapz_worker(struct work_struct *work)
 			 */
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio)) {
-				bool defer_for_preparation = false;
-				bool lower_busy = swapz_inflight_lower_pending(ctx);
 				bool accepted_backlog;
 
 				wait_for_preparation = true;
@@ -5218,49 +5216,42 @@ static void swapz_worker(struct work_struct *work)
 					entry->list.next != &local ||
 					!list_empty(&ctx->incoming);
 				if (!list_empty(&entry->preparation_list)) {
-					if (lower_busy) {
-						swapz_queue_preparation_workers(ctx);
-						defer_for_preparation = true;
+					/*
+					 * queue_work() is only a request, not an ownership
+					 * transfer. Never return with this FIFO head still
+					 * unclaimed: the ordered lane owns it until the
+					 * producer has actually removed preparation_list.
+					 * This keeps accepted progress independent of a
+					 * producer/lower-completion wake race.
+					 */
+					if (ctx->preparation_queued)
+						ctx->preparation_queued--;
+					list_del_init(&entry->preparation_list);
+					entry->preparation_inline = true;
+					inline_preparation = true;
+					wait_for_preparation = false;
+					if (ctx->engine.bulk_enabled &&
+					    !ctx->engine.verify_after_write &&
+					    accepted_backlog &&
+					    !(entry->bio->bi_opf &
+					      (REQ_PREFLUSH | REQ_FUA))) {
+						entry->preparation_force_raw = true;
+						ctx->preparation_ordered_raw++;
+						ctx->work_conserving_window = true;
 					} else {
-						if (ctx->preparation_queued)
-							ctx->preparation_queued--;
-						list_del_init(&entry->preparation_list);
-						entry->preparation_inline = true;
-						inline_preparation = true;
-						wait_for_preparation = false;
-						if (ctx->engine.bulk_enabled &&
-						    !ctx->engine.verify_after_write &&
-						    accepted_backlog &&
-						    !(entry->bio->bi_opf &
-						      (REQ_PREFLUSH | REQ_FUA))) {
-							entry->preparation_force_raw = true;
-							ctx->preparation_ordered_raw++;
-							ctx->work_conserving_window = true;
-						} else {
-							ctx->preparation_ordered_inline++;
-						}
-						atomic_set(&ctx->preparation_tail_credit, 1);
-						if (!list_empty(&ctx->preparation_incoming) &&
-						    (atomic_read(&ctx->lower_write_active) ||
-						     ctx->preparation_queued >=
-							SWAPZ_PREPARATION_TAIL_WAKE_MIN))
-							swapz_queue_preparation_workers(ctx);
+						ctx->preparation_ordered_inline++;
 					}
+					atomic_set(&ctx->preparation_tail_credit, 1);
+					if (!list_empty(&ctx->preparation_incoming) &&
+					    (atomic_read(&ctx->lower_write_active) ||
+					     ctx->preparation_queued >=
+						SWAPZ_PREPARATION_TAIL_WAKE_MIN))
+						swapz_queue_preparation_workers(ctx);
 				} else {
 					atomic_set(&ctx->preparation_tail_credit, 0);
 					ctx->preparation_ordered_handoffs++;
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				if (defer_for_preparation) {
-					spin_lock_irqsave(&ctx->queue_lock, flags);
-					list_splice_init(&local, &ctx->incoming);
-					spin_unlock_irqrestore(&ctx->queue_lock, flags);
-					swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
-								 wall_start_ns,
-								 &ctx->ordered_worker_cpu_ns,
-								 cpu_start_ns);
-					return;
-				}
 				if (wait_for_preparation) {
 					u64 wait_start = 0;
 
@@ -5273,7 +5264,8 @@ static void swapz_worker(struct work_struct *work)
 						ctx->preparation_ordered_wait_wall_ns +=
 							swapz_elapsed_ns(wait_start, ktime_get_ns());
 					if (entry->prepared_page &&
-					    atomic_read(&entry->prepared_page->state) ==
+					    swapz_preparation_read_state(
+						&entry->prepared_page->state) ==
 						SWAPZ_PREPARATION_PREPARING) {
 						if (ctx->engine.bulk_enabled &&
 						    !ctx->engine.verify_after_write &&

@@ -855,10 +855,18 @@ memory bounds and no hot-path dynamic allocation.
 A descriptor needs an explicit one-way state machine such as QUEUED ->
 PREPARING -> READY_COMPRESSED or RAW_SELECTED -> SEALED -> COMMITTED/ABORTED.
 A producer publishes READY_COMPRESSED only after its payload, length, encoding
-and CRC are complete. If the dispatcher atomically selects RAW first, a late
-producer result is discarded and its reservoir slot is recycled; it must never
-republish or replace that generation. The dispatcher never waits for a
-PREPARING descriptor solely to improve representation quality.
+and CRC are complete. READY observation must use acquire ordering; a relaxed
+state load is insufficient on weakly ordered CPUs. If the dispatcher atomically
+selects RAW first, a late producer result is discarded and its reservoir slot
+is recycled; it must never republish or replace that generation. The dispatcher
+never waits for a PREPARING descriptor solely to improve representation quality.
+
+Queueing a preparation worker is not an ownership transfer. An unclaimed FIFO
+head remains ordered-dispatcher owned until a producer has actually removed its
+preparation descriptor under queue_lock. The dispatcher must not return merely
+because producer work was requested. It may defer a PREPARING head only after
+producer ownership is established and the stable RAW snapshot has been
+published, so producer READY or lower completion provides a concrete wake edge.
 
 Representation selection is terminal for that accepted generation. If a
 compressed result is ready when the ordered owner seals the run, it may be used.

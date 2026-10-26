@@ -814,10 +814,15 @@ from a non-PACK close.
 
 
 Nonblocking preparation-slot qualification executes the shared production
-mask helper with C11 atomic shims. Exercise all 64 slots, exhaustion without
-mask mutation, bit 63, release/reclaim, rejected-claim cleanup and concurrent
-producer/consumer payload reuse. Native stress does not prove the Linux memory
-model or loaded BIO lifecycle. Source contracts require a bounded claim before
+mask helper with C11 atomic shims. The shim must model Linux atomic_read() as
+relaxed and provide a separate acquire load for prepared-state publication;
+tests must not accidentally strengthen the production memory model. Exercise
+all 64 slots, exhaustion without mask mutation, bit 63, release/reclaim,
+rejected-claim cleanup and concurrent producer/consumer payload reuse. Native
+stress does not prove the Linux memory model or loaded BIO lifecycle. Source
+contracts also require that an unclaimed ordered FIFO head is removed from the
+preparation queue before the ordered worker may return; merely queueing producer
+work is not an ownership handoff. Source contracts require a bounded claim before
 `queue_lock`/descriptor removal, no producer allocation or semaphore, return on
 all three early-release paths, pointer clearing before bit return, release
 barrier plus ordered compare/exchange, array destruction after worker drain,

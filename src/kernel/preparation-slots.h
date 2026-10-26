@@ -23,9 +23,18 @@ enum swapz_preparation_state {
 	SWAPZ_PREPARATION_ERROR,
 };
 
+static inline int swapz_preparation_read_state(const atomic_t *state)
+{
+	/*
+	 * READY publishes payload metadata and bytes before the state change.
+	 * Use acquire ordering for non-RMW observation on weakly ordered CPUs.
+	 */
+	return atomic_read_acquire(state);
+}
+
 static inline int swapz_preparation_select_raw(atomic_t *state)
 {
-	int observed = atomic_read(state);
+	int observed = swapz_preparation_read_state(state);
 
 	if (observed == SWAPZ_PREPARATION_PREPARING)
 		observed = atomic_cmpxchg(state, SWAPZ_PREPARATION_PREPARING,

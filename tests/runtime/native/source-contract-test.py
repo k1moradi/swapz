@@ -2630,6 +2630,9 @@ static swapz_u16 swapz_probe_set(
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         fixture = (ROOT / "tests/runtime/benchmark/anon-page-fixture.py").read_text()
+        prep_slots = (ROOT / "src/kernel/preparation-slots.h").read_text()
+        prep_slots_native = (
+            ROOT / "tests/runtime/native/io/preparation-slots.c").read_text()
 
         self.assertRegex(DM, r"static\s+bool\s+swapz_async_prepare\s*=\s*true\s*;")
         self.assertIn(
@@ -2712,6 +2715,13 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("!list_empty(&entry->preparation_list)", ordered)
         self.assertIn("list_del_init(&entry->preparation_list)", ordered)
         self.assertIn("entry->preparation_inline = true", ordered)
+        self.assertNotIn("defer_for_preparation", ordered)
+        self.assertNotIn("bool lower_busy =", ordered)
+        self.assertIn("queue_work() is only a request, not an ownership", ordered)
+        self.assertIn("swapz_preparation_read_state(", ordered)
+        self.assertIn("atomic_read_acquire(state)", prep_slots)
+        self.assertIn("memory_order_relaxed", prep_slots_native)
+        self.assertIn("static int atomic_read_acquire(", prep_slots_native)
         self.assertNotIn("ordered_worker_busy", DM)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 1)", ordered)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 0)", ordered)
