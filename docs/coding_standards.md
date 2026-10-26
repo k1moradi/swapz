@@ -1300,11 +1300,15 @@ The ordered worker may force an unclaimed accepted WRITE to RAW only while the
 lower WRITE path is actually idle. Once K=1 is in flight, the remaining accepted
 work keeps its compression opportunity so producer/ordered preparation can
 overlap lower service. Eight records are the minimum pressure hand, not a
-maximum run size: if the next accepted FIFO WRITE is already
+maximum run size: the worker refreshes accepted followers from incoming before
+evaluating local readiness. If the next accepted FIFO WRITE is already
 READY_COMPRESSED/READY_RAW, the dispatcher continues consuming consecutive ready
 work up to the existing 64-record window. Consuming either READY state makes the
-current window work-conserving, so a dry accepted FIFO closes immediately rather
-than falling back to the retention timer.
+current window work-conserving, so a dry accepted FIFO of two or more records
+closes immediately rather than falling back to the retention timer. When a
+work-conserving hand or dry FIFO closes a window containing packed records, it
+commits via `swapz_close_worker_pack()`, maintaining exact PACK_READY cause
+conservation and preventing starvation of concurrent packed read verification.
 
 Producer and consumer each hold one reference to a prepared slot. Only the final
 drop returns the slot to the free mask, so an upper BIO may complete after RAW

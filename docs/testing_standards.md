@@ -842,7 +842,10 @@ work-conserving; and producer ownership does not make RAW dispatchable before
 the stable snapshot completion. Status/report qualification must retain
 `accepted_work_lower_idle_events` and `accepted_work_lower_idle_ns` as
 observational timed fields. Reporter aggregation must classify them as timed
-window deltas so mixed-regime means cannot silently drop them. An early
+window deltas so mixed-regime means cannot silently drop them. When
+work-conserving hand or dry FIFO closure dispatches a multi-record packed window,
+it commits via `swapz_close_worker_pack()` so that `close_pack_ready` reflects
+packed early commits and satisfies PACK_READY cause conservation. An early
 `prepared_page` publication is not an optimization unless RAW selection is
 separately gated on snapshot completion.
 

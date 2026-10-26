@@ -3646,7 +3646,6 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				 !ctx->engine.verify_after_write;
 	bool prepared_async = ctx->async_prepare && !entry->preparation_inline;
 	bool force_raw = entry->preparation_force_raw;
-	bool selected_raw_not_ready = false;
 	int prepared_state = SWAPZ_PREPARATION_EMPTY;
 	int length;
 	int error;
@@ -3700,7 +3699,6 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			   bulk_raw_eligible) {
 			ctx->work_conserving_raw_not_ready++;
 			ctx->work_conserving_window = true;
-			selected_raw_not_ready = true;
 			length = 0;
 		} else {
 			return -EUCLEAN;
@@ -3723,7 +3721,6 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			length = 0;
 			ctx->work_conserving_raw_not_ready++;
 			ctx->work_conserving_window = true;
-			selected_raw_not_ready = true;
 		} else {
 			length = swapz_compress_page(
 				ctx, input,
@@ -5145,7 +5142,7 @@ static bool swapz_retention_expired(struct swapz_dm *ctx)
 static bool swapz_next_local_write_ready(const struct swapz_dm *ctx,
 					 const struct list_head *local)
 {
-	const struct swapz_bio_ref *next_entry;
+	struct swapz_bio_ref *next_entry;
 	const struct swapz_prepared_page *prepared;
 	int state;
 
@@ -5381,16 +5378,6 @@ static void swapz_worker(struct work_struct *work)
 				}
 			}
 
-			if (ctx->work_conserving_window &&
-			    !swapz_has_inflight(ctx) &&
-			    ctx->batch_count >= SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
-			    !swapz_next_local_write_ready(ctx, &local) &&
-			    !ctx->failed && READ_ONCE(ctx->accepting)) {
-				ctx->work_conserving_hand_closes++;
-				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
-				swapz_flush_window(ctx);
-			}
-
 			if (!inline_preparation || !ctx->retain_ms ||
 			    !ctx->batch_count || ctx->singleton_fast_close ||
 			    ctx->failed || !READ_ONCE(ctx->accepting))
@@ -5424,6 +5411,21 @@ static void swapz_worker(struct work_struct *work)
 			}
 			if (swapz_worker_pack_close_ready(ctx))
 				swapz_close_worker_pack(ctx);
+			else if (ctx->work_conserving_window &&
+				 !swapz_has_inflight(ctx) &&
+				 ctx->batch_count >= SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
+				 !swapz_next_local_write_ready(ctx, &local) &&
+				 !ctx->failed && READ_ONCE(ctx->accepting)) {
+				ctx->work_conserving_hand_closes++;
+				if (ctx->batch_count >= 2U &&
+				    (ctx->single_pack_deferred ||
+				     ctx->accepted_burst_pack_ready))
+					swapz_close_worker_pack(ctx);
+				else {
+					ctx->next_window_close = SWAPZ_CLOSE_IDLE;
+					swapz_flush_window(ctx);
+				}
+			}
 			ctx->worker_has_immediate_followup = false;
 			if (!(remaining & 7U))
 				cond_resched();
@@ -5540,12 +5542,17 @@ static void swapz_worker(struct work_struct *work)
 				}
 				ctx->pack_close_pending_tail_sample = false;
 			}
-			if (ctx->batch_count && ctx->work_conserving_window &&
+			if (ctx->batch_count >= 2U && ctx->work_conserving_window &&
 			    !swapz_has_inflight(ctx) && ctx->accepting && !ctx->failed) {
 				ctx->work_conserving_dry_closes++;
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
-				swapz_flush_window(ctx);
+				if (ctx->single_pack_deferred ||
+				    ctx->accepted_burst_pack_ready)
+					swapz_close_worker_pack(ctx);
+				else {
+					ctx->next_window_close = SWAPZ_CLOSE_IDLE;
+					swapz_flush_window(ctx);
+				}
 				ctx->worker_has_immediate_followup = false;
 				continue;
 			}
