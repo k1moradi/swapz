@@ -114,12 +114,48 @@ static inline int swapz_window_compressed_extent_fits(
 		if (!pending[i].length ||
 		    pending[i].length > SWAPZ_MAX_COMPRESSED)
 			return 0;
+		if (++compressed > compressed_target)
+			return 0;
 		extent_bytes += pending[i].length;
-		compressed++;
+		if (extent_bytes > (swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES)
+			return 0;
 	}
-	if (compressed != compressed_target)
+	return compressed == compressed_target;
+}
+
+/*
+ * The exact three-record first-pack check must know whether its first two
+ * compressed predecessors had already formed the 4KiB first pack.  Find that
+ * bounded compressed prefix directly instead of re-scanning every total-count
+ * prefix when RAW records are interleaved.
+ */
+static inline int swapz_window_first_compressed_extent_fits(
+		const struct swapz_pending_bio *pending, swapz_u8 count,
+		swapz_u8 compressed_target, swapz_u8 extent_blocks)
+{
+	swapz_u32 extent_bytes;
+	swapz_u8 compressed = 0;
+	swapz_u8 i;
+
+	if (!pending || !count || count > SWAPZ_MAX_RECORDS ||
+	    !compressed_target ||
+	    (extent_blocks != 1U && extent_blocks != 2U &&
+	     extent_blocks != 4U))
 		return 0;
-	return extent_bytes <= (swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES;
+	extent_bytes = sizeof(struct swapz_header) +
+		(swapz_u32)compressed_target * sizeof(struct swapz_record);
+	for (i = 0; i < count; ++i) {
+		if (pending[i].raw)
+			continue;
+		if (!pending[i].length ||
+		    pending[i].length > SWAPZ_MAX_COMPRESSED)
+			return 0;
+		extent_bytes += pending[i].length;
+		if (++compressed == compressed_target)
+			return extent_bytes <=
+				(swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES;
+	}
+	return 0;
 }
 
 /*
@@ -142,13 +178,9 @@ static inline int swapz_window_single_pack_ready(
 		return 1;
 	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
 						read_budget, 3U, 2U)) {
-		swapz_u8 prefix;
-
-		for (prefix = 2U; prefix < count; ++prefix)
-			if (swapz_window_compressed_extent_fits(
-					pending, prefix, retain_ms,
-					read_budget, 2U, 1U))
-				return 0;
+		if (swapz_window_first_compressed_extent_fits(
+				pending, count, 2U, 1U))
+			return 0;
 		return 1;
 	}
 	return 0;
