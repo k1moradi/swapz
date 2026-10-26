@@ -3408,9 +3408,15 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	if (tail) {
 		swapz_u8 old_target = ctx->retained_burst_target;
 
+		/*
+		 * Only batch[] is known to have been admitted before the just-finished
+		 * K=1 generation completed. local/incoming can already contain BIOs
+		 * resubmitted by those completed writers, so adding queued_tail to the
+		 * completed count can still learn a target above live closed-loop QD.
+		 */
 		ctx->retained_burst_target = swapz_window_grow_burst_target(
 			ctx->retained_burst_target, ctx->retained_chain_completed,
-			tail, ctx->max_window);
+			staged_tail, ctx->max_window);
 		if (ctx->retained_burst_target != old_target)
 			ctx->burst_target_grows++;
 		if (tail == 1U) {
