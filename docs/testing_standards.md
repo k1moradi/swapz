@@ -568,7 +568,8 @@ three-compressed/two-block geometry; four ordinary compressed records fitting
 the 16KiB class must still not become a first-pack shortcut. Bulk RAW records
 are excluded from compressed-pack membership rather than poisoning all later
 compressed geometry. Native coverage must prove: one RAW plus two exact
-compressed records can establish the 4KiB first pack; one RAW plus four
+compressed records can establish the 4KiB first pack; RAW-assisted geometry at
+total count four still cannot establish a first pack; one RAW plus four
 compressed records can establish the 8KiB second pack; one RAW plus six
 compressed records can establish the 16KiB second pack; a newest RAW admission
 does not manufacture a transition; invalid compressed lengths, disabled
