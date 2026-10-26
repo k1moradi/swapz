@@ -570,9 +570,11 @@ The next ID78 candidate keeps the completion-only K=1 guard but treats a
 PACK_READY completion as one completed closed-loop generation: its count
 replaces, rather than accumulates with, older PACK_READY generations whose
 upper BIOs have already been released. After finalization the bounded
-`batch_count + local + incoming` sample is consumed exactly once. The total
-tail may raise the learned burst target; staged-only work installs no immediate
-tail-close target, while queued followers make the finite tail explicit. This
+`batch_count + local + incoming` sample is consumed exactly once. Only the
+pre-completion `batch_count` prefix may raise the learned burst target; queued
+followers make the finite tail explicit but are excluded from burst learning
+because they may already include resubmissions from the just-completed writers.
+Staged-only work installs no immediate tail-close target. This
 removes the c07 pending-sample lockout without restoring premature staged-only
 self-closure. The same candidate evaluates early pack readiness over valid
 compressed records even when earlier RAW records share the bulk batch, matching
