@@ -532,13 +532,16 @@ has not yet been released as a completed PACK_READY run.
 
 After K=1 completion, bounded sampling counts both records already staged in
 `batch[]` and plain retained-WRITE followers still queued in worker-local or
-`incoming` state. Their total may raise the learned burst width. A staged-only
-prefix does not install a sampled-tail close target, because the just-completed
-writers may immediately re-enter and join it; however, the sample itself is no
-longer left pending and therefore cannot suppress an otherwise valid
-service-dry or learned-target PACK_READY close until the absolute deadline.
-Queued accepted followers establish the finite sampled-tail target after they
-are consumed. This keeps the existing absolute deadline and adds no grace wait,
+`incoming` state. Only the staged `batch[]` prefix may raise the learned burst
+width: it was admitted before the completed K=1 generation released its upper
+BIOs and is therefore disjoint closed-loop evidence. `local`/`incoming` entries
+remain valid finite tail-close evidence, but they must not be added to the
+completed generation for learning because they can already include immediate
+resubmissions from those just-completed writers. A staged-only prefix does not
+install a sampled-tail close target; however, the sample itself is no longer
+left pending and therefore cannot suppress an otherwise valid service-dry or
+learned-target PACK_READY close until the absolute deadline. Queued accepted
+followers establish the finite sampled-tail target after they are consumed. This keeps the existing absolute deadline and adds no grace wait,
 device-latency heuristic, K>1 slot or timeout scaling.
 
 Retained bulk windows may contain incompressible RAW records before later
