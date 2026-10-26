@@ -371,6 +371,10 @@ struct swapz_dm {
 	u64 work_conserving_raw_not_ready;
 	u64 work_conserving_compressed_ready;
 	u64 work_conserving_raw_ready;
+	/* Accepted retained work that waits while no lower WRITE is active. */
+	u64 accepted_work_lower_idle_events;
+	u64 accepted_work_lower_idle_ns;
+	u64 accepted_work_lower_idle_start_ns;
 	/* Diagnostic queue-depth samples at synchronous lower-WRITE boundaries. */
 	u64 prep_lower_write_samples;
 	u64 prep_lower_write_start_queued;
@@ -1068,6 +1072,16 @@ static void swapz_mark_segments_dirty(struct swapz_dm *ctx,
 			WRITE_ONCE(ctx->segment_trimmed[segment], 0);
 }
 
+static void swapz_end_accepted_lower_idle(struct swapz_dm *ctx, u64 now_ns)
+{
+	u64 start_ns = ctx->accepted_work_lower_idle_start_ns;
+
+	if (!start_ns)
+		return;
+	ctx->accepted_work_lower_idle_ns += swapz_elapsed_ns(start_ns, now_ns);
+	ctx->accepted_work_lower_idle_start_ns = 0;
+}
+
 static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 				       struct swapz_inflight_write *inflight)
 {
@@ -1114,6 +1128,7 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	reinit_completion(&inflight->lower_done);
 	inflight->lower_error = 0;
 	inflight->lower_start_ns = ktime_get_ns();
+	swapz_end_accepted_lower_idle(ctx, inflight->lower_start_ns);
 	inflight->lower_end_ns = 0;
 	WRITE_ONCE(inflight->active, true);
 	ctx->inflight_count++;
@@ -1328,6 +1343,8 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 		ctx->lower_write_submitted_reqs++;
 	}
 	section_start = ktime_get_ns();
+	if (op == REQ_OP_WRITE)
+		swapz_end_accepted_lower_idle(ctx, section_start);
 	/* The producer observes only this atomic diagnostic; lower I/O
 	 * completion and mapping publication remain owned by this caller.
 	 * If an inline-steal head left preparation work queued, a real lower
@@ -2817,6 +2834,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 */
 	if (!count) {
 		if (hard_boundary) {
+			swapz_end_accepted_lower_idle(ctx, ktime_get_ns());
 			if (!swapz_has_inflight(ctx))
 				ctx->single_pack_deferred = false;
 			ctx->accepted_burst_pack_ready = false;
@@ -2876,6 +2894,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	}
 	/* Measure BEFORE any dm_io, GC, verification or lower FUA. */
 	end_ns = ktime_get_ns();
+	swapz_end_accepted_lower_idle(ctx, end_ns);
 	/* The timer can only be armed by opted-in retained windows.
 	 * Nonretained singleton windows have no callback to synchronize,
 	 * so avoid a needless hrtimer_cancel() on every physical WRITE.
@@ -3658,6 +3677,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		if (prepared_state == SWAPZ_PREPARATION_READY_COMPRESSED) {
 			atomic_dec(&ctx->preparation_ready_current);
 			ctx->work_conserving_compressed_ready++;
+			ctx->work_conserving_window = true;
 			length = prepared->length;
 			payload_crc32c = prepared->payload_crc32c;
 			payload_crc32c_valid = prepared->payload_crc32c_valid;
@@ -3674,6 +3694,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		} else if (prepared_state == SWAPZ_PREPARATION_READY_RAW) {
 			atomic_dec(&ctx->preparation_ready_current);
 			ctx->work_conserving_raw_ready++;
+			ctx->work_conserving_window = true;
 			length = 0;
 		} else if (prepared_state == SWAPZ_PREPARATION_RAW_SELECTED &&
 			   bulk_raw_eligible) {
@@ -5116,6 +5137,32 @@ static bool swapz_retention_expired(struct swapz_dm *ctx)
 					     ktime_get_ns());
 }
 
+/*
+ * Continue past the first pressure hand while the next already-accepted WRITE
+ * has a completed representation. This consumes only current FIFO work and
+ * never waits for preparation or a future BIO merely to enlarge the run.
+ */
+static bool swapz_next_local_write_ready(const struct swapz_dm *ctx,
+					 const struct list_head *local)
+{
+	const struct swapz_bio_ref *next_entry;
+	const struct swapz_prepared_page *prepared;
+	int state;
+
+	if (list_empty(local) || ctx->batch_count >= ctx->max_window)
+		return false;
+	next_entry = list_first_entry(local, struct swapz_bio_ref, list);
+	if (!swapz_plain_retained_write(next_entry->bio))
+		return false;
+	prepared = READ_ONCE(next_entry->prepared_page);
+	if (!prepared ||
+	    !completion_done(&next_entry->preparation_snapshot_ready))
+		return false;
+	state = swapz_preparation_read_state(&prepared->state);
+	return state == SWAPZ_PREPARATION_READY_COMPRESSED ||
+	       state == SWAPZ_PREPARATION_READY_RAW;
+}
+
 static enum hrtimer_restart swapz_retention_wake(struct hrtimer *timer)
 {
 	struct swapz_dm *ctx = container_of(timer, struct swapz_dm, retention_timer);
@@ -5209,6 +5256,7 @@ static void swapz_worker(struct work_struct *work)
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio)) {
 				bool accepted_backlog;
+				bool lower_write_busy;
 
 				if (!entry->prepared_page) {
 					wait_for_preparation = true;
@@ -5216,6 +5264,8 @@ static void swapz_worker(struct work_struct *work)
 					accepted_backlog = ctx->batch_count ||
 						entry->list.next != &local ||
 						!list_empty(&ctx->incoming);
+					lower_write_busy = swapz_has_inflight(ctx) ||
+						atomic_read(&ctx->lower_write_active);
 					if (!list_empty(&entry->preparation_list)) {
 						/*
 						 * queue_work() is only a request, not an ownership
@@ -5233,7 +5283,7 @@ static void swapz_worker(struct work_struct *work)
 						wait_for_preparation = false;
 						if (ctx->engine.bulk_enabled &&
 						    !ctx->engine.verify_after_write &&
-						    accepted_backlog &&
+						    !lower_write_busy && accepted_backlog &&
 						    !(entry->bio->bi_opf &
 						      (REQ_PREFLUSH | REQ_FUA))) {
 							entry->preparation_force_raw = true;
@@ -5334,6 +5384,7 @@ static void swapz_worker(struct work_struct *work)
 			if (ctx->work_conserving_window &&
 			    !swapz_has_inflight(ctx) &&
 			    ctx->batch_count >= SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
+			    !swapz_next_local_write_ready(ctx, &local) &&
 			    !ctx->failed && READ_ONCE(ctx->accepting)) {
 				ctx->work_conserving_hand_closes++;
 				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
@@ -5531,6 +5582,12 @@ static void swapz_worker(struct work_struct *work)
 			if (ctx->batch_count &&
 			    swapz_window_timer_enabled(ctx->retain_ms) &&
 			    ctx->accepting && !ctx->failed) {
+				if (!swapz_has_inflight(ctx) &&
+				    !ctx->accepted_work_lower_idle_start_ns) {
+					ctx->accepted_work_lower_idle_start_ns =
+						ktime_get_ns();
+					ctx->accepted_work_lower_idle_events++;
+				}
 				if (swapz_retention_timer_needs_arm(
 						ctx->retain_ms,
 						hrtimer_is_queued(&ctx->retention_timer))) {
@@ -6913,7 +6970,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_late_results_discarded=%llu "
 		       "prep_ready_current=%d prep_ready_max=%d "
 		       "prep_slots_in_use=%d prep_slots_in_use_max=%d "
-		       "prep_ordered_raw=%llu",
+		       "prep_ordered_raw=%llu "
+		       "accepted_work_lower_idle_events=%llu "
+		       "accepted_work_lower_idle_ns=%llu",
 		       SWAPZ_WORK_CONSERVING_HAND_RECORDS,
 		       ctx->work_conserving_hand_closes,
 		       ctx->work_conserving_dry_closes,
@@ -6925,7 +6984,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       atomic_read(&ctx->preparation_ready_max),
 		       atomic_read(&ctx->preparation_slots_in_use),
 		       atomic_read(&ctx->preparation_slots_in_use_max),
-		       ctx->preparation_ordered_raw);
+		       ctx->preparation_ordered_raw,
+		       ctx->accepted_work_lower_idle_events,
+		       ctx->accepted_work_lower_idle_ns);
 		/* These independent single-writer values are diagnostic while busy;
 		 * qualification snapshots only at drained measurement boundaries. */
 		DMEMIT(" delta64_rescue=%u delta64_eligible=%llu "

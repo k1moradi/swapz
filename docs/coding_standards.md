@@ -1285,30 +1285,37 @@ Fault-injection knobs are forbidden on physical backing.
 
 Alpha.29 keeps one unbound producer lane, K=1 and the existing 64 preparation
 slots. A producer copies one stable 4KiB RAW snapshot before optional LZ4 and
-publishes that lifetime boundary through `preparation_snapshot_ready`. If the
-lower WRITE is still active, a PREPARING FIFO head is deferred. Producer READY
-or lower completion wakes the ordered dispatcher; if lower completion wins,
-PREPARING atomically becomes RAW_SELECTED and a late compressed result is
-discarded. READY_COMPRESSED/READY_RAW are consumed normally. When a PREPARING
-FIFO head is deferred while lower write is pending, its stable snapshot has
-already been taken and its `prepared_page` descriptor assigned. On subsequent
-dispatcher execution, the re-encountered head bypasses snapshot completion wait
-and directly samples the active preparation and lower state, preventing
-deadlocks from re-waiting on an already consumed snapshot completion.
+publishes that lifetime boundary through `preparation_snapshot_ready`. The
+`prepared_page` pointer must not become dispatchable before that snapshot is
+complete: publishing it early without a snapshot-ready gate would allow the
+dispatcher to select RAW while `raw_bytes` is still being filled.
 
-When lower service is idle, an unclaimed WRITE with already-accepted backlog
-skips inline LZ4 and becomes RAW. Eight records form the first work-conserving
-hand; a shorter work-conserving tail closes when the admitted FIFO is dry.
-Lone/no-backlog QD1 retains inline preparation and the retained lifecycle.
+If the lower WRITE is still active, a PREPARING FIFO head is deferred after the
+stable snapshot is published. Producer READY or lower completion wakes the
+ordered dispatcher; if lower completion wins, PREPARING atomically becomes
+RAW_SELECTED and a late compressed result is discarded. READY state observation
+is acquire-ordered.
+
+The ordered worker may force an unclaimed accepted WRITE to RAW only while the
+lower WRITE path is actually idle. Once K=1 is in flight, the remaining accepted
+work keeps its compression opportunity so producer/ordered preparation can
+overlap lower service. Eight records are the minimum pressure hand, not a
+maximum run size: if the next accepted FIFO WRITE is already
+READY_COMPRESSED/READY_RAW, the dispatcher continues consuming consecutive ready
+work up to the existing 64-record window. Consuming either READY state makes the
+current window work-conserving, so a dry accepted FIFO closes immediately rather
+than falling back to the retention timer.
 
 Producer and consumer each hold one reference to a prepared slot. Only the final
 drop returns the slot to the free mask, so an upper BIO may complete after RAW
 selection while the producer finishes against slot-owned memory. Producer BIO
-access must end before the snapshot completion.
+access must end before snapshot completion. The historical per-producer 4KiB
+input scratch stays removed; producer fallback writes directly into the slot's
+stable `raw_bytes` snapshot.
 
-
-Alpha.29 does not retain the historical per-producer 4KiB input scratch.
-Producer copy fallback writes directly into the prepared slot's stable
-`raw_bytes` snapshot, and direct single-bvec input is copied there before the
-temporary mapping is released. This removes one redundant 4KiB allocation per
-preparation lane and preserves the one-snapshot ownership boundary.
+ID83 instrumentation includes work-conserving hand/dry closes, representation
+selection, late-result discard, reservoir occupancy, K=1 ready wait, and
+`accepted_work_lower_idle_events/ns`. The idle counters are observational:
+they measure retained accepted work that reaches an owner-observed no-lower-WRITE
+wait interval and end when that wait is closed or lower submission begins. They
+must never change scheduling policy.

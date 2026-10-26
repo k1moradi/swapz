@@ -329,7 +329,8 @@ KERNEL_WRITE_FIELDS = (
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + (
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
-    "work_conserving_raw_ready", "prep_late_results_discarded")
+    "work_conserving_raw_ready", "prep_late_results_discarded",
+    "accepted_work_lower_idle_events", "accepted_work_lower_idle_ns")
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
     "target_interval_ns", "samples", "read_start", "write_start",
@@ -6340,6 +6341,9 @@ def print_bench(result):
                  f"{asynchronous['mixed_prep_lower_write_end_nonempty']:.1f}"),
                 ("K=1 read-bypass detach skips",
                  f"{asynchronous['mixed_pipeline_read_bypass_skips']:.1f}"),
+                ("accepted lower-idle events/ms",
+                 f"{counters['accepted_work_lower_idle_events']:.1f}/"
+                 f"{counters['accepted_work_lower_idle_ns'] / 1e6:.2f}"),
                 ("K=1 ready wait win/records/ms",
                  f"{counters['k1_ready_wait_windows']:.1f}/"
                  f"{counters['k1_ready_wait_records']:.1f}/"

@@ -641,49 +641,42 @@ retired from current source.
 
 ## Alpha.29 work-conserving dispatcher benchmark
 
-Alpha.29 adds no public command or benchmark-only selector. The ordinary
-`make test` storage envelopes remain the decision surface. Timed swapz arms
-record `work_conserving_hand_records=8`, hand/dry closes, RAW-not-ready,
-compressed-ready, raw-ready, late-result-discard and prepared-reservoir/slot
-occupancy.
+ID83 adds no public command or benchmark-only selector. The ordinary `make test`
+storage envelopes remain the decision surface, and the SIMD qualification
+matrix remains unchanged: SSE2/AVX2/AVX-512 objects on x86_64, NEON on arm64,
+with runtime execution only when the host advertises the ISA.
 
-The expected fast-media signature is fewer worker-empty/deadline stalls and
-nonzero RAW-not-ready selection with improved useful throughput or p99. Lower
-bytes/requests may rise because RAW is intentionally selected when compression
-loses the service race. On SD, longer lower-I/O service should allow more READY
-compression before dispatch. Reservoir high water decides whether more than 64
-slots are justified; K=1 ready-wait decides whether another lower run buffer is
-justified.
+The first owner-qualified run is report `aacf96c02325` on exact source
+`91c2cb2edb1e`. All five correctness/build stages pass. Its performance result
+is a refinement baseline, not a promotion: fast mixed async is 45.35 MB/s versus
+43.84 sync, but the +3.5% paired effect has CI -0.2..+7.2 while async lower
+WRITE requests are 2560.4 versus 1691.0 sync, a significant +869.4
+(+796.2..+942.6). Fast sustained QD8 improves +14.6% (+12.5..+16.7), but QD32
+regresses -9.8% (-14.2..-5.5). SD mixed remains strongly favorable versus raw,
+although async is 7.1% below sync.
 
-Portable CI evidence for production candidate `3ce83f9d407e`, with the ARM
-matrix introduced by `94f3e1364294`, is PASS: exact production-C/source tests
-and W=1/W=2/normal module builds succeed on x86_64 and ARM64. The native x86
-host measured delta64 SSE2 at 938/983 ns per 4KiB transform/inverse and AVX2 at
-705/533 ns; its AVX-512 object compiled but the host CPU did not advertise
-AVX-512, so no runtime AVX-512 timing is claimed. The ARM64 host selected NEON
-and measured 748/880 ns per page. These are offline predictor timings only, not
-ID83 storage-service evidence.
+The dispatcher refinement tests one production-C hypothesis: the first
+eight-record hand should start service when accepted work is unready, but it
+must not force later RAW while K=1 is already busy or split a consecutive FIFO
+prefix whose representations are already READY. READY_COMPRESSED/READY_RAW also
+make the current window work-conserving so a dry accepted tail cannot fall back
+to the retention timer. The stable 4KiB RAW snapshot boundary is unchanged.
 
-The performance hypothesis is intentionally bounded by the current qualified
-modern-envelope data. Current Gen4 mixed swapz takes 591.3 ms for the fixed
-trace versus 85.6 ms raw, with 197 worker-empty deadline closes, 33.9 ms lower
-WRITE service and zero K=1 ready wait. Gen5 takes 522.5 ms versus 81.6 ms raw,
-with 176 worker-empty deadline closes and 23.8 ms lower WRITE service. ID83 is
-designed to convert part of that deadline/scheduler gap into immediate
-eight-record lower service. Because deadline-reaching age is not pure idle time,
-do not predict an exact speedup from count*2ms. If roughly one-half to
-three-quarters of the previously deadline-reaching age proves removable idle
-time, the fixed-trace arithmetic corresponds to roughly 1.5--2.0x current
-fast-mixed useful service before accounting for the extra RAW lower bytes; this
-is a decision hypothesis, not a qualification result. A larger gain is possible
-only if nearly all of that age was avoidable idle time.
+Timed swapz arms retain hand/dry closes, RAW-not-ready, compressed-ready,
+RAW-ready, late-result-discard and reservoir/slot high water, and additionally
+record `accepted_work_lower_idle_events/ns`. The new counters are diagnostic:
+the desired fast-media signature is lower accepted-work idle wall, lower
+WRITE-request inflation, and recovered useful service/p99 without converting the
+qualified SD workload into excessive RAW traffic. K=1 ready-wait remains the
+only reopen signal for another lower-WRITE slot.
 
-Expected costs are explicit. Every producer-owned page now pays one stable 4KiB
-snapshot copy; fast media may write more RAW bytes and create more 1-block
-extents; late LZ4 results can consume CPU and then be discarded; and higher RAW
-prevalence can increase capacity/GC pressure. The counter set must distinguish
-those costs from the intended gains. Slow media should see relatively few
-RAW-not-ready selections because lower service gives the producer time to
-publish READY compression. Fast media should show the opposite. Do not promote
-ID83 merely because deadline counts fall: useful WRITE/READ, p99, lower
-bytes/requests, CPU, RAM and GC remain the product criteria.
+Expected direction is strongest at deep QD on fast storage. Avoiding RAW forcing
+during K=1 service should let already-accepted pages use otherwise idle CPU
+overlap, reducing lower bytes and extent/request count. Extending ready prefixes
+past eight records should reduce request chopping. Immediate dry closure of
+READY work removes up to the remaining retention budget for those windows.
+Costs are bounded extra state checks plus potentially more compression CPU; no
+new payload allocation, queue depth, on-disk representation or completion owner
+is introduced. These are hypotheses until the next exact-source owner
+`make test` report; do not infer physical-device performance from RAM-backed
+service envelopes.

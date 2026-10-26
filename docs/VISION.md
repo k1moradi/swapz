@@ -48,18 +48,20 @@ useful service than the saved lower I/O is worth. Slow media should naturally
 receive more completed compression because long lower service provides
 preparation overlap; fast media may trade some lower bytes for continuous
 service. Alpha.29 implements the first bounded candidate without changing SWZ: the
-existing per-BIO descriptor queue stays the low-copy admission queue, the
-64-slot preparation array becomes a stable RAW+compressed reservoir, and the
-ordered worker dispatches eight-record work-conserving hands or any shorter dry
-pressure tail. A producer snapshots the 4KiB page once, then optional LZ4 races
-against lower completion; when lower service becomes available first, RAW wins
-atomically and any late compression result is discarded. Hosted rootless qualification is green on both x86_64 and ARM64, including
-W=1/W=2/normal module compilation and the native preparation-race/source
-contracts. The candidate remains unqualified until the complete owner
-`make test` matrix publishes PASS and its SD/SATA/NVMe service tradeoff is
-acceptable. It preserves the single
-authority/ordering model, bounded memory, CRC/generation validation and the
-existing SWZ format.
+existing per-BIO descriptor queue stays the low-copy admission queue and the
+64-slot preparation array is a stable RAW+compressed reservoir. Owner
+`make test` now passes full correctness/lifecycle qualification on source
+`91c2cb2edb1e` (report `aacf96c02325`), so the remaining ID83 question is
+performance policy rather than basic lifetime safety. That same run shows the
+first dispatcher policy is not yet qualified on fast media: it creates
+significantly more lower WRITE requests than synchronous preparation and
+regresses sustained QD32 service. The next bounded refinement therefore keeps
+K=1/SWZ/authority unchanged, forces RAW only when lower service is truly idle,
+extends an eight-record pressure hand across already-READY accepted work, and
+closes READY dry tails without retention sleep. The stable RAW snapshot remains
+a mandatory ownership boundary. Promotion still requires same-source owner
+evidence that preserves the SD gains while improving fast-media useful service
+and lower-I/O economics.
 
 The next qualification priorities are work-conserving fast-media dispatch,
 realistic churn/GC/TRIM evidence and representative-content evidence, not

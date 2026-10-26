@@ -834,6 +834,16 @@ owners (for example, PACK_READY closure from write admission to the serialized
 worker), contract assertions must move with that ownership in the same
 standards-backed change rather than preserving historical body-local syntax.
 
+ID83 dispatcher refinement contracts must prove all four scheduling boundaries:
+ordered RAW forcing requires accepted backlog and an actually idle lower-WRITE
+path; the eight-record pressure hand may not split a consecutive already-READY
+FIFO prefix; READY_COMPRESSED and READY_RAW make a dry accepted window
+work-conserving; and producer ownership does not make RAW dispatchable before
+the stable snapshot completion. Status/report qualification must retain
+`accepted_work_lower_idle_events` and `accepted_work_lower_idle_ns` as
+observational timed fields. An early `prepared_page` publication is not an
+optimization unless RAW selection is separately gated on snapshot completion.
+
 
 Only a successful PACK_READY continuation may arm post-I/O admitted-tail
 sampling. Other retained chain continuations such as duplicate/full or
@@ -897,14 +907,17 @@ FIFO and before arming `retention_timer`. The compatibility
 `pack_close_burst_admission` counter remains parseable during this evidence
 cycle but must be exactly zero for every current swapz timed arm.
 
-Loaded qualification compares fast mixed async versus sync against the
-`5f92ea3` baseline: the candidate must materially reduce the prior +45.6
-lower-WRITE-request excess (95% CI +13.9..+77.3), remove admission-site burst
-closes, and eliminate avoidable worker-empty deadline closes without materially
-regressing useful WRITE/READ throughput or p99. The same run must retain the
-established fast write-only QD8/QD32 async benefit. Modern-SD/SATA/Gen4/Gen5
-rows remain directional product evidence and must report whether useful service
-improves while lower bytes/requests remain favorable.
+Loaded qualification now uses owner-qualified source `91c2cb2edb1e` / report
+`aacf96c02325` as the ID83 refinement baseline. That run passes correctness,
+lifecycle, fault and resource-pressure qualification, but fast-media scheduling
+is not promoted: fast mixed async-minus-sync useful WRITE is +3.5% with a 95% CI
+of -0.2..+7.2 while lower WRITE requests regress by +869.4
+(+796.2..+942.6), and fast sustained QD32 async-minus-sync is -9.8%
+(-14.2..-5.5). A refinement must reduce the request inflation and recover
+deep-QD service without materially regressing the qualified SD result, lower
+bytes, READ service/p99, CPU/RAM/GC or correctness. The new accepted-work lower
+idle wall must be reported beside existing ready-wait/preparation counters;
+K>1 remains closed while K=1 ready wait stays zero.
 
 These scheduling rules are architecture-neutral. The single public `make test`
 command remains unchanged on SSE2, AVX2, AVX-512 and NEON hosts; existing
