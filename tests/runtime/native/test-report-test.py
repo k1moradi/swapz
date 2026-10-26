@@ -1056,6 +1056,30 @@ def synthetic_log():
 
 
 class ReportContract(unittest.TestCase):
+    def test_loaded_progress_stream_hides_bulk_evidence_but_keeps_phase_and_failure(self):
+        self.assertIsNone(runner.loaded_progress_line(
+            "TARGET_STATUS_AFTER=0 8192 swapz physical_write=123456"))
+        self.assertIsNone(runner.loaded_progress_line(
+            '{"candidate":"swapz","verdict":"PASS","throughput_mbps":{}}'))
+        self.assertEqual(
+            runner.loaded_progress_line("START_OWNED_RAM_PAIR_ASYNC_PREPARE=1"),
+            "START_OWNED_RAM_PAIR_ASYNC_PREPARE=1")
+        self.assertEqual(
+            runner.loaded_progress_line(
+                "PASS_LOADED_LIVE_GC=victims:20 rotations:20 pages:20"),
+            "PASS_LOADED_LIVE_GC")
+        self.assertEqual(
+            runner.loaded_progress_line(
+                "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1"),
+            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT")
+        self.assertEqual(
+            runner.loaded_progress_line(
+                "START_ID36_RESOURCE_PRESSURE=memory_high:1 pressure_mib:576"),
+            "START_ID36_RESOURCE_PRESSURE")
+        self.assertEqual(
+            runner.loaded_progress_line("FAIL: owned RAM pair timed out"),
+            "FAIL: owned RAM pair timed out")
+
     def test_host_cpu_record_keeps_aggregate_counters_and_missing_status(self):
         raw = {"status": "AVAILABLE", "wall_ns": 1000000000,
                "online_cpus": 4, "affinity_cpus": 2, "tick_hz": 100,

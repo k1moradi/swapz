@@ -1830,7 +1830,10 @@ privileged fifth stage. `run-tests.py` therefore streams the captured
 `test-loaded.sh` output live while retaining an identical in-memory copy for
 the existing report parsers. The child harness already emits bounded
 `START_*/PASS_*` phase markers; those markers are now user-visible as they
-happen.
+happen. Live terminal output is deliberately filtered to phase transitions and
+`FAIL:`/`BLOCKED:` diagnostics. Full child stdout, including status snapshots,
+JSON benchmark records and detailed evidence counters, remains captured verbatim
+for report parsing but must not be echoed line-for-line to the operator terminal.
 
 Every top-level privileged helper invoked by `test-loaded.sh` also has a
 root-owned outer watchdog in addition to its internal operation/replay

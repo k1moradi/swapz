@@ -1409,7 +1409,10 @@ static swapz_u16 swapz_probe_set(
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
         self.assertIn('print("       loaded qualification progress:")', runner)
         self.assertIn("subprocess.Popen(", runner)
-        self.assertIn('sys.stdout.write("       " + line)', runner)
+        self.assertIn("def loaded_progress_line(line):", runner)
+        self.assertIn("progress = loaded_progress_line(line)", runner)
+        self.assertIn('sys.stdout.write("       " + progress + "\\n")', runner)
+        self.assertNotIn('sys.stdout.write("       " + line)', runner)
         authority = (ROOT / "src/kernel/authority.h").read_text()
 
         self.assertIn("262144U, 1048576U", scale)

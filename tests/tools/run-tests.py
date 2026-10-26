@@ -1450,6 +1450,34 @@ def failure_context(output, *, loaded=True, default_phase=None):
                       "Child returned nonzero in this non-privileged stage")
     return phase, reason
 
+LOADED_PROGRESS_PREFIXES = (
+    "START_LOADED_", "PASS_LOADED_",
+    "START_OWNED_RAM_REGIME=", "PASS_OWNED_RAM_REGIME=",
+    "START_OWNED_RAM_PAIR_ASYNC_PREPARE=", "PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=",
+    "START_STORAGE_ENVELOPE=", "PASS_STORAGE_ENVELOPE=",
+    "START_DELTA64_RESCUE=", "PASS_DELTA64_RESCUE=",
+    "START_READ_COALESCE_AB=", "PASS_READ_COALESCE_AB=",
+    "START_SD_READ_COALESCE_AB=", "PASS_SD_READ_COALESCE_AB=",
+    "START_WRITE_SATURATION_REGIME=", "PASS_WRITE_SATURATION_REGIME=",
+    "START_WRITE_SATURATION_PAIR_QD=", "PASS_WRITE_SATURATION_PAIR_QD=",
+    "START_ID36_RESOURCE_PRESSURE=", "PASS_ID36_RESOURCE_PRESSURE=",
+)
+
+
+def loaded_progress_line(line):
+    """Return concise live stage-5 progress while retaining full captured output."""
+    stripped = line.strip()
+    if stripped.startswith(("BLOCKED:", "BLOCKED_LOADED_QUALIFICATION:", "FAIL:")):
+        return stripped
+    if not stripped.startswith(LOADED_PROGRESS_PREFIXES):
+        return None
+    if stripped.startswith(("PASS_LOADED_", "PASS_RETAINED_SYNTHETIC_",
+                            "START_ID36_RESOURCE_PRESSURE=",
+                            "PASS_ID36_RESOURCE_PRESSURE=")):
+        return re.split(r"[=:]", stripped, maxsplit=1)[0]
+    return stripped
+
+
 def run_stage(title, command, result, *, parse_bench=False):
     start = time.monotonic()
     try:
@@ -1471,8 +1499,10 @@ def run_stage(title, command, result, *, parse_bench=False):
             assert proc.stdout is not None
             for line in proc.stdout:
                 chunks.append(line)
-                sys.stdout.write("       " + line)
-                sys.stdout.flush()
+                progress = loaded_progress_line(line)
+                if progress is not None:
+                    sys.stdout.write("       " + progress + "\n")
+                    sys.stdout.flush()
             rc = proc.wait()
             output = "".join(chunks)
         else:

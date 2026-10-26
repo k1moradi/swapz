@@ -514,4 +514,7 @@ then exposed a second harness-only regression: the watchdog executed private
 shell helpers directly, adding an executable-bit requirement that the previous
 `bash helper.sh` privilege path did not have. The bounded wrapper now invokes
 those helpers through `bash` inside `timeout`, preserving the original helper
-contract while keeping the outer deadline.
+contract while keeping the outer deadline. Live stage-5 output is also filtered
+to concise phase transitions and failure/block diagnostics; full raw evidence is
+still captured for the report instead of flooding the terminal with status and
+JSON records.
