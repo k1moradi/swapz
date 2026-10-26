@@ -2136,22 +2136,29 @@ static void swapz_preparation_worker(struct work_struct *work)
 		final_state = prepared->length > 0 ?
 			SWAPZ_PREPARATION_READY_COMPRESSED :
 			SWAPZ_PREPARATION_READY_RAW;
+		/*
+		 * Charge READY residency before publishing the READY state. Once
+		 * READY is visible, the ordered consumer may immediately decrement
+		 * this gauge. If RAW won the state race, undo the speculative charge.
+		 */
+		active = atomic_inc_return(&ctx->preparation_ready_current);
 		publish_state = swapz_preparation_publish_result(&prepared->state,
 							 final_state);
 		if (publish_state == SWAPZ_PREPARATION_PREPARING) {
-			int ready = atomic_inc_return(&ctx->preparation_ready_current);
 			peak = atomic_read(&ctx->preparation_ready_max);
-			while (ready > peak) {
+			while (active > peak) {
 				observed = atomic_cmpxchg(&ctx->preparation_ready_max,
-							 peak, ready);
+							 peak, active);
 				if (observed == peak)
 					break;
 				peak = observed;
 			}
-		} else if (publish_state == SWAPZ_PREPARATION_RAW_SELECTED) {
-			lane->late_results_discarded++;
 		} else {
-			swapz_fail(ctx, -EUCLEAN);
+			atomic_dec(&ctx->preparation_ready_current);
+			if (publish_state == SWAPZ_PREPARATION_RAW_SELECTED)
+				lane->late_results_discarded++;
+			else
+				swapz_fail(ctx, -EUCLEAN);
 		}
 		complete(&prepared->result_ready);
 		lane->prepared_pages++;

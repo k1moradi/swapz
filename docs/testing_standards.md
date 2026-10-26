@@ -1798,3 +1798,10 @@ publication; per-extent/verify-after-write paths instead wait on the slot-owned
 result completion and retain their pre-alpha.29 representation behavior. The
 producer must never signal a per-BIO completion after
 `preparation_snapshot_ready`, because the upper BIO may already have completed.
+
+
+The prepared-reservoir current gauge must never transiently underflow. Producer
+code charges `preparation_ready_current` before publishing a READY state, then
+rolls that charge back when RAW_SELECTED won the state race. The high-water
+mark is updated only after a successful READY publication. This ordering is
+telemetry correctness only; it must not influence representation selection.
