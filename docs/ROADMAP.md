@@ -527,4 +527,8 @@ repository-mode regression in that repair: `loaded-preflight.sh` had lost its
 executable bit, while rootless qualification only syntax-checked the file. The
 helper mode is restored and rootless qualification now locks it; status-two
 preflight runtime exits also surface a concise live failure marker instead of
-being reduced to a generic missing-diagnostic verdict.
+being reduced to a generic missing-diagnostic verdict. The following owner rerun
+then exposed that an earlier malformed repair had re-entered history as a
+duplicated tail in `source-contract-test.py`. The file is rebuilt from the
+known-good baseline with only the intended stale-recovery assertions, and
+rootless qualification now rejects multiple terminal test runners.

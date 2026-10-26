@@ -100,7 +100,10 @@ operations; they must not rely on an unguarded pipeline/assignment under
 `set -e`. Because ordinary preflight safety rejections emit `BLOCKED:` and exit one, a
 status-two preflight return is classified as a shell/runtime harness failure and
 must emit a concise `FAIL:` marker rather than disappearing behind filtered
-stage-5 output.
+stage-5 output. The rootless harness must also prove that
+`source-contract-test.py` contains exactly one terminal test runner; duplicated
+tails or duplicate `__main__` blocks are harness corruption and fail before
+loaded qualification.
 
 Transient target teardown between benchmark or lifecycle phases (such as tearing down the target prior to live-GC evacuation and recreation in `deploy-nullblk.sh`) must similarly settle `udevadm` and use bounded non-force `timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry` to safely absorb transient `systemd-udevd` probe activity without failing or hanging.
 

@@ -22,6 +22,10 @@ python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
   printf '%s\n' 'FAIL: loaded-preflight.sh must remain executable' >&2
   exit 1
 }
+[[ "$(grep -Fc 'if __name__ == "__main__":' tests/runtime/native/source-contract-test.py)" == 1 ]] || {
+  printf '%s\n' 'FAIL: source-contract-test.py must have exactly one test runner' >&2
+  exit 1
+}
 bash -n tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/tools/qualify-resource-pressure.sh \
   tests/tools/qualify-logical-open-balance.sh packaging/package-dkms.sh \
