@@ -325,6 +325,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("prepared = &ctx->preparation_pages[slot]", producer)
         self.assertEqual(producer.count("swapz_preparation_release_slot("), 2)
         self.assertIn("refcount_set(&prepared->refs, 2)", producer)
+        self.assertIn("reinit_completion(&prepared->result_ready)", producer)
+        self.assertIn("complete(&prepared->result_ready)", producer)
         self.assertNotIn("-ENOMEM", producer)
         for allocation in ("kmalloc(", "kzalloc(", "vzalloc(", "mempool_alloc("):
             self.assertNotIn(allocation, producer)
@@ -991,9 +993,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
         self.assertIn("cond_resched()", worker)
         self.assertLess(worker.index("remaining -= processed_bios"),
-                        worker.index("list_splice_init(&local, &ctx->incoming)"))
+                        worker.rindex("list_splice_init(&local, &ctx->incoming)"))
         self.assertLess(worker.index("swapz_flush_window(ctx)"),
-                        worker.index("list_splice_init(&local, &ctx->incoming)"))
+                        worker.rindex("list_splice_init(&local, &ctx->incoming)"))
 
     def test_shutdown_completes_all_accepted_queued_bios(self):
         worker = body("swapz_worker")
@@ -2644,7 +2646,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_preparation_claim_slot(&ctx->preparation_free_mask)",
                       producer)
         self.assertNotIn("mempool_", DM)
-        self.assertNotIn("preparation_slots", DM)
+        self.assertNotRegex(DM, r"\bpreparation_slots\b")
         self.assertLess(producer.index("swapz_preparation_claim_slot("),
                         producer.index("spin_lock_irqsave(&ctx->queue_lock, flags)"))
         self.assertLess(producer.index("swapz_preparation_claim_slot("),
@@ -3262,7 +3264,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("prepared->length = swapz_compress_page(", producer)
         self.assertIn("length = swapz_compress_page(", accept)
         self.assertIn("prepared->length > 0 && !prepared->zero", producer)
-        self.assertIn("length > 0 && !entry->prepared_page->zero", accept)
+        self.assertIn("if (!prepared->zero)", accept)
+        self.assertIn("prepared_async ? entry->prepared_page->zero : inline_zero",
+                      accept)
         self.assertIn("length > 0 && !inline_zero", accept)
 
         # Production transform telemetry includes the dispatched SIMD wrapper;

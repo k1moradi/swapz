@@ -136,6 +136,7 @@ struct swapz_delta64_stats {
 struct swapz_prepared_page {
 	atomic_t state;
 	refcount_t refs;
+	struct completion result_ready;
 	int length;
 	bool zero;
 	bool payload_crc32c_valid;
@@ -2046,6 +2047,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		list_del_init(&entry->preparation_list);
 		refcount_set(&prepared->refs, 2);
 		atomic_set(&prepared->state, SWAPZ_PREPARATION_PREPARING);
+		reinit_completion(&prepared->result_ready);
 		active = atomic_inc_return(&ctx->preparation_slots_in_use);
 		peak = atomic_read(&ctx->preparation_slots_in_use_max);
 		while (active > peak) {
@@ -2072,6 +2074,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			if (error) {
 				prepared->length = 0;
 				atomic_set(&prepared->state, SWAPZ_PREPARATION_ERROR);
+				complete(&prepared->result_ready);
 				entry->prepared_page = prepared;
 				entry->preparation_error = error;
 				complete(&entry->preparation_snapshot_ready);
@@ -2150,6 +2153,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		} else {
 			swapz_fail(ctx, -EUCLEAN);
 		}
+		complete(&prepared->result_ready);
 		lane->prepared_pages++;
 		swapz_prepared_put(ctx, prepared);
 		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
@@ -3642,7 +3646,9 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 
 		if (entry->preparation_error || !prepared)
 			return entry->preparation_error ? entry->preparation_error : -EIO;
-		prepared_state = swapz_preparation_select_raw(&prepared->state);
+		prepared_state = bulk_raw_eligible ?
+			swapz_preparation_select_raw(&prepared->state) :
+			atomic_read(&prepared->state);
 		if (prepared_state == SWAPZ_PREPARATION_READY_COMPRESSED) {
 			atomic_dec(&ctx->preparation_ready_current);
 			ctx->work_conserving_compressed_ready++;
@@ -5262,17 +5268,27 @@ static void swapz_worker(struct work_struct *work)
 							swapz_elapsed_ns(wait_start, ktime_get_ns());
 					if (entry->prepared_page &&
 					    atomic_read(&entry->prepared_page->state) ==
-						SWAPZ_PREPARATION_PREPARING &&
-					    swapz_inflight_lower_pending(ctx)) {
-						spin_lock_irqsave(&ctx->queue_lock, flags);
-						list_splice_init(&local, &ctx->incoming);
-						spin_unlock_irqrestore(&ctx->queue_lock, flags);
-						swapz_account_worker_runtime(
-							&ctx->ordered_worker_wall_ns,
-							wall_start_ns,
-							&ctx->ordered_worker_cpu_ns,
-							cpu_start_ns);
-						return;
+						SWAPZ_PREPARATION_PREPARING) {
+						if (ctx->engine.bulk_enabled &&
+						    !ctx->engine.verify_after_write &&
+						    swapz_inflight_lower_pending(ctx)) {
+							spin_lock_irqsave(&ctx->queue_lock,
+									 flags);
+							list_splice_init(&local,
+								       &ctx->incoming);
+							spin_unlock_irqrestore(&ctx->queue_lock,
+									 flags);
+							swapz_account_worker_runtime(
+								&ctx->ordered_worker_wall_ns,
+								wall_start_ns,
+								&ctx->ordered_worker_cpu_ns,
+								cpu_start_ns);
+							return;
+						}
+						if (!ctx->engine.bulk_enabled ||
+						    ctx->engine.verify_after_write)
+							wait_for_completion(
+								&entry->prepared_page->result_ready);
 					}
 				}
 			} else if (ctx->async_prepare) {
@@ -6241,6 +6257,14 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		 * remains ordered and singular. */
 		ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *
 					       sizeof(*ctx->preparation_pages));
+		if (ctx->preparation_pages) {
+			swapz_u8 prepared_slot;
+
+			for (prepared_slot = 0; prepared_slot < SWAPZ_MAX_RECORDS;
+			     ++prepared_slot)
+				init_completion(
+					&ctx->preparation_pages[prepared_slot].result_ready);
+		}
 		ctx->preparation_lanes = kcalloc(ctx->preparation_worker_count,
 					       sizeof(*ctx->preparation_lanes),
 					       GFP_KERNEL);

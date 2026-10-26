@@ -1788,3 +1788,13 @@ Performance is a service tradeoff: SD must retain useful service and material
 lower-I/O savings, while SATA/NVMe may spend additional lower bytes/requests
 only when useful throughput or p99 improves. K>1, more than 64 reservoir slots
 and wider preparation remain closed until the new counters prove pressure.
+
+
+Alpha.29 legacy-path correction: the stable RAW snapshot completion is not the
+same as optional preparation completion. Each prepared slot therefore owns a
+separate `result_ready` completion with the same refcounted lifetime as the
+slot. The ordinary bulk path may choose RAW from PREPARING after snapshot
+publication; per-extent/verify-after-write paths instead wait on the slot-owned
+result completion and retain their pre-alpha.29 representation behavior. The
+producer must never signal a per-BIO completion after
+`preparation_snapshot_ready`, because the upper BIO may already have completed.
