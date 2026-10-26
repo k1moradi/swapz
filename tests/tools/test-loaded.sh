@@ -67,7 +67,7 @@ run_privileged_bounded() {
     if "${privileged[@]}" -c '
         limit="$1"
         shift
-        exec timeout --signal=TERM --kill-after=10s "${limit}s" "$@"
+        exec timeout --signal=TERM --kill-after=10s "${limit}s" bash "$@"
     ' swapz-loaded "$seconds" "$@"; then
         rc=0
     else

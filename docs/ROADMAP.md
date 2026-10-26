@@ -509,4 +509,9 @@ had no visible progress until all loaded work returned. The harness now streams
 the existing phase markers live and wraps each privileged top-level helper in a
 root-owned outer watchdog. This does not qualify ID83 and does not change
 production kernel behavior; it makes any subsequent loaded stall attributable
-to an exact smoke/benchmark phase and bounded in time.
+to an exact smoke/benchmark phase and bounded in time. The first owner rerun
+then exposed a second harness-only regression: the watchdog executed private
+shell helpers directly, adding an executable-bit requirement that the previous
+`bash helper.sh` privilege path did not have. The bounded wrapper now invokes
+those helpers through `bash` inside `timeout`, preserving the original helper
+contract while keeping the outer deadline.

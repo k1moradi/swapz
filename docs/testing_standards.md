@@ -1840,3 +1840,9 @@ each owned-RAM benchmark pair at 720s, and the ID36 resource-pressure helper at
 its privileged descendants and still execute ordinary helper cleanup. An outer
 watchdog expiration is BLOCKED/nonzero, never PASS and never silently retried.
 Do not weaken these bounds to hide a kernel forward-progress defect.
+
+The bounded privilege wrapper must preserve the existing shell-helper execution
+contract: private loaded helpers are invoked through `bash` inside `timeout`, not
+executed directly. Their Git executable bit is not an authorization or safety
+boundary. A watchdog refactor must not silently turn a readable private helper
+into an `EACCES` failure before its own validation and cleanup can run.

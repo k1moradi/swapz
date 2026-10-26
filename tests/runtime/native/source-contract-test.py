@@ -2909,6 +2909,14 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('dmsetup remove --retry "$owned_map"', preflight)
         self.assertIn('timeout --signal=TERM --kill-after=2s 10s', preflight)
         self.assertIn("run_privileged_bounded()", loaded)
+        # Private loaded helpers are shell scripts and are intentionally invoked
+        # through bash; the watchdog must not add an executable-bit requirement.
+        self.assertIn(
+            'exec timeout --signal=TERM --kill-after=10s "${limit}s" bash "$@"',
+            loaded)
+        self.assertNotIn(
+            'exec timeout --signal=TERM --kill-after=10s "${limit}s" "$@"',
+            loaded)
         self.assertIn("run_privileged_bounded 60 tests/tools/loaded-preflight.sh",
                       loaded)
         self.assertIn("run_privileged_bounded 600 tests/tools/deploy-nullblk.sh",
