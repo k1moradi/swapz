@@ -167,26 +167,24 @@ post-lower or commit non-I/O dominates, investigate serialized
 authority/publication before widening lower-I/O depth.
 
 The latest successful standard owner matrix tested source
-`174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and
+`0155a09a0f2ef97daff68da045f615a04000ed02`, passed all five stages, and
 published report-only commit
-`edab5b87344b33f95b2152dab5efbc39fdb0b1a0`. It qualifies that exact
-source on owned RAM-backed `null_blk`; current `main` has since advanced and
-requires a fresh complete owner run before current HEAD becomes the qualified
-baseline.
+`dc78c9bbffbd2e8178fea9df2ca66006855c22e5`. It qualifies that exact source
+on owned RAM-backed `null_blk`, including the ID36 resource-pressure gate and
+retained suspend/drain lifecycle.
 
-Five matched fast-model async/sync sustained-write pairs measured QD4 +1.66%
-throughput (95% CI [+0.33%,+3.00%]), QD8 +23.88%
-([+18.52%,+29.24%]), and QD32 +22.15% ([+15.65%,+28.65%]). QD8 lower
-WRITE requests fell 17.96% while bytes rose 0.54%; QD32 requests fell 9.96%
-while bytes were statistically neutral. Production lower-WRITE depth remains
-fixed at one.
+Five matched fast-model async/sync sustained-write pairs now measure QD4 +3.94%
+throughput (95% CI -14.42..+22.30), QD8 +0.95% (-0.98..+2.87), and QD32 +0.94%
+(-4.72..+6.61). All intervals overlap zero: the significant ID80 QD8 regression
+is gone, but the earlier ID77 deep-QD async advantage is not recovered.
+Production lower-WRITE depth remains fixed at one.
 
-The same source passed the predictor-first positive delta64 A/B and the current
-ID63 confirmations. Rescue remains default-off pending representative content;
-READ coalescing remains default-on with an eight-block fixed cap. Loaded
-lifecycle evidence again exercised GC relocation, whole-segment DISCARD,
-packed placement and byte-exact readback. Low-RAM/heavy-CPU, representative
-long-run churn, real kernel swap and physical-media qualification remain open.
+The same source passes the predictor-first positive delta64 A/B and current ID63
+confirmations. Delta64 rescue remains default-off pending representative
+content; READ coalescing remains fixed-on with an eight-block cap. Loaded
+lifecycle evidence exercises GC relocation, whole-segment DISCARD, packed
+placement, low-RAM/heavy-CPU pressure and byte-exact readback. Representative
+long-run churn, actual kernel swap and physical-media qualification remain open.
 
 ## Timed boundaries
 
@@ -285,14 +283,12 @@ useful service benefit. Production lower-WRITE depth is fixed at one, the
 runtime selector is retired, and the second-slot allocation/append path has
 been removed. Ready-wait counters remain passive evidence.
 
-**ID63 adjacent distinct-extent READ coalescing.** The latest qualified source
-(`174d42eb7135...`) reconfirms the production mechanism. Fast sequential lower
-requests improve 17.53% and p99 5.43%, while the useful-throughput confidence
-interval overlaps zero. Serial-depth sequential requests improve 20.75%, p99
-12.24%, and throughput 16.61%, with all three intervals excluding zero.
-Production keeps `read_coalesce=1` and fixes the maximum coalesced span at
-eight blocks; exact-current-main confirmation is pending only because source has
-advanced after the qualified report.
+**ID63 adjacent distinct-extent READ coalescing.** Current qualified source
+`0155a09a0f2e` reconfirms the production mechanism. Fast sequential lower
+requests improve 11.29% (95% CI -14.35..-8.24), while throughput and p99
+intervals overlap zero. Serial-depth sequential requests improve 25.89%, p99
+13.69%, and throughput 30.58%, with all three intervals favorable. Production
+keeps the fixed-on mechanism and maximum coalesced span at eight blocks.
 
 Passive evidence finds 162.4/207.0 sequential distinct pairs physically
 adjacent but only 2.6/392.2 random. The bounded active experiment is stricter:
@@ -314,6 +310,17 @@ exists. After that rejection, the fixed-on ordered-worker fan-out path may still
 prepare private slots for two or more independent missing lower ranges; it
 never merges those ranges and preserves same-page ordering across any skipped
 retained WRITEs.
+
+**ID79 read-cache/write-window coupling.** Current source preserves validated
+metadata residency across disjoint planned one-record writes and reduces fast
+mixed lower READ requests to 9.0 in both sync and async. Against qualified
+pre-ID79 `ab885372`, the fast synchronous metadata-set hit rate rises
+42.94% -> 99.78%, but windows rise 694.8 -> 1793.8 and lower WRITE requests
+724.6 -> 1818.2. The production kernel trees match outside `engine.c`, and
+the fast fixture/trace/session order are identical; cross-report throughput is
+still load-sensitive. Run one temporary source-only ID79-off A/B before changing
+retention policy. Do not retain an invalidation selector or deliberately restore
+lower-READ stalls as a batching mechanism.
 
 **IDs58/59.** Current fixture has zero nonzero same-filled writes and extreme
 128-payload synthetic duplication. Keep representative-corpus evidence only.

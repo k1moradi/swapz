@@ -9,58 +9,83 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest successful standard owner matrix tested source
-`ab56b41c35b8b2b78752598365bf9ad310c40c5e`, passed all five stages (including
-the ID36 low-RAM/heavy-CPU pressure gate and explicit segmented direct-I/O
-coverage), and published report-only commit
-`c8a67f451495c65f9bf72382f7169dc30e00be98`. It qualifies the complete
-owned-RAM `null_blk` matrix for that exact source. Evidence-monotonic
-publication is enforced so concurrent or delayed older test runs can never
-overwrite canonical qualification reports on main.
+`0155a09a0f2ef97daff68da045f615a04000ed02`, passed all five stages, and
+published report-only commit
+`dc78c9bbffbd2e8178fea9df2ca66006855c22e5`. It qualifies the complete
+owned-RAM `null_blk` matrix for that exact source, including retained
+suspend/drain, ID36 low-RAM/heavy-CPU pressure, explicit segmented/compound BIO
+coverage, live GC, DISCARD/TRIM, packed placement and synthetic fail-closed
+faults. `main` currently points at that report-only commit; its tested source
+is the direct parent. Evidence-monotonic publication remains authoritative.
 
-The positive-fixture delta64 A/B on the qualified source exercised 4096 direct
-predictor-first adoptions, reduced lower WRITE bytes 27.04%, and increased
-useful WRITE throughput 5.15%. Lower-request and p99 intervals overlapped zero.
-That proves the opt-in route on controlled positive content; it does not
-establish representative swap prevalence, so rescue remains default-off.
+The positive-fixture delta64 A/B on this source exercised 4096 direct
+predictor-first adoptions. Rescue-on increased useful WRITE throughput 26.87%
+(95% CI +17.25..+36.49), reduced WRITE p99 20.93%
+(-23.24..-18.62) and reduced lower WRITE bytes 25.33%
+(-25.51..-25.14). Lower-WRITE requests improved 2.39%, but the interval
+crossed zero. This is strong controlled-content evidence, not representative
+swap prevalence, so rescue remains default-off.
 
-ID63 is qualified with independent READ fan-out common to both A/B arms and an
-active 2..8-extent exact-range chain. Fast sequential coalescing reduced lower
-requests 17.53% and p99 5.43%, with throughput statistically unresolved.
-Serial-depth sequential requests fell 20.75%, p99 fell 12.24%, and throughput
-rose 16.61%, with all three intervals excluding zero. Multi-host cap evidence
-closed the span experiment at eight blocks.
+ID63 remains qualified with independent READ fan-out common to both A/B arms
+and an active 2..8-extent exact-range chain. On the fast model, sequential
+coalescing reduced lower READ requests 11.29% (95% CI -14.35..-8.24) while
+throughput and p99 remained statistically unresolved. On the serial-depth
+model, sequential requests fell 25.89%, p99 fell 13.69%, and useful throughput
+rose 30.58%, with all three intervals favorable. The production cap remains
+fixed at eight blocks.
 
-Current source has retired the ordinary-LZ4 acceleration selector, delta64
-preparation-width selector, read-coalescing cap selector and lower-WRITE depth
-selector. Production is fixed at LZ4 acceleration one, one preparation lane,
-an eight-block coalescing cap and one lower-WRITE slot; the depth-two allocation
-and append path is removed rather than retained as dormant diagnostic code.
+Current source keeps ordinary LZ4 at acceleration one, one asynchronous
+preparation producer, one immutable lower-WRITE slot, independent READ fan-out,
+the eight-block ID63 cap, and SWZ 1/2/4-block extents. Retired selectors and
+rejected scheduling candidates remain absent.
 
 ## Current bottleneck ranking
 
-The ID36 low-RAM/heavy-CPU pressure gate is qualified on the owner matrix
-(tested source `ab56b41c35b8`, 0 OOM, 15,031 memory.high events, 236,695,801 µs
-(236.7s cumulative) CPU PSI contention, report `c8a67f451495`). Explicit
-multi-bvec, non-zero offset, and THP compound folio backing are verified
-byte-exact on owned RAM with active kernel observation counters (ID43).
-Publication monotonicity is enforced in the test runner.
+The current owner matrix qualifies the ID36 low-RAM/heavy-CPU pressure gate on
+exact source `0155a09a0f2e`: 16,085 `memory.high` events, zero reported OOM
+or OOM-kill, and 221,285,362 us (221.3s cumulative) CPU PSI `some` contention.
+Explicit multi-bvec, non-zero offset, and THP compound-folio backing also remain
+byte-exact on owned RAM.
 
-Next collect realistic churn/GC/TRIM evidence: about 70% logical occupancy, an
-explicit cold/hot split, and at least ten logical capacities of hot rewrites.
-Verify every live page and report foreground plus GC write amplification,
-victim live ratios, TRIM wall/latency, useful throughput/p99 and segment-open
-distribution. Only after that evidence should asynchronous TRIM be reconsidered.
+ID79 is now both a major READ-I/O win and the cleanest unresolved mixed-WRITE
+coupling. The pre-ID79 qualified source `ab8853725801` and current tested
+source `0155a09a0f2e` use the same fast mixed fixture, trace and session order.
+Their production kernel trees are byte-identical except for `engine.c`, where
+ID79 replaces the planned one-record full read-cache invalidation with exact
+physical-range invalidation after stage/seal. Fast synchronous metadata-set hit
+rate rises from 42.94% to 99.78% and lower READ requests collapse
+2328.4 -> 9.0, but WRITE windows rise 694.8 -> 1793.8 and lower WRITE requests
+724.6 -> 1818.2. Async lower READ requests likewise fall 2810.2 -> 9.0 while
+windows rise 678.4 -> 1074.8 and lower WRITE requests 708.0 -> 1102.6.
+Cross-report throughput remains host-load-sensitive, so these geometry deltas
+are a strong causality signal rather than a final throughput verdict.
 
-Delta64 remains an opt-in evidence problem rather than a default-policy problem.
-The predictor-first positive fixture proves the implementation can save physical
-bytes and useful time, but representative swap content is still required before
-promotion. Reintroducing any retired concurrency/compression selector requires a
-new evidence-backed experiment.
+The next bounded experiment is therefore an ID79 causality A/B, not another
+retention heuristic. Keep current `0155a09` as A; make one temporary source
+revision that restores only the old planned one-record full invalidation while
+leaving the current scheduler, K=1 ownership and all other production bytes
+unchanged; run the same official `make test`; compare fast synchronous mixed
+lower READ requests, windows/one-page windows, deadline/PACK_READY causes,
+lower WRITE requests, useful WRITE/READ and p99. Remove the experimental
+revision after the decision rather than retaining a runtime selector. Do not
+reintroduce intentional READ stalls merely to recover batching.
 
-Compound/folio BIO coverage remains independent release work. ID62 physical
-media stays blocked pending separate owner authorization, explicit device-loss
-acceptance, identity/alias checks, endurance/error metrics and independent
-safety review.
+After that isolation, collect realistic churn/GC/TRIM evidence: about 70%
+logical occupancy, an explicit cold/hot split, and at least ten logical
+capacities of hot rewrites. Verify every live page and report foreground plus
+GC write amplification, victim live ratios, TRIM wall/latency, useful
+throughput/p99 and segment-open distribution. Only evidence that synchronous
+TRIM is materially blocking useful work should reopen asynchronous TRIM.
+
+Delta64 remains an opt-in evidence problem rather than a default-policy
+problem. The controlled positive fixture now shows a large loaded service,
+tail-latency and lower-byte benefit, but representative swap content is still
+required before promotion. Reintroducing any retired concurrency/compression
+selector requires a new evidence-backed experiment.
+
+ID62 physical media stays blocked pending separate owner authorization,
+explicit device-loss acceptance, identity/alias checks, endurance/error metrics
+and independent safety review.
 
 ## Optimization evidence table
 
@@ -154,11 +179,11 @@ changes.
 | 60 | Queued READ grouping within the same immutable extent | **5 refuted / retired** | Five matched hwq=1 rounds showed no request win and an unfavorable p99 direction; the qualified post-ID65 fast directional sample was also worse. Remove standalone slot grouping and its dedicated benchmark controls; ordinary reads keep the shared caches. |
 | 61 | Foreground GC scaling / background-GC question | **1 ID61b owner-qualified / keep; broader background-GC question remains open** | Report `85aeac4` proves the production survivor list in loaded GC: 20 relocated pages produced exactly 20 relocation-list visits, `gc_choose_map_entries=0`, 1,280 segment-score visits, 20 victims/rotations and byte-exact verification of all 4,096 pages. The same qualified report's native scaling measured full-map relocation at 1.215/4.901ms versus 0.00169/0.00196ms for the 256-survivor list at 1/4GiB-equivalent scale. Keep the per-segment list; realistic foreground-GC stall/headroom evidence remains separate. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
-| 63 | Physically adjacent distinct-extent READ coalescing | **1 owner-qualified / active default-on / cap fixed at 8 blocks** | Latest fast sequential confirmation reduces lower requests 17.53% and p99 5.43%, while throughput CI overlaps zero. Serial-depth sequential requests fall 20.75%, p99 12.24% and throughput rises 16.61%, all significant. Active chains combine 2..8 exact adjacent ranges with zero padding; the runtime cap selector is retired. |
+| 63 | Physically adjacent distinct-extent READ coalescing | **1 owner-qualified / active default-on / cap fixed at 8 blocks** | Current report `dc78c9bbffbd` on exact source `0155a09a0f2e` reconfirms the active path. Fast sequential lower requests fall 11.29% (95% CI -14.35..-8.24) while throughput and p99 overlap zero. Serial-depth sequential requests fall 25.89%, p99 13.69% and throughput rises 30.58%, all significant. Keep exact 2..8-range zero-padding-free coalescing and the fixed eight-block cap. |
 | 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Page-local delta64 rescue around LZ4 | **4 opt-in positive evidence; default off** | Predictor-first rescue is qualified on controlled positive content: 4,096/4,096 pages were direct adoptions, lower WRITE bytes fell 27.04%, and useful WRITE throughput rose 5.15%; request and p99 intervals crossed zero. Keep default-off until representative swap content demonstrates prevalence and end-to-end benefit. |
+| 67 | Page-local delta64 rescue around LZ4 | **4 strong opt-in positive evidence; representative-content gate remains** | Current report `dc78c9bbffbd` on exact source `0155a09a0f2e` records 4096/4096 direct adoptions on the controlled positive fixture: useful WRITE +26.87% (95% CI +17.25..+36.49), p99 -20.93% (-23.24..-18.62), lower WRITE bytes -25.33% (-25.51..-25.14), while lower-request change overlaps zero. Keep default-off and collect representative anonymous-memory/page-corpus prevalence before any promotion. |
 | 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
 | 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
@@ -171,9 +196,9 @@ changes.
 | 77 | Worker-owned PACK_READY and post-K1 completion re-evaluation | **1 owner-qualified / keep; residual moves to ID78** | Report `6c7d645924cd` on exact source `8a6dd2a` passes all five owner stages. Admission burst closes are now exactly zero, async-minus-sync lower-WRITE request excess improves from +45.6 (CI +13.9..+77.3) to +31.6 (CI -10.3..+73.5), and the throughput delta improves from -4.86% significant to -3.13% with CI crossing zero. QD8/QD32 async gains survive at +74.6%/+14.9%. Keep worker ownership. The remaining +49.8 burst-target closes and asymmetric post-PACK sampling are a distinct state-conservation defect tracked by ID78, not evidence to restore admission closure. |
 | 78 | Completion-aware post-PACK generation conservation / RAW-safe pack recognition | **1 owner-qualified state repair / keep; performance recovery incomplete** | Exact ARM64/NEON source `ab885372` passed the full five-stage owner `make test`. It eliminates the catastrophic `c07edd9` deadline/target inflation and keeps completed-generation learning bounded, but it does not recover the earlier async throughput advantage: latest fast QD8 async/sync is -0.07% (95% CI -1.12..+0.98) and QD32 is -0.36% (-8.27..+7.54), while lower-WRITE requests regress +2.16% and +8.13% respectively; QD4 is -9.32% with a wide CI. Keep the completion-state repair and RAW-safe recognition as correctness/state hygiene, but do not claim a scheduling win. Same-source mixed evidence is heavily replay/load sensitive, so the remaining low-QD detachment question moves to ID80 rather than reopening K>1 or the refuted staged-only PACK_READY lockout. |
 
-| 79 | Planned single-record exact read-cache invalidation | **1 owner-qualified read-I/O win / keep; scheduling interaction moved to ID81** | Report `71251ba9232e` on exact source `f3f9f0052b70` passes all five owner stages on ARM64/NEON. Fast mixed lower READ requests collapse from the latest comparable `ab885372` ARM64 means of 2328.4 sync / 2810.2 async to 9.0 / 9.0 while preserving byte-exact correctness. The same run exposes a scheduling interaction rather than a reason to restore global invalidation: fast sync windows rise ~694.8->2243.6, one-record windows ~32.2->261.2 and deadline closes ~47.2->328.4. Keep exact-range mutation fencing and address the retained-window coupling in ID81. |
-| 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; pre-ID80 policy restored** | Report `71251ba9232e` on exact ARM64/NEON source `f3f9f0052b70` refutes ID80's static `count > 4U` gate: fast sustained QD8 async/sync useful WRITE is -9.1% with 95% CI [-15.1%, -3.1%] and lower-WRITE requests rise +11.8%. Removal restores the actual last owner-qualified ancestry, `count > 4U || preparation_queued > 0`, not the later unqualified `count > 1U` rule. The restored policy keeps K=1 and the existing preparation ownership model; exact-source owner requalification remains required after rollback. |
-| 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed before performance evidence** | Exact ARM64/NEON source `26a045c80b56` passed build, native/rootless contracts and W=1/W=2, then the loaded stage BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`). No mixed/QD benchmark result from this source is valid. The bundled candidate also incorrectly described `count > 1U` as an ID80 rollback even though qualified pre-ID80 ancestry used `count > 4U || preparation_queued > 0`. Remove the entire ID81 scheduling candidate, restore the pre-ID80 policy, retain ID79's exact-range cache invalidation, and do not modify suspend/drain based on this single failed candidate without independent evidence. |
+| 79 | Planned single-record exact read-cache invalidation | **1 owner-qualified READ-I/O win / keep; isolated causality A/B next** | Current report `dc78c9bbffbd` on exact source `0155a09a0f2e` retains the 9.0 fast mixed lower READ requests in both sync and async after ID80/ID81 removal. Versus qualified pre-ID79 `ab885372`, the fast synchronous metadata-set hit rate rises 42.94%->99.78% and lower READ requests 2328.4->9.0, while windows rise 694.8->1793.8 and lower WRITE requests 724.6->1818.2. The two production kernel trees are byte-identical outside `engine.c`, and their fast mixed fixture/trace/order match; cross-report throughput is still host-load-sensitive. Keep exact-range fencing in production, but run one temporary ID79-off source A/B to prove whether the lost lower-READ stall was accidentally providing WRITE batching. Do not retain a selector. |
+| 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; restored pre-ID80 policy requalified** | Report `71251ba9232e` refuted ID80's static `count > 4U` gate with fast QD8 async/sync -9.1% (95% CI -15.1..-3.1). Current report `dc78c9bbffbd` on source `0155a09a0f2e` passes all five stages with the actual pre-ID80 predicate `count > 4U || preparation_queued > 0`; sustained QD4/QD8/QD32 async/sync throughput is +3.94% / +0.95% / +0.94%, with all three intervals overlapping zero. Keep ID80 removed and retain no dormant selector. |
+| 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed; rollback lifecycle requalified** | Exact source `26a045c80b56` passed build/native/W=1/W=2, then BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`); no benchmark result from that source is valid. The bundled candidate also replaced the true pre-ID80 detach predicate with unqualified `count > 1U`. Current source `0155a09a0f2e` removes the whole bundle and passes retained suspend/drain plus the complete owner matrix in report `dc78c9bbffbd`. This proves the rollback is healthy but does not identify which ID81 sub-change caused the lifecycle failure; do not split or revive those changes without independent evidence. |
 
 ## What the pinned queue experiment establishes
 
@@ -237,39 +262,29 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-The reviewed allocation/rescue-gate increment and inherited metadata-locality
-work need an exact-source owner run before another kernel experiment. Static
-AVX-512 review/build evidence does not qualify runtime on this SSE2-only host.
+Current exact source `0155a09a0f2e` is owner-qualified by report
+`dc78c9bbffbd`; the rollback qualification gate is closed.
 
-1. Packed-placement retirement is owner-qualified and remains covered by the
-   loaded zero-hole/zero-split invariant.
-2. The alpha.24 production-C change enables `async_prepare=1` by default.
-   Standard owned-RAM qualification passed on the source and report named
-   above. Keep K=1 and its existing activation gates, retain
-   `async_prepare=0` as the sync control, and preserve the fast-mixed paired
-   intervals. The ID36 low-RAM/heavy-CPU gate is qualified on the owner
-   matrix (tested source `ab56b41c35b8`, report `c8a67f451495`).
-3. ID78's completion-state repair and ID79's exact-range read-cache
-   invalidation remain retained. ID80 is owner-refuted and ID81 failed the
-   loaded suspend/drain correctness gate before benchmarks, so both candidate
-   policies are removed. The source now restores the exact pre-ID80
-   depth/backlog detachment rule while keeping K=1, one preparation lane, ID63
-   and SWZ 1/2/4 extents. Run one exact-source owner `make test` to requalify
-   the rollback; do not start another scheduling experiment until that passes.
-   Afterward return to realistic churn/GC/TRIM evidence unless new production
-   evidence justifies reopening retained-window scheduling.
-4. Terminal ID72 churn A/B completed: circular allocator fairness proved
-   optimal (spread=4 across all runs, 0.00% spread reduction and +9.93% p99
-   latency regression with least-open scanning); optional switch removed and
-   circular allocator fairness retained. Logical opens remain distinct from NAND wear.
-5. Keep SWZ 1/2/4 classes, K=1 scheduling and ID63 completion semantics
-   unchanged. Do not implement the currently weak 3/8/16-block class ideas.
-6. Fully qualify the production ID67 route, including byte-exact delta64 reads,
-   GC preservation and fast/slow CPU-throughput effects; first owner-qualify the
-   corrected classifier and shared native/production routing, then run a
-   representative-content rescue-on/off loaded A/B. Map RAM compaction remains
-   an isolated later experiment with measured bytes/page.
-7. Keep ID62 blocked. Physical-device testing remains separately unauthorized
+1. Keep ID78's completion-state repair, ID79's exact-range read-cache
+   invalidation, the restored pre-ID80 detachment rule, K=1 lower-WRITE
+   ownership, one preparation lane, ID63 and SWZ 1/2/4 extents.
+2. Run one isolated ID79 causality A/B before another retained-window policy
+   experiment. A is current `0155a09`; B reverts only the planned one-record
+   invalidation to the old full fence. Use the same official `make test` and
+   compare fast synchronous mixed lower READ requests, total/one-page windows,
+   deadline and PACK_READY causes, lower WRITE requests, useful W/R and p99.
+   Remove B afterward; do not add a production selector or intentional delay.
+3. After ID79 isolation, return to realistic churn/GC/TRIM evidence at roughly
+   70% occupancy with a cold/hot split and at least ten logical capacities of
+   hot rewrites. Asynchronous TRIM remains deferred until that workload proves a
+   material synchronous-TRIM service bottleneck.
+4. Keep delta64 rescue default-off. The controlled positive fixture is now
+   strongly favorable; the next gate is representative-content prevalence and
+   matched end-to-end benefit, not another classifier micro-optimization.
+5. Keep packed-placement retirement, circular allocator fairness, ordinary LZ4
+   acceleration one, the eight-block READ-coalescing cap and the removed
+   depth-two WRITE path unchanged.
+6. Keep ID62 blocked. Physical-device testing remains separately unauthorized
    and requires its own owner approval and safety review.
 
 ## Deferred asynchronous segment TRIM design for review

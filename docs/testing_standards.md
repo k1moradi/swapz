@@ -200,28 +200,32 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 ## Current qualified baseline
 
 The latest successful standard owner matrix tested source
-`ab56b41c35b8b2b78752598365bf9ad310c40c5e`, passed all five stages (including
-the ID36 low-RAM/heavy-CPU pressure gate and explicit segmented direct-I/O
-coverage), and published report-only commit
-`c8a67f451495c65f9bf72382f7169dc30e00be98`. It qualifies that exact source
-on owned RAM-backed `null_blk`. Current `main` has since advanced through
-settled source/test cleanup and therefore needs a fresh complete owner
-`make test` before current HEAD is the qualified baseline.
+`0155a09a0f2ef97daff68da045f615a04000ed02`, passed all five stages, and
+published report-only commit
+`dc78c9bbffbd2e8178fea9df2ca66006855c22e5`. It qualifies that exact source
+on owned RAM-backed `null_blk`, including ID36 low-RAM/heavy-CPU pressure,
+segmented/compound direct I/O, retained suspend/drain, live GC, DISCARD/TRIM,
+packed placement and synthetic failure paths. `main` currently points at that
+report-only commit.
 
 The same report passed the positive-content delta64 rescue A/B with 4096 direct
-adoptions/first-LZ4 skips, -27.04% lower WRITE bytes and +5.15% useful WRITE
-throughput; request and p99 intervals overlapped zero. Rescue remains default-
-off because representative swap-content prevalence is still unqualified.
+adoptions/first-LZ4 skips, +26.87% useful WRITE throughput
+(95% CI +17.25..+36.49), -20.93% WRITE p99 (-23.24..-18.62), and -25.33%
+lower WRITE bytes (-25.51..-25.14). Lower-WRITE requests improved 2.39%, but
+the interval crossed zero. Rescue remains default-off because representative
+swap-content prevalence is still unqualified.
 
-ID63 fast sequential confirmation reduced lower READ requests 17.53% and p99
-5.43%, while throughput overlapped zero. Serial-depth sequential confirmation
-reduced requests 20.75%, p99 12.24% and increased useful throughput 16.61%,
-all significant. The production coalesced span is fixed at eight blocks.
+ID63 fast sequential confirmation reduces lower READ requests 11.29%
+(95% CI -14.35..-8.24), while throughput and p99 overlap zero. Serial-depth
+sequential confirmation reduces requests 25.89%, p99 13.69% and increases
+useful throughput 30.58%, all significant. The production coalesced span remains
+fixed at eight blocks.
 
 Current source fixes ordinary LZ4 at acceleration one, async preparation at one
-producer lane regardless of delta64 policy, and lower-WRITE submission at one
-slot. The retired runtime selectors remain absent, and the depth-two allocation/
-append path is removed. Low-RAM/heavy-CPU, representative long-run churn,
+producer lane regardless of delta64 policy, lower-WRITE submission at one slot,
+and the restored pre-ID80 detachment predicate
+`count > 4U || preparation_queued > 0`. The retired runtime selectors and
+depth-two allocation/append path remain absent. Representative long-run churn,
 actual kernel swap and physical media remain open qualification gates.
 
 ## Deferred optimization evidence gates
@@ -358,11 +362,13 @@ Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
 only for reads already waiting behind active lower work.
 
-Genuine device-originated/partial lower errors, long-run resource pressure,
-larger controlled cold-read working sets, >=5-pair statistics, deliberate CPU
-oversubscription/low-RAM qualification, automatic device-queue-depth policy,
-physical-device behavior and physical endurance remain open. Physical-device
-admission remains separately blocked.
+Genuine device-originated/partial lower errors, representative long-run
+resource/churn pressure, larger controlled cold-read working sets, automatic
+device-queue-depth policy, actual kernel swap, physical-device behavior and
+physical endurance remain open. The current owner matrix already satisfies the
+bounded ID36 deliberate CPU-oversubscription/low-RAM gate and the promoted
+five-pair statistical protocols. Physical-device admission remains separately
+blocked.
 
 
 Source contracts should assert retained scheduling semantics rather than a
@@ -743,13 +749,13 @@ verify-after-write.
 K=1 detachment source coverage must require the restored pre-ID80
 depth/backlog predicate
 `(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U)`. IDLE and DEADLINE
-remain eligible under that same previously owner-qualified close-reason set.
-Source tests must reject both the refuted ID80 `count > 4U`-only policy and the
-unqualified `count > 1U` replacement. A scheduling candidate that fails the
-loaded suspend/drain lifecycle gate is rejected before any performance result is
-interpreted. After this rollback, the exact-source owner `make test` must pass
-all five stages before the restored policy is treated as current qualified
-evidence. No new timer, K>1 slot, preparation lane or SWZ class is permitted.
+remain eligible under that same close-reason set. Source tests must reject both
+the refuted ID80 `count > 4U`-only policy and the unqualified `count > 1U`
+replacement. Exact source `0155a09a0f2e` passes all five owner stages with
+this restored predicate, including retained suspend/drain (report
+`dc78c9bbffbd`). A future scheduling candidate that fails the loaded
+suspend/drain lifecycle gate is rejected before any performance result is
+interpreted. No new timer, K>1 slot, preparation lane or SWZ class is permitted.
 
 Source-contract maintenance must follow the same standards co-change rule as
 production implementation work. When an implementation invariant moves between
