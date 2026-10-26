@@ -474,6 +474,10 @@ cannot inherit a blocked FIFO reader. The concurrent lifecycle writer and subseq
 byte-exact verification processes run with a bounded 30s timeout headroom across
 dmsetup suspend and resume operations, ensuring host scheduling load during post-compilation
 drain does not prematurely terminate the writer, and dumping writer stderr on unexpected exit.
+Deferred upper completions buffered during active drain are released after allowing sufficient
+time for DM core to establish `DMF_BLOCK_IO_FOR_SUSPEND` across its SRCU barrier, ensuring
+concurrent upper submissions during suspend are deferred to the resume phase rather than hitting
+closed admission.
 The maximum supported 4ms deadline can legitimately expire between that observation and the
 separate suspend request, so the oracle must not require a specific close-reason counter afterwards.
 Loaded failure reporting skips the generic cleanup epilogue so the preceding

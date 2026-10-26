@@ -821,7 +821,9 @@ presuspend and sets `DMF_BLOCK_IO_FOR_SUSPEND`, completions processed while
 drain is active are buffered onto `drain_completed_bios`. After draining queues
 and issuing the physical flush, `swapz_drain` schedules `drain_endio_work` when
 `drain_completed_bios` is non-empty to release buffered completions after
-allowing presuspend to return to DM core, and `swapz_free()` drains any
+a bounded grace interval (25–35ms) ensuring presuspend returns to DM core and
+DM core completes its SRCU grace-period barrier (`synchronize_srcu(&md->io_barrier)`)
+to set `DMF_BLOCK_IO_FOR_SUSPEND`, and `swapz_free()` drains any
 remaining buffered completions while preserving each BIO's recorded status,
 ensuring subsequent requests are deferred by DM core rather than hitting closed
 admission. The target drain invariant includes the asynchronous run-active bit

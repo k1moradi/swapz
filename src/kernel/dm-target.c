@@ -860,8 +860,8 @@ static void swapz_drain_endio_work(struct work_struct *work)
 	unsigned long flags;
 
 	/* Allow presuspend to return to DM core so DMF_BLOCK_IO_FOR_SUSPEND is
-	 * set and memory-barrier synchronized before upper writers wake up. */
-	usleep_range(100, 250);
+	 * set and SRCU grace-period barrier is complete before upper writers wake up. */
+	usleep_range(25000, 35000);
 	spin_lock_irqsave(&ctx->drain_completed_lock, flags);
 	bio_list_merge(&completed, &ctx->drain_completed_bios);
 	bio_list_init(&ctx->drain_completed_bios);
