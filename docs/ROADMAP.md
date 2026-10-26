@@ -15,8 +15,10 @@ published report-only commit
 owned-RAM `null_blk` matrix for that exact source, including retained
 suspend/drain, ID36 low-RAM/heavy-CPU pressure, explicit segmented/compound BIO
 coverage, live GC, DISCARD/TRIM, packed placement and synthetic fail-closed
-faults. `main` currently points at that report-only commit; its tested source
-is the direct parent. Evidence-monotonic publication remains authoritative.
+faults. `dc78c9bbffbd` is the canonical report commit for that tested source.
+Later documentation-only descendants do not change the qualified product/test
+bytes; they are not themselves a newly tested source. Evidence-monotonic
+publication remains authoritative.
 
 The positive-fixture delta64 A/B on this source exercised 4096 direct
 predictor-first adoptions. Rescue-on increased useful WRITE throughput 26.87%
