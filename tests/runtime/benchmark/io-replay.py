@@ -552,6 +552,7 @@ class LowerInflightSampler:
         self._start_ns = 0
         self._last_ns = 0
         self._stop_requested_ns = 0
+        self._stop_deadline_ns = None
         self._last_sample_ns = 0
         self._current = (0, 0)
         self._start = (0, 0)
@@ -630,10 +631,58 @@ class LowerInflightSampler:
             self._set_error(exc)
             self._ready.set()
         finally:
-            self._state = SamplerState.STOPPED
-            if fd is not None:
-                os.close(fd)
-            self._stopped.set()
+            try:
+                if fd is not None:
+                    os.close(fd)
+            finally:
+                self._state = SamplerState.STOPPED
+                self._stopped.set()
+
+    def _request_stop(self, timeout_s=2.0):
+        if self._thread is None:
+            return
+        now_ns = time.monotonic_ns()
+        if self._stop_deadline_ns is None:
+            self._stop_requested_ns = now_ns
+            self._stop_deadline_ns = now_ns + int(timeout_s * 1e9)
+        self._stop.set()
+        remaining_s = max(0.0, (self._stop_deadline_ns - time.monotonic_ns()) / 1e9)
+        self._stopped.wait(timeout=remaining_s)
+        remaining_join_s = max(0.0, (self._stop_deadline_ns - time.monotonic_ns()) / 1e9)
+        self._thread.join(timeout=remaining_join_s)
+
+    def _format_timeout_diagnostic(self, action="stop"):
+        now_ns = time.monotonic_ns()
+        stop_age_ms = ((now_ns - self._stop_requested_ns) / 1e6
+                       if self._stop_requested_ns else -1)
+        last_sample_age_ms = ((now_ns - self._last_sample_ns) / 1e6
+                              if self._last_sample_ns else -1)
+        samples = self._samples
+        measuring = self._measuring
+        lock_held = False
+        if self._lock.acquire(blocking=False):
+            try:
+                samples = self._samples
+                measuring = self._measuring
+            finally:
+                self._lock.release()
+        else:
+            lock_held = True
+        stack = ""
+        if self._thread is not None and self._thread.is_alive():
+            frame = sys._current_frames().get(self._thread.ident)
+            if frame is not None:
+                stack = "".join(traceback.format_stack(frame))
+        state_val = (self._state.value
+                     if isinstance(self._state, SamplerState)
+                     else str(self._state))
+        lock_str = " lock_held=True" if lock_held else ""
+        return (
+            f"lower inflight sampler did not {action} within 2.0s "
+            f"(state={state_val}, stop_age_ms={stop_age_ms:.1f}, "
+            f"last_sample_age_ms={last_sample_age_ms:.1f}, "
+            f"samples={samples}, measuring={measuring}{lock_str}):\n{stack}"
+        )
 
     def start(self):
         if self._path is None:
@@ -646,18 +695,8 @@ class LowerInflightSampler:
             target=self._run, name="swapz-lower-inflight", daemon=True)
         self._thread.start()
         if not self._ready.wait(timeout=2.0):
-            self._stop_requested_ns = time.monotonic_ns()
-            self._stop.set()
-            self._thread.join(timeout=2.0)
-            stack = ""
-            if self._thread.is_alive():
-                frame = sys._current_frames().get(self._thread.ident)
-                if frame is not None:
-                    stack = "".join(traceback.format_stack(frame))
-            raise ValueError(
-                f"lower inflight sampler did not start within 2.0s "
-                f"(state={self._state.value}):\n{stack}"
-            )
+            self._request_stop(timeout_s=2.0)
+            raise ValueError(self._format_timeout_diagnostic(action="start"))
         with self._lock:
             self._raise_error_locked()
 
@@ -716,24 +755,9 @@ class LowerInflightSampler:
     def close(self):
         if self._thread is None:
             return
-        self._stop_requested_ns = time.monotonic_ns()
-        self._stop.set()
-        self._thread.join(timeout=2.0)
+        self._request_stop(timeout_s=2.0)
         if self._thread.is_alive():
-            now_ns = time.monotonic_ns()
-            stop_age_ms = (now_ns - self._stop_requested_ns) / 1e6
-            last_sample_age_ms = ((now_ns - self._last_sample_ns) / 1e6
-                                  if self._last_sample_ns else -1)
-            stack = ""
-            frame = sys._current_frames().get(self._thread.ident)
-            if frame is not None:
-                stack = "".join(traceback.format_stack(frame))
-            raise ValueError(
-                f"lower inflight sampler did not stop within 2.0s "
-                f"(state={self._state.value}, stop_age_ms={stop_age_ms:.1f}, "
-                f"last_sample_age_ms={last_sample_age_ms:.1f}, "
-                f"samples={self._samples}):\n{stack}"
-            )
+            raise ValueError(self._format_timeout_diagnostic(action="stop"))
         with self._lock:
             self._raise_error_locked()
 

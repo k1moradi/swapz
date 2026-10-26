@@ -1291,11 +1291,16 @@ publishes `WRITE_ONCE(entry->prepared_page, prepared)`, and signals persistent
 snapshot publication via `complete_all(&entry->preparation_snapshot_ready)`. The
 `prepared_page` pointer must not become dispatchable before that snapshot is
 complete: publishing it early without a snapshot-ready gate would allow the
-dispatcher to select RAW while `raw_bytes` is still being filled. The ordered
+dispatcher to select RAW while `raw_bytes` is still being filled. Lockless pointer
+accesses use `READ_ONCE`/`WRITE_ONCE` to prevent compiler tearing, while cross-CPU
+publication and memory ordering are provided by `complete_all(&entry->preparation_snapshot_ready)`
+and `wait_for_completion(&entry->preparation_snapshot_ready)`. The ordered
 dispatcher enforces snapshot wait (`wait_for_completion(&entry->preparation_snapshot_ready)`)
 on every entry not stolen inline (`!entry->preparation_inline`), ensuring `complete_all`
 provides a persistent, one-shot barrier across all scheduling passes and deferred
-worker revisits without repeat-wait deadlocks.
+worker revisits without repeat-wait deadlocks. After `complete_all(&entry->preparation_snapshot_ready)`
+is called, the background producer relinquishes the entry descriptor and never
+dereferences `entry` or `entry->bio` again.
 
 If the lower WRITE is still active, a PREPARING FIFO head is deferred after the
 stable snapshot is published. Producer READY or lower completion wakes the

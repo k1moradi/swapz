@@ -2092,7 +2092,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 				atomic_set(&prepared->state, SWAPZ_PREPARATION_ERROR);
 				complete(&prepared->result_ready);
 				WRITE_ONCE(entry->prepared_page, prepared);
-				entry->preparation_error = error;
+				WRITE_ONCE(entry->preparation_error, error);
 				complete_all(&entry->preparation_snapshot_ready);
 				swapz_prepared_put(ctx, prepared);
 				mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
@@ -2105,7 +2105,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		prepared->encoding = SWAPZ_ENCODING_LZ4;
 		prepared->payload_crc32c = 0;
 		WRITE_ONCE(entry->prepared_page, prepared);
-		entry->preparation_error = 0;
+		WRITE_ONCE(entry->preparation_error, 0);
 		complete_all(&entry->preparation_snapshot_ready);
 
 		lower_write_overlap = atomic_read(&ctx->lower_write_active);
@@ -5230,7 +5230,6 @@ static void swapz_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
 		while (remaining && !list_empty(&local)) {
-			bool wait_for_preparation = false;
 			bool inline_preparation = false;
 			unsigned int processed_bios = 1;
 
@@ -5255,10 +5254,10 @@ static void swapz_worker(struct work_struct *work)
 				bool accepted_backlog;
 				bool lower_write_busy;
 
-				struct swapz_prepared_page *prepared;
+				struct swapz_prepared_page *prepared =
+					READ_ONCE(entry->prepared_page);
 
-				if (!entry->preparation_inline) {
-					wait_for_preparation = true;
+				if (!prepared && !entry->preparation_inline) {
 					spin_lock_irqsave(&ctx->queue_lock, flags);
 					accepted_backlog = ctx->batch_count ||
 						entry->list.next != &local ||
@@ -5279,7 +5278,6 @@ static void swapz_worker(struct work_struct *work)
 						list_del_init(&entry->preparation_list);
 						entry->preparation_inline = true;
 						inline_preparation = true;
-						wait_for_preparation = false;
 						if (ctx->engine.bulk_enabled &&
 						    !ctx->engine.verify_after_write &&
 						    !lower_write_busy && accepted_backlog &&
@@ -5302,18 +5300,21 @@ static void swapz_worker(struct work_struct *work)
 						ctx->preparation_ordered_handoffs++;
 					}
 					spin_unlock_irqrestore(&ctx->queue_lock, flags);
-					if (wait_for_preparation) {
-						u64 wait_start = 0;
+				} else if (!entry->preparation_inline) {
+					atomic_set(&ctx->preparation_tail_credit, 0);
+				}
 
-						if (!completion_done(&entry->preparation_snapshot_ready)) {
-							ctx->preparation_ordered_waits++;
-							wait_start = ktime_get_ns();
-						}
-						wait_for_completion(&entry->preparation_snapshot_ready);
-						if (wait_start)
-							ctx->preparation_ordered_wait_wall_ns +=
-								swapz_elapsed_ns(wait_start, ktime_get_ns());
+				if (!entry->preparation_inline) {
+					u64 wait_start = 0;
+
+					if (!completion_done(&entry->preparation_snapshot_ready)) {
+						ctx->preparation_ordered_waits++;
+						wait_start = ktime_get_ns();
 					}
+					wait_for_completion(&entry->preparation_snapshot_ready);
+					if (wait_start)
+						ctx->preparation_ordered_wait_wall_ns +=
+							swapz_elapsed_ns(wait_start, ktime_get_ns());
 				} else {
 					inline_preparation = true;
 				}

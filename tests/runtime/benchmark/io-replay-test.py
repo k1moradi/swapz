@@ -1216,6 +1216,43 @@ class PairReplayContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "same logical page"):
                 mod.check_plan(plan / "trace.jsonl", mf, 16)
 
+    def test_lower_inflight_sampler_timeout_diagnostic_lock_free(self):
+        import importlib.util
+        import threading
+
+        spec = importlib.util.spec_from_file_location("swapz_replay_diag", SCRIPT)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as temp:
+            dummy_path = Path(temp) / "inflight"
+            dummy_path.write_text("0 0\n", encoding="ascii")
+            sampler = mod.LowerInflightSampler("dummy")
+            sampler._path = dummy_path
+
+            read_entered = threading.Event()
+            block_read = threading.Event()
+
+            def blocking_read_fd(fd):
+                read_entered.set()
+                block_read.wait(timeout=5.0)
+                return (0, 0)
+
+            orig_read_fd = mod.LowerInflightSampler._read_fd
+            mod.LowerInflightSampler._read_fd = staticmethod(blocking_read_fd)
+            try:
+                sampler.start()
+                self.assertTrue(read_entered.wait(timeout=2.0))
+                with sampler._lock:
+                    diagnostic = sampler._format_timeout_diagnostic(action="test")
+                    self.assertIn("state=READING", diagnostic)
+                    self.assertIn("lock_held=True", diagnostic)
+                    self.assertIn("blocking_read_fd", diagnostic)
+            finally:
+                block_read.set()
+                mod.LowerInflightSampler._read_fd = orig_read_fd
+                sampler.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2686,6 +2686,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->preparation_producer_head_claims++", producer)
         self.assertIn("ctx->preparation_producer_tail_claims++", producer)
         self.assertIn("complete_all(&entry->preparation_snapshot_ready)", producer)
+        self.assertNotIn("complete(&entry->preparation_snapshot_ready)", DM)
+        call = "complete_all(&entry->preparation_snapshot_ready);"
+        producer_tail = producer[producer.rindex(call) + len(call):]
+        self.assertNotIn("entry->", producer_tail)
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
                           "swapz_flush_window(", "dm_io(", "bio_endio(",
                           "swapz_engine_write_window"):
@@ -2737,6 +2741,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->preparation_ordered_inline++", ordered)
         self.assertIn("ctx->preparation_ordered_handoffs++", ordered)
         self.assertIn("ctx->preparation_ordered_waits++", ordered)
+        self.assertIn("wait_for_completion(&entry->preparation_snapshot_ready)", ordered)
+        self.assertIn("prepared = READ_ONCE(entry->prepared_page);", ordered)
         self.assertLess(ordered.index("wait_for_completion("),
                         ordered.index("swapz_process(ctx, entry->bio)"))
         self.assertIn("prepared_async = ctx->async_prepare && !entry->preparation_inline",
