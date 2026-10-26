@@ -334,6 +334,15 @@ cleanup() {
             note 'QUARANTINED: owned DM UUID changed before teardown'
         else
             open_before_remove="$(dm_open_count)" || open_before_remove=unknown
+            if [[ "$open_before_remove" =~ ^[0-9]+$ ]] && (( open_before_remove != 0 )) && command -v fuser >/dev/null 2>&1; then
+                fuser -k -TERM "/dev/mapper/$DMNAME" >/dev/null 2>&1 || true
+                settle_udev
+                if [[ "$(dm_open_count 2>/dev/null)" =~ ^[0-9]+$ ]] && (( $(dm_open_count 2>/dev/null) != 0 )); then
+                    fuser -k -KILL "/dev/mapper/$DMNAME" >/dev/null 2>&1 || true
+                    settle_udev
+                fi
+                open_before_remove="$(dm_open_count)" || open_before_remove=unknown
+            fi
             settle_udev
             if timeout --signal=TERM --kill-after=2s 10s                     dmsetup remove --retry "$DMNAME"; then
                 OWN_DM=0
