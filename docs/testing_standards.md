@@ -597,6 +597,17 @@ SSE2/AVX2/AVX512 objects on x86_64 and NEON on arm64, with runtime execution
 only on hosts advertising the required ISA. A scheduling change is not allowed
 to weaken or bypass those existing backend checks.
 
+Direct production-C window-policy coverage must prove that 2/3-record sampled
+tails cannot override a larger learned target without selective first-pack
+geometry, while a four-record tail remains eligible. Source coverage must prove
+that only BURST_TARGET PACK_READY starts a new completed-generation width;
+TAIL_TARGET and SERVICE_DRY accumulate with the prior prefix. Independent READ
+service accounting must be covered by the pure bounded-shift helper: disabled or
+missing windows add no credit, overlapping service excludes only the uncovered
+suffix, and cumulative credit cannot exceed one `retain_ms` interval. Source
+coverage must also prove that cache-hit independent READs use this service-time
+exclusion without incrementing the lower-I/O-only bypass evidence.
+
 Tail learning must be gated exclusively by
 `pack_close_pending_tail_sample`; pre-PACK sampling from a deferred first
 pack is forbidden. The sampler is completion-only: it returns directly while
@@ -740,15 +751,15 @@ stage/seal and before `write_extent`, with full invalidation retained only for
 verify-after-write.
 
 
-K=1 detachment source coverage must require `count > 4U` and must reject
+K=1 detachment source coverage must require `count > 1U` and must reject
 `preparation_queued` as an independent detach-enabling condition. It must also
 require `IDLE`/`DEADLINE` detachment to carry immediate accepted follow-up
 evidence while preserving the synchronous lower-WRITE producer wake for any
-nonempty preparation queue. Loaded evidence for this policy is performance
-evidence, not a correctness shortcut: fast QD4 must not gain lower-WRITE
-requests or materially lose useful throughput versus sync, QD8/QD32 must retain
-their byte/request aggregation and useful service, and the slow model must not
-regress. No new timer, K>1 slot, preparation lane or SWZ class is permitted.
+nonempty preparation queue. This is the restored pre-ID80 multi-record policy,
+not a new selector. Loaded evidence must show QD4 does not materially regress
+while QD8/QD32 recover from ID80's owner-observed request/service loss; the slow
+model must not regress. No new timer, K>1 slot, preparation lane or SWZ class is
+permitted.
 
 Source-contract maintenance must follow the same standards co-change rule as
 production implementation work. When an implementation invariant moves between
@@ -1146,8 +1157,10 @@ rather than rerunning the old optimization sequence.
 
 - **ID50 remains active:** a sampled admitted tail of one may update learned
   burst width but cannot arm a one-record PACK_READY target. It sets
-  `retained_single_tail_deferred`; tails of two or more may arm their exact
-  finite target. The second admitted WRITE resolves the deferral.
+  `retained_single_tail_deferred`; the second admitted WRITE resolves the
+  deferral. A sampled tail of two or three may arm an early close only when
+  selective first-pack geometry is already proven; four or more records may
+  arm their exact finite target.
 - **One deadline only:** a deferred singleton uses the ordinary first-record
   retained deadline. ID53's short cutoff/watermark/timer is rejected and must
   remain absent.

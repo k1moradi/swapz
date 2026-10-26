@@ -168,11 +168,12 @@ static inline int swapz_window_single_pack_ready(
 		const struct swapz_pending_bio *pending, swapz_u8 count,
 		swapz_u8 retain_ms, swapz_u8 read_budget)
 {
-	/* Count four is the learned floor but remains below the count > 4 K=1
-	 * detach threshold. RAW skipping must not recreate the refuted four-record
-	 * first-pack close through otherwise selective compressed geometry. */
-	if (count == 4U)
-		return 0;
+	/*
+	 * First-pack recognition is geometry-only. K=1 detachment accepts every
+	 * multi-record window, so total admission count is not a scheduling gate.
+	 * RAW records may be skipped only by the bounded compressed-prefix checks
+	 * below; they never become compressed pack members.
+	 */
 	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
 						read_budget, 2U, 1U))
 		return 1;
@@ -269,8 +270,15 @@ static inline int swapz_window_burst_close_ready(
 	 * companion already in flight can join without manufacturing win1. */
 	if (count < 2U)
 		return 0;
+	/*
+	 * A sampled residual below the four-record learned floor is timing-skew
+	 * evidence, not by itself proof of useful pack geometry. Such a 2/3-record
+	 * tail may close early only after the selective first-pack predicate has
+	 * proved that it fits one 4KiB/8KiB SWZ extent. Four or more admitted
+	 * records remain sufficient finite tail evidence.
+	 */
 	return target && count >= target &&
-		(first_pack_seen || admitted_tail_target);
+		(first_pack_seen || admitted_tail_target >= 4U);
 }
 
 
@@ -329,6 +337,42 @@ static inline unsigned long long swapz_window_retention_deadline_ns(
 		return 0;
 	duration = (unsigned long long)retain_ms * 1000000ULL;
 	return first_ns > ~0ULL - duration ? ~0ULL : first_ns + duration;
+}
+
+/*
+ * Ordered-worker time spent servicing an already-admitted independent READ is
+ * not idle wait for a WRITE companion. Return the bounded amount by which the
+ * caller may move the retained-window origin forward. Lower-I/O and cache-hit
+ * reads use the same accounting; only separate lower-I/O evidence may authorize
+ * service-dry closure. Total excluded service on one write window is capped at
+ * one retain_ms interval so a READ stream cannot postpone a WRITE indefinitely.
+ */
+static inline unsigned long long swapz_window_read_service_shift_ns(
+		unsigned long long first_ns,
+		unsigned long long read_start_ns,
+		unsigned long long read_end_ns,
+		unsigned long long credited_ns,
+		swapz_u8 retain_ms)
+{
+	unsigned long long budget_ns, remaining_ns, shift_ns;
+
+	if (!retain_ms || !first_ns || read_end_ns <= read_start_ns)
+		return 0;
+	budget_ns = (unsigned long long)retain_ms * 1000000ULL;
+	if (credited_ns >= budget_ns)
+		return 0;
+	if (first_ns <= read_start_ns)
+		shift_ns = read_end_ns - read_start_ns;
+	else if (first_ns < read_end_ns)
+		shift_ns = read_end_ns - first_ns;
+	else
+		return 0;
+	remaining_ns = budget_ns - credited_ns;
+	if (shift_ns > remaining_ns)
+		shift_ns = remaining_ns;
+	if (shift_ns > ~0ULL - first_ns)
+		shift_ns = ~0ULL - first_ns;
+	return shift_ns;
 }
 
 static inline int swapz_window_deadline_expired(unsigned long long deadline_ns,
