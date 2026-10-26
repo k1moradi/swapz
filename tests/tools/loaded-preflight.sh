@@ -6,7 +6,7 @@ set -Eeuo pipefail
 fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 
-for cmd in rmmod dmsetup timeout awk sed tr findmnt cat readlink stat sleep id ls; do
+for cmd in rmmod dmsetup timeout awk tr findmnt cat readlink stat sleep id ls; do
     command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "root required for loaded preflight"
@@ -77,10 +77,15 @@ fi
 # was still alive. Recover only the exact private harness identity. Never
 # remove multiple mappings, arbitrary swapz mappings, physical lowers, mounts,
 # swap aliases, open mappings, or anything requiring force.
-mapfile -t swapz_maps < <(
+swapz_map_list="$(
     dmsetup ls --target swapz --noheadings 2>/dev/null |
         awk 'NF { print $1 }'
-)
+)" || fail "cannot enumerate pre-existing swapz mappings"
+swapz_maps=()
+if [[ -n $swapz_map_list ]]; then
+    mapfile -t swapz_maps <<< "$swapz_map_list" ||
+        fail "cannot parse pre-existing swapz mapping list"
+fi
 (( ${#swapz_maps[@]} == 1 )) ||
     fail "pre-existing dm_swapz module is busy with non-unique mappings; no cleanup attempted"
 owned_map="${swapz_maps[0]}"
@@ -109,10 +114,11 @@ read_opens() {
 
 deps="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
     fail "cannot read pre-existing dm_swapz dependency"
-lower_name="$(printf '%s\n' "$deps" |
-    sed -nE 's/^[[:space:]]*1 dependencies[[:space:]]*:[[:space:]]*\(([^()[:space:]]+)\)[[:space:]]*$/\1/p')"
-[[ -n $lower_name ]] ||
+if [[ $deps =~ ^[[:space:]]*1[[:space:]]+dependencies[[:space:]]*:[[:space:]]*\(([^()[:space:]]+)\)[[:space:]]*$ ]]; then
+    lower_name="${BASH_REMATCH[1]}"
+else
     fail "pre-existing harness dm_swapz mapping does not have one lower dependency"
+fi
 [[ $lower_name =~ ^nullb([0-9]+)$ ||
    $lower_name =~ ^nullb-swapz-[a-f0-9]{16}$ ]] ||
     fail "pre-existing harness dm_swapz lower is not null_blk"

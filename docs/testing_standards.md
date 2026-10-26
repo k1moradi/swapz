@@ -95,7 +95,9 @@ qualification must fail if its executable bit is lost. Privileged orchestration
 still invokes shell helpers through `bash` inside the watchdog, but repository
 mode is part of the harness contract and must not silently drift. Preflight's
 required-command audit must include every unconditional utility it executes.
-Because ordinary preflight safety rejections emit `BLOCKED:` and exit one, a
+Mapper enumeration and lower-dependency parsing are explicit fail-closed
+operations; they must not rely on an unguarded pipeline/assignment under
+`set -e`. Because ordinary preflight safety rejections emit `BLOCKED:` and exit one, a
 status-two preflight return is classified as a shell/runtime harness failure and
 must emit a concise `FAIL:` marker rather than disappearing behind filtered
 stage-5 output.
