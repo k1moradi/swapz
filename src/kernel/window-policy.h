@@ -82,6 +82,45 @@ static inline int swapz_window_extent_fits(
 }
 
 /*
+ * Bulk windows may stage incompressible RAW records beside compressed records;
+ * the flush planner later orders compressed records before the RAW tail.  Early
+ * pack recognition must therefore follow the compressed prefix geometry rather
+ * than let an earlier RAW admission permanently poison the window.  Latch a
+ * pack only when the newest admission is compressed and the bounded prefix now
+ * contains exactly the requested number of valid compressed records.
+ */
+static inline int swapz_window_compressed_extent_fits(
+		const struct swapz_pending_bio *pending, swapz_u8 count,
+		swapz_u8 retain_ms, swapz_u8 read_budget,
+		swapz_u8 compressed_target, swapz_u8 extent_blocks)
+{
+	swapz_u32 extent_bytes;
+	swapz_u8 compressed = 0;
+	swapz_u8 i;
+
+	if (!retain_ms || read_budget || !pending || !count ||
+	    count > SWAPZ_MAX_RECORDS || !compressed_target ||
+	    pending[count - 1U].raw ||
+	    (extent_blocks != 1U && extent_blocks != 2U &&
+	     extent_blocks != 4U))
+		return 0;
+	extent_bytes = sizeof(struct swapz_header) +
+		(swapz_u32)compressed_target * sizeof(struct swapz_record);
+	for (i = 0; i < count; ++i) {
+		if (pending[i].raw)
+			continue;
+		if (!pending[i].length ||
+		    pending[i].length > SWAPZ_MAX_COMPRESSED)
+			return 0;
+		extent_bytes += pending[i].length;
+		compressed++;
+	}
+	if (compressed != compressed_target)
+		return 0;
+	return extent_bytes <= (swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES;
+}
+
+/*
  * Identify the first useful pack. The worker decides whether an already
  * accepted local FIFO successor exists: only that immediate backlog may
  * justify deferring this pack for a second group. This pure geometry helper
@@ -91,16 +130,19 @@ static inline int swapz_window_single_pack_ready(
 		const struct swapz_pending_bio *pending, swapz_u8 count,
 		swapz_u8 retain_ms, swapz_u8 read_budget)
 {
-	if (count == 2U)
-		return swapz_window_extent_fits(pending, count, retain_ms,
-						 read_budget, 1U);
-	if (count == 3U) {
-		/* A two-record 4KiB first pack was already counted at count=2. */
-		if (swapz_window_extent_fits(pending, 2U, retain_ms,
-						 read_budget, 1U))
-			return 0;
-		return swapz_window_extent_fits(pending, count, retain_ms,
-						 read_budget, 2U);
+	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
+						read_budget, 2U, 1U))
+		return 1;
+	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
+						read_budget, 3U, 2U)) {
+		swapz_u8 prefix;
+
+		for (prefix = 2U; prefix < count; ++prefix)
+			if (swapz_window_compressed_extent_fits(
+					pending, prefix, retain_ms,
+					read_budget, 2U, 1U))
+				return 0;
+		return 1;
 	}
 	return 0;
 }
@@ -109,12 +151,12 @@ static inline int swapz_window_pack_ready(
 		const struct swapz_pending_bio *pending, swapz_u8 count,
 		swapz_u8 retain_ms, swapz_u8 read_budget)
 {
-	if (count == 4U)
-		return swapz_window_extent_fits(pending, count, retain_ms,
-						 read_budget, 2U);
-	if (count == 6U)
-		return swapz_window_extent_fits(pending, count, retain_ms,
-						 read_budget, 4U);
+	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
+						read_budget, 4U, 2U))
+		return 1;
+	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
+						read_budget, 6U, 4U))
+		return 1;
 	return 0;
 }
 
@@ -149,35 +191,6 @@ static inline swapz_u8 swapz_window_grow_burst_target(
 		current_target = (swapz_u8)observed;
 	return current_target;
 }
-/*
- * A prefix already staged in batch[] when K=1 finishes was admitted before
- * the older upper BIOs were released. It is stable evidence of the same burst
- * width, but cannot by itself prove that the burst ended: those just-completed
- * writers may immediately submit their next BIOs.
- *
- * Queued local/incoming work ends that completion gap. When a staged prefix
- * exists, learn from the staged prefix and let the learned target govern the
- * next close. Without a staged prefix, preserve the original queued-tail
- * semantics.
- */
-static inline swapz_u8 swapz_window_post_pack_learning_tail(
-		swapz_u8 staged_tail, swapz_u8 queued_tail)
-{
-	return staged_tail ? staged_tail : queued_tail;
-}
-
-static inline swapz_u8 swapz_window_post_pack_close_target(
-		swapz_u8 staged_tail, swapz_u8 queued_tail)
-{
-	return staged_tail ? 0U : queued_tail;
-}
-
-static inline int swapz_window_post_pack_sample_ready(
-		swapz_u8 staged_tail, swapz_u8 queued_tail)
-{
-	return !staged_tail || queued_tail;
-}
-
 static inline swapz_u8 swapz_window_shrink_burst_target(
 		swapz_u8 current_target, swapz_u8 observed)
 {
