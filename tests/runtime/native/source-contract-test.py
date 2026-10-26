@@ -1961,6 +1961,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("static inline int swapz_window_pack_ready(", policy)
         single = source_body("swapz_window_single_pack_ready", policy)
         pack = source_body("swapz_window_pack_ready", policy)
+        self.assertIn("if (count == 4U)", single)
+        self.assertIn("return 0;", single)
         self.assertIn("read_budget, 2U, 1U", single)
         self.assertIn("read_budget, 3U, 2U", single)
         self.assertNotIn("read_budget, 4U", single)
