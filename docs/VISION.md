@@ -39,12 +39,14 @@ persistent lane-owned workers with no per-I/O main-thread dispatch.
 
 The forward scheduling goal is **work-conserving lower service**. Compression,
 packing and delta64 are representation optimizations, not correctness
-prerequisites. When accepted independent WRITE data exists and a lower-WRITE
-dispatch opportunity would otherwise be idle, a future qualified scheduler may
-seal the best representation already available: compressed pages that are ready
-plus whole-page RAW fallback for preparation that is not ready. It must never
-wait solely to make a representation more compact when doing so loses more
-useful service than the saved lower I/O is worth. Slow media should naturally
+prerequisites. The preferred topology is a bounded low-overhead admission
+descriptor queue, a bounded prepared-data reservoir filled by opportunistic
+compressors, and one tiny ordered dispatcher. When accepted independent WRITE
+data exists and a lower-WRITE dispatch opportunity would otherwise be idle, the
+dispatcher seals the best representation already available: compressed pages
+that are ready plus whole-page RAW fallback for preparation that is not ready.
+It must never wait solely to make a representation more compact when doing so
+loses more useful service than the saved lower I/O is worth. Slow media should naturally
 receive more completed compression because long lower service provides
 preparation overlap; fast media may trade some lower bytes for continuous
 service. This policy is not yet production-qualified and must preserve the

@@ -757,6 +757,15 @@ this restored predicate, including retained suspend/drain (report
 suspend/drain lifecycle gate is rejected before any performance result is
 interpreted. No new timer, K>1 slot, preparation lane or SWZ class is permitted.
 
+Work-conserving queue/reservoir qualification must report descriptor-queue
+occupancy/high-water mark, prepared-reservoir occupancy/high-water mark,
+compressor claimed/completed/discarded work, dispatcher runs, and accepted-work
+idle episodes. Source coverage must prove admission performs no unconditional
+4KiB copy and that every retained direct upper-page reference has an explicit
+lifetime owner until all possible readers are done. The reservoir must be
+preallocated/bounded and suspend/drain must return with every descriptor and
+reservoir slot released exactly once.
+
 Work-conserving representation qualification must distinguish ordinary RAW
 fallback caused by incompressibility from RAW selected because optional
 preparation was not ready at a lower-service opportunity. The candidate must

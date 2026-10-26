@@ -843,6 +843,23 @@ both through the same paused-transaction completion path. An opportunistic
 candidate must not add an on-disk type, extent class, alternate authority state
 machine or separate completion owner.
 
+The preferred implementation separates three bounded roles. Admission appends a
+small descriptor containing sequence/order metadata and a safely owned reference
+to the still-live upper data; it must not copy 4KiB merely to enqueue. One or
+more independently measured preparation workers may claim descriptors and write
+compressed bytes into preallocated reservoir slots. The ordered dispatcher owns
+run formation, physical staging, authority reservation, lower submission and
+upper completion. The descriptor queue and prepared reservoir must have fixed
+memory bounds and no hot-path dynamic allocation.
+
+A descriptor needs an explicit one-way state machine such as QUEUED ->
+PREPARING -> READY_COMPRESSED or RAW_SELECTED -> SEALED -> COMMITTED/ABORTED.
+A producer publishes READY_COMPRESSED only after its payload, length, encoding
+and CRC are complete. If the dispatcher atomically selects RAW first, a late
+producer result is discarded and its reservoir slot is recycled; it must never
+republish or replace that generation. The dispatcher never waits for a
+PREPARING descriptor solely to improve representation quality.
+
 Representation selection is terminal for that accepted generation. If a
 compressed result is ready when the ordered owner seals the run, it may be used.
 If preparation is not ready and lower service would otherwise go idle, the
@@ -852,6 +869,14 @@ discarded and may never replace or republish the committed RAW generation.
 Zero elision is likewise optional optimization: a page dispatched RAW before
 zero detection completes remains a correct RAW page.
 
+A queue descriptor may retain a BIO/page reference to avoid an admission copy,
+but a bare RAM address is never sufficient ownership: upper pages may be reused
+after completion. Any direct page/bvec reference must remain pinned by the
+upper BIO or by an explicit independently owned page reference until both the
+dispatcher and every producer have dropped it. This lifetime rule determines
+whether RAW can be copied directly at seal time or whether an independent
+preallocated input snapshot is required.
+
 A producer-owned BIO cannot be completed while a preparation worker can still
 dereference its per-BIO state. A candidate that selects RAW while compression
 is in flight must therefore either (a) keep the upper BIO and its per-BIO data
@@ -860,6 +885,15 @@ independently owned preallocated job/snapshot before allowing upper completion.
 No cancellation design may create a second BIO completion owner, reuse a
 preparation slot before its last reader exits, or make suspend/drain depend on
 an unbounded worker cancellation.
+
+The prepared-data reservoir is a cache of optional work, not an authority
+queue. Its size may be larger than one write window so compressors can run ahead,
+but it must remain bounded and pressure-tested. A larger reservoir is useful
+only when READY_COMPRESSED occupancy is repeatedly consumed by the dispatcher;
+large memory that merely accumulates stale or superseded results is rejected.
+Compression workers should run while accepted backlog exists and CPU service is
+available, especially while lower I/O is in flight. They must not preempt the
+dispatcher enough to create lower-device idle gaps.
 
 Do not make RAW fallback unconditional. A lone QD1 write may still be prepared
 inline when there is no accepted backlog to overlap, because otherwise every
