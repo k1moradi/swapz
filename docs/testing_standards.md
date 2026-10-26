@@ -554,9 +554,11 @@ the count from that one just-completed generation. It must not accumulate older
 PACK_READY generations whose upper BIOs have already been completed and may
 have re-entered the closed-loop workload. A non-PACK split piece may still add
 to the current generation until a PACK_READY boundary. The post-completion
-sample is then consumed exactly once: staged plus queued accepted work may raise
-the learned target, while a staged-only tail installs no immediate
-`retained_tail_target`; queued followers make the finite sampled tail explicit.
+sample is then consumed exactly once: only the already-staged pre-completion
+prefix may raise the learned target. Queued `local + incoming` followers still
+make the finite sampled tail explicit, but must not be added to the completed
+generation because they may contain immediate resubmissions from those same
+writers. A staged-only tail installs no immediate `retained_tail_target`.
 A staged-only sample must not remain pending merely to suppress PACK_READY, so a
 valid service-dry or learned-target close can proceed without burning the
 absolute deadline.
