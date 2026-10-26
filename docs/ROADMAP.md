@@ -498,3 +498,15 @@ matched loaded lower-request, throughput and p99 evidence.
 ## Release gates
 
 A release or physical-media trial remains blocked until the same pinned source has repeated byte-exact loaded correctness, genuine lower error coverage, sustained GC, bounded resource behavior, acceptable read p95/p99 and CPU/RAM, statistically defensible matched performance, and an independent safety review. Physical-device admission is not part of the current roadmap implementation.
+
+
+### Alpha.29 loaded qualification observability repair
+
+After alpha.29 portable qualification, an owner `make test` was observed with
+no terminal output after stage 4. This exposed a harness defect independent of
+the benchmark verdict: stage 5 was fully captured by `subprocess.run()` and
+had no visible progress until all loaded work returned. The harness now streams
+the existing phase markers live and wraps each privileged top-level helper in a
+root-owned outer watchdog. This does not qualify ID83 and does not change
+production kernel behavior; it makes any subsequent loaded stall attributable
+to an exact smoke/benchmark phase and bounded in time.

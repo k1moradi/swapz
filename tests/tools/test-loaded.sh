@@ -60,10 +60,31 @@ run_privileged() {
     return "$rc"
 }
 
-run_privileged tests/tools/loaded-preflight.sh
+run_privileged_bounded() {
+    local seconds="$1"
+    local rc
+    shift
+    if "${privileged[@]}" -c '
+        limit="$1"
+        shift
+        exec timeout --signal=TERM --kill-after=10s "${limit}s" "$@"
+    ' swapz-loaded "$seconds" "$@"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    assert_git_metadata_unchanged || return 1
+    if (( rc == 124 || rc == 137 )); then
+        printf 'BLOCKED: privileged loaded helper exceeded %ss: %s\n' \
+            "$seconds" "$*" >&2
+    fi
+    return "$rc"
+}
+
+run_privileged_bounded 60 tests/tools/loaded-preflight.sh
 printf 'LOADED_QUALIFICATION_SOURCE=%s\n' "$tested_source"
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
-run_privileged tests/tools/deploy-nullblk.sh --validated-source "$tested_source"
+run_privileged_bounded 600 tests/tools/deploy-nullblk.sh --validated-source "$tested_source"
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
 
 # One deterministic, measured-LZ4 immutable fixture/trace for the paired
@@ -189,7 +210,7 @@ for regime in sd_emulated ssd_emulated; do
             arguments+=(--swapz-first)
         fi
         printf 'START_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
-        run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+        run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
         printf 'PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
         (( index += 1 ))
     done
@@ -237,7 +258,7 @@ for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5; do
         fi
         printf 'START_STORAGE_ENVELOPE=%s DELTA64_RESCUE=%s\n' \
             "$envelope" "$delta64_rescue"
-        run_privileged tests/tools/benchmark-owned-pair.sh \
+        run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh \
             --validated-source "$tested_source" "${arguments[@]}"
         printf 'PASS_STORAGE_ENVELOPE=%s DELTA64_RESCUE=%s\n' \
             "$envelope" "$delta64_rescue"
@@ -264,7 +285,7 @@ for delta64_rescue in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_DELTA64_RESCUE=%s\n' "$delta64_rescue"
-    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+    run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_DELTA64_RESCUE=%s\n' "$delta64_rescue"
     (( index += 1 ))
 done
@@ -282,7 +303,7 @@ for read_coalesce in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_READ_COALESCE_AB=%s\n' "$read_coalesce"
-    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+    run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_READ_COALESCE_AB=%s\n' "$read_coalesce"
     (( index += 1 ))
 done
@@ -299,7 +320,7 @@ for read_coalesce in "${confirmation_modes[@]}"; do
         arguments+=(--swapz-first)
     fi
     printf 'START_SD_READ_COALESCE_AB=%s\n' "$read_coalesce"
-    run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+    run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
     printf 'PASS_SD_READ_COALESCE_AB=%s\n' "$read_coalesce"
     (( index += 1 ))
 done
@@ -338,7 +359,7 @@ for regime in sd_emulated ssd_emulated; do
             fi
             printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
                 "$qd" "$async_prepare"
-            run_privileged tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
+            run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
             printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
                 "$qd" "$async_prepare"
             (( index += 1 ))
@@ -351,7 +372,7 @@ done
 # memory.high/memory.max domain while oversubscribing CPU. The helper itself
 # owns only null_blk-backed resources and requires observable reclaim/throttle
 # and CPU PSI without any OOM event.
-run_privileged tests/tools/qualify-resource-pressure.sh \
+run_privileged_bounded 600 tests/tools/qualify-resource-pressure.sh \
     --validated-source "$tested_source" --shared-plan "$shared_plan"
 
 # ID38 depth=2 remains a diagnostic module/benchmark control. Two idle-host

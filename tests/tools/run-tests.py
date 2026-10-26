@@ -1460,11 +1460,28 @@ def run_stage(title, command, result, *, parse_bench=False):
             child_env["SWAPZ_TESTED_SOURCE_SHA"] = tested_source
         if title == "Build module and helpers":
             child_env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
-        proc = subprocess.run(command, cwd=ROOT, text=True, encoding="utf-8",
-                              errors="replace", stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, check=False,
-                              pass_fds=jobserver_fds(), env=child_env)
-        output, rc = proc.stdout, proc.returncode
+        if parse_bench:
+            print("       loaded qualification progress:")
+            proc = subprocess.Popen(
+                command, cwd=ROOT, text=True, encoding="utf-8",
+                errors="replace", stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, pass_fds=jobserver_fds(),
+                env=child_env, bufsize=1)
+            chunks = []
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                chunks.append(line)
+                sys.stdout.write("       " + line)
+                sys.stdout.flush()
+            rc = proc.wait()
+            output = "".join(chunks)
+        else:
+            proc = subprocess.run(
+                command, cwd=ROOT, text=True, encoding="utf-8",
+                errors="replace", stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, check=False,
+                pass_fds=jobserver_fds(), env=child_env)
+            output, rc = proc.stdout, proc.returncode
     except OSError as exc:
         output, rc = type(exc).__name__, 127
     predictor_evidence = parse_predictor_evidence(output)

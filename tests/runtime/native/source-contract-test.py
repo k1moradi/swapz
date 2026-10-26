@@ -1407,6 +1407,9 @@ static swapz_u16 swapz_probe_set(
         scale = (ROOT / "tests/runtime/native/gc/scan-scaling.c").read_text()
         suites = (ROOT / "tests/suites/Makefile").read_text()
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn('print("       loaded qualification progress:")', runner)
+        self.assertIn("subprocess.Popen(", runner)
+        self.assertIn('sys.stdout.write("       " + line)', runner)
         authority = (ROOT / "src/kernel/authority.h").read_text()
 
         self.assertIn("262144U, 1048576U", scale)
@@ -2904,6 +2907,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('memory_backed', preflight)
         self.assertIn('dmsetup remove --retry "$owned_map"', preflight)
         self.assertIn('timeout --signal=TERM --kill-after=2s 10s', preflight)
+        self.assertIn("run_privileged_bounded()", loaded)
+        self.assertIn("run_privileged_bounded 60 tests/tools/loaded-preflight.sh",
+                      loaded)
+        self.assertIn("run_privileged_bounded 600 tests/tools/deploy-nullblk.sh",
+                      loaded)
+        self.assertIn("run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh",
+                      loaded)
+        self.assertIn("run_privileged_bounded 600 tests/tools/qualify-resource-pressure.sh",
+                      loaded)
         self.assertNotIn('dmsetup remove --force', preflight)
         self.assertIn('dmsetup remove --retry "$DMNAME"', pair)
         self.assertIn('open_before_remove="$(dm_open_count)"', pair)

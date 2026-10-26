@@ -1821,3 +1821,22 @@ compile-only W=1/W=2/normal module build runs on both architectures as well.
 This CI matrix does not replace loaded owner qualification: the single public
 `make test` remains authoritative on the actual owner host and selects the
 same architecture-specific native backend from `uname -m`.
+
+
+### Loaded-stage observability and hard bounds
+
+The public `make test` command must never appear to hang silently during its
+privileged fifth stage. `run-tests.py` therefore streams the captured
+`test-loaded.sh` output live while retaining an identical in-memory copy for
+the existing report parsers. The child harness already emits bounded
+`START_*/PASS_*` phase markers; those markers are now user-visible as they
+happen.
+
+Every top-level privileged helper invoked by `test-loaded.sh` also has a
+root-owned outer watchdog in addition to its internal operation/replay
+timeouts. Preflight is capped at 60s, the loaded smoke/lifecycle helper at 600s,
+each owned-RAM benchmark pair at 720s, and the ID36 resource-pressure helper at
+600s. The watchdog runs inside the authorized root shell so it can terminate
+its privileged descendants and still execute ordinary helper cleanup. An outer
+watchdog expiration is BLOCKED/nonzero, never PASS and never silently retried.
+Do not weaken these bounds to hide a kernel forward-progress defect.
