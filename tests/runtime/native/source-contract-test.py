@@ -2243,6 +2243,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("pack_tail_zero_inflight", replay)
         self.assertIn("k1_ready_wait_windows", replay)
         self.assertIn("pipeline_finalize_wait_wall_ns", replay)
+        self.assertIn("accepted_work_lower_idle_events", replay)
+        self.assertIn("accepted_work_lower_idle_ns", replay)
         self.assertIn("pack_close_burst_target_5_8", replay)
         self.assertIn("single_tail_comp_age_1001_1250us", runner)
         self.assertIn("ordered_worker_cpu_ns", runner)

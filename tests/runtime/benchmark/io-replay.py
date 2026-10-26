@@ -1094,7 +1094,8 @@ WINDOW_INTERVAL_FIELDS = (
     "windows", "one_page_windows", "win1", "win2", "win3_4", "win5_8",
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
-    "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
+    "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims",
+    "accepted_work_lower_idle_events", "accepted_work_lower_idle_ns"
 ) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
