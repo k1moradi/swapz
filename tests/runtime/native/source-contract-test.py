@@ -2611,6 +2611,7 @@ static swapz_u16 swapz_probe_set(
         lower = body("swapz_lower")
         finish = body("swapz_complete")
         release = body("swapz_release_prepared")
+        prepared_put = body("swapz_prepared_put")
         ctor = body("swapz_ctr")
         drain = body("swapz_drain")
         freeing = body("swapz_free")
@@ -2721,9 +2722,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_release_prepared(bio)", finish)
         self.assertLess(finish.index("swapz_release_prepared(bio)"),
                         finish.index("bio_endio(bio)"))
-        self.assertIn("entry->prepared_page - ctx->preparation_pages", release)
         self.assertIn("swapz_prepared_put(ctx, prepared)", release)
-        self.assertIn("refcount_dec_and_test(&prepared->refs)", DM)
+        self.assertIn("prepared - ctx->preparation_pages", prepared_put)
+        self.assertIn("refcount_dec_and_test(&prepared->refs)", prepared_put)
         self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))

@@ -1805,3 +1805,9 @@ code charges `preparation_ready_current` before publishing a READY state, then
 rolls that charge back when RAW_SELECTED won the state race. The high-water
 mark is updated only after a successful READY publication. This ordering is
 telemetry correctness only; it must not influence representation selection.
+
+
+Alpha.29 source qualification follows ownership after the refcount split:
+`swapz_release_prepared()` must clear the per-BIO pointer and delegate to
+`swapz_prepared_put()`; only the latter may derive the fixed slot index and
+return the final reference to the free mask.
