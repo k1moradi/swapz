@@ -4671,7 +4671,9 @@ def benchmark_verdicts(sessions):
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
                 for key in (BURST_COUNTER_FIELDS + ("windows",
-                            "one_page_windows", "gc_victims") + WIN1_PACK_CAUSE_FIELDS +
+                            "one_page_windows", "gc_victims",
+                            "accepted_work_lower_idle_events",
+                            "accepted_work_lower_idle_ns") + WIN1_PACK_CAUSE_FIELDS +
                             SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
