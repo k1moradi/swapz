@@ -1038,6 +1038,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn('is_hex16 "$token"', preflight)
         self.assertIn('"SWAPZ-TEST-$token"', preflight)
         self.assertIn('"SWAPZ-TEST-$token-packed"', preflight)
+        self.assertIn('case "$uuid" in', preflight)
         self.assertNotIn("BASH_REMATCH", preflight)
         self.assertIn("memory_backed", preflight)
         self.assertIn('dmsetup remove --retry "$owned_map"', preflight)

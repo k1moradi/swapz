@@ -539,4 +539,4 @@ patterns, a guarded dependency parser, and separately checked canonical-device
 stats. This preserves the same positive-ownership boundary while converting
 malformed or unexpected state into explicit `BLOCKED:` results instead of an
 opaque shell-runtime status. The numeric internal-error trap remains as a
-last-resort diagnostic.
+last-resort diagnostic. A subsequent owner run exposed one stale native interface assertion that still required the removed regex literals; that contract is aligned with the exact-token ownership checks and now explicitly rejects reintroduction of `BASH_REMATCH`.

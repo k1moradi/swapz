@@ -101,7 +101,7 @@ operations; they must not rely on an unguarded pipeline/assignment under
 must avoid runtime-dependent Bash extended-regex capture state; exact shell
 patterns and guarded parsers are preferred so malformed input reaches an
 explicit `BLOCKED:` path rather than shell status 2. Canonical mapper identity
-checks must separately guard both `stat` calls before comparing device IDs. Because ordinary preflight safety rejections emit `BLOCKED:` and exit one, a
+checks must separately guard both `stat` calls before comparing device IDs. All native interface/source-contract tests that describe this ownership proof must assert the same exact shell-pattern/token contract and must not retain obsolete `BASH_REMATCH`/extended-regex expectations. Because ordinary preflight safety rejections emit `BLOCKED:` and exit one, a
 status-two preflight return is classified as a shell/runtime harness failure and
 must emit a concise `FAIL:` marker rather than disappearing behind filtered
 stage-5 output. The rootless harness must also prove that
