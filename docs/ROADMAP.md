@@ -531,4 +531,8 @@ being reduced to a generic missing-diagnostic verdict. The following owner rerun
 then exposed that an earlier malformed repair had re-entered history as a
 duplicated tail in `source-contract-test.py`. The file is rebuilt from the
 known-good baseline with only the intended stale-recovery assertions, and
-rootless qualification now rejects multiple terminal test runners.
+rootless qualification now rejects multiple terminal test runners. The next
+owner run reached preflight but returned shell status 2 before any normal safety
+diagnostic. Preflight now traps unexpected command failures at the source and
+emits only numeric status plus source line, preserving the fail-closed ownership
+boundary while making the exact harness fault attributable on the next run.

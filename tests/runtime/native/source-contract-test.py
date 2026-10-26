@@ -2926,6 +2926,17 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('^SWAPZ-TEST-$token', preflight)
         self.assertIn('opens == 0', preflight)
         self.assertIn('memory_backed', preflight)
+        self.assertIn("preflight_internal_error()", preflight)
+        self.assertIn(
+            "FAIL: loaded preflight internal command failed status=%s line=%s",
+            preflight)
+        self.assertIn(
+            "trap 'rc=$?; preflight_internal_error \"$rc\" \"$LINENO\"' ERR",
+            preflight)
+        self.assertNotIn("BASH_COMMAND", preflight)
+        self.assertLess(
+            preflight.index("trap 'rc=$?; preflight_internal_error"),
+            preflight.index("clean_orphaned_nullb()"))
         self.assertIn('mapper_node="$(readlink -f "$mapper"', recovery)
         self.assertIn("stat -Lc '%t:%T'", recovery)
         self.assertLess(

@@ -5,6 +5,18 @@ set -Eeuo pipefail
 
 fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
+preflight_internal_error() {
+    local rc="$1" line="$2"
+    trap - ERR
+    if [[ $rc =~ ^[1-9][0-9]*$ && $line =~ ^[1-9][0-9]*$ ]]; then
+        printf 'FAIL: loaded preflight internal command failed status=%s line=%s\n' \
+            "$rc" "$line" >&2
+    else
+        printf '%s\n' 'FAIL: loaded preflight internal command failed' >&2
+    fi
+    exit "$rc"
+}
+trap 'rc=$?; preflight_internal_error "$rc" "$LINENO"' ERR
 
 for cmd in rmmod dmsetup timeout awk tr findmnt cat readlink stat sleep id ls; do
     command -v "$cmd" >/dev/null || fail "missing required tool $cmd"

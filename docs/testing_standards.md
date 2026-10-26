@@ -103,7 +103,11 @@ must emit a concise `FAIL:` marker rather than disappearing behind filtered
 stage-5 output. The rootless harness must also prove that
 `source-contract-test.py` contains exactly one terminal test runner; duplicated
 tails or duplicate `__main__` blocks are harness corruption and fail before
-loaded qualification.
+loaded qualification. Unexpected preflight command failures must be trapped
+before any ownership mutation and reported only as numeric status and source
+line. The diagnostic must not include `BASH_COMMAND`, paths, UUIDs, mapper
+names, or other host-specific values; normal ownership/safety rejections still
+use the explicit `BLOCKED:` paths.
 
 Transient target teardown between benchmark or lifecycle phases (such as tearing down the target prior to live-GC evacuation and recreation in `deploy-nullblk.sh`) must similarly settle `udevadm` and use bounded non-force `timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry` to safely absorb transient `systemd-udevd` probe activity without failing or hanging.
 
