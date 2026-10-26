@@ -132,6 +132,11 @@ static inline int swapz_window_single_pack_ready(
 		const struct swapz_pending_bio *pending, swapz_u8 count,
 		swapz_u8 retain_ms, swapz_u8 read_budget)
 {
+	/* Count four is the learned floor but remains below the count > 4 K=1
+	 * detach threshold. RAW skipping must not recreate the refuted four-record
+	 * first-pack close through otherwise selective compressed geometry. */
+	if (count == 4U)
+		return 0;
 	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
 						read_budget, 2U, 1U))
 		return 1;
