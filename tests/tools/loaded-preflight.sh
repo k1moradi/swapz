@@ -7,11 +7,11 @@ fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 is_uint() {
     local value="$1"
-    [[ -n $value ]] || return 1
     case "$value" in
-        *[!0-9]*) return 1 ;;
+        0) return 0 ;;
+        ""|0*|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
     esac
-    return 0
 }
 is_hex16() {
     local value="$1"
@@ -42,15 +42,19 @@ done
 clean_orphaned_nullb() {
     local cfgbase=/sys/kernel/config/nullb
     [[ -d $cfgbase ]] || return 0
-    local cfg name idx dev_disk dev_path holders
+    local cfg name orphan_token idx dev_disk dev_path holders
     shopt -s nullglob
     for cfg in "$cfgbase"/nullb-swapz-*; do
         [[ -d $cfg ]] || continue
         name="${cfg##*/}"
-        [[ $name =~ ^nullb-swapz-[a-f0-9]{16}$ ]] || continue
+        case "$name" in
+            nullb-swapz-*) orphan_token="${name#nullb-swapz-}" ;;
+            *) continue ;;
+        esac
+        is_hex16 "$orphan_token" || continue
         [[ -r $cfg/memory_backed && "$(cat "$cfg/memory_backed" 2>/dev/null)" == 1 ]] || continue
         idx="$(cat "$cfg/index" 2>/dev/null || true)"
-        if [[ $idx =~ ^[0-9]+$ ]]; then
+        if is_uint "$idx"; then
             dev_disk="nullb$idx"
             dev_path="/dev/$dev_disk"
             if [[ -d "/sys/block/$dev_disk/holders" ]]; then
@@ -81,7 +85,7 @@ read_refcount() {
         fail "pre-existing dm_swapz reference count is unreadable"
     value="$(cat /sys/module/dm_swapz/refcnt)" ||
         fail "cannot read pre-existing dm_swapz reference count"
-    [[ $value =~ ^(0|[1-9][0-9]*)$ ]] ||
+    is_uint "$value" ||
         fail "pre-existing dm_swapz reference count is malformed"
     printf '%s\n' "$value"
 }
@@ -94,7 +98,7 @@ remove_idle_module() {
 }
 
 refcount="$(read_refcount)"
-if (( refcount == 0 )); then
+if [[ $refcount == 0 ]]; then
     remove_idle_module
     clean_orphaned_nullb
     note "AUTO_REMOVED_IDLE_DM_SWAPZ=1"
@@ -114,7 +118,7 @@ if [[ -n $swapz_map_list ]]; then
     mapfile -t swapz_maps <<< "$swapz_map_list" ||
         fail "cannot parse pre-existing swapz mapping list"
 fi
-(( ${#swapz_maps[@]} == 1 )) ||
+[[ ${#swapz_maps[@]} == 1 ]] ||
     fail "pre-existing dm_swapz module is busy with non-unique mappings; no cleanup attempted"
 owned_map="${swapz_maps[0]}"
 case "$owned_map" in
@@ -188,8 +192,9 @@ case "$lower_name" in
                 matches+=("$config")
         done
         shopt -u nullglob
-        (( ${#matches[@]} == 1 )) &&
+        if [[ ${#matches[@]} == 1 ]]; then
             owned_config="${matches[0]}"
+        fi
         ;;
     *)
         fail "pre-existing harness dm_swapz lower is not null_blk"
@@ -225,7 +230,7 @@ canonical_dev="$(stat -Lc '%t:%T' "$mapper_node" 2>/dev/null)" ||
 wait_for_zero_opens() {
     local attempt
 
-    for (( attempt=0; attempt<30; ++attempt )); do
+    for attempt in {1..30}; do
         opens="$(read_opens 2>/dev/null || echo "$opens")"
         [[ $opens == 0 ]] && return 0
         command -v udevadm >/dev/null 2>&1 &&
@@ -256,7 +261,7 @@ timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$owned_map" ||
 [[ ! -e $mapper ]] ||
     fail "stale harness dm_swapz mapping still exists after ordinary removal"
 refcount="$(read_refcount)"
-(( refcount == 0 )) ||
+[[ $refcount == 0 ]] ||
     fail "dm_swapz still has references after stale harness mapping removal"
 if [[ -n $owned_config && -d $owned_config ]]; then
     echo 0 > "$owned_config/power" 2>/dev/null || true

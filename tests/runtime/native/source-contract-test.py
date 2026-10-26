@@ -2929,7 +2929,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('opens == 0', preflight)
         self.assertIn('memory_backed', preflight)
         self.assertIn("is_uint()", preflight)
+        self.assertIn('""|0*|*[!0-9]*) return 1', preflight)
         self.assertIn("is_hex16()", preflight)
+        self.assertNotIn("=~", preflight)
+        self.assertNotIn("((", preflight)
+        self.assertIn('for attempt in {1..30}; do', recovery)
         self.assertIn("preflight_internal_error()", preflight)
         self.assertIn(
             "FAIL: loaded preflight internal command failed status=%s line=%s",
