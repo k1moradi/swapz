@@ -522,4 +522,9 @@ issue: stale-open cleanup signaled holders before proving that the mapper's lowe
 device was private harness RAM. Preflight now completes the exact mapper/UUID and
 memory-backed null_blk proof first, then targets only the canonical owned DM node.
 A holder that remains open after bounded TERM/KILL is reported as requiring a
-host reboot; force removal remains forbidden.
+host reboot; force removal remains forbidden. The next owner rerun exposed a
+repository-mode regression in that repair: `loaded-preflight.sh` had lost its
+executable bit, while rootless qualification only syntax-checked the file. The
+helper mode is restored and rootless qualification now locks it; status-two
+preflight runtime exits also surface a concise live failure marker instead of
+being reduced to a generic missing-diagnostic verdict.

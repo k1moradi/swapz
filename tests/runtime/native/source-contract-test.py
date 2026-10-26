@@ -2948,6 +2948,8 @@ static swapz_u16 swapz_probe_set(
             loaded)
         self.assertIn("run_privileged_bounded 60 tests/tools/loaded-preflight.sh",
                       loaded)
+        self.assertIn(
+            "loaded preflight exited with shell/runtime status 2", loaded)
         self.assertIn("run_privileged_bounded 600 tests/tools/deploy-nullblk.sh",
                       loaded)
         self.assertIn("run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh",

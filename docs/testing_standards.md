@@ -90,6 +90,16 @@ never permitted. After cleanup the reference count must be zero and ordinary
 
 Cleanup never force-removes uncertain resources. If identity or teardown is ambiguous, quarantine and fail.
 
+The private loaded preflight is an executable repository helper and rootless
+qualification must fail if its executable bit is lost. Privileged orchestration
+still invokes shell helpers through `bash` inside the watchdog, but repository
+mode is part of the harness contract and must not silently drift. Preflight's
+required-command audit must include every unconditional utility it executes.
+Because ordinary preflight safety rejections emit `BLOCKED:` and exit one, a
+status-two preflight return is classified as a shell/runtime harness failure and
+must emit a concise `FAIL:` marker rather than disappearing behind filtered
+stage-5 output.
+
 Transient target teardown between benchmark or lifecycle phases (such as tearing down the target prior to live-GC evacuation and recreation in `deploy-nullblk.sh`) must similarly settle `udevadm` and use bounded non-force `timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry` to safely absorb transient `systemd-udevd` probe activity without failing or hanging.
 
 Owned benchmark-pair final teardown must also settle after a successful mapper

@@ -77,6 +77,9 @@ run_privileged_bounded() {
     if (( rc == 124 || rc == 137 )); then
         printf 'BLOCKED: privileged loaded helper exceeded %ss: %s\n' \
             "$seconds" "$*" >&2
+    elif (( rc == 2 )) && [[ ${1:-} == tests/tools/loaded-preflight.sh ]]; then
+        printf '%s\n' \
+            'FAIL: loaded preflight exited with shell/runtime status 2 before a normal safety diagnostic' >&2
     fi
     return "$rc"
 }

@@ -6,7 +6,7 @@ set -Eeuo pipefail
 fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 
-for cmd in rmmod dmsetup timeout awk sed tr findmnt cat readlink stat sleep; do
+for cmd in rmmod dmsetup timeout awk sed tr findmnt cat readlink stat sleep id ls; do
     command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "root required for loaded preflight"

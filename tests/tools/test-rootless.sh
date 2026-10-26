@@ -18,6 +18,10 @@ python3 -B tests/runtime/native/make-interface-test.py -v
 python3 -B tests/runtime/native/test-report-test.py -v
 python3 -B tests/runtime/native/package-dkms-test.py -v
 python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
+[[ -x tests/tools/loaded-preflight.sh ]] || {
+  printf '%s\n' 'FAIL: loaded-preflight.sh must remain executable' >&2
+  exit 1
+}
 bash -n tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/tools/qualify-resource-pressure.sh \
   tests/tools/qualify-logical-open-balance.sh packaging/package-dkms.sh \
