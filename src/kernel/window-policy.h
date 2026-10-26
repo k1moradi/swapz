@@ -55,8 +55,10 @@ static inline int swapz_window_read_independent(
  * smaller window. FUA/conflict/read/discard/shutdown fences remain caller
  * owned and bypass this predicate. This changes only the early-close point;
  * the engine still chooses the real extent and publishes only after lower
- * success. Restricted read budgets, RAW records and invalid inputs fail
- * closed.
+ * success. Restricted read budgets and invalid compressed inputs fail
+ * closed. RAW records are never members of a compressed extent; the separate
+ * compressed-prefix helper below may skip earlier RAW slots because the flush
+ * planner already emits them after the compressed prefix.
  */
 static inline int swapz_window_extent_fits(
 		const struct swapz_pending_bio *pending, swapz_u8 count,
