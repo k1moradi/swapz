@@ -293,10 +293,11 @@ The last owner-qualified product source remains `0155a09a0f2e`, report
 `dc78c9bbffbd`. Documentation descendants and the alpha.29 ID83 candidate do
 not supersede that baseline until a new complete owner report passes.
 
-1. Qualify alpha.29 production candidate `3ce83f9d407e` (portable CI matrix
-   confirmed at `94f3e1364294`) with the single public `make test`. Keep
-   ID78/ID79 correctness repairs, the restored pre-ID80
-   detachment rule, K=1, one preparation lane, ID63 and SWZ 1/2/4 extents.
+1. Qualify alpha.29 production candidate with work-conserving dispatcher,
+   persistent snapshot completion barrier, and 2s-bounded inflight sampler with
+   the single public `make test`. Keep ID78/ID79 correctness repairs, the
+   restored pre-ID80 detachment rule, K=1, one preparation lane, ID63 and SWZ
+   1/2/4 extents.
 2. Interpret the new ID83 counters before changing concurrency: eight-record
    hand/dry closes, RAW-not-ready, compressed-ready, raw-ready, late-result
    discards, ready-reservoir high water and slot high water. Fast-media success

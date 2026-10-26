@@ -2685,7 +2685,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("atomic_xchg(&ctx->preparation_tail_credit, 0)", producer)
         self.assertIn("ctx->preparation_producer_head_claims++", producer)
         self.assertIn("ctx->preparation_producer_tail_claims++", producer)
-        self.assertIn("complete(&entry->preparation_snapshot_ready)", producer)
+        self.assertIn("complete_all(&entry->preparation_snapshot_ready)", producer)
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
                           "swapz_flush_window(", "dm_io(", "bio_endio(",
                           "swapz_engine_write_window"):
@@ -2786,10 +2786,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_memcpy_accounted(prepared->raw_bytes", producer)
         self.assertLess(
             producer.index("swapz_memcpy_accounted(prepared->raw_bytes"),
-            producer.rindex("entry->prepared_page = prepared"))
+            producer.rindex("WRITE_ONCE(entry->prepared_page, prepared)"))
         self.assertLess(
-            producer.rindex("entry->prepared_page = prepared"),
-            producer.rindex("complete(&entry->preparation_snapshot_ready)"))
+            producer.rindex("WRITE_ONCE(entry->prepared_page, prepared)"),
+            producer.rindex("complete_all(&entry->preparation_snapshot_ready)"))
         self.assertIn("async_prepare=%u delta64_prepare_workers=%u", status)
         self.assertIn('"delta64_rescue=$DELTA64_RESCUE"', benchmark)
         self.assertRegex(benchmark, r"(?m)^DELTA64_LZ4_ACCELERATION=1$")

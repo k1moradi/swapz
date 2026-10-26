@@ -8,6 +8,7 @@ Both arms consume the identical fixture and ordered logical I/O trace.
 """
 import argparse
 import concurrent.futures
+import enum
 import gc
 import hashlib
 import json
@@ -24,6 +25,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 
 PAGE = 4096
@@ -517,6 +519,17 @@ def host_cpu_delta(before, after):
     }
 
 
+class SamplerState(enum.Enum):
+    UNINITIALIZED = "UNINITIALIZED"
+    STARTING = "STARTING"
+    OPENING = "OPENING"
+    READY = "READY"
+    WAITING = "WAITING"
+    READING = "READING"
+    ACCOUNTING = "ACCOUNTING"
+    STOPPED = "STOPPED"
+
+
 class LowerInflightSampler:
     """Sample the exact owned lower block device during the timed interval.
 
@@ -528,14 +541,18 @@ class LowerInflightSampler:
     def __init__(self, disk_name):
         self._path = ((Path("/sys/block") / disk_name / "inflight")
                       if disk_name is not None else None)
+        self._state = SamplerState.UNINITIALIZED
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._ready = threading.Event()
+        self._stopped = threading.Event()
         self._thread = None
         self._error = None
         self._measuring = False
         self._start_ns = 0
         self._last_ns = 0
+        self._stop_requested_ns = 0
+        self._last_sample_ns = 0
         self._current = (0, 0)
         self._start = (0, 0)
         self._samples = 0
@@ -591,12 +608,20 @@ class LowerInflightSampler:
     def _run(self):
         fd = None
         try:
+            self._state = SamplerState.OPENING
             fd = os.open(self._path, os.O_RDONLY | os.O_CLOEXEC)
+            self._state = SamplerState.READY
             self._ready.set()
             interval_s = LOWER_INFLIGHT_SAMPLE_INTERVAL_NS / 1e9
-            while not self._stop.wait(interval_s):
+            while True:
+                self._state = SamplerState.WAITING
+                if self._stop.wait(interval_s):
+                    break
+                self._state = SamplerState.READING
                 current = self._read_fd(fd)
                 now_ns = time.monotonic_ns()
+                self._last_sample_ns = now_ns
+                self._state = SamplerState.ACCOUNTING
                 with self._lock:
                     if self._measuring:
                         self._account_locked(now_ns)
@@ -605,8 +630,10 @@ class LowerInflightSampler:
             self._set_error(exc)
             self._ready.set()
         finally:
+            self._state = SamplerState.STOPPED
             if fd is not None:
                 os.close(fd)
+            self._stopped.set()
 
     def start(self):
         if self._path is None:
@@ -614,13 +641,23 @@ class LowerInflightSampler:
         # Fail before the timed boundary if this kernel lacks the required
         # split lower READ/WRITE inflight telemetry.
         self._read_once()
+        self._state = SamplerState.STARTING
         self._thread = threading.Thread(
             target=self._run, name="swapz-lower-inflight", daemon=True)
         self._thread.start()
-        if not self._ready.wait(timeout=10):
+        if not self._ready.wait(timeout=2.0):
+            self._stop_requested_ns = time.monotonic_ns()
             self._stop.set()
-            self._thread.join(timeout=10)
-            raise ValueError("lower inflight sampler did not start")
+            self._thread.join(timeout=2.0)
+            stack = ""
+            if self._thread.is_alive():
+                frame = sys._current_frames().get(self._thread.ident)
+                if frame is not None:
+                    stack = "".join(traceback.format_stack(frame))
+            raise ValueError(
+                f"lower inflight sampler did not start within 2.0s "
+                f"(state={self._state.value}):\n{stack}"
+            )
         with self._lock:
             self._raise_error_locked()
 
@@ -679,10 +716,24 @@ class LowerInflightSampler:
     def close(self):
         if self._thread is None:
             return
+        self._stop_requested_ns = time.monotonic_ns()
         self._stop.set()
-        self._thread.join(timeout=10)
+        self._thread.join(timeout=2.0)
         if self._thread.is_alive():
-            raise ValueError("lower inflight sampler did not stop")
+            now_ns = time.monotonic_ns()
+            stop_age_ms = (now_ns - self._stop_requested_ns) / 1e6
+            last_sample_age_ms = ((now_ns - self._last_sample_ns) / 1e6
+                                  if self._last_sample_ns else -1)
+            stack = ""
+            frame = sys._current_frames().get(self._thread.ident)
+            if frame is not None:
+                stack = "".join(traceback.format_stack(frame))
+            raise ValueError(
+                f"lower inflight sampler did not stop within 2.0s "
+                f"(state={self._state.value}, stop_age_ms={stop_age_ms:.1f}, "
+                f"last_sample_age_ms={last_sample_age_ms:.1f}, "
+                f"samples={self._samples}):\n{stack}"
+            )
         with self._lock:
             self._raise_error_locked()
 

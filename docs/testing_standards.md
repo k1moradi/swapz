@@ -1116,8 +1116,9 @@ READ/WRITE depth, sampled peaks and sample-and-hold time-weighted means.
 Sampling is observational and is not an exact per-request trace; the achieved
 sample count stays visible so sparse evidence cannot be mistaken for complete
 queue history. Lower inflight sampler thread startup and shutdown lifecycle
-synchronization bounds provide 10s timeout headroom so host scheduling load during
-intensive benchmarks cannot prematurely abort an otherwise clean trial.
+synchronization bounds provide 2s timeout headroom with rich state and thread
+frame diagnostics so any stall pinpoints the exact blocking location without
+masking test regressions.
 
 For swapz mixed arms, the kernel also reports K=1 immutable-run occupancy as
 wall time from setting `inflight_write.active` before asynchronous `dm_io`

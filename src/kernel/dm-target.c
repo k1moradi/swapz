@@ -843,11 +843,11 @@ static void swapz_release_prepared(struct bio *bio)
 {
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 	struct swapz_dm *ctx = entry->preparation_ctx;
-	struct swapz_prepared_page *prepared = entry->prepared_page;
+	struct swapz_prepared_page *prepared = READ_ONCE(entry->prepared_page);
 
 	if (!prepared)
 		return;
-	entry->prepared_page = NULL;
+	WRITE_ONCE(entry->prepared_page, NULL);
 	swapz_prepared_put(ctx, prepared);
 }
 
@@ -2091,9 +2091,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 				prepared->length = 0;
 				atomic_set(&prepared->state, SWAPZ_PREPARATION_ERROR);
 				complete(&prepared->result_ready);
-				entry->prepared_page = prepared;
+				WRITE_ONCE(entry->prepared_page, prepared);
 				entry->preparation_error = error;
-				complete(&entry->preparation_snapshot_ready);
+				complete_all(&entry->preparation_snapshot_ready);
 				swapz_prepared_put(ctx, prepared);
 				mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 				continue;
@@ -2104,9 +2104,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 		prepared->payload_crc32c_valid = false;
 		prepared->encoding = SWAPZ_ENCODING_LZ4;
 		prepared->payload_crc32c = 0;
-		entry->prepared_page = prepared;
+		WRITE_ONCE(entry->prepared_page, prepared);
 		entry->preparation_error = 0;
-		complete(&entry->preparation_snapshot_ready);
+		complete_all(&entry->preparation_snapshot_ready);
 
 		lower_write_overlap = atomic_read(&ctx->lower_write_active);
 		if (lower_write_overlap)
@@ -3666,7 +3666,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	}
 
 	if (prepared_async) {
-		struct swapz_prepared_page *prepared = entry->prepared_page;
+		struct swapz_prepared_page *prepared = READ_ONCE(entry->prepared_page);
 
 		if (entry->preparation_error || !prepared)
 			return entry->preparation_error ? entry->preparation_error : -EIO;
@@ -5255,7 +5255,9 @@ static void swapz_worker(struct work_struct *work)
 				bool accepted_backlog;
 				bool lower_write_busy;
 
-				if (!entry->prepared_page) {
+				struct swapz_prepared_page *prepared;
+
+				if (!entry->preparation_inline) {
 					wait_for_preparation = true;
 					spin_lock_irqsave(&ctx->queue_lock, flags);
 					accepted_backlog = ctx->batch_count ||
@@ -5312,10 +5314,13 @@ static void swapz_worker(struct work_struct *work)
 							ctx->preparation_ordered_wait_wall_ns +=
 								swapz_elapsed_ns(wait_start, ktime_get_ns());
 					}
+				} else {
+					inline_preparation = true;
 				}
-				if (entry->prepared_page &&
+				prepared = READ_ONCE(entry->prepared_page);
+				if (prepared &&
 				    swapz_preparation_read_state(
-					&entry->prepared_page->state) ==
+					&prepared->state) ==
 					SWAPZ_PREPARATION_PREPARING) {
 					if (ctx->engine.bulk_enabled &&
 					    !ctx->engine.verify_after_write &&
@@ -5336,7 +5341,7 @@ static void swapz_worker(struct work_struct *work)
 					if (!ctx->engine.bulk_enabled ||
 					    ctx->engine.verify_after_write)
 						wait_for_completion(
-							&entry->prepared_page->result_ready);
+							&prepared->result_ready);
 				}
 			} else if (ctx->async_prepare) {
 				/* READs/barriers revoke idle WRITE-wave credit. */

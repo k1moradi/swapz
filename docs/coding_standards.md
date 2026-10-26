@@ -1286,11 +1286,16 @@ Fault-injection knobs are forbidden on physical backing.
 ### Alpha.29 work-conserving dispatcher candidate
 
 Alpha.29 keeps one unbound producer lane, K=1 and the existing 64 preparation
-slots. A producer copies one stable 4KiB RAW snapshot before optional LZ4 and
-publishes that lifetime boundary through `preparation_snapshot_ready`. The
+slots. A producer copies one stable 4KiB RAW snapshot before optional LZ4,
+publishes `WRITE_ONCE(entry->prepared_page, prepared)`, and signals persistent
+snapshot publication via `complete_all(&entry->preparation_snapshot_ready)`. The
 `prepared_page` pointer must not become dispatchable before that snapshot is
 complete: publishing it early without a snapshot-ready gate would allow the
-dispatcher to select RAW while `raw_bytes` is still being filled.
+dispatcher to select RAW while `raw_bytes` is still being filled. The ordered
+dispatcher enforces snapshot wait (`wait_for_completion(&entry->preparation_snapshot_ready)`)
+on every entry not stolen inline (`!entry->preparation_inline`), ensuring `complete_all`
+provides a persistent, one-shot barrier across all scheduling passes and deferred
+worker revisits without repeat-wait deadlocks.
 
 If the lower WRITE is still active, a PREPARING FIFO head is deferred after the
 stable snapshot is published. Producer READY or lower completion wakes the
