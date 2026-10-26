@@ -522,17 +522,35 @@ classes nor the authoritative retention deadline.
 If a ready window was held back only because the immutable K=1 lower WRITE was
 still pending, the completion wake must finalize that run and deliver its upper
 BIO completions before consuming the next accepted FIFO. A pending post-PACK
-sample must survive every interim worker pass while K=1 is in flight. Once
-finalized, sampling distinguishes records already staged in `batch[]` before
-completion from plain retained-WRITE followers still queued in worker-local or
-`incoming` state. A staged prefix is burst-width evidence but is not by itself
-a terminal tail: the just-completed upper BIOs have only then been released and
-may immediately resubmit. While such a staged-only sample is unresolved, it
-must not authorize PACK_READY. Queued accepted followers resolve that completion
-gap; learning uses the staged prefix when present, while a sampled close target
-is used only when no staged prefix exists. If no follower arrives, the ordinary
-absolute retention deadline remains authoritative. This adds no grace wait,
+sample survives every interim worker pass while K=1 is in flight and is consumed
+exactly once after that run is finalized. The completed-width evidence for a
+PACK_READY close is the count from that one just-completed generation, not an
+accumulation of earlier PACK_READY generations whose upper BIOs have already
+been completed and may have resubmitted. Non-PACK split pieces may still
+accumulate until a packed boundary because their preceding accepted generation
+has not yet been released as a completed PACK_READY run.
+
+After K=1 completion, bounded sampling counts both records already staged in
+`batch[]` and plain retained-WRITE followers still queued in worker-local or
+`incoming` state. Their total may raise the learned burst width. A staged-only
+prefix does not install a sampled-tail close target, because the just-completed
+writers may immediately re-enter and join it; however, the sample itself is no
+longer left pending and therefore cannot suppress an otherwise valid
+service-dry or learned-target PACK_READY close until the absolute deadline.
+Queued accepted followers establish the finite sampled-tail target after they
+are consumed. This keeps the existing absolute deadline and adds no grace wait,
 device-latency heuristic, K>1 slot or timeout scaling.
+
+Retained bulk windows may contain incompressible RAW records before later
+compressed records in admission order, while the flush planner already orders
+the compressed prefix before the RAW tail. Early first/second-pack recognition
+therefore evaluates the valid compressed records in the bounded admitted prefix
+instead of allowing an earlier RAW slot to poison all later pack geometry. The
+newest admission must itself be compressed, the exact compressed-record target
+must be present, every compressed payload must remain valid and bounded, and
+the existing 1/2/4-block extent limits and read-budget gates still apply. RAW
+records remain complete 4KiB records and are never treated as compressed
+members of a pack.
 
 For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
 with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan
