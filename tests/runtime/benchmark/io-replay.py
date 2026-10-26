@@ -617,9 +617,9 @@ class LowerInflightSampler:
         self._thread = threading.Thread(
             target=self._run, name="swapz-lower-inflight", daemon=True)
         self._thread.start()
-        if not self._ready.wait(timeout=2):
+        if not self._ready.wait(timeout=10):
             self._stop.set()
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=10)
             raise ValueError("lower inflight sampler did not start")
         with self._lock:
             self._raise_error_locked()
@@ -680,7 +680,7 @@ class LowerInflightSampler:
         if self._thread is None:
             return
         self._stop.set()
-        self._thread.join(timeout=2)
+        self._thread.join(timeout=10)
         if self._thread.is_alive():
             raise ValueError("lower inflight sampler did not stop")
         with self._lock:
