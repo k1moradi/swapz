@@ -654,3 +654,36 @@ loses the service race. On SD, longer lower-I/O service should allow more READY
 compression before dispatch. Reservoir high water decides whether more than 64
 slots are justified; K=1 ready-wait decides whether another lower run buffer is
 justified.
+
+Portable CI evidence for production candidate `3ce83f9d407e`, with the ARM
+matrix introduced by `94f3e1364294`, is PASS: exact production-C/source tests
+and W=1/W=2/normal module builds succeed on x86_64 and ARM64. The native x86
+host measured delta64 SSE2 at 938/983 ns per 4KiB transform/inverse and AVX2 at
+705/533 ns; its AVX-512 object compiled but the host CPU did not advertise
+AVX-512, so no runtime AVX-512 timing is claimed. The ARM64 host selected NEON
+and measured 748/880 ns per page. These are offline predictor timings only, not
+ID83 storage-service evidence.
+
+The performance hypothesis is intentionally bounded by the current qualified
+modern-envelope data. Current Gen4 mixed swapz takes 591.3 ms for the fixed
+trace versus 85.6 ms raw, with 197 worker-empty deadline closes, 33.9 ms lower
+WRITE service and zero K=1 ready wait. Gen5 takes 522.5 ms versus 81.6 ms raw,
+with 176 worker-empty deadline closes and 23.8 ms lower WRITE service. ID83 is
+designed to convert part of that deadline/scheduler gap into immediate
+eight-record lower service. Because deadline-reaching age is not pure idle time,
+do not predict an exact speedup from count*2ms. If roughly one-half to
+three-quarters of the previously deadline-reaching age proves removable idle
+time, the fixed-trace arithmetic corresponds to roughly 1.3--2.0x current
+fast-mixed useful service before accounting for the extra RAW lower bytes; this
+is a decision hypothesis, not a qualification result. A larger gain is possible
+only if nearly all of that age was avoidable idle time.
+
+Expected costs are explicit. Every producer-owned page now pays one stable 4KiB
+snapshot copy; fast media may write more RAW bytes and create more 1-block
+extents; late LZ4 results can consume CPU and then be discarded; and higher RAW
+prevalence can increase capacity/GC pressure. The counter set must distinguish
+those costs from the intended gains. Slow media should see relatively few
+RAW-not-ready selections because lower service gives the producer time to
+publish READY compression. Fast media should show the opposite. Do not promote
+ID83 merely because deadline counts fall: useful WRITE/READ, p99, lower
+bytes/requests, CPU, RAM and GC remain the product criteria.

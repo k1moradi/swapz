@@ -53,9 +53,11 @@ existing per-BIO descriptor queue stays the low-copy admission queue, the
 ordered worker dispatches eight-record work-conserving hands or any shorter dry
 pressure tail. A producer snapshots the 4KiB page once, then optional LZ4 races
 against lower completion; when lower service becomes available first, RAW wins
-atomically and any late compression result is discarded. The candidate remains
-unqualified until the complete owner `make test` matrix publishes PASS and its
-SD/SATA/NVMe service tradeoff is acceptable. It preserves the single
+atomically and any late compression result is discarded. Hosted rootless qualification is green on both x86_64 and ARM64, including
+W=1/W=2/normal module compilation and the native preparation-race/source
+contracts. The candidate remains unqualified until the complete owner
+`make test` matrix publishes PASS and its SD/SATA/NVMe service tradeoff is
+acceptable. It preserves the single
 authority/ordering model, bounded memory, CRC/generation validation and the
 existing SWZ format.
 
