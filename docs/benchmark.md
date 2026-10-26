@@ -379,7 +379,7 @@ cacheline-local mixed structured/high-entropy records.
 
 The evaluator now keeps only whole-page delta64. Retired comparator
 implementations are removed from current source; historical evidence remains in
-Git. The selected scalar/SSE2/AVX2/NEON path must match the portable scalar
+Git. The selected scalar/SSE2/AVX2/AVX512/NEON path must match the portable scalar
 classifier and transformed bytes before its measurement is accepted. It records
 transform/inverse/second-LZ4 time, adopted representations, RAW rescues and
 >2024 -> <=2024 crossings. The ID67a.3 delta64 signpost samples 8 page-wide
