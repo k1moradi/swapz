@@ -15,6 +15,17 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+class FakeStreamingProcess:
+    """Minimal Popen-compatible process for streamed loaded-stage tests."""
+
+    def __init__(self, output: str, returncode: int = 0):
+        self.stdout = io.StringIO(output)
+        self.returncode = returncode
+
+    def wait(self):
+        return self.returncode
+
+
 def predictor_evidence():
     thresholds = []
     profile_pages = {"zero": 32, "repeat": 32,
@@ -2372,21 +2383,18 @@ class ReportContract(unittest.TestCase):
 
     def test_retired_parallel_read_diagnostic_is_observational(self):
         broken = synthetic_log().replace("PASS_PARALLEL_READ_AB=1\n", "", 1)
-        fake_process = type("FakeProcess", (), {
-            "stdout": broken,
-            "returncode": 0,
-        })()
-        original_run = runner.subprocess.run
+        fake_process = FakeStreamingProcess(broken)
+        original_popen = runner.subprocess.Popen
         report = {"schema": "swapz-test-results-v1", "stages": [],
                   "benchmarks": {"sessions": [], "verdicts": {}}}
         try:
-            runner.subprocess.run = lambda *args, **kwargs: fake_process
+            runner.subprocess.Popen = lambda *args, **kwargs: fake_process
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(
                     runner.run_stage("Owned RAM smoke and pairs",
                                      ["unused"], report, parse_bench=True), 0)
         finally:
-            runner.subprocess.run = original_run
+            runner.subprocess.Popen = original_popen
         stage = report["stages"][-1]
         self.assertEqual(stage["status"], "PASS")
         diagnostic = report["benchmarks"]["parallel_read_ab"]
@@ -2396,21 +2404,18 @@ class ReportContract(unittest.TestCase):
 
     def test_read_coalesce_diagnostic_failure_reports_its_own_reason(self):
         broken = synthetic_log().replace("PASS_READ_COALESCE_AB=1\n", "", 1)
-        fake_process = type("FakeProcess", (), {
-            "stdout": broken,
-            "returncode": 0,
-        })()
-        original_run = runner.subprocess.run
+        fake_process = FakeStreamingProcess(broken)
+        original_popen = runner.subprocess.Popen
         report = {"schema": "swapz-test-results-v1", "stages": [],
                   "benchmarks": {"sessions": [], "verdicts": {}}}
         try:
-            runner.subprocess.run = lambda *args, **kwargs: fake_process
+            runner.subprocess.Popen = lambda *args, **kwargs: fake_process
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(
                     runner.run_stage("Owned RAM smoke and 8 pairs",
                                      ["unused"], report, parse_bench=True), 1)
         finally:
-            runner.subprocess.run = original_run
+            runner.subprocess.Popen = original_popen
         stage = report["stages"][-1]
         self.assertEqual(stage["status"], "FAIL")
         self.assertEqual(stage["failed_phase"],
