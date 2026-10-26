@@ -116,24 +116,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 708,
-"legacy_dead_probe_ns": 76711,
-"legacy_score_scan_ns": 467099,
+"incremental_select_ns": 875,
+"legacy_dead_probe_ns": 102835,
+"legacy_score_scan_ns": 593006,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 708,
-"relocation_list_ns": 416,
-"relocation_scan_ns": 89087,
+"mapped_dead_probe_ns": 625,
+"relocation_list_ns": 458,
+"relocation_scan_ns": 101292,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2417,
-"legacy_dead_probe_ns": 290760,
-"legacy_score_scan_ns": 1839647,
+"incremental_select_ns": 2584,
+"legacy_dead_probe_ns": 295670,
+"legacy_score_scan_ns": 1847103,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 1167,
-"relocation_list_ns": 458,
-"relocation_scan_ns": 359137,
+"mapped_dead_probe_ns": 1292,
+"relocation_list_ns": 583,
+"relocation_scan_ns": 409463,
 "segments": 4096,
 "victim_records": 256
 }
@@ -143,14 +143,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 171,
+"inverse_ns_per_page": 162,
 "name": "scalar",
-"transform_ns_per_page": 144
+"transform_ns_per_page": 137
 },
 {
-"inverse_ns_per_page": 113,
+"inverse_ns_per_page": 109,
 "name": "neon",
-"transform_ns_per_page": 93
+"transform_ns_per_page": 99
 }
 ],
 "classifier": {
@@ -160,9 +160,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 29,
+"ns_per_page": 32,
 "sample_pairs": 32,
-"scalar_ns_per_page": 29,
+"scalar_ns_per_page": 32,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -177,7 +177,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1900
+"wall_ns_per_page": 1866
 },
 {
 "acceleration": 2,
@@ -193,7 +193,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1648
+"wall_ns_per_page": 1686
 },
 {
 "acceleration": 4,
@@ -201,7 +201,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1641
+"wall_ns_per_page": 1651
 }
 ],
 "negative_pages": 256,
@@ -218,9 +218,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1332,
-"modeled_wall_ns_total": 767488,
-"ns_per_saved_block": 14759,
+"modeled_wall_ns_per_page": 1385,
+"modeled_wall_ns_total": 797952,
+"ns_per_saved_block": 15345,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -285,14 +285,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15166,
+"ns_per_saved_block": 15766,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1500,
-"routed_cpu_ns_total": 864508,
+"routed_cpu_ns_per_page": 1560,
+"routed_cpu_ns_total": 898701,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -340,14 +340,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15237,
+"ns_per_saved_block": 15840,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1454,
-"routed_cpu_ns_total": 838048,
+"routed_cpu_ns_per_page": 1512,
+"routed_cpu_ns_total": 871224,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -395,14 +395,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14759,
+"ns_per_saved_block": 15345,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1332,
-"routed_cpu_ns_total": 767488,
+"routed_cpu_ns_per_page": 1385,
+"routed_cpu_ns_total": 797952,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -450,14 +450,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14759,
+"ns_per_saved_block": 15345,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1332,
-"routed_cpu_ns_total": 767488,
+"routed_cpu_ns_per_page": 1385,
+"routed_cpu_ns_total": 797952,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -505,14 +505,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14759,
+"ns_per_saved_block": 15345,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1332,
-"routed_cpu_ns_total": 767488,
+"routed_cpu_ns_per_page": 1385,
+"routed_cpu_ns_total": 797952,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -529,17 +529,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 113,
+"inverse_ns_per_page": 109,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 171,
-"scalar_transform_ns_per_page": 144,
-"second_lz4_ns_per_page": 2847,
+"scalar_inverse_ns_per_page": 162,
+"scalar_transform_ns_per_page": 137,
+"second_lz4_ns_per_page": 2954,
 "transform_backend": "neon",
-"transform_ns_per_page": 93
+"transform_ns_per_page": 99
 }
 ]
 }
@@ -551,32 +551,32 @@
 "source_sha": "29cfea17819f9ecd965b601bfdb68e67fb299fe4",
 "stages": [
 {
-"elapsed_s": 0.36,
+"elapsed_s": 0.332,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 14.64,
+"elapsed_s": 14.893,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.224,
+"elapsed_s": 0.247,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.241,
+"elapsed_s": 0.284,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
 "diagnostic": "BLOCKED: proven-owned stale dm_swapz mapping remains open after bounded holder cleanup; reboot required before make test",
-"elapsed_s": 9.902,
+"elapsed_s": 9.906,
 "exit_code": 1,
 "failed_phase": "preflight / administrator authorization",
 "name": "Owned RAM smoke + mixed/QD pilot",
