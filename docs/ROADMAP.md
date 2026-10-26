@@ -172,8 +172,8 @@ changes.
 | 78 | Completion-aware post-PACK generation conservation / RAW-safe pack recognition | **1 owner-qualified state repair / keep; performance recovery incomplete** | Exact ARM64/NEON source `ab885372` passed the full five-stage owner `make test`. It eliminates the catastrophic `c07edd9` deadline/target inflation and keeps completed-generation learning bounded, but it does not recover the earlier async throughput advantage: latest fast QD8 async/sync is -0.07% (95% CI -1.12..+0.98) and QD32 is -0.36% (-8.27..+7.54), while lower-WRITE requests regress +2.16% and +8.13% respectively; QD4 is -9.32% with a wide CI. Keep the completion-state repair and RAW-safe recognition as correctness/state hygiene, but do not claim a scheduling win. Same-source mixed evidence is heavily replay/load sensitive, so the remaining low-QD detachment question moves to ID80 rather than reopening K>1 or the refuted staged-only PACK_READY lockout. |
 
 | 79 | Planned single-record exact read-cache invalidation | **1 owner-qualified read-I/O win / keep; scheduling interaction moved to ID81** | Report `71251ba9232e` on exact source `f3f9f0052b70` passes all five owner stages on ARM64/NEON. Fast mixed lower READ requests collapse from the latest comparable `ab885372` ARM64 means of 2328.4 sync / 2810.2 async to 9.0 / 9.0 while preserving byte-exact correctness. The same run exposes a scheduling interaction rather than a reason to restore global invalidation: fast sync windows rise ~694.8->2243.6, one-record windows ~32.2->261.2 and deadline closes ~47.2->328.4. Keep exact-range mutation fencing and address the retained-window coupling in ID81. |
-| 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed** | The complete ARM64/NEON report `71251ba9232e` refutes the static `count > 4U` gate: fast sustained QD8 async/sync useful WRITE is -9.1% with 95% CI [-15.1%, -3.1%], while lower-WRITE requests rise +11.8%; QD32 is unresolved and QD4 does not provide a compensating qualified win. Per the predeclared gate and de-bloat rule, remove the shallow cutoff and restore the prior fixed K=1 multi-record detachment rule (`count > 1U`) without adding a selector. |
-| 81 | Cache-hit-neutral retained burst learning | **4 candidate implemented; owner evidence required** | New production-C candidate preserves ID79 residency while removing the timing feedback it exposed: sub-floor 2/3-record sampled tails cannot override a larger learned target without selective first-pack geometry; residual TAIL_TARGET/SERVICE_DRY drains accumulate with the completed generation instead of replacing it; successful independent READ service, including cache hits, is excluded from WRITE idle-wait age with total credit capped at one `retain_ms` interval, while SERVICE_DRY evidence remains lower-I/O-only. Acceptance: current ID79 lower READ requests must stay near the qualified floor, fast mixed 17-64 windows and lower-WRITE request aggregation must materially recover toward the `ab885372` ARM64 baseline, fast QD8/QD32 must not regress after ID80 removal, and slow-model useful service/lower-byte savings, correctness, GC/TRIM and pressure gates must remain qualified. |
+| 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; pre-ID80 policy restored** | Report `71251ba9232e` on exact ARM64/NEON source `f3f9f0052b70` refutes ID80's static `count > 4U` gate: fast sustained QD8 async/sync useful WRITE is -9.1% with 95% CI [-15.1%, -3.1%] and lower-WRITE requests rise +11.8%. Removal restores the actual last owner-qualified ancestry, `count > 4U || preparation_queued > 0`, not the later unqualified `count > 1U` rule. The restored policy keeps K=1 and the existing preparation ownership model; exact-source owner requalification remains required after rollback. |
+| 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed before performance evidence** | Exact ARM64/NEON source `26a045c80b56` passed build, native/rootless contracts and W=1/W=2, then the loaded stage BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`). No mixed/QD benchmark result from this source is valid. The bundled candidate also incorrectly described `count > 1U` as an ID80 rollback even though qualified pre-ID80 ancestry used `count > 4U || preparation_queued > 0`. Remove the entire ID81 scheduling candidate, restore the pre-ID80 policy, retain ID79's exact-range cache invalidation, and do not modify suspend/drain based on this single failed candidate without independent evidence. |
 
 ## What the pinned queue experiment establishes
 
@@ -249,15 +249,15 @@ AVX-512 review/build evidence does not qualify runtime on this SSE2-only host.
    `async_prepare=0` as the sync control, and preserve the fast-mixed paired
    intervals. The ID36 low-RAM/heavy-CPU gate is qualified on the owner
    matrix (tested source `ab56b41c35b8`, report `c8a67f451495`).
-3. ID78's completion-state repair is now owner-qualified on exact source
-   `ab885372`; keep the state conservation but do not claim a recovered async
-   throughput advantage. ID79 is now owner-qualified for its read-I/O effect;
-   ID80 is owner-refuted and removed. Owner-qualify ID81's cache-hit-neutral
-   retained-window repair next. Keep K=1, one preparation lane, ID63, SWZ 1/2/4
-   extents and the bounded ordinary retention policy fixed. If ID81 does not
-   retain ID79's read savings while recovering fast mixed WRITE aggregation,
-   remove the candidate and return to realistic churn/GC/TRIM evidence before
-   choosing asynchronous TRIM.
+3. ID78's completion-state repair and ID79's exact-range read-cache
+   invalidation remain retained. ID80 is owner-refuted and ID81 failed the
+   loaded suspend/drain correctness gate before benchmarks, so both candidate
+   policies are removed. The source now restores the exact pre-ID80
+   depth/backlog detachment rule while keeping K=1, one preparation lane, ID63
+   and SWZ 1/2/4 extents. Run one exact-source owner `make test` to requalify
+   the rollback; do not start another scheduling experiment until that passes.
+   Afterward return to realistic churn/GC/TRIM evidence unless new production
+   evidence justifies reopening retained-window scheduling.
 4. Terminal ID72 churn A/B completed: circular allocator fairness proved
    optimal (spread=4 across all runs, 0.00% spread reduction and +9.93% p99
    latency regression with least-open scanning); optional switch removed and

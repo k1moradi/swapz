@@ -251,23 +251,6 @@ static int test_pack_ready_uses_compressed_geometry_across_raw_slots(void)
 	CHECK(!swapz_window_pack_ready(batch, 7, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 7, 0, 0));
 	CHECK(!swapz_window_pack_ready(batch, 7, 2, 1));
-
-	/* ID80 is removed: total count four is not itself a first-pack ban.
-	 * Two compressed records behind two RAW slots may still prove the exact
-	 * 4KiB first-pack geometry, and the resulting multi-record window may
-	 * detach asynchronously under the ordinary K=1 ownership rules. */
-	memset(batch, 0, sizeof(batch));
-	batch[0].logical = 500;
-	batch[0].length = SWAPZ_BLOCK_BYTES;
-	batch[0].raw = 1;
-	batch[1].logical = 501;
-	batch[1].length = SWAPZ_BLOCK_BYTES;
-	batch[1].raw = 1;
-	batch[2].logical = 502;
-	batch[2].length = 2024;
-	batch[3].logical = 503;
-	batch[3].length = 2024;
-	CHECK(swapz_window_single_pack_ready(batch, 4, 2, 0));
 	return 0;
 }
 
@@ -299,14 +282,9 @@ static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 	CHECK(swapz_window_burst_close_ready(1, 1, 6, 32, 0));
 	CHECK(swapz_window_burst_close_ready(0, 1, 6, 32, 0));
 	CHECK(!swapz_window_burst_close_ready(0, 0, 1, 8, 1));
-	/* Sub-floor sampled tails cannot override a larger learned target unless
-	 * selective first-pack geometry proves that the residual is packable. */
-	CHECK(!swapz_window_burst_close_ready(0, 0, 2, 8, 2));
-	CHECK(swapz_window_burst_close_ready(1, 0, 2, 8, 2));
+	CHECK(swapz_window_burst_close_ready(0, 0, 2, 8, 2));
 	CHECK(!swapz_window_burst_close_ready(0, 0, 2, 8, 3));
-	CHECK(!swapz_window_burst_close_ready(0, 0, 3, 8, 3));
-	CHECK(swapz_window_burst_close_ready(1, 0, 3, 8, 3));
-	CHECK(swapz_window_burst_close_ready(0, 0, 4, 8, 4));
+	CHECK(swapz_window_burst_close_ready(0, 0, 3, 8, 3));
 	return 0;
 }
 
@@ -353,30 +331,6 @@ static int test_uniform_compressed_identity_sort_safety(void)
 	batch[4].length = SWAPZ_BLOCK_BYTES;
 	batch[4].raw = 1;
 	CHECK(!swapz_window_uniform_compressed(batch, 8));
-	return 0;
-}
-
-static int test_read_service_shift_is_bounded(void)
-{
-	const unsigned long long first = 1000000ULL;
-
-	CHECK(swapz_window_read_service_shift_ns(
-		first, 1100000ULL, 1300000ULL, 0, 2) == 200000ULL);
-	/* If the shifted origin already overlaps this service interval, exclude
-	 * only the still-unaccounted suffix. */
-	CHECK(swapz_window_read_service_shift_ns(
-		1250000ULL, 1100000ULL, 1300000ULL, 0, 2) == 50000ULL);
-	/* One retained interval is the hard per-window exclusion cap. */
-	CHECK(swapz_window_read_service_shift_ns(
-		first, 1100000ULL, 1300000ULL, 1950000ULL, 2) == 50000ULL);
-	CHECK(swapz_window_read_service_shift_ns(
-		first, 1100000ULL, 1300000ULL, 2000000ULL, 2) == 0);
-	CHECK(swapz_window_read_service_shift_ns(
-		first, 1300000ULL, 1100000ULL, 0, 2) == 0);
-	CHECK(swapz_window_read_service_shift_ns(
-		0, 1100000ULL, 1300000ULL, 0, 2) == 0);
-	CHECK(swapz_window_read_service_shift_ns(
-		first, 1100000ULL, 1300000ULL, 0, 0) == 0);
 	return 0;
 }
 
@@ -504,7 +458,6 @@ int main(void)
 	CHECK(test_pack_ready_uses_compressed_geometry_across_raw_slots() == 0); passed++;
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
-	CHECK(test_read_service_shift_is_bounded() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_ordinary_retention_deadline_is_pinned() == 0); passed++;

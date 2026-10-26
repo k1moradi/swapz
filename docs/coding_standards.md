@@ -512,12 +512,11 @@ The serialized worker closes burst-target, sampled-tail and service-proven-dry
 windows only after refreshing its local and incoming accepted FIFO state. At the
 initial four-record learned burst floor, only the selective two-record 4KiB or
 three-record 8KiB geometry may establish a first pack; that first pack still
-waits for a second accepted pack or an explicit sampled tail. Four non-RAW
-compressed records fitting the existing 16KiB class remain insufficient
-first-pack evidence because `SWAPZ_MAX_COMPRESSED` makes that predicate
-effectively tautological. Total admission count is not itself a first-pack gate:
-after removal of ID80, every eligible multi-record window (`count > 1U`) may
-detach under the fixed K=1 ownership model. This changes neither SWZ extent
+waits for a second accepted pack or an explicit sampled tail. Do not treat four
+non-RAW compressed records fitting the existing 16KiB class as first-pack
+evidence: `SWAPZ_MAX_COMPRESSED` makes that predicate effectively
+tautological, so it closes at count four below the `count > 4U` K=1
+asynchronous-detachment threshold. This restriction changes neither SWZ extent
 classes nor the authoritative retention deadline.
 
 If a ready window was held back only because the immutable K=1 lower WRITE was
@@ -545,24 +544,6 @@ learned-target PACK_READY close until the absolute deadline. Queued accepted
 followers establish the finite sampled-tail target after they are consumed. This keeps the existing absolute deadline and adds no grace wait,
 device-latency heuristic, K>1 slot or timeout scaling.
 
-A sampled residual tail below the four-record learned floor is never sufficient
-by itself to override a larger learned burst target. Two- and three-record tails
-may close early only when `single_pack_deferred` proves the selective 4KiB/8KiB
-first-pack geometry; a sampled tail of four or more remains finite accepted
-evidence. A BURST_TARGET PACK_READY close establishes a new completed-generation
-width. TAIL_TARGET and SERVICE_DRY closes drain residue from the current wave and
-therefore accumulate with `retained_chain_completed` rather than replacing a
-larger completed prefix with a timing-dependent small tail.
-
-Independent READ service must not be confused with WRITE-companion idle wait.
-The ordered worker excludes successful independent READ wall service from
-`window_first_ns` whether the READ hit validated residency or issued lower I/O,
-but the excluded service on one WRITE window is capped at one `retain_ms`
-interval. Only an actual lower READ may increment
-`retained_window_read_bypasses`, authorize SERVICE_DRY, or mark the singleton
-read-bypass diagnostic. This preserves cache-hit latency gains without allowing a
-READ stream to postpone a WRITE indefinitely or manufacture lower-I/O evidence.
-
 Retained bulk windows may contain incompressible RAW records before later
 compressed records in admission order, while the flush planner already orders
 the compressed prefix before the RAW tail. Early first/second-pack recognition
@@ -570,11 +551,11 @@ therefore evaluates the valid compressed records in the bounded admitted prefix
 instead of allowing an earlier RAW slot to poison all later pack geometry. The
 newest admission must itself be compressed, the exact compressed-record target
 must be present, every compressed payload must remain valid and bounded, and
-the existing 1/2/4-block extent limits and read-budget gates still apply.
-After ID80 removal, total `batch_count == 4` is not a scheduling prohibition:
-RAW-assisted total-count-four windows may establish a first pack only when the
-same selective two-record 4KiB or three-record 8KiB geometry is actually
-present. Geometry scans are bounded by the tiny compressed target: return as soon as compressed count
+the existing 1/2/4-block extent limits and read-budget gates still apply. A
+total `batch_count == 4` remains ineligible as a first pack even when RAW
+records are skipped, preserving the settled rule that first-pack recognition
+must not close below the `count > 4U` K=1 detach threshold. Geometry scans are
+bounded by the tiny compressed target: return as soon as compressed count
 exceeds the target or the target extent byte cap is already impossible, and do
 not re-scan every total-count prefix to recover the earlier two-record check.
 RAW records remain complete 4KiB records and are never treated as compressed
@@ -784,14 +765,17 @@ only when every other detach predicate is satisfied and the fixed read-bypass
 guard alone rejects the window. It must not alter timers, scheduling, authority
 or completion ownership.
 
-K=1 lower-WRITE detachment is a useful-overlap policy, not permission to turn
-an instantaneous preparation queue into a second batching clock. ID80's static
-shallow cutoff is retired after owner evidence showed a significant fast-QD8
-regression. Any eligible multi-record prepared window (`count > 1U`) may
-detach asynchronously; `preparation_queued` alone never enables detachment.
-`IDLE` and `DEADLINE` closes still require immediate accepted follow-up.
-PACK_READY/FULL/DUPLICATE/QUANTUM keep their existing ownership semantics, and
-the immutable lower-WRITE depth remains exactly K=1.
+K=1 lower-WRITE detachment uses the last owner-qualified depth/backlog gate
+from before ID80. A prepared window may detach asynchronously when it contains
+more than four records or when a separate unclaimed preparation descriptor is
+already queued:
+`count > 4U || READ_ONCE(ctx->preparation_queued) > 0U`. Shallow windows with
+no confirmed prepared WRITE successor stay synchronous. ID80's unconditional
+`count > 4U` restriction was owner-refuted, while the later `count > 1U`
+replacement was not a rollback and failed the loaded correctness gate before
+benchmarking; neither policy remains in production. IDLE and DEADLINE retain
+the pre-ID80 eligibility semantics. Do not add another shallow-count threshold
+without a separately reviewed ownership model and owner-loaded evidence.
 
 Idle asynchronous preparation must be self-gating. With no lower WRITE active,
 a tail-credit workqueue wake requires at least four unclaimed preparation

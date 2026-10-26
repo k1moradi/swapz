@@ -605,8 +605,6 @@ struct swapz_dm {
 	u64 window_gc_pressure;
 	/* First accepted record -> flush entry, excluding physical I/O. */
 	u64 window_first_ns;
-	/* Bounded ordered READ service excluded from this window's idle-wait age. */
-	u64 retained_read_service_credit_ns;
 	u64 window_age_sum_ns;
 	u64 window_age_max_ns;
 	u64 window_age_le_100us;
@@ -2630,24 +2628,8 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 static void swapz_window_admit_clock(struct swapz_dm *ctx)
 {
 	/* Serialized worker: do not refresh the start for later records. */
-	if (!ctx->batch_count) {
+	if (!ctx->batch_count)
 		ctx->window_first_ns = ktime_get_ns();
-		ctx->retained_read_service_credit_ns = 0;
-	}
-}
-
-static void swapz_exclude_retained_read_service(struct swapz_dm *ctx,
-						 u64 read_start_ns,
-						 u64 read_end_ns)
-{
-	u64 shift_ns = swapz_window_read_service_shift_ns(
-		ctx->window_first_ns, read_start_ns, read_end_ns,
-		ctx->retained_read_service_credit_ns, ctx->retain_ms);
-
-	if (!shift_ns)
-		return;
-	ctx->window_first_ns += shift_ns;
-	ctx->retained_read_service_credit_ns += shift_ns;
 }
 
 static void swapz_account_single_tail_terminal(struct swapz_dm *ctx,
@@ -2811,7 +2793,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	open_age_ns = ctx->window_first_ns && end_ns >= ctx->window_first_ns ?
 		end_ns - ctx->window_first_ns : 0;
 	ctx->window_first_ns = 0;
-	ctx->retained_read_service_credit_ns = 0;
 	ctx->window_age_sum_ns += open_age_ns;
 	if (open_age_ns > ctx->window_age_max_ns)
 		ctx->window_age_max_ns = open_age_ns;
@@ -2891,15 +2872,15 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			needs_fua = true;
 	async_detach_ready =
 		ctx->async_prepare && READ_ONCE(ctx->accepting) &&
-		count > 1U && !needs_fua && ctx->engine.bulk_enabled &&
+		(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U) &&
+		!needs_fua && ctx->engine.bulk_enabled &&
 		!ctx->engine.verify_after_write &&
 		(close_reason == SWAPZ_CLOSE_FULL ||
 		 close_reason == SWAPZ_CLOSE_DUPLICATE ||
 		 close_reason == SWAPZ_CLOSE_QUANTUM ||
-		 close_reason == SWAPZ_CLOSE_PACK_READY ||
-		 ((close_reason == SWAPZ_CLOSE_IDLE ||
-		   close_reason == SWAPZ_CLOSE_DEADLINE) &&
-		  ctx->worker_has_immediate_followup));
+		 close_reason == SWAPZ_CLOSE_IDLE ||
+		 close_reason == SWAPZ_CLOSE_DEADLINE ||
+		 close_reason == SWAPZ_CLOSE_PACK_READY);
 	/*
 	 * The read-bypass guard is fixed after the two-host A/B showed no service
 	 * benefit from relaxing it. Keep passive pressure attribution, but do not
@@ -3176,20 +3157,8 @@ accounted:
 		return error ? error : -EIO;
 	}
 	if (chain_continues) {
-		unsigned int chain;
-
-		/*
-		 * Only a burst-target PACK_READY close establishes a new completed
-		 * generation width. Tail-target and service-dry closes drain residue
-		 * from the current accepted wave and therefore accumulate with the
-		 * previously completed prefix instead of replacing it with a small
-		 * timing-dependent tail.
-		 */
-		if (packed_close &&
-		    pack_close_cause == SWAPZ_PACK_CLOSE_BURST_TARGET)
-			chain = count;
-		else
-			chain = (unsigned int)ctx->retained_chain_completed + count;
+		unsigned int chain = packed_close ?
+			count : (unsigned int)ctx->retained_chain_completed + count;
 
 		ctx->retained_chain_completed = (swapz_u8)min_t(
 			unsigned int, chain, ctx->max_window);
@@ -4503,9 +4472,12 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 		swapz_note_single_tail_read_bypass(ctx);
 		ctx->retained_window_read_bypasses = (swapz_u8)min_t(
 			unsigned int, bypasses, SWAPZ_MAX_RECORDS);
-		if (elapsed)
-			swapz_exclude_retained_read_service(
-				ctx, read_start_ns, read_end_ns);
+		if (ctx->window_first_ns && elapsed) {
+			if (ctx->window_first_ns <= read_start_ns)
+				ctx->window_first_ns += elapsed;
+			else
+				ctx->window_first_ns = read_end_ns;
+		}
 	}
 	atomic_set(&ctx->preparation_tail_credit, 0);
 	if (retained_bypass && !ctx->worker_has_immediate_followup &&
@@ -4810,9 +4782,12 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		swapz_note_single_tail_read_bypass(ctx);
 		ctx->retained_window_read_bypasses = (swapz_u8)min_t(
 			unsigned int, bypasses, SWAPZ_MAX_RECORDS);
-		if (elapsed)
-			swapz_exclude_retained_read_service(
-				ctx, read_start_ns, read_end_ns);
+		if (ctx->window_first_ns && elapsed) {
+			if (ctx->window_first_ns <= read_start_ns)
+				ctx->window_first_ns += elapsed;
+			else
+				ctx->window_first_ns = read_end_ns;
+		}
 	}
 	atomic_set(&ctx->preparation_tail_credit, 0);
 	if (retained_bypass && !ctx->worker_has_immediate_followup &&
@@ -4908,12 +4883,18 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			 * a lower-device service interval and therefore cannot authorize
 			 * service-dry window closure or extend the retention deadline.
 			 */
-			swapz_exclude_retained_read_service(
-				ctx, read_start_ns, read_end_ns);
 			if (had_lower_io) {
 				swapz_note_single_tail_read_bypass(ctx);
 				if (ctx->retained_window_read_bypasses < SWAPZ_MAX_RECORDS)
 					ctx->retained_window_read_bypasses++;
+				if (ctx->window_first_ns && read_end_ns > read_start_ns) {
+					u64 read_elapsed = read_end_ns - read_start_ns;
+
+					if (ctx->window_first_ns <= read_start_ns)
+						ctx->window_first_ns += read_elapsed;
+					else
+						ctx->window_first_ns = read_end_ns;
+				}
 			}
 		}
 		swapz_complete(bio, error);
