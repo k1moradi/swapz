@@ -274,6 +274,8 @@ BURST_COUNTER_FIELDS = (
     "packed_early_commits", "single_pack_deferrals",
     "accepted_burst_extensions", "accepted_burst_tail_flushes",
     "accepted_burst_read_caps")
+# These are interval deltas, including accepted lower-idle time; keep them in
+# kernel_counter_delta so mixed-regime means cannot silently drop new telemetry.
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
     WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS +
