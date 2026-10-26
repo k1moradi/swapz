@@ -265,7 +265,8 @@ PREPARATION_FIELDS = (
     "prep_lower_write_overlap_starts", "prep_lower_read_overlap_starts",
     "prep_wave_kicks",
     "prep_producer_head_claims", "prep_producer_tail_claims",
-    "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
+    "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits",
+    "prep_ordered_raw")
 WINDOW_SIZE_FIELDS = (
     "windows", "one_page_windows", "win1", "win2", "win3_4", "win5_8",
     "win9_16", "win17_64")
@@ -322,8 +323,13 @@ KERNEL_WRITE_FIELDS = (
     "lz4_acceleration", "delta64_lz4_acceleration",
     "write_pipeline_depth", "pipeline_active_max",
     "k1_allow_after_read_bypass", "read_coalesce_max_blocks",
-    "invalidate_cache_on_write_admit"
-) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
+    "invalidate_cache_on_write_admit",
+    "work_conserving_hand_records", "prep_ready_current", "prep_ready_max",
+    "prep_slots_in_use", "prep_slots_in_use_max"
+) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + (
+    "work_conserving_hand_closes", "work_conserving_dry_closes",
+    "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
+    "work_conserving_raw_ready", "prep_late_results_discarded")
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
     "target_interval_ns", "samples", "read_start", "write_start",

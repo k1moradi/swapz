@@ -637,3 +637,20 @@ ordinary LZ4 is fixed at acceleration one, delta64 preparation at one producer
 lane, lower-WRITE submission at one immutable slot, and ID63 coalescing at an
 eight-block cap. The depth-two path and the settled runtime selectors are
 retired from current source.
+
+
+## Alpha.29 work-conserving dispatcher benchmark
+
+Alpha.29 adds no public command or benchmark-only selector. The ordinary
+`make test` storage envelopes remain the decision surface. Timed swapz arms
+record `work_conserving_hand_records=8`, hand/dry closes, RAW-not-ready,
+compressed-ready, raw-ready, late-result-discard and prepared-reservoir/slot
+occupancy.
+
+The expected fast-media signature is fewer worker-empty/deadline stalls and
+nonzero RAW-not-ready selection with improved useful throughput or p99. Lower
+bytes/requests may rise because RAW is intentionally selected when compression
+loses the service race. On SD, longer lower-I/O service should allow more READY
+compression before dispatch. Reservoir high water decides whether more than 64
+slots are justified; K=1 ready-wait decides whether another lower run buffer is
+justified.

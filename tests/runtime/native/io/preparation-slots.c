@@ -9,6 +9,19 @@
 
 typedef int64_t s64;
 typedef struct { _Atomic int64_t value; } atomic64_t;
+typedef struct { _Atomic int value; } atomic_t;
+
+static int atomic_read(atomic_t *value)
+{
+	return atomic_load_explicit(&value->value, memory_order_acquire);
+}
+
+static int atomic_cmpxchg(atomic_t *value, int old, int replacement)
+{
+	atomic_compare_exchange_strong_explicit(&value->value, &old, replacement,
+			memory_order_seq_cst, memory_order_acquire);
+	return old;
+}
 
 static s64 atomic64_read(atomic64_t *mask)
 {
@@ -35,6 +48,35 @@ static void atomic64_or(s64 bits, atomic64_t *mask)
 	fprintf(stderr, "%s:%d failed %s\n", __FILE__, __LINE__, #x); \
 	return 1; \
 } } while (0)
+
+static int test_representation_race(void)
+{
+	atomic_t state;
+	int observed;
+
+	atomic_init(&state.value, SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_select_raw(&state) ==
+	      SWAPZ_PREPARATION_RAW_SELECTED);
+	CHECK(atomic_read(&state) == SWAPZ_PREPARATION_RAW_SELECTED);
+	CHECK(swapz_preparation_publish_result(
+		      &state, SWAPZ_PREPARATION_READY_COMPRESSED) ==
+	      SWAPZ_PREPARATION_RAW_SELECTED);
+
+	atomic_store(&state.value, SWAPZ_PREPARATION_PREPARING);
+	observed = swapz_preparation_publish_result(
+		&state, SWAPZ_PREPARATION_READY_COMPRESSED);
+	CHECK(observed == SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_select_raw(&state) ==
+	      SWAPZ_PREPARATION_READY_COMPRESSED);
+
+	atomic_store(&state.value, SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_publish_result(
+		      &state, SWAPZ_PREPARATION_READY_RAW) ==
+	      SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_select_raw(&state) ==
+	      SWAPZ_PREPARATION_READY_RAW);
+	return 0;
+}
 
 static int test_capacity_high_bit_and_reuse(void)
 {
@@ -152,8 +194,9 @@ static int test_concurrent_reuse(void)
 
 int main(void)
 {
+	CHECK(!test_representation_race());
 	CHECK(!test_capacity_high_bit_and_reuse());
 	CHECK(!test_concurrent_reuse());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=2");
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=3");
 	return 0;
 }

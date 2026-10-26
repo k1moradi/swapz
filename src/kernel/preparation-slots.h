@@ -14,6 +14,35 @@
 
 #define SWAPZ_PREPARATION_FREE_MASK (~0ULL)
 
+enum swapz_preparation_state {
+	SWAPZ_PREPARATION_EMPTY = 0,
+	SWAPZ_PREPARATION_PREPARING,
+	SWAPZ_PREPARATION_READY_COMPRESSED,
+	SWAPZ_PREPARATION_READY_RAW,
+	SWAPZ_PREPARATION_RAW_SELECTED,
+	SWAPZ_PREPARATION_ERROR,
+};
+
+static inline int swapz_preparation_select_raw(atomic_t *state)
+{
+	int observed = atomic_read(state);
+
+	if (observed == SWAPZ_PREPARATION_PREPARING)
+		observed = atomic_cmpxchg(state, SWAPZ_PREPARATION_PREPARING,
+					 SWAPZ_PREPARATION_RAW_SELECTED);
+	return observed == SWAPZ_PREPARATION_PREPARING ?
+		SWAPZ_PREPARATION_RAW_SELECTED : observed;
+}
+
+static inline int swapz_preparation_publish_result(atomic_t *state,
+						   int ready_state)
+{
+	if (ready_state != SWAPZ_PREPARATION_READY_COMPRESSED &&
+	    ready_state != SWAPZ_PREPARATION_READY_RAW)
+		return SWAPZ_PREPARATION_ERROR;
+	return atomic_cmpxchg(state, SWAPZ_PREPARATION_PREPARING, ready_state);
+}
+
 /*
  * One serialized producer clears bits; consumers only return them. During a
  * claim at most 64 occupied slots can be returned, so 65 attempts suffice.

@@ -1271,3 +1271,24 @@ Non-`null_blk` backing is disabled by default. When explicitly enabled it
 requires a valid exact-size SWAPZ authorization header in reserved block 0.
 All mapping data and segment discard ranges start after that reserved block.
 Fault-injection knobs are forbidden on physical backing.
+
+
+### Alpha.29 work-conserving dispatcher candidate
+
+Alpha.29 keeps one unbound producer lane, K=1 and the existing 64 preparation
+slots. A producer copies one stable 4KiB RAW snapshot before optional LZ4 and
+publishes that lifetime boundary through `preparation_snapshot_ready`. If the
+lower WRITE is still active, a PREPARING FIFO head is deferred. Producer READY
+or lower completion wakes the ordered dispatcher; if lower completion wins,
+PREPARING atomically becomes RAW_SELECTED and a late compressed result is
+discarded. READY_COMPRESSED/READY_RAW are consumed normally.
+
+When lower service is idle, an unclaimed WRITE with already-accepted backlog
+skips inline LZ4 and becomes RAW. Eight records form the first work-conserving
+hand; a shorter work-conserving tail closes when the admitted FIFO is dry.
+Lone/no-backlog QD1 retains inline preparation and the retained lifecycle.
+
+Producer and consumer each hold one reference to a prepared slot. Only the final
+drop returns the slot to the free mask, so an upper BIO may complete after RAW
+selection while the producer finishes against slot-owned memory. Producer BIO
+access must end before the snapshot completion.

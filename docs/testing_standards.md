@@ -1768,3 +1768,23 @@ before any physical-media evidence is considered.
 Capacity-exhaustion evidence must preserve committed reads: a write may return
 `-ENOSPC`, but `ctx->failed` must stay clear unless a separate integrity or
 lower-I/O error occurs.
+
+
+### Alpha.29 work-conserving dispatcher qualification
+
+The public command remains exactly `make test`. Native qualification exercises
+the production PREPARING/READY/RAW_SELECTED atomic race. Source contracts require
+the stable `raw_bytes` snapshot, two-reference slot ownership, producer BIO
+access ending before `preparation_snapshot_ready`, and worker-owned
+eight-record/dry-tail dispatch.
+
+Loaded qualification retains existing byte-exact, fault, GC, PREFLUSH/FUA,
+resource-pressure and suspend/drain gates. Timed arms additionally require
+parseable hand/dry-close, RAW-not-ready, compressed-ready, raw-ready,
+late-result-discard, ready-reservoir and slot high-water counters. Drained
+current-ready/current-slot counts must return to zero.
+
+Performance is a service tradeoff: SD must retain useful service and material
+lower-I/O savings, while SATA/NVMe may spend additional lower bytes/requests
+only when useful throughput or p99 improves. K>1, more than 64 reservoir slots
+and wider preparation remain closed until the new counters prove pressure.

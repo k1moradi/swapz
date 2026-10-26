@@ -323,7 +323,8 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(release_slot.index("smp_mb__before_atomic()"),
                         release_slot.index("atomic64_or("))
         self.assertIn("prepared = &ctx->preparation_pages[slot]", producer)
-        self.assertEqual(producer.count("swapz_preparation_release_slot("), 3)
+        self.assertEqual(producer.count("swapz_preparation_release_slot("), 2)
+        self.assertIn("refcount_set(&prepared->refs, 2)", producer)
         self.assertNotIn("-ENOMEM", producer)
         for allocation in ("kmalloc(", "kzalloc(", "vzalloc(", "mempool_alloc("):
             self.assertNotIn(allocation, producer)
@@ -343,6 +344,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled",
                       ctor)
         self.assertIn("prepared->length = swapz_compress_page(", producer)
+        self.assertIn("prepared->raw_bytes", producer)
+        self.assertIn("swapz_preparation_publish_result(", producer)
         self.assertIn("length = swapz_compress_page(", ordered)
         self.assertIn("if (ctx->delta64_rescue_enabled)", compressor)
         self.assertIn("swapz_predict_delta64_sample_score(input)", compressor)
@@ -2665,7 +2668,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("atomic_xchg(&ctx->preparation_tail_credit, 0)", producer)
         self.assertIn("ctx->preparation_producer_head_claims++", producer)
         self.assertIn("ctx->preparation_producer_tail_claims++", producer)
-        self.assertIn("complete(&entry->preparation_finished)", producer)
+        self.assertIn("complete(&entry->preparation_snapshot_ready)", producer)
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
                           "swapz_flush_window(", "dm_io(", "bio_endio(",
                           "swapz_engine_write_window"):
@@ -2690,7 +2693,10 @@ static swapz_u16 swapz_probe_set(
                         lower.index("swapz_queue_preparation_workers(ctx)"))
         self.assertLess(lower.index("swapz_queue_preparation_workers(ctx)"),
                         lower.index("error = dm_io("))
-        self.assertIn("wait_for_completion(&entry->preparation_finished)", ordered)
+        self.assertIn("&entry->preparation_snapshot_ready", ordered)
+        self.assertIn("entry->preparation_force_raw = true", ordered)
+        self.assertIn("ctx->preparation_ordered_raw++", ordered)
+        self.assertIn("SWAPZ_WORK_CONSERVING_HAND_RECORDS", ordered)
         self.assertIn("!list_empty(&entry->preparation_list)", ordered)
         self.assertIn("list_del_init(&entry->preparation_list)", ordered)
         self.assertIn("entry->preparation_inline = true", ordered)
@@ -2706,13 +2712,16 @@ static swapz_u16 swapz_probe_set(
                         ordered.index("swapz_process(ctx, entry->bio)"))
         self.assertIn("prepared_async = ctx->async_prepare && !entry->preparation_inline",
                       accept)
-        self.assertIn("entry->prepared_page->bytes", accept)
+        self.assertIn("prepared->bytes", accept)
+        self.assertIn("entry->prepared_page->raw_bytes", accept)
+        self.assertIn("swapz_preparation_select_raw(&prepared->state)", accept)
         self.assertIn("ctx->lz4_workmem", accept)
         self.assertIn("swapz_release_prepared(bio)", finish)
         self.assertLess(finish.index("swapz_release_prepared(bio)"),
                         finish.index("bio_endio(bio)"))
         self.assertIn("entry->prepared_page - ctx->preparation_pages", release)
-        self.assertIn("swapz_preparation_release_slot(", release)
+        self.assertIn("swapz_prepared_put(ctx, prepared)", release)
+        self.assertIn("refcount_dec_and_test(&prepared->refs)", DM)
         self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))
@@ -2740,7 +2749,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("direct_lz4_input_pages=%llu", status)
         self.assertIn("static const u8 *swapz_map_single_bio_input", DM)
         self.assertIn("swapz_map_single_bio_input(entry->bio", producer)
-        self.assertIn("swapz_memcpy_accounted(prepared->bytes", producer)
+        self.assertIn("swapz_memcpy_accounted(prepared->raw_bytes", producer)
         self.assertIn("async_prepare=%u delta64_prepare_workers=%u", status)
         self.assertIn('"delta64_rescue=$DELTA64_RESCUE"', benchmark)
         self.assertRegex(benchmark, r"(?m)^DELTA64_LZ4_ACCELERATION=1$")

@@ -1088,7 +1088,8 @@ PREPARATION_FIELDS = (
     "prep_lower_write_overlap_starts", "prep_lower_read_overlap_starts",
     "prep_wave_kicks",
     "prep_producer_head_claims", "prep_producer_tail_claims",
-    "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
+    "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits",
+    "prep_ordered_raw")
 WINDOW_INTERVAL_FIELDS = (
     "windows", "one_page_windows", "win1", "win2", "win3_4", "win5_8",
     "win9_16", "win17_64", "packed_early_commits",
@@ -1132,14 +1133,19 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "pipeline_post_lower_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms",
-    "delta64_prepare_pages", "delta64_prepare_parallel_starts"
+    "delta64_prepare_pages", "delta64_prepare_parallel_starts",
+    "work_conserving_hand_closes", "work_conserving_dry_closes",
+    "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
+    "work_conserving_raw_ready", "prep_late_results_discarded"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",
     "delta64_prepare_active_max", "lz4_acceleration",
     "delta64_lz4_acceleration", "write_pipeline_depth",
     "pipeline_active_max", "k1_allow_after_read_bypass",
-    "read_coalesce_max_blocks", "invalidate_cache_on_write_admit")
+    "read_coalesce_max_blocks", "invalidate_cache_on_write_admit",
+    "work_conserving_hand_records", "prep_ready_current", "prep_ready_max",
+    "prep_slots_in_use", "prep_slots_in_use_max")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
