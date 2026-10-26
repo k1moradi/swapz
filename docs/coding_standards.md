@@ -1289,7 +1289,12 @@ publishes that lifetime boundary through `preparation_snapshot_ready`. If the
 lower WRITE is still active, a PREPARING FIFO head is deferred. Producer READY
 or lower completion wakes the ordered dispatcher; if lower completion wins,
 PREPARING atomically becomes RAW_SELECTED and a late compressed result is
-discarded. READY_COMPRESSED/READY_RAW are consumed normally.
+discarded. READY_COMPRESSED/READY_RAW are consumed normally. When a PREPARING
+FIFO head is deferred while lower write is pending, its stable snapshot has
+already been taken and its `prepared_page` descriptor assigned. On subsequent
+dispatcher execution, the re-encountered head bypasses snapshot completion wait
+and directly samples the active preparation and lower state, preventing
+deadlocks from re-waiting on an already consumed snapshot completion.
 
 When lower service is idle, an unclaimed WRITE with already-accepted backlog
 skips inline LZ4 and becomes RAW. Eight records form the first work-conserving

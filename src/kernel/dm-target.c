@@ -5210,84 +5210,86 @@ static void swapz_worker(struct work_struct *work)
 			    bio_sectors(entry->bio)) {
 				bool accepted_backlog;
 
-				wait_for_preparation = true;
-				spin_lock_irqsave(&ctx->queue_lock, flags);
-				accepted_backlog = ctx->batch_count ||
-					entry->list.next != &local ||
-					!list_empty(&ctx->incoming);
-				if (!list_empty(&entry->preparation_list)) {
-					/*
-					 * queue_work() is only a request, not an ownership
-					 * transfer. Never return with this FIFO head still
-					 * unclaimed: the ordered lane owns it until the
-					 * producer has actually removed preparation_list.
-					 * This keeps accepted progress independent of a
-					 * producer/lower-completion wake race.
-					 */
-					if (ctx->preparation_queued)
-						ctx->preparation_queued--;
-					list_del_init(&entry->preparation_list);
-					entry->preparation_inline = true;
-					inline_preparation = true;
-					wait_for_preparation = false;
-					if (ctx->engine.bulk_enabled &&
-					    !ctx->engine.verify_after_write &&
-					    accepted_backlog &&
-					    !(entry->bio->bi_opf &
-					      (REQ_PREFLUSH | REQ_FUA))) {
-						entry->preparation_force_raw = true;
-						ctx->preparation_ordered_raw++;
-						ctx->work_conserving_window = true;
-					} else {
-						ctx->preparation_ordered_inline++;
-					}
-					atomic_set(&ctx->preparation_tail_credit, 1);
-					if (!list_empty(&ctx->preparation_incoming) &&
-					    (atomic_read(&ctx->lower_write_active) ||
-					     ctx->preparation_queued >=
-						SWAPZ_PREPARATION_TAIL_WAKE_MIN))
-						swapz_queue_preparation_workers(ctx);
-				} else {
-					atomic_set(&ctx->preparation_tail_credit, 0);
-					ctx->preparation_ordered_handoffs++;
-				}
-				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				if (wait_for_preparation) {
-					u64 wait_start = 0;
-
-					if (!completion_done(&entry->preparation_snapshot_ready)) {
-						ctx->preparation_ordered_waits++;
-						wait_start = ktime_get_ns();
-					}
-					wait_for_completion(&entry->preparation_snapshot_ready);
-					if (wait_start)
-						ctx->preparation_ordered_wait_wall_ns +=
-							swapz_elapsed_ns(wait_start, ktime_get_ns());
-					if (entry->prepared_page &&
-					    swapz_preparation_read_state(
-						&entry->prepared_page->state) ==
-						SWAPZ_PREPARATION_PREPARING) {
+				if (!entry->prepared_page) {
+					wait_for_preparation = true;
+					spin_lock_irqsave(&ctx->queue_lock, flags);
+					accepted_backlog = ctx->batch_count ||
+						entry->list.next != &local ||
+						!list_empty(&ctx->incoming);
+					if (!list_empty(&entry->preparation_list)) {
+						/*
+						 * queue_work() is only a request, not an ownership
+						 * transfer. Never return with this FIFO head still
+						 * unclaimed: the ordered lane owns it until the
+						 * producer has actually removed preparation_list.
+						 * This keeps accepted progress independent of a
+						 * producer/lower-completion wake race.
+						 */
+						if (ctx->preparation_queued)
+							ctx->preparation_queued--;
+						list_del_init(&entry->preparation_list);
+						entry->preparation_inline = true;
+						inline_preparation = true;
+						wait_for_preparation = false;
 						if (ctx->engine.bulk_enabled &&
 						    !ctx->engine.verify_after_write &&
-						    swapz_inflight_lower_pending(ctx)) {
-							spin_lock_irqsave(&ctx->queue_lock,
-									 flags);
-							list_splice_init(&local,
-								       &ctx->incoming);
-							spin_unlock_irqrestore(&ctx->queue_lock,
-									 flags);
-							swapz_account_worker_runtime(
-								&ctx->ordered_worker_wall_ns,
-								wall_start_ns,
-								&ctx->ordered_worker_cpu_ns,
-								cpu_start_ns);
-							return;
+						    accepted_backlog &&
+						    !(entry->bio->bi_opf &
+						      (REQ_PREFLUSH | REQ_FUA))) {
+							entry->preparation_force_raw = true;
+							ctx->preparation_ordered_raw++;
+							ctx->work_conserving_window = true;
+						} else {
+							ctx->preparation_ordered_inline++;
 						}
-						if (!ctx->engine.bulk_enabled ||
-						    ctx->engine.verify_after_write)
-							wait_for_completion(
-								&entry->prepared_page->result_ready);
+						atomic_set(&ctx->preparation_tail_credit, 1);
+						if (!list_empty(&ctx->preparation_incoming) &&
+						    (atomic_read(&ctx->lower_write_active) ||
+						     ctx->preparation_queued >=
+							SWAPZ_PREPARATION_TAIL_WAKE_MIN))
+							swapz_queue_preparation_workers(ctx);
+					} else {
+						atomic_set(&ctx->preparation_tail_credit, 0);
+						ctx->preparation_ordered_handoffs++;
 					}
+					spin_unlock_irqrestore(&ctx->queue_lock, flags);
+					if (wait_for_preparation) {
+						u64 wait_start = 0;
+
+						if (!completion_done(&entry->preparation_snapshot_ready)) {
+							ctx->preparation_ordered_waits++;
+							wait_start = ktime_get_ns();
+						}
+						wait_for_completion(&entry->preparation_snapshot_ready);
+						if (wait_start)
+							ctx->preparation_ordered_wait_wall_ns +=
+								swapz_elapsed_ns(wait_start, ktime_get_ns());
+					}
+				}
+				if (entry->prepared_page &&
+				    swapz_preparation_read_state(
+					&entry->prepared_page->state) ==
+					SWAPZ_PREPARATION_PREPARING) {
+					if (ctx->engine.bulk_enabled &&
+					    !ctx->engine.verify_after_write &&
+					    swapz_inflight_lower_pending(ctx)) {
+						spin_lock_irqsave(&ctx->queue_lock,
+								 flags);
+						list_splice_init(&local,
+							       &ctx->incoming);
+						spin_unlock_irqrestore(&ctx->queue_lock,
+								 flags);
+						swapz_account_worker_runtime(
+							&ctx->ordered_worker_wall_ns,
+							wall_start_ns,
+							&ctx->ordered_worker_cpu_ns,
+							cpu_start_ns);
+						return;
+					}
+					if (!ctx->engine.bulk_enabled ||
+					    ctx->engine.verify_after_write)
+						wait_for_completion(
+							&entry->prepared_page->result_ready);
 				}
 			} else if (ctx->async_prepare) {
 				/* READs/barriers revoke idle WRITE-wave credit. */
