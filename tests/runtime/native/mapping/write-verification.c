@@ -269,10 +269,14 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 	CHECK(size == sizeof(result) &&
 	      !memcmp(result, payloads[0], size));
 
-	/* A new authoritative generation cannot reuse old metadata. */
+	/* A new authoritative generation cannot reuse old metadata. The old
+	 * immutable physical extent may remain resident because this append
+	 * mutates a disjoint range; the authoritative start-block mismatch must
+	 * still force a fresh lower read for generation 2. */
 	memset(payloads[0], 0x5a, sizeof(payloads[0]));
 	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == 0);
-	CHECK(committed == 3 && !engine.read_cache_valid);
+	CHECK(committed == 3 && engine.read_cache_valid);
+	CHECK(engine.read_cached_start_block == old_start);
 	CHECK(map[0].start_block != old_start && map[0].generation == 2);
 	CHECK(swapz_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == 0);

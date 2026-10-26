@@ -720,9 +720,13 @@ the mutation fence twice before a reread and still require a lower metadata
 read, proving repeated invalidation changes no observable authority behavior.
 A direct production-C regression must also populate validated read residency,
 perform a non-overlapping one-record planned write, and require the original
-page to reread without another lower request. Source coverage must place the
-planned-write exact-range invalidation after successful stage/seal and before
-`write_extent`, with full invalidation retained only for verify-after-write.
+page to reread without another lower request. An append-only overwrite may
+therefore leave the old immutable physical extent resident, but authority must
+point at the new start block/generation and the next logical reread must miss
+that stale-range entry, issue lower I/O, and validate the new bytes. Source
+coverage must place the planned-write exact-range invalidation after successful
+stage/seal and before `write_extent`, with full invalidation retained only for
+verify-after-write.
 
 
 Source-contract maintenance must follow the same standards co-change rule as
