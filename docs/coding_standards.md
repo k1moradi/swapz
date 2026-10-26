@@ -551,9 +551,11 @@ therefore evaluates the valid compressed records in the bounded admitted prefix
 instead of allowing an earlier RAW slot to poison all later pack geometry. The
 newest admission must itself be compressed, the exact compressed-record target
 must be present, every compressed payload must remain valid and bounded, and
-the existing 1/2/4-block extent limits and read-budget gates still apply. RAW
-records remain complete 4KiB records and are never treated as compressed
-members of a pack.
+the existing 1/2/4-block extent limits and read-budget gates still apply. A
+total `batch_count == 4` remains ineligible as a first pack even when RAW
+records are skipped, preserving the settled rule that first-pack recognition
+must not close below the `count > 4U` K=1 detach threshold. RAW records remain
+complete 4KiB records and are never treated as compressed members of a pack.
 
 For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
 with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan
