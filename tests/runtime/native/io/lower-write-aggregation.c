@@ -1154,6 +1154,36 @@ static int test_malformed_mixed_input_fails_before_staging(void)
 	return 0;
 }
 
+static int test_planned_write_preserves_nonoverlap_read_residency(void)
+{
+	swapz_u8 output[SWAPZ_MAX_COMPRESSED];
+	swapz_u16 length = 0;
+	swapz_u8 committed = 0;
+	unsigned int reads_after_first;
+
+	CHECK(setup() == 0);
+	/* count==1 deliberately exercises swapz_engine_write_window_planned(). */
+	CHECK(swapz_engine_write_window_batched(&e, pages, 1, &committed) == 0);
+	CHECK(committed == 1 && extent_calls == 1 && run_calls == 0);
+	CHECK(swapz_engine_read_page(&e, 0, output, sizeof(output), &length) == 0);
+	CHECK(length == pages[0].length);
+	CHECK(!memcmp(output, payloads[0], length));
+	reads_after_first = read_calls;
+	CHECK(reads_after_first > 0);
+
+	/* A second one-record append mutates a disjoint physical range. It must
+	 * not evict page 0's validated direct/shared residency. */
+	committed = 0;
+	CHECK(swapz_engine_write_window_batched(&e, pages + 1, 1,
+					     &committed) == 0);
+	CHECK(committed == 1 && extent_calls == 2 && run_calls == 0);
+	CHECK(swapz_engine_read_page(&e, 0, output, sizeof(output), &length) == 0);
+	CHECK(length == pages[0].length);
+	CHECK(!memcmp(output, payloads[0], length));
+	CHECK(read_calls == reads_after_first);
+	return 0;
+}
+
 static int test_immutable_run_prepare_then_complete(void)
 {
 	struct swapz_io_run run = {
@@ -1223,6 +1253,7 @@ int main(void)
 {
 	int passed = 0;
 
+	CHECK(test_planned_write_preserves_nonoverlap_read_residency() == 0); passed++;
 	CHECK(test_immutable_run_prepare_then_complete() == 0); passed++;
 	CHECK(test_immutable_run_failure_quarantines_all() == 0); passed++;
 	CHECK(test_real_aggregation_and_readback() == 0); passed++;

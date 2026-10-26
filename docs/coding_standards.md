@@ -916,7 +916,12 @@ never publishes authority independently. Lower writes invalidate master and
 private residency across the exact physical block range being overwritten
 (`swapz_engine_invalidate_read_range`); full cache invalidation occurs on
 REQ_OP_DISCARD, segment recycling, flush/FUA barriers, verify-after-write mode,
-or when `invalidate_cache_on_write_admit` is enabled. Post-`PACK_READY` tail
+or when `invalidate_cache_on_write_admit` is enabled. The single-record
+planned-write fallback follows the same rule: planning/staging failure must not
+evict unrelated validated residency, and once the extent is sealed the engine
+invalidates only `tx->start_block..blocks` immediately before lower mutation.
+Verify-after-write remains the explicit full-invalidation exception because its
+verification read reuses engine scratch. Post-`PACK_READY` tail
 sampling and early window closure wait until detached in-flight K=1 lower writes
 have completed to avoid premature single-tail deferrals and blocking stalls.
 Independent READs may skip uncommitted plain retained WRITEs across the admitted

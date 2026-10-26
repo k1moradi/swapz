@@ -718,6 +718,11 @@ explicit-invalidation and post-write miss tests. Source coverage requires the
 clock, with the clock reset inside that guarded block. Native coverage must call
 the mutation fence twice before a reread and still require a lower metadata
 read, proving repeated invalidation changes no observable authority behavior.
+A direct production-C regression must also populate validated read residency,
+perform a non-overlapping one-record planned write, and require the original
+page to reread without another lower request. Source coverage must place the
+planned-write exact-range invalidation after successful stage/seal and before
+`write_extent`, with full invalidation retained only for verify-after-write.
 
 
 Source-contract maintenance must follow the same standards co-change rule as

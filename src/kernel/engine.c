@@ -1308,8 +1308,6 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 	    !engine->io.write_extent || !committed_pages)
 		return -EINVAL;
 	*committed_pages = 0;
-	/* Even a failed/torn write must never leave reusable old metadata. */
-	swapz_engine_invalidate_read_cache(engine);
 	/*
 	 * Never stage or submit a potentially destructive extent if the
 	 * requested read-after-write guard cannot run with isolated scratch.
@@ -1368,6 +1366,16 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 			phase_start, swapz_engine_now_ns());
 		if (error)
 			goto abort_transaction;
+
+		/* A planned extent becomes a mutation fence only once its exact
+		 * physical range is known and sealed. Preserve unrelated immutable
+		 * read residency; verify-after-write retains its conservative full
+		 * invalidation because read_scratch is reused for the verification. */
+		if (engine->verify_after_write)
+			swapz_engine_invalidate_read_cache(engine);
+		else
+			swapz_engine_invalidate_read_range(engine, tx->start_block,
+						 blocks);
 
 		/*
 		 * Synchronous and completion-confirmed lower I/O. The on-media

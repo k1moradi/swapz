@@ -510,6 +510,19 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("engine->read_metadata_cache +", engine)
         self.assertNotIn("read_metadata_lru_valid", engine)
         invalidate = source_body("swapz_engine_invalidate_read_cache", engine)
+        planned = source_body("swapz_engine_write_window_planned", engine)
+        stage_pos = planned.index("error = swapz_stage(")
+        write_pos = planned.index("error = engine->io.write_extent(")
+        range_pos = planned.index("swapz_engine_invalidate_read_range(",
+                                  stage_pos)
+        self.assertLess(stage_pos, range_pos)
+        self.assertLess(range_pos, write_pos)
+        self.assertNotIn("swapz_engine_invalidate_read_cache(engine)",
+                         planned[:stage_pos])
+        self.assertIn("if (engine->verify_after_write)",
+                      planned[stage_pos:write_pos])
+        self.assertIn("swapz_engine_invalidate_read_cache(engine)",
+                      planned[stage_pos:write_pos])
         self.assertIn("if (engine->read_metadata_lru_clock)", invalidate)
         self.assertIn("swapz_read_metadata_advance_epoch(engine)", invalidate)
         self.assertNotIn("memset(engine->read_metadata_tags", invalidate)
