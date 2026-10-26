@@ -202,6 +202,8 @@ OWN_DM=0
 QUARANTINE=0
 DMNAME=""
 DMUUID=""
+DMDEV=""
+DMKNAME=""
 note() { printf '%s\n' "$*"; }
 fail() { note "BLOCKED: $*" >&2; exit 1; }
 devno() {
@@ -209,6 +211,67 @@ devno() {
     encoded="$(stat -Lc '%t:%T' "$1")" || return 1
     IFS=: read -r major minor <<< "$encoded"
     printf '%d:%d\n' "0x$major" "0x$minor"
+}
+settle_udev() {
+    command -v udevadm >/dev/null 2>&1 &&
+        udevadm settle --timeout=3 2>/dev/null || true
+}
+dm_open_count() {
+    local opens
+    opens="$(dmsetup info -c --noheadings -o open "$DMNAME" 2>/dev/null |
+        tr -d '[:space:]')" || return 1
+    [[ "$opens" =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "$opens"
+}
+wait_for_retired_dm_holder_release() {
+    local attempt i holder holder_name
+    local retired_holder unexpected_holder
+    local -a holders=()
+
+    # After the exact owned mapper has been removed, only its own former
+    # dm-X holder is allowed to linger transiently. Any different holder is
+    # new/foreign ownership and must quarantine immediately.
+    for (( attempt=0; attempt<30; ++attempt )); do
+        retired_holder=0
+        unexpected_holder=0
+        for (( i=0; i<READY_COUNT; ++i )); do
+            [[ -d /sys/block/${DISKS[i]}/holders ]] || continue
+            shopt -s nullglob
+            holders=(/sys/block/${DISKS[i]}/holders/*)
+            shopt -u nullglob
+            for holder in "${holders[@]}"; do
+                holder_name="${holder##*/}"
+                if [[ -n "$DMKNAME" && "$holder_name" == "$DMKNAME" ]]; then
+                    retired_holder=1
+                else
+                    unexpected_holder=1
+                fi
+            done
+        done
+        (( unexpected_holder )) && return 2
+        (( retired_holder == 0 )) && return 0
+        settle_udev
+        sleep 0.1
+    done
+    return 1
+}
+remove_owned_ram_config() {
+    local i="$1" attempt
+
+    echo 0 > "${CONFIGS[i]}/power" || return 1
+    settle_udev
+    for (( attempt=0; attempt<30; ++attempt )); do
+        [[ ! -e /sys/block/${DISKS[i]} ]] && break
+        sleep 0.1
+        settle_udev
+    done
+    [[ ! -e /sys/block/${DISKS[i]} ]] || return 2
+    for (( attempt=0; attempt<30; ++attempt )); do
+        rmdir "${CONFIGS[i]}" 2>/dev/null && return 0
+        sleep 0.1
+        settle_udev
+    done
+    return 3
 }
 for program in insmod rmmod modprobe dmsetup modinfo blockdev readlink \
                findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
@@ -253,6 +316,7 @@ note "EVIDENCE_DIR=$SESSION"
 # config/index/rdev/holder is still ours. Partial setup is quarantined.
 cleanup() {
     local result=$? i valid=1 end_swaps current_id
+    local mapper_uuid open_before_remove open_after_remove holder_rc remove_rc
     trap - EXIT HUP INT TERM
     set +e
     # Genuine inventory changes forbid teardown. Ignore ONLY volatile
@@ -263,14 +327,31 @@ cleanup() {
         note 'QUARANTINED: host swap changed during owned pair'
     fi
     if (( OWN_DM && !QUARANTINE )); then
-        command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=3 2>/dev/null || true
-        if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
-                  tr -d '[:space:]') == "$DMUUID" ]] &&
-            timeout --signal=TERM --kill-after=2s 10s                 dmsetup remove --retry "$DMNAME"; then
-            OWN_DM=0
-        else
+        mapper_uuid="$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+            tr -d '[:space:]')"
+        if [[ "$mapper_uuid" != "$DMUUID" ]]; then
             QUARANTINE=1
-            note 'QUARANTINED: DM UUID changed or mapping busy'
+            note 'QUARANTINED: owned DM UUID changed before teardown'
+        else
+            open_before_remove="$(dm_open_count)" || open_before_remove=unknown
+            settle_udev
+            if timeout --signal=TERM --kill-after=2s 10s                     dmsetup remove --retry "$DMNAME"; then
+                OWN_DM=0
+                settle_udev
+                wait_for_retired_dm_holder_release
+                holder_rc=$?
+                if (( holder_rc == 1 )); then
+                    QUARANTINE=1
+                    note 'QUARANTINED: retired owned DM holder did not settle'
+                elif (( holder_rc == 2 )); then
+                    QUARANTINE=1
+                    note 'QUARANTINED: unexpected holder appeared after owned DM removal'
+                fi
+            else
+                open_after_remove="$(dm_open_count)" || open_after_remove=unknown
+                QUARANTINE=1
+                note "QUARANTINED: owned DM removal failed open:$open_before_remove->$open_after_remove"
+            fi
         fi
     fi
     if (( COUNT != READY_COUNT )); then
@@ -294,10 +375,15 @@ cleanup() {
         done
         if (( valid )); then
             for (( i=1; i>=0; --i )); do
-                if ! { echo 0 > "${CONFIGS[i]}/power" &&
-                       rmdir "${CONFIGS[i]}"; }; then
+                remove_owned_ram_config "$i"
+                remove_rc=$?
+                if (( remove_rc != 0 )); then
                     QUARANTINE=1
-                    note 'QUARANTINED: cannot remove owned RAM backing'
+                    case "$remove_rc" in
+                    1) note 'QUARANTINED: owned RAM power-off failed' ;;
+                    2) note 'QUARANTINED: owned RAM block device did not settle after power-off' ;;
+                    *) note 'QUARANTINED: owned RAM configfs removal did not settle' ;;
+                    esac
                     break
                 fi
             done
@@ -541,6 +627,10 @@ for (( n=0; n<50; ++n )); do
 done
 [[ -b /dev/mapper/$DMNAME ]] || fail 'owned DM block node missing'
 DMDEV="$(devno "/dev/mapper/$DMNAME")"
+dm_sysfs="$(readlink -f "/sys/dev/block/$DMDEV")"
+DMKNAME="${dm_sysfs##*/}"
+[[ "$DMKNAME" =~ ^dm-[0-9]+$ ]] ||
+    fail 'owned DM kernel identity is ambiguous'
 if [[ -n $SHARED_PLAN ]]; then
     plan_dir="$SHARED_PLAN/plan"
     if (( RESOURCE_PRESSURE_SHORT )); then

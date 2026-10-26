@@ -2490,6 +2490,18 @@ class ReportContract(unittest.TestCase):
         self.assertIn("[swapz packed_read]", phase)
         self.assertEqual(reason, "FAIL: short or mismatched packed swap-in page")
 
+    def test_loaded_quarantine_reports_specific_sanitized_reason(self):
+        log = (
+            "START_OWNED_RAM_REGIME=sd_emulated\n"
+            "START_OWNED_RAM_PAIR_ASYNC_PREPARE=0\n"
+            "QUARANTINED: owned DM removal failed open:1->1\n"
+            "BLOCKED: retain all remaining resources for read-only investigation\n"
+        )
+        phase, reason = runner.failure_context(log)
+        self.assertIn("sd_emulated comparison 1/8 (sync)", phase)
+        self.assertEqual(
+            reason, "Safety quarantine: owned DM removal failed open:1->1")
+
     def test_native_failure_identifies_sanitized_helper_error(self):
         log = "predictor sampling/route control failed: -117\n"
         phase, reason = runner.failure_context(

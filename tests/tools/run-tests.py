@@ -1374,7 +1374,21 @@ def failure_context(output, *, loaded=True, default_phase=None):
     elif loaded and "BLOCKED_LOADED_QUALIFICATION" in output:
         reason = "Noninteractive root/sudo authorization is unavailable"
     elif loaded and "QUARANTINED:" in output:
-        reason = "Safety quarantine: owned device or swap identity could not be safely released"
+        reason = None
+        for line in reversed(output.splitlines()):
+            candidate = line.strip()
+            if not candidate.startswith("QUARANTINED: "):
+                continue
+            msg = candidate.partition(": ")[2]
+            msg = re.sub(r"(?<![A-Za-z0-9])/[^s'\"<>]+", "[path]", msg)
+            msg = re.sub(r"\b(?:[a-f0-9]{16,}|[0-9a-f]{8}-[0-9a-f-]{18,})\b",
+                         "[id]", msg, flags=re.I)
+            msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]>]", "?", msg)
+            reason = f"Safety quarantine: {msg[:155]}"
+            break
+        if reason is None:
+            reason = ("Safety quarantine: owned device or swap identity "
+                      "could not be safely released")
     elif loaded and any("mktemp:" in line and "Permission denied" in line
                         for line in output.splitlines()):
         reason = ("Cannot allocate the shared fixture: directory is not writable "

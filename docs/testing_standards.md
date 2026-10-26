@@ -85,6 +85,17 @@ Cleanup never force-removes uncertain resources. If identity or teardown is ambi
 
 Transient target teardown between benchmark or lifecycle phases (such as tearing down the target prior to live-GC evacuation and recreation in `deploy-nullblk.sh`) must similarly settle `udevadm` and use bounded non-force `timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry` to safely absorb transient `systemd-udevd` probe activity without failing or hanging.
 
+Owned benchmark-pair final teardown must also settle after a successful mapper
+removal before judging lower-device holders. During that bounded post-remove
+settle, only the exact former owned `dm-X` holder is permitted to disappear;
+any different holder is foreign/new ownership and quarantines immediately.
+A failed mapper removal records numeric open counts before/after when available.
+After a lower passes the full identity/holder/mount/swap audit, power-off may
+boundedly wait for that exact null_blk sysfs device to disappear before configfs
+removal. No wait authorizes force removal or weakens identity checks. Sanitized
+reports must preserve the specific `QUARANTINED:` reason instead of collapsing
+all teardown failures into one generic diagnostic.
+
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 
 ### Direct-I/O and memory input qualification boundary (ID43)

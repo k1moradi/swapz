@@ -2893,6 +2893,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('timeout --signal=TERM --kill-after=2s 10s', preflight)
         self.assertNotIn('dmsetup remove --force', preflight)
         self.assertIn('dmsetup remove --retry "$DMNAME"', pair)
+        self.assertIn('open_before_remove="$(dm_open_count)"', pair)
+        self.assertIn('open_after_remove="$(dm_open_count)"', pair)
+        self.assertIn("wait_for_retired_dm_holder_release", pair)
+        self.assertIn("retired owned DM holder did not settle", pair)
+        self.assertIn("unexpected holder appeared after owned DM removal", pair)
+        self.assertIn("remove_owned_ram_config", pair)
+        self.assertIn("owned RAM block device did not settle after power-off", pair)
+        self.assertIn("settle_udev", pair)
+        self.assertNotIn('dmsetup remove --force', pair)
 
     def test_dkms_sandbox_does_not_depend_on_host_module_state(self):
         package = (ROOT / "packaging/package-dkms.sh").read_text()
