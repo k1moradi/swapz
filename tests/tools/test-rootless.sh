@@ -56,7 +56,7 @@ grep -Fq 'modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"' tes
 grep -Fq 'SWAPS_ID_BEFORE' tests/tools/deploy-nullblk.sh
 grep -Fq 'SWAPS_ID' tests/tools/benchmark-owned-pair.sh
 grep -Fq 'cat /sys/module/dm_swapz/refcnt' tests/tools/loaded-preflight.sh
-grep -Fq '(( refcount == 0 ))' tests/tools/loaded-preflight.sh
+grep -Fq '[[ $refcount == 0 ]]' tests/tools/loaded-preflight.sh
 grep -Fq 'rmmod dm_swapz' tests/tools/loaded-preflight.sh
 grep -Fq 'AUTO_REMOVED_IDLE_DM_SWAPZ=1' tests/tools/loaded-preflight.sh
 ! grep -Fq 'rmmod -f' tests/tools/loaded-preflight.sh

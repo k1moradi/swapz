@@ -1030,7 +1030,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("tests/tools/benchmark-owned-pair.sh", loaded)
         preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text()
         self.assertIn("/sys/module/dm_swapz/refcnt", preflight)
-        self.assertIn("(( refcount == 0 ))", preflight)
+        self.assertIn("[[ $refcount == 0 ]]", preflight)
         self.assertIn("rmmod dm_swapz", preflight)
         self.assertIn("AUTO_REMOVED_IDLE_DM_SWAPZ=1", preflight)
         self.assertIn("AUTO_REMOVED_STALE_OWNED_DM_SWAPZ=1", preflight)

@@ -2919,7 +2919,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('swapz_map_list="$(', preflight)
         self.assertIn("cannot enumerate pre-existing swapz mappings", preflight)
         self.assertIn("cannot parse pre-existing swapz mapping list", preflight)
-        self.assertIn('(( ${#swapz_maps[@]} == 1 ))', preflight)
+        self.assertIn('[[ ${#swapz_maps[@]} == 1 ]]', preflight)
         self.assertIn('token="${owned_map#swapz-demo-}"', recovery)
         self.assertIn('is_hex16 "$token"', recovery)
         self.assertIn('"SWAPZ-TEST-$token-flushfault"', recovery)
