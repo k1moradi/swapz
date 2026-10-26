@@ -47,9 +47,17 @@ wait solely to make a representation more compact when doing so loses more
 useful service than the saved lower I/O is worth. Slow media should naturally
 receive more completed compression because long lower service provides
 preparation overlap; fast media may trade some lower bytes for continuous
-service. This policy is not yet production-qualified and must preserve the
-single authority/ordering model, bounded memory, CRC/generation validation and
-the existing SWZ format.
+service. Alpha.29 implements the first bounded candidate without changing SWZ: the
+existing per-BIO descriptor queue stays the low-copy admission queue, the
+64-slot preparation array becomes a stable RAW+compressed reservoir, and the
+ordered worker dispatches eight-record work-conserving hands or any shorter dry
+pressure tail. A producer snapshots the 4KiB page once, then optional LZ4 races
+against lower completion; when lower service becomes available first, RAW wins
+atomically and any late compression result is discarded. The candidate remains
+unqualified until the complete owner `make test` matrix publishes PASS and its
+SD/SATA/NVMe service tradeoff is acceptable. It preserves the single
+authority/ordering model, bounded memory, CRC/generation validation and the
+existing SWZ format.
 
 The next qualification priorities are work-conserving fast-media dispatch,
 realistic churn/GC/TRIM evidence and representative-content evidence, not

@@ -225,7 +225,7 @@ changes.
 | 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; restored pre-ID80 policy requalified** | Report `71251ba9232e` refuted ID80's static `count > 4U` gate with fast QD8 async/sync -9.1% (95% CI -15.1..-3.1). Current report `dc78c9bbffbd` on source `0155a09a0f2e` passes all five stages with the actual pre-ID80 predicate `count > 4U || preparation_queued > 0`; sustained QD4/QD8/QD32 async/sync throughput is +3.94% / +0.95% / +0.94%, with all three intervals overlapping zero. Keep ID80 removed and retain no dormant selector. |
 | 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed; rollback lifecycle requalified** | Exact source `26a045c80b56` passed build/native/W=1/W=2, then BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`); no benchmark result from that source is valid. The bundled candidate also replaced the true pre-ID80 detach predicate with unqualified `count > 1U`. Current source `0155a09a0f2e` removes the whole bundle and passes retained suspend/drain plus the complete owner matrix in report `dc78c9bbffbd`. This proves the rollback is healthy but does not identify which ID81 sub-change caused the lifecycle failure; do not split or revive those changes without independent evidence. |
 | 82 | Fast-media retained deadline and wakeup overhead | **4 evidence-backed candidate; measurement first** | Current exact source `0155a09a0f2e` shows Gen4 mixed 591.3 ms with 197 worker-empty deadline closes, 33.9 ms lower-WRITE service, 37.3 ms ordered-worker CPU and zero K=1 ready waits; Gen5 is 522.5 ms / 176 deadlines / 23.8 ms lower-WRITE / 32.3 ms worker CPU. At retain_ms=2, count*deadline proves at least 394/352 ms of aggregate deadline-reaching window age; it is not a pure-idle measurement. First add exact retained idle-wait and worker-wake attribution; then test a fast-media microsecond-scale or accepted-work-only closure policy without changing K=1, SWZ, ID63 or authority ownership. Reject if SD gains, lower-byte savings, lifecycle safety or mixed p99 regress materially. |
-| 83 | Work-conserving opportunistic compressed/RAW dispatch | **4 recommended architecture candidate; no format change** | Make representation optional at dispatch: while lower I/O is active, prepare/compress future accepted writes; when the K=1 lower slot becomes idle, submit the best already-ready representation instead of waiting solely for optional compression. The existing batched engine already accepts a compressed prefix plus RAW 4KiB tail in one immutable run, so SWZ does not change. Preserve inline preparation for lone/no-backlog QD1 work, barriers and capacity pressure; under backlog, a producer-owned not-ready page may be sealed RAW with exact lifetime/cancellation ownership. Measure accepted-work idle wall, ready-at-dispatch, RAW-not-ready fallback, discarded late prep, useful service/p99 and lower bytes/requests. More buffers/K>1 are successors only if a work-conserving K=1 then shows material ready-run wait. |
+| 83 | Work-conserving admission queue + prepared reservoir + compressed/RAW dispatcher | **3 alpha.29 implemented candidate; owner qualification pending** | Source `d7213f1f12ea` keeps the low-copy per-BIO admission descriptors, one producer lane, K=1 and 64 preparation slots. Each claimed slot snapshots RAW once and then races optional LZ4 against lower completion. The ordered worker defers a PREPARING head while K=1 is active, atomically chooses RAW when lower service becomes free first, consumes READY results when compression wins, closes an eight-record work-conserving hand, and immediately closes a shorter dry pressure tail. Late compression after RAW selection is discarded; producer/consumer references keep the slot alive independently of upper-BIO completion. SWZ and authority publication are unchanged. Owner `make test` must prove lifecycle/fault/ISA correctness plus SD preservation and SATA/NVMe useful-service gains before promotion. |
 
 ## What the pinned queue experiment establishes
 
@@ -289,30 +289,29 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-Current exact source `0155a09a0f2e` is owner-qualified by report
-`dc78c9bbffbd`; the rollback qualification gate is closed.
+The last owner-qualified product source remains `0155a09a0f2e`, report
+`dc78c9bbffbd`. Documentation descendants and the alpha.29 ID83 candidate do
+not supersede that baseline until a new complete owner report passes.
 
-1. Keep ID78's completion-state repair, ID79's exact-range read-cache
-   invalidation, the restored pre-ID80 detachment rule, K=1 lower-WRITE
-   ownership, one preparation lane, ID63 and SWZ 1/2/4 extents.
-2. Implement passive ID82/ID83 attribution first: exact accepted-work/no-lower-
-   WRITE idle wall, worker wake effectiveness, compressed-ready-at-dispatch,
-   RAW-not-ready fallback opportunities and ready-run wait. These counters must
-   not change scheduling.
-3. Then test one bounded ID83 work-conserving candidate. While lower WRITE I/O
-   is active, preserve speculative preparation. When K=1 becomes idle and
-   accepted backlog exists, seal already-ready compressed pages plus RAW for
-   not-ready pages rather than waiting solely for compression. Keep lone/no-
-   backlog QD1 inline preparation, barriers, same-page dependencies, capacity
-   gates and one completion owner. Use the existing compressed-prefix/RAW-tail
-   batched format; add no runtime selector or SWZ change.
-4. Treat the earlier ID79 full-invalidation A/B as supporting diagnosis rather
-   than a gate for ID83. Run it only if work-conserving evidence still needs to
-   separate cache-induced batching loss from scheduler idle time; never restore
-   global invalidation as production policy.
-5. More lower-WRITE buffers or K>1 remain deferred. Reopen only if ID83 makes
-   K=1 work-conserving and `k1_ready_wait_*` then shows complete ready runs
-   repeatedly blocked behind the active slot.
+1. Qualify alpha.29 candidate source `d7213f1f12ea` with the single public
+   `make test`. Keep ID78/ID79 correctness repairs, the restored pre-ID80
+   detachment rule, K=1, one preparation lane, ID63 and SWZ 1/2/4 extents.
+2. Interpret the new ID83 counters before changing concurrency: eight-record
+   hand/dry closes, RAW-not-ready, compressed-ready, raw-ready, late-result
+   discards, ready-reservoir high water and slot high water. Fast-media success
+   requires useful throughput or p99 improvement; slow/SD must retain useful
+   service and material lower-I/O savings.
+3. If alpha.29 is correct but fast-media gains are weak, use those counters to
+   distinguish insufficient prepared run-ahead from dispatch/retention overhead.
+   Do not add K>1 or more workers merely because the device supports queue depth.
+4. Reopen a larger reservoir only if the 64-slot high-water/ready occupancy
+   saturates while READY work is actually consumed. Reopen K>1 only if the
+   work-conserving K=1 path creates material `k1_ready_wait_*`. Reopen wider
+   preparation only if a sustained preparation backlog remains after dispatch
+   is work-conserving.
+5. Treat the earlier ID79 full-invalidation A/B as supporting diagnosis only if
+   ID83 still leaves unexplained mixed-WRITE geometry. Never restore deliberate
+   READ stalls or global invalidation as a production batching mechanism.
 6. After the fast-media dispatch question is resolved, return to realistic
    churn/GC/TRIM evidence at roughly 70% occupancy with a cold/hot split and at
    least ten logical capacities of hot rewrites.
