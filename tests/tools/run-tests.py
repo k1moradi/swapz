@@ -277,7 +277,9 @@ BURST_COUNTER_FIELDS = (
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
     WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS +
-    BURST_COUNTER_FIELDS + ("gc_victims",))
+    BURST_COUNTER_FIELDS + (
+        "gc_victims", "accepted_work_lower_idle_events",
+        "accepted_work_lower_idle_ns"))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
 DELTA64_FIELDS = (
@@ -329,8 +331,7 @@ KERNEL_WRITE_FIELDS = (
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + (
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
-    "work_conserving_raw_ready", "prep_late_results_discarded",
-    "accepted_work_lower_idle_events", "accepted_work_lower_idle_ns")
+    "work_conserving_raw_ready", "prep_late_results_discarded")
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
     "target_interval_ns", "samples", "read_start", "write_start",
