@@ -131,9 +131,9 @@ uuid="$(dmsetup info -c --noheadings -o uuid "$owned_map" 2>/dev/null |
     tr -d '[:space:]')" ||
     fail "cannot read pre-existing dm_swapz mapping UUID"
 case "$uuid" in
-    "SWAPZ-TEST-$token"|"SWAPZ-TEST-$token-gc"|
-    "SWAPZ-TEST-$token-discardtrim"|"SWAPZ-TEST-$token-suspend"|
-    "SWAPZ-TEST-$token-writefault"|"SWAPZ-TEST-$token-flushfault"|
+    "SWAPZ-TEST-$token"|"SWAPZ-TEST-$token-gc"| \
+    "SWAPZ-TEST-$token-discardtrim"|"SWAPZ-TEST-$token-suspend"| \
+    "SWAPZ-TEST-$token-writefault"|"SWAPZ-TEST-$token-flushfault"| \
     "SWAPZ-TEST-$token-packed") ;;
     *) fail "pre-existing dm_swapz mapping UUID is not harness-owned; no cleanup attempted" ;;
 esac

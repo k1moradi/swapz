@@ -26,7 +26,7 @@ python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
   printf '%s\n' 'FAIL: source-contract-test.py must have exactly one test runner' >&2
   exit 1
 }
-bash -n tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
+for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/tools/qualify-resource-pressure.sh \
   tests/tools/qualify-logical-open-balance.sh packaging/package-dkms.sh \
   packaging/sign-module.sh \
@@ -35,7 +35,9 @@ bash -n tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/tools/benchmark-owned-pair.sh tests/tools/nullblk-identity.sh \
   tests/runtime/native/nullblk-identity-test.sh \
   tests/runtime/native/quiet-lower-io-test.sh \
-  tests/runtime/native/swap-inventory-test.sh
+  tests/runtime/native/swap-inventory-test.sh; do
+  bash -n "$script"
+done
 bash tests/runtime/native/nullblk-identity-test.sh
 bash tests/runtime/native/quiet-lower-io-test.sh
 bash tests/runtime/native/swap-inventory-test.sh
