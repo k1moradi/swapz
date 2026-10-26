@@ -765,7 +765,16 @@ only when every other detach predicate is satisfied and the fixed read-bypass
 guard alone rejects the window. It must not alter timers, scheduling, authority
 or completion ownership.
 
-K=1 lower-WRITE detachment is a depth/backlog policy, not merely a multi-record test. A prepared window may detach asynchronously only when it contains more than four records or when a separate unclaimed preparation descriptor is already queued. Shallow <=4-record windows with no confirmed WRITE successor stay synchronous. This removes callback/workqueue cost where no overlap can exist while preserving QD8/QD32 overlap.
+K=1 lower-WRITE detachment is a useful-overlap policy, not permission to turn
+an instantaneous preparation queue into a second batching clock. A prepared
+window may detach asynchronously only when it contains more than four records
+(`count > 4U`). Shallow `<=4` windows remain synchronously owned even when
+preparation descriptors are queued; synchronous lower-WRITE service still sets
+`lower_write_active` and wakes the producer, so compression/CRC overlap remains
+available without transferring completion ownership. `IDLE` and `DEADLINE`
+closes may detach only when the ordered worker already knows immediate accepted
+follow-up work exists. PACK_READY/FULL/DUPLICATE/QUANTUM retain the same
+multi-record detachment semantics.
 
 Idle asynchronous preparation must be self-gating. With no lower WRITE active,
 a tail-credit workqueue wake requires at least four unclaimed preparation

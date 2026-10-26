@@ -2872,15 +2872,15 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			needs_fua = true;
 	async_detach_ready =
 		ctx->async_prepare && READ_ONCE(ctx->accepting) &&
-		(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U) &&
-		!needs_fua && ctx->engine.bulk_enabled &&
+		count > 4U && !needs_fua && ctx->engine.bulk_enabled &&
 		!ctx->engine.verify_after_write &&
 		(close_reason == SWAPZ_CLOSE_FULL ||
 		 close_reason == SWAPZ_CLOSE_DUPLICATE ||
 		 close_reason == SWAPZ_CLOSE_QUANTUM ||
-		 close_reason == SWAPZ_CLOSE_IDLE ||
-		 close_reason == SWAPZ_CLOSE_DEADLINE ||
-		 close_reason == SWAPZ_CLOSE_PACK_READY);
+		 close_reason == SWAPZ_CLOSE_PACK_READY ||
+		 ((close_reason == SWAPZ_CLOSE_IDLE ||
+		   close_reason == SWAPZ_CLOSE_DEADLINE) &&
+		  ctx->worker_has_immediate_followup));
 	/*
 	 * The read-bypass guard is fixed after the two-host A/B showed no service
 	 * benefit from relaxing it. Keep passive pressure attribution, but do not

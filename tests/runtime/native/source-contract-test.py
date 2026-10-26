@@ -1891,8 +1891,18 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("burst_shrink_after_inflight_zero=%llu", status)
         self.assertNotIn("--guard-inflight-zero-shrink", pair)
         self.assertNotIn("START_BURST_GUARD_AB=", loaded)
-        self.assertIn("(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U)",
-                      flush)
+        detach_start = flush.index("async_detach_ready =")
+        detach_end = flush.index("/*", detach_start)
+        detach = flush[detach_start:detach_end]
+        self.assertIn("count > 4U && !needs_fua", detach)
+        self.assertNotIn("preparation_queued", detach)
+        self.assertIn("close_reason == SWAPZ_CLOSE_PACK_READY", detach)
+        self.assertIn("close_reason == SWAPZ_CLOSE_IDLE", detach)
+        self.assertIn("close_reason == SWAPZ_CLOSE_DEADLINE", detach)
+        self.assertIn("ctx->worker_has_immediate_followup", detach)
+        lower = body("swapz_lower")
+        self.assertIn("ctx->async_prepare && ctx->preparation_queued", lower)
+        self.assertIn("swapz_queue_preparation_workers(ctx)", lower)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()

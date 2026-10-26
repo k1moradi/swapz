@@ -729,6 +729,16 @@ stage/seal and before `write_extent`, with full invalidation retained only for
 verify-after-write.
 
 
+K=1 detachment source coverage must require `count > 4U` and must reject
+`preparation_queued` as an independent detach-enabling condition. It must also
+require `IDLE`/`DEADLINE` detachment to carry immediate accepted follow-up
+evidence while preserving the synchronous lower-WRITE producer wake for any
+nonempty preparation queue. Loaded evidence for this policy is performance
+evidence, not a correctness shortcut: fast QD4 must not gain lower-WRITE
+requests or materially lose useful throughput versus sync, QD8/QD32 must retain
+their byte/request aggregation and useful service, and the slow model must not
+regress. No new timer, K>1 slot, preparation lane or SWZ class is permitted.
+
 Source-contract maintenance must follow the same standards co-change rule as
 production implementation work. When an implementation invariant moves between
 owners (for example, PACK_READY closure from write admission to the serialized
