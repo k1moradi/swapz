@@ -554,8 +554,12 @@ must be present, every compressed payload must remain valid and bounded, and
 the existing 1/2/4-block extent limits and read-budget gates still apply. A
 total `batch_count == 4` remains ineligible as a first pack even when RAW
 records are skipped, preserving the settled rule that first-pack recognition
-must not close below the `count > 4U` K=1 detach threshold. RAW records remain
-complete 4KiB records and are never treated as compressed members of a pack.
+must not close below the `count > 4U` K=1 detach threshold. Geometry scans are
+bounded by the tiny compressed target: return as soon as compressed count
+exceeds the target or the target extent byte cap is already impossible, and do
+not re-scan every total-count prefix to recover the earlier two-record check.
+RAW records remain complete 4KiB records and are never treated as compressed
+members of a pack.
 
 For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
 with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan
