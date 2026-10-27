@@ -3071,7 +3071,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			needs_fua = true;
 	async_detach_ready =
 		ctx->async_prepare && READ_ONCE(ctx->accepting) &&
-		(count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||
+		(count > SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||
 		 READ_ONCE(ctx->preparation_queued) > 0U) &&
 		!needs_fua && ctx->engine.bulk_enabled &&
 		!ctx->engine.verify_after_write &&
@@ -3536,15 +3536,49 @@ static void swapz_note_single_tail_read_bypass(struct swapz_dm *ctx)
 		ctx->single_tail_read_bypass_seen = true;
 }
 
+/*
+ * The post-PACK sampler observes accepted READs without servicing them.
+ * Skip only a complete independent page READ: earlier staged or queued
+ * same-page WRITEs and ordering/authority fences must remain boundaries.
+ * Queue scanning is serialized under queue_lock after K=1 finalization.
+ */
+static bool swapz_tail_read_is_independent_locked(
+		const struct swapz_dm *ctx, const struct bio *bio,
+		const swapz_u32 *queued_writes, swapz_u8 queued_count)
+{
+	swapz_u32 logical;
+	swapz_u8 index;
+
+	if (!ctx->retain_ms || bio_op(bio) != REQ_OP_READ ||
+	    bio_sectors(bio) != SWAPZ_SECTORS ||
+	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
+	    !READ_ONCE(ctx->accepting) || ctx->failed ||
+	    ctx->authority.in_flight || ctx->authority.batch_replaying ||
+	    ctx->authority.batch_pending || swapz_has_inflight(ctx))
+		return false;
+	logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
+	for (index = 0; index < ctx->batch_count; ++index)
+		if (ctx->batch[index].logical == logical)
+			return false;
+	for (index = 0; index < queued_count; ++index)
+		if (queued_writes[index] == logical)
+			return false;
+	return true;
+}
+
 static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 					  struct list_head *local)
 {
 	struct swapz_bio_ref *entry;
+	swapz_u32 queued_writes[SWAPZ_MAX_RECORDS];
+	unsigned int scanned_bios = 0;
 	swapz_u8 staged_tail = 0;
 	swapz_u8 queued_tail = 0;
 	swapz_u8 tail;
 	swapz_u8 room;
 	bool prefix_open = true;
+	bool saw_independent_read = false;
+	bool scan_truncated = false;
 
 	/*
 	 * Sample only after a real PACK_READY lower write. Sampling before the
@@ -3582,22 +3616,48 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 		list_for_each_entry(entry, local, list) {
 			if (!room)
 				break;
+			if (scanned_bios++ >= SWAPZ_WORK_QUANTUM_BIOS) {
+				scan_truncated = true;
+				break;
+			}
 			if (!swapz_plain_retained_write(entry->bio)) {
+				if (swapz_tail_read_is_independent_locked(
+						ctx, entry->bio,
+						queued_writes, queued_tail)) {
+					saw_independent_read = true;
+					continue;
+				}
 				prefix_open = false;
 				break;
 			}
+			queued_writes[queued_tail] =
+				(swapz_u32)(entry->bio->bi_iter.bi_sector /
+					    SWAPZ_SECTORS);
 			queued_tail++;
 			room--;
 		}
 	}
-	if (prefix_open && room) {
+	if (prefix_open && room && !scan_truncated) {
 		list_for_each_entry(entry, &ctx->incoming, list) {
 			if (!room)
 				break;
+			if (scanned_bios++ >= SWAPZ_WORK_QUANTUM_BIOS) {
+				scan_truncated = true;
+				break;
+			}
 			if (!swapz_plain_retained_write(entry->bio)) {
+				if (swapz_tail_read_is_independent_locked(
+						ctx, entry->bio,
+						queued_writes, queued_tail)) {
+					saw_independent_read = true;
+					continue;
+				}
 				prefix_open = false;
 				break;
 			}
+			queued_writes[queued_tail] =
+				(swapz_u32)(entry->bio->bi_iter.bi_sector /
+					    SWAPZ_SECTORS);
 			queued_tail++;
 			room--;
 		}
@@ -3646,10 +3706,10 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			 * evidence still protects the four-record floor. A serviced READ
 			 * or accepted non-WRITE boundary instead proves a mixed tail is
 			 * already finite and may use its exact two/three-record target. */
-			ctx->retained_tail_target =
+			ctx->retained_tail_target = scan_truncated ? 0 :
 				swapz_window_sampled_tail_target(
 					tail, queued_tail,
-					!prefix_open ||
+					!prefix_open || saw_independent_read ||
 					(queued_tail && ctx->retained_wave_read_seen));
 		}
 	} else {

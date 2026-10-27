@@ -1246,8 +1246,17 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("swapz_arm_closed_small_tail_observation", DM)
         self.assertNotIn("suppressed_tail_", DM)
         self.assertNotIn("SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS", policy)
-        self.assertIn("!prefix_open ||", sample)
+        self.assertIn("!prefix_open || saw_independent_read ||", sample)
         self.assertIn("(queued_tail && ctx->retained_wave_read_seen)", sample)
+        self.assertIn("scan_truncated ? 0 :", sample)
+        self.assertIn("scanned_bios++ >= SWAPZ_WORK_QUANTUM_BIOS", sample)
+        self.assertIn("swapz_tail_read_is_independent_locked(", sample)
+        independent = body("swapz_tail_read_is_independent_locked")
+        self.assertIn("ctx->batch[index].logical == logical", independent)
+        self.assertIn("queued_writes[index] == logical", independent)
+        self.assertIn("bio_sectors(bio) != SWAPZ_SECTORS", independent)
+        self.assertIn("ctx->authority.batch_pending", independent)
+        self.assertNotIn("ctx->retained_wave_read_seen = true", sample)
         self.assertIn("prefix_open = false", sample)
         self.assertIn("ctx->retained_wave_read_seen = true", process_body)
         self.assertIn("ctx->retained_wave_read_seen = true", parallel_slots)
@@ -1299,11 +1308,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_wave_interrupted", service_dry)
         self.assertIn("!swapz_has_inflight(ctx)", service_dry)
         service_policy = source_body("swapz_window_service_close_ready", policy)
-        self.assertIn("if (count < 2U)", service_policy)
+        self.assertIn("if (count < 2U || sampled_tail_target)", service_policy)
         self.assertIn("count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS && lower_idle", service_policy)
-        self.assertIn("!valid_pack || sampled_tail_target", service_policy)
-        self.assertLess(service_policy.index("count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS && lower_idle"),
-                        service_policy.index("!valid_pack || sampled_tail_target"))
+        self.assertIn("if (!valid_pack)", service_policy)
+        self.assertLess(service_policy.index("if (count < 2U || sampled_tail_target)"),
+                        service_policy.index("count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS && lower_idle"))
         self.assertIn("count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
                       service_policy)
         self.assertIn("return read_bypasses || wave_interrupted",
@@ -1958,7 +1967,7 @@ static swapz_u16 swapz_probe_set(
         detach_end = flush.index("/*", detach_start)
         detach = flush[detach_start:detach_end]
         self.assertIn(
-            "(count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||", detach)
+            "(count > SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||", detach)
         self.assertIn("READ_ONCE(ctx->preparation_queued) > 0U", detach)
         self.assertIn("close_reason == SWAPZ_CLOSE_PACK_READY", detach)
         self.assertIn("close_reason == SWAPZ_CLOSE_IDLE", detach)

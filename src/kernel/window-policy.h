@@ -289,18 +289,18 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
  * staged valid pack when read-bypass or wave-interruption evidence proves
  * the accepted wave was broken. If both accepted FIFOs are dry and the lower
  * path is idle, four records may dispatch regardless of compressed-only
- * geometry or an oversized sampled target. A singleton never closes here.
+ * geometry, provided no authoritative sampled tail is active. A singleton never closes here.
  */
 static inline int swapz_window_service_close_ready(
 		int valid_pack, int lower_idle, swapz_u8 count,
 		swapz_u8 sampled_tail_target, int chain_completed,
 		int read_bypasses, int wave_interrupted)
 {
-	if (count < 2U)
+	if (count < 2U || sampled_tail_target)
 		return 0;
 	if (count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS && lower_idle)
 		return 1;
-	if (!valid_pack || sampled_tail_target)
+	if (!valid_pack)
 		return 0;
 	if (count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)
 		return read_bypasses || wave_interrupted;

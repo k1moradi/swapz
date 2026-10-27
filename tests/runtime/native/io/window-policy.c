@@ -310,8 +310,10 @@ static int test_service_dry_pack_requires_valid_multi_record_pack(void)
 	 * an unproven two/three-record tail must not inherit this permission. */
 	CHECK(!swapz_window_service_close_ready(0, 1, 3, 0, 0, 1, 1));
 	CHECK(swapz_window_service_close_ready(0, 1, 4, 0, 0, 0, 0));
-	CHECK(swapz_window_service_close_ready(0, 1, 4, 8, 0, 0, 0));
-	CHECK(swapz_window_service_close_ready(0, 1, 7, 16, 0, 0, 0));
+	CHECK(!swapz_window_service_close_ready(0, 1, 4, 8, 0, 0, 0));
+	CHECK(!swapz_window_service_close_ready(0, 1, 7, 16, 0, 0, 0));
+	CHECK(!swapz_window_service_close_ready(1, 1, 4, 8, 1, 1, 1));
+	CHECK(swapz_window_service_close_ready(0, 1, 7, 0, 0, 0, 0));
 	CHECK(!swapz_window_service_close_ready(0, 0, 4, 0, 0, 0, 0));
 	return 0;
 }

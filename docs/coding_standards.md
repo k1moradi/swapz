@@ -116,8 +116,8 @@ belong in the ROADMAP decision table and Git history.
 - **Proven-dry retained service:** an active accepted plain-WRITE wave keeps the
   existing eight-record pressure hand and effective learned/sampled target. After
   the serialized worker proves both accepted FIFOs dry and no K=1 WRITE is
-  active, four staged records can close below a larger learned/sampled target,
-  including mixed compressed+RAW records without a valid compressed pack. One-record windows keep the original pinned deadline.
+  active, four staged records can close below a larger learned target only when
+  no authoritative sampled target is active, including compressed+RAW mixes. One-record windows keep the original pinned deadline.
   A pure-WRITE post-PACK tail of two/three is not a finite close target; target
   four and larger still require already-accepted queued follower evidence. A
   mixed accepted wave is finite once the worker has serviced a READ in that wave
@@ -165,10 +165,17 @@ belong in the ROADMAP decision table and Git history.
   residency before authority changes. Set lookups cache the active epoch locally
   and avoid redundant engine field traversal. Extent geometry calculations and
   fitting use constant block-shift powers (`SWAPZ_BLOCK_SHIFT`) rather than integer division.
-- **Small-batch I/O:** complete four-record batches may detach through K=1,
+- **Small-batch I/O:** four-record batches detach through K=1 only when queued
+  preparation work can overlap; without that overlap, dispatch synchronously,
   preserving all FUA/verification and publication fences. Keep the first three
   inline-stolen pages eligible for ordinary LZ4; idle lower service may choose
   RAW on later pages using the existing stable-snapshot/atomic state rules.
+- **Post-PACK READ-transparent sampling:** under queue_lock, skip only
+  independent accepted READs with no staged/earlier queued same-page write,
+  FUA/flush or authority conflict. Limit scans to one 64-BIO quantum; an
+  incomplete scan is never a finite sampled tail. A queued READ is not a
+  completed READ, so do not persist service evidence prematurely. The staged
+  post-K=1 tail without a queued follower keeps its prior safety gate.
 - **Preparation ownership:** async preparation uses one unbound producer lane.
   The ordered owner may steal only an unclaimed next preparation entry while
   holding the admission lock. Producer and ordered compression use separate

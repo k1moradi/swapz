@@ -57,6 +57,15 @@ Native tests compile the real `src/kernel/{codec,authority,engine}.c` where appl
 
 Source contracts validate behavior that requires the Linux Device Mapper target itself, including BIO ownership, queue/drain ordering, null_blk-only admission, lower-I/O accounting and current report/build contracts. Source-string assertions are secondary to executable production-C coverage.
 
+## Retained-window scheduler qualification
+
+Native tests must keep authoritative sampled tails ahead of dry four-record
+closure; source contracts must cover dependency-safe independent READ scanning,
+one-quantum scan bounds and four-record no-overlap synchronous dispatch.
+Only an exact-source owner `make test` with the loaded RAM-backed null_blk phase
+can qualify useful READ/WRITE, p99, lower bytes/requests, SD/SSD/NVMe, GC and
+fault/lifecycle behavior. Rootless checks alone are supporting evidence.
+
 ## Loaded correctness
 
 Loaded tests use only newly created, positively owned, RAM-backed `null_blk`. Before and after use, verify device identity, size, major/minor, DM UUID, holders, mounts and active-swap aliases. Never substitute a physical or existing block device.
