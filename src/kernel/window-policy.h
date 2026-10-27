@@ -265,7 +265,7 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
  * bypass or ordering transition. A completed chain alone is not enough, and a
  * one-record window can never become PACK_READY through this path.
  */
-static inline int swapz_window_service_dry_pack_ready(
+static inline int swapz_window_service_close_ready(
 		int valid_pack, int lower_idle, swapz_u8 count,
 		swapz_u8 sampled_tail_target, int chain_completed,
 		int read_bypasses, int wave_interrupted)

@@ -1321,8 +1321,8 @@ static swapz_u16 swapz_probe_set(
         close_ready = body("swapz_retained_pack_close_ready")
         service_dry = body("swapz_service_proven_dry_pack")
         self.assertNotIn("swapz_retained_target_close_ready", DM)
-        self.assertIn("swapz_window_service_dry_pack_ready(", service_dry)
-        self.assertIn("swapz_window_service_dry_pack_ready(", policy)
+        self.assertIn("swapz_window_service_close_ready(", service_dry)
+        self.assertIn("swapz_window_service_close_ready(", policy)
         self.assertNotIn("pack_close_pending_tail_sample", close_ready)
         self.assertIn("ctx->retained_single_tail_deferred && ctx->batch_count == 1U",
                       close_ready)
@@ -1331,14 +1331,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_chain_completed", service_dry)
         self.assertIn("ctx->retained_window_read_bypasses", service_dry)
         self.assertIn("ctx->retained_wave_interrupted", service_dry)
-        self.assertIn("count < 2U", policy)
-        self.assertIn("count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", policy)
-        self.assertIn("ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
-                      service_dry)
-        self.assertIn("ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
-                      service_dry)
         self.assertIn("!swapz_has_inflight(ctx)", service_dry)
-        self.assertIn("!ctx->retained_tail_target", service_dry)
+        service_policy = source_body("swapz_window_service_close_ready", policy)
+        self.assertIn("!valid_pack || sampled_tail_target || count < 2U",
+                      service_policy)
+        self.assertIn("count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
+                      service_policy)
+        self.assertIn("return read_bypasses || wave_interrupted", service_policy)
+        self.assertIn("return chain_completed || read_bypasses || lower_idle",
+                      service_policy)
         self.assertIn("swapz_window_burst_close_ready(", close_ready)
         self.assertIn("retained_burst_target=%u", status)
         self.assertIn("#define SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS 4U", policy)

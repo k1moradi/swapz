@@ -284,16 +284,16 @@ static int test_sampled_tail_target_preserves_four_record_floor(void)
 
 static int test_service_dry_pack_requires_valid_multi_record_pack(void)
 {
-	CHECK(!swapz_window_service_dry_pack_ready(0, 1, 1, 0, 1, 1, 1));
-	CHECK(!swapz_window_service_dry_pack_ready(0, 1, 2, 0, 1, 1, 0));
-	CHECK(!swapz_window_service_dry_pack_ready(1, 1, 1, 0, 1, 1, 1));
-	CHECK(!swapz_window_service_dry_pack_ready(1, 1, 2, 0, 1, 0, 0));
-	CHECK(swapz_window_service_dry_pack_ready(1, 1, 2, 0, 1, 1, 0));
-	CHECK(swapz_window_service_dry_pack_ready(1, 1, 3, 0, 1, 0, 1));
-	CHECK(!swapz_window_service_dry_pack_ready(1, 1, 3, 4, 1, 1, 1));
-	CHECK(swapz_window_service_dry_pack_ready(1, 1, 4, 0, 0, 0, 0));
-	CHECK(swapz_window_service_dry_pack_ready(1, 0, 4, 0, 1, 0, 0));
-	CHECK(!swapz_window_service_dry_pack_ready(1, 0, 4, 0, 0, 0, 0));
+	CHECK(!swapz_window_service_close_ready(0, 1, 1, 0, 1, 1, 1));
+	CHECK(!swapz_window_service_close_ready(0, 1, 2, 0, 1, 1, 0));
+	CHECK(!swapz_window_service_close_ready(1, 1, 1, 0, 1, 1, 1));
+	CHECK(!swapz_window_service_close_ready(1, 1, 2, 0, 1, 0, 0));
+	CHECK(swapz_window_service_close_ready(1, 1, 2, 0, 1, 1, 0));
+	CHECK(swapz_window_service_close_ready(1, 1, 3, 0, 1, 0, 1));
+	CHECK(!swapz_window_service_close_ready(1, 1, 3, 4, 1, 1, 1));
+	CHECK(swapz_window_service_close_ready(1, 1, 4, 0, 0, 0, 0));
+	CHECK(swapz_window_service_close_ready(1, 0, 4, 0, 1, 0, 0));
+	CHECK(!swapz_window_service_close_ready(1, 0, 4, 0, 0, 0, 0));
 	return 0;
 }
 

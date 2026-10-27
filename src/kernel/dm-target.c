@@ -3840,7 +3840,7 @@ static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 		ctx->single_pack_deferred || ctx->accepted_burst_pack_ready;
 	bool lower_idle = !swapz_has_inflight(ctx);
 
-	return swapz_window_service_dry_pack_ready(
+	return swapz_window_service_close_ready(
 		valid_pack, lower_idle, ctx->batch_count, ctx->retained_tail_target,
 		ctx->retained_chain_completed, ctx->retained_window_read_bypasses,
 		ctx->retained_wave_interrupted);
