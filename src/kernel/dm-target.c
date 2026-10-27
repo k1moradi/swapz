@@ -5111,8 +5111,6 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		swapz_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
 		return;
 	}
-	if (op == REQ_OP_READ && ctx->retain_ms)
-		ctx->retained_wave_read_seen = true;
 	/* Future arrivals never refresh the retention budget. Expiry bounds
 	 * idle waiting, not finite already-accepted work or synchronous service
 	 * of an independent read. Let accepted work reach the existing
@@ -5146,6 +5144,9 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		}
 		if (!error) {
 			u64 read_end_ns = ktime_get_ns();
+
+			if (ctx->retain_ms)
+				ctx->retained_wave_read_seen = true;
 			bool had_lower_io =
 				ctx->lower_read_submitted_reqs != lower_reqs_before;
 
@@ -5155,9 +5156,10 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			/*
 			 * Cache hits do not prove a lower-device service interval, so
 			 * they still do not enter general retained_window_read_bypasses
-			 * or extend the ordinary retention deadline. The separately
-			 * qualified suppressed-tail state above may treat the independent
-			 * READ itself as a finite wave pivot for only that 2/3-record tail.
+			 * or extend the ordinary retention deadline. The worker-owned
+			 * mixed-wave mark records only that this READ was serviced; it may
+			 * make an existing 2/3-record residue finite without a timer or
+			 * cache-hit close authorization.
 			 */
 			if (had_lower_io) {
 				swapz_note_single_tail_read_bypass(ctx);

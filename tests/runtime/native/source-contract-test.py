@@ -2103,9 +2103,9 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(tail_guard, tail_splice)
         self.assertNotIn("!ctx->worker_has_immediate_followup",
                          worker[post_process:tail_guard])
-        self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
-        self.assertIn("ctx->accepted_burst_extensions++", writer)
-        self.assertIn("ctx->single_pack_deferred = true", writer)
+        self.assertIn("ctx->accepted_burst_pack_ready = true", record_geometry)
+        self.assertIn("ctx->accepted_burst_extensions++", record_geometry)
+        self.assertIn("ctx->single_pack_deferred = true", record_geometry)
         self.assertNotIn("swapz_window_admission_burst_close_ready(", policy)
         self.assertNotIn("swapz_retained_target_close_ready", DM)
         self.assertNotIn("swapz_retained_pack_close_ready(ctx)", writer)
@@ -2465,9 +2465,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_window_read_independent(ctx->batch, ctx->batch_count",
                       independent)
         self.assertIn("logical, ctx->retain_ms, blocked", independent)
-        bypass = process[process.index("if (op == REQ_OP_READ &&"):
-                         process.index("if (op != REQ_OP_WRITE ||")]
+        independent_read = process.index(
+            "if (op == REQ_OP_READ && swapz_read_is_independent(ctx, bio))")
+        bypass = process[independent_read:
+                         process.index("if (op != REQ_OP_WRITE ||",
+                                       independent_read)]
         self.assertIn("swapz_read_is_independent(ctx, bio)", bypass)
+        self.assertIn("ctx->retained_wave_read_seen = true", bypass)
+        self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
+                        bypass.index("ctx->retained_wave_read_seen = true"))
         self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
                         bypass.index("swapz_fail(ctx, error)"))
         self.assertLess(bypass.index("swapz_fail(ctx, error)"),

@@ -699,7 +699,12 @@ The refuted suppressed-tail lifetime counters and their replay/reporter schema
 are removed in the same change. Keep exact target-2/3/4 PACK_READY attribution
 and accepted-work lower-idle partitioning so the new scheduling decision remains
 measurable without retaining dead policy state. There is no microsecond wake,
-timer rearm, second timer, mapper atomic or future-arrival grace period.
+timer rearm, second timer, mapper atomic or future-arrival grace period. Source
+contracts must scope fail-closed READ ordering to the independent-READ service
+block rather than an earlier deadline-flush block, and mixed-wave state may be
+set only after the independent READ has actually completed successfully; a READ
+that merely reaches the worker before an expired window flush is not evidence
+for the preceding window.
 
 Loaded qualification must use the exact-source owner `make test` matrix and
 Loaded qualification must use the exact-source owner `make test` matrix and
