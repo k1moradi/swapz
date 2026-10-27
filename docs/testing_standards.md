@@ -659,31 +659,31 @@ Source coverage must preserve DUPLICATE continuation semantics because the
 current WRITE continues after that older batch is flushed.
 
 ID83's first exact small-tail attribution is settled by owner report
-`685c52f5a272`, but report `f0d2e04e50e7` on exact source
-`32f41984b934` shows that suppressing sampled target 2/3 through the full
-ordinary deadline is not yet a product win: sustained fast QD4/QD8/QD32
-improves while fast mixed service regresses. The next evidence source therefore
-replaces the completed mapper-side post-close atomic observer with worker-owned
-suppressed-tail lifetime attribution. For each suppressed sampled tail 2/3,
-report the first post-sample WRITE age, record-four age, deadline-at-two,
-tail-two-to-deadline-at-three, tail-three-deadline-at-three, interruption and
-other-clear outcomes. Also report whether the first independent READ pivot was
-a cache hit or performed lower I/O. These counters are passive: no new timer,
-wake, grace period, deadline, admission action or mapper atomic is permitted.
+`685c52f5a272`; the full-deadline suppression regression is recorded by
+`f0d2e04e50e7`. Owner report `64f6e8e1890e` on exact source
+`e17f05a1c256` settles the lifetime question. In fast mixed I/O, reached-four
+tails land by 500us in 332.6/333.0 sync observations (99.9%) and 239.2/239.2
+async observations (100%); 250us would cover only 98.1% and 97.6% respectively.
+The same report shows independent suppressed-tail READ pivots are overwhelmingly
+cache hits (331.0/332.4 sync and 215.6/216.4 async), so lower-I/O-only bypass
+evidence misses the observed wave transition.
 
-Every suppressed sample must resolve into record four, a classified deadline,
-interruption or other clear at quiescence. Timed deltas may differ by at most
-one sample because one worker-owned observation may cross either interval
-snapshot; age bins and read-pivot sub-buckets must conserve exactly. Native
-policy coverage must prove that sub-four SERVICE_DRY requires a staged valid
-pack and at least two records, so stale read/wave evidence cannot create a
-one-record PACK_READY window.
+The qualified candidate therefore uses the existing retention hrtimer with one
+earlier absolute wake at `suppressed_tail_start_ns + 500us` only while a
+suppressed two/three-record tail is active, a valid pack is staged and K=1 is
+idle. The ordinary first-record deadline remains the hard upper bound and is
+still used by one-record windows. The candidate may also treat an independent
+cache-hit READ as suppressed-tail wave-pivot evidence; this must not increment
+general lower-I/O read-bypass state or extend `window_first_ns`. Source
+contracts must prove no mapper atomic, no second timer, no future-arrival
+admission wait, at least two records, valid-pack gating and FIFO-dry worker
+ownership.
 
-Keep exact target-2/3/4 close counters through this evidence cycle. Every
-interval counter added to kernel status must be carried by both the timed replay
-producer and final report consumer; source contracts must reject
-producer/consumer schema drift. Remove the lifetime diagnostics after they
-settle the next scheduling decision.
+Keep the lifetime and exact target-2/3/4 counters through this candidate's owner
+qualification so the scheduling change remains attributable. Every interval
+counter in kernel status must still be carried by both timed replay producer and
+final report consumer, with conservation guards intact. Remove these lifetime
+diagnostics after the candidate result settles the policy.
 
 Loaded qualification must use the exact-source owner `make test` matrix and
 judge product-facing service before internal attribution. The sustained
@@ -693,7 +693,9 @@ the one-producer/64-slot preparation subsystem still earns its code and state.
 The rootless report and public-`make test` fixture contracts must mirror that
 48-session shape and must print the serial-QD32 paired 95% interval alongside
 the three fast-QD intervals, so a harness change cannot silently drop the
-de-bloat gate. On the same ARM64/NEON
+de-bloat gate. Report `64f6e8e1890e` measures serial-QD32 async/sync at +4.2%
+with paired 95% CI [+2.7,+5.7]%, so the producer lane and 64-slot reservoir stay;
+the synchronous-default de-bloat branch is rejected on this evidence. On the same ARM64/NEON
 lineage, preserve the `b389204` completion-state result (fast mixed useful
 WRITE 60.43 MB/s, async/sync +0.7%, async-minus-sync lower-WRITE requests -12.6
 with 95% CI -23.6..-1.6) while recovering the `8a6dd2a` deep-QD direction
@@ -888,9 +890,12 @@ unready. Only after the serialized worker proves local and incoming accepted
 FIFOs dry, no K=1 lower WRITE remains active, no sampled tail target is pending,
 and `single_pack_deferred || accepted_burst_pack_ready` proves valid staged
 compressed geometry may a below-target `SERVICE_DRY` close occur at
-`SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS == 4`. Counts 1..3 retain the pinned
-deadline. Producer ownership still does not make RAW dispatchable before the
-stable snapshot completion.
+`SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS == 4`. A one-record window always retains
+the pinned ordinary deadline. A suppressed post-PACK tail at count two/three may
+close below that floor only when a valid pack is staged, K=1 and both accepted
+FIFOs are dry, and either an independent READ has pivoted the accepted wave or
+the fixed 500us resubmission bound has expired. Producer ownership still does
+not make RAW dispatchable before the stable snapshot completion.
 
 Status/replay/reporter qualification must retain
 `accepted_work_lower_idle_events/ns` and the four-way retained-open-batch

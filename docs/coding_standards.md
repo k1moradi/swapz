@@ -118,19 +118,25 @@ belong in the ROADMAP decision table and Git history.
   after the serialized worker proves both accepted FIFOs dry, no K=1 lower WRITE
   remains active, no sampled tail target is pending, and a valid compressed pack
   is already staged may a retained window close below a larger learned target at
-  the four-record floor. Counts 1..3 keep the original pinned deadline. Post-PACK
-  sampled tails below four are not authoritative close targets; sampled target
-  four and larger may remain one-shot finite targets. A prior completed chain or
-  deferred valid pack must never bypass the same four-record floor. The explicit
-  sub-four read-bypass/wave-interruption exception requires a staged valid pack
-  and at least two records; it must never manufacture a one-record PACK_READY
+  the four-record floor. One-record windows keep the original pinned deadline.
+  Post-PACK sampled tails two/three are not authoritative close targets, but an
+  already-staged valid pack from such a suppressed tail may close SERVICE_DRY
+  after the qualified 500us post-completion resubmission bound, or once an
+  independent READ proves a wave pivot, provided K=1 is idle and both accepted
+  FIFOs are dry. Sampled target four and larger remain one-shot finite targets.
+  A prior completed chain or deferred valid pack alone must never bypass the
+  four-record floor. The explicit sub-four paths require a staged valid pack and
+  at least two records; they must never manufacture a one-record PACK_READY
   close.
 - **Retention deadline:** learned/admitted targets may shape aggregation, but
-  the ordinary absolute deadline remains authoritative ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$).
-  Timing diagnostics must never become scheduling or timeout policy without a
-  separately qualified experiment. A deferred sampled singleton uses that same
-  deadline; there is no short singleton timer, watermark or dynamic device scaling.
-  Hard ordering boundaries reset retained scheduling evidence.
+  the ordinary absolute deadline remains the hard boundary
+  ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$).
+  ID83 has one separately qualified earlier wake: a suppressed post-PACK tail of
+  two/three records with a staged valid pack may advance the existing hrtimer to
+  `sample_start + 500us`; it does not extend or replace the ordinary deadline and
+  it allocates no second timer. A deferred sampled singleton still uses only the
+  ordinary deadline; ID53 remains rejected. Hard ordering boundaries reset
+  retained scheduling evidence.
 - **In-flight write reaping:** completed detached $K=1$ lower writes are reaped
   opportunistically inside the worker loop so upper BIOs receive `bio_endio()`
   immediately without waiting for the full 64-BIO quantum or retention expiration.
@@ -164,10 +170,11 @@ belong in the ROADMAP decision table and Git history.
 - **Diagnostics:** PACK_READY causes, tail samples, ready-wait counters and
   similar telemetry are observational unless a separately qualified policy
   explicitly consumes them. Adding a counter is not permission to change a
-  scheduling decision. ID83 suppressed-tail lifetime attribution is worker-owned
-  only: it may measure post-sample WRITE progress, record-four age and independent
-  READ pivots, but must add no mapper atomic, timer, wake, admission gate or
-  alternate deadline.
+  scheduling decision. ID83 suppressed-tail state is worker-owned only: no
+  mapper atomic or admission gate is permitted. Owner report `64f6e8e1890e`
+  qualified the existing retention hrtimer's bounded 500us suppressed-tail wake
+  and cache-hit independent-READ pivot; lifetime counters remain through the
+  candidate qualification and are removed after that scheduling result settles.
 
 ### Settled implementation policies
 

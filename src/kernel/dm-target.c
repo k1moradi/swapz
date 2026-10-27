@@ -610,13 +610,15 @@ struct swapz_dm {
 	u64 pack_close_tail_target_3;
 	u64 pack_close_tail_target_4;
 	/*
-	 * Worker-owned passive lifetime attribution for sampled tails of two or
-	 * three records suppressed by the four-record floor. This state never
-	 * arms work, changes a deadline or participates in admission.
+	 * Worker-owned bounded policy state plus lifetime attribution for sampled
+	 * tails of two or three records suppressed by the four-record floor.
+	 * Only the existing retention hrtimer may be advanced to the qualified
+	 * resubmission bound; admission and mapper ownership stay unchanged.
 	 */
 	bool suppressed_tail_active;
 	bool suppressed_tail_next_write_seen;
 	bool suppressed_tail_read_pivot_seen;
+	bool suppressed_tail_read_bypass_seen;
 	swapz_u8 suppressed_tail_initial_count;
 	u64 suppressed_tail_start_ns;
 	u64 suppressed_tail_samples;
@@ -2871,6 +2873,7 @@ static void swapz_reset_suppressed_tail_observation(struct swapz_dm *ctx)
 	ctx->suppressed_tail_active = false;
 	ctx->suppressed_tail_next_write_seen = false;
 	ctx->suppressed_tail_read_pivot_seen = false;
+	ctx->suppressed_tail_read_bypass_seen = false;
 	ctx->suppressed_tail_initial_count = 0;
 	ctx->suppressed_tail_start_ns = 0;
 }
@@ -2946,7 +2949,16 @@ static void swapz_note_suppressed_tail_write_progress(struct swapz_dm *ctx)
 static void swapz_note_suppressed_tail_read_pivot(struct swapz_dm *ctx,
 						  bool had_lower_io)
 {
-	if (!ctx->suppressed_tail_active || ctx->suppressed_tail_read_pivot_seen)
+	if (!ctx->suppressed_tail_active)
+		return;
+	/*
+	 * An independent READ is a finite accepted-wave pivot even when shared
+	 * cache residency satisfies it without lower I/O. General retained
+	 * read-bypass evidence remains lower-I/O-only; this flag is scoped only
+	 * to the currently suppressed 2/3-record post-PACK tail.
+	 */
+	ctx->suppressed_tail_read_bypass_seen = true;
+	if (ctx->suppressed_tail_read_pivot_seen)
 		return;
 	ctx->suppressed_tail_read_pivot_seen = true;
 	ctx->suppressed_tail_read_pivots++;
@@ -2973,7 +2985,8 @@ static void swapz_account_suppressed_tail_close(
 	} else if (interrupted_close || ordering_boundary ||
 		   (close_reason == SWAPZ_CLOSE_PACK_READY &&
 		    (ctx->retained_window_read_bypasses ||
-		     ctx->retained_wave_interrupted))) {
+		     ctx->retained_wave_interrupted ||
+		     ctx->suppressed_tail_read_bypass_seen))) {
 		ctx->suppressed_tail_interrupted++;
 	} else {
 		ctx->suppressed_tail_other_clears++;
@@ -3839,11 +3852,16 @@ static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 	bool valid_pack =
 		ctx->single_pack_deferred || ctx->accepted_burst_pack_ready;
 	bool lower_idle = !swapz_has_inflight(ctx);
+	bool suppressed_tail_exhausted =
+		ctx->suppressed_tail_active && lower_idle &&
+		(ctx->suppressed_tail_read_bypass_seen ||
+		 swapz_window_suppressed_tail_resubmit_expired(
+			 ctx->suppressed_tail_start_ns, ktime_get_ns()));
 
 	return swapz_window_service_close_ready(
 		valid_pack, lower_idle, ctx->batch_count, ctx->retained_tail_target,
 		ctx->retained_chain_completed, ctx->retained_window_read_bypasses,
-		ctx->retained_wave_interrupted);
+		ctx->retained_wave_interrupted, suppressed_tail_exhausted);
 }
 
 static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
@@ -5308,9 +5326,11 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			swapz_note_suppressed_tail_read_pivot(ctx, had_lower_io);
 			ctx->retained_read_bypasses++;
 			/*
-			 * Cache hits are independent READ bypasses, but they do not prove
-			 * a lower-device service interval and therefore cannot authorize
-			 * service-dry window closure or extend the retention deadline.
+			 * Cache hits do not prove a lower-device service interval, so
+			 * they still do not enter general retained_window_read_bypasses
+			 * or extend the ordinary retention deadline. The separately
+			 * qualified suppressed-tail state above may treat the independent
+			 * READ itself as a finite wave pivot for only that 2/3-record tail.
 			 */
 			if (had_lower_io) {
 				swapz_note_single_tail_read_bypass(ctx);
@@ -5412,13 +5432,32 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
  * may finish ALL previously accepted BIOs without building a potentially
  * unbounded chain of requeued delayed works during drain_workqueue().
  */
-/* Every retained window, including a deferred sampled singleton, uses only
- * the ordinary first-record absolute deadline. ID53's shorter active cutoff
- * was rejected by owner evidence and is intentionally absent here. */
+/* The ordinary first-record absolute deadline remains the hard retention
+ * boundary. ID53's singleton cutoff stays rejected. The qualified ID83
+ * suppressed-tail path may only wake the same hrtimer earlier; it does not
+ * redefine ordinary deadline expiry. */
 static u64 swapz_retention_deadline_ns(struct swapz_dm *ctx)
 {
 	return swapz_window_retention_deadline_ns(
 		ctx->window_first_ns, ctx->retain_ms);
+}
+
+static u64 swapz_effective_wait_deadline_ns(struct swapz_dm *ctx)
+{
+	u64 deadline_ns = swapz_retention_deadline_ns(ctx);
+	bool valid_pack =
+		ctx->single_pack_deferred || ctx->accepted_burst_pack_ready;
+
+	if (ctx->suppressed_tail_active && valid_pack &&
+	    !swapz_has_inflight(ctx) && ctx->suppressed_tail_start_ns) {
+		u64 resubmit_deadline_ns =
+			swapz_window_suppressed_tail_resubmit_deadline_ns(
+				ctx->suppressed_tail_start_ns);
+
+		if (!deadline_ns || resubmit_deadline_ns < deadline_ns)
+			return resubmit_deadline_ns;
+	}
+	return deadline_ns;
 }
 
 static bool swapz_retention_expired(struct swapz_dm *ctx)
@@ -5955,7 +5994,7 @@ static void swapz_worker(struct work_struct *work)
 						hrtimer_is_queued(&ctx->retention_timer))) {
 					ctx->retain_timer_arms++;
 					hrtimer_start(&ctx->retention_timer,
-						ns_to_ktime(swapz_retention_deadline_ns(ctx)),
+						ns_to_ktime(swapz_effective_wait_deadline_ns(ctx)),
 						HRTIMER_MODE_ABS);
 				} else {
 					ctx->retain_timer_arm_skips++;

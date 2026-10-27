@@ -7,6 +7,12 @@
 struct bio;
 
 #define SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS 4U
+/*
+ * Owner report 64f6e8e1890e on source e17f05a1c256 measured the fast
+ * suppressed-tail reach-four p99 inside the <=500us bucket. Keep this fixed
+ * until another exact-source owner qualification replaces that evidence.
+ */
+#define SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS 500000ULL
 
 /* Prepared bytes and upper completion ownership remain with the worker. */
 struct swapz_pending_bio {
@@ -261,19 +267,22 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
 
 /*
  * SERVICE_DRY is allowed below the four-record floor only for an already
- * staged valid pack whose accepted wave was explicitly interrupted by a READ
- * bypass or ordering transition. A completed chain alone is not enough, and a
- * one-record window can never become PACK_READY through this path.
+ * staged valid pack. Existing read/fence evidence remains authoritative; the
+ * separately qualified suppressed-tail path may also close counts two/three
+ * after its bounded post-completion resubmission window or a cache-hit READ
+ * wave pivot. A one-record window can never become PACK_READY here.
  */
 static inline int swapz_window_service_close_ready(
 		int valid_pack, int lower_idle, swapz_u8 count,
 		swapz_u8 sampled_tail_target, int chain_completed,
-		int read_bypasses, int wave_interrupted)
+		int read_bypasses, int wave_interrupted,
+		int suppressed_tail_exhausted)
 {
 	if (!valid_pack || sampled_tail_target || count < 2U)
 		return 0;
 	if (count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)
-		return read_bypasses || wave_interrupted;
+		return read_bypasses || wave_interrupted ||
+			suppressed_tail_exhausted;
 	return chain_completed || read_bypasses || lower_idle;
 }
 
@@ -399,6 +408,33 @@ static inline unsigned long long swapz_window_retention_deadline_ns(
 		return 0;
 	duration = (unsigned long long)retain_ms * 1000000ULL;
 	return first_ns > ~0ULL - duration ? ~0ULL : first_ns + duration;
+}
+
+/*
+ * This is not a second retention budget. It is a bounded wake point inside the
+ * existing ordinary deadline for the specifically qualified suppressed 2/3
+ * post-PACK tail. Saturating addition keeps the helper total for native tests.
+ */
+static inline unsigned long long
+swapz_window_suppressed_tail_resubmit_deadline_ns(
+		unsigned long long sample_start_ns)
+{
+	if (!sample_start_ns)
+		return 0;
+	return sample_start_ns >
+		~0ULL - SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS ?
+		~0ULL :
+		sample_start_ns + SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS;
+}
+
+static inline int swapz_window_suppressed_tail_resubmit_expired(
+		unsigned long long sample_start_ns,
+		unsigned long long now_ns)
+{
+	if (!sample_start_ns || now_ns < sample_start_ns)
+		return 0;
+	return now_ns - sample_start_ns >=
+		SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS;
 }
 
 static inline int swapz_window_deadline_expired(unsigned long long deadline_ns,

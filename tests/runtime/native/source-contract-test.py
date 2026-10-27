@@ -1247,13 +1247,19 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("closed_small_tail_deadline_ns", DM)
         self.assertNotIn("swapz_note_closed_small_tail_companion_locked", DM)
         self.assertNotIn("swapz_arm_closed_small_tail_observation", DM)
-        self.assertNotIn("SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS", DM + policy)
+        self.assertIn("#define SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS 500000ULL",
+                      policy)
+        self.assertIn("swapz_window_suppressed_tail_resubmit_expired(", policy)
+        self.assertIn("swapz_window_suppressed_tail_resubmit_deadline_ns(",
+                      policy)
         self.assertIn("suppressed_tail_samples++", suppressed_start)
         self.assertIn("ctx->batch_count <= ctx->suppressed_tail_initial_count",
                       suppressed_progress)
         self.assertIn("ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
                       suppressed_progress)
         self.assertIn("suppressed_tail_reached_4++", suppressed_progress)
+        self.assertIn("ctx->suppressed_tail_read_bypass_seen = true",
+                      suppressed_pivot)
         self.assertIn("suppressed_tail_read_pivot_cache_hits++", suppressed_pivot)
         self.assertIn("suppressed_tail_read_pivot_lower_io++", suppressed_pivot)
         self.assertIn("suppressed_tail_deadline_at_2++", suppressed_close)
@@ -1334,12 +1340,17 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_window_read_bypasses", service_dry)
         self.assertIn("ctx->retained_wave_interrupted", service_dry)
         self.assertIn("!swapz_has_inflight(ctx)", service_dry)
+        self.assertIn("ctx->suppressed_tail_read_bypass_seen", service_dry)
+        self.assertIn("swapz_window_suppressed_tail_resubmit_expired(",
+                      service_dry)
         service_policy = source_body("swapz_window_service_close_ready", policy)
         self.assertIn("!valid_pack || sampled_tail_target || count < 2U",
                       service_policy)
         self.assertIn("count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
                       service_policy)
-        self.assertIn("return read_bypasses || wave_interrupted", service_policy)
+        self.assertIn("return read_bypasses || wave_interrupted ||",
+                      service_policy)
+        self.assertIn("suppressed_tail_exhausted", service_policy)
         self.assertIn("return chain_completed || read_bypasses || lower_idle",
                       service_policy)
         self.assertIn("swapz_window_burst_close_ready(", close_ready)
@@ -2020,16 +2031,24 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_order_window(ctx)", flush)
         self.assertIn("swapz_engine_write_window_batched_read_cap", flush)
 
-    def test_retention_timer_keeps_ordinary_pinned_deadline(self):
+    def test_retention_timer_keeps_ordinary_hard_deadline_with_bounded_tail_wake(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
         worker = body("swapz_worker")
+        effective = body("swapz_effective_wait_deadline_ns")
         status = body("swapz_status")
         self.assertIn("swapz_retention_timer_needs_arm(", policy)
         self.assertIn("swapz_window_timer_enabled(retain_ms) && !queued", policy)
         self.assertNotIn("swapz_retention_timer_needs_rearm(", policy)
         self.assertNotIn("hrtimer_get_expires(", worker)
         self.assertIn("hrtimer_is_queued(&ctx->retention_timer)", worker)
-        self.assertIn("ns_to_ktime(swapz_retention_deadline_ns(ctx))", worker)
+        self.assertIn("swapz_retention_deadline_ns(ctx)", effective)
+        self.assertIn("ctx->suppressed_tail_active", effective)
+        self.assertIn("ctx->suppressed_tail_start_ns", effective)
+        self.assertIn("!swapz_has_inflight(ctx)", effective)
+        self.assertIn("swapz_window_suppressed_tail_resubmit_deadline_ns(",
+                      effective)
+        self.assertIn("ns_to_ktime(swapz_effective_wait_deadline_ns(ctx))",
+                      worker)
         self.assertLess(worker.index("hrtimer_is_queued(&ctx->retention_timer)"),
                         worker.index("hrtimer_start(&ctx->retention_timer"))
         self.assertIn("ctx->retain_timer_arms++", worker)
@@ -2372,7 +2391,8 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("swapz_retention_delay", DM)
         self.assertIn("hrtimer_start(&ctx->retention_timer", worker)
         self.assertIn("swapz_retention_timer_needs_arm(", worker)
-        self.assertIn("ns_to_ktime(swapz_retention_deadline_ns(ctx))", worker)
+        self.assertIn("ns_to_ktime(swapz_effective_wait_deadline_ns(ctx))",
+                      worker)
         self.assertIn("HRTIMER_MODE_ABS", worker)
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock", wake)
         self.assertIn("if (ctx->accepting)", wake)

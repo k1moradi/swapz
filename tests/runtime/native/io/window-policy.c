@@ -284,16 +284,38 @@ static int test_sampled_tail_target_preserves_four_record_floor(void)
 
 static int test_service_dry_pack_requires_valid_multi_record_pack(void)
 {
-	CHECK(!swapz_window_service_close_ready(0, 1, 1, 0, 1, 1, 1));
-	CHECK(!swapz_window_service_close_ready(0, 1, 2, 0, 1, 1, 0));
-	CHECK(!swapz_window_service_close_ready(1, 1, 1, 0, 1, 1, 1));
-	CHECK(!swapz_window_service_close_ready(1, 1, 2, 0, 1, 0, 0));
-	CHECK(swapz_window_service_close_ready(1, 1, 2, 0, 1, 1, 0));
-	CHECK(swapz_window_service_close_ready(1, 1, 3, 0, 1, 0, 1));
-	CHECK(!swapz_window_service_close_ready(1, 1, 3, 4, 1, 1, 1));
-	CHECK(swapz_window_service_close_ready(1, 1, 4, 0, 0, 0, 0));
-	CHECK(swapz_window_service_close_ready(1, 0, 4, 0, 1, 0, 0));
-	CHECK(!swapz_window_service_close_ready(1, 0, 4, 0, 0, 0, 0));
+	CHECK(!swapz_window_service_close_ready(0, 1, 1, 0, 1, 1, 1, 1));
+	CHECK(!swapz_window_service_close_ready(0, 1, 2, 0, 1, 1, 0, 1));
+	CHECK(!swapz_window_service_close_ready(1, 1, 1, 0, 1, 1, 1, 1));
+	CHECK(!swapz_window_service_close_ready(1, 1, 2, 0, 1, 0, 0, 0));
+	CHECK(swapz_window_service_close_ready(1, 1, 2, 0, 1, 1, 0, 0));
+	CHECK(swapz_window_service_close_ready(1, 1, 3, 0, 1, 0, 1, 0));
+	CHECK(swapz_window_service_close_ready(1, 1, 2, 0, 0, 0, 0, 1));
+	CHECK(swapz_window_service_close_ready(1, 1, 3, 0, 0, 0, 0, 1));
+	CHECK(!swapz_window_service_close_ready(1, 1, 3, 4, 1, 1, 1, 1));
+	CHECK(swapz_window_service_close_ready(1, 1, 4, 0, 0, 0, 0, 0));
+	CHECK(swapz_window_service_close_ready(1, 0, 4, 0, 1, 0, 0, 0));
+	CHECK(!swapz_window_service_close_ready(1, 0, 4, 0, 0, 0, 0, 0));
+	return 0;
+}
+
+static int test_suppressed_tail_resubmit_window_is_bounded(void)
+{
+	unsigned long long start = 1000ULL;
+
+	CHECK(SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS == 500000ULL);
+	CHECK(swapz_window_suppressed_tail_resubmit_deadline_ns(0) == 0);
+	CHECK(swapz_window_suppressed_tail_resubmit_deadline_ns(start) ==
+	      start + 500000ULL);
+	CHECK(swapz_window_suppressed_tail_resubmit_deadline_ns(
+		      ULLONG_MAX - 100ULL) == ULLONG_MAX);
+	CHECK(!swapz_window_suppressed_tail_resubmit_expired(0, 999999ULL));
+	CHECK(!swapz_window_suppressed_tail_resubmit_expired(start, start - 1ULL));
+	CHECK(!swapz_window_suppressed_tail_resubmit_expired(
+		      start, start + 499999ULL));
+	CHECK(swapz_window_suppressed_tail_resubmit_expired(
+		      start, start + 500000ULL));
+	CHECK(swapz_window_suppressed_tail_resubmit_expired(start, ULLONG_MAX));
 	return 0;
 }
 
@@ -518,6 +540,7 @@ int main(void)
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
 	CHECK(test_sampled_tail_target_preserves_four_record_floor() == 0); passed++;
 	CHECK(test_service_dry_pack_requires_valid_multi_record_pack() == 0); passed++;
+	CHECK(test_suppressed_tail_resubmit_window_is_bounded() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
