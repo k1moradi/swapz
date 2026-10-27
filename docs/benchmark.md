@@ -646,36 +646,42 @@ storage envelopes remain the decision surface, and the SIMD qualification
 matrix remains unchanged: SSE2/AVX2/AVX-512 objects on x86_64, NEON on arm64,
 with runtime execution only when the host advertises the ISA.
 
-Owner report `6836b4ff1ffc` qualifies exact source `b4bc5e0ba965`
-across all five stages. Fast mixed async useful WRITE reaches 46.73 MB/s versus
-41.06 MB/s sync, a statistically significant +13.9% gain (95% CI
-+9.6..+18.1), but async lower WRITE requests rise to 2678.8 versus 1757.6 sync
-(+921.2, CI +899.1..+943.3). Fast sustained QD4 regresses -28.1%
-(-37.4..-18.7) with about 2046 lower requests, while QD8 is statistically
-neutral and the earlier QD32 regression narrows to an unresolved -3.8%.
+Owner report `5f867aa81fce` qualifies exact source `5edcb2981573` across all
+five stages. The short-window/service-dry refinement fixes the specific request
+geometry path identified in `b4bc5e0ba965`: fast mixed async IDLE closes fall
+681.6 -> 0.6, `prep_ordered_raw` falls 2751.6 -> 1001.6, lower WRITE bytes
+40.68 -> 38.13 MB, and lower WRITE requests 2678.8 -> 2444.4. Explicit
+PACK_READY cause accounting now reports only 25.4 BURST_TARGET closes and
+1129.2 SERVICE_DRY closes.
 
-The next ID83 source change is a single production-policy experiment, not a new
-concurrency architecture. It keeps the qualified snapshot publication boundary,
-K=1, one preparation lane, 64 slots, ID63, cache policy and SWZ 1/2/4 geometry.
-It prevents a momentarily idle lower path from flushing a retained two/three
-record prefix below its effective target, prevents the eight-record pressure
-hand from chopping already-accepted plain-WRITE work below a larger target, and
-bounds forced RAW to the first eight-record hand only when at least eight
-accepted records of backlog are already proven. A truly dry FIFO may still
-service a complete staged multi-pack hand without waiting for future arrivals.
+Fast sustained scaling also improves. QD4 async-minus-sync throughput moves from
+-28.1% (95% CI -37.4..-18.7) to -6.55% (-12.45..-0.65); its lower-request
+change is now unresolved at +17.1% (-6.17..+40.44). QD8 is +4.22%
+(-3.95..+12.39) and QD32 +1.77% (-4.83..+8.37), both statistically neutral.
+The two-record ping-pong diagnosis is therefore confirmed, but QD4 is not yet
+fully recovered.
 
-PACK_READY cause accounting is corrected at the same boundary: a packed
-work-conserving close below the effective target is SERVICE_DRY, not a synthetic
-BURST_TARGET. Retained lower-idle wall is split into four conserved timed
-components (undersized retained wait, worker scheduling delay, preparation-head
-wait and remaining active no-ready work); a separate post-lower diagnostic
-measures callback-to-publication hold when accepted WRITE work is waiting.
+The geometry gain does not translate into a fast-mixed service promotion.
+Same-source fast mixed async is 37.22 MB/s versus 37.86 sync, or -1.68%
+(95% CI -4.75..+1.39), while lower requests remain +30.0%
+(+27.3..+32.8) and lower bytes remain about +5.3% versus sync. The previous
+`b4bc5e0` report had a confirmed +13.9% async/sync service gain. Cross-report
+raw throughput is nearly unchanged (62.88 -> 62.39 MB/s), so the large async
+drop is unlikely to be explained solely by host-speed variation, although
+cross-report scheduler/CPU attribution remains non-comparable by policy.
 
-The performance hypothesis is deliberately narrow. QD4 should stop the observed
-two-record IDLE oscillation and move request geometry toward the synchronous
-control, while fast mixed should reduce forced RAW bytes and short-window lower
-requests without surrendering its confirmed async service gain. No exact
-throughput or request-count improvement is considered established until the
-next same-source owner `make test` report. Slow/SD useful service, lower-byte
-savings, p99, loaded lifecycle correctness and all supported ISA/build coverage
-remain non-regression gates.
+The new idle attribution makes the remaining cause concrete. Fast mixed async
+records 679.41 ms accepted lower-idle wall: 621.35 ms undersized-batch retention,
+54.71 ms worker-unscheduled, 0 ms preparation-head wait and 3.35 ms remaining
+active no-ready work. The separate post-lower diagnostic is 17.29 ms. K=1 ready
+wait remains zero. The next experiment therefore targets undersized retention,
+not more preparation or lower-WRITE concurrency.
+
+A bounded next policy is to preserve retention for 1..3 records but permit a
+proven-dry retained window with at least one complete four-record SWZ pack to
+close as SERVICE_DRY below a larger learned target. Four records is an existing
+format/packing boundary rather than a new timing heuristic. Accept it only if a
+new owner `make test` recovers fast mixed useful service, removes the remaining
+significant QD4 deficit, preserves the current request/byte improvement, and
+keeps QD8/QD32 plus slow/SD evidence non-regressing.
+
