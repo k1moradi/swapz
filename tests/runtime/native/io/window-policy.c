@@ -270,6 +270,18 @@ static int test_retained_burst_target_adapts_from_finite_evidence(void)
 	return 0;
 }
 
+static int test_sampled_tail_target_preserves_four_record_floor(void)
+{
+	CHECK(swapz_window_sampled_tail_target(0, 0) == 0);
+	CHECK(swapz_window_sampled_tail_target(1, 1) == 0);
+	CHECK(swapz_window_sampled_tail_target(2, 2) == 0);
+	CHECK(swapz_window_sampled_tail_target(3, 3) == 0);
+	CHECK(swapz_window_sampled_tail_target(4, 0) == 0);
+	CHECK(swapz_window_sampled_tail_target(4, 1) == 4);
+	CHECK(swapz_window_sampled_tail_target(8, 3) == 8);
+	return 0;
+}
+
 static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 {
 	CHECK(!swapz_window_burst_close_ready(0, 0, 3, 4, 0));
@@ -489,6 +501,7 @@ int main(void)
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_pack_ready_uses_compressed_geometry_across_raw_slots() == 0); passed++;
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
+	CHECK(test_sampled_tail_target_preserves_four_record_floor() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;

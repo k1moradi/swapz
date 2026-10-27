@@ -658,18 +658,25 @@ must be consumed so it cannot authorize another dry-tail singleton close.
 Source coverage must preserve DUPLICATE continuation semantics because the
 current WRITE continues after that older batch is flushed.
 
-While the exact small-tail attribution question is active, source contracts and
-loaded reports must expose sampled-tail PACK_READY closes with exact targets 2,
-3 and 4. A target-2/target-3 close must also arm passive observation of the first
-later plain WRITE admission against the absolute retention deadline that close
-displaced. The observation may survive the close itself, but a worker-idle or
-hard ordering boundary cancels it. A newer target-2/target-3 close may supersede
-an older live observation only if that supersession is counted explicitly.
-These counters must not arm a timer, wake work, change FIFO ownership, alter a
-close target or extend retention. Every interval counter added to kernel status
-must be carried by both the timed replay producer and the final report consumer;
-source contracts must reject producer/consumer schema drift. Remove the
-diagnostic counters after they settle the policy question.
+ID83 exact small-tail attribution is settled by owner report `685c52f5a272`
+on source `f111c6e0e25d`: on fast mixed media, more than 99.7% of sampled
+target-2 and target-3 PACK_READY closes are followed by a later plain WRITE
+before the displaced absolute retention deadline. The production candidate must
+therefore suppress sampled tail targets below
+`SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS` while keeping target four and larger
+finite targets authoritative. Source contracts and native policy tests must
+also prove that the `valid_pack` SERVICE_DRY branch cannot close counts 1..3
+through prior `retained_chain_completed` evidence; the existing sub-four
+read-bypass/wave-interrupted exception remains separate.
+
+Keep the exact target-2/3/4 and companion/supersession counters through the
+candidate's owner qualification. Target-2/3 closes and their companion counters
+should fall to zero while target four remains observable. These counters must
+not arm a timer, wake work, change FIFO ownership, alter a close target or
+extend retention. Every interval counter added to kernel status must be carried
+by both the timed replay producer and final report consumer; source contracts
+must reject producer/consumer schema drift. Remove the diagnostic counters after
+the policy result is settled.
 
 Loaded qualification must use the exact-source owner `make test` matrix and
 judge product-facing service before internal attribution. On the same ARM64/NEON

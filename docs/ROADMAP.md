@@ -9,11 +9,11 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest successful standard owner matrix tested exact source
-`83492a24ee3df6d949ee76219080e616126a7ca9` and published canonical
-report-only commit `d29a606dc714d98733c284925472b3de9b999f27`. All five
+`f111c6e0e25d2f32f7fef29786cc6b5745cab973` and published canonical
+report-only commit `685c52f5a272552487ddc584505bf6df8a3ec892`. All five
 stages passed, including loaded correctness, live GC, DISCARD/TRIM,
 suspend/drain, retained write/flush fault injection, packed placement, both
-emulated storage regimes, modern storage envelopes and resource pressure.
+emulated storage regimes, modern storage envelopes and ID36 resource pressure.
 
 The four-record proven-dry `SERVICE_DRY` floor is qualified and stays in
 production. Against the immediately preceding ARM64/NEON source `5edcb298`,
@@ -25,19 +25,18 @@ Lower-WRITE requests rise 5.1%, but lower bytes improve slightly
 regression.
 
 Fast media is still not product-qualified against raw. The current fast mixed
-result is 44.75 MB/s swapz versus 62.95 MB/s raw (-28.9%), despite 25.3% fewer
-backing WRITE bytes per useful byte and 80.4% fewer lower WRITE requests.
-Sustained WRITE is 19.46/56.92/81.96/126.70 MB/s at QD1/4/8/32 versus raw
-22.66/83.86/84.89/85.66 MB/s. The QD32 result proves compression and packing
-can beat raw when request geometry is large enough; the QD4 deficit remains the
+result is 42.72 MB/s async swapz versus 62.96 MB/s raw (-32.1%), despite 25.3%
+fewer backing WRITE bytes per useful byte and 80.2% fewer lower WRITE requests.
+Fast sustained async WRITE is 17.23/58.11/75.15/119.39 MB/s at QD1/4/8/32
+versus raw 21.58/83.74/85.36/85.67 MB/s. QD32 still proves compression and
+packing can beat raw when request geometry is large enough; QD4 remains the
 critical fast-media service problem.
 
-The current async preparation result is not a broad fast-media win. Fast mixed
-sync is 45.77 MB/s versus async 44.75 MB/s; paired async-minus-sync is -2.2%
-with 95% CI [-6.1%, +1.7%], while async adds about 148 lower requests. The
-preceding source showed a significant async benefit and slow QD4 still favors
-async, so the producer/reservoir path remains pending one terminal de-bloat A/B
-rather than being removed from this source.
+Async preparation remains unqualified as a general service win. Fast sustained
+async/sync is -1.2% at QD4, -4.5% at QD8 and -4.1% at QD32, while serial-depth
+QD4 is also lower under async. Keep the producer/reservoir path fixed through
+the small-tail policy qualification so the causal variable remains isolated;
+the terminal de-bloat A/B remains the next scheduling experiment afterward.
 
 Delta64 remains default-off. Its controlled positive fixture still provides
 strong loaded evidence (+19.8% useful WRITE, -21.4% p99 and -24.8% lower
@@ -53,22 +52,20 @@ extents.
 
 ## Current bottleneck ranking
 
-The strongest current fast-QD4 signal is sampled-tail closure fragmentation.
-Across the five owner-qualified fast QD4 async rounds, `TAIL_TARGET` closes
-track useful throughput with correlation about -0.997 and lower-WRITE requests
-with correlation about +1.000. That is strong loaded evidence, but the current
-report combines small target sizes and therefore does not yet establish which
-sampled target causes the regression.
+The strongest current fast-QD4 signal is now confirmed sampled-tail closure
+fragmentation. Report `685c52f5a272` records fast mixed target-2/3/4 closes
+of 293.0/198.0/124.0 in sync and 215.0/154.6/124.2 in async. Of target-2/3
+closes, 99.96% in sync and 99.78% in async are followed by a later plain WRITE
+before the displaced absolute retention deadline; observation supersession is
+zero. These are not terminal tails on fast media.
 
-The source makes the next hypothesis concrete. After a K=1 PACK_READY
-completion, the worker samples already-accepted followers and a queued tail of
-two or three records can install `retained_tail_target`, allowing that small
-window to close before the general proven-dry policy would service counts 1..3.
-The next step is therefore passive attribution, not another scheduler change:
-report exact sampled-tail PACK_READY target-2/3/4 closes and, for target 2/3,
-whether a later plain WRITE arrives before the absolute deadline that the close
-displaced. Count observation supersession so missing follow-up coverage is
-visible.
+Two production paths must move together. Post-PACK sampling must not install a
+finite target below the qualified four-record floor, and SERVICE_DRY must not
+let prior `retained_chain_completed` plus `valid_pack` immediately close the
+same two/three-record window under a different cause. The candidate therefore
+suppresses sampled targets below four and applies the four-record floor to the
+entire valid-pack SERVICE_DRY branch, while preserving the existing explicit
+read-bypass/wave-interrupted sub-four exception and the pinned deadline.
 
 Fast sustained-write geometry reinforces that priority. At QD4 swapz averages
 about 2.97 logical pages per lower request while raw can keep four lower
@@ -204,7 +201,7 @@ changes.
 | 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; restored pre-ID80 policy requalified** | Report `71251ba9232e` refuted ID80's static `count > 4U` gate with fast QD8 async/sync -9.1% (95% CI -15.1..-3.1). Current report `dc78c9bbffbd` on source `0155a09a0f2e` passes all five stages with the actual pre-ID80 predicate `count > 4U || preparation_queued > 0`; sustained QD4/QD8/QD32 async/sync throughput is +3.94% / +0.95% / +0.94%, with all three intervals overlapping zero. Keep ID80 removed and retain no dormant selector. |
 | 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed; rollback lifecycle requalified** | Exact source `26a045c80b56` passed build/native/W=1/W=2, then BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`); no benchmark result from that source is valid. The bundled candidate also replaced the true pre-ID80 detach predicate with unqualified `count > 1U`. Current source `0155a09a0f2e` removes the whole bundle and passes retained suspend/drain plus the complete owner matrix in report `dc78c9bbffbd`. This proves the rollback is healthy but does not identify which ID81 sub-change caused the lifecycle failure; do not split or revive those changes without independent evidence. |
 | 82 | Fast-media retained deadline and wakeup overhead | **4 evidence-backed candidate; measurement first** | Current exact source `0155a09a0f2e` shows Gen4 mixed 591.3 ms with 197 worker-empty deadline closes, 33.9 ms lower-WRITE service, 37.3 ms ordered-worker CPU and zero K=1 ready waits; Gen5 is 522.5 ms / 176 deadlines / 23.8 ms lower-WRITE / 32.3 ms worker CPU. At retain_ms=2, count*deadline proves at least 394/352 ms of aggregate deadline-reaching window age; it is not a pure-idle measurement. First add exact retained idle-wait and worker-wake attribution; then test a fast-media microsecond-scale or accepted-work-only closure policy without changing K=1, SWZ, ID63 or authority ownership. Reject if SD gains, lower-byte savings, lifecycle safety or mixed p99 regress materially. |
-| 83 | Work-conserving admission queue + prepared reservoir + compressed/RAW dispatcher | **1 four-record dry floor owner-qualified / keep; exact small-tail attribution next** | Exact ARM64/NEON source `83492a24ee3d`, report `d29a606dc714`, passes all five owner stages. The four-record proven-dry floor improves fast mixed async 40.25 -> 44.75 MB/s versus `5edcb298` while preserving QD8/QD32 direction, but swapz still trails raw 28.9%. Five fast-QD4 async rounds show `TAIL_TARGET` close count tracking useful throughput at about -0.997 correlation and lower requests at about +1.000. Before changing policy, disaggregate exact target-2/3/4 PACK_READY closes and observe whether the first later plain WRITE after target 2/3 arrives before the displaced absolute deadline. Keep the observation passive and count supersession. If confirmed, test suppressing only sampled targets below four; keep target four, K=1, one producer, 64 slots, ID63 and SWZ fixed. |
+| 83 | Work-conserving admission queue + prepared reservoir + compressed/RAW dispatcher | **2 small-tail cause confirmed / four-record policy candidate pending owner qualification** | Exact source `f111c6e0e25d`, report `685c52f5a272`, passes all five owner stages. Fast mixed target-2/3 closes are followed by another plain WRITE before the displaced deadline 99.96% of the time in sync and 99.78% in async, with zero supersession. The production candidate suppresses sampled targets below four and prevents prior completed-chain `valid_pack` evidence from bypassing the same four-record SERVICE_DRY floor. Keep target four, the existing deadline, K=1, one producer, 64 slots, ID63 and SWZ fixed; qualify service/lower-I/O/p99 before promotion. |
 
 ## What the pinned queue experiment establishes
 
@@ -268,22 +265,21 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-The latest owner-qualified source is `83492a24ee3d`, with canonical
-report-only commit `d29a606dc714`. The immediate preceding policy source is
-`5edcb2981573`; `b389204` remains the near-raw mixed-service reference that
-also demonstrated why unconditional four-record closure is not acceptable.
+The latest owner-qualified source is `f111c6e0e25d`, with canonical
+report-only commit `685c52f5a272`. The exact small-tail attribution question
+is closed: target-2/3 PACK_READY closes are overwhelmingly premature on fast
+mixed media.
 
-1. Collect exact passive sampled-tail PACK_READY attribution: target 2, target
-   3 and target 4 close counts, plus for target 2/3 whether the first later
-   plain WRITE admission occurs before the absolute retention deadline that the
-   close displaced. Report observation supersession explicitly. Do not alter
-   scheduling while collecting this evidence.
-2. If bad fast-QD4 rounds are dominated by target-2/target-3 closes and later
-   WRITEs commonly arrive before the displaced deadline, suppress only sampled
-   tail targets below four. Keep target four authoritative and reuse the
-   existing deadline; add no new timer, grace period, device classifier or
-   queue-depth selector.
-3. Qualify any policy change only through the public `make test`. Primary
+1. Qualify the coupled four-record policy candidate: suppress sampled tail
+   targets 2/3, keep target four authoritative, and require the valid-pack
+   SERVICE_DRY branch itself to reach `SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS`.
+   Preserve the existing sub-four read-bypass/wave-interrupted exception and
+   the original pinned deadline; add no timer, grace period, device classifier
+   or queue-depth selector.
+2. Keep exact target-2/3/4 telemetry for this qualification. Target-2/3 closes,
+   companion-before-deadline counts and supersession should be zero; target four
+   should remain observable.
+3. Qualify the policy change only through the public `make test`. Primary
    gates are materially better raw-relative fast QD4 and fast mixed useful
    service, preserved QD8/QD32 and slow/SD direction, non-regressive p99 and
    lifecycle behavior, and no lower-byte regression.

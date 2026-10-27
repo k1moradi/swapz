@@ -1229,7 +1229,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->single_tail_deferrals++", sample)
         self.assertIn("ctx->retained_single_tail_deferred = true", sample)
         self.assertIn("ctx->single_tail_other_clears++", sample)
-        self.assertIn("ctx->retained_tail_target = queued_tail ? tail : 0U", sample)
+        self.assertIn("swapz_window_sampled_tail_target(tail, queued_tail)",
+                      sample)
+        self.assertIn("swapz_window_sampled_tail_target(", policy)
+        self.assertIn("tail < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", policy)
         self.assertIn("ctx->retained_single_tail_deferred = false", sample)
         self.assertNotIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
         small_tail_arm = body("swapz_arm_closed_small_tail_observation")
@@ -1308,6 +1311,15 @@ static swapz_u16 swapz_probe_set(
                       close_ready)
         self.assertIn("swapz_service_proven_dry_pack(ctx)", close_ready)
         self.assertIn("ctx->batch_count", service_dry)
+        self.assertEqual(
+            service_dry.count(
+                "ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS"), 1)
+        self.assertEqual(
+            service_dry.count(
+                "ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS"), 1)
+        self.assertIn("ctx->retained_chain_completed", service_dry)
+        self.assertIn("ctx->retained_window_read_bypasses", service_dry)
+        self.assertIn("ctx->retained_wave_interrupted", service_dry)
         self.assertIn("ctx->retained_chain_completed", service_dry)
         self.assertIn("ctx->retained_window_read_bypasses", service_dry)
         self.assertIn("ctx->retained_wave_interrupted", service_dry)

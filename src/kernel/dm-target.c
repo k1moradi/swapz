@@ -3714,9 +3714,11 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			ctx->retained_single_tail_deferred = true;
 		} else {
 			/* A staged-only prefix may be joined by writers released by
-			 * the just-finalized K=1 run. Do not self-close that prefix;
-			 * queued accepted followers provide the finite tail target. */
-			ctx->retained_tail_target = queued_tail ? tail : 0U;
+			 * the just-finalized K=1 run. Do not self-close that prefix,
+			 * and do not let a two/three-record reschedule gap override
+			 * the qualified four-record service floor. */
+			ctx->retained_tail_target =
+				swapz_window_sampled_tail_target(tail, queued_tail);
 		}
 	} else {
 		ctx->retained_chain_completed = 0;
@@ -3732,8 +3734,8 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
  * caller supplies that FIFO-dry proof; this helper supplies the staged-pack,
  * lower-idle and sampled-tail policy.
  *
- * Counts 1..3 retain the pinned deadline. A sampled finite tail is stronger
- * evidence and must still drain to its one-shot target.
+ * Counts 1..3 retain the pinned deadline. A sampled finite tail is
+ * authoritative only at or above the same four-record floor.
  */
 static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 {
@@ -3742,10 +3744,10 @@ static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 	bool lower_idle = !swapz_has_inflight(ctx);
 
 	return !ctx->retained_tail_target && ctx->batch_count &&
-		(((ctx->retained_chain_completed ||
+		(((ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS) &&
+		  (ctx->retained_chain_completed ||
 		   ctx->retained_window_read_bypasses ||
-		   (lower_idle &&
-		    ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)) &&
+		   lower_idle) &&
 		  valid_pack) ||
 		 ((ctx->retained_window_read_bypasses ||
 		   ctx->retained_wave_interrupted) &&

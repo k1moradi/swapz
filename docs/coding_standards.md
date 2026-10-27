@@ -118,7 +118,10 @@ belong in the ROADMAP decision table and Git history.
   after the serialized worker proves both accepted FIFOs dry, no K=1 lower WRITE
   remains active, no sampled tail target is pending, and a valid compressed pack
   is already staged may a retained window close below a larger learned target at
-  the four-record floor. Counts 1..3 keep the original pinned deadline.
+  the four-record floor. Counts 1..3 keep the original pinned deadline. Post-PACK
+  sampled tails below four are not authoritative close targets; sampled target
+  four and larger may remain one-shot finite targets. A prior completed chain or
+  deferred valid pack must never bypass the same four-record floor.
 - **Retention deadline:** learned/admitted targets may shape aggregation, but
   the ordinary absolute deadline remains authoritative ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$).
   Timing diagnostics must never become scheduling or timeout policy without a
