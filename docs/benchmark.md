@@ -455,7 +455,7 @@ they affect how new measurements are designed:
 
 | Topic | Settled conclusion | Reopen only when |
 |---|---|---|
-| Retained-window deadline duration | Slow-media retention remains useful, but current Gen4/Gen5 envelope evidence reopens the 2 ms duration for fast media. Measure exact idle-wait first; do not add another grace/recheck timer. | Exact retained idle-wait shows the current deadline materially dominates wall time while already-accepted batching and lower-byte savings can be preserved with a shorter fast-media budget or accepted-work-only close. |
+| Retained-window deadline duration | Slow-media retention remains useful, but current Gen4/Gen5 envelope evidence reopens the 2 ms duration for fast media. Report `f0d2e04e50e7` further shows that suppressing target-2/3 through the full deadline improves sustained QD geometry but regresses fast mixed service. Measure suppressed-tail WRITE/reach-four lifetime and cache-hit READ pivots first; do not add another grace/recheck timer. | Passive lifetime evidence must separate quickly reaching four records from wave-end tails that remain at two/three until deadline, with a threshold justified by measured p99 before any alternate wake policy. |
 | Admission queue + prepared reservoir + opportunistic compressed/RAW dispatch | Admission should be descriptor-only where ownership permits; prepared payloads live in a bounded preallocated reservoir and the ordered dispatcher never waits solely for compression. Existing mixed runs already support compressed extents followed by RAW 4KiB extents. | Queue/reservoir occupancy proves useful run-ahead work and accepted work exists while lower WRITE is idle; a same-source candidate reduces that idle wall and improves useful service without unacceptable slow-media/lower-I/O regression. |
 | Deferred singleton age cutoff (ID53) | Rejected and reverted; keep the ordinary deadline. | New evidence invalidates the feedback/artifact mechanism recorded under ID53. |
 | Completion-aware zero-tail preservation (ID57) | Rejected and reverted; it contaminated later closed-loop waves. | A new state model can prove wave ownership without stale service evidence. |
@@ -519,6 +519,11 @@ Current benchmark work must preserve these contracts:
 - **Evidence:** compare byte-exact useful work, independent lower bytes and
   requests, useful throughput, p99, CPU/PSI context and the relevant bounded
   internal counters. Internal counters alone never establish a product win.
+  The official `make test` sustained matrix keeps five matched fast QD4/QD8/
+  QD32 pairs and five matched serial QD32 pairs. Generic scheduling changes do
+  not alter the codec matrix: x86_64 qualification compiles SSE2, AVX2 and
+  AVX-512 objects and arm64 compiles NEON, with byte-exact scalar fallback and
+  runtime ISA selection preserved.
 
 ### Current evidence cycle
 
