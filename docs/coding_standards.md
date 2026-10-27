@@ -121,7 +121,10 @@ belong in the ROADMAP decision table and Git history.
   the four-record floor. Counts 1..3 keep the original pinned deadline. Post-PACK
   sampled tails below four are not authoritative close targets; sampled target
   four and larger may remain one-shot finite targets. A prior completed chain or
-  deferred valid pack must never bypass the same four-record floor.
+  deferred valid pack must never bypass the same four-record floor. The explicit
+  sub-four read-bypass/wave-interruption exception requires a staged valid pack
+  and at least two records; it must never manufacture a one-record PACK_READY
+  close.
 - **Retention deadline:** learned/admitted targets may shape aggregation, but
   the ordinary absolute deadline remains authoritative ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$).
   Timing diagnostics must never become scheduling or timeout policy without a
@@ -161,7 +164,10 @@ belong in the ROADMAP decision table and Git history.
 - **Diagnostics:** PACK_READY causes, tail samples, ready-wait counters and
   similar telemetry are observational unless a separately qualified policy
   explicitly consumes them. Adding a counter is not permission to change a
-  scheduling decision.
+  scheduling decision. ID83 suppressed-tail lifetime attribution is worker-owned
+  only: it may measure post-sample WRITE progress, record-four age and independent
+  READ pivots, but must add no mapper atomic, timer, wake, admission gate or
+  alternate deadline.
 
 ### Settled implementation policies
 

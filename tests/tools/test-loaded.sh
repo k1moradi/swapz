@@ -333,13 +333,16 @@ done
 # and tail-latency gains; the off/on selector is retired from routine tests.
 
 # Write-only sustained-QD controls stay one sync/async observation per point
-# except fast QD8 and QD32, which keep five adjacent counterbalanced rounds.
+# except fast QD4/QD8/QD32 and serial QD32, which keep five adjacent
+# counterbalanced rounds. The serial QD32 gate decides whether the one-producer
+# preparation path still earns its retained code/state on high-delay media.
 # Historical wave-driver evidence is not reused as sustained-QD qualification.
 for regime in sd_emulated ssd_emulated; do
     printf 'START_WRITE_SATURATION_REGIME=%s\n' "$regime"
     index=0
     for qd in 1 4 8 32; do
-        if [[ $regime == ssd_emulated && ( $qd == 4 || $qd == 8 || $qd == 32 ) ]]; then
+        if [[ ( $regime == ssd_emulated && ( $qd == 4 || $qd == 8 || $qd == 32 ) ) ||
+              ( $regime == sd_emulated && $qd == 32 ) ]]; then
             modes=("${confirmation_modes[@]}")
         else
             modes=(0 1)
@@ -383,5 +386,5 @@ run_privileged_bounded 600 tests/tools/qualify-resource-pressure.sh \
 # remains depth=1 and routine qualification no longer spends ten sessions here.
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 8 directional modern-storage envelope sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 40 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 8 directional modern-storage envelope sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 48 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, predictor-first delta64, promoted independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'

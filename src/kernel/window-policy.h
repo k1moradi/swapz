@@ -259,6 +259,24 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
 	return tail;
 }
 
+/*
+ * SERVICE_DRY is allowed below the four-record floor only for an already
+ * staged valid pack whose accepted wave was explicitly interrupted by a READ
+ * bypass or ordering transition. A completed chain alone is not enough, and a
+ * one-record window can never become PACK_READY through this path.
+ */
+static inline int swapz_window_service_dry_pack_ready(
+		int valid_pack, int lower_idle, swapz_u8 count,
+		swapz_u8 sampled_tail_target, int chain_completed,
+		int read_bypasses, int wave_interrupted)
+{
+	if (!valid_pack || sampled_tail_target || count < 2U)
+		return 0;
+	if (count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)
+		return read_bypasses || wave_interrupted;
+	return chain_completed || read_bypasses || lower_idle;
+}
+
 static inline swapz_u8 swapz_window_effective_burst_target(
 		swapz_u8 learned, swapz_u8 admitted_tail)
 {

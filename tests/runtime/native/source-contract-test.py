@@ -1235,55 +1235,70 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("tail < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", policy)
         self.assertIn("ctx->retained_single_tail_deferred = false", sample)
         self.assertNotIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
-        small_tail_arm = body("swapz_arm_closed_small_tail_observation")
-        small_tail_note = body("swapz_note_closed_small_tail_companion_locked")
+        suppressed_start = body("swapz_start_suppressed_tail_observation")
+        suppressed_progress = body("swapz_note_suppressed_tail_write_progress")
+        suppressed_pivot = body("swapz_note_suppressed_tail_read_pivot")
+        suppressed_close = body("swapz_account_suppressed_tail_close")
         map_body = body("swapz_map")
-        self.assertIn("tail_target_at_close = ctx->retained_tail_target", flush)
-        self.assertIn("swapz_arm_closed_small_tail_observation(", flush)
-        arm_index = flush.index("swapz_arm_closed_small_tail_observation(")
-        nonempty_reset = flush.index("ctx->retained_tail_target = 0;",
-                                     arm_index)
-        self.assertLess(arm_index, nonempty_reset)
-        self.assertIn("ctx->pack_close_tail_target_2++", flush)
-        self.assertIn("ctx->pack_close_tail_target_3++", flush)
-        self.assertIn("ctx->pack_close_tail_target_4++", flush)
-        self.assertIn("atomic_xchg(&ctx->closed_small_tail_target, 0)",
-                      small_tail_arm)
-        self.assertIn("swapz_window_retention_deadline_ns(", small_tail_arm)
-        self.assertIn("pack_close_small_tail_observation_superseded++",
-                      small_tail_arm)
-        self.assertIn("swapz_plain_retained_write(bio)", small_tail_note)
-        self.assertIn("atomic_cmpxchg(&ctx->closed_small_tail_target",
-                      small_tail_note)
-        self.assertIn("swapz_window_deadline_expired(deadline_ns, now_ns)",
-                      small_tail_note)
-        self.assertIn("pack_close_tail_target_2_companion_before_deadline++",
-                      small_tail_note)
-        self.assertIn("pack_close_tail_target_3_companion_before_deadline++",
-                      small_tail_note)
-        note_call = "swapz_note_closed_small_tail_companion_locked(ctx, bio)"
-        self.assertIn(note_call, map_body)
-        self.assertLess(
-            map_body.index(note_call),
-            map_body.index("list_add_tail(&entry->list, &ctx->incoming)"))
-        self.assertIn("if (hard_boundary)", flush)
-        self.assertIn("swapz_clear_closed_small_tail_observation(ctx)", flush)
+        process_body = body("swapz_process")
+        self.assertNotIn("closed_small_tail_target", DM)
+        self.assertNotIn("closed_small_tail_deadline_ns", DM)
+        self.assertNotIn("swapz_note_closed_small_tail_companion_locked", DM)
+        self.assertNotIn("swapz_arm_closed_small_tail_observation", DM)
+        self.assertNotIn("SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS", DM + policy)
+        self.assertIn("suppressed_tail_samples++", suppressed_start)
+        self.assertIn("ctx->batch_count <= ctx->suppressed_tail_initial_count",
+                      suppressed_progress)
+        self.assertIn("ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
+                      suppressed_progress)
+        self.assertIn("suppressed_tail_reached_4++", suppressed_progress)
+        self.assertIn("suppressed_tail_read_pivot_cache_hits++", suppressed_pivot)
+        self.assertIn("suppressed_tail_read_pivot_lower_io++", suppressed_pivot)
+        self.assertIn("suppressed_tail_deadline_at_2++", suppressed_close)
+        self.assertIn("suppressed_tail_2_deadline_at_3++", suppressed_close)
+        self.assertIn("suppressed_tail_3_deadline_at_3++", suppressed_close)
+        self.assertIn("swapz_account_suppressed_tail_close(", flush)
+        self.assertIn("swapz_start_suppressed_tail_observation(ctx, tail)", sample)
+        self.assertGreaterEqual(
+            DM.count("swapz_note_suppressed_tail_write_progress(ctx)"), 2)
+        self.assertIn("swapz_note_suppressed_tail_read_pivot(ctx, had_lower_io)",
+                      process_body)
+        self.assertNotIn("swapz_note_suppressed_tail", map_body)
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
-        self.assertIn("SMALL_TAIL_CLOSE_FIELDS", replay)
-        self.assertIn("SMALL_TAIL_CLOSE_FIELDS", runner)
+        self.assertIn("SUPPRESSED_TAIL_FIELDS", replay)
+        self.assertIn("SUPPRESSED_TAIL_FIELDS", runner)
         for field in (
                 "pack_close_tail_target_2", "pack_close_tail_target_3",
                 "pack_close_tail_target_4",
-                "pack_close_tail_target_2_companion_before_deadline",
-                "pack_close_tail_target_3_companion_before_deadline",
-                "pack_close_small_tail_observation_superseded"):
+                "suppressed_tail_samples", "suppressed_tail_2_samples",
+                "suppressed_tail_3_samples",
+                "suppressed_tail_next_write_arrived",
+                "suppressed_tail_reached_4",
+                "suppressed_tail_2_reached_4",
+                "suppressed_tail_3_reached_4",
+                "suppressed_tail_deadline_at_2",
+                "suppressed_tail_2_deadline_at_3",
+                "suppressed_tail_3_deadline_at_3",
+                "suppressed_tail_interrupted",
+                "suppressed_tail_other_clears",
+                "suppressed_tail_read_pivots",
+                "suppressed_tail_read_pivot_cache_hits",
+                "suppressed_tail_read_pivot_lower_io"):
             self.assertIn(field + "=%llu", status)
             self.assertIn("ctx->" + field, status)
             self.assertIn('"' + field + '"', replay)
             self.assertIn('"' + field + '"', runner)
-        self.assertIn("inconsistent swapz exact small-tail close attribution",
-                      replay)
+        for suffix in ("le50us", "51_100us", "101_250us",
+                       "251_500us", "501_1000us", "gt1000us"):
+            for prefix in ("suppressed_tail_next_write_age_",
+                           "suppressed_tail_reach4_age_"):
+                field = prefix + suffix
+                self.assertIn(field + "=%llu", status)
+                self.assertIn('"' + field + '"', replay)
+                self.assertIn('"' + field + '"', runner)
+        self.assertIn("inconsistent swapz suppressed-tail attribution", replay)
+        self.assertIn("timed suppressed-tail attribution is inconsistent", runner)
         self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
         top_finalize = worker.index("while (swapz_has_inflight(ctx))")
         top_sample = worker.index("swapz_sample_pack_tail_locked(ctx, &local)",
@@ -1306,20 +1321,18 @@ static swapz_u16 swapz_probe_set(
         close_ready = body("swapz_retained_pack_close_ready")
         service_dry = body("swapz_service_proven_dry_pack")
         self.assertNotIn("swapz_retained_target_close_ready", DM)
+        self.assertIn("swapz_window_service_dry_pack_ready(", service_dry)
+        self.assertIn("swapz_window_service_dry_pack_ready(", policy)
         self.assertNotIn("pack_close_pending_tail_sample", close_ready)
         self.assertIn("ctx->retained_single_tail_deferred && ctx->batch_count == 1U",
                       close_ready)
         self.assertIn("swapz_service_proven_dry_pack(ctx)", close_ready)
         self.assertIn("ctx->batch_count", service_dry)
-        self.assertEqual(
-            service_dry.count(
-                "ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS"), 1)
-        self.assertEqual(
-            service_dry.count(
-                "ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS"), 1)
         self.assertIn("ctx->retained_chain_completed", service_dry)
         self.assertIn("ctx->retained_window_read_bypasses", service_dry)
         self.assertIn("ctx->retained_wave_interrupted", service_dry)
+        self.assertIn("count < 2U", policy)
+        self.assertIn("count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", policy)
         self.assertIn("ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
                       service_dry)
         self.assertIn("ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",

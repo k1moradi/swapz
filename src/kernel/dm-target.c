@@ -605,15 +605,47 @@ struct swapz_dm {
 	swapz_u8 next_burst_close_target;
 	u64 pack_close_tail_target;
 	u64 pack_close_tail_target_le4;
-	/* Passive exact attribution for small sampled-tail PACK_READY closes. */
+	/* Exact close attribution remains until the suppressed-tail policy settles. */
 	u64 pack_close_tail_target_2;
 	u64 pack_close_tail_target_3;
 	u64 pack_close_tail_target_4;
-	u64 pack_close_tail_target_2_companion_before_deadline;
-	u64 pack_close_tail_target_3_companion_before_deadline;
-	u64 pack_close_small_tail_observation_superseded;
-	atomic_t closed_small_tail_target;
-	atomic64_t closed_small_tail_deadline_ns;
+	/*
+	 * Worker-owned passive lifetime attribution for sampled tails of two or
+	 * three records suppressed by the four-record floor. This state never
+	 * arms work, changes a deadline or participates in admission.
+	 */
+	bool suppressed_tail_active;
+	bool suppressed_tail_next_write_seen;
+	bool suppressed_tail_read_pivot_seen;
+	swapz_u8 suppressed_tail_initial_count;
+	u64 suppressed_tail_start_ns;
+	u64 suppressed_tail_samples;
+	u64 suppressed_tail_2_samples;
+	u64 suppressed_tail_3_samples;
+	u64 suppressed_tail_next_write_arrived;
+	u64 suppressed_tail_next_write_age_le50us;
+	u64 suppressed_tail_next_write_age_51_100us;
+	u64 suppressed_tail_next_write_age_101_250us;
+	u64 suppressed_tail_next_write_age_251_500us;
+	u64 suppressed_tail_next_write_age_501_1000us;
+	u64 suppressed_tail_next_write_age_gt1000us;
+	u64 suppressed_tail_reached_4;
+	u64 suppressed_tail_2_reached_4;
+	u64 suppressed_tail_3_reached_4;
+	u64 suppressed_tail_reach4_age_le50us;
+	u64 suppressed_tail_reach4_age_51_100us;
+	u64 suppressed_tail_reach4_age_101_250us;
+	u64 suppressed_tail_reach4_age_251_500us;
+	u64 suppressed_tail_reach4_age_501_1000us;
+	u64 suppressed_tail_reach4_age_gt1000us;
+	u64 suppressed_tail_deadline_at_2;
+	u64 suppressed_tail_2_deadline_at_3;
+	u64 suppressed_tail_3_deadline_at_3;
+	u64 suppressed_tail_interrupted;
+	u64 suppressed_tail_other_clears;
+	u64 suppressed_tail_read_pivots;
+	u64 suppressed_tail_read_pivot_cache_hits;
+	u64 suppressed_tail_read_pivot_lower_io;
 	u64 pack_close_burst_target;
 	u64 pack_close_service_dry;
 	/* ID55: passive attribution inside the learned burst-target bucket. */
@@ -2815,47 +2847,138 @@ static void swapz_window_admit_clock(struct swapz_dm *ctx)
 		ctx->window_first_ns = ktime_get_ns();
 }
 
-static void swapz_clear_closed_small_tail_observation(struct swapz_dm *ctx)
+static void swapz_bin_suppressed_tail_age(u64 elapsed_ns,
+					  u64 *le50us, u64 *to100us,
+					  u64 *to250us, u64 *to500us,
+					  u64 *to1000us, u64 *gt1000us)
 {
-	atomic_set(&ctx->closed_small_tail_target, 0);
-	atomic64_set(&ctx->closed_small_tail_deadline_ns, 0);
+	if (elapsed_ns <= 50000ULL)
+		(*le50us)++;
+	else if (elapsed_ns <= 100000ULL)
+		(*to100us)++;
+	else if (elapsed_ns <= 250000ULL)
+		(*to250us)++;
+	else if (elapsed_ns <= 500000ULL)
+		(*to500us)++;
+	else if (elapsed_ns <= 1000000ULL)
+		(*to1000us)++;
+	else
+		(*gt1000us)++;
 }
 
-static void swapz_arm_closed_small_tail_observation(struct swapz_dm *ctx,
-						    swapz_u8 target)
+static void swapz_reset_suppressed_tail_observation(struct swapz_dm *ctx)
 {
-	u64 previous_deadline_ns;
-	u64 deadline_ns;
-	u64 now_ns;
-	int previous_target;
+	ctx->suppressed_tail_active = false;
+	ctx->suppressed_tail_next_write_seen = false;
+	ctx->suppressed_tail_read_pivot_seen = false;
+	ctx->suppressed_tail_initial_count = 0;
+	ctx->suppressed_tail_start_ns = 0;
+}
 
-	if (target != 2U && target != 3U)
+static void swapz_cancel_suppressed_tail_observation(struct swapz_dm *ctx,
+						     bool interrupted)
+{
+	if (!ctx->suppressed_tail_active)
 		return;
+	if (interrupted)
+		ctx->suppressed_tail_interrupted++;
+	else
+		ctx->suppressed_tail_other_clears++;
+	swapz_reset_suppressed_tail_observation(ctx);
+}
 
-	/*
-	 * Claim any older observation before replacing it. A later mapper can
-	 * concurrently claim the same state, so exactly one side owns the result.
-	 */
-	previous_target = atomic_xchg(&ctx->closed_small_tail_target, 0);
-	previous_deadline_ns =
-		atomic64_xchg(&ctx->closed_small_tail_deadline_ns, 0);
-	now_ns = ktime_get_ns();
-	if ((previous_target == 2 || previous_target == 3) &&
-	    previous_deadline_ns &&
-	    !swapz_window_deadline_expired(previous_deadline_ns, now_ns))
-		ctx->pack_close_small_tail_observation_superseded++;
-
-	deadline_ns = swapz_window_retention_deadline_ns(
-		ctx->window_first_ns, ctx->retain_ms);
-	if (!deadline_ns)
+static void swapz_start_suppressed_tail_observation(struct swapz_dm *ctx,
+						    swapz_u8 sampled_tail)
+{
+	if (sampled_tail != 2U && sampled_tail != 3U)
 		return;
+	if (ctx->suppressed_tail_active)
+		swapz_cancel_suppressed_tail_observation(ctx, false);
+	ctx->suppressed_tail_active = true;
+	ctx->suppressed_tail_initial_count = sampled_tail;
+	ctx->suppressed_tail_start_ns = ktime_get_ns();
+	ctx->suppressed_tail_samples++;
+	if (sampled_tail == 2U)
+		ctx->suppressed_tail_2_samples++;
+	else
+		ctx->suppressed_tail_3_samples++;
+}
 
-	/*
-	 * This preserves only the deadline that the tail-target close displaced.
-	 * It never arms a timer, wakes work or changes a close decision.
-	 */
-	atomic64_set(&ctx->closed_small_tail_deadline_ns, deadline_ns);
-	atomic_set(&ctx->closed_small_tail_target, target);
+static void swapz_note_suppressed_tail_write_progress(struct swapz_dm *ctx)
+{
+	u64 elapsed_ns;
+
+	if (!ctx->suppressed_tail_active ||
+	    ctx->batch_count <= ctx->suppressed_tail_initial_count)
+		return;
+	elapsed_ns = swapz_elapsed_ns(ctx->suppressed_tail_start_ns,
+				      ktime_get_ns());
+	if (!ctx->suppressed_tail_next_write_seen) {
+		ctx->suppressed_tail_next_write_seen = true;
+		ctx->suppressed_tail_next_write_arrived++;
+		swapz_bin_suppressed_tail_age(
+			elapsed_ns,
+			&ctx->suppressed_tail_next_write_age_le50us,
+			&ctx->suppressed_tail_next_write_age_51_100us,
+			&ctx->suppressed_tail_next_write_age_101_250us,
+			&ctx->suppressed_tail_next_write_age_251_500us,
+			&ctx->suppressed_tail_next_write_age_501_1000us,
+			&ctx->suppressed_tail_next_write_age_gt1000us);
+	}
+	if (ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)
+		return;
+	ctx->suppressed_tail_reached_4++;
+	if (ctx->suppressed_tail_initial_count == 2U)
+		ctx->suppressed_tail_2_reached_4++;
+	else
+		ctx->suppressed_tail_3_reached_4++;
+	swapz_bin_suppressed_tail_age(
+		elapsed_ns,
+		&ctx->suppressed_tail_reach4_age_le50us,
+		&ctx->suppressed_tail_reach4_age_51_100us,
+		&ctx->suppressed_tail_reach4_age_101_250us,
+		&ctx->suppressed_tail_reach4_age_251_500us,
+		&ctx->suppressed_tail_reach4_age_501_1000us,
+		&ctx->suppressed_tail_reach4_age_gt1000us);
+	swapz_reset_suppressed_tail_observation(ctx);
+}
+
+static void swapz_note_suppressed_tail_read_pivot(struct swapz_dm *ctx,
+						  bool had_lower_io)
+{
+	if (!ctx->suppressed_tail_active || ctx->suppressed_tail_read_pivot_seen)
+		return;
+	ctx->suppressed_tail_read_pivot_seen = true;
+	ctx->suppressed_tail_read_pivots++;
+	if (had_lower_io)
+		ctx->suppressed_tail_read_pivot_lower_io++;
+	else
+		ctx->suppressed_tail_read_pivot_cache_hits++;
+}
+
+static void swapz_account_suppressed_tail_close(
+		struct swapz_dm *ctx, swapz_u8 count,
+		enum swapz_window_close_reason close_reason,
+		bool interrupted_close, bool ordering_boundary)
+{
+	if (!ctx->suppressed_tail_active)
+		return;
+	if (close_reason == SWAPZ_CLOSE_DEADLINE && count == 2U) {
+		ctx->suppressed_tail_deadline_at_2++;
+	} else if (close_reason == SWAPZ_CLOSE_DEADLINE && count == 3U) {
+		if (ctx->suppressed_tail_initial_count == 2U)
+			ctx->suppressed_tail_2_deadline_at_3++;
+		else
+			ctx->suppressed_tail_3_deadline_at_3++;
+	} else if (interrupted_close || ordering_boundary ||
+		   (close_reason == SWAPZ_CLOSE_PACK_READY &&
+		    (ctx->retained_window_read_bypasses ||
+		     ctx->retained_wave_interrupted))) {
+		ctx->suppressed_tail_interrupted++;
+	} else {
+		ctx->suppressed_tail_other_clears++;
+	}
+	swapz_reset_suppressed_tail_observation(ctx);
 }
 
 static void swapz_account_single_tail_terminal(struct swapz_dm *ctx,
@@ -2929,8 +3052,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		ctx->singleton_deadline_streak = 0;
 		ctx->singleton_fast_close = false;
 	}
-	if (hard_boundary)
-		swapz_clear_closed_small_tail_observation(ctx);
+	swapz_account_suppressed_tail_close(ctx, count, close_reason,
+					    interrupted_close, ordering_boundary);
 	if (deferred_single_tail && (count || hard_boundary)) {
 		if (count == 1U && close_reason == SWAPZ_CLOSE_DEADLINE) {
 			ctx->win1_deadline_deferred_tail++;
@@ -2996,8 +3119,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		 ((close_reason == SWAPZ_CLOSE_ZERO ||
 		   close_reason == SWAPZ_CLOSE_RAW) &&
 		  ctx->worker_has_immediate_followup));
-	if (packed_close && pack_close_cause == SWAPZ_PACK_CLOSE_TAIL_TARGET)
-		swapz_arm_closed_small_tail_observation(ctx, tail_target_at_close);
 	ctx->single_pack_deferred = false;
 	ctx->accepted_burst_pack_ready = false;
 	ctx->retained_tail_target = 0;
@@ -3500,35 +3621,6 @@ static bool swapz_plain_retained_write(const struct bio *bio)
 		!(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
 }
 
-static void swapz_note_closed_small_tail_companion_locked(
-		struct swapz_dm *ctx, const struct bio *bio)
-{
-	int target = atomic_read(&ctx->closed_small_tail_target);
-	u64 deadline_ns;
-	u64 now_ns;
-
-	if ((target != 2 && target != 3) || !swapz_plain_retained_write(bio))
-		return;
-
-	deadline_ns = atomic64_read(&ctx->closed_small_tail_deadline_ns);
-	now_ns = ktime_get_ns();
-	/*
-	 * A hard boundary or a newer small-tail close can cancel this state.
-	 * The first later plain WRITE that wins this exchange owns the sample.
-	 */
-	if (atomic_cmpxchg(&ctx->closed_small_tail_target, target, 0) != target)
-		return;
-	atomic64_set(&ctx->closed_small_tail_deadline_ns, 0);
-	if (!deadline_ns ||
-	    swapz_window_deadline_expired(deadline_ns, now_ns))
-		return;
-
-	if (target == 2)
-		ctx->pack_close_tail_target_2_companion_before_deadline++;
-	else
-		ctx->pack_close_tail_target_3_companion_before_deadline++;
-}
-
 static bool swapz_local_head_is_plain_write(const struct list_head *local)
 {
 	struct swapz_bio_ref *entry;
@@ -3691,6 +3783,8 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 		ctx->retained_single_tail_deferred = false;
 		swapz_account_single_tail_terminal(ctx, false, false);
 	}
+	if (ctx->suppressed_tail_active)
+		swapz_cancel_suppressed_tail_observation(ctx, false);
 	if (tail) {
 		swapz_u8 old_target = ctx->retained_burst_target;
 
@@ -3719,6 +3813,9 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			 * the qualified four-record service floor. */
 			ctx->retained_tail_target =
 				swapz_window_sampled_tail_target(tail, queued_tail);
+			if (queued_tail && !ctx->retained_tail_target &&
+			    (tail == 2U || tail == 3U))
+				swapz_start_suppressed_tail_observation(ctx, tail);
 		}
 	} else {
 		ctx->retained_chain_completed = 0;
@@ -3743,15 +3840,10 @@ static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 		ctx->single_pack_deferred || ctx->accepted_burst_pack_ready;
 	bool lower_idle = !swapz_has_inflight(ctx);
 
-	return !ctx->retained_tail_target && ctx->batch_count &&
-		(((ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS) &&
-		  (ctx->retained_chain_completed ||
-		   ctx->retained_window_read_bypasses ||
-		   lower_idle) &&
-		  valid_pack) ||
-		 ((ctx->retained_window_read_bypasses ||
-		   ctx->retained_wave_interrupted) &&
-		  ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS));
+	return swapz_window_service_dry_pack_ready(
+		valid_pack, lower_idle, ctx->batch_count, ctx->retained_tail_target,
+		ctx->retained_chain_completed, ctx->retained_window_read_bypasses,
+		ctx->retained_wave_interrupted);
 }
 
 static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
@@ -4047,6 +4139,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			.length = SWAPZ_BLOCK_BYTES,
 			.raw = 1,
 		};
+		swapz_note_suppressed_tail_write_progress(ctx);
 		swapz_resolve_single_tail_companion(ctx);
 		if (swapz_has_inflight(ctx))
 			ctx->pipeline_collected_pages++;
@@ -4083,6 +4176,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		.encoding = encoding,
 	};
 	ctx->batch_count++;
+	swapz_note_suppressed_tail_write_progress(ctx);
 	swapz_resolve_single_tail_companion(ctx);
 	if (swapz_has_inflight(ctx)) {
 		ctx->pipeline_collected_pages++;
@@ -4801,6 +4895,7 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 			(unsigned int)ctx->retained_window_read_bypasses + selected;
 
 		ctx->retained_read_bypasses += selected;
+		swapz_note_suppressed_tail_read_pivot(ctx, true);
 		swapz_note_single_tail_read_bypass(ctx);
 		ctx->retained_window_read_bypasses = (swapz_u8)min_t(
 			unsigned int, bypasses, SWAPZ_MAX_RECORDS);
@@ -5111,6 +5206,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 			(unsigned int)ctx->retained_window_read_bypasses + selected;
 
 		ctx->retained_read_bypasses += selected;
+		swapz_note_suppressed_tail_read_pivot(ctx, true);
 		swapz_note_single_tail_read_bypass(ctx);
 		ctx->retained_window_read_bypasses = (swapz_u8)min_t(
 			unsigned int, bypasses, SWAPZ_MAX_RECORDS);
@@ -5209,6 +5305,7 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 
 			/* BIOs may have arrived while synchronous lower READ I/O ran. */
 			swapz_refresh_accepted_followup(ctx);
+			swapz_note_suppressed_tail_read_pivot(ctx, had_lower_io);
 			ctx->retained_read_bypasses++;
 			/*
 			 * Cache hits are independent READ bypasses, but they do not prove
@@ -5777,6 +5874,8 @@ static void swapz_worker(struct work_struct *work)
 				ctx->retained_wave_interrupted = false;
 				ctx->retained_chain_completed = 0;
 				ctx->retained_tail_target = 0;
+				if (ctx->suppressed_tail_active)
+					swapz_cancel_suppressed_tail_observation(ctx, false);
 				if (ctx->retained_single_tail_deferred) {
 					ctx->single_tail_other_clears++;
 					swapz_account_single_tail_terminal(ctx, false, false);
@@ -6005,8 +6104,6 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 				ctx->bio_compound_folio_pages++;
 		}
 	}
-	if (ctx->retain_ms && bio_op(bio) == REQ_OP_WRITE && count)
-		swapz_note_closed_small_tail_companion_locked(ctx, bio);
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
@@ -6319,8 +6416,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	atomic_set(&ctx->preparation_ready_max, 0);
 	atomic_set(&ctx->preparation_slots_in_use, 0);
 	atomic_set(&ctx->preparation_slots_in_use_max, 0);
-	atomic_set(&ctx->closed_small_tail_target, 0);
-	atomic64_set(&ctx->closed_small_tail_deadline_ns, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
@@ -6886,9 +6981,32 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "pack_close_tail_target=%llu pack_close_tail_target_le4=%llu "
 		       "pack_close_tail_target_2=%llu pack_close_tail_target_3=%llu "
 		       "pack_close_tail_target_4=%llu "
-		       "pack_close_tail_target_2_companion_before_deadline=%llu "
-		       "pack_close_tail_target_3_companion_before_deadline=%llu "
-		       "pack_close_small_tail_observation_superseded=%llu "
+		       "suppressed_tail_samples=%llu suppressed_tail_2_samples=%llu "
+		       "suppressed_tail_3_samples=%llu "
+		       "suppressed_tail_next_write_arrived=%llu "
+		       "suppressed_tail_next_write_age_le50us=%llu "
+		       "suppressed_tail_next_write_age_51_100us=%llu "
+		       "suppressed_tail_next_write_age_101_250us=%llu "
+		       "suppressed_tail_next_write_age_251_500us=%llu "
+		       "suppressed_tail_next_write_age_501_1000us=%llu "
+		       "suppressed_tail_next_write_age_gt1000us=%llu "
+		       "suppressed_tail_reached_4=%llu "
+		       "suppressed_tail_2_reached_4=%llu "
+		       "suppressed_tail_3_reached_4=%llu "
+		       "suppressed_tail_reach4_age_le50us=%llu "
+		       "suppressed_tail_reach4_age_51_100us=%llu "
+		       "suppressed_tail_reach4_age_101_250us=%llu "
+		       "suppressed_tail_reach4_age_251_500us=%llu "
+		       "suppressed_tail_reach4_age_501_1000us=%llu "
+		       "suppressed_tail_reach4_age_gt1000us=%llu "
+		       "suppressed_tail_deadline_at_2=%llu "
+		       "suppressed_tail_2_deadline_at_3=%llu "
+		       "suppressed_tail_3_deadline_at_3=%llu "
+		       "suppressed_tail_interrupted=%llu "
+		       "suppressed_tail_other_clears=%llu "
+		       "suppressed_tail_read_pivots=%llu "
+		       "suppressed_tail_read_pivot_cache_hits=%llu "
+		       "suppressed_tail_read_pivot_lower_io=%llu "
 		       "pack_close_burst_target=%llu pack_close_service_dry=%llu "
 		       "pack_close_burst_admission=%llu pack_close_burst_worker=%llu "
 		       "pack_close_burst_target_le4=%llu "
@@ -7155,9 +7273,33 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->pack_close_tail_target_2,
 		       ctx->pack_close_tail_target_3,
 		       ctx->pack_close_tail_target_4,
-		       ctx->pack_close_tail_target_2_companion_before_deadline,
-		       ctx->pack_close_tail_target_3_companion_before_deadline,
-		       ctx->pack_close_small_tail_observation_superseded,
+		       ctx->suppressed_tail_samples,
+		       ctx->suppressed_tail_2_samples,
+		       ctx->suppressed_tail_3_samples,
+		       ctx->suppressed_tail_next_write_arrived,
+		       ctx->suppressed_tail_next_write_age_le50us,
+		       ctx->suppressed_tail_next_write_age_51_100us,
+		       ctx->suppressed_tail_next_write_age_101_250us,
+		       ctx->suppressed_tail_next_write_age_251_500us,
+		       ctx->suppressed_tail_next_write_age_501_1000us,
+		       ctx->suppressed_tail_next_write_age_gt1000us,
+		       ctx->suppressed_tail_reached_4,
+		       ctx->suppressed_tail_2_reached_4,
+		       ctx->suppressed_tail_3_reached_4,
+		       ctx->suppressed_tail_reach4_age_le50us,
+		       ctx->suppressed_tail_reach4_age_51_100us,
+		       ctx->suppressed_tail_reach4_age_101_250us,
+		       ctx->suppressed_tail_reach4_age_251_500us,
+		       ctx->suppressed_tail_reach4_age_501_1000us,
+		       ctx->suppressed_tail_reach4_age_gt1000us,
+		       ctx->suppressed_tail_deadline_at_2,
+		       ctx->suppressed_tail_2_deadline_at_3,
+		       ctx->suppressed_tail_3_deadline_at_3,
+		       ctx->suppressed_tail_interrupted,
+		       ctx->suppressed_tail_other_clears,
+		       ctx->suppressed_tail_read_pivots,
+		       ctx->suppressed_tail_read_pivot_cache_hits,
+		       ctx->suppressed_tail_read_pivot_lower_io,
 		       ctx->pack_close_burst_target,
 		       ctx->pack_close_service_dry,
 		       ctx->pack_close_burst_admission,

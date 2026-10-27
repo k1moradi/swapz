@@ -658,28 +658,38 @@ must be consumed so it cannot authorize another dry-tail singleton close.
 Source coverage must preserve DUPLICATE continuation semantics because the
 current WRITE continues after that older batch is flushed.
 
-ID83 exact small-tail attribution is settled by owner report `685c52f5a272`
-on source `f111c6e0e25d`: on fast mixed media, more than 99.7% of sampled
-target-2 and target-3 PACK_READY closes are followed by a later plain WRITE
-before the displaced absolute retention deadline. The production candidate must
-therefore suppress sampled tail targets below
-`SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS` while keeping target four and larger
-finite targets authoritative. Source contracts and native policy tests must
-also prove that the `valid_pack` SERVICE_DRY branch cannot close counts 1..3
-through prior `retained_chain_completed` evidence; the existing sub-four
-read-bypass/wave-interrupted exception remains separate.
+ID83's first exact small-tail attribution is settled by owner report
+`685c52f5a272`, but report `f0d2e04e50e7` on exact source
+`32f41984b934` shows that suppressing sampled target 2/3 through the full
+ordinary deadline is not yet a product win: sustained fast QD4/QD8/QD32
+improves while fast mixed service regresses. The next evidence source therefore
+replaces the completed mapper-side post-close atomic observer with worker-owned
+suppressed-tail lifetime attribution. For each suppressed sampled tail 2/3,
+report the first post-sample WRITE age, record-four age, deadline-at-two,
+tail-two-to-deadline-at-three, tail-three-deadline-at-three, interruption and
+other-clear outcomes. Also report whether the first independent READ pivot was
+a cache hit or performed lower I/O. These counters are passive: no new timer,
+wake, grace period, deadline, admission action or mapper atomic is permitted.
 
-Keep the exact target-2/3/4 and companion/supersession counters through the
-candidate's owner qualification. Target-2/3 closes and their companion counters
-should fall to zero while target four remains observable. These counters must
-not arm a timer, wake work, change FIFO ownership, alter a close target or
-extend retention. Every interval counter added to kernel status must be carried
-by both the timed replay producer and final report consumer; source contracts
-must reject producer/consumer schema drift. Remove the diagnostic counters after
-the policy result is settled.
+Every suppressed sample must resolve into record four, a classified deadline,
+interruption or other clear at quiescence. Timed deltas may differ by at most
+one sample because one worker-owned observation may cross either interval
+snapshot; age bins and read-pivot sub-buckets must conserve exactly. Native
+policy coverage must prove that sub-four SERVICE_DRY requires a staged valid
+pack and at least two records, so stale read/wave evidence cannot create a
+one-record PACK_READY window.
+
+Keep exact target-2/3/4 close counters through this evidence cycle. Every
+interval counter added to kernel status must be carried by both the timed replay
+producer and final report consumer; source contracts must reject
+producer/consumer schema drift. Remove the lifetime diagnostics after they
+settle the next scheduling decision.
 
 Loaded qualification must use the exact-source owner `make test` matrix and
-judge product-facing service before internal attribution. On the same ARM64/NEON
+judge product-facing service before internal attribution. The sustained
+write-only matrix uses five counterbalanced async/sync pairs for fast QD4/QD8/
+QD32 and serial-depth QD32; the latter is the terminal evidence gate for whether
+the one-producer/64-slot preparation subsystem still earns its code and state. On the same ARM64/NEON
 lineage, preserve the `b389204` completion-state result (fast mixed useful
 WRITE 60.43 MB/s, async/sync +0.7%, async-minus-sync lower-WRITE requests -12.6
 with 95% CI -23.6..-1.6) while recovering the `8a6dd2a` deep-QD direction

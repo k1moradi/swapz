@@ -183,10 +183,31 @@ PACK_CLOSE_FIELDS = (
     "pack_close_burst_target", "pack_close_service_dry")
 SMALL_TAIL_CLOSE_FIELDS = (
     "pack_close_tail_target_2", "pack_close_tail_target_3",
-    "pack_close_tail_target_4",
-    "pack_close_tail_target_2_companion_before_deadline",
-    "pack_close_tail_target_3_companion_before_deadline",
-    "pack_close_small_tail_observation_superseded")
+    "pack_close_tail_target_4")
+SUPPRESSED_TAIL_FIELDS = (
+    "suppressed_tail_samples", "suppressed_tail_2_samples",
+    "suppressed_tail_3_samples", "suppressed_tail_next_write_arrived",
+    "suppressed_tail_next_write_age_le50us",
+    "suppressed_tail_next_write_age_51_100us",
+    "suppressed_tail_next_write_age_101_250us",
+    "suppressed_tail_next_write_age_251_500us",
+    "suppressed_tail_next_write_age_501_1000us",
+    "suppressed_tail_next_write_age_gt1000us",
+    "suppressed_tail_reached_4", "suppressed_tail_2_reached_4",
+    "suppressed_tail_3_reached_4",
+    "suppressed_tail_reach4_age_le50us",
+    "suppressed_tail_reach4_age_51_100us",
+    "suppressed_tail_reach4_age_101_250us",
+    "suppressed_tail_reach4_age_251_500us",
+    "suppressed_tail_reach4_age_501_1000us",
+    "suppressed_tail_reach4_age_gt1000us",
+    "suppressed_tail_deadline_at_2",
+    "suppressed_tail_2_deadline_at_3",
+    "suppressed_tail_3_deadline_at_3",
+    "suppressed_tail_interrupted", "suppressed_tail_other_clears",
+    "suppressed_tail_read_pivots",
+    "suppressed_tail_read_pivot_cache_hits",
+    "suppressed_tail_read_pivot_lower_io")
 BURST_CLOSE_DETAIL_FIELDS = (
     "pack_close_burst_admission", "pack_close_burst_worker",
     "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
@@ -285,7 +306,7 @@ BURST_COUNTER_FIELDS = (
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
     WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS +
-    SMALL_TAIL_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS +
+    SMALL_TAIL_CLOSE_FIELDS + SUPPRESSED_TAIL_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS +
     K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS + BURST_COUNTER_FIELDS + (
         "gc_victims", "accepted_work_lower_idle_events",
         "accepted_work_lower_idle_ns",
@@ -868,18 +889,45 @@ def timed_window_error(record):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             record["pack_tail_samples"]):
         return "timed post-pack tail-sample attribution is inconsistent"
-    # One live post-close observation may cross an interval snapshot.
+    terminal = sum(record[field] for field in (
+        "suppressed_tail_reached_4", "suppressed_tail_deadline_at_2",
+        "suppressed_tail_2_deadline_at_3",
+        "suppressed_tail_3_deadline_at_3",
+        "suppressed_tail_interrupted", "suppressed_tail_other_clears"))
     if (sum(record[field] for field in (
                 "pack_close_tail_target_2", "pack_close_tail_target_3",
                 "pack_close_tail_target_4")) > record["pack_close_tail_target"] or
-            record["pack_close_tail_target_2_companion_before_deadline"] >
-            record["pack_close_tail_target_2"] + 1 or
-            record["pack_close_tail_target_3_companion_before_deadline"] >
-            record["pack_close_tail_target_3"] + 1 or
-            record["pack_close_small_tail_observation_superseded"] >
-            record["pack_close_tail_target_2"] +
-            record["pack_close_tail_target_3"] + 1):
-        return "timed exact small-tail close attribution is inconsistent"
+            record["suppressed_tail_2_samples"] +
+            record["suppressed_tail_3_samples"] !=
+            record["suppressed_tail_samples"] or
+            abs(record["suppressed_tail_samples"] - terminal) > 1 or
+            record["suppressed_tail_2_reached_4"] +
+            record["suppressed_tail_3_reached_4"] !=
+            record["suppressed_tail_reached_4"] or
+            sum(record[field] for field in (
+                "suppressed_tail_next_write_age_le50us",
+                "suppressed_tail_next_write_age_51_100us",
+                "suppressed_tail_next_write_age_101_250us",
+                "suppressed_tail_next_write_age_251_500us",
+                "suppressed_tail_next_write_age_501_1000us",
+                "suppressed_tail_next_write_age_gt1000us")) !=
+            record["suppressed_tail_next_write_arrived"] or
+            sum(record[field] for field in (
+                "suppressed_tail_reach4_age_le50us",
+                "suppressed_tail_reach4_age_51_100us",
+                "suppressed_tail_reach4_age_101_250us",
+                "suppressed_tail_reach4_age_251_500us",
+                "suppressed_tail_reach4_age_501_1000us",
+                "suppressed_tail_reach4_age_gt1000us")) !=
+            record["suppressed_tail_reached_4"] or
+            record["suppressed_tail_read_pivot_cache_hits"] +
+            record["suppressed_tail_read_pivot_lower_io"] !=
+            record["suppressed_tail_read_pivots"] or
+            record["suppressed_tail_next_write_arrived"] >
+            record["suppressed_tail_samples"] + 1 or
+            record["suppressed_tail_read_pivots"] >
+            record["suppressed_tail_samples"] + 1):
+        return "timed suppressed-tail attribution is inconsistent"
     if (sum(record[field] for field in (
                 "burst_shrink_after_inflight_zero",
                 "burst_shrink_after_read_bypass",
@@ -3977,7 +4025,8 @@ def write_saturation_verdict(sessions):
         expected_shape = []
         for qd in (1, 4, 8, 32):
             modes = (CONFIRMATION_SEQUENCE
-                     if regime == "ssd_emulated" and qd in (4, 8, 32)
+                     if ((regime == "ssd_emulated" and qd in (4, 8, 32)) or
+                         (regime == "sd_emulated" and qd == 32))
                      else (0, 1))
             expected_shape.extend((qd, mode) for mode in modes)
         expected_total += len(expected_shape)
@@ -4070,7 +4119,7 @@ def write_saturation_verdict(sessions):
         regimes[regime] = rows
     if len(sessions) != expected_total:
         return {"overall": "INCOMPLETE",
-                "reason": "exactly 40 write-only evidence sessions required"}
+                "reason": "exactly 48 write-only evidence sessions required"}
     if len({row["source_sha"] for row in sessions}) != 1 or \
             len({row.get("fixture_sha256") for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
@@ -4174,8 +4223,36 @@ def write_saturation_verdict(sessions):
             "lower_bytes_change_fraction": paired_ci95(lower_bytes),
         }
 
+    serial_qd32_rows = [row for row in regimes["sd_emulated"]
+                         if row["qd"] == 32]
+    try:
+        serial_qd32_pairs = matched_binary_pairs(
+            serial_qd32_rows, "async_prepare")
+    except ValueError as exc:
+        return {"overall": "INCOMPLETE",
+                "reason": f"serial QD32: {exc}"}
+    serial_throughput, serial_requests, serial_lower_bytes = [], [], []
+    for pair in serial_qd32_pairs:
+        sync = pair[0]["arms"]["swapz"]
+        asynchronous = pair[1]["arms"]["swapz"]
+        serial_throughput.append(
+            asynchronous["input_write_mbps"] /
+            sync["input_write_mbps"] - 1.0)
+        serial_requests.append(
+            asynchronous["lower_write_requests"] /
+            sync["lower_write_requests"] - 1.0)
+        serial_lower_bytes.append(
+            asynchronous["lower_write_bytes"] /
+            sync["lower_write_bytes"] - 1.0)
+    serial_qd32_paired = {
+        "throughput_change_fraction": paired_ci95(serial_throughput),
+        "lower_requests_change_fraction": paired_ci95(serial_requests),
+        "lower_bytes_change_fraction": paired_ci95(serial_lower_bytes),
+    }
+
     return {
         "overall": "PASS_WRITE_SATURATION_EVIDENCE",
+        "serial_qd32_matched_pairs": 5,
         "fast_qd4_matched_pairs": 5,
         "fast_qd8_matched_pairs": 5,
         "fast_qd32_matched_pairs": 5,
@@ -4189,9 +4266,10 @@ def write_saturation_verdict(sessions):
         "fast_qd4_paired": paired_results[4],
         "fast_qd8_paired": paired_results[8],
         "fast_qd32_paired": paired_results[32],
+        "serial_qd32_paired": serial_qd32_paired,
         "regimes": summaries,
         "interpretation":
-            "SYNTHETIC_RAM_SUSTAINED_QD4_QD8_QD32_CONFIRMATION_QD1_DIRECTIONAL",
+            "SYNTHETIC_RAM_SUSTAINED_FAST_QD4_QD8_QD32_SERIAL_QD32_CONFIRMATION_QD1_DIRECTIONAL",
     }
 
 
@@ -6144,26 +6222,43 @@ def print_bench(result):
                  *(f"{columns['async'][f'mixed_{field}'] - columns['sync'][f'mixed_{field}']:+.1f}"
                    for field in pack_fields))
             ])
-        print("  Mixed exact small-tail close attribution")
-        small_tail_rows = []
-        for mode in ("sync", "async"):
-            target_2_followup = columns[mode][
-                "mixed_pack_close_tail_target_2_companion_before_deadline"]
-            target_3_followup = columns[mode][
-                "mixed_pack_close_tail_target_3_companion_before_deadline"]
-            superseded = columns[mode][
-                "mixed_pack_close_small_tail_observation_superseded"]
-            small_tail_rows.append((
-                mode,
-                "/".join(
-                    f"{columns[mode][f'mixed_pack_close_tail_target_{target}']:.1f}"
-                    for target in (2, 3, 4)),
-                f"{target_2_followup:.1f}/{target_3_followup:.1f}",
-                f"{superseded:.1f}",
-            ))
+        print("  Mixed exact sampled-tail close attribution")
         print_table(
-            f"{model_label} mixed-I/O exact small-tail PACK_READY attribution",
-            ("mode", "t2/3/4", "next<ddl 2/3", "sup"), small_tail_rows)
+            f"{model_label} mixed-I/O exact sampled-tail PACK_READY attribution",
+            ("mode", "t2/3/4"),
+            [(mode, "/".join(
+                f"{columns[mode][f'mixed_pack_close_tail_target_{target}']:.1f}"
+                for target in (2, 3, 4))) for mode in ("sync", "async")])
+        print("  Suppressed sampled-tail lifetime attribution")
+        print_table(
+            f"{model_label} mixed-I/O suppressed-tail outcomes",
+            ("mode", "samples 2/3", "reach4 2/3", "D2/2->D3/3->D3",
+             "I/O", "read C/L"),
+            [(mode,
+              f"{columns[mode]['mixed_suppressed_tail_2_samples']:.1f}/"
+              f"{columns[mode]['mixed_suppressed_tail_3_samples']:.1f}",
+              f"{columns[mode]['mixed_suppressed_tail_2_reached_4']:.1f}/"
+              f"{columns[mode]['mixed_suppressed_tail_3_reached_4']:.1f}",
+              f"{columns[mode]['mixed_suppressed_tail_deadline_at_2']:.1f}/"
+              f"{columns[mode]['mixed_suppressed_tail_2_deadline_at_3']:.1f}/"
+              f"{columns[mode]['mixed_suppressed_tail_3_deadline_at_3']:.1f}",
+              f"{columns[mode]['mixed_suppressed_tail_interrupted']:.1f}/"
+              f"{columns[mode]['mixed_suppressed_tail_other_clears']:.1f}",
+              f"{columns[mode]['mixed_suppressed_tail_read_pivot_cache_hits']:.1f}/"
+              f"{columns[mode]['mixed_suppressed_tail_read_pivot_lower_io']:.1f}")
+             for mode in ("sync", "async")])
+        print_table(
+            f"{model_label} mixed-I/O suppressed-tail age bins",
+            ("mode", "next W <=50/100/250/500/1000/> us",
+             "reach4 <=50/100/250/500/1000/> us"),
+            [(mode,
+              "/".join(f"{columns[mode][f'mixed_suppressed_tail_next_write_age_{suffix}']:.1f}"
+                       for suffix in ("le50us", "51_100us", "101_250us",
+                                      "251_500us", "501_1000us", "gt1000us")),
+              "/".join(f"{columns[mode][f'mixed_suppressed_tail_reach4_age_{suffix}']:.1f}"
+                       for suffix in ("le50us", "51_100us", "101_250us",
+                                      "251_500us", "501_1000us", "gt1000us")))
+             for mode in ("sync", "async")])
         print("  Mixed burst-close split")
         burst_fields = (
             "pack_close_burst_admission", "pack_close_burst_worker",
