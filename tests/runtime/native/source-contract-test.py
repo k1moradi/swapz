@@ -1320,9 +1320,6 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_chain_completed", service_dry)
         self.assertIn("ctx->retained_window_read_bypasses", service_dry)
         self.assertIn("ctx->retained_wave_interrupted", service_dry)
-        self.assertIn("ctx->retained_chain_completed", service_dry)
-        self.assertIn("ctx->retained_window_read_bypasses", service_dry)
-        self.assertIn("ctx->retained_wave_interrupted", service_dry)
         self.assertIn("ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
                       service_dry)
         self.assertIn("ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",

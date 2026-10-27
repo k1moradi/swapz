@@ -299,9 +299,10 @@ static inline int swapz_window_burst_close_ready(
  *
  * Once the serialized worker proves both accepted FIFOs dry, a staged valid
  * compressed pack may close below a larger learned target at the four-record
- * floor. Counts 1..3 retain the pinned deadline, and a sampled finite tail
- * remains authoritative. This never waits for future admissions and does not
- * change the pinned retention deadline.
+ * floor. Counts 1..3 retain the pinned deadline; only a sampled finite tail
+ * already filtered to the four-record floor or above remains authoritative.
+ * This never waits for future admissions and does not change the pinned
+ * retention deadline.
  */
 static inline int swapz_window_work_conserving_close_ready(
 		swapz_u8 retain_ms, int has_valid_pack,
