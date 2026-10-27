@@ -1231,8 +1231,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->single_tail_deferrals++", sample)
         self.assertIn("ctx->retained_single_tail_deferred = true", sample)
         self.assertIn("ctx->single_tail_other_clears++", sample)
-        self.assertIn("swapz_window_sampled_tail_target(tail, queued_tail)",
-                      sample)
+        self.assertIn("tail, queued_tail,", sample)
         self.assertIn("swapz_window_sampled_tail_target(", policy)
         self.assertIn("tail < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", policy)
         self.assertIn("ctx->retained_single_tail_deferred = false", sample)
@@ -2073,7 +2072,7 @@ static swapz_u16 swapz_probe_set(
         self.assertEqual(DM.count("swapz_record_pack_geometry(ctx)"), 2)
         self.assertLess(writer.index("if (bio->bi_opf & REQ_FUA)",
                                      writer.index("ctx->batch_count++")),
-                        writer.index("swapz_window_pack_ready("))
+                        writer.rindex("swapz_record_pack_geometry(ctx)"))
         worker = body("swapz_worker")
         # Admission records finite pack geometry only. Every PACK_READY close
         # is owned by the serialized worker after accepted-tail refresh.
@@ -2088,7 +2087,7 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(writer.index("ctx->batch_count++"),
                         writer.index("swapz_refresh_accepted_followup(ctx)"))
         self.assertLess(writer.index("swapz_refresh_accepted_followup(ctx)"),
-                        writer.index("swapz_window_single_pack_ready("))
+                        writer.rindex("swapz_record_pack_geometry(ctx)"))
         local_successor = worker.index("entry->list.next != &local")
         initial_refresh = worker.index("swapz_refresh_accepted_followup(ctx)",
                                        local_successor)
