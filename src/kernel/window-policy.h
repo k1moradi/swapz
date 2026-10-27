@@ -7,13 +7,6 @@
 struct bio;
 
 #define SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS 4U
-/*
- * Owner report 64f6e8e1890e on source e17f05a1c256 measured the fast
- * suppressed-tail reach-four p99 inside the <=500us bucket. Keep this fixed
- * until another exact-source owner qualification replaces that evidence.
- */
-#define SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS 500000ULL
-
 /* Prepared bytes and upper completion ownership remain with the worker. */
 struct swapz_pending_bio {
 	struct bio *bio;
@@ -194,6 +187,27 @@ static inline int swapz_window_single_pack_ready(
 	return 0;
 }
 
+/*
+ * Preserve proof that a selective first compressed pack existed after total
+ * window count has crossed the four-record synchronous-detach boundary. RAW
+ * interleaving or a later third compressed record must not erase that finite
+ * geometry. Count four itself remains excluded by the qualified first-pack
+ * policy; this helper only repairs the stale-latch case at count five and up.
+ */
+static inline int swapz_window_prior_single_pack_ready(
+		const struct swapz_pending_bio *pending, swapz_u8 count,
+		swapz_u8 retain_ms, swapz_u8 read_budget)
+{
+	if (!retain_ms || read_budget || !pending ||
+	    count <= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||
+	    count > SWAPZ_MAX_RECORDS)
+		return 0;
+	return swapz_window_first_compressed_extent_fits(
+		pending, count, 2U, 1U) ||
+		swapz_window_first_compressed_extent_fits(
+			pending, count, 3U, 2U);
+}
+
 static inline int swapz_window_pack_ready(
 		const struct swapz_pending_bio *pending, swapz_u8 count,
 		swapz_u8 retain_ms, swapz_u8 read_budget)
@@ -252,16 +266,19 @@ static inline swapz_u8 swapz_window_shrink_burst_target(
 	return current_target;
 }
 /*
- * A post-PACK sampled tail becomes a one-shot close target only at or above
- * the qualified four-record floor. Two/three-record samples are dominated by
- * writers resubmitted after bio_endio(), so they are not immediate close
- * targets; only the separately qualified bounded resubmission/read-pivot path
- * may release a valid staged 2/3 tail before the ordinary hard deadline.
- * A staged-only prefix is still not a finite accepted tail.
+ * Pure WRITE waves keep the qualified four-record service floor and require
+ * queued follower evidence before a post-PACK sample becomes authoritative.
+ * A mixed accepted wave is different: an already-observed READ/non-WRITE
+ * boundary proves that a staged two/three-record residue is finite, so it may
+ * become a one-shot target without a timer or a wait for future arrivals.
  */
 static inline swapz_u8 swapz_window_sampled_tail_target(
-		swapz_u8 tail, swapz_u8 queued_tail)
+		swapz_u8 tail, swapz_u8 queued_tail, int mixed_wave)
 {
+	if (tail < 2U)
+		return 0;
+	if (mixed_wave)
+		return tail;
 	if (!queued_tail || tail < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)
 		return 0;
 	return tail;
@@ -277,14 +294,12 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
 static inline int swapz_window_service_close_ready(
 		int valid_pack, int lower_idle, swapz_u8 count,
 		swapz_u8 sampled_tail_target, int chain_completed,
-		int read_bypasses, int wave_interrupted,
-		int suppressed_tail_exhausted)
+		int read_bypasses, int wave_interrupted)
 {
 	if (!valid_pack || sampled_tail_target || count < 2U)
 		return 0;
 	if (count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)
-		return read_bypasses || wave_interrupted ||
-			suppressed_tail_exhausted;
+		return read_bypasses || wave_interrupted;
 	return chain_completed || read_bypasses || lower_idle;
 }
 
@@ -410,33 +425,6 @@ static inline unsigned long long swapz_window_retention_deadline_ns(
 		return 0;
 	duration = (unsigned long long)retain_ms * 1000000ULL;
 	return first_ns > ~0ULL - duration ? ~0ULL : first_ns + duration;
-}
-
-/*
- * This is not a second retention budget. It is a bounded wake point inside the
- * existing ordinary deadline for the specifically qualified suppressed 2/3
- * post-PACK tail. Saturating addition keeps the helper total for native tests.
- */
-static inline unsigned long long
-swapz_window_suppressed_tail_resubmit_deadline_ns(
-		unsigned long long sample_start_ns)
-{
-	if (!sample_start_ns)
-		return 0;
-	return sample_start_ns >
-		~0ULL - SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS ?
-		~0ULL :
-		sample_start_ns + SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS;
-}
-
-static inline int swapz_window_suppressed_tail_resubmit_expired(
-		unsigned long long sample_start_ns,
-		unsigned long long now_ns)
-{
-	if (!sample_start_ns || now_ns < sample_start_ns)
-		return 0;
-	return now_ns - sample_start_ns >=
-		SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS;
 }
 
 static inline int swapz_window_deadline_expired(unsigned long long deadline_ns,

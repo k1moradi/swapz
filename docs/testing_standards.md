@@ -229,40 +229,45 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-The latest successful standard owner matrix tested source
-`5edcb2981573756debd9582b1d5c8b177c4d86be`, passed all five stages, and
-published the latest same-source report-only commit
-`926decb9f64ce82603dc7ca001f4bf40021d9e0d`. It qualifies that exact source
-on owned RAM-backed `null_blk`, including ID36 low-RAM/heavy-CPU pressure,
-segmented/compound direct I/O, retained suspend/drain, live GC, DISCARD/TRIM,
-packed placement and synthetic failure paths. Later documentation-only
-descendants on `main` do not supersede that exact-source qualification.
+The latest successful standard owner matrix tested exact source
+`829cdbe0d9eb9541cc3954e3af02e821a90c5595` and published canonical
+report-only commit `efb713c06daa4fc03fdd7a200032c9c243089850`. All five public
+`make test` stages passed, including loaded correctness/lifecycle, W=1/W=2,
+owned-RAM storage regimes, retained fault paths, live GC, DISCARD/TRIM, packed
+placement and ID36 resource pressure. Later source changes are unqualified until
+their own complete owner `make test` finishes.
 
-The same report passed the positive-content delta64 rescue A/B with rescue-on
-useful WRITE +29.08% (95% CI +19.92..+38.24), WRITE p99 -29.00%
-(-30.38..-27.62), and lower WRITE bytes -24.66% (-24.88..-24.44).
-Lower-WRITE requests regress 0.53%, but the interval crosses zero. Rescue
-remains default-off because representative swap-content prevalence is still
-unqualified.
+That exact source is not a fast-media product win. In fast QD32 mixed I/O, raw
+useful WRITE is 62.96 MB/s versus 32.86 MB/s sync swapz and 32.21 MB/s async
+swapz. Async lowers backing WRITE throughput to 24.00 MB/s and lower-WRITE
+requests to 2572.6 versus raw 62.96 MB/s and 12295.7 requests, but useful READ
+also falls to 10.69 MB/s versus raw 20.90 MB/s. READ p99 improves to 1.21 ms
+from raw 4.57 ms. Treat this as a performance/endurance-proxy trade-off, not a
+success: fewer lower bytes/requests do not compensate for lost useful service.
 
-ID63 remains qualified on this source. The fast-model sequential A/B is
-statistically unresolved (lower READ requests -3.57%, useful throughput -3.67%,
-p99 +6.8%), while the serial-depth model remains strongly favorable: lower READ
-requests -31.61% (95% CI -35.47..-27.76) and useful throughput +39.42%
-(+33.26..+45.58), with p99 direction favorable but unresolved. The production
-coalesced span remains fixed at eight blocks.
+Fast sustained WRITE shows the storage-adaptive opportunity is real but
+queue-depth dependent. Async swapz versus raw is 19.30/22.22 MB/s at QD1,
+68.52/84.00 at QD4, 82.50/85.81 at QD8, and 130.83/89.11 at QD32. The QD32
+result proves compression/packing can exceed raw when enough useful work is
+available; QD4 and mixed service remain the immediate scheduling problem.
+Production remains ordinary LZ4 acceleration one, one asynchronous preparation
+producer, a bounded 64-slot RAW+compressed reservoir, lower-WRITE depth one,
+independent READ fan-out, the eight-block ID63 cap, packed placement and SWZ
+1/2/4-block extents. Delta64 remains default-off pending representative-content
+prevalence.
 
-Current source keeps ordinary LZ4 at acceleration one, one asynchronous
-preparation producer, the 64-slot RAW+compressed preparation reservoir, one
-immutable lower-WRITE slot, independent READ fan-out, the eight-block ID63 cap,
-and SWZ 1/2/4-block extents. The current ID83 policy removes the two-record IDLE
-oscillation and improves lower-WRITE geometry, but fast mixed async/sync useful
-WRITE remains -1.68% (95% CI -4.75..+1.39) and QD4 remains significantly
-negative at -6.55% (-12.45..-0.65). The next bounded qualification target is a
-four-record SERVICE_DRY floor for proven-dry retained windows; K=1, preparation
-width, reservoir size, ID63 and SWZ remain unchanged. Representative long-run
-churn, actual kernel swap and physical media remain open qualification gates.
+The `829cdbe0d9eb` result refutes the active ID83 500us suppressed-tail wake
+and cache-hit READ-pivot close policy as a service policy, not as a correctness
+mechanism. The next candidate removes that timer/pivot machinery and its
+temporary lifetime telemetry, preserves the qualified four-record floor for
+pure-WRITE waves, recognizes finite two/three-record tails only when the
+already-accepted wave is mixed, and conserves earlier valid compressed-pack
+geometry across RAW interleaving after total count crosses four. K=1,
+preparation width, reservoir size, ID63 and SWZ stay unchanged. Representative
+long-run churn, actual kernel swap and physical media remain open qualification
+gates.
 
+## Deferred optimization evidence gates
 ## Deferred optimization evidence gates
 
 - **ID38 lower-WRITE depth:** closed for the current product. Repeated paired
@@ -659,32 +664,43 @@ Source coverage must preserve DUPLICATE continuation semantics because the
 current WRITE continues after that older batch is flushed.
 
 ID83's first exact small-tail attribution is settled by owner report
-`685c52f5a272`; the full-deadline suppression regression is recorded by
-`f0d2e04e50e7`. Owner report `64f6e8e1890e` on exact source
-`e17f05a1c256` settles the lifetime question. In fast mixed I/O, reached-four
-tails land by 500us in 332.6/333.0 sync observations (99.9%) and 239.2/239.2
-async observations (100%); 250us would cover only 98.1% and 97.6% respectively.
-The same report shows independent suppressed-tail READ pivots are overwhelmingly
-cache hits (331.0/332.4 sync and 215.6/216.4 async), so lower-I/O-only bypass
-evidence misses the observed wave transition.
+`685c52f5a272`; full-deadline suppression is refuted by `f0d2e04e50e7`,
+and the later 500us/cache-hit-pivot candidate is refuted by report
+`efb713c06daa` on exact source `829cdbe0d9eb`. Relative to the immediately
+preceding `e17f05a1c256` result, fast mixed async useful WRITE fell
+38.26 -> 32.21 MB/s while lower-WRITE requests rose 2255.0 -> 2572.6 and mixed
+READ p99 rose 0.823 -> 1.208 ms. The candidate also accumulated 756.58 ms of
+accepted-work lower-idle undersized-batch time. These are product-facing
+regressions, so distribution evidence that originally motivated the 500us wake
+does not justify retaining it.
 
-The qualified candidate therefore uses the existing retention hrtimer with one
-earlier absolute wake at `suppressed_tail_start_ns + 500us` only while a
-suppressed two/three-record tail is active, a valid pack is staged and K=1 is
-idle. The ordinary first-record deadline remains the hard upper bound and is
-still used by one-record windows. The candidate may also treat an independent
-cache-hit READ as suppressed-tail wave-pivot evidence; this must not increment
-general lower-I/O read-bypass state or extend `window_first_ns`. Source
-contracts must prove no mapper atomic, no second timer, no future-arrival
-admission wait, at least two records, valid-pack gating and FIFO-dry worker
-ownership.
+The replacement contract is work-conserving and timer-free. Pure-WRITE
+post-PACK tails of two/three remain below the qualified four-record floor. A
+two/three-record tail may become an exact finite target only when the serialized
+worker has already observed a READ in the active accepted wave or tail scanning
+encounters an accepted non-WRITE boundary. Source contracts must prove the
+incoming scan records that non-WRITE boundary, all normal and bounded parallel
+READ paths mark worker-owned mixed-wave state, true worker-idle and hard
+ordering boundaries clear it, and the mapper never touches it.
 
-Keep the lifetime and exact target-2/3/4 counters through this candidate's owner
-qualification so the scheduling change remains attributable. Every interval
-counter in kernel status must still be carried by both timed replay producer and
-final report consumer, with conservation guards intact. Remove these lifetime
-diagnostics after the candidate result settles the policy.
+Pack-readiness qualification must separately cover the RAW-interleaving state
+repair. The total-count-four first-pack guard remains in force because its
+removal previously split QD8 into synchronous 4+4 service. After total count is
+greater than four, however, an earlier two-compressed-record/4KiB or
+three-compressed-record/8KiB prefix is persistent finite evidence and must
+remain recognizable even when RAW records or later compressed records change
+the current exact geometry. Both RAW and compressed admission paths must
+re-evaluate that proof. Native tests must cover count four remaining ineligible
+and count five recovering the earlier pack with both compressed and RAW newest
+records.
 
+The refuted suppressed-tail lifetime counters and their replay/reporter schema
+are removed in the same change. Keep exact target-2/3/4 PACK_READY attribution
+and accepted-work lower-idle partitioning so the new scheduling decision remains
+measurable without retaining dead policy state. There is no microsecond wake,
+timer rearm, second timer, mapper atomic or future-arrival grace period.
+
+Loaded qualification must use the exact-source owner `make test` matrix and
 Loaded qualification must use the exact-source owner `make test` matrix and
 judge product-facing service before internal attribution. The sustained
 write-only matrix uses five counterbalanced async/sync pairs for fast QD4/QD8/
@@ -889,13 +905,13 @@ effective learned/sampled target merely because the next representation is
 unready. Only after the serialized worker proves local and incoming accepted
 FIFOs dry, no K=1 lower WRITE remains active, no sampled tail target is pending,
 and `single_pack_deferred || accepted_burst_pack_ready` proves valid staged
-compressed geometry may a below-target `SERVICE_DRY` close occur at
-`SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS == 4`. A one-record window always retains
-the pinned ordinary deadline. A suppressed post-PACK tail at count two/three may
-close below that floor only when a valid pack is staged, K=1 and both accepted
-FIFOs are dry, and either an independent READ has pivoted the accepted wave or
-the fixed 500us resubmission bound has expired. Producer ownership still does
-not make RAW dispatchable before the stable snapshot completion.
+compressed geometry may a below-target `SERVICE_DRY` close occur at the
+qualified pure-WRITE four-record floor. A one-record window always retains the
+pinned ordinary deadline. A mixed-wave sampled tail at count two/three is
+different: a READ already serviced by the worker or an accepted non-WRITE
+boundary in the sampler proves the current tail finite, so that exact target may
+close without a timer. Producer ownership still does not make RAW dispatchable
+before the stable snapshot completion.
 
 Status/replay/reporter qualification must retain
 `accepted_work_lower_idle_events/ns` and the four-way retained-open-batch
@@ -1305,7 +1321,7 @@ One-page PACK_READY cause attribution remains exact. The repaired READ baseline
 confirms 78.0 sampled-tail / 24.2 read-bypass / 0 wave-interruption on the fast
 model and 0/0/0 on the slow model, so the dominant-cause measurement is closed.
 For every timed `win1_pack_ready`, exactly one T/R/W counter must still increment
-and their sum must equal `win1_pack_ready`; ID50 must not make suppressed tail
+and their sum must equal `win1_pack_ready`; ID50 must not make sub-four singleton tail
 closes reappear under the read-bypass or wave bucket.
 
 ### Retained-singleton and PACK_READY regression contract

@@ -184,30 +184,6 @@ PACK_CLOSE_FIELDS = (
 SMALL_TAIL_CLOSE_FIELDS = (
     "pack_close_tail_target_2", "pack_close_tail_target_3",
     "pack_close_tail_target_4")
-SUPPRESSED_TAIL_FIELDS = (
-    "suppressed_tail_samples", "suppressed_tail_2_samples",
-    "suppressed_tail_3_samples", "suppressed_tail_next_write_arrived",
-    "suppressed_tail_next_write_age_le50us",
-    "suppressed_tail_next_write_age_51_100us",
-    "suppressed_tail_next_write_age_101_250us",
-    "suppressed_tail_next_write_age_251_500us",
-    "suppressed_tail_next_write_age_501_1000us",
-    "suppressed_tail_next_write_age_gt1000us",
-    "suppressed_tail_reached_4", "suppressed_tail_2_reached_4",
-    "suppressed_tail_3_reached_4",
-    "suppressed_tail_reach4_age_le50us",
-    "suppressed_tail_reach4_age_51_100us",
-    "suppressed_tail_reach4_age_101_250us",
-    "suppressed_tail_reach4_age_251_500us",
-    "suppressed_tail_reach4_age_501_1000us",
-    "suppressed_tail_reach4_age_gt1000us",
-    "suppressed_tail_deadline_at_2",
-    "suppressed_tail_2_deadline_at_3",
-    "suppressed_tail_3_deadline_at_3",
-    "suppressed_tail_interrupted", "suppressed_tail_other_clears",
-    "suppressed_tail_read_pivots",
-    "suppressed_tail_read_pivot_cache_hits",
-    "suppressed_tail_read_pivot_lower_io")
 BURST_CLOSE_DETAIL_FIELDS = (
     "pack_close_burst_admission", "pack_close_burst_worker",
     "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
@@ -889,45 +865,6 @@ def timed_window_error(record):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             record["pack_tail_samples"]):
         return "timed post-pack tail-sample attribution is inconsistent"
-    terminal = sum(record[field] for field in (
-        "suppressed_tail_reached_4", "suppressed_tail_deadline_at_2",
-        "suppressed_tail_2_deadline_at_3",
-        "suppressed_tail_3_deadline_at_3",
-        "suppressed_tail_interrupted", "suppressed_tail_other_clears"))
-    if (sum(record[field] for field in (
-                "pack_close_tail_target_2", "pack_close_tail_target_3",
-                "pack_close_tail_target_4")) > record["pack_close_tail_target"] or
-            record["suppressed_tail_2_samples"] +
-            record["suppressed_tail_3_samples"] !=
-            record["suppressed_tail_samples"] or
-            abs(record["suppressed_tail_samples"] - terminal) > 1 or
-            record["suppressed_tail_2_reached_4"] +
-            record["suppressed_tail_3_reached_4"] !=
-            record["suppressed_tail_reached_4"] or
-            sum(record[field] for field in (
-                "suppressed_tail_next_write_age_le50us",
-                "suppressed_tail_next_write_age_51_100us",
-                "suppressed_tail_next_write_age_101_250us",
-                "suppressed_tail_next_write_age_251_500us",
-                "suppressed_tail_next_write_age_501_1000us",
-                "suppressed_tail_next_write_age_gt1000us")) !=
-            record["suppressed_tail_next_write_arrived"] or
-            sum(record[field] for field in (
-                "suppressed_tail_reach4_age_le50us",
-                "suppressed_tail_reach4_age_51_100us",
-                "suppressed_tail_reach4_age_101_250us",
-                "suppressed_tail_reach4_age_251_500us",
-                "suppressed_tail_reach4_age_501_1000us",
-                "suppressed_tail_reach4_age_gt1000us")) !=
-            record["suppressed_tail_reached_4"] or
-            record["suppressed_tail_read_pivot_cache_hits"] +
-            record["suppressed_tail_read_pivot_lower_io"] !=
-            record["suppressed_tail_read_pivots"] or
-            record["suppressed_tail_next_write_arrived"] >
-            record["suppressed_tail_samples"] + 1 or
-            record["suppressed_tail_read_pivots"] >
-            record["suppressed_tail_samples"] + 1):
-        return "timed suppressed-tail attribution is inconsistent"
     if (sum(record[field] for field in (
                 "burst_shrink_after_inflight_zero",
                 "burst_shrink_after_read_bypass",
@@ -6229,36 +6166,6 @@ def print_bench(result):
             [(mode, "/".join(
                 f"{columns[mode][f'mixed_pack_close_tail_target_{target}']:.1f}"
                 for target in (2, 3, 4))) for mode in ("sync", "async")])
-        print("  Suppressed sampled-tail lifetime attribution")
-        print_table(
-            f"{model_label} mixed-I/O suppressed-tail outcomes",
-            ("mode", "samples 2/3", "reach4 2/3", "D2/2->D3/3->D3",
-             "I/O", "read C/L"),
-            [(mode,
-              f"{columns[mode]['mixed_suppressed_tail_2_samples']:.1f}/"
-              f"{columns[mode]['mixed_suppressed_tail_3_samples']:.1f}",
-              f"{columns[mode]['mixed_suppressed_tail_2_reached_4']:.1f}/"
-              f"{columns[mode]['mixed_suppressed_tail_3_reached_4']:.1f}",
-              f"{columns[mode]['mixed_suppressed_tail_deadline_at_2']:.1f}/"
-              f"{columns[mode]['mixed_suppressed_tail_2_deadline_at_3']:.1f}/"
-              f"{columns[mode]['mixed_suppressed_tail_3_deadline_at_3']:.1f}",
-              f"{columns[mode]['mixed_suppressed_tail_interrupted']:.1f}/"
-              f"{columns[mode]['mixed_suppressed_tail_other_clears']:.1f}",
-              f"{columns[mode]['mixed_suppressed_tail_read_pivot_cache_hits']:.1f}/"
-              f"{columns[mode]['mixed_suppressed_tail_read_pivot_lower_io']:.1f}")
-             for mode in ("sync", "async")])
-        print_table(
-            f"{model_label} mixed-I/O suppressed-tail age bins",
-            ("mode", "next W <=50/100/250/500/1000/> us",
-             "reach4 <=50/100/250/500/1000/> us"),
-            [(mode,
-              "/".join(f"{columns[mode][f'mixed_suppressed_tail_next_write_age_{suffix}']:.1f}"
-                       for suffix in ("le50us", "51_100us", "101_250us",
-                                      "251_500us", "501_1000us", "gt1000us")),
-              "/".join(f"{columns[mode][f'mixed_suppressed_tail_reach4_age_{suffix}']:.1f}"
-                       for suffix in ("le50us", "51_100us", "101_250us",
-                                      "251_500us", "501_1000us", "gt1000us")))
-             for mode in ("sync", "async")])
         print("  Mixed burst-close split")
         burst_fields = (
             "pack_close_burst_admission", "pack_close_burst_worker",

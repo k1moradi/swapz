@@ -1134,30 +1134,6 @@ PACK_CLOSE_FIELDS = (
 SMALL_TAIL_CLOSE_FIELDS = (
     "pack_close_tail_target_2", "pack_close_tail_target_3",
     "pack_close_tail_target_4")
-SUPPRESSED_TAIL_FIELDS = (
-    "suppressed_tail_samples", "suppressed_tail_2_samples",
-    "suppressed_tail_3_samples", "suppressed_tail_next_write_arrived",
-    "suppressed_tail_next_write_age_le50us",
-    "suppressed_tail_next_write_age_51_100us",
-    "suppressed_tail_next_write_age_101_250us",
-    "suppressed_tail_next_write_age_251_500us",
-    "suppressed_tail_next_write_age_501_1000us",
-    "suppressed_tail_next_write_age_gt1000us",
-    "suppressed_tail_reached_4", "suppressed_tail_2_reached_4",
-    "suppressed_tail_3_reached_4",
-    "suppressed_tail_reach4_age_le50us",
-    "suppressed_tail_reach4_age_51_100us",
-    "suppressed_tail_reach4_age_101_250us",
-    "suppressed_tail_reach4_age_251_500us",
-    "suppressed_tail_reach4_age_501_1000us",
-    "suppressed_tail_reach4_age_gt1000us",
-    "suppressed_tail_deadline_at_2",
-    "suppressed_tail_2_deadline_at_3",
-    "suppressed_tail_3_deadline_at_3",
-    "suppressed_tail_interrupted", "suppressed_tail_other_clears",
-    "suppressed_tail_read_pivots",
-    "suppressed_tail_read_pivot_cache_hits",
-    "suppressed_tail_read_pivot_lower_io")
 BURST_CLOSE_DETAIL_FIELDS = (
     "pack_close_burst_admission", "pack_close_burst_worker",
     "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
@@ -1205,7 +1181,7 @@ WINDOW_INTERVAL_FIELDS = (
     "accepted_work_lower_idle_post_lower_ns"
 ) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + \
     SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + \
-    SMALL_TAIL_CLOSE_FIELDS + SUPPRESSED_TAIL_FIELDS + BURST_CLOSE_DETAIL_FIELDS + \
+    SMALL_TAIL_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + \
     TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
@@ -1427,47 +1403,6 @@ def kernel_write_delta(before, after):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             counters["pack_tail_samples"]):
         raise ValueError("inconsistent swapz post-pack tail-sample attribution")
-    # One worker-owned suppressed-tail observation may cross either timed
-    # snapshot. Starts versus terminal outcomes may therefore differ by one.
-    terminal = sum(counters[field] for field in (
-        "suppressed_tail_reached_4", "suppressed_tail_deadline_at_2",
-        "suppressed_tail_2_deadline_at_3",
-        "suppressed_tail_3_deadline_at_3",
-        "suppressed_tail_interrupted", "suppressed_tail_other_clears"))
-    if (sum(counters[field] for field in (
-                "pack_close_tail_target_2", "pack_close_tail_target_3",
-                "pack_close_tail_target_4")) > counters["pack_close_tail_target"] or
-            counters["suppressed_tail_2_samples"] +
-            counters["suppressed_tail_3_samples"] !=
-            counters["suppressed_tail_samples"] or
-            abs(counters["suppressed_tail_samples"] - terminal) > 1 or
-            counters["suppressed_tail_2_reached_4"] +
-            counters["suppressed_tail_3_reached_4"] !=
-            counters["suppressed_tail_reached_4"] or
-            sum(counters[field] for field in (
-                "suppressed_tail_next_write_age_le50us",
-                "suppressed_tail_next_write_age_51_100us",
-                "suppressed_tail_next_write_age_101_250us",
-                "suppressed_tail_next_write_age_251_500us",
-                "suppressed_tail_next_write_age_501_1000us",
-                "suppressed_tail_next_write_age_gt1000us")) !=
-            counters["suppressed_tail_next_write_arrived"] or
-            sum(counters[field] for field in (
-                "suppressed_tail_reach4_age_le50us",
-                "suppressed_tail_reach4_age_51_100us",
-                "suppressed_tail_reach4_age_101_250us",
-                "suppressed_tail_reach4_age_251_500us",
-                "suppressed_tail_reach4_age_501_1000us",
-                "suppressed_tail_reach4_age_gt1000us")) !=
-            counters["suppressed_tail_reached_4"] or
-            counters["suppressed_tail_read_pivot_cache_hits"] +
-            counters["suppressed_tail_read_pivot_lower_io"] !=
-            counters["suppressed_tail_read_pivots"] or
-            counters["suppressed_tail_next_write_arrived"] >
-            counters["suppressed_tail_samples"] + 1 or
-            counters["suppressed_tail_read_pivots"] >
-            counters["suppressed_tail_samples"] + 1):
-        raise ValueError("inconsistent swapz suppressed-tail attribution")
     if (sum(counters[field] for field in (
                 "burst_shrink_after_inflight_zero",
                 "burst_shrink_after_read_bypass",

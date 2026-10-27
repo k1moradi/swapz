@@ -229,6 +229,15 @@ static int test_pack_ready_uses_compressed_geometry_across_raw_slots(void)
 	 * close below the K=1 asynchronous detach threshold. */
 	batch[3].length = 2712;
 	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 0));
+	CHECK(!swapz_window_prior_single_pack_ready(batch, 4, 2, 0));
+	/* Once total count crosses four, preserve proof that the earlier two-page
+	 * compressed pack existed even if a later admission changes exact geometry. */
+	batch[4].length = 1000;
+	CHECK(swapz_window_prior_single_pack_ready(batch, 5, 2, 0));
+	batch[4].length = SWAPZ_BLOCK_BYTES;
+	batch[4].raw = 1;
+	CHECK(swapz_window_prior_single_pack_ready(batch, 5, 2, 0));
+	batch[4].raw = 0;
 	batch[3].length = 2028;
 	/* Four compressed records plus one RAW record exactly fill the same 8KiB
 	 * compressed extent geometry used by a RAW-free four-record prefix. */
@@ -270,54 +279,35 @@ static int test_retained_burst_target_adapts_from_finite_evidence(void)
 	return 0;
 }
 
-static int test_sampled_tail_target_preserves_four_record_floor(void)
+static int test_sampled_tail_target_distinguishes_mixed_wave(void)
 {
-	CHECK(swapz_window_sampled_tail_target(0, 0) == 0);
-	CHECK(swapz_window_sampled_tail_target(1, 1) == 0);
-	CHECK(swapz_window_sampled_tail_target(2, 2) == 0);
-	CHECK(swapz_window_sampled_tail_target(3, 3) == 0);
-	CHECK(swapz_window_sampled_tail_target(4, 0) == 0);
-	CHECK(swapz_window_sampled_tail_target(4, 1) == 4);
-	CHECK(swapz_window_sampled_tail_target(8, 3) == 8);
+	CHECK(swapz_window_sampled_tail_target(0, 0, 0) == 0);
+	CHECK(swapz_window_sampled_tail_target(1, 1, 1) == 0);
+	CHECK(swapz_window_sampled_tail_target(2, 2, 0) == 0);
+	CHECK(swapz_window_sampled_tail_target(3, 3, 0) == 0);
+	CHECK(swapz_window_sampled_tail_target(2, 0, 1) == 2);
+	CHECK(swapz_window_sampled_tail_target(3, 2, 1) == 3);
+	CHECK(swapz_window_sampled_tail_target(4, 0, 0) == 0);
+	CHECK(swapz_window_sampled_tail_target(4, 1, 0) == 4);
+	CHECK(swapz_window_sampled_tail_target(8, 3, 0) == 8);
 	return 0;
 }
 
 static int test_service_dry_pack_requires_valid_multi_record_pack(void)
 {
-	CHECK(!swapz_window_service_close_ready(0, 1, 1, 0, 1, 1, 1, 1));
-	CHECK(!swapz_window_service_close_ready(0, 1, 2, 0, 1, 1, 0, 1));
-	CHECK(!swapz_window_service_close_ready(1, 1, 1, 0, 1, 1, 1, 1));
-	CHECK(!swapz_window_service_close_ready(1, 1, 2, 0, 1, 0, 0, 0));
-	CHECK(swapz_window_service_close_ready(1, 1, 2, 0, 1, 1, 0, 0));
-	CHECK(swapz_window_service_close_ready(1, 1, 3, 0, 1, 0, 1, 0));
-	CHECK(swapz_window_service_close_ready(1, 1, 2, 0, 0, 0, 0, 1));
-	CHECK(swapz_window_service_close_ready(1, 1, 3, 0, 0, 0, 0, 1));
-	CHECK(!swapz_window_service_close_ready(1, 1, 3, 4, 1, 1, 1, 1));
-	CHECK(swapz_window_service_close_ready(1, 1, 4, 0, 0, 0, 0, 0));
-	CHECK(swapz_window_service_close_ready(1, 0, 4, 0, 1, 0, 0, 0));
-	CHECK(!swapz_window_service_close_ready(1, 0, 4, 0, 0, 0, 0, 0));
+	CHECK(!swapz_window_service_close_ready(0, 1, 1, 0, 1, 1, 1));
+	CHECK(!swapz_window_service_close_ready(0, 1, 2, 0, 1, 1, 0));
+	CHECK(!swapz_window_service_close_ready(1, 1, 1, 0, 1, 1, 1));
+	CHECK(!swapz_window_service_close_ready(1, 1, 2, 0, 1, 0, 0));
+	CHECK(swapz_window_service_close_ready(1, 1, 2, 0, 1, 1, 0));
+	CHECK(swapz_window_service_close_ready(1, 1, 3, 0, 1, 0, 1));
+	CHECK(!swapz_window_service_close_ready(1, 1, 3, 4, 1, 1, 1));
+	CHECK(swapz_window_service_close_ready(1, 1, 4, 0, 0, 0, 0));
+	CHECK(swapz_window_service_close_ready(1, 0, 4, 0, 1, 0, 0));
+	CHECK(!swapz_window_service_close_ready(1, 0, 4, 0, 0, 0, 0));
 	return 0;
 }
 
-static int test_suppressed_tail_resubmit_window_is_bounded(void)
-{
-	unsigned long long start = 1000ULL;
-
-	CHECK(SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS == 500000ULL);
-	CHECK(swapz_window_suppressed_tail_resubmit_deadline_ns(0) == 0);
-	CHECK(swapz_window_suppressed_tail_resubmit_deadline_ns(start) ==
-	      start + 500000ULL);
-	CHECK(swapz_window_suppressed_tail_resubmit_deadline_ns(
-		      ULLONG_MAX - 100ULL) == ULLONG_MAX);
-	CHECK(!swapz_window_suppressed_tail_resubmit_expired(0, 999999ULL));
-	CHECK(!swapz_window_suppressed_tail_resubmit_expired(start, start - 1ULL));
-	CHECK(!swapz_window_suppressed_tail_resubmit_expired(
-		      start, start + 499999ULL));
-	CHECK(swapz_window_suppressed_tail_resubmit_expired(
-		      start, start + 500000ULL));
-	CHECK(swapz_window_suppressed_tail_resubmit_expired(start, ULLONG_MAX));
-	return 0;
-}
 
 static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 {
@@ -538,9 +528,8 @@ int main(void)
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_pack_ready_uses_compressed_geometry_across_raw_slots() == 0); passed++;
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
-	CHECK(test_sampled_tail_target_preserves_four_record_floor() == 0); passed++;
+	CHECK(test_sampled_tail_target_distinguishes_mixed_wave() == 0); passed++;
 	CHECK(test_service_dry_pack_requires_valid_multi_record_pack() == 0); passed++;
-	CHECK(test_suppressed_tail_resubmit_window_is_bounded() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;

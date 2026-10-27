@@ -119,25 +119,30 @@ belong in the ROADMAP decision table and Git history.
   remains active, no sampled tail target is pending, and a valid compressed pack
   is already staged may a retained window close below a larger learned target at
   the four-record floor. One-record windows keep the original pinned deadline.
-  Post-PACK sampled tails two/three are not authoritative close targets, but an
-  already-staged valid pack from such a suppressed tail may close SERVICE_DRY
-  after the qualified 500us post-completion resubmission bound, or once an
-  independent READ proves a wave pivot, provided K=1 is idle and both accepted
-  FIFOs are dry. Sampled target four and larger remain one-shot finite targets.
-  A prior completed chain or deferred valid pack alone must never bypass the
-  four-record floor. The explicit sub-four paths require a staged valid pack and
-  at least two records; they must never manufacture a one-record PACK_READY
-  close. Source comments and native contracts must distinguish this qualified
-  suppressed-tail exception from the general four-record work-conserving floor.
+  A pure-WRITE post-PACK tail of two/three is not a finite close target; target
+  four and larger still require already-accepted queued follower evidence. A
+  mixed accepted wave is finite once the worker has serviced a READ in that wave
+  or tail scanning encounters an accepted non-WRITE boundary. In that mixed
+  case, a staged tail of two/three may become its exact one-shot PACK_READY
+  target immediately, without a timer or waiting for another arrival. A prior
+  completed chain or deferred valid pack alone must never bypass the pure-WRITE
+  four-record floor, and no path may manufacture a one-record PACK_READY close.
+- **Pack-readiness conservation:** `single_pack_deferred` is monotonic within
+  one open window once selective compressed geometry has been proved. The
+  refuted total-count-four first-pack close remains forbidden, but after total
+  count exceeds four an earlier valid two-record/4KiB or three-record/8KiB
+  compressed prefix must remain recognizable across interleaved RAW records and
+  later compressed admissions. Both RAW and compressed admissions re-evaluate
+  this finite geometry; representation order must not erase already-proved pack
+  readiness.
 - **Retention deadline:** learned/admitted targets may shape aggregation, but
-  the ordinary absolute deadline remains the hard boundary
+  the ordinary absolute deadline remains the only timer boundary
   ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$).
-  ID83 has one separately qualified earlier wake: a suppressed post-PACK tail of
-  two/three records with a staged valid pack may advance the existing hrtimer to
-  `sample_start + 500us`; it does not extend or replace the ordinary deadline and
-  it allocates no second timer. A deferred sampled singleton still uses only the
-  ordinary deadline; ID53 remains rejected. Hard ordering boundaries reset
-  retained scheduling evidence.
+  ID83's 500us suppressed-tail wake and cache-hit pivot policy are refuted by the
+  exact-source `829cdbe0d9eb` owner result and must stay removed. There is no
+  microsecond rearm, second timer or grace wait for a future arrival. A deferred
+  sampled singleton still uses only the ordinary deadline; ID53 remains
+  rejected. Hard ordering boundaries reset retained scheduling evidence.
 - **In-flight write reaping:** completed detached $K=1$ lower writes are reaped
   opportunistically inside the worker loop so upper BIOs receive `bio_endio()`
   immediately without waiting for the full 64-BIO quantum or retention expiration.
@@ -168,14 +173,14 @@ belong in the ROADMAP decision table and Git history.
   `next_segment_probe`; collection must not restart at segment zero. A
   destination remains reusable only after the existing deadness, mapping and
   role checks succeed.
-- **Diagnostics:** PACK_READY causes, tail samples, ready-wait counters and
-  similar telemetry are observational unless a separately qualified policy
-  explicitly consumes them. Adding a counter is not permission to change a
-  scheduling decision. ID83 suppressed-tail state is worker-owned only: no
-  mapper atomic or admission gate is permitted. Owner report `64f6e8e1890e`
-  qualified the existing retention hrtimer's bounded 500us suppressed-tail wake
-  and cache-hit independent-READ pivot; lifetime counters remain through the
-  candidate qualification and are removed after that scheduling result settles.
+- **Diagnostics:** PACK_READY causes, exact target-2/3/4 attribution,
+  ready-wait counters and accepted-work lower-idle attribution are observational
+  unless a separately qualified policy explicitly consumes them. Adding a
+  counter is not permission to change a scheduling decision. The refuted ID83
+  suppressed-tail lifetime state and its timer/pivot counters are removed rather
+  than retained as dead policy scaffolding. Mixed-wave classification is one
+  worker-owned boolean plus the sampler's existing prefix state; neither may add
+  mapper atomics or admission-side scheduling.
 
 ### Settled implementation policies
 
@@ -1344,9 +1349,11 @@ refreshes accepted followers from incoming before evaluating local readiness.
 A retained work-conserving hand may not split an already-accepted plain-WRITE
 FIFO below the effective learned/sampled target merely because the next
 representation is not READY. When the accepted FIFO is genuinely dry, an
-undersized retained batch remains on the existing pinned retention deadline
-unless a complete multi-pack hand of at least eight records is already staged.
-Non-retained operation keeps the historical immediate work-conserving behavior.
+undersized pure-WRITE retained batch remains on the existing pinned retention
+deadline unless a complete multi-pack hand of at least eight records is already
+staged. A finite mixed-wave sampled target is serviced at that exact target
+instead of being converted into a timed wait. Non-retained operation keeps the
+historical immediate work-conserving behavior.
 
 Packed work-conserving closes below the effective target are attributed
 explicitly to `SWAPZ_PACK_CLOSE_SERVICE_DRY`; BURST_TARGET is reserved for
