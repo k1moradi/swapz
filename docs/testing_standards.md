@@ -689,7 +689,11 @@ Loaded qualification must use the exact-source owner `make test` matrix and
 judge product-facing service before internal attribution. The sustained
 write-only matrix uses five counterbalanced async/sync pairs for fast QD4/QD8/
 QD32 and serial-depth QD32; the latter is the terminal evidence gate for whether
-the one-producer/64-slot preparation subsystem still earns its code and state. On the same ARM64/NEON
+the one-producer/64-slot preparation subsystem still earns its code and state.
+The rootless report and public-`make test` fixture contracts must mirror that
+48-session shape and must print the serial-QD32 paired 95% interval alongside
+the three fast-QD intervals, so a harness change cannot silently drop the
+de-bloat gate. On the same ARM64/NEON
 lineage, preserve the `b389204` completion-state result (fast mixed useful
 WRITE 60.43 MB/s, async/sync +0.7%, async-minus-sync lower-WRITE requests -12.6
 with 95% CI -23.6..-1.6) while recovering the `8a6dd2a` deep-QD direction
