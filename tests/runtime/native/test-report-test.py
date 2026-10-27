@@ -1005,7 +1005,8 @@ def synthetic_log():
         index = 0
         for qd in (1, 4, 8, 32):
             modes = (runner.CONFIRMATION_SEQUENCE
-                     if regime == "ssd_emulated" and qd in (4, 8, 32)
+                     if ((regime == "ssd_emulated" and qd in (4, 8, 32)) or
+                         (regime == "sd_emulated" and qd == 32))
                      else (0, 1))
             for mode in modes:
                 out.append(
@@ -1574,7 +1575,7 @@ class ReportContract(unittest.TestCase):
 
     def test_write_saturation_evidence_repeats_fast_qd4_qd8_and_qd32(self):
         sessions = runner.parse_write_saturation(synthetic_log())
-        self.assertEqual(len(sessions), 40)
+        self.assertEqual(len(sessions), 48)
         verdict = runner.write_saturation_verdict(sessions)
         self.assertEqual(verdict["overall"], "PASS_WRITE_SATURATION_EVIDENCE")
         self.assertAlmostEqual(
@@ -1583,8 +1584,11 @@ class ReportContract(unittest.TestCase):
         self.assertAlmostEqual(
             verdict["model_limits"]["ssd_emulated"]["cap_decimal_mbps"],
             80 * (1 << 20) / 1_000_000.0, places=3)
+        self.assertEqual(verdict["serial_qd32_matched_pairs"], 5)
         self.assertEqual(verdict["fast_qd8_matched_pairs"], 5)
         self.assertEqual(verdict["fast_qd32_matched_pairs"], 5)
+        self.assertEqual(
+            verdict["serial_qd32_paired"]["throughput_change_fraction"]["n"], 5)
         self.assertEqual(
             verdict["fast_qd8_paired"]["throughput_change_fraction"]["n"], 5)
         self.assertEqual(
@@ -1609,6 +1613,9 @@ class ReportContract(unittest.TestCase):
             [(p["qd"], p["mode"]) for p in verdict["regimes"]["sd_emulated"]],
             [(1, "sync"), (1, "async"), (4, "sync"), (4, "async"),
              (8, "sync"), (8, "async"), (32, "sync"), (32, "async")])
+        serial_qd32 = [p for p in verdict["regimes"]["sd_emulated"]
+                       if p["qd"] == 32]
+        self.assertEqual([p["observations"] for p in serial_qd32], [5, 5])
         fast_qd4 = [p for p in verdict["regimes"]["ssd_emulated"]
                     if p["qd"] == 4]
         fast_qd8 = [p for p in verdict["regimes"]["ssd_emulated"]

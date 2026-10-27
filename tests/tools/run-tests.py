@@ -4258,7 +4258,7 @@ def write_saturation_verdict(sessions):
         "fast_qd32_matched_pairs": 5,
         "replay_mode": "persistent-write",
         "confidence":
-            "FAST_QD4_QD8_QD32_PAIRED_95PCT_CI_QD1_DIRECTIONAL",
+            "FAST_QD4_QD8_QD32_AND_SERIAL_QD32_PAIRED_95PCT_CI_QD1_DIRECTIONAL",
         "model_limits": {
             regime: device_model_limits(MODEL_SPECS[regime])
             for regime in MODEL_ORDER
@@ -6918,7 +6918,8 @@ def print_bench(result):
             ("mixed CI", "fast: five matched pairs; slow: two observations per mode"),
             ("READ coalescing", "five pairs per model; fast-model p99 unresolved"),
             ("zero-tail shrink", "retired; compatibility fields stay fixed at zero"),
-            ("write-only QD", "five pairs at fast QD4/8/32; QD1 is directional"),
+            ("write-only QD",
+             "five pairs at fast QD4/8/32 and serial QD32; QD1 is directional"),
             ("CPU", "scheduler time is a lower bound; phase floors are separate"),
             ("host load", "background apps included; idle-host control not established"),
             ("4MiB READ", "RAM-backed; not a cold physical swap-in"),
@@ -7013,6 +7014,12 @@ def print_bench(result):
                 f"{model_label} sustained-QD retained-window geometry and close reasons",
                 ("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
                         window_rows)
+        serial_ci = saturation["serial_qd32_paired"][
+            "throughput_change_fraction"]
+        print("  Serial QD32 A/S paired 95% CI: "
+              f"{serial_ci['mean'] * 100:+.1f}% "
+              f"[{serial_ci['low'] * 100:+.1f},"
+              f"{serial_ci['high'] * 100:+.1f}]%")
         for qd in (4, 8, 32):
             ci = saturation[f"fast_qd{qd}_paired"][
                 "throughput_change_fraction"]
