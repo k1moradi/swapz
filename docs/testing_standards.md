@@ -231,17 +231,17 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 The latest successful standard owner matrix tested source
 `5edcb2981573756debd9582b1d5c8b177c4d86be`, passed all five stages, and
-published canonical report-only commit
-`5f867aa81fce55de4d523a2aefb2c05ea065d249`. It qualifies that exact source
+published the latest same-source report-only commit
+`926decb9f64ce82603dc7ca001f4bf40021d9e0d`. It qualifies that exact source
 on owned RAM-backed `null_blk`, including ID36 low-RAM/heavy-CPU pressure,
 segmented/compound direct I/O, retained suspend/drain, live GC, DISCARD/TRIM,
 packed placement and synthetic failure paths. Later documentation-only
 descendants on `main` do not supersede that exact-source qualification.
 
 The same report passed the positive-content delta64 rescue A/B with rescue-on
-useful WRITE +27.63% (95% CI +16.36..+38.89), WRITE p99 -23.19%
-(-24.12..-22.26), and lower WRITE bytes -24.87% (-25.19..-24.55).
-Lower-WRITE requests improve 1.46%, but the interval crosses zero. Rescue
+useful WRITE +29.08% (95% CI +19.92..+38.24), WRITE p99 -29.00%
+(-30.38..-27.62), and lower WRITE bytes -24.66% (-24.88..-24.44).
+Lower-WRITE requests regress 0.53%, but the interval crosses zero. Rescue
 remains default-off because representative swap-content prevalence is still
 unqualified.
 
@@ -847,12 +847,16 @@ ID83 dispatcher refinement contracts must prove all scheduling boundaries:
 ordered RAW forcing requires an actually idle lower-WRITE path, stays within the
 first eight-record pressure hand, and requires at least eight accepted records
 across the active batch plus unclaimed preparation queue; QD1/QD4 must not be
-forced RAW by transient two-record backlog. The eight-record pressure hand may
-not split an already-accepted plain-WRITE FIFO below the effective burst/tail
-target merely because the next representation is unready. A dry retained FIFO
-below that target may close early only with a complete staged multi-pack hand of
-at least eight records. Producer ownership still does not make RAW dispatchable
-before the stable snapshot completion.
+forced RAW by transient two-record backlog. While an already-accepted plain
+WRITE remains, the eight-record pressure hand may not split the FIFO below the
+effective learned/sampled target merely because the next representation is
+unready. Only after the serialized worker proves local and incoming accepted
+FIFOs dry, no K=1 lower WRITE remains active, no sampled tail target is pending,
+and `single_pack_deferred || accepted_burst_pack_ready` proves valid staged
+compressed geometry may a below-target `SERVICE_DRY` close occur at
+`SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS == 4`. Counts 1..3 retain the pinned
+deadline. Producer ownership still does not make RAW dispatchable before the
+stable snapshot completion.
 
 Status/replay/reporter qualification must retain
 `accepted_work_lower_idle_events/ns` and the four-way retained-open-batch
@@ -863,9 +867,10 @@ interval deltas must sum exactly to `accepted_work_lower_idle_ns`.
 diagnostic and must not be included in that conservation sum. PACK_READY
 telemetry must attribute below-target work-conserving packed closes to
 `SWAPZ_PACK_CLOSE_SERVICE_DRY`, never BURST_TARGET. Native window-policy tests
-must cover QD4 2/3/4-record retention, an unready accepted eight-record prefix
-under a larger target, dry complete-multi-pack closure, sampled-tail override,
-and unchanged non-retained behavior. Loaded qualification remains authoritative
+must cover 1..3-record retention, dry valid-pack closure at each count 4..7
+below a larger learned target, an accepted plain-WRITE follower blocking that
+floor, the unchanged eight-record active-wave hand, sampled-tail override, and
+unchanged non-retained behavior. Loaded qualification remains authoritative
 for actual scheduler timing, byte geometry, useful throughput and p99.
 
 

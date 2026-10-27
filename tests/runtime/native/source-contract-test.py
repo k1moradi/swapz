@@ -1262,10 +1262,18 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_chain_completed", service_dry)
         self.assertIn("ctx->retained_window_read_bypasses", service_dry)
         self.assertIn("ctx->retained_wave_interrupted", service_dry)
-        self.assertIn("ctx->batch_count < 4U", service_dry)
+        self.assertIn("ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
+                      service_dry)
+        self.assertIn("ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
+                      service_dry)
+        self.assertIn("!swapz_has_inflight(ctx)", service_dry)
         self.assertIn("!ctx->retained_tail_target", service_dry)
         self.assertIn("swapz_window_burst_close_ready(", close_ready)
         self.assertIn("retained_burst_target=%u", status)
+        self.assertIn("#define SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS 4U", policy)
+        self.assertIn("int has_valid_pack", policy)
+        self.assertIn("next_local_is_plain_write || admitted_tail_target", policy)
+        self.assertIn("count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", policy)
         self.assertIn("if (count < 2U)", policy)
         accept = body("swapz_accept_write")
         companion = body("swapz_resolve_single_tail_companion")
@@ -2741,6 +2749,14 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->batch_count <", ordered)
         self.assertIn("ctx->batch_count + ctx->preparation_queued >=", ordered)
         self.assertIn("swapz_window_work_conserving_close_ready(", ordered)
+        dry_pack_call = re.compile(
+            r"swapz_window_work_conserving_close_ready\(\s*ctx->retain_ms,\s*"
+            r"ctx->single_pack_deferred \|\|\s*"
+            r"ctx->accepted_burst_pack_ready,")
+        self.assertEqual(len(dry_pack_call.findall(ordered)), 2)
+        self.assertIn("ctx->batch_count >= SWAPZ_WORK_CONSERVING_HAND_RECORDS",
+                      ordered)
+        self.assertIn("if (list_empty(&ctx->incoming))", ordered)
         self.assertIn("swapz_local_head_is_plain_write(&local)", ordered)
         self.assertIn("swapz_close_worker_pack_cause(", ordered)
         self.assertIn("queue_work() is only a request, not an ownership", ordered)

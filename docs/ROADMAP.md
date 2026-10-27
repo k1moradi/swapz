@@ -230,7 +230,7 @@ changes.
 | 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; restored pre-ID80 policy requalified** | Report `71251ba9232e` refuted ID80's static `count > 4U` gate with fast QD8 async/sync -9.1% (95% CI -15.1..-3.1). Current report `dc78c9bbffbd` on source `0155a09a0f2e` passes all five stages with the actual pre-ID80 predicate `count > 4U || preparation_queued > 0`; sustained QD4/QD8/QD32 async/sync throughput is +3.94% / +0.95% / +0.94%, with all three intervals overlapping zero. Keep ID80 removed and retain no dormant selector. |
 | 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed; rollback lifecycle requalified** | Exact source `26a045c80b56` passed build/native/W=1/W=2, then BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`); no benchmark result from that source is valid. The bundled candidate also replaced the true pre-ID80 detach predicate with unqualified `count > 1U`. Current source `0155a09a0f2e` removes the whole bundle and passes retained suspend/drain plus the complete owner matrix in report `dc78c9bbffbd`. This proves the rollback is healthy but does not identify which ID81 sub-change caused the lifecycle failure; do not split or revive those changes without independent evidence. |
 | 82 | Fast-media retained deadline and wakeup overhead | **4 evidence-backed candidate; measurement first** | Current exact source `0155a09a0f2e` shows Gen4 mixed 591.3 ms with 197 worker-empty deadline closes, 33.9 ms lower-WRITE service, 37.3 ms ordered-worker CPU and zero K=1 ready waits; Gen5 is 522.5 ms / 176 deadlines / 23.8 ms lower-WRITE / 32.3 ms worker CPU. At retain_ms=2, count*deadline proves at least 394/352 ms of aggregate deadline-reaching window age; it is not a pure-idle measurement. First add exact retained idle-wait and worker-wake attribution; then test a fast-media microsecond-scale or accepted-work-only closure policy without changing K=1, SWZ, ID63 or authority ownership. Reject if SD gains, lower-byte savings, lifecycle safety or mixed p99 regress materially. |
-| 83 | Work-conserving admission queue + prepared reservoir + compressed/RAW dispatcher | **4 owner-qualified correctness; geometry improved; retained-service refinement still open** | Owner `make test` report `5f867aa81fce` on exact source `5edcb2981573` passes all five stages. The refinement removes the two-record IDLE oscillation (fast async IDLE closes 681.6 -> 0.6), cuts `prep_ordered_raw` 2751.6 -> 1001.6, lower bytes 40.68 -> 38.13 MB and lower requests 2678.8 -> 2444.4, and fixes PACK_READY cause attribution (BURST_TARGET 25.4; SERVICE_DRY 1129.2). QD4 improves -28.1% -> -6.55% but remains significantly negative; QD8/QD32 are neutral. Fast mixed async/sync service is now -1.68% (CI -4.75..+1.39), so the prior +13.9% async advantage was not preserved. New telemetry attributes 621.35/679.41 ms of accepted lower-idle wall to undersized-batch retention, while preparation-head wait and K=1 ready wait are zero. Next test a four-record SERVICE_DRY floor for proven-dry windows below larger learned targets; keep K=1, one producer, 64 slots, ID63 and SWZ fixed. |
+| 83 | Work-conserving admission queue + prepared reservoir + compressed/RAW dispatcher | **4 owner-qualified baseline; four-record dry-floor candidate implemented / owner qualification pending** | Owner `make test` report `926decb9f64c` repeats all five stages on exact source `5edcb2981573`. Fast mixed async/sync useful WRITE is now +6.0% (95% CI +1.0..+11.0), confirming speculative preparation is useful, but async still trails raw by 32.5%. Accepted lower-idle attribution remains dominated by undersized retention: 630.82/697.65 ms (90.4%), while preparation-head and K=1 ready waits are effectively zero. The candidate now permits a below-target `SERVICE_DRY` close at a valid staged four-record pack only after the accepted FIFO is proven dry, no K=1 lower WRITE is active and no sampled tail target is pending. Counts 1..3 retain the pinned deadline; an active accepted plain-WRITE wave keeps the eight-record pressure hand and learned/tail target. Hypothesis: remove most undersized idle wall and raise fast useful service while avoiding both the old two-record QD4 fragmentation and the refuted unconditional four-record deep-QD split. K=1, one producer, 64 slots, ID63 and SWZ stay fixed. |
 
 ## What the pinned queue experiment establishes
 
@@ -294,27 +294,29 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-The latest owner-qualified source is `5edcb2981573`, canonical report
-`5f867aa81fce`. The immediate pre-refinement comparison is
+The latest owner-qualified source is `5edcb2981573`, latest same-source report
+`926decb9f64c`. The immediate pre-refinement comparison is
 `b4bc5e0ba965` / `6836b4ff1ffc`; the pre-ID83 request-geometry reference
 remains `0155a09a0f2e` / `dc78c9bbffbd`.
 
-1. Test one bounded ID83 retention refinement: when retention is enabled, the
-   accepted FIFO is proven dry, no K=1 lower WRITE is active, and at least one
-   complete four-record SWZ pack is staged, permit a below-target
-   `SERVICE_DRY` close even when the learned target is greater than four.
-   Preserve retention for 1..3 records so the eliminated two-record QD4
-   oscillation cannot return.
-2. Qualify only through the single public `make test`. Fast-media acceptance
-   requires same-source async/sync mixed useful WRITE to recover materially from
-   -1.68% without returning lower-request/byte geometry toward the
-   `b4bc5e0` regression, and QD4 must no longer have a statistically negative
-   throughput interval. QD8/QD32, slow/SD service, lifecycle safety, p99 and
-   lower-I/O savings are non-regression gates.
+1. Owner-qualify the implemented bounded ID83 dry-floor candidate: when
+   retention is enabled, the accepted FIFO is proven dry, no K=1 lower WRITE is
+   active, no sampled tail target is pending, and valid staged compressed
+   geometry exists, permit a below-target `SERVICE_DRY` close at four or more
+   records. Preserve retention for 1..3 records and keep the eight-record hand
+   for an active accepted plain-WRITE wave.
+2. Qualify only through the single public `make test`. The primary fast-media
+   product gate is raw-relative useful service: materially improve the current
+   -32.5% fast mixed async/raw gap and do not promote while a material raw loss
+   remains. Async/sync should remain non-regressive, QD4 must lose its negative
+   tendency, and QD8/QD32, slow/SD service, lifecycle safety, p99 and lower-I/O
+   savings are non-regression gates. Do not trade back toward the `b4bc5e0`
+   request/byte regression merely to improve throughput.
 3. Continue reporting the conserved retained-open-batch split. The current
-   621.35 ms undersized bucket is the target signal; do not optimize the
-   54.71 ms worker-unscheduled bucket or the zero preparation-head bucket first.
-   Keep the separate 17.29 ms post-lower diagnostic observational.
+   630.82 ms undersized bucket out of 697.65 ms accepted lower-idle wall is the
+   target signal; do not optimize the 63.16 ms worker-unscheduled bucket or the
+   effectively zero preparation-head bucket first. Keep post-lower hold
+   observational.
 4. Do not add K>1, a larger reservoir or another preparation worker: K=1 ready
    wait is zero and no reservoir-saturation evidence exists. Reopen those
    directions only if their existing pressure counters become material after

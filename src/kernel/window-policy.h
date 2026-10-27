@@ -6,6 +6,8 @@
 
 struct bio;
 
+#define SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS 4U
+
 /* Prepared bytes and upper completion ownership remain with the worker. */
 struct swapz_pending_bio {
 	struct bio *bio;
@@ -277,12 +279,18 @@ static inline int swapz_window_burst_close_ready(
 /*
  * An idle lower path alone must not fragment an opted-in retained window.
  * Already-admitted FIFO work is finite: consume it until the learned/sampled
- * target is reached. A dry FIFO may close earlier only after a complete
- * multi-pack hand is staged. This never waits for future admissions and does
- * not change the pinned retention deadline.
+ * target is reached. While an accepted plain WRITE remains, the existing
+ * eight-record pressure hand stays authoritative and cannot split the wave
+ * below its effective target.
+ *
+ * Once the serialized worker proves both accepted FIFOs dry, a staged valid
+ * compressed pack may close below a larger learned target at the four-record
+ * floor. Counts 1..3 retain the pinned deadline, and a sampled finite tail
+ * remains authoritative. This never waits for future admissions and does not
+ * change the pinned retention deadline.
  */
 static inline int swapz_window_work_conserving_close_ready(
-		swapz_u8 retain_ms, int accepted_pack_ready,
+		swapz_u8 retain_ms, int has_valid_pack,
 		swapz_u8 count, swapz_u8 learned_target,
 		swapz_u8 admitted_tail_target, swapz_u8 hand_records,
 		int next_local_is_plain_write)
@@ -297,10 +305,10 @@ static inline int swapz_window_work_conserving_close_ready(
 	if (target && count >= target)
 		return !next_local_is_plain_write ||
 			(hand_records && count >= hand_records);
-	if (next_local_is_plain_write)
+	if (next_local_is_plain_write || admitted_tail_target)
 		return 0;
-	return accepted_pack_ready && hand_records &&
-		count >= hand_records;
+	return has_valid_pack &&
+		count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS;
 }
 
 /*

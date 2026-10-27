@@ -3627,26 +3627,30 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 }
 
 /*
- * The worker-tail path has refreshed both its local FIFO and incoming under
- * queue_lock. It may close any nonempty residue below the learned target only
- * after real synchronous service in this retained chain/window: a prior packed
- * commit or a successful independent read while the window was open.
+ * A retained pack may close below the learned target after earlier synchronous
+ * service, or at the four-record floor when the lower path is idle and the
+ * serialized worker has proven there is no accepted immediate follower. The
+ * caller supplies that FIFO-dry proof; this helper supplies the staged-pack,
+ * lower-idle and sampled-tail policy.
  *
- * That service interval already gave accepted followers time to queue. If the
- * refreshed FIFO is still dry, burning the remaining retention budget cannot
- * discover already-accepted work. A sampled tail is stronger evidence and
- * must still drain to its one-shot target.
+ * Counts 1..3 retain the pinned deadline. A sampled finite tail is stronger
+ * evidence and must still drain to its one-shot target.
  */
 static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 {
+	bool valid_pack =
+		ctx->single_pack_deferred || ctx->accepted_burst_pack_ready;
+	bool lower_idle = !swapz_has_inflight(ctx);
+
 	return !ctx->retained_tail_target && ctx->batch_count &&
 		(((ctx->retained_chain_completed ||
-		   ctx->retained_window_read_bypasses) &&
-		  (ctx->single_pack_deferred ||
-		   ctx->accepted_burst_pack_ready)) ||
+		   ctx->retained_window_read_bypasses ||
+		   (lower_idle &&
+		    ctx->batch_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)) &&
+		  valid_pack) ||
 		 ((ctx->retained_window_read_bypasses ||
 		   ctx->retained_wave_interrupted) &&
-		  ctx->batch_count < 4U));
+		  ctx->batch_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS));
 }
 
 static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
@@ -5543,7 +5547,9 @@ static void swapz_worker(struct work_struct *work)
 				 ctx->batch_count >= SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
 				 !swapz_next_local_write_ready(ctx, &local) &&
 				 swapz_window_work_conserving_close_ready(
-					 ctx->retain_ms, ctx->accepted_burst_pack_ready,
+					 ctx->retain_ms,
+					 ctx->single_pack_deferred ||
+					 ctx->accepted_burst_pack_ready,
 					 ctx->batch_count, ctx->retained_burst_target,
 					 ctx->retained_tail_target,
 					 SWAPZ_WORK_CONSERVING_HAND_RECORDS,
@@ -5680,7 +5686,9 @@ static void swapz_worker(struct work_struct *work)
 			if (ctx->batch_count >= 2U && ctx->work_conserving_window &&
 			    !swapz_has_inflight(ctx) && ctx->accepting && !ctx->failed &&
 			    swapz_window_work_conserving_close_ready(
-				ctx->retain_ms, ctx->accepted_burst_pack_ready,
+				ctx->retain_ms,
+				ctx->single_pack_deferred ||
+					ctx->accepted_burst_pack_ready,
 				ctx->batch_count, ctx->retained_burst_target,
 				ctx->retained_tail_target,
 				SWAPZ_WORK_CONSERVING_HAND_RECORDS, 0)) {

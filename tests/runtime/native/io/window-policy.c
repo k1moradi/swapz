@@ -291,26 +291,33 @@ static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 
 static int test_work_conserving_close_respects_retained_target(void)
 {
-	CHECK(!swapz_window_work_conserving_close_ready(2, 0, 1, 4, 0, 8, 0));
+	swapz_u8 count;
+
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 1, 4, 0, 8, 0));
 	CHECK(swapz_window_work_conserving_close_ready(0, 0, 2, 4, 0, 8, 0));
 
-	/* QD4 transient prefixes must remain open until the effective target. */
-	CHECK(!swapz_window_work_conserving_close_ready(2, 0, 2, 4, 0, 8, 0));
-	CHECK(!swapz_window_work_conserving_close_ready(2, 0, 3, 4, 0, 8, 0));
+	/* Counts 1..3 keep the pinned deadline even with valid pack evidence. */
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 2, 4, 0, 8, 0));
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 3, 4, 0, 8, 0));
 	CHECK(swapz_window_work_conserving_close_ready(2, 0, 4, 4, 0, 8, 0));
 
-	/* An unready next plain WRITE is already accepted finite work. */
-	CHECK(!swapz_window_work_conserving_close_ready(2, 0, 8, 16, 0, 8, 1));
+	/* An accepted plain WRITE keeps the active wave on its target/hand rule. */
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 4, 16, 0, 8, 1));
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 7, 16, 0, 8, 1));
 	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 8, 16, 0, 8, 1));
 	CHECK(swapz_window_work_conserving_close_ready(2, 0, 16, 16, 0, 8, 1));
 
-	/* A genuinely dry FIFO may service a complete multi-pack hand early. */
-	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 7, 32, 0, 8, 0));
+	/* A genuinely dry FIFO may service a valid pack at the four-record floor. */
+	CHECK(!swapz_window_work_conserving_close_ready(2, 0, 4, 32, 0, 8, 0));
+	for (count = SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS; count < 8U; ++count)
+		CHECK(swapz_window_work_conserving_close_ready(
+			2, 1, count, 32, 0, 8, 0));
 	CHECK(swapz_window_work_conserving_close_ready(2, 1, 8, 32, 0, 8, 0));
 
-	/* A sampled finite tail overrides the larger learned target. */
-	CHECK(!swapz_window_work_conserving_close_ready(2, 0, 3, 32, 4, 8, 0));
-	CHECK(swapz_window_work_conserving_close_ready(2, 0, 4, 32, 4, 8, 0));
+	/* A sampled finite tail overrides the learned target and dry floor. */
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 4, 32, 8, 8, 0));
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 7, 32, 8, 8, 0));
+	CHECK(swapz_window_work_conserving_close_ready(2, 0, 8, 32, 8, 8, 0));
 	return 0;
 }
 

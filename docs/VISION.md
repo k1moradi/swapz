@@ -51,19 +51,20 @@ service. Alpha.29 established the first bounded candidate without changing SWZ: 
 existing per-BIO descriptor queue remains the low-copy admission queue and the
 64-slot preparation array is the stable RAW+compressed reservoir. The latest
 owner `make test` passes full correctness/lifecycle qualification on source
-`5edcb2981573` (report `5f867aa81fce`). That refinement removes the
-two-record IDLE oscillation and materially improves lower-WRITE geometry, but
-fast-media service is not yet promoted: fast mixed async/sync useful WRITE is
--1.68% (95% CI -4.75..+1.39) and QD4 remains significantly negative at -6.55%
-(-12.45..-0.65). Accepted lower-idle attribution identifies undersized-batch
-retention, not preparation starvation or K=1 ready wait, as the dominant
-remaining cost. The next bounded refinement therefore keeps K=1/SWZ/authority,
-one producer and the 64-slot reservoir unchanged while allowing a proven-dry
-retained window to SERVICE_DRY close once a complete four-record SWZ pack is
-staged; 1..3 records retain the existing absolute deadline. The stable RAW
-snapshot remains a mandatory ownership boundary. Promotion still requires
-same-source owner evidence that preserves the SD gains, lower-I/O geometry,
-p99/lifecycle safety and QD8/QD32 service.
+`5edcb2981573` (latest same-source report `926decb9f64c`). That repeat
+confirms asynchronous preparation can beat synchronous service on fast mixed
+I/O (+6.0%, 95% CI +1.0..+11.0), but swapz still trails raw useful WRITE by
+32.5%. Accepted lower-idle attribution assigns 630.82/697.65 ms to undersized
+retention while K=1 ready wait remains zero, identifying dispatch retention
+rather than preparation starvation or lower-WRITE depth as the dominant
+remaining cost. The bounded candidate therefore keeps K=1/SWZ/authority, one
+producer, the 64-slot reservoir and the eight-record active-wave pressure hand
+unchanged while allowing a worker-proven-dry retained window to SERVICE_DRY
+close at a valid staged four-record pack; 1..3 records retain the existing
+absolute deadline and sampled finite tails remain authoritative. The stable RAW
+snapshot remains a mandatory ownership boundary. Promotion requires same-source
+owner evidence that materially closes the fast raw-service gap without losing
+the SD gains, lower-I/O geometry, p99/lifecycle safety or QD8/QD32 service.
 
 The next qualification priorities are work-conserving fast-media dispatch,
 realistic churn/GC/TRIM evidence and representative-content evidence, not
