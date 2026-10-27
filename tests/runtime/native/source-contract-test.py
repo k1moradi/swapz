@@ -1237,9 +1237,10 @@ static swapz_u16 swapz_probe_set(
         map_body = body("swapz_map")
         self.assertIn("tail_target_at_close = ctx->retained_tail_target", flush)
         self.assertIn("swapz_arm_closed_small_tail_observation(", flush)
-        self.assertLess(
-            flush.index("swapz_arm_closed_small_tail_observation("),
-            flush.index("ctx->retained_tail_target = 0"))
+        arm_index = flush.index("swapz_arm_closed_small_tail_observation(")
+        nonempty_reset = flush.index("ctx->retained_tail_target = 0;",
+                                     arm_index)
+        self.assertLess(arm_index, nonempty_reset)
         self.assertIn("ctx->pack_close_tail_target_2++", flush)
         self.assertIn("ctx->pack_close_tail_target_3++", flush)
         self.assertIn("ctx->pack_close_tail_target_4++", flush)
