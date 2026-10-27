@@ -289,6 +289,48 @@ static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 }
 
 
+static int test_work_conserving_close_respects_retained_target(void)
+{
+	/* Count one is never a multi-record work-conserving close. */
+	CHECK(!swapz_window_work_conserving_close_ready(
+		2, 0, 1, 4, 0, 8, 0));
+
+	/* Non-retained operation preserves the historical immediate close. */
+	CHECK(swapz_window_work_conserving_close_ready(
+		0, 0, 2, 4, 0, 8, 0));
+
+	/* QD4: a transient two-record dry prefix must remain retained. */
+	CHECK(!swapz_window_work_conserving_close_ready(
+		2, 0, 2, 4, 0, 8, 0));
+	CHECK(!swapz_window_work_conserving_close_ready(
+		2, 0, 3, 4, 0, 8, 0));
+	CHECK(swapz_window_work_conserving_close_ready(
+		2, 0, 4, 4, 0, 8, 0));
+
+	/* Already-admitted local writes are finite work, not a reason to hand
+	 * an eight-record prefix below a larger learned target to the lower path. */
+	CHECK(!swapz_window_work_conserving_close_ready(
+		2, 0, 8, 16, 0, 8, 1));
+	CHECK(!swapz_window_work_conserving_close_ready(
+		2, 1, 8, 16, 0, 8, 1));
+	CHECK(swapz_window_work_conserving_close_ready(
+		2, 0, 16, 16, 0, 8, 1));
+
+	/* A truly dry accepted FIFO may close a complete multi-pack hand below
+	 * an oversized learned target, but not a smaller partial batch. */
+	CHECK(!swapz_window_work_conserving_close_ready(
+		2, 1, 7, 32, 0, 8, 0));
+	CHECK(swapz_window_work_conserving_close_ready(
+		2, 1, 8, 32, 0, 8, 0));
+
+	/* A sampled finite tail overrides the learned target. */
+	CHECK(!swapz_window_work_conserving_close_ready(
+		2, 0, 3, 32, 4, 8, 0));
+	CHECK(swapz_window_work_conserving_close_ready(
+		2, 0, 4, 32, 4, 8, 0));
+	return 0;
+}
+
 static int test_uniform_compressed_identity_sort_safety(void)
 {
 	struct swapz_pending_bio batch[SWAPZ_MAX_RECORDS] = { 0 };
@@ -458,6 +500,7 @@ int main(void)
 	CHECK(test_pack_ready_uses_compressed_geometry_across_raw_slots() == 0); passed++;
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
+	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_ordinary_retention_deadline_is_pinned() == 0); passed++;
