@@ -254,8 +254,10 @@ static inline swapz_u8 swapz_window_shrink_burst_target(
 /*
  * A post-PACK sampled tail becomes a one-shot close target only at or above
  * the qualified four-record floor. Two/three-record samples are dominated by
- * writers resubmitted after bio_endio() and must remain on the existing pinned
- * deadline. A staged-only prefix is still not a finite accepted tail.
+ * writers resubmitted after bio_endio(), so they are not immediate close
+ * targets; only the separately qualified bounded resubmission/read-pivot path
+ * may release a valid staged 2/3 tail before the ordinary hard deadline.
+ * A staged-only prefix is still not a finite accepted tail.
  */
 static inline swapz_u8 swapz_window_sampled_tail_target(
 		swapz_u8 tail, swapz_u8 queued_tail)

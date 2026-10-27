@@ -127,7 +127,8 @@ belong in the ROADMAP decision table and Git history.
   A prior completed chain or deferred valid pack alone must never bypass the
   four-record floor. The explicit sub-four paths require a staged valid pack and
   at least two records; they must never manufacture a one-record PACK_READY
-  close.
+  close. Source comments and native contracts must distinguish this qualified
+  suppressed-tail exception from the general four-record work-conserving floor.
 - **Retention deadline:** learned/admitted targets may shape aggregation, but
   the ordinary absolute deadline remains the hard boundary
   ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$).

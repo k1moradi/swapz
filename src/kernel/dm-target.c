@@ -3844,8 +3844,9 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
  * caller supplies that FIFO-dry proof; this helper supplies the staged-pack,
  * lower-idle and sampled-tail policy.
  *
- * Counts 1..3 retain the pinned deadline. A sampled finite tail is
- * authoritative only at or above the same four-record floor.
+ * Count one retains the pinned deadline. Counts two/three may use only the
+ * qualified suppressed-tail resubmission/read-pivot path below the four-record
+ * floor; a sampled finite close target itself is authoritative only at four+.
  */
 static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 {
