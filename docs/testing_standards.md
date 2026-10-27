@@ -268,7 +268,6 @@ long-run churn, actual kernel swap and physical media remain open qualification
 gates.
 
 ## Deferred optimization evidence gates
-## Deferred optimization evidence gates
 
 - **ID38 lower-WRITE depth:** closed for the current product. Repeated paired
   depth-1/depth-2 evidence did not establish a useful service benefit.

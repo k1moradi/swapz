@@ -46,7 +46,6 @@ relative to `e17f05a1c256`, fast mixed async useful WRITE fell 38.26 ->
 temporary lifetime telemetry rather than tuning its timeout.
 
 ## Current bottleneck ranking
-## Current bottleneck ranking
 
 The strongest current signal is accepted-work lower-device idle time caused by
 small retained windows. On `829cdbe0d9eb`, the regressed mixed workload
@@ -90,7 +89,6 @@ restore K>1 in this round. The candidate must isolate dispatch/state behavior
 and preserve the current ownership, RAW terminal-selection, ordering and
 fail-closed rules.
 
-## Optimization evidence table
 ## Optimization evidence table
 
 This table is the canonical anti-retest index. Before proposing optimization
@@ -300,7 +298,6 @@ so the next change is a performance-policy repair, not a correctness rollback.
    whether a second producer, a larger reservoir or multiple lower-I/O buffers
    earns a new bounded experiment. Do not preemptively add those resources.
 
-## Deferred asynchronous segment TRIM design for review
 ## Deferred asynchronous segment TRIM design for review
 
 Step 3 of the owner's original plan is deferred behind resource-pressure and
