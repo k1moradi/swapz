@@ -709,7 +709,6 @@ that owns the latch, not the admission caller, and generated telemetry-field
 checks must interpolate the field name rather than compare placeholder text.
 
 Loaded qualification must use the exact-source owner `make test` matrix and
-Loaded qualification must use the exact-source owner `make test` matrix and
 judge product-facing service before internal attribution. The sustained
 write-only matrix uses five counterbalanced async/sync pairs for fast QD4/QD8/
 QD32 and serial-depth QD32; the latter is the terminal evidence gate for whether
