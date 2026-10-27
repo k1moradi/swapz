@@ -265,41 +265,41 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-The latest owner-qualified source is `32f41984b934`, with canonical report-only
-commit `f0d2e04e50e7`. It proves the four-record suppression mechanically works
-and improves sustained QD4/QD8/QD32, but the full-deadline form regresses fast
-mixed useful service enough that it is not the final ID83 scheduling policy.
+The latest owner-qualified source is `e17f05a1c256`, with canonical report-only
+commit `64f6e8e1890e`. All five owner stages pass, including ID36. The passive
+ID83 evidence now qualifies the remaining bounded tail policy: in fast mixed
+I/O, 332.6/333.0 sync reached-four observations (99.9%) and all 239.2/239.2
+async observations reach four by 500us, whereas a 250us cutoff would discard
+about two percent. Independent READ pivots are almost entirely cache hits
+(331.0/332.4 sync, 215.6/216.4 async), confirming that lower-I/O-only bypass
+state misses wave transitions. Serial-QD32 async preparation is also retained:
++4.2% async/sync with paired 95% CI [+2.7,+5.7]%.
 
-1. Collect passive suppressed-tail lifetime evidence for sampled tail 2/3:
-   first post-sample WRITE age, record-four age, deadline-at-two,
-   tail-two/deadline-at-three, tail-three/deadline-at-three, interruption and
-   other clears. Split the first independent READ pivot into cache-hit versus
-   lower-I/O. Keep target-2/3 close counters to prove the current suppression.
-2. Do not add the proposed 150-250us resubmission wake yet. Only if the new
-   record-four distribution has a stable bounded p99 while mixed wave-end tails
-   demonstrably remain at two/three until the 2ms deadline may a separately
-   qualified alternate wake/accepted-work policy be implemented.
-3. Keep the sub-four SERVICE_DRY exception only for an already staged valid pack
-   with at least two records and explicit read-bypass/wave-interruption evidence;
-   a one-record PACK_READY close is invalid.
-4. Extend sustained write-only qualification to five counterbalanced
-   async/sync pairs at serial-depth QD32. If its current +10.3% mean async
-   advantage does not survive paired inference or is outweighed by lower-I/O
-   cost, run the terminal synchronous-default de-bloat candidate and remove the
-   producer/64-slot reservoir only after that source passes the full matrix.
-5. Qualify changes only through public `make test`: preserve byte-exact
-   correctness, lifecycle/ID36, fast QD4/QD8/QD32 gains, slow/SD direction,
-   lower-byte savings and p99. The existing x86 SSE2/AVX2/AVX-512 and arm64
-   NEON codec qualification matrix remains mandatory.
-6. Do not add K>1, another preparation worker or a larger reservoir; current
-   ready/preparation pressure counters do not support those changes.
-7. Keep delta64 rescue default-off pending representative-content prevalence.
+1. Qualify the bounded ID83 candidate: use the existing hrtimer to wake at the
+   earlier of the ordinary first-record deadline and
+   `suppressed_tail_start + 500us` only for a staged suppressed tail of two or
+   three records with K=1 idle. An independent READ may prove that suppressed
+   wave ended even when it is a cache hit. Require both accepted FIFOs dry and
+   preserve the valid-pack/count>=2 guard.
+2. Promotion requires public `make test` to recover fast mixed useful service
+   materially toward/past the pre-suppression `f111c6e` result while preserving
+   the current sustained fast geometry, lower-WRITE byte/request savings,
+   p99/lifecycle/ID36, and slow/SD direction. Product-facing results decide;
+   lifetime counters are attribution only.
+3. Keep one unbound preparation producer and the 64-slot reservoir. The
+   serial-QD32 paired interval is strictly positive, so do not run or merge the
+   synchronous-default de-bloat branch on current evidence. Keep K=1.
+4. Keep target four and larger as finite sampled-tail targets. A singleton never
+   uses the bounded tail wake. Do not add another grace timer, K>1, another
+   preparation worker or a larger reservoir.
+5. Keep delta64 rescue default-off pending representative-content prevalence.
    Keep ordinary LZ4 acceleration one, packed placement, circular allocation,
    ID63 and SWZ geometry unchanged.
-8. After the fast-media dispatch question is resolved, return to realistic
-   churn/GC/TRIM evidence at roughly 70% occupancy with a cold/hot split and at
-   least ten logical capacities of hot rewrites. ID62 remains separately
-   unauthorized for physical-device testing.
+6. After the fast-media dispatch candidate is qualified, remove the temporary
+   suppressed-tail lifetime telemetry and return to realistic churn/GC/TRIM
+   evidence at roughly 70% occupancy with a cold/hot split and at least ten
+   logical capacities of hot rewrites. ID62 remains separately unauthorized for
+   physical-device testing.
 
 ## Deferred asynchronous segment TRIM design for review
 
