@@ -608,7 +608,7 @@ struct swapz_dm {
 	swapz_u8 next_burst_close_target;
 	u64 pack_close_tail_target;
 	u64 pack_close_tail_target_le4;
-	/* Exact close attribution remains until the suppressed-tail policy settles. */
+	/* Passive exact attribution for small sampled-tail PACK_READY closes. */
 	u64 pack_close_tail_target_2;
 	u64 pack_close_tail_target_3;
 	u64 pack_close_tail_target_4;
@@ -3640,10 +3640,11 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			ctx->single_tail_read_bypass_seen = false;
 			ctx->retained_single_tail_deferred = true;
 		} else {
-			/* A staged-only prefix may be joined by writers released by
-			 * the just-finalized K=1 run. Do not self-close that prefix,
-			 * and do not let a two/three-record reschedule gap override
-			 * the qualified four-record service floor. */
+			/* A staged-only pure-WRITE prefix may be joined by writers
+			 * released by the just-finalized K=1 run, so queued follower
+			 * evidence still protects the four-record floor. A serviced READ
+			 * or accepted non-WRITE boundary instead proves a mixed tail is
+			 * already finite and may use its exact two/three-record target. */
 			ctx->retained_tail_target =
 				swapz_window_sampled_tail_target(
 					tail, queued_tail,
@@ -3663,9 +3664,10 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
  * caller supplies that FIFO-dry proof; this helper supplies the staged-pack,
  * lower-idle and sampled-tail policy.
  *
- * Count one retains the pinned deadline. Counts two/three may use only the
- * qualified suppressed-tail resubmission/read-pivot path below the four-record
- * floor; a sampled finite close target itself is authoritative only at four+.
+ * Count one retains the pinned deadline. SERVICE_DRY never invents a new
+ * two/three-record exception: sub-four service still requires existing
+ * read-bypass or wave-interruption evidence. A mixed-wave sampled target is
+ * handled separately as authoritative finite accepted work.
  */
 static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 {
@@ -5261,10 +5263,9 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
  * may finish ALL previously accepted BIOs without building a potentially
  * unbounded chain of requeued delayed works during drain_workqueue().
  */
-/* The ordinary first-record absolute deadline remains the hard retention
- * boundary. ID53's singleton cutoff stays rejected. The qualified ID83
- * suppressed-tail path may only wake the same hrtimer earlier; it does not
- * redefine ordinary deadline expiry. */
+/* The ordinary first-record absolute deadline is the only retention timer
+ * boundary. ID53's singleton cutoff and ID83's 500us suppressed-tail wake are
+ * both rejected; finite mixed-wave targets are serviced without timer rearm. */
 static u64 swapz_retention_deadline_ns(struct swapz_dm *ctx)
 {
 	return swapz_window_retention_deadline_ns(

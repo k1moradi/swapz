@@ -286,10 +286,10 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
 
 /*
  * SERVICE_DRY is allowed below the four-record floor only for an already
- * staged valid pack. Existing read/fence evidence remains authoritative; the
- * separately qualified suppressed-tail path may also close counts two/three
- * after its bounded post-completion resubmission window or a cache-hit READ
- * wave pivot. A one-record window can never become PACK_READY here.
+ * staged valid pack when existing read-bypass or wave-interruption evidence
+ * proves the accepted wave was broken. Mixed-wave finite sampled tails are
+ * handled by sampled_tail_target before this helper. A one-record window can
+ * never become PACK_READY here.
  */
 static inline int swapz_window_service_close_ready(
 		int valid_pack, int lower_idle, swapz_u8 count,

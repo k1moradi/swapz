@@ -180,7 +180,9 @@ belong in the ROADMAP decision table and Git history.
   suppressed-tail lifetime state and its timer/pivot counters are removed rather
   than retained as dead policy scaffolding. Mixed-wave classification is one
   worker-owned boolean plus the sampler's existing prefix state; neither may add
-  mapper atomics or admission-side scheduling.
+  mapper atomics or admission-side scheduling. Kernel/header comments must name
+  this current mixed-wave policy directly and must not retain descriptions of
+  the refuted 500us wake or cache-hit close authorization.
 
 ### Settled implementation policies
 
