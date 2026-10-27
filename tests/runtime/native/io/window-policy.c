@@ -238,6 +238,7 @@ static int test_pack_ready_uses_compressed_geometry_across_raw_slots(void)
 	batch[4].raw = 1;
 	CHECK(swapz_window_prior_single_pack_ready(batch, 5, 2, 0));
 	batch[4].raw = 0;
+	batch[4].length = 2028;
 	batch[3].length = 2028;
 	/* Four compressed records plus one RAW record exactly fill the same 8KiB
 	 * compressed extent geometry used by a RAW-free four-record prefix. */

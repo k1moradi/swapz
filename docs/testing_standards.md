@@ -691,7 +691,9 @@ remain recognizable even when RAW records or later compressed records change
 the current exact geometry. Both RAW and compressed admission paths must
 re-evaluate that proof. Native tests must cover count four remaining ineligible
 and count five recovering the earlier pack with both compressed and RAW newest
-records.
+records. Geometry fixtures that temporarily mark a record RAW must restore both
+its RAW flag and compressed length before reusing that array for later exact-pack
+assertions; otherwise the fixture is testing stale mutation rather than policy.
 
 The refuted suppressed-tail lifetime counters and their replay/reporter schema
 are removed in the same change. Keep exact target-2/3/4 PACK_READY attribution
