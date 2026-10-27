@@ -838,20 +838,30 @@ owners (for example, PACK_READY closure from write admission to the serialized
 worker), contract assertions must move with that ownership in the same
 standards-backed change rather than preserving historical body-local syntax.
 
-ID83 dispatcher refinement contracts must prove all four scheduling boundaries:
-ordered RAW forcing requires accepted backlog and an actually idle lower-WRITE
-path; the eight-record pressure hand may not split a consecutive already-READY
-FIFO prefix; READY_COMPRESSED and READY_RAW make a dry accepted window
-work-conserving; and producer ownership does not make RAW dispatchable before
-the stable snapshot completion. Status/report qualification must retain
-`accepted_work_lower_idle_events` and `accepted_work_lower_idle_ns` as
-observational timed fields. Replay telemetry capture and reporter aggregation
-must classify them as timed window deltas so mixed-regime means cannot silently drop them. When
-work-conserving hand or dry FIFO closure dispatches a multi-record packed window,
-it commits via `swapz_close_worker_pack()` so that `close_pack_ready` reflects
-packed early commits and satisfies PACK_READY cause conservation. An early
-`prepared_page` publication is not an optimization unless RAW selection is
-separately gated on snapshot completion.
+ID83 dispatcher refinement contracts must prove all scheduling boundaries:
+ordered RAW forcing requires an actually idle lower-WRITE path, stays within the
+first eight-record pressure hand, and requires at least eight accepted records
+across the active batch plus unclaimed preparation queue; QD1/QD4 must not be
+forced RAW by transient two-record backlog. The eight-record pressure hand may
+not split an already-accepted plain-WRITE FIFO below the effective burst/tail
+target merely because the next representation is unready. A dry retained FIFO
+below that target may close early only with a complete staged multi-pack hand of
+at least eight records. Producer ownership still does not make RAW dispatchable
+before the stable snapshot completion.
+
+Status/replay/reporter qualification must retain
+`accepted_work_lower_idle_events/ns` and the four-way retained-open-batch
+attribution
+`undersized_batch/worker_unscheduled/preparing_head/no_ready_work`; their timed
+interval deltas must sum exactly to `accepted_work_lower_idle_ns`.
+`accepted_work_lower_idle_post_lower_ns` is a separate callback-to-publication
+diagnostic and must not be included in that conservation sum. PACK_READY
+telemetry must attribute below-target work-conserving packed closes to
+`SWAPZ_PACK_CLOSE_SERVICE_DRY`, never BURST_TARGET. Native window-policy tests
+must cover QD4 2/3/4-record retention, an unready accepted eight-record prefix
+under a larger target, dry complete-multi-pack closure, sampled-tail override,
+and unchanged non-retained behavior. Loaded qualification remains authoritative
+for actual scheduler timing, byte geometry, useful throughput and p99.
 
 
 Only a successful PACK_READY continuation may arm post-I/O admitted-tail

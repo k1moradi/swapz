@@ -646,37 +646,36 @@ storage envelopes remain the decision surface, and the SIMD qualification
 matrix remains unchanged: SSE2/AVX2/AVX-512 objects on x86_64, NEON on arm64,
 with runtime execution only when the host advertises the ISA.
 
-The first owner-qualified run is report `aacf96c02325` on exact source
-`91c2cb2edb1e`. All five correctness/build stages pass. Its performance result
-is a refinement baseline, not a promotion: fast mixed async is 45.35 MB/s versus
-43.84 sync, but the +3.5% paired effect has CI -0.2..+7.2 while async lower
-WRITE requests are 2560.4 versus 1691.0 sync, a significant +869.4
-(+796.2..+942.6). Fast sustained QD8 improves +14.6% (+12.5..+16.7), but QD32
-regresses -9.8% (-14.2..-5.5). SD mixed remains strongly favorable versus raw,
-although async is 7.1% below sync.
+Owner report `6836b4ff1ffc` qualifies exact source `b4bc5e0ba965`
+across all five stages. Fast mixed async useful WRITE reaches 46.73 MB/s versus
+41.06 MB/s sync, a statistically significant +13.9% gain (95% CI
++9.6..+18.1), but async lower WRITE requests rise to 2678.8 versus 1757.6 sync
+(+921.2, CI +899.1..+943.3). Fast sustained QD4 regresses -28.1%
+(-37.4..-18.7) with about 2046 lower requests, while QD8 is statistically
+neutral and the earlier QD32 regression narrows to an unresolved -3.8%.
 
-The dispatcher refinement tests one production-C hypothesis: the first
-eight-record hand should start service when accepted work is unready, but it
-must not force later RAW while K=1 is already busy or split a consecutive FIFO
-prefix whose representations are already READY. READY_COMPRESSED/READY_RAW also
-make the current window work-conserving so a dry accepted tail cannot fall back
-to the retention timer. The stable 4KiB RAW snapshot boundary is unchanged.
+The next ID83 source change is a single production-policy experiment, not a new
+concurrency architecture. It keeps the qualified snapshot publication boundary,
+K=1, one preparation lane, 64 slots, ID63, cache policy and SWZ 1/2/4 geometry.
+It prevents a momentarily idle lower path from flushing a retained two/three
+record prefix below its effective target, prevents the eight-record pressure
+hand from chopping already-accepted plain-WRITE work below a larger target, and
+bounds forced RAW to the first eight-record hand only when at least eight
+accepted records of backlog are already proven. A truly dry FIFO may still
+service a complete staged multi-pack hand without waiting for future arrivals.
 
-Timed swapz arms retain hand/dry closes, RAW-not-ready, compressed-ready,
-RAW-ready, late-result-discard and reservoir/slot high water, and additionally
-record `accepted_work_lower_idle_events/ns`. The new counters are diagnostic:
-the desired fast-media signature is lower accepted-work idle wall, lower
-WRITE-request inflation, and recovered useful service/p99 without converting the
-qualified SD workload into excessive RAW traffic. K=1 ready-wait remains the
-only reopen signal for another lower-WRITE slot.
+PACK_READY cause accounting is corrected at the same boundary: a packed
+work-conserving close below the effective target is SERVICE_DRY, not a synthetic
+BURST_TARGET. Retained lower-idle wall is split into four conserved timed
+components (undersized retained wait, worker scheduling delay, preparation-head
+wait and remaining active no-ready work); a separate post-lower diagnostic
+measures callback-to-publication hold when accepted WRITE work is waiting.
 
-Expected direction is strongest at deep QD on fast storage. Avoiding RAW forcing
-during K=1 service should let already-accepted pages use otherwise idle CPU
-overlap, reducing lower bytes and extent/request count. Extending ready prefixes
-past eight records should reduce request chopping. Immediate dry closure of
-READY work removes up to the remaining retention budget for those windows.
-Costs are bounded extra state checks plus potentially more compression CPU; no
-new payload allocation, queue depth, on-disk representation or completion owner
-is introduced. These are hypotheses until the next exact-source owner
-`make test` report; do not infer physical-device performance from RAM-backed
-service envelopes.
+The performance hypothesis is deliberately narrow. QD4 should stop the observed
+two-record IDLE oscillation and move request geometry toward the synchronous
+control, while fast mixed should reduce forced RAW bytes and short-window lower
+requests without surrendering its confirmed async service gain. No exact
+throughput or request-count improvement is considered established until the
+next same-source owner `make test` report. Slow/SD useful service, lower-byte
+savings, p99, loaded lifecycle correctness and all supported ISA/build coverage
+remain non-regression gates.

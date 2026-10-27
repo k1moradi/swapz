@@ -281,7 +281,12 @@ TIMED_WINDOW_COUNTER_FIELDS = (
     WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS +
     BURST_COUNTER_FIELDS + (
         "gc_victims", "accepted_work_lower_idle_events",
-        "accepted_work_lower_idle_ns"))
+        "accepted_work_lower_idle_ns",
+        "accepted_work_lower_idle_undersized_batch_ns",
+        "accepted_work_lower_idle_worker_unscheduled_ns",
+        "accepted_work_lower_idle_preparing_head_ns",
+        "accepted_work_lower_idle_no_ready_work_ns",
+        "accepted_work_lower_idle_post_lower_ns"))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
 DELTA64_FIELDS = (
@@ -765,6 +770,13 @@ def timed_window_error(record):
     if any(type(record.get(field)) is not int or record[field] < 0
            for field in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS):
         return "invalid timed swapz window telemetry"
+    if sum(record[field] for field in (
+            "accepted_work_lower_idle_undersized_batch_ns",
+            "accepted_work_lower_idle_worker_unscheduled_ns",
+            "accepted_work_lower_idle_preparing_head_ns",
+            "accepted_work_lower_idle_no_ready_work_ns")) != \
+            record["accepted_work_lower_idle_ns"]:
+        return "inconsistent accepted lower-idle attribution"
     if not record["delta64_rescue"] and any(record[field] for field in DELTA64_FIELDS):
         return "disabled delta64 recorded rescue activity"
     if not (record["delta64_adopted"] <= record["delta64_attempts"] <=
@@ -4676,7 +4688,12 @@ def benchmark_verdicts(sessions):
                 for key in (BURST_COUNTER_FIELDS + ("windows",
                             "one_page_windows", "gc_victims",
                             "accepted_work_lower_idle_events",
-                            "accepted_work_lower_idle_ns") + WIN1_PACK_CAUSE_FIELDS +
+                            "accepted_work_lower_idle_ns",
+                            "accepted_work_lower_idle_undersized_batch_ns",
+                            "accepted_work_lower_idle_worker_unscheduled_ns",
+                            "accepted_work_lower_idle_preparing_head_ns",
+                            "accepted_work_lower_idle_no_ready_work_ns",
+                            "accepted_work_lower_idle_post_lower_ns") + WIN1_PACK_CAUSE_FIELDS +
                             SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
@@ -6349,6 +6366,13 @@ def print_bench(result):
                 ("accepted lower-idle events/ms",
                  f"{counters['accepted_work_lower_idle_events']:.1f}/"
                  f"{counters['accepted_work_lower_idle_ns'] / 1e6:.2f}"),
+                ("idle U/W/P/N ms",
+                 f"{counters['accepted_work_lower_idle_undersized_batch_ns'] / 1e6:.2f}/"
+                 f"{counters['accepted_work_lower_idle_worker_unscheduled_ns'] / 1e6:.2f}/"
+                 f"{counters['accepted_work_lower_idle_preparing_head_ns'] / 1e6:.2f}/"
+                 f"{counters['accepted_work_lower_idle_no_ready_work_ns'] / 1e6:.2f}"),
+                ("accepted post-lower ms",
+                 f"{counters['accepted_work_lower_idle_post_lower_ns'] / 1e6:.2f}"),
                 ("K=1 ready wait win/records/ms",
                  f"{counters['k1_ready_wait_windows']:.1f}/"
                  f"{counters['k1_ready_wait_records']:.1f}/"

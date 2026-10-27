@@ -1170,7 +1170,12 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims",
-    "accepted_work_lower_idle_events", "accepted_work_lower_idle_ns"
+    "accepted_work_lower_idle_events", "accepted_work_lower_idle_ns",
+    "accepted_work_lower_idle_undersized_batch_ns",
+    "accepted_work_lower_idle_worker_unscheduled_ns",
+    "accepted_work_lower_idle_preparing_head_ns",
+    "accepted_work_lower_idle_no_ready_work_ns",
+    "accepted_work_lower_idle_post_lower_ns"
 ) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
@@ -1253,6 +1258,15 @@ def kernel_write_delta(before, after):
                 for key in KERNEL_WRITE_COUNTER_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
+    idle_parts = (
+        "accepted_work_lower_idle_undersized_batch_ns",
+        "accepted_work_lower_idle_worker_unscheduled_ns",
+        "accepted_work_lower_idle_preparing_head_ns",
+        "accepted_work_lower_idle_no_ready_work_ns",
+    )
+    if sum(counters[field] for field in idle_parts) != \
+            counters["accepted_work_lower_idle_ns"]:
+        raise ValueError("inconsistent accepted lower-idle attribution")
     if (before["delta64_rescue"] != after["delta64_rescue"] or
             after["delta64_rescue"] not in (0, 1)):
         raise ValueError("invalid or changed swapz delta64 policy")

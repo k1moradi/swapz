@@ -375,6 +375,13 @@ struct swapz_dm {
 	u64 accepted_work_lower_idle_events;
 	u64 accepted_work_lower_idle_ns;
 	u64 accepted_work_lower_idle_start_ns;
+	u64 accepted_work_lower_idle_accounted_until_ns;
+	atomic64_t accepted_work_lower_idle_wake_ns;
+	u64 accepted_work_lower_idle_undersized_batch_ns;
+	u64 accepted_work_lower_idle_worker_unscheduled_ns;
+	u64 accepted_work_lower_idle_preparing_head_ns;
+	u64 accepted_work_lower_idle_no_ready_work_ns;
+	u64 accepted_work_lower_idle_post_lower_ns;
 	/* Diagnostic queue-depth samples at synchronous lower-WRITE boundaries. */
 	u64 prep_lower_write_samples;
 	u64 prep_lower_write_start_queued;
@@ -1072,14 +1079,65 @@ static void swapz_mark_segments_dirty(struct swapz_dm *ctx,
 			WRITE_ONCE(ctx->segment_trimmed[segment], 0);
 }
 
+static void swapz_account_accepted_lower_idle_segment(
+	struct swapz_dm *ctx, u64 now_ns, u64 *counter)
+{
+	u64 start_ns = READ_ONCE(ctx->accepted_work_lower_idle_start_ns);
+	u64 accounted_ns = ctx->accepted_work_lower_idle_accounted_until_ns;
+	u64 elapsed_ns;
+
+	if (!start_ns || accounted_ns < start_ns || now_ns < accounted_ns)
+		return;
+	elapsed_ns = swapz_elapsed_ns(accounted_ns, now_ns);
+	*counter += elapsed_ns;
+	ctx->accepted_work_lower_idle_ns += elapsed_ns;
+	ctx->accepted_work_lower_idle_accounted_until_ns = now_ns;
+}
+
+static void swapz_account_accepted_lower_idle_worker_entry(
+	struct swapz_dm *ctx, u64 now_ns)
+{
+	u64 start_ns = READ_ONCE(ctx->accepted_work_lower_idle_start_ns);
+	u64 accounted_ns = ctx->accepted_work_lower_idle_accounted_until_ns;
+	u64 wake_ns;
+
+	if (!start_ns || accounted_ns < start_ns || now_ns < accounted_ns)
+		return;
+	wake_ns = (u64)atomic64_xchg(&ctx->accepted_work_lower_idle_wake_ns, 0);
+	if (wake_ns >= accounted_ns && wake_ns <= now_ns) {
+		ctx->accepted_work_lower_idle_undersized_batch_ns +=
+			swapz_elapsed_ns(accounted_ns, wake_ns);
+		ctx->accepted_work_lower_idle_worker_unscheduled_ns +=
+			swapz_elapsed_ns(wake_ns, now_ns);
+	} else {
+		ctx->accepted_work_lower_idle_undersized_batch_ns +=
+			swapz_elapsed_ns(accounted_ns, now_ns);
+	}
+	ctx->accepted_work_lower_idle_ns +=
+		swapz_elapsed_ns(accounted_ns, now_ns);
+	ctx->accepted_work_lower_idle_accounted_until_ns = now_ns;
+}
+
+static void swapz_note_accepted_lower_idle_wake(struct swapz_dm *ctx)
+{
+	u64 start_ns = READ_ONCE(ctx->accepted_work_lower_idle_start_ns);
+
+	if (!start_ns || !READ_ONCE(ctx->accepting) ||
+	    atomic_read(&ctx->lower_write_active))
+		return;
+	atomic64_cmpxchg(&ctx->accepted_work_lower_idle_wake_ns, 0,
+			 (s64)ktime_get_ns());
+}
+
 static void swapz_end_accepted_lower_idle(struct swapz_dm *ctx, u64 now_ns)
 {
-	u64 start_ns = ctx->accepted_work_lower_idle_start_ns;
-
-	if (!start_ns)
+	if (!READ_ONCE(ctx->accepted_work_lower_idle_start_ns))
 		return;
-	ctx->accepted_work_lower_idle_ns += swapz_elapsed_ns(start_ns, now_ns);
-	ctx->accepted_work_lower_idle_start_ns = 0;
+	swapz_account_accepted_lower_idle_segment(
+		ctx, now_ns, &ctx->accepted_work_lower_idle_no_ready_work_ns);
+	WRITE_ONCE(ctx->accepted_work_lower_idle_start_ns, 0);
+	ctx->accepted_work_lower_idle_accounted_until_ns = 0;
+	atomic64_set(&ctx->accepted_work_lower_idle_wake_ns, 0);
 }
 
 static int swapz_submit_inflight_write(struct swapz_dm *ctx,
@@ -1240,9 +1298,13 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	ctx->pipeline_active_wall_ns +=
 		swapz_elapsed_ns(inflight->lower_start_ns, finalize_end);
 	if (lower_end && lower_end >= inflight->lower_start_ns &&
-	    lower_end <= finalize_end)
-		ctx->pipeline_post_lower_wall_ns +=
-			swapz_elapsed_ns(lower_end, finalize_end);
+	    lower_end <= finalize_end) {
+		u64 post_lower_ns = swapz_elapsed_ns(lower_end, finalize_end);
+
+		ctx->pipeline_post_lower_wall_ns += post_lower_ns;
+		if (ctx->batch_count || READ_ONCE(ctx->preparation_queued))
+			ctx->accepted_work_lower_idle_post_lower_ns += post_lower_ns;
+	}
 
 	WRITE_ONCE(inflight->active, false);
 	ctx->inflight_count--;
@@ -2095,6 +2157,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 				WRITE_ONCE(entry->preparation_error, error);
 				complete_all(&entry->preparation_snapshot_ready);
 				swapz_prepared_put(ctx, prepared);
+				swapz_note_accepted_lower_idle_wake(ctx);
 				mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 				continue;
 			}
@@ -2179,6 +2242,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		complete(&prepared->result_ready);
 		lane->prepared_pages++;
 		swapz_prepared_put(ctx, prepared);
+		swapz_note_accepted_lower_idle_wake(ctx);
 		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 		    !atomic_read(&ctx->preparation_tail_credit))
@@ -3365,6 +3429,16 @@ static bool swapz_plain_retained_write(const struct bio *bio)
 	return bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio) &&
 		!(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
 }
+
+static bool swapz_local_head_is_plain_write(const struct list_head *local)
+{
+	struct swapz_bio_ref *entry;
+
+	if (list_empty(local))
+		return false;
+	entry = list_first_entry(local, struct swapz_bio_ref, list);
+	return swapz_plain_retained_write(entry->bio);
+}
 static void swapz_reset_single_tail_observation(struct swapz_dm *ctx)
 {
 	ctx->single_tail_deferred_start_ns = 0;
@@ -3601,14 +3675,16 @@ static bool swapz_worker_pack_close_ready(struct swapz_dm *ctx)
 		!swapz_retention_expired(ctx);
 }
 
-static void swapz_close_worker_pack(struct swapz_dm *ctx)
+static void swapz_close_worker_pack_cause(
+	struct swapz_dm *ctx, enum swapz_pack_close_cause cause)
 {
-	ctx->next_pack_close_cause =
-		swapz_service_proven_dry_pack(ctx) ?
-		SWAPZ_PACK_CLOSE_SERVICE_DRY :
-		(ctx->retained_tail_target ?
-		 SWAPZ_PACK_CLOSE_TAIL_TARGET :
-		 SWAPZ_PACK_CLOSE_BURST_TARGET);
+	ctx->next_pack_close_cause = cause != SWAPZ_PACK_CLOSE_NONE ?
+		cause :
+		(swapz_service_proven_dry_pack(ctx) ?
+		 SWAPZ_PACK_CLOSE_SERVICE_DRY :
+		 (ctx->retained_tail_target ?
+		  SWAPZ_PACK_CLOSE_TAIL_TARGET :
+		  SWAPZ_PACK_CLOSE_BURST_TARGET));
 	if (ctx->next_pack_close_cause == SWAPZ_PACK_CLOSE_BURST_TARGET) {
 		ctx->next_burst_close_site = SWAPZ_BURST_CLOSE_WORKER;
 		ctx->next_burst_close_target = ctx->retained_burst_target;
@@ -3618,6 +3694,21 @@ static void swapz_close_worker_pack(struct swapz_dm *ctx)
 	if (ctx->accepted_burst_pack_ready)
 		ctx->accepted_burst_tail_flushes++;
 	swapz_flush_window(ctx);
+}
+
+static void swapz_close_worker_pack(struct swapz_dm *ctx)
+{
+	swapz_close_worker_pack_cause(ctx, SWAPZ_PACK_CLOSE_NONE);
+}
+
+static enum swapz_pack_close_cause
+swapz_work_conserving_pack_close_cause(const struct swapz_dm *ctx)
+{
+	swapz_u8 target = swapz_window_effective_burst_target(
+		ctx->retained_burst_target, ctx->retained_tail_target);
+
+	return target && ctx->batch_count < target ?
+		SWAPZ_PACK_CLOSE_SERVICE_DRY : SWAPZ_PACK_CLOSE_NONE;
 }
 
 static void swapz_resolve_single_tail_companion(struct swapz_dm *ctx)
@@ -5168,8 +5259,10 @@ static enum hrtimer_restart swapz_retention_wake(struct hrtimer *timer)
 	/* No batch/map accesses or sleeping I/O in timer context. The same
 	 * admission lock prevents a wake from racing past suspend/free. */
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	if (ctx->accepting)
+	if (ctx->accepting) {
+		swapz_note_accepted_lower_idle_wake(ctx);
 		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	}
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	return HRTIMER_NORESTART;
 }
@@ -5185,6 +5278,7 @@ static void swapz_worker(struct work_struct *work)
 	u64 wall_start_ns = ktime_get_ns();
 	u64 cpu_start_ns = swapz_worker_cpu_sample();
 
+	swapz_account_accepted_lower_idle_worker_entry(ctx, wall_start_ns);
 	for (;;) {
 		while (swapz_has_inflight(ctx)) {
 			struct swapz_inflight_write *head =
@@ -5259,9 +5353,14 @@ static void swapz_worker(struct work_struct *work)
 
 				if (!prepared && !entry->preparation_inline) {
 					spin_lock_irqsave(&ctx->queue_lock, flags);
-					accepted_backlog = ctx->batch_count ||
-						entry->list.next != &local ||
-						!list_empty(&ctx->incoming);
+					accepted_backlog =
+						(ctx->batch_count ||
+						 entry->list.next != &local ||
+						 !list_empty(&ctx->incoming)) &&
+						ctx->batch_count <
+							SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
+						ctx->batch_count + ctx->preparation_queued >=
+							SWAPZ_WORK_CONSERVING_HAND_RECORDS;
 					lower_write_busy = swapz_has_inflight(ctx) ||
 						atomic_read(&ctx->lower_write_active);
 					if (!list_empty(&entry->preparation_list)) {
@@ -5311,10 +5410,20 @@ static void swapz_worker(struct work_struct *work)
 						ctx->preparation_ordered_waits++;
 						wait_start = ktime_get_ns();
 					}
-					wait_for_completion(&entry->preparation_snapshot_ready);
 					if (wait_start)
+						swapz_account_accepted_lower_idle_segment(
+							ctx, wait_start,
+							&ctx->accepted_work_lower_idle_no_ready_work_ns);
+					wait_for_completion(&entry->preparation_snapshot_ready);
+					if (wait_start) {
+						u64 wait_end = ktime_get_ns();
+
 						ctx->preparation_ordered_wait_wall_ns +=
-							swapz_elapsed_ns(wait_start, ktime_get_ns());
+							swapz_elapsed_ns(wait_start, wait_end);
+						swapz_account_accepted_lower_idle_segment(
+							ctx, wait_end,
+							&ctx->accepted_work_lower_idle_preparing_head_ns);
+					}
 				} else {
 					inline_preparation = true;
 				}
@@ -5340,9 +5449,21 @@ static void swapz_worker(struct work_struct *work)
 						return;
 					}
 					if (!ctx->engine.bulk_enabled ||
-					    ctx->engine.verify_after_write)
-						wait_for_completion(
-							&prepared->result_ready);
+					    ctx->engine.verify_after_write) {
+						u64 wait_start = 0;
+
+						if (!completion_done(&prepared->result_ready)) {
+							wait_start = ktime_get_ns();
+							swapz_account_accepted_lower_idle_segment(
+								ctx, wait_start,
+								&ctx->accepted_work_lower_idle_no_ready_work_ns);
+						}
+						wait_for_completion(&prepared->result_ready);
+						if (wait_start)
+							swapz_account_accepted_lower_idle_segment(
+								ctx, ktime_get_ns(),
+								&ctx->accepted_work_lower_idle_preparing_head_ns);
+					}
 				}
 			} else if (ctx->async_prepare) {
 				/* READs/barriers revoke idle WRITE-wave credit. */
@@ -5421,12 +5542,20 @@ static void swapz_worker(struct work_struct *work)
 				 !swapz_has_inflight(ctx) &&
 				 ctx->batch_count >= SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
 				 !swapz_next_local_write_ready(ctx, &local) &&
+				 swapz_window_work_conserving_close_ready(
+					 ctx->retain_ms, ctx->accepted_burst_pack_ready,
+					 ctx->batch_count, ctx->retained_burst_target,
+					 ctx->retained_tail_target,
+					 SWAPZ_WORK_CONSERVING_HAND_RECORDS,
+					 swapz_local_head_is_plain_write(&local)) &&
 				 !ctx->failed && READ_ONCE(ctx->accepting)) {
 				ctx->work_conserving_hand_closes++;
 				if (ctx->batch_count >= 2U &&
 				    (ctx->single_pack_deferred ||
 				     ctx->accepted_burst_pack_ready))
-					swapz_close_worker_pack(ctx);
+					swapz_close_worker_pack_cause(
+						ctx,
+						swapz_work_conserving_pack_close_cause(ctx));
 				else {
 					ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 					swapz_flush_window(ctx);
@@ -5549,12 +5678,19 @@ static void swapz_worker(struct work_struct *work)
 				ctx->pack_close_pending_tail_sample = false;
 			}
 			if (ctx->batch_count >= 2U && ctx->work_conserving_window &&
-			    !swapz_has_inflight(ctx) && ctx->accepting && !ctx->failed) {
+			    !swapz_has_inflight(ctx) && ctx->accepting && !ctx->failed &&
+			    swapz_window_work_conserving_close_ready(
+				ctx->retain_ms, ctx->accepted_burst_pack_ready,
+				ctx->batch_count, ctx->retained_burst_target,
+				ctx->retained_tail_target,
+				SWAPZ_WORK_CONSERVING_HAND_RECORDS, 0)) {
 				ctx->work_conserving_dry_closes++;
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				if (ctx->single_pack_deferred ||
 				    ctx->accepted_burst_pack_ready)
-					swapz_close_worker_pack(ctx);
+					swapz_close_worker_pack_cause(
+						ctx,
+						swapz_work_conserving_pack_close_cause(ctx));
 				else {
 					ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 					swapz_flush_window(ctx);
@@ -5597,8 +5733,13 @@ static void swapz_worker(struct work_struct *work)
 			    ctx->accepting && !ctx->failed) {
 				if (!swapz_has_inflight(ctx) &&
 				    !ctx->accepted_work_lower_idle_start_ns) {
-					ctx->accepted_work_lower_idle_start_ns =
-						ktime_get_ns();
+					u64 idle_start_ns = ktime_get_ns();
+
+					WRITE_ONCE(ctx->accepted_work_lower_idle_start_ns,
+						   idle_start_ns);
+					ctx->accepted_work_lower_idle_accounted_until_ns =
+						idle_start_ns;
+					atomic64_set(&ctx->accepted_work_lower_idle_wake_ns, 0);
 					ctx->accepted_work_lower_idle_events++;
 				}
 				if (swapz_retention_timer_needs_arm(
@@ -5641,6 +5782,7 @@ static void swapz_worker(struct work_struct *work)
 			 * at the head, ahead of concurrently admitted BIOs.
 			 */
 			ctx->worker_requeues++;
+			swapz_note_accepted_lower_idle_wake(ctx);
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
@@ -5781,9 +5923,10 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	 */
 	if (bio_op(bio) != REQ_OP_WRITE ||
 	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
-	    !bio_sectors(bio) || ctx->retain_ms)
+	    !bio_sectors(bio) || ctx->retain_ms) {
+		swapz_note_accepted_lower_idle_wake(ctx);
 		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
-	else
+	} else
 		queue_delayed_work(ctx->workqueue, &ctx->worker, 0);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	return DM_MAPIO_SUBMITTED;
@@ -6056,6 +6199,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
 	atomic64_set(&ctx->preparation_free_mask,
 		     (s64)SWAPZ_PREPARATION_FREE_MASK);
+	atomic64_set(&ctx->accepted_work_lower_idle_wake_ns, 0);
 	atomic_set(&ctx->lower_write_active, 0);
 	atomic_set(&ctx->preparation_workers_active, 0);
 	atomic_set(&ctx->preparation_workers_active_max, 0);
@@ -6985,7 +7129,12 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_slots_in_use=%d prep_slots_in_use_max=%d "
 		       "prep_ordered_raw=%llu "
 		       "accepted_work_lower_idle_events=%llu "
-		       "accepted_work_lower_idle_ns=%llu",
+		       "accepted_work_lower_idle_ns=%llu "
+		       "accepted_work_lower_idle_undersized_batch_ns=%llu "
+		       "accepted_work_lower_idle_worker_unscheduled_ns=%llu "
+		       "accepted_work_lower_idle_preparing_head_ns=%llu "
+		       "accepted_work_lower_idle_no_ready_work_ns=%llu "
+		       "accepted_work_lower_idle_post_lower_ns=%llu",
 		       SWAPZ_WORK_CONSERVING_HAND_RECORDS,
 		       ctx->work_conserving_hand_closes,
 		       ctx->work_conserving_dry_closes,
@@ -6999,7 +7148,12 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       atomic_read(&ctx->preparation_slots_in_use_max),
 		       ctx->preparation_ordered_raw,
 		       ctx->accepted_work_lower_idle_events,
-		       ctx->accepted_work_lower_idle_ns);
+		       ctx->accepted_work_lower_idle_ns,
+		       ctx->accepted_work_lower_idle_undersized_batch_ns,
+		       ctx->accepted_work_lower_idle_worker_unscheduled_ns,
+		       ctx->accepted_work_lower_idle_preparing_head_ns,
+		       ctx->accepted_work_lower_idle_no_ready_work_ns,
+		       ctx->accepted_work_lower_idle_post_lower_ns);
 		/* These independent single-writer values are diagnostic while busy;
 		 * qualification snapshots only at drained measurement boundaries. */
 		DMEMIT(" delta64_rescue=%u delta64_eligible=%llu "

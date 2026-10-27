@@ -9,16 +9,16 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest successful standard owner matrix tested source
-`0155a09a0f2ef97daff68da045f615a04000ed02`, passed all five stages, and
-published report-only commit
-`dc78c9bbffbd2e8178fea9df2ca66006855c22e5`. It qualifies the complete
+`b4bc5e0ba96523f09d2e5acded8f477ffd9a992c`, passed all five stages, and
+published canonical report-only commit
+`6836b4ff1ffc162d2fd315b6787b25deb151ee08`. It qualifies the complete
 owned-RAM `null_blk` matrix for that exact source, including retained
 suspend/drain, ID36 low-RAM/heavy-CPU pressure, explicit segmented/compound BIO
 coverage, live GC, DISCARD/TRIM, packed placement and synthetic fail-closed
-faults. `dc78c9bbffbd` is the canonical report commit for that tested source.
-Later documentation-only descendants do not change the qualified product/test
-bytes; they are not themselves a newly tested source. Evidence-monotonic
-publication remains authoritative.
+faults, with persistent snapshot completion publication and the restored
+2.0-second sampler watchdog. `0155a09a0f2e` / `dc78c9bbffbd` remains the
+pre-ID83 request-geometry comparison point. Later documentation-only descendants
+do not supersede exact-source owner qualification.
 
 The positive-fixture delta64 A/B on this source exercised 4096 direct
 predictor-first adoptions. Rescue-on increased useful WRITE throughput 26.87%
@@ -225,7 +225,7 @@ changes.
 | 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; restored pre-ID80 policy requalified** | Report `71251ba9232e` refuted ID80's static `count > 4U` gate with fast QD8 async/sync -9.1% (95% CI -15.1..-3.1). Current report `dc78c9bbffbd` on source `0155a09a0f2e` passes all five stages with the actual pre-ID80 predicate `count > 4U || preparation_queued > 0`; sustained QD4/QD8/QD32 async/sync throughput is +3.94% / +0.95% / +0.94%, with all three intervals overlapping zero. Keep ID80 removed and retain no dormant selector. |
 | 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed; rollback lifecycle requalified** | Exact source `26a045c80b56` passed build/native/W=1/W=2, then BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`); no benchmark result from that source is valid. The bundled candidate also replaced the true pre-ID80 detach predicate with unqualified `count > 1U`. Current source `0155a09a0f2e` removes the whole bundle and passes retained suspend/drain plus the complete owner matrix in report `dc78c9bbffbd`. This proves the rollback is healthy but does not identify which ID81 sub-change caused the lifecycle failure; do not split or revive those changes without independent evidence. |
 | 82 | Fast-media retained deadline and wakeup overhead | **4 evidence-backed candidate; measurement first** | Current exact source `0155a09a0f2e` shows Gen4 mixed 591.3 ms with 197 worker-empty deadline closes, 33.9 ms lower-WRITE service, 37.3 ms ordered-worker CPU and zero K=1 ready waits; Gen5 is 522.5 ms / 176 deadlines / 23.8 ms lower-WRITE / 32.3 ms worker CPU. At retain_ms=2, count*deadline proves at least 394/352 ms of aggregate deadline-reaching window age; it is not a pure-idle measurement. First add exact retained idle-wait and worker-wake attribution; then test a fast-media microsecond-scale or accepted-work-only closure policy without changing K=1, SWZ, ID63 or authority ownership. Reject if SD gains, lower-byte savings, lifecycle safety or mixed p99 regress materially. |
-| 83 | Work-conserving admission queue + prepared reservoir + compressed/RAW dispatcher | **4 owner-correctness PASS; dispatcher refinement pending performance requalification** | Owner `make test` report `aacf96c02325` on exact source `91c2cb2edb1e` passes all five stages, loaded byte-exact lifecycle/GC/fault/resource checks and the supported ISA/build matrix. Performance does not yet qualify the first dispatcher: fast mixed async-minus-sync useful WRITE is +3.5% with CI -0.2..+7.2, but lower WRITE requests regress +869.4 (+796.2..+942.6); fast sustained QD32 regresses -9.8% (-14.2..-5.5), while K=1 ready wait remains zero. Source audit identifies three distinct work-conserving violations: ordered RAW forcing can continue after K=1 becomes busy, the fixed eight-record hand can split an already-READY FIFO prefix, and READY_COMPRESSED/READY_RAW do not themselves prevent retention sleep. Refine only those boundaries and add accepted-work lower-idle telemetry. Do not early-publish `prepared_page` before the stable RAW snapshot: without an explicit snapshot-ready RAW-selection gate that creates a partial-`raw_bytes` race and violates the ownership standard. K>1 and wider preparation remain closed pending evidence. |
+| 83 | Work-conserving admission queue + prepared reservoir + compressed/RAW dispatcher | **4 owner-correctness PASS at `b4bc5e0ba965`; short-window/service-dry refinement pending owner requalification** | Report `6836b4ff1ffc` passes all five stages. Fast mixed async-minus-sync useful WRITE is +13.9% (95% CI +9.6..+18.1), but lower WRITE requests regress +921.2 (+899.1..+943.3; 2678.8 vs 1757.6) and fast QD4 regresses -28.1% (-37.4..-18.7; about 2046 lower requests). The next bounded source change keeps snapshot ownership, K=1, one producer, 64 slots, ID63 and SWZ fixed; it prevents below-target retained dry/hand closure, bounds RAW forcing to a proven first-eight backlog, corrects below-target packed-close attribution to SERVICE_DRY, and adds conserved retained-idle timing attribution plus separate post-lower hold. K>1, larger reservoirs and wider preparation remain closed unless their existing pressure counters become material. |
 
 ## What the pinned queue experiment establishes
 
@@ -289,23 +289,23 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-The last owner-qualified product source remains `0155a09a0f2e`, report
-`dc78c9bbffbd`. Documentation descendants and the alpha.29 ID83 candidate do
-not supersede that baseline until a new complete owner report passes.
+The latest owner-qualified correctness source is `b4bc5e0ba965`, report
+`6836b4ff1ffc`. The pre-ID83 request-geometry reference remains
+`0155a09a0f2e` / `dc78c9bbffbd`.
 
-1. Qualify alpha.29 production candidate with work-conserving dispatcher,
-   persistent snapshot completion publication barrier, lock-free 2.0s-bounded
-   inflight sampler diagnostics, and single public `make test`. Keep ID78/ID79
-   correctness repairs, the restored pre-ID80 detachment rule, K=1, one preparation
-   lane, ID63 and SWZ 1/2/4 extents.
-2. Interpret the new ID83 counters before changing concurrency: eight-record
-   hand/dry closes, RAW-not-ready, compressed-ready, raw-ready, late-result
-   discards, ready-reservoir high water and slot high water. Fast-media success
-   requires useful throughput or p99 improvement; slow/SD must retain useful
-   service and material lower-I/O savings.
-3. If alpha.29 is correct but fast-media gains are weak, use those counters to
-   distinguish insufficient prepared run-ahead from dispatch/retention overhead.
-   Do not add K>1 or more workers merely because the device supports queue depth.
+1. Qualify the ID83 short-window/service-dry refinement with the single public
+   `make test`, keeping the qualified snapshot publication boundary, K=1, one
+   preparation lane, 64 slots, ID63 and SWZ 1/2/4 extents unchanged.
+2. Require the four retained open-batch idle components
+   (undersized/worker-unscheduled/preparing-head/no-ready-work) to conserve
+   exactly to `accepted_work_lower_idle_ns`; inspect the separate post-lower
+   hold beside hand/dry close causes, forced RAW, lower bytes/requests, useful
+   throughput and p99.
+3. Promote the policy only if fast QD4 loses its significant async regression
+   and fast mixed request/byte inflation falls without sacrificing the confirmed
+   async service gain; slow/SD useful service and lower-I/O savings must remain
+   materially favorable. Do not add K>1, a larger reservoir or more preparation
+   workers merely because the lower model supports queue depth.
 4. Reopen a larger reservoir only if the 64-slot high-water/ready occupancy
    saturates while READY work is actually consumed. Reopen K>1 only if the
    work-conserving K=1 path creates material `k1_ready_wait_*`. Reopen wider

@@ -1309,18 +1309,26 @@ RAW_SELECTED and a late compressed result is discarded. READY state observation
 is acquire-ordered.
 
 The ordered worker may force an unclaimed accepted WRITE to RAW only while the
-lower WRITE path is actually idle. Once K=1 is in flight, the remaining accepted
-work keeps its compression opportunity so producer/ordered preparation can
-overlap lower service. Eight records are the minimum pressure hand, not a
-maximum run size: the worker refreshes accepted followers from incoming before
-evaluating local readiness. If the next accepted FIFO WRITE is already
-READY_COMPRESSED/READY_RAW, the dispatcher continues consuming consecutive ready
-work up to the existing 64-record window. Consuming either READY state makes the
-current window work-conserving, so a dry accepted FIFO of two or more records
-closes immediately rather than falling back to the retention timer. When a
-work-conserving hand or dry FIFO closes a window containing packed records, it
-commits via `swapz_close_worker_pack()`, maintaining exact PACK_READY cause
-conservation and preventing starvation of concurrent packed read verification.
+lower WRITE path is actually idle, before the first eight-record pressure hand,
+and only when the active batch plus unclaimed preparation queue already prove at
+least eight records of accepted backlog. QD1/QD4 and later records in a larger
+wave therefore retain their inline compression opportunity. Once K=1 is in
+flight, remaining accepted work keeps its compression opportunity so
+producer/ordered preparation can overlap lower service.
+
+Eight records are the minimum pressure hand, not a maximum run size. The worker
+refreshes accepted followers from incoming before evaluating local readiness.
+A retained work-conserving hand may not split an already-accepted plain-WRITE
+FIFO below the effective learned/sampled target merely because the next
+representation is not READY. When the accepted FIFO is genuinely dry, an
+undersized retained batch remains on the existing pinned retention deadline
+unless a complete multi-pack hand of at least eight records is already staged.
+Non-retained operation keeps the historical immediate work-conserving behavior.
+
+Packed work-conserving closes below the effective target are attributed
+explicitly to `SWAPZ_PACK_CLOSE_SERVICE_DRY`; BURST_TARGET is reserved for
+actual learned/sampled target closure. No attribution decision changes the
+mapping, completion or lower-I/O ownership rules.
 
 Producer and consumer each hold one reference to a prepared slot. Only the final
 drop returns the slot to the free mask, so an upper BIO may complete after RAW
@@ -1331,7 +1339,14 @@ stable `raw_bytes` snapshot.
 
 ID83 instrumentation includes work-conserving hand/dry closes, representation
 selection, late-result discard, reservoir occupancy, K=1 ready wait, and
-`accepted_work_lower_idle_events/ns`. The idle counters are observational:
-they measure retained accepted work that reaches an owner-observed no-lower-WRITE
-wait interval and end when that wait is closed or lower submission begins. They
-must never change scheduling policy.
+`accepted_work_lower_idle_events/ns`. For each existing retained open-batch
+lower-idle interval, four monotonic counters partition that same wall time:
+`accepted_work_lower_idle_undersized_batch_ns`,
+`accepted_work_lower_idle_worker_unscheduled_ns`,
+`accepted_work_lower_idle_preparing_head_ns`, and
+`accepted_work_lower_idle_no_ready_work_ns`. Their interval deltas must sum
+exactly to `accepted_work_lower_idle_ns`. The separate
+`accepted_work_lower_idle_post_lower_ns` diagnostic measures callback-to-
+publication hold after lower completion when accepted WRITE work is already
+waiting; it is intentionally not part of that four-way conservation identity.
+All idle attribution is observational and must never change scheduling policy.

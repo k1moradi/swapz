@@ -275,6 +275,35 @@ static inline int swapz_window_burst_close_ready(
 
 
 /*
+ * An idle lower path alone must not fragment an opted-in retained window.
+ * Already-admitted FIFO work is finite: consume it until the learned/sampled
+ * target is reached. A dry FIFO may close earlier only after a complete
+ * multi-pack hand is staged. This never waits for future admissions and does
+ * not change the pinned retention deadline.
+ */
+static inline int swapz_window_work_conserving_close_ready(
+		swapz_u8 retain_ms, int accepted_pack_ready,
+		swapz_u8 count, swapz_u8 learned_target,
+		swapz_u8 admitted_tail_target, swapz_u8 hand_records,
+		int next_local_is_plain_write)
+{
+	swapz_u8 target = swapz_window_effective_burst_target(
+		learned_target, admitted_tail_target);
+
+	if (count < 2U)
+		return 0;
+	if (!retain_ms)
+		return 1;
+	if (target && count >= target)
+		return !next_local_is_plain_write ||
+			(hand_records && count >= hand_records);
+	if (next_local_is_plain_write)
+		return 0;
+	return accepted_pack_ready && hand_records &&
+		count >= hand_records;
+}
+
+/*
  * Equal-length accepted compressed records retain their exact input order
  * under the production greedy ordering: largest is always the earliest
  * remaining record and, when a 4KiB complement exists, the chosen partner
