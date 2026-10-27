@@ -114,17 +114,18 @@ belong in the ROADMAP decision table and Git history.
   64-BIO quantum. Refresh accepted queue state after synchronous copy/LZ4 work
   before deciding the current pack is isolated.
 - **Proven-dry retained service:** an active accepted plain-WRITE wave keeps the
-  existing eight-record pressure hand and effective learned/sampled target. Only
-  after the serialized worker proves both accepted FIFOs dry, no K=1 lower WRITE
-  remains active, no sampled tail target is pending, and a valid compressed pack
-  is already staged may a retained window close below a larger learned target at
-  the four-record floor. One-record windows keep the original pinned deadline.
+  existing eight-record pressure hand and effective learned/sampled target. After
+  the serialized worker proves both accepted FIFOs dry and no K=1 WRITE is
+  active, four staged records can close below a larger learned/sampled target,
+  including mixed compressed+RAW records without a valid compressed pack. One-record windows keep the original pinned deadline.
   A pure-WRITE post-PACK tail of two/three is not a finite close target; target
   four and larger still require already-accepted queued follower evidence. A
   mixed accepted wave is finite once the worker has serviced a READ in that wave
   or tail scanning encounters an accepted non-WRITE boundary. In that mixed
   case, a staged tail of two/three may become its exact one-shot PACK_READY
-  target immediately, without a timer or waiting for another arrival. A prior
+  target immediately, without a timer or waiting for another arrival. A
+  staged-only post-K=1 tail with no queued follower or non-WRITE boundary
+  must not inherit earlier READ evidence as a finite close target. A prior
   completed chain or deferred valid pack alone must never bypass the pure-WRITE
   four-record floor, and no path may manufacture a one-record PACK_READY close.
 - **Pack-readiness conservation:** `single_pack_deferred` is monotonic within
@@ -164,6 +165,10 @@ belong in the ROADMAP decision table and Git history.
   residency before authority changes. Set lookups cache the active epoch locally
   and avoid redundant engine field traversal. Extent geometry calculations and
   fitting use constant block-shift powers (`SWAPZ_BLOCK_SHIFT`) rather than integer division.
+- **Small-batch I/O:** complete four-record batches may detach through K=1,
+  preserving all FUA/verification and publication fences. Keep the first three
+  inline-stolen pages eligible for ordinary LZ4; idle lower service may choose
+  RAW on later pages using the existing stable-snapshot/atomic state rules.
 - **Preparation ownership:** async preparation uses one unbound producer lane.
   The ordered owner may steal only an unclaimed next preparation entry while
   holding the admission lock. Producer and ordered compression use separate

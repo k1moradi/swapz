@@ -618,7 +618,8 @@ sample is then consumed exactly once: only the already-staged pre-completion
 prefix may raise the learned target. Queued `local + incoming` followers still
 make the finite sampled tail explicit, but must not be added to the completed
 generation because they may contain immediate resubmissions from those same
-writers. A staged-only tail installs no immediate `retained_tail_target`.
+writers. A staged-only tail installs no immediate `retained_tail_target`, even if
+previously serviced READs marked the worker's mixed wave.
 A staged-only sample must not remain pending merely to suppress PACK_READY, so a
 valid service-dry or learned-target close can proceed without burning the
 absolute deadline.
@@ -909,11 +910,10 @@ across the active batch plus unclaimed preparation queue; QD1/QD4 must not be
 forced RAW by transient two-record backlog. While an already-accepted plain
 WRITE remains, the eight-record pressure hand may not split the FIFO below the
 effective learned/sampled target merely because the next representation is
-unready. Only after the serialized worker proves local and incoming accepted
-FIFOs dry, no K=1 lower WRITE remains active, no sampled tail target is pending,
-and `single_pack_deferred || accepted_burst_pack_ready` proves valid staged
-compressed geometry may a below-target `SERVICE_DRY` close occur at the
-qualified pure-WRITE four-record floor. A one-record window always retains the
+unready. Only after the worker proves local and incoming accepted FIFOs dry and
+no K=1 lower WRITE remains active may a below-target `SERVICE_DRY` close
+occur at the four-record floor, including RAW/compressed mixes and oversized
+sampled targets. Pure-WRITE two/three-record tails retain their old fence. A one-record window always retains the
 pinned ordinary deadline. A mixed-wave sampled tail at count two/three is
 different: a READ already serviced by the worker or an accepted non-WRITE
 boundary in the sampler proves the current tail finite, so that exact target may
@@ -929,10 +929,12 @@ interval deltas must sum exactly to `accepted_work_lower_idle_ns`.
 diagnostic and must not be included in that conservation sum. PACK_READY
 telemetry must attribute below-target work-conserving packed closes to
 `SWAPZ_PACK_CLOSE_SERVICE_DRY`, never BURST_TARGET. Native window-policy tests
-must cover 1..3-record retention, dry valid-pack closure at each count 4..7
-below a larger learned target, an accepted plain-WRITE follower blocking that
+must cover 1..3-record retention, dry compressed+RAW closure at each count 4..7
+below a larger learned or sampled target, an accepted plain-WRITE follower blocking that
 floor, the unchanged eight-record active-wave hand, sampled-tail override, and
-unchanged non-retained behavior. Loaded qualification remains authoritative
+unchanged non-retained behavior. Source contracts must retain four-record
+K=1 detach eligibility and first-three-inline LZ4 protection, without
+weakening producer snapshot/terminal-state ownership. Loaded qualification remains authoritative
 for actual scheduler timing, byte geometry, useful throughput and p99.
 
 

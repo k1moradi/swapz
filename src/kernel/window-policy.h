@@ -286,21 +286,25 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
 
 /*
  * SERVICE_DRY is allowed below the four-record floor only for an already
- * staged valid pack when existing read-bypass or wave-interruption evidence
- * proves the accepted wave was broken. Mixed-wave finite sampled tails are
- * handled by sampled_tail_target before this helper. A one-record window can
- * never become PACK_READY here.
+ * staged valid pack when read-bypass or wave-interruption evidence proves
+ * the accepted wave was broken. If both accepted FIFOs are dry and the lower
+ * path is idle, four records may dispatch regardless of compressed-only
+ * geometry or an oversized sampled target. A singleton never closes here.
  */
 static inline int swapz_window_service_close_ready(
 		int valid_pack, int lower_idle, swapz_u8 count,
 		swapz_u8 sampled_tail_target, int chain_completed,
 		int read_bypasses, int wave_interrupted)
 {
-	if (!valid_pack || sampled_tail_target || count < 2U)
+	if (count < 2U)
+		return 0;
+	if (count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS && lower_idle)
+		return 1;
+	if (!valid_pack || sampled_tail_target)
 		return 0;
 	if (count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS)
 		return read_bypasses || wave_interrupted;
-	return chain_completed || read_bypasses || lower_idle;
+	return chain_completed || read_bypasses;
 }
 
 static inline swapz_u8 swapz_window_effective_burst_target(

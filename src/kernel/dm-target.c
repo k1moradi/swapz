@@ -3071,7 +3071,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			needs_fua = true;
 	async_detach_ready =
 		ctx->async_prepare && READ_ONCE(ctx->accepting) &&
-		(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U) &&
+		(count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||
+		 READ_ONCE(ctx->preparation_queued) > 0U) &&
 		!needs_fua && ctx->engine.bulk_enabled &&
 		!ctx->engine.verify_after_write &&
 		(close_reason == SWAPZ_CLOSE_FULL ||
@@ -3648,7 +3649,8 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			ctx->retained_tail_target =
 				swapz_window_sampled_tail_target(
 					tail, queued_tail,
-					ctx->retained_wave_read_seen || !prefix_open);
+					!prefix_open ||
+					(queued_tail && ctx->retained_wave_read_seen));
 		}
 	} else {
 		ctx->retained_chain_completed = 0;
@@ -5432,6 +5434,8 @@ static void swapz_worker(struct work_struct *work)
 						inline_preparation = true;
 						if (ctx->engine.bulk_enabled &&
 						    !ctx->engine.verify_after_write &&
+						    ctx->batch_count >=
+							SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS - 1U &&
 						    !lower_write_busy && accepted_backlog &&
 						    !(entry->bio->bi_opf &
 						      (REQ_PREFLUSH | REQ_FUA))) {
