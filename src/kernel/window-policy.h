@@ -273,6 +273,38 @@ static inline int swapz_window_burst_close_ready(
 		(first_pack_seen || admitted_tail_target);
 }
 
+/*
+ * An idle lower path is not enough reason to fragment an opted-in retained
+ * window.  Work already admitted in the ordered FIFO is finite; consume it
+ * until the learned/sampled target is reached.  A dry FIFO may close earlier
+ * only after a complete multi-pack batch reaches the fixed pressure hand.
+ *
+ * This predicate never waits for future arrivals and never changes the pinned
+ * retention deadline.  Non-retained operation preserves the historical
+ * work-conserving close.
+ */
+static inline int swapz_window_work_conserving_close_ready(
+		swapz_u8 retain_ms, int accepted_pack_ready,
+		swapz_u8 count, swapz_u8 learned_target,
+		swapz_u8 admitted_tail_target, swapz_u8 hand_records,
+		int next_local_is_plain_write)
+{
+	swapz_u8 target = swapz_window_effective_burst_target(
+		learned_target, admitted_tail_target);
+
+	if (count < 2U)
+		return 0;
+	if (!retain_ms)
+		return 1;
+	if (target && count >= target)
+		return !next_local_is_plain_write ||
+			(hand_records && count >= hand_records);
+	if (next_local_is_plain_write)
+		return 0;
+	return accepted_pack_ready && hand_records &&
+		count >= hand_records;
+}
+
 
 /*
  * Equal-length accepted compressed records retain their exact input order
