@@ -1262,8 +1262,8 @@ static swapz_u16 swapz_probe_set(
                       "pack_close_tail_target_4"):
             self.assertIn(field + "=%llu", status)
             self.assertIn("ctx->" + field, status)
-            self.assertIn('" + field + "', replay)
-            self.assertIn('" + field + "', runner)
+            self.assertIn(f'"{field}"', replay)
+            self.assertIn(f'"{field}"', runner)
         self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
         top_finalize = worker.index("while (swapz_has_inflight(ctx))")
         top_sample = worker.index("swapz_sample_pack_tail_locked(ctx, &local)",
@@ -2148,7 +2148,7 @@ static swapz_u16 swapz_probe_set(
                         close.index("swapz_flush_window(ctx)"))
         self.assertIn("ctx->accepted_burst_pack_ready = false", flush)
         self.assertIn("ctx->single_pack_deferred = false", flush)
-        self.assertIn("ctx->single_pack_deferrals++", writer)
+        self.assertIn("ctx->single_pack_deferrals++", record_geometry)
         self.assertNotIn("ctx->packed_early_commits++", writer)
         self.assertIn("ctx->packed_early_commits++", close)
         self.assertIn("swapz_flush_window(ctx)", writer)

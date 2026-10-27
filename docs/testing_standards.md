@@ -704,7 +704,9 @@ contracts must scope fail-closed READ ordering to the independent-READ service
 block rather than an earlier deadline-flush block, and mixed-wave state may be
 set only after the independent READ has actually completed successfully; a READ
 that merely reaches the worker before an expired window flush is not evidence
-for the preceding window.
+for the preceding window. Geometry-latch counter assertions follow the helper
+that owns the latch, not the admission caller, and generated telemetry-field
+checks must interpolate the field name rather than compare placeholder text.
 
 Loaded qualification must use the exact-source owner `make test` matrix and
 Loaded qualification must use the exact-source owner `make test` matrix and
