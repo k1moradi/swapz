@@ -2067,10 +2067,13 @@ class ReportContract(unittest.TestCase):
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
         self.assertIn("WRITE-ONLY SUSTAINED-QD EVIDENCE", rendered)
         self.assertIn("Persistent lane workers", rendered)
+        self.assertIn("Serial QD32 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD4 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD8 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD32 A/S paired 95% CI", rendered)
-        self.assertIn("five pairs at fast QD4/8/32; QD1 is directional", rendered)
+        self.assertIn(
+            "five pairs at fast QD4/8/32 and serial QD32; QD1 is directional",
+            rendered)
         self.assertIn("QD1 remains a directional control.", rendered)
         self.assertIn("DEVICE MODEL LIMITS", rendered)
         self.assertIn("4K latency MB/s", rendered)
