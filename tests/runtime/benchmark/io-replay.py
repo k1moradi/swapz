@@ -1131,6 +1131,12 @@ ID52_FIELDS = (
 PACK_CLOSE_FIELDS = (
     "pack_close_tail_target", "pack_close_tail_target_le4",
     "pack_close_burst_target", "pack_close_service_dry")
+SMALL_TAIL_CLOSE_FIELDS = (
+    "pack_close_tail_target_2", "pack_close_tail_target_3",
+    "pack_close_tail_target_4",
+    "pack_close_tail_target_2_companion_before_deadline",
+    "pack_close_tail_target_3_companion_before_deadline",
+    "pack_close_small_tail_observation_superseded")
 BURST_CLOSE_DETAIL_FIELDS = (
     "pack_close_burst_admission", "pack_close_burst_worker",
     "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
@@ -1176,7 +1182,10 @@ WINDOW_INTERVAL_FIELDS = (
     "accepted_work_lower_idle_preparing_head_ns",
     "accepted_work_lower_idle_no_ready_work_ns",
     "accepted_work_lower_idle_post_lower_ns"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + \
+    SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + \
+    SMALL_TAIL_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + \
+    TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
     "delta64_adopted", "delta64_direct_adopted",
@@ -1397,6 +1406,18 @@ def kernel_write_delta(before, after):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             counters["pack_tail_samples"]):
         raise ValueError("inconsistent swapz post-pack tail-sample attribution")
+    # One live post-close observation may cross a timed snapshot boundary.
+    if (sum(counters[field] for field in (
+                "pack_close_tail_target_2", "pack_close_tail_target_3",
+                "pack_close_tail_target_4")) > counters["pack_close_tail_target"] or
+            counters["pack_close_tail_target_2_companion_before_deadline"] >
+            counters["pack_close_tail_target_2"] + 1 or
+            counters["pack_close_tail_target_3_companion_before_deadline"] >
+            counters["pack_close_tail_target_3"] + 1 or
+            counters["pack_close_small_tail_observation_superseded"] >
+            counters["pack_close_tail_target_2"] +
+            counters["pack_close_tail_target_3"] + 1):
+        raise ValueError("inconsistent swapz exact small-tail close attribution")
     if (sum(counters[field] for field in (
                 "burst_shrink_after_inflight_zero",
                 "burst_shrink_after_read_bypass",

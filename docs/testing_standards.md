@@ -666,8 +666,10 @@ displaced. The observation may survive the close itself, but a worker-idle or
 hard ordering boundary cancels it. A newer target-2/target-3 close may supersede
 an older live observation only if that supersession is counted explicitly.
 These counters must not arm a timer, wake work, change FIFO ownership, alter a
-close target or extend retention. Remove them after they settle the policy
-question.
+close target or extend retention. Every interval counter added to kernel status
+must be carried by both the timed replay producer and the final report consumer;
+source contracts must reject producer/consumer schema drift. Remove the
+diagnostic counters after they settle the policy question.
 
 Loaded qualification must use the exact-source owner `make test` matrix and
 judge product-facing service before internal attribution. On the same ARM64/NEON

@@ -1265,7 +1265,10 @@ static swapz_u16 swapz_probe_set(
             map_body.index("list_add_tail(&entry->list, &ctx->incoming)"))
         self.assertIn("if (hard_boundary)", flush)
         self.assertIn("swapz_clear_closed_small_tail_observation(ctx)", flush)
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn("SMALL_TAIL_CLOSE_FIELDS", replay)
+        self.assertIn("SMALL_TAIL_CLOSE_FIELDS", runner)
         for field in (
                 "pack_close_tail_target_2", "pack_close_tail_target_3",
                 "pack_close_tail_target_4",
@@ -1274,7 +1277,10 @@ static swapz_u16 swapz_probe_set(
                 "pack_close_small_tail_observation_superseded"):
             self.assertIn(field + "=%llu", status)
             self.assertIn("ctx->" + field, status)
+            self.assertIn('"' + field + '"', replay)
             self.assertIn('"' + field + '"', runner)
+        self.assertIn("inconsistent swapz exact small-tail close attribution",
+                      replay)
         self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
         top_finalize = worker.index("while (swapz_has_inflight(ctx))")
         top_sample = worker.index("swapz_sample_pack_tail_locked(ctx, &local)",
