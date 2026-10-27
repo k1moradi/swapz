@@ -605,6 +605,15 @@ struct swapz_dm {
 	swapz_u8 next_burst_close_target;
 	u64 pack_close_tail_target;
 	u64 pack_close_tail_target_le4;
+	/* Passive exact attribution for small sampled-tail PACK_READY closes. */
+	u64 pack_close_tail_target_2;
+	u64 pack_close_tail_target_3;
+	u64 pack_close_tail_target_4;
+	u64 pack_close_tail_target_2_companion_before_deadline;
+	u64 pack_close_tail_target_3_companion_before_deadline;
+	u64 pack_close_small_tail_observation_superseded;
+	atomic_t closed_small_tail_target;
+	atomic64_t closed_small_tail_deadline_ns;
 	u64 pack_close_burst_target;
 	u64 pack_close_service_dry;
 	/* ID55: passive attribution inside the learned burst-target bucket. */
@@ -2806,6 +2815,49 @@ static void swapz_window_admit_clock(struct swapz_dm *ctx)
 		ctx->window_first_ns = ktime_get_ns();
 }
 
+static void swapz_clear_closed_small_tail_observation(struct swapz_dm *ctx)
+{
+	atomic_set(&ctx->closed_small_tail_target, 0);
+	atomic64_set(&ctx->closed_small_tail_deadline_ns, 0);
+}
+
+static void swapz_arm_closed_small_tail_observation(struct swapz_dm *ctx,
+						    swapz_u8 target)
+{
+	u64 previous_deadline_ns;
+	u64 deadline_ns;
+	u64 now_ns;
+	int previous_target;
+
+	if (target != 2U && target != 3U)
+		return;
+
+	/*
+	 * Claim any older observation before replacing it. A later mapper can
+	 * concurrently claim the same state, so exactly one side owns the result.
+	 */
+	previous_target = atomic_xchg(&ctx->closed_small_tail_target, 0);
+	previous_deadline_ns =
+		atomic64_xchg(&ctx->closed_small_tail_deadline_ns, 0);
+	now_ns = ktime_get_ns();
+	if ((previous_target == 2 || previous_target == 3) &&
+	    previous_deadline_ns &&
+	    !swapz_window_deadline_expired(previous_deadline_ns, now_ns))
+		ctx->pack_close_small_tail_observation_superseded++;
+
+	deadline_ns = swapz_window_retention_deadline_ns(
+		ctx->window_first_ns, ctx->retain_ms);
+	if (!deadline_ns)
+		return;
+
+	/*
+	 * This preserves only the deadline that the tail-target close displaced.
+	 * It never arms a timer, wakes work or changes a close decision.
+	 */
+	atomic64_set(&ctx->closed_small_tail_deadline_ns, deadline_ns);
+	atomic_set(&ctx->closed_small_tail_target, target);
+}
+
 static void swapz_account_single_tail_terminal(struct swapz_dm *ctx,
 					       bool companion,
 					       bool deadline);
@@ -2821,6 +2873,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	enum swapz_burst_close_site burst_close_site =
 		ctx->next_burst_close_site;
 	swapz_u8 burst_close_target = ctx->next_burst_close_target;
+	swapz_u8 tail_target_at_close = ctx->retained_tail_target;
 	bool win1_pack_tail_target = count == 1U && packed_close &&
 		ctx->retained_tail_target == 1U;
 	bool win1_pack_read_bypass = count == 1U && packed_close &&
@@ -2876,6 +2929,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		ctx->singleton_deadline_streak = 0;
 		ctx->singleton_fast_close = false;
 	}
+	if (hard_boundary)
+		swapz_clear_closed_small_tail_observation(ctx);
 	if (deferred_single_tail && (count || hard_boundary)) {
 		if (count == 1U && close_reason == SWAPZ_CLOSE_DEADLINE) {
 			ctx->win1_deadline_deferred_tail++;
@@ -2941,6 +2996,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		 ((close_reason == SWAPZ_CLOSE_ZERO ||
 		   close_reason == SWAPZ_CLOSE_RAW) &&
 		  ctx->worker_has_immediate_followup));
+	if (packed_close && pack_close_cause == SWAPZ_PACK_CLOSE_TAIL_TARGET)
+		swapz_arm_closed_small_tail_observation(ctx, tail_target_at_close);
 	ctx->single_pack_deferred = false;
 	ctx->accepted_burst_pack_ready = false;
 	ctx->retained_tail_target = 0;
@@ -2987,6 +3044,19 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			ctx->pack_close_tail_target++;
 			if (count <= 4U)
 				ctx->pack_close_tail_target_le4++;
+			switch (tail_target_at_close) {
+			case 2U:
+				ctx->pack_close_tail_target_2++;
+				break;
+			case 3U:
+				ctx->pack_close_tail_target_3++;
+				break;
+			case 4U:
+				ctx->pack_close_tail_target_4++;
+				break;
+			default:
+				break;
+			}
 			break;
 		case SWAPZ_PACK_CLOSE_BURST_TARGET:
 			ctx->pack_close_burst_target++;
@@ -3428,6 +3498,35 @@ static bool swapz_plain_retained_write(const struct bio *bio)
 {
 	return bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio) &&
 		!(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
+}
+
+static void swapz_note_closed_small_tail_companion_locked(
+		struct swapz_dm *ctx, const struct bio *bio)
+{
+	int target = atomic_read(&ctx->closed_small_tail_target);
+	u64 deadline_ns;
+	u64 now_ns;
+
+	if ((target != 2 && target != 3) || !swapz_plain_retained_write(bio))
+		return;
+
+	deadline_ns = atomic64_read(&ctx->closed_small_tail_deadline_ns);
+	now_ns = ktime_get_ns();
+	/*
+	 * A hard boundary or a newer small-tail close can cancel this state.
+	 * The first later plain WRITE that wins this exchange owns the sample.
+	 */
+	if (atomic_cmpxchg(&ctx->closed_small_tail_target, target, 0) != target)
+		return;
+	atomic64_set(&ctx->closed_small_tail_deadline_ns, 0);
+	if (!deadline_ns ||
+	    swapz_window_deadline_expired(deadline_ns, now_ns))
+		return;
+
+	if (target == 2)
+		ctx->pack_close_tail_target_2_companion_before_deadline++;
+	else
+		ctx->pack_close_tail_target_3_companion_before_deadline++;
 }
 
 static bool swapz_local_head_is_plain_write(const struct list_head *local)
@@ -5904,6 +6003,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 				ctx->bio_compound_folio_pages++;
 		}
 	}
+	if (ctx->retain_ms && bio_op(bio) == REQ_OP_WRITE && count)
+		swapz_note_closed_small_tail_companion_locked(ctx, bio);
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
@@ -6216,6 +6317,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	atomic_set(&ctx->preparation_ready_max, 0);
 	atomic_set(&ctx->preparation_slots_in_use, 0);
 	atomic_set(&ctx->preparation_slots_in_use_max, 0);
+	atomic_set(&ctx->closed_small_tail_target, 0);
+	atomic64_set(&ctx->closed_small_tail_deadline_ns, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
@@ -6779,6 +6882,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu "
 		       "pack_close_tail_target=%llu pack_close_tail_target_le4=%llu "
+		       "pack_close_tail_target_2=%llu pack_close_tail_target_3=%llu "
+		       "pack_close_tail_target_4=%llu "
+		       "pack_close_tail_target_2_companion_before_deadline=%llu "
+		       "pack_close_tail_target_3_companion_before_deadline=%llu "
+		       "pack_close_small_tail_observation_superseded=%llu "
 		       "pack_close_burst_target=%llu pack_close_service_dry=%llu "
 		       "pack_close_burst_admission=%llu pack_close_burst_worker=%llu "
 		       "pack_close_burst_target_le4=%llu "
@@ -7042,6 +7150,12 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_PACK_READY],
 		       ctx->pack_close_tail_target,
 		       ctx->pack_close_tail_target_le4,
+		       ctx->pack_close_tail_target_2,
+		       ctx->pack_close_tail_target_3,
+		       ctx->pack_close_tail_target_4,
+		       ctx->pack_close_tail_target_2_companion_before_deadline,
+		       ctx->pack_close_tail_target_3_companion_before_deadline,
+		       ctx->pack_close_small_tail_observation_superseded,
 		       ctx->pack_close_burst_target,
 		       ctx->pack_close_service_dry,
 		       ctx->pack_close_burst_admission,

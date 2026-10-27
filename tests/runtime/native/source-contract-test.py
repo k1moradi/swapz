@@ -1232,6 +1232,48 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_tail_target = queued_tail ? tail : 0U", sample)
         self.assertIn("ctx->retained_single_tail_deferred = false", sample)
         self.assertNotIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
+        small_tail_arm = body("swapz_arm_closed_small_tail_observation")
+        small_tail_note = body("swapz_note_closed_small_tail_companion_locked")
+        map_body = body("swapz_map")
+        self.assertIn("tail_target_at_close = ctx->retained_tail_target", flush)
+        self.assertIn("swapz_arm_closed_small_tail_observation(", flush)
+        self.assertLess(
+            flush.index("swapz_arm_closed_small_tail_observation("),
+            flush.index("ctx->retained_tail_target = 0"))
+        self.assertIn("ctx->pack_close_tail_target_2++", flush)
+        self.assertIn("ctx->pack_close_tail_target_3++", flush)
+        self.assertIn("ctx->pack_close_tail_target_4++", flush)
+        self.assertIn("atomic_xchg(&ctx->closed_small_tail_target, 0)",
+                      small_tail_arm)
+        self.assertIn("swapz_window_retention_deadline_ns(", small_tail_arm)
+        self.assertIn("pack_close_small_tail_observation_superseded++",
+                      small_tail_arm)
+        self.assertIn("swapz_plain_retained_write(bio)", small_tail_note)
+        self.assertIn("atomic_cmpxchg(&ctx->closed_small_tail_target",
+                      small_tail_note)
+        self.assertIn("swapz_window_deadline_expired(deadline_ns, now_ns)",
+                      small_tail_note)
+        self.assertIn("pack_close_tail_target_2_companion_before_deadline++",
+                      small_tail_note)
+        self.assertIn("pack_close_tail_target_3_companion_before_deadline++",
+                      small_tail_note)
+        note_call = "swapz_note_closed_small_tail_companion_locked(ctx, bio)"
+        self.assertIn(note_call, map_body)
+        self.assertLess(
+            map_body.index(note_call),
+            map_body.index("list_add_tail(&entry->list, &ctx->incoming)"))
+        self.assertIn("if (hard_boundary)", flush)
+        self.assertIn("swapz_clear_closed_small_tail_observation(ctx)", flush)
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        for field in (
+                "pack_close_tail_target_2", "pack_close_tail_target_3",
+                "pack_close_tail_target_4",
+                "pack_close_tail_target_2_companion_before_deadline",
+                "pack_close_tail_target_3_companion_before_deadline",
+                "pack_close_small_tail_observation_superseded"):
+            self.assertIn(field + "=%llu", status)
+            self.assertIn("ctx->" + field, status)
+            self.assertIn('"' + field + '"', runner)
         self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
         top_finalize = worker.index("while (swapz_has_inflight(ctx))")
         top_sample = worker.index("swapz_sample_pack_tail_locked(ctx, &local)",

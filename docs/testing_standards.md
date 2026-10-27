@@ -658,6 +658,17 @@ must be consumed so it cannot authorize another dry-tail singleton close.
 Source coverage must preserve DUPLICATE continuation semantics because the
 current WRITE continues after that older batch is flushed.
 
+While the exact small-tail attribution question is active, source contracts and
+loaded reports must expose sampled-tail PACK_READY closes with exact targets 2,
+3 and 4. A target-2/target-3 close must also arm passive observation of the first
+later plain WRITE admission against the absolute retention deadline that close
+displaced. The observation may survive the close itself, but a worker-idle or
+hard ordering boundary cancels it. A newer target-2/target-3 close may supersede
+an older live observation only if that supersession is counted explicitly.
+These counters must not arm a timer, wake work, change FIFO ownership, alter a
+close target or extend retention. Remove them after they settle the policy
+question.
+
 Loaded qualification must use the exact-source owner `make test` matrix and
 judge product-facing service before internal attribution. On the same ARM64/NEON
 lineage, preserve the `b389204` completion-state result (fast mixed useful

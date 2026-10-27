@@ -181,6 +181,12 @@ ID52_FIELDS = (
 PACK_CLOSE_FIELDS = (
     "pack_close_tail_target", "pack_close_tail_target_le4",
     "pack_close_burst_target", "pack_close_service_dry")
+SMALL_TAIL_CLOSE_FIELDS = (
+    "pack_close_tail_target_2", "pack_close_tail_target_3",
+    "pack_close_tail_target_4",
+    "pack_close_tail_target_2_companion_before_deadline",
+    "pack_close_tail_target_3_companion_before_deadline",
+    "pack_close_small_tail_observation_superseded")
 BURST_CLOSE_DETAIL_FIELDS = (
     "pack_close_burst_admission", "pack_close_burst_worker",
     "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
@@ -278,8 +284,9 @@ BURST_COUNTER_FIELDS = (
 # kernel_counter_delta so mixed-regime means cannot silently drop new telemetry.
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
-    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS +
-    BURST_COUNTER_FIELDS + (
+    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS +
+    SMALL_TAIL_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS +
+    K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS + BURST_COUNTER_FIELDS + (
         "gc_victims", "accepted_work_lower_idle_events",
         "accepted_work_lower_idle_ns",
         "accepted_work_lower_idle_undersized_batch_ns",
@@ -861,6 +868,18 @@ def timed_window_error(record):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             record["pack_tail_samples"]):
         return "timed post-pack tail-sample attribution is inconsistent"
+    # One live post-close observation may cross an interval snapshot.
+    if (sum(record[field] for field in (
+                "pack_close_tail_target_2", "pack_close_tail_target_3",
+                "pack_close_tail_target_4")) > record["pack_close_tail_target"] or
+            record["pack_close_tail_target_2_companion_before_deadline"] >
+            record["pack_close_tail_target_2"] + 1 or
+            record["pack_close_tail_target_3_companion_before_deadline"] >
+            record["pack_close_tail_target_3"] + 1 or
+            record["pack_close_small_tail_observation_superseded"] >
+            record["pack_close_tail_target_2"] +
+            record["pack_close_tail_target_3"] + 1):
+        return "timed exact small-tail close attribution is inconsistent"
     if (sum(record[field] for field in (
                 "burst_shrink_after_inflight_zero",
                 "burst_shrink_after_read_bypass",
@@ -4825,6 +4844,10 @@ TABLE_HEADER_LEGEND = {
     "P/D/I": "PACK_READY / deadline / idle window closes",
     "tail<=4": "PACK_READY closes with at most four records remaining",
     "tail": "PACK_READY closes with a larger remaining tail",
+    "t2/3/4": "sampled-tail PACK_READY closes with exact target two / three / four",
+    "next<ddl 2/3": "target-2 / target-3 closes followed by a later plain "
+                    "WRITE before the displaced deadline",
+    "sup": "small-tail follow-up observations superseded by another 2/3-target close",
     "burst": "burst-target PACK_READY closes",
     "dry": "service-dry PACK_READY closes",
     "adm/wrk": "burst closes attributed to admission / worker",
@@ -6121,6 +6144,26 @@ def print_bench(result):
                  *(f"{columns['async'][f'mixed_{field}'] - columns['sync'][f'mixed_{field}']:+.1f}"
                    for field in pack_fields))
             ])
+        print("  Mixed exact small-tail close attribution")
+        small_tail_rows = []
+        for mode in ("sync", "async"):
+            target_2_followup = columns[mode][
+                "mixed_pack_close_tail_target_2_companion_before_deadline"]
+            target_3_followup = columns[mode][
+                "mixed_pack_close_tail_target_3_companion_before_deadline"]
+            superseded = columns[mode][
+                "mixed_pack_close_small_tail_observation_superseded"]
+            small_tail_rows.append((
+                mode,
+                "/".join(
+                    f"{columns[mode][f'mixed_pack_close_tail_target_{target}']:.1f}"
+                    for target in (2, 3, 4)),
+                f"{target_2_followup:.1f}/{target_3_followup:.1f}",
+                f"{superseded:.1f}",
+            ))
+        print_table(
+            f"{model_label} mixed-I/O exact small-tail PACK_READY attribution",
+            ("mode", "t2/3/4", "next<ddl 2/3", "sup"), small_tail_rows)
         print("  Mixed burst-close split")
         burst_fields = (
             "pack_close_burst_admission", "pack_close_burst_worker",
