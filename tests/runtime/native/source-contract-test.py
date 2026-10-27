@@ -233,7 +233,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('"replay_mode": obj.get("replay_mode")', reporter)
         self.assertIn('arm.get("replay_mode") != "persistent-write"', reporter)
         self.assertIn("PASS_WRITE_SATURATION_EVIDENCE", reporter)
-        self.assertIn("FAST_QD4_QD8_QD32_PAIRED_95PCT_CI", reporter)
+        self.assertIn(
+            "FAST_QD4_QD8_QD32_AND_SERIAL_QD32_PAIRED_95PCT_CI", reporter)
+        self.assertIn("serial_qd32_paired", reporter)
         self.assertIn("fast_qd4_paired", reporter)
         self.assertIn("fast_qd8_paired", reporter)
         self.assertIn("fast_qd32_paired", reporter)
