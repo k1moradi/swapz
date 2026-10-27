@@ -230,33 +230,38 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 ## Current qualified baseline
 
 The latest successful standard owner matrix tested source
-`0155a09a0f2ef97daff68da045f615a04000ed02`, passed all five stages, and
-published report-only commit
-`dc78c9bbffbd2e8178fea9df2ca66006855c22e5`. It qualifies that exact source
+`5edcb2981573756debd9582b1d5c8b177c4d86be`, passed all five stages, and
+published canonical report-only commit
+`5f867aa81fce55de4d523a2aefb2c05ea065d249`. It qualifies that exact source
 on owned RAM-backed `null_blk`, including ID36 low-RAM/heavy-CPU pressure,
 segmented/compound direct I/O, retained suspend/drain, live GC, DISCARD/TRIM,
-packed placement and synthetic failure paths. `main` currently points at that
-report-only commit.
+packed placement and synthetic failure paths. Later documentation-only
+descendants on `main` do not supersede that exact-source qualification.
 
-The same report passed the positive-content delta64 rescue A/B with 4096 direct
-adoptions/first-LZ4 skips, +26.87% useful WRITE throughput
-(95% CI +17.25..+36.49), -20.93% WRITE p99 (-23.24..-18.62), and -25.33%
-lower WRITE bytes (-25.51..-25.14). Lower-WRITE requests improved 2.39%, but
-the interval crossed zero. Rescue remains default-off because representative
-swap-content prevalence is still unqualified.
+The same report passed the positive-content delta64 rescue A/B with rescue-on
+useful WRITE +27.63% (95% CI +16.36..+38.89), WRITE p99 -23.19%
+(-24.12..-22.26), and lower WRITE bytes -24.87% (-25.19..-24.55).
+Lower-WRITE requests improve 1.46%, but the interval crosses zero. Rescue
+remains default-off because representative swap-content prevalence is still
+unqualified.
 
-ID63 fast sequential confirmation reduces lower READ requests 11.29%
-(95% CI -14.35..-8.24), while throughput and p99 overlap zero. Serial-depth
-sequential confirmation reduces requests 25.89%, p99 13.69% and increases
-useful throughput 30.58%, all significant. The production coalesced span remains
-fixed at eight blocks.
+ID63 remains qualified on this source. The fast-model sequential A/B is
+statistically unresolved (lower READ requests -3.57%, useful throughput -3.67%,
+p99 +6.8%), while the serial-depth model remains strongly favorable: lower READ
+requests -31.61% (95% CI -35.47..-27.76) and useful throughput +39.42%
+(+33.26..+45.58), with p99 direction favorable but unresolved. The production
+coalesced span remains fixed at eight blocks.
 
-Current source fixes ordinary LZ4 at acceleration one, async preparation at one
-producer lane regardless of delta64 policy, lower-WRITE submission at one slot,
-and the restored pre-ID80 detachment predicate
-`count > 4U || preparation_queued > 0`. The retired runtime selectors and
-depth-two allocation/append path remain absent. Representative long-run churn,
-actual kernel swap and physical media remain open qualification gates.
+Current source keeps ordinary LZ4 at acceleration one, one asynchronous
+preparation producer, the 64-slot RAW+compressed preparation reservoir, one
+immutable lower-WRITE slot, independent READ fan-out, the eight-block ID63 cap,
+and SWZ 1/2/4-block extents. The current ID83 policy removes the two-record IDLE
+oscillation and improves lower-WRITE geometry, but fast mixed async/sync useful
+WRITE remains -1.68% (95% CI -4.75..+1.39) and QD4 remains significantly
+negative at -6.55% (-12.45..-0.65). The next bounded qualification target is a
+four-record SERVICE_DRY floor for proven-dry retained windows; K=1, preparation
+width, reservoir size, ID63 and SWZ remain unchanged. Representative long-run
+churn, actual kernel swap and physical media remain open qualification gates.
 
 ## Deferred optimization evidence gates
 
@@ -926,17 +931,19 @@ FIFO and before arming `retention_timer`. The compatibility
 `pack_close_burst_admission` counter remains parseable during this evidence
 cycle but must be exactly zero for every current swapz timed arm.
 
-Loaded qualification now uses owner-qualified source `91c2cb2edb1e` / report
-`aacf96c02325` as the ID83 refinement baseline. That run passes correctness,
+The first owner-qualified ID83 dispatcher baseline used source
+`91c2cb2edb1e` / report `aacf96c02325`. That run passed correctness,
 lifecycle, fault and resource-pressure qualification, but fast-media scheduling
-is not promoted: fast mixed async-minus-sync useful WRITE is +3.5% with a 95% CI
-of -0.2..+7.2 while lower WRITE requests regress by +869.4
-(+796.2..+942.6), and fast sustained QD32 async-minus-sync is -9.8%
-(-14.2..-5.5). A refinement must reduce the request inflation and recover
-deep-QD service without materially regressing the qualified SD result, lower
-bytes, READ service/p99, CPU/RAM/GC or correctness. The new accepted-work lower
-idle wall must be reported beside existing ready-wait/preparation counters;
-K>1 remains closed while K=1 ready wait stays zero.
+was not promoted: fast mixed async-minus-sync useful WRITE was +3.5% with a 95%
+CI of -0.2..+7.2 while lower WRITE requests regressed by +869.4
+(+796.2..+942.6), and fast sustained QD32 async-minus-sync was -9.8%
+(-14.2..-5.5). That result established the requirement for the later refinement
+to reduce request inflation and recover deep-QD service without materially
+regressing the qualified SD result, lower bytes, READ service/p99, CPU/RAM/GC
+or correctness. Accepted-work lower-idle wall remains required beside existing
+ready-wait/preparation counters; K>1 remains closed while K=1 ready wait stays
+zero. The current qualified ID83 state is recorded in the Current qualified
+baseline above and in the ROADMAP decision record.
 
 These scheduling rules are architecture-neutral. The single public `make test`
 command remains unchanged on SSE2, AVX2, AVX-512 and NEON hosts; existing

@@ -100,8 +100,6 @@ SWZ format. Acceptance requires recovering fast mixed useful service and
 removing the remaining significant QD4 loss without returning to the old
 two-record request inflation.
 
-After that isolation,
-
 After that isolation, collect realistic churn/GC/TRIM evidence: about 70%
 logical occupancy, an explicit cold/hot split, and at least ten logical
 capacities of hot rewrites. Verify every live page and report foreground plus

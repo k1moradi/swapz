@@ -47,21 +47,23 @@ wait solely to make a representation more compact when doing so loses more
 useful service than the saved lower I/O is worth. Slow media should naturally
 receive more completed compression because long lower service provides
 preparation overlap; fast media may trade some lower bytes for continuous
-service. Alpha.29 implements the first bounded candidate without changing SWZ: the
-existing per-BIO descriptor queue stays the low-copy admission queue and the
-64-slot preparation array is a stable RAW+compressed reservoir. Owner
-`make test` now passes full correctness/lifecycle qualification on source
-`91c2cb2edb1e` (report `aacf96c02325`), so the remaining ID83 question is
-performance policy rather than basic lifetime safety. That same run shows the
-first dispatcher policy is not yet qualified on fast media: it creates
-significantly more lower WRITE requests than synchronous preparation and
-regresses sustained QD32 service. The next bounded refinement therefore keeps
-K=1/SWZ/authority unchanged, forces RAW only when lower service is truly idle,
-extends an eight-record pressure hand across already-READY accepted work, and
-closes READY dry tails without retention sleep. The stable RAW snapshot remains
-a mandatory ownership boundary. Promotion still requires same-source owner
-evidence that preserves the SD gains while improving fast-media useful service
-and lower-I/O economics.
+service. Alpha.29 established the first bounded candidate without changing SWZ: the
+existing per-BIO descriptor queue remains the low-copy admission queue and the
+64-slot preparation array is the stable RAW+compressed reservoir. The latest
+owner `make test` passes full correctness/lifecycle qualification on source
+`5edcb2981573` (report `5f867aa81fce`). That refinement removes the
+two-record IDLE oscillation and materially improves lower-WRITE geometry, but
+fast-media service is not yet promoted: fast mixed async/sync useful WRITE is
+-1.68% (95% CI -4.75..+1.39) and QD4 remains significantly negative at -6.55%
+(-12.45..-0.65). Accepted lower-idle attribution identifies undersized-batch
+retention, not preparation starvation or K=1 ready wait, as the dominant
+remaining cost. The next bounded refinement therefore keeps K=1/SWZ/authority,
+one producer and the 64-slot reservoir unchanged while allowing a proven-dry
+retained window to SERVICE_DRY close once a complete four-record SWZ pack is
+staged; 1..3 records retain the existing absolute deadline. The stable RAW
+snapshot remains a mandatory ownership boundary. Promotion still requires
+same-source owner evidence that preserves the SD gains, lower-I/O geometry,
+p99/lifecycle safety and QD8/QD32 service.
 
 The next qualification priorities are work-conserving fast-media dispatch,
 realistic churn/GC/TRIM evidence and representative-content evidence, not
