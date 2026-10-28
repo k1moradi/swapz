@@ -40,6 +40,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertNotIn('env["GIT_ASKPASS"] = "false"', reporter)
         self.assertNotIn('REPORT = ROOT / "build/test_results.json"', reporter)
         self.assertIn("build/tests/device-roundtrip: tests/tools/device-roundtrip.c", MAKE)
+        self.assertIn("build/tests/direct-write-probe: tests/tools/direct-write-probe.c", MAKE)
         self.assertIn("build/userspace/swapzctl: src/userspace/swapzctl.c "
                       "src/kernel/VERSION", MAKE)
         staged = (ROOT / "src/kernel/Makefile").read_text()
@@ -188,6 +189,8 @@ class PublicMakeContract(unittest.TestCase):
             (fixture / "src/kernel/dummy.h").write_text(
                 "#define FAKE_KERNEL_SOURCE 1\n")
             (fixture / "tests/tools/device-roundtrip.c").write_text(
+                "int main(void) { return 0; }\n")
+            (fixture / "tests/tools/direct-write-probe.c").write_text(
                 "int main(void) { return 0; }\n")
             cli = fixture / "src/userspace/swapzctl.c"
             cli.write_text("int main(void) { return 0; }\n")
@@ -948,10 +951,12 @@ class PublicMakeContract(unittest.TestCase):
             w1_staged = fixture / "build/kernel/w1/dm-target.c"
             w2_staged = fixture / "build/kernel/w2/dm-target.c"
             device = fixture / "build/tests/device-roundtrip"
+            direct_probe = fixture / "build/tests/direct-write-probe"
             cli_out = fixture / "build/userspace/swapzctl"
             execute("initial")
             tracked = (module, w1_module, w2_module, staged,
-                       w1_staged, w2_staged, staged_make, device, cli_out)
+                       w1_staged, w2_staged, staged_make, device,
+                       direct_probe, cli_out)
             first = {p: p.stat().st_mtime_ns for p in tracked}
             execute("unchanged")
             self.assertEqual(first,
@@ -965,7 +970,7 @@ class PublicMakeContract(unittest.TestCase):
             self.assertGreater(cli_out.stat().st_mtime_ns, first[cli_out],
                                "MAKE_INCREMENTAL_PHASE=cli-source")
             for p in (module, w1_module, w2_module, staged,
-                      w1_staged, w2_staged, staged_make, device):
+                      w1_staged, w2_staged, staged_make, device, direct_probe):
                 self.assertEqual(first[p], p.stat().st_mtime_ns, str(p))
 
             second = {p: p.stat().st_mtime_ns for p in tracked}
@@ -977,7 +982,7 @@ class PublicMakeContract(unittest.TestCase):
             self.assertGreater(staged.stat().st_mtime_ns, second[staged])
             for p in (module, w1_module, w2_module, w1_staged, w2_staged):
                 self.assertGreater(p.stat().st_mtime_ns, second[p])
-            for p in (staged_make, device, cli_out):
+            for p in (staged_make, device, direct_probe, cli_out):
                 self.assertEqual(second[p], p.stat().st_mtime_ns, str(p))
 
             # Changing only canonical VERSION must regenerate every kernel
