@@ -73,6 +73,13 @@ Only an exact-source owner `make test` with the loaded RAM-backed null_blk phase
 can qualify useful READ/WRITE, p99, lower bytes/requests, SD/SSD/NVMe, GC and
 fault/lifecycle behavior. Rootless checks alone are supporting evidence.
 
+Native window tests must distinguish a successful READ serviced after a staged
+two/three-record post-PACK tail from stale earlier READ evidence. The bounded
+candidate must reject singleton, pure-WRITE, sampled-target, K=1-busy and
+pending-sample service-dry cases and reset the evidence on a nonempty flush.
+Owner loaded qualification must compare the same useful mixed/QD trace and
+lower-device bytes/requests; no improvement is asserted from native tests.
+
 ## Loaded correctness
 
 Loaded tests use only newly created, positively owned, RAM-backed `null_blk`. Before and after use, verify device identity, size, major/minor, DM UUID, holders, mounts and active-swap aliases. Never substitute a physical or existing block device.

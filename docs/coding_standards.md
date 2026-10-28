@@ -183,6 +183,15 @@ belong in the ROADMAP decision table and Git history.
   incomplete scan is never a finite sampled tail. A queued READ is not a
   completed READ, so do not persist service evidence prematurely. The staged
   post-K=1 tail without a queued follower keeps its prior safety gate.
+- **Serviced post-PACK READ boundary:** A successful independent READ served
+  after a two/three-record post-PACK tail is already staged may make that exact
+  dry residue serviceable without compressed-only pack geometry. The ordered
+  worker must prove no K=1 I/O, no pending tail sample, no authoritative
+  sampled target, and both accepted FIFOs dry. Reset this per-window evidence
+  on flush. Earlier READ evidence, cached READs serviced before the tail,
+  singleton residues, and future-arrival guesses never authorize the close.
+  This experiment must not add any compression-completion wait or suppress the
+  qualified four-record dispatch below a larger learned target.
 - **Preparation ownership:** async preparation uses one unbound producer lane.
   The ordered owner may steal only an unclaimed next preparation entry while
   holding the admission lock. Producer and ordered compression use separate

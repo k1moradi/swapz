@@ -1328,6 +1328,18 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_chain_completed", service_dry)
         self.assertIn("ctx->retained_window_read_bypasses", service_dry)
         self.assertIn("ctx->retained_wave_interrupted", service_dry)
+        self.assertIn("swapz_window_post_pack_read_boundary_ready(", service_dry)
+        self.assertIn("ctx->retained_post_pack_read_boundary", service_dry)
+        self.assertIn("ctx->retained_post_pack_read_boundary = true;",
+                      body("swapz_process"))
+        self.assertIn("ctx->retained_post_pack_read_boundary = false;",
+                      body("swapz_flush_window"))
+        boundary_policy = source_body(
+            "swapz_window_post_pack_read_boundary_ready", policy)
+        self.assertIn("read_serviced_after_tail && !tail_sample_pending",
+                      boundary_policy)
+        self.assertIn("count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS",
+                      boundary_policy)
         self.assertIn("!swapz_has_inflight(ctx)", service_dry)
         service_policy = source_body("swapz_window_service_close_ready", policy)
         self.assertIn("if (count < 2U || sampled_tail_target)", service_policy)

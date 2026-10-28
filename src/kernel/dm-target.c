@@ -536,6 +536,13 @@ struct swapz_dm {
 	/* Worker-owned active-burst discriminator. READ service keeps a mixed
 	 * accepted wave distinct from sustained WRITE-only tails without timers. */
 	bool retained_wave_read_seen;
+	/*
+	 * Set only by a successful independent READ serviced while an existing
+	 * two/three-record post-PACK tail is staged; reset on every nonempty
+	 * window flush. Earlier READs cannot authorize a staged-only tail.
+	 * Written and consumed only by the ordered worker.
+	 */
+	bool retained_post_pack_read_boundary;
 	u64 packed_early_commits;
 	u64 single_pack_deferrals;
 	/*
@@ -3391,6 +3398,8 @@ accounted:
 		}
 	}
 	ctx->batch_count = 0;
+	/* A serviced READ belongs to the window just flushed, never the next. */
+	ctx->retained_post_pack_read_boundary = false;
 	if (error || committed != count) {
 		ctx->retained_chain_completed = 0;
 		ctx->pack_close_pending_tail_sample = false;
@@ -3776,13 +3785,21 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
  */
 static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 {
-	bool valid_pack =
-		ctx->single_pack_deferred || ctx->accepted_burst_pack_ready;
 	bool lower_idle = !swapz_has_inflight(ctx);
+	bool post_pack_read_boundary =
+		swapz_window_post_pack_read_boundary_ready(
+			lower_idle, ctx->batch_count, ctx->retained_tail_target,
+			ctx->retained_chain_completed,
+			ctx->retained_post_pack_read_boundary,
+			ctx->pack_close_pending_tail_sample);
+	bool valid_pack = ctx->single_pack_deferred ||
+		ctx->accepted_burst_pack_ready || post_pack_read_boundary;
+	int read_bypasses = ctx->retained_window_read_bypasses ||
+		post_pack_read_boundary;
 
 	return swapz_window_service_close_ready(
 		valid_pack, lower_idle, ctx->batch_count, ctx->retained_tail_target,
-		ctx->retained_chain_completed, ctx->retained_window_read_bypasses,
+		ctx->retained_chain_completed, read_bypasses,
 		ctx->retained_wave_interrupted);
 }
 
@@ -5252,8 +5269,21 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		if (!error) {
 			u64 read_end_ns = ktime_get_ns();
 
-			if (ctx->retain_ms)
+			if (ctx->retain_ms) {
 				ctx->retained_wave_read_seen = true;
+				/*
+				 * A completed cache-hit READ is a genuine accepted
+				 * boundary, but only when this tail was already
+				 * staged. Never reuse READ evidence from before K=1
+				 * completion or a pending post-PACK sample.
+				 */
+				if (ctx->retained_chain_completed &&
+				    ctx->batch_count >= 2U &&
+				    ctx->batch_count <
+					    SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS &&
+				    !ctx->pack_close_pending_tail_sample)
+					ctx->retained_post_pack_read_boundary = true;
+			}
 			bool had_lower_io =
 				ctx->lower_read_submitted_reqs != lower_reqs_before;
 

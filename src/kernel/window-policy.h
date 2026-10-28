@@ -291,6 +291,24 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
  * path is idle, four records may dispatch regardless of compressed-only
  * geometry, provided no authoritative sampled tail is active. A singleton never closes here.
  */
+/*
+ * Only a successfully serviced independent READ after a staged post-PACK
+ * tail can prove this particular two/three-record residue finite. Earlier
+ * READs in the accepted wave cannot substitute for this boundary. This
+ * helper does not authorize a singleton, bypass a sampled target, wait for
+ * future BIOs or alter the ordinary retention deadline.
+ */
+static inline int swapz_window_post_pack_read_boundary_ready(
+		int lower_idle, swapz_u8 count, swapz_u8 sampled_tail_target,
+		int chain_completed, int read_serviced_after_tail,
+		int tail_sample_pending)
+{
+	return lower_idle && count >= 2U &&
+		count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS &&
+		!sampled_tail_target && chain_completed &&
+		read_serviced_after_tail && !tail_sample_pending;
+}
+
 static inline int swapz_window_service_close_ready(
 		int valid_pack, int lower_idle, swapz_u8 count,
 		swapz_u8 sampled_tail_target, int chain_completed,

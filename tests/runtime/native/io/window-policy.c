@@ -294,6 +294,20 @@ static int test_sampled_tail_target_distinguishes_mixed_wave(void)
 	return 0;
 }
 
+static int test_post_pack_read_boundary_requires_fresh_finite_tail(void)
+{
+	CHECK(!swapz_window_post_pack_read_boundary_ready(0, 2, 0, 1, 1, 0));
+	CHECK(!swapz_window_post_pack_read_boundary_ready(1, 1, 0, 1, 1, 0));
+	CHECK(!swapz_window_post_pack_read_boundary_ready(1, 4, 0, 1, 1, 0));
+	CHECK(!swapz_window_post_pack_read_boundary_ready(1, 2, 0, 0, 1, 0));
+	CHECK(!swapz_window_post_pack_read_boundary_ready(1, 3, 0, 1, 0, 0));
+	CHECK(!swapz_window_post_pack_read_boundary_ready(1, 3, 0, 1, 1, 1));
+	CHECK(!swapz_window_post_pack_read_boundary_ready(1, 3, 3, 1, 1, 0));
+	CHECK(swapz_window_post_pack_read_boundary_ready(1, 2, 0, 1, 1, 0));
+	CHECK(swapz_window_post_pack_read_boundary_ready(1, 3, 0, 1, 1, 0));
+	return 0;
+}
+
 static int test_service_dry_pack_requires_valid_multi_record_pack(void)
 {
 	CHECK(!swapz_window_service_close_ready(0, 1, 1, 0, 1, 1, 1));
@@ -540,6 +554,7 @@ int main(void)
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
 	CHECK(test_sampled_tail_target_distinguishes_mixed_wave() == 0); passed++;
 	CHECK(test_service_dry_pack_requires_valid_multi_record_pack() == 0); passed++;
+	CHECK(test_post_pack_read_boundary_requires_fresh_finite_tail() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
