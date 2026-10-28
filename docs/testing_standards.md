@@ -543,7 +543,9 @@ and contain no deferred drain-completion BIO list/work item or fixed
 `usleep_range()` barrier guess. DM core blocks new I/O and waits for existing
 target I/O before `->postsuspend`; `->resume` must reopen swapz admission
 before the core releases deferred I/O. If the lifecycle writer fails, report
-its exact exit status plus current target status on the fail-only path.
+its exact exit status plus current target status on the fail-only path. The
+owned loaded harness must remain executable in the Git tree; losing its execute
+bit is a qualification failure, not an operator workaround.
 The maximum supported 4ms deadline can legitimately expire between that observation and the
 separate suspend request, so the oracle must not require a specific close-reason counter afterwards.
 Loaded failure reporting skips the generic cleanup epilogue so the preceding
