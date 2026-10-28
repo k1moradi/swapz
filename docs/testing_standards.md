@@ -187,6 +187,19 @@ effects, but suppresses repetitive per-control diagnostics. Detailed cache,
 window and counter evidence remains in the single replace-in-place
 root `test_results.json` report.
 
+The default operator output must place the qualification decision ahead of
+native-only screening. On BLOCKED, FAIL or missing matched loaded sessions, it
+prints the gate and why no new raw-relative performance claim is possible,
+without dumping diagnostic/native tables. On qualified runs it keeps the
+synthetic serial-depth and fast QD32 mixed raw/sync/async comparison, accepted-
+work lower-idle (including undersized and preparing-head attribution), K=1
+ready-run wait, sustained QD1/4/8/32 raw-versus-async service, and separately
+labeled async-versus-sync paired confidence intervals. Missing telemetry is
+unavailable, never zero. Internal rootless fixtures may still exercise the
+legacy detailed Markdown renderer, but it is not the default terminal report.
+The saved JSON, qualification gates, stage progress, safety checks and exit
+codes are unchanged.
+
 ### Evidence-monotonic report publication
 
 Report publication must be strictly evidence-monotonic. When publishing `test_results.json` to `origin/main`, if `origin/main` has advanced while the test suite was running, the publisher fetches `origin/main` and inspects the remote `test_results.json`. If `origin/main` already carries qualification evidence from a tested commit that is an ancestor or newer descendant of the local tested source (`git merge-base --is-ancestor local_tested remote_tested`), publication is declined with `SKIPPED_GIT_SYNC` so that delayed or concurrent runs cannot overwrite newer qualification evidence with older results. Furthermore, the ancestor evaluation must fail closed: if `git merge-base` returns an error status (exit code > 1), publication halts with `GIT_SYNC_FAILED` rather than proceeding under uncertain ancestry.
