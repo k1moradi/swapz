@@ -35,7 +35,9 @@ across RAW interleaving after the protected count-four boundary. Source
 contracts must prove that the pressure hand never steals an unprepared
 descriptor, retained READ-bypass credit requires an already-open staged WRITE
 window, and worker-empty burst-target shrink is not blocked merely because an
-earlier chain completed. This supports correctness review but cannot prove
+earlier chain completed. Existing ID63 cache-coherence contracts must assert the
+same open-window-only bypass rule rather than preserving skipped-WRITE credit.
+This supports correctness review but cannot prove
 loaded I/O service. Owner `make test` must compare matched raw/sync/async mixed
 and sustained QD1/4/8/32, SD/SSD/NVMe profiles, lower WRITE bytes/requests,
 read p99, deadline/undersized-idle attribution, full GC, retained faults and

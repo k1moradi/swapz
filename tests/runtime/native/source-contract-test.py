@@ -1862,7 +1862,10 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("!ctx->read_coalescing_enabled", concurrent)
         self.assertIn("ctx->retain_ms &&", concurrent)
         self.assertIn("swapz_plain_retained_write(bio)", concurrent)
-        self.assertIn("(ctx->batch_count || skipped_write_count) && ctx->retain_ms", concurrent)
+        self.assertIn("ctx->batch_count && ctx->retain_ms", concurrent)
+        self.assertNotIn(
+            "(ctx->batch_count || skipped_write_count) && ctx->retain_ms",
+            concurrent)
         self.assertNotIn("swapz_lower_read_overlap_begin(ctx)", concurrent)
         self.assertNotIn("swapz_lower_read_overlap_end(ctx)", concurrent)
         self.assertIn("skipped_writes[SWAPZ_MAX_RECORDS]", concurrent)
