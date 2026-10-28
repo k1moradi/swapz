@@ -93,9 +93,10 @@ static int test_pack_ready_waits_for_second_medium_pack(void)
 		batch[i].logical = 100 + i;
 		batch[i].length = 2073;
 	}
-	/* Three medium pages fit 8KiB but are deliberately retained.
-	 * Six fit one 16KiB extent: same bytes as two old 8KiB commits,
-	 * one synchronous lower callback. */
+	/* Two or three medium pages fit one 8KiB extent and are valid
+	 * selective geometry. Six fit one 16KiB extent: same bytes as two
+	 * old 8KiB commits, one synchronous lower callback. */
+	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 5, 2, 0));
@@ -118,9 +119,10 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 		batch[i].logical = 300 + i;
 		batch[i].length = 2073;
 	}
-	/* Two medium pages do not fit 4KiB. Three fit 8KiB, but wait for
-	 * a second triplet instead of closing the first pack immediately. */
-	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
+	/* Two medium pages exceed 4KiB but fit one 8KiB extent. Three also
+	 * fit 8KiB; service policy still decides whether the deferred geometry
+	 * is finite enough to close. */
+	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 3, 2, 0));
 	CHECK(swapz_window_pack_ready(batch, 6, 2, 0));
@@ -134,7 +136,7 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 	 */
 	for (i = 0; i < 5; ++i)
 		batch[i].length = 3000;
-	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(!swapz_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 4, 2, 0));
@@ -488,21 +490,29 @@ static int test_timer_arm_requires_retention_and_unqueued_timer(void)
 	return 0;
 }
 
-static int test_inline_short_tail_never_exceeds_window_or_floor(void)
+static int test_two_record_two_block_pack_geometry_survives_raw_slots(void)
 {
-	/* One to three already-accepted local WRITEs may join a pressure hand. */
-	CHECK(swapz_window_inline_short_tail_fits(8, 16, 1));
-	CHECK(swapz_window_inline_short_tail_fits(8, 16, 2));
-	CHECK(swapz_window_inline_short_tail_fits(8, 16, 3));
-	/* Never manufacture a new minimum, exceed space, or wrap subtraction. */
-	CHECK(!swapz_window_inline_short_tail_fits(8, 16, 0));
-	CHECK(!swapz_window_inline_short_tail_fits(8, 16, 4));
-	CHECK(!swapz_window_inline_short_tail_fits(8, 10, 3));
-	CHECK(swapz_window_inline_short_tail_fits(8, 10, 2));
-	CHECK(!swapz_window_inline_short_tail_fits(8, 8, 1));
-	CHECK(!swapz_window_inline_short_tail_fits(9, 8, 1));
-	CHECK(!swapz_window_inline_short_tail_fits(255, 0, 1));
-	CHECK(!swapz_window_inline_short_tail_fits(0, 0, 1));
+	struct swapz_pending_bio batch[5] = { 0 };
+	unsigned int index;
+
+	batch[0].logical = 700;
+	batch[1].logical = 701;
+	batch[0].length = 2100;
+	batch[1].length = 2100;
+	for (index = 2; index < 5; ++index) {
+		batch[index].logical = 700 + index;
+		batch[index].length = SWAPZ_BLOCK_BYTES;
+		batch[index].raw = 1;
+	}
+
+	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 0, 0));
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 1));
+	/* Count four stays the protected first-pack floor. */
+	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 0));
+	/* Once count exceeds four, RAW interleaving must not erase the proof. */
+	CHECK(swapz_window_prior_single_pack_ready(batch, 5, 2, 0));
+	CHECK(!swapz_window_prior_single_pack_ready(batch, 4, 2, 0));
 	return 0;
 }
 
@@ -613,7 +623,7 @@ int main(void)
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_raw_pressure_hand_requires_dispatchable_target() == 0); passed++;
 	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
-	CHECK(test_inline_short_tail_never_exceeds_window_or_floor() == 0); passed++;
+	CHECK(test_two_record_two_block_pack_geometry_survives_raw_slots() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_ordinary_retention_deadline_is_pinned() == 0); passed++;

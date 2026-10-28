@@ -53,23 +53,28 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
-    def test_short_tail_inline_claim_is_bounded_and_exclusive(self):
+    def test_pressure_hand_requires_completed_representation(self):
         ready = body("swapz_next_local_write_ready")
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
-        self.assertIn("swapz_window_inline_short_tail_fits(", ready)
-        self.assertIn("short_tail_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", ready)
-        self.assertIn("!swapz_plain_retained_write(tail_entry->bio)", ready)
-        self.assertIn("list_empty(&ctx->incoming)", ready)
-        self.assertIn("!list_empty(&next_entry->preparation_list)", ready)
-        self.assertIn("ctx->preparation_queued--", ready)
-        self.assertIn("list_del_init(&next_entry->preparation_list)", ready)
-        self.assertIn("next_entry->preparation_inline = true", ready)
-        self.assertIn("staged_count <= max_window", policy)
-        self.assertLess(ready.index("spin_lock_irqsave(&ctx->queue_lock"),
-                        ready.index("list_del_init(&next_entry->preparation_list)"))
-        self.assertLess(ready.index("list_del_init(&next_entry->preparation_list)"),
-                        ready.index("spin_unlock_irqrestore(&ctx->queue_lock"))
+        self.assertNotIn("swapz_window_inline_short_tail_fits(", policy)
+        self.assertNotIn("spin_lock_irqsave(&ctx->queue_lock", ready)
+        self.assertNotIn("preparation_ordered_inline", ready)
+        self.assertIn("prepared = READ_ONCE(next_entry->prepared_page);", ready)
+        self.assertIn("if (!prepared)", ready)
+        self.assertIn("completion_done(&next_entry->preparation_snapshot_ready)", ready)
+        self.assertIn("SWAPZ_PREPARATION_READY_COMPRESSED", ready)
+        self.assertIn("SWAPZ_PREPARATION_READY_RAW", ready)
         self.assertNotIn("wait_for_completion(", ready)
+
+    def test_retained_read_bypass_requires_open_window(self):
+        concurrent = body("swapz_try_concurrent_read_slots")
+        coalesced = body("swapz_try_parallel_read_batch")
+        self.assertIn("if (missing_slots < 2U)", concurrent)
+        self.assertIn(
+            "retained_bypass = ctx->batch_count && ctx->retain_ms;", concurrent)
+        self.assertNotIn("ctx->batch_count || skipped_write_count", concurrent)
+        self.assertIn(
+            "retained_bypass = ctx->batch_count && ctx->retain_ms;", coalesced)
 
     def test_source_body_extracts_u16_definition_after_prototype(self):
         source = """
@@ -1395,7 +1400,7 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(processed_sample, processed_tail)
         self.assertIn("if (!ctx->batch_count && !swapz_has_inflight(ctx))", worker)
         self.assertIn("swapz_window_shrink_burst_target(", worker)
-        self.assertIn("!ctx->retained_chain_completed", worker)
+        self.assertNotIn("!ctx->retained_chain_completed", worker)
         close_ready = body("swapz_retained_pack_close_ready")
         service_dry = body("swapz_service_proven_dry_pack")
         self.assertNotIn("swapz_retained_target_close_ready", DM)
@@ -2193,6 +2198,7 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(single.index("if (count == 4U)"),
                         single.index("swapz_window_compressed_extent_fits("))
         self.assertIn("read_budget, 2U, 1U", single)
+        self.assertIn("read_budget, 2U, 2U", single)
         self.assertIn("read_budget, 3U, 2U", single)
         self.assertIn("swapz_window_first_compressed_extent_fits(", single)
         self.assertNotIn("for (prefix", single)
@@ -2200,6 +2206,7 @@ static swapz_u16 swapz_probe_set(
         prior = source_body("swapz_window_prior_single_pack_ready", policy)
         self.assertIn("count <= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", prior)
         self.assertIn("pending, count, 2U, 1U", prior)
+        self.assertIn("pending, count, 2U, 2U", prior)
         self.assertIn("pending, count, 3U, 2U", prior)
         self.assertIn("read_budget, 4U, 2U", pack)
         self.assertIn("read_budget, 6U, 4U", pack)

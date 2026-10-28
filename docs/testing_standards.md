@@ -29,17 +29,18 @@ runtime/test control is removed, keep only any still-required regression or
 safety assertion here; record the anti-retest decision in the ROADMAP evidence
 table and leave detailed trial history in Git/report commits.
 
-For the bounded short-tail pressure-hand candidate, native tests must reject
-empty tails, four-or-more-record tails, exhausted or exceeded window capacity
-and unsigned underflow. Source contracts must show that a short accepted
-plain-WRITE suffix is inspected at most four entries and the first unclaimed
-preparation descriptor is transferred under queue_lock; producer-owned and
-incoming-queue cases must retain the ordinary immediate hand. This supports
-correctness review but cannot prove loaded I/O service. Owner `make test`
-must compare matched raw/sync/async mixed and sustained QD1/4/8/32, SD/SSD/NVMe
-profiles, lower WRITE bytes/requests, read p99, retention idle attribution,
-full GC, retained faults and suspend/drain. SIMD compile/runtime coverage must
-include SSE2, AVX2, AVX-512 and ARM64/NEON where hardware is available.
+For the post-ID97 retention-idle repair, native tests must prove two-record
+compressed geometry that crosses 4KiB but fits 8KiB, including persistence
+across RAW interleaving after the protected count-four boundary. Source
+contracts must prove that the pressure hand never steals an unprepared
+descriptor, retained READ-bypass credit requires an already-open staged WRITE
+window, and worker-empty burst-target shrink is not blocked merely because an
+earlier chain completed. This supports correctness review but cannot prove
+loaded I/O service. Owner `make test` must compare matched raw/sync/async mixed
+and sustained QD1/4/8/32, SD/SSD/NVMe profiles, lower WRITE bytes/requests,
+read p99, deadline/undersized-idle attribution, full GC, retained faults and
+suspend/drain. SIMD compile/runtime coverage must include SSE2, AVX2, AVX-512
+and ARM64/NEON where hardware is available.
 
 ## Required stages
 

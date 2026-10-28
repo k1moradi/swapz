@@ -4814,7 +4814,7 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 	ctx->worker_has_immediate_followup = !list_empty(local);
 	if (ctx->async_prepare)
 		atomic_set(&ctx->preparation_tail_credit, 0);
-	retained_bypass = (ctx->batch_count || skipped_write_count) && ctx->retain_ms;
+	retained_bypass = ctx->batch_count && ctx->retain_ms;
 	if (ctx->retain_ms)
 		ctx->retained_wave_read_seen = true;
 	read_start_ns = ktime_get_ns();
@@ -5459,10 +5459,10 @@ static bool swapz_retention_expired(struct swapz_dm *ctx)
 }
 
 /*
- * Continue past the first pressure hand when the next accepted WRITE has a
- * completed representation. A short, already-accepted plain-WRITE remainder
- * may instead be claimed for immediate inline preparation without waiting
- * for producer work or any future BIO; other pressure hands still dispatch.
+ * Continue past the first pressure hand only when the next accepted WRITE has
+ * a completed representation. Never steal an unprepared descriptor merely to
+ * extend the current window: dispatch ready lower work and let preparation
+ * overlap that I/O instead of idling the lower device for ordered LZ4.
  */
 static bool swapz_next_local_write_ready(struct swapz_dm *ctx,
 					 const struct list_head *local)
@@ -5477,47 +5477,8 @@ static bool swapz_next_local_write_ready(struct swapz_dm *ctx,
 	if (!swapz_plain_retained_write(next_entry->bio))
 		return false;
 	prepared = READ_ONCE(next_entry->prepared_page);
-	if (!prepared) {
-		struct swapz_bio_ref *tail_entry;
-		unsigned long flags;
-		unsigned int short_tail_count = 0;
-		bool claimed = false;
-
-		/*
-		 * A pressure-hand close can strand one to three already-accepted
-		 * local WRITEs for a full retention deadline. Only consume such a
-		 * bounded tail if it fits this window and its next entry is still
-		 * unclaimed. A producer-owned head is never stolen or waited for.
-		 * The admission lock makes the inline claim exclusive with the
-		 * producer's preparation_list removal.
-		 */
-		if (!ctx->retain_ms ||
-		    ctx->batch_count < SWAPZ_WORK_CONSERVING_HAND_RECORDS)
-			return false;
-		list_for_each_entry(tail_entry, local, list) {
-			if (++short_tail_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||
-			    !swapz_plain_retained_write(tail_entry->bio))
-				return false;
-		}
-		if (!swapz_window_inline_short_tail_fits(
-				ctx->batch_count, ctx->max_window,
-				short_tail_count))
-			return false;
-		spin_lock_irqsave(&ctx->queue_lock, flags);
-		if (list_empty(&ctx->incoming) &&
-		    !next_entry->preparation_inline &&
-		    !READ_ONCE(next_entry->prepared_page) &&
-		    !list_empty(&next_entry->preparation_list) &&
-		    ctx->preparation_queued) {
-			ctx->preparation_queued--;
-			list_del_init(&next_entry->preparation_list);
-			next_entry->preparation_inline = true;
-			ctx->preparation_ordered_inline++;
-			claimed = true;
-		}
-		spin_unlock_irqrestore(&ctx->queue_lock, flags);
-		return claimed;
-	}
+	if (!prepared)
+		return false;
 	if (!completion_done(&next_entry->preparation_snapshot_ready))
 		return false;
 	state = swapz_preparation_read_state(&prepared->state);
@@ -5890,8 +5851,7 @@ static void swapz_worker(struct work_struct *work)
 						ctx->singleton_fast_close = false;
 						if ((ctx->single_pack_deferred ||
 						     ctx->accepted_burst_pack_ready) &&
-						    !ctx->retained_tail_target &&
-						    !ctx->retained_chain_completed) {
+						    !ctx->retained_tail_target) {
 							swapz_u8 old_target =
 								ctx->retained_burst_target;
 							swapz_u8 candidate_target =

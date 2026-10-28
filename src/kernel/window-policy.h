@@ -178,6 +178,8 @@ static inline int swapz_window_single_pack_ready(
 						read_budget, 2U, 1U))
 		return 1;
 	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
+						read_budget, 2U, 2U) ||
+	    swapz_window_compressed_extent_fits(pending, count, retain_ms,
 						read_budget, 3U, 2U)) {
 		if (swapz_window_first_compressed_extent_fits(
 				pending, count, 2U, 1U))
@@ -204,6 +206,8 @@ static inline int swapz_window_prior_single_pack_ready(
 		return 0;
 	return swapz_window_first_compressed_extent_fits(
 		pending, count, 2U, 1U) ||
+		swapz_window_first_compressed_extent_fits(
+			pending, count, 2U, 2U) ||
 		swapz_window_first_compressed_extent_fits(
 			pending, count, 3U, 2U);
 }
@@ -424,22 +428,6 @@ static inline int swapz_window_work_conserving_close_ready(
 		return 0;
 	return has_valid_pack &&
 		count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS;
-}
-
-/*
- * At a pressure-hand boundary, keeping a locally accepted short WRITE tail
- * inline avoids leaving one to three residual records on the 2ms deadline.
- * This is a capacity check only: the serialized worker must separately prove
- * every local entry is plain, the accepted incoming queue is empty, and the
- * next preparation descriptor is atomically claimed under queue_lock.
- * Never defer the hand for a producer-owned entry or a future arrival.
- */
-static inline int swapz_window_inline_short_tail_fits(
-		swapz_u8 staged_count, swapz_u8 max_window, unsigned int tail_count)
-{
-	return tail_count && tail_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS &&
-		staged_count <= max_window &&
-		tail_count <= (unsigned int)(max_window - staged_count);
 }
 
 /*

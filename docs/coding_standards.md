@@ -177,16 +177,29 @@ belong in the ROADMAP decision table and Git history.
   preserving all FUA/verification and publication fences. Keep the first three
   inline-stolen pages eligible for ordinary LZ4; idle lower service may choose
   RAW on later pages using the existing stable-snapshot/atomic state rules.
-- **Bounded local short-tail continuity:** At an existing eight-record
-  work-conserving pressure hand, a local suffix of one to three already-accepted
-  plain WRITEs may stay in the current window only if the complete suffix fits
-  the remaining record capacity, no incoming BIOs are queued, and the next
-  unclaimed preparation descriptor is transferred to ordered inline ownership
-  under queue_lock. The producer must not have claimed that descriptor.
-  Never block on compression, scan more than four local candidates, extend
-  retention, infer a completed wave from staged-only post-K=1 evidence, or
-  keep a four-or-more-record tail merely to improve packing. If any condition
-  fails, keep the established pressure-hand dispatch.
+- **Pressure-hand dispatchability:** At the existing eight-record
+  work-conserving hand, continue the current retained window only when the next
+  already-accepted plain WRITE has a completed prepared snapshot in
+  READY_COMPRESSED or READY_RAW state. Never steal an unprepared descriptor
+  merely to extend the window: dispatch already-ready lower work and let the
+  producer prepare the tail in parallel with K=1 I/O. Do not wait for
+  compression or for a future BIO.
+- **Retained READ attribution:** `retained_window_read_bypasses` may be charged
+  only when a retained WRITE window is already staged at the moment lower READ
+  service is issued. Independent READs that skip unstaged local WRITEs may
+  classify the accepted wave as mixed, but they must not pre-poison the next
+  WRITE window or authorize an early SERVICE_DRY close.
+- **Selective two-record geometry:** Two compressed records whose complete SWZ
+  extent fits 8KiB are valid deferred pack geometry, alongside the existing
+  two-in-4KiB and three-in-8KiB cases. This proof does not override the
+  count-four first-pack guard, sampled-tail authority, singleton rules, or the
+  ordinary deadline; it only preserves a beneficial representation once the
+  worker independently proves the residue finite.
+- **Burst-target shrink after a chain:** On a worker-empty ordinary deadline,
+  valid pack geometry with no authoritative sampled tail may shrink the learned
+  burst target to the observed count at or above the four-record floor even
+  after an earlier K=1 chain completed. A two/three-record deadline still cannot
+  lower the learned floor.
 - **Post-PACK READ-transparent sampling:** under queue_lock, skip only
   independent accepted READs with no staged/earlier queued same-page write,
   FUA/flush or authority conflict. Limit scans to one 64-BIO quantum; an
