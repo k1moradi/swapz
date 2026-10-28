@@ -820,6 +820,9 @@ static swapz_u16 swapz_probe_set(
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         probe = (ROOT / "tests/tools/direct-write-probe.c").read_text()
         self.assertIn("build/tests/direct-write-probe", mk)
+        self.assertIn(
+            "build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile "
+            "build/tests/direct-write-probe", mk)
         self.assertIn('WRITE_PROBE="$ROOT/build/tests/direct-write-probe"', deploy)
         self.assertIn('"$WRITE_PROBE" "/dev/mapper/$DMNAME"', deploy)
         self.assertIn("write_fault_probe_rc", deploy)
