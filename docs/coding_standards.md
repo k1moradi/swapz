@@ -1346,7 +1346,9 @@ Fault-injection knobs are forbidden on physical backing. Upper WRITE completion 
 successful BIO acknowledgments from BIO errors; a terminally failed target
 must not newly acknowledge success, even if the call site omitted the error.
 No result derived from a dm status counter substitutes for a loaded direct
-WRITE failure observed by the original submitting process.
+WRITE failure observed by a dedicated aligned O_DIRECT pwrite(2) oracle. The
+oracle must distinguish the write(2) return value and errno directly; generic
+copy-utility exit behavior is not the correctness boundary.
 The Device Mapper target's end_io callback sees the clone status before DM
 propagates it to the original BIO. It may enforce terminal fail-closed status
 there but must leave any existing failure unchanged, and must not treat a

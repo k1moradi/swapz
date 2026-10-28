@@ -215,6 +215,8 @@ changes.
 
 | 90 | Retained synthetic WRITE error survives DM clone boundary | **Owner loaded gate pending** | The owner test for `e9122f3` reports `calls=1 injected=1 failed=1 upper_write_ok=0 upper_write_err=1 logical_write_bytes=0` but direct `dd` still returns zero. Kernel 6.12's Device Mapper `clone_endio()` passes clone errors to the original bio, which the previous counter did not inspect. Add a target `end_io` fail-closed guard and distinct pre-DM-boundary counters; neither native CI nor those counters qualify userspace error propagation. Accept only after owner `make test` sees the direct injected WRITE fail and all subsequent loaded phases pass. |
 
+| 91 | Replace ambiguous retained WRITE-fault process probe with exact O_DIRECT syscall oracle | **Owner loaded gate pending** | The owner test for `42347a9` records `upper_write_err=1 endio_seen_err=1 endio_seen_ok=0 logical_write_bytes=0`, proving the target clone reached Device Mapper with an error. Linux 7.0 block-device synchronous direct I/O waits for BIO completion and converts final BIO status to errno, while GNU dd separately wraps write(2) and process exit behavior. Qualification now uses a tiny aligned `O_DIRECT` `pwrite(2)` helper that exits zero only for exactly `-1/EIO`; success, partial I/O, a different errno, setup failure or timeout remains BLOCKED with numeric syscall evidence. This changes the oracle, not the kernel fault policy. Accept only after owner `make test` passes this loaded gate and the remaining stages. |
+
 ## What the pinned queue experiment establishes
 
 The QD32 replay remains intentionally unpaced and closed-loop, but the lower

@@ -20,6 +20,7 @@ cd "$ROOT"
 # Privileged code must never invoke Git inside the operator checkout.
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
+WRITE_PROBE="$ROOT/build/tests/direct-write-probe"
 CONFIG=""
 CONFIGNAME=""
 DISK=""
@@ -78,7 +79,8 @@ grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/s
     fail "staged kernel version header does not match canonical VERSION"
 [[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
     fail "built swapz module version does not match canonical VERSION"
-[[ -s "$MODULE" && -x "$ORACLE" ]] || fail "swapz/oracle not compiled"
+[[ -s "$MODULE" && -x "$ORACLE" && -x "$WRITE_PROBE" ]] ||
+    fail "swapz/oracle/direct-write probe not compiled"
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
 	fail "swapz vermagic does not match running kernel"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
@@ -854,13 +856,20 @@ write_fault_status_before="$(dmsetup status "$DMNAME")"
    $(status_u64 "$write_fault_status_before" failed) == 0 )) ||
     fail "retained WRITE-fault mapping policy mismatch"
 read -r -a write_fault_lower_before < "/sys/block/$DISK/stat"
-if timeout --signal=TERM --kill-after=5s 20s dd if=/dev/urandom \
-        of="/dev/mapper/$DMNAME" bs=4096 count=1 oflag=direct status=none; then
-    # Do not assume a success means the fault was never armed. The status
-    # distinguishes bypassed injection from missing upper error propagation.
+# Use an exact syscall oracle rather than a utility's process-level exit policy.
+# The helper exits zero ONLY when one aligned O_DIRECT pwrite(2) returns
+# -1/EIO. Any success, partial result, different errno, setup error or timeout
+# remains a hard BLOCKED qualification with the numeric syscall outcome.
+set +e
+write_fault_probe_output="$(timeout --signal=TERM --kill-after=5s 20s \
+    "$WRITE_PROBE" "/dev/mapper/$DMNAME" 2>&1)"
+write_fault_probe_rc=$?
+set -e
+if (( write_fault_probe_rc != 0 )); then
     write_fault_unexpected_status="$(dmsetup status "$DMNAME")" ||
-        fail "cannot read status after unexpectedly successful WRITE"
-    fail "synthetic retained WRITE fault unexpectedly completed successfully: calls=$(status_u64 "$write_fault_unexpected_status" write_fault_calls) injected=$(status_u64 "$write_fault_unexpected_status" write_fault_injected) failed=$(status_u64 "$write_fault_unexpected_status" failed) zero_pages=$(status_u64 "$write_fault_unexpected_status" zero_elided) upper_write_ok=$(status_u64 "$write_fault_unexpected_status" upper_write_completed_ok) upper_write_err=$(status_u64 "$write_fault_unexpected_status" upper_write_completed_err) endio_seen_ok=$(status_u64 "$write_fault_unexpected_status" endio_write_seen_ok) endio_seen_err=$(status_u64 "$write_fault_unexpected_status" endio_write_seen_err) endio_forced_err=$(status_u64 "$write_fault_unexpected_status" endio_write_forced_err) logical_write_bytes=$(status_u64 "$write_fault_unexpected_status" logical_write)"
+        fail "cannot read status after unexpected direct WRITE syscall result"
+    write_fault_probe_output="${write_fault_probe_output//$'\n'/;}"
+    fail "synthetic retained WRITE syscall probe did not observe EIO: probe_rc=$write_fault_probe_rc probe=$write_fault_probe_output calls=$(status_u64 "$write_fault_unexpected_status" write_fault_calls) injected=$(status_u64 "$write_fault_unexpected_status" write_fault_injected) failed=$(status_u64 "$write_fault_unexpected_status" failed) zero_pages=$(status_u64 "$write_fault_unexpected_status" zero_elided) upper_write_ok=$(status_u64 "$write_fault_unexpected_status" upper_write_completed_ok) upper_write_err=$(status_u64 "$write_fault_unexpected_status" upper_write_completed_err) endio_seen_ok=$(status_u64 "$write_fault_unexpected_status" endio_write_seen_ok) endio_seen_err=$(status_u64 "$write_fault_unexpected_status" endio_write_seen_err) endio_forced_err=$(status_u64 "$write_fault_unexpected_status" endio_write_forced_err) logical_write_bytes=$(status_u64 "$write_fault_unexpected_status" logical_write)"
 fi
 write_fault_status_after="$(dmsetup status "$DMNAME")"
 read -r -a write_fault_lower_after < "/sys/block/$DISK/stat"
@@ -875,7 +884,7 @@ read -r -a write_fault_lower_after < "/sys/block/$DISK/stat"
 (( write_fault_lower_after[4] == write_fault_lower_before[4] &&
    write_fault_lower_after[6] == write_fault_lower_before[6] )) ||
     fail "pre-submission WRITE fault reached the owned lower device"
-note "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0"
+note "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 syscall_errno:EIO lower_write_delta:0"
 
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove retained WRITE-fault mapping"
 OWN_DM=0

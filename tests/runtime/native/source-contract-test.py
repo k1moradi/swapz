@@ -815,6 +815,25 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('status_u64 "$write_fault_status_after" endio_write_seen_err',
                       deploy)
 
+    def test_retained_write_fault_uses_exact_direct_syscall_oracle(self):
+        mk = (ROOT / "Makefile").read_text()
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        probe = (ROOT / "tests/tools/direct-write-probe.c").read_text()
+        self.assertIn("build/tests/direct-write-probe", mk)
+        self.assertIn('WRITE_PROBE="$ROOT/build/tests/direct-write-probe"', deploy)
+        self.assertIn('"$WRITE_PROBE" "/dev/mapper/$DMNAME"', deploy)
+        self.assertIn("write_fault_probe_rc", deploy)
+        self.assertIn("did not observe EIO", deploy)
+        self.assertNotIn(
+            'dd if=/dev/urandom \\\n        of="/dev/mapper/$DMNAME" bs=4096 count=1 oflag=direct',
+            deploy)
+        self.assertIn("O_DIRECT", probe)
+        self.assertIn("posix_memalign", probe)
+        self.assertIn("pwrite(fd, buffer, PROBE_BYTES, 0)", probe)
+        self.assertIn("write_errno == EIO", probe)
+        self.assertIn("DIRECT_WRITE_PROBE", probe)
+        self.assertIn("write_ret=%zd write_errno=%d", probe)
+
     def test_immutable_io_run_split_preserves_publication_gate(self):
         engine_h = (ROOT / "src/kernel/engine.h").read_text()
         engine = (ROOT / "src/kernel/engine.c").read_text()
