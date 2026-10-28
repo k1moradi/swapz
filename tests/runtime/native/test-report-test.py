@@ -851,7 +851,7 @@ def synthetic_log():
            "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 immediate_sectors:2048 reuse_skips:2 verified_pages:4096",
            "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:0 run_splits:0 failed:0",
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
-           "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
+           "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 syscall_errno:EIO lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
            "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
            "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
@@ -1367,13 +1367,31 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.parse_loaded_correctness(missing)["overall"],
                          "INCOMPLETE")
 
-        bad = synthetic_log().replace(
+        # The exact loaded test now proves an aligned O_DIRECT pwrite(2)
+        # returned -1/EIO, not just that the kernel injected a fault.
+        # Missing, wrong or reordered syscall evidence must fail closed.
+        marker = (
             "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 "
-            "lower_write_delta:0",
-            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 "
-            "lower_write_delta:1")
-        self.assertEqual(runner.parse_loaded_correctness(bad)["overall"],
-                         "INCOMPLETE")
+            "syscall_errno:EIO lower_write_delta:0")
+        # Prevent a future contract drift: the rootless fixture must match
+        # the exact marker the privileged owner script actually emits.
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        self.assertIn('note "' + marker + '"', deploy)
+        self.assertIn(marker, synthetic_log())
+        for replacement in (
+            marker.replace("syscall_errno:EIO ", ""),
+            marker.replace("syscall_errno:EIO", "syscall_errno:ENOSPC"),
+            marker.replace("syscall_errno:EIO", "syscall_errno:0"),
+            marker.replace("lower_write_delta:0", "lower_write_delta:1"),
+            marker.replace("injected:1", "injected:0"),
+            marker.replace("retain_ms:2", "retain_ms:0"),
+        ):
+            with self.subTest(invalid_write_fault_marker=replacement):
+                bad = synthetic_log().replace(marker, replacement)
+                result = runner.parse_loaded_correctness(bad)
+                self.assertEqual(result["overall"], "INCOMPLETE")
+                self.assertIn("write", result["reason"].lower())
+
 
     def test_mixed_sessions_end_before_later_benchmark_families(self):
         log = synthetic_log()

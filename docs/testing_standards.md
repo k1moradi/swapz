@@ -91,6 +91,15 @@ Loaded tests use only newly created, positively owned, RAM-backed `null_blk`. Be
 
 The deterministic lifecycle oracle must preserve exact readback, RAW fallback, zero elision and explicit flush behavior. The loaded qualification must also recreate a fresh target on the same positively identified RAM lower and force repeated live-GC evacuation under bounded capacity pressure. Passing GC evidence requires at least two nonzero victims/role rotations, nonzero GC lower READ and WRITE traffic, distinct victim/destination identities, and byte-exact verification of all 4096 logical pages after pressure. This proves loaded GC correctness/cost only on synthetic RAM; it is not physical-wear evidence.
 
+The loaded correctness report must recognize only the exact retained WRITE-fault
+pass marker produced by the aligned syscall probe:
+`PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 syscall_errno:EIO lower_write_delta:0`.
+A missing `syscall_errno:EIO`, a different errno, a nonzero lower-WRITE delta,
+or an unarmed fault must remain INCOMPLETE, even when the loaded shell phase
+prints a PASS prefix. Keep the native parser fixture and the privileged
+marker format in lockstep; the official acceptance command is still
+`make test` on an authorized owner host.
+
 Retained-window suspend/resume must drain accepted ownership and verify all pages. Synthetic pre-submission WRITE and FLUSH injection must fail closed. Upper WRITE errors must be verified at both the target's BIO completion call and Device Mapper's clone end_io boundary, and by a dedicated aligned O_DIRECT pwrite(2) syscall oracle that requires -1/EIO for the injected first WRITE. The end_io hook must preserve prior error statuses and reject new successes after terminal target failure; its counts cannot substitute for the userspace failure gate. These synthetic failures are not evidence for torn/device-originated errors. Recreated owned DM mappings must validate the opened /dev/mapper block node's actual major:minor against the current phase's sysfs DM name and UUID after udev settles, not just dmsetup's name-based UUID. If the deliberately injected WRITE syscall does not return -1/EIO, report the probe return/errno plus write-fault call, injection, failed-state, upper-BIO completion and zero-elision counters before blocking; do not turn this into a pass.
 
 Before any new owned RAM device is provisioned, loaded qualification may

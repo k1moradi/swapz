@@ -1057,7 +1057,7 @@ def parse_loaded_correctness(output):
             r"observed_open:(\d+) verified_pages:(\d+)$"),
         "write_fault": re.compile(
             r"PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:(\d+) "
-            r"injected:(\d+) lower_write_delta:(\d+)$"),
+            r"injected:(\d+) syscall_errno:EIO lower_write_delta:(\d+)$"),
         "flush_fault": re.compile(
             r"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:(\d+) "
             r"injected:(\d+) data_write_reached_lower:(\d+)$"),
