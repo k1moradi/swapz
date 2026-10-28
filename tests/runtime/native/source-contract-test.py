@@ -3216,6 +3216,21 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('flush_fault_lower_after[6] > flush_fault_lower_before[6]',
                       deploy)
         self.assertIn('if timeout --signal=TERM --kill-after=5s 20s dd', deploy)
+        self.assertIn('swapz_verify_owned_dm_node() {', deploy)
+        self.assertIn('stat -Lc \'%t:%T\' "$mapper_node"', deploy)
+        self.assertIn('sysfs_device="/sys/dev/block/$node_dev/dm"', deploy)
+        self.assertIn('"$(cat "$sysfs_device/uuid")" == "$UUID"', deploy)
+        self.assertIn('"$(cat "$sysfs_device/name")" == "$DMNAME"', deploy)
+        self.assertGreaterEqual(deploy.count('swapz_verify_owned_dm_node\n'), 7)
+        self.assertLess(deploy.index('swapz_verify_owned_dm_node\n',
+                                     deploy.index('START_LOADED_RETAINED_WRITE_FAULT')),
+                        deploy.index('write_fault_status_before='))
+        self.assertIn('write_fault_unexpected_status="$(dmsetup status "$DMNAME")"',
+                      deploy)
+        self.assertIn('status_u64 "$write_fault_unexpected_status" write_fault_calls',
+                      deploy)
+        self.assertIn('status_u64 "$write_fault_unexpected_status" write_fault_injected',
+                      deploy)
         self.assertIn("PASS_LOADED_ORACLE_PROFILE=", deploy)
         self.assertIn("raw_writes == 64", deploy)
         self.assertIn("flush_ok == flush_calls", deploy)

@@ -35,6 +35,36 @@ QUARANTINE=0
 SUSPENDED=0
 fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
+
+# A repeated dmsetup remove/create can reassign the DM minor while udev is
+# still updating /dev/mapper. Before ANY owned I/O, prove that the actual
+# block node's major:minor resolves to this phase's exact DM UUID and name.
+# Checking dmsetup's name alone does not authenticate the path opened by dd.
+swapz_verify_owned_dm_node() {
+    local mapper_node="/dev/mapper/$DMNAME"
+    local node_hex node_major node_minor node_dev
+    local sysfs_device
+
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm settle --timeout=10 ||
+            fail "udev queue did not settle before owned DM node verification"
+    fi
+    [[ -b "$mapper_node" ]] ||
+        fail "owned DM block node is absent: $DMNAME"
+    node_hex="$(stat -Lc '%t:%T' "$mapper_node")" ||
+        fail "cannot stat owned DM block node"
+    IFS=: read -r node_major node_minor <<< "$node_hex"
+    [[ "$node_major" =~ ^[[:xdigit:]]+$ &&
+       "$node_minor" =~ ^[[:xdigit:]]+$ ]] ||
+        fail "owned DM block node has invalid major:minor"
+    printf -v node_dev '%d:%d' "0x$node_major" "0x$node_minor"
+    sysfs_device="/sys/dev/block/$node_dev/dm"
+    [[ -r "$sysfs_device/uuid" && -r "$sysfs_device/name" &&
+       "$(cat "$sysfs_device/uuid")" == "$UUID" &&
+       "$(cat "$sysfs_device/name")" == "$DMNAME" ]] ||
+        fail "owned DM node points to a different mapping: $DMNAME"
+}
+
 for cmd in insmod rmmod modprobe dmsetup modinfo blockdev readlink \
            findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
            tee mktemp ls sleep cat id rmdir stat sort dd; do
@@ -255,6 +285,7 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
 	fail "owned DM UUID mismatch"
+swapz_verify_owned_dm_node
 default_status="$(dmsetup status "$DMNAME")" ||
 	fail "cannot read default-policy target status"
 grep -Eq '(^|[[:space:]])async_prepare=1([[:space:]]|$)' <<< "$default_status" ||
@@ -455,6 +486,7 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "live-GC DM UUID mismatch"
+swapz_verify_owned_dm_node
 gc_before="$(dmsetup status "$DMNAME")"
 if ! gc_oracle_output="$(timeout --signal=TERM --kill-after=5s 90s "$ORACLE" \
     "/dev/mapper/$DMNAME" --gc-stress 5 2>&1)"; then
@@ -637,6 +669,7 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "discard-time TRIM DM UUID mismatch"
+swapz_verify_owned_dm_node
 timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
     "/dev/mapper/$DMNAME" --raw-write-series 257 0 ||
     fail "discard-time TRIM setup write failed"
@@ -704,6 +737,7 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "retained suspend DM UUID mismatch"
+swapz_verify_owned_dm_node
 suspend_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$suspend_before" retain_ms) == 4 &&
    $(status_u64 "$suspend_before" failed) == 0 )) ||
@@ -813,6 +847,7 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "retained WRITE-fault DM UUID mismatch"
+swapz_verify_owned_dm_node
 write_fault_status_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$write_fault_status_before" retain_ms) == 2 &&
    $(status_u64 "$write_fault_status_before" write_fault_nth) == 1 &&
@@ -821,7 +856,11 @@ write_fault_status_before="$(dmsetup status "$DMNAME")"
 read -r -a write_fault_lower_before < "/sys/block/$DISK/stat"
 if timeout --signal=TERM --kill-after=5s 20s dd if=/dev/urandom \
         of="/dev/mapper/$DMNAME" bs=4096 count=1 oflag=direct status=none; then
-    fail "synthetic retained WRITE fault unexpectedly completed successfully"
+    # Do not assume a success means the fault was never armed. The status
+    # distinguishes bypassed injection from missing upper error propagation.
+    write_fault_unexpected_status="$(dmsetup status "$DMNAME")" ||
+        fail "cannot read status after unexpectedly successful WRITE"
+    fail "synthetic retained WRITE fault unexpectedly completed successfully: calls=$(status_u64 "$write_fault_unexpected_status" write_fault_calls) injected=$(status_u64 "$write_fault_unexpected_status" write_fault_injected) failed=$(status_u64 "$write_fault_unexpected_status" failed) zero_pages=$(status_u64 "$write_fault_unexpected_status" zero_elided)"
 fi
 write_fault_status_after="$(dmsetup status "$DMNAME")"
 read -r -a write_fault_lower_after < "/sys/block/$DISK/stat"
@@ -848,6 +887,7 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "retained FLUSH-fault DM UUID mismatch"
+swapz_verify_owned_dm_node
 flush_fault_status_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$flush_fault_status_before" retain_ms) == 2 &&
    $(status_u64 "$flush_fault_status_before" flush_fault_nth) == 1 &&
@@ -888,6 +928,7 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "packed-placement DM UUID mismatch"
+swapz_verify_owned_dm_node
 packed_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$packed_before" async_prepare) == 1 &&
    $(status_u64 "$packed_before" delta64_rescue) == 0 &&
