@@ -536,10 +536,14 @@ cannot inherit a blocked FIFO reader. The concurrent lifecycle writer and subseq
 byte-exact verification processes run with a bounded 30s timeout headroom across
 dmsetup suspend and resume operations, ensuring host scheduling load during post-compilation
 drain does not prematurely terminate the writer, and dumping writer stderr on unexpected exit.
-Deferred upper completions buffered during active drain are released after allowing sufficient
-time for DM core to establish `DMF_BLOCK_IO_FOR_SUSPEND` across its SRCU barrier, ensuring
-concurrent upper submissions during suspend are deferred to the resume phase rather than hitting
-closed admission.
+Suspend qualification must rely on Device Mapper's callback ordering, not a
+time-based completion grace period. Production source must place the closed-
+admission drain in `->postsuspend`, keep `->presuspend` free of that drain,
+and contain no deferred drain-completion BIO list/work item or fixed
+`usleep_range()` barrier guess. DM core blocks new I/O and waits for existing
+target I/O before `->postsuspend`; `->resume` must reopen swapz admission
+before the core releases deferred I/O. If the lifecycle writer fails, report
+its exact exit status plus current target status on the fail-only path.
 The maximum supported 4ms deadline can legitimately expire between that observation and the
 separate suspend request, so the oracle must not require a specific close-reason counter afterwards.
 Loaded failure reporting skips the generic cleanup epilogue so the preceding

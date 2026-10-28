@@ -16,7 +16,6 @@
 #include <linux/blkdev.h>
 #include <linux/cache.h>
 #include <linux/device-mapper.h>
-#include <linux/delay.h>
 #include <linux/dm-io.h>
 #include <linux/highmem.h>
 #include <linux/hrtimer.h>
@@ -391,10 +390,6 @@ struct swapz_dm {
 	/* Callback only queues the serialized worker; it never owns BIOs. */
 	struct hrtimer retention_timer;
 	spinlock_t queue_lock;
-	spinlock_t drain_completed_lock;
-	struct bio_list drain_completed_bios;
-	struct work_struct drain_endio_work;
-	bool drain_active;
 	struct list_head incoming;
 	bool accepting;
 	bool failed;
@@ -880,30 +875,10 @@ static void swapz_release_prepared(struct bio *bio)
 	swapz_prepared_put(ctx, prepared);
 }
 
-static void swapz_drain_endio_work(struct work_struct *work)
-{
-	struct swapz_dm *ctx =
-		container_of(work, struct swapz_dm, drain_endio_work);
-	struct bio_list completed = BIO_EMPTY_LIST;
-	struct bio *bio;
-	unsigned long flags;
-
-	/* Allow presuspend to return to DM core so DMF_BLOCK_IO_FOR_SUSPEND is
-	 * set and SRCU grace-period barrier is complete before upper writers wake up. */
-	usleep_range(25000, 35000);
-	spin_lock_irqsave(&ctx->drain_completed_lock, flags);
-	bio_list_merge(&completed, &ctx->drain_completed_bios);
-	bio_list_init(&ctx->drain_completed_bios);
-	spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
-	while ((bio = bio_list_pop(&completed)) != NULL)
-		bio_endio(bio);
-}
-
 static void swapz_complete(struct bio *bio, int error)
 {
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 	struct swapz_dm *ctx = entry ? entry->preparation_ctx : NULL;
-	unsigned long flags;
 
 	swapz_release_prepared(bio);
 	/* Any BIO still owned when the target becomes terminally failed must
@@ -921,12 +896,6 @@ static void swapz_complete(struct bio *bio, int error)
 			ctx->upper_write_completed_err++;
 		else
 			ctx->upper_write_completed_ok++;
-	}
-	if (ctx && READ_ONCE(ctx->drain_active)) {
-		spin_lock_irqsave(&ctx->drain_completed_lock, flags);
-		bio_list_add(&ctx->drain_completed_bios, bio);
-		spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
-		return;
 	}
 	bio_endio(bio);
 }
@@ -6218,12 +6187,17 @@ static void swapz_drain(struct dm_target *ti)
 {
 	struct swapz_dm *ctx = ti->private;
 	unsigned long flags;
-	bool has_drain_bios;
 
+	/*
+	 * Normal DM suspend reaches ->postsuspend only after DM core has blocked
+	 * new I/O, crossed its SRCU barrier and waited for all preexisting target
+	 * I/O to complete. Closing swapz admission here therefore cannot race an
+	 * upper writer into the target while admission is false. The same helper
+	 * remains valid for dtr(), where the mapped device is already being removed.
+	 */
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
-	WRITE_ONCE(ctx->drain_active, true);
 	/* The callback takes queue_lock. Close admission first, then cancel
 	 * outside that lock before waiting for any worker or freeing it. */
 	hrtimer_cancel(&ctx->retention_timer);
@@ -6231,7 +6205,8 @@ static void swapz_drain(struct dm_target *ti)
 	 * flush_delayed_work() only waits for the last queued instance.
 	 * This worker can chain itself after its 64-BIO quantum, so merely
 	 * flushing that instance (or the workqueue once) is insufficient:
-	 * presuspend must not return while a requeued accepted BIO exists.
+	 * the closed-admission drain must not return while accepted BIO ownership
+	 * remains.
 	 *
 	 * The admission lock is now closed. Force the pending timer to fire,
 	 * wait for it, then drain *all chained* worker executions before
@@ -6284,12 +6259,6 @@ static void swapz_drain(struct dm_target *ti)
 		if (error)
 			swapz_fail(ctx, error);
 	}
-	WRITE_ONCE(ctx->drain_active, false);
-	spin_lock_irqsave(&ctx->drain_completed_lock, flags);
-	has_drain_bios = !bio_list_empty(&ctx->drain_completed_bios);
-	spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
-	if (has_drain_bios)
-		schedule_work(&ctx->drain_endio_work);
 }
 
 static void swapz_resume(struct dm_target *ti)
@@ -6305,21 +6274,11 @@ static void swapz_resume(struct dm_target *ti)
 
 static void swapz_free(struct swapz_dm *ctx)
 {
-	struct bio_list completed = BIO_EMPTY_LIST;
-	struct bio *bio;
-	unsigned long flags;
 	swapz_u8 slot, prep_lane;
 
 	if (!ctx)
 		return;
 	hrtimer_cancel(&ctx->retention_timer);
-	cancel_work_sync(&ctx->drain_endio_work);
-	spin_lock_irqsave(&ctx->drain_completed_lock, flags);
-	bio_list_merge(&completed, &ctx->drain_completed_bios);
-	bio_list_init(&ctx->drain_completed_bios);
-	spin_unlock_irqrestore(&ctx->drain_completed_lock, flags);
-	while ((bio = bio_list_pop(&completed)) != NULL)
-		bio_endio(bio);
 	if (ctx->workqueue) {
 		/* The constructor-failure path has no accepted BIOs.
 		 * The live teardown path already closed admission and drained
@@ -6472,10 +6431,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->delta64_lz4_acceleration =
 		(swapz_u8)swapz_delta64_lz4_acceleration;
 	spin_lock_init(&ctx->queue_lock);
-	spin_lock_init(&ctx->drain_completed_lock);
-	bio_list_init(&ctx->drain_completed_bios);
-	INIT_WORK(&ctx->drain_endio_work, swapz_drain_endio_work);
-	ctx->drain_active = false;
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
@@ -7534,7 +7489,12 @@ static struct target_type swapz_target = {
 	.dtr = swapz_dtr,
 	.map = swapz_map,
 	.end_io = swapz_end_io,
-	.presuspend = swapz_drain,
+	/*
+	 * DM core blocks new I/O and waits for all preexisting target I/O before
+	 * ->postsuspend. Drain there rather than closing admission in ->presuspend
+	 * and guessing when the core suspension barrier has completed.
+	 */
+	.postsuspend = swapz_drain,
 	.resume = swapz_resume,
 	.iterate_devices = swapz_iterate_devices,
 	.io_hints = swapz_io_hints,

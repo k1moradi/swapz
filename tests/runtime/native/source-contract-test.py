@@ -3746,6 +3746,12 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(drained.index("WRITE_ONCE(ctx->accepting, false)"),
                         drained.index("drain_workqueue(ctx->workqueue)"))
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock", drained)
+        self.assertIn(".postsuspend = swapz_drain", DM)
+        self.assertNotIn(".presuspend = swapz_drain", DM)
+        self.assertNotIn("drain_completed_bios", DM)
+        self.assertNotIn("drain_endio_work", DM)
+        self.assertNotIn("drain_active", DM)
+        self.assertNotIn("usleep_range(", DM)
 
 
 if __name__ == "__main__":

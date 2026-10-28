@@ -817,10 +817,13 @@ SUSPENDED=1
 timeout --signal=TERM --kill-after=2s 10s dmsetup resume "$DMNAME" ||
     fail "owned retained mapping did not resume"
 SUSPENDED=0
-wait "$writer_pid" || {
+writer_rc=0
+wait "$writer_pid" || writer_rc=$?
+if (( writer_rc != 0 )); then
     [[ -f "$SESSION/suspend-writer.log" ]] && cat "$SESSION/suspend-writer.log" >&2
-    fail "retained lifecycle writer failed across suspend/resume"
-}
+    lifecycle_failure_status="$(dmsetup status "$DMNAME" 2>/dev/null || true)"
+    fail "retained lifecycle writer failed across suspend/resume: writer_rc=$writer_rc status=$lifecycle_failure_status"
+fi
 timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
     "/dev/mapper/$DMNAME" --verify-series 128 2 ||
     fail "retained lifecycle bytes changed across suspend/resume"

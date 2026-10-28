@@ -887,23 +887,22 @@ synchronously and the existing committed-prefix/GC retry path handles the
 remainder. The experiment must never fragment a full packable window solely to
 manufacture overlap.
 
-Presuspend closes admission before waiting for an external lower completion,
-then wakes/drains the ordered worker so every paused transaction is published
-or aborted before teardown. While admission is closed during suspend/drain,
-incoming requests are requeued with `DM_MAPIO_REQUEUE` (or killed with
-`DM_MAPIO_KILL` if the target is failed). To prevent synchronous upper-layer
-writers from waking up and submitting subsequent writes before DM core finishes
-presuspend and sets `DMF_BLOCK_IO_FOR_SUSPEND`, completions processed while
-drain is active are buffered onto `drain_completed_bios`. After draining queues
-and issuing the physical flush, `swapz_drain` schedules `drain_endio_work` when
-`drain_completed_bios` is non-empty to release buffered completions after
-a bounded grace interval (25–35ms) ensuring presuspend returns to DM core and
-DM core completes its SRCU grace-period barrier (`synchronize_srcu(&md->io_barrier)`)
-to set `DMF_BLOCK_IO_FOR_SUSPEND`, and `swapz_free()` drains any
-remaining buffered completions while preserving each BIO's recorded status,
-ensuring subsequent requests are deferred by DM core rather than hitting closed
-admission. The target drain invariant includes the asynchronous run-active bit
-in addition to batch and authority state.
+Normal Device Mapper suspend must use the core's ordering boundary rather than a
+target-side timing guess. swapz does not close admission in `->presuspend`.
+DM core first establishes `DMF_BLOCK_IO_FOR_SUSPEND`, crosses its SRCU barrier
+and waits for every preexisting target I/O to complete; only then does swapz
+run `swapz_drain` from `->postsuspend`. At that point new upper I/O is already
+deferred by DM before `->map`, so closing `ctx->accepting` cannot turn a
+normal flush-suspend race into `DM_MAPIO_REQUEUE`/I/O error.
+
+`swapz_drain` then cancels the retention timer, drains the ordered and
+preparation workqueues, finalizes any internal lower-WRITE ownership, checks
+that every descriptor/reservoir/authority owner is quiescent and issues the
+required lower flush. `->resume` reopens target admission before DM core
+releases deferred I/O. The same closed-admission drain remains the defensive
+teardown helper for `dtr()`. Do not add fixed sleeps, delayed upper BIO
+completion, or polling for an internal DM suspension flag; those mechanisms
+cannot establish the core ordering boundary.
 
 
 ### Work-conserving opportunistic representation
