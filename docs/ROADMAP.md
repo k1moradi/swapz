@@ -211,6 +211,8 @@ changes.
 
 | 88 | Owned retained WRITE-fault BLOCKED: device-node identity and fail-closed diagnosis | **4 root-cause isolation / exact-source owner repeat required** | Source `08e9ce0d34a1` passed build/native/W=1/W=2, oracle, GC, DISCARD and suspend, then BLOCKED when a single direct WRITE unexpectedly succeeded with test_fail_write_nth=1. The test checked dmsetup's UUID but did not prove that /dev/mapper after repeated remove/create pointed to the same DM device. The harness now validates the opened node's sysfs UUID/name and reports the armed hook's counters if the write still succeeds. This removes a wrong-device false qualification path but is not proof that udev was the actual cause; if calls=1 and injected=1 despite success, fix upper BIO completion/error propagation before any performance work. Re-run full owner `make test` on the exact source. |
 
+| 89 | Pre-submission retained WRITE error propagated to upper BIO | **Owner loaded gate pending** | The ID88 owner report authenticated the exact mapped node and recorded `write_fault_calls=1 injected=1 failed=1 zero_pages=0`, yet direct `dd` returned success. This eliminates the stale-node theory and proves the synthetic lower fault was armed, not that the upper WRITE completed in error. Protect `swapz_complete` against new success on an already failed target; count actual upper WRITE BIO success/error completions and require exactly one upper WRITE error after the injected fault. Native source and kernel compile tests validate code paths but cannot prove original user-process error propagation: owner `make test` remains the sole acceptance gate. |
+
 ## What the pinned queue experiment establishes
 
 The QD32 replay remains intentionally unpaced and closed-loop, but the lower

@@ -775,6 +775,27 @@ static swapz_u16 swapz_probe_set(
                       "write_fault_injected=%llu", status)
         self.assertIn("ctx->engine.bulk_enabled, ctx->write_fault_nth", status)
 
+    def test_failed_target_cannot_complete_new_upper_write_success(self):
+        complete = body("swapz_complete")
+        status = body("swapz_status")
+        self.assertIn("if (!error && ctx && READ_ONCE(ctx->failed))", complete)
+        self.assertIn("error = READ_ONCE(ctx->last_error)", complete)
+        self.assertIn("error = -EIO", complete)
+        self.assertIn("bio->bi_status = errno_to_blk_status(error)", complete)
+        self.assertIn("ctx->upper_write_completed_err++", complete)
+        self.assertIn("ctx->upper_write_completed_ok++", complete)
+        self.assertLess(complete.index("ctx->upper_write_completed_err++"),
+                        complete.index("bio_endio(bio)"))
+        self.assertIn("upper_write_completed_ok=%llu upper_write_completed_err=%llu",
+                      status)
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        self.assertIn('status_u64 "$write_fault_status_after" upper_write_completed_ok',
+                      deploy)
+        self.assertIn('status_u64 "$write_fault_status_after" upper_write_completed_err',
+                      deploy)
+        self.assertIn('status_u64 "$write_fault_unexpected_status" upper_write_completed_err',
+                      deploy)
+
     def test_immutable_io_run_split_preserves_publication_gate(self):
         engine_h = (ROOT / "src/kernel/engine.h").read_text()
         engine = (ROOT / "src/kernel/engine.c").read_text()

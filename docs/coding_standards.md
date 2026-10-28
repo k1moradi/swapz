@@ -1342,7 +1342,11 @@ fail while the READ continues against committed authority.
 Non-`null_blk` backing is disabled by default. When explicitly enabled it
 requires a valid exact-size SWAPZ authorization header in reserved block 0.
 All mapping data and segment discard ranges start after that reserved block.
-Fault-injection knobs are forbidden on physical backing.
+Fault-injection knobs are forbidden on physical backing. Upper WRITE completion accounting distinguishes
+successful BIO acknowledgments from BIO errors; a terminally failed target
+must not newly acknowledge success, even if the call site omitted the error.
+No result derived from a dm status counter substitutes for a loaded direct
+WRITE failure observed by the original submitting process.
 
 
 ### Alpha.29 work-conserving dispatcher candidate

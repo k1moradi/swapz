@@ -667,6 +667,10 @@ struct swapz_dm {
 	u8 *read_compressed;   /* VMALLOC: 4KiB compressed record buffer */
 	void *lz4_workmem;
 	u64 logical_write_bytes;
+	/* Count actual upper WRITE BIO completions, including injected failure.
+	 * These are completion observations, not lower submitted bytes. */
+	u64 upper_write_completed_ok;
+	u64 upper_write_completed_err;
 	u64 logical_read_bytes;
 	u64 physical_write_bytes;
 	u64 physical_write_reqs;
@@ -898,8 +902,22 @@ static void swapz_complete(struct bio *bio, int error)
 	unsigned long flags;
 
 	swapz_release_prepared(bio);
+	/* Any BIO still owned when the target becomes terminally failed must
+	 * never receive a fresh success, even if its caller missed the error.
+	 * Preserve the preexisting BIO error (if any) rather than clearing it. */
+	if (!error && ctx && READ_ONCE(ctx->failed)) {
+		error = READ_ONCE(ctx->last_error);
+		if (!error)
+			error = -EIO;
+	}
 	if (error)
 		bio->bi_status = errno_to_blk_status(error);
+	if (ctx && bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio)) {
+		if (bio->bi_status)
+			ctx->upper_write_completed_err++;
+		else
+			ctx->upper_write_completed_ok++;
+	}
 	if (ctx && READ_ONCE(ctx->drain_active)) {
 		spin_lock_irqsave(&ctx->drain_completed_lock, flags);
 		bio_list_add(&ctx->drain_completed_bios, bio);
@@ -7429,6 +7447,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			prep.delta64.transform_wall_ns,
 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
 			prep.delta64.wall_ns);
+		DMEMIT(" upper_write_completed_ok=%llu upper_write_completed_err=%llu",
+		       ctx->upper_write_completed_ok,
+		       ctx->upper_write_completed_err);
 		break;
 	case STATUSTYPE_TABLE:
 		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,
