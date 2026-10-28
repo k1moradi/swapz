@@ -1028,9 +1028,15 @@ Low-depth asynchronous-preparation qualification must prove the idle producer
 gate in source: four unclaimed tails are required for an idle tail-credit wake,
 the pre-head wave starter requires five total queued preparations, and an idle
 producer tail claim requires two queued descriptors. Active lower WRITE overlap
-alone may wake on one queued descriptor because the ordered owner is blocked in
-lower-device service. Lower READ service must not wake or switch the producer
-to head-first claiming. The compatibility status fields
+alone may wake on one queued descriptor, but source qualification must
+distinguish synchronous lower service from a detached K=1 run. Only synchronous
+lower WRITE service may make the producer claim the FIFO head. While detached
+K=1 is active, the producer must leave a singular head for ordered inline steal,
+claim only a true tail, and bypass idle tail-credit gating without changing
+mapping/publication/completion ownership. Source contracts must pin that
+distinction to the existing in-flight K=1 state rather than a new mapper-visible
+busy flag. Lower READ service must not wake or switch the producer to head-first
+claiming. The compatibility status fields
 `prep_lower_read_overlap_starts` and `prep_lower_read_overlap_ns` must remain
 parseable and exactly zero. Owner evidence must re-run the existing
 persistent-worker QD1/4/8/32 matrix; reject the candidate if QD8/QD32 loses its

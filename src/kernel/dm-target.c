@@ -68,10 +68,10 @@
 #define SWAPZ_ORDINARY_LZ4_ACCELERATION 1U
 #define SWAPZ_READ_COALESCE_MAX_BLOCKS (2U * SWAPZ_MAX_BLOCKS)
 /*
- * A separate bounded LZ4 producer may prepare future writes while the
- * existing ordered commit worker waits on lower dm_io. WRITE physical I/O
- * and all mapping authority remain single-thread owned; bounded READ helpers
- * never publish or mutate authority.
+ * A separate bounded LZ4 producer may prepare future writes while synchronous
+ * lower dm_io blocks the ordered commit worker or while a detached K=1 lower
+ * WRITE is active. WRITE physical I/O and all mapping authority remain
+ * single-thread owned; bounded READ helpers never publish or mutate authority.
  */
 static bool swapz_async_prepare = true;
 module_param_named(async_prepare, swapz_async_prepare, bool, 0444);
@@ -2190,6 +2190,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 		void *mapped_input = NULL;
 		u64 section_start;
 		bool tail_claim = false;
+		bool lower_write_active;
+		bool detached_lower_write;
 		bool lower_write_overlap;
 		u64 elapsed_ns;
 		int final_state, publish_state;
@@ -2207,7 +2209,15 @@ static void swapz_preparation_worker(struct work_struct *work)
 			swapz_preparation_release_slot(&ctx->preparation_free_mask, slot);
 			goto out;
 		}
-		if (atomic_read(&ctx->lower_write_active)) {
+		lower_write_active = atomic_read(&ctx->lower_write_active);
+		detached_lower_write = lower_write_active && swapz_has_inflight(ctx);
+		/*
+		 * A synchronous lower WRITE blocks the ordered worker, so preparing
+		 * its next FIFO head is useful. A detached K=1 WRITE leaves that worker
+		 * runnable: preserve the head for inline steal and prepare only a true
+		 * tail, avoiding a producer/consumer completion convoy on the same BIO.
+		 */
+		if (lower_write_active && !detached_lower_write) {
 			atomic_set(&ctx->preparation_tail_credit, 0);
 			entry = list_first_entry(&ctx->preparation_incoming,
 						 struct swapz_bio_ref, preparation_list);
@@ -2215,12 +2225,15 @@ static void swapz_preparation_worker(struct work_struct *work)
 		} else {
 			if (ctx->preparation_queued < SWAPZ_PREPARATION_TAIL_CLAIM_MIN ||
 			    list_is_singular(&ctx->preparation_incoming) ||
-			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
+			    (!detached_lower_write &&
+			     !atomic_xchg(&ctx->preparation_tail_credit, 0))) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				swapz_preparation_release_slot(&ctx->preparation_free_mask,
 							 slot);
 				goto out;
 			}
+			if (detached_lower_write)
+				atomic_set(&ctx->preparation_tail_credit, 0);
 			entry = list_last_entry(&ctx->preparation_incoming,
 						struct swapz_bio_ref, preparation_list);
 			tail_claim = true;
@@ -5561,9 +5574,10 @@ static void swapz_worker(struct work_struct *work)
 		 * An idle producer starts only when the accepted wave contains the
 		 * ordered head plus at least four unclaimed tails. This keeps QD4
 		 * entirely inline while preserving an immediate producer start for
-		 * QD8/QD32. Real active lower READ or WRITE service is an
-		 * independent head-first overlap signal and is not subject to this
-		 * idle threshold.
+		 * QD8/QD32. Real active lower WRITE service is an independent
+		 * overlap signal and is not subject to this idle threshold. Synchronous
+		 * service prepares the FIFO head; detached K=1 service preserves that
+		 * head for the still-runnable ordered worker and prepares true tails.
 		 */
 		if (ctx->async_prepare &&
 		    ctx->preparation_queued >=
@@ -6161,8 +6175,10 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		 * inline WRITE may leave one earned tail token alive after that worker
 		 * goes idle; the next admitted companion can therefore wake the
 		 * producer without reading worker-owned batch_count. Real lower WRITE
-		 * service remains the independent head-first overlap signal; lower
-		 * READ service is intentionally not a producer trigger.
+		 * service remains an independent overlap signal: synchronous service is
+		 * head-first, while detached K=1 service keeps the FIFO head available
+		 * to the ordered worker. Lower READ service is intentionally not a
+		 * producer trigger.
 		 */
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);

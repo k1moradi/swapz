@@ -89,6 +89,37 @@ restore K>1 in this round. The candidate must isolate dispatch/state behavior
 and preserve the current ownership, RAW terminal-selection, ordering and
 fail-closed rules.
 
+### Detached K=1 preparation ownership candidate
+
+A later source audit found one scheduling assumption that became stale when the
+single immutable lower-WRITE slot was detached asynchronously. The preparation
+producer still treats every `lower_write_active` interval as if the ordered
+worker were blocked inside synchronous `dm_io()`, so it claims the FIFO head.
+During detached K=1 service the ordered worker is still runnable and consuming
+that same FIFO from the head. A producer-owned PREPARING head can therefore
+force the ordered worker to hand the local queue back and return, converting
+lower-I/O overlap into a producer/consumer completion convoy.
+
+The bounded candidate distinguishes synchronous lower-WRITE blocking from an
+existing detached K=1 run without adding state: synchronous service remains
+head-first, while detached K=1 service leaves a singular head for ordered inline
+steal and prepares only true tails. The existing single producer, 64-slot
+reservoir, K=1 lower depth, stable RAW snapshot, FIFO publication/completion,
+retention policy, planner and SWZ geometry remain unchanged. The earlier
+eight-record-below-target hand experiment stays rejected; this candidate does
+not reopen it.
+
+Performance hypothesis, not qualification: head/tail separation during detached
+K=1 should reduce producer-owned FIFO-head waits/requeues and move LZ4 work into
+the lower-I/O overlap interval. Expected evidence is fewer ordered preparation
+handoffs/waits, more producer tail claims, less accepted-work
+preparing-head/no-ready idle, and equal or lower backing WRITE bytes/requests
+without worsening p99. Fast mixed/QD4-QD32 useful throughput should improve only
+to the extent that the convoy is material. Slow-media behavior should remain
+neutral or gain compression opportunity. Owner `make test` remains the
+promotion gate across raw/synchronous/asynchronous arms and the supported
+SSE2/AVX2/AVX-512/NEON matrix.
+
 ## Optimization evidence table
 
 This table is the canonical anti-retest index. Before proposing optimization
@@ -220,6 +251,7 @@ changes.
 | 92 | Loaded WRITE-fault marker parser drift after exact syscall oracle | **Root-cause fix / owner requalification required** | Owner `make test` on `fdcd5c6456f0` completed every loaded smoke subphase including `PASS_RETAINED_SYNTHETIC_WRITE_FAULT`, `PASS_RETAINED_SYNTHETIC_FLUSH_FAULT`, packed placement, both RAM regimes, storage envelopes, delta64/read-coalescing A/B, sustained QD sweeps and ID36 resource pressure. Stage 5 still FAILed with `missing loaded correctness markers: write_fault` because `parse_loaded_correctness()` required the pre-ID91 marker without `syscall_errno:EIO`. Synchronize the parser with the exact aligned-pwrite marker and native synthetic fixture, rejecting missing/wrong errno and incorrect fault/lower-I/O numbers. This is a report-contract bug, not proof of a kernel regression; rootless CI plus the owner’s already-executed loaded data support the diagnosis, but only an exact-source owner `make test` can requalify the full matrix. |
 
 | 93 | ID36 mixed replay under memory.high occasionally exhausts its per-candidate deadline | **Harness allocation fix / owner loaded qualification pending** | The owner `make test` on `69e7f2643627` passed build/native/W=1/W=2, owned smoke, retained WRITE/FLUSH faults, both mixed RAM models, storage envelopes, delta64/coalescing A/B and all sustained QD sweeps. During the last ID36 test, the off replay and swapz prefill passed but swapz mixed timed out at its unchanged 280s bound. Under the intentionally exceeded cgroup `memory.high` limit, the Python mixed QD-wave dispatcher was still allocating a new `Future`/`WorkItem` per I/O, triggering avoidable reclaim throttling. Select the existing pre-created native-C QD32 waves for **ID36 only**, with identical immutable 128+2048 trace, byte-exact reads/writes, ownership, packed readback, CPU/memory pressure and original watchdogs. A kernel stall or wrong data must still BLOCK; native/CI checks do not prove the owner-loaded timeout is resolved. |
+| 94 | Detached K=1 producer/ordered FIFO-head collision | **4 candidate / owner qualification pending** | The K=1 async lower pipeline reuses `lower_write_active`, but the producer's head-first rule predates detachment and assumes that signal means the ordered worker is blocked in synchronous lower I/O. During detached K=1 the ordered worker remains runnable, so a producer-owned PREPARING head can force a queue handback instead of useful inline LZ4 work. Distinguish the existing in-flight K=1 state: synchronous lower WRITE remains head-first; detached K=1 leaves a singular head for ordered steal and prepares true tails without idle credit. No new state, worker, buffer, lower depth, timer or format. Hypothesis: fewer preparation handoffs/waits and less preparing-head/no-ready idle, with equal or lower lower-WRITE work and improved fast mixed/QD4-QD32 service. Require exact-source owner `make test`, including raw/sync/async, p99, lower bytes/requests, lifecycle/fault/GC and SSE2/AVX2/AVX-512/NEON qualification. |
 
 ## What the pinned queue experiment establishes
 

@@ -517,15 +517,24 @@ preparation entry from the head. The asynchronous producer is pure preparation:
 it never publishes mappings, submits lower I/O, changes ordering, or completes
 upper BIOs.
 
-When lower WRITE I/O is active, the producer prepares from the head because the
-ordered worker is blocked in device service and cannot steal from
-`preparation_incoming`. Lower READ service is deliberately not a producer wake
-or head-claim signal: the qualified mixed-I/O evidence showed that rapidly
-preparing the small interleaved WRITE queue can outrun accepted-work
-replenishment and fragment retained windows. Outside active lower WRITE I/O,
-tail preparation is credit-limited: each ordered inline WRITE may leave at most
-one unconsumed tail token. The token is earned only after the ordered worker
-atomically reserves its own FIFO head.
+Synchronous lower WRITE I/O blocks the ordered worker, so the producer prepares
+from the FIFO head during that blocking interval. A detached asynchronous K=1
+lower WRITE uses the same `lower_write_active` overlap signal but does **not**
+block the ordered worker. During that interval the producer must leave a
+singular FIFO head unclaimed and may prepare only a true tail, allowing the
+ordered worker to continue inline from the head instead of convoying on a
+producer-owned completion. The producer distinguishes the two cases from the
+existing immutable in-flight K=1 state; do not add another ownership flag.
+
+Lower READ service is deliberately not a producer wake or head-claim signal:
+the qualified mixed-I/O evidence showed that rapidly preparing the small
+interleaved WRITE queue can outrun accepted-work replenishment and fragment
+retained windows. Outside active lower WRITE I/O, tail preparation remains
+credit-limited: each ordered inline WRITE may leave at most one unconsumed tail
+token. The token is earned only after the ordered worker atomically reserves its
+own FIFO head. Detached K=1 tail preparation is instead bounded by the existing
+single producer, 64-slot reservoir and requirement for a true tail; it consumes
+no idle tail credit.
 
 For a retained window, an earned `preparation_tail_credit` may survive the end
 of that individual `swapz_process()` call. This bridges the admission gap

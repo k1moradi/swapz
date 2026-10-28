@@ -2866,6 +2866,19 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("&lane->delta64", producer)
         self.assertNotIn("ctx->preparation_lz4_workmem", producer)
         self.assertIn("atomic_read(&ctx->lower_write_active)", producer)
+        self.assertIn("bool detached_lower_write;", producer)
+        self.assertIn("bool lower_write_active;", producer)
+        self.assertRegex(
+            producer,
+            r"detached_lower_write\s*=\s*lower_write_active\s*&&\s*"
+            r"swapz_has_inflight\(ctx\);")
+        self.assertIn("if (lower_write_active && !detached_lower_write)",
+                      producer)
+        self.assertRegex(
+            producer,
+            r"\(!detached_lower_write\s*&&\s*"
+            r"!atomic_xchg\(&ctx->preparation_tail_credit, 0\)\)")
+        self.assertIn("if (detached_lower_write)", producer)
         self.assertNotIn("lower_read_active", DM)
         self.assertNotIn("swapz_lower_read_overlap_begin", DM)
         self.assertNotIn("swapz_lower_read_overlap_end", DM)
