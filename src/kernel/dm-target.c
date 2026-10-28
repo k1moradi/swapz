@@ -5612,6 +5612,7 @@ static void swapz_worker(struct work_struct *work)
 			    bio_sectors(entry->bio)) {
 				bool accepted_backlog;
 				bool lower_write_busy;
+				bool raw_pressure_hand_dispatchable;
 
 				struct swapz_prepared_page *prepared =
 					READ_ONCE(entry->prepared_page);
@@ -5626,6 +5627,12 @@ static void swapz_worker(struct work_struct *work)
 							SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
 						ctx->batch_count + ctx->preparation_queued >=
 							SWAPZ_WORK_CONSERVING_HAND_RECORDS;
+					raw_pressure_hand_dispatchable =
+						swapz_window_raw_pressure_hand_dispatchable(
+							ctx->retain_ms,
+							ctx->retained_burst_target,
+							ctx->retained_tail_target,
+							SWAPZ_WORK_CONSERVING_HAND_RECORDS);
 					lower_write_busy = swapz_has_inflight(ctx) ||
 						atomic_read(&ctx->lower_write_active);
 					if (!list_empty(&entry->preparation_list)) {
@@ -5646,6 +5653,7 @@ static void swapz_worker(struct work_struct *work)
 						    !ctx->engine.verify_after_write &&
 						    ctx->batch_count >=
 							SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS - 1U &&
+						    raw_pressure_hand_dispatchable &&
 						    !lower_write_busy && accepted_backlog &&
 						    !(entry->bio->bi_opf &
 						      (REQ_PREFLUSH | REQ_FUA))) {

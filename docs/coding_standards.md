@@ -1397,9 +1397,13 @@ is acquire-ordered.
 The ordered worker may force an unclaimed accepted WRITE to RAW only while the
 lower WRITE path is actually idle, before the first eight-record pressure hand,
 and only when the active batch plus unclaimed preparation queue already prove at
-least eight records of accepted backlog. QD1/QD4 and later records in a larger
-wave therefore retain their inline compression opportunity. Once K=1 is in
-flight, remaining accepted work keeps its compression opportunity so
+least eight records of accepted backlog. For retained operation, the current
+effective learned/sampled target must also be no larger than that pressure hand;
+if policy will keep the wave open beyond eight records, forcing an early record
+RAW cannot start lower I/O and only sacrifices compression. Non-retained
+operation remains immediately dispatchable. QD1/QD4 and later records in a
+larger wave therefore retain their inline compression opportunity. Once K=1 is
+in flight, remaining accepted work keeps its compression opportunity so
 producer/ordered preparation can overlap lower service.
 
 Eight records are the minimum pressure hand, not a maximum run size. The worker

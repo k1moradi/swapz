@@ -2922,8 +2922,11 @@ static swapz_u16 swapz_probe_set(
                         lower.index("error = swapz_dm_io("))
         self.assertIn("&entry->preparation_snapshot_ready", ordered)
         self.assertIn("entry->preparation_force_raw = true", ordered)
+        self.assertIn("bool raw_pressure_hand_dispatchable;", ordered)
+        self.assertIn("swapz_window_raw_pressure_hand_dispatchable(", ordered)
         self.assertRegex(ordered,
             r"ctx->batch_count >=\s*SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS - 1U\s*&&"
+            r"\s*raw_pressure_hand_dispatchable\s*&&"
             r"\s*!lower_write_busy && accepted_backlog")
         self.assertIn("ctx->preparation_ordered_raw++", ordered)
         self.assertIn("SWAPZ_WORK_CONSERVING_HAND_RECORDS", ordered)

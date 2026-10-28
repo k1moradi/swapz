@@ -342,6 +342,28 @@ static inline swapz_u8 swapz_window_effective_burst_target(
 {
 	return admitted_tail ? admitted_tail : learned;
 }
+
+/*
+ * RAW selection is a latency trade only when the current retained policy can
+ * actually dispatch no later than the pressure hand. If a larger effective
+ * target keeps an accepted plain-WRITE wave open, preserve LZ4 opportunity
+ * instead of paying extra lower bytes for a hand that cannot be submitted.
+ */
+static inline int swapz_window_raw_pressure_hand_dispatchable(
+		swapz_u8 retain_ms, swapz_u8 learned_target,
+		swapz_u8 admitted_tail_target, swapz_u8 hand_records)
+{
+	swapz_u8 target;
+
+	if (!hand_records)
+		return 0;
+	if (!retain_ms)
+		return 1;
+	target = swapz_window_effective_burst_target(
+		learned_target, admitted_tail_target);
+	return target && target <= hand_records;
+}
+
 static inline int swapz_window_burst_close_ready(
 		int first_pack_seen, int accepted_pack_ready, swapz_u8 count,
 		swapz_u8 learned_target, swapz_u8 admitted_tail_target)

@@ -375,6 +375,19 @@ static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 }
 
 
+static int test_raw_pressure_hand_requires_dispatchable_target(void)
+{
+	CHECK(!swapz_window_raw_pressure_hand_dispatchable(2, 4, 0, 0));
+	CHECK(swapz_window_raw_pressure_hand_dispatchable(0, 32, 0, 8));
+	CHECK(swapz_window_raw_pressure_hand_dispatchable(2, 4, 0, 8));
+	CHECK(swapz_window_raw_pressure_hand_dispatchable(2, 8, 0, 8));
+	CHECK(!swapz_window_raw_pressure_hand_dispatchable(2, 9, 0, 8));
+	CHECK(!swapz_window_raw_pressure_hand_dispatchable(2, 32, 0, 8));
+	CHECK(swapz_window_raw_pressure_hand_dispatchable(2, 32, 6, 8));
+	CHECK(!swapz_window_raw_pressure_hand_dispatchable(2, 32, 12, 8));
+	return 0;
+}
+
 static int test_work_conserving_close_respects_retained_target(void)
 {
 	swapz_u8 count;
@@ -580,6 +593,7 @@ int main(void)
 	CHECK(test_post_pack_read_boundary_requires_fresh_finite_tail() == 0); passed++;
 	CHECK(test_post_pack_boundary_observation_survives_pending_sample() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
+	CHECK(test_raw_pressure_hand_requires_dispatchable_target() == 0); passed++;
 	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;

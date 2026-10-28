@@ -958,9 +958,13 @@ standards-backed change rather than preserving historical body-local syntax.
 
 ID83 dispatcher refinement contracts must prove all scheduling boundaries:
 ordered RAW forcing requires an actually idle lower-WRITE path, stays within the
-first eight-record pressure hand, and requires at least eight accepted records
-across the active batch plus unclaimed preparation queue; QD1/QD4 must not be
-forced RAW by transient two-record backlog. While an already-accepted plain
+first eight-record pressure hand, requires at least eight accepted records
+across the active batch plus unclaimed preparation queue, and for retained
+operation requires an effective learned/sampled target no larger than the hand.
+Native policy coverage must prove non-retained dispatchability, retained targets
+at/below eight, rejection above eight, sampled-target override, and a zero-hand
+fail-closed case. QD1/QD4 must not be forced RAW by transient two-record
+backlog. While an already-accepted plain
 WRITE remains, the eight-record pressure hand may not split the FIFO below the
 effective learned/sampled target merely because the next representation is
 unready. Only after the worker proves local and incoming accepted FIFOs dry and
