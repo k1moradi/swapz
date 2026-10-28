@@ -5298,6 +5298,24 @@ def _table_interpretation(headers, rows):
                         "and higher useful MB/s are helpful. Use the paired interval "
                         "below for repeatable evidence.")
 
+    if all(name in header_index for name in ("QD", "raw", "async", "A/raw")):
+        comparisons = []
+        changes = []
+        for row in rows:
+            raw_value = _table_number(row[header_index["raw"]])
+            async_value = _table_number(row[header_index["async"]])
+            change = _percent_change(async_value, raw_value)
+            if change is None:
+                continue
+            changes.append((change, False))
+            comparisons.append(f"QD{row[header_index['QD']]} {change * 100:+.1f}%")
+        if comparisons:
+            state = _directional_project_state(changes)
+            return (f"Directional performance view vs raw: {state}. "
+                    "Async useful WRITE changes: " + ", ".join(comparisons) +
+                    ". Native/raw service direction is not a paired confidence result. "
+                    "Check lower WRITE bytes/requests, p99, READ service and resource "
+                    "cost before treating higher throughput as a project win.")
     if all(name in header_index for name in ("QD", "raw", "sync", "async", "A/S")):
         comparisons = []
         project_changes = []
