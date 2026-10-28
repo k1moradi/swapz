@@ -4766,6 +4766,7 @@ def benchmark_verdicts(sessions):
 
 
 TABLE_HEADER_LEGEND = {
+    "A/raw": "async swapz useful WRITE percent change versus raw/off",
     "scope": "evidence area",
     "value": "scope limit or result detail",
     "control": "deterministic classifier input designed to catch a sampling blind spot",
@@ -4964,6 +4965,7 @@ TABLE_HEADER_LEGEND = {
 }
 
 TABLE_HEADER_GOAL = {
+    "A/raw": "positive is better; requires correct lower-I/O and latency tradeoffs",
     "ns/page": "lower for equal work",
     "payload B": "lower for equal input",
     "baseline ns/page": "lower is faster",
@@ -5777,7 +5779,118 @@ def print_table(title, headers, rows):
     print("---")
 
 
-def print_bench(result):
+def print_bench(result, *, detailed=False):
+    """Show the decision first; retain detailed rendering for rootless contract fixtures."""
+    benchmarks = result.get("benchmarks", {})
+    verdict = benchmarks.get("verdicts", {})
+    print("\n  Product decision snapshot — synthetic owned-RAM evidence only")
+    if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
+        stages = result.get("stages", [])
+        passed = sum(stage.get("status") == "PASS" for stage in stages)
+        print(f"  Stages passed: {passed}/5; loaded service: NOT QUALIFIED")
+        _print_table_note(
+            "Gate", verdict.get("reason", verdict.get("overall", "NOT_RUN")))
+        _print_table_note(
+            "Goal implication",
+            "No new byte-exact loaded mixed/QD comparison against raw is qualified. "
+            "Do not infer a throughput, latency, lower-I/O or endurance-proxy win "
+            "from native compression and allocator models.")
+        evidence = result.get("evidence", {})
+        present = [name for key, name in (
+            ("predictor", "compression"),
+            ("gc_scan_scale", "GC scans"),
+            ("extent_geometry", "placement"))
+            if isinstance(evidence.get(key), dict)]
+        if present:
+            print("  Native diagnostics captured: " + ", ".join(present) +
+                  " (supporting only; full data in test_results.json).")
+        return
+
+    print("  Qualified mixed workload: useful READ/WRITE vs raw, lower WRITE work and READ p99.")
+    print("  Both device profiles are synthetic null_blk; sync isolates scheduling only.")
+    for regime in MODEL_ORDER:
+        data = verdict["regimes"][regime]
+        columns = data["columns"]
+        label = "Serial-depth" if regime == "sd_emulated" else "Fast"
+        print_table(
+            f"{label} QD32 mixed-I/O service and lower WRITE cost",
+            ("mode", "W", "lower W", "W req", "R", "R p99"),
+            [(mode,
+              f"{columns[mode]['input_write_mbps']:.2f}",
+              f"{columns[mode]['output_lower_write_mbps']:.2f}",
+              f"{columns[mode]['lower_write_requests']:.1f}",
+              f"{columns[mode]['swap_in_read_mbps']:.2f}",
+              f"{columns[mode]['swap_in_read_p99_ms']:.2f}")
+             for mode in COLUMNS])
+        raw, asynchronous = columns["off"], columns["async"]
+        direction = _directional_project_state((
+            (_percent_change(asynchronous["input_write_mbps"],
+                             raw["input_write_mbps"]), False),
+            (_percent_change(asynchronous["swap_in_read_mbps"],
+                             raw["swap_in_read_mbps"]), False),
+            (_percent_change(asynchronous["output_lower_write_mbps"],
+                             raw["output_lower_write_mbps"]), True),
+            (_percent_change(asynchronous["lower_write_requests"],
+                             raw["lower_write_requests"]), True),
+            (_percent_change(asynchronous["swap_in_read_p99_ms"],
+                             raw["swap_in_read_p99_ms"]), True),
+        ))
+        print(f"  {label} vs raw: {direction} mean directions; not a paired confidence verdict.")
+        counters = data["kernel_counters"]
+        def counter_ms(field):
+            value = counters.get(field)
+            return (f"{value / 1_000_000:.1f}"
+                    if isinstance(value, (int, float)) else "N/A")
+        print(f"  {label} accepted-work lower-idle: "
+              f"{counter_ms('accepted_work_lower_idle_ns')} ms; "
+              f"undersized batches: "
+              f"{counter_ms('accepted_work_lower_idle_undersized_batch_ns')} ms")
+        print(f"  {label} preparing-head idle: "
+              f"{counter_ms('accepted_work_lower_idle_preparing_head_ns')} ms; "
+              f"K=1 ready-run wait: {counter_ms('k1_ready_wait_wall_ns')} ms")
+        if regime == "ssd_emulated":
+            interval = data["criteria"]["async_vs_sync"]["paired_95pct_ci"]
+            status = ("overlaps zero" if interval["low"] <= 0 <= interval["high"]
+                      else "excludes zero")
+            print(f"  Fast mixed async-minus-sync WRITE 95% paired CI: "
+                  f"{interval['mean'] * 100:+.1f}% "
+                  f"[{interval['low'] * 100:+.1f}%, "
+                  f"{interval['high'] * 100:+.1f}%]; {status}.")
+            print("  Async-vs-sync measures scheduling; raw remains the product control.")
+
+    saturation = benchmarks.get("write_saturation", {})
+    if saturation.get("overall") == "PASS_WRITE_SATURATION_EVIDENCE":
+        print("\n  Sustained lane-owned WRITE — MB/s, raw is the product control")
+        for regime in MODEL_ORDER:
+            label = "Serial-depth" if regime == "sd_emulated" else "Fast"
+            points = {point["qd"]: point for point in saturation["regimes"][regime]
+                      if point["mode"] == "async"}
+            print_table(
+                f"{label} sustained-QD useful WRITE throughput",
+                ("QD", "raw", "async", "A/raw"),
+                [(qd, f"{points[qd]['raw_write_mbps']:.2f}",
+                  f"{points[qd]['swapz_write_mbps']:.2f}",
+                  f"{_percent_change(points[qd]['swapz_write_mbps'], points[qd]['raw_write_mbps']) * 100:+.1f}%")
+                 for qd in (1, 4, 8, 32)])
+        for qd in (4, 8, 32):
+            interval = saturation[f"fast_qd{qd}_paired"]["throughput_change_fraction"]
+            status = ("overlaps zero" if interval["low"] <= 0 <= interval["high"]
+                      else "excludes zero")
+            print(f"  Fast QD{qd} async-minus-sync paired 95% CI: "
+                  f"{interval['mean'] * 100:+.1f}% "
+                  f"[{interval['low'] * 100:+.1f}%, "
+                  f"{interval['high'] * 100:+.1f}%]; {status}.")
+        print("  QD1 and the raw gaps are directional; paired CIs above compare async vs sync.")
+    else:
+        _print_table_note(
+            "Sustained QD", "NOT QUALIFIED: " +
+            str(saturation.get("reason", saturation.get("overall", "NOT_RUN"))))
+    print("  Resource, lifecycle, GC, lower READ and full telemetry: test_results.json.")
+    if result.get("overall") not in (None, "PASS"):
+        print(f"  Overall gate remains {result['overall']}; partial performance is not promotion.")
+    if not detailed:
+        return
+
     print("\n  Project decision rule")
     _print_table_note(
         "Goal chain",
