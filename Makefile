@@ -22,17 +22,21 @@ CC ?= cc
 # exists; an explicit inherited GNU Make jobserver still takes precedence.
 # The module recipe always checks running-kernel Kbuild; Kbuild's own
 # incremental dependency logic avoids unchanged .o recompilation.
-all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/tests/direct-write-probe build/userspace/swapzctl
+all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/userspace/swapzctl
 
 build/kernel/experimental/dm-swapz.ko:
 	$(MAKE) -C src/kernel KDIR="$(KDIR)" all
 	@bash packaging/sign-module.sh "$@"
 
-build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile
+build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile build/tests/direct-write-probe
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-build/tests/direct-write-probe: tests/tools/direct-write-probe.c Makefile\n\t@mkdir -p build/tests\n\t$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@\n\nbuild/userspace/swapzctl: src/userspace/swapzctl.c src/kernel/VERSION src/kernel/superblock.h Makefile
+build/tests/direct-write-probe: tests/tools/direct-write-probe.c Makefile
+	@mkdir -p build/tests
+	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
+
+build/userspace/swapzctl: src/userspace/swapzctl.c src/kernel/VERSION src/kernel/superblock.h Makefile
 	@mkdir -p build/userspace
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' $< -o $@
 
