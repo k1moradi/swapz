@@ -796,6 +796,25 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('status_u64 "$write_fault_unexpected_status" upper_write_completed_err',
                       deploy)
 
+    def test_dm_clone_endio_retains_injected_write_error(self):
+        endio = body("swapz_end_io")
+        status = body("swapz_status")
+        self.assertIn("blk_status_t *error", DM)
+        self.assertIn("if (*error)", endio)
+        self.assertIn("ctx->endio_write_seen_err++", endio)
+        self.assertIn("if (!*error && READ_ONCE(ctx->failed))", endio)
+        self.assertIn("*error = errno_to_blk_status(failure ? failure : -EIO)", endio)
+        self.assertIn("ctx->endio_write_forced_err++", endio)
+        self.assertIn("return DM_ENDIO_DONE", endio)
+        self.assertIn(".end_io = swapz_end_io", DM)
+        self.assertIn("endio_write_seen_ok=%llu endio_write_seen_err=%llu", status)
+        self.assertIn("endio_write_forced_err=%llu", status)
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        self.assertIn('status_u64 "$write_fault_unexpected_status" endio_write_seen_err',
+                      deploy)
+        self.assertIn('status_u64 "$write_fault_status_after" endio_write_seen_err',
+                      deploy)
+
     def test_immutable_io_run_split_preserves_publication_gate(self):
         engine_h = (ROOT / "src/kernel/engine.h").read_text()
         engine = (ROOT / "src/kernel/engine.c").read_text()

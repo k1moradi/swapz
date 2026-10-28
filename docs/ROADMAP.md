@@ -213,6 +213,8 @@ changes.
 
 | 89 | Pre-submission retained WRITE error propagated to upper BIO | **Owner loaded gate pending** | The ID88 owner report authenticated the exact mapped node and recorded `write_fault_calls=1 injected=1 failed=1 zero_pages=0`, yet direct `dd` returned success. This eliminates the stale-node theory and proves the synthetic lower fault was armed, not that the upper WRITE completed in error. Protect `swapz_complete` against new success on an already failed target; count actual upper WRITE BIO success/error completions and require exactly one upper WRITE error after the injected fault. Native source and kernel compile tests validate code paths but cannot prove original user-process error propagation: owner `make test` remains the sole acceptance gate. |
 
+| 90 | Retained synthetic WRITE error survives DM clone boundary | **Owner loaded gate pending** | The owner test for `e9122f3` reports `calls=1 injected=1 failed=1 upper_write_ok=0 upper_write_err=1 logical_write_bytes=0` but direct `dd` still returns zero. Kernel 6.12's Device Mapper `clone_endio()` passes clone errors to the original bio, which the previous counter did not inspect. Add a target `end_io` fail-closed guard and distinct pre-DM-boundary counters; neither native CI nor those counters qualify userspace error propagation. Accept only after owner `make test` sees the direct injected WRITE fail and all subsequent loaded phases pass. |
+
 ## What the pinned queue experiment establishes
 
 The QD32 replay remains intentionally unpaced and closed-loop, but the lower

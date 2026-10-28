@@ -671,6 +671,10 @@ struct swapz_dm {
 	 * These are completion observations, not lower submitted bytes. */
 	u64 upper_write_completed_ok;
 	u64 upper_write_completed_err;
+	/* DM clone->original completion boundary, never a media-write proxy. */
+	u64 endio_write_seen_ok;
+	u64 endio_write_seen_err;
+	u64 endio_write_forced_err;
 	u64 logical_read_bytes;
 	u64 physical_write_bytes;
 	u64 physical_write_reqs;
@@ -925,6 +929,33 @@ static void swapz_complete(struct bio *bio, int error)
 		return;
 	}
 	bio_endio(bio);
+}
+
+/*
+ * Device Mapper invokes this on the target clone immediately before it
+ * translates the clone status to the original submitting BIO.  The worker's
+ * completion counter alone proves only what swapz_complete() attempted:
+ * a later DM boundary must never turn a terminally failed target into a
+ * successful WRITE.  Preserve an existing status from the worker verbatim.
+ */
+static int swapz_end_io(struct dm_target *ti, struct bio *bio,
+			blk_status_t *error)
+{
+	struct swapz_dm *ctx = ti->private;
+
+	if (bio_op(bio) != REQ_OP_WRITE || !bio_sectors(bio))
+		return DM_ENDIO_DONE;
+	if (*error)
+		ctx->endio_write_seen_err++;
+	else
+		ctx->endio_write_seen_ok++;
+	if (!*error && READ_ONCE(ctx->failed)) {
+		int failure = READ_ONCE(ctx->last_error);
+
+		*error = errno_to_blk_status(failure ? failure : -EIO);
+		ctx->endio_write_forced_err++;
+	}
+	return DM_ENDIO_DONE;
 }
 
 static void swapz_fail(struct swapz_dm *ctx, int error)
@@ -7447,9 +7478,14 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			prep.delta64.transform_wall_ns,
 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
 			prep.delta64.wall_ns);
-		DMEMIT(" upper_write_completed_ok=%llu upper_write_completed_err=%llu",
+		DMEMIT(" upper_write_completed_ok=%llu upper_write_completed_err=%llu"
+		       " endio_write_seen_ok=%llu endio_write_seen_err=%llu"
+		       " endio_write_forced_err=%llu",
 		       ctx->upper_write_completed_ok,
-		       ctx->upper_write_completed_err);
+		       ctx->upper_write_completed_err,
+		       ctx->endio_write_seen_ok,
+		       ctx->endio_write_seen_err,
+		       ctx->endio_write_forced_err);
 		break;
 	case STATUSTYPE_TABLE:
 		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,
@@ -7473,6 +7509,7 @@ static struct target_type swapz_target = {
 	.ctr = swapz_ctr,
 	.dtr = swapz_dtr,
 	.map = swapz_map,
+	.end_io = swapz_end_io,
 	.presuspend = swapz_drain,
 	.resume = swapz_resume,
 	.iterate_devices = swapz_iterate_devices,

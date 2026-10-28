@@ -860,7 +860,7 @@ if timeout --signal=TERM --kill-after=5s 20s dd if=/dev/urandom \
     # distinguishes bypassed injection from missing upper error propagation.
     write_fault_unexpected_status="$(dmsetup status "$DMNAME")" ||
         fail "cannot read status after unexpectedly successful WRITE"
-    fail "synthetic retained WRITE fault unexpectedly completed successfully: calls=$(status_u64 "$write_fault_unexpected_status" write_fault_calls) injected=$(status_u64 "$write_fault_unexpected_status" write_fault_injected) failed=$(status_u64 "$write_fault_unexpected_status" failed) zero_pages=$(status_u64 "$write_fault_unexpected_status" zero_elided) upper_write_ok=$(status_u64 "$write_fault_unexpected_status" upper_write_completed_ok) upper_write_err=$(status_u64 "$write_fault_unexpected_status" upper_write_completed_err) logical_write_bytes=$(status_u64 "$write_fault_unexpected_status" logical_write)"
+    fail "synthetic retained WRITE fault unexpectedly completed successfully: calls=$(status_u64 "$write_fault_unexpected_status" write_fault_calls) injected=$(status_u64 "$write_fault_unexpected_status" write_fault_injected) failed=$(status_u64 "$write_fault_unexpected_status" failed) zero_pages=$(status_u64 "$write_fault_unexpected_status" zero_elided) upper_write_ok=$(status_u64 "$write_fault_unexpected_status" upper_write_completed_ok) upper_write_err=$(status_u64 "$write_fault_unexpected_status" upper_write_completed_err) endio_seen_ok=$(status_u64 "$write_fault_unexpected_status" endio_write_seen_ok) endio_seen_err=$(status_u64 "$write_fault_unexpected_status" endio_write_seen_err) endio_forced_err=$(status_u64 "$write_fault_unexpected_status" endio_write_forced_err) logical_write_bytes=$(status_u64 "$write_fault_unexpected_status" logical_write)"
 fi
 write_fault_status_after="$(dmsetup status "$DMNAME")"
 read -r -a write_fault_lower_after < "/sys/block/$DISK/stat"
@@ -868,7 +868,9 @@ read -r -a write_fault_lower_after < "/sys/block/$DISK/stat"
    $(status_u64 "$write_fault_status_after" write_fault_calls) == 1 &&
    $(status_u64 "$write_fault_status_after" write_fault_injected) == 1 &&
    $(status_u64 "$write_fault_status_after" upper_write_completed_ok) == 0 &&
-   $(status_u64 "$write_fault_status_after" upper_write_completed_err) == 1 )) ||
+   $(status_u64 "$write_fault_status_after" upper_write_completed_err) == 1 &&
+   $(status_u64 "$write_fault_status_after" endio_write_seen_err) +
+   $(status_u64 "$write_fault_status_after" endio_write_forced_err) == 1 )) ||
     fail "retained WRITE fault did not fail-close exactly once"
 (( write_fault_lower_after[4] == write_fault_lower_before[4] &&
    write_fault_lower_after[6] == write_fault_lower_before[6] )) ||
