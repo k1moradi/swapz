@@ -1385,6 +1385,8 @@ class ReportContract(unittest.TestCase):
             marker.replace("syscall_errno:EIO ", ""),
             marker.replace("syscall_errno:EIO", "syscall_errno:ENOSPC"),
             marker.replace("syscall_errno:EIO", "syscall_errno:0"),
+            marker.replace("syscall_errno:EIO lower_write_delta:0",
+                           "lower_write_delta:0 syscall_errno:EIO"),
             marker.replace("lower_write_delta:0", "lower_write_delta:1"),
             marker.replace("injected:1", "injected:0"),
             marker.replace("retain_ms:2", "retain_ms:0"),
