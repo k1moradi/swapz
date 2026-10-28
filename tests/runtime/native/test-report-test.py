@@ -1376,7 +1376,10 @@ class ReportContract(unittest.TestCase):
         # Prevent a future contract drift: the rootless fixture must match
         # the exact marker the privileged owner script actually emits.
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        make_interface = (
+            ROOT / "tests/runtime/native/make-interface-test.py").read_text()
         self.assertIn('note "' + marker + '"', deploy)
+        self.assertIn(marker, make_interface)
         self.assertIn(marker, synthetic_log())
         for replacement in (
             marker.replace("syscall_errno:EIO ", ""),
