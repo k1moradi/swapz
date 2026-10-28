@@ -1981,7 +1981,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("accepted-work lower-idle", operator)
         self.assertIn("A/raw", operator)
         self.assertNotIn("Negative classifier profile breakdown", operator)
-        self.assertLess(len(operator.splitlines()), 110)
+        self.assertIn("Directional performance view vs raw", operator)
+        self.assertLess(len(operator.splitlines()), 160)
 
         # The diagnostic renderer stays under the existing strict Markdown contract.
         with contextlib.redirect_stdout(io.StringIO()) as output:
