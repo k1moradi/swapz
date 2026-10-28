@@ -660,8 +660,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("&unsupported_bits", wrapper)
         self.assertIn("return -EOPNOTSUPP", wrapper)
         self.assertIn("dm_io(req, 1, region, sync_error_bits,", wrapper)
-        self.assertIn("error |= unsupported", write_done)
-        self.assertIn("error |= unsupported", read_done)
+        self.assertIn("SWAPZ_DM_IO_NOTIFY_PARAMETERS(error, context)", DM)
+        self.assertIn("do { (error_name) |= unsupported; } while (0)", DM)
+        self.assertIn("SWAPZ_DM_IO_MERGE_UNSUPPORTED(error)", write_done)
+        self.assertIn("SWAPZ_DM_IO_MERGE_UNSUPPORTED(error)", read_done)
         self.assertIn(".fn = swapz_async_lower_write_done",
                       body("swapz_submit_inflight_write"))
         self.assertIn(".fn = swapz_async_lower_read_done",
@@ -3139,7 +3141,7 @@ static swapz_u16 swapz_probe_set(
                       loaded)
         self.assertIn("run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh",
                       loaded)
-        self.assertIn("run_privileged_bounded 600 tests/tools/qualify-resource-pressure.sh",
+        self.assertIn("run_privileged_bounded 720 tests/tools/qualify-resource-pressure.sh",
                       loaded)
         self.assertNotIn('dmsetup remove --force', preflight)
         self.assertIn('dmsetup remove --retry "$DMNAME"', pair)

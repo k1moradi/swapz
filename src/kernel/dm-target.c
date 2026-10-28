@@ -918,6 +918,43 @@ static void swapz_fail(struct swapz_dm *ctx, int error)
 	}
 }
 
+/*
+ * Device Mapper gained a separate unsupported-operation completion bitmap.
+ * Some distribution kernels backport that API independently of
+ * LINUX_VERSION_CODE, so Kbuild feature-probes dm-io.h and selects the exact
+ * signature. Keep all call sites behind this wrapper and fail closed if a
+ * synchronous request reports unsupported service.
+ */
+static int swapz_dm_io(struct dm_io_request *req,
+		       struct dm_io_region *region,
+		       unsigned long *sync_error_bits)
+{
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+	unsigned long unsupported_bits = 0;
+	unsigned long *sync_unsupported_bits =
+		req->notify.fn ? NULL : &unsupported_bits;
+	int error = dm_io(req, 1, region, sync_error_bits,
+			  sync_unsupported_bits, IOPRIO_DEFAULT);
+
+	if (!error && unsupported_bits)
+		return -EOPNOTSUPP;
+	return error;
+#else
+	return dm_io(req, 1, region, sync_error_bits, IOPRIO_DEFAULT);
+#endif
+}
+
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+#define SWAPZ_DM_IO_NOTIFY_PARAMETERS(error_name, context_name) \
+	unsigned long error_name, unsigned long unsupported, void *context_name
+#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_name) \
+	do { (error_name) |= unsupported; } while (0)
+#else
+#define SWAPZ_DM_IO_NOTIFY_PARAMETERS(error_name, context_name) \
+	unsigned long error_name, void *context_name
+#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_name) do { } while (0)
+#endif
+
 static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 					      u64 device_bytes)
 {
@@ -954,32 +991,6 @@ static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 	return error;
 }
 
-
-/*
- * Device Mapper gained a separate unsupported-operation completion bitmap.
- * Some distribution kernels backport that API independently of
- * LINUX_VERSION_CODE, so Kbuild feature-probes dm-io.h and selects the exact
- * signature. Keep all call sites behind this wrapper and fail closed if a
- * synchronous request reports unsupported service.
- */
-static int swapz_dm_io(struct dm_io_request *req,
-		       struct dm_io_region *region,
-		       unsigned long *sync_error_bits)
-{
-#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
-	unsigned long unsupported_bits = 0;
-	unsigned long *sync_unsupported_bits =
-		req->notify.fn ? NULL : &unsupported_bits;
-	int error = dm_io(req, 1, region, sync_error_bits,
-			  sync_unsupported_bits, IOPRIO_DEFAULT);
-
-	if (!error && unsupported_bits)
-		return -EOPNOTSUPP;
-	return error;
-#else
-	return dm_io(req, 1, region, sync_error_bits, IOPRIO_DEFAULT);
-#endif
-}
 
 static void swapz_invalidate_read_caches(struct swapz_dm *ctx)
 {
@@ -1080,18 +1091,12 @@ static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
 	return false;
 }
 
-#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
-static void swapz_async_lower_write_done(unsigned long error,
-					 unsigned long unsupported,
-					 void *context)
-#else
-static void swapz_async_lower_write_done(unsigned long error, void *context)
-#endif
+static void swapz_async_lower_write_done(
+	SWAPZ_DM_IO_NOTIFY_PARAMETERS(error, context))
 {
 	struct swapz_inflight_write *inflight = context;
-#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
-	error |= unsupported;
-#endif
+
+	SWAPZ_DM_IO_MERGE_UNSUPPORTED(error);
 	struct swapz_dm *ctx = inflight->ctx;
 	unsigned long flags;
 
@@ -1690,18 +1695,12 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	return 0;
 }
 
-#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
-static void swapz_async_lower_read_done(unsigned long error,
-					unsigned long unsupported,
-					void *context)
-#else
-static void swapz_async_lower_read_done(unsigned long error, void *context)
-#endif
+static void swapz_async_lower_read_done(
+	SWAPZ_DM_IO_NOTIFY_PARAMETERS(error, context))
 {
 	struct swapz_read_slot *slot = context;
-#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
-	error |= unsupported;
-#endif
+
+	SWAPZ_DM_IO_MERGE_UNSUPPORTED(error);
 
 	WRITE_ONCE(slot->lower_error, error ? -EIO : 0);
 	WRITE_ONCE(slot->lower_end_ns, ktime_get_ns());
