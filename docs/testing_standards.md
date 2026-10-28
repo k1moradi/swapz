@@ -481,6 +481,7 @@ and replacing newer source bytes remain forbidden.
 
 
 Rootless incremental-build fixtures mirror the current `src/` and `tests/` layout; they must not recreate removed top-level `tools/` or `userspace/` directories.
+They must also mirror every helper built transitively by the root Makefile, including private qualification helpers, so the fake-Kbuild incremental test exercises the real dependency graph without changing the public Make goal contract.
 
 
 Native shell regressions source shared helpers only from `tests/tools/`.
