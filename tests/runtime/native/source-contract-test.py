@@ -53,6 +53,24 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_short_tail_inline_claim_is_bounded_and_exclusive(self):
+        ready = body("swapz_next_local_write_ready")
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        self.assertIn("swapz_window_inline_short_tail_fits(", ready)
+        self.assertIn("short_tail_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS", ready)
+        self.assertIn("!swapz_plain_retained_write(tail_entry->bio)", ready)
+        self.assertIn("list_empty(&ctx->incoming)", ready)
+        self.assertIn("!list_empty(&next_entry->preparation_list)", ready)
+        self.assertIn("ctx->preparation_queued--", ready)
+        self.assertIn("list_del_init(&next_entry->preparation_list)", ready)
+        self.assertIn("next_entry->preparation_inline = true", ready)
+        self.assertIn("staged_count <= max_window", policy)
+        self.assertLess(ready.index("spin_lock_irqsave(&ctx->queue_lock"),
+                        ready.index("list_del_init(&next_entry->preparation_list)"))
+        self.assertLess(ready.index("list_del_init(&next_entry->preparation_list)"),
+                        ready.index("spin_unlock_irqrestore(&ctx->queue_lock"))
+        self.assertNotIn("wait_for_completion(", ready)
+
     def test_source_body_extracts_u16_definition_after_prototype(self):
         source = """
 static swapz_u16 swapz_probe_set(swapz_u32 block);

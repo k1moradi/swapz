@@ -5459,11 +5459,12 @@ static bool swapz_retention_expired(struct swapz_dm *ctx)
 }
 
 /*
- * Continue past the first pressure hand while the next already-accepted WRITE
- * has a completed representation. This consumes only current FIFO work and
- * never waits for preparation or a future BIO merely to enlarge the run.
+ * Continue past the first pressure hand when the next accepted WRITE has a
+ * completed representation. A short, already-accepted plain-WRITE remainder
+ * may instead be claimed for immediate inline preparation without waiting
+ * for producer work or any future BIO; other pressure hands still dispatch.
  */
-static bool swapz_next_local_write_ready(const struct swapz_dm *ctx,
+static bool swapz_next_local_write_ready(struct swapz_dm *ctx,
 					 const struct list_head *local)
 {
 	struct swapz_bio_ref *next_entry;
@@ -5476,8 +5477,48 @@ static bool swapz_next_local_write_ready(const struct swapz_dm *ctx,
 	if (!swapz_plain_retained_write(next_entry->bio))
 		return false;
 	prepared = READ_ONCE(next_entry->prepared_page);
-	if (!prepared ||
-	    !completion_done(&next_entry->preparation_snapshot_ready))
+	if (!prepared) {
+		struct swapz_bio_ref *tail_entry;
+		unsigned long flags;
+		unsigned int short_tail_count = 0;
+		bool claimed = false;
+
+		/*
+		 * A pressure-hand close can strand one to three already-accepted
+		 * local WRITEs for a full retention deadline. Only consume such a
+		 * bounded tail if it fits this window and its next entry is still
+		 * unclaimed. A producer-owned head is never stolen or waited for.
+		 * The admission lock makes the inline claim exclusive with the
+		 * producer's preparation_list removal.
+		 */
+		if (!ctx->retain_ms ||
+		    ctx->batch_count < SWAPZ_WORK_CONSERVING_HAND_RECORDS)
+			return false;
+		list_for_each_entry(tail_entry, local, list) {
+			if (++short_tail_count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||
+			    !swapz_plain_retained_write(tail_entry->bio))
+				return false;
+		}
+		if (!swapz_window_inline_short_tail_fits(
+				ctx->batch_count, ctx->max_window,
+				short_tail_count))
+			return false;
+		spin_lock_irqsave(&ctx->queue_lock, flags);
+		if (list_empty(&ctx->incoming) &&
+		    !next_entry->preparation_inline &&
+		    !READ_ONCE(next_entry->prepared_page) &&
+		    !list_empty(&next_entry->preparation_list) &&
+		    ctx->preparation_queued) {
+			ctx->preparation_queued--;
+			list_del_init(&next_entry->preparation_list);
+			next_entry->preparation_inline = true;
+			ctx->preparation_ordered_inline++;
+			claimed = true;
+		}
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		return claimed;
+	}
+	if (!completion_done(&next_entry->preparation_snapshot_ready))
 		return false;
 	state = swapz_preparation_read_state(&prepared->state);
 	return state == SWAPZ_PREPARATION_READY_COMPRESSED ||

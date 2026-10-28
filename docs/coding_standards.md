@@ -177,6 +177,16 @@ belong in the ROADMAP decision table and Git history.
   preserving all FUA/verification and publication fences. Keep the first three
   inline-stolen pages eligible for ordinary LZ4; idle lower service may choose
   RAW on later pages using the existing stable-snapshot/atomic state rules.
+- **Bounded local short-tail continuity:** At an existing eight-record
+  work-conserving pressure hand, a local suffix of one to three already-accepted
+  plain WRITEs may stay in the current window only if the complete suffix fits
+  the remaining record capacity, no incoming BIOs are queued, and the next
+  unclaimed preparation descriptor is transferred to ordered inline ownership
+  under queue_lock. The producer must not have claimed that descriptor.
+  Never block on compression, scan more than four local candidates, extend
+  retention, infer a completed wave from staged-only post-K=1 evidence, or
+  keep a four-or-more-record tail merely to improve packing. If any condition
+  fails, keep the established pressure-hand dispatch.
 - **Post-PACK READ-transparent sampling:** under queue_lock, skip only
   independent accepted READs with no staged/earlier queued same-page write,
   FUA/flush or authority conflict. Limit scans to one 64-BIO quantum; an

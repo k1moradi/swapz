@@ -427,6 +427,22 @@ static inline int swapz_window_work_conserving_close_ready(
 }
 
 /*
+ * At a pressure-hand boundary, keeping a locally accepted short WRITE tail
+ * inline avoids leaving one to three residual records on the 2ms deadline.
+ * This is a capacity check only: the serialized worker must separately prove
+ * every local entry is plain, the accepted incoming queue is empty, and the
+ * next preparation descriptor is atomically claimed under queue_lock.
+ * Never defer the hand for a producer-owned entry or a future arrival.
+ */
+static inline int swapz_window_inline_short_tail_fits(
+		swapz_u8 staged_count, swapz_u8 max_window, unsigned int tail_count)
+{
+	return tail_count && tail_count < SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS &&
+		staged_count <= max_window &&
+		tail_count <= (unsigned int)(max_window - staged_count);
+}
+
+/*
  * Equal-length accepted compressed records retain their exact input order
  * under the production greedy ordering: largest is always the earliest
  * remaining record and, when a 4KiB complement exists, the chosen partner

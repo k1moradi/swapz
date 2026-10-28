@@ -488,6 +488,24 @@ static int test_timer_arm_requires_retention_and_unqueued_timer(void)
 	return 0;
 }
 
+static int test_inline_short_tail_never_exceeds_window_or_floor(void)
+{
+	/* One to three already-accepted local WRITEs may join a pressure hand. */
+	CHECK(swapz_window_inline_short_tail_fits(8, 16, 1));
+	CHECK(swapz_window_inline_short_tail_fits(8, 16, 2));
+	CHECK(swapz_window_inline_short_tail_fits(8, 16, 3));
+	/* Never manufacture a new minimum, exceed space, or wrap subtraction. */
+	CHECK(!swapz_window_inline_short_tail_fits(8, 16, 0));
+	CHECK(!swapz_window_inline_short_tail_fits(8, 16, 4));
+	CHECK(!swapz_window_inline_short_tail_fits(8, 10, 3));
+	CHECK(swapz_window_inline_short_tail_fits(8, 10, 2));
+	CHECK(!swapz_window_inline_short_tail_fits(8, 8, 1));
+	CHECK(!swapz_window_inline_short_tail_fits(9, 8, 1));
+	CHECK(!swapz_window_inline_short_tail_fits(255, 0, 1));
+	CHECK(!swapz_window_inline_short_tail_fits(0, 0, 1));
+	return 0;
+}
+
 static int test_ordinary_retention_deadline_is_pinned(void)
 {
 	const unsigned long long first = 1000000ULL;
@@ -595,6 +613,7 @@ int main(void)
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_raw_pressure_hand_requires_dispatchable_target() == 0); passed++;
 	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
+	CHECK(test_inline_short_tail_never_exceeds_window_or_floor() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_ordinary_retention_deadline_is_pinned() == 0); passed++;
