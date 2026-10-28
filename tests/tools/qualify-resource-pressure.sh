@@ -30,7 +30,13 @@ READY_PRESSURE_MIB=$((PRESSURE_MIB - PRESSURE_RAMP_MIB))
 PRESSURE_RAMP_BYTES=$((PRESSURE_RAMP_MIB * 1024 * 1024))
 MEMORY_HEADROOM_BYTES=$((64 * 1024 * 1024))
 MEMORY_MAX_BYTES=$((896 * 1024 * 1024))
-PAIR_OUTER_SECONDS=420
+# Two independently bounded candidate replays run inside this pair. Keep the
+# pair watchdog strictly outside both 280s replay bounds plus bounded barrier,
+# comparison and teardown slack, so the parent cannot manufacture a timeout
+# while a child is still within its own forward-progress contract.
+PAIR_REPLAY_TIMEOUT_SECONDS=280
+PAIR_OUTER_SLACK_SECONDS=120
+PAIR_OUTER_SECONDS=$((PAIR_REPLAY_TIMEOUT_SECONDS * 2 + PAIR_OUTER_SLACK_SECONDS))
 MIN_AVAILABLE_KIB=$((1024 * 1024))
 PRESSURE_SCRIPT="$ROOT/tests/runtime/benchmark/resource-pressure.py"
 PAIR="$ROOT/tests/tools/benchmark-owned-pair.sh"
@@ -173,6 +179,7 @@ oom_kill_start="$(event_value oom_kill)"
 SWAPZ_ID36_PAIR_READY="$PAIR_READY" \
 SWAPZ_ID36_PAIR_GO="$PAIR_GO" \
 SWAPZ_ID36_CGROUP="$CGROUP" \
+SWAPZ_ID36_REPLAY_TIMEOUT_SECONDS="$PAIR_REPLAY_TIMEOUT_SECONDS" \
     timeout --signal=TERM --kill-after=10s "${PAIR_OUTER_SECONDS}s" \
     bash "$PAIR" --validated-source "$VALIDATED_SOURCE" \
     --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced \

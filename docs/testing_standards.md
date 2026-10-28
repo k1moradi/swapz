@@ -1388,8 +1388,12 @@ while a separate helper faults 576 MiB of anonymous memory and runs twice the
 online CPU count of integer burners, capped at 32. The shorter trace preserves
 mixed QD32 concurrency while preventing arbitrary benchmark-duration timeouts
 from being mistaken for a forward-progress failure; the per-candidate replay
-timeout under `--resource-pressure-short` remains bounded at 280s (within the
-unchanged 420s outer cgroup barrier). The pressure-only packed-read verifier uses
+timeout under `--resource-pressure-short` remains bounded at 280s. Because the
+OFF and swapz candidates run sequentially, the pair watchdog is 680s
+(`2 * 280 + 120` seconds of bounded barrier/comparison/teardown slack), and the
+top-level ID36 helper watchdog is 720s. Parent bounds must remain strictly
+outside their bounded children; a parent timeout may not preempt a candidate
+that is still within its own forward-progress limit. The pressure-only packed-read verifier uses
 32 persistent lane jobs and reusable barriers/results for population plus both
 4MiB read orders, eliminating per-I/O Future/work-item allocation while keeping
 QD32, byte-exact verification, p99 and lower-I/O boundaries unchanged. The
@@ -1996,7 +2000,8 @@ Every top-level privileged helper invoked by `test-loaded.sh` also has a
 root-owned outer watchdog in addition to its internal operation/replay
 timeouts. Preflight is capped at 60s, the loaded smoke/lifecycle helper at 600s,
 each owned-RAM benchmark pair at 720s, and the ID36 resource-pressure helper at
-600s. The watchdog runs inside the authorized root shell so it can terminate
+720s. ID36 additionally keeps its internal 680s pair watchdog and two 280s
+per-candidate replay watchdogs. The watchdog runs inside the authorized root shell so it can terminate
 its privileged descendants and still execute ordinary helper cleanup. An outer
 watchdog expiration is BLOCKED/nonzero, never PASS and never silently retried.
 Do not weaken these bounds to hide a kernel forward-progress defect.

@@ -33,6 +33,7 @@ RESOURCE_PRESSURE_SHORT=0
 ID36_PAIR_READY="${SWAPZ_ID36_PAIR_READY:-}"
 ID36_PAIR_GO="${SWAPZ_ID36_PAIR_GO:-}"
 ID36_CGROUP="${SWAPZ_ID36_CGROUP:-}"
+ID36_REPLAY_TIMEOUT_SECONDS="${SWAPZ_ID36_REPLAY_TIMEOUT_SECONDS:-}"
 LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
@@ -162,6 +163,10 @@ if (( RESOURCE_PRESSURE_SHORT )); then
     [[ $RATE_MODE == unpaced && $PROFILE == medium &&
        $ASYNC_PREPARE == 1 && $WRITE_ONLY_QD == 0 ]] || {
         echo 'BLOCKED: resource-pressure short trace requires async unpaced QD32 medium profile' >&2
+        exit 2
+    }
+    [[ $ID36_REPLAY_TIMEOUT_SECONDS == 280 ]] || {
+        echo 'BLOCKED: resource-pressure replay timeout contract mismatch' >&2
         exit 2
     }
     WARMUP_OPS=128
@@ -709,7 +714,7 @@ else
 fi
 REPLAY_TIMEOUT=120s
 if (( RESOURCE_PRESSURE_SHORT )); then
-    REPLAY_TIMEOUT=280s
+    REPLAY_TIMEOUT="${ID36_REPLAY_TIMEOUT_SECONDS}s"
     REPLAY_ARGS+=(--allocation-bounded-packed-read)
 fi
 replay_off() {

@@ -2964,7 +2964,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("MEMORY_HEADROOM_BYTES=$((64 * 1024 * 1024))", pressure)
         self.assertIn("MEMORY_MAX_BYTES=$((896 * 1024 * 1024))", pressure)
         self.assertIn("MEMORY_HIGH_BYTES=$((pressure_current + MEMORY_HEADROOM_BYTES))", pressure)
-        self.assertIn("PAIR_OUTER_SECONDS=420", pressure)
+        self.assertIn("PAIR_REPLAY_TIMEOUT_SECONDS=280", pressure)
+        self.assertIn("PAIR_OUTER_SLACK_SECONDS=120", pressure)
+        self.assertIn(
+            "PAIR_OUTER_SECONDS=$((PAIR_REPLAY_TIMEOUT_SECONDS * 2 + PAIR_OUTER_SLACK_SECONDS))",
+            pressure)
         self.assertIn("memory.swap.max", pressure)
         self.assertIn("cpu_workers=$((online_cpus * 2))", pressure)
         self.assertIn("PRESSURE_MIB=576", pressure)
@@ -2987,7 +2991,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("high_active > high_before", pressure)
         self.assertIn("SWAPZ_ID36_PAIR_READY", pressure)
         self.assertIn('SWAPZ_ID36_CGROUP="$CGROUP"', pressure)
+        self.assertIn(
+            'SWAPZ_ID36_REPLAY_TIMEOUT_SECONDS="$PAIR_REPLAY_TIMEOUT_SECONDS"',
+            pressure)
         self.assertIn('ID36_CGROUP="${SWAPZ_ID36_CGROUP:-}"', benchmark)
+        self.assertIn(
+            'ID36_REPLAY_TIMEOUT_SECONDS="${SWAPZ_ID36_REPLAY_TIMEOUT_SECONDS:-}"',
+            benchmark)
+        self.assertIn('[[ $ID36_REPLAY_TIMEOUT_SECONDS == 280 ]]', benchmark)
+        self.assertIn('REPLAY_TIMEOUT="${ID36_REPLAY_TIMEOUT_SECONDS}s"', benchmark)
         self.assertIn("PASS_ID36_NULLBLK_PREWARM", benchmark)
         self.assertIn("PASS_ID36_PAIR_CGROUP", benchmark)
         self.assertIn('> "$ID36_CGROUP/cgroup.procs"', benchmark)
@@ -2999,6 +3011,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("for _ in {1..800}", pressure)
         self.assertIn("for _ in {1..1200}", benchmark)
         self.assertIn('"${PAIR_OUTER_SECONDS}s"', pressure)
+        self.assertIn(
+            "run_privileged_bounded 720 tests/tools/qualify-resource-pressure.sh",
+            loaded)
         self.assertIn("oflag=direct", benchmark)
         self.assertIn("--lower-mbps 80 --hw-queue-depth 64", pressure)
         self.assertIn('PAIR_LOG="$SESSION/pair.log"', pressure)

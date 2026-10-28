@@ -378,7 +378,7 @@ done
 # memory.high/memory.max domain while oversubscribing CPU. The helper itself
 # owns only null_blk-backed resources and requires observable reclaim/throttle
 # and CPU PSI without any OOM event.
-run_privileged_bounded 600 tests/tools/qualify-resource-pressure.sh \
+run_privileged_bounded 720 tests/tools/qualify-resource-pressure.sh \
     --validated-source "$tested_source" --shared-plan "$shared_plan"
 
 # ID38 depth=2 remains a diagnostic module/benchmark control. Two idle-host
