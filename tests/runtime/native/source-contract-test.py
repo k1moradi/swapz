@@ -1330,10 +1330,24 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->retained_wave_interrupted", service_dry)
         self.assertIn("swapz_window_post_pack_read_boundary_ready(", service_dry)
         self.assertIn("ctx->retained_post_pack_read_boundary", service_dry)
+        boundary_observer = body("swapz_note_post_pack_read_boundary")
+        admit_clock = body("swapz_window_admit_clock")
         self.assertIn("ctx->retained_post_pack_read_boundary = true;",
-                      body("swapz_process"))
+                      boundary_observer)
+        self.assertIn("swapz_window_post_pack_read_boundary_observed(",
+                      boundary_observer)
+        self.assertNotIn("pack_close_pending_tail_sample", boundary_observer)
+        self.assertIn("ctx->retained_post_pack_read_boundary = false;",
+                      admit_clock)
         self.assertIn("ctx->retained_post_pack_read_boundary = false;",
                       body("swapz_flush_window"))
+        self.assertIn("swapz_note_post_pack_read_boundary(ctx);", process_body)
+        self.assertIn("swapz_note_post_pack_read_boundary(ctx);", parallel_slots)
+        self.assertIn("swapz_note_post_pack_read_boundary(ctx);", parallel_batch)
+        self.assertLess(parallel_slots.rfind("if (batch_error)"),
+                        parallel_slots.rfind("swapz_note_post_pack_read_boundary(ctx)"))
+        self.assertLess(parallel_batch.rfind("if (batch_error)"),
+                        parallel_batch.rfind("swapz_note_post_pack_read_boundary(ctx)"))
         boundary_policy = source_body(
             "swapz_window_post_pack_read_boundary_ready", policy)
         self.assertIn("read_serviced_after_tail && !tail_sample_pending",

@@ -77,6 +77,11 @@ Native window tests must distinguish a successful READ serviced after a staged
 two/three-record post-PACK tail from stale earlier READ evidence. The bounded
 candidate must reject singleton, pure-WRITE, sampled-target, K=1-busy and
 pending-sample service-dry cases and reset the evidence on a nonempty flush.
+Observe successful READ service from the single-BIO, independent read-slot and
+parallel read-batch paths even when an earlier K=1 sample is still pending.
+Native tests must prove pending sampling blocks dispatch without erasing a
+completed READ observation. Source contracts must verify a later staged WRITE
+revokes that observation and failed batched READs cannot create it.
 Owner loaded qualification must compare the same useful mixed/QD trace and
 lower-device bytes/requests; no improvement is asserted from native tests.
 

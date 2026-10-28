@@ -308,6 +308,29 @@ static int test_post_pack_read_boundary_requires_fresh_finite_tail(void)
 	return 0;
 }
 
+static int test_post_pack_boundary_observation_survives_pending_sample(void)
+{
+	int serviced_after_tail =
+		swapz_window_post_pack_read_boundary_observed(2, 1);
+
+	CHECK(!swapz_window_post_pack_read_boundary_observed(1, 1));
+	CHECK(!swapz_window_post_pack_read_boundary_observed(4, 1));
+	CHECK(!swapz_window_post_pack_read_boundary_observed(3, 0));
+	CHECK(swapz_window_post_pack_read_boundary_observed(3, 1));
+	/* K=1 still owns the tail sample when this READ finishes. */
+	CHECK(serviced_after_tail);
+	CHECK(!swapz_window_post_pack_read_boundary_ready(
+		1, 2, 0, 1, serviced_after_tail, 1));
+	/* Once the sample is consumed, the original observation survives. */
+	CHECK(swapz_window_post_pack_read_boundary_ready(
+		1, 2, 0, 1, serviced_after_tail, 0));
+	/* A subsequent staged WRITE revokes that ordering evidence. */
+	serviced_after_tail = 0;
+	CHECK(!swapz_window_post_pack_read_boundary_ready(
+		1, 3, 0, 1, serviced_after_tail, 0));
+	return 0;
+}
+
 static int test_service_dry_pack_requires_valid_multi_record_pack(void)
 {
 	CHECK(!swapz_window_service_close_ready(0, 1, 1, 0, 1, 1, 1));
@@ -555,6 +578,7 @@ int main(void)
 	CHECK(test_sampled_tail_target_distinguishes_mixed_wave() == 0); passed++;
 	CHECK(test_service_dry_pack_requires_valid_multi_record_pack() == 0); passed++;
 	CHECK(test_post_pack_read_boundary_requires_fresh_finite_tail() == 0); passed++;
+	CHECK(test_post_pack_boundary_observation_survives_pending_sample() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_work_conserving_close_respects_retained_target() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;

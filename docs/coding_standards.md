@@ -185,11 +185,15 @@ belong in the ROADMAP decision table and Git history.
   post-K=1 tail without a queued follower keeps its prior safety gate.
 - **Serviced post-PACK READ boundary:** A successful independent READ served
   after a two/three-record post-PACK tail is already staged may make that exact
-  dry residue serviceable without compressed-only pack geometry. The ordered
+  dry residue serviceable without compressed-only pack geometry. Single-BIO,
+  independent read-slot fan-out and parallel read-batch paths must all observe
+  successful READ service, even while the preceding K=1 WRITE's tail sample is
+  pending. Observation never authorizes dispatch before sampling completes;
+  each later staged WRITE and each nonempty flush must revoke it. The ordered
   worker must prove no K=1 I/O, no pending tail sample, no authoritative
-  sampled target, and both accepted FIFOs dry. Reset this per-window evidence
-  on flush. Earlier READ evidence, cached READs serviced before the tail,
-  singleton residues, and future-arrival guesses never authorize the close.
+  sampled target, and both accepted FIFOs dry. Earlier READ evidence, cached
+  READs serviced before the tail, singleton residues, and future-arrival guesses
+  never authorize the close.
   This experiment must not add any compression-completion wait or suppress the
   qualified four-record dispatch below a larger learned target.
 - **Preparation ownership:** async preparation uses one unbound producer lane.
