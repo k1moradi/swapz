@@ -1920,6 +1920,34 @@ class ReportContract(unittest.TestCase):
             "Synthetic RAM only.")
         self.assertIn("Verdict: CLAIM BOUNDARY", limits_reasoning)
 
+    def test_unqualified_console_does_not_bury_the_blocking_gate(self):
+        report = {
+            "overall": "BLOCKED",
+            "stages": [
+                {"status": "PASS"} for _ in range(4)
+            ] + [{"status": "BLOCKED"}],
+            "benchmarks": {"verdicts": {
+                "overall": "INCOMPLETE",
+                "reason": "sd_emulated: required counterbalanced sessions missing",
+            }},
+            "evidence": {
+                "predictor": predictor_evidence(),
+                "gc_scan_scale": gc_scan_scale_evidence(),
+                "extent_geometry": extent_geometry_evidence(),
+            },
+        }
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            runner.print_bench(report)
+        rendered = output.getvalue()
+        self.assertIn("Stages passed: 4/5", rendered)
+        self.assertIn("loaded service: NOT QUALIFIED", rendered)
+        self.assertIn("sd_emulated: required counterbalanced sessions missing", rendered)
+        self.assertIn("No new byte-exact loaded mixed/QD comparison", rendered)
+        self.assertIn("Native diagnostics captured", rendered)
+        self.assertNotIn("Predictive transform compression", rendered)
+        self.assertNotIn("Simulated extent placement geometry", rendered)
+        self.assertLess(len(rendered.splitlines()), 16)
+
     def test_benchmark_console_is_compact_and_keeps_sync_control(self):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
@@ -1944,8 +1972,20 @@ class ReportContract(unittest.TestCase):
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
-        with contextlib.redirect_stdout(io.StringIO()) as output:
+        # The operator view is short and puts the product control first.
+        with contextlib.redirect_stdout(io.StringIO()) as summary:
             runner.print_bench(report)
+        operator = summary.getvalue()
+        self.assertIn("Product decision snapshot", operator)
+        self.assertIn("Sustained lane-owned WRITE", operator)
+        self.assertIn("accepted-work lower-idle", operator)
+        self.assertIn("A/raw", operator)
+        self.assertNotIn("Negative classifier profile breakdown", operator)
+        self.assertLess(len(operator.splitlines()), 110)
+
+        # The diagnostic renderer stays under the existing strict Markdown contract.
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            runner.print_bench(report, detailed=True)
         rendered = output.getvalue()
         self.assertIn("Predictive-compression screening", rendered)
         self.assertIn("LZ4 acceleration 1 vs 4", rendered)
