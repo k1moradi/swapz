@@ -784,7 +784,7 @@ that temporarily mark a record RAW must restore both its RAW flag and compressed
 length before reusing that array for later exact-pack assertions; otherwise the
 fixture is testing stale mutation rather than policy.
 
-The refuted suppressed-tail lifetime countersThe refuted suppressed-tail lifetime counters and their replay/reporter schema
+The refuted suppressed-tail lifetime counters and their replay/reporter schema
 are removed in the same change. Keep exact target-2/3/4 PACK_READY attribution
 and accepted-work lower-idle partitioning so the new scheduling decision remains
 measurable without retaining dead policy state. There is no microsecond wake,

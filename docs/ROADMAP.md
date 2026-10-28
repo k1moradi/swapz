@@ -75,7 +75,6 @@ the READY-only pressure hand, K=1, one producer, 64-slot reservoir, ordinary
 deadline, ID63 and SWZ geometry unchanged.
 
 ### Detached K=1 preparation ownership candidate
-### Detached K=1 preparation ownership candidate
 
 A later source audit found one scheduling assumption that became stale when the
 single immutable lower-WRITE slot was detached asynchronously. The preparation
