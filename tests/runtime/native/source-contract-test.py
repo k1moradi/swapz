@@ -824,9 +824,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('"$WRITE_PROBE" "/dev/mapper/$DMNAME"', deploy)
         self.assertIn("write_fault_probe_rc", deploy)
         self.assertIn("did not observe EIO", deploy)
-        self.assertNotIn(
-            'dd if=/dev/urandom \\\n        of="/dev/mapper/$DMNAME" bs=4096 count=1 oflag=direct',
-            deploy)
+        write_fault = deploy.split("START_LOADED_RETAINED_WRITE_FAULT", 1)[1].split(
+            "START_LOADED_RETAINED_FLUSH_FAULT", 1)[0]
+        self.assertIn('"$WRITE_PROBE" "/dev/mapper/$DMNAME"', write_fault)
+        self.assertNotIn("dd if=/dev/urandom", write_fault)
         self.assertIn("O_DIRECT", probe)
         self.assertIn("posix_memalign", probe)
         self.assertIn("pwrite(fd, buffer, PROBE_BYTES, 0)", probe)
