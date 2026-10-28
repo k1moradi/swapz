@@ -127,14 +127,15 @@ belong in the ROADMAP decision table and Git history.
   no authoritative sampled target is active, including compressed+RAW mixes. One-record windows keep the original pinned deadline.
   A pure-WRITE post-PACK tail of two/three is not a finite close target; target
   four and larger still require already-accepted queued follower evidence. A
-  mixed accepted wave is finite once the worker has serviced a READ in that wave
-  or tail scanning encounters an accepted non-WRITE boundary. In that mixed
-  case, a staged tail of two/three may become its exact one-shot PACK_READY
-  target immediately, without a timer or waiting for another arrival. A
-  staged-only post-K=1 tail with no queued follower or non-WRITE boundary
-  must not inherit earlier READ evidence as a finite close target. A prior
-  completed chain or deferred valid pack alone must never bypass the pure-WRITE
-  four-record floor, and no path may manufacture a one-record PACK_READY close.
+  sub-four sampled tail is finite only when the sampler's own bounded current
+  queue snapshot encounters an independent READ/non-WRITE boundary. Earlier
+  wave-level READ service must not certify a later pure-WRITE continuation.
+  A serviced READ that occurs after a two/three-record post-PACK tail is already
+  staged uses the dedicated post-pack boundary state instead. A staged-only
+  post-K=1 tail with no queued follower or current non-WRITE boundary must not
+  inherit earlier READ evidence as a finite close target. A prior completed
+  chain or deferred valid pack alone must never bypass the pure-WRITE four-record
+  floor, and no path may manufacture a one-record PACK_READY close.
 - **Pack-readiness conservation:** `single_pack_deferred` is monotonic within
   one open window once selective compressed geometry has been proved. The
   refuted total-count-four first-pack close remains forbidden, but after total
@@ -186,15 +187,18 @@ belong in the ROADMAP decision table and Git history.
   compression or for a future BIO.
 - **Retained READ attribution:** `retained_window_read_bypasses` may be charged
   only when a retained WRITE window is already staged at the moment lower READ
-  service is issued. Independent READs that skip unstaged local WRITEs may
-  classify the accepted wave as mixed, but they must not pre-poison the next
-  WRITE window or authorize an early SERVICE_DRY close.
-- **Selective two-record geometry:** Two compressed records whose complete SWZ
-  extent fits 8KiB are valid deferred pack geometry, alongside the existing
-  two-in-4KiB and three-in-8KiB cases. This proof does not override the
-  count-four first-pack guard, sampled-tail authority, singleton rules, or the
-  ordinary deadline; it only preserves a beneficial representation once the
-  worker independently proves the residue finite.
+  service is issued. The worker-level `retained_wave_read_seen` mark may be set
+  only after actual lower READ I/O; a cache-hit READ must not set it. Every
+  nonempty WRITE-window flush clears that mark, and tail sampling must not use
+  it to certify a later two/three-record residue. Independent READs may still be
+  recognized directly by the sampler's current bounded queue snapshot, while a
+  READ serviced after a post-PACK tail was already staged uses the dedicated
+  post-pack boundary state.
+- **Block-saving deferred pack geometry:** Only compressed prefixes that save
+  at least one physical 4KiB block—two compressed records in 4KiB (1 block) or
+  three compressed records in 8KiB (2 blocks)—qualify as early deferred pack
+  geometry (`single_pack_deferred`). Two records in 8KiB consume two physical
+  blocks and remain planner-only extent geometry, never an early-close trigger.
 - **Burst-target shrink after a chain:** On a worker-empty ordinary deadline,
   valid pack geometry with no authoritative sampled tail may shrink the learned
   burst target to the observed count at or above the four-record floor even

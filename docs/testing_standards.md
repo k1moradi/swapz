@@ -29,20 +29,26 @@ runtime/test control is removed, keep only any still-required regression or
 safety assertion here; record the anti-retest decision in the ROADMAP evidence
 table and leave detailed trial history in Git/report commits.
 
-For the post-ID97 retention-idle repair, native tests must prove two-record
-compressed geometry that crosses 4KiB but fits 8KiB, including persistence
-across RAW interleaving after the protected count-four boundary. Source
-contracts must prove that the pressure hand never steals an unprepared
+For the post-ID97 retention-idle repair, native tests must distinguish
+block-saving deferred pack geometry from planner-only geometry. Two compressed
+records may arm `single_pack_deferred` only when the complete SWZ extent fits
+4KiB; three may arm it when the complete extent fits 8KiB. A two-record prefix
+that needs 8KiB remains valid planner geometry but must not become an early-close
+latch, including across RAW interleaving after the protected count-four boundary.
+Source contracts must prove that the pressure hand never steals an unprepared
 descriptor, retained READ-bypass credit requires an already-open staged WRITE
-window, and worker-empty burst-target shrink is not blocked merely because an
-earlier chain completed. Existing ID63 cache-coherence contracts must assert the
-same open-window-only bypass rule rather than preserving skipped-WRITE credit.
-This supports correctness review but cannot prove
-loaded I/O service. Owner `make test` must compare matched raw/sync/async mixed
-and sustained QD1/4/8/32, SD/SSD/NVMe profiles, lower WRITE bytes/requests,
-read p99, deadline/undersized-idle attribution, full GC, retained faults and
-suspend/drain. SIMD compile/runtime coverage must include SSE2, AVX2, AVX-512
-and ARM64/NEON where hardware is available.
+window, sampled two/three-record tails are certified only by the sampler's
+current bounded queue snapshot (or the dedicated post-pack READ boundary), every
+nonempty WRITE flush clears stale wave-level READ state, and a single-BIO cache
+hit cannot set that state. Worker-empty burst-target shrink remains unblocked
+merely because an earlier chain completed. Existing ID63 cache-coherence
+contracts retain the same open-window-only bypass rule. This supports
+correctness review but cannot prove loaded I/O service. Owner `make test` must
+compare matched raw/sync/async mixed and sustained QD1/4/8/32, SD/SSD/NVMe
+profiles, lower WRITE bytes/requests, read p99, deadline/undersized-idle
+attribution, full GC, retained faults and suspend/drain. SIMD compile/runtime
+coverage must include SSE2, AVX2, AVX-512 and ARM64/NEON where hardware is
+available.
 
 ## Required stages
 
@@ -750,27 +756,35 @@ does not justify retaining it.
 
 The replacement contract is work-conserving and timer-free. Pure-WRITE
 post-PACK tails of two/three remain below the qualified four-record floor. A
-two/three-record tail may become an exact finite target only when the serialized
-worker has already observed a READ in the active accepted wave or tail scanning
-encounters an accepted non-WRITE boundary. Source contracts must prove the
-incoming scan records that non-WRITE boundary, all normal and bounded parallel
-READ paths mark worker-owned mixed-wave state, true worker-idle and hard
-ordering boundaries clear it, and the mapper never touches it.
+two/three-record tail may become an exact finite sampled target only when the
+sampler's own bounded current queue snapshot encounters an independent READ or
+other accepted non-WRITE boundary. Earlier wave-level READ evidence is not
+sampling authority and must be cleared on every nonempty WRITE-window flush. A
+successful independent READ serviced after a two/three-record tail was already
+staged remains a separate, dedicated post-pack boundary path. Source contracts
+must prove the sampler does not consume `retained_wave_read_seen`, the single-
+BIO path sets that mark only after actual lower READ I/O, normal and bounded
+parallel READ paths cannot turn a cache-only event into sampled-tail authority,
+true worker-idle and hard ordering boundaries still clear retained evidence, and
+the mapper never mutates worker-owned scheduling state.
 
 Pack-readiness qualification must separately cover the RAW-interleaving state
 repair. The total-count-four first-pack guard remains in force because its
 removal previously split QD8 into synchronous 4+4 service. After total count is
-greater than four, however, an earlier two-compressed-record/4KiB or
+greater than four, only an earlier block-saving two-compressed-record/4KiB or
 three-compressed-record/8KiB prefix is persistent finite evidence and must
 remain recognizable even when RAW records or later compressed records change
-the current exact geometry. Both RAW and compressed admission paths must
-re-evaluate that proof. Native tests must cover count four remaining ineligible
-and count five recovering the earlier pack with both compressed and RAW newest
-records. Geometry fixtures that temporarily mark a record RAW must restore both
-its RAW flag and compressed length before reusing that array for later exact-pack
-assertions; otherwise the fixture is testing stale mutation rather than policy.
+the current exact geometry. Two compressed records requiring 8KiB are
+planner-only geometry and must fail both current and prior deferred-pack
+readiness. Both RAW and compressed admission paths must re-evaluate the
+block-saving proof. Native tests must cover count four remaining ineligible,
+count five recovering a valid earlier block-saving pack, and an explicit
+two-record/8KiB case that remains ineligible across RAW slots. Geometry fixtures
+that temporarily mark a record RAW must restore both its RAW flag and compressed
+length before reusing that array for later exact-pack assertions; otherwise the
+fixture is testing stale mutation rather than policy.
 
-The refuted suppressed-tail lifetime counters and their replay/reporter schema
+The refuted suppressed-tail lifetime countersThe refuted suppressed-tail lifetime counters and their replay/reporter schema
 are removed in the same change. Keep exact target-2/3/4 PACK_READY attribution
 and accepted-work lower-idle partitioning so the new scheduling decision remains
 measurable without retaining dead policy state. There is no microsecond wake,

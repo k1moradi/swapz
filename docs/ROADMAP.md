@@ -9,86 +9,72 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest successful standard owner matrix tested exact source
-`829cdbe0d9eb9541cc3954e3af02e821a90c5595` and published canonical
-report-only commit `efb713c06daa4fc03fdd7a200032c9c243089850`. All five
+`ffc527f4956bec17c8c2a2a0b2f237c34d51d8df` and published canonical
+report-only commit `dacc8a0a93b3a208860d151d672a4b45c27fae46`. All five
 `make test` stages passed, including loaded correctness/lifecycle, live GC,
 DISCARD/TRIM, retained write/flush fault injection, packed placement, both
-owned-RAM storage regimes and ID36 resource pressure.
+owned-RAM storage regimes, storage envelopes and ID36 resource pressure.
 
-The source is nevertheless not product-qualified against raw on fast mixed
-service. At QD32, raw useful WRITE/READ is 62.96/20.90 MB/s. Async swapz is
-32.21/10.69 MB/s, while lowering backing WRITE throughput from 62.96 to
-24.00 MB/s and lower-WRITE requests from 12295.7 to 2572.6; READ p99 improves
-from 4.57 to 1.21 ms. This is a trade-off: swapz preserves a strong
-lower-device byte/request advantage but gives up too much useful service.
+The source is still not product-qualified against raw on fast mixed service. At
+QD32, raw useful WRITE/READ is 62.81/20.85 MB/s. Async swapz is 39.84/13.22
+MB/s while lowering backing WRITE throughput to 29.59 MB/s and lower-WRITE
+requests from 12296.4 to 2458.0; READ p99 improves from 4.50 to 0.88 ms. This is
+a trade-off: the host-write endurance proxy and read tail improve, but useful
+service remains 36.6% below raw.
 
-Fast sustained WRITE confirms the architecture can beat raw once enough useful
-work is available. Async swapz versus raw is 19.30/22.22 MB/s at QD1,
-68.52/84.00 at QD4, 82.50/85.81 at QD8 and 130.83/89.11 at QD32. The QD32
-+46.8% direction proves compression and packing can outrun raw on the same
-synthetic fast device; the QD4 -18.4% and mixed -48.8% directions show that
-small-batch dispatch and idle-time elimination, not another compression
-micro-optimization, are the immediate product bottleneck.
+The same exact-source run records 604.7 ms of accepted-work lower idle, of which
+581.5 ms is undersized-batch idle, while preparing-head idle and K=1 ready-run
+wait are both effectively zero. Fast sustained WRITE reaches 126.54 MB/s versus
+85.57 MB/s raw at QD32 (+47.9%), but remains below raw at QD1/QD4/QD8. Slow
+serial-depth and modern-SD models remain strong compression wins. Together these
+results support the work-conserving architecture while localizing the remaining
+fast-media loss to dispatch/retention policy rather than LZ4 throughput,
+preparation-worker count, reservoir size or lower-WRITE depth.
 
 Production infrastructure remains ordinary LZ4 acceleration one, one unbound
-asynchronous preparation producer, the bounded 64-slot RAW+compressed
-reservoir, immutable lower-WRITE depth one, independent READ fan-out, the
-eight-block ID63 cap, packed placement and SWZ 1/2/4-block extents. Delta64
-remains default-off pending representative swap-content prevalence. Do not add
-another producer, enlarge the reservoir or reopen K>1 until existing
-preparation/ready-wait telemetry shows pressure.
-
-The `829cdbe0d9eb` result refutes the active 500us suppressed-tail wake plus
-cache-hit READ-pivot close policy. It passed correctness but regressed service:
-relative to `e17f05a1c256`, fast mixed async useful WRITE fell 38.26 ->
-32.21 MB/s, lower-WRITE requests rose 2255.0 -> 2572.6 and READ p99 rose
-0.823 -> 1.208 ms. The next candidate therefore removes that policy and its
-temporary lifetime telemetry rather than tuning its timeout.
+asynchronous preparation producer, the bounded 64-slot RAW+compressed reservoir,
+immutable lower-WRITE depth one, independent READ fan-out, the eight-block ID63
+cap, packed placement and SWZ 1/2/4-block extents. Delta64 remains default-off
+pending representative swap-content prevalence. Do not add another producer,
+enlarge the reservoir or reopen K>1 while preparation and ready-wait telemetry
+remain at zero on the failing fast workload.
 
 ## Current bottleneck ranking
 
-The strongest current signal is accepted-work lower-device idle time caused by
-small retained windows. On `829cdbe0d9eb`, the regressed mixed workload
-records 756.58 ms in `accepted_work_lower_idle_undersized_batch_ns`. The
-500us/cache-hit-pivot policy can close a two/three-record window just before its
-third/fourth WRITE arrives; because such a close is below the existing
-`count > 4 || preparation_queued > 0` asynchronous-detach gate, it performs a
-synchronous lower WRITE and strands the companion records in a fresh window
-that can then reach the full ordinary retention deadline.
-
-Two bounded state defects are therefore the next ID83 candidate, with no new
+Two state-machine feedback defects are the next bounded repair, with no new
 resource concurrency:
 
-1. **Mixed-wave finite-tail recognition.** Keep the four-record floor for a
-   pure-WRITE wave. When the serialized worker has already serviced a READ in
-   the active accepted wave, or the post-PACK sampler encounters an already
-   accepted non-WRITE boundary, a two/three-record residue is finite accepted
-   work and may become its exact one-shot target immediately. This uses one
-   worker-owned boolean plus the sampler's existing prefix state; it adds no
-   timer, mapper atomic or future-arrival wait.
-2. **Persistent selective-pack recognition across RAW.** Preserve the refuted
-   total-count-four first-pack guard, but once total count exceeds four retain
-   proof that an earlier two-compressed-record/4KiB or
-   three-compressed-record/8KiB prefix formed a valid pack. Re-evaluate that
-   proof after RAW as well as compressed admission so RAW interleaving or a
-   later compressed record cannot permanently erase pack readiness.
+1. **Non-saving two-record pack latch.** Two medium compressed records that
+   require an 8KiB extent consume the same two physical 4KiB blocks as two RAW
+   records. Treating this `(2U, 2U)` geometry as `single_pack_deferred`
+   evidence can close windows early without saving lower blocks, increasing
+   request fragmentation. Deferred early-pack evidence must therefore be
+   block-saving: two-in-4KiB or three-in-8KiB. The planner remains free to emit
+   a two-record 8KiB extent when an independently justified flush occurs.
+2. **Stale wave-level READ certification.** Cache-hit READs can currently set
+   `retained_wave_read_seen`, and successful nonempty PACK_READY/SERVICE_DRY
+   flushes do not clear it. Tail sampling can then combine that stale bit with a
+   later queued pure-WRITE continuation and install a two/three-record target.
+   Sampling must instead certify mixed tails from its own bounded current queue
+   snapshot. Every nonempty flush clears the wave mark, and the single-BIO path
+   charges it only after actual lower READ I/O. The dedicated post-pack READ
+   boundary remains the only serviced-READ exception for a tail that was already
+   staged before that READ completed.
 
-Performance hypothesis, not qualification: removing the failed timeout/pivot
-path should first recover toward the pre-candidate ~38.26 MB/s fast-mixed
-baseline by avoiding premature synchronous two/three-record closes. Finite
-mixed-tail dispatch and the persistent pack latch should then reduce the
-756.58 ms undersized-idle component and lower request fragmentation, so useful
-mixed and QD4 throughput should rise without giving back the existing
-lower-byte advantage. The analytical ~114 MB/s figure obtained by subtracting
-measured lower-I/O+CPU work from the old wall time is an upper-bound opportunity
-signal, not a throughput prediction; scheduler, read, publication and device
-serialization costs remain.
+Performance hypothesis, not qualification: removing the non-saving latch and
+stale certification should reduce `single_pack_deferrals`,
+`pack_close_tail_target`, lower-WRITE request fragmentation and
+`accepted_work_lower_idle_undersized_batch_ns`. Fast mixed useful WRITE/READ
+should recover toward the earlier ARM64 baseline while preserving the current
+lower-WRITE byte advantage. The decisive gate remains exact-source owner
+`make test`; no throughput claim is promoted from source inspection alone.
 
-Do not optimize LZ4 itself, add preparation workers, enlarge the reservoir or
-restore K>1 in this round. The candidate must isolate dispatch/state behavior
-and preserve the current ownership, RAW terminal-selection, ordering and
-fail-closed rules.
+Do not optimize LZ4 itself, add preparation workers, enlarge the reservoir,
+restore K>1 or introduce another timer/queue-depth heuristic in this round. Keep
+the READY-only pressure hand, K=1, one producer, 64-slot reservoir, ordinary
+deadline, ID63 and SWZ geometry unchanged.
 
+### Detached K=1 preparation ownership candidate
 ### Detached K=1 preparation ownership candidate
 
 A later source audit found one scheduling assumption that became stale when the
@@ -255,7 +241,8 @@ changes.
 | 95 | Gate opportunistic RAW pressure selection on actual hand dispatchability | **4 candidate / owner qualification pending** | The retained close policy intentionally refuses the eight-record hand below a larger effective learned/sampled target, but ordered async preparation still forces records before that hand to RAW whenever eight accepted records are visible. That can spend lower bytes without starting I/O. Keep the qualified no-below-target dispatch rule; instead allow pressure RAW only when retention is disabled or the effective target is <= the eight-record hand. Larger-target waves retain LZ4 opportunity. Hypothesis: lower async backing WRITE bytes/requests and improve endurance proxy with neutral-to-positive useful service; risk is extra inline LZ4 CPU before larger targets on very fast media. Require exact-source owner `make test`, including raw/sync/async useful service, p99, lower bytes/requests, QD4/8/32, SD/SSD/NVMe, lifecycle/fault/GC and architecture qualification. |
 | 96 | Retained suspend completion race against DM core barrier | **4 root-cause fix / owner requalification required** | Exact source `aaf2f523e3a8` passed build/native/W=1/W=2 plus loaded oracle, compound BIO, live GC and DISCARD/TRIM, then BLOCKED when the retained lifecycle writer failed after `dmsetup suspend` and `resume` both succeeded (report `522d1583447d`). The target closed admission in `->presuspend` and delayed buffered completions by 25–35ms hoping DM core would set `DMF_BLOCK_IO_FOR_SUSPEND` first. Linux DM converts ordinary-flush-suspend `DM_MAPIO_REQUEUE` to I/O error unless noflush/split/polled requeue rules apply, so the delay cannot prove safety. Move the existing closed-admission drain to `->postsuspend`, where DM has already blocked new I/O, crossed SRCU and waited for preexisting target I/O; remove delayed completion buffering. This is a lifecycle correctness repair, not ID94/ID95 performance evidence. Require exact-source owner `make test` before interpreting any benchmark. |
 | 97 | Bounded accepted short-tail continuity at the work-conserving hand | **5 owner result did not justify keep / removed** | Exact source `b6461a8e2871` passed the full five-stage owner `make test`, but its latest report `e1eac4cd62b5` shows fast mixed async 33.62 MB/s, 2,816.2 lower-WRITE requests and 658.8 ms of undersized accepted-work lower idle. The older report had async 64.52 MB/s and 1,450.6 requests; synchronous throughput also moved sharply between runs, so the cross-report regression is not a clean causal A/B. The candidate nevertheless failed its promotion gate, and its unprepared pressure-hand claim can deliberately run ordered LZ4 before dispatching an already-serviceable batch. Remove that claim rather than retain an unqualified hot-path policy. |
-| 98 | Retention-idle state repair after ID97 | **4 candidate / owner qualification pending** | Keep K=1, one producer, the 64-slot reservoir, SWZ, the ordinary deadline and the eight-record hand. Four bounded repairs address the current idle mechanism without new resources: pressure-hand continuation requires an already completed READY_COMPRESSED/READY_RAW snapshot; independent READ fan-out credits retained bypasses only when a WRITE window is already staged; two compressed records fitting one 8KiB extent count as deferred beneficial pack geometry; and worker-empty deadline learning may shrink to an observed count >=4 even after an earlier chain completed. Hypothesis: fewer premature SERVICE_DRY fragments and 2ms worker-empty stalls, fewer lower-WRITE requests, and higher fast mixed/QD4-QD32 useful service with neutral-or-lower lower WRITE bytes. Risk: additional 8KiB two-record extents can increase request fragmentation if finite-tail evidence is too permissive, so loaded lower-I/O and p99 decide promotion. The separate ID63 lookahead idea for READs behind queued WRITEs is not included: current standards require a queue-depth/latency gate, and production does not yet expose a qualified signal for that decision. Require exact-source owner `make test` plus SSE2/AVX2/AVX-512/NEON rootless qualification before keeping the repair. |
+| 98 | Retention-idle state repair after ID97 | **5 owner-qualified / partial keep; follow-up repair required** | Exact source `ffc527f4956b` passed the full five-stage owner `make test` and improved fast mixed async versus ID97 to 39.84 MB/s with 2458.0 lower-WRITE requests and 581.5 ms undersized accepted-work lower idle, but it still trails raw 62.81 MB/s and the earlier pre-ID97 64.52 MB/s baseline. Keep the READY-only pressure hand and correctness-side retained READ-bypass repair; preparation/ready-wait telemetry is zero on the failing workload, so do not add resources. The two-record/8KiB early latch and stale wave-level READ tail certification remain the bounded scheduling defects isolated by ID99. |
+| 99 | Block-saving deferred-pack latch and current-snapshot mixed-tail certification | **4 candidate / owner qualification pending** | Remove `(2U, 2U)` from `single_pack_deferred`/prior-pack readiness while preserving planner 8KiB geometry; tail sampling may classify a sub-four residue as mixed only from its own bounded queue snapshot, not `retained_wave_read_seen`. Clear that wave mark on every nonempty flush and set it in the single-BIO path only after actual lower READ I/O. Hypothesis: materially fewer `single_pack_deferrals`, target-2/3 closes, lower-WRITE requests and undersized lower-idle, with fast mixed useful WRITE/READ recovering toward raw while lower-WRITE bytes remain neutral-to-better. Require exact-source owner `make test`; keep K=1, one producer, the 64-slot reservoir, ordinary LZ4 acceleration one, READY-only pressure hand, ID63 and SWZ unchanged. |
 
 ## What the pinned queue experiment establishes
 

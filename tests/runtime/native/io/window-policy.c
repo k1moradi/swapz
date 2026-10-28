@@ -93,10 +93,11 @@ static int test_pack_ready_waits_for_second_medium_pack(void)
 		batch[i].logical = 100 + i;
 		batch[i].length = 2073;
 	}
-	/* Two or three medium pages fit one 8KiB extent and are valid
-	 * selective geometry. Six fit one 16KiB extent: same bytes as two
-	 * old 8KiB commits, one synchronous lower callback. */
-	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
+	/* Two medium pages fit 8KiB but save no 4KiB block, so they are
+	 * planner-only geometry. Three medium pages fit 8KiB and save one block.
+	 * Six fit one 16KiB extent: same bytes as two old 8KiB commits, one
+	 * synchronous lower callback. */
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 5, 2, 0));
@@ -119,10 +120,10 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 		batch[i].logical = 300 + i;
 		batch[i].length = 2073;
 	}
-	/* Two medium pages exceed 4KiB but fit one 8KiB extent. Three also
-	 * fit 8KiB; service policy still decides whether the deferred geometry
-	 * is finite enough to close. */
-	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
+	/* Two medium pages exceed 4KiB and need two physical blocks, so they
+	 * remain planner-only geometry. Three fit 8KiB and save one block, which
+	 * may qualify as deferred pack geometry when service policy permits. */
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 3, 2, 0));
 	CHECK(swapz_window_pack_ready(batch, 6, 2, 0));
@@ -136,7 +137,7 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 	 */
 	for (i = 0; i < 5; ++i)
 		batch[i].length = 3000;
-	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(!swapz_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 4, 2, 0));
@@ -505,13 +506,16 @@ static int test_two_record_two_block_pack_geometry_survives_raw_slots(void)
 		batch[index].raw = 1;
 	}
 
-	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
+	/* The two compressed records still form valid 8KiB representation
+	 * geometry across RAW slots, but two blocks for two records save no
+	 * physical block and therefore must not arm deferred early-close state. */
+	CHECK(swapz_window_first_compressed_extent_fits(batch, 5, 2U, 2U));
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(!swapz_window_single_pack_ready(batch, 2, 0, 0));
 	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 1));
 	/* Count four stays the protected first-pack floor. */
 	CHECK(!swapz_window_single_pack_ready(batch, 4, 2, 0));
-	/* Once count exceeds four, RAW interleaving must not erase the proof. */
-	CHECK(swapz_window_prior_single_pack_ready(batch, 5, 2, 0));
+	CHECK(!swapz_window_prior_single_pack_ready(batch, 5, 2, 0));
 	CHECK(!swapz_window_prior_single_pack_ready(batch, 4, 2, 0));
 	return 0;
 }

@@ -3431,8 +3431,9 @@ accounted:
 		}
 	}
 	ctx->batch_count = 0;
-	/* A serviced READ belongs to the window just flushed, never the next. */
+	/* Serviced READ evidence belongs to the window just flushed, never the next. */
 	ctx->retained_post_pack_read_boundary = false;
+	ctx->retained_wave_read_seen = false;
 	if (error || committed != count) {
 		ctx->retained_chain_completed = 0;
 		ctx->pack_close_pending_tail_sample = false;
@@ -3794,8 +3795,7 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			ctx->retained_tail_target = scan_truncated ? 0 :
 				swapz_window_sampled_tail_target(
 					tail, queued_tail,
-					!prefix_open || saw_independent_read ||
-					(queued_tail && ctx->retained_wave_read_seen));
+					!prefix_open || saw_independent_read);
 		}
 	} else {
 		ctx->retained_chain_completed = 0;
@@ -5320,7 +5320,6 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			u64 read_end_ns = ktime_get_ns();
 
 			if (ctx->retain_ms) {
-				ctx->retained_wave_read_seen = true;
 				/*
 				 * A completed cache-hit READ is a genuine boundary
 				 * only after this tail was staged. Observe it while
@@ -5341,9 +5340,12 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			 * or extend the ordinary retention deadline. The worker-owned
 			 * mixed-wave mark records only that this READ was serviced; it may
 			 * make an existing 2/3-record residue finite without a timer or
-			 * cache-hit close authorization.
+			 * cache-hit close authorization. Wave-level READ state is
+			 * charged only for actual lower READ service and is never tail-
+			 * certification evidence after a nonempty WRITE flush.
 			 */
 			if (had_lower_io) {
+				ctx->retained_wave_read_seen = true;
 				swapz_note_single_tail_read_bypass(ctx);
 				if (ctx->retained_window_read_bypasses < SWAPZ_MAX_RECORDS)
 					ctx->retained_window_read_bypasses++;

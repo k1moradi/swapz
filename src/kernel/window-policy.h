@@ -178,8 +178,6 @@ static inline int swapz_window_single_pack_ready(
 						read_budget, 2U, 1U))
 		return 1;
 	if (swapz_window_compressed_extent_fits(pending, count, retain_ms,
-						read_budget, 2U, 2U) ||
-	    swapz_window_compressed_extent_fits(pending, count, retain_ms,
 						read_budget, 3U, 2U)) {
 		if (swapz_window_first_compressed_extent_fits(
 				pending, count, 2U, 1U))
@@ -206,8 +204,6 @@ static inline int swapz_window_prior_single_pack_ready(
 		return 0;
 	return swapz_window_first_compressed_extent_fits(
 		pending, count, 2U, 1U) ||
-		swapz_window_first_compressed_extent_fits(
-			pending, count, 2U, 2U) ||
 		swapz_window_first_compressed_extent_fits(
 			pending, count, 3U, 2U);
 }
