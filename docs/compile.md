@@ -56,7 +56,8 @@ kernel header, not from a kernel-version threshold. Kbuild probes `dm-io.h`
 for the separate unsupported-operation bitmap ABI and compiles the single
 `dm-target.o` wrapper with the matching typed callback/call signature. This
 also covers distribution kernels that backport the API before its upstream
-release version.
+release version. Build comments and source contracts should describe this as a
+header capability probe rather than embedding a particular version-macro token.
 
 The official test runner may use Make jobserver parallelism for independent compilation, but loaded device phases and benchmark pairs remain sequential.
 

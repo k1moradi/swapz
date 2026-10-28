@@ -5,7 +5,7 @@ dm-swapz-y := dm-target.o codec.o authority.o engine.o predictor.o
 
 # dm-io's unsupported-operation bitmap/callback argument was backported by
 # some distributions before its upstream kernel version. Probe the installed
-# build header instead of guessing from a version threshold.
+# build header directly instead of inferring this ABI from a release number.
 ifneq ($(shell grep -q 'sync_unsup_bits' "$(srctree)/include/linux/dm-io.h" 2>/dev/null && echo y),)
 CFLAGS_dm-target.o += -DSWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
 endif
