@@ -3,6 +3,13 @@ ifneq ($(KERNELRELEASE),)
 obj-m += dm-swapz.o
 dm-swapz-y := dm-target.o codec.o authority.o engine.o predictor.o
 
+# dm-io's unsupported-operation bitmap/callback argument was backported by
+# some distributions before its upstream kernel version. Probe the installed
+# build header instead of guessing from LINUX_VERSION_CODE.
+ifneq ($(shell grep -q 'sync_unsup_bits' "$(srctree)/include/linux/dm-io.h" 2>/dev/null && echo y),)
+CFLAGS_dm-target.o += -DSWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+endif
+
 ifeq ($(CONFIG_X86_64),y)
 dm-swapz-y += predictor-sse2.o predictor-avx2.o predictor-avx512.o
 CFLAGS_predictor-sse2.o += $(CC_FLAGS_FPU)

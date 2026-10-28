@@ -39,6 +39,13 @@ A complete run includes:
 4. Kernel W=2 build.
 5. Owned RAM-backed `null_blk` correctness, lifecycle/fault checks, matched mixed benchmark evidence and bounded write-only QD evidence.
 
+The compile matrix must cover both Device Mapper `dm_io` ABIs currently
+encountered by supported builders: the legacy error-only callback/signature and
+the newer separate unsupported-bitmap callback/signature. Distribution
+backports make kernel-version inference insufficient; Kbuild must feature-probe
+the installed `dm-io.h`. Both synchronous and asynchronous unsupported
+completions fail closed.
+
 Stages are ordered and fail fast. Privileged device sessions must never overlap. If noninteractive privilege or safe owned-device provisioning is unavailable, the complete run reports BLOCKED rather than silently skipping loaded work.
 
 On Secure Boot-enabled hosts, stage 1 uses the same root-build signing hook as

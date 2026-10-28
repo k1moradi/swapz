@@ -644,8 +644,28 @@ static swapz_u16 swapz_probe_set(
     def test_real_swapz_not_memory_smoke(self):
         for snippet in ("dm_register_target(&swapz_target)",
                         "LZ4_compress_fast(", "LZ4_decompress_safe(",
-                        "dm_io(&req,", "DM_IO_VMA", "SWAPZ_SECTORS"):
+                        "swapz_dm_io(&req,", "DM_IO_VMA", "SWAPZ_SECTORS"):
             self.assertIn(snippet, DM)
+
+    def test_dm_io_unsupported_bitmap_api_is_feature_probed(self):
+        wrapper = body("swapz_dm_io")
+        write_done = body("swapz_async_lower_write_done")
+        read_done = body("swapz_async_lower_read_done")
+        self.assertIn("sync_unsup_bits", MK)
+        self.assertIn("SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS", MK)
+        self.assertIn("$(srctree)/include/linux/dm-io.h", MK)
+        self.assertNotIn("LINUX_VERSION_CODE", MK)
+        self.assertIn("#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS", wrapper)
+        self.assertIn("sync_unsupported_bits", wrapper)
+        self.assertIn("&unsupported_bits", wrapper)
+        self.assertIn("return -EOPNOTSUPP", wrapper)
+        self.assertIn("dm_io(req, 1, region, sync_error_bits,", wrapper)
+        self.assertIn("error |= unsupported", write_done)
+        self.assertIn("error |= unsupported", read_done)
+        self.assertIn(".fn = swapz_async_lower_write_done",
+                      body("swapz_submit_inflight_write"))
+        self.assertIn(".fn = swapz_async_lower_read_done",
+                      body("swapz_submit_read_slot_range"))
 
     def test_allocation_has_gc_reserve_and_fail_closed_reuse(self):
         compact = body("swapz_gc_compact_one_inner")
@@ -743,7 +763,7 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(lower.index("ctx->write_fault_injected++"),
                         lower.index("ctx->lower_write_submitted_reqs++"))
         self.assertLess(lower.index("ctx->write_fault_injected++"),
-                        lower.index("error = dm_io(&req"))
+                        lower.index("error = swapz_dm_io(&req"))
         self.assertIn("swapz_lower(ctx, REQ_OP_WRITE", body("swapz_lower_write"))
         self.assertIn("swapz_lower(ctx, REQ_OP_WRITE", body("swapz_lower_write_run"))
         async_submit = body("swapz_submit_inflight_write")
@@ -1057,8 +1077,8 @@ static swapz_u16 swapz_probe_set(
     def test_attempted_and_completed_lower_io_are_distinct(self):
         lower = body("swapz_lower")
         self.assertLess(lower.index("ctx->lower_write_submitted_reqs++"),
-                        lower.index("error = dm_io(&req"))
-        self.assertLess(lower.index("error = dm_io(&req"),
+                        lower.index("error = swapz_dm_io(&req"))
+        self.assertLess(lower.index("error = swapz_dm_io(&req"),
                         lower.index("ctx->physical_write_reqs++"))
         self.assertIn("one_page_windows", body("swapz_flush_window"))
         self.assertIn("worker_requeues", body("swapz_worker"))
@@ -1411,7 +1431,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("end_ns >= start_ns ? end_ns - start_ns : 0", policy)
         self.assertIn("section_start = ktime_get_ns();", lower)
         self.assertLess(lower.index("section_start = ktime_get_ns();"),
-                        lower.index("error = dm_io("))
+                        lower.index("error = swapz_dm_io("))
         self.assertIn("ctx->lower_read_wall_ns +=", lower)
         self.assertIn("ctx->lower_write_wall_ns +=", lower)
         self.assertIn("swapz_compress_page(", accept)
@@ -2795,7 +2815,7 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(lower.index("atomic_set(&ctx->lower_write_active, 1)"),
                         lower.index("swapz_queue_preparation_workers(ctx)"))
         self.assertLess(lower.index("swapz_queue_preparation_workers(ctx)"),
-                        lower.index("error = dm_io("))
+                        lower.index("error = swapz_dm_io("))
         self.assertIn("&entry->preparation_snapshot_ready", ordered)
         self.assertIn("entry->preparation_force_raw = true", ordered)
         self.assertRegex(ordered,

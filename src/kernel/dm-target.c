@@ -945,7 +945,7 @@ static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 	region.bdev = ctx->backing->bdev;
 	region.sector = 0;
 	region.count = SWAPZ_SUPERBLOCK_BYTES >> SECTOR_SHIFT;
-	error = dm_io(&req, 1, &region, &error_bits, IOPRIO_DEFAULT);
+	error = swapz_dm_io(&req, &region, &error_bits);
 	if (!error && error_bits)
 		error = -EIO;
 	if (!error && !swapz_sb_valid(block, device_bytes))
@@ -954,6 +954,32 @@ static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 	return error;
 }
 
+
+/*
+ * Device Mapper gained a separate unsupported-operation completion bitmap.
+ * Some distribution kernels backport that API independently of
+ * LINUX_VERSION_CODE, so Kbuild feature-probes dm-io.h and selects the exact
+ * signature. Keep all call sites behind this wrapper and fail closed if a
+ * synchronous request reports unsupported service.
+ */
+static int swapz_dm_io(struct dm_io_request *req,
+		       struct dm_io_region *region,
+		       unsigned long *sync_error_bits)
+{
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+	unsigned long unsupported_bits = 0;
+	unsigned long *sync_unsupported_bits =
+		req->notify.fn ? NULL : &unsupported_bits;
+	int error = dm_io(req, 1, region, sync_error_bits,
+			  sync_unsupported_bits, IOPRIO_DEFAULT);
+
+	if (!error && unsupported_bits)
+		return -EOPNOTSUPP;
+	return error;
+#else
+	return dm_io(req, 1, region, sync_error_bits, IOPRIO_DEFAULT);
+#endif
+}
 
 static void swapz_invalidate_read_caches(struct swapz_dm *ctx)
 {
@@ -1054,9 +1080,18 @@ static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
 	return false;
 }
 
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+static void swapz_async_lower_write_done(unsigned long error,
+					 unsigned long unsupported,
+					 void *context)
+#else
 static void swapz_async_lower_write_done(unsigned long error, void *context)
+#endif
 {
 	struct swapz_inflight_write *inflight = context;
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+	error |= unsupported;
+#endif
 	struct swapz_dm *ctx = inflight->ctx;
 	unsigned long flags;
 
@@ -1206,7 +1241,7 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	if (ctx->async_prepare && ctx->preparation_queued)
 		swapz_queue_preparation_workers(ctx);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
-	error = dm_io(&req, 1, &region, NULL, IOPRIO_DEFAULT);
+	error = swapz_dm_io(&req, &region, NULL);
 	if (error) {
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		ctx->prep_lower_write_end_queued += ctx->preparation_queued;
@@ -1431,7 +1466,7 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 			swapz_queue_preparation_workers(ctx);
 		spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
 	}
-	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
+	error = swapz_dm_io(&req, &region, &bitmap);
 	if (op == REQ_OP_WRITE) {
 		unsigned long irq_flags;
 
@@ -1645,7 +1680,7 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	slot->lower_read_submitted_bytes += (u64)blocks * SWAPZ_BLOCK_BYTES;
 	slot->lower_read_submitted_reqs++;
 	start_ns = ktime_get_ns();
-	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
+	error = swapz_dm_io(&req, &region, &bitmap);
 	elapsed_ns = swapz_elapsed_ns(start_ns, ktime_get_ns());
 	slot->lower_read_wall_ns += elapsed_ns;
 	if (error || bitmap)
@@ -1655,9 +1690,18 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	return 0;
 }
 
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+static void swapz_async_lower_read_done(unsigned long error,
+					unsigned long unsupported,
+					void *context)
+#else
 static void swapz_async_lower_read_done(unsigned long error, void *context)
+#endif
 {
 	struct swapz_read_slot *slot = context;
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+	error |= unsupported;
+#endif
 
 	WRITE_ONCE(slot->lower_error, error ? -EIO : 0);
 	WRITE_ONCE(slot->lower_end_ns, ktime_get_ns());
@@ -1704,7 +1748,7 @@ static int swapz_submit_read_slot_range(struct swapz_read_slot *slot,
 	slot->lower_submitted = true;
 	slot->lower_read_submitted_bytes += (u64)blocks * SWAPZ_BLOCK_BYTES;
 	slot->lower_read_submitted_reqs++;
-	error = dm_io(&req, 1, &region, NULL, IOPRIO_DEFAULT);
+	error = swapz_dm_io(&req, &region, NULL);
 	if (error) {
 		slot->lower_error = error;
 		slot->lower_end_ns = ktime_get_ns();

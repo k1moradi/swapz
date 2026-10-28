@@ -51,6 +51,13 @@ conflicting no-SIMD flags removed per object. arm64 NEON uses `CC_FLAGS_FPU`
 and removes `CC_FLAGS_NO_FPU`. Runtime selection never changes the
 single-module artifact.
 
+Device Mapper API compatibility is selected at build time from the installed
+kernel header, not from a kernel-version threshold. Kbuild probes `dm-io.h`
+for the separate unsupported-operation bitmap ABI and compiles the single
+`dm-target.o` wrapper with the matching typed callback/call signature. This
+also covers distribution kernels that backport the API before its upstream
+release version.
+
 The official test runner may use Make jobserver parallelism for independent compilation, but loaded device phases and benchmark pairs remain sequential.
 
 ## Secure Boot module signing
