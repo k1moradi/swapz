@@ -3135,6 +3135,23 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("--resource-pressure-short", benchmark)
         self.assertIn("WARMUP_OPS=128", benchmark)
         self.assertIn("MEASURE_OPS=2048", benchmark)
+        # Keep the ID36 mixed trace in a fixed-lane native engine: allocations
+        # in the old Python per-wave Future dispatcher are reclaim-throttled
+        # under the deliberately exceeded cgroup memory.high watermark.
+        pressure_mode = benchmark.split(
+            "if (( RESOURCE_PRESSURE_SHORT )); then", 1)[1].split(
+                "if (( WRITE_ONLY_QD )); then", 1)[0]
+        self.assertIn("NATIVE_REPLAY=1", pressure_mode)
+        self.assertIn("[[ -x build/tests/native/io-replay-native ]]", pressure_mode)
+        self.assertIn("REPLAY_ARGS+=(--native-replay)", benchmark)
+        native = (ROOT / "tests/runtime/benchmark/io-replay-native.c").read_text()
+        self.assertIn("ctx.events = calloc(ctx.event_count,", native)
+        self.assertIn("ctx.latencies = calloc(ctx.measure_ops,", native)
+        self.assertIn("pthread_barrier_wait(&ctx->wave_barrier)", native)
+        self.assertIn("pthread_create(&threads[index]", native)
+        self.assertLess(native.index("ctx.events = calloc("),
+                        native.index("pthread_create(&threads[index]"))
+        self.assertIn('helper_mode = "persistent" if replay_mode == "persistent-write" else "waves"', replay)
         self.assertIn("REPLAY_ARGS+=(--allocation-bounded-packed-read)", benchmark)
         self.assertIn("--allocation-bounded-packed-read", replay)
         self.assertIn("allocation_bounded=args.allocation_bounded_packed_read", replay)

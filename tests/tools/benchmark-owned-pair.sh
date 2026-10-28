@@ -172,6 +172,17 @@ if (( RESOURCE_PRESSURE_SHORT )); then
     WARMUP_OPS=128
     MEASURE_OPS=2048
     IOPS=0
+    # Under memory.high, the Python QD-wave dispatcher creates one Future
+    # and WorkItem per I/O; per-wave allocation can be reclaim-throttled
+    # for seconds while the block device itself continues to make progress.
+    # Use the pre-created fixed-lane C engine for this correctness-only
+    # pressure run. The immutable QD32 trace, O_DIRECT byte oracle and the
+    # 280s fail-closed replay watchdog are unchanged.
+    NATIVE_REPLAY=1
+    [[ -x build/tests/native/io-replay-native ]] || {
+        echo 'BLOCKED: ID36 allocation-bounded native replay helper missing' >&2
+        exit 2
+    }
 fi
 if (( WRITE_ONLY_QD )); then
     QD="$WRITE_ONLY_QD"

@@ -467,20 +467,25 @@ evidence, and may not weaken ordinary byte-exact/OOM/teardown requirements.
 
 Replay harnesses (`io-replay.py`) running inside the pressurized cgroup must
 avoid heap allocation churn in hot loops. Because the cgroup is deliberately
-held above `memory.high`, thread allocations can trigger kernel throttling
-via `mem_cgroup_handle_over_high()` (up to 2.0s penalty). To ensure reliable
-completion within the immutable `PAIR_OUTER_SECONDS=420` budget without false
-timeouts, the harness shares a single persistent `ThreadPoolExecutor` across
-both the mixed workload and packed read-set verification, pre-allocates I/O
-vectors (`read_iovs`, `mixed_iovs`), uses direct buffer writes (`os.pwrite()`),
-avoids per-sample regex parsing in the background telemetry sampler, and
-disables cyclic garbage collection during timed measurement loops. The private
-ID36 packed-read path must additionally submit exactly one long-lived job per
-QD lane and reuse barriers/result slots across population, sequential and
-seeded-random waves; it must not allocate a `Future`/work item/list per 4KiB
-I/O or construct a temporary 4MiB joined oracle. Ordinary non-pressure
-benchmark submission remains unchanged so this harness fix cannot masquerade
-as a production performance change.
+held above `memory.high`, allocations can trigger kernel reclaim/throttling
+via `mem_cgroup_handle_over_high()` (up to 2.0s per allocation); this is a
+harness artifact and cannot be equated with target I/O forward progress.
+The previous Python QD-wave mixed path still allocated a `Future` and
+`WorkItem` for each 4KiB request, despite the reusable pool and packed-read
+optimization. Only `--resource-pressure-short` now selects the already
+qualified native-C wave replay: one event/latency allocation before the
+measured waves, pre-created QD32 worker threads, native wave barriers, the
+same immutable ordered mixed trace and direct 4KiB I/O with byte-exact checks.
+Missing native helper must BLOCK, not silently revert to Python. Maintain the
+existing 280s per-candidate watchdog and the 680s pair / 720s parent bounds;
+do not grant a longer deadline to conceal an actual stalled BIO.
+
+The private ID36 packed-read path remains Python but submits exactly one
+long-lived job per QD lane and reuses barriers/result slots across population,
+sequential and seeded-random waves. It must not allocate a `Future`/work
+item/list per 4KiB I/O or construct a temporary 4MiB joined oracle. Ordinary
+non-pressure benchmark submission remains unchanged so the ID36 harness
+fix cannot masquerade as a production performance change.
 
 ### Foreground GC pressure and scaling telemetry
 

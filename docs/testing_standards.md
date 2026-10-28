@@ -1437,9 +1437,15 @@ OFF and swapz candidates run sequentially, the pair watchdog is 680s
 (`2 * 280 + 120` seconds of bounded barrier/comparison/teardown slack), and the
 top-level ID36 helper watchdog is 720s. Parent bounds must remain strictly
 outside their bounded children; a parent timeout may not preempt a candidate
-that is still within its own forward-progress limit. The pressure-only packed-read verifier uses
-32 persistent lane jobs and reusable barriers/results for population plus both
-4MiB read orders, eliminating per-I/O Future/work-item allocation while keeping
+that is still within its own forward-progress limit. The pressure-only mixed-QD32 replay uses the existing native-C wave helper
+with pre-created worker lanes and fixed event/latency buffers, instead of
+creating Python Futures/WorkItems for every wave above `memory.high`. It
+retains the identical 128+2048 immutable read/write trace, direct I/O,
+per-operation byte checks, timed workload boundaries, final image oracle and
+280s timeout, and requires the native helper to exist before entering the
+owned cgroup. The pressure-only packed-read verifier still uses 32 persistent
+Python lane jobs and reusable barriers/results for population plus both 4MiB
+read orders, eliminating per-I/O Future/work-item allocation while keeping
 QD32, byte-exact verification, p99 and lower-I/O boundaries unchanged. The
 ordinary benchmark path is not switched to this replay mode. The cgroup sets
 `memory.max=896MiB` and `memory.swap.max=0` when supported. The helper first
