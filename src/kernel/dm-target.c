@@ -88,11 +88,12 @@ module_param_named(delta64_rescue, swapz_delta64_rescue_enabled, bool, 0444);
 MODULE_PARM_DESC(delta64_rescue,
 		 "Page-local delta64 rescue with predictor-first high-score path; default on (0 disables)");
 
-static unsigned int swapz_delta64_lz4_acceleration = 1U;
+/* 4 is the ID67-qualified second pass; ordinary first-pass LZ4 stays at 1. */
+static unsigned int swapz_delta64_lz4_acceleration = 4U;
 module_param_named(delta64_lz4_acceleration, swapz_delta64_lz4_acceleration,
 		   uint, 0444);
 MODULE_PARM_DESC(delta64_lz4_acceleration,
-		 "Second-pass LZ4 acceleration 1..4 used only by delta64 rescue");
+		 "Second-pass LZ4 acceleration 1..4 used only by delta64 rescue; default 4");
 
 static bool swapz_read_coalesce = true;
 module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);

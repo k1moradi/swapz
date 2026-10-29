@@ -296,6 +296,8 @@ SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
 # Standard (non-A/B) sessions run the production module default: delta64
 # rescue on. Explicit A/B control arms pin it off with --no-delta64-rescue.
 PRODUCTION_DELTA64_RESCUE = 1
+# Production second-pass LZ4 acceleration used only by delta64 rescue (ID67).
+PRODUCTION_DELTA64_LZ4_ACCELERATION = 4
 
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
@@ -4007,7 +4009,8 @@ def write_saturation_verdict(sessions):
                         "reason":
                             f"{regime}: write-only timed attribution missing"}
             if (timed["lz4_acceleration"] != 1 or
-                    timed["delta64_lz4_acceleration"] != 1 or
+                    timed["delta64_lz4_acceleration"] !=
+                    PRODUCTION_DELTA64_LZ4_ACCELERATION or
                     timed["write_pipeline_depth"] != 1 or
                     timed["pipeline_active_max"] > 1 or
                     timed["delta64_rescue"] != PRODUCTION_DELTA64_RESCUE):
@@ -4314,7 +4317,8 @@ def write_pipeline_depth_verdict(sessions):
         if (kernel["write_pipeline_depth"] != depth or
                 kernel["pipeline_active_max"] > depth or
                 kernel["lz4_acceleration"] != 1 or
-                kernel["delta64_lz4_acceleration"] != 1 or
+                kernel["delta64_lz4_acceleration"] !=
+                PRODUCTION_DELTA64_LZ4_ACCELERATION or
                 kernel["delta64_rescue"] != 0 or
                 kernel["delta64_prepare_workers"] != 1):
             return {"overall": "INCOMPLETE",

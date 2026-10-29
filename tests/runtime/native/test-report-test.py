@@ -241,7 +241,7 @@ def timed_kernel_write(*, mode, target=8):
     record.update({
         "physical_write_reqs": 5,
         "lz4_acceleration": 1,
-        "delta64_lz4_acceleration": 1,
+        "delta64_lz4_acceleration": runner.PRODUCTION_DELTA64_LZ4_ACCELERATION,
         "delta64_prepare_workers": 1,
         "write_pipeline_depth": 1,
         "pipeline_active_max": 1 if mode else 0,

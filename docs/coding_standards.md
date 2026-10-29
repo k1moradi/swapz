@@ -477,7 +477,8 @@ Git history. The read-only module parameter `delta64_rescue` defaults to one
 (owner decision; zero disables it) and is snapshotted into each target at
 construction. The rescue-only second LZ4
 pass uses the separate read-only `delta64_lz4_acceleration` parameter
-(default 1, bounded 1..4); changing it must not alter the ordinary first-pass
+(default 4, the ID67-qualified value, bounded 1..4); changing it must not alter
+the ordinary first-pass
 `lz4_acceleration` policy. Both producer and ordered
 write paths must bypass the rescue call entirely when disabled; no classifier,
 rescue timer or rescue counter runs and no predictor scratch is allocated for
@@ -1434,8 +1435,8 @@ count, and every active logical-page/generation record.
 
 Ordinary first-pass LZ4 is fixed at acceleration one; the retired runtime
 selector must not be reintroduced without a new matched loaded experiment.
-Delta64's second LZ4 retains its separate read-only acceleration control because
-it is an opt-in rescue path with independently measured economics.
+Delta64's second LZ4 retains its separate read-only acceleration control
+(default 4) because the rescue path has independently measured economics.
 
 The exact-zero scan is allowed only after ordinary LZ4 has produced the
 existing tiny-candidate admission. If the full 4KiB source page is zero, route

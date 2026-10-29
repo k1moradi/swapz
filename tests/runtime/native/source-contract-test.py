@@ -3170,7 +3170,11 @@ static swapz_u16 swapz_probe_set(
             producer.rindex("complete_all(&entry->preparation_snapshot_ready)"))
         self.assertIn("async_prepare=%u delta64_prepare_workers=%u", status)
         self.assertIn('"delta64_rescue=$DELTA64_RESCUE"', benchmark)
-        self.assertRegex(benchmark, r"(?m)^DELTA64_LZ4_ACCELERATION=1$")
+        self.assertRegex(benchmark, r"(?m)^DELTA64_LZ4_ACCELERATION=4$")
+        self.assertRegex(
+            DM, r"static unsigned int swapz_delta64_lz4_acceleration = 4U;")
+        self.assertIn("PRODUCTION_DELTA64_LZ4_ACCELERATION = 4",
+                      (ROOT / "tests/tools/run-tests.py").read_text())
         self.assertNotRegex(benchmark, r"(?m)^PARALLEL_READS=")
         self.assertNotIn("DELTA64_PARALLEL_READS", benchmark)
         self.assertNotIn("$DELTA64_PREPARE_WORKERS", benchmark)

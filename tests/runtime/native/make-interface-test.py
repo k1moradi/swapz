@@ -248,7 +248,8 @@ class PublicMakeContract(unittest.TestCase):
                     "physical_write_reqs": 5,
                     "lz4_acceleration": 1,
                     "delta64_rescue": runner_contract.PRODUCTION_DELTA64_RESCUE,
-                    "delta64_lz4_acceleration": 1,
+                    "delta64_lz4_acceleration":
+                        runner_contract.PRODUCTION_DELTA64_LZ4_ACCELERATION,
                     "delta64_prepare_workers": 1,
                     "write_pipeline_depth": 1,
                     "pipeline_active_max": 1 if mode else 0,

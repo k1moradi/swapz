@@ -25,7 +25,8 @@ ASYNC_PREPARE=0
 # Production module default; --no-delta64-rescue pins LZ4-only control arms.
 DELTA64_RESCUE=1
 DELTA64_POSITIVE_EXPERIMENT=0
-DELTA64_LZ4_ACCELERATION=1
+# Production module default for the delta64-only second LZ4 pass.
+DELTA64_LZ4_ACCELERATION=4
 READ_COALESCE=1
 INVALIDATE_CACHE_ON_WRITE_ADMIT=0
 WRITE_ONLY_QD=0

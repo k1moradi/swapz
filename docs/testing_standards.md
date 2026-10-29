@@ -487,8 +487,10 @@ counters themselves do not establish a performance gain.
   before return/commit, including an error after a validated shared-extent page.
 - **ID67 predictive rescue:** rescue is default-on by owner decision; the
   paired A/B off arm pins `--no-delta64-rescue`. The second LZ4 pass
-  has a separate read-only `delta64_lz4_acceleration` control, default 1. The
-  standard rescue A/B fixes that control at 4 in both arms so rescue remains the
+  has a separate read-only `delta64_lz4_acceleration` control, default 4 (the
+  value the A/B qualified; `PRODUCTION_DELTA64_LZ4_ACCELERATION` in the
+  reporter). Standard sessions run that default. The standard rescue A/B fixes
+  that control at 4 in both arms so rescue remains the
   only changed policy while testing whether lower second-pass CPU cost closes
   the idle-SSE2 service regression. RAW or >2024-byte LZ4 baselines use
   threshold 24 and require a strictly smaller candidate. A
@@ -2099,7 +2101,7 @@ runtime selector plus ten-session loaded 1/4 A/B are retired. The fixed ordinary
 acceleration is not stored per target; status emits the compile-time policy
 value. The deterministic native 1/2/3/4 sweep remains only as low-cost
 codec/geometry regression evidence; it is not a promotion gate. Delta64's
-second LZ4 acceleration is a separate opt-in rescue policy and remains
+second LZ4 acceleration is a separate rescue policy (default 4) and remains
 independently qualified.
 
 Source-contract qualification must pin the safety boundaries of the optimized
