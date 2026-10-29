@@ -228,6 +228,9 @@ def render(data):
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10,
                          "axes.spines.top": False, "axes.spines.right": False})
     charts = {
+        "mixed-throughput": ("Absolute useful WRITE service (decimal MB/s)",
+                             [("raw_write_mbps", "Raw WRITE", "#777777", "--"),
+                              ("swapz_write_mbps", "Swapz WRITE", "#1764ad", "-")]),
         "mixed-service": ("Useful mixed READ/WRITE gain versus raw (%)",
                           [("write_mbps_gain_pct", "Useful WRITE", "#1764ad", "-"),
                            ("read_mbps_gain_pct", "Useful READ", "#d67d18", "--")]),
@@ -258,15 +261,21 @@ def render(data):
             if rows:
                 latest = rows[-1].get(metrics[0][0])
                 if latest is not None:
-                    ax.text(.98, .03, f"Latest {latest:+.1f}%", transform=ax.transAxes,
+                    caption = (f"Raw {rows[-1]['raw_write_mbps']:.1f}; "
+                               f"swapz {rows[-1]['swapz_write_mbps']:.1f} MB/s"
+                               if filename == "mixed-throughput" else f"Latest {latest:+.1f}%")
+                    ax.text(.98, .03, caption, transform=ax.transAxes,
                             ha="right", color=metrics[0][2], fontweight="bold")
         fig.suptitle("ARM64 / NEON VM · " + title, fontsize=17, fontweight="bold")
         fig.text(.5, .935, f"{total} passing reports · {data['reports'][0]['date'][:10]} to "
                  f"{data['reports'][-1]['date'][:10]} · latest source {data['reports'][-1]['source_sha'][:7]}",
                  ha="center", fontsize=10, color="#555555")
         fig.supxlabel("Qualified report sequence · oldest to newest · source/report SHA mapping in CSV", y=.075)
-        fig.text(.5, .025, "Async mixed; delta64 on/off shown separately · 0% = raw parity · positive = improvement\n"
-                 "Ratios of matched-arm means; panel scales differ. READ is mixed-load service. Line breaks = kernel/model/workload changes.\n"
+        scale_note = ("Absolute decimal MB/s; higher is better for both raw and swapz"
+                      if filename == "mixed-throughput" else
+                      "0% = raw parity · positive = improvement")
+        fig.text(.5, .025, "Async mixed; delta64 on/off shown separately · " + scale_note + "\n"
+                 "Matched-arm means; panel scales differ. READ is mixed-load service. Line breaks = kernel/model/workload changes.\n"
                  "Historical host load varies; ratios are descriptive, not causal gains or physical NAND wear evidence.",
                  ha="center", fontsize=9, color="#555555")
         fig.tight_layout(rect=(0, .10, 1, .94))
@@ -339,11 +348,13 @@ def main():
                 f"{value:+.1f}%" if value is not None else "unavailable" for value in values) + " |")
     summary.extend(["", "Plots and source data:", ""] +
                    [f"- [{name}]({OUT / name})" for name in
-                    ("mixed-service.png", "mixed-latency.png", "lower-write-savings.png",
+                    ("mixed-service.png", "mixed-throughput.png", "mixed-latency.png", "lower-write-savings.png",
                      "sustained-write.png", "history.csv", "history.json")])
     (OUT / "index.md").write_text("\n".join(summary) + "\n")
     print(json.dumps({"reports": len(data["reports"]), "points": len(data["points"]),
-                      "excluded": data["excluded"], "output": str(OUT)}))
+                      "excluded": data["excluded"], "output": str(OUT),
+                      "latest_source": data["reports"][-1]["source_sha"],
+                      "latest_report": data["reports"][-1]["report_sha"]}))
 
 
 if __name__ == "__main__":

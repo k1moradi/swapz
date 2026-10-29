@@ -7387,6 +7387,33 @@ def publish(source_sha):
     return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
 
+def refresh_history():
+    """Refresh local committed ARM64 evidence after report publication.
+
+    Plot availability is separate from device/source qualification. Failure is
+    visible in stdout and a local log; it must not rewrite the benchmark verdict.
+    """
+    output = ROOT / "build/history"
+    log = output / "refresh.log"
+    env = os.environ.copy()
+    env["MPLBACKEND"] = "Agg"
+    env.setdefault("MPLCONFIGDIR", str(output / "matplotlib-cache"))
+    try:
+        output.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "tests/tools/plot-history.py")],
+            cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+        log.write_text(proc.stdout + proc.stderr)
+        if proc.returncode:
+            return f"NOT UPDATED: history helper failed; see {log.relative_to(ROOT)}"
+        summary = json.loads(proc.stdout)
+        source = summary["latest_source"]
+        return (f"UPDATED: {summary['reports']} ARM64/NEON PASS reports; latest source "
+                f"{source[:12]}; build/history/arm64-neon/index.md")
+    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
+        return f"NOT UPDATED: {type(error).__name__}; inspect local history before use"
+
+
 def qualification_overall(exit_code, stages):
     if not exit_code:
         return "PASS"
@@ -7501,6 +7528,7 @@ def main():
     print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
     notice = publish(result["tested_commit_sha"])
     print(f"  Git result: {notice}", flush=True)
+    print(f"  History plots: {refresh_history()}", flush=True)
     return exit_code
 
 

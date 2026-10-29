@@ -2346,3 +2346,15 @@ contract: private loaded helpers are invoked through `bash` inside `timeout`, no
 executed directly. Their Git executable bit is not an authorization or safety
 boundary. A watchdog refactor must not silently turn a readable private helper
 into an `EACCES` failure before its own validation and cleanup can run.
+
+### Automatic historical artifacts
+
+After report publication, `make test` refreshes the local ARM64/NEON seven-CPU
+history from committed PASS reports using the installed Python Matplotlib.
+It prints the latest plotted source and the local index path. Failed/blocked,
+uncommitted and other-host runs never become ARM64 performance points. Plot
+failure prints `NOT UPDATED` and diagnostics separately from the qualification
+verdict; it cannot turn a failed device gate into a pass or hide a passed gate.
+Keep the absolute raw/swapz useful-WRITE MB/s chart alongside relative gains so
+a changing raw control cannot masquerade as a product speed change. Previously
+rendered chat images are snapshots; refreshed files live under the stable index.

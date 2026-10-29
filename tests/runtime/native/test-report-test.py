@@ -1142,6 +1142,33 @@ class ReportContract(unittest.TestCase):
         sustained["benchmarks"]["write_saturation_sessions"].append(mixed)
         self.assertEqual(len(history.report_points(sustained)), 1)
 
+    def test_history_refresh_executes_after_publication_without_changing_verdicts(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = root / "tests/tools/plot-history.py"
+            helper.parent.mkdir(parents=True)
+            helper.write_text(
+                "from pathlib import Path\n"
+                "Path('build/history/marker').write_text('refreshed')\n"
+                "print('{\"reports\": 54, \"latest_source\": \"abcdef0123456789\"}')\n")
+            with patch.object(runner, "ROOT", root):
+                result = runner.refresh_history()
+                self.assertIn("UPDATED: 54 ARM64/NEON PASS reports", result)
+                self.assertIn("abcdef012345", result)
+                marker = root / "build/history/marker"
+                self.assertEqual(marker.read_text(), "refreshed")
+                helper.write_text("raise SystemExit('matplotlib unavailable')\n")
+                self.assertTrue(runner.refresh_history().startswith("NOT UPDATED:"))
+                self.assertIn("matplotlib unavailable",
+                              (root / "build/history/refresh.log").read_text())
+                self.assertEqual(marker.read_text(), "refreshed")
+                helper.write_text("print('invalid summary')\n")
+                self.assertTrue(runner.refresh_history().startswith("NOT UPDATED:"))
+        main = (ROOT / "tests/tools/run-tests.py").read_text().split("def main():", 1)[1]
+        self.assertLess(main.index("notice = publish("), main.index("refresh_history()"))
+
     def test_vm_history_lines_break_at_workload_changes_and_missing_reports(self):
         spec = importlib.util.spec_from_file_location(
             "swapz_history_lines", ROOT / "tests/tools/plot-history.py")
