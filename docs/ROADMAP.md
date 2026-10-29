@@ -380,31 +380,81 @@ A new SWZ representation/format requires its own independent justification,
 compatibility rules and measured admission gate. If interoperability is not
 worth the complexity, retain the Phase B/C outcome.
 
-### Phase E — folio and swap-in locality (independent, no-wait study)
 
-1. Observe, within live upper BIO ownership, ordinary versus large folios,
-   candidate folio index/size, adjacent logical swap pages, and useful
-   grouping lost when the DM upper-BIO limit splits larger submissions.
-   Folio pointers are ephemeral: no unprotected pointer retained across
-   completion, reuse or unrelated writes. On reconstructed zswap-writeback
-   folios, current folio identity need not reflect the original RAM folio.
-2. Determine whether the same-folio pages or nearby logical offsets actually
-   swap back in close together. Measure real read-request reduction and
-   cold-read amplification, not just same-burst swap-out arrival.
-3. Only if evidence supports it, test an **already-accepted-window**
-   tie-break: retain the existing byte-minimal, bounded cold-read and
-   extent-count objectives first; prefer nearby indexes in the same folio,
-   then adjacent logical swap pages, then stable ordering **only among
-   equivalent safe layouts**. Never wait for future arrivals, add a block,
-   reorder across a same-page generation or ordering fence, or delay an
-   otherwise dispatchable lower run.
-4. Treat larger upstream BIO admission/group identity as a distinct
-   ownership/completion experiment. It must maintain exact per-page
-   authority and never conflate an upstream folio with one SWZ extent.
+### Phase E — folio locality (ID113: measured cohort correlation)
 
-**E exit gate:** positive measured swap-in locality/read behavior with
-unchanged WRITE dispatch responsiveness, physical block/request budget and
-correctness. Otherwise leave folio and adjacency signals as passive telemetry.
+**Hypothesis.** When real swap WRITEs originate from the same large RAM
+folio, those pages are more likely to cause **nearby lower-device READs**
+than equally adjacent logical swap pages or pages merely admitted together.
+This is unproven; the initial task is source-aware telemetry, not packing.
+The full technical reasoning, kernel-version distinctions and identity
+model are in [context.md](context.md).
+
+**E1 — pin the source and identify the WRITE observation boundary.**
+Reinspect the installed kernel and the relevant upstream release before
+assuming the shape of a swap BIO. The audited Ubuntu 7.0.14-based source
+used one block-backed BIO per folio; newer upstream
+`swap_io_ctx` can merge compatible folios. Swapz's current 4KiB split
+retains bvec page references and can already observe compound folio
+membership. Do not make larger upper BIOs a prerequisite. Keep the
+original upstream BIO-group token, if later desired, as a distinct
+kernel-interface proposal.
+
+**E2 — collect bounded WRITE-cohort observations.** While a write
+window owns its accepted BIOs, inspect page/folio identity, folio order
+and position of each 4KiB slice in that folio. Group pages from a
+single safely observed source folio into a **window-local cohort**;
+also retain comparison controls for logical adjacency and arrival order.
+No persistent folio pointer, added reference extending the RAM's life
+through swap-in, unbounded allocation or new SWZ metadata is allowed.
+Ordinary ownership, fences and publication stay unchanged.
+
+**E3 — correlate through authority, not READ folio identity.**
+Maintain a fixed-size, volatile cache of
+`(logical_page, successfully_committed_generation) -> cohort_id`.
+Publish associations **only after** the lower write succeeds and mapping
+authority commits; handle overwrite, generation changes, DISCARD, slot
+reuse, failed/partial writes, GC relocation and cache eviction without
+stale attribution. Cache absence is unknown; generation mismatch must
+never match. A later target READ uses its **current authoritative
+logical page/generation** to look up the WRITE cohort; its destination
+folio may be a new allocation and is not compared to the earlier WRITE
+folio. Cohort records are telemetry only, never a correctness dependency.
+
+**E4 — test whether the signal predicts real lower READ co-access.**
+Measure timing and sequences of later **backing** READs attributed to
+each known cohort, with controls for logical adjacency, arrival order,
+compression length and read readahead. Separate observable demand
+READs from speculative readahead where possible; target-only reads
+cannot see swap-cache or zswap hits and must not be described as all
+application accesses. Report cohort coverage/evictions, false/stale
+lookup prevention, hit-rate denominators, time windows, conditional
+co-access lift over controls and independent lower READ bytes/requests.
+Existing `series_thp()` tests validate THP-backed I/O handling only:
+they are **not** evidence of swap-in correlation.
+
+**E5 — consider one geometry-preserving layout candidate only if
+E4 is positive.** The current greedy largest-plus-partner ordering
+precedes a DP planner that optimizes the supplied record length sequence.
+Do **not** generally sort the whole window by folio before DP. The first
+candidate may permute **only compressed records with exactly equal encoded
+lengths after greedy ordering**, under the already-accepted independent
+window and the existing fences. Verify whole-window equality of physical
+bytes, bounded cold-read cost, extent count, exact extent classes, lower
+run splits/requests, segment alignment padding and segment-tail waste.
+Account for any extra CPU/planner cost. Reorder neither RAW nor
+different-length records in this first candidate. Never wait for a
+future cohort member or postpone an otherwise dispatchable lower WRITE.
+
+**ID113 exit gate:** a bounded, generationally safe correlation cache
+with no held original folios; native/safe loaded correctness of stale
+entry and publication cases; and evidence that same-folio membership
+predicts later backing READ co-access **beyond adjacency and arrival
+order**. Only then may the separately gated equal-length placement
+policy be evaluated. Promotion requires preserved byte-exact readback,
+zero new order/authority violations, no lower dispatch delay, and no
+increase in physical runs, bytes, padding or cold-read amplification.
+Otherwise retain observational telemetry or close the idea as refuted.
 
 ### Qualification and integration constraints
 

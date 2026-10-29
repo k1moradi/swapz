@@ -79,8 +79,18 @@ independently reconstructible 4KiB logical page as swapz's authority unit:
 a folio, process, VMA or allocator object is not an SWZ record/extent identity.
 
 Packing locality may only break ties among **already accepted**, authority-
-safe layouts with equal lower-byte, bounded cold-read and extent-count cost.
-Never wait for future work or weaken work-conserving dispatch for locality.
+safe layouts. Folio identity belongs to the WRITE-side owned BIO lifetime:
+never retain a source folio pointer/reference until a later READ or compare it
+with the destination READ folio. Any optional WRITE-to-READ correlation uses a
+bounded, volatile, generation-checked `(logical_page, committed_generation)`
+cohort association; stale/unknown mappings must not influence correctness.
+
+A first placement candidate may permute only **equal encoded-length compressed
+records after the existing greedy ordering**, never a blanket folio-first sort.
+It must prove whole-window equivalence: lower bytes, bounded cold-read cost,
+extent count, physical run splits/requests, segment alignment holes and tail
+waste. Preserve authority publication and same-page/fence constraints. Never
+wait for future work or weaken work-conserving dispatch for locality.
 
 A zswap-origin compression bypass must depend on an explicit end-to-end
 semantic handoff surviving BIO cloning/splitting; `REQ_SWAP`,

@@ -534,6 +534,40 @@ A CPU/throughput win with materially greater lower-device traffic is a
 tradeoff, not automatic qualification. Locality-aware layout remains
 telemetry-only until measured swap-in correlation justifies the tie-break.
 
+### Folio-locality observation and packing qualification (ID113)
+
+The [context.md](context.md) WRITE-cohort identity and Linux-version caveats
+are required background. This is **not** an existing performance claim.
+Do not confuse the direct-I/O `series_thp()` compound-backing regression
+with actual anonymous swap/folio locality.
+
+Native/source and safe owned-RAM loaded fixtures must check bounded source
+folio observations only during owned WRITE BIO lifetimes, no retained folio
+pointers/references to swap-in, and cache association exclusively after
+confirmed mapping publication. Exercise overwrite, DISCARD, generation/slot
+reuse, failed/partial/uncertain lower I/O, GC relocation, suspend/drain
+and bounded cache eviction; every stale or missing cohort lookup must be
+unknown, never a correctness input. Prove one completion owner and no
+change in authority, bytes, publication order or output without enabling
+any locality policy.
+
+Any subsequent actual-swap correlation claims require separately
+authorized safe kernel-swap qualification, including a fixed kernel source,
+observed backing READ timing, comparison with logical adjacency and
+arrival order, cache coverage, and readahead / swap-cache / zswap effects.
+Target-only READ observations measure backing co-access, not all user
+faults. The current THP transfer-buffer tests cannot establish it.
+
+If an equal-length permutation policy is proposed, direct production-C
+planner/source tests must compare the **entire resulting physical run**:
+same encoded-length sequence, lower bytes, cold-read cap, extent classes,
+extent count, physical run count/splits and requests, alignment padding,
+segment-tail waste, read CRC/generation correctness and CPU/dispatch cost.
+Reject any candidate that delays an otherwise dispatchable WRITE, adds
+extra blocks/requests or crosses a same-page/barrier dependency. No
+alternative test entrypoint; `make test` remains the official qualification
+command and `make fast_test` remains development-only.
+
 Source contracts should assert retained scheduling semantics rather than a
 particular obsolete branch spelling: retained writes must reach the ordered
 worker immediately, while retention-off ordinary writes retain zero-delay

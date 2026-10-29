@@ -150,11 +150,28 @@ swap-out, zswap rejection and zswap writeback.
 
 Current swapz limits upper requests with
 `dm_set_target_max_io_len(ti, SWAPZ_SECTORS)` and validates ordinary
-READ/WRITE BIOs as exactly one 4KiB logical page. Upstream Linux can merge
-multiple swap folios into a larger BIO; splitting at the DM boundary may lose
-the original grouping. A bvec's compound-page flag may remain observable,
-but does not recover a persistent original swap grouping, especially if folios
-were split or newly allocated for writeback.
+READ/WRITE BIOs as exactly one 4KiB logical page. **Splitting changes the BIO
+boundary but does not erase its backing `struct page` references**. Existing
+`swapz_map()` inspection can detect compound/large-folio backing and bvec
+offsets after that split. Larger upper BIO admission is therefore **not a
+prerequisite** for observing same-folio membership among accepted WRITE pages.
+The split *does* lose the original multi-folio BIO-group token (if one existed)
+and does not preserve a safe identity for later swap-in comparison.
+
+The upstream block-backed swap BIO shape is **kernel-version dependent**.
+Linux `v7.0` `mm/page_io.c:swap_writepage_bdev_sync()` and
+`swap_writepage_bdev_async()` construct one BIO from one folio (which itself
+may be large). The later `master` implementation inspected at
+`c339f4010dea8b0d754f84ace70cd1b089878ef8` uses
+`swap_io_ctx`/`swap_add_folio()` to merge compatible folios into one BIO.
+Do not attribute the newer multi-folio upstream batching behavior to v7.0,
+or conclude from v7.0 that a large folio can never contain several base pages.
+The reported development host in the related source audit was an Ubuntu
+7.0.14-based kernel; revalidate the specific build before coding against
+either upstream implementation.
+
+- [v7.0 block-backed folio BIO construction](https://github.com/torvalds/linux/blob/v7.0/mm/page_io.c)
+- [newer upstream multi-folio swap I/O](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/page_io.c)
 
 Swapz records independent 4KiB logical pages and maps them to its own 4/8/16KiB
 physical SWZ extents. Compressed extents contain a header and one or more
@@ -267,24 +284,155 @@ explicit, semantically reliable "compression was tried and ineffective" reason
 could justify skipping swapz compression on that basis. "Zswap failed to
 retain" alone is not enough.
 
-## 7. Physical locality versus logical locality
+## 7. Folio locality: source identity, READ correlation and packing
 
-Promising but non-authoritative hints for pages likely to be read together
-include (in rough order): same **current large folio** and nearby base-page
-indexes; adjacent **logical swap offsets** (also used by swap readahead);
-compatible folios delivered in one upstream swap BIO; and arrival in the
-same reclaim burst. Same-folio identity and original BIO grouping can be
-weakened/lost through splitting, allocation and writeback. Swap-out proximity
-does **not** guarantee swap-in proximity.
+The **research hypothesis** is that certain WRITE-time page cohorts predict
+subsequent backing-device READ co-access beyond simpler controls such as
+adjacent swap offsets and arrival order. A cohort is a *volatile observation*
+about pages seen during an already-accepted WRITE window, not a new object,
+storage record, swap entry, ownership class or required page grouping.
 
-Locality can only be used on already-accepted independent writes. An
-immediately dispatchable lower run must not wait for more pages, and grouping
-must not violate same-page generations, upper ordering, fences, CRC, GC
-authority or completion ownership. Between equally economical layouts,
-locality can be a final tie-break; it cannot justify extra physical blocks
-or a larger cold-read cost by itself. Actual swap-in clustering, cold-read
-amplification and lower request counts determine whether the hint is useful.
+### 7.1 WRITE and READ folios are not the same identity
 
-The operational proposal and evidence gates for zswap origin and locality are
-in [ROADMAP.md](ROADMAP.md); this document intentionally contains no historical
-trial chronology, benchmark winners or task queue.
+A WRITE BIO may reference a page belonging to original RAM folio A. After its
+data has been swapped and the source RAM reclaimed, a later swap-in may
+allocate a **different destination folio B**. A page-table fault can also hit
+swap cache or zswap without a backing READ at all. Comparing
+`page_folio(write_page) == page_folio(read_page)`, retaining the original folio
+pointer until a READ, or treating a physical folio pointer as a persistent
+identifier is incorrect. Keeping a reference to the original folio for later
+correlation could defeat the memory reclamation being studied.
+
+The robust association is through **logical swapz page and successfully
+committed generation** (and safe map identity/epoch when the authority changes):
+
+```text
+WRITE source folio A
+    -> accepted 4KiB logical page L
+    -> committed generation G
+    -> observation cohort C
+
+Later backing READ of logical page L
+    -> resolve CURRENT authoritative generation G
+    -> optional volatile lookup (L,G) -> cohort C
+    -> READ destination folio B is irrelevant to cohort identity
+```
+
+Linux's swap-cache allocation path explicitly allocates a folio for a swap
+entry when a suitable folio is not already cached. In v7.0 this path is
+`mm/swap_state.c:swap_cache_alloc_folio()`. The WRITE-time folio pointer is
+therefore **not** a key for READ correlation.
+
+### 7.2 Capture a cohort without retaining application RAM
+
+During a live upper WRITE BIO, swapz may observe
+`page_folio(bvec.bv_page)`, the current folio's order/size and the base-page
+index inside the folio. Those observations are valid only during owned
+access to the page; folios can split, be migrated, freed or reused. For
+segmented BIOs, bvec offsets and 4KiB logical-page boundaries need explicit
+handling. Identical folio pointers within a *single safely observed window*
+can support a provisional same-folio cohort, but pointers must not become a
+persistent key, and their reuse must not create false cross-window matches.
+
+One bounded correlation design is:
+
+1. While a WRITE window is owned and complete source bvecs remain valid,
+   assign a bounded window-local cohort token to pages observed in the same
+   folio, together with their offsets/indexes and logical page IDs. Also
+   record independent controls for logical adjacency and WRITE arrival order.
+2. Do **not** publish cohort metadata for a speculative, failed, partial or
+   uncommitted mapping. Only upon confirmed lower completion and serialized
+   publication associate the authoritative `(logical_page, generation)`
+   with that cohort token.
+3. Keep association in a fixed-size, generation-checked volatile lookup cache,
+   not in SWZ bytes or a correctness-critical mapping. Overwrite,
+   DISCARD, slot reuse, generation change and stale publication invalidate or
+   supersede associations. For GC relocation, either preserve an association
+   only after verified matching authority/generation or invalidate it.
+4. A cache eviction or missing entry means **unknown**, not a negative
+   locality observation. Never use a generation-mismatched or unverified
+   entry. Bound the lookup and cleanup cost, and leave the storage authority
+   usable without this cache.
+5. On a later backing READ, validate the current authoritative logical page
+   and generation before attributing it to cohort C. The destination READ
+   folio and the thread requesting it do not establish original ownership.
+
+This can be done without enlarging the supported 4KiB upper BIO size. Original
+upstream BIO membership, if needed, is an **additional** hint that requires a
+deliberate propagation token; splitting alone does not erase source bvecs.
+
+### 7.3 Kernel-version dependency and what READ observations mean
+
+The block-backed swap I/O path differs across upstream releases:
+
+- [Linux v7.0 `mm/page_io.c`](https://github.com/torvalds/linux/blob/v7.0/mm/page_io.c)
+  submits one folio per block-backed BIO; a folio may span multiple 4KiB pages.
+- [Newer Linux swap I/O](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/page_io.c)
+  can merge compatible folios within a `swap_io_ctx`.
+
+These are different sources of potential batching/locality evidence. Verify
+the actual running kernel's source and DM split behavior rather than assuming
+both models coexist in one version.
+
+A READ seen by swapz is a **backing READ**, not necessarily a user page fault:
+Linux supports clustered swap readahead and VMA-based readahead. It may read
+several pages speculatively, and many real accesses may be served from swap
+cache or zswap without reaching swapz. Target-only READ sequences thus
+measure *lower-I/O co-access* and cannot prove exact application-level
+memory-access locality. A study of real fault/access locality additionally
+needs properly scoped upstream fault/readahead observations.
+
+- [Linux v7.0 swap-cache allocation and readahead](https://github.com/torvalds/linux/blob/v7.0/mm/swap_state.c)
+
+### 7.4 Separate genuine folio evidence from synthetic buffer tests
+
+Swapz's existing `tests/tools/device-roundtrip.c:series_thp()` maps a
+2MiB `MADV_HUGEPAGE` transfer buffer, then performs logical I/O through it.
+That proves compound-backed buffer admission and byte-exact behavior; it does
+**not** prove that real swapped anonymous application pages shared their
+original folio, nor that they will swap in together. Likewise, seeing pages
+arrive in one reclaim burst is not proof of correlated later faults.
+
+Useful controls for any correlation result include equal logical adjacency,
+arrival order, page compression size and content, read sequence timing, swap
+readahead mode, upper cache hits and whether a target-visible READ was a
+verified demand read or speculative readahead where such a distinction is
+observable. Treat high cache-miss/eviction rates as unknown coverage rather
+than manufacturing a stronger effect from a biased surviving sample.
+
+### 7.5 Equal-cost placement requires a whole-run geometry proof
+
+The current [swapz greedy ordering](../src/kernel/dm-target.c) pairs
+size-complementary compressed records before the
+[bounded extent dynamic-programming planner](../src/kernel/engine.c)
+optimizes the **given sequence**. Pre-sorting by folio identity is unsafe as
+a blanket policy: a different length sequence can change record packing,
+cold-read cost, extent classes, run boundaries, segment alignment holes,
+tail waste or physically dispatched requests.
+
+The strongest **first candidate** is to consider swapping only **compressed
+records with identical encoded lengths**, *after* existing greedy ordering
+has already fixed the sequence. This preserves the encoded-length sequence
+seen by the planner. It is still a hypothesis, not an automatic geometry
+proof: representation/encoding and other attributes, same-page ordering,
+extent placement, segment crossings, lower-run splits, read cost, physical
+padding and allocator waste must remain equivalent.
+
+Any policy must verify the **whole window and resulting physical run(s)**,
+not just a reported sum of bytes/cold-read cost/extent count. Compare actual
+pre-/post-geometry including physical request count, alignment holes and
+segment-tail waste. Never increase planner cost, dispatch latency or lower
+traffic merely to co-locate a folio cohort. Never wait for a future page.
+
+### 7.6 Scope of a positive result
+
+A positive result would mean that WRITE-time folio cohorts predict **later
+backing READ co-access** after controlling for logical adjacency and arrival
+order. It would not establish one application object per physical extent,
+accurate user fault proximity, or free compression/CPU cost. If the signal is
+weak or masked by readahead/cache hits, retain passive telemetry and the
+current byte-minimal, work-conserving placement.
+
+The staged measurement and tie-break experiment is tracked as **ID113** in
+[ROADMAP.md](ROADMAP.md); this context file intentionally contains no
+experiment chronology or task history.
