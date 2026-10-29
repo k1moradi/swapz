@@ -1030,6 +1030,9 @@ def safe_lines(log):
 def parse_loaded_correctness(output):
     """Parse fixed, non-identifying owned-RAM correctness evidence."""
     patterns = {
+        "raw_read": re.compile(
+            r"PASS_LOADED_RAW_READ_FANOUT=profiles:(\d+) verified_pages:(\d+) "
+            r"async_batches:(\d+) lower_read_reqs:(\d+)$"),
         "oracle": re.compile(
             r"PASS_LOADED_ORACLE_PROFILE=raw_pages:(\d+) zero_pages:(\d+) "
             r"flush_calls:(\d+)$"),
@@ -1087,6 +1090,11 @@ def parse_loaded_correctness(output):
         return {"overall": "INCOMPLETE",
                 "reason": "missing loaded correctness markers: " + ",".join(missing)}
 
+    raw_read_profiles, raw_read_pages, raw_read_batches, raw_read_reqs = found["raw_read"]
+    if (raw_read_profiles != 2 or raw_read_pages != 2048 or
+            raw_read_batches <= 0 or raw_read_reqs <= 0):
+        return {"overall": "INCOMPLETE",
+                "reason": "RAW/mixed asynchronous READ evidence is incomplete"}
     raw_pages, zero_pages, flush_calls = found["oracle"]
     (gc_victims, gc_rotations, gc_pages, gc_read_bytes, gc_write_bytes,
      gc_read_reqs, gc_write_reqs, gc_distinct_victims,
@@ -1174,6 +1182,10 @@ def parse_loaded_correctness(output):
                 "reason": "ID36 low-RAM/heavy-CPU evidence is incomplete"}
     return {
         "overall": "PASS",
+        "raw_read_profiles": raw_read_profiles,
+        "raw_read_verified_pages": raw_read_pages,
+        "raw_read_async_batches": raw_read_batches,
+        "raw_read_lower_requests": raw_read_reqs,
         "raw_pages": raw_pages,
         "zero_pages": zero_pages,
         "flush_calls": flush_calls,

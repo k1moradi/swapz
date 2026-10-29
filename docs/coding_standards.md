@@ -1623,3 +1623,15 @@ exactly to `accepted_work_lower_idle_ns`. The separate
 publication hold after lower completion when accepted WRITE work is already
 waiting; it is intentionally not part of that four-way conservation identity.
 All idle attribution is observational and must never change scheduling policy.
+
+### RAW READ fan-out
+
+The existing eight private READ slots may serve independent authoritative RAW
+pages as one-block reads, under the same staged/in-flight/earlier-queued-WRITE
+and fence checks as compressed records. Keep RAW out of SWZ adjacent coalescing,
+header decoding and cache prime/seed/absorb. Reset the slot representation on
+reuse, join every submitted lower operation before reuse, and verify each RAW
+page through the authoritative CRC before copying it to an upper BIO. Callbacks
+report lower completion only; the ordered worker retains completion and mapping
+ownership. Merge read accounting once on success and failure. No extra READ
+workers, buffers, RAW cache or lower-WRITE depth is authorized by this path.

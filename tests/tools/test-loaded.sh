@@ -117,6 +117,15 @@ cleanup_shared_plan() {
     done
     rm -f -- "$shared_plan/delta64/fixture.bin"         "$shared_plan/delta64/fixture.json"         "$shared_plan/delta64/plan-write-qd32/trace.jsonl"         "$shared_plan/delta64/plan-write-qd32/manifest.json"
     rmdir -- "$shared_plan/delta64/plan-write-qd32"         "$shared_plan/delta64" 2>/dev/null || true
+    for content in entropy balanced; do
+        rm -f -- "$shared_plan/raw-read-$content/fixture.bin" \
+            "$shared_plan/raw-read-$content/fixture.json" \
+            "$shared_plan/raw-read-$content/plan/trace.jsonl" \
+            "$shared_plan/raw-read-$content/plan/manifest.json" \
+            "$shared_plan/raw-read-$content/run.log"
+        rmdir -- "$shared_plan/raw-read-$content/plan" \
+            "$shared_plan/raw-read-$content" 2>/dev/null || true
+    done
     rmdir -- "$shared_plan/plan" "$shared_plan" 2>/dev/null || true
 }
 trap cleanup_shared_plan EXIT
@@ -182,6 +191,63 @@ assert fixture["raw_pages"] == 0
 assert 2200 <= fixture["lz4_min_accepted_payload_bytes"]
 assert fixture["lz4_max_accepted_payload_bytes"] <= 2450
 PY
+
+# Exercise the RAW-aware slots on cold reads as a correctness gate, separate
+# from the fixed medium performance matrix. The balanced case also decodes SWZ.
+printf '%s\n' 'START_LOADED_RAW_READ_FANOUT'
+for content in entropy balanced; do
+    raw_plan="$shared_plan/raw-read-$content"
+    mkdir -p "$raw_plan"
+    weights=entropy=100
+    [[ $content == balanced ]] && weights=medium=50,entropy=50
+    python3 -B tests/runtime/benchmark/anon-page-fixture.py \
+        --output-prefix "$raw_plan/fixture" --pages 128 \
+        --seed 0x51a0a9 --weights "$weights" >/dev/null
+    python3 -B tests/runtime/benchmark/io-replay.py prepare \
+        --fixture "$raw_plan/fixture.bin" --output-dir "$raw_plan/plan" \
+        --logical-pages 1024 --writer-pages 256 --reader-start 512 \
+        --reader-pages 256 --qd 32 --read-pct 25 \
+        --warmup-ops 128 --measure-ops 2048 --iops 0 >/dev/null
+    if run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh \
+        --validated-source "$tested_source" --run-owned-ram-pair \
+        --profile medium --retain-ms 2 --unpaced --lower-mbps 80 \
+        --hw-queue-depth 64 --completion-nsec 150000 --async-prepare \
+        --shared-plan "$raw_plan" >"$raw_plan/run.log" 2>&1; then
+        :
+    else
+        rc=$?
+        tail -n 12 "$raw_plan/run.log"
+        exit "$rc"
+    fi
+done
+python3 -B - "$shared_plan/raw-read-entropy/run.log" \
+    "$shared_plan/raw-read-balanced/run.log" <<'PYRAW'
+import json
+import sys
+from pathlib import Path
+pages = batches = requests = 0
+for path in sys.argv[1:]:
+    arms = {}
+    for line in Path(path).read_text().splitlines():
+        if not line.startswith('{'):
+            continue
+        record = json.loads(line)
+        if record.get('candidate') in ('off', 'swapz'):
+            arms[record['candidate']] = record
+    assert set(arms) == {'off', 'swapz'}
+    for arm in arms.values():
+        assert arm['verdict'] == 'PASS' and arm['verified_pages'] == 1024
+        assert arm['expected_post_sha256'] == arm['verified_post_sha256']
+    actual = arms['swapz']
+    async_batches = actual['kernel_read_path']['parallel_read_async_batches']
+    lower_requests = actual['lower_io']['lower_read_requests']
+    assert async_batches > 0 and lower_requests > 0
+    pages += actual['verified_pages']
+    batches += async_batches
+    requests += lower_requests
+print(f'PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:{pages} '
+      f'async_batches:{batches} lower_read_reqs:{requests}')
+PYRAW
 
 # Two representative delay-modeled RAM-backed environments provide paired
 # write/read evidence. Slow remains a bounded directional control. Fast runs

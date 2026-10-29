@@ -65,6 +65,15 @@ them from performance decisions while preserving byte-exact correctness results
 and all measurements in `build/tests/fast-test/latest.json`. The table prints
 one compact quality status and exclusion reasons; no automatic retry occurs.
 
+Before a source-performance comparison, declare primary endpoints, a practical
+effect threshold, matched inputs, counterbalanced source order and a fixed run
+count. Preserve exact source hashes for dirty development variants. Use paired
+intervals and an appropriate direction test; adjust for the declared comparison
+family when claiming significance across devices/content. Report excluded pairs
+and assumptions. Do not promote a marginal gain/loss from a mean alone, interpret
+an interval crossing zero as equivalence, or keep sampling until significance
+appears. Historical cross-report changes remain descriptive evidence.
+
 These are conservative development screening thresholds, not statistical
 qualification or proof of causality. `SCREENED` means the checks passed, not
 that the host was idle throughout. Timed busy/PSI alone must never reject a run:
@@ -2358,3 +2367,17 @@ verdict; it cannot turn a failed device gate into a pass or hide a passed gate.
 Keep the absolute raw/swapz useful-WRITE MB/s chart alongside relative gains so
 a changing raw control cannot masquerade as a product speed change. Previously
 rendered chat images are snapshots; refreshed files live under the stable index.
+
+### RAW READ slot qualification
+
+Execute the target's actual RAW selection, slot preparation/decode and lower
+completion bodies with the real authority CRC verifier. Reject corrupt/stale
+RAW bytes and invalid geometry, preserve the independence/fence gate, and prove
+RAW completion cannot seed the SWZ cache. Source checks keep cache prime/absorb
+compressed-only and callback ownership unchanged.
+
+The official loaded phase must additionally run byte-exact all-RAW and
+half-RAW/half-compressed QD32 mixed traces on newly owned RAM-backed null_blk,
+verify both complete images, and observe successful asynchronous READ batches
+and lower READ requests. Its mandatory marker is correctness evidence separate
+from the unchanged medium performance matrix; omitting it cannot qualify a run.

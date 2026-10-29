@@ -1173,6 +1173,160 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->authority.in_flight", drain)
         self.assertIn("swapz_fail(ctx, -EUCLEAN)", drain)
 
+    def test_raw_read_slots_verify_authority_and_never_seed_swz_cache(self):
+        import subprocess
+        import tempfile
+
+        def definition(name):
+            match = re.search(r"static\s+(?:int|void|bool)\s+" + name +
+                              r"\s*\([^;]*?\)\s*\{", DM, re.S)
+            self.assertIsNotNone(match)
+            return match.group(0) + body(name) + "}\n"
+
+        start = DM.index("struct swapz_read_slot {")
+        end = DM.index("\n};", start) + 3
+        source = r'''
+/* Execute the real target selection, decode and completion bodies. */
+#include <assert.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include "authority.h"
+#include "engine.h"
+typedef uint8_t u8;
+typedef uint64_t u64;
+#define SWAPZ_SECTORS 8U
+#define REQ_OP_READ 0U
+#define REQ_PREFLUSH 0x10U
+#define REQ_FUA 0x20U
+#define bio_op(bio) ((bio)->op)
+#define READ_ONCE(value) (value)
+struct completion { int done; };
+struct bio { struct { unsigned long bi_sector; } bi_iter; unsigned int op, bi_opf; };
+struct swapz_dm { struct swapz_map *maps; struct swapz_authority authority;
+                 swapz_u32 physical_blocks; };
+static unsigned int engine_reads, seeds, waits, independence_calls;
+static bool independent = true;
+static u64 clock_ns;
+static u64 ktime_get_ns(void) { return ++clock_ns; }
+static u64 swapz_elapsed_ns(u64 a, u64 b) { return b - a; }
+static void wait_for_completion(struct completion *done) { assert(done->done); waits++; }
+static bool swapz_read_can_parallel(struct swapz_dm *ctx, struct bio *bio)
+{ (void)ctx; (void)bio; independence_calls++; return independent; }
+void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
+{ engine->read_cache_valid = 0; }
+int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical,
+                          swapz_u8 *output, swapz_u16 capacity, swapz_u16 *bytes)
+{ (void)engine; (void)logical; (void)output; (void)capacity; (void)bytes;
+  engine_reads++; return -EIO; }
+int swapz_engine_seed_read_range(struct swapz_engine *engine, swapz_u32 start,
+                                swapz_u8 extent, swapz_u8 first, swapz_u8 blocks)
+{ (void)engine; (void)start; (void)extent; (void)first; (void)blocks; seeds++; return 0; }
+void swapz_unpredict_delta64(const void *src, void *dst)
+{ (void)src; (void)dst; assert(false); }
+void swapz_unpredict_delta64_shuf8(const void *src, void *scratch, void *dst)
+{ (void)src; (void)scratch; (void)dst; assert(false); }
+static int LZ4_decompress_safe(const void *src, void *dst, int length, int capacity)
+{ (void)src; (void)dst; (void)length; (void)capacity; assert(false); return -1; }
+/* Insert actual struct swapz_read_slot and target function definitions here. */
+''' + DM[start:end] + "\n" + "\n".join(definition(name) for name in (
+            "swapz_parallel_read_extent_mapped", "swapz_parallel_read_extent",
+            "swapz_read_slot_prepare", "swapz_read_slot_run",
+            "swapz_finish_read_slot_range")) + r'''
+int main(void)
+{
+    struct swapz_map maps[2] = {{0}};
+    swapz_u8 classes[8] = {0};
+    swapz_u16 live[8] = {0};
+    u8 raw[SWAPZ_BLOCK_BYTES], outputs[2 * SWAPZ_BLOCK_BYTES];
+    struct swapz_dm ctx = {.maps = maps, .physical_blocks = 8};
+    struct bio bio = {.bi_iter.bi_sector = 0, .op = REQ_OP_READ};
+    struct swapz_read_slot slot = {.ctx = &ctx};
+    swapz_u32 start;
+    swapz_u8 blocks;
+    unsigned int i;
+
+    for (i = 0; i < sizeof(raw); ++i) raw[i] = (u8)(i * 13 + i / 17);
+    maps[0] = (struct swapz_map){.valid = 1, .raw = 1, .start_block = 3,
+        .extent_blocks = 1, .payload_length = SWAPZ_BLOCK_BYTES,
+        .raw_crc32c = swapz_crc32c_bytes(raw, sizeof(raw)), .generation = 7};
+    classes[3] = 1; live[3] = 1;
+    ctx.authority = (struct swapz_authority){.maps = maps, .logical_pages = 2,
+        .physical_blocks = 8, .extent_classes = classes, .live_records = live};
+    /* RAW never enters compressed coalescing; asynchronous fan-out opts in. */
+    assert(!swapz_parallel_read_extent(&ctx, &bio, &start, &blocks, false));
+    assert(swapz_parallel_read_extent(&ctx, &bio, &start, &blocks, true));
+    assert(start == 3 && blocks == 1 && independence_calls == 1);
+    independent = false;
+    assert(!swapz_parallel_read_extent(&ctx, &bio, &start, &blocks, true));
+    independent = true;
+    bio.bi_opf = REQ_FUA;
+    assert(!swapz_parallel_read_extent(&ctx, &bio, &start, &blocks, true));
+    bio.bi_opf = REQ_PREFLUSH;
+    assert(!swapz_parallel_read_extent(&ctx, &bio, &start, &blocks, true));
+    bio.bi_opf = 0; bio.op = 1;
+    assert(!swapz_parallel_read_extent(&ctx, &bio, &start, &blocks, true));
+    bio.op = REQ_OP_READ; maps[0].extent_blocks = 2;
+    assert(!swapz_parallel_read_extent(&ctx, &bio, &start, &blocks, true));
+    maps[0].extent_blocks = 1; maps[0].start_block = 8;
+    assert(!swapz_parallel_read_extent(&ctx, &bio, &start, &blocks, true));
+    maps[0].start_block = 3;
+
+    slot.engine.read_scratch = raw; slot.raw = true;
+    swapz_read_slot_prepare(&slot, 3, 1);
+    assert(!slot.raw && slot.bio_count == 0);
+    slot.raw = true; slot.bio_count = 2; slot.bios[0] = slot.bios[1] = &bio;
+    slot.read_pages = outputs;
+    memset(outputs, 0, sizeof(outputs));
+    assert(swapz_read_slot_run(&slot) == 0);
+    assert(!memcmp(raw, outputs, sizeof(raw)));
+    assert(!memcmp(raw, outputs + sizeof(raw), sizeof(raw)));
+    assert(engine_reads == 0);
+    /* A corrupt RAW page must fail through the real authority CRC verifier. */
+    raw[101] ^= 1;
+    assert(swapz_read_slot_run(&slot) == -EBADMSG);
+    raw[101] ^= 1;
+    classes[3] = 0;
+    assert(swapz_read_slot_run(&slot) == -EUCLEAN);
+    classes[3] = 1; maps[0].raw = 0;
+    assert(swapz_read_slot_run(&slot) == -ESTALE);
+    maps[0].raw = 1; maps[0].start_block = 4;
+    assert(swapz_read_slot_run(&slot) == -ESTALE);
+    maps[0].start_block = 3;
+    slot.extent_blocks = 2; maps[0].extent_blocks = 2;
+    assert(swapz_read_slot_run(&slot) == -EUCLEAN);
+    slot.extent_blocks = maps[0].extent_blocks = 1;
+
+    /* Lower failure joins once and publishes no successful physical work. */
+    slot.lower_done.done = 1; slot.lower_submitted = true; slot.lower_error = -EIO;
+    slot.lower_blocks = 1; slot.lower_start_ns = 1; slot.lower_end_ns = 3;
+    assert(swapz_finish_read_slot_range(&slot) == -EIO);
+    assert(!slot.lower_submitted && !slot.physical_read_reqs && seeds == 0);
+    slot.lower_submitted = true; slot.lower_error = 0;
+    assert(swapz_finish_read_slot_range(&slot) == 0);
+    assert(slot.physical_read_reqs == 1 && slot.physical_read_bytes == 4096);
+    assert(seeds == 0 && waits == 2);
+    slot.raw = false; slot.lower_submitted = true;
+    assert(swapz_finish_read_slot_range(&slot) == 0 && seeds == 1);
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / "probe.c").write_text(source)
+            subprocess.run(["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+                            "-I", str(ROOT / "src/kernel"), str(path / "probe.c"),
+                            str(ROOT / "src/kernel/authority.c"),
+                            str(ROOT / "src/kernel/codec.c"), "-o", str(path / "probe")],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([str(path / "probe")], check=True)
+        concurrent = body("swapz_try_concurrent_read_slots")
+        self.assertRegex(concurrent,
+                         r"if \(!slot->raw\)\s+swapz_engine_prime_read_slot")
+        self.assertRegex(concurrent,
+                         r"if \(!slot->raw\)\s+swapz_engine_absorb_read_slot")
+
     def test_rejected_read_batches_charge_single_bio_quantum(self):
         import subprocess
         import tempfile
