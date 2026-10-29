@@ -552,6 +552,66 @@ five-pair statistical protocols. Physical-device admission remains separately
 blocked.
 
 
+### zswap collaboration qualification
+
+See [context.md](context.md) for Linux swap and zswap code paths and the staged
+[ROADMAP.md](ROADMAP.md) for planned origin and RAW-bypass experiments.
+This is a **future actual-swap gate**, not authorization for `swapon` or
+`swapoff` in today's owned-RAM `null_blk` qualification scope.
+
+Before origin-aware code can promote, source/native fixtures must prove
+explicit origin propagation across simulated BIO split/clone, correct
+unknown-origin fallback, producer-claim/snapshot/RAW atomicity, exact
+one-owner completion, and no compressed result republished after RAW selection.
+Tagged bypass must perform zero ordinary LZ4/delta64 attempts and produce
+byte-exact readback through the existing CRC/generation and GC mapping rules.
+Include duplicate-page ordering, overwrite, DISCARD, PREFLUSH/FUA,
+suspend/drain, fault/uncertain lower completion, and preparation-slot cleanup.
+
+After separate owner authorization for actual kernel swap, loaded tests must
+force and distinguish: zswap accepted with no backing write, initial zswap
+rejection with backing write, and later stored-then-evicted zswap writeback.
+Record tagged-origin counts, attempts skipped, useful throughput/p95/p99,
+CPU/RAM and independently measured lower READ/WRITE bytes/requests against
+matched zswap-enabled control runs; include swap-in and GC effects.
+A CPU/throughput win with materially greater lower-device traffic is a
+tradeoff, not automatic qualification. Locality-aware layout remains
+telemetry-only until measured swap-in correlation justifies the tie-break.
+
+### Folio-locality observation and packing qualification (ID113)
+
+The [context.md](context.md) WRITE-cohort identity and Linux-version caveats
+are required background. This is **not** an existing performance claim.
+Do not confuse the direct-I/O `series_thp()` compound-backing regression
+with actual anonymous swap/folio locality.
+
+Native/source and safe owned-RAM loaded fixtures must check bounded source
+folio observations only during owned WRITE BIO lifetimes, no retained folio
+pointers/references to swap-in, and cache association exclusively after
+confirmed mapping publication. Exercise overwrite, DISCARD, generation/slot
+reuse, failed/partial/uncertain lower I/O, GC relocation, suspend/drain
+and bounded cache eviction; every stale or missing cohort lookup must be
+unknown, never a correctness input. Prove one completion owner and no
+change in authority, bytes, publication order or output without enabling
+any locality policy.
+
+Any subsequent actual-swap correlation claims require separately
+authorized safe kernel-swap qualification, including a fixed kernel source,
+observed backing READ timing, comparison with logical adjacency and
+arrival order, cache coverage, and readahead / swap-cache / zswap effects.
+Target-only READ observations measure backing co-access, not all user
+faults. The current THP transfer-buffer tests cannot establish it.
+
+If an equal-length permutation policy is proposed, direct production-C
+planner/source tests must compare the **entire resulting physical run**:
+same encoded-length sequence, lower bytes, cold-read cap, extent classes,
+extent count, physical run count/splits and requests, alignment padding,
+segment-tail waste, read CRC/generation correctness and CPU/dispatch cost.
+Reject any candidate that delays an otherwise dispatchable WRITE, adds
+extra blocks/requests or crosses a same-page/barrier dependency. No
+alternative test entrypoint; `make test` remains the official qualification
+command and `make fast_test` remains development-only.
+
 Source contracts should assert retained scheduling semantics rather than a
 particular obsolete branch spelling: retained writes must reach the ordered
 worker immediately, while retention-off ordinary writes retain zero-delay

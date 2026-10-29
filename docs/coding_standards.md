@@ -91,6 +91,37 @@ qualified source. This closeout creates no new public test command or publicatio
 Never reboot, `swapon`, `swapoff`, mount test storage, force-remove mappings or touch physical/unowned devices. Loaded development uses only positively owned RAM-backed `null_blk` with exact identity checks and ordinary teardown/quarantine.
 
 
+## MM, folio and zswap semantic boundary
+
+Read [context.md](context.md) for the kernel reclaim/BIO/zswap semantics and
+[ROADMAP.md](ROADMAP.md) for the staged collaboration blueprint. Keep the
+independently reconstructible 4KiB logical page as swapz's authority unit:
+a folio, process, VMA or allocator object is not an SWZ record/extent identity.
+
+Packing locality may only break ties among **already accepted**, authority-
+safe layouts. Folio identity belongs to the WRITE-side owned BIO lifetime:
+never retain a source folio pointer/reference until a later READ or compare it
+with the destination READ folio. Any optional WRITE-to-READ correlation uses a
+bounded, volatile, generation-checked `(logical_page, committed_generation)`
+cohort association; stale/unknown mappings must not influence correctness.
+
+A first placement candidate may permute only **equal encoded-length compressed
+records after the existing greedy ordering**, never a blanket folio-first sort.
+It must prove whole-window equivalence: lower bytes, bounded cold-read cost,
+extent count, physical run splits/requests, segment alignment holes and tail
+waste. Preserve authority publication and same-page/fence constraints. Never
+wait for future work or weaken work-conserving dispatch for locality.
+
+A zswap-origin compression bypass must depend on an explicit end-to-end
+semantic handoff surviving BIO cloning/splitting; `REQ_SWAP`,
+`folio_set_dropbehind` and `current` are insufficient. Tagged writeback
+must use a stable RAW snapshot, terminal atomic representation ownership,
+the existing CRC/generation authority and exact upper completion after
+confirmed lower I/O. Skip pointless LZ4/delta64 and producer claims without
+creating worker/BIO lifetime races; unknown-origin traffic retains normal
+behavior. Directly accepting zswap-compressed payload requires a separate
+codec/representation/read-side and ownership contract.
+
 ### Deferred content-sharing and concurrency experiments
 
 Same-filled-page and dedup optimizations must preserve the existing authority

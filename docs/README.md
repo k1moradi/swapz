@@ -90,6 +90,8 @@ behavior and endurance remain open qualification gates.
   experiment chronology.
 - [testing_standards.md](testing_standards.md): current qualification contract,
   not a history of retired A/B protocols.
+- [context.md](context.md): reusable Linux MM, folio, swap/zswap, BIO and SWZ
+  technical context; implementation proposals and priorities stay in ROADMAP.
 - [compile.md](compile.md): build/install/test interface and artifacts.
 - [benchmark.md](benchmark.md): current benchmark methodology, interpretation and
   only the minimum settled evidence needed to avoid repeating a test.
