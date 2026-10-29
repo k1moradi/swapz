@@ -1173,6 +1173,93 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->authority.in_flight", drain)
         self.assertIn("swapz_fail(ctx, -EUCLEAN)", drain)
 
+    def test_rejected_read_batches_charge_single_bio_quantum(self):
+        import subprocess
+        import tempfile
+
+        worker = body("swapz_worker_pass")
+        start = worker.index("unsigned int processed_bios = 1;")
+        end = worker.index("entry = list_first_entry(&local,", start)
+        # Execute the real dispatch selection, including the success gotos.
+        # A rejected probe owns no BIOs; its output count is not authoritative.
+        dispatch = worker[start:end]
+        source = r'''
+#include <assert.h>
+#include <stdbool.h>
+struct probe {
+    unsigned int batch, slots, rejected, slot_calls, batch_calls, op;
+};
+struct bio { unsigned int op; };
+struct swapz_bio_ref { struct bio *bio; };
+#define REQ_OP_READ 0U
+#define bio_op(bio) ((bio)->op)
+#define list_first_entry(head, type, member) ((type *)(head))
+static bool swapz_try_parallel_read_batch(struct probe *ctx, void *local,
+                                        unsigned int remaining,
+                                        unsigned int *processed)
+{
+    (void)local; (void)remaining;
+    ctx->batch_calls++;
+    *processed = ctx->batch ? ctx->batch : ctx->rejected;
+    return ctx->batch != 0;
+}
+static bool swapz_try_concurrent_read_slots(struct probe *ctx, void *local,
+                                          unsigned int remaining,
+                                          unsigned int *processed)
+{
+    (void)local; (void)remaining;
+    ctx->slot_calls++;
+    *processed = ctx->slots ? ctx->slots : ctx->rejected;
+    return ctx->slots != 0;
+}
+static unsigned int charge(struct probe *ctx, unsigned int remaining)
+{
+    struct bio bio = {ctx->op};
+    struct swapz_bio_ref local = {&bio};
+DISPATCH
+    return processed_bios;
+processed_bio:
+    return processed_bios;
+}
+int main(void)
+{
+    struct probe ctx = {0};
+    unsigned int remaining, completed = 0, count;
+    assert(charge(&ctx, 64) == 1); /* coalescer clears count on rejection */
+    ctx.rejected = 37;
+    assert(charge(&ctx, 64) == 1); /* any rejected speculative output */
+    ctx.batch = 5; ctx.slot_calls = 0;
+    assert(charge(&ctx, 64) == 5 && ctx.slot_calls == 0);
+    ctx.batch = 0; ctx.slots = 3;
+    assert(charge(&ctx, 64) == 3);
+    ctx.batch = 5; ctx.slot_calls = 0; ctx.batch_calls = 0;
+    assert(charge(&ctx, 1) == 1);
+    assert(ctx.batch_calls == 0 && ctx.slot_calls == 0);
+    ctx.op = 1; ctx.batch = 5; ctx.slots = 3;
+    ctx.batch_calls = 0; ctx.slot_calls = 0;
+    assert(charge(&ctx, 64) == 1);
+    assert(ctx.batch_calls == 0 && ctx.slot_calls == 0);
+    ctx.op = REQ_OP_READ; ctx.batch = 0; ctx.slots = 0;
+    for (remaining = 64; remaining; remaining -= count) {
+        count = charge(&ctx, remaining);
+        assert(count == 1 && count <= remaining);
+        completed += count;
+    }
+    assert(completed == 64);
+    return 0;
+}
+'''.replace("DISPATCH", dispatch)
+        with tempfile.TemporaryDirectory(prefix="swapz-quantum-") as temp:
+            binary = Path(temp) / "quantum"
+            compiled = subprocess.run(
+                ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-x", "c",
+                 "-", "-o", str(binary)], input=source, text=True,
+                capture_output=True, timeout=30)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            executed = subprocess.run([str(binary)], cwd=temp,
+                                      capture_output=True, text=True, timeout=5)
+            self.assertEqual(executed.returncode, 0, executed.stderr)
+
     def test_raw_crc_protection_and_gc_relocation(self):
         auth = (ROOT / "src/kernel/authority.c").read_text()
         auth_h = (ROOT / "src/kernel/authority.h").read_text()

@@ -203,6 +203,14 @@ belong in the ROADMAP decision table and Git history.
   accepted into the worker-local FIFO or `incoming`, bounded by the existing
   64-BIO quantum. Refresh accepted queue state after synchronous copy/LZ4 work
   before deciding the current pack is isolated.
+  A rejected speculative read-batch probe owns no BIOs and its count output
+  is not authoritative. Restore the ordinary path's one-BIO charge after both
+  probes decline; accepted batches keep their exact returned count. Zero-cost
+  ordinary dispatch must not prevent budget exhaustion or turn the periodic
+  reschedule check into a per-BIO operation.
+  Enter READ-batch selection only for a READ FIFO head; WRITE, empty-flush
+  and DISCARD heads take their ordinary ordered path without speculative
+  read-slot or coalescing calls.
 - **Proven-dry retained service:** an active accepted plain-WRITE wave keeps the
   existing eight-record pressure hand and effective learned/sampled target. After
   the serialized worker proves both accepted FIFOs dry and no K=1 WRITE is

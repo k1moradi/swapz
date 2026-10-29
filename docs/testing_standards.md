@@ -123,6 +123,13 @@ Native tests compile the real `src/kernel/{codec,authority,engine}.c` where appl
 
 Source contracts validate behavior that requires the Linux Device Mapper target itself, including BIO ownership, queue/drain ordering, null_blk-only admission, lower-I/O accounting and current report/build contracts. Source-string assertions are secondary to executable production-C coverage.
 
+Execute the worker's actual batch-selection C block with rejected-probe
+outputs of zero and a nonzero poison value: either fallback must charge one
+ordinary BIO. Accepted coalescing/fan-out batches retain their actual counts,
+the final one-BIO budget skips batch probes, and 64 ordinary completions must
+exhaust the quantum exactly. The regression must fail on the old zero-charge
+path; merely finding a decrement in source is insufficient.
+
 ## Retained-window scheduler qualification
 
 Native tests must keep authoritative sampled tails ahead of dry four-record
@@ -378,14 +385,14 @@ state the last qualified source when a round creates no new owner report.
 ## Current qualified baseline
 
 The latest successful ARM64/NEON VM owner matrix tested exact source
-`b86fefd9e364727fa002ebd891ef4adfbd1166b1` and published report-only commit
-`0d97e99890ee8b1a34744f70ce82021db12b1c9e`. That report says PASS
+`3362fa020bf34379ac609840669bce79e479298b` and published report-only commit
+`87180ee5b8a8` (same production C as `005592d`). That report says PASS
 for all five stages: build, native/rootless, W=1, W=2 and owned-RAM loaded
 qualification, including lifecycle/fault/GC and ID36 resource pressure.
 Later source changes require their own complete owner `make test`.
 
-That run reports fast mixed async useful WRITE +10.8% versus raw, SD mixed
-+404%, and fast sustained QD1/QD4/QD8/QD32 -4.9/-11.3/+28.4/+50.0%.
+That run reports fast mixed async useful WRITE +9.9% versus raw, SD mixed
++400%, and fast sustained QD1/QD4/QD8/QD32 -3.7/-11.7/+21.7/+52.2%.
 SATA/NVMe envelopes and fast QD4 remain below raw.
 These are host-specific synthetic results, not universal raw parity or physical
 endurance evidence. Preserve independent lower WRITE bytes/requests as the
@@ -399,11 +406,10 @@ deferred acknowledgements are now owner-qualified; the fresh K=2 development
 experiment in ROADMAP ID110 is rejected rather than promoted. Delta64 is now
 default-on with second-pass LZ4 acceleration four (ID115), qualified in that
 owner run. The later `005592d` adds DELTA64_SHUF8 and the faster NEON inverse;
-its ARM64 native, warning-build, loaded-smoke and positive-fixture checks are
-supporting evidence. The owner x86 matrix on exact source `005592d` passed
+the complete ARM64 matrix above now qualifies it. The owner x86 matrix on exact source `005592d` passed
 all five stages (report `4886c4d79a362b546b69bc5f9356be05ec2f536f`), including
 scalar/SSE2/AVX2/AVX-512 runtime qualification and loaded resource pressure.
-Its full ARM64 matrix remains pending. Keep the x86 eight-CPU result out of
+Keep the x86 eight-CPU result out of
 the seven-CPU ARM64 history.
 Representative-content prevalence, long-run churn, actual
 kernel swap and physical media remain separate qualification gates.

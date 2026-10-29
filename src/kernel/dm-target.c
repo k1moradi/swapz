@@ -5772,13 +5772,20 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 			unsigned int processed_bios = 1;
 
 			if (remaining > 1U &&
-			    swapz_try_parallel_read_batch(ctx, &local, remaining,
-							 &processed_bios))
-				goto processed_bio;
-			if (remaining > 1U &&
-			    swapz_try_concurrent_read_slots(ctx, &local, remaining,
-							  &processed_bios))
-				goto processed_bio;
+			    bio_op(list_first_entry(&local, struct swapz_bio_ref,
+						   list)->bio) == REQ_OP_READ) {
+				if (swapz_try_parallel_read_batch(ctx, &local, remaining,
+								 &processed_bios))
+					goto processed_bio;
+				if (swapz_try_concurrent_read_slots(ctx, &local, remaining,
+								  &processed_bios))
+					goto processed_bio;
+			}
+			/*
+			 * Rejected batch probes may clear their speculative count.
+			 * The ordinary path below always consumes exactly one BIO.
+			 */
+			processed_bios = 1;
 			entry = list_first_entry(&local, struct swapz_bio_ref, list);
 			if (entry->admitted_ns &&
 			    bio_op(entry->bio) == REQ_OP_WRITE &&
