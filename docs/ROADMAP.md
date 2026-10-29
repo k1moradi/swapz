@@ -24,10 +24,17 @@ proxy, not NAND wear measurement.
 ## Current qualified source (ID107–ID108)
 
 Exact source `03becc01802b` passed all five owner `make test` stages; report
-`b5227ca58001` is the current checked-in evidence. Fast mixed async useful WRITE
+`b5227ca58001` is the latest successful qualification evidence. Fast mixed async useful WRITE
 is +7.4% versus raw (READ p99 0.88 vs 3.71 ms), SD mixed is +393%, and fast
 QD1/QD4/QD8/QD32 are -2.7/-10.2/+18.2/+56.3%. This single qualification run
 preserves host-WRITE savings but does not establish SATA/NVMe or QD4 parity.
+
+The later owner run on `de79f2ec832d` (report `a4ff2205fa95`) passed stages
+1–4 and loaded correctness smoke, then failed the first mixed swapz session:
+`profile_epoch` returned success without exporting its acknowledgement. The
+callback now returns DM's success-with-output value 1, covered by an executable
+rootless regression. Exact-source owner qualification remains pending; this
+failed run does not establish performance for the new delta64 defaults.
 
 The preceding directional `make fast_test` observations were
 (absolute swapz useful WRITE MB/s; raw varies ~5%):

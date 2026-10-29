@@ -165,6 +165,10 @@ four-record start; it must never hold a BIO or keep the lane busy to obtain a
 sample. The internal `profile_epoch` message may clear only the passive
 sync4 predecessor timestamp at a quiescent benchmark boundary; it must not reset
 mapping/ordering state, cumulative product counters or alter service.
+An acknowledged Device Mapper message must return 1 after filling its reply
+buffer: return 0 means success without output. Keep an executable regression
+of the production callback's reply and rejected-command behavior; checking only
+the acknowledgement string in source cannot verify the DM output contract.
 Production policy cannot change from this profiling commit alone.
 
 Any future K>1 experiment is a new architecture change, not a dormant knob. It

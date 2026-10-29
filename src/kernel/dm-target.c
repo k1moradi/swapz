@@ -7759,7 +7759,8 @@ static int swapz_message(struct dm_target *ti, unsigned int argc, char **argv,
 		return -EINVAL;
 	WRITE_ONCE(ctx->sync4_last_done_ns, 0);
 	DMEMIT("profile_epoch=1");
-	return 0;
+	/* DM core exports the reply buffer only for message return value 1. */
+	return 1;
 }
 
 static struct target_type swapz_target = {

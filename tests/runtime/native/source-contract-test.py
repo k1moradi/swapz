@@ -2544,6 +2544,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("sync4_reissue_gap_ns", dm)
 
     def test_id114_measurement_epoch_breaks_warmup_sync4_link_only(self):
+        import subprocess
+        import tempfile
+
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         dm = (ROOT / "src/kernel/dm-target.c").read_text()
         message = body("swapz_message")
@@ -2557,6 +2560,53 @@ static swapz_u16 swapz_probe_set(
             replay.count("kernel_write_profile_epoch(path, identity)"), 3)
         self.assertIn('"dmsetup", "message", str(path), "0", "profile_epoch"', replay)
         self.assertIn("profile_epoch=1", replay)
+
+        # Execute the production callback. DM only exports a message reply
+        # when the callback returns 1; success-without-output (0) loses it.
+        source = r'''
+#include <assert.h>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+struct swapz_dm {
+    unsigned long long sync4_last_done_ns;
+    unsigned long long sync4_windows;
+};
+struct dm_target { void *private; };
+#define WRITE_ONCE(value, new_value) ((value) = (new_value))
+#define DMEMIT(...) (sz += snprintf(result + sz, maxlen - sz, __VA_ARGS__))
+static int swapz_message(struct dm_target *ti, unsigned int argc, char **argv,
+                         char *result, unsigned int maxlen)
+{CALLBACK}
+int main(void)
+{
+    struct swapz_dm ctx = {123, 7};
+    struct dm_target ti = {&ctx};
+    char *valid[] = {"profile_epoch"};
+    char *invalid[] = {"unknown"};
+    char result[64] = "unchanged";
+
+    assert(swapz_message(&ti, 0, NULL, result, sizeof(result)) == -EINVAL);
+    assert(swapz_message(&ti, 2, valid, result, sizeof(result)) == -EINVAL);
+    assert(swapz_message(&ti, 1, invalid, result, sizeof(result)) == -EINVAL);
+    assert(ctx.sync4_last_done_ns == 123 && ctx.sync4_windows == 7);
+    assert(!strcmp(result, "unchanged"));
+    assert(swapz_message(&ti, 1, valid, result, sizeof(result)) == 1);
+    assert(!strcmp(result, "profile_epoch=1"));
+    assert(ctx.sync4_last_done_ns == 0 && ctx.sync4_windows == 7);
+    return 0;
+}
+'''.replace("CALLBACK", message)
+        with tempfile.TemporaryDirectory(prefix="swapz-message-") as temp:
+            binary = Path(temp) / "message"
+            compiled = subprocess.run(
+                ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-x", "c",
+                 "-", "-o", str(binary)], input=source, text=True,
+                capture_output=True, timeout=30)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            executed = subprocess.run([str(binary)], cwd=temp,
+                                      capture_output=True, text=True, timeout=5)
+            self.assertEqual(executed.returncode, 0, executed.stderr)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
         deadline = body("swapz_first_record_deadline_ns")

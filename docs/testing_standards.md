@@ -379,7 +379,7 @@ state the last qualified source when a round creates no new owner report.
 
 The latest successful owner matrix tested exact source
 `03becc01802b1af1455c2a1c0a43b00ca1d22046` and published report-only commit
-`b5227ca58001abad1de216739a1bb30ce8ae0801`. The checked-in report says PASS
+`b5227ca58001abad1de216739a1bb30ce8ae0801`. That historical report says PASS
 for all five stages: build, native/rootless, W=1, W=2 and owned-RAM loaded
 qualification, including lifecycle/fault/GC and ID36 resource pressure.
 Later source changes require their own complete owner `make test`.
@@ -396,8 +396,9 @@ producer, the bounded 64-slot RAW+compressed reservoir, lower-WRITE depth one,
 independent READ fan-out, the eight-block ID63 cap, packed placement and SWZ
 1/2/4-block extents. ID107–ID108 independent dispatched-run READ service and
 deferred acknowledgements are now owner-qualified; the fresh K=2 development
-experiment in ROADMAP ID110 is rejected rather than promoted. Delta64 remains
-default-off pending representative-content prevalence. Long-run churn, actual
+experiment in ROADMAP ID110 is rejected rather than promoted. Delta64 is now
+default-on with second-pass LZ4 acceleration four (ID115), pending new loaded
+qualification and representative-content measurements. Long-run churn, actual
 kernel swap and physical media remain separate qualification gates.
 
 ## Immediate K=1 critical-path profiling gate (ID114)
@@ -424,6 +425,16 @@ the internal `profile_epoch` DM message. That message clears only the passive
 previous-sync4 timestamp, so the first timed reissue sample cannot bridge the
 warmup/status-snapshot boundary; it must not reset cumulative counters or any
 correctness/scheduling state.
+
+The production message callback must return 1 with `profile_epoch=1`, so DM
+core exports the reply to `dmsetup`; returning 0 suppresses that output even
+when the command succeeded. Rootless coverage executes the actual callback
+with minimal DM stubs, checking the return value, exact reply, timestamp reset,
+unchanged cumulative counters and rejection of unknown commands/wrong argument
+counts. The replay harness must continue rejecting a missing acknowledgement.
+Owner report `a4ff2205fa95` on `de79f2ec832d` passed stages 1–4 and loaded smoke
+but failed this acknowledgement at the first mixed swapz session. It does not
+qualify the new defaults; the callback repair still needs owner `make test`.
 
 Development decisions retain absolute raw/swapz useful throughput, READ/WRITE
 p99 and independent lower WRITE bytes/requests alongside the compact phase
