@@ -2533,6 +2533,7 @@ static swapz_u16 swapz_probe_set(
         dm = (ROOT / "src/kernel/dm-target.c").read_text()
         message = body("swapz_message")
         self.assertIn('strcmp(argv[0], "profile_epoch")', message)
+        self.assertIn("unsigned int sz = 0;", message)
         self.assertIn("WRITE_ONCE(ctx->sync4_last_done_ns, 0)", message)
         self.assertNotIn("sync4_windows =", message)
         self.assertIn(".message = swapz_message", dm)

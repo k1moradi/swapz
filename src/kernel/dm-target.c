@@ -7745,6 +7745,7 @@ static int swapz_message(struct dm_target *ti, unsigned int argc, char **argv,
 			 char *result, unsigned int maxlen)
 {
 	struct swapz_dm *ctx = ti->private;
+	unsigned int sz = 0;
 
 	/*
 	 * Measurement-only epoch boundary. This changes no scheduling, mapping,
