@@ -473,8 +473,9 @@ dead benchmark sessions merely for historical telemetry.
 
 Whole-page delta64 is the only maintained predictive transform; the refuted
 CL-delta, byte-delta, delta32, reset-delta64 and xor64 experiments live only in
-Git history. The read-only module parameter `delta64_rescue` defaults to zero
-and is snapshotted into each target at construction. The rescue-only second LZ4
+Git history. The read-only module parameter `delta64_rescue` defaults to one
+(owner decision; zero disables it) and is snapshotted into each target at
+construction. The rescue-only second LZ4
 pass uses the separate read-only `delta64_lz4_acceleration` parameter
 (default 1, bounded 1..4); changing it must not alter the ordinary first-pass
 `lz4_acceleration` policy. Both producer and ordered
@@ -482,10 +483,10 @@ write paths must bypass the rescue call entirely when disabled; no classifier,
 rescue timer or rescue counter runs and no predictor scratch is allocated for
 either write or read slots. Ordinary LZ4 remains active. The codec and GC retain
 delta64 encoding support; reads of an encoded record require their scratch and
-fail closed if it is missing. Only an explicitly enabled target may write new
-delta64 records. A default-off result is not a measured classifier rejection.
+fail closed if it is missing. Only an enabled target may write new delta64
+records. A `delta64_rescue=0` result is not a measured classifier rejection.
 
-When explicitly enabled, the scalar sampled classifier runs before ordinary
+When enabled (the default), the scalar sampled classifier runs before ordinary
 LZ4. Score >=24 pages run delta64 plus the rescue LZ4 first. A candidate at or
 below 2024 bytes may be adopted directly and skip ordinary LZ4; a larger
 high-score candidate falls through to ordinary LZ4 and is adopted only if

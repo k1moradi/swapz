@@ -83,10 +83,10 @@ module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0
 MODULE_PARM_DESC(allow_physical_backing,
 		 "Allow explicitly formatted non-null_blk backing; default off");
 
-static bool swapz_delta64_rescue_enabled;
+static bool swapz_delta64_rescue_enabled = true;
 module_param_named(delta64_rescue, swapz_delta64_rescue_enabled, bool, 0444);
 MODULE_PARM_DESC(delta64_rescue,
-		 "Opt in to page-local delta64 rescue with predictor-first high-score path; default off");
+		 "Page-local delta64 rescue with predictor-first high-score path; default on (0 disables)");
 
 static unsigned int swapz_delta64_lz4_acceleration = 1U;
 module_param_named(delta64_lz4_acceleration, swapz_delta64_lz4_acceleration,

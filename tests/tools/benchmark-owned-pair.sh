@@ -11,7 +11,7 @@ if [[ $# -ge 3 && $1 == --validated-source &&
 fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--delta64-rescue|--no-delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -22,7 +22,9 @@ WARMUP_OPS=256
 MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
-DELTA64_RESCUE=0
+# Production module default; --no-delta64-rescue pins LZ4-only control arms.
+DELTA64_RESCUE=1
+DELTA64_POSITIVE_EXPERIMENT=0
 DELTA64_LZ4_ACCELERATION=1
 READ_COALESCE=1
 INVALIDATE_CACHE_ON_WRITE_ADMIT=0
@@ -67,6 +69,10 @@ if [[ $# -ge 3 && ${@: -2:1} == --delta64-lz4-acceleration &&
 fi
 if [[ $# -gt 1 && ${!#} == --delta64-rescue ]]; then
     DELTA64_RESCUE=1
+    DELTA64_POSITIVE_EXPERIMENT=1
+    set -- "${@:1:$(( $# - 1 ))}"
+elif [[ $# -gt 1 && ${!#} == --no-delta64-rescue ]]; then
+    DELTA64_RESCUE=0
     set -- "${@:1:$(( $# - 1 ))}"
 fi
 # Test-only policy controls. They are accepted only from make test's private
@@ -782,7 +788,9 @@ else
 fi
 swapz_status_after="$(dmsetup status "$DMNAME")"
 note "SWAPZ_STATUS_AFTER=$swapz_status_after"
-if (( DELTA64_RESCUE )); then
+# Only the explicit delta64-positive fixture must show classifier passes and
+# adoptions; default-on sessions on ordinary content may legitimately have none.
+if (( DELTA64_POSITIVE_EXPERIMENT )); then
     [[ "$swapz_status_after" =~ delta64_classifier_pass=([0-9]+) ]] ||
         fail 'delta64 experiment did not expose classifier activity'
     (( ${BASH_REMATCH[1]} > 0 )) ||
@@ -791,6 +799,8 @@ if (( DELTA64_RESCUE )); then
         fail 'delta64 experiment did not expose adoption activity'
     (( ${BASH_REMATCH[1]} > 0 )) ||
         fail 'delta64-positive experiment recorded zero adoptions'
+fi
+if (( DELTA64_RESCUE )); then
     [[ "$swapz_status_after" =~ delta64_prepare_active_max=([0-9]+) ]] ||
         fail 'delta64 experiment did not expose preparation concurrency'
     active_max=${BASH_REMATCH[1]}

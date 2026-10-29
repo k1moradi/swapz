@@ -117,7 +117,7 @@ def reject_raw_drift(rows):
             validity["reasons"].append(f"raw repeat spread {spread:.1%}")
 
 
-def scenario_arguments(name, plan):
+def scenario_arguments(name, plan, delta64=1):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
         raise ValueError(f"unknown scenario {name!r}")
@@ -126,7 +126,11 @@ def scenario_arguments(name, plan):
         arguments += ["--write-only-qd", kind[1:]]
     elif kind != "mixed":
         raise ValueError(f"unknown scenario {name!r}")
-    return arguments + ["--async-prepare", "--shared-plan", str(plan)]
+    arguments.append("--async-prepare")
+    if not delta64:
+        # Suffix order of benchmark-owned-pair.sh: rescue sits after async.
+        arguments.append("--no-delta64-rescue")
+    return arguments + ["--shared-plan", str(plan)]
 
 
 def run(command, **kwargs):
@@ -367,6 +371,9 @@ def main():
     parser.add_argument("--scenarios", default=os.environ.get("SCENARIOS", ""))
     parser.add_argument("--repeat", type=int,
                         default=int(os.environ.get("REPEAT", "3") or 3))
+    # Delta64 rescue is the production default; DELTA64=0 measures LZ4-only.
+    parser.add_argument("--delta64", type=int, choices=(0, 1),
+                        default=int(os.environ.get("DELTA64", "1") or 1))
     args = parser.parse_args()
     scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
         or list(DEFAULT_SCENARIOS)
@@ -406,7 +413,7 @@ def main():
                 quiet_before = quiet_host_sample()
                 begin = time.monotonic()
                 proc = privileged(720, PAIR, "--validated-source", head,
-                                  *scenario_arguments(name, plan))
+                                  *scenario_arguments(name, plan, args.delta64))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
                 arms = parse_arms(proc.stdout)
@@ -430,7 +437,8 @@ def main():
         shutil.rmtree(plan, ignore_errors=True)
     reject_raw_drift(rows)
     (OUT_DIR / "latest.json").write_text(
-        json.dumps({"head": head, "dirty": bool(dirty), "rows": rows,
+        json.dumps({"head": head, "dirty": bool(dirty),
+                    "delta64_rescue": args.delta64, "rows": rows,
                     "reports": raw_reports}, sort_keys=True) + "\n")
     print()
     print_table(rows)

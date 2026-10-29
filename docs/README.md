@@ -4,7 +4,7 @@
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
 
-swapz is an experimental Linux Device Mapper target that compresses and packs 4KiB logical pages into 4/8/16KiB SWZ physical extents. Ordinary compression uses LZ4. The experimental page-local delta64 rescue is off by default (`delta64_rescue=0`); when explicitly enabled, a scalar sampled classifier runs before ordinary LZ4, high-score pages may run delta64 plus the rescue LZ4 first and directly adopt a sufficiently small candidate, and lower-score pages retain the ordinary-LZ4 packing-cliff route. The project exists to reduce independently measured lower-device READ and WRITE bytes and requests for the same byte-exact logical workload without sacrificing mapping correctness, ordering, integrity, bounded resource use, or acceptable read latency.
+swapz is an experimental Linux Device Mapper target that compresses and packs 4KiB logical pages into 4/8/16KiB SWZ physical extents. Ordinary compression uses LZ4. Page-local delta64 rescue is on by default (`delta64_rescue=1`; load with `delta64_rescue=0` to disable): a scalar sampled classifier runs before ordinary LZ4, high-score pages may run delta64 plus the rescue LZ4 first and directly adopt a sufficiently small candidate, and lower-score pages retain the ordinary-LZ4 packing-cliff route. The project exists to reduce independently measured lower-device READ and WRITE bytes and requests for the same byte-exact logical workload without sacrificing mapping correctness, ordering, integrity, bounded resource use, or acceptable read latency.
 
 There is one product. The active product source is under `src/`; test-only code is under `tests/`; maintained documentation is under `docs/`; packaging support is under `packaging/`. Historical implementations and rejected experiments belong in Git history, not dormant source trees.
 
@@ -31,7 +31,7 @@ No legacy, recall, NBD, pressure, alternate-module, or historical-model subsyste
 
 ## Supported commands
 
-The root Make interface is exactly `make`, `make install`, `make uninstall`, `make test` and the development-only `make fast_test`. `make fast_test` builds the working tree (dirty trees allowed), runs the window-policy native checks and a single-pair subset of the owned null_blk matrix, and prints one raw-versus-swapz table; optional `SCENARIOS=fast-mixed,fast-w8` and `REPEAT=n` select scenarios and repeats. Its numbers are unpaired single observations for development decisions only. Installation never activates swap. Official loaded qualification remains limited to positively owned RAM-backed `null_blk`. Physical backing is disabled by default; the implementation can attach only when `allow_physical_backing=1` and block 0 contains a valid matching SWAPZ authorization header created by the conservative `swapzctl format <blockdev>` command. That formatter writes block 0 and refuses non-block devices, busy devices, and nonzero unrecognized headers. This safety gate does not itself qualify physical media or authorize active system swap, reboot, `swapon`, `swapoff`, force removal, or unrelated block devices.
+The root Make interface is exactly `make`, `make install`, `make uninstall`, `make test` and the development-only `make fast_test`. `make fast_test` builds the working tree (dirty trees allowed), runs the window-policy native checks and a single-pair subset of the owned null_blk matrix, and prints one raw-versus-swapz table; optional `SCENARIOS=fast-mixed,fast-w8` and `REPEAT=n` select scenarios and repeats, and `DELTA64=0` measures the LZ4-only policy against the default-on delta64 rescue. Its numbers are unpaired single observations for development decisions only. Installation never activates swap. Official loaded qualification remains limited to positively owned RAM-backed `null_blk`. Physical backing is disabled by default; the implementation can attach only when `allow_physical_backing=1` and block 0 contains a valid matching SWAPZ authorization header created by the conservative `swapzctl format <blockdev>` command. That formatter writes block 0 and refuses non-block devices, busy devices, and nonzero unrecognized headers. This safety gate does not itself qualify physical media or authorize active system swap, reboot, `swapon`, `swapoff`, force removal, or unrelated block devices.
 
 Every completed `make test` run replaces exactly one generated evidence file,
 root `test_results.json`, with the latest sanitized PASS/FAIL/BLOCKED test
@@ -63,8 +63,9 @@ The qualified positive-fixture delta64 rescue A/B exercised 4096 direct
 predictor-first adoptions that skipped ordinary LZ4. Lower WRITE bytes fell
 27.04% and useful WRITE throughput rose 5.15%; lower-request and p99 intervals
 overlapped zero. This is controlled positive-content evidence, not
-representative swap evidence, so `delta64_rescue=0` remains the production
-default.
+representative swap evidence. By owner decision `delta64_rescue=1` is now the
+production default; representative content and the loaded mixed matrix decide
+whether it stays on, and `delta64_rescue=0` restores LZ4-only behavior.
 
 Adjacent-range READ coalescing remains default-on. Fast sequential confirmation
 reduced lower READ requests 17.53% and p99 5.43%, while the useful-throughput

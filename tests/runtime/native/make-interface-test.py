@@ -247,6 +247,7 @@ class PublicMakeContract(unittest.TestCase):
                 record.update({
                     "physical_write_reqs": 5,
                     "lz4_acceleration": 1,
+                    "delta64_rescue": runner_contract.PRODUCTION_DELTA64_RESCUE,
                     "delta64_lz4_acceleration": 1,
                     "delta64_prepare_workers": 1,
                     "write_pipeline_depth": 1,
@@ -610,6 +611,8 @@ class PublicMakeContract(unittest.TestCase):
                 record["fixture_sha256"] = "b" * 64
                 record["trace_sha256"] = "c" * 64
                 if candidate == "swapz":
+                    # Retired LZ4 A/B arms pin LZ4-only delta64 policy.
+                    record["kernel_write_path"]["delta64_rescue"] = 0
                     record["kernel_write_path"]["lz4_acceleration"] = acceleration
                 return json.dumps(record, sort_keys=True)
 
@@ -655,6 +658,7 @@ class PublicMakeContract(unittest.TestCase):
                     record["write_p99_ns"] = 2300000
                 else:
                     record = json.loads(mock_write_arm("swapz", 32, 1))
+                    record["kernel_write_path"]["delta64_rescue"] = 0
                     record["kernel_write_path"]["delta64_prepare_workers"] = 1
                 record["kernel_write_path"]["delta64_lz4_acceleration"] = 4
                 record["fixture_sha256"] = "e" * 64
@@ -664,6 +668,7 @@ class PublicMakeContract(unittest.TestCase):
             def mock_write_pipeline_arm(depth):
                 record = json.loads(mock_write_arm("swapz", 32, 1))
                 kernel = record["kernel_write_path"]
+                kernel["delta64_rescue"] = 0
                 kernel["write_pipeline_depth"] = depth
                 kernel["pipeline_active_max"] = depth
                 if depth == 2:

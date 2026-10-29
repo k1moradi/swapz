@@ -195,9 +195,9 @@ Swapz records independent 4KiB logical pages and maps them to its own 4/8/16KiB
 physical SWZ extents. Compressed extents contain a header (magic, extent
 blocks, record count, sequence, metadata CRC32C) and one or more record
 descriptors: logical page, generation, payload offset/length and payload
-CRC32C. A payload is LZ4, or, only on a target with the default-off
-`delta64_rescue` enabled, a whole-page delta64 transform followed by LZ4,
-flagged in the length field.
+CRC32C. A payload is LZ4, or, when the default-on `delta64_rescue` policy
+adopts it, a whole-page delta64 transform followed by LZ4, flagged in the
+length field.
 RAW fallback holds one whole 4KiB logical page in one physical block with
 its mapping/integrity authority in RAM. A **SWZ record** is independently
 decodable; a **physical extent** may hold multiple records; an **I/O run** may

@@ -378,9 +378,9 @@ def timed_kernel_write(*, mode, target=8):
 
 
 def standard_kernel_write(*, mode, target=8):
-    """Standard loaded benchmark policy: LZ4 accel 1, delta64 disabled."""
+    """Standard loaded benchmark policy: LZ4 accel 1, production delta64 default."""
     record = timed_kernel_write(mode=mode, target=target)
-    record["delta64_rescue"] = 0
+    record["delta64_rescue"] = runner.PRODUCTION_DELTA64_RESCUE
     for field in runner.DELTA64_FIELDS:
         record[field] = 0
     return record
@@ -726,7 +726,9 @@ def delta64_rescue_arm(enabled):
         record["throughput_mbps"]["logical_write_mbps"] = 20.0
         record["write_p99_ns"] = 2_300_000
     else:
+        # The A/B off arm is pinned with --no-delta64-rescue.
         record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
+        record["kernel_write_path"]["delta64_rescue"] = 0
         record["kernel_write_path"]["delta64_prepare_workers"] = 1
     record["kernel_write_path"]["delta64_lz4_acceleration"] = 4
     record["fixture_sha256"] = "e" * 64
@@ -737,6 +739,7 @@ def delta64_rescue_arm(enabled):
 def write_pipeline_arm(depth):
     record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
     kernel = record["kernel_write_path"]
+    kernel["delta64_rescue"] = 0  # retired depth A/B pins LZ4-only arms
     kernel["write_pipeline_depth"] = depth
     kernel["pipeline_active_max"] = depth
     if depth == 2:
@@ -830,6 +833,7 @@ def lz4_acceleration_log():
             26.0 if acceleration == 1 else 27.0)
         swapz["write_p99_ns"] = 4_000_000 if acceleration == 1 else 3_800_000
         kernel = swapz["kernel_write_path"]
+        kernel["delta64_rescue"] = 0  # retired LZ4 A/B pins LZ4-only arms
         kernel["lz4_acceleration"] = acceleration
         kernel["lz4_wall_ns"] = 1_000_000 if acceleration == 1 else 800_000
         kernel["ordered_lz4_wall_ns"] = (
@@ -1104,8 +1108,15 @@ class ReportContract(unittest.TestCase):
         bad = copy.deepcopy(report)
         bad["benchmarks"]["sessions"][0]["async_prepare"] = 0
         self.assertEqual(history.report_points(bad), [])
+        on = copy.deepcopy(report)
+        on["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
+        on_points = history.report_points(on)
+        self.assertEqual(len(on_points), 1)
+        self.assertEqual(on_points[0]["workload"], "mixed QD32, delta64 on")
+        self.assertEqual(points[0]["workload"], "mixed QD32, delta64 off")
+        self.assertNotEqual(on_points[0]["compatibility"], points[0]["compatibility"])
         bad = copy.deepcopy(report)
-        bad["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
+        bad["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = None
         self.assertEqual(history.report_points(bad), [])
         sustained = copy.deepcopy(report)
         write_session = copy.deepcopy(session)
@@ -1121,7 +1132,14 @@ class ReportContract(unittest.TestCase):
         sustained["benchmarks"]["write_saturation"]["replay_mode"] = "qd-waves"
         self.assertEqual(len(history.report_points(sustained)), 1)
         sustained["benchmarks"]["write_saturation"]["replay_mode"] = "persistent-write"
+        off_write = history.report_points(sustained)[-1]
         write_session["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
+        on_write = history.report_points(sustained)
+        self.assertEqual(len(on_write), 2)
+        self.assertNotEqual(on_write[-1]["compatibility"], off_write["compatibility"])
+        mixed = copy.deepcopy(write_session)
+        mixed["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
+        sustained["benchmarks"]["write_saturation_sessions"].append(mixed)
         self.assertEqual(len(history.report_points(sustained)), 1)
 
     def test_vm_history_lines_break_at_workload_changes_and_missing_reports(self):
@@ -1495,7 +1513,7 @@ class ReportContract(unittest.TestCase):
             row["arms"]["swapz"]["kernel_write_path"][
                 "lz4_acceleration"] == 1 and
             row["arms"]["swapz"]["kernel_write_path"][
-                "delta64_rescue"] == 0
+                "delta64_rescue"] == runner.PRODUCTION_DELTA64_RESCUE
             for row in sessions))
 
         lz4_start = log.index("START_LZ4_ACCELERATION=")
@@ -1518,7 +1536,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(set(incomplete[0]["arms"]), {"swapz"})
 
         for field, value in (("lz4_acceleration", 4),
-                             ("delta64_rescue", 1)):
+                             ("delta64_rescue",
+                              1 - runner.PRODUCTION_DELTA64_RESCUE)):
             mixed = runner.parse_sessions(log)
             mixed[-1]["arms"]["swapz"]["kernel_write_path"][field] = value
             with self.subTest(mixed_policy=field):
@@ -1760,7 +1779,8 @@ class ReportContract(unittest.TestCase):
         for field, value in (("lz4_acceleration", 2),
                               ("delta64_lz4_acceleration", 2),
                               ("write_pipeline_depth", 2),
-                             ("delta64_rescue", 1)):
+                             ("delta64_rescue",
+                              1 - runner.PRODUCTION_DELTA64_RESCUE)):
             sessions = runner.parse_write_saturation(synthetic_log())
             sessions[0]["arms"]["swapz"]["kernel_write_path"][field] = value
             with self.subTest(policy=field):
@@ -2115,7 +2135,11 @@ class ReportContract(unittest.TestCase):
         self.assertIn("payload KiB", rendered)
         self.assertIn("RAW+ KiB", rendered)
         self.assertIn("rescue ms", rendered)
-        self.assertIn("Delta64 rescue is disabled", rendered)
+        # Standard mixed sessions now run the production delta64 default; the
+        # synthetic ordinary content adopts nothing, which must read as such.
+        self.assertNotIn("Delta64 rescue is disabled", rendered)
+        self.assertIn("No delta64 payload was adopted in these measured intervals",
+                      rendered)
         self.assertNotIn("not kernel policy", rendered)
         self.assertIn("Garbage-collection map-scan scaling", rendered)
         self.assertIn("Simulated extent geometry", rendered)

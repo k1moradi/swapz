@@ -359,14 +359,17 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("atomic64_read(&ctx->preparation_free_mask)", drain)
         self.assertIn("SWAPZ_PREPARATION_FREE_MASK", drain)
 
-    def test_delta64_rescue_is_opt_in_and_default_avoids_scratch(self):
+    def test_delta64_rescue_defaults_on_and_disabled_avoids_scratch(self):
         ctor = body("swapz_ctr")
         producer = body("swapz_preparation_worker")
         ordered = body("swapz_accept_write")
         compressor = body("swapz_compress_page")
         read = body("swapz_read")
         slot_read = body("swapz_read_slot_run")
-        self.assertRegex(DM, r"static\s+bool\s+swapz_delta64_rescue_enabled\s*;")
+        # Owner decision: delta64 rescue is the production default; 0 disables.
+        self.assertRegex(
+            DM, r"static\s+bool\s+swapz_delta64_rescue_enabled\s*=\s*true\s*;")
+        self.assertIn("default on (0 disables)", DM)
         self.assertIn("module_param_named(delta64_rescue, "
                       "swapz_delta64_rescue_enabled, bool, 0444)", DM)
         self.assertIn("ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled",
@@ -399,8 +402,19 @@ static swapz_u16 swapz_probe_set(
                       ctor)
         self.assertNotIn("ctx->delta64_rescue_enabled ?", ctor)
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
-        self.assertIn("delta64_rescue=0([[:space:]]|$)", deploy)
-        self.assertIn('status_u64 "$packed_before" delta64_rescue', deploy)
+        self.assertIn("delta64_rescue=1([[:space:]]|$)", deploy)
+        self.assertIn('PASS_DEFAULT_DELTA64_RESCUE=1', deploy)
+        self.assertIn('status_u64 "$packed_before" delta64_rescue) == 1', deploy)
+        self.assertIn('require_delta64_default "$status_after"', deploy)
+        self.assertNotIn("require_delta64_disabled", deploy)
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        self.assertIn("\nDELTA64_RESCUE=1\n", pair)
+        self.assertIn("== --no-delta64-rescue", pair)
+        self.assertIn("if (( DELTA64_POSITIVE_EXPERIMENT )); then", pair)
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        self.assertEqual(loaded.count("--no-delta64-rescue"), 2)
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn("PRODUCTION_DELTA64_RESCUE = 1", runner)
 
     def test_reclaim_scratch_uses_kvmalloc_and_read_bypass_is_window_local(self):
         ctor = body("swapz_ctr")

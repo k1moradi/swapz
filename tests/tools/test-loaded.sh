@@ -257,7 +257,9 @@ for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5; do
                         --delta64-rescue --delta64-lz4-acceleration 4
                         --shared-plan "$shared_plan/delta64")
         else
-            arguments+=(--async-prepare --shared-plan "$shared_plan")
+            # Explicit LZ4-only control row on the medium mixed fixture.
+            arguments+=(--async-prepare --no-delta64-rescue
+                        --shared-plan "$shared_plan")
         fi
         printf 'START_STORAGE_ENVELOPE=%s DELTA64_RESCUE=%s\n' \
             "$envelope" "$delta64_rescue"
@@ -281,6 +283,8 @@ for delta64_rescue in "${confirmation_modes[@]}"; do
     # shared plan, workers, second-LZ4 acceleration, then rescue.
     if (( delta64_rescue )); then
         arguments+=(--delta64-rescue)
+    else
+        arguments+=(--no-delta64-rescue)
     fi
     arguments+=(--delta64-lz4-acceleration 4
                --shared-plan "$shared_plan/delta64")

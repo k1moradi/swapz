@@ -188,8 +188,8 @@ is gone, but the earlier ID77 deep-QD async advantage is not recovered.
 Production lower-WRITE depth remains fixed at one.
 
 The same source passes the predictor-first positive delta64 A/B and current ID63
-confirmations. Delta64 rescue remains default-off pending representative
-content; READ coalescing remains fixed-on with an eight-block cap. Loaded
+confirmations. Delta64 rescue is now default-on by owner decision, still
+pending representative content; READ coalescing remains fixed-on with an eight-block cap. Loaded
 lifecycle evidence exercises GC relocation, whole-segment DISCARD, packed
 placement, low-RAM/heavy-CPU pressure and byte-exact readback. Representative
 long-run churn, actual kernel swap and physical-media qualification remain open.
@@ -465,7 +465,7 @@ they affect how new measurements are designed:
 | Direct single-bvec compression input | Qualified; keep direct input with safe fallback. | Only if ownership/page-mapping assumptions change. |
 | Final payload CRC removal | Rejected; it is an integrity boundary, not optional benchmark overhead. | Only with an equivalent fail-closed integrity design. |
 | Ordinary LZ4 acceleration | Fixed at 1; runtime selector and loaded promotion A/B are retired. | A materially different codec/library/CPU changes end-to-end service economics. |
-| Delta64 rescue | Predictor-first route is qualified on controlled positive content but remains default-off. | Representative swap content demonstrates prevalence and matched end-to-end benefit. |
+| Delta64 rescue | Default-on by owner decision; predictor-first route is qualified on controlled positive content. | Representative swap content or the default-on mixed matrix shows no prevalence, or a service/CPU regression versus `delta64_rescue=0`. |
 | Adjacent READ coalescing | Keep default-on, exact 2..8 ranges, zero padding, fixed eight-block cap. | New device/workload evidence shows a service regression or a larger cap has a measurable opportunity. |
 | Same-extent standalone READ grouping | Rejected/retired; shared caches remain. | A new cache/layout regime creates a measured request opportunity not covered by ID63. |
 
@@ -479,8 +479,8 @@ Current benchmark work must preserve these contracts:
 
 - **Ordinary LZ4:** production acceleration is fixed at one. The native
   1/2/3/4 sweep remains only a byte-exact codec/geometry regression check.
-- **Delta64:** rescue is default-off. When enabled, the scalar classifier runs
-  before ordinary LZ4; high-score pages may directly adopt a sufficiently small
+- **Delta64:** rescue is default-on (`delta64_rescue=0` disables it). The
+  scalar classifier runs before ordinary LZ4; high-score pages may directly adopt a sufficiently small
   delta64+LZ4 result. Scalar and every compiled SIMD backend must remain
   byte-identical, and loaded wrapper-inclusive timing remains authoritative.
   In console tables, a timing column that measures only compression of an
@@ -636,8 +636,10 @@ capacity, suspend/drain safety, immutable lower-run lifetime and no completion
 ownership cycle. Final publication payload CRC remains a settled integrity
 boundary and is not part of that experiment.
 
-Delta64 rescue remains default-off despite the qualified positive-fixture A/B;
-representative swap content is the remaining promotion gate. Production
+Delta64 rescue is default-on by owner decision after the qualified
+positive-fixture A/B; representative swap content remains the evidence that
+keeps or reverts it. Standard sessions run the default, while the paired A/B
+off arm and the medium-mixed envelope control pin `--no-delta64-rescue`. Production
 ordinary LZ4 is fixed at acceleration one, delta64 preparation at one producer
 lane, lower-WRITE submission at one immutable slot, and ID63 coalescing at an
 eight-block cap. The depth-two path and the settled runtime selectors are

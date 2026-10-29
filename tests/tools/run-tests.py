@@ -293,6 +293,10 @@ TIMED_WINDOW_COUNTER_FIELDS = (
         "accepted_work_lower_idle_post_lower_ns"))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
+# Standard (non-A/B) sessions run the production module default: delta64
+# rescue on. Explicit A/B control arms pin it off with --no-delta64-rescue.
+PRODUCTION_DELTA64_RESCUE = 1
+
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
     "delta64_adopted", "delta64_direct_adopted",
@@ -4006,7 +4010,7 @@ def write_saturation_verdict(sessions):
                     timed["delta64_lz4_acceleration"] != 1 or
                     timed["write_pipeline_depth"] != 1 or
                     timed["pipeline_active_max"] > 1 or
-                    timed["delta64_rescue"] != 0):
+                    timed["delta64_rescue"] != PRODUCTION_DELTA64_RESCUE):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: standard write-only policy mismatch"}
             row["timed_window_delta"] = {
@@ -4452,9 +4456,10 @@ def benchmark_verdicts(sessions):
         if error is not None:
             return {"overall": "INCOMPLETE",
                     "reason": f"timed mixed window telemetry: {error}"}
-        if timed["lz4_acceleration"] != 1 or timed["delta64_rescue"] != 0:
+        if (timed["lz4_acceleration"] != 1 or
+                timed["delta64_rescue"] != PRODUCTION_DELTA64_RESCUE):
             return {"overall": "INCOMPLETE",
-                    "reason": "standard mixed sessions require LZ4 acceleration 1 and delta64 off"}
+                    "reason": "standard mixed sessions require LZ4 acceleration 1 and the production delta64 default"}
         row["kernel_counter_delta"] = {
             key: timed[key]
             for key in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS

@@ -33,7 +33,7 @@ Gen4 mixed). It prints one table of useful READ/WRITE, lower WRITE bytes ratio
 and requests, READ/WRITE p99, windows, deadline and idle-bound closes,
 accepted-work lower idle, lower-WRITE service and its EWMA, and keeps detailed
 telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
-select scenarios and repeats. It never writes or publishes `test_results.json`,
+select scenarios and repeats; `DELTA64=0` pins the LZ4-only control policy. It never writes or publishes `test_results.json`,
 never records a qualification verdict and never substitutes for `make test`:
 single unpaired observations decide only which candidate deserves the full
 owner matrix.
@@ -357,8 +357,10 @@ plotting dependency.
 
 ARM64/NEON plus the seven-online-CPU profile selects this VM's historical
 cohort; old reports lack an immutable VM identifier, so record that limitation.
-Require overall PASS, default async preparation and explicit delta64-off state
-for mixed points, and matching source/fixture/trace between each pair. Exclude
+Require overall PASS, default async preparation and a recorded delta64 state
+for mixed points, and matching source/fixture/trace between each pair. Delta64
+off and on are separate series: the production default became rescue-on, so the
+line breaks there instead of joining LZ4-only history. Exclude
 failed/blocked reports and other or unproven hosts. Never pool optional delta64
 positive write-only envelopes with ordinary mixed service, or historical wave
 drivers with persistent WRITE. Missing targets/metrics are absent, never zero.
@@ -483,7 +485,8 @@ counters themselves do not establish a performance gain.
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
   continue proving the temporary live-reference decrement is exactly restored
   before return/commit, including an error after a validated shared-extent page.
-- **ID67 predictive rescue:** rescue remains default-off. The second LZ4 pass
+- **ID67 predictive rescue:** rescue is default-on by owner decision; the
+  paired A/B off arm pins `--no-delta64-rescue`. The second LZ4 pass
   has a separate read-only `delta64_lz4_acceleration` control, default 1. The
   standard rescue A/B fixes that control at 4 in both arms so rescue remains the
   only changed policy while testing whether lower second-pass CPU cost closes
@@ -1986,14 +1989,19 @@ extent. Direct production-C coverage must prove ordinary LZ4 and delta64 records
 share the unchanged 16-byte SWZ record size, decode the encoding bit exactly,
 reject reserved header flags, and preserve payload CRC validation.
 
-Both write owners must bypass rescue when the read-only, default-off
-`delta64_rescue` module parameter is disabled. Snapshot it at construction and
-allocate predictor scratch only when enabled. The bare-load smoke and reload
-must assert `delta64_rescue=0`; all rescue counters and wall time stay zero.
-This describes the bypass, not classifier selectivity. Encoded reads retain
-inverse support and fail closed if their scratch is missing.
+Both write owners must bypass rescue when the read-only, default-on
+`delta64_rescue` module parameter is loaded as 0. Snapshot it at construction
+and allocate predictor scratch only when enabled. The bare-load smoke and the
+packed-placement reload must assert `delta64_rescue=1` and nonzero
+`delta64_eligible` (the classifier scored ordinary oracle pages); adoption is
+content-dependent and not required there. Standard mixed and write-only
+sessions must report the production default (`PRODUCTION_DELTA64_RESCUE`); the
+rescue A/B off arm, the medium-mixed envelope control and retired LZ4/depth
+A/Bs pin rescue off. Only an explicit `--delta64-rescue` positive-fixture
+session must show classifier passes and adoptions. Encoded reads retain inverse
+support and fail closed if their scratch is missing.
 
-The opt-in classifier has two production routes and runs before ordinary LZ4.
+The default-on classifier has two production routes and runs before ordinary LZ4.
 Score >=24 pages try delta64 plus the rescue LZ4 first; candidates <=2024 bytes
 may be direct adoptions with no ordinary-LZ4 baseline, while larger candidates
 fall through to ordinary LZ4 and require a strict size win. Lower-score pages

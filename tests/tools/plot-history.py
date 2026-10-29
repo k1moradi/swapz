@@ -76,7 +76,10 @@ def report_points(report):
             continue
         arms = session.get("arms", {})
         raw, swapz = arms.get("off", {}), arms.get("swapz", {})
-        if (swapz.get("kernel_write_path") or {}).get("delta64_rescue") != 0:
+        # Delta64 policy is part of series identity: the production default
+        # changed to rescue-on, so never join it to LZ4-only history.
+        delta64 = (swapz.get("kernel_write_path") or {}).get("delta64_rescue")
+        if delta64 not in (0, 1):
             continue
         target = envelope or session.get("regime")
         if target not in TARGETS:
@@ -87,13 +90,14 @@ def report_points(report):
         # Never join different device geometry, content, replay or kernels.
         identity = (session.get("device_model"), fixture, trace,
                     raw.get("replay_engine"), raw.get("replay_mode"),
-                    report.get("kernel_release"))
+                    report.get("kernel_release"), delta64)
         compatibility = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         groups[(target, compatibility)].append((raw, swapz))
         metadata[(target, compatibility)] = {
             "device_model": json.dumps(identity[0], sort_keys=True),
             "fixture_sha256": fixture, "trace_sha256": trace,
-            "replay_engine": raw.get("replay_engine"), "replay_mode": raw.get("replay_mode")}
+            "replay_engine": raw.get("replay_engine"), "replay_mode": raw.get("replay_mode"),
+            "delta64_rescue": delta64}
 
     points = []
     fields = {
@@ -105,7 +109,9 @@ def report_points(report):
         "lower_write_requests": ("lower_write_requests", "lower_write_requests"),
     }
     for (target, compatibility), sessions in groups.items():
-        point = {"target": target, "workload": "mixed QD32, delta64 off",
+        delta64 = metadata[(target, compatibility)]["delta64_rescue"]
+        point = {"target": target,
+                 "workload": "mixed QD32, delta64 " + ("on" if delta64 else "off"),
                  "compatibility": compatibility, "observations": len(sessions),
                  **metadata[(target, compatibility)]}
         for metric, keys in fields.items():
@@ -133,14 +139,16 @@ def report_points(report):
                     continue
                 gain = change(row.get("swapz_write_mbps"), row.get("raw_write_mbps"))
                 identities = {json.dumps((s.get("device_model"), s.get("fixture_sha256"),
-                                          s.get("trace_sha256"), report.get("kernel_release")),
+                                          s.get("trace_sha256"), report.get("kernel_release"),
+                                          (s.get("arms", {}).get("swapz", {}).get(
+                                              "kernel_write_path") or {}).get("delta64_rescue")),
                                          sort_keys=True)
                               for s in benchmarks.get("write_saturation_sessions", [])
                               if s.get("status") == "PASS" and s.get("async_prepare") == 1 and
                               s.get("regime") == target and s.get("qd") == row["qd"] and
                               paired_inputs_match(s, source) and
                               (s.get("arms", {}).get("swapz", {}).get("kernel_write_path") or {}).get(
-                                  "delta64_rescue") == 0 and
+                                  "delta64_rescue") in (0, 1) and
                               all((s.get("arms", {}).get(arm) or {}).get("replay_mode") ==
                                   "persistent-write" for arm in ("off", "swapz"))}
                 if gain is not None and len(identities) == 1:
