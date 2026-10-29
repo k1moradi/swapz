@@ -31,8 +31,18 @@ typedef uint32_t swapz_u32;
 #define SWAPZ_MAGIC 0x005a5753U /* little endian "SWZ\\0" */
 #define SWAPZ_ENCODING_LZ4 0U
 #define SWAPZ_ENCODING_DELTA64 1U
+/* delta64, then 8-byte byte-plane shuffle (predictor-shuffle.h), then LZ4. */
+#define SWAPZ_ENCODING_DELTA64_SHUF8 2U
+/* Decoded only from a reserved flag combination; never valid. */
+#define SWAPZ_ENCODING_INVALID 0xffU
+/*
+ * payload_length_le: bits 0..13 length (<= SWAPZ_MAX_COMPRESSED), bit 15
+ * delta64, bit 14 byte-plane shuffle. Bit 14 without bit 15 is reserved and
+ * rejected by validation.
+ */
 #define SWAPZ_RECORD_DELTA64_FLAG 0x8000U
-#define SWAPZ_RECORD_LENGTH_MASK 0x7fffU
+#define SWAPZ_RECORD_SHUF8_FLAG 0x4000U
+#define SWAPZ_RECORD_LENGTH_MASK 0x3fffU
 
 /* Endian encoding is little-endian, independently of the host CPU. */
 struct swapz_header {

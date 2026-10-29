@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "codec.h"
+#include "authority.h"
+#include <stddef.h>
 
 #define CHECK(expression) do { \
 	if (!(expression)) { \
@@ -122,6 +124,88 @@ static int test_delta64_record_encoding(void)
 	return 0;
 }
 
+/* Recompute the metadata CRC after deliberately editing a descriptor so the
+ * encoding check, not the CRC, is what rejects the extent. */
+static void reseal_metadata(uint8_t *bytes, swapz_u8 records)
+{
+	swapz_u32 zero = 0, crc;
+	size_t end = sizeof(struct swapz_header) +
+		(size_t)records * sizeof(struct swapz_record);
+
+	memcpy(bytes + offsetof(struct swapz_header, metadata_crc32c_le),
+	       &zero, sizeof(zero));
+	crc = swapz_crc32c_bytes(bytes, (swapz_u32)end);
+	memcpy(bytes + offsetof(struct swapz_header, metadata_crc32c_le),
+	       &crc, sizeof(crc));
+}
+
+static int test_delta64_shuf8_record_encoding(void)
+{
+	struct swapz_builder b;
+	struct swapz_decoded d;
+	const uint8_t *p;
+	swapz_u32 crc;
+	swapz_u16 raw;
+	size_t length_at = sizeof(struct swapz_header) +
+		offsetof(struct swapz_record, payload_length_le);
+
+	set_payload(1200, 91);
+	crc = swapz_crc32c_bytes(payload, 1200);
+	CHECK(swapz_begin(&b, extent, 4096, 94) == 0);
+	CHECK(swapz_append_prehashed_encoded(&b, 11, 6, payload, 1200, crc,
+					    SWAPZ_ENCODING_DELTA64_SHUF8) == 0);
+	CHECK(swapz_seal(&b) == 0);
+	memcpy(&raw, extent + length_at, sizeof(raw));
+	CHECK(raw == (1200U | SWAPZ_RECORD_DELTA64_FLAG | SWAPZ_RECORD_SHUF8_FLAG));
+	CHECK(swapz_validate(extent, 4096) == 0);
+	CHECK(swapz_lookup(extent, 4096, 0, &d, &p) == 0);
+	CHECK(d.logical_page == 11 && d.generation == 6);
+	CHECK(d.payload_length == 1200 && d.payload_crc32c == crc);
+	CHECK(d.encoding == SWAPZ_ENCODING_DELTA64_SHUF8);
+	CHECK(!memcmp(p, payload, 1200));
+
+	/* Lone bit 14 (shuffle without delta64) is reserved: fail closed. */
+	raw = (swapz_u16)(1200U | SWAPZ_RECORD_SHUF8_FLAG);
+	memcpy(extent + length_at, &raw, sizeof(raw));
+	reseal_metadata(extent, 1);
+	CHECK(swapz_validate_metadata_crc(extent, 4096) == 0);
+	CHECK(swapz_validate(extent, 4096) == -EUCLEAN);
+	CHECK(swapz_peek(extent, 4096, 0, &d) == -EUCLEAN);
+	CHECK(swapz_lookup_validated_descriptor(extent, 4096, 0, &d, &p) ==
+	      -EUCLEAN);
+	CHECK(p == NULL && d.encoding == 0);
+
+	/* Writers can never emit an unknown or reserved encoding. */
+	CHECK(swapz_begin(&b, extent, 4096, 95) == 0);
+	CHECK(swapz_append_encoded(&b, 12, 7, payload, 1200,
+				   SWAPZ_ENCODING_INVALID) == -EINVAL);
+	CHECK(swapz_append_prehashed_encoded(&b, 12, 7, payload, 1200, crc,
+					    3U) == -EINVAL);
+	return 0;
+}
+
+static int test_map_encoding_packing(void)
+{
+	static const swapz_u8 encodings[] = {
+		SWAPZ_ENCODING_LZ4, SWAPZ_ENCODING_DELTA64,
+		SWAPZ_ENCODING_DELTA64_SHUF8,
+	};
+	struct swapz_map map = { 0 };
+	unsigned int e;
+
+	for (e = 0; e < sizeof(encodings); ++e) {
+		map.record_index = swapz_map_pack_record_index(63, encodings[e]);
+		CHECK(swapz_map_record_index(&map) == 63);
+		CHECK(swapz_map_encoding(&map) == encodings[e]);
+		map.record_index = swapz_map_pack_record_index(0, encodings[e]);
+		CHECK(swapz_map_record_index(&map) == 0);
+		CHECK(swapz_map_encoding(&map) == encodings[e]);
+	}
+	CHECK(swapz_map_pack_record_index(5, SWAPZ_ENCODING_DELTA64_SHUF8) ==
+	      (5U | SWAPZ_MAP_DELTA64_FLAG | SWAPZ_MAP_SHUF8_FLAG));
+	return 0;
+}
+
 static int test_seal_clears_only_unwritten_gap(void)
 {
 	struct swapz_builder b;
@@ -156,7 +240,7 @@ static int test_bad_inputs(void)
 	CHECK(swapz_append(&b, 0, 1, NULL, 2072) == -EINVAL);
 	CHECK(swapz_append(&b, 0, 1, payload, 0) == -EINVAL);
 	CHECK(swapz_append(&b, 0, 1, payload, 3569) == -EINVAL);
-	CHECK(swapz_append_encoded(&b, 4, 1, payload, 2072, 2U) == -EINVAL);
+	CHECK(swapz_append_encoded(&b, 4, 1, payload, 2072, 3U) == -EINVAL);
 	CHECK(swapz_append(&b, 5, 1, payload, 2072) == 0);
 	CHECK(swapz_append(&b, 5, 2, payload, 2072) == -EEXIST);
 	CHECK(swapz_seal(&b) == 0);
@@ -308,6 +392,8 @@ int main(void)
 	CHECK(test_class(16384, 7) == 0); tests++;
 	CHECK(test_prehashed_and_validated_lookup() == 0); tests++;
 	CHECK(test_delta64_record_encoding() == 0); tests++;
+	CHECK(test_delta64_shuf8_record_encoding() == 0); tests++;
+	CHECK(test_map_encoding_packing() == 0); tests++;
 	CHECK(test_seal_clears_only_unwritten_gap() == 0); tests++;
 	CHECK(test_bad_inputs() == 0); tests++;
 	CHECK(test_integrity() == 0); tests++;

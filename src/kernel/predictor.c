@@ -88,6 +88,40 @@ void swapz_unpredict_delta64_scalar(const swapz_u8 *input, swapz_u8 *output)
 		swapz_predictor_store64(output + offset, previous);
 	}
 }
+/* Scalar byte-plane shuffle: out[b * 512 + w] = in[w * 8 + b]. */
+void swapz_shuffle8_scalar(const swapz_u8 *input, swapz_u8 *output)
+{
+	swapz_u32 word, byte;
+
+	for (word = 0; word < SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_U64_BYTES; ++word)
+		for (byte = 0; byte < SWAPZ_PREDICTOR_U64_BYTES; ++byte)
+			output[byte * (SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_U64_BYTES) + word] =
+				input[word * SWAPZ_PREDICTOR_U64_BYTES + byte];
+}
+void swapz_unshuffle8_scalar(const swapz_u8 *input, swapz_u8 *output)
+{
+	swapz_u32 word, byte;
+
+	for (word = 0; word < SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_U64_BYTES; ++word)
+		for (byte = 0; byte < SWAPZ_PREDICTOR_U64_BYTES; ++byte)
+			output[word * SWAPZ_PREDICTOR_U64_BYTES + byte] =
+				input[byte * (SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_U64_BYTES) + word];
+}
+swapz_u32 swapz_predict_delta64_shuf8_scalar(const swapz_u8 *input,
+					     swapz_u8 *scratch, swapz_u8 *output)
+{
+	swapz_u32 result = swapz_predict_delta64_scalar(input, scratch);
+
+	if (!result)
+		swapz_shuffle8_scalar(scratch, output);
+	return result;
+}
+void swapz_unpredict_delta64_shuf8_scalar(const swapz_u8 *input,
+					  swapz_u8 *scratch, swapz_u8 *output)
+{
+	swapz_unshuffle8_scalar(input, scratch);
+	swapz_unpredict_delta64_scalar(scratch, output);
+}
 #ifdef __KERNEL__
 #if defined(CONFIG_X86_64)
 #define SWAPZ_X86_TRANSFORM_WRAPPER(suffix) static swapz_u32 swapz_predict_##suffix(const swapz_u8 *input, swapz_u8 *output) { swapz_u32 result; if (!in_task()) return swapz_predict_delta64_scalar(input, output); kernel_fpu_begin(); result = swapz_predict_delta64_##suffix(input, output); kernel_fpu_end(); return result; }
@@ -98,8 +132,15 @@ SWAPZ_X86_TRANSFORM_WRAPPER(avx512)
 SWAPZ_X86_INVERSE_WRAPPER(sse2)
 SWAPZ_X86_INVERSE_WRAPPER(avx2)
 SWAPZ_X86_INVERSE_WRAPPER(avx512)
+/* DELTA64_SHUF8: both stages inside one FPU section per page. */
+#define SWAPZ_X86_SHUF8_WRAPPERS(suffix) static swapz_u32 swapz_predict_shuf8_##suffix(const swapz_u8 *input, swapz_u8 *scratch, swapz_u8 *output) { swapz_u32 result; if (!in_task()) return swapz_predict_delta64_shuf8_scalar(input, scratch, output); kernel_fpu_begin(); result = swapz_predict_delta64_##suffix(input, scratch); if (!result) swapz_shuffle8_##suffix(scratch, output); kernel_fpu_end(); return result; } \
+	static void swapz_unpredict_shuf8_##suffix(const swapz_u8 *input, swapz_u8 *scratch, swapz_u8 *output) { if (!in_task()) { swapz_unpredict_delta64_shuf8_scalar(input, scratch, output); return; } kernel_fpu_begin(); swapz_unshuffle8_##suffix(input, scratch); swapz_unpredict_delta64_##suffix(scratch, output); kernel_fpu_end(); }
+SWAPZ_X86_SHUF8_WRAPPERS(sse2)
+SWAPZ_X86_SHUF8_WRAPPERS(avx2)
+SWAPZ_X86_SHUF8_WRAPPERS(avx512)
 #undef SWAPZ_X86_TRANSFORM_WRAPPER
 #undef SWAPZ_X86_INVERSE_WRAPPER
+#undef SWAPZ_X86_SHUF8_WRAPPERS
 #endif
 #if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)
 static swapz_u32 swapz_predict_neon_guarded(const swapz_u8 *input, swapz_u8 *output)
@@ -114,9 +155,34 @@ static void swapz_unpredict_neon_guarded(const swapz_u8 *input, swapz_u8 *output
 	if (!in_task()) { swapz_unpredict_delta64_scalar(input, output); return; }
 	kernel_fpu_begin(); swapz_unpredict_delta64_neon(input, output); kernel_fpu_end();
 }
+static swapz_u32 swapz_predict_shuf8_neon_guarded(const swapz_u8 *input,
+						  swapz_u8 *scratch, swapz_u8 *output)
+{
+	swapz_u32 result;
+	if (!in_task()) return swapz_predict_delta64_shuf8_scalar(input, scratch, output);
+	kernel_fpu_begin();
+	result = swapz_predict_delta64_neon(input, scratch);
+	if (!result)
+		swapz_shuffle8_neon(scratch, output);
+	kernel_fpu_end();
+	return result;
+}
+static void swapz_unpredict_shuf8_neon_guarded(const swapz_u8 *input,
+					       swapz_u8 *scratch, swapz_u8 *output)
+{
+	if (!in_task()) { swapz_unpredict_delta64_shuf8_scalar(input, scratch, output); return; }
+	kernel_fpu_begin();
+	swapz_unshuffle8_neon(input, scratch);
+	swapz_unpredict_delta64_neon(scratch, output);
+	kernel_fpu_end();
+}
 #endif
 DEFINE_STATIC_CALL(swapz_predictor_transform_call, swapz_predict_delta64_scalar);
 DEFINE_STATIC_CALL(swapz_predictor_inverse_call, swapz_unpredict_delta64_scalar);
+DEFINE_STATIC_CALL(swapz_predictor_shuf8_transform_call,
+		   swapz_predict_delta64_shuf8_scalar);
+DEFINE_STATIC_CALL(swapz_predictor_shuf8_inverse_call,
+		   swapz_unpredict_delta64_shuf8_scalar);
 int swapz_predictor_init(void)
 {
 	swapz_transform_backend = "scalar";
@@ -127,6 +193,10 @@ int swapz_predictor_init(void)
 			      XFEATURE_MASK_AVX512, NULL)) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_avx512);
 		static_call_update(swapz_predictor_inverse_call, swapz_unpredict_avx512);
+		static_call_update(swapz_predictor_shuf8_transform_call,
+				   swapz_predict_shuf8_avx512);
+		static_call_update(swapz_predictor_shuf8_inverse_call,
+				   swapz_unpredict_shuf8_avx512);
 		/*
 		 * Native same-host qualification selected AVX-512 for both directions.
 		 * Loaded rescue A/B remains the end-to-end policy evidence because the
@@ -137,6 +207,10 @@ int swapz_predictor_init(void)
 		   cpu_has_xfeatures(XFEATURE_MASK_SSE | XFEATURE_MASK_YMM, NULL)) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_avx2);
 		static_call_update(swapz_predictor_inverse_call, swapz_unpredict_avx2);
+		static_call_update(swapz_predictor_shuf8_transform_call,
+				   swapz_predict_shuf8_avx2);
+		static_call_update(swapz_predictor_shuf8_inverse_call,
+				   swapz_unpredict_shuf8_avx2);
 		/*
 		 * The carry-decoupled AVX2 inverse keeps the cross-vector dependency
 		 * in YMM; native qualification still reports scalar and AVX2 timings
@@ -147,12 +221,20 @@ int swapz_predictor_init(void)
 		   cpu_has_xfeatures(XFEATURE_MASK_SSE, NULL)) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_sse2);
 		static_call_update(swapz_predictor_inverse_call, swapz_unpredict_sse2);
+		static_call_update(swapz_predictor_shuf8_transform_call,
+				   swapz_predict_shuf8_sse2);
+		static_call_update(swapz_predictor_shuf8_inverse_call,
+				   swapz_unpredict_shuf8_sse2);
 		swapz_transform_backend = "sse2"; swapz_inverse_backend = "sse2";
 	}
 #elif defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)
 	if (kernel_fpu_available()) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_neon_guarded);
 		static_call_update(swapz_predictor_inverse_call, swapz_unpredict_neon_guarded);
+		static_call_update(swapz_predictor_shuf8_transform_call,
+				   swapz_predict_shuf8_neon_guarded);
+		static_call_update(swapz_predictor_shuf8_inverse_call,
+				   swapz_unpredict_shuf8_neon_guarded);
 		swapz_transform_backend = "neon"; swapz_inverse_backend = "neon";
 	}
 #endif
@@ -168,34 +250,53 @@ swapz_u32 swapz_predict_delta64(const swapz_u8 *input, swapz_u8 *output)
 { return static_call(swapz_predictor_transform_call)(input, output); }
 void swapz_unpredict_delta64(const swapz_u8 *input, swapz_u8 *output)
 { static_call(swapz_predictor_inverse_call)(input, output); }
+swapz_u32 swapz_predict_delta64_shuf8(const swapz_u8 *input, swapz_u8 *scratch,
+				      swapz_u8 *output)
+{ return static_call(swapz_predictor_shuf8_transform_call)(input, scratch, output); }
+void swapz_unpredict_delta64_shuf8(const swapz_u8 *input, swapz_u8 *scratch,
+				   swapz_u8 *output)
+{ static_call(swapz_predictor_shuf8_inverse_call)(input, scratch, output); }
 #else
 typedef swapz_u32 (*swapz_predict_fn)(const swapz_u8 *, swapz_u8 *);
 typedef void (*swapz_unpredict_fn)(const swapz_u8 *, swapz_u8 *);
+typedef void (*swapz_shuffle_fn)(const swapz_u8 *, swapz_u8 *);
 static swapz_predict_fn swapz_predict_impl = swapz_predict_delta64_scalar;
 static swapz_unpredict_fn swapz_unpredict_impl = swapz_unpredict_delta64_scalar;
+static swapz_shuffle_fn swapz_shuffle_impl = swapz_shuffle8_scalar;
+static swapz_shuffle_fn swapz_unshuffle_impl = swapz_unshuffle8_scalar;
 int swapz_predictor_init(void)
 {
 	swapz_transform_backend = "scalar"; swapz_inverse_backend = "scalar";
 	swapz_predict_impl = swapz_predict_delta64_scalar;
 	swapz_unpredict_impl = swapz_unpredict_delta64_scalar;
+	swapz_shuffle_impl = swapz_shuffle8_scalar;
+	swapz_unshuffle_impl = swapz_unshuffle8_scalar;
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 	__builtin_cpu_init();
 	if (__builtin_cpu_supports("avx512f")) {
 		swapz_predict_impl = swapz_predict_delta64_avx512;
 		swapz_unpredict_impl = swapz_unpredict_delta64_avx512;
+		swapz_shuffle_impl = swapz_shuffle8_avx512;
+		swapz_unshuffle_impl = swapz_unshuffle8_avx512;
 		swapz_transform_backend = "avx512"; swapz_inverse_backend = "avx512";
 	} else if (__builtin_cpu_supports("avx2")) {
 		swapz_predict_impl = swapz_predict_delta64_avx2;
 		swapz_unpredict_impl = swapz_unpredict_delta64_avx2;
+		swapz_shuffle_impl = swapz_shuffle8_avx2;
+		swapz_unshuffle_impl = swapz_unshuffle8_avx2;
 		swapz_transform_backend = "avx2"; swapz_inverse_backend = "avx2";
 	} else {
 		swapz_predict_impl = swapz_predict_delta64_sse2;
 		swapz_unpredict_impl = swapz_unpredict_delta64_sse2;
+		swapz_shuffle_impl = swapz_shuffle8_sse2;
+		swapz_unshuffle_impl = swapz_unshuffle8_sse2;
 		swapz_transform_backend = "sse2"; swapz_inverse_backend = "sse2";
 	}
 #elif defined(__aarch64__)
 	swapz_predict_impl = swapz_predict_delta64_neon;
 	swapz_unpredict_impl = swapz_unpredict_delta64_neon;
+	swapz_shuffle_impl = swapz_shuffle8_neon;
+	swapz_unshuffle_impl = swapz_unshuffle8_neon;
 	swapz_transform_backend = "neon"; swapz_inverse_backend = "neon";
 #endif
 	return 0;
@@ -208,6 +309,21 @@ swapz_u32 swapz_predict_delta64(const swapz_u8 *input, swapz_u8 *output)
 { return swapz_predict_impl(input, output); }
 void swapz_unpredict_delta64(const swapz_u8 *input, swapz_u8 *output)
 { swapz_unpredict_impl(input, output); }
+swapz_u32 swapz_predict_delta64_shuf8(const swapz_u8 *input, swapz_u8 *scratch,
+				      swapz_u8 *output)
+{
+	swapz_u32 result = swapz_predict_impl(input, scratch);
+
+	if (!result)
+		swapz_shuffle_impl(scratch, output);
+	return result;
+}
+void swapz_unpredict_delta64_shuf8(const swapz_u8 *input, swapz_u8 *scratch,
+				   swapz_u8 *output)
+{
+	swapz_unshuffle_impl(input, scratch);
+	swapz_unpredict_impl(scratch, output);
+}
 #endif
 int swapz_predict_should_try_delta64(const swapz_u8 *input, swapz_u32 threshold)
 {

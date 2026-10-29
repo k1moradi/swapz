@@ -1454,6 +1454,18 @@ already-loaded delta register rather than reload a lane from memory. Inline
 assembly is restricted to these explicit SSE2 register operations and the
 native x86 qualification must verify the emitted instructions.
 
+NEON delta64 forward processes one 64-byte line per iteration and forms each
+predecessor with EXT from registers; reloading predecessors from unaligned
+addresses measured slower. The NEON inverse reconstructs 128 bytes per
+iteration as eight two-lane ZIP columns `[d[j], d[8 + j]]`: one serial column
+scan, EXT for the upper-half carry and ADDP for the line total keep the
+loop-carried chain to one add per 128 bytes before ZIP restores natural order.
+At -O2 on the ARM64 development VM this measured ~70 ns/page versus ~85 ns for
+the earlier per-vector EXT/DUP tree; LD4/ST4 column loads were slower than
+both. Inline assembly is limited to these register permutes. The rootless
+native predictor suite builds at -O1, so its backend ns/page overstate the
+kernel's -O2 cost; compare variants only within one build.
+
 Production transform timing surrounds `swapz_predict_delta64()`, not just the
 raw architecture function. On x86 this intentionally includes the per-call
 kernel FPU enter/exit wrapper. Native backend timings remain raw implementation

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "predictor-internal.h"
+#include "predictor-shuffle.h"
 
 typedef unsigned long long swapz_u64x8 __attribute__((vector_size(64)));
 
@@ -98,4 +99,15 @@ void swapz_unpredict_delta64_avx512(const swapz_u8 *input, swapz_u8 *output)
 		memcpy(output + offset, &out0, sizeof(out0));
 		memcpy(output + offset + sizeof(out0), &out1, sizeof(out1));
 	}
+}
+
+/* Byte-plane shuffle stage of DELTA64_SHUF8, built with this unit's ISA. */
+void swapz_shuffle8_avx512(const swapz_u8 *input, swapz_u8 *output)
+{
+	swapz_shuffle8_vector(input, output);
+}
+
+void swapz_unshuffle8_avx512(const swapz_u8 *input, swapz_u8 *output)
+{
+	swapz_unshuffle8_vector(input, output);
 }

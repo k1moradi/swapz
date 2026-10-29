@@ -21,6 +21,7 @@ PROGRAMS := io-replay-native codec-roundtrip extent-geometry zero-write-elision 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
 codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
+codec-roundtrip_HDR := $(KERNEL)/codec.h $(KERNEL)/authority.h
 extent-geometry_SRC := $(NATIVE)/codec/extent-geometry.c
 extent-geometry_HDR := $(KERNEL)/codec.h $(KERNEL)/authority.h
 PREDICTOR_CORE_OBJ := $(OUT)/predictor-core.o
@@ -69,16 +70,16 @@ $(foreach name,$(PROGRAMS),$(eval $(call BUILD_NATIVE,$(name))))
 $(PREDICTOR_CORE_OBJ): $(KERNEL)/predictor.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(KERNEL)/predictor.c -o "$@"
 
-$(OUT)/predictor-sse2.o: $(KERNEL)/predictor-sse2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
+$(OUT)/predictor-sse2.o: $(KERNEL)/predictor-sse2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -msse2 -c $(KERNEL)/predictor-sse2.c -o "$@"
 
-$(OUT)/predictor-avx2.o: $(KERNEL)/predictor-avx2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
+$(OUT)/predictor-avx2.o: $(KERNEL)/predictor-avx2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -mavx2 -c $(KERNEL)/predictor-avx2.c -o "$@"
 
-$(OUT)/predictor-avx512.o: $(KERNEL)/predictor-avx512.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
+$(OUT)/predictor-avx512.o: $(KERNEL)/predictor-avx512.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -mavx512f -c $(KERNEL)/predictor-avx512.c -o "$@"
 
-$(OUT)/predictor-neon.o: $(KERNEL)/predictor-neon.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
+$(OUT)/predictor-neon.o: $(KERNEL)/predictor-neon.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(KERNEL)/predictor-neon.c -o "$@"
 
 $(OUT)/predictor-qualification: $(NATIVE)/codec/predictor-qualification.c \

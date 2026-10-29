@@ -821,6 +821,88 @@ static int benchmark_backend(struct backend_benchmark *backend, swapz_u32 count)
 	if (!start || !end) return -EUCLEAN;
 	backend->inverse_ns_per_page = (end - start) / calls; return 0;
 }
+/*
+ * DELTA64_SHUF8 byte-plane stage: every compiled backend (one portable body
+ * per ISA unit) must equal an independent known-answer formula and the
+ * scalar oracle, invert exactly, and the dispatched combined transform must
+ * round-trip through distinct scratch/output pages.
+ */
+typedef void (*shuffle_fn)(const swapz_u8 *, swapz_u8 *);
+struct shuffle_backend { const char *name; shuffle_fn shuffle, unshuffle; };
+static swapz_u8 shuffle_reference[SWAPZ_BLOCK_BYTES];
+static swapz_u8 shuffle_scratch[SWAPZ_BLOCK_BYTES];
+static int verify_shuffle_backends(swapz_u32 count)
+{
+	struct shuffle_backend backends[4];
+	unsigned int backend_count = 0, backend;
+	const swapz_u32 words = SWAPZ_BLOCK_BYTES / SWAPZ_PREDICTOR_U64_BYTES;
+	swapz_u32 index, word, byte;
+
+	backends[backend_count++] = (struct shuffle_backend){
+		"scalar", swapz_shuffle8_scalar, swapz_unshuffle8_scalar };
+#if defined(__x86_64__)
+	backends[backend_count++] = (struct shuffle_backend){
+		"sse2", swapz_shuffle8_sse2, swapz_unshuffle8_sse2 };
+	__builtin_cpu_init();
+	if (__builtin_cpu_supports("avx2"))
+		backends[backend_count++] = (struct shuffle_backend){
+			"avx2", swapz_shuffle8_avx2, swapz_unshuffle8_avx2 };
+	if (__builtin_cpu_supports("avx512f"))
+		backends[backend_count++] = (struct shuffle_backend){
+			"avx512", swapz_shuffle8_avx512, swapz_unshuffle8_avx512 };
+#elif defined(__aarch64__)
+	backends[backend_count++] = (struct shuffle_backend){
+		"neon", swapz_shuffle8_neon, swapz_unshuffle8_neon };
+#endif
+	for (index = 0; index < count; ++index) {
+		const swapz_u8 *page = evidence_pages[index];
+
+		for (word = 0; word < words; ++word)
+			for (byte = 0; byte < SWAPZ_PREDICTOR_U64_BYTES; ++byte)
+				shuffle_reference[byte * words + word] =
+					page[word * SWAPZ_PREDICTOR_U64_BYTES + byte];
+		for (backend = 0; backend < backend_count; ++backend) {
+			backends[backend].shuffle(page, transform_page);
+			if (memcmp(transform_page, shuffle_reference, SWAPZ_BLOCK_BYTES)) {
+				fprintf(stderr, "shuffle8 %s mismatch page=%u\n",
+					backends[backend].name, index);
+				return -EUCLEAN;
+			}
+			backends[backend].unshuffle(shuffle_reference, recovered_page);
+			if (memcmp(recovered_page, page, SWAPZ_BLOCK_BYTES)) {
+				fprintf(stderr, "unshuffle8 %s mismatch page=%u\n",
+					backends[backend].name, index);
+				return -EUCLEAN;
+			}
+		}
+		/* Dispatched DELTA64_SHUF8 equals shuffle(delta64) and inverts. */
+		if (swapz_predict_delta64_shuf8(page, shuffle_scratch, transform_page))
+			return -EUCLEAN;
+		swapz_shuffle8_scalar(delta64_pages[index], shuffle_reference);
+		if (memcmp(transform_page, shuffle_reference, SWAPZ_BLOCK_BYTES)) {
+			fprintf(stderr, "delta64_shuf8 transform mismatch page=%u\n", index);
+			return -EUCLEAN;
+		}
+		swapz_unpredict_delta64_shuf8(transform_page, shuffle_scratch,
+					      recovered_page);
+		if (memcmp(recovered_page, page, SWAPZ_BLOCK_BYTES)) {
+			fprintf(stderr, "delta64_shuf8 inverse mismatch page=%u\n", index);
+			return -EUCLEAN;
+		}
+		if (swapz_predict_delta64_shuf8_scalar(page, shuffle_scratch,
+						       transform_page) ||
+		    memcmp(transform_page, shuffle_reference, SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
+		swapz_unpredict_delta64_shuf8_scalar(transform_page, shuffle_scratch,
+						     recovered_page);
+		if (memcmp(recovered_page, page, SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
+	}
+	printf("SWAPZ_PREDICTOR_SHUFFLE8_BACKENDS=%u pages=%u byte_exact=1\n",
+	       backend_count, count);
+	return 0;
+}
+
 static int collect_backend_benchmarks(struct backend_benchmark *backends,
 				      unsigned int *count_out, swapz_u32 page_count)
 {
@@ -1192,6 +1274,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	error = build_delta64_pages(count);
+	if (!error) error = verify_shuffle_backends(count);
 	if (!error) error = collect_backend_benchmarks(backend_benchmarks, &backend_count, count);
 	if (!error) error = benchmark_sse2_forward_ab(count, sse2_forward_ab);
 	if (!error) error = benchmark_second_lz4(count, &second_lz4_ns_per_page);

@@ -6,6 +6,8 @@
 #define SWAPZ_SEGMENT_BLOCKS 256U
 #define SWAPZ_MAP_RECORD_INDEX_MASK 0x3fU
 #define SWAPZ_MAP_DELTA64_FLAG 0x80U
+/* Set only together with SWAPZ_MAP_DELTA64_FLAG (DELTA64_SHUF8 records). */
+#define SWAPZ_MAP_SHUF8_FLAG 0x40U
 
 /*
  * Experimental worker-owned volatile mapping authority. Caller provisions
@@ -39,16 +41,19 @@ static inline swapz_u8 swapz_map_record_index(const struct swapz_map *map)
 
 static inline swapz_u8 swapz_map_encoding(const struct swapz_map *map)
 {
-	return (map->record_index & SWAPZ_MAP_DELTA64_FLAG) ?
-		SWAPZ_ENCODING_DELTA64 : SWAPZ_ENCODING_LZ4;
+	if (!(map->record_index & SWAPZ_MAP_DELTA64_FLAG))
+		return SWAPZ_ENCODING_LZ4;
+	return (map->record_index & SWAPZ_MAP_SHUF8_FLAG) ?
+		SWAPZ_ENCODING_DELTA64_SHUF8 : SWAPZ_ENCODING_DELTA64;
 }
 
 static inline swapz_u8 swapz_map_pack_record_index(swapz_u8 index,
 						   swapz_u8 encoding)
 {
 	return (index & SWAPZ_MAP_RECORD_INDEX_MASK) |
-		(encoding == SWAPZ_ENCODING_DELTA64 ?
-		 SWAPZ_MAP_DELTA64_FLAG : 0U);
+		(encoding == SWAPZ_ENCODING_DELTA64 ? SWAPZ_MAP_DELTA64_FLAG :
+		 encoding == SWAPZ_ENCODING_DELTA64_SHUF8 ?
+		 SWAPZ_MAP_DELTA64_FLAG | SWAPZ_MAP_SHUF8_FLAG : 0U);
 }
 
 struct swapz_tx_record {

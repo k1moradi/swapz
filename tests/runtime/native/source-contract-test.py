@@ -308,9 +308,9 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(compressor.index("swapz_predict_delta64_sample_score"),
                         compressor.index("baseline = LZ4_compress_fast(input"))
         self.assertLess(compressor.index("stats->classifier_pass++"),
-                        compressor.index("swapz_predict_delta64(input"))
+                        compressor.index("swapz_predict_delta64_shuf8(input"))
         self.assertLess(compressor.index("stats->attempts++"),
-                        compressor.index("swapz_predict_delta64(input"))
+                        compressor.index("swapz_predict_delta64_shuf8(input"))
         self.assertIn("candidate <= (int)SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH",
                       compressor)
         self.assertIn("stats->direct_adopted++", compressor)
@@ -2126,7 +2126,27 @@ static swapz_u16 swapz_probe_set(
         init_end = DM.index("static void __exit swapz_dm_exit", init_start)
         init = DM[init_start:init_end]
         self.assertIn("swapz_predictor_init()", init)
-        self.assertIn("swapz_predict_delta64(", DM)
+        # Rescue writes DELTA64_SHUF8 only; plain DELTA64 stays decodable.
+        self.assertIn("swapz_predict_delta64_shuf8(input, candidate_output,", DM)
+        self.assertNotIn("swapz_predict_delta64(input", DM)
+        self.assertEqual(DM.count("*encoding = SWAPZ_ENCODING_DELTA64_SHUF8;"), 2)
+        self.assertNotIn("*encoding = SWAPZ_ENCODING_DELTA64;", DM)
+        self.assertEqual(DM.count("swapz_unpredict_delta64_shuf8("), 2)
+        self.assertEqual(DM.count("ctx->read_compressed,\n\t\t\t\t\t\t\t      ctx->read_page"), 1)
+        self.assertIn("SWAPZ_RECORD_SHUF8_FLAG 0x4000U", (ROOT / "src/kernel/codec.h").read_text())
+        self.assertIn("SWAPZ_RECORD_LENGTH_MASK 0x3fffU", (ROOT / "src/kernel/codec.h").read_text())
+        self.assertIn("return SWAPZ_ENCODING_INVALID;", codec)
+        self.assertIn("!swapz_encoding_valid(out->encoding)", codec)
+        self.assertIn("SWAPZ_MAP_SHUF8_FLAG 0x40U", authority_header := (ROOT / "src/kernel/authority.h").read_text())
+        shuffle_header = (ROOT / "src/kernel/predictor-shuffle.h").read_text()
+        self.assertNotIn("__asm__", shuffle_header)
+        for isa in ("sse2", "avx2", "avx512", "neon"):
+            unit = (ROOT / f"src/kernel/predictor-{isa}.c").read_text()
+            self.assertIn('#include "predictor-shuffle.h"', unit)
+            self.assertIn(f"void swapz_shuffle8_{isa}(", unit)
+        predictor_src = (ROOT / "src/kernel/predictor.c").read_text()
+        for tier in ("avx512", "avx2", "sse2", "neon_guarded"):
+            self.assertIn(f"swapz_predict_shuf8_{tier})", predictor_src.replace("\n\t\t\t\t   ", ""))
         self.assertNotIn('#include "predictor.h"', authority)
         self.assertNotIn('#include "predictor.h"', codec)
         self.assertNotIn('#include "predictor.h"', engine)
@@ -3706,15 +3726,24 @@ int main(void)
         neon_inverse = source_body("swapz_unpredict_delta64_neon", predictor_neon)
         for neon_body in (neon_forward, neon_inverse):
             self.assertIn("swapz_u32 offset = 0", neon_body)
-            self.assertIn("4U * sizeof(swapz_u64x2)", neon_body)
             self.assertNotIn("2U * sizeof(swapz_u64x2)", neon_body)
+        # Forward: one 64-byte line per iteration, EXT predecessors from
+        # registers (unaligned predecessor reloads measured slower).
+        self.assertIn("4U * sizeof(swapz_u64x2)", neon_forward)
         self.assertIn("previous = { 0ULL, 0ULL }", neon_forward)
+        self.assertIn('ext %0.16b', neon_forward)
+        # Inverse: 16-word ZIP column scan; one carried add per 128 bytes.
+        self.assertIn("8U * sizeof(swapz_u64x2)", neon_inverse)
         self.assertIn("base = { 0ULL, 0ULL }", neon_inverse)
-        self.assertIn('ext %0.16b', predictor_neon)
-        self.assertIn('dup %0.2d', neon_inverse)
-        self.assertIn("step_quad = step01 + step23", neon_inverse)
-        self.assertIn("base += step_quad", neon_inverse)
-        self.assertNotIn("base += step_pair", neon_inverse)
+        self.assertIn('"zip1 %0.2d, %1.2d, %2.2d"', predictor_neon)
+        self.assertIn('"zip2 %0.2d, %1.2d, %2.2d"', predictor_neon)
+        self.assertIn("SWAPZ_NEON_ZIP1(c0, q0, q4);", neon_inverse)
+        self.assertIn('ext %0.16b', neon_inverse)
+        self.assertIn('addp %0.2d', neon_inverse)
+        self.assertIn("base += total;", neon_inverse)
+        self.assertEqual(neon_inverse.count("base +="), 1)
+        self.assertNotIn("ld4", predictor_neon)
+        self.assertNotIn("dup %0.2d", neon_inverse)
 
         # Validated metadata-cache bytes bypass full swapz_validate(), but a
         # sequence mismatch is rejected before any lower payload read.

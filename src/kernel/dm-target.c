@@ -2030,10 +2030,13 @@ static void swapz_delta64_note_score(struct swapz_delta64_stats *stats,
 
 /*
  * Predictor-first rescue: score before ordinary LZ4. High-score pages run
- * delta64+LZ4 first and candidates <=2024 bytes may be adopted directly,
- * genuinely skipping ordinary LZ4. Larger candidates retain the old strict
- * comparison after ordinary LZ4. Lower scores run ordinary LZ4 first and may
- * enter only the existing packing-cliff route.
+ * delta64+shuffle8+LZ4 first and candidates <=2024 bytes may be adopted
+ * directly, genuinely skipping ordinary LZ4. Larger candidates retain the old
+ * strict comparison after ordinary LZ4. Lower scores run ordinary LZ4 first
+ * and may enter only the existing packing-cliff route. Rescue candidates are
+ * DELTA64_SHUF8: the byte-plane shuffle turns small deltas into long zero
+ * planes that LZ4 encodes faster and smaller. candidate_output is free while
+ * the transform runs and holds the intermediate delta words.
  */
 static int swapz_compress_page(struct swapz_dm *ctx, const u8 *input,
 			       u8 *output, u8 *transform_scratch,
@@ -2068,7 +2071,8 @@ static int swapz_compress_page(struct swapz_dm *ctx, const u8 *input,
 			stats->classifier_pass++;
 			stats->attempts++;
 			start = now;
-			if (swapz_predict_delta64(input, transform_scratch)) {
+			if (swapz_predict_delta64_shuf8(input, candidate_output,
+							transform_scratch)) {
 				now = ktime_get_ns();
 				elapsed = swapz_elapsed_ns(start, now);
 				stats->transform_wall_ns += elapsed;
@@ -2098,7 +2102,7 @@ static int swapz_compress_page(struct swapz_dm *ctx, const u8 *input,
 					*zero = true;
 					return candidate;
 				}
-				*encoding = SWAPZ_ENCODING_DELTA64;
+				*encoding = SWAPZ_ENCODING_DELTA64_SHUF8;
 				stats->adopted++;
 				stats->direct_adopted++;
 				stats->first_lz4_skipped++;
@@ -2164,7 +2168,8 @@ ordinary:
 		if (route.pack_path)
 			stats->pack_attempts++;
 		start = ktime_get_ns();
-		if (swapz_predict_delta64(input, transform_scratch)) {
+		if (swapz_predict_delta64_shuf8(input, candidate_output,
+						transform_scratch)) {
 			now = ktime_get_ns();
 			elapsed = swapz_elapsed_ns(start, now);
 			stats->transform_wall_ns += elapsed;
@@ -2195,7 +2200,7 @@ ordinary:
 	if (!swapz_delta64_candidate_adoptable(&route, baseline, candidate))
 		goto out;
 	memcpy(output, candidate_output, (size_t)candidate);
-	*encoding = SWAPZ_ENCODING_DELTA64;
+	*encoding = SWAPZ_ENCODING_DELTA64_SHUF8;
 	saved = baseline > 0 ? (u64)baseline : SWAPZ_BLOCK_BYTES;
 	saved -= (u64)candidate;
 	stats->adopted++;
@@ -4423,14 +4428,21 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 				read_engine_elapsed - lower_read_elapsed;
 		if (error)
 			return error;
-		if (swapz_map_encoding(map) == SWAPZ_ENCODING_DELTA64) {
+		if (swapz_map_encoding(map) != SWAPZ_ENCODING_LZ4) {
 			if (!ctx->predictor_page)
 				return -EUCLEAN;
 			decompressed = LZ4_decompress_safe(ctx->read_compressed,
 						  ctx->predictor_page,
 						  payload_bytes,
 						  SWAPZ_BLOCK_BYTES);
-			if (decompressed == SWAPZ_BLOCK_BYTES)
+			/* The consumed compressed page is the unshuffle scratch. */
+			if (decompressed == SWAPZ_BLOCK_BYTES &&
+			    swapz_map_encoding(map) ==
+				    SWAPZ_ENCODING_DELTA64_SHUF8)
+				swapz_unpredict_delta64_shuf8(ctx->predictor_page,
+							      ctx->read_compressed,
+							      ctx->read_page);
+			else if (decompressed == SWAPZ_BLOCK_BYTES)
 				swapz_unpredict_delta64(ctx->predictor_page,
 						       ctx->read_page);
 		} else {
@@ -4511,14 +4523,21 @@ static int swapz_read_slot_run(struct swapz_read_slot *slot)
 			slot->read_engine_nonio_wall_ns += engine_elapsed - lower_elapsed;
 		if (error)
 			return error;
-		if (swapz_map_encoding(map) == SWAPZ_ENCODING_DELTA64) {
+		if (swapz_map_encoding(map) != SWAPZ_ENCODING_LZ4) {
 			if (!slot->predictor_page)
 				return -EUCLEAN;
 			decompressed = LZ4_decompress_safe(slot->read_compressed,
 						 slot->predictor_page,
 						 payload_bytes,
 						 SWAPZ_BLOCK_BYTES);
-			if (decompressed == SWAPZ_BLOCK_BYTES)
+			/* The consumed compressed page is the unshuffle scratch. */
+			if (decompressed == SWAPZ_BLOCK_BYTES &&
+			    swapz_map_encoding(map) ==
+				    SWAPZ_ENCODING_DELTA64_SHUF8)
+				swapz_unpredict_delta64_shuf8(slot->predictor_page,
+							      slot->read_compressed,
+							      read_page);
+			else if (decompressed == SWAPZ_BLOCK_BYTES)
 				swapz_unpredict_delta64(slot->predictor_page,
 						       read_page);
 		} else {

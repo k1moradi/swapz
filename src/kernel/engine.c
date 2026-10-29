@@ -71,7 +71,8 @@ static int swapz_page_valid(const struct swapz_compressed_page *page)
 	return page && !page->raw && page->payload && page->length > 0 &&
 		page->length <= SWAPZ_MAX_COMPRESSED &&
 		(page->encoding == SWAPZ_ENCODING_LZ4 ||
-		 page->encoding == SWAPZ_ENCODING_DELTA64);
+		 page->encoding == SWAPZ_ENCODING_DELTA64 ||
+		 page->encoding == SWAPZ_ENCODING_DELTA64_SHUF8);
 }
 
 /*

@@ -34,5 +34,15 @@ swapz_u32 swapz_predict_delta64_sample_score(const swapz_u8 *input);
 int swapz_predict_should_try_delta64(const swapz_u8 *input, swapz_u32 threshold);
 swapz_u32 swapz_predict_delta64(const swapz_u8 *input, swapz_u8 *output);
 void swapz_unpredict_delta64(const swapz_u8 *input, swapz_u8 *output);
+/*
+ * SWAPZ_ENCODING_DELTA64_SHUF8 payload transform: delta64 into the caller's
+ * 4KiB scratch page, then the 8-byte byte-plane shuffle into output (and the
+ * reverse). Both stages share one kernel FPU section. All three buffers are
+ * distinct 4KiB pages.
+ */
+swapz_u32 swapz_predict_delta64_shuf8(const swapz_u8 *input, swapz_u8 *scratch,
+				      swapz_u8 *output);
+void swapz_unpredict_delta64_shuf8(const swapz_u8 *input, swapz_u8 *scratch,
+				   swapz_u8 *output);
 
 #endif

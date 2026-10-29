@@ -157,6 +157,34 @@ static inline swapz_u32 swapz_record_logical_le(const void *bytes,
 	return logical_le;
 }
 
+static inline swapz_u8 swapz_length_encoding(swapz_u16 raw_length)
+{
+	switch (raw_length & (SWAPZ_RECORD_DELTA64_FLAG | SWAPZ_RECORD_SHUF8_FLAG)) {
+	case 0:
+		return SWAPZ_ENCODING_LZ4;
+	case SWAPZ_RECORD_DELTA64_FLAG:
+		return SWAPZ_ENCODING_DELTA64;
+	case SWAPZ_RECORD_DELTA64_FLAG | SWAPZ_RECORD_SHUF8_FLAG:
+		return SWAPZ_ENCODING_DELTA64_SHUF8;
+	default:
+		return SWAPZ_ENCODING_INVALID;
+	}
+}
+
+static inline swapz_u16 swapz_encoding_length_flags(swapz_u8 encoding)
+{
+	return encoding == SWAPZ_ENCODING_DELTA64 ? SWAPZ_RECORD_DELTA64_FLAG :
+		encoding == SWAPZ_ENCODING_DELTA64_SHUF8 ?
+		SWAPZ_RECORD_DELTA64_FLAG | SWAPZ_RECORD_SHUF8_FLAG : 0U;
+}
+
+static inline int swapz_encoding_valid(swapz_u8 encoding)
+{
+	return encoding == SWAPZ_ENCODING_LZ4 ||
+		encoding == SWAPZ_ENCODING_DELTA64 ||
+		encoding == SWAPZ_ENCODING_DELTA64_SHUF8;
+}
+
 static inline void swapz_decode_record(const struct swapz_record *record,
 				       struct swapz_decoded *out)
 {
@@ -168,8 +196,7 @@ static inline void swapz_decode_record(const struct swapz_record *record,
 		.payload_crc32c = swapz_le32(record->payload_crc32c_le),
 		.payload_offset = swapz_le16(record->payload_offset_le),
 		.payload_length = raw_length & SWAPZ_RECORD_LENGTH_MASK,
-		.encoding = (raw_length & SWAPZ_RECORD_DELTA64_FLAG) ?
-			SWAPZ_ENCODING_DELTA64 : SWAPZ_ENCODING_LZ4,
+		.encoding = swapz_length_encoding(raw_length),
 	};
 }
 
@@ -210,9 +237,7 @@ static int swapz_append_crc(struct swapz_builder *builder,
 
 	if (!builder || !builder->bytes || builder->sealed ||
 	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
-	    !generation ||
-	    (encoding != SWAPZ_ENCODING_LZ4 &&
-	     encoding != SWAPZ_ENCODING_DELTA64))
+	    !generation || !swapz_encoding_valid(encoding))
 		return -EINVAL;
 	if (builder->count >= SWAPZ_MAX_RECORDS)
 		return -ENOSPC;
@@ -237,8 +262,7 @@ static int swapz_append_crc(struct swapz_builder *builder,
 		.generation_le = swapz_le32(generation),
 		.payload_offset_le = swapz_le16(offset),
 		.payload_length_le = swapz_le16(length |
-			(encoding == SWAPZ_ENCODING_DELTA64 ?
-			 SWAPZ_RECORD_DELTA64_FLAG : 0U)),
+			swapz_encoding_length_flags(encoding)),
 		.payload_crc32c_le = swapz_le32(payload_crc32c),
 	};
 	memcpy(builder->bytes + offset, payload, length);
@@ -282,9 +306,7 @@ int swapz_append_encoded(struct swapz_builder *builder,
 {
 	if (!builder || !builder->bytes || builder->sealed ||
 	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
-	    !generation ||
-	    (encoding != SWAPZ_ENCODING_LZ4 &&
-	     encoding != SWAPZ_ENCODING_DELTA64))
+	    !generation || !swapz_encoding_valid(encoding))
 		return -EINVAL;
 	return swapz_append_crc(builder, logical_page, generation, payload,
 				length, swapz_crc32c_bytes(payload, length),
@@ -406,6 +428,8 @@ int swapz_validate(const void *bytes, swapz_u32 bytes_total)
 		length = swapz_le16(record.payload_length_le) &
 			SWAPZ_RECORD_LENGTH_MASK;
 		if (start + length != previous_end ||
+		    !swapz_encoding_valid(swapz_length_encoding(
+			    swapz_le16(record.payload_length_le))) ||
 		    !record.generation_le ||
 		    !length || length > SWAPZ_MAX_COMPRESSED ||
 		    start < metadata_end)
@@ -466,6 +490,7 @@ int swapz_lookup_validated_descriptor(const void *bytes,
 	swapz_get_record(bytes, index, &record);
 	swapz_decode_record(&record, out);
 	if (!out->payload_length || out->payload_length > SWAPZ_MAX_COMPRESSED ||
+	    !swapz_encoding_valid(out->encoding) ||
 	    out->payload_offset >= bytes_total ||
 	    out->payload_length > bytes_total - out->payload_offset) {
 		*out = (struct swapz_decoded){ 0 };
