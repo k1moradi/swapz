@@ -37,10 +37,11 @@ that needs 8KiB remains valid planner geometry but must not become an early-clos
 latch, including across RAW interleaving after the protected count-four boundary.
 Source contracts must prove that the pressure hand never steals an unprepared
 descriptor, retained READ-bypass credit requires an already-open staged WRITE
-window, sampled two/three-record tails are certified only by the sampler's
-current bounded queue snapshot (or the dedicated post-pack READ boundary), every
-nonempty WRITE flush clears stale wave-level READ state, and a single-BIO cache
-hit cannot set that state. Worker-empty burst-target shrink remains unblocked
+window, sampled two/three-record tails require a current bounded queue boundary or
+queued WRITE followers plus a successful independent READ in the same continuing
+PACK chain (or the dedicated post-pack READ boundary). Failed/finite closes
+and zero-tail samples revoke the mark; cached READs are upper-wave evidence,
+never lower-device service accounting. Worker-empty burst-target shrink remains unblocked
 merely because an earlier chain completed. Existing ID63 cache-coherence
 contracts retain the same open-window-only bypass rule. This supports
 correctness review but cannot prove loaded I/O service. Owner `make test` must
@@ -95,7 +96,8 @@ can qualify useful READ/WRITE, p99, lower bytes/requests, SD/SSD/NVMe, GC and
 fault/lifecycle behavior. Rootless checks alone are supporting evidence.
 
 Native window tests must distinguish a successful READ serviced after a staged
-two/three-record post-PACK tail from stale earlier READ evidence. The bounded
+two/three-record post-PACK tail from successful READ continuity in the same
+accepted PACK chain; source contracts must enforce the queued follower gate. The bounded
 candidate must reject singleton, pure-WRITE, sampled-target, K=1-busy and
 pending-sample service-dry cases and reset the evidence on a nonempty flush.
 Observe successful READ service from the single-BIO, independent read-slot and

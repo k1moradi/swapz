@@ -127,9 +127,11 @@ belong in the ROADMAP decision table and Git history.
   no authoritative sampled target is active, including compressed+RAW mixes. One-record windows keep the original pinned deadline.
   A pure-WRITE post-PACK tail of two/three is not a finite close target; target
   four and larger still require already-accepted queued follower evidence. A
-  sub-four sampled tail is finite only when the sampler's own bounded current
-  queue snapshot encounters an independent READ/non-WRITE boundary. Earlier
-  wave-level READ service must not certify a later pure-WRITE continuation.
+  sub-four sampled tail is finite when the current bounded snapshot observes
+  an independent READ/non-WRITE boundary, or queued WRITE followers plus
+  successful READ service in the same continuing PACK chain. Staged-only
+  residues and pure WRITE waves retain the four-record floor; finite/hard
+  closes and zero sampled tails revoke the chain mark.
   A serviced READ that occurs after a two/three-record post-PACK tail is already
   staged uses the dedicated post-pack boundary state instead. A staged-only
   post-K=1 tail with no queued follower or current non-WRITE boundary must not
@@ -188,9 +190,11 @@ belong in the ROADMAP decision table and Git history.
 - **Retained READ attribution:** `retained_window_read_bypasses` may be charged
   only when a retained WRITE window is already staged at the moment lower READ
   service is issued. The worker-level `retained_wave_read_seen` mark may be set
-  only after actual lower READ I/O; a cache-hit READ must not set it. Every
-  nonempty WRITE-window flush clears that mark, and tail sampling must not use
-  it to certify a later two/three-record residue. Independent READs may still be
+  only after successful READ service within an active staged/continuing WRITE
+  chain or behind skipped accepted WRITE followers. Cache-hit READs delimit an
+  upper wave but cannot charge lower READ I/O. Continuing PACK chains preserve
+  that mark, while failed/finite/hard closes and empty samples revoke it.
+  Tail sampling requires a current queued WRITE follower to use the mark. Independent READs may still be
   recognized directly by the sampler's current bounded queue snapshot, while a
   READ serviced after a post-PACK tail was already staged uses the dedicated
   post-pack boundary state.

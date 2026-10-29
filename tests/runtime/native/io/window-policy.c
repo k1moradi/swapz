@@ -289,6 +289,10 @@ static int test_sampled_tail_target_distinguishes_mixed_wave(void)
 	CHECK(swapz_window_sampled_tail_target(1, 1, 1) == 0);
 	CHECK(swapz_window_sampled_tail_target(2, 2, 0) == 0);
 	CHECK(swapz_window_sampled_tail_target(3, 3, 0) == 0);
+	/* The caller requires current queued followers before allowing
+	 * earlier chain-level READ proof to classify a short mixed tail. */
+	CHECK(swapz_window_sampled_tail_target(3, 0, 0) == 0);
+	CHECK(swapz_window_sampled_tail_target(3, 1, 1) == 3);
 	CHECK(swapz_window_sampled_tail_target(2, 0, 1) == 2);
 	CHECK(swapz_window_sampled_tail_target(3, 2, 1) == 3);
 	CHECK(swapz_window_sampled_tail_target(4, 0, 0) == 0);

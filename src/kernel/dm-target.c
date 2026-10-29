@@ -2999,6 +2999,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			ctx->retained_chain_completed = 0;
 			ctx->retained_window_read_bypasses = 0;
 			ctx->retained_wave_interrupted = false;
+			ctx->retained_wave_read_seen = false;
 		} else if (ctx->retain_ms && interrupted_close &&
 			   ctx->worker_has_immediate_followup) {
 			ctx->retained_wave_interrupted = true;
@@ -3431,9 +3432,12 @@ accounted:
 		}
 	}
 	ctx->batch_count = 0;
-	/* Serviced READ evidence belongs to the window just flushed, never the next. */
+	/* Post-PACK READ evidence belongs to the staged tail just flushed;
+	 * a distinct successful-READ wave mark has chain-scoped lifetime. */
 	ctx->retained_post_pack_read_boundary = false;
-	ctx->retained_wave_read_seen = false;
+	/* Carry READ proof only across a continuing, successful WRITE chain. */
+	if (error || committed != count || !chain_continues)
+		ctx->retained_wave_read_seen = false;
 	if (error || committed != count) {
 		ctx->retained_chain_completed = 0;
 		ctx->pack_close_pending_tail_sample = false;
@@ -3790,16 +3794,21 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			/* A staged-only pure-WRITE prefix may be joined by writers
 			 * released by the just-finalized K=1 run, so queued follower
 			 * evidence still protects the four-record floor. A serviced READ
-			 * or accepted non-WRITE boundary instead proves a mixed tail is
-			 * already finite and may use its exact two/three-record target. */
+			 * or accepted non-WRITE boundary proves a finite mixed tail.
+			 * Earlier successful READ evidence is allowed only for this
+			 * continuing chain with a current queued WRITE follower;
+			 * staged-only residues retain the four-record floor. */
 			ctx->retained_tail_target = scan_truncated ? 0 :
 				swapz_window_sampled_tail_target(
 					tail, queued_tail,
-					!prefix_open || saw_independent_read);
+					!prefix_open || saw_independent_read ||
+					(queued_tail && ctx->retained_wave_read_seen));
 		}
 	} else {
 		ctx->retained_chain_completed = 0;
 		ctx->retained_tail_target = 0;
+		/* A zero sampled tail ends the preceding accepted WRITE chain. */
+		ctx->retained_wave_read_seen = false;
 	}
 	ctx->pack_close_pending_tail_sample = false;
 }
@@ -4815,8 +4824,6 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 	if (ctx->async_prepare)
 		atomic_set(&ctx->preparation_tail_credit, 0);
 	retained_bypass = ctx->batch_count && ctx->retain_ms;
-	if (ctx->retain_ms)
-		ctx->retained_wave_read_seen = true;
 	read_start_ns = ktime_get_ns();
 
 	/* Submit every independent missing range before joining any slot. */
@@ -4900,6 +4907,12 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 		return true;
 	}
 
+	/* Skipped FIFO WRITEs are accepted follower evidence, not a staged
+	 * window for lower READ-bypass accounting. Observe successful reads only. */
+	if (ctx->retain_ms &&
+	    (ctx->batch_count || skipped_write_count ||
+	     ctx->retained_chain_completed))
+		ctx->retained_wave_read_seen = true;
 	/* Completed independent READs may follow an already-staged tail. */
 	swapz_note_post_pack_read_boundary(ctx);
 	ctx->logical_read_bytes += (u64)selected * SWAPZ_BLOCK_BYTES;
@@ -5151,8 +5164,6 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		atomic_set(&ctx->preparation_tail_credit, 0);
 
 	retained_bypass = ctx->batch_count && ctx->retain_ms;
-	if (ctx->retain_ms)
-		ctx->retained_wave_read_seen = true;
 	read_start_ns = ktime_get_ns();
 	batch_error = swapz_engine_coalesce_read_chain(
 		chain_engines, execute_starts, execute_extents, execute_first,
@@ -5214,6 +5225,11 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		return true;
 	}
 
+	/* Only a successful READ in a staged/continuing WRITE chain may
+	 * certify later accepted followers; READ errors cannot create proof. */
+	if (ctx->retain_ms &&
+	    (ctx->batch_count || ctx->retained_chain_completed))
+		ctx->retained_wave_read_seen = true;
 	/* Completed independent READs may follow an already-staged tail. */
 	swapz_note_post_pack_read_boundary(ctx);
 	ctx->logical_read_bytes += (u64)selected * SWAPZ_BLOCK_BYTES;
@@ -5320,12 +5336,13 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			u64 read_end_ns = ktime_get_ns();
 
 			if (ctx->retain_ms) {
-				/*
-				 * A completed cache-hit READ is a genuine boundary
-				 * only after this tail was staged. Observe it while
-				 * the preceding K=1 sample is pending; only dispatch
-				 * requires completion of that earlier sample.
-				 */
+				/* Successful cached READs can delimit an already-
+				 * active WRITE chain without consuming lower I/O.
+				 * Earlier unrelated READs never certify later waves. */
+				if (ctx->batch_count || ctx->retained_chain_completed)
+					ctx->retained_wave_read_seen = true;
+				/* The post-PACK observation is restricted to a
+				 * two/three-record tail already staged before READ. */
 				swapz_note_post_pack_read_boundary(ctx);
 			}
 			bool had_lower_io =
@@ -5338,14 +5355,11 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			 * Cache hits do not prove a lower-device service interval, so
 			 * they still do not enter general retained_window_read_bypasses
 			 * or extend the ordinary retention deadline. The worker-owned
-			 * mixed-wave mark records only that this READ was serviced; it may
-			 * make an existing 2/3-record residue finite without a timer or
-			 * cache-hit close authorization. Wave-level READ state is
-			 * charged only for actual lower READ service and is never tail-
-			 * certification evidence after a nonempty WRITE flush.
+			 * wave mark above records successful upper READ completion
+			 * within an existing chain. Lower READ attribution and
+			 * deadline adjustment still require real lower READ I/O.
 			 */
 			if (had_lower_io) {
-				ctx->retained_wave_read_seen = true;
 				swapz_note_single_tail_read_bypass(ctx);
 				if (ctx->retained_window_read_bypasses < SWAPZ_MAX_RECORDS)
 					ctx->retained_window_read_bypasses++;

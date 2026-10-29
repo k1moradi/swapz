@@ -72,7 +72,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("if (missing_slots < 2U)", concurrent)
         self.assertIn(
             "retained_bypass = ctx->batch_count && ctx->retain_ms;", concurrent)
-        self.assertNotIn("ctx->batch_count || skipped_write_count", concurrent)
+        self.assertIn("ctx->batch_count || skipped_write_count", concurrent)
         self.assertIn(
             "retained_bypass = ctx->batch_count && ctx->retain_ms;", coalesced)
 
@@ -1355,7 +1355,7 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("suppressed_tail_", DM)
         self.assertNotIn("SWAPZ_SUPPRESSED_TAIL_RESUBMIT_NS", policy)
         self.assertIn("!prefix_open || saw_independent_read", sample)
-        self.assertNotIn("queued_tail && ctx->retained_wave_read_seen", sample)
+        self.assertIn("queued_tail && ctx->retained_wave_read_seen", sample)
         self.assertIn("scan_truncated ? 0 :", sample)
         self.assertIn("scanned_bios++ >= SWAPZ_WORK_QUANTUM_BIOS", sample)
         self.assertIn("swapz_tail_read_is_independent_locked(", sample)
@@ -2645,8 +2645,9 @@ static swapz_u16 swapz_probe_set(
         completion = bypass.index("swapz_complete(bio, error)")
         self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
                         had_lower_io)
-        self.assertLess(had_lower_io, wave_read_seen)
-        self.assertLess(wave_read_seen, note_bypass)
+        self.assertLess(wave_read_seen, had_lower_io)
+        self.assertLess(had_lower_io, note_bypass)
+        self.assertIn("ctx->batch_count || ctx->retained_chain_completed", bypass)
         self.assertLess(note_bypass, service_shift)
         self.assertLess(service_shift, completion)
         self.assertIn("if (!error && !ctx->worker_has_immediate_followup &&",
@@ -2663,6 +2664,7 @@ static swapz_u16 swapz_probe_set(
         wave_read_reset = flush.index(
             "ctx->retained_wave_read_seen = false;", batch_reset)
         self.assertLess(batch_reset, wave_read_reset)
+        self.assertIn("error || committed != count || !chain_continues", flush)
         self.assertIn("ctx->retained_wave_interrupted", flush)
         reset_pos = flush.rindex("ctx->retained_window_read_bypasses = 0;")
         policy_pos = flush.rindex("if (!ctx->retain_ms")
