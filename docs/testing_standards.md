@@ -38,6 +38,26 @@ never records a qualification verdict and never substitutes for `make test`:
 single unpaired observations decide only which candidate deserves the full
 owner matrix.
 
+The development loop automatically screens host noise with the replay's existing
+`/proc/stat` and CPU-PSI counter readers. It samples 200ms quiet windows before
+and after each owned pair, outside useful-work timing, with no polling worker.
+Quiet-window busy >25%, CPU PSI waiting >5%, steal >1%, timed-arm steal >1%,
+or a same-scenario raw-WRITE max/min spread >10% across repeats marks the result
+`NOISY`. Missing/reset counters mark it `UNKNOWN` unless noise is already proved.
+Both set `performance_validity.performance_usable=false`; consumers must exclude
+them from performance decisions while preserving byte-exact correctness results
+and all measurements in `build/tests/fast-test/latest.json`. The table prints
+one compact quality status and exclusion reasons; no automatic retry occurs.
+
+These are conservative development screening thresholds, not statistical
+qualification or proof of causality. `SCREENED` means the checks passed, not
+that the host was idle throughout. Timed busy/PSI alone must never reject a run:
+the workload and kernel workers contribute to those counters. Mid-pair noise,
+affinity-local contention or virtualization pressure invisible in guest steal
+can still escape detection. A single repeat cannot establish raw-control drift.
+This screen does not apply to the deliberately contended ID36 gate and does not
+change `make test`, its exit codes, publication or qualification criteria.
+
 ## Scope discipline
 
 This file specifies tests that current source must pass. It is not the archive
@@ -325,48 +345,72 @@ when one measurement includes both operations. The console must not use
 
 Source contracts show structure, not loaded semantics. Native C shows portable product logic, not Device Mapper runtime. W=1/W=2 shows compilation, not correctness. Owned RAM-backed loaded tests show real kernel BIO behavior on the test host, not physical-media benefit. Only separately authorized physical testing can establish behavior on a particular real device.
 
+### Optimization-round history artifacts
+
+After each optimization round, the private history plotting helper reads the
+committed `test_results.json` revisions and emits a six-target default-LZ4 mixed
+READ/WRITE chart, mixed p99 chart, lower-WRITE bytes/requests savings chart and
+separate persistent-WRITE QD1/4/8/32 chart. Use standard plotting tools; rendering
+dependencies stay outside production and ordinary qualification. Rootless tests
+exercise the pure report selector/normalizer and line-break logic without a
+plotting dependency.
+
+ARM64/NEON plus the seven-online-CPU profile selects this VM's historical
+cohort; old reports lack an immutable VM identifier, so record that limitation.
+Require overall PASS, default async preparation and explicit delta64-off state
+for mixed points, and matching source/fixture/trace between each pair. Exclude
+failed/blocked reports and other or unproven hosts. Never pool optional delta64
+positive write-only envelopes with ordinary mixed service, or historical wave
+drivers with persistent WRITE. Missing targets/metrics are absent, never zero.
+Kernel/model/content/replay discontinuities break lines.
+
+Positive percentages mean useful throughput gain, p99 reduction or host-WRITE
+savings versus that report's raw control. Mixed rates are ratios of matched-arm
+arithmetic means, and may differ slightly from the reporter's differently pooled
+raw column. CSV/JSON must retain report and tested-source SHAs, kernel, local
+dates, compatibility identity, absolute rates and ratios. Historical host load
+was not quiet-screened; cross-report changes are descriptive, not causal or
+paired confidence estimates. Keep unqualified development trials separate and
+state the last qualified source when a round creates no new owner report.
+
 ## Current qualified baseline
 
-The latest successful standard owner matrix tested exact source
-`829cdbe0d9eb9541cc3954e3af02e821a90c5595` and published canonical
-report-only commit `efb713c06daa4fc03fdd7a200032c9c243089850`. All five public
-`make test` stages passed, including loaded correctness/lifecycle, W=1/W=2,
-owned-RAM storage regimes, retained fault paths, live GC, DISCARD/TRIM, packed
-placement and ID36 resource pressure. Later source changes are unqualified until
-their own complete owner `make test` finishes.
+The latest successful owner matrix tested exact source
+`03becc01802b1af1455c2a1c0a43b00ca1d22046` and published report-only commit
+`b5227ca58001abad1de216739a1bb30ce8ae0801`. The checked-in report says PASS
+for all five stages: build, native/rootless, W=1, W=2 and owned-RAM loaded
+qualification, including lifecycle/fault/GC and ID36 resource pressure.
+Later source changes require their own complete owner `make test`.
 
-That exact source is not a fast-media product win. In fast QD32 mixed I/O, raw
-useful WRITE is 62.96 MB/s versus 32.86 MB/s sync swapz and 32.21 MB/s async
-swapz. Async lowers backing WRITE throughput to 24.00 MB/s and lower-WRITE
-requests to 2572.6 versus raw 62.96 MB/s and 12295.7 requests, but useful READ
-also falls to 10.69 MB/s versus raw 20.90 MB/s. READ p99 improves to 1.21 ms
-from raw 4.57 ms. Treat this as a performance/endurance-proxy trade-off, not a
-success: fewer lower bytes/requests do not compensate for lost useful service.
+That run reports fast mixed async useful WRITE +7.4% versus raw, READ p99
+0.88 vs 3.71 ms, SD mixed +393%, and fast sustained QD1/QD4/QD8/QD32
+-2.7/-10.2/+18.2/+56.3%. SATA/NVMe envelopes and fast QD4 remain below raw.
+These are host-specific synthetic results, not universal raw parity or physical
+endurance evidence. Preserve independent lower WRITE bytes/requests as the
+host-I/O endurance proxy and circular segment allocation as logical fairness.
 
-Fast sustained WRITE shows the storage-adaptive opportunity is real but
-queue-depth dependent. Async swapz versus raw is 19.30/22.22 MB/s at QD1,
-68.52/84.00 at QD4, 82.50/85.81 at QD8, and 130.83/89.11 at QD32. The QD32
-result proves compression/packing can exceed raw when enough useful work is
-available; QD4 and mixed service remain the immediate scheduling problem.
-Production remains ordinary LZ4 acceleration one, one asynchronous preparation
-producer, a bounded 64-slot RAW+compressed reservoir, lower-WRITE depth one,
+Production keeps ordinary LZ4 acceleration one, one unbound preparation
+producer, the bounded 64-slot RAW+compressed reservoir, lower-WRITE depth one,
 independent READ fan-out, the eight-block ID63 cap, packed placement and SWZ
-1/2/4-block extents. Delta64 remains default-off pending representative-content
-prevalence.
-
-The `829cdbe0d9eb` result refutes the active ID83 500us suppressed-tail wake
-and cache-hit READ-pivot close policy as a service policy, not as a correctness
-mechanism. The next candidate removes that timer/pivot machinery and its
-temporary lifetime telemetry, preserves the qualified four-record floor for
-pure-WRITE waves, recognizes finite two/three-record tails only when the
-already-accepted wave is mixed, and conserves earlier valid compressed-pack
-geometry across RAW interleaving after total count crosses four. K=1,
-preparation width, reservoir size, ID63 and SWZ stay unchanged. Representative
-long-run churn, actual kernel swap and physical media remain open qualification
-gates.
+1/2/4-block extents. ID107–ID108 independent dispatched-run READ service and
+deferred acknowledgements are now owner-qualified; the fresh K=2 development
+experiment in ROADMAP ID110 is rejected rather than promoted. Delta64 remains
+default-off pending representative-content prevalence. Long-run churn, actual
+kernel swap and physical media remain separate qualification gates.
 
 ## Deferred optimization evidence gates
 
+- **ID113 folio locality:** currently a source audit and bounded measurement
+  proposal, not an active layout policy. Existing THP/compound direct-I/O tests
+  establish buffer shape and byte correctness only. A future sampler must
+  distinguish upper WRITE provenance, recover later READ cohorts through current
+  logical-page/generation tags rather than READ buffer pointers, and account for
+  window censoring, pointer reuse, eviction, overwrite/DISCARD/zero/GC invalidation
+  and failed publication. Controls must separate folio hints from logical
+  adjacency, reused transfer buffers and readahead. Representative actual-swap
+  collection is outside the current owned-null_blk gate. A later policy needs
+  full-window geometry/run equivalence and measured CPU, useful READ/WRITE,
+  p99 and lower-I/O evidence; no larger upper BIO or active-swap test is implied.
 - **ID38 lower-WRITE depth:** closed for the current product. Repeated paired
   depth-1/depth-2 evidence did not establish a useful service benefit.
   Production is fixed at depth one; the runtime selector, second-slot allocation
@@ -1185,6 +1229,15 @@ run ownership and FIFO publication from first principles.
 Latency-sensitive READs still bypass batching when lower I/O is idle. Busy-time
 READ fan-out/coalescing uses private scratch and must respect same-page
 dependencies against collected/frozen/in-flight writes.
+
+The fresh post-ID107/ID108 K=2 trial (ROADMAP ID110) reached observed depth
+two but did not establish a useful-service win in adjacent three-repeat
+K=1/K=2 development blocks. It is not owner qualification. Current source
+contracts and benchmark policy must continue requiring the fixed one-slot
+implementation. Any later overlap claim must record actual lower depth,
+absolute useful READ/WRITE, p99, independent lower bytes/requests and raw
+control drift; a configured depth of two or a busier device is insufficient.
+Remove rejected experimental selectors, allocations and hot-path branches.
 
 ### Report publication authentication and concurrency
 

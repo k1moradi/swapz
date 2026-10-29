@@ -1057,6 +1057,95 @@ def synthetic_log():
 
 
 class ReportContract(unittest.TestCase):
+    def test_vm_history_excludes_unqualified_other_host_and_mismatched_inputs(self):
+        import copy
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_history_plot", ROOT / "tests/tools/plot-history.py")
+        history = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(history)
+        raw = {"source_sha": "source", "fixture_sha256": "fixture",
+               "trace_sha256": "trace", "host_cpu": {"online_cpus": 7},
+               "input_write_mbps": 100, "swap_in_read_mbps": 40,
+               "swap_in_read_p99_ms": 4, "write_p99_ms": 8,
+               "lower_write_bytes": 1000, "lower_write_requests": 100}
+        swapz = {**raw, "input_write_mbps": 150, "swap_in_read_mbps": 60,
+                 "swap_in_read_p99_ms": 2, "write_p99_ms": 4,
+                 "lower_write_bytes": 700, "lower_write_requests": 20,
+                 "kernel_write_path": {"delta64_rescue": 0}}
+        session = {"status": "PASS", "async_prepare": 1, "regime": "sd_emulated",
+                   "device_model": {"cap_mib_s": 10}, "arms": {"off": raw, "swapz": swapz}}
+        report = {"overall": "PASS", "tested_commit_sha": "source", "kernel_release": "kernel",
+                  "evidence": {"predictor": {"backend_benchmarks": [{"name": "neon"}]}},
+                  "benchmarks": {"sessions": [session]}}
+        self.assertTrue(history.host_matches(report))
+        points = history.report_points(report)
+        self.assertEqual(len(points), 1)
+        for metric in ("write_mbps_gain_pct", "read_mbps_gain_pct", "read_p99_ms_gain_pct"):
+            self.assertAlmostEqual(points[0][metric], 50)
+        self.assertAlmostEqual(points[0]["lower_write_bytes_gain_pct"], 30)
+        self.assertAlmostEqual(points[0]["lower_write_requests_gain_pct"], 80)
+        self.assertEqual(history.change(0, 100, True), 100)
+        self.assertIsNone(history.change(1, 0))
+        for key, value in (("source_sha", "other"), ("fixture_sha256", "other"),
+                           ("trace_sha256", "other"), ("kernel_write_path", None)):
+            bad = copy.deepcopy(report)
+            bad["benchmarks"]["sessions"][0]["arms"]["swapz"][key] = value
+            self.assertEqual(history.report_points(bad), [])
+        for state in ("FAIL", "BLOCKED"):
+            self.assertEqual(history.report_points({**report, "overall": state}), [])
+        self.assertFalse(history.host_matches({**report, "evidence": {}}))
+        bad = copy.deepcopy(report)
+        bad["benchmarks"]["sessions"][0]["arms"]["off"]["host_cpu"] = {"online_cpus": 8}
+        self.assertFalse(history.host_matches(bad))
+        bad = copy.deepcopy(report)
+        bad["kernel_release"] = "another kernel"
+        self.assertNotEqual(history.report_points(bad)[0]["compatibility"], points[0]["compatibility"])
+        bad = copy.deepcopy(report)
+        bad["benchmarks"]["sessions"][0]["async_prepare"] = 0
+        self.assertEqual(history.report_points(bad), [])
+        bad = copy.deepcopy(report)
+        bad["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
+        self.assertEqual(history.report_points(bad), [])
+        sustained = copy.deepcopy(report)
+        write_session = copy.deepcopy(session)
+        write_session["qd"] = 4
+        for arm in write_session["arms"].values():
+            arm["replay_mode"] = "persistent-write"
+        sustained["benchmarks"]["write_saturation"] = {
+            "replay_mode": "persistent-write", "regimes": {"sd_emulated": [
+                {"mode": "async", "qd": 4, "raw_write_mbps": 100,
+                 "swapz_write_mbps": 150, "observations": 1}]}}
+        sustained["benchmarks"]["write_saturation_sessions"] = [write_session]
+        self.assertEqual(len(history.report_points(sustained)), 2)
+        sustained["benchmarks"]["write_saturation"]["replay_mode"] = "qd-waves"
+        self.assertEqual(len(history.report_points(sustained)), 1)
+        sustained["benchmarks"]["write_saturation"]["replay_mode"] = "persistent-write"
+        write_session["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
+        self.assertEqual(len(history.report_points(sustained)), 1)
+
+    def test_vm_history_lines_break_at_workload_changes_and_missing_reports(self):
+        spec = importlib.util.spec_from_file_location(
+            "swapz_history_lines", ROOT / "tests/tools/plot-history.py")
+        history = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(history)
+
+        class Axes:
+            def __init__(self):
+                self.chunks = []
+
+            def plot(self, x, y, *args, **kwargs):
+                self.chunks.append(x)
+
+        axes = Axes()
+        history.draw_line(axes, [
+            {"sequence": 1, "compatibility": "a", "gain": 1},
+            {"sequence": 2, "compatibility": "a", "gain": 2},
+            {"sequence": 3, "compatibility": "b", "gain": 3},
+            {"sequence": 5, "compatibility": "b", "gain": 4},
+        ], "gain", "gain", "blue")
+        self.assertEqual(axes.chunks, [[1, 2], [3], [5]])
+
     def test_loaded_progress_stream_hides_bulk_evidence_but_keeps_phase_and_failure(self):
         self.assertIsNone(runner.loaded_progress_line(
             "TARGET_STATUS_AFTER=0 8192 swapz physical_write=123456"))

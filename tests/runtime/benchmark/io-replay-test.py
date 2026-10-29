@@ -18,6 +18,66 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_fast_development_noise_screen_does_not_reject_workload_cpu(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_fast_test", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        idle = {"status": "AVAILABLE", "busy_fraction": .03,
+                "pressure_some_fraction": .01, "steal_fraction": 0}
+        busy = {**idle, "busy_fraction": .99, "pressure_some_fraction": .85}
+        arms = {name: {"host_cpu": busy} for name in ("off", "swapz")}
+        screened = fast.performance_validity(idle, idle, arms)
+        self.assertEqual(screened["status"], "SCREENED")
+        self.assertTrue(screened["performance_usable"])
+        self.assertEqual(screened["reasons"], [])
+        for key, value in (("busy_fraction", .26),
+                           ("pressure_some_fraction", .06),
+                           ("steal_fraction", .02)):
+            for before, after in (({**idle, key: value}, idle),
+                                  (idle, {**idle, key: value})):
+                noisy = fast.performance_validity(before, after, arms)
+                self.assertEqual(noisy["status"], "NOISY")
+                self.assertFalse(noisy["performance_usable"])
+        unknown = fast.performance_validity({}, idle, arms)
+        self.assertEqual(unknown["status"], "UNKNOWN")
+        self.assertFalse(unknown["performance_usable"])
+        partial = fast.performance_validity(
+            {**idle, "status": "PARTIAL", "pressure_some_fraction": None},
+            idle, arms)
+        self.assertEqual(partial["status"], "UNKNOWN")
+        self.assertEqual(fast.performance_validity(
+            {**idle, "pressure_some_fraction": None}, idle, arms)["status"],
+            "UNKNOWN")
+        stolen = {"off": {"host_cpu": {**busy, "steal_fraction": .02}}}
+        self.assertEqual(fast.performance_validity(idle, idle, stolen)["status"],
+                         "NOISY")
+        missing_arm = fast.performance_validity(idle, idle, {"off": {}})
+        self.assertEqual(missing_arm["status"], "UNKNOWN")
+        self.assertEqual(fast.performance_validity(
+            idle, idle, {"off": {"host_cpu": {"status": "AVAILABLE"}}})["status"],
+            "UNKNOWN")
+        rows = [
+            {"scenario": "sata-mixed#1", "raw_w": 100,
+             "performance_validity": fast.performance_validity(idle, idle, arms)},
+            {"scenario": "sata-mixed#2", "raw_w": 112,
+             "performance_validity": fast.performance_validity(idle, idle, arms)},
+            {"scenario": "fast-mixed", "raw_w": 50,
+             "performance_validity": fast.performance_validity(idle, idle, arms)},
+        ]
+        fast.reject_raw_drift(rows)
+        for row in rows[:2]:
+            self.assertEqual(row["performance_validity"]["status"], "NOISY")
+            self.assertFalse(row["performance_validity"]["performance_usable"])
+            self.assertIn("raw repeat spread", row["performance_validity"]["reasons"][0])
+        self.assertEqual(rows[2]["performance_validity"]["status"], "SCREENED")
+        rows[2]["raw_w"] = 0
+        fast.reject_raw_drift(rows[2:])
+        self.assertEqual(rows[2]["performance_validity"]["status"], "UNKNOWN")
+        self.assertFalse(rows[2]["performance_validity"]["performance_usable"])
+
     def test_host_cpu_boundaries_expose_contention_without_idle_inference(self):
         import importlib.util
         from unittest.mock import patch

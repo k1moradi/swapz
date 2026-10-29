@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# Reuse the measured replay's counter parsing/reset checks; no polling worker.
+HOST_CPU = runpy.run_path(str(ROOT / "tests/runtime/benchmark/io-replay.py"))
 OUT_DIR = ROOT / "build/tests/fast-test"
 PAIR = "tests/tools/benchmark-owned-pair.sh"
 PREFLIGHT = "tests/tools/loaded-preflight.sh"
@@ -47,6 +50,71 @@ DEFAULT_SCENARIOS = (
     "fast-mixed", "fast-w1", "fast-w4", "fast-w8", "fast-w32",
     "sd-mixed", "sd-w1", "sd-w32", "sata-mixed", "nvme4-mixed",
 )
+
+
+def quiet_host_sample():
+    before = HOST_CPU["host_cpu_snapshot"]()
+    time.sleep(0.2)
+    return HOST_CPU["host_cpu_delta"](before, HOST_CPU["host_cpu_snapshot"]())
+
+
+def performance_validity(before, after, arms):
+    """Conservative development screen, not proof of an idle host or causality."""
+    reasons, missing = [], False
+    for label, sample in (("pre", before), ("post", after)):
+        if sample.get("status") != "AVAILABLE":
+            missing = True
+        for field, limit, name in (("busy_fraction", .25, "busy"),
+                                   ("pressure_some_fraction", .05, "CPU PSI"),
+                                   ("steal_fraction", .01, "steal")):
+            value = sample.get(field)
+            if value is None:
+                missing = True
+            elif value > limit:
+                reasons.append(f"{label} {name} {value:.1%}")
+    # Timed CPU/PSI includes the benchmark itself; only steal is unambiguous
+    # external service loss. Do not mistake target saturation for host noise.
+    for label, arm in arms.items():
+        sample = arm.get("host_cpu") or {}
+        if sample.get("status") != "AVAILABLE":
+            missing = True
+        steal = sample.get("steal_fraction")
+        if steal is None:
+            missing = True
+        elif steal > .01:
+            reasons.append(f"{label} timed steal {steal:.1%}")
+    noisy = bool(reasons)
+    if missing:
+        reasons.append("host counters unavailable")
+    status = "NOISY" if noisy else "UNKNOWN" if missing else "SCREENED"
+    return {"status": status, "performance_usable": status == "SCREENED",
+            "reasons": reasons, "quiet_before": before, "quiet_after": after}
+
+
+def reject_raw_drift(rows):
+    groups = {}
+    for row in rows:
+        if "error" not in row:
+            groups.setdefault(row["scenario"].split("#")[0], []).append(row)
+    for group in groups.values():
+        rates = [row["raw_w"] for row in group]
+        if min(rates) <= 0:
+            for row in group:
+                validity = row["performance_validity"]
+                if validity["status"] != "NOISY":
+                    validity["status"] = "UNKNOWN"
+                validity["performance_usable"] = False
+                validity["reasons"].append("raw control unavailable")
+            continue
+        if len(rates) < 2:
+            continue
+        spread = max(rates) / min(rates) - 1
+        if spread <= .10:
+            continue
+        for row in group:
+            validity = row["performance_validity"]
+            validity.update(status="NOISY", performance_usable=False)
+            validity["reasons"].append(f"raw repeat spread {spread:.1%}")
 
 
 def scenario_arguments(name, plan):
@@ -172,7 +240,7 @@ def print_table(rows):
               f"{'raw R':>6} {'swapz R':>7} {'lowW B':>7} {'reqs raw>swapz':>15} "
               f"{'R p99 raw>swapz':>16} {'W p99 raw>swapz':>16} "
               f"{'win':>5} {'dl':>4} {'ib':>4} {'idle':>6} {'lwbusy':>7} "
-              f"{'svc':>6} {'wall':>6}")
+              f"{'svc':>6} {'wall':>6} {'quality':>8}")
     print(header)
     print("-" * len(header))
     for row in rows:
@@ -190,7 +258,9 @@ def print_table(rows):
               f"{rp99:>16} {wp99:>16} {row['windows']:5d} "
               f"{row['deadline']:4d} {row['idle_bound']:4d} {row['idle_ms']:6.1f} "
               f"{row['lw_busy_ms']:7.1f} {row['service_us']:6.0f} "
-              f"{row['wall_s']:6.3f}")
+              f"{row['wall_s']:6.3f} {row['performance_validity']['status']:>8}")
+        if row["performance_validity"]["reasons"]:
+            print("  excluded: " + "; ".join(row["performance_validity"]["reasons"]))
     print("Legend: W/R useful MB/s; dW swapz vs raw useful WRITE; lowW B "
           "swapz/raw lower WRITE bytes (endurance proxy, lower is better);\n"
           "        reqs lower WRITE requests; p99 in ms; win/dl/ib swapz windows, "
@@ -198,7 +268,13 @@ def print_table(rows):
           "        idle accepted-work lower-idle ms; lwbusy lower-WRITE service ms; "
           "svc lower-WRITE service EWMA us;\n"
           "        wall swapz measured seconds. "
-          "Single unpaired observations; only make test qualifies.")
+          "Single unpaired observations; only make test qualifies.\n"
+          "        quality: SCREENED passes the noise screen; NOISY/UNKNOWN "
+          "excludes performance inference, not correctness.\n"
+          "        200ms pre/post: busy >25%, CPU PSI >5%, steal >1%; "
+          "timed steal >1% or raw-repeat spread >10% also excludes.\n"
+          "        This heuristic can miss noise between samples; "
+          "SCREENED does not establish an idle host.")
 
 
 def main():
@@ -242,10 +318,12 @@ def main():
         for name in scenarios:
             for attempt in range(args.repeat):
                 label = name if args.repeat == 1 else f"{name}#{attempt + 1}"
+                quiet_before = quiet_host_sample()
                 begin = time.monotonic()
                 proc = privileged(720, PAIR, "--validated-source", head,
                                   *scenario_arguments(name, plan))
                 elapsed = time.monotonic() - begin
+                quiet_after = quiet_host_sample()
                 arms = parse_arms(proc.stdout)
                 if proc.returncode or set(arms) != {"off", "swapz"}:
                     status = 1
@@ -256,6 +334,8 @@ def main():
                           "\n    ".join(tail), flush=True)
                     continue
                 row = summarize(label, arms, elapsed)
+                row["performance_validity"] = performance_validity(
+                    quiet_before, quiet_after, arms)
                 rows.append(row)
                 raw_reports.append({"scenario": label, "arms": arms})
                 print(f"  {label}: raw W {row['raw_w']:.2f} swapz W "
@@ -263,6 +343,7 @@ def main():
                       f"[{elapsed:.1f}s]", flush=True)
     finally:
         shutil.rmtree(plan, ignore_errors=True)
+    reject_raw_drift(rows)
     (OUT_DIR / "latest.json").write_text(
         json.dumps({"head": head, "dirty": bool(dirty), "rows": rows,
                     "reports": raw_reports}, sort_keys=True) + "\n")

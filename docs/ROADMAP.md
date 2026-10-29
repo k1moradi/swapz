@@ -6,9 +6,9 @@
 
 This file contains only active work. Completed experiments and detailed historical transcripts belong in Git history.
 
-## Current baseline
+## Previous comparison baseline
 
-The last official owner `make test` passed all five stages on production
+The prior official owner `make test` passed all five stages on production
 source `0f5db1f8a771` (report `08a4b855f541`), which carries ID101–ID104.
 Fast QD32 mixed useful WRITE/READ is 69.69/23.13 MB/s versus raw 62.94/20.89
 (+10.7%, READ p99 0.85 vs 4.32 ms) and SD mixed is +405%; fast QD1/QD4/QD8/QD32
@@ -18,10 +18,16 @@ Storage envelopes (swapz/raw useful WRITE, DELTA64 off/on): SD card 3.35/5.38,
 SATA 0.53/0.58, NVMe Gen4 0.54/0.27, Gen5 0.60/0.28. Lower host WRITE bytes are
 an endurance proxy, not NAND wear measurement.
 
-## Current candidate (ID107–ID108), owner qualification pending
+## Current qualified source (ID107–ID108)
 
-Two ordered-worker service changes, measured only by `make fast_test` single
-pairs on ARM64/NEON (absolute swapz useful WRITE MB/s; raw varies ~5%):
+Exact source `03becc01802b` passed all five owner `make test` stages; report
+`b5227ca58001` is the current checked-in evidence. Fast mixed async useful WRITE
+is +7.4% versus raw (READ p99 0.88 vs 3.71 ms), SD mixed is +393%, and fast
+QD1/QD4/QD8/QD32 are -2.7/-10.2/+18.2/+56.3%. This single qualification run
+preserves host-WRITE savings but does not establish SATA/NVMe or QD4 parity.
+
+The preceding directional `make fast_test` observations were
+(absolute swapz useful WRITE MB/s; raw varies ~5%):
 
 | Scenario | 0f5db1f | Candidate | vs raw |
 |---|---:|---:|---:|
@@ -30,8 +36,9 @@ pairs on ARM64/NEON (absolute swapz useful WRITE MB/s; raw varies ~5%):
 | Fast mixed / QD8 / QD32 | unchanged within noise | | +11% / +30% / +36..+50% |
 | Fast QD1 / QD4, SD mixed / QD32 | unchanged within interleaved A/B noise | | |
 
-Lower WRITE bytes and requests are unchanged (~0.69–0.74 of raw). Rootless
-contracts pass; loaded correctness and owner qualification are still required.
+Lower WRITE bytes remain ~0.69–0.74 of raw in those development observations.
+The owner run qualifies this source on owned RAM; cross-host architecture
+coverage and repeatable product performance remain distinct evidence gates.
 
 ## Current bottleneck ranking
 
@@ -43,12 +50,15 @@ contracts pass; loaded correctness and owner qualification are still required.
    last completion. Wave ~368 us versus raw ~184 us. A single merged WRITE per
    wave would at best tie raw here (fixed 100 us device latency dominates both),
    so the remaining loss is the serialized second WRITE plus ordered-worker CPU.
-   Waiting for stragglers (ID109) trades the same time it saves. Next: a fresh
-   K=2 lower-WRITE experiment that dispatches the staged straggler window while
-   the first run is in flight.
+   Waiting for stragglers (ID109) trades the same time it saves. The fresh
+   post-ID107/ID108 K=2 experiment (ID110) reached depth two but did not improve
+   useful service and increased requests. Profile ordered-worker CPU and
+   arrival-to-dispatch timing before changing concurrency again.
 2. **Fast QD4 (-12..-15%, bimodal).** K=1 completes all four writers together,
    so their reissue spread sits on every cycle while raw overlaps it. Parity
-   needs overlapping lower WRITEs (K>1); retention policy cannot recover it.
+   was hypothesized to need overlapping lower WRITEs; ID110 did not improve
+   it because four-record windows without followers still dispatch synchronously.
+   Reopening needs a separately justified shallow-window ownership policy.
 3. **QD8 bimodality and the 8KiB READ-amplification cap.** Unchanged from the
    ID101–ID104 analysis: merged eight-record windows win, and accepted-burst
    extents are capped at 8KiB, holding QD8 lower bytes near 0.75.
@@ -197,9 +207,13 @@ changes.
 | 104 | CPU-bound ordered workqueue | **4 owner-qualified (`0f5db1f`)** | The ordered owner now chains admission, K=1 completion and upper wakeups on the submitting CPU instead of waking idle remote CPUs: fast QD1 -12% -> -1.5%, QD4 -22% -> -12%, SD QD1 -4% -> -1%, ID36 pressure gate passes. Preparation stays unbound (ID7). `WQ_HIGHPRI` showed no effect and is not used. |
 | 105 | `make fast_test` development loop | **1 owner-requested / keep** | One single-pair subset of the owned matrix (~85 s default) with a compact raw/swapz table and telemetry in `build/tests/fast-test/latest.json`. Never qualifies or publishes; `make test` remains the only qualification command. |
 | 106 | Pressure-hand inline extension when LZ4 is cheap | **5 no effect / removed** | Hand closes on the NVMe trace happen when the accepted FIFO is genuinely dry, not over an unprepared queued head, so the gate never fired. |
-| 107 | Unrelated READs stay independent after a K=1 window is dispatched | **4 fast_test-positive / owner qualification pending** | With an empty collector and an active run, a READ took the dependency path and its empty flush slept the ordered worker for the whole lower WRITE (traced ~127 us/wave in D state) while cache hits and stragglers queued. Committed mappings stay authoritative, so the in-flight run fence alone applies; window evidence and the deadline-after-READ flush still need an open window. SATA mixed swapz 188 -> 206 MB/s, READ p99 0.40 -> 0.24 ms. |
-| 108 | Acknowledge a finalized run after the next window reaches the lane | **4 fast_test-positive / owner qualification pending** | Finalize delivered ~20 `bio_endio()` wakeups (1–5 us each, preempted by co-located writers) before dispatching the staged straggler window. Deferral (only with staged/queued work, preemption-disabled batch, delivered before any lower wait and before the work item returns) cut first-done -> second-issue from ~100 to ~17 us: SATA mixed 206 -> 216–223 MB/s; QD1/QD4 unchanged in interleaved A/B. A dedicated completion thread was not needed. |
+| 107 | Unrelated READs stay independent after a K=1 window is dispatched | **1 owner-qualified (`03becc0`, report `b5227ca`)** | With an empty collector and an active run, a READ took the dependency path and its empty flush slept the ordered worker for the whole lower WRITE (traced ~127 us/wave in D state) while cache hits and stragglers queued. Committed mappings stay authoritative, so the in-flight run fence alone applies; window evidence and the deadline-after-READ flush still need an open window. SATA mixed swapz 188 -> 206 MB/s, READ p99 0.40 -> 0.24 ms. |
+| 108 | Acknowledge a finalized run after the next window reaches the lane | **1 owner-qualified (`03becc0`, report `b5227ca`)** | Finalize delivered ~20 `bio_endio()` wakeups (1–5 us each, preempted by co-located writers) before dispatching the staged straggler window. Deferral (only with staged/queued work, preemption-disabled batch, delivered before any lower wait and before the work item returns) cut first-done -> second-issue from ~100 to ~17 us: SATA mixed 206 -> 216–223 MB/s; QD1/QD4 unchanged in interleaved A/B. A dedicated completion thread was not needed. |
 | 109 | First window of a mixed wave waits for the learned width | **5 no throughput gain / removed** | Gating the first mixed window (chain_completed == 0) like ID102 cut SATA/NVMe lower requests 1047/1255 -> 868/1056 but left useful WRITE flat and raised idle-bound closes; under trace perturbation write p99 jumped to 2.3 ms. Stragglers arrive ~35–80 us late, close to what one fixed device latency saves. Reopen only with K=2 data showing merge beats overlap. |
+| 110 | Fresh two-run lower-WRITE overlap after ID101/ID107/ID108 | **5 no demonstrated service benefit / removed** | ARM64 development experiment on `03becc0`/report head `b5227ca`, 2026-10-29: two disjoint immutable slots, FIFO publication, same-page append fences, bounded paused-group capacity and four-record successor service. Observed depth reached 2 on SATA/NVMe/fast mixed. Adjacent K=1/K=2 blocks, three `make fast_test` repeats each (mean useful WRITE MB/s): SATA 182.19/177.11, NVMe4 237.33/234.14, fast QD4 61.91/60.81, QD8 95.80/92.08, fast mixed 47.54/48.39. Lower-WRITE requests changed +21.2/+3.6/+0.3/+9.9/+3.9%; SATA lower-byte ratio 0.696/0.702 and fast mixed 0.762/0.765. Raw SATA 329.14/322.33 and NVMe4 422.61/439.16 show residual host drift; these pre-ID111 observations have no quiet-window screen and are directional, unpaired development evidence, not confidence-qualified regression claims. No demonstrated service gain repays the added requests, ownership state and buffers; restore K=1. Rootless, W=1/W=2, loaded smoke, full default development scenarios and ID36 passed. Reopen only with a materially different workload/policy and repeatable useful-service benefit without fragmentation; depth-two activity alone is insufficient. |
+| 111 | Compact automatic host-noise screen for development comparisons | **1 owner-requested / keep** | `make fast_test` adds 200ms pre/post quiet CPU/PSI/steal deltas, timed steal and >10% same-scenario raw-repeat spread checks. `NOISY`/`UNKNOWN` results set `performance_validity.performance_usable=false`, retain all evidence and print compact reasons. Timed workload CPU/PSI alone is never external-noise proof. Thresholds are conservative screening heuristics; `SCREENED` is not idle-host proof, single repeats cannot bound control drift, and owner `make test` qualification/ID36 is unchanged. |
+| 112 | Per-round ARM64/NEON VM performance history plots | **1 owner-requested / keep** | After every optimization round, regenerate default-LZ4 mixed useful READ/WRITE, mixed p99, lower-WRITE savings and persistent-WRITE QD plots plus source-mapped CSV/JSON under `build/history/arm64-neon/`. Initial history through report `b5227ca` selects 51 owner-PASS NEON/seven-CPU reports from 230 revisions. Exclude failed/blocked/other-host and unqualified trial data; use each report's own raw controls and break kernel/model/content/replay discontinuities. Descriptive history never establishes causal gains or physical wear. |
+| 113 | WRITE-folio locality as an equal-cost packing hint | **6 source audit / representative evidence gate** | See [reviewed measurement proposal](folio-locality.md). Current 4KiB splitting preserves page references but no explicit parent-BIO token. READ destination folios cannot identify earlier WRITE RAM; correlation needs bounded logical/generation tags and live-owner-only cohort discovery, with censoring and reuse handled explicitly. ID43 THP direct I/O is functional coverage, not real swap-locality evidence. Linux 7.0 block swap and newer `master` batching differ. Keep layout unchanged until folio membership predicts backing READ co-access beyond logical adjacency. A later policy must preserve full byte/read/extent costs and physical run/tail geometry; equal-length permutations are a narrower candidate than arbitrary reordering. No actual-swap collection or larger upper BIO is authorized by this design. |
 
 ## What the pinned queue experiment establishes
 
@@ -224,6 +238,11 @@ sampled depth ~4 while swapz remains serialized at one; this is the cleaner
 bounded concurrency opportunity.
 
 ## Huge/compound-page support roadmap
+
+ID43 already qualifies 4KiB slices backed by THP/compound memory. ID113's
+[folio-locality audit](folio-locality.md) separates that completed input-shape
+support from unqualified semantic locality and larger upper-BIO admission.
+The current upper READ/WRITE contract remains exactly 4KiB.
 
 swapz must not permanently assume that useful RAM input arrives as one ordinary
 4KiB physical page. Add explicit support for compound/folio-backed inputs,
@@ -263,20 +282,20 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-1. Run the exact-source owner `make test` on the ID107–ID108 candidate. Promote
-   only with correctness/lifecycle PASS, preserved fast/SD/QD direction and
-   lower bytes, and SATA/NVMe mixed recovery across the SSE2/AVX2/AVX-512/NEON
-   matrix.
-2. Use `make fast_test` for every next scheduling candidate before spending a
-   full owner run; record refuted ideas here so they are not retried.
-3. Open a fresh K=2 lower-WRITE experiment (ID38's refutation predates ID101,
-   ID107 and ID108): traces now show the lane idle with a staged straggler window
-   for ~100 us per SATA wave, and QD4 remains lock-step bound. Keep publication
-   order, authority reservations and same-page fences per run; measure SATA/NVMe
-   mixed, QD4 and lower requests before any owner run.
+1. Use owner-qualified `03becc0` (report `b5227ca`) as the source baseline.
+   ID107–ID108 qualification is complete; the new K=2 development result is
+   ID110 and is not promoted.
+2. Profile ordered-worker CPU and the accepted-arrival/dispatch gaps on fresh
+   matched SATA/NVMe mixed runs. Distinguish software time, fixed per-request
+   latency and transfer time before proposing another production-C change.
+3. Preserve the four-record service threshold and single-slot ownership.
+   QD4 still dispatches a complete four-record no-follower window synchronously;
+   merely adding a second slot cannot overlap that closed loop. A new shallow
+   dispatch policy needs its own evidence and ownership review.
 4. Keep one unbound preparation producer, the 64-slot reservoir, ordinary LZ4
    acceleration one, packed placement, circular allocation, ID63 and SWZ
-   geometry unchanged.
+   geometry unchanged. Use `make fast_test` for development decisions and the
+   exact-source owner `make test` for qualification.
 
 ## Deferred asynchronous segment TRIM design for review
 

@@ -54,6 +54,14 @@ ownership while preserving that lane's operation order, so unconstrained
 cross-lane completion cannot change the final image. A QD-wave driver may be
 kept only when explicitly labeled as burst/wave evidence.
 
+Development benchmark consumers must honor the `make fast_test` machine-readable
+`performance_validity.performance_usable` flag before comparing useful service.
+Host-noise screening uses quiet pre/post counter deltas, timed steal and raw
+repeat drift; timed CPU utilization/PSI includes product work and is not alone
+evidence of external interference. Preserve noisy measurements for diagnosis,
+exclude them from performance decisions, and keep missing telemetry unavailable.
+The screen is a heuristic and never replaces exact-source owner qualification.
+
 ## Dead-code rule
 
 Keep the working tree centered on code that ships or directly qualifies the current product. Historical reproduction belongs in immutable Git history. Delete alternate implementations, obsolete compatibility harnesses, unused models, stale workflow gates and historical test-only backends once no active product invariant depends on them.
@@ -65,6 +73,18 @@ Before deleting production code, identify all current callers and preserve neces
 Work directly on `main` unless the owner explicitly authorizes another branch. Check the current remote head before every write and use lease-protected fast-forward updates. Keep commits small enough to review. Do not force-push or overwrite concurrent work.
 
 Every implementation task updates the relevant governing standard in the same commit. README/VISION change only when user-facing structure or acceptance criteria change.
+
+At the end of every optimization round, regenerate the ARM64/NEON VM historical
+performance plots from committed `test_results.json` history using the private
+`tests/tools/plot-history.py` artifact helper. Keep its plots, source/report SHA
+mapping and CSV/JSON under `build/history/arm64-neon/` and show the useful-service
+plot to the owner. Select owner-PASS NEON reports with this VM's seven-CPU profile;
+exclude other/ambiguous hosts, failed/blocked reports and unqualified fast-test
+trials. Keep default-LZ4 mixed, optional policies and sustained WRITE QDs separate.
+Use each report's own raw controls and break lines at kernel/model/content/replay
+changes. History is descriptive, not causal attribution or physical wear evidence.
+If no new owner report exists, state that the plots still end at the prior
+qualified source. This closeout creates no new public test command or publication.
 
 ## Host safety
 
@@ -99,6 +119,12 @@ The sole active run retains immutable packed bytes, transaction snapshots, BIO
 references and completion state through definitive lower completion and
 serialized authority publication.
 
+The fresh post-ID101/ID107/ID108 two-slot trial is also rejected (ROADMAP
+ID110): observed depth two without a repeatable useful-service gain does not
+justify extra buffers or ownership state, especially when lower requests rise.
+Keep its experimental dispatch/array paths out of production. Four-record
+no-follower windows retain their existing synchronous service rule.
+
 Any future K>1 experiment is a new architecture change, not a dormant knob. It
 must restore disjoint immutable run ownership, same-page generation/order
 fences, FIFO authority publication and upper-BIO completion despite out-of-order
@@ -107,6 +133,17 @@ PREFLUSH/FUA/DISCARD, GC, suspend, teardown and failure.
 
 Physical-device support is not a coding shortcut around current safety policy.
 No production/test flag may silently relax the RAM-backed owned-device gate.
+
+Folio locality is an unqualified observation hypothesis (ROADMAP ID113 and
+`docs/folio-locality.md`). Observe membership only through valid owned pages;
+never retain raw folio addresses as WRITE-to-READ identity or pin original RAM
+until swap-in. Any cross-I/O correlation must be bounded, volatile, generation-
+checked and worker-owned, with ambiguity/eviction reported as unknown. A READ
+buffer's folio identifies destination RAM, not the earlier WRITE source. Synthetic
+compound-buffer coverage does not establish reclaim or application locality.
+Locality must not add waits or displace complete byte/read/extent and physical-
+run/tail-waste objectives. Extra tie-break CPU still requires useful-service
+measurement. Larger upper BIO admission is a separate ownership change.
 
 ## Current write-window, packing and preparation rules
 
