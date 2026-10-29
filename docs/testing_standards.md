@@ -38,6 +38,22 @@ never records a qualification verdict and never substitutes for `make test`:
 single unpaired observations decide only which candidate deserves the full
 owner matrix.
 
+`CONTENT=medium` keeps the existing fixture. `CONTENT=entropy` supplies only
+incompressible pages; `CONTENT=balanced` supplies equal numbers of medium and
+entropy pages. These are synthetic content controls, not representative swap
+populations. Each private pair loads the kernel LZ4 dependency before inserting
+the product module, including the first development pair after a boot. Keep the selected content and the actual fixture metadata (weights,
+page counts, measured LZ4 sizes and hash) in the development JSON, alongside the
+immutable plan hashes consumed by both arms. A private helper's medium protocol
+selects queue geometry; the shared fixture remains the content authority. Never
+attribute a content change to a source optimization or mix these controls into
+the qualified medium history.
+An all-RAW shared fixture omits the separate compressed-pack population/readback
+phase because it has no compressed pack to qualify; mixed replay and complete
+image verification remain mandatory. The omitted phase is explicit in the
+pair log and JSON (`packed_read=null`). Official medium/delta-positive pack
+requirements remain unchanged.
+
 The development loop automatically screens host noise with the replay's existing
 `/proc/stat` and CPU-PSI counter readers. It samples 200ms quiet windows before
 and after each owned pair, outside useful-work timing, with no polling worker.

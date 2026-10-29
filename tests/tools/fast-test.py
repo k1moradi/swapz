@@ -47,6 +47,8 @@ MODELS = {
     "nvme5": ["--lower-mbps", "12000", "--submit-queues", "4",
               "--hw-queue-depth", "64", "--completion-nsec", "14000"],
 }
+CONTENT_WEIGHTS = {"medium": "medium=100", "entropy": "entropy=100",
+                   "balanced": "medium=50,entropy=50"}
 DEFAULT_SCENARIOS = (
     "sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8",
 )
@@ -144,7 +146,8 @@ def build():
          "test-replay-helper", "test-lower-io"], stdout=subprocess.DEVNULL)
 
 
-def prepare_plan():
+def prepare_plan(content="medium"):
+    weights = CONTENT_WEIGHTS[content]
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
     plan = Path(tempfile.mkdtemp(prefix="benchmark-plan.",
                                  dir=ROOT / "build/tests"))
@@ -155,7 +158,7 @@ def prepare_plan():
     quiet = {"stdout": subprocess.DEVNULL}
     run(["python3", "-B", "tests/runtime/benchmark/anon-page-fixture.py",
          "--output-prefix", str(plan / "fixture"), "--pages", "128",
-         "--seed", "0x51a0a9", "--weights", "medium=100"], **quiet)
+         "--seed", "0x51a0a9", "--weights", weights], **quiet)
     run([*replay, "--output-dir", str(plan / "plan"), "--qd", "32",
          "--read-pct", "25", "--warmup-ops", "1024", "--measure-ops",
          "16384", "--iops", "0"], **quiet)
@@ -374,11 +377,15 @@ def main():
     # Delta64 rescue is the production default; DELTA64=0 measures LZ4-only.
     parser.add_argument("--delta64", type=int, choices=(0, 1),
                         default=int(os.environ.get("DELTA64", "1") or 1))
+    parser.add_argument("--content", choices=tuple(CONTENT_WEIGHTS),
+                        default=os.environ.get("CONTENT", "medium"))
     args = parser.parse_args()
     scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
         or list(DEFAULT_SCENARIOS)
     if not 1 <= args.repeat <= 10:
         parser.error("REPEAT must be 1..10")
+    if args.content not in CONTENT_WEIGHTS:
+        parser.error("CONTENT must be medium, entropy or balanced")
     for name in scenarios:
         scenario_arguments(name, "/dev/null")
 
@@ -392,7 +399,7 @@ def main():
     dirty = subprocess.run(["git", "status", "--porcelain", "--", "src", "tests"],
                            cwd=ROOT, capture_output=True, text=True).stdout.strip()
     print(f"swapz fast_test (development only; not qualification) "
-          f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
+          f"content={args.content} HEAD={head[:12]}{' +dirty' if dirty else ''}")
     started = time.monotonic()
     build()
     print(f"  build + window-policy native checks: PASS "
@@ -402,7 +409,8 @@ def main():
         print(preflight.stdout + preflight.stderr, file=sys.stderr)
         print("BLOCKED: loaded preflight failed", file=sys.stderr)
         return 2
-    plan = prepare_plan()
+    plan = prepare_plan(args.content)
+    fixture = json.loads((plan / "fixture.json").read_text())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     rows, raw_reports = [], []
     status = 0
@@ -438,7 +446,8 @@ def main():
     reject_raw_drift(rows)
     (OUT_DIR / "latest.json").write_text(
         json.dumps({"head": head, "dirty": bool(dirty),
-                    "delta64_rescue": args.delta64, "rows": rows,
+                    "delta64_rescue": args.delta64,
+                    "content_profile": args.content, "fixture": fixture, "rows": rows,
                     "reports": raw_reports}, sort_keys=True) + "\n")
     print()
     print_table(rows)

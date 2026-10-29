@@ -78,6 +78,38 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(rows[2]["performance_validity"]["status"], "UNKNOWN")
         self.assertFalse(rows[2]["performance_validity"]["performance_usable"])
 
+    def test_fast_content_controls_preserve_fixture_provenance(self):
+        import hashlib
+        import importlib.util
+        import shutil
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_fast_content", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        fixtures = {}
+        for content, profiles, raw_pages in (
+                ("medium", {"medium": 128}, 0),
+                ("entropy", {"entropy": 128}, 128),
+                ("balanced", {"medium": 64, "entropy": 64}, 64)):
+            plan = fast.prepare_plan(content)
+            try:
+                fixture = (plan / "fixture.bin").read_bytes()
+                metadata = json.loads((plan / "fixture.json").read_text())
+                self.assertEqual(metadata["profile_pages"], profiles)
+                self.assertEqual(metadata["raw_pages"], raw_pages)
+                self.assertEqual(metadata["fixture_sha256"],
+                                 hashlib.sha256(fixture).hexdigest())
+                # Both candidates consume this fixture's immutable replay plan.
+                for name in ("plan", "plan-write-qd4"):
+                    manifest = json.loads((plan / name / "manifest.json").read_text())
+                    self.assertEqual(manifest["fixture_sha256"],
+                                     metadata["fixture_sha256"])
+                fixtures[content] = metadata["fixture_sha256"]
+            finally:
+                shutil.rmtree(plan)
+        self.assertEqual(len(set(fixtures.values())), 3)
+
     def test_host_cpu_boundaries_expose_contention_without_idle_inference(self):
         import importlib.util
         from unittest.mock import patch
