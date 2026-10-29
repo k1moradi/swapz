@@ -377,7 +377,7 @@ state the last qualified source when a round creates no new owner report.
 
 ## Current qualified baseline
 
-The latest successful owner matrix tested exact source
+The latest successful ARM64/NEON VM owner matrix tested exact source
 `b86fefd9e364727fa002ebd891ef4adfbd1166b1` and published report-only commit
 `0d97e99890ee8b1a34744f70ce82021db12b1c9e`. That report says PASS
 for all five stages: build, native/rootless, W=1, W=2 and owned-RAM loaded
@@ -400,7 +400,11 @@ experiment in ROADMAP ID110 is rejected rather than promoted. Delta64 is now
 default-on with second-pass LZ4 acceleration four (ID115), qualified in that
 owner run. The later `005592d` adds DELTA64_SHUF8 and the faster NEON inverse;
 its ARM64 native, warning-build, loaded-smoke and positive-fixture checks are
-supporting evidence. Its full matrix and x86 runtime coverage remain pending.
+supporting evidence. The owner x86 matrix on exact source `005592d` passed
+all five stages (report `4886c4d79a362b546b69bc5f9356be05ec2f536f`), including
+scalar/SSE2/AVX2/AVX-512 runtime qualification and loaded resource pressure.
+Its full ARM64 matrix remains pending. Keep the x86 eight-CPU result out of
+the seven-CPU ARM64 history.
 Representative-content prevalence, long-run churn, actual
 kernel swap and physical media remain separate qualification gates.
 
