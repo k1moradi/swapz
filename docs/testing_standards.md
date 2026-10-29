@@ -2364,6 +2364,10 @@ It prints the latest plotted source and the local index path. Failed/blocked,
 uncommitted and other-host runs never become ARM64 performance points. Plot
 failure prints `NOT UPDATED` and diagnostics separately from the qualification
 verdict; it cannot turn a failed device gate into a pass or hide a passed gate.
+The stable index links to image/data snapshots keyed by report, plotter source
+and collected data, so later refreshes cannot change an already shared plot
+and corrected rendering/data can receive a fresh path. Retain the stable
+latest files for local consumers, and preserve each snapshot once created.
 Keep the absolute raw/swapz useful-WRITE MB/s chart alongside relative gains so
 a changing raw control cannot masquerade as a product speed change. Previously
 rendered chat images are snapshots; refreshed files live under the stable index.

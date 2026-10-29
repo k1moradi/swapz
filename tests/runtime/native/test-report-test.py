@@ -1157,6 +1157,28 @@ class ReportContract(unittest.TestCase):
         sustained["benchmarks"]["write_saturation_sessions"].append(mixed)
         self.assertEqual(len(history.report_points(sustained)), 1)
 
+    def test_history_snapshots_preserve_report_specific_artifacts(self):
+        spec = importlib.util.spec_from_file_location(
+            "swapz_history_snapshots", ROOT / "tests/tools/plot-history.py")
+        history = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(history)
+        with tempfile.TemporaryDirectory() as directory:
+            history.OUT = Path(directory)
+            names = ("mixed-service.png", "mixed-throughput.png", "mixed-latency.png",
+                     "lower-write-savings.png", "sustained-write.png", "history.csv", "history.json")
+            for name in names:
+                (history.OUT / name).write_bytes(b"first report")
+            data = {"reports": [{"report_sha": "a" * 40}]}
+            first = history.snapshot_history(data)
+            for name in names:
+                self.assertEqual((first / name).read_bytes(), b"first report")
+                (history.OUT / name).write_bytes(b"next report")
+            self.assertEqual(history.snapshot_history(data), first)
+            self.assertEqual((first / names[0]).read_bytes(), b"first report")
+            second = history.snapshot_history({"reports": [{"report_sha": "b" * 40}]})
+            self.assertNotEqual(second, first)
+            self.assertEqual((second / names[0]).read_bytes(), b"next report")
+
     def test_history_refresh_executes_after_publication_without_changing_verdicts(self):
         from unittest.mock import patch
 

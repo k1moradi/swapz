@@ -9,6 +9,7 @@ import csv
 import hashlib
 import json
 import math
+import shutil
 import statistics
 import subprocess
 from collections import Counter, defaultdict
@@ -311,6 +312,20 @@ def render(data):
     plt.close(fig)
 
 
+def snapshot_history(data):
+    """Keep report-specific images/data stable when the latest files refresh."""
+    identity = hashlib.sha256(Path(__file__).read_bytes() +
+                              json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
+    snapshot = OUT / "snapshots" / data["reports"][-1]["report_sha"] / identity
+    snapshot.mkdir(parents=True, exist_ok=True)
+    for name in ("mixed-service.png", "mixed-throughput.png", "mixed-latency.png",
+                 "lower-write-savings.png", "sustained-write.png", "history.csv", "history.json"):
+        target = snapshot / name
+        if not target.exists():
+            shutil.copyfile(OUT / name, target)
+    return snapshot
+
+
 def main():
     data = collect()
     if not data["reports"]:
@@ -322,6 +337,7 @@ def main():
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         writer.writerows(data["points"])
+    snapshot = snapshot_history(data)
     summary = ["# ARM64 / NEON VM performance history", "", data["scope"], "",
                f"{len(data['reports'])} passing report revisions; latest source "
                f"`{data['reports'][-1]['source_sha']}`. All points require NEON and the "
@@ -347,14 +363,18 @@ def main():
             summary.append("| " + name + " | " + " | ".join(
                 f"{value:+.1f}%" if value is not None else "unavailable" for value in values) + " |")
     summary.extend(["", "Plots and source data:", ""] +
-                   [f"- [{name}]({OUT / name})" for name in
+                   [f"- [{name}]({snapshot / name})" for name in
                     ("mixed-service.png", "mixed-throughput.png", "mixed-latency.png", "lower-write-savings.png",
                      "sustained-write.png", "history.csv", "history.json")])
-    (OUT / "index.md").write_text("\n".join(summary) + "\n")
+    index = "\n".join(summary) + "\n"
+    (OUT / "index.md").write_text(index)
+    if not (snapshot / "index.md").exists():
+        (snapshot / "index.md").write_text(index)
     print(json.dumps({"reports": len(data["reports"]), "points": len(data["points"]),
                       "excluded": data["excluded"], "output": str(OUT),
                       "latest_source": data["reports"][-1]["source_sha"],
-                      "latest_report": data["reports"][-1]["report_sha"]}))
+                      "latest_report": data["reports"][-1]["report_sha"],
+                      "snapshot": str(snapshot)}))
 
 
 if __name__ == "__main__":

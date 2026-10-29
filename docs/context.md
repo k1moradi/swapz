@@ -207,6 +207,13 @@ decodable; a **physical extent** may hold multiple records; an **I/O run** may
 concatenate several extents/RAW blocks. None represents a guaranteed language
 object or whole folio.
 
+Up to eight private READ slots can overlap independent lower misses for
+compressed records or authoritative one-block RAW pages. RAW reads verify the
+volatile authority's CRC before upper completion and bypass SWZ header decoding
+and cache prime/seed/absorb. Adjacent compressed-range coalescing is a separate
+mechanism; RAW admission does not turn RAW bytes into an SWZ extent. One ordered
+worker still owns dependency checks, mapping publication and upper completion.
+
 Volatile swapz RAM state includes per-BIO admission descriptors, a bounded
 64-slot preparation reservoir (stable RAW snapshots, optional compressed
 payloads, atomic states and references), logical-page-to-extent mapping

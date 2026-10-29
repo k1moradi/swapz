@@ -33,7 +33,9 @@ Most development effort belongs in production kernel C: measured bottlenecks, co
 Current production policy keeps bounded asynchronous preparation enabled,
 lower-WRITE submission fixed at one immutable run, ordinary LZ4 fixed at
 acceleration one, delta64 preparation fixed at one producer lane, and exact
-adjacent READ coalescing bounded to eight 4KiB blocks. The earlier write-only
+adjacent READ coalescing bounded to eight 4KiB blocks. The existing eight
+private READ slots overlap independent compressed or RAW misses; RAW retains
+its authority CRC and bypasses compressed caches. The earlier write-only
 wave driver remains historical burst evidence; current qualification uses
 persistent lane-owned workers with no per-I/O main-thread dispatch.
 
