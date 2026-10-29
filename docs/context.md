@@ -9,10 +9,23 @@ belong in [ROADMAP.md](ROADMAP.md); normative constraints belong in
 [coding_standards.md](coding_standards.md) and
 [testing_standards.md](testing_standards.md).
 
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
+
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
+
+**Device safety:** official loaded qualification uses only newly created,
+positively identified, RAM-backed `null_blk`. Nothing in this reference
+authorizes active system swap, `swapon`, `swapoff`, mounting, reboot or
+touching unrelated block devices; see [VISION.md](VISION.md).
+
 The upstream functions cited here were inspected on Linux master at
-`c339f4010dea8b0d754f84ace70cd1b089878ef8`. Kernel internals are not a
-stable ABI; recheck the target kernel source before implementing a coupled
-feature. The SWZ information describes the current swapz implementation.
+`c339f4010dea8b0d754f84ace70cd1b089878ef8` and on tag `v7.0`; where the two
+differ, the text names the version. The development host runs Ubuntu
+`7.0.0-42-generic` (7.0.14 base), so the `v7.0` behavior is the nearest
+upstream model for it; distribution backports can still differ. Kernel
+internals are not a stable ABI; recheck the target kernel source before
+implementing a coupled feature. The SWZ information describes the current
+swapz implementation.
 
 ## 1. Storage abstractions: files, RAM objects, pages and extents
 
@@ -97,20 +110,25 @@ watermark / cgroup / proactive pressure
           -> mm/vmscan.c reclaim
           -> swap slot + swap cache / page-table swap entry
           -> mm/page_io.c:swap_writeout()
-                 -> zero-page metadata? no backing BIO
+                 -> zero-filled folio? zeromap mark, no backing BIO
                  -> zswap_store() accepted? compressed RAM, no BIO yet
-                 -> else __swap_writeout() / swap_write_submit()
-          -> swap_bdev_submit_write()
+                 -> zswap writeback disabled for the memcg? stay in RAM
+                 -> else master: __swap_writeout() -> swap_add_folio()
+                         -> swap_write_submit() -> swap_bdev_submit_write()
+                    v7.0:   __swap_writepage()
+                         -> swap_writepage_bdev_sync() / _async()
           -> BIO (REQ_OP_WRITE | REQ_SWAP, sector, bvecs)
           -> block layer -> Device Mapper -> swapz_map()
           -> swapz preparation, packing, lower I/O and ordered publication
 ```
 
-`mm/swapfile.c` maps swap entries into backing sectors. Swapfile extent
-mapping is established for swap activation rather than doing a pathname
-lookup for each page. An ordinary block-backed swap WRITE may contain several
-compatible folios in one upstream BIO; `mm/page_io.c:swap_add_folio()` /
-`swap_write_submit()` merge compatible entries.
+`mm/swapfile.c` maps swap entries into backing sectors
+(`swap_folio_sector()`). Swapfile extent mapping is established at swap
+activation (`setup_swap_extents()`) rather than by a pathname lookup for each
+page. Upper BIO shape is version dependent (see section 4): in v7.0 each
+block-backed swap WRITE carries exactly one folio, while master's
+`swap_add_folio()` / `swap_write_submit()` can merge several sector-contiguous,
+same-blkcg folios into one BIO.
 
 Swap-in begins when a task faults on a page-table swap entry or when the
 kernel performs swap readahead. The kernel checks swap cache, can obtain the
@@ -174,8 +192,12 @@ either upstream implementation.
 - [newer upstream multi-folio swap I/O](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/page_io.c)
 
 Swapz records independent 4KiB logical pages and maps them to its own 4/8/16KiB
-physical SWZ extents. Compressed extents contain a header and one or more
-record descriptors: logical page, generation, payload offset/length and CRC.
+physical SWZ extents. Compressed extents contain a header (magic, extent
+blocks, record count, sequence, metadata CRC32C) and one or more record
+descriptors: logical page, generation, payload offset/length and payload
+CRC32C. A payload is LZ4, or, only on a target with the default-off
+`delta64_rescue` enabled, a whole-page delta64 transform followed by LZ4,
+flagged in the length field.
 RAW fallback holds one whole 4KiB logical page in one physical block with
 its mapping/integrity authority in RAM. A **SWZ record** is independently
 decodable; a **physical extent** may hold multiple records; an **I/O run** may
@@ -200,8 +222,10 @@ Source anchors:
 
 zswap is a compressed **RAM cache** for swap pages, not the swap device's
 on-disk compression format. It may intercept a swap-out and keep compressed
-bytes in RAM, using a configured compressor and zpool. Its success is not a
-promise that its compressed representation will remain available forever.
+bytes in RAM, using a configured compressor and zsmalloc storage (v7.0 and the
+inspected master use zsmalloc directly; the older zpool layer is gone). Its
+success is not a promise that its compressed representation will remain
+available forever.
 
 ### Initial rejection or inability to retain the page
 
@@ -215,16 +239,20 @@ compressor behavior and policy may all matter.
 ### Later eviction of a page previously compressed by zswap
 
 When the zswap pool must release stored entries, its shrinker can call
-`mm/zswap.c:zswap_writeback_entry()`. For the inspected upstream implementation:
+`mm/zswap.c:zswap_writeback_entry()`. In both v7.0 and the inspected master:
 
-1. Obtain the original swap entry and allocate a swap-cache folio for it.
+1. Obtain the original swap entry and allocate a swap-cache folio for it
+   (v7.0 `swap_cache_alloc_folio()`, master `__swap_cache_alloc_folio()`).
 2. Verify that the zswap entry is still the entry authoritative for the slot,
    protecting against concurrent swap-in/invalidation/slot reuse.
 3. Run `zswap_decompress(entry, folio)` to reconstruct the original page bytes.
 4. Remove and release the compressed zswap entry.
-5. Mark the reconstructed folio for drop-behind handling.
-6. Call `__swap_writeout(&ctx, folio)` and `swap_write_submit(&ctx)`, which
-   produce an ordinary backing swap WRITE.
+5. Mark the reconstructed folio for prompt release after writeback: v7.0 sets
+   `PG_reclaim` (`folio_set_reclaim()`); master sets drop-behind
+   (`folio_set_dropbehind()`).
+6. Submit an ordinary backing swap WRITE: v7.0 calls
+   `__swap_writepage(folio, NULL)`; master calls `__swap_writeout(&ctx, folio)`
+   and `swap_write_submit(&ctx)`.
 
 ```text
 original 4KiB page
@@ -232,7 +260,7 @@ original 4KiB page
       -> later zswap eviction
       -> zswap DECOMPRESSION to a swap-cache folio
       -> normal backing BIO with reconstructed page bytes
-      -> swapz may LZ4-COMPRESS the page again
+      -> swapz may compress the page again (LZ4, optionally delta64+LZ4)
       -> physical SWZ or RAW storage
 ```
 
@@ -242,10 +270,11 @@ reconstructed page, not zswap's compressed payload, payload length, compressor
 ID or guaranteed semantic origin. zswap may compress with a different algorithm
 from SWZ LZ4, so treating arbitrary zswap bytes as LZ4 would be incorrect.
 
-In the inspected kernel, `folio_set_dropbehind(folio)` is used on this
-writeback folio; `mm/page_io.c` observes the drop-behind bit when deciding
-completion handling for an async backing BIO. The flag has other uses and is
-**not a stable zswap-origin API**. It may help an investigation against a pinned
+In the inspected master, `folio_set_dropbehind(folio)` is used on this
+writeback folio and `mm/page_io.c:swap_bdev_submit_write()` observes the
+drop-behind bit to complete an async backing BIO in task context. v7.0 instead
+sets `PG_reclaim`, and its `page_io.c` has no drop-behind check. Both bits
+have other uses and neither is **a stable zswap-origin API**. It may help an investigation against a pinned
 kernel, but cannot safely drive production bypass policy. Neither
 `REQ_SWAP` nor the submitting PID provides origin. Some zswap-enabled
 systems may never issue a writeback for particular entries (no eviction,
@@ -264,7 +293,7 @@ block/Device Mapper cloning and splitting. `REQ_ZSWAP_WRITEBACK` is a useful
 *illustrative name only*, not an existing Linux flag or an approved API.
 An origin enumeration or another reviewed, stable, per-BIO mechanism could
 serve; mixed-origin upstream BIOs need origin-safe splitting or per-folio
-metadata. Do not derive origin from `current` or `folio_set_dropbehind`.
+metadata. Do not derive origin from `current`, drop-behind or `PG_reclaim`.
 
 With an authoritative writeback-origin hint, swapz has two conceptually
 different choices:
@@ -320,7 +349,8 @@ Later backing READ of logical page L
 
 Linux's swap-cache allocation path explicitly allocates a folio for a swap
 entry when a suitable folio is not already cached. In v7.0 this path is
-`mm/swap_state.c:swap_cache_alloc_folio()`. The WRITE-time folio pointer is
+`mm/swap_state.c:swap_cache_alloc_folio()` (master:
+`__swap_cache_alloc_folio()`). The WRITE-time folio pointer is
 therefore **not** a key for READ correlation.
 
 ### 7.2 Capture a cohort without retaining application RAM

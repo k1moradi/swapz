@@ -221,7 +221,8 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn('"swapz3"', DM)
         for path in ("docs/README.md", "docs/VISION.md",
                      "docs/coding_standards.md", "docs/testing_standards.md",
-                     "docs/compile.md", "docs/benchmark.md"):
+                     "docs/compile.md", "docs/benchmark.md",
+                     "docs/context.md"):
             with self.subTest(naming_policy=path):
                 document = (ROOT / path).read_text()
                 self.assertIn("Immutable naming policy (read before every prompt)",

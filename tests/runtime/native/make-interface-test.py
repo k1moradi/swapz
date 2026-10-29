@@ -135,7 +135,8 @@ class PublicMakeContract(unittest.TestCase):
     def test_make_test_is_only_official_documented_test_command(self):
         canonical = ("docs/README.md", "docs/VISION.md",
                      "docs/coding_standards.md", "docs/testing_standards.md",
-                     "docs/compile.md", "docs/benchmark.md")
+                     "docs/compile.md", "docs/benchmark.md",
+                     "docs/context.md")
         policy = "**Single official test command (read before every prompt):**"
         for document in canonical:
             with self.subTest(canonical=document):
