@@ -146,7 +146,7 @@ There is **no ordinary stable BIO contract** supplying process PID, owning
 filename/ELF section, page coldness, or zswap compressor/origin. `current`
 may be a reclaimer, zswap worker or unrelated allocator and is not a reliable
 owner. `REQ_SWAP` means swap I/O generally; it does not distinguish normal
-swap-out, zswap rejection and zswap writeback.
+swap-out, zswap rejection and zswap writeback. In Linux v7.0, the upper block-backed swap WRITE carries `REQ_SWAP`, but swap READ BIOs need not; do not filter READ correlations by that flag. Track upper WRITE provenance independently of swapz's own lower BIO flags.
 
 Current swapz limits upper requests with
 `dm_set_target_max_io_len(ti, SWAPZ_SECTORS)` and validates ordinary
@@ -334,6 +334,8 @@ handling. Identical folio pointers within a *single safely observed window*
 can support a provisional same-folio cohort, but pointers must not become a
 persistent key, and their reuse must not create false cross-window matches.
 
+Window-local observation covers **only** the subset of an original folio whose pages were in that owned window. If one folio crosses windows, missing members are **censored observations**, not proof of a different cohort. Compare folio pointers only while source memory ownership is valid and copy scalar index/order hints before releasing the BIO.
+
 One bounded correlation design is:
 
 1. While a WRITE window is owned and complete source bvecs remain valid,
@@ -343,23 +345,23 @@ One bounded correlation design is:
 2. Do **not** publish cohort metadata for a speculative, failed, partial or
    uncommitted mapping. Only upon confirmed lower completion and serialized
    publication associate the authoritative `(logical_page, generation)`
-   with that cohort token.
+   with that cohort token. Only the serialized mapping-publication worker may update the voluntary correlation cache.
 3. Keep association in a fixed-size, generation-checked volatile lookup cache,
    not in SWZ bytes or a correctness-critical mapping. Overwrite,
    DISCARD, slot reuse, generation change and stale publication invalidate or
    supersede associations. For GC relocation, either preserve an association
-   only after verified matching authority/generation or invalidate it.
+   only after verified matching authority/generation or invalidate it. Explicit zero-page elision must likewise invalidate any older tag. Cohort ID or epoch wrap must clear/retire previous tags before numeric reuse.
 4. A cache eviction or missing entry means **unknown**, not a negative
    locality observation. Never use a generation-mismatched or unverified
    entry. Bound the lookup and cleanup cost, and leave the storage authority
-   usable without this cache.
+   usable without this cache. Where analyzing committed physical co-location, retain a scalar committed extent identity with the cohort observation. Tear this cache down with the target; it is not another authority.
 5. On a later backing READ, validate the current authoritative logical page
    and generation before attributing it to cohort C. The destination READ
    folio and the thread requesting it do not establish original ownership.
 
 This can be done without enlarging the supported 4KiB upper BIO size. Original
 upstream BIO membership, if needed, is an **additional** hint that requires a
-deliberate propagation token; splitting alone does not erase source bvecs.
+deliberate propagation token; splitting alone does not erase source bvecs. The existing window is bounded to 64 records. A separate fixed-size, preallocated correlation cache can bound observation cost independently of the number of logical swap pages; the proposed implementation budget belongs in ROADMAP.
 
 ### 7.3 Kernel-version dependency and what READ observations mean
 
@@ -390,7 +392,7 @@ Swapz's existing `tests/tools/device-roundtrip.c:series_thp()` maps a
 2MiB `MADV_HUGEPAGE` transfer buffer, then performs logical I/O through it.
 That proves compound-backed buffer admission and byte-exact behavior; it does
 **not** prove that real swapped anonymous application pages shared their
-original folio, nor that they will swap in together. Likewise, seeing pages
+original folio, nor that they will swap in together. Reusing one THP transfer buffer for unrelated logical I/O is a **negative control**: a shared source buffer does not imply common application semantics or future read locality. Likewise, seeing pages
 arrive in one reclaim burst is not proof of correlated later faults.
 
 Useful controls for any correlation result include equal logical adjacency,
@@ -398,7 +400,7 @@ arrival order, page compression size and content, read sequence timing, swap
 readahead mode, upper cache hits and whether a target-visible READ was a
 verified demand read or speculative readahead where such a distinction is
 observable. Treat high cache-miss/eviction rates as unknown coverage rather
-than manufacturing a stronger effect from a biased surviving sample.
+than manufacturing a stronger effect from a biased surviving sample. Report eligible/sampled/dropped/ambiguous cohorts, observed folio order and within-window index spans, censored window boundaries, committed extent co-location, RAW versus compressed records, bounded READ event-distance/time histograms, cache coverage, and independent lower bytes/requests. Separate target-visible backing co-access from user demand.
 
 ### 7.5 Equal-cost placement requires a whole-run geometry proof
 
@@ -422,7 +424,7 @@ Any policy must verify the **whole window and resulting physical run(s)**,
 not just a reported sum of bytes/cold-read cost/extent count. Compare actual
 pre-/post-geometry including physical request count, alignment holes and
 segment-tail waste. Never increase planner cost, dispatch latency or lower
-traffic merely to co-locate a folio cohort. Never wait for a future page.
+traffic merely to co-locate a folio cohort. Never wait for a future page. A tie-break can still delay the lower submission through extra CPU work even without an explicit wait; measure that cost. Do not displace the live allocator-cursor tie-break with an equally scored geometry that produces more run splits or segment-tail waste. RAW remains whole-page blocks after the compressed prefix.
 
 ### 7.6 Scope of a positive result
 

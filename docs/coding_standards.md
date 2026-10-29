@@ -166,7 +166,7 @@ Physical-device support is not a coding shortcut around current safety policy.
 No production/test flag may silently relax the RAM-backed owned-device gate.
 
 Folio locality is an unqualified observation hypothesis (ROADMAP ID113 and
-`docs/folio-locality.md`). Observe membership only through valid owned pages;
+`docs/context.md`). Observe membership only through valid owned pages;
 never retain raw folio addresses as WRITE-to-READ identity or pin original RAM
 until swap-in. Any cross-I/O correlation must be bounded, volatile, generation-
 checked and worker-owned, with ambiguity/eviction reported as unknown. A READ

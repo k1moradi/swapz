@@ -213,7 +213,7 @@ changes.
 | 110 | Fresh two-run lower-WRITE overlap after ID101/ID107/ID108 | **5 no demonstrated service benefit / removed** | ARM64 development experiment on `03becc0`/report head `b5227ca`, 2026-10-29: two disjoint immutable slots, FIFO publication, same-page append fences, bounded paused-group capacity and four-record successor service. Observed depth reached 2 on SATA/NVMe/fast mixed. Adjacent K=1/K=2 blocks, three `make fast_test` repeats each (mean useful WRITE MB/s): SATA 182.19/177.11, NVMe4 237.33/234.14, fast QD4 61.91/60.81, QD8 95.80/92.08, fast mixed 47.54/48.39. Lower-WRITE requests changed +21.2/+3.6/+0.3/+9.9/+3.9%; SATA lower-byte ratio 0.696/0.702 and fast mixed 0.762/0.765. Raw SATA 329.14/322.33 and NVMe4 422.61/439.16 show residual host drift; these pre-ID111 observations have no quiet-window screen and are directional, unpaired development evidence, not confidence-qualified regression claims. No demonstrated service gain repays the added requests, ownership state and buffers; restore K=1. Rootless, W=1/W=2, loaded smoke, full default development scenarios and ID36 passed. Reopen only with a materially different workload/policy and repeatable useful-service benefit without fragmentation; depth-two activity alone is insufficient. |
 | 111 | Compact automatic host-noise screen for development comparisons | **1 owner-requested / keep** | `make fast_test` adds 200ms pre/post quiet CPU/PSI/steal deltas, timed steal and >10% same-scenario raw-repeat spread checks. `NOISY`/`UNKNOWN` results set `performance_validity.performance_usable=false`, retain all evidence and print compact reasons. Timed workload CPU/PSI alone is never external-noise proof. Thresholds are conservative screening heuristics; `SCREENED` is not idle-host proof, single repeats cannot bound control drift, and owner `make test` qualification/ID36 is unchanged. |
 | 112 | Per-round ARM64/NEON VM performance history plots | **1 owner-requested / keep** | After every optimization round, regenerate default-LZ4 mixed useful READ/WRITE, mixed p99, lower-WRITE savings and persistent-WRITE QD plots plus source-mapped CSV/JSON under `build/history/arm64-neon/`. Initial history through report `b5227ca` selects 51 owner-PASS NEON/seven-CPU reports from 230 revisions. Exclude failed/blocked/other-host and unqualified trial data; use each report's own raw controls and break kernel/model/content/replay discontinuities. Descriptive history never establishes causal gains or physical wear. |
-| 113 | WRITE-folio locality as an equal-cost packing hint | **6 source audit / representative evidence gate** | See [reviewed measurement proposal](folio-locality.md). Current 4KiB splitting preserves page references but no explicit parent-BIO token. READ destination folios cannot identify earlier WRITE RAM; correlation needs bounded logical/generation tags and live-owner-only cohort discovery, with censoring and reuse handled explicitly. ID43 THP direct I/O is functional coverage, not real swap-locality evidence. Linux 7.0 block swap and newer `master` batching differ. Keep layout unchanged until folio membership predicts backing READ co-access beyond logical adjacency. A later policy must preserve full byte/read/extent costs and physical run/tail geometry; equal-length permutations are a narrower candidate than arbitrary reordering. No actual-swap collection or larger upper BIO is authorized by this design. |
+| 113 | WRITE-folio locality as an equal-cost packing hint | **6 source audit / representative evidence gate** | See [reviewed measurement proposal](context.md). Current 4KiB splitting preserves page references but no explicit parent-BIO token. READ destination folios cannot identify earlier WRITE RAM; correlation needs bounded logical/generation tags and live-owner-only cohort discovery, with censoring and reuse handled explicitly. ID43 THP direct I/O is functional coverage, not real swap-locality evidence. Linux 7.0 block swap and newer `master` batching differ. Keep layout unchanged until folio membership predicts backing READ co-access beyond logical adjacency. A later policy must preserve full byte/read/extent costs and physical run/tail geometry; equal-length permutations are a narrower candidate than arbitrary reordering. No actual-swap collection or larger upper BIO is authorized by this design. |
 
 ## What the pinned queue experiment establishes
 
@@ -240,7 +240,7 @@ bounded concurrency opportunity.
 ## Huge/compound-page support roadmap
 
 ID43 already qualifies 4KiB slices backed by THP/compound memory. ID113's
-[folio-locality audit](folio-locality.md) separates that completed input-shape
+[folio-locality audit](context.md) separates that completed input-shape
 support from unqualified semantic locality and larger upper-BIO admission.
 The current upper READ/WRITE contract remains exactly 4KiB.
 
@@ -426,15 +426,15 @@ single safely observed source folio into a **window-local cohort**;
 also retain comparison controls for logical adjacency and arrival order.
 No persistent folio pointer, added reference extending the RAM's life
 through swap-in, unbounded allocation or new SWZ metadata is allowed.
-Ordinary ownership, fences and publication stay unchanged.
+Ordinary ownership, fences and publication stay unchanged. Report window boundary censoring explicitly: a large folio can span several 64-record windows, and absence from a given window does not imply a different folio. Copy scalar hints before source BIO ownership ends.
 
 **E3 — correlate through authority, not READ folio identity.**
 Maintain a fixed-size, volatile cache of
-`(logical_page, successfully_committed_generation) -> cohort_id`.
+`(logical_page, successfully_committed_generation) -> cohort_id`. The reviewed **initial prototype budget** is 256 preallocated 64-byte entries (16KiB), with a numeric cohort/epoch, observed order/index and committed extent identity; this is a proposal, not active configuration.
 Publish associations **only after** the lower write succeeds and mapping
 authority commits; handle overwrite, generation changes, DISCARD, slot
 reuse, failed/partial writes, GC relocation and cache eviction without
-stale attribution. Cache absence is unknown; generation mismatch must
+stale attribution. Invalidate tags on zero elision; clear cache safely on cohort/epoch wrap and target teardown. Keep cache updates confined to the serialized authority worker. Cache absence is unknown; generation mismatch must
 never match. A later target READ uses its **current authoritative
 logical page/generation** to look up the WRITE cohort; its destination
 folio may be a new allocation and is not compared to the earlier WRITE
@@ -443,7 +443,7 @@ folio. Cohort records are telemetry only, never a correctness dependency.
 **E4 — test whether the signal predicts real lower READ co-access.**
 Measure timing and sequences of later **backing** READs attributed to
 each known cohort, with controls for logical adjacency, arrival order,
-compression length and read readahead. Separate observable demand
+compression length and read readahead. Record upper WRITE `REQ_SWAP` provenance without requiring `REQ_SWAP` on upper READs or confusing lower swapz BIO flags with upper origins. Separate observable demand
 READs from speculative readahead where possible; target-only reads
 cannot see swap-cache or zswap hits and must not be described as all
 application accesses. Report cohort coverage/evictions, false/stale
@@ -461,7 +461,7 @@ lengths after greedy ordering**, under the already-accepted independent
 window and the existing fences. Verify whole-window equality of physical
 bytes, bounded cold-read cost, extent count, exact extent classes, lower
 run splits/requests, segment alignment padding and segment-tail waste.
-Account for any extra CPU/planner cost. Reorder neither RAW nor
+Account for any extra CPU/planner cost. An implementation that adds no explicit wait may still increase dispatch latency by doing extra permutation work; measure it. Reorder neither RAW nor
 different-length records in this first candidate. Never wait for a
 future cohort member or postpone an otherwise dispatchable lower WRITE.
 
