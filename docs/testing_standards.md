@@ -28,8 +28,8 @@ command. It builds the current working tree (dirty trees allowed), runs the
 lower-I/O window-policy native checks, runs the root preflight, and then runs
 one counterbalance-free raw/swapz pair per selected scenario through the same
 private owned null_blk pair helper and exact device models used by `make test`
-(default: fast mixed, fast QD1/4/8/32, SD mixed, SD QD1/32, SATA mixed, NVMe
-Gen4 mixed). It prints one table of useful READ/WRITE, lower WRITE bytes ratio
+(default: three repeats each of SATA mixed, NVMe Gen4 mixed, fast mixed,
+fast QD4 and fast QD8). It prints one table of useful READ/WRITE, lower WRITE bytes ratio
 and requests, READ/WRITE p99, windows, deadline and idle-bound closes,
 accepted-work lower idle, lower-WRITE service and its EWMA, and keeps detailed
 telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
@@ -378,15 +378,15 @@ state the last qualified source when a round creates no new owner report.
 ## Current qualified baseline
 
 The latest successful owner matrix tested exact source
-`03becc01802b1af1455c2a1c0a43b00ca1d22046` and published report-only commit
-`b5227ca58001abad1de216739a1bb30ce8ae0801`. That historical report says PASS
+`b86fefd9e364727fa002ebd891ef4adfbd1166b1` and published report-only commit
+`0d97e99890ee8b1a34744f70ce82021db12b1c9e`. That report says PASS
 for all five stages: build, native/rootless, W=1, W=2 and owned-RAM loaded
 qualification, including lifecycle/fault/GC and ID36 resource pressure.
 Later source changes require their own complete owner `make test`.
 
-That run reports fast mixed async useful WRITE +7.4% versus raw, READ p99
-0.88 vs 3.71 ms, SD mixed +393%, and fast sustained QD1/QD4/QD8/QD32
--2.7/-10.2/+18.2/+56.3%. SATA/NVMe envelopes and fast QD4 remain below raw.
+That run reports fast mixed async useful WRITE +10.8% versus raw, SD mixed
++404%, and fast sustained QD1/QD4/QD8/QD32 -4.9/-11.3/+28.4/+50.0%.
+SATA/NVMe envelopes and fast QD4 remain below raw.
 These are host-specific synthetic results, not universal raw parity or physical
 endurance evidence. Preserve independent lower WRITE bytes/requests as the
 host-I/O endurance proxy and circular segment allocation as logical fairness.
@@ -397,8 +397,11 @@ independent READ fan-out, the eight-block ID63 cap, packed placement and SWZ
 1/2/4-block extents. ID107–ID108 independent dispatched-run READ service and
 deferred acknowledgements are now owner-qualified; the fresh K=2 development
 experiment in ROADMAP ID110 is rejected rather than promoted. Delta64 is now
-default-on with second-pass LZ4 acceleration four (ID115), pending new loaded
-qualification and representative-content measurements. Long-run churn, actual
+default-on with second-pass LZ4 acceleration four (ID115), qualified in that
+owner run. The later `005592d` adds DELTA64_SHUF8 and the faster NEON inverse;
+its ARM64 native, warning-build, loaded-smoke and positive-fixture checks are
+supporting evidence. Its full matrix and x86 runtime coverage remain pending.
+Representative-content prevalence, long-run churn, actual
 kernel swap and physical media remain separate qualification gates.
 
 ## Immediate K=1 critical-path profiling gate (ID114)
@@ -433,8 +436,9 @@ with minimal DM stubs, checking the return value, exact reply, timestamp reset,
 unchanged cumulative counters and rejection of unknown commands/wrong argument
 counts. The replay harness must continue rejecting a missing acknowledgement.
 Owner report `a4ff2205fa95` on `de79f2ec832d` passed stages 1–4 and loaded smoke
-but failed this acknowledgement at the first mixed swapz session. It does not
-qualify the new defaults; the callback repair still needs owner `make test`.
+but failed this acknowledgement at the first mixed swapz session. The later
+owner run on `b86fefd` (report `0d97e99`) passed the repaired handshake and all
+five qualification stages, including the new defaults.
 
 Development decisions retain absolute raw/swapz useful throughput, READ/WRITE
 p99 and independent lower WRITE bytes/requests alongside the compact phase
@@ -1996,6 +2000,15 @@ changes in this round. Predictor qualification continues to require SSE2
 transformed bytes and inverse reconstruction to match scalar exactly.
 
 ### Production delta64 qualification
+
+Current rescue emits DELTA64_SHUF8 (delta64, eight byte planes, LZ4).
+Require byte-exact scalar/SIMD shuffle, unshuffle and combined reconstruction,
+legacy plain-delta64 decoding, all valid map encodings at index 63, rejection
+of reserved flag combinations with a recomputed valid metadata CRC, and GC
+preservation of payload/encoding. Execute each ISA on supporting hardware;
+ARM64 runtime coverage and x86 assembly inspection do not qualify x86 runtime.
+Keep offline timings, loaded positive-fixture pairs and the full owner matrix
+distinct. Historical plain-delta64 timings do not measure the new path.
 
 The delta64 transform unit is one 4KiB logical page, never a whole packed
 extent. Direct production-C coverage must prove ordinary LZ4 and delta64 records

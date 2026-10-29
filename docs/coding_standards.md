@@ -491,8 +491,17 @@ delta64 encoding support; reads of an encoded record require their scratch and
 fail closed if it is missing. Only an enabled target may write new delta64
 records. A `delta64_rescue=0` result is not a measured classifier rejection.
 
+Current rescue writes `SWAPZ_ENCODING_DELTA64_SHUF8`: delta64, eight byte
+planes, then LZ4. Preserve decoding of plain DELTA64. Codec validation must
+reject a shuffle flag without delta64, including with a valid metadata CRC;
+map index 63 must round-trip with all three valid encodings. GC preserves the
+encoded payload and encoding without recompression. Combined transform and
+inverse reuse existing scratch with disjoint live input/output and one SIMD
+entry/exit per page. Native scalar and each executable ISA backend must match
+an independent byte-plane oracle. Cross-compilation is not runtime coverage.
+
 When enabled (the default), the scalar sampled classifier runs before ordinary
-LZ4. Score >=24 pages run delta64 plus the rescue LZ4 first. A candidate at or
+LZ4. Score >=24 pages run delta64 plus shuffle and the rescue LZ4 first. A candidate at or
 below 2024 bytes may be adopted directly and skip ordinary LZ4; a larger
 high-score candidate falls through to ordinary LZ4 and is adopted only if
 strictly smaller. Lower-score pages run ordinary LZ4 first and may enter the

@@ -58,7 +58,7 @@ def paired_inputs_match(session, source):
 
 
 def report_points(report):
-    """Keep default LZ4 async mixed sessions; separate persistent WRITE QDs."""
+    """Keep async mixed sessions by rescue policy; separate persistent WRITE QDs."""
     if report.get("overall") != "PASS":
         return []
     benchmarks = report.get("benchmarks", {})
@@ -158,6 +158,7 @@ def report_points(report):
                                    "swapz_write_mbps": row["swapz_write_mbps"],
                                    "compatibility": hashlib.sha256(
                                        json.dumps(sorted(identities)).encode()).hexdigest(),
+                                   "delta64_rescue": json.loads(next(iter(identities)))[-1],
                                    "observations": row.get("observations")})
     return points
 
@@ -243,7 +244,12 @@ def render(data):
         for ax, (target, name) in zip(axes.flat, TARGETS.items()):
             rows = [r for r in data["points"] if r["target"] == target and r["workload"].startswith("mixed")]
             for metric, label, color, style in metrics:
-                draw_line(ax, rows, metric, label, color, style)
+                for policy in (0, 1):
+                    selected = [r for r in rows if r["delta64_rescue"] == policy]
+                    if selected:
+                        draw_line(ax, selected, metric,
+                                  label + " · delta64 " + ("on" if policy else "off"),
+                                  color, style)
             ax.axhline(0, color="#888888", linewidth=.8)
             ax.set_title(name)
             ax.set_xlim(.5, total + 1)
@@ -259,7 +265,7 @@ def render(data):
                  f"{data['reports'][-1]['date'][:10]} · latest source {data['reports'][-1]['source_sha'][:7]}",
                  ha="center", fontsize=10, color="#555555")
         fig.supxlabel("Qualified report sequence · oldest to newest · source/report SHA mapping in CSV", y=.075)
-        fig.text(.5, .025, "Default LZ4 async, delta64 off · 0% = raw parity · positive = improvement\n"
+        fig.text(.5, .025, "Async mixed; delta64 on/off shown separately · 0% = raw parity · positive = improvement\n"
                  "Ratios of matched-arm means; panel scales differ. READ is mixed-load service. Line breaks = kernel/model/workload changes.\n"
                  "Historical host load varies; ratios are descriptive, not causal gains or physical NAND wear evidence.",
                  ha="center", fontsize=9, color="#555555")
@@ -273,11 +279,17 @@ def render(data):
             ax = axes[row_index, column]
             rows = [r for r in data["points"] if r["target"] == target and
                     r["workload"] == "persistent WRITE" and r["qd"] == qd]
-            draw_line(ax, rows, "write_mbps_gain_pct", "Useful WRITE", "#1764ad")
+            for policy in (0, 1):
+                selected = [r for r in rows if r["delta64_rescue"] == policy]
+                if selected:
+                    draw_line(ax, selected, "write_mbps_gain_pct",
+                              "WRITE · delta64 " + ("on" if policy else "off"),
+                              "#1764ad")
             ax.axhline(0, color="#888888", linewidth=.8)
             ax.set_title(("Serial" if row_index == 0 else "Fast") + f" · QD{qd}")
             ax.grid(axis="y", alpha=.2)
             ax.set_xlim(.5, total + 1)
+            ax.legend(loc="best", fontsize=8)
     fig.suptitle("ARM64 / NEON VM · sustained WRITE gain versus raw (%)", fontsize=17, fontweight="bold")
     fig.text(.5, .935, f"{total} passing reports · {data['reports'][0]['date'][:10]} to "
              f"{data['reports'][-1]['date'][:10]} · latest source {data['reports'][-1]['source_sha'][:7]}",
@@ -305,7 +317,9 @@ def main():
                f"{len(data['reports'])} passing report revisions; latest source "
                f"`{data['reports'][-1]['source_sha']}`. All points require NEON and the "
                "seven-CPU VM profile. Reports do not contain an immutable VM identifier.", "",
-               "Each mixed point uses default-LZ4 async, delta64-off sessions and its own raw controls. "
+               "Each mixed point uses async sessions and its own raw controls; delta64-on and "
+               "delta64-off policies have separate labels and lines. Modern envelope mixed controls "
+               "remain LZ4-only; delta-positive write-only envelopes are a different workload and excluded. "
                "Rates are ratios of matched-arm arithmetic means, so rounded percentages may differ "
                "slightly from the official report's differently pooled raw column. Positive means "
                "improvement; zero is raw parity. p99 and lower I/O use percent reduction. "

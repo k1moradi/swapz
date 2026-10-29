@@ -367,14 +367,17 @@ NAND-wear evidence.
 
 ## ID67 predictor evidence and production route
 
-The native ID67 evidence remains the measurement basis for the opt-in
+The native ID67 evidence remains the measurement basis for the default-on
 page-local delta64 rescue, but production routing is predictor-first. The
 scalar classifier runs before ordinary LZ4. Score >=24 pages try delta64 plus
 the rescue LZ4 first; candidates <=2024 bytes may be adopted directly and skip
 ordinary LZ4, while larger candidates fall through to the strict ordinary-LZ4
 comparison. Lower-score pages run ordinary LZ4 first and may use threshold 16
 only when the production planner identifies an exact lower SWZ packing limit
-that the candidate crosses. Rescue is default-off.
+that the candidate crosses. Rescue is default-on; `delta64_rescue=0` disables it.
+Current rescue writes DELTA64_SHUF8 (delta64, eight byte planes, LZ4), while
+the historical ID67 timings below measured plain delta64. ID117 records the
+shuffle evidence and pending full-matrix/x86 execution gates.
 
 Earlier loaded enabled-policy evidence observed eligible pages but zero
 classifier passes, transform attempts or adoptions, which justified the
@@ -481,7 +484,7 @@ Current benchmark work must preserve these contracts:
   1/2/3/4 sweep remains only a byte-exact codec/geometry regression check.
 - **Delta64:** rescue is default-on (`delta64_rescue=0` disables it). The
   scalar classifier runs before ordinary LZ4; high-score pages may directly adopt a sufficiently small
-  delta64+LZ4 result. Scalar and every compiled SIMD backend must remain
+  delta64+shuffle8+LZ4 result. Scalar and every compiled SIMD backend must remain
   byte-identical, and loaded wrapper-inclusive timing remains authoritative.
   In console tables, a timing column that measures only compression of an
   already transformed page is labeled `LZ4 ns`; use a combined delta64+LZ4
