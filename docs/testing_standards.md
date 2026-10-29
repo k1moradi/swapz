@@ -885,6 +885,13 @@ must clear the token after the existing zero-count early-return path. The former
 `ordered_worker_busy` atomic had no reader and is dead state; source coverage
 must keep it absent.
 
+Source coverage must keep dispatched-run READ independence (an empty collector
+with an active K=1 run is not a dependency, and window evidence plus the
+deadline-after-READ flush require an open window) and the deferred
+acknowledgement invariants: deferral only inside the ordered work item, delivery
+before any finalize wait and before the work item returns, slot release before
+deferral, failed runs acknowledged immediately.
+
 Source coverage must require the ordered `swapz` workqueue to use a bound,
 single-active `WQ_MEM_RECLAIM` queue and the `swapz-lz4` preparation workqueue
 to use `WQ_MEM_RECLAIM | WQ_UNBOUND`. The ordered authority workqueue remains

@@ -170,7 +170,15 @@ belong in the ROADMAP decision table and Git history.
   retained scheduling evidence.
 - **In-flight write reaping:** completed detached $K=1$ lower writes are reaped
   opportunistically inside the worker loop so upper BIOs receive `bio_endio()`
-  immediately without waiting for the full 64-BIO quantum or retention expiration.
+  without waiting for the full 64-BIO quantum or retention expiration. When a
+  staged window or queued arrival exists at reap time, the run's successful
+  acknowledgements are held on a worker-owned list until that next window has
+  reached the lane (or nothing is staged, or the local FIFO is drained), so one
+  lower WRITE no longer waits behind ~20 wakeups. The list is delivered with
+  preemption disabled (`bio_endio()` is IRQ-safe), before any finalize wait on
+  the lower device, and always before the work item returns; failed runs are
+  acknowledged immediately with their error, and delivery re-checks terminal
+  failure. With nothing staged or queued (QD1) acknowledgements stay inline.
   Tail sampling is gated on `swapz_has_inflight(ctx)` so unfinalized completions
   never produce false empty-tail measurements.
 - **Planner:** minimize lower bytes first, bounded cold-read cost second and
@@ -1066,6 +1074,13 @@ collector and every transaction in the immutable run, authority replay is not
 active, and no PREFLUSH/FUA/control fence applies. Malformed or mismatched run
 metadata fails closed and forces ordered finalization. Same-page read-after-
 write never bypasses the unpublished generation.
+
+The same rule holds after the run's window was dispatched and before the next
+window opens (empty collector, run still in flight). Such a READ must not take
+the dependency path: an empty flush there waits for the whole lower WRITE and
+sleeps the only ordered worker while cache hits and staged stragglers queue.
+Window-scoped evidence (lower-READ bypass attribution, the deadline-after-READ
+flush) still requires an open window, because an empty window has no deadline.
 
 ### Exact per-segment mapping counts
 

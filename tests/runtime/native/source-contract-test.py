@@ -1092,9 +1092,44 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->gc_write_bytes", gc)
         self.assertIn("a->gc_allocation = 0", gc)
 
+    def test_deferred_upper_completions_never_outlive_worker_or_wait(self):
+        wrapper = body("swapz_worker")
+        self.assertLess(wrapper.index("ctx->defer_upper_completions = true;"),
+                        wrapper.index("swapz_worker_pass(ctx);"))
+        self.assertLess(wrapper.index("swapz_worker_pass(ctx);"),
+                        wrapper.index("ctx->defer_upper_completions = false;"))
+        self.assertLess(wrapper.index("ctx->defer_upper_completions = false;"),
+                        wrapper.rindex("swapz_deliver_upper_completions(ctx);"))
+        finalize = body("swapz_finalize_inflight_write")
+        # Deliver before sleeping on the lower device, never after.
+        self.assertLess(finalize.index("swapz_deliver_upper_completions(ctx);"),
+                        finalize.index("wait_for_completion(&inflight->lower_done)"))
+        success = finalize[finalize.rindex("for (index = 0; index < inflight->count"):]
+        self.assertIn("defer = ctx->defer_upper_completions &&\n"
+                      "\t\t(ctx->batch_count || !list_empty(&ctx->incoming));",
+                      finalize)
+        self.assertIn("if (defer)", success)
+        self.assertIn("swapz_defer_upper_completion(ctx,", success)
+        # Failed runs are still acknowledged immediately with their error.
+        failed = finalize[finalize.index("if (error || committed != inflight->count)"):
+                          finalize.rindex("for (index = 0; index < inflight->count")]
+        self.assertIn("swapz_complete(inflight->bios[index], error)", failed)
+        self.assertNotIn("swapz_defer_upper_completion", failed)
+        defer = body("swapz_defer_upper_completion")
+        self.assertLess(defer.index("swapz_release_prepared(bio);"),
+                        defer.index("bio_list_add(&ctx->deferred_upper_completions"))
+        deliver = body("swapz_deliver_upper_completions")
+        self.assertIn("bio_list_pop(&ctx->deferred_upper_completions)", deliver)
+        self.assertIn("swapz_complete(bio, 0)", deliver)
+        worker = body("swapz_worker_pass")
+        self.assertIn("if (list_empty(&local) || !ctx->batch_count ||\n"
+                      "\t\t\t    swapz_has_inflight(ctx))\n"
+                      "\t\t\t\tswapz_deliver_upper_completions(ctx);", worker)
+        self.assertIn("bio_list_init(&ctx->deferred_upper_completions);", DM)
+
     def test_worker_yields_after_finite_window_and_preserves_fifo(self):
         # Assert the finite-quantum semantics, not one obsolete decrement idiom.
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         self.assertIn("SWAPZ_WORK_QUANTUM_BIOS", worker)
         self.assertIn("while (remaining && !list_empty(&local))", worker)
         self.assertIn("remaining -= processed_bios", worker)
@@ -1108,7 +1143,7 @@ static swapz_u16 swapz_probe_set(
                         worker.rindex("list_splice_init(&local, &ctx->incoming)"))
 
     def test_shutdown_completes_all_accepted_queued_bios(self):
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         drain = body("swapz_drain")
         self.assertIn("for (;;)", worker)
         self.assertIn("remaining = SWAPZ_WORK_QUANTUM_BIOS", worker)
@@ -1169,13 +1204,13 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(lower.index("error = swapz_dm_io(&req"),
                         lower.index("ctx->physical_write_reqs++"))
         self.assertIn("one_page_windows", body("swapz_flush_window"))
-        self.assertIn("worker_requeues", body("swapz_worker"))
+        self.assertIn("worker_requeues", body("swapz_worker_pass"))
 
     def test_online_batching_bounded_and_barrier_first(self):
         admitted = body("swapz_map")
         ctor = body("swapz_ctr")
         drain = body("swapz_drain")
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         self.assertNotIn("msecs_to_jiffies", admitted)
         self.assertIn("REQ_PREFLUSH | REQ_FUA", admitted)
         self.assertIn("bio_op(bio) != REQ_OP_WRITE", admitted)
@@ -1228,7 +1263,7 @@ static swapz_u16 swapz_probe_set(
         flush = body("swapz_flush_window")
         write = body("swapz_accept_write")
         process = body("swapz_process")
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         status = body("swapz_status")
         # The implementation snapshots the primary reason before resetting
         # next_window_close so the singleton cross-tab and legacy marginal
@@ -1275,7 +1310,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("#include <linux/ktime.h>", DM)
 
     def test_alpha20_worker_restores_finite_snapshot_requeue(self):
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         header = (ROOT / "src/kernel/window-policy.h").read_text()
         status = body("swapz_status")
         self.assertIn("for (;;)", worker)
@@ -1302,7 +1337,7 @@ static swapz_u16 swapz_probe_set(
 
     def test_retained_burst_target_learns_only_from_admitted_tail(self):
         flush = body("swapz_flush_window")
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         sample = body("swapz_sample_pack_tail_locked")
         status = body("swapz_status")
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
@@ -1538,7 +1573,7 @@ static swapz_u16 swapz_probe_set(
         read = body("swapz_read")
         flush = body("swapz_flush_window")
         producer = body("swapz_preparation_worker")
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         status = body("swapz_status")
         totals = body("swapz_preparation_totals_snapshot")
         engine_prepare = source_body("swapz_engine_prepare_batched_run", ENGINE)
@@ -2087,7 +2122,7 @@ static swapz_u16 swapz_probe_set(
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         flush = body("swapz_flush_window")
         status = body("swapz_status")
         self.assertNotIn("module_param_named(guard_inflight_zero_shrink", DM)
@@ -2137,7 +2172,7 @@ static swapz_u16 swapz_probe_set(
 
     def test_retention_timer_keeps_ordinary_pinned_deadline(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         status = body("swapz_status")
         self.assertIn("swapz_retention_timer_needs_arm(", policy)
         self.assertIn("swapz_window_timer_enabled(retain_ms) && !queued", policy)
@@ -2162,7 +2197,7 @@ static swapz_u16 swapz_probe_set(
     def test_alpha15_nonretained_hot_path_skips_unarmed_timer_cancel(self):
         window = (ROOT / "src/kernel/window-policy.h").read_text()
         flush = body("swapz_flush_window")
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         drain = body("swapz_drain")
         free = body("swapz_free")
         self.assertIn("static inline int swapz_window_timer_enabled", window)
@@ -2229,7 +2264,7 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(writer.index("if (bio->bi_opf & REQ_FUA)",
                                      writer.index("ctx->batch_count++")),
                         writer.rindex("swapz_record_pack_geometry(ctx)"))
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         # Admission records finite pack geometry only. Every PACK_READY close
         # is owned by the serialized worker after accepted-tail refresh.
         self.assertNotIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", writer)
@@ -2482,7 +2517,7 @@ static swapz_u16 swapz_probe_set(
         expiry = body("swapz_retention_expired")
         wake = body("swapz_retention_wake")
         process = body("swapz_process")
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         flush = body("swapz_flush_window")
         mapping = body("swapz_map")
         drain = body("swapz_drain")
@@ -2630,6 +2665,12 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_window_read_independent(ctx->batch, ctx->batch_count",
                       independent)
         self.assertIn("logical, ctx->retain_ms, blocked", independent)
+        # A dispatched K=1 run with no open window must not force a drain:
+        # only an empty batch with an idle lane stays a dependency.
+        self.assertIn("(!ctx->batch_count && !inflight_active)", independent)
+        self.assertNotIn("!ctx->retain_ms || !ctx->batch_count ||", independent)
+        self.assertLess(independent.index("if (!ctx->batch_count)\n\t\treturn !blocked;"),
+                        independent.index("swapz_window_read_independent("))
         independent_read = process.index(
             "if (op == REQ_OP_READ && swapz_read_is_independent(ctx, bio))")
         bypass = process[independent_read:
@@ -2648,11 +2689,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("u64 read_end_ns = ktime_get_ns()", bypass)
         self.assertIn("bool had_lower_io =", bypass)
         self.assertIn("ctx->lower_read_submitted_reqs != lower_reqs_before", bypass)
-        self.assertIn("if (had_lower_io)", bypass)
+        self.assertIn("if (had_lower_io && ctx->batch_count)", bypass)
         self.assertIn("swapz_note_single_tail_read_bypass(ctx)", bypass)
         self.assertIn("ctx->window_first_ns += read_elapsed", bypass)
         self.assertIn("ctx->window_first_ns = read_end_ns", bypass)
-        had_lower_io = bypass.index("if (had_lower_io)")
+        had_lower_io = bypass.index("if (had_lower_io && ctx->batch_count)")
         wave_read_seen = bypass.index("ctx->retained_wave_read_seen = true")
         note_bypass = bypass.index("swapz_note_single_tail_read_bypass(ctx)")
         service_shift = bypass.index("ctx->window_first_ns += read_elapsed")
@@ -2664,8 +2705,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->batch_count || ctx->retained_chain_completed", bypass)
         self.assertLess(note_bypass, service_shift)
         self.assertLess(service_shift, completion)
-        self.assertIn("if (!error && !ctx->worker_has_immediate_followup &&",
-                      bypass)
+        # An empty batch has a zero (always expired) deadline; never turn a
+        # dispatched-run READ into an empty flush that waits for the lane.
+        self.assertIn("if (!error && ctx->batch_count &&\n\t\t    "
+                      "!ctx->worker_has_immediate_followup &&", bypass)
         deadline_gate = bypass.index("!ctx->worker_has_immediate_followup",
                                      completion)
         deadline_expiry = bypass.index("swapz_retention_expired(ctx)",
@@ -2766,7 +2809,7 @@ static swapz_u16 swapz_probe_set(
         done = body("swapz_async_lower_write_done")
         finalize = body("swapz_finalize_inflight_write")
         flush = body("swapz_flush_window")
-        worker = body("swapz_worker")
+        worker = body("swapz_worker_pass")
         drain = body("swapz_drain")
         authority = (ROOT / "src/kernel/authority.c").read_text()
         engine = (ROOT / "src/kernel/engine.c").read_text()
@@ -2861,7 +2904,7 @@ static swapz_u16 swapz_probe_set(
         queue_helper = body("swapz_queue_preparation_workers")
         accept = body("swapz_accept_write")
         mapper = body("swapz_map")
-        ordered = body("swapz_worker")
+        ordered = body("swapz_worker_pass")
         lower = body("swapz_lower")
         finish = body("swapz_complete")
         release = body("swapz_release_prepared")

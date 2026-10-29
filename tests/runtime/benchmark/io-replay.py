@@ -1224,7 +1224,8 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
     "work_conserving_raw_ready", "prep_late_results_discarded",
-    "idle_bound_closes"
+    "idle_bound_closes", "deferred_upper_completion_bios",
+    "deferred_upper_completion_wall_ns"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",

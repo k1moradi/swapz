@@ -388,6 +388,15 @@ struct swapz_dm {
 	/* Per-block lower-WRITE service and per-page ordered LZ4 EWMAs. */
 	u64 lower_write_block_service_ewma_ns;
 	u64 ordered_lz4_page_ewma_ns;
+	/*
+	 * Ordered-worker-owned successful upper WRITE completions of a finalized
+	 * K=1 run, held only within one worker invocation so the next ready
+	 * window reaches the lower device before those bio_endio() wakeups.
+	 */
+	struct bio_list deferred_upper_completions;
+	bool defer_upper_completions;
+	u64 deferred_upper_completion_bios;
+	u64 deferred_upper_completion_wall_ns;
 	/* Diagnostic queue-depth samples at synchronous lower-WRITE boundaries. */
 	u64 prep_lower_write_samples;
 	u64 prep_lower_write_start_queued;
@@ -908,6 +917,40 @@ static void swapz_complete(struct bio *bio, int error)
 }
 
 /*
+ * A finalized run's mappings are already published, so its successful upper
+ * BIOs may be acknowledged a few microseconds later. Release the preparation
+ * slot now (the BIO, and so dm_per_bio_data, stays owned until delivery) and
+ * let swapz_complete() re-check terminal failure at delivery time.
+ */
+static void swapz_defer_upper_completion(struct swapz_dm *ctx, struct bio *bio)
+{
+	swapz_release_prepared(bio);
+	bio_list_add(&ctx->deferred_upper_completions, bio);
+	ctx->deferred_upper_completion_bios++;
+}
+
+static void swapz_deliver_upper_completions(struct swapz_dm *ctx)
+{
+	struct bio *bio;
+	u64 start_ns;
+
+	if (bio_list_empty(&ctx->deferred_upper_completions))
+		return;
+	start_ns = ktime_get_ns();
+	/*
+	 * bio_endio() is IRQ-safe. Without this, each woken writer sharing the
+	 * worker's CPU preempts it mid-batch, turning one wakeup loop into a
+	 * context switch per BIO; the writers run once the batch is delivered.
+	 */
+	preempt_disable();
+	while ((bio = bio_list_pop(&ctx->deferred_upper_completions)))
+		swapz_complete(bio, 0);
+	preempt_enable();
+	ctx->deferred_upper_completion_wall_ns +=
+		swapz_elapsed_ns(start_ns, ktime_get_ns());
+}
+
+/*
  * Device Mapper invokes this on the target clone immediately before it
  * translates the clone status to the original submitting BIO.  The worker's
  * completion counter alone proves only what swapz_complete() attempted:
@@ -1305,6 +1348,7 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	u64 lower_end, lower_elapsed, commit_elapsed, finalize_end;
 	swapz_u8 committed = 0, index;
 	int lower_error, error;
+	bool defer;
 
 	if (!inflight)
 		return 0;
@@ -1313,6 +1357,8 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	if (!completion_done(&inflight->lower_done)) {
 		if (!wait)
 			return 0;
+		/* Never hold acknowledged writers across a lower-device wait. */
+		swapz_deliver_upper_completions(ctx);
 		ctx->pipeline_finalize_waits++;
 		{
 			u64 wait_start_ns = ktime_get_ns();
@@ -1404,13 +1450,24 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		inflight->count = 0;
 		return error;
 	}
+	/*
+	 * Defer acknowledgements only when staged or queued work could reach
+	 * the idle lane first; with neither (QD1) wake the writers now. The
+	 * unlocked FIFO peek is a hint: either answer is correct.
+	 */
+	defer = ctx->defer_upper_completions &&
+		(ctx->batch_count || !list_empty(&ctx->incoming));
 	for (index = 0; index < inflight->count; ++index) {
 		ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 		if (inflight->raw[index])
 			ctx->raw_pages++;
 		else
 			ctx->compressed_pages++;
-		swapz_complete(inflight->bios[index], 0);
+		if (defer)
+			swapz_defer_upper_completion(ctx,
+						     inflight->bios[index]);
+		else
+			swapz_complete(inflight->bios[index], 0);
 	}
 	ctx->pipeline_completed_runs++;
 	inflight->count = 0;
@@ -4566,7 +4623,8 @@ static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	bool inflight_active = swapz_has_inflight(ctx);
-	bool blocked = !ctx->retain_ms || !ctx->batch_count ||
+	bool blocked = !ctx->retain_ms ||
+		(!ctx->batch_count && !inflight_active) ||
 		!READ_ONCE(ctx->accepting) || ctx->failed ||
 		ctx->authority.in_flight || ctx->authority.batch_replaying ||
 		(ctx->authority.batch_pending && !inflight_active) ||
@@ -4578,9 +4636,14 @@ static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 	 * A K=1 lower run has reserved unpublished generations, but its committed
 	 * predecessor mappings remain authoritative until ordered completion.
 	 * Unrelated reads may therefore use those committed mappings while the
-	 * lower WRITE is active. Same-page reads and collector conflicts still
-	 * fence and force ordered finalization.
+	 * lower WRITE is active, including after its window was dispatched and
+	 * before the next one opens: draining there would sleep the only ordered
+	 * worker for a whole lower WRITE while cache hits and stragglers queue.
+	 * Same-page reads and collector conflicts still fence and force ordered
+	 * finalization.
 	 */
+	if (!ctx->batch_count)
+		return !blocked;
 	return swapz_window_read_independent(ctx->batch, ctx->batch_count,
 					 logical, ctx->retain_ms, blocked);
 }
@@ -5409,7 +5472,7 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			 * within an existing chain. Lower READ attribution and
 			 * deadline adjustment still require real lower READ I/O.
 			 */
-			if (had_lower_io) {
+			if (had_lower_io && ctx->batch_count) {
 				swapz_note_single_tail_read_bypass(ctx);
 				if (ctx->retained_window_read_bypasses < SWAPZ_MAX_RECORDS)
 					ctx->retained_window_read_bypasses++;
@@ -5429,7 +5492,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		 * completion. A slow read may cross the pinned deadline, but
 		 * already-accepted follow-up work is finite and must not be
 		 * fragmented merely because the ordered worker serviced that read. */
-		if (!error && !ctx->worker_has_immediate_followup &&
+		if (!error && ctx->batch_count &&
+		    !ctx->worker_has_immediate_followup &&
 		    swapz_retention_expired(ctx)) {
 			ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 			ctx->deadline_after_read++;
@@ -5583,10 +5647,8 @@ static enum hrtimer_restart swapz_retention_wake(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-static void swapz_worker(struct work_struct *work)
+static void swapz_worker_pass(struct swapz_dm *ctx)
 {
-	struct swapz_dm *ctx =
-		container_of(to_delayed_work(work), struct swapz_dm, worker);
 	LIST_HEAD(local);
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
@@ -5894,6 +5956,15 @@ static void swapz_worker(struct work_struct *work)
 				}
 			}
 			ctx->worker_has_immediate_followup = false;
+			/*
+			 * Hold a finalized run's acknowledgements only while
+			 * already-accepted local work may still complete the next
+			 * window on an idle K=1 lane; once that window is in flight,
+			 * or nothing is staged, wake its writers.
+			 */
+			if (list_empty(&local) || !ctx->batch_count ||
+			    swapz_has_inflight(ctx))
+				swapz_deliver_upper_completions(ctx);
 			if (!(remaining & 7U))
 				cond_resched();
 			remaining -= processed_bios;
@@ -6142,6 +6213,22 @@ static void swapz_worker(struct work_struct *work)
 		 */
 		cond_resched();
 	}
+}
+
+/*
+ * The ordered workqueue never runs this work concurrently with itself, so the
+ * deferred acknowledgement list is owned by exactly one invocation and is
+ * always empty when it returns, including on shutdown/drain passes.
+ */
+static void swapz_worker(struct work_struct *work)
+{
+	struct swapz_dm *ctx =
+		container_of(to_delayed_work(work), struct swapz_dm, worker);
+
+	ctx->defer_upper_completions = true;
+	swapz_worker_pass(ctx);
+	ctx->defer_upper_completions = false;
+	swapz_deliver_upper_completions(ctx);
 }
 
 static int swapz_map(struct dm_target *ti, struct bio *bio)
@@ -6528,6 +6615,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
+	bio_list_init(&ctx->deferred_upper_completions);
 	atomic64_set(&ctx->preparation_free_mask,
 		     (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic64_set(&ctx->accepted_work_lower_idle_wake_ns, 0);
@@ -7473,7 +7561,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "accepted_work_lower_idle_post_lower_ns=%llu "
 		       "lower_write_service_ewma_ns=%llu idle_bound_closes=%llu "
 		       "lower_write_block_service_ewma_ns=%llu "
-		       "ordered_lz4_page_ewma_ns=%llu",
+		       "ordered_lz4_page_ewma_ns=%llu "
+		       "deferred_upper_completion_bios=%llu "
+		       "deferred_upper_completion_wall_ns=%llu",
 		       SWAPZ_WORK_CONSERVING_HAND_RECORDS,
 		       ctx->work_conserving_hand_closes,
 		       ctx->work_conserving_dry_closes,
@@ -7496,7 +7586,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_write_service_ewma_ns,
 		       ctx->idle_bound_closes,
 		       ctx->lower_write_block_service_ewma_ns,
-		       ctx->ordered_lz4_page_ewma_ns);
+		       ctx->ordered_lz4_page_ewma_ns,
+		       ctx->deferred_upper_completion_bios,
+		       ctx->deferred_upper_completion_wall_ns);
 		/* These independent single-writer values are diagnostic while busy;
 		 * qualification snapshots only at drained measurement boundaries. */
 		DMEMIT(" delta64_rescue=%u delta64_eligible=%llu "
