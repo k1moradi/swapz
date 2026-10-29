@@ -510,32 +510,29 @@ blocked.
 
 ### zswap collaboration qualification
 
-zswap-aware policy is a future actual-swap gate and is not authorized by the
-current RAM-backed `null_blk` qualification scope. Do not add `swapon` or
-`swapoff` to `make test` until the owner separately authorizes real kernel
-swap semantics.
+See [context.md](context.md) for Linux swap and zswap code paths and the staged
+[ROADMAP.md](ROADMAP.md) for planned origin and RAW-bypass experiments.
+This is a **future actual-swap gate**, not authorization for `swapon` or
+`swapoff` in today's owned-RAM `null_blk` qualification scope.
 
-Before any zswap-origin policy can promote, direct/source tests must prove that
-the origin signal is explicit and preserved end-to-end rather than inferred
-from `REQ_SWAP`, PID/current task or incidental folio flags. Loaded
-qualification, once separately authorized, must force and distinguish:
+Before origin-aware code can promote, source/native fixtures must prove
+explicit origin propagation across simulated BIO split/clone, correct
+unknown-origin fallback, producer-claim/snapshot/RAW atomicity, exact
+one-owner completion, and no compressed result republished after RAW selection.
+Tagged bypass must perform zero ordinary LZ4/delta64 attempts and produce
+byte-exact readback through the existing CRC/generation and GC mapping rules.
+Include duplicate-page ordering, overwrite, DISCARD, PREFLUSH/FUA,
+suspend/drain, fault/uncertain lower completion, and preparation-slot cleanup.
 
-- a page accepted and retained by zswap with no immediate backing WRITE;
-- an initial zswap rejection that proceeds to backing swap I/O;
-- a previously compressed zswap entry evicted through zswap writeback;
-- byte-exact swap-in/readback after the zswap-writeback page was stored RAW by
-  swapz;
-- ordering, DISCARD/free-slot reuse, fault, suspend/drain and GC interactions
-  without a second completion owner.
-
-For the first explicit-origin candidate, report tagged zswap-writeback count,
-swapz compression attempts on tagged writes (required zero), RAW tagged pages,
-useful throughput/p99, CPU time and independent lower WRITE bytes/requests
-against the same zswap-enabled control that recompresses normally. A service
-gain with materially higher lower traffic is a tradeoff, not an automatic
-product win. Same-folio packing remains telemetry-only until swap-in locality
-evidence shows predictive value.
-
+After separate owner authorization for actual kernel swap, loaded tests must
+force and distinguish: zswap accepted with no backing write, initial zswap
+rejection with backing write, and later stored-then-evicted zswap writeback.
+Record tagged-origin counts, attempts skipped, useful throughput/p95/p99,
+CPU/RAM and independently measured lower READ/WRITE bytes/requests against
+matched zswap-enabled control runs; include swap-in and GC effects.
+A CPU/throughput win with materially greater lower-device traffic is a
+tradeoff, not automatic qualification. Locality-aware layout remains
+telemetry-only until measured swap-in correlation justifies the tie-break.
 
 Source contracts should assert retained scheduling semantics rather than a
 particular obsolete branch spelling: retained writes must reach the ordered

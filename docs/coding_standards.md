@@ -73,36 +73,24 @@ Never reboot, `swapon`, `swapoff`, mount test storage, force-remove mappings or 
 
 ## MM, folio and zswap semantic boundary
 
-Read [memory-swap-context.md](memory-swap-context.md) before changing policy
-based on RAM identity, swap locality, folios or zswap. swapz's correctness
-identity remains the independently reconstructible 4KiB logical page. A folio,
-VMA, PID or temporal reclaim burst is not an application-object boundary.
+Read [context.md](context.md) for the kernel reclaim/BIO/zswap semantics and
+[ROADMAP.md](ROADMAP.md) for the staged collaboration blueprint. Keep the
+independently reconstructible 4KiB logical page as swapz's authority unit:
+a folio, process, VMA or allocator object is not an SWZ record/extent identity.
 
-Same-folio membership and adjacent logical swap pages may become packing hints
-only for work already accepted by swapz. They may break ties only after the
-existing lower-byte, bounded cold-read and extent-count objectives; they must
-never delay dispatch, wait for a future page, increase physical blocks merely
-to preserve a group, or change publication/completion ownership.
+Packing locality may only break ties among **already accepted**, authority-
+safe layouts with equal lower-byte, bounded cold-read and extent-count cost.
+Never wait for future work or weaken work-conserving dispatch for locality.
 
-`REQ_SWAP` identifies swap I/O but does not identify zswap origin. Current
-upstream zswap writeback decompresses its stored entry into a swap-cache folio
-before issuing ordinary backing swap I/O. Do not make production policy depend
-on incidental folio flags such as drop-behind to infer zswap origin. A zswap-
-aware representation policy requires an explicit end-to-end origin contract
-that survives the block/Device Mapper path.
-
-The first explicit zswap-writeback candidate must reuse the existing RAW
-representation: after the stable 4KiB snapshot is owned, skip ordinary
-LZ4/delta64 preparation for that tagged generation and dispatch through the
-same authority, CRC/generation, ordering and completion rules. This introduces
-no new SWZ type. Treat CPU/latency versus lower-byte/request cost as measured
-product evidence, not an assumed win.
-
-Passing zswap's compressed bytes directly is a separate later experiment. It
-requires explicit compressor/encoding identity, integrity, bounded ownership
-and compatible read-side decoding; arbitrary zswap storage must never be
-relabelled as ordinary SWZ LZ4.
-
+A zswap-origin compression bypass must depend on an explicit end-to-end
+semantic handoff surviving BIO cloning/splitting; `REQ_SWAP`,
+`folio_set_dropbehind` and `current` are insufficient. Tagged writeback
+must use a stable RAW snapshot, terminal atomic representation ownership,
+the existing CRC/generation authority and exact upper completion after
+confirmed lower I/O. Skip pointless LZ4/delta64 and producer claims without
+creating worker/BIO lifetime races; unknown-origin traffic retains normal
+behavior. Directly accepting zswap-compressed payload requires a separate
+codec/representation/read-side and ownership contract.
 
 ### Deferred content-sharing and concurrency experiments
 

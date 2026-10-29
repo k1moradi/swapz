@@ -4,7 +4,7 @@
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
 
-This file contains only active work. Completed experiments and detailed historical transcripts belong in Git history.
+This file is the project's **rolling engineering blueprint**: active priorities, proposals, decisions and acceptance gates. Linux MM/swap/zswap semantics and implementation context live in [context.md](context.md). Completed experimental transcripts belong in Git history.
 
 ## Current baseline
 
@@ -246,54 +246,181 @@ recovery, GC movement and random swap-in cost. It requires separate evidence
 before any on-disk-format change.
 
 
-## zswap collaboration and MM-locality roadmap
+## MM-aware storage blueprint: zswap collaboration and locality
 
-The Linux swap/MM boundary and the information actually visible to Device
-Mapper are documented in [memory-swap-context.md](memory-swap-context.md).
-Keep this work separate from application-object claims: swapz can observe
-logical swap pages and page/folio backing while the BIO is owned, but it does
-not receive malloc/C++ object identity, VMA ownership or reclaim-generation
-semantics.
+**Direction.** Preserve swapz's independently decodable 4KiB logical records
+and 4/8/16KiB SWZ physical extents while avoiding wasteful compression work
+when the Linux swap path already compressed a page. Combine that with
+no-wait locality-aware placement only when it does not sacrifice bytes,
+bounded cold-read cost, extent count or lower-device service. The technical
+explanation of Linux reclaim, folios, BIOs and the zswap writeback implementation
+lives in [context.md](context.md), not in this rolling blueprint.
 
-Current upstream zswap has two materially different backing paths. An initial
-`zswap_store()` rejection may fall through to normal swap I/O. A page that was
-successfully stored compressed in zswap can later be evicted by
-`zswap_writeback_entry()`; that path reconstructs a swap-cache folio by
-decompressing the zswap entry and only then resumes ordinary backing I/O.
-Consequently current swapz sees decompressed page bytes and `REQ_SWAP`, not the
-zswap compressed payload or a stable zswap-origin marker.
+**Scope and priority.** This is planned cross-subsystem work, **not an enabled
+feature or evidence of a current performance win**. Keep the current near-term
+work-conserving four-record service effort and owner qualification ahead of
+this integration. Current host safety still forbids `swapon`/`swapoff`;
+none of the following authorizes actual kernel swap tests, physical devices,
+new public test commands or an SWZ format change. Move the actual-swap portion
+only after explicit owner authorization and the relevant safety design.
 
-The collaboration plan is:
+### Goal, measurable hypothesis and non-goals
 
-1. Add passive MM/swap telemetry only after actual-kernel-swap qualification is
-   separately authorized. Distinguish ordinary backing writes, initial zswap
-   rejection and later zswap writeback; do not infer a product policy from
-   `REQ_SWAP`, PID/current task or the current drop-behind implementation
-   detail.
-2. Prototype an explicit upstream origin contract from zswap writeback through
-   swap I/O and Device Mapper. The origin bit must describe semantics, survive
-   BIO cloning/splitting and require no lookup back into zswap after ownership
-   has moved.
-3. For an explicitly tagged zswap writeback, make the first swapz candidate
-   bypass ordinary LZ4/delta64 and use the existing stable 4KiB RAW path. This
-   avoids decompress-in-zswap then recompress-in-swapz CPU work without changing
-   SWZ, mapping authority, ordering or completion ownership. Measure the saved
-   CPU/service time against the extra lower bytes/requests on fast, SATA/NVMe
-   and serial-depth models before promotion.
-4. Keep direct reuse of zswap's compressed payload as a separate later
-   experiment. It is allowed only with explicit compressor/encoding identity,
-   payload lifetime, integrity and compatible read-side decoding; zswap bytes
-   are not implicitly SWZ LZ4.
-5. Collect same-folio and adjacent-logical-page swap-in locality before changing
-   packing. If positive, locality may break ties between byte/read/extent-cost
-   equivalent layouts only; it may never wait for future pages or increase
-   physical blocks merely to keep a group together.
+The specific zswap case is **stored-then-evicted writeback**: zswap may
+compress a page into RAM, later decompress it into a normal swap-cache folio,
+and pass that page to the backing device. Today swapz can recompress those
+bytes. An explicit origin hint could allow the swapz dispatcher to bypass its
+own compression, reduce accepted-work lower-idle time and save CPU/wakeups,
+possibly at the cost of more lower WRITE blocks and future cold-read traffic.
 
-Current swapz limits upper swap BIOs to one 4KiB logical page. Linux can group
-compatible swap folios above Device Mapper, so a future evidence-only experiment
-should also quantify how much useful grouping is lost at that split before
-considering larger upper-BIO admission. Retain independently decodable 4KiB SWZ
-records unless separate format evidence justifies otherwise.
+The first experiment asks whether the saved compression and scheduling time
+outweighs the extra physical service time **on each target device class**.
+Do not assume that the answer is identical for fast NVMe, SATA and SD/slow
+backing. Do not infer origin from `REQ_SWAP`, a PID/current task, folio
+drop-behind, a zswap presence check, or a failed `zswap_store()`.
+Object-aware extents, direct interpretation of zswap bytes as SWZ LZ4,
+additional producer lanes/buffers and an SWZ format extension are not part
+of the initial feature.
+
+### Phase A — establish an explicit and testable origin contract
+
+1. Reinspect the target Linux version's `mm/page_io.c`,
+   `mm/zswap.c` and Device Mapper BIO cloning/splitting path; record exact
+   origin propagation sites and lifetime requirements. Upstream reference
+   anchors are in [context.md](context.md).
+2. Define a narrowly scoped semantic origin, at minimum
+   `ORDINARY_OR_UNKNOWN` versus `ZSWAP_STORED_WRITEBACK`. Distinguish
+   `ZSWAP_INITIAL_REJECT` only if the kernel explicitly supplies it;
+   rejection alone does not imply incompressibility.
+3. Carry the origin from `zswap_writeback_entry()` through
+   `swap_io_ctx` / backing-BIO creation to the swapz per-BIO descriptor.
+   Choose a reviewed explicit kernel/BIO interface; a hypothetical
+   `REQ_ZSWAP_WRITEBACK` is **not** currently a real flag or committed ABI.
+   Preserve origin during BIO split/clone, and prevent mixed-origin folios
+   from being mislabeled by a single whole-BIO tag.
+4. Preserve unknown/non-zswap traffic exactly as today. Kernel builds
+   without the new origin interface must compile with unchanged behavior,
+   without guessing from a shared flag. Document any kernel-version guard
+   only where required by the actual implementation.
+
+**A exit gate:** source/native contract fixtures can manufacture ordinary,
+reject/unknown and verified zswap-writeback origins and prove correct routing
+through a split/clone-equivalent path; ambiguous origin never triggers
+compression bypass. No change to authority or on-media format.
+
+### Phase B — first no-recompression representation candidate
+
+1. On a correctly tagged write, skip **both** ordinary LZ4 and delta64
+   work, including unnecessary producer-queue claims and compressed-result
+   allocation. The existing `struct swapz_bio_ref` has
+   `preparation_force_raw`, and `swapz_accept_write()` has a forced-RAW
+   route, but these are presently scheduling-specific: setting that bit
+   in `swapz_map()` alone is **not** a complete implementation.
+2. Coordinate admission, the bounded preparation queue and any already
+   claimed producer slot so the descriptor gets a **stable 4KiB RAW
+   snapshot** and one terminal representation selection before it can be
+   sealed. A producer must not read a BIO after upper completion; an
+   asynchronous result must not overwrite a selected RAW representation.
+   Avoid waiting for a worker that was intentionally bypassed.
+3. Use existing RAW placement, mapping/generation/CRC and serialized
+   authority publication after definitive lower-I/O completion. Preserve
+   one upper-BIO completion, zero-page exactness, fences, duplicate-page
+   ordering, DISCARD, GC, suspend, teardown, failure and rollback rules.
+   Unsupported/unavailable RAW batching must safely fall back to existing
+   semantics instead of silently dropping or reinterpreting the write.
+4. Maintain the work-conserving dispatcher: dispatch the best available
+   representation from already accepted writes at the current service hand.
+   Do not delay lower service for better compression, future folio partners
+   or a fuller window.
+
+**B exit gate:** exact byte readback, full authority/lifecycle/native
+regressions, no leaked prepared slots and zero swapz LZ4/delta64 attempts on
+**tagged RAW-bypass** writes. Unknown/ordinary writes retain current
+compression behavior; independently measured lower bytes/requests remain
+visible rather than hidden behind a throughput claim.
+
+### Phase C — evidence and storage-adaptive selection
+
+Compare **matched zswap-enabled** workloads with the explicit-origin hint
+disabled versus enabled, including genuine stored-then-evicted zswap pages,
+ordinary backing writes and initial zswap rejections. Keep useful work,
+compressibility, device/queue depth, zswap compressor/pool and fault behavior
+equivalent. Record at least:
+
+- zswap accepted/rejected/evicted backing pages and reliable tagged counts;
+- swapz tagged pages selecting RAW and attempted compression (must be zero);
+- zswap decompression time and swapz compression CPU/wall saved, prep-slot
+  occupancy, accepted-work lower-idle time and lower active fraction;
+- useful WRITE and READ throughput, p95/p99 latency, CPU/RAM footprint;
+- independently measured lower READ/WRITE bytes and requests, plus GC,
+  overwrite, DISCARD and subsequent swap-in/read amplification.
+
+Use the existing representative fast, SATA/NVMe, slow/SD, and QD1/QD4/QD8/QD32
+evaluation dimensions where available. A faster write with materially more
+lower traffic is a **device-dependent tradeoff**, not proof of product success.
+A slow device may prefer recompression; fast storage may favor immediate RAW.
+Only introduce a device-sensitive choice if measurements exclude a simpler,
+work-conserving default, and retain bounded/atomic representation ownership.
+
+**C exit gate:** benefit repeats in the chosen target class without
+unacceptable read latency, lower traffic, memory pressure, GC wear/space or
+error/lifecycle regressions; document the keep/reject verdict in this roadmap
+and qualify only through the authorized supported test scope.
+
+### Phase D — investigate direct compressed zswap handoff (separate design)
+
+The ideal later pipeline could hand off the **already compressed** zswap
+payload, avoiding both zswap decompression and swapz recompression. This is
+*not* the same feature as Phase B RAW bypass. Before any implementation,
+specify compressor/encoding compatibility (zswap need not use SWZ LZ4),
+bounded payload size, integrity/CRC, ownership and release handshake,
+crash/recovery/format semantics, read-side decoding and GC relocation.
+Do not reinterpret opaque zswap payload bytes as ordinary SWZ records.
+A new SWZ representation/format requires its own independent justification,
+compatibility rules and measured admission gate. If interoperability is not
+worth the complexity, retain the Phase B/C outcome.
+
+### Phase E — folio and swap-in locality (independent, no-wait study)
+
+1. Observe, within live upper BIO ownership, ordinary versus large folios,
+   candidate folio index/size, adjacent logical swap pages, and useful
+   grouping lost when the DM upper-BIO limit splits larger submissions.
+   Folio pointers are ephemeral: no unprotected pointer retained across
+   completion, reuse or unrelated writes. On reconstructed zswap-writeback
+   folios, current folio identity need not reflect the original RAM folio.
+2. Determine whether the same-folio pages or nearby logical offsets actually
+   swap back in close together. Measure real read-request reduction and
+   cold-read amplification, not just same-burst swap-out arrival.
+3. Only if evidence supports it, test an **already-accepted-window**
+   tie-break: retain the existing byte-minimal, bounded cold-read and
+   extent-count objectives first; prefer nearby indexes in the same folio,
+   then adjacent logical swap pages, then stable ordering **only among
+   equivalent safe layouts**. Never wait for future arrivals, add a block,
+   reorder across a same-page generation or ordering fence, or delay an
+   otherwise dispatchable lower run.
+4. Treat larger upstream BIO admission/group identity as a distinct
+   ownership/completion experiment. It must maintain exact per-page
+   authority and never conflate an upstream folio with one SWZ extent.
+
+**E exit gate:** positive measured swap-in locality/read behavior with
+unchanged WRITE dispatch responsiveness, physical block/request budget and
+correctness. Otherwise leave folio and adjacency signals as passive telemetry.
+
+### Qualification and integration constraints
+
+Native contracts and safe owned-RAM `null_blk` fixtures can exercise the
+origin/RAW state machine without activating swap. Real zswap writeback,
+swap-in, memory-cgroup interactions and accurate origin ratios require
+separately authorized actual-swap qualification. Keep the single official
+`make test` interface and the limited `make fast_test` development loop;
+do not silently expand their privilege or device scope. The governing
+regressions and loaded-safety gates are in
+[testing_standards.md](testing_standards.md).
+
+This blueprint stays **future work** until a measured, qualified source
+revision proves otherwise. It does not override the immediate scheduler
+queue or change the work-conserving four-record dispatch priority.
+
 
 ## Deferred content/concurrency evidence backlog
 
