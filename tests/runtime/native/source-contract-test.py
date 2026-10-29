@@ -2528,6 +2528,20 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->sync4_windows++", dm)
         self.assertIn("sync4_reissue_gap_ns", dm)
 
+    def test_id114_measurement_epoch_breaks_warmup_sync4_link_only(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        dm = (ROOT / "src/kernel/dm-target.c").read_text()
+        message = body("swapz_message")
+        self.assertIn('strcmp(argv[0], "profile_epoch")', message)
+        self.assertIn("WRITE_ONCE(ctx->sync4_last_done_ns, 0)", message)
+        self.assertNotIn("sync4_windows =", message)
+        self.assertIn(".message = swapz_message", dm)
+        self.assertIn("def kernel_write_profile_epoch", replay)
+        self.assertGreaterEqual(
+            replay.count("kernel_write_profile_epoch(path, identity)"), 3)
+        self.assertIn('"dmsetup", "message", str(path), "0", "profile_epoch"', replay)
+        self.assertIn("profile_epoch=1", replay)
+
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
         deadline = body("swapz_first_record_deadline_ns")
         effective = body("swapz_retention_deadline_ns")

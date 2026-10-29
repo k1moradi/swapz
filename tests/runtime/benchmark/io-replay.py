@@ -893,6 +893,7 @@ def run_native_replay(fd, fixture_fd, trace, manifest, path, identity):
                     (stderr or ready or "no READY marker"))
             sampler.start()
             sampler_active = True
+            kernel_write_profile_epoch(path, identity)
             before = lower_stat(identity.get("owned_disk"))
             kernel_write_before = kernel_write_snapshot(path, identity)
             kernel_read_before = kernel_read_snapshot(path, identity)
@@ -1243,6 +1244,19 @@ KERNEL_WRITE_GAUGE_FIELDS = (
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
+
+
+def kernel_write_profile_epoch(path, identity):
+    """Break passive sync4 predecessor linkage at a measurement boundary."""
+    if not identity.get("dm_uuid"):
+        return
+    reset = subprocess.run(
+        ["dmsetup", "message", str(path), "0", "profile_epoch"],
+        text=True, capture_output=True, check=False, timeout=8)
+    if reset.returncode:
+        raise ValueError("owned swapz profiling epoch reset failed")
+    if "profile_epoch=1" not in reset.stdout:
+        raise ValueError("owned swapz profiling epoch reset not acknowledged")
 
 
 def kernel_write_snapshot(path, identity):
@@ -1823,6 +1837,7 @@ def replay(args):
                                         "persistent write workers failed before measurement"
                                     ) from exc
                                 lower_inflight_sampler.start()
+                                kernel_write_profile_epoch(path, identity)
                                 before = lower_stat(identity.get("owned_disk"))
                                 kernel_write_before = kernel_write_snapshot(path, identity)
                                 kernel_read_before = kernel_read_snapshot(path, identity)
@@ -1841,6 +1856,7 @@ def replay(args):
                                 for wave in replay_waves:
                                     if wave[0]["phase"] == "measure" and measured_start_ns is None:
                                         lower_inflight_sampler.start()
+                                        kernel_write_profile_epoch(path, identity)
                                         before = lower_stat(identity.get("owned_disk"))
                                         kernel_write_before = kernel_write_snapshot(path, identity)
                                         kernel_read_before = kernel_read_snapshot(path, identity)

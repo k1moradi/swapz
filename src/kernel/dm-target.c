@@ -3424,12 +3424,12 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			error = 0; /* existing loop/GC path retries unchanged */
 	}
 	if (async_submitted || count != 4U || committed)
-		ctx->sync4_last_done_ns = 0;
+		WRITE_ONCE(ctx->sync4_last_done_ns, 0);
 	while (!async_submitted && committed < count) {
 		swapz_u8 succeeded = 0;
 		bool sync4_candidate = count == 4U && committed == 0U;
 		u64 sync4_previous_done_ns =
-			sync4_candidate ? ctx->sync4_last_done_ns : 0;
+			sync4_candidate ? READ_ONCE(ctx->sync4_last_done_ns) : 0;
 
 		u64 lower_write_before = ctx->lower_write_wall_ns;
 		u64 plan_before = ctx->engine.plan_wall_ns;
@@ -3476,9 +3476,9 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 						swapz_elapsed_ns(sync4_previous_done_ns,
 								 section_start);
 				}
-				ctx->sync4_last_done_ns = done_ns;
+				WRITE_ONCE(ctx->sync4_last_done_ns, done_ns);
 			} else {
-				ctx->sync4_last_done_ns = 0;
+				WRITE_ONCE(ctx->sync4_last_done_ns, 0);
 			}
 		}
 		committed += succeeded;
@@ -7741,6 +7741,25 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 	}
 }
 
+static int swapz_message(struct dm_target *ti, unsigned int argc, char **argv,
+			 char *result, unsigned int maxlen)
+{
+	struct swapz_dm *ctx = ti->private;
+
+	/*
+	 * Measurement-only epoch boundary. This changes no scheduling, mapping,
+	 * representation or cumulative counter. It only prevents a completed
+	 * warmup sync4 window from becoming the predecessor of the first timed
+	 * sync4 sample. A concurrent caller can at worst suppress one passive
+	 * reissue sample; correctness state is untouched.
+	 */
+	if (argc != 1U || strcmp(argv[0], "profile_epoch"))
+		return -EINVAL;
+	WRITE_ONCE(ctx->sync4_last_done_ns, 0);
+	DMEMIT("profile_epoch=1");
+	return 0;
+}
+
 static struct target_type swapz_target = {
 	.name = "swapz",
 	.version = {3, 0, 0},
@@ -7760,6 +7779,7 @@ static struct target_type swapz_target = {
 	.iterate_devices = swapz_iterate_devices,
 	.io_hints = swapz_io_hints,
 	.status = swapz_status,
+	.message = swapz_message,
 };
 
 static int __init swapz_dm_init(void)

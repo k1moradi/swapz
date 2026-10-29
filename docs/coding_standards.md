@@ -162,7 +162,10 @@ allocation, alternate representations or scheduling branches. WRITE admission
 timestamps live only in the per-BIO descriptor. Synchronous four-record cycle
 telemetry may observe successful K=1 commits and the gap to the next successful
 four-record start; it must never hold a BIO or keep the lane busy to obtain a
-sample. Production policy cannot change from this profiling commit alone.
+sample. The internal `profile_epoch` message may clear only the passive
+sync4 predecessor timestamp at a quiescent benchmark boundary; it must not reset
+mapping/ordering state, cumulative product counters or alter service.
+Production policy cannot change from this profiling commit alone.
 
 Any future K>1 experiment is a new architecture change, not a dormant knob. It
 must restore disjoint immutable run ownership, same-page generation/order

@@ -417,7 +417,11 @@ to first ordered-worker ownership; accepted-idle
 `accepted_work_lower_idle_worker_unscheduled_ns` remains the narrower
 wake-to-worker scheduling attribution. Ordered-worker CPU comes from scheduler
 runtime and must be reported separately from lower-I/O waits and off-CPU wall
-time.
+time. After warmup and before the timed status snapshot, the replay harness sends
+the internal `profile_epoch` DM message. That message clears only the passive
+previous-sync4 timestamp, so the first timed reissue sample cannot bridge the
+warmup/status-snapshot boundary; it must not reset cumulative counters or any
+correctness/scheduling state.
 
 Development decisions retain absolute raw/swapz useful throughput, READ/WRITE
 p99 and independent lower WRITE bytes/requests alongside the compact phase
