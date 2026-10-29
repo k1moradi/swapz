@@ -218,10 +218,11 @@ the ID39 helper-workqueue removal. Current independent lower-READ fan-out does
 not restore a read worker: the ordered worker submits and joins private lower
 ranges and retains decode/publication/completion ownership. Direct boundary
 samples can materially miss short callbacks that return before
-the scheduler updates the current entity, so treat them only as a lower-bound
-diagnostic. The report also carries separate ordered/preparation LZ4 and copy
-timers and derives measured non-sleeping phase floors from LZ4/CRC/copy plus
-ordered commit-non-I/O work. Those floors still do not equal total worker CPU;
+the scheduler updates the current entity. An update inside a callback can
+also charge execution from before entry, so these diagnostics are not guaranteed
+CPU bounds. The report carries separate ordered/preparation LZ4 and copy timers
+and sums partial phase wall time from LZ4/CRC/copy plus ordered commit-non-I/O
+work. Those phases can include preemption and do not establish total worker CPU;
 use external scheduler accounting before worker-count/affinity decisions. RAM-backed 4MiB read tests are not cold physical swap-in.
 
 Window-size bins, close reasons, one-page close reasons, deadline contexts,

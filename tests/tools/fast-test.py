@@ -314,7 +314,7 @@ def print_profile(rows):
         groups.setdefault(row["scenario"].split("#")[0], []).append(row)
 
     print("\nK=1 critical-path profile (SCREENED repeats only)")
-    header = (f"{'scenario':<12} {'n':>3} {'admit us':>9} {'worker cpu':>10} "
+    header = (f"{'scenario':<12} {'n':>3} {'admit us':>9} {'sched diag':>10} "
               f"{'idle sched':>10} {'prep/copy':>10} {'ord/plan':>9} "
               f"{'pack/crc':>9} {'lower':>9} {'publish':>9} {'post':>8}")
     print(header)
@@ -339,8 +339,10 @@ def print_profile(rows):
               f"{mean('publish_ms'):9.2f} {mean('post_lower_ms'):8.2f}")
     print("  admit us = accepted WRITE -> first ordered-worker ownership; "
           "idle sched = accepted lower-idle after a wake until worker entry.")
-    print("  worker CPU is scheduler-accounted on-CPU time. Other wall rows can overlap; "
-          "latest.json retains every raw counter.")
+    print("  sched diag = scheduler-updated runtime deltas; pending execution may be "
+          "missed or earlier execution charged at callback boundaries.")
+    print("  Phase rows are partial wall time, can overlap and include preemption; "
+          "neither these rows nor sched diag establishes total worker CPU.")
 
     sync_groups = []
     for name, group in groups.items():

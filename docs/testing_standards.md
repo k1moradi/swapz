@@ -456,8 +456,8 @@ four-record `sync4_*` counters. For every interval,
 `sync4_reissue_samples <= sync4_windows`. Admission timing is accepted WRITE
 to first ordered-worker ownership; accepted-idle
 `accepted_work_lower_idle_worker_unscheduled_ns` remains the narrower
-wake-to-worker scheduling attribution. Ordered-worker CPU comes from scheduler
-runtime and must be reported separately from lower-I/O waits and off-CPU wall
+wake-to-worker scheduling attribution. Ordered-worker scheduler-update runtime samples are separate diagnostics;
+they do not establish an exact split among CPU, lower-I/O sleep and off-CPU wall
 time. After warmup and before the timed status snapshot, the replay harness sends
 the internal `profile_epoch` DM message. That message clears only the passive
 previous-sync4 timestamp, so the first timed reissue sample cannot bridge the
@@ -1694,9 +1694,10 @@ rather than rerunning the old optimization sequence.
   state or completion-aware carry into a later wave may reappear. Source tests
   assert absence; reopening requires a new ownership model, not another tuning
   constant.
-- **Worker CPU attribution stays bounded:** scheduler-accounted
-  `ordered_worker_cpu_ns` and `prep_worker_cpu_ns` are lower bounds, not total
-  CPU. The retired read-helper compatibility CPU field remains zero. Keep
+- **Worker CPU attribution stays diagnostic:** scheduler-updated
+  `ordered_worker_cpu_ns` and `prep_worker_cpu_ns` may omit pending execution
+  or charge earlier execution at callback boundaries. They are not guaranteed
+  CPU bounds or total CPU. The retired read-helper compatibility CPU field remains zero. Keep
   ordered/preparation LZ4 and explicit copy wall counters separate.
 
 Do not add another singleton timing policy merely because these counters remain

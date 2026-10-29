@@ -4777,9 +4777,9 @@ def benchmark_verdicts(sessions):
         "packed_read": "MEASURED_4MIB_QD32_NO_COLD_CACHE_PROOF",
         "gc": "SEPARATE_LOADED_EVIDENCE_REQUIRED",
         "cpu_scope":
-            "worker-boundary sum_exec_runtime is a scheduler-accounted lower "
-            "bound that can miss short current slices; separately reported "
-            "non-sleeping phase floors are the trusted in-callback evidence",
+            "worker-boundary sum_exec_runtime is a scheduler-accounted diagnostic "
+            "that may omit pending runtime or charge earlier execution at boundaries; "
+            "phase timers measure partial wall time including preemption, not CPU bounds",
         "physical_media": "NOT_TESTED",
         "host_load_scope": "WHOLE_HOST_INCLUDING_BENCHMARK_AND_BACKGROUND",
         "idle_host_control": "NOT_ESTABLISHED",
@@ -6489,18 +6489,18 @@ def print_bench(result, *, detailed=False):
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
                 ("ordered callback",
                  f"{asynchronous['mixed_ordered_worker_wall_ns'] / 1e6:.1f}",
-                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f} sched floor"),
-                ("ordered measured floor",
+                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f} sched sample"),
+                ("ordered phase wall",
                  f"{(asynchronous['mixed_ordered_lz4_wall_ns'] + asynchronous['mixed_ordered_crc_wall_ns'] + asynchronous['mixed_ordered_write_copy_wall_ns'] + asynchronous['mixed_window_commit_nonio_wall_ns']) / 1e6:.1f}",
-                 "non-sleeping phases"),
+                 "partial wall; may be preempted"),
                 ("prep callback",
                  f"{asynchronous['mixed_prep_worker_wall_ns'] / 1e6:.1f}",
-                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f} sched floor"),
-                ("prep measured floor",
+                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f} sched sample"),
+                ("prep phase wall",
                  f"{(asynchronous['mixed_prep_lz4_wall_ns'] + asynchronous['mixed_prep_crc_wall_ns'] + asynchronous['mixed_prep_write_copy_wall_ns']) / 1e6:.1f}",
-                 "non-sleeping phases"),
+                 "partial wall; may be preempted"),
                 ("read helper", "-",
-                 f"{asynchronous['mixed_read_worker_cpu_ns'] / 1e6:.1f} sched floor"),
+                 f"{asynchronous['mixed_read_worker_cpu_ns'] / 1e6:.1f} sched sample"),
                 ("scheduling", "-",
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
             ])
@@ -6987,7 +6987,7 @@ def print_bench(result, *, detailed=False):
             ("zero-tail shrink", "retired; compatibility fields stay fixed at zero"),
             ("write-only QD",
              "five pairs at fast QD4/8/32 and serial QD32; QD1 is directional"),
-            ("CPU", "scheduler time is a lower bound; phase floors are separate"),
+            ("CPU", "scheduler-update diagnostics and partial wall phases; no total CPU proof"),
             ("host load", "background apps included; idle-host control not established"),
             ("4MiB READ", "RAM-backed; not a cold physical swap-in"),
             ("GC", "RAM exercise only; physical wear is unproven"),

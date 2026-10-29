@@ -434,26 +434,23 @@ ordered/preparation worker boundaries, sample
 `READ_ONCE(current->se.sum_exec_runtime)` and accumulate nonnegative deltas in
 dedicated counters. The retired ID39 helper has no worker boundary;
 `read_worker_cpu_ns` is retained only as a zero-valued status compatibility
-field. These samples exclude lower-I/O sleep and runqueue wall delay, but a direct
-entry/exit sample can materially miss a short non-sleeping callback when the
-scheduler has not updated the current entity between samples. Therefore the
-counters are lower-bound diagnostics, not total or cycle-exact CPU time. Expose
-separate ordered/preparation LZ4 and copy timers; reports may sum
-LZ4+CRC+copy for the producer and LZ4+CRC+copy+commit-non-I/O for the ordered
-path as measured non-sleeping phase floors. Floors are not total CPU either.
+field. The direct entry/exit reads do not refresh scheduler accounting. They can miss
+pending execution or attribute execution from before the callback to its delta;
+they are incomplete diagnostics, not guaranteed bounds on callback CPU time.
+Keep separate ordered/preparation LZ4 and copy timers. Sums of LZ4/CRC/copy and
+ordered commit-non-I/O timers are partial wall-time attribution, including any
+involuntary preemption in those phases. They are not CPU floors or total CPU.
 Do not call an unexported scheduler helper merely to sharpen this measurement.
 
 ### Synchronous READ grouping and ID63 control
 
-The read-only `parallel_reads` and `read_coalesce` module parameters remain
-evidence controls, not runtime auto-tuning policy. `parallel_reads=1` enables
-the bounded grouping machinery; `read_coalesce=1` additionally permits exact
-ID63 adjacent missing-range coalescing. When hardware queue depth exceeds 1
-and observed backing latency is low ($< 120\text{ }\mu\text{s}$), read coalescing
-yields to concurrent multi-slot asynchronous fan-out to prevent head-of-line
-serialization on fast NVMe/SATA storage, while preserving exact adjacent
-coalescing on high-latency or depth-1 serial media. They do not enable helper
-concurrency.
+The read-only `read_coalesce` parameter controls exact ID63 adjacent
+compressed-range merging. Grouping and bounded asynchronous lower-READ fan-out
+are fixed-on infrastructure; there is no `parallel_reads` module parameter.
+Both control arms retain that fan-out, including independent RAW misses.
+Eligibility follows the current exact-range/cache/dependency checks, rather
+than an undocumented queue-depth or latency threshold. No helper workqueue is
+enabled by these controls.
 
 The rejected ID39 `swapz-read` workqueue, per-slot work/completion objects,
 queue/wait/flush dispatch and helper CPU accounting are not part of current
@@ -475,9 +472,9 @@ BIO completion, but shared LRU cache absorption must occur only after every
 successful upper BIO has been completed so cache memcpy is off the completion
 critical path.
 
-Fast and serial ID63 qualification keeps `parallel_reads=1` and varies only
-`read_coalesce` for five matched rounds. The off arm is the ordinary FIFO read
-path and must execute zero grouped/coalesced slot pairs. Dedicated ID39/ID60
+Fast and serial ID63 qualification varies only `read_coalesce` for five
+matched rounds. The off arm must report zero adjacent-coalesced pairs and saved
+requests; it may still execute independent grouped/fan-out READs. Dedicated ID39/ID60
 loaded controls are removed after owner qualification/refutation; do not retain
 dead benchmark sessions merely for historical telemetry.
 
@@ -930,7 +927,7 @@ unchanged.
 
 Do not expose scheduler-accounted per-callback CPU as a portable module
 metric. The rejected task-cputime experiment undercounted short nonblocking
-preparation callbacks on the qualification host. Exact hot-path attribution
+preparation callbacks on the qualification host. Partial hot-path wall attribution
 uses explicit monotonic phase timers around LZ4, CRC, copies, planning, packing
 and publication. Whole callback entry/exit timing may be reported only as wall
 residency and must be labeled as such: ordered residency includes synchronous
