@@ -381,6 +381,13 @@ struct swapz_dm {
 	u64 accepted_work_lower_idle_preparing_head_ns;
 	u64 accepted_work_lower_idle_no_ready_work_ns;
 	u64 accepted_work_lower_idle_post_lower_ns;
+	/* Ordered-worker-owned EWMA of successful lower-WRITE service time and
+	 * the windows closed by the derived device-relative idle bound. */
+	u64 lower_write_service_ewma_ns;
+	u64 idle_bound_closes;
+	/* Per-block lower-WRITE service and per-page ordered LZ4 EWMAs. */
+	u64 lower_write_block_service_ewma_ns;
+	u64 ordered_lz4_page_ewma_ns;
 	/* Diagnostic queue-depth samples at synchronous lower-WRITE boundaries. */
 	u64 prep_lower_write_samples;
 	u64 prep_lower_write_start_queued;
@@ -1331,6 +1338,13 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	}
 	ctx->lower_write_wall_ns += lower_elapsed;
 	if (!lower_error) {
+		ctx->lower_write_service_ewma_ns =
+			swapz_window_ewma_update(
+				ctx->lower_write_service_ewma_ns, lower_elapsed);
+		ctx->lower_write_block_service_ewma_ns =
+			swapz_window_ewma_update(
+				ctx->lower_write_block_service_ewma_ns,
+				div_u64(lower_elapsed, inflight->run.blocks));
 		ctx->physical_write_bytes +=
 			(u64)inflight->run.blocks * SWAPZ_BLOCK_BYTES;
 		ctx->physical_write_reqs++;
@@ -1517,6 +1531,13 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	/* Count SUCCESSFUL dm_io callbacks, not attempted or error-injected
 	 * requests. Each accepted lower write is in exactly one wait bin. */
 	if (op == REQ_OP_WRITE) {
+		ctx->lower_write_service_ewma_ns =
+			swapz_window_ewma_update(
+				ctx->lower_write_service_ewma_ns, elapsed_ns);
+		ctx->lower_write_block_service_ewma_ns =
+			swapz_window_ewma_update(
+				ctx->lower_write_block_service_ewma_ns,
+				div_u64(elapsed_ns, blocks));
 		if (elapsed_ns <= 1000000ULL)
 			ctx->write_wait_le_1ms++;
 		else if (elapsed_ns <= 4000000ULL)
@@ -3798,11 +3819,16 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			 * Earlier successful READ evidence is allowed only for this
 			 * continuing chain with a current queued WRITE follower;
 			 * staged-only residues retain the four-record floor. */
+			bool mixed_wave = !prefix_open || saw_independent_read ||
+				(queued_tail && ctx->retained_wave_read_seen);
+
 			ctx->retained_tail_target = scan_truncated ? 0 :
 				swapz_window_sampled_tail_target(
-					tail, queued_tail,
-					!prefix_open || saw_independent_read ||
-					(queued_tail && ctx->retained_wave_read_seen));
+					tail, queued_tail, mixed_wave);
+			if (swapz_window_pure_write_below_burst(
+				    mixed_wave, ctx->retained_tail_target,
+				    ctx->retained_burst_target))
+				ctx->retained_tail_target = 0;
 		}
 	} else {
 		ctx->retained_chain_completed = 0;
@@ -3838,6 +3864,18 @@ static void swapz_note_post_pack_read_boundary(struct swapz_dm *ctx)
 		ctx->retained_post_pack_read_boundary = true;
 }
 
+/* A staged pure-WRITE half burst waits for its released writers. */
+static bool swapz_pure_write_below_burst(const struct swapz_dm *ctx,
+					 bool post_pack_read_boundary)
+{
+	return !ctx->retained_tail_target &&
+		swapz_window_pure_write_below_burst(
+			ctx->retained_wave_read_seen || post_pack_read_boundary ||
+			ctx->retained_window_read_bypasses ||
+			ctx->retained_wave_interrupted,
+			ctx->batch_count, ctx->retained_burst_target);
+}
+
 static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 {
 	bool lower_idle = !swapz_has_inflight(ctx);
@@ -3852,6 +3890,8 @@ static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 	int read_bypasses = ctx->retained_window_read_bypasses ||
 		post_pack_read_boundary;
 
+	if (swapz_pure_write_below_burst(ctx, post_pack_read_boundary))
+		return false;
 	return swapz_window_service_close_ready(
 		valid_pack, lower_idle, ctx->batch_count, ctx->retained_tail_target,
 		ctx->retained_chain_completed, read_bypasses,
@@ -4043,6 +4083,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			ctx->work_conserving_raw_not_ready++;
 			ctx->work_conserving_window = true;
 		} else {
+			u64 lz4_before = ctx->lz4_wall_ns;
+
 			length = swapz_compress_page(
 				ctx, input,
 				ctx->batch_bytes +
@@ -4050,6 +4092,10 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				ctx->predictor_page, ctx->delta64_candidate_page,
 				ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding,
 				&ctx->ordered_delta64, &inline_zero);
+			ctx->ordered_lz4_page_ewma_ns =
+				swapz_window_ewma_update(
+					ctx->ordered_lz4_page_ewma_ns,
+					ctx->lz4_wall_ns - lz4_before);
 			if (length > 0 && !inline_zero) {
 				section_start = ktime_get_ns();
 				payload_crc32c = swapz_crc32c_bytes(
@@ -4514,6 +4560,7 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 }
 
 static bool swapz_retention_expired(struct swapz_dm *ctx);
+static u64 swapz_first_record_deadline_ns(struct swapz_dm *ctx);
 
 static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 {
@@ -5304,10 +5351,13 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 	/* Future arrivals never refresh the retention budget. Expiry bounds
 	 * idle waiting, not finite already-accepted work or synchronous service
 	 * of an independent read. Let accepted work reach the existing
-	 * pack/order gates before applying the remaining idle budget. */
+	 * pack/order gates before applying the remaining idle budget. A
+	 * device-relative idle bound that expired as this BIO arrived does not
+	 * split it from the window: the end-of-pass expiry still closes both. */
 	if (ctx->batch_count && ctx->retain_ms &&
 	    !ctx->worker_has_immediate_followup &&
-	    swapz_retention_expired(ctx)) {
+	    swapz_window_deadline_expired(swapz_first_record_deadline_ns(ctx),
+					  ktime_get_ns())) {
 		ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 		ctx->deadline_before_bio++;
 		error = swapz_flush_window(ctx);
@@ -5459,13 +5509,28 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
  * may finish ALL previously accepted BIOs without building a potentially
  * unbounded chain of requeued delayed works during drain_workqueue().
  */
-/* The ordinary first-record absolute deadline is the only retention timer
- * boundary. ID53's singleton cutoff and ID83's 500us suppressed-tail wake are
- * both rejected; finite mixed-wave targets are serviced without timer rearm. */
-static u64 swapz_retention_deadline_ns(struct swapz_dm *ctx)
+/* The ordinary first-record absolute deadline. ID53's singleton cutoff and
+ * ID83's 500us suppressed-tail wake are both rejected; finite mixed-wave
+ * targets are serviced without timer rearm. */
+static u64 swapz_first_record_deadline_ns(struct swapz_dm *ctx)
 {
 	return swapz_window_retention_deadline_ns(
 		ctx->window_first_ns, ctx->retain_ms);
+}
+
+/*
+ * The first-record deadline, made earlier only while a proven-dry staged
+ * window waits with no lower WRITE in flight (see window-policy.h).
+ */
+static u64 swapz_retention_deadline_ns(struct swapz_dm *ctx)
+{
+	u64 idle_start_ns = swapz_has_inflight(ctx) ? 0 :
+		READ_ONCE(ctx->accepted_work_lower_idle_start_ns);
+
+	return swapz_window_effective_deadline_ns(
+		swapz_first_record_deadline_ns(ctx), idle_start_ns,
+		swapz_window_idle_bound_ns(ctx->lower_write_service_ewma_ns,
+					   ctx->retain_ms));
 }
 
 static bool swapz_retention_expired(struct swapz_dm *ctx)
@@ -5641,6 +5706,9 @@ static void swapz_worker(struct work_struct *work)
 						    ctx->batch_count >=
 							SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS - 1U &&
 						    raw_pressure_hand_dispatchable &&
+						    swapz_window_raw_hand_pays(
+							ctx->ordered_lz4_page_ewma_ns,
+							ctx->lower_write_block_service_ewma_ns) &&
 						    !lower_write_busy && accepted_backlog &&
 						    !(entry->bio->bi_opf &
 						      (REQ_PREFLUSH | REQ_FUA))) {
@@ -5849,6 +5917,10 @@ static void swapz_worker(struct work_struct *work)
 			else if (ctx->retain_ms &&
 				 swapz_retention_expired(ctx)) {
 				ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
+				if (!swapz_window_deadline_expired(
+					    swapz_first_record_deadline_ns(ctx),
+					    ktime_get_ns()))
+					ctx->idle_bound_closes++;
 				if (!list_empty(&local)) {
 					ctx->deadline_worker_with_local++;
 					ctx->singleton_deadline_streak = 0;
@@ -5943,6 +6015,7 @@ static void swapz_worker(struct work_struct *work)
 			}
 			if (ctx->batch_count >= 2U && ctx->work_conserving_window &&
 			    !swapz_has_inflight(ctx) && ctx->accepting && !ctx->failed &&
+			    !swapz_pure_write_below_burst(ctx, false) &&
 			    swapz_window_work_conserving_close_ready(
 				ctx->retain_ms,
 				ctx->single_pack_deferred ||
@@ -6010,7 +6083,11 @@ static void swapz_worker(struct work_struct *work)
 				}
 				if (swapz_retention_timer_needs_arm(
 						ctx->retain_ms,
-						hrtimer_is_queued(&ctx->retention_timer))) {
+						hrtimer_is_queued(&ctx->retention_timer)) ||
+				    ktime_to_ns(hrtimer_get_expires(
+					    &ctx->retention_timer)) >
+					    swapz_retention_deadline_ns(ctx)) {
+					/* Earlier only: never extend a queued deadline. */
 					ctx->retain_timer_arms++;
 					hrtimer_start(&ctx->retention_timer,
 						ns_to_ktime(swapz_retention_deadline_ns(ctx)),
@@ -6713,7 +6790,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->inflight_write.ctx = ctx;
 	init_completion(&ctx->inflight_write.lower_done);
 	ctx->workqueue = alloc_workqueue(
-				"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
+				"swapz", WQ_MEM_RECLAIM, 1);
 	if (!ctx->workqueue) {
 		error = -ENOMEM;
 		goto fail;
@@ -7393,7 +7470,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "accepted_work_lower_idle_worker_unscheduled_ns=%llu "
 		       "accepted_work_lower_idle_preparing_head_ns=%llu "
 		       "accepted_work_lower_idle_no_ready_work_ns=%llu "
-		       "accepted_work_lower_idle_post_lower_ns=%llu",
+		       "accepted_work_lower_idle_post_lower_ns=%llu "
+		       "lower_write_service_ewma_ns=%llu idle_bound_closes=%llu "
+		       "lower_write_block_service_ewma_ns=%llu "
+		       "ordered_lz4_page_ewma_ns=%llu",
 		       SWAPZ_WORK_CONSERVING_HAND_RECORDS,
 		       ctx->work_conserving_hand_closes,
 		       ctx->work_conserving_dry_closes,
@@ -7412,7 +7492,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->accepted_work_lower_idle_worker_unscheduled_ns,
 		       ctx->accepted_work_lower_idle_preparing_head_ns,
 		       ctx->accepted_work_lower_idle_no_ready_work_ns,
-		       ctx->accepted_work_lower_idle_post_lower_ns);
+		       ctx->accepted_work_lower_idle_post_lower_ns,
+		       ctx->lower_write_service_ewma_ns,
+		       ctx->idle_bound_closes,
+		       ctx->lower_write_block_service_ewma_ns,
+		       ctx->ordered_lz4_page_ewma_ns);
 		/* These independent single-writer values are diagnostic while busy;
 		 * qualification snapshots only at drained measurement boundaries. */
 		DMEMIT(" delta64_rescue=%u delta64_eligible=%llu "

@@ -1,10 +1,11 @@
-# Exactly four public root Make goals; never add aliases or extra targets.
+# Exactly five public root Make goals; never add aliases or extra targets.
+# make fast_test is a development-only decision loop; make test alone qualifies.
 .DEFAULT_GOAL := all
 # The internal default target is not an additional user-visible alias.
 # Disallow explicitly specifying it or combining supported goals.
 ifneq ($(strip $(MAKECMDGOALS)),)
-ifeq ($(filter $(MAKECMDGOALS),install uninstall test),)
-$(error Only make, make install, make uninstall, make test are supported)
+ifeq ($(filter $(MAKECMDGOALS),install uninstall test fast_test),)
+$(error Only make, make install, make uninstall, make test, make fast_test are supported)
 endif
 ifneq ($(words $(MAKECMDGOALS)),1)
 $(error Specify exactly one supported Make command)
@@ -15,7 +16,7 @@ KDIR ?= /lib/modules/$(shell uname -r)/build
 PREFIX ?= /usr/local
 CC ?= cc
 
-.PHONY: all install uninstall test
+.PHONY: all install uninstall test fast_test
 .PHONY: build/kernel/experimental/dm-swapz.ko
 # Make can compile independent outputs concurrently. The private test reporter
 # chooses a bounded CPU-aware job count automatically when no parent jobserver
@@ -52,3 +53,10 @@ uninstall:
 # the reporter completes each stage before starting the next.
 test:
 	@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)"
+
+# Development-only quick loop: build, window-policy native checks and a
+# single-pair owned null_blk subset with one compact raw/swapz table.
+# It accepts dirty trees, never writes test_results.json and never
+# qualifies a source. Optional: SCENARIOS=fast-mixed,fast-w8 REPEAT=3.
+fast_test:
+	@+python3 -B tests/tools/fast-test.py

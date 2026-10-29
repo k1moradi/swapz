@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Development-only quick decision loop behind `make fast_test`.
+
+It builds the working tree, runs the window-policy native checks and a small
+single-pair subset of the owned null_blk benchmark matrix, then prints one
+compact raw-versus-swapz table. Dirty trees are allowed so a policy change can
+be measured before it is committed.
+
+`make fast_test` never qualifies a source revision, never writes or publishes
+test_results.json and never replaces `make test`. Its numbers are single,
+unpaired observations; promotion still requires the full owner matrix.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+OUT_DIR = ROOT / "build/tests/fast-test"
+PAIR = "tests/tools/benchmark-owned-pair.sh"
+PREFLIGHT = "tests/tools/loaded-preflight.sh"
+COMMON = ["--run-owned-ram-pair", "--profile", "medium", "--retain-ms", "2",
+          "--unpaced"]
+# Exact device models from tests/tools/test-loaded.sh, in the bounded suffix
+# order that benchmark-owned-pair.sh peels from the tail.
+MODELS = {
+    "sd": ["--lower-mbps", "10", "--hw-queue-depth", "1",
+           "--completion-nsec", "1000000"],
+    "fast": ["--lower-mbps", "80", "--hw-queue-depth", "64",
+             "--completion-nsec", "150000"],
+    "sdcard": ["--lower-mbps", "100", "--submit-queues", "1",
+               "--hw-queue-depth", "4", "--completion-nsec", "500000"],
+    "sata": ["--lower-mbps", "500", "--submit-queues", "1",
+             "--hw-queue-depth", "32", "--completion-nsec", "100000"],
+    "nvme4": ["--lower-mbps", "6500", "--submit-queues", "4",
+              "--hw-queue-depth", "64", "--completion-nsec", "25000"],
+    "nvme5": ["--lower-mbps", "12000", "--submit-queues", "4",
+              "--hw-queue-depth", "64", "--completion-nsec", "14000"],
+}
+DEFAULT_SCENARIOS = (
+    "fast-mixed", "fast-w1", "fast-w4", "fast-w8", "fast-w32",
+    "sd-mixed", "sd-w1", "sd-w32", "sata-mixed", "nvme4-mixed",
+)
+
+
+def scenario_arguments(name, plan):
+    model, _, kind = name.partition("-")
+    if model not in MODELS or not kind:
+        raise ValueError(f"unknown scenario {name!r}")
+    arguments = [*COMMON, *MODELS[model]]
+    if kind.startswith("w") and kind[1:] in ("1", "4", "8", "32"):
+        arguments += ["--write-only-qd", kind[1:]]
+    elif kind != "mixed":
+        raise ValueError(f"unknown scenario {name!r}")
+    return arguments + ["--async-prepare", "--shared-plan", str(plan)]
+
+
+def run(command, **kwargs):
+    return subprocess.run(command, cwd=ROOT, check=True, **kwargs)
+
+
+def build():
+    jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
+    run(["make", jobs, "--no-print-directory"], stdout=subprocess.DEVNULL)
+    run(["make", jobs, "--no-print-directory", "-C", "tests/suites",
+         "test-replay-helper", "test-lower-io"], stdout=subprocess.DEVNULL)
+
+
+def prepare_plan():
+    (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
+    plan = Path(tempfile.mkdtemp(prefix="benchmark-plan.",
+                                 dir=ROOT / "build/tests"))
+    replay = ["python3", "-B", "tests/runtime/benchmark/io-replay.py",
+              "prepare", "--fixture", str(plan / "fixture.bin"),
+              "--logical-pages", "1024", "--writer-pages", "256",
+              "--reader-start", "512", "--reader-pages", "256"]
+    quiet = {"stdout": subprocess.DEVNULL}
+    run(["python3", "-B", "tests/runtime/benchmark/anon-page-fixture.py",
+         "--output-prefix", str(plan / "fixture"), "--pages", "128",
+         "--seed", "0x51a0a9", "--weights", "medium=100"], **quiet)
+    run([*replay, "--output-dir", str(plan / "plan"), "--qd", "32",
+         "--read-pct", "25", "--warmup-ops", "1024", "--measure-ops",
+         "16384", "--iops", "0"], **quiet)
+    for qd in (1, 4, 8, 32):
+        run([*replay, "--output-dir", str(plan / f"plan-write-qd{qd}"),
+             "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
+             "--measure-ops", "4096", "--iops", "0", "--sustained-write"],
+            **quiet)
+    return plan
+
+
+def privileged(seconds, script, *arguments):
+    prefix = [] if os.geteuid() == 0 else ["sudo", "-n"]
+    return subprocess.run(
+        [*prefix, "bash", "-c",
+         'limit="$1"; shift; exec timeout --signal=TERM --kill-after=10s '
+         '"${limit}s" bash "$@"', "swapz-fast-test", str(seconds), script,
+         *arguments],
+        cwd=ROOT, capture_output=True, text=True)
+
+
+def parse_arms(output):
+    arms = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if obj.get("candidate") in ("off", "swapz") and \
+                obj.get("verdict") == "PASS":
+            arms[obj["candidate"]] = obj
+    return arms
+
+
+def summarize(name, arms, seconds):
+    off, swapz = arms["off"], arms["swapz"]
+
+    def rate(arm, key):
+        return (arm.get("throughput_mbps") or {}).get(key) or 0.0
+
+    def lower(arm, key):
+        return (arm.get("lower_io") or {}).get(key) or 0
+
+    def ms(arm, key):
+        value = arm.get(key)
+        return value / 1e6 if isinstance(value, (int, float)) else 0.0
+
+    kernel = swapz.get("kernel_write_path") or {}
+    windows = kernel.get("windows") or 0
+    return {
+        "scenario": name,
+        "raw_w": rate(off, "logical_write_mbps"),
+        "swapz_w": rate(swapz, "logical_write_mbps"),
+        "raw_r": rate(off, "logical_read_mbps"),
+        "swapz_r": rate(swapz, "logical_read_mbps"),
+        "raw_lw_bytes": lower(off, "lower_write_bytes"),
+        "swapz_lw_bytes": lower(swapz, "lower_write_bytes"),
+        "raw_lw_reqs": lower(off, "lower_write_requests"),
+        "swapz_lw_reqs": lower(swapz, "lower_write_requests"),
+        "raw_r_p99": ms(off, "read_p99_ns"),
+        "swapz_r_p99": ms(swapz, "read_p99_ns"),
+        "raw_w_p99": ms(off, "write_p99_ns"),
+        "swapz_w_p99": ms(swapz, "write_p99_ns"),
+        "windows": windows,
+        "deadline": kernel.get("close_deadline") or 0,
+        "idle_bound": kernel.get("idle_bound_closes") or 0,
+        "service_us": (kernel.get("lower_write_service_ewma_ns") or 0) / 1e3,
+        "idle_ms": (kernel.get("accepted_work_lower_idle_ns") or 0) / 1e6,
+        "lw_busy_ms": (kernel.get("lower_write_wall_ns") or 0) / 1e6,
+        "wall_s": swapz.get("seconds") or 0.0,
+        "pair_s": seconds,
+    }
+
+
+def pct(candidate, baseline):
+    if not baseline:
+        return "   n/a"
+    return f"{(candidate / baseline - 1.0) * 100.0:+6.1f}%"
+
+
+def print_table(rows):
+    header = (f"{'scenario':<12} {'raw W':>7} {'swapz W':>8} {'dW':>7} "
+              f"{'raw R':>6} {'swapz R':>7} {'lowW B':>7} {'reqs raw>swapz':>15} "
+              f"{'R p99 raw>swapz':>16} {'W p99 raw>swapz':>16} "
+              f"{'win':>5} {'dl':>4} {'ib':>4} {'idle':>6} {'lwbusy':>7} "
+              f"{'svc':>6} {'wall':>6}")
+    print(header)
+    print("-" * len(header))
+    for row in rows:
+        if "error" in row:
+            print(f"{row['scenario']:<12} ERROR: {row['error']}")
+            continue
+        bytes_ratio = (row["swapz_lw_bytes"] / row["raw_lw_bytes"]
+                       if row["raw_lw_bytes"] else 0.0)
+        reqs = f"{row['raw_lw_reqs']}>{row['swapz_lw_reqs']}"
+        rp99 = f"{row['raw_r_p99']:.2f}>{row['swapz_r_p99']:.2f}"
+        wp99 = f"{row['raw_w_p99']:.2f}>{row['swapz_w_p99']:.2f}"
+        print(f"{row['scenario']:<12} {row['raw_w']:7.2f} {row['swapz_w']:8.2f} "
+              f"{pct(row['swapz_w'], row['raw_w']):>7} {row['raw_r']:6.2f} "
+              f"{row['swapz_r']:7.2f} {bytes_ratio:7.3f} {reqs:>15} "
+              f"{rp99:>16} {wp99:>16} {row['windows']:5d} "
+              f"{row['deadline']:4d} {row['idle_bound']:4d} {row['idle_ms']:6.1f} "
+              f"{row['lw_busy_ms']:7.1f} {row['service_us']:6.0f} "
+              f"{row['wall_s']:6.3f}")
+    print("Legend: W/R useful MB/s; dW swapz vs raw useful WRITE; lowW B "
+          "swapz/raw lower WRITE bytes (endurance proxy, lower is better);\n"
+          "        reqs lower WRITE requests; p99 in ms; win/dl/ib swapz windows, "
+          "deadline closes and idle-bound closes among them;\n"
+          "        idle accepted-work lower-idle ms; lwbusy lower-WRITE service ms; "
+          "svc lower-WRITE service EWMA us;\n"
+          "        wall swapz measured seconds. "
+          "Single unpaired observations; only make test qualifies.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--scenarios", default=os.environ.get("SCENARIOS", ""))
+    parser.add_argument("--repeat", type=int,
+                        default=int(os.environ.get("REPEAT", "1") or 1))
+    args = parser.parse_args()
+    scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
+        or list(DEFAULT_SCENARIOS)
+    if not 1 <= args.repeat <= 10:
+        parser.error("REPEAT must be 1..10")
+    for name in scenarios:
+        scenario_arguments(name, "/dev/null")
+
+    if os.geteuid() != 0 and subprocess.run(
+            ["sudo", "-n", "true"], capture_output=True).returncode:
+        print("BLOCKED: make fast_test needs noninteractive sudo for owned null_blk",
+              file=sys.stderr)
+        return 2
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain", "--", "src", "tests"],
+                           cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    print(f"swapz fast_test (development only; not qualification) "
+          f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
+    started = time.monotonic()
+    build()
+    print(f"  build + window-policy native checks: PASS "
+          f"({time.monotonic() - started:.1f}s)", flush=True)
+    preflight = privileged(60, PREFLIGHT)
+    if preflight.returncode:
+        print(preflight.stdout + preflight.stderr, file=sys.stderr)
+        print("BLOCKED: loaded preflight failed", file=sys.stderr)
+        return 2
+    plan = prepare_plan()
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    rows, raw_reports = [], []
+    status = 0
+    try:
+        for name in scenarios:
+            for attempt in range(args.repeat):
+                label = name if args.repeat == 1 else f"{name}#{attempt + 1}"
+                begin = time.monotonic()
+                proc = privileged(720, PAIR, "--validated-source", head,
+                                  *scenario_arguments(name, plan))
+                elapsed = time.monotonic() - begin
+                arms = parse_arms(proc.stdout)
+                if proc.returncode or set(arms) != {"off", "swapz"}:
+                    status = 1
+                    tail = (proc.stdout + proc.stderr).strip().splitlines()[-12:]
+                    rows.append({"scenario": label,
+                                 "error": f"pair failed rc={proc.returncode}"})
+                    print(f"  {label}: FAIL ({elapsed:.1f}s)\n    " +
+                          "\n    ".join(tail), flush=True)
+                    continue
+                row = summarize(label, arms, elapsed)
+                rows.append(row)
+                raw_reports.append({"scenario": label, "arms": arms})
+                print(f"  {label}: raw W {row['raw_w']:.2f} swapz W "
+                      f"{row['swapz_w']:.2f} ({pct(row['swapz_w'], row['raw_w']).strip()}) "
+                      f"[{elapsed:.1f}s]", flush=True)
+    finally:
+        shutil.rmtree(plan, ignore_errors=True)
+    (OUT_DIR / "latest.json").write_text(
+        json.dumps({"head": head, "dirty": bool(dirty), "rows": rows,
+                    "reports": raw_reports}, sort_keys=True) + "\n")
+    print()
+    print_table(rows)
+    print(f"\n  Detailed telemetry: {(OUT_DIR / 'latest.json').relative_to(ROOT)} "
+          f"(total {time.monotonic() - started:.0f}s)")
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main())

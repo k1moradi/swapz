@@ -1484,9 +1484,11 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("single_tail_age_cutoff_closes", DM)
         self.assertNotIn("single_tail_cutoff_late_companions", DM)
         self.assertNotIn("single_tail_cutoff_original_deadline_ns", DM)
-        deadline = body("swapz_retention_deadline_ns")
+        deadline = body("swapz_first_record_deadline_ns")
         self.assertIn("swapz_window_retention_deadline_ns(", deadline)
         self.assertNotIn("single_tail_deferred_start_ns", deadline)
+        self.assertNotIn("single_tail_deferred_start_ns",
+                         body("swapz_retention_deadline_ns"))
         self.assertIn("!ctx->retained_single_tail_deferred", worker)
         self.assertIn("ctx->single_tail_lower_done_seen = false", sample)
         self.assertIn("ctx->single_tail_read_bypass_seen = false", sample)
@@ -2140,7 +2142,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_retention_timer_needs_arm(", policy)
         self.assertIn("swapz_window_timer_enabled(retain_ms) && !queued", policy)
         self.assertNotIn("swapz_retention_timer_needs_rearm(", policy)
-        self.assertNotIn("hrtimer_get_expires(", worker)
+        # A queued timer may move earlier (idle bound), never later.
+        self.assertIn("ktime_to_ns(hrtimer_get_expires(", worker)
+        self.assertIn("swapz_retention_deadline_ns(ctx)) {", worker)
+        self.assertIn("Earlier only: never extend a queued deadline.", worker)
         self.assertIn("hrtimer_is_queued(&ctx->retention_timer)", worker)
         self.assertNotIn("swapz_effective_wait_deadline_ns", DM)
         self.assertIn("ns_to_ktime(swapz_retention_deadline_ns(ctx))", worker)
@@ -2472,7 +2477,8 @@ static swapz_u16 swapz_probe_set(
             "Never use full-process window counters for the QD pilot", runner)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
-        deadline = body("swapz_retention_deadline_ns")
+        deadline = body("swapz_first_record_deadline_ns")
+        effective = body("swapz_retention_deadline_ns")
         expiry = body("swapz_retention_expired")
         wake = body("swapz_retention_wake")
         process = body("swapz_process")
@@ -2484,6 +2490,14 @@ static swapz_u16 swapz_probe_set(
         status = body("swapz_status")
         self.assertIn("ctx->window_first_ns", deadline)
         self.assertIn("swapz_window_retention_deadline_ns", deadline)
+        # The device-relative idle bound may only make the first-record
+        # deadline earlier while no lower WRITE is in flight.
+        self.assertIn("swapz_first_record_deadline_ns(ctx)", effective)
+        self.assertIn("swapz_window_effective_deadline_ns(", effective)
+        self.assertIn("swapz_window_idle_bound_ns(ctx->lower_write_service_ewma_ns",
+                      effective)
+        self.assertIn("swapz_has_inflight(ctx) ? 0 :", effective)
+        self.assertIn("ctx->accepted_work_lower_idle_start_ns", effective)
         self.assertNotIn("swapz_window_single_tail_deadline_ns", deadline)
         self.assertNotIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS", DM)
         self.assertNotIn("single_tail_deferred_start_ns", deadline)
@@ -2876,7 +2890,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("SWAPZ_DELTA64_PREPARATION_WORKERS", ctor)
         self.assertNotIn("swapz_delta64_prepare_workers", ctor)
         self.assertIn("INIT_WORK(&lane->work, swapz_preparation_worker)", ctor)
-        self.assertIn('"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1', ctor)
+        # The ordered owner runs on the submitting CPU: a bound queue keeps
+        # admission, K=1 completion and upper wakeups off idle remote CPUs.
+        self.assertIn('"swapz", WQ_MEM_RECLAIM, 1', ctor)
+        self.assertNotIn('"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND', ctor)
         self.assertIn('"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,', ctor)
         self.assertIn("ctx->preparation_worker_count);", ctor)
         self.assertIn("ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *", ctor)
@@ -2960,9 +2977,13 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("entry->preparation_force_raw = true", ordered)
         self.assertIn("bool raw_pressure_hand_dispatchable;", ordered)
         self.assertIn("swapz_window_raw_pressure_hand_dispatchable(", ordered)
+        # RAW for latency only when measured inline LZ4 costs more lower idle
+        # than the extra RAW block costs lower service.
         self.assertRegex(ordered,
             r"ctx->batch_count >=\s*SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS - 1U\s*&&"
             r"\s*raw_pressure_hand_dispatchable\s*&&"
+            r"\s*swapz_window_raw_hand_pays\(\s*ctx->ordered_lz4_page_ewma_ns,"
+            r"\s*ctx->lower_write_block_service_ewma_ns\)\s*&&"
             r"\s*!lower_write_busy && accepted_backlog")
         self.assertIn("ctx->preparation_ordered_raw++", ordered)
         self.assertIn("SWAPZ_WORK_CONSERVING_HAND_RECORDS", ordered)

@@ -2,7 +2,7 @@
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
 
 ## Official interface
 
@@ -20,6 +20,23 @@ manual `-j` value; qualification stages and privileged device sessions remain
 strictly sequential.
 
 It must execute the supported qualification in order and fail closed. Rootless/CI-only success is partial evidence and cannot substitute for the loaded owned-RAM phase. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
+
+### Development decision loop
+
+`make fast_test` is the owner-approved development loop, not a qualification
+command. It builds the current working tree (dirty trees allowed), runs the
+lower-I/O window-policy native checks, runs the root preflight, and then runs
+one counterbalance-free raw/swapz pair per selected scenario through the same
+private owned null_blk pair helper and exact device models used by `make test`
+(default: fast mixed, fast QD1/4/8/32, SD mixed, SD QD1/32, SATA mixed, NVMe
+Gen4 mixed). It prints one table of useful READ/WRITE, lower WRITE bytes ratio
+and requests, READ/WRITE p99, windows, deadline and idle-bound closes,
+accepted-work lower idle, lower-WRITE service and its EWMA, and keeps detailed
+telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
+select scenarios and repeats. It never writes or publishes `test_results.json`,
+never records a qualification verdict and never substitutes for `make test`:
+single unpaired observations decide only which candidate deserves the full
+owner matrix.
 
 ## Scope discipline
 
@@ -89,7 +106,13 @@ Source contracts validate behavior that requires the Linux Device Mapper target 
 ## Retained-window scheduler qualification
 
 Native tests must keep authoritative sampled tails ahead of dry four-record
-closure; source contracts must cover dependency-safe independent READ scanning,
+closure, and must cover the device-relative idle bound (half service EWMA,
+20us floor, retain_ms cap, deadline only ever earlier), the pure-WRITE
+half-burst rule and the measured RAW-hand cost gate. Source contracts must
+require the effective deadline to apply the idle bound only with no lower
+WRITE in flight, a queued timer to move only earlier, and the RAW hand to
+consult the measured LZ4 and per-block service EWMAs; they must cover
+dependency-safe independent READ scanning,
 one-quantum scan bounds and four-record no-overlap synchronous dispatch.
 Only an exact-source owner `make test` with the loaded RAM-backed null_blk phase
 can qualify useful READ/WRITE, p99, lower bytes/requests, SD/SSD/NVMe, GC and
@@ -862,9 +885,9 @@ must clear the token after the existing zero-count early-return path. The former
 `ordered_worker_busy` atomic had no reader and is dead state; source coverage
 must keep it absent.
 
-Source coverage must require both the ordered `swapz` workqueue and the
-`swapz-lz4` preparation workqueue to use
-`WQ_MEM_RECLAIM | WQ_UNBOUND`. The ordered authority workqueue remains
+Source coverage must require the ordered `swapz` workqueue to use a bound,
+single-active `WQ_MEM_RECLAIM` queue and the `swapz-lz4` preparation workqueue
+to use `WQ_MEM_RECLAIM | WQ_UNBOUND`. The ordered authority workqueue remains
 single-active and async preparation owns one producer lane regardless of
 delta64 policy. The retired `delta64_prepare_workers` runtime selector must
 remain absent after two-host K=2 evidence and earlier K=4 regressions closed

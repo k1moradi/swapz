@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owner policy: only four user-visible root Make commands."""
+"""Owner policy: only five user-visible root Make commands."""
 import importlib.util
 import pathlib
 import re
@@ -10,7 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 MAKE = (ROOT / "Makefile").read_text()
 
 class PublicMakeContract(unittest.TestCase):
-    def test_exact_four_root_goals(self):
+    def test_exact_five_root_goals(self):
         targets = set()
         for line in MAKE.splitlines():
             if not line or line[0].isspace() or line.startswith("#") or line.startswith("."):
@@ -18,12 +18,23 @@ class PublicMakeContract(unittest.TestCase):
             m = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):(?!=)", line)
             if m:
                 targets.add(m.group(1))
-        self.assertEqual(targets, {"all", "install", "uninstall", "test"})
+        self.assertEqual(targets, {"all", "install", "uninstall", "test",
+                                   "fast_test"})
         self.assertIn(".DEFAULT_GOAL := all", MAKE)
-        self.assertIn("Only make, make install, make uninstall, make test", MAKE)
+        self.assertIn("Only make, make install, make uninstall, make test, "
+                      "make fast_test are supported", MAKE)
         self.assertNotIn("Only make -j2,", MAKE)
         self.assertNotIn("make test -j", MAKE)
-        self.assertIn(".PHONY: all install uninstall test", MAKE)
+        self.assertIn(".PHONY: all install uninstall test fast_test", MAKE)
+        # make fast_test is a development decision loop: it never writes or
+        # publishes the qualification report and never replaces make test.
+        self.assertIn("@+python3 -B tests/tools/fast-test.py", MAKE)
+        fast = (ROOT / "tests/tools/fast-test.py").read_text()
+        for forbidden in ("test_results.json\")", "def publish", "git push",
+                          "commit-tree", "SYNCED_GIT"):
+            self.assertNotIn(forbidden, fast)
+        self.assertIn("tests/tools/benchmark-owned-pair.sh", fast)
+        self.assertIn("never replaces `make test`", fast)
         self.assertNotIn(".NOTPARALLEL: test", MAKE)
         self.assertIn(".PHONY: build/kernel/experimental/dm-swapz.ko", MAKE)
         self.assertIn("all: build/kernel/experimental/dm-swapz.ko "

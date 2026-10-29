@@ -2,85 +2,64 @@
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
 
 This file contains only active work. Completed experiments and detailed historical transcripts belong in Git history.
 
 ## Current baseline
 
 The last official owner `make test` passed all five stages on production
-source `de51b8e5dbcfd6067956d994f7204374a4966e3e`, with report commit
-`7bcdefe88b41`. The ID99 performance hypothesis is refuted: fast mixed QD32
-useful WRITE/READ is 35.14/11.67 MB/s versus raw 62.19/20.64 MB/s, although
-READ p99 improves to ~1.07 ms versus raw 3.75 ms and lower WRITE bytes per
-useful byte fall ~25.8%. Fast sustained QD32 WRITE reaches 134.25 MB/s versus
-raw 85.68 MB/s. Lower host WRITE bytes are an endurance proxy, not physical
-NAND wear measurement. This is a mixed throughput trade-off, not a win.
+source `6d0ea1225339` (report `41b2c14c5f8f`). That source carried the ID100
+READ-continuity candidate and did not recover fast mixed service: QD32 useful
+WRITE/READ 38.42/12.75 MB/s versus raw 62.91/20.88, with 611.5 of 639.1 ms of
+accepted-work lower idle charged to undersized retention. The same report shows
+SD mixed +409%, fast QD32 +56% and lower WRITE bytes per useful byte ~26–30%
+below raw, but fast QD1/QD4/QD8 at -15/-18/-4% and SATA/NVMe mixed far below
+raw. Lower host WRITE bytes are an endurance proxy, not NAND wear measurement.
 
-Comparable ARM64/NEON pre-ID97 source `6bceaeb` reached 64.52 MB/s mixed
-useful WRITE with ~1,451 lower WRITE requests; current source reaches
-35.14 MB/s with ~2,528 requests. Approximately 1,083 extra write windows
-match ~1,078 extra lower WRITE requests. Undersized accepted-work idle rose
-from ~271 to ~688 ms, while preparation-head idle and K=1 ready wait remain
-essentially zero. ID99 reduced target-2/3 early closes but increased deadline
-and SERVICE_DRY fragmentation. The immediate target is mixed-wave continuity,
-not LZ4 throughput, new workers, larger reservoirs, K>1 or new timers.
+The `make fast_test` replay of that source pinned the cause: 274 fast-mixed
+windows closed on the 2 ms first-record deadline with the ordered worker empty
+(~550 ms), while the closed-loop submitters were blocked on exactly those
+records. A fixed millisecond timer is far longer than one 150–200 us fast
+lower WRITE.
 
-The current architecture keeps ordinary LZ4 acceleration one, one unbound
-producer, 64 compressed+RAW preparation slots, K=1 immutable lower WRITE,
-ID63 READ coalescing, READY-only pressure hand, SWZ 1/2/4-block extents and
-ID99 block-saving (not two-record/8KiB) deferred-pack geometry.
+## Current candidate (ID101–ID104), owner qualification pending
+
+Four bounded policy changes, measured only by `make fast_test` single pairs on
+ARM64/NEON (two repeats; swapz versus raw useful WRITE):
+
+| Scenario | 6d0ea12 | Candidate | Lower WRITE bytes vs raw |
+|---|---:|---:|---:|
+| Fast mixed QD32 | -36% | +8% / +11% (R p99 0.9 vs 4.0 ms) | -26% |
+| Fast QD1 / QD4 | -12% / -22% | -1.5% / -12% | 0% / -25% |
+| Fast QD8 / QD32 | -9% / +52% | +21..+32% / +57..+61% | -25% / -31% |
+| SD mixed / QD1 / QD32 | +402% / -4% / +277% | +400% / -1% / +267% | -31% |
+| SATA / NVMe Gen4 mixed | -66% / -75% | -50% / -47% | -31% |
+
+All loaded correctness phases (oracle, compound/THP BIO, live GC, DISCARD/TRIM,
+suspend/drain, retained WRITE/FLUSH faults, packed placement) and the ID36
+pressure gate pass on the candidate; rootless and W=1/W=2 stages pass.
+Promotion still requires the exact-source owner `make test` matrix.
 
 ## Current bottleneck ranking
 
-**ID100 candidate — bounded successful-READ continuity.** An independent
-READ (including a cache hit) may mark only an already-staged/continuing
-accepted WRITE chain or queued accepted WRITE followers overtaken by read
-fan-out. The mark survives a successful continuing WRITE close, never a
-failed/finite/hard close or sampled zero tail. The post-PACK sampler may use
-it for a two/three-record close only when the current bounded snapshot finds
-queued WRITE followers. A staged-only residue retains the four-record floor;
-the existing serviced post-PACK READ boundary remains separate. Lower READ
-bypass attribution still requires an already-open staged WRITE window.
-
-Hypothesis, **not a benchmark result**: restoring chain-bounded mixed-tail
-certification could reduce worker-empty 2ms deadline exposure, windows and
-lower WRITE requests, moving fast mixed throughput toward the historical
-60–65 MB/s and undersized idle toward ~270 ms. These are reference targets,
-not demonstrated gains. Promotion requires exact-source owner `make test`
-across raw/sync/async useful W/R, lower bytes/requests, READ p99, GC,
-retained fault/lifecycle safety and SSE2/AVX2/AVX-512/NEON where available.
-
-### Detached K=1 preparation ownership candidate
-
-A later source audit found one scheduling assumption that became stale when the
-single immutable lower-WRITE slot was detached asynchronously. The preparation
-producer still treats every `lower_write_active` interval as if the ordered
-worker were blocked inside synchronous `dm_io()`, so it claims the FIFO head.
-During detached K=1 service the ordered worker is still runnable and consuming
-that same FIFO from the head. A producer-owned PREPARING head can therefore
-force the ordered worker to hand the local queue back and return, converting
-lower-I/O overlap into a producer/consumer completion convoy.
-
-The bounded candidate distinguishes synchronous lower-WRITE blocking from an
-existing detached K=1 run without adding state: synchronous service remains
-head-first, while detached K=1 service leaves a singular head for ordered inline
-steal and prepares only true tails. The existing single producer, 64-slot
-reservoir, K=1 lower depth, stable RAW snapshot, FIFO publication/completion,
-retention policy, planner and SWZ geometry remain unchanged. The earlier
-eight-record-below-target hand experiment stays rejected; this candidate does
-not reopen it.
-
-Performance hypothesis, not qualification: head/tail separation during detached
-K=1 should reduce producer-owned FIFO-head waits/requeues and move LZ4 work into
-the lower-I/O overlap interval. Expected evidence is fewer ordered preparation
-handoffs/waits, more producer tail claims, less accepted-work
-preparing-head/no-ready idle, and equal or lower backing WRITE bytes/requests
-without worsening p99. Fast mixed/QD4-QD32 useful throughput should improve only
-to the extent that the convoy is material. Slow-media behavior should remain
-neutral or gain compression opportunity. Owner `make test` remains the
-promotion gate across raw/synchronous/asynchronous arms and the supported
-SSE2/AVX2/AVX-512/NEON matrix.
+1. **SATA/NVMe mixed (-45..-50%).** Host CPU is ~30% busy, so this is a latency
+   chain, not CPU saturation: one ordered worker serializes ~3 us/op of
+   admission, cache-hit READ service and 32 upper-completion wakeups per wave,
+   and waves still average ~2.2 serialized K=1 lower WRITEs. LZ4 is not the
+   cost (~0.7–0.9 us/page). Next: move upper-completion delivery and
+   independent cache-hit READ service off the ordered owner, then re-measure
+   before reopening K>1.
+2. **Fast QD4 (-12%).** K=1 completes all four writers together, so their
+   reissue spread (~46 us in the threaded replay) sits on every cycle while raw
+   overlaps it. Parity needs overlapping lower WRITEs (K>1) or earlier partial
+   completion; retention policy alone cannot recover it.
+3. **QD8 bimodality.** Merged eight-record windows win (+21..+32%), but when
+   the writers' reissue gap exceeds half a service time the idle bound splits
+   bursts and the learned target shrinks. Accepted-burst extents are also capped
+   at 8KiB (two cold read blocks per record), holding QD8 lower bytes near 0.75
+   instead of ~0.63; that cap is a swap-in latency trade-off to revisit only with
+   READ-latency evidence.
 
 ## Optimization evidence table
 
@@ -219,7 +198,13 @@ changes.
 | 97 | Bounded accepted short-tail continuity at the work-conserving hand | **5 owner result did not justify keep / removed** | Exact source `b6461a8e2871` passed the full five-stage owner `make test`, but its latest report `e1eac4cd62b5` shows fast mixed async 33.62 MB/s, 2,816.2 lower-WRITE requests and 658.8 ms of undersized accepted-work lower idle. The older report had async 64.52 MB/s and 1,450.6 requests; synchronous throughput also moved sharply between runs, so the cross-report regression is not a clean causal A/B. The candidate nevertheless failed its promotion gate, and its unprepared pressure-hand claim can deliberately run ordered LZ4 before dispatching an already-serviceable batch. Remove that claim rather than retain an unqualified hot-path policy. |
 | 98 | Retention-idle state repair after ID97 | **5 owner-qualified / partial keep; follow-up repair required** | Exact source `ffc527f4956b` passed the full five-stage owner `make test` and improved fast mixed async versus ID97 to 39.84 MB/s with 2458.0 lower-WRITE requests and 581.5 ms undersized accepted-work lower idle, but it still trails raw 62.81 MB/s and the earlier pre-ID97 64.52 MB/s baseline. Keep the READY-only pressure hand and correctness-side retained READ-bypass repair; preparation/ready-wait telemetry is zero on the failing workload, so do not add resources. The two-record/8KiB early latch and stale wave-level READ tail certification remain the bounded scheduling defects isolated by ID99. |
 | 99 | Block-saving deferred pack and current-snapshot certification | **5 owner performance hypothesis rejected / geometry retained provisionally** | Source `de51b8e5` passed loaded `make test` but fast mixed useful WRITE fell from 39.84 to 35.14 MB/s while SERVICE_DRY/deadline fragmentation rose. Removing non-saving 2-record/8KiB latch improved sustained-write saturation, but does not establish a mixed win. |
-| 100 | Bounded successful-READ continuity across continuing PACK chains | **4 source candidate / owner qualification pending** | Preserve successful READ evidence only within an accepted WRITE chain, require a bounded current queued WRITE follower before certifying a mixed short tail, and revoke on finite/failed/hard closes and zero-tail samples. Keep ID99 block-saving geometry, ID98 READY-only pressure hand, K=1, ID63, one producer and 64-slot reservoir. Qualify by exact-source owner `make test`. |
+| 100 | Bounded successful-READ continuity across continuing PACK chains | **5 owner result did not recover / superseded by ID101** | Exact source `6d0ea1225339` (report `41b2c14c5f8f`) passed all five stages but fast mixed async stayed at 38.42 vs raw 62.91 MB/s with 611.5 ms undersized accepted-work idle. The deadline itself, not READ-boundary bookkeeping, was the stall; see ID101. |
+| 101 | Device-relative idle bound on the single retention timer | **4 fast_test-positive / owner qualification pending** | While a proven-dry staged window waits with no lower WRITE in flight, close at most half of one lower-WRITE service EWMA (20us floor, retain_ms cap) after idle began; never extend a deadline. Fast mixed -36% -> +8..+11% vs raw, SATA/NVMe mixed -66/-75% -> -50/-47%. Reopen only if owner SD/lifecycle evidence regresses. |
+| 102 | Pure-WRITE half bursts wait for the learned width | **4 fast_test-positive / owner qualification pending** | Under K=1 a pure-WRITE tail below the learned burst is the half staged during the previous run; merging beats ping-pong when the reissue gap is below the device's fixed latency and packs denser extents when bandwidth-bound. Fast QD8 -9% -> +21..+32%. Applying the same wait to mixed waves gave no SATA/NVMe gain and more idle-bound waits; mixed READ evidence keeps finite tails immediate. |
+| 103 | Measured-cost RAW pressure hand | **4 fast_test-positive / owner qualification pending** | Force RAW for an unprepared head only when per-page inline LZ4 exceeds half the per-block lower-WRITE service EWMA. On this host LZ4 is ~0.9 us/page, so QD8 stopped forcing 21% of records RAW (lower bytes 0.776 -> 0.747). |
+| 104 | CPU-bound ordered workqueue | **4 fast_test-positive / owner qualification pending** | The ordered owner now chains admission, K=1 completion and upper wakeups on the submitting CPU instead of waking idle remote CPUs: fast QD1 -12% -> -1.5%, QD4 -22% -> -12%, SD QD1 -4% -> -1%, ID36 pressure gate passes. Preparation stays unbound (ID7). `WQ_HIGHPRI` showed no effect and is not used. |
+| 105 | `make fast_test` development loop | **1 owner-requested / keep** | One single-pair subset of the owned matrix (~85 s default) with a compact raw/swapz table and telemetry in `build/tests/fast-test/latest.json`. Never qualifies or publishes; `make test` remains the only qualification command. |
+| 106 | Pressure-hand inline extension when LZ4 is cheap | **5 no effect / removed** | Hand closes on the NVMe trace happen when the accepted FIFO is genuinely dry, not over an unprepared queued head, so the gate never fired. |
 
 ## What the pinned queue experiment establishes
 
@@ -283,37 +268,21 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-The latest owner-qualified exact source is
-`829cdbe0d9eb9541cc3954e3af02e821a90c5595`, with canonical report-only
-commit `efb713c06daa4fc03fdd7a200032c9c243089850`. All five owner stages pass,
-so the next change is a performance-policy repair, not a correctness rollback.
-
-1. Remove the refuted 500us suppressed-tail wake, cache-hit pivot close
-   authorization and temporary `suppressed_tail_*` lifetime telemetry. Restore
-   the ordinary first-record retention deadline as the only timer boundary.
-2. Keep the qualified four-record floor for pure-WRITE post-PACK tails. Add
-   worker-owned mixed-wave evidence so an already-serviced READ or accepted
-   non-WRITE sampler boundary can make an existing two/three-record tail its
-   exact one-shot target without waiting for future arrivals.
-3. Preserve the total-count-four first-pack guard. For count greater than four,
-   retain proof that an earlier selective two-record/4KiB or
-   three-record/8KiB compressed prefix existed, and re-evaluate this proof on
-   both RAW and compressed admissions.
-4. Run the single public `make test`. Promotion requires correctness and
-   lifecycle PASS plus material recovery in fast mixed/QD4 useful service,
-   preserved QD8/QD32 direction, acceptable p99, and no material regression in
-   lower-WRITE bytes/requests, slow/SD service, CPU/RAM/GC or ID36. Exact
-   target-2/3/4 and accepted-work lower-idle counters remain the attribution
-   evidence.
-5. Keep one unbound preparation producer, the 64-slot reservoir, K=1, ordinary
-   LZ4 acceleration one, packed placement, circular allocation, ID63 and SWZ
-   geometry unchanged. The public qualification remains architecture-neutral:
-   x86 must continue the SSE2/AVX2/AVX-512 native checks and arm64 the NEON
-   checks, with runtime ISA execution only where the host advertises support.
-6. If this candidate still leaves material accepted-work lower idle after the
-   dispatch-state defects are removed, use that measured residual to decide
-   whether a second producer, a larger reservoir or multiple lower-I/O buffers
-   earns a new bounded experiment. Do not preemptively add those resources.
+1. Run the exact-source owner `make test` on the ID101–ID104 candidate. Promote
+   only with correctness/lifecycle PASS, material fast mixed and QD8 recovery,
+   preserved SD/QD32 direction, acceptable p99 and no material lower
+   bytes/request regression across the SSE2/AVX2/AVX-512/NEON matrix.
+2. Use `make fast_test` for every next scheduling candidate before spending a
+   full owner run; record refuted ideas here so they are not retried.
+3. Move upper-completion delivery and independent cache-hit READ service off
+   the single ordered owner without changing authority, publication order or
+   K=1, then re-measure SATA/NVMe mixed.
+4. Only if (3) leaves the lower device idle with ready work, or QD4 remains
+   lock-step bound, open a fresh K>1 lower-WRITE experiment; ID38's earlier
+   refutation predates the idle bound and does not decide this question.
+5. Keep one unbound preparation producer, the 64-slot reservoir, ordinary LZ4
+   acceleration one, packed placement, circular allocation, ID63 and SWZ
+   geometry unchanged.
 
 ## Deferred asynchronous segment TRIM design for review
 

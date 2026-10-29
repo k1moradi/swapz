@@ -2,7 +2,7 @@
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
 
 ## Build
 
@@ -31,14 +31,17 @@ GitHub; no second report copy is generated.
 
 ## Root Make API
 
-Exactly four commands are public:
+Exactly five commands are public:
 
 - `make`: build product artifacts without loading them.
 - `make install`: install the owned package/binary without activating swap.
 - `make uninstall`: remove only the matching owned installation.
 - `make test`: execute the complete supported qualification.
+- `make fast_test`: development-only decision loop: build the working tree,
+  run window-policy native checks and a single-pair owned null_blk subset, and
+  print one raw/swapz table. It never qualifies a source or writes the report.
 
-No extra root aliases or public test targets are permitted.
+No other root aliases or public test targets are permitted.
 
 ## Incremental builds
 

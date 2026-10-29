@@ -1223,7 +1223,8 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "delta64_prepare_pages", "delta64_prepare_parallel_starts",
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
-    "work_conserving_raw_ready", "prep_late_results_discarded"
+    "work_conserving_raw_ready", "prep_late_results_discarded",
+    "idle_bound_closes"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",
@@ -1232,7 +1233,9 @@ KERNEL_WRITE_GAUGE_FIELDS = (
     "pipeline_active_max", "k1_allow_after_read_bypass",
     "read_coalesce_max_blocks", "invalidate_cache_on_write_admit",
     "work_conserving_hand_records", "prep_ready_current", "prep_ready_max",
-    "prep_slots_in_use", "prep_slots_in_use_max")
+    "prep_slots_in_use", "prep_slots_in_use_max",
+    "lower_write_service_ewma_ns", "lower_write_block_service_ewma_ns",
+    "ordered_lz4_page_ewma_ns")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")

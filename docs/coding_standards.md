@@ -2,7 +2,7 @@
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
 
 ## Priority
 
@@ -124,7 +124,13 @@ belong in the ROADMAP decision table and Git history.
   existing eight-record pressure hand and effective learned/sampled target. After
   the serialized worker proves both accepted FIFOs dry and no K=1 WRITE is
   active, four staged records can close below a larger learned target only when
-  no authoritative sampled target is active, including compressed+RAW mixes. One-record windows keep the original pinned deadline.
+  no authoritative sampled target is active and the stream carries READ,
+  read-bypass or wave-interruption evidence, including compressed+RAW mixes.
+  A pure-WRITE stream below its learned burst width instead waits for the
+  writers its previous K=1 run released, bounded by the device-relative idle
+  bound; a pure-WRITE sampled tail below the learned width is not authoritative
+  (`swapz_window_pure_write_below_burst`). One-record windows keep the
+  original pinned deadline.
   A pure-WRITE post-PACK tail of two/three is not a finite close target; target
   four and larger still require already-accepted queued follower evidence. A
   sub-four sampled tail is finite when the current bounded snapshot observes
@@ -147,13 +153,21 @@ belong in the ROADMAP decision table and Git history.
   this finite geometry; representation order must not erase already-proved pack
   readiness.
 - **Retention deadline:** learned/admitted targets may shape aggregation, but
-  the ordinary absolute deadline remains the only timer boundary
-  ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$).
-  ID83's 500us suppressed-tail wake and cache-hit pivot policy are refuted by the
-  exact-source `829cdbe0d9eb` owner result and must stay removed. There is no
-  microsecond rearm, second timer or grace wait for a future arrival. A deferred
-  sampled singleton still uses only the ordinary deadline; ID53 remains
-  rejected. Hard ordering boundaries reset retained scheduling evidence.
+  one retention timer bounds every retained window. Its deadline is the
+  first-record deadline
+  ($t_{\text{deadline}} = t_{\text{first}} + \text{retain\_ms} \times 1\text{ ms}$),
+  made earlier only by the device-relative idle bound: once the worker has
+  proven both accepted FIFOs dry with staged work and no lower WRITE in flight,
+  the window closes at most half of one lower-WRITE service EWMA after that idle
+  interval began (floored at 20us, capped at retain_ms). The bound never extends
+  a deadline; a queued timer may only be moved earlier. The pre-BIO deadline
+  flush uses the first-record deadline only, so an arrival at idle-bound expiry
+  joins the window that the end-of-pass expiry then closes. Successful lower
+  WRITEs (synchronous and detached) feed the ordered-worker-owned 1/8 EWMA. There
+  is no second timer, no microsecond grace wait for a future arrival and no
+  ID83 suppressed-tail wake or cache-hit pivot. A deferred sampled singleton
+  uses the same deadline; ID53 remains rejected. Hard ordering boundaries reset
+  retained scheduling evidence.
 - **In-flight write reaping:** completed detached $K=1$ lower writes are reaped
   opportunistically inside the worker loop so upper BIOs receive `bio_endio()`
   immediately without waiting for the full 64-BIO quantum or retention expiration.
@@ -179,7 +193,11 @@ belong in the ROADMAP decision table and Git history.
   preparation work can overlap; without that overlap, dispatch synchronously,
   preserving all FUA/verification and publication fences. Keep the first three
   inline-stolen pages eligible for ordinary LZ4; idle lower service may choose
-  RAW on later pages using the existing stable-snapshot/atomic state rules.
+  RAW on later pages using the existing stable-snapshot/atomic state rules only
+  when measured inline LZ4 per page exceeds half of the per-block lower-WRITE
+  service EWMA (`swapz_window_raw_hand_pays`): a RAW record costs about half a
+  block of extra lower WRITE and host writes, so fast compression always keeps
+  the compressed representation.
 - **Pressure-hand dispatchability:** At the existing eight-record
   work-conserving hand, continue the current retained window only when the next
   already-accepted plain WRITE has a completed prepared snapshot in
@@ -598,13 +616,17 @@ rechecks list shape under the same `queue_lock` before consuming the token.
 READ/barrier execution may still grant one bounded tail token while it owns
 ordered service time.
 
-The ordered Device Mapper worker and LZ4 preparation worker both use
-serialized `WQ_MEM_RECLAIM | WQ_UNBOUND` workqueues. The CPU-local preparation
-experiment increased measured lower-I/O/LZ4 overlap but regressed useful mixed
+The ordered Device Mapper worker uses a single-active, CPU-bound
+`WQ_MEM_RECLAIM` workqueue: admission, K=1 completion and upper wakeups then
+chain on the submitting CPU instead of waking idle remote CPUs, which removed
+most of the QD1 software gap. The LZ4 preparation worker keeps its serialized
+`WQ_MEM_RECLAIM | WQ_UNBOUND` workqueue; the CPU-local preparation experiment
+increased measured lower-I/O/LZ4 overlap but regressed useful mixed
 throughput, lower-WRITE request geometry and worker-empty deadlines, so bound
-placement is rejected and must not remain as production state. The single
-preparation `work_struct` remains non-reentrant system-wide; scheduling
-placement never changes FIFO, publication, completion or lower-I/O ownership.
+preparation placement is rejected. `WQ_HIGHPRI` showed no measurable effect
+and is not used. Both `work_struct`s remain non-reentrant system-wide;
+scheduling placement never changes FIFO, publication, completion or
+lower-I/O ownership.
 
 Performance attribution belongs in kernel C at phase boundaries. Explicit RAM
 copies are timed and byte-counted separately from LZ4. Engine write/read

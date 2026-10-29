@@ -535,6 +535,77 @@ static int test_ordinary_retention_deadline_is_pinned(void)
 	return 0;
 }
 
+static int test_idle_bound_scales_with_lower_service(void)
+{
+	/* No retention means no timer; no sample keeps the ordinary deadline. */
+	CHECK(swapz_window_idle_bound_ns(150000ULL, 0) == 0);
+	CHECK(swapz_window_idle_bound_ns(0, 2) == 2000000ULL);
+	/* Half of one lower service interval, floored and capped. */
+	CHECK(swapz_window_idle_bound_ns(190000ULL, 2) == 95000ULL);
+	CHECK(swapz_window_idle_bound_ns(30000ULL, 2) ==
+	      SWAPZ_WINDOW_IDLE_BOUND_MIN_NS);
+	CHECK(swapz_window_idle_bound_ns(10000000ULL, 2) == 2000000ULL);
+	CHECK(swapz_window_idle_bound_ns(10000000ULL, 4) == 4000000ULL);
+	return 0;
+}
+
+static int test_effective_deadline_only_moves_earlier(void)
+{
+	unsigned long long first = swapz_window_retention_deadline_ns(1000000ULL, 2);
+
+	/* No lower-idle interval or bound: the pinned first-record deadline. */
+	CHECK(swapz_window_effective_deadline_ns(first, 0, 95000ULL) == first);
+	CHECK(swapz_window_effective_deadline_ns(first, 1500000ULL, 0) == first);
+	CHECK(swapz_window_effective_deadline_ns(0, 1500000ULL, 95000ULL) == 0);
+	/* An idle interval makes it earlier, never later. */
+	CHECK(swapz_window_effective_deadline_ns(first, 1500000ULL, 95000ULL) ==
+	      1595000ULL);
+	CHECK(swapz_window_effective_deadline_ns(first, 2950000ULL, 95000ULL) ==
+	      first);
+	CHECK(swapz_window_effective_deadline_ns(first, ~0ULL - 1ULL, 95000ULL) ==
+	      first);
+	return 0;
+}
+
+static int test_lower_service_ewma(void)
+{
+	unsigned long long ewma = 0;
+
+	CHECK(swapz_window_ewma_update(0, 0) == 0);
+	ewma = swapz_window_ewma_update(ewma, 160000ULL);
+	CHECK(ewma == 160000ULL);
+	CHECK(swapz_window_ewma_update(ewma, 0) == ewma);
+	ewma = swapz_window_ewma_update(ewma, 240000ULL);
+	CHECK(ewma == 170000ULL);
+	return 0;
+}
+
+static int test_pure_write_half_burst_waits_for_learned_width(void)
+{
+	/* QD8 under K=1: four staged while the run flew, four just released. */
+	CHECK(swapz_window_pure_write_below_burst(0, 4, 8));
+	CHECK(!swapz_window_pure_write_below_burst(0, 8, 8));
+	CHECK(!swapz_window_pure_write_below_burst(0, 9, 8));
+	/* Mixed READ/non-WRITE evidence keeps finite tails immediate. */
+	CHECK(!swapz_window_pure_write_below_burst(1, 4, 8));
+	/* No learned width: the existing floor policy decides. */
+	CHECK(!swapz_window_pure_write_below_burst(0, 4, 0));
+	return 0;
+}
+
+static int test_raw_hand_pays_only_for_slow_compression(void)
+{
+	/* Missing evidence keeps the existing pressure hand. */
+	CHECK(swapz_window_raw_hand_pays(0, 38000ULL));
+	CHECK(swapz_window_raw_hand_pays(900ULL, 0));
+	/* Sub-microsecond LZ4 never beats tens of microseconds per block. */
+	CHECK(!swapz_window_raw_hand_pays(900ULL, 38000ULL));
+	CHECK(!swapz_window_raw_hand_pays(900ULL, 6500ULL));
+	/* Slow compression in front of a fast device prefers RAW. */
+	CHECK(swapz_window_raw_hand_pays(4000ULL, 6500ULL));
+	return 0;
+}
+
 static int test_section_wall_ns_never_underflows(void)
 {
 	CHECK(swapz_elapsed_ns(100, 170) == 70ULL);
@@ -635,6 +706,11 @@ int main(void)
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_ordinary_retention_deadline_is_pinned() == 0); passed++;
+	CHECK(test_idle_bound_scales_with_lower_service() == 0); passed++;
+	CHECK(test_effective_deadline_only_moves_earlier() == 0); passed++;
+	CHECK(test_lower_service_ewma() == 0); passed++;
+	CHECK(test_pure_write_half_burst_waits_for_learned_width() == 0); passed++;
+	CHECK(test_raw_hand_pays_only_for_slow_compression() == 0); passed++;
 	CHECK(test_uniform_compressed_identity_sort_safety() == 0); passed++;
 	CHECK(test_section_wall_ns_never_underflows() == 0); passed++;
 	CHECK(test_disabled_or_missing_timestamp_expires() == 0); passed++;

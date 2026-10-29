@@ -2,7 +2,7 @@
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
 
 ## Mission
 
@@ -47,24 +47,19 @@ wait solely to make a representation more compact when doing so loses more
 useful service than the saved lower I/O is worth. Slow media should naturally
 receive more completed compression because long lower service provides
 preparation overlap; fast media may trade some lower bytes for continuous
-service. Alpha.29 established the first bounded candidate without changing SWZ: the
-existing per-BIO descriptor queue remains the low-copy admission queue and the
-64-slot preparation array is the stable RAW+compressed reservoir. The latest
-owner `make test` passes full correctness/lifecycle qualification on source
-`5edcb2981573` (latest same-source report `926decb9f64c`). That repeat
-confirms asynchronous preparation can beat synchronous service on fast mixed
-I/O (+6.0%, 95% CI +1.0..+11.0), but swapz still trails raw useful WRITE by
-32.5%. Accepted lower-idle attribution assigns 630.82/697.65 ms to undersized
-retention while K=1 ready wait remains zero, identifying dispatch retention
-rather than preparation starvation or lower-WRITE depth as the dominant
-remaining cost. The bounded candidate therefore keeps K=1/SWZ/authority, one
-producer, the 64-slot reservoir and the eight-record active-wave pressure hand
-unchanged while allowing a worker-proven-dry retained window to SERVICE_DRY
-close at a valid staged four-record pack; 1..3 records retain the existing
-absolute deadline and sampled finite tails remain authoritative. The stable RAW
-snapshot remains a mandatory ownership boundary. Promotion requires same-source
-owner evidence that materially closes the fast raw-service gap without losing
-the SD gains, lower-I/O geometry, p99/lifecycle safety or QD8/QD32 service.
+service. The idle wait that retention may spend is therefore relative to the
+device: once accepted work is staged, both accepted FIFOs are dry and no lower
+WRITE is in flight, a window waits at most half of one measured lower-WRITE
+service time, never a fixed millisecond timer that a fast device cannot repay.
+RAW is chosen for latency only when measured compression time exceeds the lower
+service its extra bytes would cost, so fast compression keeps both the
+throughput and the host-write reduction. The existing per-BIO descriptor queue
+remains the low-copy admission queue and the 64-slot preparation array the
+stable RAW+compressed reservoir; K=1, SWZ and the single authority are
+unchanged. The ID101–ID104 candidate (see ROADMAP) moves fast mixed, fast QD8
+and fast QD32 above raw useful WRITE while writing 25–31% fewer lower bytes and
+keeps the SD gains; SATA/NVMe mixed and fast QD4 still trail raw and are the
+next targets. Promotion requires same-source owner `make test` evidence.
 
 The next qualification priorities are work-conserving fast-media dispatch,
 realistic churn/GC/TRIM evidence and representative-content evidence, not

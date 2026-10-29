@@ -285,6 +285,23 @@ static inline swapz_u8 swapz_window_sampled_tail_target(
 }
 
 /*
+ * A pure-WRITE closed-loop burst below its learned width is not finite work.
+ * Under K=1 the records staged while the previous lower run was in flight are
+ * one half of the burst; the writers that run just released are about to
+ * rejoin it. With fixed per-request device latency L0 and reissue gap g, one
+ * merged request beats two serialized half requests whenever g < L0, and a
+ * larger window also packs denser extents when the device is bandwidth bound.
+ * Treating the half as authoritative instead locks K=1 into ping-pong half
+ * windows. The device-relative idle bound caps the wait when g is large, and
+ * accepted READ/non-WRITE evidence keeps mixed tails immediately finite.
+ */
+static inline int swapz_window_pure_write_below_burst(
+		int mixed_wave, swapz_u8 count, swapz_u8 learned_target)
+{
+	return !mixed_wave && learned_target && count < learned_target;
+}
+
+/*
  * SERVICE_DRY is allowed below the four-record floor only for an already
  * staged valid pack when read-bypass or wave-interruption evidence proves
  * the accepted wave was broken. If both accepted FIFOs are dry and the lower
@@ -490,8 +507,87 @@ static inline int swapz_window_deadline_expired(unsigned long long deadline_ns,
 }
 
 /*
- * A queued hrtimer already carries the immutable first-record deadline.
- * Rearm only after the previous timer has dequeued; never extend the window.
+ * Device-relative idle bound. Once the serialized worker has proven both
+ * accepted FIFOs dry while a staged window waits and no lower WRITE is in
+ * flight, every further nanosecond of retention is lower-device idle time.
+ * Waiting can only pay for itself if a companion arrives soon enough that one
+ * lower request replaces two serialized ones, so bound the idle wait by half
+ * of one measured lower-WRITE service time: an early close then costs at most
+ * one extra service interval for late companions, and a futile wait costs at
+ * most half of one. Slow media keep (almost) the whole retain_ms budget;
+ * fast media stop paying a fixed millisecond-scale timer for closed-loop
+ * tails whose submitters are blocked on exactly these records. Without a
+ * service sample the ordinary retain_ms deadline is unchanged.
+ */
+#define SWAPZ_WINDOW_IDLE_BOUND_MIN_NS 20000ULL
+
+static inline unsigned long long swapz_window_idle_bound_ns(
+		unsigned long long service_ewma_ns, swapz_u8 retain_ms)
+{
+	unsigned long long cap = (unsigned long long)retain_ms * 1000000ULL;
+	unsigned long long bound;
+
+	if (!retain_ms)
+		return 0;
+	if (!service_ewma_ns)
+		return cap;
+	bound = service_ewma_ns / 2U;
+	if (bound < SWAPZ_WINDOW_IDLE_BOUND_MIN_NS)
+		bound = SWAPZ_WINDOW_IDLE_BOUND_MIN_NS;
+	return bound < cap ? bound : cap;
+}
+
+/*
+ * The effective retained deadline never extends the first-record deadline;
+ * an active lower-idle interval may only make it earlier.
+ */
+static inline unsigned long long swapz_window_effective_deadline_ns(
+		unsigned long long first_deadline_ns,
+		unsigned long long idle_start_ns, unsigned long long idle_bound_ns)
+{
+	unsigned long long idle_deadline;
+
+	if (!first_deadline_ns || !idle_start_ns || !idle_bound_ns)
+		return first_deadline_ns;
+	idle_deadline = idle_start_ns > ~0ULL - idle_bound_ns ?
+		~0ULL : idle_start_ns + idle_bound_ns;
+	return idle_deadline < first_deadline_ns ?
+		idle_deadline : first_deadline_ns;
+}
+
+/*
+ * RAW-for-latency trade. Skipping inline LZ4 for an unprepared head saves
+ * that page's compression time of lower idle, but a RAW record occupies a
+ * whole block where the compressed one needs about half, so it costs about
+ * half a block of extra lower WRITE service (and host writes) later. Per-block
+ * service measured from whole requests includes fixed latency and is an upper
+ * bound on the marginal block cost, so this errs toward RAW when compression
+ * is slow. Without both samples the existing pressure hand is unchanged.
+ */
+static inline int swapz_window_raw_hand_pays(
+		unsigned long long lz4_page_ewma_ns,
+		unsigned long long block_service_ewma_ns)
+{
+	if (!lz4_page_ewma_ns || !block_service_ewma_ns)
+		return 1;
+	return lz4_page_ewma_ns * 2U > block_service_ewma_ns;
+}
+
+/* 1/8 EWMA for ordered-worker lower-WRITE service and inline LZ4 samples. */
+static inline unsigned long long swapz_window_ewma_update(
+		unsigned long long ewma_ns, unsigned long long sample_ns)
+{
+	if (!sample_ns)
+		return ewma_ns;
+	if (!ewma_ns)
+		return sample_ns;
+	return ewma_ns - ewma_ns / 8U + sample_ns / 8U;
+}
+
+/*
+ * A queued hrtimer already carries the effective deadline. Rearm after it has
+ * dequeued; the caller may also move a queued timer earlier when an idle bound
+ * begins, but never extends the window.
  */
 static inline int swapz_retention_timer_needs_arm(swapz_u8 retain_ms, int queued)
 {
