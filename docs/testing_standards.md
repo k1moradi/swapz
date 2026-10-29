@@ -508,6 +508,35 @@ five-pair statistical protocols. Physical-device admission remains separately
 blocked.
 
 
+### zswap collaboration qualification
+
+zswap-aware policy is a future actual-swap gate and is not authorized by the
+current RAM-backed `null_blk` qualification scope. Do not add `swapon` or
+`swapoff` to `make test` until the owner separately authorizes real kernel
+swap semantics.
+
+Before any zswap-origin policy can promote, direct/source tests must prove that
+the origin signal is explicit and preserved end-to-end rather than inferred
+from `REQ_SWAP`, PID/current task or incidental folio flags. Loaded
+qualification, once separately authorized, must force and distinguish:
+
+- a page accepted and retained by zswap with no immediate backing WRITE;
+- an initial zswap rejection that proceeds to backing swap I/O;
+- a previously compressed zswap entry evicted through zswap writeback;
+- byte-exact swap-in/readback after the zswap-writeback page was stored RAW by
+  swapz;
+- ordering, DISCARD/free-slot reuse, fault, suspend/drain and GC interactions
+  without a second completion owner.
+
+For the first explicit-origin candidate, report tagged zswap-writeback count,
+swapz compression attempts on tagged writes (required zero), RAW tagged pages,
+useful throughput/p99, CPU time and independent lower WRITE bytes/requests
+against the same zswap-enabled control that recompresses normally. A service
+gain with materially higher lower traffic is a tradeoff, not an automatic
+product win. Same-folio packing remains telemetry-only until swap-in locality
+evidence shows predictive value.
+
+
 Source contracts should assert retained scheduling semantics rather than a
 particular obsolete branch spelling: retained writes must reach the ordered
 worker immediately, while retention-off ordinary writes retain zero-delay

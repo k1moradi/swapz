@@ -245,6 +245,56 @@ opportunity, metadata density, selective read amplification, CRC scope,
 recovery, GC movement and random swap-in cost. It requires separate evidence
 before any on-disk-format change.
 
+
+## zswap collaboration and MM-locality roadmap
+
+The Linux swap/MM boundary and the information actually visible to Device
+Mapper are documented in [memory-swap-context.md](memory-swap-context.md).
+Keep this work separate from application-object claims: swapz can observe
+logical swap pages and page/folio backing while the BIO is owned, but it does
+not receive malloc/C++ object identity, VMA ownership or reclaim-generation
+semantics.
+
+Current upstream zswap has two materially different backing paths. An initial
+`zswap_store()` rejection may fall through to normal swap I/O. A page that was
+successfully stored compressed in zswap can later be evicted by
+`zswap_writeback_entry()`; that path reconstructs a swap-cache folio by
+decompressing the zswap entry and only then resumes ordinary backing I/O.
+Consequently current swapz sees decompressed page bytes and `REQ_SWAP`, not the
+zswap compressed payload or a stable zswap-origin marker.
+
+The collaboration plan is:
+
+1. Add passive MM/swap telemetry only after actual-kernel-swap qualification is
+   separately authorized. Distinguish ordinary backing writes, initial zswap
+   rejection and later zswap writeback; do not infer a product policy from
+   `REQ_SWAP`, PID/current task or the current drop-behind implementation
+   detail.
+2. Prototype an explicit upstream origin contract from zswap writeback through
+   swap I/O and Device Mapper. The origin bit must describe semantics, survive
+   BIO cloning/splitting and require no lookup back into zswap after ownership
+   has moved.
+3. For an explicitly tagged zswap writeback, make the first swapz candidate
+   bypass ordinary LZ4/delta64 and use the existing stable 4KiB RAW path. This
+   avoids decompress-in-zswap then recompress-in-swapz CPU work without changing
+   SWZ, mapping authority, ordering or completion ownership. Measure the saved
+   CPU/service time against the extra lower bytes/requests on fast, SATA/NVMe
+   and serial-depth models before promotion.
+4. Keep direct reuse of zswap's compressed payload as a separate later
+   experiment. It is allowed only with explicit compressor/encoding identity,
+   payload lifetime, integrity and compatible read-side decoding; zswap bytes
+   are not implicitly SWZ LZ4.
+5. Collect same-folio and adjacent-logical-page swap-in locality before changing
+   packing. If positive, locality may break ties between byte/read/extent-cost
+   equivalent layouts only; it may never wait for future pages or increase
+   physical blocks merely to keep a group together.
+
+Current swapz limits upper swap BIOs to one 4KiB logical page. Linux can group
+compatible swap folios above Device Mapper, so a future evidence-only experiment
+should also quantify how much useful grouping is lost at that split before
+considering larger upper-BIO admission. Retain independently decodable 4KiB SWZ
+records unless separate format evidence justifies otherwise.
+
 ## Deferred content/concurrency evidence backlog
 
 The alpha.24 policy change only enables the already implemented bounded

@@ -71,6 +71,39 @@ Every implementation task updates the relevant governing standard in the same co
 Never reboot, `swapon`, `swapoff`, mount test storage, force-remove mappings or touch physical/unowned devices. Loaded development uses only positively owned RAM-backed `null_blk` with exact identity checks and ordinary teardown/quarantine.
 
 
+## MM, folio and zswap semantic boundary
+
+Read [memory-swap-context.md](memory-swap-context.md) before changing policy
+based on RAM identity, swap locality, folios or zswap. swapz's correctness
+identity remains the independently reconstructible 4KiB logical page. A folio,
+VMA, PID or temporal reclaim burst is not an application-object boundary.
+
+Same-folio membership and adjacent logical swap pages may become packing hints
+only for work already accepted by swapz. They may break ties only after the
+existing lower-byte, bounded cold-read and extent-count objectives; they must
+never delay dispatch, wait for a future page, increase physical blocks merely
+to preserve a group, or change publication/completion ownership.
+
+`REQ_SWAP` identifies swap I/O but does not identify zswap origin. Current
+upstream zswap writeback decompresses its stored entry into a swap-cache folio
+before issuing ordinary backing swap I/O. Do not make production policy depend
+on incidental folio flags such as drop-behind to infer zswap origin. A zswap-
+aware representation policy requires an explicit end-to-end origin contract
+that survives the block/Device Mapper path.
+
+The first explicit zswap-writeback candidate must reuse the existing RAW
+representation: after the stable 4KiB snapshot is owned, skip ordinary
+LZ4/delta64 preparation for that tagged generation and dispatch through the
+same authority, CRC/generation, ordering and completion rules. This introduces
+no new SWZ type. Treat CPU/latency versus lower-byte/request cost as measured
+product evidence, not an assumed win.
+
+Passing zswap's compressed bytes directly is a separate later experiment. It
+requires explicit compressor/encoding identity, integrity, bounded ownership
+and compatible read-side decoding; arbitrary zswap storage must never be
+relabelled as ordinary SWZ LZ4.
+
+
 ### Deferred content-sharing and concurrency experiments
 
 Same-filled-page and dedup optimizations must preserve the existing authority
