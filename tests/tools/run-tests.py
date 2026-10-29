@@ -328,6 +328,9 @@ KERNEL_WRITE_FIELDS = (
     "pipeline_read_bypass_skips",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "pipeline_post_lower_wall_ns",
+    "write_admit_worker_samples", "write_admit_worker_wall_ns",
+    "sync4_windows", "sync4_wall_ns", "sync4_lower_write_ns",
+    "sync4_nonio_ns", "sync4_reissue_samples", "sync4_reissue_gap_ns",
     "write_wait_le1ms", "write_wait_1to4ms",
     "write_wait_gt4ms", "delta64_prepare_pages",
     "delta64_prepare_parallel_starts",
@@ -4518,6 +4521,11 @@ def benchmark_verdicts(sessions):
                        record["engine_publish_crc_wall_ns"] +
                            record["engine_publish_auth_wall_ns"] !=
                            record["engine_publish_wall_ns"] or
+                       record["sync4_lower_write_ns"] +
+                           record["sync4_nonio_ns"] !=
+                           record["sync4_wall_ns"] or
+                       record["sync4_reissue_samples"] >
+                           record["sync4_windows"] or
                        timed_window_error(record) is not None or
                        record["prep_lower_write_start_nonempty"] >
                            record["prep_lower_write_samples"] or

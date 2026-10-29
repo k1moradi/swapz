@@ -1219,6 +1219,9 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "pipeline_async_runs", "pipeline_read_bypass_skips",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "pipeline_post_lower_wall_ns",
+    "write_admit_worker_samples", "write_admit_worker_wall_ns",
+    "sync4_windows", "sync4_wall_ns", "sync4_lower_write_ns",
+    "sync4_nonio_ns", "sync4_reissue_samples", "sync4_reissue_gap_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms",
     "delta64_prepare_pages", "delta64_prepare_parallel_starts",
     "work_conserving_hand_closes", "work_conserving_dry_closes",
@@ -1277,6 +1280,11 @@ def kernel_write_delta(before, after):
     if sum(counters[field] for field in idle_parts) != \
             counters["accepted_work_lower_idle_ns"]:
         raise ValueError("inconsistent accepted lower-idle attribution")
+    if counters["sync4_lower_write_ns"] + counters["sync4_nonio_ns"] != \
+            counters["sync4_wall_ns"]:
+        raise ValueError("inconsistent synchronous four-record attribution")
+    if counters["sync4_reissue_samples"] > counters["sync4_windows"]:
+        raise ValueError("invalid synchronous four-record reissue samples")
     if (before["delta64_rescue"] != after["delta64_rescue"] or
             after["delta64_rescue"] not in (0, 1)):
         raise ValueError("invalid or changed swapz delta64 policy")

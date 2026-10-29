@@ -398,6 +398,37 @@ experiment in ROADMAP ID110 is rejected rather than promoted. Delta64 remains
 default-off pending representative-content prevalence. Long-run churn, actual
 kernel swap and physical media remain separate qualification gates.
 
+## Immediate K=1 critical-path profiling gate (ID114)
+
+The profiling-only source keeps K=1, the existing four-record service rule, one
+unbound preparation producer, the 64-slot reservoir, ordinary LZ4 acceleration
+one and current SWZ geometry. `make fast_test` defaults to three repeats each
+of SATA mixed, NVMe4 mixed, fast mixed, fast QD4 and fast QD8. The existing
+pre/post host-noise and raw-repeat-spread screens remain exclusion gates:
+NOISY/UNKNOWN runs may verify correctness and telemetry plumbing but cannot
+support a performance keep/remove decision.
+
+The timed kernel interval must expose nonnegative
+`write_admit_worker_samples/write_admit_worker_wall_ns` and synchronous
+four-record `sync4_*` counters. For every interval,
+`sync4_lower_write_ns + sync4_nonio_ns == sync4_wall_ns` and
+`sync4_reissue_samples <= sync4_windows`. Admission timing is accepted WRITE
+to first ordered-worker ownership; accepted-idle
+`accepted_work_lower_idle_worker_unscheduled_ns` remains the narrower
+wake-to-worker scheduling attribution. Ordered-worker CPU comes from scheduler
+runtime and must be reported separately from lower-I/O waits and off-CPU wall
+time.
+
+Development decisions retain absolute raw/swapz useful throughput, READ/WRITE
+p99 and independent lower WRITE bytes/requests alongside the compact phase
+breakdown. Detailed per-run telemetry remains under
+`build/tests/fast-test/latest.json`; it is development evidence only and never
+updates `test_results.json`. After profiling, test at most one narrow
+production-C candidate at a time with matched screened `make fast_test`
+comparisons. A kept candidate requires the ordinary correctness stages, ARM64
+history refresh, and exact-source owner `make test` qualification. Profiling
+counters themselves do not establish a performance gain.
+
 ## Deferred optimization evidence gates
 
 - **ID113 folio locality:** currently a source audit and bounded measurement

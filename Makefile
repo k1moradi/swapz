@@ -54,9 +54,11 @@ uninstall:
 test:
 	@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)"
 
-# Development-only quick loop: build, window-policy native checks and a
-# single-pair owned null_blk subset with one compact raw/swapz table.
-# It accepts dirty trees, never writes test_results.json and never
-# qualifies a source. Optional: SCENARIOS=fast-mixed,fast-w8 REPEAT=3.
+# Development-only K=1 profiling loop: build, native checks and three
+# repeated owned-null_blk pairs for SATA mixed, NVMe4 mixed, fast mixed,
+# fast QD4 and fast QD8, with compact raw/swapz and critical-path tables.
+# It accepts dirty trees, honors the noise screen, never writes
+# test_results.json and never qualifies a source. Override with
+# SCENARIOS=... and/or REPEAT=1..10 when narrowing a follow-up.
 fast_test:
 	@+python3 -B tests/tools/fast-test.py

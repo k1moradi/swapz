@@ -2499,6 +2499,14 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("accepted_work_lower_idle_post_lower_ns", replay)
         self.assertIn("inconsistent accepted lower-idle attribution", replay)
         self.assertIn("inconsistent accepted lower-idle attribution", runner)
+        for field in ("write_admit_worker_samples",
+                      "write_admit_worker_wall_ns", "sync4_windows",
+                      "sync4_wall_ns", "sync4_lower_write_ns",
+                      "sync4_nonio_ns", "sync4_reissue_samples",
+                      "sync4_reissue_gap_ns"):
+            self.assertIn(field, replay)
+            self.assertIn(field, runner)
+        self.assertIn("inconsistent synchronous four-record attribution", replay)
         self.assertIn("pack_close_burst_target_5_8", replay)
         self.assertIn("single_tail_comp_age_1001_1250us", runner)
         self.assertIn("ordered_worker_cpu_ns", runner)
@@ -2510,6 +2518,15 @@ static swapz_u16 swapz_probe_set(
             runner)
         self.assertIn(
             "Never use full-process window counters for the QD pilot", runner)
+        fast = (ROOT / "tests/tools/fast-test.py").read_text()
+        self.assertIn('"sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8"', fast)
+        self.assertIn('os.environ.get("REPEAT", "3")', fast)
+        self.assertIn("K=1 critical-path profile", fast)
+        dm = (ROOT / "src/kernel/dm-target.c").read_text()
+        self.assertIn("entry->admitted_ns = ktime_get_ns()", dm)
+        self.assertIn("ctx->write_admit_worker_samples++", dm)
+        self.assertIn("ctx->sync4_windows++", dm)
+        self.assertIn("sync4_reissue_gap_ns", dm)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
         deadline = body("swapz_first_record_deadline_ns")

@@ -16,6 +16,7 @@ import os
 import re
 import runpy
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -47,8 +48,7 @@ MODELS = {
               "--hw-queue-depth", "64", "--completion-nsec", "14000"],
 }
 DEFAULT_SCENARIOS = (
-    "fast-mixed", "fast-w1", "fast-w4", "fast-w8", "fast-w32",
-    "sd-mixed", "sd-w1", "sd-w32", "sata-mixed", "nvme4-mixed",
+    "sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8",
 )
 
 
@@ -224,6 +224,27 @@ def summarize(name, arms, seconds):
         "service_us": (kernel.get("lower_write_service_ewma_ns") or 0) / 1e3,
         "idle_ms": (kernel.get("accepted_work_lower_idle_ns") or 0) / 1e6,
         "lw_busy_ms": (kernel.get("lower_write_wall_ns") or 0) / 1e6,
+        "admit_samples": kernel.get("write_admit_worker_samples") or 0,
+        "admit_ms": (kernel.get("write_admit_worker_wall_ns") or 0) / 1e6,
+        "worker_wall_ms": (kernel.get("ordered_worker_wall_ns") or 0) / 1e6,
+        "worker_cpu_ms": (kernel.get("ordered_worker_cpu_ns") or 0) / 1e6,
+        "idle_unsched_ms":
+            (kernel.get("accepted_work_lower_idle_worker_unscheduled_ns") or 0) / 1e6,
+        "prepare_copy_ms": sum((kernel.get(key) or 0) for key in (
+            "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
+            "ordered_write_copy_wall_ns", "prep_write_copy_wall_ns")) / 1e6,
+        "order_plan_ms": sum((kernel.get(key) or 0) for key in (
+            "window_sort_wall_ns", "engine_plan_wall_ns")) / 1e6,
+        "pack_crc_ms": sum((kernel.get(key) or 0) for key in (
+            "engine_pack_wall_ns", "ordered_crc_wall_ns", "prep_crc_wall_ns")) / 1e6,
+        "publish_ms": (kernel.get("engine_publish_wall_ns") or 0) / 1e6,
+        "post_lower_ms": (kernel.get("pipeline_post_lower_wall_ns") or 0) / 1e6,
+        "sync4_windows": kernel.get("sync4_windows") or 0,
+        "sync4_wall_ms": (kernel.get("sync4_wall_ns") or 0) / 1e6,
+        "sync4_lower_ms": (kernel.get("sync4_lower_write_ns") or 0) / 1e6,
+        "sync4_nonio_ms": (kernel.get("sync4_nonio_ns") or 0) / 1e6,
+        "sync4_reissue_samples": kernel.get("sync4_reissue_samples") or 0,
+        "sync4_reissue_ms": (kernel.get("sync4_reissue_gap_ns") or 0) / 1e6,
         "wall_s": swapz.get("seconds") or 0.0,
         "pair_s": seconds,
     }
@@ -277,11 +298,75 @@ def print_table(rows):
           "SCREENED does not establish an idle host.")
 
 
+def print_profile(rows):
+    """Compact ID114 summary; detailed per-run reports stay in latest.json."""
+    groups = {}
+    for row in rows:
+        if "error" in row:
+            continue
+        groups.setdefault(row["scenario"].split("#")[0], []).append(row)
+
+    print("\nK=1 critical-path profile (SCREENED repeats only)")
+    header = (f"{'scenario':<12} {'n':>3} {'admit us':>9} {'worker cpu':>10} "
+              f"{'idle sched':>10} {'prep/copy':>10} {'ord/plan':>9} "
+              f"{'pack/crc':>9} {'lower':>9} {'publish':>9} {'post':>8}")
+    print(header)
+    print("-" * len(header))
+    for name, group in groups.items():
+        usable = [row for row in group
+                  if row["performance_validity"]["performance_usable"]]
+        if not usable:
+            print(f"{name:<12} {0:>3} {'excluded':>9}")
+            continue
+
+        def mean(field):
+            return statistics.mean(row[field] for row in usable)
+
+        admit_samples = sum(row["admit_samples"] for row in usable)
+        admit_ms = sum(row["admit_ms"] for row in usable)
+        admit_us = admit_ms * 1000.0 / admit_samples if admit_samples else 0.0
+        print(f"{name:<12} {len(usable):3d} {admit_us:9.2f} "
+              f"{mean('worker_cpu_ms'):10.2f} {mean('idle_unsched_ms'):10.2f} "
+              f"{mean('prepare_copy_ms'):10.2f} {mean('order_plan_ms'):9.2f} "
+              f"{mean('pack_crc_ms'):9.2f} {mean('lw_busy_ms'):9.2f} "
+              f"{mean('publish_ms'):9.2f} {mean('post_lower_ms'):8.2f}")
+    print("  admit us = accepted WRITE -> first ordered-worker ownership; "
+          "idle sched = accepted lower-idle after a wake until worker entry.")
+    print("  worker CPU is scheduler-accounted on-CPU time. Other wall rows can overlap; "
+          "latest.json retains every raw counter.")
+
+    sync_groups = []
+    for name, group in groups.items():
+        usable = [row for row in group
+                  if row["performance_validity"]["performance_usable"]]
+        windows = sum(row["sync4_windows"] for row in usable)
+        if windows:
+            sync_groups.append((name, usable, windows))
+    if sync_groups:
+        print("\nSynchronous four-record cycle")
+        header = (f"{'scenario':<12} {'win':>6} {'cycle us':>10} "
+                  f"{'lower us':>10} {'nonio us':>10} {'reissue us':>11}")
+        print(header)
+        print("-" * len(header))
+        for name, usable, windows in sync_groups:
+            wall = sum(row["sync4_wall_ms"] for row in usable)
+            lower = sum(row["sync4_lower_ms"] for row in usable)
+            nonio = sum(row["sync4_nonio_ms"] for row in usable)
+            samples = sum(row["sync4_reissue_samples"] for row in usable)
+            gaps = sum(row["sync4_reissue_ms"] for row in usable)
+            print(f"{name:<12} {windows:6d} {wall * 1000.0 / windows:10.2f} "
+                  f"{lower * 1000.0 / windows:10.2f} "
+                  f"{nonio * 1000.0 / windows:10.2f} "
+                  f"{(gaps * 1000.0 / samples if samples else 0.0):11.2f}")
+        print("  reissue = previous successful synchronous four-record completion "
+              "to the next successful four-record commit start.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--scenarios", default=os.environ.get("SCENARIOS", ""))
     parser.add_argument("--repeat", type=int,
-                        default=int(os.environ.get("REPEAT", "1") or 1))
+                        default=int(os.environ.get("REPEAT", "3") or 3))
     args = parser.parse_args()
     scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
         or list(DEFAULT_SCENARIOS)
@@ -349,6 +434,7 @@ def main():
                     "reports": raw_reports}, sort_keys=True) + "\n")
     print()
     print_table(rows)
+    print_profile(rows)
     print(f"\n  Detailed telemetry: {(OUT_DIR / 'latest.json').relative_to(ROOT)} "
           f"(total {time.monotonic() - started:.0f}s)")
     return status

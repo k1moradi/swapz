@@ -214,6 +214,7 @@ changes.
 | 111 | Compact automatic host-noise screen for development comparisons | **1 owner-requested / keep** | `make fast_test` adds 200ms pre/post quiet CPU/PSI/steal deltas, timed steal and >10% same-scenario raw-repeat spread checks. `NOISY`/`UNKNOWN` results set `performance_validity.performance_usable=false`, retain all evidence and print compact reasons. Timed workload CPU/PSI alone is never external-noise proof. Thresholds are conservative screening heuristics; `SCREENED` is not idle-host proof, single repeats cannot bound control drift, and owner `make test` qualification/ID36 is unchanged. |
 | 112 | Per-round ARM64/NEON VM performance history plots | **1 owner-requested / keep** | After every optimization round, regenerate default-LZ4 mixed useful READ/WRITE, mixed p99, lower-WRITE savings and persistent-WRITE QD plots plus source-mapped CSV/JSON under `build/history/arm64-neon/`. Initial history through report `b5227ca` selects 51 owner-PASS NEON/seven-CPU reports from 230 revisions. Exclude failed/blocked/other-host and unqualified trial data; use each report's own raw controls and break kernel/model/content/replay discontinuities. Descriptive history never establishes causal gains or physical wear. |
 | 113 | WRITE-folio locality as an equal-cost packing hint | **6 source audit / representative evidence gate** | See [reviewed measurement proposal](context.md). Current 4KiB splitting preserves page references but no explicit parent-BIO token. READ destination folios cannot identify earlier WRITE RAM; correlation needs bounded logical/generation tags and live-owner-only cohort discovery, with censoring and reuse handled explicitly. ID43 THP direct I/O is functional coverage, not real swap-locality evidence. Linux 7.0 block swap and newer `master` batching differ. Keep layout unchanged until folio membership predicts backing READ co-access beyond logical adjacency. A later policy must preserve full byte/read/extent costs and physical run/tail geometry; equal-length permutations are a narrower candidate than arbitrary reordering. No actual-swap collection or larger upper BIO is authorized by this design. |
+| 114 | Focused K=1 critical-path profiling before another scheduler change | **2 passive instrumentation / owner experiment pending** | Keep K=1, the four-record service rule, one preparation producer, the 64-slot reservoir, LZ4 acceleration one and SWZ unchanged. `make fast_test` defaults to three repeated SATA mixed, NVMe4 mixed, fast mixed, fast QD4 and fast QD8 pairs with existing host-noise screening. New interval telemetry measures accepted WRITE -> first ordered-worker ownership plus successful synchronous four-record wall/lower/non-I/O and completion -> next-four-record reissue gaps; existing counters supply ordered-worker CPU, accepted-idle unscheduled time, preparation/copy, ordering/planning, pack/CRC, lower service and publication. Detailed runs stay in `build/tests/fast-test/latest.json`; compact output is diagnostic. Choose at most one narrow production-C candidate from screened evidence, keep/remove it with matched `make fast_test`, refresh ARM64 history, then require exact-source `make test` for any retained change. |
 
 ## What the pinned queue experiment establishes
 
@@ -509,20 +510,23 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-1. Use owner-qualified `03becc0` (report `b5227ca`) as the source baseline.
-   ID107–ID108 qualification is complete; the new K=2 development result is
-   ID110 and is not promoted.
-2. Profile ordered-worker CPU and the accepted-arrival/dispatch gaps on fresh
-   matched SATA/NVMe mixed runs. Distinguish software time, fixed per-request
-   latency and transfer time before proposing another production-C change.
-3. Preserve the four-record service threshold and single-slot ownership.
-   QD4 still dispatches a complete four-record no-follower window synchronously;
-   merely adding a second slot cannot overlap that closed loop. A new shallow
-   dispatch policy needs its own evidence and ownership review.
-4. Keep one unbound preparation producer, the 64-slot reservoir, ordinary LZ4
-   acceleration one, packed placement, circular allocation, ID63 and SWZ
-   geometry unchanged. Use `make fast_test` for development decisions and the
-   exact-source owner `make test` for qualification.
+1. Run ID114's default `make fast_test` baseline: three repeated SATA mixed,
+   NVMe4 mixed, fast mixed, fast QD4 and fast QD8 pairs. Discard NOISY/UNKNOWN
+   performance comparisons; retain absolute raw/swapz throughput, p99 and lower
+   WRITE bytes/requests rather than deciding from a percentage delta alone.
+2. Use the compact K=1 profile plus `build/tests/fast-test/latest.json` to
+   distinguish ordered-worker on-CPU cost, accepted-idle scheduling delay,
+   preparation/copy, ordering/planning, pack/CRC, lower service,
+   completion/publication and the synchronous four-record reissue cycle.
+3. Choose **one** narrow production-C change only if that breakdown identifies
+   a repayable software cost. Preserve the four-record service threshold,
+   single-slot ownership, one unbound preparation producer, the 64-slot
+   reservoir, ordinary LZ4 acceleration one, packed placement, circular
+   allocation, ID63 and SWZ geometry.
+4. Keep or remove the candidate with matched screened `make fast_test` evidence,
+   refresh the ARM64 history plots, and require an exact-source owner
+   `make test` before promotion. Zswap Phase A and ID113 folio locality remain
+   later architecture/evidence tasks.
 
 ## Deferred asynchronous segment TRIM design for review
 

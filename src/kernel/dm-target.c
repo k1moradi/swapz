@@ -244,6 +244,8 @@ struct swapz_bio_ref {
 	bool preparation_inline;
 	bool preparation_force_raw;
 	struct swapz_dm *preparation_ctx;
+	/* Passive profiling: accepted WRITE -> first ordered-worker ownership. */
+	u64 admitted_ns;
 	int preparation_error;
 };
 
@@ -763,6 +765,22 @@ struct swapz_dm {
 	 */
 	u64 ordered_worker_wall_ns;
 	u64 ordered_worker_cpu_ns;
+	/*
+	 * ID114 passive K=1 profiling. These counters never participate in
+	 * scheduling or representation choice. Admission timing ends when the
+	 * ordered worker first owns the WRITE descriptor. sync4 timing covers
+	 * only a successful four-record synchronous window; the reissue gap is
+	 * previous successful sync4 completion -> next successful sync4 start.
+	 */
+	u64 write_admit_worker_samples;
+	u64 write_admit_worker_wall_ns;
+	u64 sync4_windows;
+	u64 sync4_wall_ns;
+	u64 sync4_lower_write_ns;
+	u64 sync4_nonio_ns;
+	u64 sync4_reissue_samples;
+	u64 sync4_reissue_gap_ns;
+	u64 sync4_last_done_ns;
 	/* Retained status-ABI field for the retired ID39 helper; remains zero. */
 	u64 read_worker_cpu_ns;
 	u64 ordered_crc_wall_ns;
@@ -3405,8 +3423,13 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		if (error == -ENOSPC)
 			error = 0; /* existing loop/GC path retries unchanged */
 	}
+	if (async_submitted || count != 4U || committed)
+		ctx->sync4_last_done_ns = 0;
 	while (!async_submitted && committed < count) {
 		swapz_u8 succeeded = 0;
+		bool sync4_candidate = count == 4U && committed == 0U;
+		u64 sync4_previous_done_ns =
+			sync4_candidate ? ctx->sync4_last_done_ns : 0;
 
 		u64 lower_write_before = ctx->lower_write_wall_ns;
 		u64 plan_before = ctx->engine.plan_wall_ns;
@@ -3436,6 +3459,28 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		if (ctx->authority.publish_crc_wall_ns >= publish_crc_before)
 			ctx->engine_publish_crc_wall_ns +=
 				ctx->authority.publish_crc_wall_ns - publish_crc_before;
+		if (sync4_candidate) {
+			if (!error && succeeded == 4U) {
+				u64 done_ns = ktime_get_ns();
+
+				ctx->sync4_windows++;
+				ctx->sync4_wall_ns += commit_elapsed;
+				ctx->sync4_lower_write_ns += lower_write_elapsed;
+				if (commit_elapsed >= lower_write_elapsed)
+					ctx->sync4_nonio_ns +=
+						commit_elapsed - lower_write_elapsed;
+				if (sync4_previous_done_ns &&
+				    section_start >= sync4_previous_done_ns) {
+					ctx->sync4_reissue_samples++;
+					ctx->sync4_reissue_gap_ns +=
+						swapz_elapsed_ns(sync4_previous_done_ns,
+								 section_start);
+				}
+				ctx->sync4_last_done_ns = done_ns;
+			} else {
+				ctx->sync4_last_done_ns = 0;
+			}
+		}
 		committed += succeeded;
 		if (!error)
 			continue;
@@ -5715,6 +5760,16 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 							  &processed_bios))
 				goto processed_bio;
 			entry = list_first_entry(&local, struct swapz_bio_ref, list);
+			if (entry->admitted_ns &&
+			    bio_op(entry->bio) == REQ_OP_WRITE &&
+			    bio_sectors(entry->bio)) {
+				u64 owned_ns = ktime_get_ns();
+
+				ctx->write_admit_worker_samples++;
+				ctx->write_admit_worker_wall_ns +=
+					swapz_elapsed_ns(entry->admitted_ns, owned_ns);
+				entry->admitted_ns = 0;
+			}
 			/*
 			 * The two queues share queue_lock. If the bounded producer has
 			 * not claimed this FIFO entry yet, the ordered worker may steal
@@ -6268,6 +6323,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	entry->preparation_inline = false;
 	entry->preparation_force_raw = false;
 	entry->preparation_ctx = ctx;
+	entry->admitted_ns = 0;
 	entry->preparation_error = 0;
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
 		init_completion(&entry->preparation_snapshot_ready);
@@ -6326,6 +6382,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 				ctx->bio_compound_folio_pages++;
 		}
 	}
+	if (bio_op(bio) == REQ_OP_WRITE && count)
+		entry->admitted_ns = ktime_get_ns();
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
@@ -7589,6 +7647,16 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->ordered_lz4_page_ewma_ns,
 		       ctx->deferred_upper_completion_bios,
 		       ctx->deferred_upper_completion_wall_ns);
+		DMEMIT(" write_admit_worker_samples=%llu "
+		       "write_admit_worker_wall_ns=%llu "
+		       "sync4_windows=%llu sync4_wall_ns=%llu "
+		       "sync4_lower_write_ns=%llu sync4_nonio_ns=%llu "
+		       "sync4_reissue_samples=%llu sync4_reissue_gap_ns=%llu",
+		       ctx->write_admit_worker_samples,
+		       ctx->write_admit_worker_wall_ns,
+		       ctx->sync4_windows, ctx->sync4_wall_ns,
+		       ctx->sync4_lower_write_ns, ctx->sync4_nonio_ns,
+		       ctx->sync4_reissue_samples, ctx->sync4_reissue_gap_ns);
 		/* These independent single-writer values are diagnostic while busy;
 		 * qualification snapshots only at drained measurement boundaries. */
 		DMEMIT(" delta64_rescue=%u delta64_eligible=%llu "

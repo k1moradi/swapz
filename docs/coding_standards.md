@@ -156,6 +156,14 @@ justify extra buffers or ownership state, especially when lower requests rise.
 Keep its experimental dispatch/array paths out of production. Four-record
 no-follower windows retain their existing synchronous service rule.
 
+ID114 profiling is observational only. Timing counters may sample `ktime_get_ns()`
+and scheduler runtime, but must not add waits, queue ownership, dynamic
+allocation, alternate representations or scheduling branches. WRITE admission
+timestamps live only in the per-BIO descriptor. Synchronous four-record cycle
+telemetry may observe successful K=1 commits and the gap to the next successful
+four-record start; it must never hold a BIO or keep the lane busy to obtain a
+sample. Production policy cannot change from this profiling commit alone.
+
 Any future K>1 experiment is a new architecture change, not a dormant knob. It
 must restore disjoint immutable run ownership, same-page generation/order
 fences, FIFO authority publication and upper-BIO completion despite out-of-order
