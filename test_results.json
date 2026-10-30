@@ -17,7 +17,7 @@
 "k1_read_bypass_sessions": [],
 "loaded_correctness": {
 "overall": "INCOMPLETE",
-"reason": "missing loaded correctness markers: raw_read,gc,gc_pressure,discard_trim,packed_placement,suspend,completion_handoff,write_fault,flush_fault,id36"
+"reason": "missing loaded correctness markers: raw_read,completion_handoff,id36"
 },
 "lz4_acceleration": {
 "overall": "NOT_RUN",
@@ -116,24 +116,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 818,
-"legacy_dead_probe_ns": 125815,
-"legacy_score_scan_ns": 869796,
+"incremental_select_ns": 815,
+"legacy_dead_probe_ns": 127248,
+"legacy_score_scan_ns": 866536,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 646,
-"relocation_list_ns": 511,
-"relocation_scan_ns": 247473,
+"mapped_dead_probe_ns": 637,
+"relocation_list_ns": 599,
+"relocation_scan_ns": 255937,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 3283,
-"legacy_dead_probe_ns": 521073,
-"legacy_score_scan_ns": 3616561,
+"incremental_select_ns": 3406,
+"legacy_dead_probe_ns": 514064,
+"legacy_score_scan_ns": 3721935,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2105,
-"relocation_list_ns": 767,
-"relocation_scan_ns": 1853315,
+"mapped_dead_probe_ns": 1973,
+"relocation_list_ns": 835,
+"relocation_scan_ns": 1847399,
 "segments": 4096,
 "victim_records": 256
 }
@@ -143,12 +143,12 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 186,
+"inverse_ns_per_page": 187,
 "name": "scalar",
 "transform_ns_per_page": 245
 },
 {
-"inverse_ns_per_page": 272,
+"inverse_ns_per_page": 273,
 "name": "sse2",
 "transform_ns_per_page": 174
 },
@@ -158,7 +158,7 @@
 "transform_ns_per_page": 79
 },
 {
-"inverse_ns_per_page": 87,
+"inverse_ns_per_page": 88,
 "name": "avx512",
 "transform_ns_per_page": 68
 }
@@ -187,7 +187,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2266
+"wall_ns_per_page": 2359
 },
 {
 "acceleration": 2,
@@ -195,7 +195,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2047
+"wall_ns_per_page": 2131
 },
 {
 "acceleration": 3,
@@ -203,7 +203,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1987
+"wall_ns_per_page": 1991
 },
 {
 "acceleration": 4,
@@ -211,7 +211,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1983
+"wall_ns_per_page": 1969
 }
 ],
 "negative_pages": 256,
@@ -228,9 +228,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1593,
-"modeled_wall_ns_total": 917760,
-"ns_per_saved_block": 17649,
+"modeled_wall_ns_per_page": 1563,
+"modeled_wall_ns_total": 900608,
+"ns_per_saved_block": 17319,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -255,29 +255,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 180,
+"baseline_ns_per_page": 181,
 "order": "baseline_first",
 "unrolled_ns_per_page": 174
 },
 {
-"baseline_ns_per_page": 173,
+"baseline_ns_per_page": 178,
 "order": "unrolled_first",
 "unrolled_ns_per_page": 173
 },
 {
-"baseline_ns_per_page": 179,
+"baseline_ns_per_page": 176,
 "order": "baseline_first",
-"unrolled_ns_per_page": 172
+"unrolled_ns_per_page": 168
 },
 {
-"baseline_ns_per_page": 179,
+"baseline_ns_per_page": 183,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 171
+"unrolled_ns_per_page": 170
 },
 {
-"baseline_ns_per_page": 180,
+"baseline_ns_per_page": 178,
 "order": "baseline_first",
-"unrolled_ns_per_page": 173
+"unrolled_ns_per_page": 170
 }
 ],
 "repeats_per_arm": 64,
@@ -326,14 +326,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18090,
+"ns_per_saved_block": 17751,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1790,
-"routed_cpu_ns_total": 1031181,
+"routed_cpu_ns_per_page": 1756,
+"routed_cpu_ns_total": 1011818,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -381,14 +381,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18186,
+"ns_per_saved_block": 17845,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1736,
-"routed_cpu_ns_total": 1000248,
+"routed_cpu_ns_per_page": 1703,
+"routed_cpu_ns_total": 981488,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -436,14 +436,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 17649,
+"ns_per_saved_block": 17319,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1593,
-"routed_cpu_ns_total": 917760,
+"routed_cpu_ns_per_page": 1563,
+"routed_cpu_ns_total": 900608,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -491,14 +491,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 17649,
+"ns_per_saved_block": 17319,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1593,
-"routed_cpu_ns_total": 917760,
+"routed_cpu_ns_per_page": 1563,
+"routed_cpu_ns_total": 900608,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -546,14 +546,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 17649,
+"ns_per_saved_block": 17319,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1593,
-"routed_cpu_ns_total": 917760,
+"routed_cpu_ns_per_page": 1563,
+"routed_cpu_ns_total": 900608,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -570,15 +570,15 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "avx512",
-"inverse_ns_per_page": 87,
+"inverse_ns_per_page": 88,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 186,
+"scalar_inverse_ns_per_page": 187,
 "scalar_transform_ns_per_page": 245,
-"second_lz4_ns_per_page": 3369,
+"second_lz4_ns_per_page": 3302,
 "transform_backend": "avx512",
 "transform_ns_per_page": 68
 }
@@ -589,37 +589,37 @@
 "overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "0f42e01843be22fda10e67abad4beab20f4c82c8",
+"source_sha": "14cbd609bb7f6d5d71a942f0b54cf1ce65df6786",
 "stages": [
 {
-"elapsed_s": 3.49,
+"elapsed_s": 3.322,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 28.03,
+"elapsed_s": 27.804,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 3.111,
+"elapsed_s": 3.048,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 3.182,
+"elapsed_s": 3.034,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
-"diagnostic": "BLOCKED: compound/segmented BIO observation counters invariant mismatch: segs_gt1=384 segs_max=4 nonzero_off=384 compound=256 copy_fallbacks=0",
-"elapsed_s": 1.369,
+"diagnostic": "BLOCKED: completion-handoff fault did not fail closed after real handoffs",
+"elapsed_s": 5.284,
 "exit_code": 1,
-"failed_phase": "owned RAM compound/segmented BIO observation",
+"failed_phase": "owned RAM published completion handoff/drain/failure",
 "name": "Owned RAM smoke + mixed/QD pilot",
 "signals": [
 "PASS_DEFAULT_ASYNC_PREPARE",
@@ -630,11 +630,19 @@
 "PASS_ZERO_WRITE_LOWER_IO",
 "PASS_ORACLE_LOWER_READ",
 "PASS_LOADED_ORACLE_PROFILE",
+"PASS_LOADED_COMPOUND_BIO",
+"PASS_LOADED_LIVE_GC",
+"PASS_LOADED_GC_PRESSURE",
+"PASS_LOADED_DISCARD_TRIM",
+"PASS_LOADED_SUSPEND_DRAIN",
+"PASS_RETAINED_SYNTHETIC_WRITE_FAULT",
+"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT",
+"PASS_LOADED_PACKED_PLACEMENT",
 "BLOCKED",
 "FAIL"
 ],
 "status": "BLOCKED"
 }
 ],
-"tested_commit_sha": "0f42e01843be22fda10e67abad4beab20f4c82c8"
+"tested_commit_sha": "14cbd609bb7f6d5d71a942f0b54cf1ce65df6786"
 }
