@@ -4468,8 +4468,15 @@ int main(void)
                         admitted.index("if (!ctx->accepting)"))
         self.assertLess(admitted.index("if (!ctx->accepting)"),
                         admitted.index("list_add_tail(&entry->list"))
-        self.assertLess(admitted.index("queue_delayed_work(ctx->workqueue"),
-                        admitted.index("spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\treturn DM_MAPIO_SUBMITTED"))
+        final_queue = admitted.index("queue_delayed_work(ctx->workqueue")
+        final_unlock = admitted.index(
+            "spin_unlock_irqrestore(&ctx->queue_lock, flags);", final_queue)
+        submitter_call = admitted.rindex(
+            "swapz_submitter_prepare_entry(ctx, entry")
+        submitted = admitted.index("return DM_MAPIO_SUBMITTED")
+        self.assertLess(final_queue, final_unlock)
+        self.assertLess(final_unlock, submitter_call)
+        self.assertLess(submitter_call, submitted)
         self.assertIn("return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;", admitted)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", admitted)
         self.assertIn("flush_delayed_work(&ctx->worker)", drained)
@@ -4536,13 +4543,12 @@ int main(void)
             mapper.index("list_add_tail(&entry->list, &ctx->incoming)"),
             mapper.rindex("swapz_submitter_prepare_entry(ctx, entry"))
 
-        self.assertIn(
-            "atomic_read_acquire(&entry->preparation_submitter_active)",
+        active_gate = re.search(
+            r"atomic_read_acquire\(\s*&entry->preparation_submitter_active\s*\)",
             ordered)
+        self.assertIsNotNone(active_gate)
         self.assertLess(
-            ordered.index(
-                "atomic_read_acquire(&entry->preparation_submitter_active)"),
-            ordered.index("swapz_process(ctx, entry->bio)"))
+            active_gate.start(), ordered.index("swapz_process(ctx, entry->bio)"))
         self.assertIn("list_splice_init(&local, &ctx->incoming)", ordered)
         self.assertIn("ctx->submitter_owner_deferrals++", ordered)
 

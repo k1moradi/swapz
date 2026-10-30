@@ -1401,8 +1401,11 @@ def kernel_write_delta(before, after):
         raise ValueError("disabled swapz submitter preparation recorded activity")
     if counters["submitter_prepare_pages"] > counters["submitter_prepare_claims"]:
         raise ValueError("inconsistent swapz submitter preparation claims")
-    if counters["submitter_copy_bytes"] !=             counters["submitter_prepare_pages"] * 4096:
+    if (counters["submitter_copy_bytes"] !=
+            counters["submitter_prepare_pages"] * 4096):
         raise ValueError("inconsistent swapz submitter preparation copy bytes")
+    if counters["submitter_copy_bytes"] > counters["write_copy_bytes"]:
+        raise ValueError("inconsistent swapz submitter/global copy bytes")
     if (counters["submitter_lz4_wall_ns"] +
             counters["submitter_copy_wall_ns"] +
             counters["submitter_crc_wall_ns"] >
