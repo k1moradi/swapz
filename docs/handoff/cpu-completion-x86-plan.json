@@ -226,7 +226,7 @@
     "tests/runtime/native/nullblk-identity-test.sh": "60114a1cd4dce8625a15636c580be88f23fdce0b7654767c9f65e6edf6ec7e37",
     "tests/runtime/native/package-dkms-test.py": "fb131c0bb8120c5e4f153d48f5aa17289c1ef49a26f07672bdf8b02346de0b43",
     "tests/runtime/native/quiet-lower-io-test.sh": "6564a75085bf5393d72ac131e58008c73a46d181117b9736016c5d3d8eb9c3ef",
-    "tests/runtime/native/source-contract-test.py": "37d94f568beb872cbdcda6ecf5fc7448241d06c39c07d409cbf55bbef4a42373",
+    "tests/runtime/native/source-contract-test.py": "b4c0a18061d83ea4ff91416340c78902da62c9065d1085a93926a68decc2221a",
     "tests/runtime/native/swap-inventory-test.sh": "acb0f42f589b3457efb985f15e68a3bd73d6417d7c2be1a30bd61de54ae72882",
     "tests/runtime/native/test-report-test.py": "91d1d54df75e8b5a93bb5ad9f46142ad50efb75a667d5fdbd278ed6da15309a8",
     "tests/suites/Makefile": "35a31653872bc0ff80a7a75d4e4d1e96a80fed45d62b30feca80677e38559b17",
@@ -247,5 +247,6 @@
     "tests/tools/test-loaded.sh": "7fb7682aed040b619b760f30da726efcdec723ac0482f216f5e2d12eeb6c485e",
     "tests/tools/test-rootless.sh": "11460b532068e42df1bf5c7fdc21e4764241477fad2e288164971edbe39509df"
   },
-  "orchestrator_sha256": "197f63b95a152dfdf7eab086b9fb91199bfad3763c31550a3305229dc30352db"
+  "orchestrator_sha256": "197f63b95a152dfdf7eab086b9fb91199bfad3763c31550a3305229dc30352db",
+  "pre_sample_harness_correction": "Marked the candidate-helper stub unused for the unchanged baseline body; the new candidate-specific native test is skipped on baseline. Corrected before any pilot sample."
 }
