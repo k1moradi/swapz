@@ -1233,6 +1233,31 @@ class ReportContract(unittest.TestCase):
         self.assertFalse(history.same_computer_report(
             {**report, "stages": [{"status": "PASS"}] * 4}, identity))
 
+    def test_history_collects_only_matching_computer_from_shared_git_reports(self):
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location(
+            "swapz_shared_history", ROOT / "tests/tools/plot-history.py")
+        history = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(history)
+        identity = {"schema": "swapz-host-v1", "architecture": "x86_64",
+                    "id_sha256": "a" * 64}
+        reports = {}
+        for index, host in enumerate((identity, {**identity, "id_sha256": "b" * 64},
+                                      {**identity, "id_sha256": "c" * 64}, None,
+                                      identity), 1):
+            reports[f"{index:040x}"] = {"host_identity": host, "overall": "PASS",
+                "stages": [{"status": "PASS"}] * 5, "tested_commit_sha": "f" * 40}
+        def git_output(command, **kwargs):
+            if command[1] == "log":
+                return "\n".join(sha + " 2026-10-30T12:00:00-07:00" for sha in reports)
+            return json.dumps(reports[command[2].split(":")[0]]).encode()
+        with patch.object(history.subprocess, "check_output", side_effect=git_output), \
+                patch.object(history, "report_points", return_value=[{"target": "ssd_emulated"}]):
+            data = history.collect(computer=identity)
+        self.assertEqual([r["report_sha"] for r in data["reports"]],
+                         [f"{1:040x}", f"{5:040x}"])
+        self.assertEqual(data["excluded"]["other or unproven host"], 3)
+
     def test_host_identity_missing_or_invalid_fails_closed(self):
         from unittest.mock import patch
         for value in ("", "0" * 32, "not-a-machine-id"):
