@@ -730,26 +730,28 @@ if ! timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME";
 fi
 OWN_DM=0
 
-# Retained lifecycle qualification. Use the maximum already-supported
-# retention interval only to make the drain-path race observable; the real
-# performance policy remains owner-qualified retain_ms=2. The private writer
+# Retained lifecycle qualification. Use a null_blk-only 64ms observation
+# interval so even very slow SSE2-era hosts can complete one dmsetup status
+# round-trip while the retained window is still open. Physical/production
+# retain_ms remains capped at 4ms, and the real performance policy remains
+# owner-qualified retain_ms=2. The private writer
 # deliberately omits O_SYNC/FUA so a successful timer arm can represent a
 # genuinely retained upper write.
 note "START_LOADED_SUSPEND_DRAIN"
 UUID="SWAPZ-TEST-$TOKEN-suspend"
 dmsetup create "$DMNAME" --uuid "$UUID" \
-    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 4" ||
+    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 64" ||
     fail "cannot create retained suspend mapping"
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "retained suspend DM UUID mismatch"
 swapz_verify_owned_dm_node
 suspend_before="$(dmsetup status "$DMNAME")"
-(( $(status_u64 "$suspend_before" retain_ms) == 4 &&
+(( $(status_u64 "$suspend_before" retain_ms) == 64 &&
    $(status_u64 "$suspend_before" failed) == 0 )) ||
     fail "retained suspend mapping policy mismatch"
 # Arm the status sampler before releasing the bounded private writer. Starting
-# the writer first can let a fast child consume the initial 4ms retained window
+# the writer first can let a child consume the initial retained window
 # before the separately scheduled sampler runs. The writer therefore blocks on
 # a private FIFO until the sampler has completed one valid status read and
 # announced READY. Poll without sleep so adaptive singleton fast-close cannot
@@ -836,12 +838,12 @@ lifecycle_failed="$(status_u64 "$suspend_after" failed)" ||
     fail "retained lifecycle status lacks fail state"
 (( lifecycle_failed == 0 )) ||
     fail "suspend/resume left retained lifecycle target failed"
-# The sampled open 4ms window can legally expire between the status command
-# and the separate dmsetup suspend process. Do not require a particular close
+# The sampled open lifecycle window can legally expire between the status
+# command and the separate dmsetup suspend process. Do not require a particular close
 # reason across that userspace race. The safety contract is that an open
 # retained window was observed, suspend/resume completed, every accepted write
 # completed exactly once, and all 128 pages verify byte-exact afterwards.
-note "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:$open_window verified_pages:128"
+note "PASS_LOADED_SUSPEND_DRAIN=retain_ms:64 observed_open:$open_window verified_pages:128"
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove retained suspend mapping"
 OWN_DM=0
 

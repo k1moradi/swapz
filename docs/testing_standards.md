@@ -898,8 +898,17 @@ before the core releases deferred I/O. If the lifecycle writer fails, report
 its exact exit status plus current target status on the fail-only path. The
 owned loaded harness must remain executable in the Git tree; losing its execute
 bit is a qualification failure, not an operator workaround.
-The maximum supported 4ms deadline can legitimately expire between that observation and the
-separate suspend request, so the oracle must not require a specific close-reason counter afterwards.
+The physical/production retention ceiling remains 4ms. The owned null_blk-only
+lifecycle oracle may use an explicit 64ms retention interval solely to make the
+open-window observation schedulable on very slow hosts where one separately
+spawned `dmsetup status` round-trip can exceed 4ms. That longer interval does
+not qualify or select a production retention policy; benchmark arms remain on
+their separately qualified retention settings. The sampled lifecycle window
+can still legitimately expire between observation and the separate suspend
+request, so the oracle must not require a specific close-reason counter
+afterwards. Source contracts must prove values above 4ms are rejected for
+non-null_blk backing and that the extended bound is restricted to owned RAM
+qualification.
 Loaded failure reporting skips the generic cleanup epilogue so the preceding
 specific sanitized failure remains visible.
 

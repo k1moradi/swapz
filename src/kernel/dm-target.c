@@ -52,6 +52,10 @@
 #define SWAPZ_WORK_QUANTUM_BIOS 64U
 #define SWAPZ_WORK_CONSERVING_HAND_RECORDS 8U
 #define SWAPZ_MAX_RETAIN_MS 4U
+/* Keep production/physical policy at 4ms. Owned null_blk lifecycle
+ * qualification may use a longer explicit interval so a very slow userspace
+ * status observer can prove an actually open retained window. */
+#define SWAPZ_NULLBLK_TEST_MAX_RETAIN_MS 64U
 #define SWAPZ_SINGLETON_DEADLINE_STREAK 2U
 /*
  * Idle producer wakes need enough unclaimed distance to amortize a workqueue
@@ -7038,7 +7042,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	int error;
 
 	if (argc < 1 || argc > 9 || ti->len % SWAPZ_SECTORS) {
-		ti->error = "Usage: <dedicated backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4]";
+		ti->error = "Usage: <dedicated backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4; null_blk qualification 0..64]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -7065,7 +7069,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			 write_fail_nth > 65535U))
 		return -EINVAL;
 	if (argc > 8 && (kstrtou32(argv[8], 10, &retain) ||
-			 retain > SWAPZ_MAX_RETAIN_MS))
+			 retain > SWAPZ_NULLBLK_TEST_MAX_RETAIN_MS))
 		return -EINVAL;
 	if (!swapz_delta64_lz4_acceleration ||
 	    swapz_delta64_lz4_acceleration > 4U) {
@@ -7149,6 +7153,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
+	if (!is_nullb && retain > SWAPZ_MAX_RETAIN_MS) {
+		ti->error = "retain_ms above 4 is restricted to null_blk qualification";
+		error = -EINVAL;
+		goto fail;
+	}
 	if (bdev_is_zoned(ctx->backing->bdev) ||
 	    bdev_read_only(ctx->backing->bdev) ||
 	    bdev_logical_block_size(ctx->backing->bdev) > SWAPZ_BLOCK_BYTES ||

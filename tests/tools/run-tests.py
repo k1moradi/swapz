@@ -1229,7 +1229,7 @@ def parse_loaded_correctness(output):
             packed_holes != 0 or packed_run_splits != 0 or packed_failed != 0):
         return {"overall": "INCOMPLETE",
                 "reason": "loaded packed-placement structural invariant failed"}
-    if suspend_retain != 4 or observed_open != 1 or verified_pages != 128:
+    if suspend_retain != 64 or observed_open != 1 or verified_pages != 128:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded suspend/drain evidence is incomplete"}
     if (completion_batches <= 0 or completion_pages != 128 or
