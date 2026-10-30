@@ -129,7 +129,7 @@ all 128 final pages, account exactly 16,512 successful upper WRITEs, and finish
 with completion_active=0 and failed=0. It does not claim to freeze a particular
 helper instruction at the moment suspend starts.
 
-A fresh mapping injects lower WRITE fault 32 after actual successful handoffs.
+A fresh mapping injects lower WRITE fault 256 after actual successful handoffs.
 Parallel writes must fail, the target must become terminal with one injection,
 and completion ownership must drain. A fresh aligned direct WRITE must then
 return exactly -1/EIO and increment the error counter without a new success.
@@ -2449,6 +2449,14 @@ same architecture-specific native backend from `uname -m`.
 
 
 ### Loaded-stage observability and hard bounds
+
+The retained-suspend lifecycle oracle sets a 64 ms retention override on its
+owned RAM-backed `null_blk` mapping so an observer can sample the open window
+on slower hosts. The production retention ceiling stays 4 ms; no benchmark arm
+may inherit the lifecycle override. The loaded shell marker, native interface
+fixture, report-parser predicate and synthetic parser regression must all
+agree on 64 ms. The missing-marker regression must remove the actual fixture
+line and require `INCOMPLETE`, never pass vacuously after a failed replacement.
 
 The public `make test` command must never appear to hang silently during its
 privileged fifth stage. `run-tests.py` therefore streams the captured

@@ -1507,7 +1507,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(loaded["alignment_hole_blocks_gc"],
                          loaded["segment_tail_waste_blocks_gc"])
         self.assertEqual(loaded["run_splits_by_hole"], 0)
-        self.assertEqual(loaded["suspend_retain_ms"], 4)
+        # The null_blk lifecycle oracle alone uses 64 ms for slow observers;
+        # the production retained-window ceiling remains 4 ms.
+        self.assertEqual(loaded["suspend_retain_ms"], 64)
         self.assertEqual(loaded["suspend_observed_open"], 1)
         self.assertEqual(loaded["suspend_verified_pages"], 128)
         self.assertIn("PRE_SUBMISSION", loaded["retained_write_fault"])
@@ -1572,7 +1574,7 @@ class ReportContract(unittest.TestCase):
             "INCOMPLETE")
 
         missing = synthetic_log().replace(
-            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 "
+            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:64 observed_open:1 "
             "verified_pages:128\n", "")
         self.assertEqual(runner.parse_loaded_correctness(missing)["overall"],
                          "INCOMPLETE")
