@@ -2539,7 +2539,6 @@ out_release_owner:
 	 * dm_per_bio_data. Do not dereference entry or prepared below this point.
 	 */
 	atomic_set_release(&entry->preparation_submitter_active, 0);
-	swapz_preparation_release_slot(&ctx->submitter_lane_free_mask, lane_slot);
 	/*
 	 * swapz_map() skipped its admission wake for this descriptor; apply the
 	 * same plain retained/non-retained policy here, after the release store.
@@ -2551,11 +2550,12 @@ out_release_owner:
 		queue_delayed_work(ctx->workqueue, &ctx->worker, 0);
 	}
 	/*
-	 * Last ctx access: drain's quiescence check counts this task until its
-	 * wake has been queued, not merely until its descriptor is released.
+	 * Leave the active count while this task still holds its lane, so the
+	 * count can never exceed the lane count. Returning the lane is the final
+	 * ctx access; swapz_drain() waits for every lane before draining queues.
 	 */
-	smp_mb__before_atomic();
 	atomic_dec(&ctx->submitter_preparation_active);
+	swapz_preparation_release_slot(&ctx->submitter_lane_free_mask, lane_slot);
 }
 
 /*
@@ -6880,6 +6880,17 @@ static void swapz_drain(struct dm_target *ti)
 	/* The callback takes queue_lock. Close admission first, then cancel
 	 * outside that lock before waiting for any worker or freeing it. */
 	hrtimer_cancel(&ctx->retention_timer);
+	/*
+	 * ID150: a submitter may still be finishing its owner wake and lane
+	 * return after its upper BIO was already completed. Both are short,
+	 * non-blocking tails; wait for every lane before draining or destroying
+	 * the workqueues that wake targets.
+	 */
+	while (ctx->submitter_prepare &&
+	       ((u64)atomic64_read_acquire(&ctx->submitter_lane_free_mask) !=
+			ctx->submitter_lane_full_mask ||
+		atomic_read(&ctx->submitter_preparation_active)))
+		schedule_timeout_uninterruptible(1);
 	/*
 	 * flush_delayed_work() only waits for the last queued instance.
 	 * This worker can chain itself after its 64-BIO quantum, so merely

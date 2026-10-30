@@ -4618,12 +4618,26 @@ int main(void)
                       after_release)
         self.assertIn("queue_delayed_work(ctx->workqueue, &ctx->worker, 0)",
                       after_release)
+        # The active count is left while the lane is still held, so its peak
+        # can never exceed the lane count (io-replay rejects active_max >
+        # lanes); returning the lane is the final ctx access.
         active_dec = "atomic_dec(&ctx->submitter_preparation_active)"
+        lane_release = ("swapz_preparation_release_slot("
+                        "&ctx->submitter_lane_free_mask, lane_slot)")
         self.assertNotIn(active_dec, submitter[:release])
         self.assertLess(after_release.rindex("_delayed_work(ctx->workqueue"),
                         after_release.index(active_dec))
-        self.assertEqual(after_release[after_release.index(active_dec):]
-                         .strip().rstrip("}").strip(), active_dec + ";")
+        self.assertLess(after_release.index(active_dec),
+                        after_release.index(lane_release))
+        self.assertEqual(after_release[after_release.index(lane_release):]
+                         .strip().rstrip("}").strip(), lane_release + ";")
+        # Drain waits for every submitter tail before any queue is drained.
+        lane_wait = drain.index(
+            "atomic64_read_acquire(&ctx->submitter_lane_free_mask)")
+        self.assertIn("schedule_timeout_uninterruptible(1)", drain)
+        self.assertLess(lane_wait, drain.index(
+            "mod_delayed_work(ctx->workqueue, &ctx->worker, 0)"))
+        self.assertLess(lane_wait, drain.index("drain_workqueue("))
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
                           "swapz_flush_window(", "dm_io(", "bio_endio(",
                           "swapz_engine_write_window"):
