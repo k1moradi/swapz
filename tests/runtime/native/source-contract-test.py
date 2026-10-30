@@ -1153,6 +1153,102 @@ static swapz_u16 swapz_probe_set(
                         drain.index("atomic_read(&ctx->completion_active)"))
         self.assertIn("cancel_work_sync(&ctx->completion_work)", body("swapz_free"))
 
+    def test_lower_write_completion_notification_shares_drain_lifetime_gate(self):
+        """A waiter observing done cannot destroy the queue before notification."""
+        import subprocess
+        import tempfile
+
+        callback = body("swapz_async_lower_write_done")
+        unlock_tail = callback.split(
+            "spin_unlock_irqrestore(&ctx->queue_lock, flags);", 1)[1]
+        self.assertNotRegex(unlock_tail, r"\b(?:ctx|inflight)->")
+        source = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+typedef uint64_t u64;
+#define WRITE_ONCE(x,v) ((x)=(v))
+struct completion { bool done; };
+struct swapz_dm {
+    int queue_lock, lower_write_active, worker;
+    unsigned preparation_queued;
+    u64 prep_lower_write_end_queued, prep_lower_write_end_nonempty;
+    void *workqueue;
+};
+struct swapz_inflight_write {
+    struct swapz_dm *ctx;
+    struct completion lower_done;
+    int lower_error;
+    u64 lower_end_ns;
+};
+static bool alive, teardown_waiting;
+static unsigned lock_depth, notified, blocked;
+static void drain_gate(void) {
+    if (lock_depth) { ++blocked; teardown_waiting=true; return; }
+    alive=false;
+}
+static void lock(void) { assert(alive&&!lock_depth); ++lock_depth; }
+static void unlock(void) {
+    assert(lock_depth==1); --lock_depth;
+    if (teardown_waiting) { assert(notified==1); drain_gate(); }
+}
+#define spin_lock_irqsave(p,f) do { (void)(p);(f)=0;lock(); } while(0)
+#define spin_unlock_irqrestore(p,f) do { (void)(p);assert(!(f));unlock(); } while(0)
+static void atomic_dec(int *p) { assert(alive&&*p==1); --*p; }
+static u64 ktime_get_ns(void) { return 42; }
+static void complete(struct completion *c) {
+    assert(alive&&!c->done); c->done=true;
+    /* The awakened owner has finalized its last BIO; model a concurrent
+     * teardown reaching the final queue-lock drain gate immediately. */
+    drain_gate();
+}
+static void mod_delayed_work(void *queue,int *worker,unsigned delay) {
+    (void)worker; assert(alive&&queue&&delay==0); ++notified;
+}
+#define EIO 5
+'''
+        signatures = (
+            ("unsigned long error, void *context", "", "0, &inflight", "1, &inflight"),
+            ("unsigned long error, unsigned long unsupported, void *context",
+             "error |= unsupported;", "0, 0, &inflight", "0, 1, &inflight"))
+        with tempfile.TemporaryDirectory(prefix="swapz-lower-lifetime-") as temp:
+            path = Path(temp)
+            for index, (params, merge, success, failure) in enumerate(signatures):
+                unit = source + (
+                    "#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error) do { " + merge + " } while(0)\n"
+                    "static void callback(" + params + ") {\n" + callback + "\n}\n")
+                unit += r'''
+static void init(struct swapz_dm *ctx, struct swapz_inflight_write *inflight) {
+    memset(ctx,0,sizeof(*ctx));memset(inflight,0,sizeof(*inflight));
+    ctx->lower_write_active=1;ctx->preparation_queued=3;ctx->workqueue=ctx;
+    inflight->ctx=ctx;alive=true;teardown_waiting=false;lock_depth=notified=blocked=0;
+}
+int main(void) {
+    struct swapz_dm ctx;struct swapz_inflight_write inflight;
+    init(&ctx,&inflight);
+    callback(SUCCESS);
+    assert(!alive&&blocked==1&&notified==1&&!lock_depth);
+    assert(inflight.lower_done.done&&!inflight.lower_error&&inflight.lower_end_ns==42);
+    assert(!ctx.lower_write_active&&ctx.prep_lower_write_end_queued==3);
+    assert(ctx.prep_lower_write_end_nonempty==1);
+    init(&ctx,&inflight);ctx.preparation_queued=0;
+    callback(FAILURE);
+    assert(!alive&&blocked==1&&notified==1&&inflight.lower_done.done);
+    assert(inflight.lower_error==-EIO&&!ctx.lower_write_active);
+    assert(!ctx.prep_lower_write_end_queued&&!ctx.prep_lower_write_end_nonempty);
+    return 0;
+}
+'''.replace("SUCCESS", success).replace("FAILURE", failure)
+                (path / "probe.c").write_text(unit)
+                built = subprocess.run(
+                    ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+                     str(path / "probe.c"), "-o", str(path / "probe")],
+                    capture_output=True, text=True)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                ran = subprocess.run([str(path / "probe")], capture_output=True, text=True)
+                self.assertEqual(ran.returncode, 0, f"ABI {index}: {ran.stderr}")
+
     def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
         """Exercise actual target C under controlled queue/close/reuse interleavings."""
         import subprocess

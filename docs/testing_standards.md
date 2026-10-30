@@ -106,6 +106,14 @@ change `make test`, its exit codes, publication or qualification criteria.
 
 ### Published completion ownership gate
 
+The lower-WRITE notification test executes the actual callback body under both
+dm-io ABIs. On completion publication, a controlled waiter immediately attempts
+the final queue-lock drain gate. Notification must be queued before that gate
+can pass; cover success, ordinary error and the separate unsupported bitmap.
+Reject target/slot dereferences after final unlock. This models an adversarial
+interleaving, not a reproduced kernel crash. Loaded suspend, retained faults
+and resource-pressure qualification remain necessary for the kernel path.
+
 The owned serial smoke RAM device uses timer completion (irqmode 2, 14,000 ns),
 with its existing one-queue/depth-one geometry, so detached lower completion can
 exercise ACK ownership. This correctness-only model does not change the mixed

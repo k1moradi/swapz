@@ -1258,9 +1258,12 @@ static void swapz_async_lower_write_done(
 	if (ctx->preparation_queued)
 		ctx->prep_lower_write_end_nonempty++;
 	atomic_dec(&ctx->lower_write_active);
-	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	/* Publishing lower_done can let the owner finalize the last upper BIO
+	 * and teardown cross its queue_lock gate. Publish the notification under
+	 * that same lock, with no target access after unlock. */
 	complete(&inflight->lower_done);
 	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 }
 
 static void swapz_mark_segments_dirty(struct swapz_dm *ctx,

@@ -20,6 +20,12 @@ Use Linux-kernel-style C, kernel types/APIs, explicit ownership and checked arit
 
 Every accepted BIO must have exactly one completion owner. Never publish a mapping before all required lower data and ordering work succeeds. Preserve generation/CRC checks, PREFLUSH/FUA ordering, same-page dependencies, discard semantics, suspend/drain safety and fail-closed teardown.
 
+The detached lower-WRITE callback publishes `lower_done` and queues the ordered
+owner under the same `queue_lock` gate used by drain. A waiter can advance as
+soon as completion is visible; no target or in-flight-slot access may follow
+the callback's final unlock. READ callbacks that end with completion publication
+must likewise perform all slot accesses before that publication.
+
 Kernel API compatibility must be capability-probed when distributions can
 backport an interface independently of `LINUX_VERSION_CODE`. Keep such probes
 at the build boundary and route production call sites through one typed wrapper.
