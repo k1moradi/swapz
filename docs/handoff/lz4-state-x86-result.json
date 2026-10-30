@@ -1,0 +1,3606 @@
+{
+  "analysis": {
+    "absolute": [
+      {
+        "arm": "A",
+        "n": 9,
+        "raw_w": 3611.560863362499,
+        "scenario": "nvme5-mixed-lanes",
+        "swapz_w": 993.069514547421
+      },
+      {
+        "arm": "B",
+        "n": 9,
+        "raw_w": 3651.7042538829687,
+        "scenario": "nvme5-mixed-lanes",
+        "swapz_w": 1117.7530500850019
+      },
+      {
+        "arm": "C",
+        "n": 9,
+        "raw_w": 3613.770652955732,
+        "scenario": "nvme5-mixed-lanes",
+        "swapz_w": 1147.4933944668203
+      },
+      {
+        "arm": "A",
+        "n": 12,
+        "raw_w": 409.7534372622712,
+        "scenario": "sata-mixed",
+        "swapz_w": 310.7003121649693
+      },
+      {
+        "arm": "B",
+        "n": 12,
+        "raw_w": 410.26194088365804,
+        "scenario": "sata-mixed",
+        "swapz_w": 335.4501684069072
+      },
+      {
+        "arm": "C",
+        "n": 12,
+        "raw_w": 413.54253355912783,
+        "scenario": "sata-mixed",
+        "swapz_w": 336.16388132240536
+      },
+      {
+        "arm": "A",
+        "n": 12,
+        "raw_w": 62.93032711059487,
+        "scenario": "fast-mixed",
+        "swapz_w": 118.79805233145322
+      },
+      {
+        "arm": "B",
+        "n": 12,
+        "raw_w": 63.00474385344555,
+        "scenario": "fast-mixed",
+        "swapz_w": 118.47130920696304
+      },
+      {
+        "arm": "C",
+        "n": 12,
+        "raw_w": 62.845245584693686,
+        "scenario": "fast-mixed",
+        "swapz_w": 118.69491315814055
+      },
+      {
+        "arm": "A",
+        "n": 12,
+        "raw_w": 25.785598348632593,
+        "scenario": "fast-w1",
+        "swapz_w": 25.347878989065762
+      },
+      {
+        "arm": "B",
+        "n": 12,
+        "raw_w": 25.841946673964898,
+        "scenario": "fast-w1",
+        "swapz_w": 25.316078342547126
+      },
+      {
+        "arm": "C",
+        "n": 12,
+        "raw_w": 25.847228195927116,
+        "scenario": "fast-w1",
+        "swapz_w": 25.34788151407527
+      },
+      {
+        "arm": "A",
+        "n": 12,
+        "raw_w": 84.64513728437235,
+        "scenario": "fast-w4",
+        "swapz_w": 89.65747494543555
+      },
+      {
+        "arm": "B",
+        "n": 12,
+        "raw_w": 84.44730486576243,
+        "scenario": "fast-w4",
+        "swapz_w": 88.59556496605595
+      },
+      {
+        "arm": "C",
+        "n": 12,
+        "raw_w": 84.58952537399725,
+        "scenario": "fast-w4",
+        "swapz_w": 89.00942885829544
+      },
+      {
+        "arm": "A",
+        "n": 12,
+        "raw_w": 86.07937754746649,
+        "scenario": "fast-w8",
+        "swapz_w": 114.95083938995482
+      },
+      {
+        "arm": "B",
+        "n": 12,
+        "raw_w": 86.02569729310743,
+        "scenario": "fast-w8",
+        "swapz_w": 115.18806438190197
+      },
+      {
+        "arm": "C",
+        "n": 12,
+        "raw_w": 86.39151103060192,
+        "scenario": "fast-w8",
+        "swapz_w": 111.86437430386087
+      }
+    ],
+    "assumptions": "paired log t intervals and exact two-sided sign tests; chronological rounds may retain host-load dependence. Noise screens are not an idle-host proof. Secondary 95% intervals are descriptive.",
+    "excluded": [
+      {
+        "raw_spread": 0.10397415934195609,
+        "reasons": [
+          "raw WRITE spread 10.40%"
+        ],
+        "round": 1,
+        "scenario": "nvme5-mixed-lanes"
+      },
+      {
+        "raw_spread": 0.2747470764701436,
+        "reasons": [
+          "raw WRITE spread 27.47%"
+        ],
+        "round": 6,
+        "scenario": "nvme5-mixed-lanes"
+      },
+      {
+        "raw_spread": 0.1385922203665182,
+        "reasons": [
+          "raw WRITE spread 13.86%"
+        ],
+        "round": 7,
+        "scenario": "nvme5-mixed-lanes"
+      }
+    ],
+    "plan": {
+      "arms": {
+        "A": {
+          "c_sha256": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+          "name": "stateless_background",
+          "submitter": 0
+        },
+        "B": {
+          "c_sha256": "01a73fb21ab142c5f9f43363b70e76363a8abbb3097d178dbf20c85ffbb212a7",
+          "name": "independent_state_submitter",
+          "submitter": 1
+        },
+        "C": {
+          "c_sha256": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+          "name": "stateless_submitter_current",
+          "submitter": 1
+        }
+      },
+      "as_run_common_hashes": {
+        "tests/runtime/native/lz4-state-probe.c": "b2a676603e62adbc6a2879ffcabd4c336724b46016c92368af549cc962aa5832",
+        "tests/runtime/native/source-contract-test.py": "4d01b2238681ce7b45ce44751a9aa0247b58d82a879378ef00347d24c0a6f206",
+        "tests/tools/benchmark-owned-pair.sh": "b26c84d8b99f16293f7b3547a3db0adbe8e69fc276938b94db2c0ea39b02177e",
+        "tests/tools/fast-test.py": "042b6514f888e8b8924e505b1b45df9608d35d596cd3e1d996e1c6478d0dd246"
+      },
+      "async_prepare": 1,
+      "content": "medium",
+      "decision": "Development pilot only. Decline new state work if either persistent-NVMe5 B/A or B/C normalized mean estimate is below +3%, or convincing service/latency/lower-I/O harm outweighs benefit. A promising result may fund at most one independent fixed confirmation and exact-source qualification; no promotion by this pilot alone, no pooling pilot and confirmation, and no resampling to significance. C/A also evaluates current submitter policy.",
+      "delta64": 0,
+      "exclusions": [
+        "any ERROR, NOISY or UNKNOWN in compared source arms",
+        "source/fixture/trace/manifest/geometry/oracle mismatch",
+        "raw WRITE max/min spread above 10% among all three arms in that round/scenario"
+      ],
+      "guardrails": "report absolute READ/WRITE, p95/p99, independent lower READ/WRITE bytes/requests/flushes, CPU/RSS and existing GC/resource scopes. Secondary paired 95% intervals are descriptive; wide intervals do not prove no harm.",
+      "head": "3465b4c08987d6d98592f30622485ad5b872acb0",
+      "host_identity": {
+        "architecture": "x86_64",
+        "id_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
+        "schema": "swapz-host-v1"
+      },
+      "measure_ops_mixed": 16384,
+      "measure_ops_sustained": 4096,
+      "orders": [
+        "ABC",
+        "ACB",
+        "BAC",
+        "BCA",
+        "CAB",
+        "CBA",
+        "ABC",
+        "ACB",
+        "BAC",
+        "BCA",
+        "CAB",
+        "CBA"
+      ],
+      "primary_family": {
+        "contrasts": [
+          "B/A",
+          "B/C",
+          "C/A"
+        ],
+        "endpoint": "paired log change in useful WRITE divided by own raw WRITE",
+        "interval_confidence": 0.9944444444444445,
+        "practical_floor_pct": 3,
+        "tests": 9,
+        "two_sided_sign_alpha": 0.005555555555555556,
+        "workloads": [
+          "nvme5-mixed-lanes",
+          "sata-mixed",
+          "fast-mixed"
+        ]
+      },
+      "purpose": "fixed development pilot; no exact-source qualification or equivalence claim",
+      "raw_pair_order": "raw-first on odd-numbered rounds; candidate-first on even-numbered rounds",
+      "repeat_per_block": 1,
+      "replacement": "none; no additional rounds or repeats",
+      "rounds": 12,
+      "scenarios": [
+        "nvme5-mixed-lanes",
+        "sata-mixed",
+        "fast-mixed",
+        "fast-w1",
+        "fast-w4",
+        "fast-w8"
+      ]
+    },
+    "primary": [
+      {
+        "change_pct": 11.2997714144488,
+        "confidence": 0.9944444444444445,
+        "contrast": "B/A",
+        "family_adjusted_sign_p": 0.03515625,
+        "interval_pct": [
+          5.366365749314441,
+          17.567299857157252
+        ],
+        "n": 9,
+        "negative": 0,
+        "positive": 9,
+        "scenario": "nvme5-mixed-lanes",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -3.5999298036659444,
+        "confidence": 0.9944444444444445,
+        "contrast": "B/C",
+        "family_adjusted_sign_p": 1,
+        "interval_pct": [
+          -9.447329721756994,
+          2.6250634608943852
+        ],
+        "n": 9,
+        "negative": 7,
+        "positive": 2,
+        "scenario": "nvme5-mixed-lanes",
+        "sign_p": 0.1796875
+      },
+      {
+        "change_pct": 15.456110340759235,
+        "confidence": 0.9944444444444445,
+        "contrast": "C/A",
+        "family_adjusted_sign_p": 0.03515625,
+        "interval_pct": [
+          8.816805448811037,
+          22.500503116572794
+        ],
+        "n": 9,
+        "negative": 0,
+        "positive": 9,
+        "scenario": "nvme5-mixed-lanes",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": 7.860340575939616,
+        "confidence": 0.9944444444444445,
+        "contrast": "B/A",
+        "family_adjusted_sign_p": 0.00439453125,
+        "interval_pct": [
+          3.873152658149582,
+          12.00057735269796
+        ],
+        "n": 12,
+        "negative": 0,
+        "positive": 12,
+        "scenario": "sata-mixed",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": 0.5818965388093358,
+        "confidence": 0.9944444444444445,
+        "contrast": "B/C",
+        "family_adjusted_sign_p": 1,
+        "interval_pct": [
+          -2.7852436785910726,
+          4.065661368281507
+        ],
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "sata-mixed",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 7.236336048129602,
+        "confidence": 0.9944444444444445,
+        "contrast": "C/A",
+        "family_adjusted_sign_p": 0.05712890625,
+        "interval_pct": [
+          2.7702798674823974,
+          11.896472247186955
+        ],
+        "n": 12,
+        "negative": 1,
+        "positive": 11,
+        "scenario": "sata-mixed",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": -0.39475164954948133,
+        "confidence": 0.9944444444444445,
+        "contrast": "B/A",
+        "family_adjusted_sign_p": 1,
+        "interval_pct": [
+          -1.303141722205427,
+          0.5219990998138961
+        ],
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-mixed",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -0.44348242905990115,
+        "confidence": 0.9944444444444445,
+        "contrast": "B/C",
+        "family_adjusted_sign_p": 1,
+        "interval_pct": [
+          -1.0897245048487698,
+          0.2069819463680012
+        ],
+        "n": 12,
+        "negative": 9,
+        "positive": 3,
+        "scenario": "fast-mixed",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 0.04894785464517469,
+        "confidence": 0.9944444444444445,
+        "contrast": "C/A",
+        "family_adjusted_sign_p": 1,
+        "interval_pct": [
+          -0.7173776752861923,
+          0.8211883655074836
+        ],
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "fast-mixed",
+        "sign_p": 0.7744140625
+      }
+    ],
+    "secondary": [
+      {
+        "change_pct": -14.456689275048626,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -18.044183493791323,
+          -10.712157821876849
+        ],
+        "metric": "read_p95_ns",
+        "n": 9,
+        "negative": 9,
+        "positive": 0,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -24.187541555211272,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -28.54237750897929,
+          -19.567309195529887
+        ],
+        "metric": "read_p99_ns",
+        "n": 9,
+        "negative": 9,
+        "positive": 0,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -8.126841449489705,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -10.655419312174818,
+          -5.526701260825348
+        ],
+        "metric": "write_p95_ns",
+        "n": 9,
+        "negative": 9,
+        "positive": 0,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -10.112416863780622,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -16.56358751929674,
+          -3.162451957778035
+        ],
+        "metric": "write_p99_ns",
+        "n": 9,
+        "negative": 8,
+        "positive": 1,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.0390625
+      },
+      {
+        "change_pct": -0.12782595245672154,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.241766959255569,
+          -0.013754805491648066
+        ],
+        "metric": "lower_write_bytes",
+        "n": 9,
+        "negative": 8,
+        "positive": 1,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.0390625
+      },
+      {
+        "change_pct": 1.7667121219383848,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.8116126616510955,
+          2.7308602915455293
+        ],
+        "metric": "lower_write_requests",
+        "n": 9,
+        "negative": 0,
+        "positive": 9,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": 5.743657177353483,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -2.8909451999114744,
+          15.146018630916252
+        ],
+        "metric": "lower_read_bytes",
+        "n": 9,
+        "negative": 0,
+        "positive": 2,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5
+      },
+      {
+        "change_pct": 5.743657177353483,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -2.8909451999114744,
+          15.146018630916252
+        ],
+        "metric": "lower_read_requests",
+        "n": 9,
+        "negative": 0,
+        "positive": 2,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5
+      },
+      {
+        "change_pct": -2.6853637997456876,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -40.439521794238345,
+          59.000375820886916
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 9,
+        "negative": 5,
+        "positive": 4,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 71.61605595171578,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          62.12698028206015,
+          81.66051454966502
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 9,
+        "negative": 0,
+        "positive": 9,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": 0.07810249716294931,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.2257576593272706,
+          0.38288805275955384
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 9,
+        "negative": 4,
+        "positive": 5,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 2.6033093181389475,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -3.1472176904415554,
+          8.695267518347183
+        ],
+        "metric": "read_p95_ns",
+        "n": 9,
+        "negative": 4,
+        "positive": 5,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -1.7379466469666562,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -5.15330280468592,
+          1.8003938426165877
+        ],
+        "metric": "read_p99_ns",
+        "n": 9,
+        "negative": 6,
+        "positive": 3,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5078125
+      },
+      {
+        "change_pct": 3.743556568823093,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          1.8517512580555666,
+          5.67050047357297
+        ],
+        "metric": "write_p95_ns",
+        "n": 9,
+        "negative": 0,
+        "positive": 9,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": 3.2877603675106433,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -5.553519770886933,
+          12.956686324958323
+        ],
+        "metric": "write_p99_ns",
+        "n": 9,
+        "negative": 3,
+        "positive": 6,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5078125
+      },
+      {
+        "change_pct": 0.03528223037571955,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.11569497657608961,
+          0.186487642519662
+        ],
+        "metric": "lower_write_bytes",
+        "n": 9,
+        "negative": 5,
+        "positive": 4,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.9938245896226593,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          0.30201895616568414,
+          1.6904017624709995
+        ],
+        "metric": "lower_write_requests",
+        "n": 9,
+        "negative": 1,
+        "positive": 8,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.0390625
+      },
+      {
+        "change_pct": 1.2335811384723961e-15,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -9.20706258163244,
+          10.14072552714859
+        ],
+        "metric": "lower_read_bytes",
+        "n": 9,
+        "negative": 1,
+        "positive": 1,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 1.2335811384723961e-15,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -9.20706258163244,
+          10.14072552714859
+        ],
+        "metric": "lower_read_requests",
+        "n": 9,
+        "negative": 1,
+        "positive": 1,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 63.61742710602552,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -40.96763851195202,
+          353.4913016856985
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 9,
+        "negative": 3,
+        "positive": 6,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5078125
+      },
+      {
+        "change_pct": 8.940793772791574,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          4.064321111482121,
+          14.045778813392134
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 9,
+        "negative": 1,
+        "positive": 8,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.0390625
+      },
+      {
+        "change_pct": 0.08325003806177145,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.15901343764399875,
+          0.3261013644457236
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 9,
+        "negative": 2,
+        "positive": 6,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.2890625
+      },
+      {
+        "change_pct": -16.627142639512883,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -20.889193056762466,
+          -12.135476643038947
+        ],
+        "metric": "read_p95_ns",
+        "n": 9,
+        "negative": 9,
+        "positive": 0,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -22.846657628442074,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -26.757219985963392,
+          -18.727303387964756
+        ],
+        "metric": "read_p99_ns",
+        "n": 9,
+        "negative": 9,
+        "positive": 0,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -11.442058100676372,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -14.239750828899286,
+          -8.553098326506149
+        ],
+        "metric": "write_p95_ns",
+        "n": 9,
+        "negative": 9,
+        "positive": 0,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -12.973635195120675,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -19.57353038815469,
+          -5.832144470550128
+        ],
+        "metric": "write_p99_ns",
+        "n": 9,
+        "negative": 9,
+        "positive": 0,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -0.16305065492474027,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.26921256463079457,
+          -0.05677573747692177
+        ],
+        "metric": "lower_write_bytes",
+        "n": 9,
+        "negative": 7,
+        "positive": 2,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.1796875
+      },
+      {
+        "change_pct": 0.7652819718990408,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.3046657598158807,
+          1.8467125694604614
+        ],
+        "metric": "lower_write_requests",
+        "n": 9,
+        "negative": 2,
+        "positive": 6,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.2890625
+      },
+      {
+        "change_pct": 5.743657177353483,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -2.8909451999114744,
+          15.146018630916252
+        ],
+        "metric": "lower_read_bytes",
+        "n": 9,
+        "negative": 0,
+        "positive": 2,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5
+      },
+      {
+        "change_pct": 5.743657177353483,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -2.8909451999114744,
+          15.146018630916252
+        ],
+        "metric": "lower_read_requests",
+        "n": 9,
+        "negative": 0,
+        "positive": 2,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5
+      },
+      {
+        "change_pct": -40.52306168022458,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -71.99599481301026,
+          26.321437532722786
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 9,
+        "negative": 6,
+        "positive": 3,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5078125
+      },
+      {
+        "change_pct": 57.531490278692665,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          51.64285832285719,
+          63.64879100729329
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 9,
+        "negative": 0,
+        "positive": 9,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00390625
+      },
+      {
+        "change_pct": -0.005143259133632317,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.21689665653185508,
+          0.20705950794550065
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 9,
+        "negative": 5,
+        "positive": 4,
+        "scenario": "nvme5-mixed-lanes",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -19.59289034389941,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -21.613298871234548,
+          -17.52040601086576
+        ],
+        "metric": "read_p95_ns",
+        "n": 12,
+        "negative": 12,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": -4.209189080012088,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -12.508015159073093,
+          4.876800696566121
+        ],
+        "metric": "read_p99_ns",
+        "n": 12,
+        "negative": 11,
+        "positive": 1,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": -3.6828956056528845,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -7.398819806082148,
+          0.1821421658390801
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": -4.395834300705121,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -5.683404005376858,
+          -3.0906872468202833
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 12,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": 0.20968621042693328,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.07819107188780038,
+          0.34135412358633294
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 11,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.0009765625
+      },
+      {
+        "change_pct": 3.5262998879499503,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          2.824714933323236,
+          4.232671838085262
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 12,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -1.5176968965842002,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -21.485809955462624,
+          23.52880439894257
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 34.19900702470222,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          30.447627883240212,
+          38.05826735719357
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 0,
+        "positive": 12,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": 0.04891417888496269,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.16932722133313852,
+          0.2676326800525362
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 2.5309940129731756,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.4094662595068772,
+          5.558272844299028
+        ],
+        "metric": "read_p95_ns",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 0.8981790440636014,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -1.2650168003828193,
+          3.108768589402943
+        ],
+        "metric": "read_p99_ns",
+        "n": 12,
+        "negative": 4,
+        "positive": 8,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 0.05263753920409757,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -6.331655810171053,
+          6.872074713565339
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -0.6051884638836017,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -2.4799109822600864,
+          1.3055736495784505
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -0.04582153017798382,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.16503123810843667,
+          0.0735305222099382
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 0.10286285802696701,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.09383725997642935,
+          0.2999502488007452
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 2,
+        "positive": 6,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.2890625
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 29.728747160362946,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -5.605436569615424,
+          78.28937629664516
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 4.3470383512832615,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          1.3248153400822904,
+          7.459405439221765
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 2,
+        "positive": 10,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": -0.011747472885344315,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.26348272514337967,
+          0.24062315986281563
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -21.577752727212676,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -24.10419926255664,
+          -18.967204936806752
+        ],
+        "metric": "read_p95_ns",
+        "n": 12,
+        "negative": 12,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": -5.061903170566865,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -13.273772066968323,
+          3.92752509142533
+        ],
+        "metric": "read_p99_ns",
+        "n": 12,
+        "negative": 11,
+        "positive": 1,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": -3.733567886596962,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -6.886947705517309,
+          -0.4733952600375158
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": -3.8137260670232696,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -5.455114625752753,
+          -2.143841451737542
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 11,
+        "positive": 1,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": 0.255624871832708,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          0.1874402578481004,
+          0.32385589025256484
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 1,
+        "positive": 11,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": 3.4199192032882686,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          2.7530014951733883,
+          4.091165536581247
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 12,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -24.085983053796205,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -38.882037716680735,
+          -5.707949780888271
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 10,
+        "positive": 2,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": 28.60835261363394,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          25.23433423495377,
+          32.07327258163637
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 0,
+        "positive": 12,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": 0.060668778818648954,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.24209128280015196,
+          0.3643477014690225
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "sata-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -1.036317090840994,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -2.8929583620533377,
+          0.8558222941211351
+        ],
+        "metric": "read_p95_ns",
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -2.865645134720211,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -9.068642921622047,
+          3.7604980090813784
+        ],
+        "metric": "read_p99_ns",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -0.7596508283011044,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -2.5903662009931674,
+          1.1054709849564421
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 9,
+        "positive": 3,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": -3.393437046339045,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -6.885386076681536,
+          0.22946573569436463
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 0.17541379804973276,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.05447280821046056,
+          0.29650097548674825
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 2,
+        "positive": 10,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": 1.7819972704787315,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.9033019312283883,
+          2.668344544645402
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 1,
+        "positive": 11,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -1.0503019399836233,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -4.681481805816449,
+          2.719208519608205
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 23.282462571015458,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          16.864616279791157,
+          30.052757296410537
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 0,
+        "positive": 12,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": -0.2481055304185668,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.6539800412098111,
+          0.1594271657592522
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": -1.9274125788218042,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -4.596377821436131,
+          0.816218334797663
+        ],
+        "metric": "read_p95_ns",
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -3.8025794475902224,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -10.634572418157118,
+          3.5517198467183513
+        ],
+        "metric": "read_p99_ns",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.9758318438616421,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -1.282362907962436,
+          3.2856834595185873
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -2.5391511231024766,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -5.799905905269817,
+          0.8344753270988128
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 0.07023200076031708,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.027281781051408854,
+          0.16784089789763015
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 1.376723372520466,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          0.5198885430743961,
+          2.2408618901778223
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -0.3234862051644646,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -4.949417411717555,
+          4.527580281415828
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 4.322674171121389,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -2.148871793788854,
+          11.222226516169492
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": -0.42603249591321524,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.8198198162695128,
+          -0.030681673117356353
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 10,
+        "positive": 2,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": 0.908608115083122,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -1.0351778060659302,
+          2.8905722860738523
+        ],
+        "metric": "read_p95_ns",
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": 0.9739703076129274,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -7.693806071366555,
+          10.455671994942593
+        ],
+        "metric": "read_p99_ns",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -1.718710943472405,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -3.968357324328959,
+          0.5836358671372176
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": -0.8765426661895914,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -4.620860914295268,
+          3.014767044383568
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": 0.10510797785360765,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.007444855454573344,
+          0.2177875019965952
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 0.39977016861063636,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.4427844905113423,
+          1.2494553842671186
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_read_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -0.7291745137828186,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -4.127799845761973,
+          2.7899305206396705
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 18.17417790574862,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          12.692037900221306,
+          23.923008083893222
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 0,
+        "positive": 12,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": 0.17868823544400705,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.27565445693709817,
+          0.635100906635161
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "fast-mixed",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -0.34353952519637526,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.7144636699761279,
+          0.02877036746032142
+        ],
+        "n": 12,
+        "negative": 9,
+        "positive": 3,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -1.8592756601732163,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -3.2690838250216396,
+          -0.428920196278457
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 10,
+        "positive": 2,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": -0.17008625252585727,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.5221814126329289,
+          0.18325512511524641
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -39.42800722065936,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -64.23120575427679,
+          2.574503463984774
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 10,
+        "positive": 2,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": 61.60548857686731,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          34.04682615380242,
+          94.82993135699218
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 1,
+        "positive": 11,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": 0.03726853184696078,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.44398026535877927,
+          0.5208436615580511
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -0.10484896788589244,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.31256070284179305,
+          0.10329556146359045
+        ],
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -0.7497424625670477,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -2.1761775826964254,
+          0.6974924699358304
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 10,
+        "positive": 2,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": -0.07910711368552918,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.4165131806127849,
+          0.25944214331907134
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -33.96034968052197,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -59.411853417856975,
+          7.450962450147551
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 10,
+        "positive": 2,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": 13.072706007374954,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -4.437543167177551,
+          33.791420475900594
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 0.2263252276260642,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.2012702766106319,
+          0.6557527984206234
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -0.23894108457151136,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.6307607625035948,
+          0.1544235650358395
+        ],
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -1.117914678647259,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -2.4015331456152955,
+          0.18258598352164776
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": -0.09105116679035524,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.46261514921642843,
+          0.2818998301051386
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.0,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          0.0,
+          0.0
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 0,
+        "positive": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -8.27935568054444,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -17.515705057536227,
+          1.9912530045176156
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 42.92174856620739,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          23.324991184762066,
+          65.63249684420897
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 1,
+        "positive": 11,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": -0.18862977900240538,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.6930475883351535,
+          0.31835016037454456
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 8,
+        "positive": 3,
+        "scenario": "fast-w1",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.2265625
+      },
+      {
+        "change_pct": -0.9508369431633307,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -2.1414692370258113,
+          0.2542816223418528
+        ],
+        "n": 12,
+        "negative": 10,
+        "positive": 2,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 1.3842455206667712,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.11617606501464943,
+          2.907205940426512
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 2,
+        "positive": 10,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": -4.811702277363811,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -13.026666272172886,
+          4.179196484384262
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": 0.016267658249470913,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.010901150295762064,
+          0.04344384904103133
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 1,
+        "positive": 3,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.625
+      },
+      {
+        "change_pct": -0.18464691540060105,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.4323568374970863,
+          0.06367927322139495
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 7,
+        "positive": 4,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.548828125
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -15.412204844814802,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -45.20856198740331,
+          30.58783176252095
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 85.68104549789642,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          51.036079179767015,
+          128.27294540767267
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 1,
+        "positive": 11,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": -0.23531413965047362,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.591325837496771,
+          0.1219725407873451
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": -0.29809975444728604,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -1.2482096614341407,
+          0.661151342104433
+        ],
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 1.1115804232124378,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.21321528000412324,
+          2.45396446400482
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 4,
+        "positive": 8,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 0.040909010203212824,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -8.61886947907627,
+          9.521335734582138
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 0.01084245857945378,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.016085214737746288,
+          0.037777384059082514
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 2,
+        "positive": 3,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -0.032185419937936735,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.31384603640321157,
+          0.25027102122026956
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 6,
+        "positive": 5,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -17.454447160391286,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -45.04013052131926,
+          23.977155663365167
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 9.197240492463553,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -8.90641345188557,
+          30.898757893024698
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 2,
+        "positive": 10,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": -0.01868994042168817,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.30711491031446503,
+          0.27056948183128277
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 6,
+        "positive": 5,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -0.6546888144643589,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -1.7158328012089294,
+          0.41791201820664303
+        ],
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 0.26966752602724964,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.7264844279669405,
+          1.2758152851435662
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -4.850626944095543,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -13.53703234175522,
+          4.708448462194082
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 9,
+        "positive": 3,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 0.005424611508759353,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.002624884976950446,
+          0.013474755955414114
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 0,
+        "positive": 2,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.5
+      },
+      {
+        "change_pct": -0.15251058163381684,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.4046714558463639,
+          0.10028872720626847
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 6,
+        "positive": 4,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.75390625
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 2.4740791542636953,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -14.831695178593437,
+          23.2963004316478
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 70.04188444735611,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          44.88138250692704,
+          99.57182880295584
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 0,
+        "positive": 12,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": -0.21666469373095784,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.6563616071100848,
+          0.22497832690539002
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 8,
+        "positive": 4,
+        "scenario": "fast-w4",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 0.280447644793449,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -2.5579522404068324,
+          3.2015275854065828
+        ],
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 0.279364994890765,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -10.208739389887553,
+          11.992536639428856
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 5,
+        "positive": 7,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": -3.757510786367847,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -5.341045809488541,
+          -2.1474850504467247
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 12,
+        "positive": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00048828125
+      },
+      {
+        "change_pct": -0.0027157285920672153,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.021339019823077936,
+          0.01591103164895899
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 3,
+        "positive": 3,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": -0.22219697322478893,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -1.5860570741114695,
+          1.1605640508389192
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 6,
+        "positive": 5,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 35.94721698565691,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          9.774340439006318,
+          68.36034479673508
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 34.01366839891926,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          14.550439585045494,
+          56.78388823992009
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 1,
+        "positive": 11,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": -0.056196267248119706,
+        "confidence": 0.95,
+        "contrast": "B/A",
+        "interval_pct": [
+          -0.3900044157465557,
+          0.27873052280180294
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 3.5119180743292353,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -1.0213807361404024,
+          8.252845544986792
+        ],
+        "n": 12,
+        "negative": 4,
+        "positive": 8,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": -7.0412797147081,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -17.794889970228862,
+          5.119057366988816
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 2.0282507375630012,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -5.094129004591983,
+          9.685142124354956
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": 0.016283554270454588,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.018451652467040086,
+          0.051030828580486784
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 2,
+        "positive": 5,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.453125
+      },
+      {
+        "change_pct": -1.2373996286885738,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -3.343475930494207,
+          0.9145665644795683
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 7,
+        "positive": 5,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.7744140625
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 2.4282820350568155,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -19.10727450754503,
+          29.697113019534882
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 6,
+        "positive": 6,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 1.0
+      },
+      {
+        "change_pct": 6.290103293224998,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -9.205122566386454,
+          24.42977376498901
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 4,
+        "positive": 8,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": 0.16853359243303243,
+        "confidence": 0.95,
+        "contrast": "B/C",
+        "interval_pct": [
+          -0.18297168064776853,
+          0.5212766899520476
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 4,
+        "positive": 8,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": -3.1218341710326962,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -5.314833409679657,
+          -0.8780429674572207
+        ],
+        "n": 12,
+        "negative": 9,
+        "positive": 3,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no family direction or equivalence claim",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "read_p95_ns",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "read_p99_ns",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 7.875156507245025,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -5.506882014593988,
+          23.152348441501243
+        ],
+        "metric": "write_p95_ns",
+        "n": 12,
+        "negative": 4,
+        "positive": 8,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": -5.670744604661488,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -11.937701387515515,
+          1.0422003926381727
+        ],
+        "metric": "write_p99_ns",
+        "n": 12,
+        "negative": 11,
+        "positive": 1,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.00634765625
+      },
+      {
+        "change_pct": -0.01899618960767747,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.043088534143649514,
+          0.005101961841060559
+        ],
+        "metric": "lower_write_bytes",
+        "n": 12,
+        "negative": 4,
+        "positive": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.125
+      },
+      {
+        "change_pct": 1.0279221604605326,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -1.387295946192614,
+          3.502293685110638
+        ],
+        "metric": "lower_write_requests",
+        "n": 12,
+        "negative": 4,
+        "positive": 8,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.3876953125
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "lower_read_bytes",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": null,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": null,
+        "metric": "lower_read_requests",
+        "n": 0,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": null
+      },
+      {
+        "change_pct": 32.72429673195924,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -2.952974372625414,
+          81.5175563507863
+        ],
+        "metric": "mixed_replay_cpu_user_s",
+        "n": 12,
+        "negative": 3,
+        "positive": 9,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      },
+      {
+        "change_pct": 26.082922348106685,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          3.18407848185187,
+          54.06352939067693
+        ],
+        "metric": "mixed_replay_cpu_system_s",
+        "n": 12,
+        "negative": 2,
+        "positive": 10,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.03857421875
+      },
+      {
+        "change_pct": -0.224351751614472,
+        "confidence": 0.95,
+        "contrast": "C/A",
+        "interval_pct": [
+          -0.5612082670594715,
+          0.11364589105080283
+        ],
+        "metric": "mixed_replay_peak_rss_kb",
+        "n": 12,
+        "negative": 9,
+        "positive": 3,
+        "scenario": "fast-w8",
+        "scope": "descriptive secondary; no equivalence inference",
+        "sign_p": 0.14599609375
+      }
+    ],
+    "usable_rounds": {
+      "fast-mixed": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fast-w1": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fast-w4": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "fast-w8": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "nvme5-mixed-lanes": [
+        2,
+        3,
+        4,
+        5,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "sata-mixed": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ]
+    }
+  },
+  "baseline_qualification_report": "3465b4c08987d6d98592f30622485ad5b872acb0",
+  "candidate_c_sha256": "01a73fb21ab142c5f9f43363b70e76363a8abbb3097d178dbf20c85ffbb212a7",
+  "complete_packet_sha256": "26ff9bab10b416777b1c28294386b7aeba91978e90c3cbd9bbcb826a1981ab44",
+  "complete_packet_uncompressed_sha256": "124673902b312f834ddd0be5015eecd9da2682f0ebe46e505af269948233c6bd",
+  "observations": "36 source blocks; 216 owned raw/swapz pairs; 432 byte-exact arms; three NVMe5 round/scenario triplets excluded without replacement",
+  "patch_sha256": "0492c60dcc01e0fd2c90a6110025ba13e7554354e1ec6fa981b9acc8cbfe1178",
+  "qualified_source": "545defa8a1ba21f5dd49cd16a1566806e75b71ec",
+  "resource_scope": {
+    "additional_requested_bytes_with_default_delta64_scratch": 200448,
+    "additional_requested_lz4_and_lane_bytes_for_8_submitter_lanes_delta64_off": 134912,
+    "limits": "Requested storage, not actual allocator/RAM measurement. Native process system CPU increases when compression moves into that task; kworker CPU is excluded, so this is not total kernel CPU.",
+    "submitter_lane_struct_bytes": 448
+  },
+  "restored_c_sha256": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+  "status": "REJECTED_API_STATE_REUSE; production and test helpers restored to qualified stateless source"
+}

@@ -1,0 +1,477 @@
+--- a/src/kernel/dm-target.c
++++ b/src/kernel/dm-target.c
+@@ -2177,6 +2177,28 @@
+ }
+ 
+ /*
++ * Each scratch owner emits independent SWZ blocks. Forget the input before
++ * the caller may release/unmap/reuse it, including a capped-output failure.
++ * Scratch is zeroed once at allocation; no prior block is a dictionary.
++ */
++static int swapz_lz4_compress_independent(const char *input, char *output,
++					  int input_size, int capacity,
++					  int acceleration, void *workmem)
++{
++	LZ4_stream_t *stream = workmem;
++	int result;
++
++	result = LZ4_compress_fast_continue(stream, input, output, input_size,
++					    capacity, acceleration);
++	if (unlikely(LZ4_loadDict(stream, input, 0))) {
++		/* A failed forget must never leave a reference to caller memory. */
++		memset(stream, 0, sizeof(*stream));
++		return 0;
++	}
++	return result;
++}
++
++/*
+  * Predictor-first rescue: score before ordinary LZ4. High-score pages run
+  * delta64+shuffle8+LZ4 first and candidates <=2024 bytes may be adopted
+  * directly, genuinely skipping ordinary LZ4. Larger candidates retain the old
+@@ -2234,7 +2256,7 @@
+ 			stats->transform_calls++;
+ 			rescue_wall += elapsed;
+ 			start = now;
+-			candidate = LZ4_compress_fast(
++			candidate = swapz_lz4_compress_independent(
+ 				transform_scratch, output, SWAPZ_BLOCK_BYTES,
+ 				SWAPZ_MAX_COMPRESSED, ctx->delta64_lz4_acceleration,
+ 				lz4_workmem);
+@@ -2268,7 +2290,7 @@
+ 
+ ordinary:
+ 	start = (ctx->delta64_rescue_enabled && now) ? now : ktime_get_ns();
+-	baseline = LZ4_compress_fast(input, output, SWAPZ_BLOCK_BYTES,
++	baseline = swapz_lz4_compress_independent(input, output, SWAPZ_BLOCK_BYTES,
+ 				     SWAPZ_MAX_COMPRESSED, SWAPZ_ORDINARY_LZ4_ACCELERATION,
+ 				     lz4_workmem);
+ 	*lz4_wall_ns += swapz_elapsed_ns(start, ktime_get_ns());
+@@ -2331,7 +2353,7 @@
+ 		stats->transform_calls++;
+ 		rescue_wall += elapsed;
+ 		start = now;
+-		candidate = LZ4_compress_fast(
++		candidate = swapz_lz4_compress_independent(
+ 			transform_scratch, candidate_output, SWAPZ_BLOCK_BYTES,
+ 			SWAPZ_MAX_COMPRESSED, ctx->delta64_lz4_acceleration,
+ 			lz4_workmem);
+@@ -7380,7 +7402,7 @@
+ 	ctx->engine.bulk_txs = kvcalloc(SWAPZ_MAX_RECORDS,
+ 				       sizeof(*ctx->engine.bulk_txs),
+ 				       GFP_KERNEL);
+-	ctx->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
++	ctx->lz4_workmem = kvzalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
+ 	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
+ 	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
+ 	    (ctx->delta64_rescue_enabled &&
+@@ -7470,7 +7492,7 @@
+ 				lane->delta64_candidate_page =
+ 					kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+ 			}
+-			lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
++			lane->lz4_workmem = kvzalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
+ 			if ((ctx->delta64_rescue_enabled &&
+ 			     (!lane->predictor_page || !lane->delta64_candidate_page)) ||
+ 			    !lane->lz4_workmem) {
+@@ -7489,7 +7511,7 @@
+ 				lane->delta64_candidate_page =
+ 					kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+ 			}
+-			lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
++			lane->lz4_workmem = kvzalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
+ 			if ((ctx->delta64_rescue_enabled &&
+ 			     (!lane->predictor_page || !lane->delta64_candidate_page)) ||
+ 			    !lane->lz4_workmem) {
+--- a/tests/runtime/native/source-contract-test.py
++++ b/tests/runtime/native/source-contract-test.py
+@@ -271,7 +271,7 @@
+         accept = body("swapz_accept_write")
+         compressor = body("swapz_compress_page")
+         status = body("swapz_status")
+-        self.assertIn("baseline = LZ4_compress_fast(input", compressor)
++        self.assertIn("baseline = swapz_lz4_compress_independent(input", compressor)
+         self.assertIn("ctx->lz4_attempts++", accept)
+         self.assertIn("ctx->lz4_size_bins[5]++", accept)
+         self.assertIn("ctx->lz4_accepted_bytes += length", accept)
+@@ -284,7 +284,7 @@
+         self.assertIn("lz4_attempts=%llu lz4_accepted_bytes=%llu", status)
+         self.assertIn("lz4_size_3073_3568=%llu lz4_raw_fallback=%llu", status)
+         self.assertIn("ctx->lz4_size_bins[5]", status)
+-        self.assertNotIn("LZ4_compress_fast(", body("swapz_gc_compact_one_inner"))
++        self.assertNotIn("swapz_lz4_compress_independent(", body("swapz_gc_compact_one_inner"))
+ 
+     def test_production_delta64_telemetry_has_separate_worker_owners(self):
+         compressor = body("swapz_compress_page")
+@@ -306,7 +306,7 @@
+         self.assertLess(compressor.index("swapz_predict_delta64_sample_score"),
+                         compressor.index("ordinary:"))
+         self.assertLess(compressor.index("swapz_predict_delta64_sample_score"),
+-                        compressor.index("baseline = LZ4_compress_fast(input"))
++                        compressor.index("baseline = swapz_lz4_compress_independent(input"))
+         self.assertLess(compressor.index("stats->classifier_pass++"),
+                         compressor.index("swapz_predict_delta64_shuf8(input"))
+         self.assertLess(compressor.index("stats->attempts++"),
+@@ -420,8 +420,8 @@
+         ctor = body("swapz_ctr")
+         freeing = body("swapz_free")
+         flush = body("swapz_flush_window")
+-        self.assertIn("ctx->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL)", ctor)
+-        self.assertIn("lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL)", ctor)
++        self.assertIn("ctx->lz4_workmem = kvzalloc(LZ4_MEM_COMPRESS, GFP_KERNEL)", ctor)
++        self.assertIn("lane->lz4_workmem = kvzalloc(LZ4_MEM_COMPRESS, GFP_KERNEL)", ctor)
+         self.assertIn("ctx->predictor_page = kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL)", ctor)
+         self.assertIn("ctx->delta64_candidate_page = kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL)", ctor)
+         self.assertIn("slot->predictor_page = kvmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL)", ctor)
+@@ -681,7 +681,7 @@
+ 
+     def test_real_swapz_not_memory_smoke(self):
+         for snippet in ("dm_register_target(&swapz_target)",
+-                        "LZ4_compress_fast(", "LZ4_decompress_safe(",
++                        "swapz_lz4_compress_independent(", "LZ4_decompress_safe(",
+                         "swapz_dm_io(&req,", "DM_IO_VMA", "SWAPZ_SECTORS"):
+             self.assertIn(snippet, DM)
+ 
+@@ -2610,7 +2610,7 @@
+         self.assertIn("baseline_length <= 0", route)
+         self.assertIn("candidate_length <= (int)route->pack_limit", route)
+         self.assertIn("swapz_predict_delta64", compressor)
+-        self.assertIn("LZ4_compress_fast", compressor)
++        self.assertIn("swapz_lz4_compress_independent", compressor)
+         self.assertIn("swapz_unpredict_delta64", DM)
+         predictor_header = (ROOT / "src/kernel/predictor.h").read_text()
+         codec_header = (ROOT / "src/kernel/codec.h").read_text()
+@@ -3601,7 +3601,7 @@
+         self.assertIn("ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *", ctor)
+         self.assertIn("ctx->preparation_lanes = kcalloc(", ctor)
+         self.assertNotIn("lane->input_page = vzalloc", ctor)
+-        self.assertIn("lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS", ctor)
++        self.assertIn("lane->lz4_workmem = kvzalloc(LZ4_MEM_COMPRESS", ctor)
+         self.assertIn("atomic64_set(&ctx->preparation_free_mask", ctor)
+         self.assertRegex(DM, r"struct swapz_prepared_page \{[^}]+\} __aligned\(64\);")
+         self.assertRegex(DM, r"struct swapz_preparation_lane \{[^}]+\};")
+@@ -4410,7 +4410,7 @@
+         ordinary_start = compressor.index("\nordinary:")
+         high_score = compressor[high_score_start:ordinary_start]
+         self.assertIn(
+-            "LZ4_compress_fast(\n\t\t\t\ttransform_scratch, output,",
++            "swapz_lz4_compress_independent(\n\t\t\t\ttransform_scratch, output,",
+             high_score)
+         self.assertNotIn("memcpy(output, candidate_output", high_score)
+         self.assertIn("memcpy(candidate_output, output, (size_t)candidate)",
+@@ -4536,6 +4536,31 @@
+ 
+ 
+ 
++    def test_lz4_independent_state_real_helper_forgets_every_input(self):
++        import subprocess
++        import tempfile
++        start = DM.index("static int swapz_lz4_compress_independent(")
++        end = DM.index("\n}\n", start) + 3
++        helper = DM[start:end]
++        self.assertEqual(body("swapz_compress_page").count(
++            "swapz_lz4_compress_independent("), 3)
++        self.assertNotIn("LZ4_compress_fast(", DM)
++        ctor = body("swapz_ctr")
++        self.assertEqual(ctor.count("kvzalloc(LZ4_MEM_COMPRESS, GFP_KERNEL)"), 3)
++        with tempfile.TemporaryDirectory(prefix="swapz-lz4-state-") as directory:
++            path = Path(directory)
++            (path / "production-helper.h").write_text(helper)
++            for stub in (True, False):
++                command = ["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++                           "-I", str(path),
++                           str(ROOT / "tests/runtime/native/lz4-state-probe.c"),
++                           "-o", str(path / "probe")]
++                command += ["-DSWAPZ_PROBE_STUB"] if stub else ["-llz4"]
++                built = subprocess.run(command, capture_output=True, text=True)
++                self.assertEqual(built.returncode, 0, built.stderr)
++                ran = subprocess.run([str(path / "probe")], capture_output=True, text=True)
++                self.assertEqual(ran.returncode, 0, ran.stderr)
++
+     def test_snapshot_inputs_are_not_reported_as_direct_lz4(self):
+         for name in ("swapz_preparation_worker", "swapz_submitter_prepare_entry"):
+             preparing = body(name)
+@@ -4576,7 +4601,7 @@
+         self.assertIn("num_possible_cpus()", ctor)
+         self.assertIn("SWAPZ_SUBMITTER_PREPARATION_LANES_MAX", ctor)
+         self.assertIn("kvcalloc(ctx->submitter_lane_count", ctor)
+-        self.assertIn("lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS", ctor)
++        self.assertIn("lane->lz4_workmem = kvzalloc(LZ4_MEM_COMPRESS", ctor)
+ 
+         self.assertIn(
+             "swapz_preparation_claim_slot(&ctx->submitter_lane_free_mask)",
+--- a/tests/tools/benchmark-owned-pair.sh
++++ b/tests/tools/benchmark-owned-pair.sh
+@@ -58,6 +58,11 @@
+     TARGET_CANDIDATE=linear
+     set -- "${@:1:$(( $# - 1 ))}"
+ fi
++SUBMITTER_PREPARE=1
++if [[ $# -gt 1 && ${!#} == --no-submitter-prepare ]]; then
++    SUBMITTER_PREPARE=0
++    set -- "${@:1:$(( $# - 1 ))}"
++fi
+ SHARED_PLAN=""
+ # Only make test supplies its freshly made immutable workload directory.
+ if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
+@@ -239,6 +244,10 @@
+    [[ $RATE_MODE != unpaced || $PROFILE != medium ||
+       $RESOURCE_PRESSURE_SHORT != 0 || $DELTA64_POSITIVE_EXPERIMENT != 0 ]]; then
+     echo 'BLOCKED: linear calibration cannot substitute for product qualification' >&2
++    exit 2
++fi
++if (( !SUBMITTER_PREPARE && (!ASYNC_PREPARE || LINEAR_CALIBRATION) )); then
++    echo 'BLOCKED: submitter control requires owned async product comparison' >&2
+     exit 2
+ fi
+ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+@@ -618,6 +627,7 @@
+ if (( !LINEAR_CALIBRATION )); then
+ modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
+ insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
++    "submitter_prepare=$SUBMITTER_PREPARE" \
+     "delta64_rescue=$DELTA64_RESCUE" \
+     "delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION" \
+     "read_coalesce=$READ_COALESCE" \
+--- a/tests/tools/fast-test.py
++++ b/tests/tools/fast-test.py
+@@ -48,7 +48,8 @@
+               "--hw-queue-depth", "64", "--completion-nsec", "14000"],
+ }
+ CONTENT_WEIGHTS = {"medium": "medium=100", "entropy": "entropy=100",
+-                   "balanced": "medium=50,entropy=50"}
++                   "balanced": "medium=50,entropy=50",
++                   "delta64": "delta64=100"}
+ DEFAULT_SCENARIOS = (
+     "sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8",
+ )
+@@ -119,7 +120,8 @@
+             validity["reasons"].append(f"raw repeat spread {spread:.1%}")
+ 
+ 
+-def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first=False):
++def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first=False,
++                       async_prepare=True, submitter_prepare=True):
+     model, _, kind = name.partition("-")
+     if model not in MODELS or not kind:
+         raise ValueError(f"unknown scenario {name!r}")
+@@ -130,11 +132,14 @@
+         arguments += ["--mixed-lanes", "persistent" if kind == "mixed-lanes" else "waves"]
+     elif kind != "mixed":
+         raise ValueError(f"unknown scenario {name!r}")
+-    arguments.append("--async-prepare")
++    if async_prepare:
++        arguments.append("--async-prepare")
+     if not delta64:
+         # Suffix order of benchmark-owned-pair.sh: rescue sits after async.
+         arguments.append("--no-delta64-rescue")
+     arguments += ["--shared-plan", str(plan)]
++    if not submitter_prepare:
++        arguments.append("--no-submitter-prepare")
+     if calibration:
+         arguments.append("--linear-calibration")
+     if candidate_first:
+@@ -155,7 +160,7 @@
+          "test-replay-helper", "test-lower-io"], stdout=subprocess.DEVNULL)
+ 
+ 
+-def prepare_plan(content="medium"):
++def prepare_plan(content="medium", measure_ops=16384):
+     weights = CONTENT_WEIGHTS[content]
+     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
+     plan = Path(tempfile.mkdtemp(prefix="benchmark-plan.",
+@@ -170,11 +175,11 @@
+          "--seed", "0x51a0a9", "--weights", weights], **quiet)
+     run([*replay, "--output-dir", str(plan / "plan"), "--qd", "32",
+          "--read-pct", "25", "--warmup-ops", "1024", "--measure-ops",
+-         "16384", "--iops", "0"], **quiet)
++         str(measure_ops), "--iops", "0"], **quiet)
+     for mode in ("waves", "persistent"):
+         run([*replay, "--output-dir", str(plan / f"plan-mixed-lanes-{mode}"),
+              "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
+-             "--measure-ops", "16384", "--iops", "0", "--mixed-lanes", mode], **quiet)
++             "--measure-ops", str(measure_ops), "--iops", "0", "--mixed-lanes", mode], **quiet)
+     for qd in (1, 4, 8, 32):
+         run([*replay, "--output-dir", str(plan / f"plan-write-qd{qd}"),
+              "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
+@@ -396,6 +401,14 @@
+                         default=os.environ.get("CONTENT", "medium"))
+     parser.add_argument("--calibration", choices=("none", "linear"),
+                         default=os.environ.get("CALIBRATION", "none"))
++    parser.add_argument("--async-prepare", type=int, choices=(0, 1),
++                        default=int(os.environ.get("ASYNC", "1")))
++    parser.add_argument("--submitter-prepare", type=int, choices=(0, 1),
++                        default=int(os.environ.get("SUBMITTER", "1")))
++    parser.add_argument("--measure-ops", type=int,
++                        default=int(os.environ.get("MEASURE_OPS", "16384")))
++    parser.add_argument("--pair-order", choices=("raw-first", "candidate-first"),
++                        default=os.environ.get("PAIR_ORDER", "raw-first"))
+     args = parser.parse_args()
+     calibration = args.calibration == "linear"
+     candidate = "linear" if calibration else "swapz"
+@@ -405,6 +418,16 @@
+         parser.error("REPEAT must be 1..10")
+     if args.content not in CONTENT_WEIGHTS:
+         parser.error("CONTENT must be medium, entropy or balanced")
++    if args.async_prepare not in (0, 1) or args.submitter_prepare not in (0, 1):
++        parser.error("preparation controls must be 0 or 1")
++    if not args.async_prepare and not args.submitter_prepare:
++        parser.error("SUBMITTER=0 requires ASYNC=1")
++    if not 32 <= args.measure_ops <= 524288 or args.measure_ops % 32:
++        parser.error("MEASURE_OPS must be 32-aligned and 32..524288")
++    if args.measure_ops != 16384 and any("-mixed" not in name for name in scenarios):
++        parser.error("extended codec validation supports mixed scenarios only")
++    if calibration and (not args.async_prepare or not args.submitter_prepare):
++        parser.error("linear calibration cannot test preparation policies")
+     for name in scenarios:
+         scenario_arguments(name, "/dev/null")
+ 
+@@ -428,7 +451,7 @@
+         print(preflight.stdout + preflight.stderr, file=sys.stderr)
+         print("BLOCKED: loaded preflight failed", file=sys.stderr)
+         return 2
+-    plan = prepare_plan(args.content)
++    plan = prepare_plan(args.content, args.measure_ops)
+     fixture = json.loads((plan / "fixture.json").read_text())
+     OUT_DIR.mkdir(parents=True, exist_ok=True)
+     rows, raw_reports = [], []
+@@ -441,7 +464,9 @@
+                 begin = time.monotonic()
+                 proc = privileged(720, PAIR, "--validated-source", head,
+                                   *scenario_arguments(name, plan, args.delta64, calibration,
+-                                                      calibration and attempt % 2 == 1))
++                                                      (attempt % 2 == 1) if calibration else
++                                                      args.pair_order == "candidate-first",
++                                                      args.async_prepare, args.submitter_prepare))
+                 elapsed = time.monotonic() - begin
+                 quiet_after = quiet_host_sample()
+                 arms = parse_arms(proc.stdout, candidate)
+@@ -463,7 +488,10 @@
+                 row["performance_validity"] = performance_validity(
+                     quiet_before, quiet_after, arms)
+                 rows.append(row)
+-                raw_reports.append({"scenario": label, "arms": arms})
++                raw_reports.append({"scenario": label, "arms": arms,
++                                    "target_status": [line for line in proc.stdout.splitlines()
++                                        if line.startswith(("SWAPZ_STATUS_BEFORE=",
++                                                            "SWAPZ_STATUS_AFTER="))]})
+                 measured = row["linear_w"] if calibration else row["swapz_w"]
+                 print(f"  {label}: raw W {row['raw_w']:.2f} {candidate} W "
+                       f"{measured:.2f} ({pct(measured, row['raw_w']).strip()}) "
+@@ -475,6 +503,10 @@
+     (OUT_DIR / result_name).write_text(
+         json.dumps({"head": head, "dirty": bool(dirty),
+                     "calibration": args.calibration,
++                    "async_prepare": args.async_prepare,
++                    "submitter_prepare": args.submitter_prepare,
++                    "measure_ops": args.measure_ops,
++                    "pair_order": args.pair_order,
+                     "delta64_rescue": args.delta64,
+                     "content_profile": args.content, "fixture": fixture, "rows": rows,
+                     "reports": raw_reports}, sort_keys=True) + "\n")
+--- /dev/null
++++ b/tests/runtime/native/lz4-state-probe.c
+@@ -0,0 +1,103 @@
++#define _GNU_SOURCE
++#include <assert.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++#define unlikely(x) (x)
++#ifdef SWAPZ_PROBE_STUB
++typedef struct { unsigned char memory[16416]; } LZ4_stream_t;
++static int stage, encoded, forget_result;
++static const char *expected_input;
++static int LZ4_compress_fast_continue(LZ4_stream_t *stream, const char *input,
++                                    char *output, int size, int capacity, int acceleration)
++{
++    assert(stage == 0 && input == expected_input && output);
++    assert(size == 4096 && capacity == 3568 && acceleration == 1);
++    stage = 1;
++    stream->memory[0] = 0xcc;
++    return encoded;
++}
++static int LZ4_loadDict(LZ4_stream_t *stream, const char *input, int size)
++{
++    assert(stage == 1 && input == expected_input && size == 0);
++    stage = 2;
++    if (!forget_result)
++        stream->memory[0] = 0;
++    return forget_result;
++}
++#else
++#include <lz4.h>
++#include <sys/mman.h>
++#endif
++#include "production-helper.h"
++#ifdef SWAPZ_PROBE_STUB
++int main(void)
++{
++    static char input[4096], output[4096];
++    LZ4_stream_t stream;
++    expected_input = input;
++    for (int mode = 0; mode != 3; ++mode) {
++        memset(&stream, 0x5a, sizeof(stream));
++        stage = 0;
++        encoded = mode == 1 ? 0 : 17;
++        forget_result = mode == 2 ? 4 : 0;
++        int result = swapz_lz4_compress_independent(input, output, 4096, 3568, 1, &stream);
++        assert(stage == 2 && result == (mode == 2 ? 0 : encoded));
++        assert(stream.memory[0] == 0);
++        if (mode == 2)
++            for (size_t j = 0; j != sizeof(stream); ++j)
++                assert(((unsigned char *)&stream)[j] == 0);
++    }
++    return 0;
++}
++#else
++static uint32_t step(uint32_t x)
++{
++    x ^= x << 13;
++    x ^= x >> 17;
++    return x ^ (x << 5);
++}
++int main(void)
++{
++    enum { PAGE = 4096, LOOPS = 1024 };
++    unsigned char *bank[2];
++    char expected[PAGE], decoded[PAGE], output[LZ4_COMPRESSBOUND(PAGE) + 64];
++    LZ4_stream_t *stream = calloc(1, sizeof(*stream));
++    assert(stream);
++    for (int i = 0; i != 2; ++i) {
++        bank[i] = mmap(NULL, 3 * PAGE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++        assert(bank[i] != MAP_FAILED);
++    }
++    int failures = 0, successes = 0;
++    for (unsigned i = 0; i != LOOPS; ++i) {
++        unsigned char *input = bank[i & 1] + PAGE;
++        assert(mprotect(input, PAGE, PROT_READ | PROT_WRITE) == 0);
++        uint32_t seed = 0x51a0a9u + i / 2;
++        for (unsigned j = 0; j != PAGE; ++j) {
++            seed = step(seed);
++            input[j] = i % 7 < 3 ? (unsigned char)(j % (1 + i % 3)) : (unsigned char)seed;
++        }
++        memcpy(expected, input, PAGE);
++        memset(output, 0x5a, sizeof(output));
++        int capacity = i % 4 == 0 ? 1 : i % 4 == 1 ? 2048 : i % 4 == 2 ? 3568 : LZ4_COMPRESSBOUND(PAGE);
++        int length = swapz_lz4_compress_independent((const char *)input, output,
++                                                   PAGE, capacity, 1, stream);
++        assert(length >= 0 && length <= capacity);
++        assert(mprotect(input, PAGE, PROT_NONE) == 0);
++        for (size_t j = capacity; j != sizeof(output); ++j)
++            assert((unsigned char)output[j] == 0x5a);
++        if (length) {
++            ++successes;
++            assert(LZ4_decompress_safe(output, decoded, length, PAGE) == PAGE);
++            assert(memcmp(decoded, expected, PAGE) == 0);
++        } else {
++            ++failures;
++        }
++    }
++    assert(failures && successes);
++    for (int i = 0; i != 2; ++i)
++        assert(munmap(bank[i], 3 * PAGE) == 0);
++    free(stream);
++    return 0;
++}
++#endif
