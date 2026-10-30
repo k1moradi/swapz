@@ -719,6 +719,13 @@ temporal overlap with lower I/O; the observed producer overlap remains reported
 unaltered and performance inference remains dependent on the actual paired
 service, lower-traffic and latency data.
 
+The rootless Make-interface contract must execute the loaded pair's full
+asynchronous-preparation shell gate, not a truncated nested branch, with
+synthetic drained statuses for producer-only work, submitter-only work,
+no work, disabled submitter policy, claim-count mismatch, and active ownership.
+This preserves test coverage of both valid placement paths without replacing
+the required owner-loaded byte-exact and lower-I/O checks.
+
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
 only for reads already waiting behind active lower work.
