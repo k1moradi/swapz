@@ -1,0 +1,78 @@
+{
+  "status": "PROSPECTIVE_NOT_STARTED",
+  "gate": "Do not run performance pilot until loaded lifecycle/failure and rejected-destination fallback coverage passes. Apply archived patch only after verifying base and hashes.",
+  "host_identity_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
+  "architecture": "x86_64",
+  "online_cpus": 8,
+  "base": "57a1469df7ccecafcc3886b9f908d866c70c1c81",
+  "candidate_c_sha256": "af438e26b01f854ef99194815e47cbd74250de7efc9bb057ea0d9242f02c8d69",
+  "patch_sha256": "4432985852f7b8c11c140d6342dd7bbe55ba98d9449b22f09e934247421cd27e",
+  "validation_packet_sha256": "8d99b1b3cbbde2e4f5bc269444d6df2a2b8b88012530e0353a6056638beaf57d",
+  "arms": {
+    "A": "Qualified production source unchanged; existing WRITE ACK helper",
+    "B": "Archived CPU-targeted completion candidate, default placement to admission CPU; existing WRITE ACK batching unchanged"
+  },
+  "rounds": 12,
+  "source_orders": [
+    "AB",
+    "BA",
+    "AB",
+    "BA",
+    "AB",
+    "BA",
+    "AB",
+    "BA",
+    "AB",
+    "BA",
+    "AB",
+    "BA"
+  ],
+  "observations_per_source_scenario_block": 1,
+  "raw_target_order": "raw-first in odd rounds, target-first in even rounds in both source blocks",
+  "matched_inputs": {
+    "content": "medium",
+    "delta64_rescue": 0,
+    "async_prepare": 1,
+    "submitter_prepare": 1,
+    "mixed_ops": 16384,
+    "sustained_write_ops": 4096,
+    "fixture_and_plan_hashes": "Must match across sources; record before first timed sample",
+    "models": "Unchanged make fast_test RAM null_blk models; configured NVMe rates do not imply physical fidelity"
+  },
+  "scenarios": [
+    "nvme5-mixed-lanes",
+    "sata-mixed",
+    "fast-mixed",
+    "fast-w1",
+    "fast-w4",
+    "fast-w8"
+  ],
+  "primary_family": {
+    "size": 3,
+    "endpoint": "Within-round B/A change in useful WRITE normalized by each source block own raw WRITE, using paired log ratios",
+    "scenarios": [
+      "nvme5-mixed-lanes",
+      "sata-mixed",
+      "fast-mixed"
+    ],
+    "practical_floor_percent": 3,
+    "interval": "98.3333333333% paired log-t interval per endpoint",
+    "direction_test": "Exact two-sided signs; alpha=0.05/3, adjusted p=min(1,3*p)",
+    "minimum_valid_pairs": 9
+  },
+  "exclusions": [
+    "Exclude both source blocks of a scenario/round if either has ERROR, NOISY or UNKNOWN, missing counters/oracles, or source/input/CPU geometry mismatch",
+    "Exclude both blocks if paired raw WRITE max/min spread exceeds 10%",
+    "No replacement observations, extra repeats or adaptive stopping for significance; preserve every measurement"
+  ],
+  "secondary": "Pointwise descriptive 95% paired log intervals for useful READ, READ/WRITE p95/p99, independent lower bytes/requests, fast WRITE QD1/4/8, GC, CPU and memory. No new direction claims; do not add overlapping CPU/wall timers. Native task CPU excludes kernel workers.",
+  "screen_decision": "Advance only if NVMe5 point reaches +3%, its family interval is above zero and its family-adjusted sign p is below 0.05, with at least nine valid pairs. Any primary/guard material harm, unresolved correctness/resource issue or unexpected lower-IO geometry requires review before retention. Otherwise decline this variant without replacement sampling. Exact-source make test remains mandatory before retention.",
+  "next_correctness_gates": [
+    "Positive remote READ/WRITE delivery on concurrent and synchronous paths (initial four owned pairs pass)",
+    "Loaded suspend/resume and ordinary teardown with exact upper completion accounting and callback count zero",
+    "Lower WRITE fault after actual remote deliveries, terminal failure preserved at callback and DM boundaries",
+    "Real kernel rejected-destination API fallback without offlining a host CPU; native already covers ENXIO and EBUSY",
+    "Review remote callback hardirq context and bounded pool reuse, callback-final-unlock lifetime join, constructor-failure teardown"
+  ],
+  "guard_material_harm_screen": "Flag a guard with point <= -3% useful throughput and pointwise 95% upper bound below zero; review before retention. This is descriptive screening, not a new family-adjusted harm claim."
+}
