@@ -788,6 +788,48 @@ def timed_window_error(record):
     if (type(record.get("delta64_prepare_parallel_starts")) is not int or
             record["delta64_prepare_parallel_starts"] < 0):
         return "invalid timed delta64 parallel-start count"
+    submitter_counters = (
+        "submitter_prepare_claims", "submitter_prepare_lane_misses",
+        "submitter_prepare_page_misses", "submitter_owner_deferrals",
+        "submitter_prepare_pages", "submitter_prepare_wall_ns",
+        "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
+        "submitter_copy_wall_ns", "submitter_copy_bytes",
+        "submitter_crc_wall_ns",
+    )
+    if type(record.get("submitter_prepare")) is not int or             record["submitter_prepare"] not in (0, 1):
+        return "missing or invalid timed submitter preparation policy"
+    if type(record.get("submitter_prepare_lanes")) is not int or not (
+            0 <= record["submitter_prepare_lanes"] <= 8) or             bool(record["submitter_prepare_lanes"]) !=             bool(record["submitter_prepare"]):
+        return "invalid timed submitter preparation lanes"
+    if type(record.get("submitter_prepare_active")) is not int or             record["submitter_prepare_active"] != 0:
+        return "submitter preparation active at timed boundary"
+    if type(record.get("submitter_prepare_active_max")) is not int or not (
+            0 <= record["submitter_prepare_active_max"] <=
+            record["submitter_prepare_lanes"]):
+        return "invalid timed submitter preparation concurrency"
+    if any(type(record.get(field)) is not int or record[field] < 0
+           for field in submitter_counters):
+        return "invalid timed submitter preparation telemetry"
+    if not record["submitter_prepare"] and any(
+            record[field] for field in submitter_counters):
+        return "disabled submitter preparation recorded activity"
+    if record["submitter_prepare_pages"] > record["submitter_prepare_claims"]:
+        return "inconsistent timed submitter preparation claims"
+    if record["submitter_copy_bytes"] !=             record["submitter_prepare_pages"] * 4096:
+        return "inconsistent timed submitter preparation copy bytes"
+    if (record["submitter_lz4_wall_ns"] +
+            record["submitter_copy_wall_ns"] +
+            record["submitter_crc_wall_ns"] >
+            record["submitter_prepare_wall_ns"]):
+        return "inconsistent timed submitter preparation timing"
+    if (record["ordered_lz4_wall_ns"] + record["prep_lz4_wall_ns"] +
+            record["submitter_lz4_wall_ns"] != record["lz4_wall_ns"]):
+        return "inconsistent timed LZ4 attribution"
+    if (record["ordered_write_copy_wall_ns"] +
+            record["prep_write_copy_wall_ns"] +
+            record["submitter_copy_wall_ns"] !=
+            record["write_copy_wall_ns"]):
+        return "inconsistent timed WRITE-copy attribution"
     if any(type(record.get(field)) is not int or record[field] < 0
            for field in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS):
         return "invalid timed swapz window telemetry"

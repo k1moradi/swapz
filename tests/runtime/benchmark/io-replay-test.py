@@ -406,6 +406,21 @@ class PairReplayContract(unittest.TestCase):
             "write_pipeline_depth": 1,
             "pipeline_active_max": 0,
             "read_coalesce_max_blocks": 8,
+            "submitter_prepare": 1,
+            "submitter_prepare_lanes": 8,
+            "submitter_prepare_active": 0,
+            "submitter_prepare_active_max": 2,
+            "submitter_prepare_claims": 2,
+            "submitter_prepare_lane_misses": 1,
+            "submitter_prepare_page_misses": 0,
+            "submitter_owner_deferrals": 1,
+            "submitter_prepare_pages": 2,
+            "submitter_prepare_wall_ns": 2000,
+            "submitter_prepare_cpu_ns": 1500,
+            "submitter_lz4_wall_ns": 800,
+            "submitter_copy_wall_ns": 500,
+            "submitter_copy_bytes": 8192,
+            "submitter_crc_wall_ns": 100,
             "lz4_wall_ns": 100,
             "ordered_lz4_wall_ns": 60,
             "prep_lz4_wall_ns": 40,
@@ -454,10 +469,22 @@ class PairReplayContract(unittest.TestCase):
         after = dict(before)
         after.update({
             "physical_write_reqs": 7,
-            "lz4_wall_ns": 50100,
+            "submitter_prepare_active_max": 4,
+            "submitter_prepare_claims": 12,
+            "submitter_prepare_lane_misses": 3,
+            "submitter_prepare_page_misses": 1,
+            "submitter_owner_deferrals": 5,
+            "submitter_prepare_pages": 10,
+            "submitter_prepare_wall_ns": 12000,
+            "submitter_prepare_cpu_ns": 8500,
+            "submitter_lz4_wall_ns": 4800,
+            "submitter_copy_wall_ns": 2500,
+            "submitter_copy_bytes": 40960,
+            "submitter_crc_wall_ns": 700,
+            "lz4_wall_ns": 54100,
             "ordered_lz4_wall_ns": 30060,
             "prep_lz4_wall_ns": 20040,
-            "write_copy_wall_ns": 1030,
+            "write_copy_wall_ns": 3030,
             "write_copy_bytes": 8192,
             "ordered_write_copy_wall_ns": 620,
             "prep_write_copy_wall_ns": 410,
@@ -573,11 +600,54 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["delta64_pack_cliff_crossings"], 1)
         self.assertEqual(delta["delta64_score_16_23"], 2)
         self.assertEqual(delta["delta64_payload_bytes_saved"], 1200)
+        self.assertEqual(delta["submitter_prepare"], 1)
+        self.assertEqual(delta["submitter_prepare_lanes"], 8)
+        self.assertEqual(delta["submitter_prepare_active"], 0)
+        self.assertEqual(delta["submitter_prepare_active_max"], 4)
+        self.assertEqual(delta["submitter_prepare_claims"], 10)
+        self.assertEqual(delta["submitter_prepare_lane_misses"], 2)
+        self.assertEqual(delta["submitter_prepare_page_misses"], 1)
+        self.assertEqual(delta["submitter_owner_deferrals"], 4)
+        self.assertEqual(delta["submitter_prepare_pages"], 8)
+        self.assertEqual(delta["submitter_prepare_wall_ns"], 10000)
+        self.assertEqual(delta["submitter_prepare_cpu_ns"], 7000)
+        self.assertEqual(delta["submitter_lz4_wall_ns"], 4000)
+        self.assertEqual(delta["submitter_copy_wall_ns"], 2000)
+        self.assertEqual(delta["submitter_copy_bytes"], 32768)
+        self.assertEqual(delta["submitter_crc_wall_ns"], 600)
         disabled_before = dict(before, delta64_rescue=0)
         disabled_after = dict(after, delta64_rescue=0,
                               **{field: 0 for field in module.DELTA64_FIELDS})
         self.assertEqual(module.kernel_write_delta(
             disabled_before, disabled_after)["delta64_rescue"], 0)
+        for invalid, message in (
+                ({"submitter_prepare": 0}, "policy"),
+                ({"submitter_prepare_lanes": 9}, "lanes"),
+                ({"submitter_prepare_active": 1}, "measurement boundary"),
+                ({"submitter_prepare_active_max": 9}, "concurrency"),
+                ({"submitter_prepare_pages": 13}, "claims"),
+                ({"submitter_copy_bytes": 40961}, "copy bytes"),
+                ({"submitter_prepare_wall_ns": 4000}, "timing")):
+            with self.subTest(submitter=invalid),                     self.assertRaisesRegex(ValueError, message):
+                module.kernel_write_delta(before, dict(after, **invalid))
+        submitter_disabled_before = {
+            **before,
+            "submitter_prepare": 0,
+            "submitter_prepare_lanes": 0,
+            "submitter_prepare_active_max": 0,
+            **{field: 0 for field in (
+                "submitter_prepare_claims", "submitter_prepare_lane_misses",
+                "submitter_prepare_page_misses", "submitter_owner_deferrals",
+                "submitter_prepare_pages", "submitter_prepare_wall_ns",
+                "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
+                "submitter_copy_wall_ns", "submitter_copy_bytes",
+                "submitter_crc_wall_ns")},
+        }
+        submitter_disabled_after = dict(submitter_disabled_before)
+        with self.assertRaisesRegex(ValueError, "disabled.*submitter"):
+            module.kernel_write_delta(
+                submitter_disabled_before,
+                dict(submitter_disabled_after, submitter_prepare_claims=1))
         with self.assertRaisesRegex(ValueError, "disabled.*delta64"):
             module.kernel_write_delta(disabled_before,
                                       dict(disabled_after, delta64_wall_ns=1))
@@ -617,7 +687,8 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["physical_write_reqs"], 5)
         self.assertEqual([delta[key] for key in module.WRITE_WAIT_BINS],
                          [2, 2, 1])
-        self.assertEqual(delta["write_copy_wall_ns"], 1000)
+        self.assertEqual(delta["write_copy_wall_ns"], 3000)
+        self.assertEqual(delta["lz4_wall_ns"], 54000)
         self.assertEqual(delta["ordered_lz4_wall_ns"], 30000)
         self.assertEqual(delta["prep_lz4_wall_ns"], 20000)
         self.assertEqual(delta["ordered_write_copy_wall_ns"], 600)
