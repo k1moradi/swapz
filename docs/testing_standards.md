@@ -23,6 +23,11 @@ It must execute the supported qualification in order and fail closed. Rootless/C
 
 ### Development decision loop
 
+The project-goal CI policy validates all five root Make targets
+(`all install uninstall test fast_test`). This does not make `fast_test` a
+second public qualification command: `make test` remains the sole official
+qualification entrypoint.
+
 `make fast_test` is the owner-approved development loop, not a qualification
 command. It builds the current working tree (dirty trees allowed), runs the
 lower-I/O window-policy native checks, runs the root preflight, and then runs

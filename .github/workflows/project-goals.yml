@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           python3 -B tests/runtime/native/make-interface-test.py -v
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
-          grep -Fxq '.PHONY: all install uninstall test' Makefile
+          grep -Fxq '.PHONY: all install uninstall test fast_test' Makefile
           grep -Fq '@+python3 -B tests/tools/run-tests.py --kdir' Makefile
           grep -Fq 'tests/tools/test-rootless.sh' tests/tools/run-tests.py
           grep -Fq 'tests/tools/test-loaded.sh' tests/tools/run-tests.py
