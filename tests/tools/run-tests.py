@@ -318,7 +318,8 @@ KERNEL_WRITE_FIELDS = (
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
     "write_copy_wall_ns", "write_copy_bytes",
     "ordered_write_copy_wall_ns", "prep_write_copy_wall_ns",
-    "direct_lz4_input_pages", "window_sort_wall_ns",
+    "direct_lz4_input_pages", "mapped_snapshot_input_pages",
+    "window_sort_wall_ns",
     "window_commit_wall_ns", "window_commit_nonio_wall_ns",
     "engine_plan_wall_ns", "engine_pack_wall_ns",
     "engine_publish_wall_ns", "engine_publish_crc_wall_ns",
@@ -6602,6 +6603,8 @@ def print_bench(result, *, detailed=False):
             [
                 ("direct LZ4 input",
                  f"{asynchronous['mixed_direct_lz4_input_pages']:.1f} pages"),
+                ("mapped snapshot input",
+                 f"{asynchronous['mixed_mapped_snapshot_input_pages']:.1f} pages"),
                 ("wave kicks", f"{prep['prep_wave_kicks']:.1f}"),
                 ("lower-WRITE prep starts",
                  f"{prep['prep_lower_write_overlap_starts']:.1f}"),

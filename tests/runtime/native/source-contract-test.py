@@ -4536,6 +4536,22 @@ int main(void)
 
 
 
+    def test_snapshot_inputs_are_not_reported_as_direct_lz4(self):
+        for name in ("swapz_preparation_worker", "swapz_submitter_prepare_entry"):
+            preparing = body(name)
+            self.assertIn("lane->mapped_snapshot_pages++", preparing)
+            self.assertNotIn("direct_lz4_pages", preparing)
+            self.assertIn("ctx, prepared->raw_bytes, prepared->bytes", preparing)
+        status = body("swapz_status")
+        self.assertIn("mapped_snapshot_input_pages=%llu", status)
+        self.assertIn("prep.mapped_snapshot_pages + submitter.mapped_snapshot_pages", status)
+        self.assertIn("ctx->ordered_direct_lz4_pages,", status)
+        ordered = body("swapz_accept_write")
+        force_raw = ordered.index("if (force_raw && bulk_raw_eligible)")
+        direct = ordered.index("ctx->ordered_direct_lz4_pages++")
+        self.assertGreater(direct, force_raw)
+        self.assertLess(direct, ordered.index("length = swapz_compress_page(", force_raw))
+
     def test_submitter_preparation_is_bounded_and_owner_gated(self):
         mapper = body("swapz_map")
         claim = body("swapz_claim_submitter_preparation_locked")

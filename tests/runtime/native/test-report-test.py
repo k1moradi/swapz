@@ -275,6 +275,7 @@ def timed_kernel_write(*, mode, target=8):
         "ordered_write_copy_wall_ns": 2000000,
         "prep_write_copy_wall_ns": 1000000,
         "direct_lz4_input_pages": 3000,
+        "mapped_snapshot_input_pages": 1000,
         "window_sort_wall_ns": 1000000,
         "window_commit_wall_ns": 40000000,
         "window_commit_nonio_wall_ns": 10000000,

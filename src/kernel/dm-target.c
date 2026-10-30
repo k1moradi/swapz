@@ -187,7 +187,7 @@ struct swapz_preparation_lane {
 	u64 lower_write_overlap_ns;
 	u64 copy_wall_ns;
 	u64 copy_bytes;
-	u64 direct_lz4_pages;
+	u64 mapped_snapshot_pages;
 	u64 copy_fallback_pages;
 	u64 crc_wall_ns;
 	u64 worker_wall_ns;
@@ -208,7 +208,7 @@ struct swapz_submitter_lane {
 	u64 lz4_wall_ns;
 	u64 copy_wall_ns;
 	u64 copy_bytes;
-	u64 direct_lz4_pages;
+	u64 mapped_snapshot_pages;
 	u64 copy_fallback_pages;
 	u64 crc_wall_ns;
 	u64 wall_ns;
@@ -225,7 +225,7 @@ struct swapz_preparation_totals {
 	u64 lower_write_overlap_ns;
 	u64 copy_wall_ns;
 	u64 copy_bytes;
-	u64 direct_lz4_pages;
+	u64 mapped_snapshot_pages;
 	u64 copy_fallback_pages;
 	u64 crc_wall_ns;
 	u64 worker_wall_ns;
@@ -917,7 +917,7 @@ static void swapz_preparation_totals_snapshot(
 		total->lower_write_overlap_ns += READ_ONCE(lane->lower_write_overlap_ns);
 		total->copy_wall_ns += READ_ONCE(lane->copy_wall_ns);
 		total->copy_bytes += READ_ONCE(lane->copy_bytes);
-		total->direct_lz4_pages += READ_ONCE(lane->direct_lz4_pages);
+		total->mapped_snapshot_pages += READ_ONCE(lane->mapped_snapshot_pages);
 		total->copy_fallback_pages += READ_ONCE(lane->copy_fallback_pages);
 		total->crc_wall_ns += READ_ONCE(lane->crc_wall_ns);
 		total->worker_wall_ns += READ_ONCE(lane->worker_wall_ns);
@@ -953,7 +953,7 @@ static void swapz_submitter_totals_snapshot(
 		total->lz4_wall_ns += READ_ONCE(lane->lz4_wall_ns);
 		total->copy_wall_ns += READ_ONCE(lane->copy_wall_ns);
 		total->copy_bytes += READ_ONCE(lane->copy_bytes);
-		total->direct_lz4_pages += READ_ONCE(lane->direct_lz4_pages);
+		total->mapped_snapshot_pages += READ_ONCE(lane->mapped_snapshot_pages);
 		total->copy_fallback_pages += READ_ONCE(lane->copy_fallback_pages);
 		total->crc_wall_ns += READ_ONCE(lane->crc_wall_ns);
 		total->worker_wall_ns += READ_ONCE(lane->wall_ns);
@@ -2453,7 +2453,7 @@ static void swapz_submitter_prepare_entry(struct swapz_dm *ctx,
 
 	input = swapz_map_single_bio_input(entry->bio, &mapped_input);
 	if (input) {
-		lane->direct_lz4_pages++;
+		lane->mapped_snapshot_pages++;
 		swapz_memcpy_accounted(prepared->raw_bytes, input,
 				      SWAPZ_BLOCK_BYTES,
 				      &lane->copy_wall_ns, &lane->copy_bytes);
@@ -2666,7 +2666,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 
 		input = swapz_map_single_bio_input(entry->bio, &mapped_input);
 		if (input) {
-			lane->direct_lz4_pages++;
+			lane->mapped_snapshot_pages++;
 			swapz_memcpy_accounted(prepared->raw_bytes, input,
 					      SWAPZ_BLOCK_BYTES,
 					      &lane->copy_wall_ns, &lane->copy_bytes);
@@ -4511,9 +4511,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		}
 	} else {
 		input = swapz_map_single_bio_input(bio, &mapped_input);
-		if (input) {
-			ctx->ordered_direct_lz4_pages++;
-		} else {
+		if (!input) {
 			ctx->ordered_copy_fallback_pages++;
 			error = swapz_copy_bio_accounted(
 				bio, ctx->input_page, false,
@@ -4530,6 +4528,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		} else {
 			u64 lz4_before = ctx->lz4_wall_ns;
 
+			if (mapped_input)
+				ctx->ordered_direct_lz4_pages++;
 			length = swapz_compress_page(
 				ctx, input,
 				ctx->batch_bytes +
@@ -7742,6 +7742,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "write_copy_wall_ns=%llu write_copy_bytes=%llu "
 		       "ordered_write_copy_wall_ns=%llu prep_write_copy_wall_ns=%llu "
 		       "direct_lz4_input_pages=%llu "
+		       "mapped_snapshot_input_pages=%llu "
 		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "window_commit_nonio_wall_ns=%llu "
@@ -8001,8 +8002,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			       ctx->ordered_write_copy_bytes,
 		       ctx->ordered_write_copy_wall_ns,
 		       prep.copy_wall_ns,
-		       prep.direct_lz4_pages + submitter.direct_lz4_pages +
-			       ctx->ordered_direct_lz4_pages,
+		       ctx->ordered_direct_lz4_pages,
+		       prep.mapped_snapshot_pages + submitter.mapped_snapshot_pages,
 		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,

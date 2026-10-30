@@ -1237,7 +1237,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
     "write_copy_wall_ns", "write_copy_bytes",
     "ordered_write_copy_wall_ns", "prep_write_copy_wall_ns",
-    "direct_lz4_input_pages",
+    "direct_lz4_input_pages", "mapped_snapshot_input_pages",
     "window_sort_wall_ns", "window_commit_wall_ns",
     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
     "engine_pack_wall_ns", "engine_publish_wall_ns",

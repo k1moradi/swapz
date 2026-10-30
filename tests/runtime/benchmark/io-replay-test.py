@@ -453,6 +453,7 @@ class PairReplayContract(unittest.TestCase):
             "ordered_write_copy_wall_ns": 20,
             "prep_write_copy_wall_ns": 10,
             "direct_lz4_input_pages": 1,
+            "mapped_snapshot_input_pages": 1,
             "window_sort_wall_ns": 20,
             "window_commit_wall_ns": 400,
             "window_commit_nonio_wall_ns": 100,
@@ -513,6 +514,7 @@ class PairReplayContract(unittest.TestCase):
             "ordered_write_copy_wall_ns": 620,
             "prep_write_copy_wall_ns": 410,
             "direct_lz4_input_pages": 5,
+            "mapped_snapshot_input_pages": 5,
             "window_sort_wall_ns": 1020,
             "window_commit_wall_ns": 70400,
             "window_commit_nonio_wall_ns": 10100,
@@ -720,6 +722,7 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["ordered_write_copy_wall_ns"], 600)
         self.assertEqual(delta["prep_write_copy_wall_ns"], 400)
         self.assertEqual(delta["direct_lz4_input_pages"], 4)
+        self.assertEqual(delta["mapped_snapshot_input_pages"], 4)
         self.assertEqual(delta["window_commit_nonio_wall_ns"], 10000)
         self.assertEqual(delta["engine_plan_wall_ns"], 1000)
         self.assertEqual(delta["engine_pack_wall_ns"], 2000)

@@ -2540,3 +2540,16 @@ half-RAW/half-compressed QD32 mixed traces on newly owned RAM-backed null_blk,
 verify both complete images, and observe successful asynchronous READ batches
 and lower READ requests. Its mandatory marker is correctness evidence separate
 from the unchanged medium performance matrix; omitting it cannot qualify a run.
+
+### Compression input telemetry
+
+`direct_lz4_input_pages` counts ordered page-codec calls receiving the mapped
+BIO input; forced RAW bypasses do not count. It does not count preparation
+snapshots. `mapped_snapshot_input_pages` counts background/submitter inputs
+whose single-BIO shape permits a mapped copy into the immutable RAW snapshot.
+Both preparation paths compress that snapshot, after unmapping the source.
+The latter counter is not zero-copy evidence. Old reports through `df861f74`
+combined both categories under the direct-LZ4 label; do not infer copy savings
+from that historical field. Independent WRITE-copy bytes and wall retain their
+original scope. Real loaded development validation must observe mapped
+snapshots for submitter-prepared ordinary input and preserve the byte oracle.
