@@ -2539,10 +2539,23 @@ out_release_owner:
 	 * dm_per_bio_data. Do not dereference entry or prepared below this point.
 	 */
 	atomic_set_release(&entry->preparation_submitter_active, 0);
-	atomic_dec(&ctx->submitter_preparation_active);
 	swapz_preparation_release_slot(&ctx->submitter_lane_free_mask, lane_slot);
-	swapz_note_accepted_lower_idle_wake(ctx);
-	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	/*
+	 * swapz_map() skipped its admission wake for this descriptor; apply the
+	 * same plain retained/non-retained policy here, after the release store.
+	 */
+	if (ctx->retain_ms) {
+		swapz_note_accepted_lower_idle_wake(ctx);
+		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	} else {
+		queue_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	}
+	/*
+	 * Last ctx access: drain's quiescence check counts this task until its
+	 * wake has been queued, not merely until its descriptor is released.
+	 */
+	smp_mb__before_atomic();
+	atomic_dec(&ctx->submitter_preparation_active);
 }
 
 /*
@@ -6795,7 +6808,13 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		 * unavailable capacity, non-task contexts and FUA/PREFLUSH retain the
 		 * established producer/ordered-owner path.
 		 */
-		if (in_task() && !(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
+		/*
+		 * flags were saved before queue_lock: a caller that entered ->map with
+		 * IRQs disabled keeps the established path instead of running LZ4 and
+		 * the kernel-FPU delta64 transform in its context.
+		 */
+		if (in_task() && !irqs_disabled_flags(flags) &&
+		    !(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
 			submitter_lane =
 				swapz_claim_submitter_preparation_locked(ctx, entry);
 		if (submitter_lane < 0) {
@@ -6821,8 +6840,15 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	 * only after preparation. With retention disabled, preserve the prior
 	 * coalesce=0 behavior: queue one immediate finite worker instance and
 	 * let additional writes join while that instance is pending/running.
+	 *
+	 * ID150: a submitter-owned descriptor is woken by its submitter after the
+	 * release store instead. Waking the CPU-bound owner here would only let it
+	 * preempt this task, find the head still submitter-active, defer and be
+	 * woken again: two owner passes and context switches per WRITE.
 	 */
-	if (bio_op(bio) != REQ_OP_WRITE ||
+	if (submitter_lane >= 0) {
+		/* swapz_submitter_prepare_entry() owns the wake. */
+	} else if (bio_op(bio) != REQ_OP_WRITE ||
 	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
 	    !bio_sectors(bio) || ctx->retain_ms) {
 		swapz_note_accepted_lower_idle_wake(ctx);

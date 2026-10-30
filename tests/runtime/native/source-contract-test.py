@@ -4556,14 +4556,27 @@ int main(void)
         self.assertLess(
             mapper.index("list_add_tail(&entry->list, &ctx->incoming)"),
             mapper.index("swapz_claim_submitter_preparation_locked(ctx, entry)"))
-        self.assertIn(
-            "if (in_task() && !(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))",
-            mapper)
+        self.assertRegex(
+            mapper,
+            r"if \(in_task\(\) && !irqs_disabled_flags\(flags\) &&\s*"
+            r"!\(bio->bi_opf & \(REQ_PREFLUSH \| REQ_FUA\)\)\)")
         self.assertIn("if (submitter_lane < 0)", mapper)
         self.assertIn("swapz_submitter_prepare_entry(ctx, entry", mapper)
         self.assertLess(
             mapper.index("list_add_tail(&entry->list, &ctx->incoming)"),
             mapper.rindex("swapz_submitter_prepare_entry(ctx, entry"))
+        # A submitter-owned descriptor must not wake the CPU-bound owner at
+        # admission: that pass would only defer on the still-active head. The
+        # admission wake chain is skipped and the submitter wakes after release.
+        self.assertIn("if (submitter_lane >= 0) {", mapper,
+                      "submitter-owned admission must skip the owner wake")
+        skip_wake = mapper.index("if (submitter_lane >= 0) {")
+        self.assertLess(skip_wake, mapper.index(
+            "mod_delayed_work(ctx->workqueue, &ctx->worker, 0)"))
+        self.assertLess(skip_wake, mapper.index(
+            "queue_delayed_work(ctx->workqueue, &ctx->worker, 0)"))
+        self.assertLess(skip_wake, mapper.index(
+            "spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\tif (submitter_lane"))
 
         active_gate = re.search(
             r"atomic_read_acquire\(\s*&entry->preparation_submitter_active\s*\)",
@@ -4587,6 +4600,20 @@ int main(void)
         release = submitter.index(release_call) + len(release_call)
         self.assertNotIn("entry->", submitter[release:])
         self.assertNotIn("prepared->", submitter[release:])
+        after_release = submitter[release:]
+        # The owner wake follows the release, mirrors swapz_map()'s retained
+        # policy, and the drain-visible active count is the final ctx access.
+        self.assertIn("if (ctx->retain_ms)", after_release)
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)",
+                      after_release)
+        self.assertIn("queue_delayed_work(ctx->workqueue, &ctx->worker, 0)",
+                      after_release)
+        active_dec = "atomic_dec(&ctx->submitter_preparation_active)"
+        self.assertNotIn(active_dec, submitter[:release])
+        self.assertLess(after_release.rindex("_delayed_work(ctx->workqueue"),
+                        after_release.index(active_dec))
+        self.assertEqual(after_release[after_release.index(active_dec):]
+                         .strip().rstrip("}").strip(), active_dec + ";")
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
                           "swapz_flush_window(", "dm_io(", "bio_endio(",
                           "swapz_engine_write_window"):
