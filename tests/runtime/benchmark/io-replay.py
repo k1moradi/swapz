@@ -1264,7 +1264,13 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
     "work_conserving_raw_ready", "prep_late_results_discarded",
     "idle_bound_closes", "deferred_upper_completion_bios",
-    "deferred_upper_completion_wall_ns"
+    "deferred_upper_completion_wall_ns",
+    "submitter_prepare_claims", "submitter_prepare_lane_misses",
+    "submitter_prepare_page_misses", "submitter_owner_deferrals",
+    "submitter_prepare_pages", "submitter_prepare_wall_ns",
+    "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
+    "submitter_copy_wall_ns", "submitter_copy_bytes",
+    "submitter_crc_wall_ns"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",
@@ -1274,6 +1280,8 @@ KERNEL_WRITE_GAUGE_FIELDS = (
     "read_coalesce_max_blocks", "invalidate_cache_on_write_admit",
     "work_conserving_hand_records", "prep_ready_current", "prep_ready_max",
     "prep_slots_in_use", "prep_slots_in_use_max",
+    "submitter_prepare", "submitter_prepare_lanes",
+    "submitter_prepare_active", "submitter_prepare_active_max",
     "lower_write_service_ewma_ns", "lower_write_block_service_ewma_ns",
     "ordered_lz4_page_ewma_ns")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
@@ -1352,6 +1360,22 @@ def kernel_write_delta(before, after):
     if (before["delta64_prepare_workers"] != after["delta64_prepare_workers"] or
             not 0 <= after["delta64_prepare_workers"] <= 4):
         raise ValueError("invalid or changed swapz delta64 preparation width")
+    if (before["submitter_prepare"] != after["submitter_prepare"] or
+            after["submitter_prepare"] not in (0, 1)):
+        raise ValueError("invalid or changed swapz submitter preparation policy")
+    if (before["submitter_prepare_lanes"] != after["submitter_prepare_lanes"] or
+            not 0 <= after["submitter_prepare_lanes"] <= 8 or
+            bool(after["submitter_prepare_lanes"]) !=
+            bool(after["submitter_prepare"])):
+        raise ValueError("invalid or changed swapz submitter preparation lanes")
+    if before["submitter_prepare_active"] or after["submitter_prepare_active"]:
+        raise ValueError("swapz submitter preparation active at measurement boundary")
+    if (not 0 <= before["submitter_prepare_active_max"] <=
+            before["submitter_prepare_lanes"] or
+            not before["submitter_prepare_active_max"] <=
+            after["submitter_prepare_active_max"] <=
+            after["submitter_prepare_lanes"]):
+        raise ValueError("invalid swapz submitter preparation concurrency")
     for field in ("k1_allow_after_read_bypass",
                   "invalidate_cache_on_write_admit"):
         if before[field] != after[field] or after[field] not in (0, 1):
@@ -1364,6 +1388,34 @@ def kernel_write_delta(before, after):
     if not after["delta64_rescue"] and any(
             before[key] or after[key] for key in DELTA64_FIELDS):
         raise ValueError("disabled swapz delta64 recorded rescue activity")
+    submitter_activity = (
+        "submitter_prepare_claims", "submitter_prepare_lane_misses",
+        "submitter_prepare_page_misses", "submitter_owner_deferrals",
+        "submitter_prepare_pages", "submitter_prepare_wall_ns",
+        "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
+        "submitter_copy_wall_ns", "submitter_copy_bytes",
+        "submitter_crc_wall_ns",
+    )
+    if not after["submitter_prepare"] and any(
+            counters[field] for field in submitter_activity):
+        raise ValueError("disabled swapz submitter preparation recorded activity")
+    if counters["submitter_prepare_pages"] > counters["submitter_prepare_claims"]:
+        raise ValueError("inconsistent swapz submitter preparation claims")
+    if counters["submitter_copy_bytes"] !=             counters["submitter_prepare_pages"] * 4096:
+        raise ValueError("inconsistent swapz submitter preparation copy bytes")
+    if (counters["submitter_lz4_wall_ns"] +
+            counters["submitter_copy_wall_ns"] +
+            counters["submitter_crc_wall_ns"] >
+            counters["submitter_prepare_wall_ns"]):
+        raise ValueError("inconsistent swapz submitter preparation timing")
+    if (counters["ordered_lz4_wall_ns"] + counters["prep_lz4_wall_ns"] +
+            counters["submitter_lz4_wall_ns"] != counters["lz4_wall_ns"]):
+        raise ValueError("inconsistent swapz LZ4 attribution")
+    if (counters["ordered_write_copy_wall_ns"] +
+            counters["prep_write_copy_wall_ns"] +
+            counters["submitter_copy_wall_ns"] !=
+            counters["write_copy_wall_ns"]):
+        raise ValueError("inconsistent swapz WRITE-copy attribution")
     if not (counters["delta64_adopted"] <= counters["delta64_attempts"] <=
             counters["delta64_classifier_pass"] <= counters["delta64_eligible"]):
         raise ValueError("inconsistent swapz delta64 attempt accounting")

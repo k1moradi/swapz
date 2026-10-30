@@ -2059,6 +2059,49 @@ class ReportContract(unittest.TestCase):
         del record["read_meta_secondary_hits"]
         self.assertFalse(runner.read_metadata_counters_consistent(record))
 
+    def test_submitter_preparation_accounting_is_fail_closed(self):
+        record = timed_kernel_write(mode=1)
+        record.update({
+            "submitter_prepare": 1,
+            "submitter_prepare_lanes": 8,
+            "submitter_prepare_active": 0,
+            "submitter_prepare_active_max": 4,
+            "submitter_prepare_claims": 100,
+            "submitter_prepare_lane_misses": 3,
+            "submitter_prepare_page_misses": 2,
+            "submitter_owner_deferrals": 7,
+            "submitter_prepare_pages": 80,
+            "submitter_prepare_wall_ns": 3000000,
+            "submitter_prepare_cpu_ns": 2000000,
+            "submitter_lz4_wall_ns": 1000000,
+            "submitter_copy_wall_ns": 500000,
+            "submitter_copy_bytes": 80 * 4096,
+            "submitter_crc_wall_ns": 200000,
+            "lz4_wall_ns": 21000000,
+            "write_copy_wall_ns": 3500000,
+        })
+        self.assertIsNone(runner.timed_window_error(record))
+        for invalid in (
+                {"submitter_prepare": 0},
+                {"submitter_prepare_lanes": 0},
+                {"submitter_prepare_lanes": 9},
+                {"submitter_prepare_active": 1},
+                {"submitter_prepare_active_max": 9},
+                {"submitter_prepare_pages": 101},
+                {"submitter_copy_bytes": 1},
+                {"submitter_prepare_wall_ns": 1000000},
+                {"lz4_wall_ns": 20000000},
+                {"write_copy_wall_ns": 3000000}):
+            with self.subTest(invalid=invalid):
+                self.assertIsNotNone(
+                    runner.timed_window_error({**record, **invalid}))
+
+        disabled = timed_kernel_write(mode=1)
+        self.assertEqual(disabled["submitter_prepare"], 0)
+        self.assertIsNone(runner.timed_window_error(disabled))
+        disabled["submitter_prepare_claims"] = 1
+        self.assertIsNotNone(runner.timed_window_error(disabled))
+
     def test_delta64_accounting_and_interpretation_are_fail_closed(self):
         record = timed_kernel_write(mode=1)
         self.assertIsNone(runner.timed_window_error(record))

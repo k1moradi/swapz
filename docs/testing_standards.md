@@ -688,8 +688,10 @@ source contracts must prove the scratch pool is preallocated/bounded, claim
 failure falls back without waiting, and release/acquire ownership prevents the
 ordered worker from touching a submitter-owned FIFO head. Performance evidence
 must retain submitter claims, lane/page misses, active peak, owner deferrals and
-submitter wall/CPU/LZ4/copy/CRC counters. Treat those clocks as attribution,
-not additive CPU totals. ID36 must remain within its resource-pressure gate;
+submitter wall/CPU/LZ4/copy/CRC counters. Claims/pages/timing are measurement
+deltas; `submitter_prepare_active_max` is deliberately the loaded-target
+high-water mark and is not reset by `profile_epoch`. Treat those clocks as
+attribution, not additive CPU totals. ID36 must remain within its resource-pressure gate;
 the extra scratch allocation is part of the candidate cost.
 
 Parallel READ service is separate: it requires private read scratch and must

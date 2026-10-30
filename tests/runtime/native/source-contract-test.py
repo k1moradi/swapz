@@ -4494,6 +4494,8 @@ int main(void)
         drain = body("swapz_drain")
         freeing = body("swapz_free")
         status = body("swapz_status")
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        reporter = (ROOT / "tests/tools/run-tests.py").read_text()
 
         self.assertRegex(
             DM, r"static\s+bool\s+swapz_submitter_prepare\s*=\s*true\s*;")
@@ -4568,18 +4570,17 @@ int main(void)
         self.assertIn("kvfree(ctx->submitter_lanes[prep_lane].lz4_workmem)",
                       freeing)
         for field in (
-                "submitter_prepare=%u", "submitter_prepare_lanes=%u",
-                "submitter_prepare_claims=%llu",
-                "submitter_prepare_lane_misses=%llu",
-                "submitter_prepare_page_misses=%llu",
-                "submitter_prepare_active=%u",
-                "submitter_prepare_active_max=%u",
-                "submitter_owner_deferrals=%llu",
-                "submitter_prepare_pages=%llu",
-                "submitter_prepare_wall_ns=%llu",
-                "submitter_prepare_cpu_ns=%llu",
-                "submitter_lz4_wall_ns=%llu"):
-            self.assertIn(field, status)
+                "submitter_prepare", "submitter_prepare_lanes",
+                "submitter_prepare_claims", "submitter_prepare_lane_misses",
+                "submitter_prepare_page_misses", "submitter_prepare_active",
+                "submitter_prepare_active_max", "submitter_owner_deferrals",
+                "submitter_prepare_pages", "submitter_prepare_wall_ns",
+                "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
+                "submitter_copy_wall_ns", "submitter_copy_bytes",
+                "submitter_crc_wall_ns"):
+            self.assertRegex(status, rf"{field}=%[ul]+")
+            self.assertIn(f'"{field}"', replay)
+            self.assertIn(f'"{field}"', reporter)
 
 
 if __name__ == "__main__":
