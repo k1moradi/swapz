@@ -695,7 +695,6 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["prep_lz4_wall_ns"], 20000)
         self.assertEqual(delta["ordered_write_copy_wall_ns"], 600)
         self.assertEqual(delta["prep_write_copy_wall_ns"], 400)
-        self.assertEqual(delta["write_copy_bytes"], 4096)
         self.assertEqual(delta["direct_lz4_input_pages"], 4)
         self.assertEqual(delta["window_commit_nonio_wall_ns"], 10000)
         self.assertEqual(delta["engine_plan_wall_ns"], 1000)

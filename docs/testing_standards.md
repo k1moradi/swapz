@@ -690,7 +690,8 @@ ordered worker from touching a submitter-owned FIFO head. Performance evidence
 must retain submitter claims, lane/page misses, active peak, owner deferrals and
 submitter wall/CPU/LZ4/copy/CRC counters. Claims/pages/timing are measurement
 deltas; `submitter_prepare_active_max` is deliberately the loaded-target
-high-water mark and is not reset by `profile_epoch`. Treat those clocks as
+high-water mark and is not reset by `profile_epoch`. Global WRITE-copy bytes
+and LZ4/copy wall totals include submitter work exactly once. Treat those clocks as
 attribution, not additive CPU totals. ID36 must remain within its resource-pressure gate;
 the extra scratch allocation is part of the candidate cost. The source contract
 also permits the submitter helper between the final admission-lock release and
