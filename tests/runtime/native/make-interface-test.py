@@ -1033,7 +1033,7 @@ class PublicMakeContract(unittest.TestCase):
         # submitter ownership may pass the loaded pair.
         benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         start = benchmark.index("# ID150 async preparation activity gate:")
-        end = benchmark.index("\nfi\n", start) + len("\nfi\n")
+        end = benchmark.index("\nfi\nfi\nCOMPARE_ARGS=()", start) + len("\nfi\n")
         gate = benchmark[start:end]
         cases = (
             ("background", 7, 0, 0, 0, 0, True),
