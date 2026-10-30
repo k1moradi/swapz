@@ -1029,9 +1029,13 @@ OWN_DM=0
 
 # A later lower fault follows actual successful handoffs; future syscalls must
 # see EIO even if a published ACK batch was concurrently being delivered.
+# This fixed series submits 16,512 logical WRITEs. With at most 64 records per
+# lower run and only the known zero-elided pages, at least 258 physical WRITE
+# attempts remain. Fault attempt 256 therefore gives the handoff path enough
+# loaded scheduling headroom while still guaranteeing that the fault is hit.
 UUID="SWAPZ-TEST-$TOKEN-completionfault"
 dmsetup create "$DMNAME" --uuid "$UUID" \
-    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 32 2" ||
+    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 256 2" ||
     fail "cannot create completion-handoff fault mapping"
 OWN_DM=1
 swapz_verify_owned_dm_node
@@ -1045,13 +1049,19 @@ swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
     fail "completion-handoff fault did not become quiescent"
 completion_fault_before="$SWAPZ_QUIET_STATUS"
 fault_batches="$(status_u64 "$completion_fault_before" completion_offloaded_batches)"
-(( fault_batches > 0 &&
-   $(status_u64 "$completion_fault_before" completion_active) == 0 &&
-   $(status_u64 "$completion_fault_before" failed) == 1 &&
-   $(status_u64 "$completion_fault_before" write_fault_calls) == 32 &&
-   $(status_u64 "$completion_fault_before" write_fault_injected) == 1 &&
-   $(status_u64 "$completion_fault_before" upper_write_completed_err) > 0 )) ||
-    fail "completion-handoff fault did not fail closed after real handoffs"
+fault_active="$(status_u64 "$completion_fault_before" completion_active)"
+fault_failed="$(status_u64 "$completion_fault_before" failed)"
+fault_calls="$(status_u64 "$completion_fault_before" write_fault_calls)"
+fault_injected="$(status_u64 "$completion_fault_before" write_fault_injected)"
+fault_upper_err="$(status_u64 "$completion_fault_before" upper_write_completed_err)"
+if ! (( fault_batches > 0 &&
+       fault_active == 0 &&
+       fault_failed == 1 &&
+       fault_calls == 256 &&
+       fault_injected == 1 &&
+       fault_upper_err > 0 )); then
+    fail "completion-handoff fault invariant mismatch: offloaded=$fault_batches active=$fault_active failed=$fault_failed calls=$fault_calls injected=$fault_injected upper_err=$fault_upper_err"
+fi
 timeout --signal=TERM --kill-after=2s 20s "$WRITE_PROBE" "/dev/mapper/$DMNAME" ||
     fail "post-handoff terminal target accepted a new WRITE"
 completion_fault_after="$(dmsetup status "$DMNAME")"

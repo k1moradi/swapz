@@ -1401,6 +1401,20 @@ int main(void) {
             self.assertEqual(built.returncode, 0, built.stderr)
             subprocess.run([str(path / "probe")], check=True)
 
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        completion_fault = deploy.split(
+            'UUID="SWAPZ-TEST-$TOKEN-completionfault"', 1)[1].split(
+            'PASS_LOADED_COMPLETION_HANDOFF=', 1)[0]
+        self.assertIn(
+            '--table "0 32768 swapz $LOWER 0 64 0 2 0 1 256 2"',
+            completion_fault)
+        self.assertIn("fault_calls == 256", completion_fault)
+        for field in ("fault_batches", "fault_active", "fault_failed",
+                      "fault_calls", "fault_injected", "fault_upper_err"):
+            self.assertIn(field, completion_fault)
+        self.assertIn(
+            "completion-handoff fault invariant mismatch:", completion_fault)
+
     def test_worker_yields_after_finite_window_and_preserves_fifo(self):
         # Assert the finite-quantum semantics, not one obsolete decrement idiom.
         worker = body("swapz_worker_pass")
