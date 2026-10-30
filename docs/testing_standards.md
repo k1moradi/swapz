@@ -329,7 +329,7 @@ Direct-I/O tests covering segmented and offset user buffers (via `transfer_segme
 - `bio_segments_max`: maximum segment count observed on an admitted BIO.
 - `bio_nonzero_offset`: admitted BIOs with non-zero within-page `bv_offset`.
 - `bio_compound_folio_pages`: admitted BIOs whose backing memory is a compound folio (`PageCompound()` or `folio_test_large(page_folio())`).
-- `bio_copy_fallback_pages`: write pages where direct LZ4 mapping was safely bypassed in favor of accounted copy fallback.
+- `bio_copy_fallback_pages`: write pages where direct LZ4 mapping was safely bypassed in favor of accounted copy fallback. This status field aggregates the ordered owner, background preparation producer, and ID150 submitter-preparation owners exactly once; changing execution placement must not hide fallback coverage.
 
 Loaded qualification on owned RAM asserts `segs_gt1 > 0`, `segs_max >= 2`, `nonzero_off > 0`, `compound_pages >= 128`, and `copy_fallbacks > 0`, while preserving byte-exact verification across all segmented, THP, and cross-mode reads and writes with zero DM target failures. BIO shape and compound folio inspection in `swapz_map()` strictly gates `bio_for_each_segment()` iteration to data-carrying operations (`REQ_OP_READ` and `REQ_OP_WRITE`) with positive sector counts, preventing invalid bvec traversal on non-data requests (e.g., `REQ_OP_DISCARD` or empty flushes). Failure context extraction in the test harness explicitly distinguishes each loaded subphase (`START_LOADED_COMPOUND_BIO`, `START_LOADED_LIVE_GC`, `START_LOADED_DISCARD_TRIM`, `START_LOADED_PACKED_PLACEMENT`).
 

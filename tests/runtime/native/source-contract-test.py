@@ -3513,6 +3513,11 @@ int main(void)
         self.assertIn("bio_segments_max=%u", status)
         self.assertIn("bio_nonzero_offset=%llu", status)
         self.assertIn("bio_copy_fallback_pages=%llu", status)
+        self.assertRegex(
+            status,
+            r"ctx->ordered_copy_fallback_pages\s*\+\s*"
+            r"prep\.copy_fallback_pages\s*\+\s*"
+            r"submitter\.copy_fallback_pages")
         self.assertIn("PageCompound(vec.bv_page)", mapper)
         self.assertIn("folio_test_large(page_folio(vec.bv_page))", mapper)
 

@@ -8069,7 +8069,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->invalidate_cache_on_write_admit,
 		       ctx->bio_segments_gt1, ctx->bio_segments_max,
 		       ctx->bio_nonzero_offset, ctx->bio_compound_folio_pages,
-		       ctx->ordered_copy_fallback_pages + prep.copy_fallback_pages);
+		       ctx->ordered_copy_fallback_pages +
+			       prep.copy_fallback_pages +
+			       submitter.copy_fallback_pages);
 		DMEMIT(" work_conserving_hand_records=%u "
 		       "work_conserving_hand_closes=%llu "
 		       "work_conserving_dry_closes=%llu "
