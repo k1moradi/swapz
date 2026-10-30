@@ -86,6 +86,15 @@ and assumptions. Do not promote a marginal gain/loss from a mean alone, interpre
 an interval crossing zero as equivalence, or keep sampling until significance
 appears. Historical cross-report changes remain descriptive evidence.
 
+For passive cross-CPU tracing, globally sort per-CPU records by timestamp before
+correlating events. Validate the timed population and complete event pairs
+against independent operation/request counts; no reported ring-buffer loss is
+not proof of completeness. Reject incomplete correlations explicitly, even when
+the byte oracle passes. Admission/completion CPU identity and instrumented
+`bio_endio()` wall time establish an association only: placement, tracing,
+interrupts and workload progress can confound it. Do not turn that association
+into a causal speedup, exact CPU cost or a raw-device comparison.
+
 These are conservative development screening thresholds, not statistical
 qualification or proof of causality. `SCREENED` means the checks passed, not
 that the host was idle throughout. Timed busy/PSI alone must never reject a run:
