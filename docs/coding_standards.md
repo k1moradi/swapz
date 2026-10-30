@@ -1653,8 +1653,9 @@ workers, buffers, RAW cache or lower-WRITE depth is authorized by this path.
 
 ### Published completion handoff verification
 
-The unbound completion item shares the preparation queue; its execution is not
-included in the ordered/preparation/read worker runtime diagnostics. Moving
+The unbound completion item shares the preparation queue and has no dedicated
+CPU measurement. Scheduler boundary deltas may misattribute its execution to
+later callbacks on that pool worker. Moving
 completion work is not proof of total CPU savings. Both completion loops can
 include IRQ service; timers ending after preempt_enable can include scheduling.
 Use explicit phase/scheduler evidence when attributing their cost. The private

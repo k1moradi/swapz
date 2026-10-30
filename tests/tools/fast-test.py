@@ -347,7 +347,7 @@ def print_profile(rows):
           "idle sched = accepted lower-idle after a wake until worker entry.")
     print("  sched diag = scheduler-updated runtime deltas; pending execution may be "
           "missed or earlier execution charged at callback boundaries.")
-    print("  ACK helper execution is outside these worker counters. Phase rows are partial wall time, can overlap and include preemption; "
+    print("  ACK helper has no dedicated CPU measurement. Phase rows are partial wall time, can overlap and include preemption; "
           "neither these rows nor sched diag establishes total worker CPU.")
 
     sync_groups = []

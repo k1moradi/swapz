@@ -4797,7 +4797,7 @@ def benchmark_verdicts(sessions):
         "gc": "SEPARATE_LOADED_EVIDENCE_REQUIRED",
         "cpu_scope":
             "worker-boundary sum_exec_runtime is a scheduler-accounted diagnostic "
-            "that may omit pending runtime or charge earlier execution at boundaries; ACK helper execution is not included; "
+            "that may omit pending runtime or charge earlier execution at boundaries; ACK helper has no dedicated CPU measurement; "
             "phase timers measure partial wall time including preemption, not CPU bounds",
         "physical_media": "NOT_TESTED",
         "host_load_scope": "WHOLE_HOST_INCLUDING_BENCHMARK_AND_BACKGROUND",
