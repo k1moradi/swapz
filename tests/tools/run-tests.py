@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Private make test runner: one bounded, replace-in-place, sanitized report."""
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -7490,16 +7491,26 @@ def publish(source_sha):
     return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
 
-def refresh_history(host_arch=None):
-    """Refresh local committed ARM64 evidence after report publication.
+def report_host_identity():
+    """Stable OS installation identity; never publish raw machine-id or hostname."""
+    try:
+        machine_id = Path("/etc/machine-id").read_text().strip()
+        if not re.fullmatch(r"[0-9a-fA-F]{32}", machine_id) or int(machine_id, 16) == 0:
+            raise ValueError("invalid machine-id")
+        return {"schema": "swapz-host-v1", "architecture": os.uname().machine,
+                "id_sha256": hashlib.sha256(
+                    b"swapz-host\0" + machine_id.lower().encode()).hexdigest()}
+    except (OSError, ValueError):
+        return {"schema": "swapz-host-v1", "status": "UNAVAILABLE"}
 
-    Plot availability is separate from device/source qualification. Failure is
-    visible in stdout and a local log; it must not rewrite the benchmark verdict.
-    """
-    if (host_arch or os.uname().machine) != "aarch64":
-        return ("NOT UPDATED automatically: ARM history is preserved; refresh x86 "
-                "with its explicit audited host profile")
-    output = ROOT / "build/history"
+
+def refresh_history(host_identity):
+    """Render only this run's computer after publication, independently of verdict."""
+    digest = host_identity.get("id_sha256", "")
+    arch = host_identity.get("architecture", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest) or not re.fullmatch(r"[a-zA-Z0-9_-]+", arch):
+        return "NOT UPDATED: stable host identity unavailable; refusing to mix computers"
+    output = ROOT / "build/history" / (arch + "-" + digest)
     log = output / "refresh.log"
     env = os.environ.copy()
     env["MPLBACKEND"] = "Agg"
@@ -7507,17 +7518,17 @@ def refresh_history(host_arch=None):
     try:
         output.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
-            [sys.executable, "-B", str(ROOT / "tests/tools/plot-history.py")],
+            [sys.executable, "-B", str(ROOT / "tests/tools/plot-history.py"),
+             "--host-id", digest, "--host-architecture", arch],
             cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
         log.write_text(proc.stdout + proc.stderr)
         if proc.returncode:
             return f"NOT UPDATED: history helper failed; see {log.relative_to(ROOT)}"
         summary = json.loads(proc.stdout)
-        source = summary["latest_source"]
-        return (f"UPDATED: {summary['reports']} ARM64/NEON PASS reports; latest source "
-                f"{source[:12]}; build/history/arm64-neon/index.md")
+        return (f"UPDATED: {summary['reports']} this-computer PASS reports; latest source "
+                f"{summary['latest_source'][:12]}; {output.relative_to(ROOT)}/index.md")
     except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
-        return f"NOT UPDATED: {type(error).__name__}; inspect local history before use"
+        return f"NOT UPDATED: {type(error).__name__}; see {log.relative_to(ROOT)}"
 
 
 def qualification_overall(exit_code, stages):
@@ -7543,6 +7554,7 @@ def main():
     args = parser.parse_args()
     result = {
         "schema": "swapz-test-results-v1",
+        "host_identity": report_host_identity(),
         "source_sha": git_sha(),
         "tested_commit_sha": git_sha(),
         "kernel_release": os.uname().release,
@@ -7634,7 +7646,7 @@ def main():
     print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
     notice = publish(result["tested_commit_sha"])
     print(f"  Git result: {notice}", flush=True)
-    print(f"  History plots: {refresh_history()}", flush=True)
+    print("  History plots: " + refresh_history(result["host_identity"]), flush=True)
     return exit_code
 
 

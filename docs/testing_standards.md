@@ -2488,13 +2488,21 @@ into an `EACCES` failure before its own validation and cleanup can run.
 
 ### Automatic historical artifacts
 
-After report publication, `make test` refreshes the local ARM64/NEON seven-CPU
-history on ARM64 from committed PASS reports using installed Python Matplotlib.
-On x86 it preserves ARM artifacts and requests explicit audited host selection
-for the separate round-closeout refresh; it never substitutes an ARM refresh
-for a receiving-host update.
+After report publication, `make test` refreshes plots for the computer that
+executed the run, on every architecture. Reports carry `host_identity` with a
+domain-separated SHA-256 of `/etc/machine-id` and the running architecture;
+raw machine IDs and hostnames are never published. Only committed reports with
+that exact identity, overall PASS and all five stages PASS enter its history.
+Git report history preserves each computer's measurements even though the
+shared `test_results.json` is overwritten by the latest upload. The plotter
+scans report revisions, never assumes the current file belongs to this host.
+Outputs are isolated under `build/history/<architecture>-<full-host-digest>/`.
+A missing/invalid identity fails closed. Legacy reports without identity remain
+in their existing manually selected histories; ISA/CPU count cannot migrate them
+automatically. OS reinstalls start a new history, and cloned installations must
+have unique machine IDs. Python Matplotlib must be installed for rendering.
 It prints the latest plotted source and the local index path. Failed/blocked,
-uncommitted and other-host runs never become ARM64 performance points. Plot
+uncommitted and other-host runs never become this computer’s performance points. Plot
 failure prints `NOT UPDATED` and diagnostics separately from the qualification
 verdict; it cannot turn a failed device gate into a pass or hide a passed gate.
 The stable index links to image/data snapshots keyed by report, plotter source

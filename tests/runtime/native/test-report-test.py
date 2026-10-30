@@ -1214,36 +1214,69 @@ class ReportContract(unittest.TestCase):
             self.assertNotEqual(second, first)
             self.assertEqual((second / names[0]).read_bytes(), b"next report")
 
+    def test_computer_history_rejects_other_and_unidentified_hosts(self):
+        spec = importlib.util.spec_from_file_location(
+            "swapz_computer_history", ROOT / "tests/tools/plot-history.py")
+        history = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(history)
+        identity = {"schema": "swapz-host-v1", "architecture": "x86_64",
+                    "id_sha256": "a" * 64}
+        report = {"host_identity": identity, "overall": "PASS",
+                  "stages": [{"status": "PASS"}] * 5}
+        self.assertTrue(history.same_computer_report(report, identity))
+        for different in ({**identity, "id_sha256": "b" * 64},
+                          {**identity, "architecture": "aarch64"}, {},
+                          {**identity, "schema": "unknown"}):
+            self.assertFalse(history.same_computer_report(report, different))
+        self.assertFalse(history.same_computer_report(
+            {**report, "overall": "BLOCKED"}, identity))
+        self.assertFalse(history.same_computer_report(
+            {**report, "stages": [{"status": "PASS"}] * 4}, identity))
+
+    def test_host_identity_missing_or_invalid_fails_closed(self):
+        from unittest.mock import patch
+        for value in ("", "0" * 32, "not-a-machine-id"):
+            with patch.object(Path, "read_text", return_value=value):
+                self.assertEqual(runner.report_host_identity()["status"], "UNAVAILABLE")
+        with patch.object(Path, "read_text", return_value="a" * 32):
+            identity = runner.report_host_identity()
+            self.assertEqual(len(identity["id_sha256"]), 64)
+            self.assertNotIn("a" * 32, json.dumps(identity))
+        with patch.object(Path, "read_text", side_effect=OSError):
+            self.assertEqual(runner.report_host_identity()["status"], "UNAVAILABLE")
+
     def test_history_refresh_executes_after_publication_without_changing_verdicts(self):
         from unittest.mock import patch
-
+        identity = {"schema": "swapz-host-v1", "architecture": "x86_64",
+                    "id_sha256": "a" * 64}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             helper = root / "tests/tools/plot-history.py"
             helper.parent.mkdir(parents=True)
             helper.write_text(
+                "import json, sys\n"
                 "from pathlib import Path\n"
-                "Path('build/history/marker').write_text('refreshed')\n"
-                "print('{\"reports\": 54, \"latest_source\": \"abcdef0123456789\"}')\n")
+                "Path('build/history/marker').write_text(json.dumps(sys.argv))\n"
+                "print('{\"reports\": 3, \"latest_source\": \"abcdef0123456789\"}')\n")
             with patch.object(runner, "ROOT", root):
-                result = runner.refresh_history(host_arch="aarch64")
-                self.assertIn("UPDATED: 54 ARM64/NEON PASS reports", result)
+                result = runner.refresh_history(identity)
+                self.assertIn("UPDATED: 3 this-computer PASS reports", result)
                 self.assertIn("abcdef012345", result)
                 marker = root / "build/history/marker"
-                self.assertEqual(marker.read_text(), "refreshed")
+                command = json.loads(marker.read_text())
+                self.assertEqual(command[1:], ["--host-id", "a" * 64,
+                                               "--host-architecture", "x86_64"])
                 helper.write_text("raise SystemExit('matplotlib unavailable')\n")
-                self.assertTrue(runner.refresh_history(host_arch="aarch64").startswith("NOT UPDATED:"))
-                self.assertIn("matplotlib unavailable",
-                              (root / "build/history/refresh.log").read_text())
-                self.assertEqual(marker.read_text(), "refreshed")
+                self.assertTrue(runner.refresh_history(identity).startswith("NOT UPDATED:"))
+                log = root / "build/history" / ("x86_64-" + "a" * 64) / "refresh.log"
+                self.assertIn("matplotlib unavailable", log.read_text())
                 helper.write_text("print('invalid summary')\n")
-                self.assertTrue(runner.refresh_history(host_arch="aarch64").startswith("NOT UPDATED:"))
+                self.assertTrue(runner.refresh_history(identity).startswith("NOT UPDATED:"))
                 marker.unlink()
-                self.assertIn("explicit audited host profile",
-                              runner.refresh_history(host_arch="x86_64"))
+                self.assertIn("stable host identity unavailable", runner.refresh_history({}))
                 self.assertFalse(marker.exists())
         main = (ROOT / "tests/tools/run-tests.py").read_text().split("def main():", 1)[1]
-        self.assertLess(main.index("notice = publish("), main.index("refresh_history()"))
+        self.assertLess(main.index("notice = publish("), main.index("refresh_history("))
 
     def test_vm_history_lines_break_at_workload_changes_and_missing_reports(self):
         spec = importlib.util.spec_from_file_location(

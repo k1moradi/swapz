@@ -704,3 +704,17 @@ new owner `make test` recovers fast mixed useful service, removes the remaining
 significant QD4 deficit, preserves the current request/byte improvement, and
 keeps QD8/QD32 plus slow/SD evidence non-regressing.
 
+
+## Automatic plots for each computer
+
+`make test` publishes its report and then refreshes only that computer's plots.
+The terminal prints the local index path under
+`build/history/<architecture>-<host-digest>/index.md`. Each report records a
+hashed OS machine identity; history is recovered from committed report revisions
+so uploads by other computers do not mix their measurements or erase prior runs.
+Only complete PASS reports with the same identity and architecture are plotted.
+Legacy reports without this identity remain separate. An OS reinstall changes
+the history identity; cloned systems need distinct `/etc/machine-id` values.
+Install Python Matplotlib on each test computer. Rendering failures are reported
+as `NOT UPDATED` with a local diagnostic log, independently of qualification.
+Plots are local generated artifacts; report publication keeps them reproducible.

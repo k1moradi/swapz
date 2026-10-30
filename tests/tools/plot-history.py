@@ -72,6 +72,12 @@ def selected_host_report(report, sha, profile=None):
         len(stages) == 5 and all(stage.get("status") == "PASS" for stage in stages)
 
 
+def same_computer_report(report, identity):
+    stages = report.get("stages", [])
+    return report.get("host_identity") == identity and report.get("overall") == "PASS" and \
+        len(stages) == 5 and all(stage.get("status") == "PASS" for stage in stages)
+
+
 def number(value, allow_zero=False):
     return isinstance(value, (int, float)) and math.isfinite(value) and \
         (value >= 0 if allow_zero else value > 0)
@@ -197,7 +203,7 @@ def report_points(report):
     return points
 
 
-def collect(profile=None):
+def collect(profile=None, computer=None):
     if profile is not None:
         validate_host_profile(profile)
     history = subprocess.check_output(
@@ -215,7 +221,8 @@ def collect(profile=None):
         except (ValueError, subprocess.CalledProcessError):
             excluded["unreadable report"] += 1
             continue
-        if not selected_host_report(report, sha, profile):
+        if not (same_computer_report(report, computer) if computer is not None
+                else selected_host_report(report, sha, profile)):
             excluded["other or unproven host"] += 1
             continue
         if report.get("overall") != "PASS":
@@ -227,8 +234,10 @@ def collect(profile=None):
             continue
         metadata = {"sequence": len(reports) + 1, "report_sha": sha,
                     "source_sha": report.get("tested_commit_sha") or report.get("source_sha"),
-                    "host_profile_id": profile["id"] if profile else "arm64-neon",
-                    "host_id_sha256": profile["host_id_sha256"] if profile else None,
+                    "host_profile_id": computer["architecture"] + "-" + computer["id_sha256"] if computer else
+                    (profile["id"] if profile else "arm64-neon"),
+                    "host_id_sha256": computer["id_sha256"] if computer else
+                    (profile["host_id_sha256"] if profile else None),
                     "date": datetime.fromisoformat(stamp).astimezone(
                         ZoneInfo("America/Los_Angeles")).isoformat(),
                     "kernel": report.get("kernel_release")}
@@ -238,6 +247,9 @@ def collect(profile=None):
     identity = ("Explicit audited report allowlist for host digest " + profile["host_id_sha256"] +
                 "; legacy reports without a host match stay separate."
                 if profile else "NEON/seven-CPU VM cohort; old reports lack an immutable VM ID.")
+    if computer is not None:
+        title = computer["architecture"] + " · host " + computer["id_sha256"][:12]
+        identity = "Exact OS installation identity and architecture; unidentified legacy reports excluded."
     return {"reports": reports, "points": points, "excluded": dict(excluded),
             "title": title, "host_profile": profile,
             "identity_note": identity,
@@ -378,12 +390,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host-profile", type=Path,
                         help="audited x86 host JSON; omission preserves the ARM64 cohort")
+    parser.add_argument("--host-id", help="exact report machine identity digest")
+    parser.add_argument("--host-architecture", help="exact report architecture")
     args = parser.parse_args()
+    computer = None
+    if args.host_id or args.host_architecture:
+        if args.host_profile or not re.fullmatch(r"[0-9a-f]{64}", args.host_id or "") or not re.fullmatch(r"[a-zA-Z0-9_-]+", args.host_architecture or ""):
+            parser.error("computer selection needs a valid digest and architecture, without --host-profile")
+        computer = {"schema": "swapz-host-v1", "id_sha256": args.host_id,
+                    "architecture": args.host_architecture}
+        OUT = ROOT / "build/history" / (args.host_architecture + "-" + args.host_id)
     profile = validate_host_profile(json.loads(args.host_profile.read_text())) \
         if args.host_profile else None
     if profile is not None:
         OUT = ROOT / "build/history" / profile["id"]
-    data = collect(profile)
+    data = collect(profile, computer)
     if not data["reports"]:
         raise SystemExit("No proven PASS history for the selected host profile")
     render(data)
