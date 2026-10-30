@@ -85,17 +85,28 @@ Work directly on `main` unless the owner explicitly authorizes another branch. C
 
 Every implementation task updates the relevant governing standard in the same commit. README/VISION change only when user-facing structure or acceptance criteria change.
 
-At the end of every optimization round, regenerate the ARM64/NEON VM historical
-performance plots from committed `test_results.json` history using the private
-`tests/tools/plot-history.py` artifact helper. Keep its plots, source/report SHA
-mapping and CSV/JSON under `build/history/arm64-neon/` and show the useful-service
-plot to the owner. Select owner-PASS NEON reports with this VM's seven-CPU profile;
-exclude other/ambiguous hosts, failed/blocked reports and unqualified fast-test
-trials. Keep default-LZ4 mixed, optional policies and sustained WRITE QDs separate.
+At the end of every optimization round, refresh the active host's historical
+performance plots from committed `test_results.json` reports and display every
+generated or refreshed plot inline to the owner. The current private
+`tests/tools/plot-history.py` helper selects this ARM64/NEON VM's seven-CPU profile;
+preserve its plots, source/report SHA mapping and CSV/JSON under
+`build/history/arm64-neon/` with its documented identity limitations. It does not
+currently select x86 history. An x86 continuation must add explicit host/ISA
+selection and a separate output before claiming an x86 history update. Treat
+old reports without a confirmed host/protocol match as separate references,
+not connected comparison points. Exclude failed/blocked reports and unqualified
+fast-test trials. Keep default-LZ4 mixed, optional policies and sustained WRITE
+QDs separate.
 Use each report's own raw controls and break lines at kernel/model/content/replay
 changes. History is descriptive, not causal attribution or physical wear evidence.
 If no new owner report exists, state that the plots still end at the prior
 qualified source. This closeout creates no new public test command or publication.
+
+Host RAM type/speed, virtualization and CPU/queue service can limit RAM-backed
+device emulation. Verify what the host exposes and retain achieved raw controls;
+do not infer a RAM bottleneck from low 4KiB throughput alone or claim physical
+NVMe fidelity from a configured bandwidth ceiling. Never combine ARM and x86
+history or retune only one arm to make a desired model rate appear achievable.
 
 ## Host safety
 

@@ -2425,6 +2425,15 @@ Keep the absolute raw/swapz useful-WRITE MB/s chart alongside relative gains so
 a changing raw control cannot masquerade as a product speed change. Previously
 rendered chat images are snapshots; refreshed files live under the stable index.
 
+For work moved to x86, the existing ARM-only helper is not an x86 history
+implementation. Keep x86 outputs and host/ISA identities separate, verify any
+legacy report's host and protocol before joining it, and otherwise start a new
+series from a fresh owner qualification. Backend names and CPU count alone do
+not establish the same physical machine. Show every newly generated/refreshed
+plot inline. Keep configured emulation rates and achieved raw controls visible;
+host-limited RAM emulation is synthetic software evidence, not a physical
+Gen4/Gen5 device measurement. Do not change model settings to improve one arm.
+
 ### RAW READ slot qualification
 
 Execute the target's actual RAW selection, slot preparation/decode and lower

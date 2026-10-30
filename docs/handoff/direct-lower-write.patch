@@ -1,0 +1,414 @@
+--- a/src/kernel/dm-target.c
++++ b/src/kernel/dm-target.c
+@@ -161,6 +161,10 @@
+ 	u64 lower_end_ns;
+ 	u64 commit_start_ns;
+ 	u64 prepare_nonio_ns;
++	/* One reusable descriptor for the existing immutable bulk scratch. */
++	struct bio lower_bio;
++	struct bio_vec lower_vecs[SWAPZ_BULK_BLOCKS];
++	bool lower_bio_initialized;
+ };
+ 
+ struct swapz_preparation_lane {
+@@ -1242,16 +1246,15 @@
+ 	return false;
+ }
+ 
+-static void swapz_async_lower_write_done(
+-	SWAPZ_DM_IO_NOTIFY_PARAMETERS(error, context))
+-{
+-	struct swapz_inflight_write *inflight = context;
+-
+-	SWAPZ_DM_IO_MERGE_UNSUPPORTED(error);
++static void swapz_async_lower_write_done(struct bio *bio)
++{
++	struct swapz_inflight_write *inflight = bio->bi_private;
+ 	struct swapz_dm *ctx = inflight->ctx;
++	blk_status_t status = bio->bi_status;
+ 	unsigned long flags;
+ 
+-	WRITE_ONCE(inflight->lower_error, error ? -EIO : 0);
++	/* Includes unsupported service: no reserved prefix may be published. */
++	WRITE_ONCE(inflight->lower_error, status ? -EIO : 0);
+ 	WRITE_ONCE(inflight->lower_end_ns, ktime_get_ns());
+ 	spin_lock_irqsave(&ctx->queue_lock, flags);
+ 	ctx->prep_lower_write_end_queued += ctx->preparation_queued;
+@@ -1344,25 +1347,15 @@
+ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
+ 				       struct swapz_inflight_write *inflight)
+ {
+-	struct dm_io_region region;
+-	struct dm_io_request req = {
+-		.bi_opf = REQ_OP_WRITE | REQ_SWAP,
+-		.mem = {
+-			.type = DM_IO_VMA,
+-			.offset = 0,
+-			.ptr.vma = inflight->run.bytes,
+-		},
+-		.notify = {
+-			.fn = swapz_async_lower_write_done,
+-			.context = inflight,
+-		},
+-		.client = ctx->io_client,
+-	};
++	struct bio *bio;
+ 	unsigned long flags;
+ 	int error;
+ 
+ 	if (!inflight || inflight != swapz_inflight_tail_slot(ctx) ||
+-	    inflight->active || !inflight->run.blocks ||
++	    inflight->active || !inflight->lower_bio_initialized ||
++	    !inflight->run.blocks || inflight->run.blocks > SWAPZ_BULK_BLOCKS ||
++	    !inflight->run.bytes ||
++	    inflight->run.bytes != ctx->engine.bulk_scratch ||
+ 	    inflight->run.start_block >= ctx->physical_blocks ||
+ 	    inflight->run.blocks >
+ 		ctx->physical_blocks - inflight->run.start_block)
+@@ -1380,10 +1373,6 @@
+ 		(u64)inflight->run.blocks * SWAPZ_BLOCK_BYTES;
+ 	ctx->lower_write_submitted_reqs++;
+ 	ctx->engine.submitted_blocks += inflight->run.blocks;
+-	region.bdev = ctx->backing->bdev;
+-	region.sector = (sector_t)(ctx->data_start_block + inflight->run.start_block) *
+-		SWAPZ_SECTORS;
+-	region.count = (sector_t)inflight->run.blocks * SWAPZ_SECTORS;
+ 	reinit_completion(&inflight->lower_done);
+ 	inflight->lower_error = 0;
+ 	inflight->lower_start_ns = ktime_get_ns();
+@@ -1400,7 +1389,30 @@
+ 	if (ctx->async_prepare && ctx->preparation_queued)
+ 		swapz_queue_preparation_workers(ctx);
+ 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+-	error = swapz_dm_io(&req, &region, NULL);
++	/* Keep descriptor construction inside the original lower-service scope.
++	 * bio_add_vmalloc performs the WRITE cache flush before page submission.
++	 * A split parent reaches this callback only after all children complete.
++	 */
++	bio = &inflight->lower_bio;
++	bio_reset(bio, ctx->backing->bdev, REQ_OP_WRITE | REQ_SWAP);
++	bio->bi_iter.bi_sector =
++		(sector_t)(ctx->data_start_block + inflight->run.start_block) *
++		SWAPZ_SECTORS;
++	bio->bi_ioprio = IOPRIO_DEFAULT;
++	bio->bi_private = inflight;
++	bio->bi_end_io = swapz_async_lower_write_done;
++	if (!bio_add_vmalloc(bio, inflight->run.bytes,
++			     (unsigned int)inflight->run.blocks * SWAPZ_BLOCK_BYTES)) {
++		/* Nothing was submitted: release the association acquired by reset. */
++		bio_uninit(bio);
++		error = -E2BIG;
++	} else {
++		/* The callback may run inline. It owns all completion/error state;
++		 * neither inspect the BIO nor return a second error after submission.
++		 */
++		submit_bio(bio);
++		error = 0;
++	}
+ 	if (error) {
+ 		spin_lock_irqsave(&ctx->queue_lock, flags);
+ 		ctx->prep_lower_write_end_queued += ctx->preparation_queued;
+@@ -6672,6 +6684,8 @@
+ 		kfree(ctx->preparation_lanes);
+ 	}
+ 	vfree(ctx->preparation_pages);
++	if (ctx->inflight_write.lower_bio_initialized)
++		bio_uninit(&ctx->inflight_write.lower_bio);
+ 	if (ctx->io_client)
+ 		dm_io_client_destroy(ctx->io_client);
+ 	if (ctx->backing)
+@@ -7072,6 +7086,9 @@
+ 	ctx->inflight_write.run.txs = ctx->engine.bulk_txs;
+ 	ctx->inflight_write.ctx = ctx;
+ 	init_completion(&ctx->inflight_write.lower_done);
++	bio_init(&ctx->inflight_write.lower_bio, NULL,
++		 ctx->inflight_write.lower_vecs, SWAPZ_BULK_BLOCKS, 0);
++	ctx->inflight_write.lower_bio_initialized = true;
+ 	ctx->workqueue = alloc_workqueue(
+ 				"swapz", WQ_MEM_RECLAIM, 1);
+ 	if (!ctx->workqueue) {
+--- a/tests/runtime/native/source-contract-test.py
++++ b/tests/runtime/native/source-contract-test.py
+@@ -700,9 +700,9 @@
+         self.assertIn("dm_io(req, 1, region, sync_error_bits,", wrapper)
+         self.assertIn("SWAPZ_DM_IO_NOTIFY_PARAMETERS(error, context)", DM)
+         self.assertIn("do { (error_name) |= unsupported; } while (0)", DM)
+-        self.assertIn("SWAPZ_DM_IO_MERGE_UNSUPPORTED(error)", write_done)
++        self.assertIn("status = bio->bi_status", write_done)
+         self.assertIn("SWAPZ_DM_IO_MERGE_UNSUPPORTED(error)", read_done)
+-        self.assertIn(".fn = swapz_async_lower_write_done",
++        self.assertIn("bio->bi_end_io = swapz_async_lower_write_done",
+                       body("swapz_submit_inflight_write"))
+         self.assertIn(".fn = swapz_async_lower_read_done",
+                       body("swapz_submit_read_slot_range"))
+@@ -1168,6 +1168,8 @@
+ #include <stdint.h>
+ #include <string.h>
+ typedef uint64_t u64;
++typedef unsigned blk_status_t;
++struct bio { void *bi_private; blk_status_t bi_status; };
+ #define WRITE_ONCE(x,v) ((x)=(v))
+ struct completion { bool done; };
+ struct swapz_dm {
+@@ -1208,16 +1210,10 @@
+ }
+ #define EIO 5
+ '''
+-        signatures = (
+-            ("unsigned long error, void *context", "", "0, &inflight", "1, &inflight"),
+-            ("unsigned long error, unsigned long unsupported, void *context",
+-             "error |= unsupported;", "0, 0, &inflight", "0, 1, &inflight"))
+         with tempfile.TemporaryDirectory(prefix="swapz-lower-lifetime-") as temp:
+             path = Path(temp)
+-            for index, (params, merge, success, failure) in enumerate(signatures):
+-                unit = source + (
+-                    "#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error) do { " + merge + " } while(0)\n"
+-                    "static void callback(" + params + ") {\n" + callback + "\n}\n")
++            for index, status in enumerate((0, 1, 6, 10)):
++                unit = source + "static void callback(struct bio *bio) {\n" + callback + "\n}\n"
+                 unit += r'''
+ static void init(struct swapz_dm *ctx, struct swapz_inflight_write *inflight) {
+     memset(ctx,0,sizeof(*ctx));memset(inflight,0,sizeof(*inflight));
+@@ -1226,20 +1222,22 @@
+ }
+ int main(void) {
+     struct swapz_dm ctx;struct swapz_inflight_write inflight;
++    struct bio bio={&inflight,0};
+     init(&ctx,&inflight);
+-    callback(SUCCESS);
++    callback(&bio);
+     assert(!alive&&blocked==1&&notified==1&&!lock_depth);
+     assert(inflight.lower_done.done&&!inflight.lower_error&&inflight.lower_end_ns==42);
+     assert(!ctx.lower_write_active&&ctx.prep_lower_write_end_queued==3);
+     assert(ctx.prep_lower_write_end_nonempty==1);
+     init(&ctx,&inflight);ctx.preparation_queued=0;
+-    callback(FAILURE);
++    bio.bi_status=STATUS;
++    callback(&bio);
+     assert(!alive&&blocked==1&&notified==1&&inflight.lower_done.done);
+-    assert(inflight.lower_error==-EIO&&!ctx.lower_write_active);
++    assert(inflight.lower_error==(STATUS ? -EIO : 0)&&!ctx.lower_write_active);
+     assert(!ctx.prep_lower_write_end_queued&&!ctx.prep_lower_write_end_nonempty);
+     return 0;
+ }
+-'''.replace("SUCCESS", success).replace("FAILURE", failure)
++'''.replace("STATUS", str(status))
+                 (path / "probe.c").write_text(unit)
+                 built = subprocess.run(
+                     ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+@@ -1247,7 +1245,201 @@
+                     capture_output=True, text=True)
+                 self.assertEqual(built.returncode, 0, built.stderr)
+                 ran = subprocess.run([str(path / "probe")], capture_output=True, text=True)
+-                self.assertEqual(ran.returncode, 0, f"ABI {index}: {ran.stderr}")
++                self.assertEqual(ran.returncode, 0, f"BIO status case {index}: {ran.stderr}")
++
++    def test_direct_lower_write_submission_real_body_owns_one_descriptor(self):
++        """Exercise synchronous callback, delayed callback, reuse and rollback."""
++        import subprocess
++        import tempfile
++
++        submit = body("swapz_submit_inflight_write")
++        self.assertLess(submit.index("inflight->lower_start_ns ="),
++                        submit.index("bio_reset(bio,"))
++        self.assertLess(submit.index("bio_add_vmalloc(bio,"),
++                        submit.index("submit_bio(bio)"))
++        self.assertNotIn("swapz_dm_io(", submit)
++        self.assertNotIn("bio_alloc", submit)
++        source = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++typedef uint64_t u64;
++typedef uint64_t sector_t;
++typedef uint32_t swapz_u32;
++typedef uint16_t swapz_u16;
++typedef uint8_t swapz_u8;
++typedef unsigned blk_status_t;
++#define SWAPZ_BULK_BLOCKS 64U
++#define SWAPZ_BLOCK_BYTES 4096U
++#define SWAPZ_SECTORS 8U
++#define REQ_OP_WRITE 1U
++#define REQ_SWAP 256U
++#define IOPRIO_DEFAULT 0
++#define EINVAL 22
++#define EIO 5
++#define E2BIG 7
++#define WRITE_ONCE(x,v) ((x)=(v))
++#define max_t(t,a,b) ((t)((a)>(b)?(a):(b)))
++struct completion { bool done; };
++struct bio {
++    void *bi_private;
++    void (*bi_end_io)(struct bio *);
++    struct { sector_t bi_sector; unsigned bi_size; } bi_iter;
++    unsigned bi_ioprio, opf, max_vecs;
++    blk_status_t bi_status;
++};
++struct swapz_dm;
++struct owned_backing { void *bdev; };
++struct swapz_io_run { swapz_u32 start_block;swapz_u16 blocks;unsigned char *bytes; };
++struct swapz_inflight_write {
++    struct swapz_dm *ctx;
++    struct swapz_io_run run;
++    struct completion lower_done;
++    struct bio lower_bio;
++    bool lower_bio_initialized, active;
++    int lower_error;
++    u64 lower_start_ns, lower_end_ns;
++};
++struct swapz_dm {
++    struct swapz_inflight_write inflight_write;
++    struct { unsigned char *bulk_scratch;u64 submitted_blocks; } engine;
++    struct owned_backing *backing;
++    unsigned physical_blocks, data_start_block, write_fault_nth;
++    u64 write_fault_calls, write_fault_injected, lower_write_submitted_bytes;
++    u64 lower_write_submitted_reqs, prep_lower_write_samples;
++    u64 prep_lower_write_start_queued, prep_lower_write_start_nonempty;
++    u64 prep_lower_write_end_queued, prep_lower_write_end_nonempty;
++    unsigned inflight_count, preparation_queued, pipeline_active_max;
++    int queue_lock, worker, lower_write_active;
++    u64 pipeline_async_runs;
++    bool async_prepare;
++    void *workqueue;
++};
++static u64 clock_ns, reset_clock;
++static unsigned lock_depth, reset_calls, uninit_calls, submits, notifications, dirty, invalidated, wakes;
++static bool map_fail, delayed;
++static blk_status_t injected_status;
++static struct bio *pending;
++static unsigned char scratch[SWAPZ_BULK_BLOCKS*SWAPZ_BLOCK_BYTES];
++static struct swapz_inflight_write *swapz_inflight_tail_slot(struct swapz_dm *c) {
++    return c->inflight_count ? NULL : &c->inflight_write;
++}
++static u64 ktime_get_ns(void) { return ++clock_ns; }
++#define spin_lock_irqsave(p,f) do { (void)(p);(f)=0;assert(!lock_depth);++lock_depth; } while(0)
++#define spin_unlock_irqrestore(p,f) do { (void)(p);assert(!(f)&&lock_depth==1);--lock_depth; } while(0)
++static void atomic_inc(int *p) { ++*p; }
++static void atomic_dec(int *p) { assert(*p==1);--*p; }
++static void complete(struct completion *p) { assert(!p->done);p->done=true; }
++static void reinit_completion(struct completion *p) { p->done=false; }
++static void mod_delayed_work(void *q,int *w,unsigned delay) {
++    (void)w;assert(q&&lock_depth==1&&!delay);++notifications;
++}
++static void swapz_mark_segments_dirty(struct swapz_dm *c,unsigned block,unsigned blocks) {
++    (void)c;assert(block==7&&blocks);++dirty;
++}
++static void swapz_invalidate_read_caches_range(struct swapz_dm *c,unsigned block,unsigned blocks) {
++    (void)c;assert(block==7&&blocks);++invalidated;
++}
++static void swapz_end_accepted_lower_idle(struct swapz_dm *c,u64 now) {
++    (void)c;assert(now==clock_ns);
++}
++static void swapz_queue_preparation_workers(struct swapz_dm *c) {
++    assert(c->preparation_queued&&lock_depth==1);++wakes;
++}
++static void bio_reset(struct bio *b,void *dev,unsigned opf) {
++    assert(!pending&&dev&&b->max_vecs==SWAPZ_BULK_BLOCKS);
++    unsigned n=b->max_vecs;memset(b,0,sizeof(*b));b->max_vecs=n;b->opf=opf;
++    reset_clock=clock_ns;++reset_calls;
++}
++static void bio_uninit(struct bio *b) { (void)b;assert(!pending);++uninit_calls; }
++static bool bio_add_vmalloc(struct bio *b,void *address,unsigned len) {
++    assert(address==scratch&&len&&len<=sizeof(scratch));
++    assert(b->opf==(REQ_OP_WRITE|REQ_SWAP));
++    if(map_fail)return false;
++    b->bi_iter.bi_size=len;return true;
++}
++static void submit_bio(struct bio *b) {
++    struct swapz_inflight_write *i=b->bi_private;struct swapz_dm *c=i->ctx;
++    assert(i->active&&c->inflight_count==1&&c->lower_write_active==1);
++    assert(!i->lower_done.done&&b->bi_end_io&&b->bi_ioprio==IOPRIO_DEFAULT);
++    assert(b->bi_iter.bi_sector==(c->data_start_block+i->run.start_block)*SWAPZ_SECTORS);
++    assert(b->bi_iter.bi_size==i->run.blocks*SWAPZ_BLOCK_BYTES);
++    assert(reset_clock>=i->lower_start_ns&&dirty==1&&invalidated==1);
++    ++submits;
++    if(delayed)pending=b;
++    else {b->bi_status=injected_status;b->bi_end_io(b);}
++}
++'''
++        source += "static void swapz_async_lower_write_done(struct bio *bio) {\n" + body("swapz_async_lower_write_done") + "\n}\n"
++        source += "static int swapz_submit_inflight_write(struct swapz_dm *ctx, struct swapz_inflight_write *inflight) {\n" + submit + "\n}\n"
++        source += r'''
++static struct swapz_dm ctx;
++static struct owned_backing backing;
++static void init(void) {
++    assert(!pending&&!lock_depth);memset(&ctx,0,sizeof(ctx));
++    ctx.backing=&backing;backing.bdev=&ctx;
++    ctx.engine.bulk_scratch=scratch;ctx.physical_blocks=128;ctx.data_start_block=1;
++    ctx.workqueue=&ctx;ctx.inflight_write.ctx=&ctx;
++    ctx.inflight_write.run=(struct swapz_io_run){7,64,scratch};
++    ctx.inflight_write.lower_bio_initialized=true;
++    ctx.inflight_write.lower_bio.max_vecs=64;
++    reset_calls=uninit_calls=submits=notifications=dirty=invalidated=wakes=0;
++    clock_ns=reset_clock=0;map_fail=delayed=false;injected_status=0;
++}
++int main(void) {
++    struct swapz_inflight_write *i=&ctx.inflight_write;
++    init();assert(swapz_submit_inflight_write(&ctx,NULL)==-EINVAL);assert(!reset_calls);
++    init();i->run.blocks=0;assert(swapz_submit_inflight_write(&ctx,i)==-EINVAL);
++    init();i->run.blocks=65;assert(swapz_submit_inflight_write(&ctx,i)==-EINVAL);
++    init();i->run.bytes=scratch+1;assert(swapz_submit_inflight_write(&ctx,i)==-EINVAL);
++    init();i->run.bytes=ctx.engine.bulk_scratch=NULL;
++    assert(swapz_submit_inflight_write(&ctx,i)==-EINVAL);
++    init();i->lower_bio_initialized=false;assert(swapz_submit_inflight_write(&ctx,i)==-EINVAL);
++    init();i->run.start_block=128;assert(swapz_submit_inflight_write(&ctx,i)==-EINVAL);
++    init();i->run.start_block=127;i->run.blocks=2;
++    assert(swapz_submit_inflight_write(&ctx,i)==-EINVAL);assert(!reset_calls&&!submits);
++    init();ctx.write_fault_nth=1;
++    assert(swapz_submit_inflight_write(&ctx,i)==-EIO);
++    assert(ctx.write_fault_calls==1&&ctx.write_fault_injected==1);
++    assert(!reset_calls&&!submits&&!dirty&&!ctx.lower_write_submitted_reqs);
++    init();map_fail=true;
++    assert(swapz_submit_inflight_write(&ctx,i)==-E2BIG);
++    assert(reset_calls==1&&uninit_calls==1&&!submits&&!notifications&&!i->lower_done.done);
++    assert(!i->active&&!ctx.inflight_count&&!ctx.lower_write_active);
++    assert(i->lower_error==-E2BIG&&!ctx.pipeline_async_runs);
++    for(unsigned status=0;status<3;++status) {
++        init();injected_status=status;ctx.async_prepare=true;ctx.preparation_queued=3;
++        assert(swapz_submit_inflight_write(&ctx,i)==0);
++        assert(i->active&&ctx.inflight_count==1&&i->lower_done.done);
++        assert(i->lower_error==(status?-EIO:0)&&!ctx.lower_write_active);
++        assert(submits==1&&notifications==1&&reset_calls==1&&wakes==1);
++        assert(ctx.pipeline_async_runs==1&&ctx.engine.submitted_blocks==64);
++        assert(ctx.lower_write_submitted_bytes==sizeof(scratch));
++    }
++    init();delayed=true;assert(!swapz_submit_inflight_write(&ctx,i));
++    assert(pending==&i->lower_bio&&!i->lower_done.done&&ctx.lower_write_active==1);
++    assert(swapz_submit_inflight_write(&ctx,i)==-EINVAL);assert(reset_calls==1&&submits==1);
++    struct bio *saved=pending;pending=NULL;saved->bi_end_io(saved);
++    assert(i->lower_done.done&&ctx.inflight_count==1&&i->active);
++    /* Only the owner reaps the old run; notification alone does not free it. */
++    i->active=false;ctx.inflight_count=0;dirty=invalidated=0;delayed=false;
++    i->run.blocks=1;assert(!swapz_submit_inflight_write(&ctx,i));
++    assert(saved==&i->lower_bio&&reset_calls==2&&submits==2&&notifications==2);
++    assert(!i->lower_error&&i->lower_done.done&&ctx.pipeline_async_runs==2);
++    return 0;
++}
++'''
++        with tempfile.TemporaryDirectory(prefix="swapz-direct-write-") as temp:
++            path = Path(temp)
++            (path / "probe.c").write_text(source)
++            built = subprocess.run(
++                ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
++                 str(path / "probe.c"), "-o", str(path / "probe")],
++                capture_output=True, text=True)
++            self.assertEqual(built.returncode, 0, built.stderr)
++            ran = subprocess.run([str(path / "probe")], capture_output=True, text=True)
++            self.assertEqual(ran.returncode, 0, ran.stderr)
+ 
+     def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
+         """Exercise actual target C under controlled queue/close/reuse interleavings."""
+@@ -3436,9 +3628,9 @@
+         self.assertNotIn("inflight_writes[", DM)
+         self.assertNotIn("module_param_named(write_pipeline_depth,", DM)
+         self.assertNotIn("SWAPZ_PRODUCTION_WRITE_PIPELINE_DEPTH", DM)
+-        self.assertIn(".fn = swapz_async_lower_write_done", submit)
+-        self.assertIn(".context = inflight", submit)
+-        self.assertIn("DM_IO_VMA", submit)
++        self.assertIn("bio->bi_end_io = swapz_async_lower_write_done", submit)
++        self.assertIn("bio->bi_private = inflight", submit)
++        self.assertIn("bio_add_vmalloc(bio, inflight->run.bytes", submit)
+         self.assertIn("complete(&inflight->lower_done)", done)
+         self.assertNotIn("swapz_engine_complete_batched_run", done)
+         self.assertNotIn("swapz_complete(", done)

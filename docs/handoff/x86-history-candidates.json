@@ -1,0 +1,77 @@
+{
+  "scope": "Verified Git report candidates, not a merged history. Confirm host/protocol or start a separate series.",
+  "reports": [
+    {
+      "report_commit": "4886c4d79a362b546b69bc5f9356be05ec2f536f",
+      "tested_commit": "005592dbb7fe6503c37a306bfd2987b56e1affef",
+      "overall": "PASS",
+      "kernel_release": "7.0.0-42-generic",
+      "online_cpu_counts": [
+        8
+      ],
+      "backend_benchmarks": [
+        {
+          "inverse_ns_per_page": 310,
+          "name": "scalar",
+          "transform_ns_per_page": 457
+        },
+        {
+          "inverse_ns_per_page": 510,
+          "name": "sse2",
+          "transform_ns_per_page": 315
+        },
+        {
+          "inverse_ns_per_page": 251,
+          "name": "avx2",
+          "transform_ns_per_page": 135
+        },
+        {
+          "inverse_ns_per_page": 176,
+          "name": "avx512",
+          "transform_ns_per_page": 91
+        }
+      ],
+      "session_replay_engines": [
+        "unknown"
+      ],
+      "session_replay_modes": [
+        "unknown"
+      ],
+      "classification": "AVX-512 historical candidate; same physical host not yet established",
+      "same_machine_confirmed": false,
+      "immutable_machine_id_in_report": false,
+      "scope": "Historical qualification only; not evidence of current-source performance or a cross-source speedup"
+    },
+    {
+      "report_commit": "1df2e5a6d7c52682c2ac048310b0ed2f932a2791",
+      "tested_commit": "5bdd040334ee0739e1663e98eef4c875a1c4629a",
+      "overall": "PASS",
+      "kernel_release": "7.0.0-38-generic",
+      "online_cpu_counts": [
+        4
+      ],
+      "backend_benchmarks": [
+        {
+          "inverse_ns_per_page": 780,
+          "name": "scalar",
+          "transform_ns_per_page": 808
+        },
+        {
+          "inverse_ns_per_page": 579,
+          "name": "sse2",
+          "transform_ns_per_page": 502
+        }
+      ],
+      "session_replay_engines": [
+        "unknown"
+      ],
+      "session_replay_modes": [
+        "unknown"
+      ],
+      "classification": "SSE2-only four-CPU profile; keep separate from the eight-CPU AVX-512 candidate",
+      "same_machine_confirmed": false,
+      "immutable_machine_id_in_report": false,
+      "scope": "Historical qualification only; not evidence of current-source performance or a cross-source speedup"
+    }
+  ]
+}

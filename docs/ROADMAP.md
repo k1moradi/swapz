@@ -79,6 +79,18 @@ partial performance as unusable; it adds no historical point. Owned mapping
 cleanup completed. Hold further benchmarks until the owner says the host is
 free, then run exact-source owner qualification before promotion.
 
+The owner is moving continuation to a free x86_64/AVX-512 computer. The hold
+above applies to the busy ARM64 host. On the receiving computer, first qualify
+unchanged ID148 production C, then evaluate the still-unapplied direct-BIO
+experiment. The tracked [goal prompt](handoff/goal-prompt.md) and
+[x86 handoff](handoff/x86-handoff.md) include the portable patch, validation
+manifest, remaining untested ideas and verified legacy report candidates.
+Report `4886c4d79a36` is an eight-CPU x86 AVX-512 candidate; report
+`1df2e5a6d7c5` is a different four-CPU SSE2-only profile. Neither establishes
+current-source performance or a confirmed machine match. Preserve ARM history,
+create a separate x86 series, and verify the owner's suspected LPDDR4 memory
+instead of assuming physical NVMe fidelity on RAM-backed emulation.
+
 Previous source `a9bfe44c253271dc928cde0593c2e0f6236d24ec` passed all five
 ARM64 stages, report `1e8a5bbf8965f4857c8366ea6bb5a2416ddcbe88`, with the
 RAW READ fan-out in ID129. The added all-RAW/balanced correctness gate verified
@@ -620,6 +632,10 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 - **ID62:** physical devices remain outside the current development safety scope.
 
 ## Immediate work queue
+
+For the current x86 migration, finish the pending ID148 baseline qualification
+before applying the portable draft; follow the [receiving-host handoff](handoff/x86-handoff.md).
+The existing source/report remains BLOCKED until a full owner run succeeds.
 
 1. Run ID114's default `make fast_test` baseline: three repeated SATA mixed,
    NVMe4 mixed, fast mixed, fast QD4 and fast QD8 pairs. Discard NOISY/UNKNOWN
