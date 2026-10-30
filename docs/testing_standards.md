@@ -54,6 +54,18 @@ image verification remain mandatory. The omitted phase is explicit in the
 pair log and JSON (`packed_read=null`). Official medium/delta-positive pack
 requirements remain unchanged.
 
+Mixed development scenarios ending in `-mixed-lanes` use persistent native
+lanes; `-mixed-lanes-waves` is their matched wave-barrier control. The ordinary
+`-mixed` scenarios and the owner qualification matrix retain their original
+wave trace. The two new plans must have identical operation, payload and final-
+image hashes, with per-lane WRITE stripes and an immutable disjoint READ region.
+Only start/end phase barriers are allowed in the persistent mode. Both modes
+retain byte-exact timed READs and complete final-image verification. Results
+must identify the replay mode and remain outside the existing history series.
+This is workload sensitivity, not a production-source performance A/B; actual
+reclaim can be bursty too. Keep new traces out of the qualification matrix until
+separately justified.
+
 The development loop automatically screens host noise with the replay's existing
 `/proc/stat` and CPU-PSI counter readers. It samples 200ms quiet windows before
 and after each owned pair, outside useful-work timing, with no polling worker.

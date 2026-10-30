@@ -1185,8 +1185,8 @@ class PairReplayContract(unittest.TestCase):
         helper = SCRIPT.parents[3] / "build/tests/native/io-replay-native"
         self.assertTrue(helper.is_file())
         self.assertTrue(os.access(helper, os.X_OK))
-        for sustained in (False, True):
-            with self.subTest(sustained=sustained), \
+        for mode in ("qd-waves", "persistent-write", "persistent-mixed", "lane-mixed-waves"):
+            with self.subTest(mode=mode), \
                     tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
                 fixture = root / "fixture.bin"
@@ -1198,10 +1198,12 @@ class PairReplayContract(unittest.TestCase):
                     "--qd", 4, "--logical-pages", 64, "--writer-pages", 16,
                     "--reader-start", 32, "--reader-pages", 16,
                     "--warmup-ops", 8, "--measure-ops", 32, "--iops", 0,
-                    "--read-pct", 0 if sustained else 50,
+                    "--read-pct", 0 if mode == "persistent-write" else 50,
                 ]
-                if sustained:
+                if mode == "persistent-write":
                     prepare.append("--sustained-write")
+                elif mode in ("persistent-mixed", "lane-mixed-waves"):
+                    prepare += ["--mixed-lanes", "persistent" if mode == "persistent-mixed" else "waves"]
                 self.run_cmd(*prepare)
                 reports = []
                 for candidate in ("off", "swapz"):
@@ -1219,6 +1221,7 @@ class PairReplayContract(unittest.TestCase):
                         "--result", result)
                     record = json.loads(result.read_text())
                     self.assertEqual(record["replay_engine"], "native-c")
+                    self.assertEqual(record["replay_mode"], mode)
                     self.assertEqual(
                         record["verified_post_sha256"],
                         record["expected_post_sha256"])
@@ -1231,6 +1234,50 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(compared["replay_engine"], "native-c")
                 self.assertEqual(
                     compared["verdict"], "PASS_IDENTICAL_LOGICAL_INPUT")
+
+    def test_mixed_lanes_isolate_barrier_and_reject_cross_lane_mutations(self):
+        import runpy
+        replay = runpy.run_path(str(SCRIPT))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(bytes([i + 1]) * PAGE for i in range(16)))
+            plans = []
+            for mode in ("waves", "persistent"):
+                plan = root / mode
+                self.run_cmd("prepare", "--fixture", fixture, "--output-dir", plan,
+                             "--qd", 4, "--logical-pages", 64, "--writer-pages", 16,
+                             "--reader-start", 32, "--reader-pages", 16,
+                             "--warmup-ops", 8, "--measure-ops", 64,
+                             "--read-pct", 50, "--iops", 0, "--mixed-lanes", mode)
+                plans.append(plan)
+            self.assertEqual((plans[0] / "trace.jsonl").read_bytes(),
+                             (plans[1] / "trace.jsonl").read_bytes())
+            manifests = [json.loads((p / "manifest.json").read_text()) for p in plans]
+            for key in ("trace_sha256", "expected_post_sha256", "write_payload_stream_sha256"):
+                self.assertEqual(manifests[0][key], manifests[1][key])
+            rows, _ = replay["check_plan"](plans[1] / "trace.jsonl", manifests[1], 16)
+            self.assertTrue(any(r["op"] == "R" for r in rows))
+            self.assertTrue(any(r["op"] == "W" for r in rows))
+            for mode in ("persistent-mixed", "lane-mixed-waves"):
+                manifest = {**manifests[1], "replay_mode": mode}
+                for field, value in (("reader_start", 0), ("layout", "same-region"),
+                                     ("iops", 500), ("writer_pages", 15)):
+                    with self.assertRaisesRegex(ValueError, "mixed-lane manifest"):
+                        replay["check_plan"](plans[1] / "trace.jsonl",
+                                             {**manifest, field: value}, 16)
+                bad = [dict(row) for row in rows]
+                write = next(r for r in bad if r["op"] == "W")
+                # Stay within the WRITE region and avoid an in-wave collision,
+                # but move the page to another lane's stripe.
+                wave_pages = {r["page"] for r in bad if r["wave"] == write["wave"]}
+                write["page"] = next(p for p in range(16)
+                                     if p % 4 != write["lane"] and p not in wave_pages)
+                data = "".join(json.dumps(r) + "\n" for r in bad).encode()
+                bad_path = root / "bad.jsonl"
+                bad_path.write_bytes(data)
+                with self.assertRaisesRegex(ValueError, "mixed-lane ownership"):
+                    replay["check_plan"](bad_path, {**manifest, "trace_sha256": replay["sha"](data)}, 16)
 
     def test_sustained_write_uses_persistent_lane_owned_streams(self):
         with tempfile.TemporaryDirectory() as temp:

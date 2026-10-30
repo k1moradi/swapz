@@ -52,7 +52,12 @@ completion handoff or a full-QD barrier between successive writes. Write-only
 saturation traces must give each persistent lane disjoint logical-page
 ownership while preserving that lane's operation order, so unconstrained
 cross-lane completion cannot change the final image. A QD-wave driver may be
-kept only when explicitly labeled as burst/wave evidence.
+kept only when explicitly labeled as burst/wave evidence. A mixed persistent
+lane must own its WRITE pages independently of every other lane and use an
+immutable disjoint READ region, unless a stronger cross-lane oracle is proved.
+A barrier-isolation experiment must give its wave control the identical trace,
+payload stream and final image; changing ownership and barriers together does
+not isolate barrier cost.
 
 Development benchmark consumers must honor the `make fast_test` machine-readable
 `performance_validity.performance_usable` flag before comparing useful service.

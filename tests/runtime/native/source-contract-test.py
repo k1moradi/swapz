@@ -3629,7 +3629,7 @@ int main(void)
         self.assertIn("pthread_create(&threads[index]", native)
         self.assertLess(native.index("ctx.events = calloc("),
                         native.index("pthread_create(&threads[index]"))
-        self.assertIn('helper_mode = "persistent" if replay_mode == "persistent-write" else "waves"', replay)
+        self.assertIn('("persistent-write", "persistent-mixed") else "waves")', replay)
         self.assertIn("REPLAY_ARGS+=(--allocation-bounded-packed-read)", benchmark)
         self.assertIn("--allocation-bounded-packed-read", replay)
         self.assertIn("allocation_bounded=args.allocation_bounded_packed_read", replay)

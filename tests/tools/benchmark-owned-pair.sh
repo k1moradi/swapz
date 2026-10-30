@@ -30,6 +30,7 @@ DELTA64_LZ4_ACCELERATION=4
 READ_COALESCE=1
 INVALIDATE_CACHE_ON_WRITE_ADMIT=0
 WRITE_ONLY_QD=0
+MIXED_LANES=""
 READ_PCT=25
 PACKED_READ=1
 RESOURCE_PRESSURE_SHORT=0
@@ -100,6 +101,12 @@ fi
 if [[ $# -ge 3 && ${@: -2:1} == --write-only-qd &&
       ( ${!#} == 1 || ${!#} == 4 || ${!#} == 8 || ${!#} == 32 ) ]]; then
     WRITE_ONLY_QD="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# Matched development traces only; never replace the official wave matrix.
+if [[ $# -ge 3 && ${@: -2:1} == --mixed-lanes &&
+      ( ${!#} == waves || ${!#} == persistent ) ]]; then
+    MIXED_LANES="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Exact private device-model suffixes. Never permit arbitrary device
@@ -198,6 +205,18 @@ if (( WRITE_ONLY_QD )); then
     IOPS=0
     READ_PCT=0
     PACKED_READ=0
+fi
+if [[ -n $MIXED_LANES ]]; then
+    [[ $RATE_MODE == unpaced && $PROFILE == medium &&
+       $WRITE_ONLY_QD == 0 && $RESOURCE_PRESSURE_SHORT == 0 ]] || {
+        echo 'BLOCKED: mixed lanes require an ordinary unpaced mixed profile' >&2
+        exit 2
+    }
+    NATIVE_REPLAY=1
+    [[ -x build/tests/native/io-replay-native ]] || {
+        echo 'BLOCKED: mixed-lane native replay helper missing' >&2
+        exit 2
+    }
 fi
 if (( REPLAY_SWAPZ_FIRST )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
@@ -666,6 +685,9 @@ DMKNAME="${dm_sysfs##*/}"
     fail 'owned DM kernel identity is ambiguous'
 if [[ -n $SHARED_PLAN ]]; then
     plan_dir="$SHARED_PLAN/plan"
+    if [[ -n $MIXED_LANES ]]; then
+        plan_dir="$SHARED_PLAN/plan-mixed-lanes-$MIXED_LANES"
+    fi
     if (( RESOURCE_PRESSURE_SHORT )); then
         plan_dir="$SHARED_PLAN/plan-id36"
     fi
@@ -729,12 +751,26 @@ fi
 prepare_replay_args=()
 (( WRITE_ONLY_QD )) &&
     prepare_replay_args+=(--sustained-write)
+[[ -n $MIXED_LANES ]] &&
+    prepare_replay_args+=(--mixed-lanes "$MIXED_LANES")
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
     --reader-pages 256 --qd "$QD" --read-pct "$READ_PCT" \
     --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS" \
     "${prepare_replay_args[@]}"
+fi
+if [[ -n $MIXED_LANES ]]; then
+    python3 -B - "$SESSION/plan/manifest.json" "$MIXED_LANES" <<'PYLANES'
+import json
+import sys
+from pathlib import Path
+manifest = json.loads(Path(sys.argv[1]).read_text())
+expected = "persistent-mixed" if sys.argv[2] == "persistent" else "lane-mixed-waves"
+if (manifest.get("replay_mode") != expected or manifest.get("qd") != 32 or
+        manifest.get("iops") != 0 or manifest.get("layout") != "disjoint"):
+    raise SystemExit("FAIL: mixed-lane shared plan policy mismatch")
+PYLANES
 fi
 note "SWAPZ_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
 PACKED_ARGS=()

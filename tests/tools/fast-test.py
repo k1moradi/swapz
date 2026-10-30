@@ -126,6 +126,8 @@ def scenario_arguments(name, plan, delta64=1):
     arguments = [*COMMON, *MODELS[model]]
     if kind.startswith("w") and kind[1:] in ("1", "4", "8", "32"):
         arguments += ["--write-only-qd", kind[1:]]
+    elif kind in ("mixed-lanes", "mixed-lanes-waves"):
+        arguments += ["--mixed-lanes", "persistent" if kind == "mixed-lanes" else "waves"]
     elif kind != "mixed":
         raise ValueError(f"unknown scenario {name!r}")
     arguments.append("--async-prepare")
@@ -162,6 +164,10 @@ def prepare_plan(content="medium"):
     run([*replay, "--output-dir", str(plan / "plan"), "--qd", "32",
          "--read-pct", "25", "--warmup-ops", "1024", "--measure-ops",
          "16384", "--iops", "0"], **quiet)
+    for mode in ("waves", "persistent"):
+        run([*replay, "--output-dir", str(plan / f"plan-mixed-lanes-{mode}"),
+             "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
+             "--measure-ops", "16384", "--iops", "0", "--mixed-lanes", mode], **quiet)
     for qd in (1, 4, 8, 32):
         run([*replay, "--output-dir", str(plan / f"plan-write-qd{qd}"),
              "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",

@@ -57,6 +57,14 @@ The kernel documents [CPU ticks](https://docs.kernel.org/filesystems/proc.html)
 and [PSI waiting totals](https://docs.kernel.org/accounting/psi.html); the
 report uses interval deltas, rather than the PSI rolling averages.
 
+Fresh owned RAM-backed null_blk is sparse: writes to new physical addresses
+can allocate host RAM, whereas rewriting an already populated address need not.
+Keep backing preconditioning in the protocol identity and apply it symmetrically
+to raw and swapz. ID36 already uses full backing population for its separate
+memory-pressure gate. ID139 did not establish a material benefit from extending
+that protocol to ordinary performance comparisons; do not present prewarming
+as a kernel optimization or drop the allocation cost from only one arm.
+
 ## Current synthetic models
 
 ### Production delta64 attribution and Core-2 cache baseline
