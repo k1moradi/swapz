@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Private round-closeout plots from committed ARM64/NEON owner reports.
+"""Private round-closeout plots from separately selected owner reports.
 
 This is descriptive history, not qualification or a cross-source causal A/B.
 No devices, Git mutations, report publication or new public Make goal.
 Matplotlib is imported only for rendering, outside rootless parser tests.
 """
+import argparse
 import csv
 import hashlib
 import json
 import math
+import re
 import shutil
 import statistics
 import subprocess
@@ -29,14 +31,45 @@ TARGETS = {
 }
 
 
-def host_matches(report, online_cpus=7):
+def host_matches(report, online_cpus=7, backend="neon"):
     backends = report.get("evidence", {}).get("predictor", {}).get(
         "backend_benchmarks", []) or []
     cpus = {(arm.get("host_cpu") or {}).get("online_cpus")
             for session in report.get("benchmarks", {}).get("sessions", [])
             for arm in (session.get("arms") or {}).values()
             if (arm.get("host_cpu") or {}).get("online_cpus") is not None}
-    return any(row.get("name") == "neon" for row in backends) and cpus == {online_cpus}
+    return any(row.get("name") == backend for row in backends) and cpus == {online_cpus}
+
+
+def validate_host_profile(profile):
+    """x86 cohorts require an audited immutable report allowlist, not ISA guessing."""
+    if not isinstance(profile, dict) or not re.fullmatch(
+            r"x86-[a-z0-9-]+", str(profile.get("id", ""))) or \
+            not isinstance(profile.get("title"), str) or \
+            not profile["title"].strip() or "\n" in profile["title"] or \
+            type(profile.get("online_cpus")) is not int or profile["online_cpus"] < 1 or \
+            not re.fullmatch(r"[0-9a-f]{64}", str(profile.get("host_id_sha256", ""))) or \
+            not isinstance(profile.get("report_shas"), list) or not profile["report_shas"] or \
+            any(not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
+                for sha in profile["report_shas"]):
+        raise ValueError("x86 profile needs id/title, CPU count, host digest and full audited report SHAs")
+    return profile
+
+
+def selected_host_report(report, sha, profile=None):
+    if profile is None:
+        return host_matches(report)
+    backends = {row.get("name") for row in report.get("evidence", {}).get(
+        "predictor", {}).get("backend_benchmarks", []) or []}
+    stages = report.get("stages", [])
+    return sha in profile["report_shas"] and \
+        report.get("overall") == "PASS" and \
+        host_matches(report, profile["online_cpus"], "avx512") and \
+        all((arm.get("host_cpu") or {}).get("online_cpus") == profile["online_cpus"]
+            for session in report.get("benchmarks", {}).get("sessions", [])
+            for arm in (session.get("arms") or {}).values()) and \
+        {"scalar", "sse2", "avx2", "avx512"}.issubset(backends) and \
+        len(stages) == 5 and all(stage.get("status") == "PASS" for stage in stages)
 
 
 def number(value, allow_zero=False):
@@ -164,24 +197,29 @@ def report_points(report):
     return points
 
 
-def collect():
+def collect(profile=None):
+    if profile is not None:
+        validate_host_profile(profile)
     history = subprocess.check_output(
         ["git", "log", "--reverse", "--format=%H %cI", "--", "test_results.json"],
         cwd=ROOT, text=True).splitlines()
     reports, points, excluded = [], [], Counter()
     for entry in history:
         sha, stamp = entry.split()
+        if profile is not None and sha not in profile["report_shas"]:
+            excluded["outside audited host report allowlist"] += 1
+            continue
         try:
             report = json.loads(subprocess.check_output(
                 ["git", "show", sha + ":test_results.json"], cwd=ROOT))
         except (ValueError, subprocess.CalledProcessError):
             excluded["unreadable report"] += 1
             continue
-        if not host_matches(report):
+        if not selected_host_report(report, sha, profile):
             excluded["other or unproven host"] += 1
             continue
         if report.get("overall") != "PASS":
-            excluded["ARM64 FAIL/BLOCKED"] += 1
+            excluded["selected host FAIL/BLOCKED"] += 1
             continue
         rows = report_points(report)
         if not rows:
@@ -189,14 +227,23 @@ def collect():
             continue
         metadata = {"sequence": len(reports) + 1, "report_sha": sha,
                     "source_sha": report.get("tested_commit_sha") or report.get("source_sha"),
+                    "host_profile_id": profile["id"] if profile else "arm64-neon",
+                    "host_id_sha256": profile["host_id_sha256"] if profile else None,
                     "date": datetime.fromisoformat(stamp).astimezone(
                         ZoneInfo("America/Los_Angeles")).isoformat(),
                     "kernel": report.get("kernel_release")}
         reports.append(metadata)
         points.extend({**metadata, **row} for row in rows)
+    title = profile["title"] if profile else "ARM64 / NEON VM"
+    identity = ("Explicit audited report allowlist for host digest " + profile["host_id_sha256"] +
+                "; legacy reports without a host match stay separate."
+                if profile else "NEON/seven-CPU VM cohort; old reports lack an immutable VM ID.")
     return {"reports": reports, "points": points, "excluded": dict(excluded),
-            "scope": "Historical descriptive ARM64/NEON seven-CPU VM owner PASS reports; "
-                     "no quiet-window noise screen in old reports; no causal cross-report inference."}
+            "title": title, "host_profile": profile,
+            "identity_note": identity,
+            "scope": "Historical descriptive " + title + " owner PASS reports. " + identity +
+                     " No quiet-window noise screen in official reports; no causal cross-report "
+                     "inference or physical NVMe fidelity claim from configured RAM-model ceilings."}
 
 
 def draw_line(ax, rows, metric, label, color, style="-"):
@@ -267,7 +314,7 @@ def render(data):
                                if filename == "mixed-throughput" else f"Latest {latest:+.1f}%")
                     ax.text(.98, .03, caption, transform=ax.transAxes,
                             ha="right", color=metrics[0][2], fontweight="bold")
-        fig.suptitle("ARM64 / NEON VM · " + title, fontsize=17, fontweight="bold")
+        fig.suptitle(data["title"] + " · " + title, fontsize=17, fontweight="bold")
         fig.text(.5, .935, f"{total} passing reports · {data['reports'][0]['date'][:10]} to "
                  f"{data['reports'][-1]['date'][:10]} · latest source {data['reports'][-1]['source_sha'][:7]}",
                  ha="center", fontsize=10, color="#555555")
@@ -300,7 +347,7 @@ def render(data):
             ax.grid(axis="y", alpha=.2)
             ax.set_xlim(.5, total + 1)
             ax.legend(loc="best", fontsize=8)
-    fig.suptitle("ARM64 / NEON VM · sustained WRITE gain versus raw (%)", fontsize=17, fontweight="bold")
+    fig.suptitle(data["title"] + " · sustained WRITE gain versus raw (%)", fontsize=17, fontweight="bold")
     fig.text(.5, .935, f"{total} passing reports · {data['reports'][0]['date'][:10]} to "
              f"{data['reports'][-1]['date'][:10]} · latest source {data['reports'][-1]['source_sha'][:7]}",
              ha="center", fontsize=10, color="#555555")
@@ -327,9 +374,18 @@ def snapshot_history(data):
 
 
 def main():
-    data = collect()
+    global OUT
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--host-profile", type=Path,
+                        help="audited x86 host JSON; omission preserves the ARM64 cohort")
+    args = parser.parse_args()
+    profile = validate_host_profile(json.loads(args.host_profile.read_text())) \
+        if args.host_profile else None
+    if profile is not None:
+        OUT = ROOT / "build/history" / profile["id"]
+    data = collect(profile)
     if not data["reports"]:
-        raise SystemExit("No proven seven-CPU ARM64/NEON PASS history")
+        raise SystemExit("No proven PASS history for the selected host profile")
     render(data)
     (OUT / "history.json").write_text(json.dumps(data, indent=2) + "\n")
     fields = sorted({key for point in data["points"] for key in point})
@@ -338,10 +394,9 @@ def main():
         writer.writeheader()
         writer.writerows(data["points"])
     snapshot = snapshot_history(data)
-    summary = ["# ARM64 / NEON VM performance history", "", data["scope"], "",
+    summary = ["# " + data["title"] + " performance history", "", data["scope"], "",
                f"{len(data['reports'])} passing report revisions; latest source "
-               f"`{data['reports'][-1]['source_sha']}`. All points require NEON and the "
-               "seven-CPU VM profile. Reports do not contain an immutable VM identifier.", "",
+               f"`{data['reports'][-1]['source_sha']}`. " + data["identity_note"], "",
                "Each mixed point uses async sessions and its own raw controls; delta64-on and "
                "delta64-off policies have separate labels and lines. Modern envelope mixed controls "
                "remain LZ4-only; delta-positive write-only envelopes are a different workload and excluded. "

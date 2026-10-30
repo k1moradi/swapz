@@ -10,6 +10,14 @@ is busy: no builds/benchmarks there until the owner says it is free. That hold
 does not prohibit work on this new free computer. Check its noise/provenance
 before timing; no other agent should edit the same checkout concurrently.
 
+**Receiving-host continuation:** [The x86 result](x86-continuation-result.md)
+supersedes the first-action status below. Unchanged baseline `a2b5569` passed
+in report `c0feb2127c05`. The direct-BIO draft compiled and passed development
+byte/ownership checks, but its fixed pilot did not justify retention; it is
+unapplied again. The [audited x86 profile](x86-host-history.json) now starts a
+separate series, without joining the unproven legacy candidates. Do not apply
+the removed draft again as a new idea without a materially different hypothesis.
+
 ## What is already committed
 
 - Production source `2aa3ba06520fbf3a723294d7d7dd09cdd45e6502` fixes a lower-WRITE

@@ -2412,7 +2412,10 @@ into an `EACCES` failure before its own validation and cleanup can run.
 ### Automatic historical artifacts
 
 After report publication, `make test` refreshes the local ARM64/NEON seven-CPU
-history from committed PASS reports using the installed Python Matplotlib.
+history on ARM64 from committed PASS reports using installed Python Matplotlib.
+On x86 it preserves ARM artifacts and requests explicit audited host selection
+for the separate round-closeout refresh; it never substitutes an ARM refresh
+for a receiving-host update.
 It prints the latest plotted source and the local index path. Failed/blocked,
 uncommitted and other-host runs never become ARM64 performance points. Plot
 failure prints `NOT UPDATED` and diagnostics separately from the qualification
@@ -2425,11 +2428,16 @@ Keep the absolute raw/swapz useful-WRITE MB/s chart alongside relative gains so
 a changing raw control cannot masquerade as a product speed change. Previously
 rendered chat images are snapshots; refreshed files live under the stable index.
 
-For work moved to x86, the existing ARM-only helper is not an x86 history
-implementation. Keep x86 outputs and host/ISA identities separate, verify any
-legacy report's host and protocol before joining it, and otherwise start a new
-series from a fresh owner qualification. Backend names and CPU count alone do
-not establish the same physical machine. Show every newly generated/refreshed
+For work moved to x86, the private history helper accepts an explicit audited
+host JSON with full report SHAs and host identity digest. The receiving host's
+profile is `docs/handoff/x86-host-history.json`; output stays under its distinct
+`build/history/x86-*` directory. Selection also requires all five stages PASS,
+eight-CPU identity for this profile and scalar/SSE2/AVX2/AVX-512 execution evidence.
+Rootless report tests reject unlisted, incomplete, missing-CPU and wrong-ISA reports,
+unsafe output names and missing host digests, while retaining ARM selector and
+snapshot/line-break coverage. Verify legacy host/protocol before adding its SHA;
+backend names and CPU count alone do not establish the same physical machine.
+Show every newly generated/refreshed
 plot inline. Keep configured emulation rates and achieved raw controls visible;
 host-limited RAM emulation is synthetic software evidence, not a physical
 Gen4/Gen5 device measurement. Do not change model settings to improve one arm.

@@ -1,24 +1,26 @@
 {
-  "state": "UNAPPLIED / UNCOMPILED / UNTESTED; portable draft for the free x86 host",
+  "state": "UNAPPLIED / x86 development pilot removed; no candidate qualification or retention",
   "base_head": "42b948bf36c56eb6724399ad49dab2f3d9c2d793",
   "base_c_sha256": "8a5ebda7575653ff0807cc89ee958a14602d5f355a6a4f7abc59647ae997870f",
   "candidate_c_sha256": "b34bbb2a7f4741f49912226659bb92be482643d2cd3d469c49c14374a9fb937a",
   "patch_sha256": "28950b7d3664f698a86387c423742e9fa433c9a3c5099bac8479b821b4aaf5b6",
-  "qualification_prerequisite": "Qualify unchanged production C from 2aa3ba0 on the receiving host before applying this patch. The original ARM64 host remains on a busy-host hold.",
+  "qualification_prerequisite": "Unchanged baseline a2b556998a8554b4f64960c77d6818fce1d4e811 qualified on this x86 host in report c0feb2127c05ffde1826e250e1ade55918d21448. Do not repeat the removed draft unchanged without a new material hypothesis.",
   "scope": "one preallocated lower BIO and 64 vectors for existing detached WRITE run; no additional data buffer, lower depth, compression lane or publication change; READ/sync adapters stay dm_io",
   "static_checks": {
     "python_ast_parse": "PASS",
     "git_apply_check_whitespace_error": "PASS"
   },
   "execution_checks": {
-    "C_build": "NOT_RUN_HOST_BUSY",
-    "native_tests": "NOT_RUN_HOST_BUSY",
-    "loaded_tests": "NOT_RUN_HOST_BUSY",
-    "benchmarks": "NOT_RUN_HOST_BUSY"
+    "C_build": "PASS_X86_64_7.0.0-42-generic_NORMAL_SIGNED_MODULE",
+    "native_tests": "PASS_91_SOURCE_CONTRACTS_INCLUDING_ACTUAL_BODY_DESCRIPTOR_AND_CALLBACK_TESTS",
+    "loaded_tests": "108_OWNED_RAW_SWAPZ_PAIRS_BYTE_EXACT; NO_FORCED_SPLIT_CHILD_ERROR_GATE",
+    "benchmarks": "FIXED_3_SOURCE_ROUND_PILOT_COMPLETE_NO_REPLACEMENTS; REMOVED_UNPROMISING"
   },
   "patch_path": "docs/handoff/direct-lower-write.patch",
   "source_base_commit": "2aa3ba06520fbf3a723294d7d7dd09cdd45e6502",
   "interrupted_owner_report": "ff66c705b152",
-  "baseline_qualification": "BLOCKED; intentionally interrupted after the owner reported a busy ARM64 host",
-  "loaded_split_gate": "Not included in this draft; require actual multi-block parent, forced lower splitting and completion/error verification before retention"
+  "baseline_qualification": "PASS_X86_64: c0feb2127c05ffde1826e250e1ade55918d21448; prior ARM interruption remains BLOCKED",
+  "loaded_split_gate": "Not included in this draft; require actual multi-block parent, forced lower splitting and completion/error verification before retention",
+  "decision_evidence": "docs/handoff/direct-bio-x86-pilot.json",
+  "candidate_qualification": "NOT_RUN; draft removed before retention; forced-split/genuine lower-child-error and cross-architecture gates remain unfulfilled"
 }

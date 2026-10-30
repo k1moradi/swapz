@@ -88,11 +88,14 @@ Every implementation task updates the relevant governing standard in the same co
 At the end of every optimization round, refresh the active host's historical
 performance plots from committed `test_results.json` reports and display every
 generated or refreshed plot inline to the owner. The current private
-`tests/tools/plot-history.py` helper selects this ARM64/NEON VM's seven-CPU profile;
+`tests/tools/plot-history.py` helper defaults to the ARM64/NEON VM's seven-CPU profile;
 preserve its plots, source/report SHA mapping and CSV/JSON under
 `build/history/arm64-neon/` with its documented identity limitations. It does not
-currently select x86 history. An x86 continuation must add explicit host/ISA
-selection and a separate output before claiming an x86 history update. Treat
+select x86 history without an explicit audited host profile. The private
+`--host-profile` artifact option reads full attested report SHAs, a host digest
+and the online-CPU count; x86 currently requires executable scalar/SSE2/AVX2/AVX-512
+evidence and five passing stages. Its `x86-*` output cannot overwrite ARM history.
+Use `docs/handoff/x86-host-history.json` for the receiving i7-1185G7 host. Treat
 old reports without a confirmed host/protocol match as separate references,
 not connected comparison points. Exclude failed/blocked reports and unqualified
 fast-test trials. Keep default-LZ4 mixed, optional policies and sustained WRITE

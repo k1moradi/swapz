@@ -7418,12 +7418,15 @@ def publish(source_sha):
     return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
 
-def refresh_history():
+def refresh_history(host_arch=None):
     """Refresh local committed ARM64 evidence after report publication.
 
     Plot availability is separate from device/source qualification. Failure is
     visible in stdout and a local log; it must not rewrite the benchmark verdict.
     """
+    if (host_arch or os.uname().machine) != "aarch64":
+        return ("NOT UPDATED automatically: ARM history is preserved; refresh x86 "
+                "with its explicit audited host profile")
     output = ROOT / "build/history"
     log = output / "refresh.log"
     env = os.environ.copy()

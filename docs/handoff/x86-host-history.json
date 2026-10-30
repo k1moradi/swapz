@@ -1,0 +1,59 @@
+{
+  "id": "x86-i7-1185g7-avx512",
+  "title": "x86_64 / AVX-512 \u00b7 i7-1185G7",
+  "online_cpus": 8,
+  "host_id_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
+  "report_shas": [
+    "c0feb2127c05ffde1826e250e1ade55918d21448"
+  ],
+  "host_audit": {
+    "source_sha": "a2b556998a8554b4f64960c77d6818fce1d4e811",
+    "host_id_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
+    "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+    "online_cpus": 8,
+    "affinity_cpus": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "kernel_release": "7.0.0-42-generic",
+    "virtualization": "none",
+    "memory_firmware_fields": {
+      "Size": [
+        "2 GB"
+      ],
+      "Type": [
+        "LPDDR4"
+      ],
+      "Speed": [
+        "4267 MT/s"
+      ],
+      "Manufacturer": [
+        "Micron Technology"
+      ],
+      "Part Number": [
+        "53E1G32D2NP-046"
+      ],
+      "Configured Memory Speed": [
+        "4267 MT/s"
+      ]
+    },
+    "memory_devices": 8,
+    "mem_total_kib": 16099928,
+    "xstate": [
+      "x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format."
+    ],
+    "kernel_backend": [
+      "delta64 classifier=scalar transform=avx512 inverse=avx512"
+    ],
+    "limits": "Firmware type/speed are inventory, not measured memory bandwidth. RAM-backed null_blk results are synthetic; configured ceilings do not establish physical NVMe fidelity.",
+    "platform_uuid_sha256": "9fda07b89a502e50b4e81458e97d272cd834469ff996517657d3488bf197c242",
+    "identity_scope": "host_id_sha256 is a domain-separated OS machine-id digest; platform_uuid_sha256 is a domain-separated firmware UUID digest. These attest this observed run, not the unidentified legacy report."
+  },
+  "scope": "Only fresh live qualification is attested. 4886c4d7 and the older four-CPU SSE2 report remain separate unconfirmed historical references."
+}

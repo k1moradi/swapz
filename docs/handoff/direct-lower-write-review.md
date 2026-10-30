@@ -1,8 +1,17 @@
-# Direct detached lower WRITE draft — unapplied and unvalidated
+# Direct detached lower WRITE draft — unapplied after x86 pilot removal
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
+
+**Receiving-host update:** The baseline passed on x86 in report `c0feb2127c05`.
+The exact draft compiled, passed 91 source contracts and 108 byte-exact owned
+raw/swapz pairs, then was removed after its fixed pilot failed to justify a
+larger confirmation/retention. See [the continuation result](x86-continuation-result.md)
+and [complete pilot evidence](direct-bio-x86-pilot.json). No forced-split/child-error
+gate or exact-source candidate owner qualification ran. The static/unrun state
+below records packet creation on the busy ARM host, not the current x86 status.
+Do not repeat the removed draft unchanged without new material evidence.
 
 Inspected installed Linux 7.0.0-42 headers/Module.symvers and upstream v7.0
 block/bio.c, block/blk-core.c and drivers/md/dm-io.c, fetched from

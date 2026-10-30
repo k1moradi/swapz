@@ -1158,6 +1158,40 @@ class ReportContract(unittest.TestCase):
         sustained["benchmarks"]["write_saturation_sessions"].append(mixed)
         self.assertEqual(len(history.report_points(sustained)), 1)
 
+    def test_x86_history_requires_audited_reports_and_separate_isa_profile(self):
+        import copy
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_x86_history", ROOT / "tests/tools/plot-history.py")
+        history = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(history)
+        sha = "a" * 40
+        profile = {"id": "x86-i7-avx512", "title": "x86 AVX-512 host",
+                   "online_cpus": 8, "host_id_sha256": "b" * 64,
+                   "report_shas": [sha]}
+        self.assertEqual(history.validate_host_profile(profile), profile)
+        report = {"overall": "PASS", "stages": [{"status": "PASS"}] * 5,
+                  "evidence": {"predictor": {"backend_benchmarks": [
+                      {"name": name} for name in ("scalar", "sse2", "avx2", "avx512")]}},
+                  "benchmarks": {"sessions": [{"arms": {
+                      arm: {"host_cpu": {"online_cpus": 8}} for arm in ("off", "swapz")}}]}}
+        self.assertTrue(history.selected_host_report(report, sha, profile))
+        self.assertFalse(history.selected_host_report(report, "c" * 40, profile))
+        self.assertFalse(history.selected_host_report(report, sha))
+        for mutate in (lambda r: r.update(overall="BLOCKED"),
+                       lambda r: r["stages"].pop(),
+                       lambda r: r["evidence"]["predictor"]["backend_benchmarks"].pop(),
+                       lambda r: r["benchmarks"]["sessions"][0]["arms"]["off"].update(
+                           host_cpu={"online_cpus": 4}),
+                       lambda r: r["benchmarks"]["sessions"][0]["arms"]["off"].pop("host_cpu")):
+            bad = copy.deepcopy(report)
+            mutate(bad)
+            self.assertFalse(history.selected_host_report(bad, sha, profile))
+        for changes in ({"id": "../arm64-neon"}, {"report_shas": []},
+                        {"report_shas": ["HEAD"]}, {"host_id_sha256": ""}):
+            with self.assertRaises(ValueError):
+                history.validate_host_profile({**profile, **changes})
+
     def test_history_snapshots_preserve_report_specific_artifacts(self):
         spec = importlib.util.spec_from_file_location(
             "swapz_history_snapshots", ROOT / "tests/tools/plot-history.py")
@@ -1192,18 +1226,22 @@ class ReportContract(unittest.TestCase):
                 "Path('build/history/marker').write_text('refreshed')\n"
                 "print('{\"reports\": 54, \"latest_source\": \"abcdef0123456789\"}')\n")
             with patch.object(runner, "ROOT", root):
-                result = runner.refresh_history()
+                result = runner.refresh_history(host_arch="aarch64")
                 self.assertIn("UPDATED: 54 ARM64/NEON PASS reports", result)
                 self.assertIn("abcdef012345", result)
                 marker = root / "build/history/marker"
                 self.assertEqual(marker.read_text(), "refreshed")
                 helper.write_text("raise SystemExit('matplotlib unavailable')\n")
-                self.assertTrue(runner.refresh_history().startswith("NOT UPDATED:"))
+                self.assertTrue(runner.refresh_history(host_arch="aarch64").startswith("NOT UPDATED:"))
                 self.assertIn("matplotlib unavailable",
                               (root / "build/history/refresh.log").read_text())
                 self.assertEqual(marker.read_text(), "refreshed")
                 helper.write_text("print('invalid summary')\n")
-                self.assertTrue(runner.refresh_history().startswith("NOT UPDATED:"))
+                self.assertTrue(runner.refresh_history(host_arch="aarch64").startswith("NOT UPDATED:"))
+                marker.unlink()
+                self.assertIn("explicit audited host profile",
+                              runner.refresh_history(host_arch="x86_64"))
+                self.assertFalse(marker.exists())
         main = (ROOT / "tests/tools/run-tests.py").read_text().split("def main():", 1)[1]
         self.assertLess(main.index("notice = publish("), main.index("refresh_history()"))
 
