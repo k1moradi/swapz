@@ -53,10 +53,10 @@ static inline int swapz_preparation_publish_result(atomic_t *state,
 }
 
 /*
- * One serialized producer clears bits; consumers only return them. During a
- * claim at most 64 occupied slots can be returned, so 65 attempts suffice.
- * A failed claim leaves the BIO available for the ordered worker's inline
- * preparation. Never wait for capacity after claiming a FIFO descriptor.
+ * Bounded preparers may clear bits concurrently; cmpxchg keeps each claim
+ * unique and consumers return bits only after their slot use is complete.
+ * During a claim at most 64 occupied slots can be returned, so 65 attempts
+ * suffice. A failed claim must fall back without waiting for capacity.
  */
 static inline int swapz_preparation_claim_slot(atomic64_t *free_mask)
 {

@@ -672,14 +672,25 @@ and upper-BIO completion remain serialized after the sole immutable lower run
 completes. Historical depth-two code may be removed mechanically only while
 preserving the byte-exact, barrier, suspend, teardown and failure contracts.
 
-Generic ordinary-LZ4 preparation concurrency remains blocked by the prior
-shallow-backlog evidence. Delta64 preparation is likewise fixed at K=1:
-two-host paired evidence found no service gain from K=2 and materially worse
-p99/preparation cost on the newer host, with earlier K=4 regressions. The
-runtime preparation-width selector and routine K=2/K=4 qualification are
-retired; Git history is the archive. Async preparation therefore owns one
-producer lane regardless of delta64 policy; only predictor scratch allocation
-remains conditional on rescue being enabled.
+Generic **background-worker** ordinary-LZ4 preparation concurrency remains
+blocked by the prior shallow-backlog evidence. Delta64 background preparation
+is likewise fixed at K=1: two-host paired evidence found no service gain from
+K=2 and materially worse p99/preparation cost on the newer host, with earlier
+K=4 regressions. The runtime preparation-width selector and routine K=2/K=4
+qualification are retired; Git history is the archive. Async background
+preparation therefore owns one producer lane regardless of delta64 policy.
+
+ID150 is a distinct submitter-context placement experiment, not permission to
+raise that background width. Qualification must prove byte-exact ordinary,
+RAW, zero, delta64, fault, suspend/drain and GC behavior with the candidate
+default enabled. Drained status must show `submitter_prepare_active=0` and
+source contracts must prove the scratch pool is preallocated/bounded, claim
+failure falls back without waiting, and release/acquire ownership prevents the
+ordered worker from touching a submitter-owned FIFO head. Performance evidence
+must retain submitter claims, lane/page misses, active peak, owner deferrals and
+submitter wall/CPU/LZ4/copy/CRC counters. Treat those clocks as attribution,
+not additive CPU totals. ID36 must remain within its resource-pressure gate;
+the extra scratch allocation is part of the candidate cost.
 
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted

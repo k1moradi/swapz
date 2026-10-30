@@ -4484,5 +4484,103 @@ int main(void)
         self.assertNotIn("usleep_range(", DM)
 
 
+
+    def test_submitter_preparation_is_bounded_and_owner_gated(self):
+        mapper = body("swapz_map")
+        claim = body("swapz_claim_submitter_preparation_locked")
+        submitter = body("swapz_submitter_prepare_entry")
+        ordered = body("swapz_worker_pass")
+        ctor = body("swapz_ctr")
+        drain = body("swapz_drain")
+        freeing = body("swapz_free")
+        status = body("swapz_status")
+
+        self.assertRegex(
+            DM, r"static\s+bool\s+swapz_submitter_prepare\s*=\s*true\s*;")
+        self.assertIn(
+            "module_param_named(submitter_prepare, swapz_submitter_prepare, bool, 0444)",
+            DM)
+        self.assertIn("#define SWAPZ_SUBMITTER_PREPARATION_LANES_MAX 8U", DM)
+        self.assertIn(
+            "ctx->submitter_prepare = ctx->async_prepare && swapz_submitter_prepare",
+            ctor)
+        self.assertIn("num_possible_cpus()", ctor)
+        self.assertIn("SWAPZ_SUBMITTER_PREPARATION_LANES_MAX", ctor)
+        self.assertIn("kvcalloc(ctx->submitter_lane_count", ctor)
+        self.assertIn("lane->lz4_workmem = kvmalloc(LZ4_MEM_COMPRESS", ctor)
+
+        self.assertIn(
+            "swapz_preparation_claim_slot(&ctx->submitter_lane_free_mask)",
+            claim)
+        self.assertIn(
+            "swapz_preparation_claim_slot(&ctx->preparation_free_mask)", claim)
+        self.assertIn("refcount_set(&prepared->refs, 1)", claim)
+        self.assertIn(
+            "atomic_set(&entry->preparation_submitter_active, 1)", claim)
+        for allocation in ("kmalloc(", "kzalloc(", "vzalloc(", "kvmalloc(",
+                           "kvcalloc(", "mempool_alloc("):
+            self.assertNotIn(allocation, claim)
+            self.assertNotIn(allocation, submitter)
+
+        self.assertLess(
+            mapper.index("list_add_tail(&entry->list, &ctx->incoming)"),
+            mapper.index("swapz_claim_submitter_preparation_locked(ctx, entry)"))
+        self.assertIn(
+            "if (in_task() && !(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))",
+            mapper)
+        self.assertIn("if (submitter_lane < 0)", mapper)
+        self.assertIn("swapz_submitter_prepare_entry(ctx, entry", mapper)
+        self.assertLess(
+            mapper.index("list_add_tail(&entry->list, &ctx->incoming)"),
+            mapper.rindex("swapz_submitter_prepare_entry(ctx, entry"))
+
+        self.assertIn(
+            "atomic_read_acquire(&entry->preparation_submitter_active)",
+            ordered)
+        self.assertLess(
+            ordered.index(
+                "atomic_read_acquire(&entry->preparation_submitter_active)"),
+            ordered.index("swapz_process(ctx, entry->bio)"))
+        self.assertIn("list_splice_init(&local, &ctx->incoming)", ordered)
+        self.assertIn("ctx->submitter_owner_deferrals++", ordered)
+
+        self.assertIn("complete_all(&entry->preparation_snapshot_ready)",
+                      submitter)
+        self.assertIn("prepared->length = swapz_compress_page(", submitter)
+        self.assertIn("swapz_preparation_publish_result(", submitter)
+        release_call = (
+            "atomic_set_release(&entry->preparation_submitter_active, 0)")
+        self.assertIn(release_call, submitter)
+        self.assertLess(
+            submitter.index("swapz_preparation_publish_result("),
+            submitter.index(release_call))
+        release = submitter.index(release_call) + len(release_call)
+        self.assertNotIn("entry->", submitter[release:])
+        self.assertNotIn("prepared->", submitter[release:])
+        for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
+                          "swapz_flush_window(", "dm_io(", "bio_endio(",
+                          "swapz_engine_write_window"):
+            self.assertNotIn(forbidden, submitter)
+
+        self.assertIn("ctx->submitter_lane_free_mask", drain)
+        self.assertIn("ctx->submitter_lane_full_mask", drain)
+        self.assertIn("atomic_read(&ctx->submitter_preparation_active)", drain)
+        self.assertIn("kvfree(ctx->submitter_lanes[prep_lane].lz4_workmem)",
+                      freeing)
+        for field in (
+                "submitter_prepare=%u", "submitter_prepare_lanes=%u",
+                "submitter_prepare_claims=%llu",
+                "submitter_prepare_lane_misses=%llu",
+                "submitter_prepare_page_misses=%llu",
+                "submitter_prepare_active=%u",
+                "submitter_prepare_active_max=%u",
+                "submitter_owner_deferrals=%llu",
+                "submitter_prepare_pages=%llu",
+                "submitter_prepare_wall_ns=%llu",
+                "submitter_prepare_cpu_ns=%llu",
+                "submitter_lz4_wall_ns=%llu"):
+            self.assertIn(field, status)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

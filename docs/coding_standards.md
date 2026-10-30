@@ -380,11 +380,13 @@ belong in the ROADMAP decision table and Git history.
   never authorize the close.
   This experiment must not add any compression-completion wait or suppress the
   qualified four-record dispatch below a larger learned target.
-- **Preparation ownership:** async preparation uses one unbound producer lane.
-  The ordered owner may steal only an unclaimed next preparation entry while
-  holding the admission lock. Producer and ordered compression use separate
-  input/LZ4 scratch and single-writer timing state. Prepared-array slots belong
-  only to producer-prepared entries.
+- **Preparation ownership:** background async preparation uses one unbound
+  producer lane. The ordered owner may steal only an unclaimed next preparation
+  entry while holding the admission lock. Producer and ordered compression use
+  separate input/LZ4 scratch and single-writer timing state. ID150 separately
+  permits an already-admitting task to claim one preallocated scratch lane and
+  one existing prepared-array slot after FIFO admission; claim failure must
+  fall back immediately to the established producer/owner path without waiting.
 - **GC destination probing:** preserve the authority's circular
   `next_segment_probe`; collection must not restart at segment zero. A
   destination remains reusable only after the existing deadness, mapping and
@@ -1102,6 +1104,44 @@ teardown helper for `dtr()`. Do not add fixed sleeps, delayed upper BIO
 completion, or polling for an internal DM suspension flag; those mechanisms
 cannot establish the core ordering boundary.
 
+
+### Bounded submitter-context preparation candidate
+
+ID150 is an execution-placement experiment, not a new representation or
+authority path. FIFO admission occurs first under `queue_lock`; only then may
+an ordinary task-context WRITE claim one preallocated submitter scratch lane and
+one slot from the existing 64-page prepared reservoir. No allocation, sleep for
+capacity, lower I/O, mapping publication or upper completion is permitted in
+the submitter preparation helper. The scratch pool is capped at eight lanes;
+contention or reservoir exhaustion falls back immediately to the qualified
+single background producer/ordered-owner path. PREFLUSH, FUA and non-task
+contexts always use that established path.
+
+A claimed descriptor carries an atomic submitter-active gate. The ordered
+worker must preserve FIFO by putting its local list back ahead of later accepted
+work and returning while the FIFO head remains submitter-active. The submitter
+publishes the stable RAW snapshot, optional unchanged LZ4/delta64 payload and
+payload CRC before its terminal prepared state, then clears the active gate with
+release semantics. The ordered worker observes it with acquire semantics.
+After clearing the gate the submitter may touch only target-owned counters and
+scratch-pool state; it must never dereference the per-BIO descriptor or prepared
+page again because the ordered owner may immediately complete that BIO.
+
+Submitter-prepared slots have one owner reference: the submitting task stops
+touching the slot before releasing the descriptor, and the ordered consumer
+returns the slot after copying/sealing it. Background producer slots retain
+their existing two-reference producer/consumer lifetime because compression may
+continue after RAW selection. Both paths share the same prepared-state machine
+and 64-slot global bound; neither changes SWZ bytes, the four-record service
+floor, K=1 lower-WRITE depth, planner geometry, allocator, GC or publication
+authority.
+
+Status must expose submitter claims, scratch/reservoir misses, active/current
+peak, ordered-owner deferrals, prepared pages and submitter wall/CPU/LZ4/copy/
+CRC time separately from the background producer's worker timing. These are
+diagnostics only. Do not add overlapping phase walls to manufacture a CPU
+budget, and do not retain the candidate merely because preparation moved to a
+different task if useful service, p99, lower-I/O or resource pressure worsens.
 
 ### Work-conserving opportunistic representation
 

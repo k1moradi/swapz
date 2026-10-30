@@ -349,6 +349,8 @@ changes.
 | 147 | Already-copied READs join the existing published-ACK handoff | **1 weakly exercised pilot / removed** | Three successful READ paths defer only notification while a lower WRITE is pending; copied BIO bytes and all authority/cache/scratch remain with their established owners. Reuse ID143 list, 4..64 gate, helper, inline fallback and drain; no new queue, worker, I/O buffer or CPU-targeted callback. Fixed control/candidate/control, three repeats on six medium workloads (54 byte-exact owned raw/swapz pairs). Post-drain candidate counters show 15,653 deferred READs but only seven actual helper READ completions across 18 target sessions: entering the list does not establish useful offload. Five scenarios lack a complete usable three-block comparison under the declared noise screen; persistent after-control raw spread reaches 139.3%. Only fast WRITE QD4 remains fully screened, with descriptive normalized changes -5.14% vs before and +0.89% vs after; it has no READ activity and establishes no READ-policy benefit. No significance/equivalence or causal regression claim; no replacements. Audit also finds a deferred READ can remain queued through a subsequent synchronous READ wait, contradicting the candidate's broad before-any-lower-wait comment. Any renewed READ deferral needs explicit notification boundaries and meaningful helper activity before performance confirmation. Candidate module builds and byte oracles pass, but its source-contract run retains a changed-call-site assertion error; it is not qualified. Remove C, counters and test edits; restored qualified d2b66ac C passes all 89 source contracts. Local exact sources, hashes, plan, activity, exclusions and analysis: build/optimization-round/read-completion-handoff. |
 | 148 | Lower-WRITE completion publication and owner notification share the drain gate | **1 controlled race verified / busy-host owner run interrupted** | Adapter audit finds the callback published lower_done after releasing queue_lock, then still dereferenced ctx to queue the owner. A waiter can observe completion, finalize the last upper BIO and reach the final drain gate before that notification; no kernel UAF is claimed observed. Move complete plus mod_delayed_work inside the existing queue-lock critical section and make unlock the callback's last target/slot access. This preserves the established admission/workqueue lock order, completion/error semantics, K=1 ownership and publication policy; no new resource or speedup claim. Actual callback-body native test fails on old source when a controlled waiter passes the final gate at complete, and passes on repaired source under both dm-io ABIs, success, ordinary error and separate unsupported bitmap. Full rootless suite and W=1/W=2 builds pass with known warnings. A fixed default development run passes all 15 byte oracles; SATA/NVMe4/fast mixed are NOISY (raw spreads 19.7/32.7/39.5%), so exclude performance inference. Fast WRITE QD4/QD8 are SCREENED but this is not a source A/B. Owner run on 2aa3ba0 was intentionally stopped for the reported busy host: report ff66c70 is BLOCKED, exit 2, after stages 1–4 and loaded smoke/ACK/RAW-read gates passed; remaining matrix/ID36 unfinished. Owned cleanup completed. No performance evidence or history point is accepted from the interrupted run; wait for owner host-free notice before benchmarking again. Exact-source qualification remains required. READ callback already ends with complete and performs no following slot access. Keep direct-BIO work separate. Local exact sources, red-control proof, plan and logs: build/optimization-round/lower-completion-lifetime. |
 | 149 | Direct BIO for the detached immutable lower WRITE | **1 unpromising x86 pilot / removed** | After unchanged-source x86 qualification (`a2b5569`, report `c0feb2127c05`), the exact portable draft compiled and passed 91 source contracts plus 108 owned raw/swapz pairs (216 byte-exact arms). One reusable parent BIO and 64 vectors replaced only detached dm_io submission; existing service timer, callback drain gate and lower-success publication stayed intact. Compiled context 24,832 -> 25,984 bytes. Prospective three counterbalanced source rounds, two repeats per block, nine content/workload cases, +3% practical floor, three primary normalized-WRITE endpoints, 98.333% paired log-effect intervals and exact direction cutoff 0.05/3; both repeats SCREENED/provenance-matched and <=10% paired raw drift required, no replacements. Primary SATA n2 -0.38% [-11.95,+12.70], p0.5; persistent NVMe5 n1 +3.30%, no interval, p1; fast mixed n3 -0.41% [-2.02,+1.23], p0.25. These do not establish gain/loss/equivalence or justify larger confirmation. Five scenario-round exclusions remain in the full packet. Mixed arms exercised hundreds of detached runs, while QD1/4 had zero; QD4's noisy-direction +6.11% point is not adapter benefit. No lower-I/O/p99 benefit repays a new backend: fast mixed requests +0.69% descriptively; entropy NVMe4 +1.99% with equal bytes; QD8 WRITE p99 4.73 -> 6.02 ms descriptively. These are not qualified regressions. Restore exact qualified C and source tests; remove the temporary fast_test native hook. Forced-split/genuine child-error, ARM and exact-source candidate qualification gates were not completed. [Complete fixed sample and exclusions](handoff/direct-bio-x86-pilot.json), [decision](handoff/x86-continuation-result.md); full logs/manifests local under build/handoff-x86. Do not repeat the same draft without new material mechanism/workload evidence. |
+| 150 | Bounded submitter-context preparation before ordered ownership | **4 candidate implemented / owner qualification pending** | Move ordinary WRITE LZ4/payload-CRC preparation into the already-admitting task without moving FIFO admission, lower I/O or authority publication. Up to eight preallocated submitter scratch lanes share the existing 64 prepared-page reservoir; each claim is allocation-free and failure falls back immediately to the qualified single producer/ordered path. The descriptor is admitted first, marked submitter-owned under queue_lock, and the ordered worker defers that FIFO head until a release/acquire handoff publishes a terminal prepared representation. PREFLUSH/FUA and non-task contexts retain the old path. Existing LZ4/SWZ bytes, K=1, four-record floor, planner, allocator and publication contract are unchanged. New status separates submitter claims/misses/active peak/owner deferrals and submitter wall/CPU/LZ4/copy/CRC time. Require exact-source owner `make test`; compare persistent NVMe5 plus SATA/fast mixed and QD4/QD8 to the qualified x86 baseline. Keep only if useful service improves without correctness, lower-I/O, p99 or ID36 resource-pressure regression. |
+
 
 ## What the pinned queue experiment establishes
 
@@ -644,28 +646,25 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-For the current x86 migration, finish the pending ID148 baseline qualification
-before applying the portable draft; follow the [receiving-host handoff](handoff/x86-handoff.md).
-The existing source/report remains BLOCKED until a full owner run succeeds.
+The receiving x86 ID148 baseline is now qualified and ID149's direct-BIO
+draft was removed after its bounded pilot did not justify retention. ID150 is
+the current single production-C candidate: move ordinary preparation into
+submitting task context while preserving FIFO admission, K=1 lower service and
+serialized authority publication.
 
-1. Run ID114's default `make fast_test` baseline: three repeated SATA mixed,
-   NVMe4 mixed, fast mixed, fast QD4 and fast QD8 pairs. Discard NOISY/UNKNOWN
-   performance comparisons; retain absolute raw/swapz throughput, p99 and lower
-   WRITE bytes/requests rather than deciding from a percentage delta alone.
-2. Use the compact K=1 profile plus `build/tests/fast-test/latest.json` to
-   distinguish ordered-worker partial phase wall, scheduler diagnostics,
-   accepted-idle scheduling delay,
-   preparation/copy, ordering/planning, pack/CRC, lower service,
-   completion/publication and the synchronous four-record reissue cycle.
-3. Choose **one** narrow production-C change only if that breakdown identifies
-   a repayable software cost. Preserve the four-record service threshold,
-   single-slot ownership, one unbound preparation producer, the 64-slot
-   reservoir, ordinary LZ4 acceleration one, packed placement, circular
-   allocation, ID63 and SWZ geometry.
-4. Keep or remove the candidate with matched screened `make fast_test` evidence,
-   refresh the ARM64 history plots, and require an exact-source owner
-   `make test` before promotion. Zswap Phase A and ID113 folio locality remain
-   later architecture/evidence tasks.
+1. Run exact-source owner `make test` on ID150. The rootless source contracts,
+   loaded byte oracles, fault/lifecycle gates and ID36 resource-pressure stage
+   must pass before any performance interpretation.
+2. Use the report's existing ordered-worker CPU/wall, plan/pack, CRC, lower
+   service, accepted-idle and completion counters together with ID150's
+   submitter claims/misses/active peak/deferrals and submitter CPU/wall/LZ4
+   counters. Do not infer a serialized budget by summing overlapping clocks.
+3. Compare absolute raw/swapz throughput, p99 and lower WRITE bytes/requests
+   against the qualified x86 baseline, with persistent NVMe5 as the primary
+   ceiling check and SATA/fast mixed plus QD4/QD8 as guardrails.
+4. Keep or remove ID150 from measured evidence. Do not combine a custom LZ4
+   encoder, marginal-RAW rule, completion-delivery change or admission rewrite
+   into this A/B; each needs a separate roadmap row and source experiment.
 
 
 The nine-idea review now has direct evidence for first-window lead (ID140)
@@ -683,8 +682,8 @@ a deferred list is not proof of offload. A renewed candidate must explicitly
 cover synchronous READ waits and demonstrate actual helper delivery. Selected-wait idle,
 accepted post-lower delay and deferred-ACK wall have different scopes and may
 overlap other work; never sum them into a CPU total or call the first the whole
-device-idle budget. Submitter compression and lockless admission remain
-conditional candidates, not consequences of summing concurrent lock waits.
+device-idle budget. ID150 now tests submitter compression as one bounded candidate; lockless admission remains
+conditional and is not a consequence of summing concurrent lock waits.
 
 A dm-linear arm would be a DM calibration reference, not an exact unavoidable
 overhead budget: DM has target-specific fast paths, while swapz owns clones,

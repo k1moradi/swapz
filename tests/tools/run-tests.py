@@ -347,7 +347,15 @@ KERNEL_WRITE_FIELDS = (
     "k1_allow_after_read_bypass", "read_coalesce_max_blocks",
     "invalidate_cache_on_write_admit",
     "work_conserving_hand_records", "prep_ready_current", "prep_ready_max",
-    "prep_slots_in_use", "prep_slots_in_use_max"
+    "prep_slots_in_use", "prep_slots_in_use_max",
+    "submitter_prepare", "submitter_prepare_lanes",
+    "submitter_prepare_claims", "submitter_prepare_lane_misses",
+    "submitter_prepare_page_misses", "submitter_prepare_active",
+    "submitter_prepare_active_max", "submitter_owner_deferrals",
+    "submitter_prepare_pages", "submitter_prepare_wall_ns",
+    "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
+    "submitter_copy_wall_ns", "submitter_copy_bytes",
+    "submitter_crc_wall_ns"
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + (
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
