@@ -1026,6 +1026,48 @@ class PublicMakeContract(unittest.TestCase):
                     (module, w1_module, w2_module), before_module):
                 self.assertGreater(p.stat().st_mtime_ns, old_mtime)
 
+    def test_async_preparation_gate_accepts_real_submitter_work_only(self):
+        # Execute the actual benchmark admission gate with synthetic drained
+        # target statuses. Zero background overlap is valid only with real
+        # completed submitter work; neither missing evidence nor active
+        # submitter ownership may pass the loaded pair.
+        benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        start = benchmark.index("# ID150 async preparation activity gate:")
+        end = benchmark.index("\nfi\n", start) + len("\nfi\n")
+        gate = benchmark[start:end]
+        cases = (
+            ("background", 7, 0, 0, 0, 0, True),
+            ("submitter", 0, 1, 19, 18, 0, True),
+            ("neither", 0, 1, 0, 0, 0, False),
+            ("disabled", 0, 0, 19, 18, 0, False),
+            ("invalid_claims", 0, 1, 4, 9, 0, False),
+            ("active_owner", 0, 1, 19, 18, 1, False),
+        )
+        for name, overlap, enabled, claims, pages, active, expected in cases:
+            with self.subTest(name=name):
+                status = (
+                    f"prep_lower_write_overlap_starts={overlap} "
+                    f"submitter_prepare={enabled} "
+                    f"submitter_prepare_claims={claims} "
+                    f"submitter_prepare_pages={pages} "
+                    f"submitter_prepare_active={active}")
+                command = (
+                    'set -euo pipefail\n'
+                    'fail() { echo "BLOCKED: $*" >&2; exit 1; }\n'
+                    'note() { printf "%s\\n" "$*"; }\n'
+                    'ASYNC_PREPARE=1 WRITE_ONLY_QD=0\n'
+                    f"swapz_status_after='{status}'\n" + gate)
+                result = subprocess.run(
+                    ["bash", "-c", command], capture_output=True,
+                    text=True, timeout=5)
+                self.assertEqual(result.returncode == 0, expected,
+                                 result.stdout + result.stderr)
+                if expected:
+                    self.assertIn("PASS_ASYNC_PREPARATION_ACTIVITY=",
+                                  result.stdout)
+                else:
+                    self.assertIn("BLOCKED:", result.stderr)
+
     def test_packaging_and_loaded_tests_are_bounded(self):
         self.assertIn("packaging/package-dkms.sh install", MAKE)
         self.assertIn("packaging/package-dkms.sh uninstall", MAKE)

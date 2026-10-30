@@ -707,6 +707,18 @@ also permits the submitter helper between the final admission-lock release and
 and the helper must not dereference per-BIO/prepared ownership after releasing
 the submitter-active gate.
 
+For mixed loaded pairs with asynchronous preparation enabled, positive
+`prep_lower_write_overlap_starts` still proves background-producer preparation
+began during a lower WRITE. ID150's submitter preparation is a different owner
+and is not counted by that producer-only metric. The activity gate may instead
+accept positive `submitter_prepare_pages` with `submitter_prepare=1`, claims
+at least as large as completed pages, and `submitter_prepare_active=0` at
+the drained status boundary. It must reject both paths idle, missing counters,
+or outstanding submitter ownership. Submitter pages alone do not prove
+temporal overlap with lower I/O; the observed producer overlap remains reported
+unaltered and performance inference remains dependent on the actual paired
+service, lower-traffic and latency data.
+
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
 only for reads already waiting behind active lower work.

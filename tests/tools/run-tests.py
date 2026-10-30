@@ -1865,6 +1865,15 @@ def parse_sessions(output):
         elif current is not None and line.startswith(
                 "PASS_ASYNC_LOWER_IO_OVERLAP_STARTS="):
             current["overlap_starts"] = int(line.rsplit("=", 1)[-1])
+        elif current is not None and line.startswith(
+                "PASS_ASYNC_PREPARATION_ACTIVITY="):
+            match = re.fullmatch(
+                r"PASS_ASYNC_PREPARATION_ACTIVITY="
+                r"producer_lower_write_overlap:(\d+) submitter_pages:(\d+)",
+                line)
+            if match:
+                current["overlap_starts"] = int(match.group(1))
+                current["submitter_prepared_pages"] = int(match.group(2))
         elif current is not None and line.startswith("{"):
             try:
                 obj = json.loads(line)

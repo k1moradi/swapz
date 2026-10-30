@@ -884,14 +884,32 @@ if (( DELTA64_RESCUE )); then
     (( active_max <= expected_delta64_workers )) ||
         fail 'delta64 preparation exceeded configured concurrency'
 fi
+# ID150 async preparation activity gate: background producer overlap is not
+# submitter-context preparation. Require real work on at least one path without
+# misreporting producer-only overlap as a property of submitter preparation.
 if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
-    if [[ "$swapz_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]]; then
-        (( ${BASH_REMATCH[1]} > 0 )) ||
-            fail 'async preparation never started while lower WRITE was active'
-        note "PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=${BASH_REMATCH[1]}"
-    else
-        fail 'loaded swapz did not expose the asynchronous preparation counter'
+    [[ "$swapz_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]] ||
+        fail 'loaded swapz did not expose background preparation overlap'
+    producer_lower_write_overlap="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ submitter_prepare=([01]) ]] ||
+        fail 'loaded swapz did not expose submitter preparation policy'
+    submitter_enabled="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ submitter_prepare_claims=([0-9]+) ]] ||
+        fail 'loaded swapz did not expose submitter preparation claims'
+    submitter_claims="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ submitter_prepare_pages=([0-9]+) ]] ||
+        fail 'loaded swapz did not expose completed submitter preparation'
+    submitter_pages="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ submitter_prepare_active=([0-9]+) ]] ||
+        fail 'loaded swapz did not expose active submitter ownership'
+    submitter_active="${BASH_REMATCH[1]}"
+    if ! (( submitter_active == 0 && submitter_pages <= submitter_claims &&
+            (!submitter_pages || submitter_enabled) &&
+            (producer_lower_write_overlap > 0 ||
+             (submitter_enabled && submitter_pages > 0)) )); then
+        fail "async preparation activity mismatch: producer_lower_write_overlap=$producer_lower_write_overlap submitter_enabled=$submitter_enabled claims=$submitter_claims pages=$submitter_pages active=$submitter_active"
     fi
+    note "PASS_ASYNC_PREPARATION_ACTIVITY=producer_lower_write_overlap:$producer_lower_write_overlap submitter_pages:$submitter_pages"
 fi
 fi
 COMPARE_ARGS=()
