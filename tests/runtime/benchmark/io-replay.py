@@ -380,6 +380,14 @@ def validate_swapz_table(table, logical_pages, lower_dev, disk_name):
             "lower_bulk": lower_bulk, "retain_ms": retain_ms}
 
 
+def validate_linear_table(table, logical_pages, lower_dev):
+    """Only a zero-offset, single-extent mapping onto the pinned owned RAM lower."""
+    rows = table.strip().splitlines()
+    if len(rows) != 1 or rows[0].split() != [
+            "0", str(logical_pages * PAGE // 512), "linear", lower_dev, "0"]:
+        raise ValueError("unexpected linear calibration table or owned backing")
+
+
 def check_owned_block(path, st, candidate, args, logical_pages):
     if not args.owned_nullblk_name or not args.expected_dev:
         raise ValueError("block I/O requires owned null_blk identity and exact major:minor")
@@ -414,9 +422,12 @@ def check_owned_block(path, st, candidate, args, logical_pages):
         table = subprocess.run(["dmsetup", "table", dm_name],
                                check=True, capture_output=True, text=True,
                                timeout=10).stdout
-        swapz_config = validate_swapz_table(
-            table, logical_pages, null_dev, disk_name
-        )
+        if candidate == "linear":
+            validate_linear_table(table, logical_pages, null_dev)
+        else:
+            swapz_config = validate_swapz_table(
+                table, logical_pages, null_dev, disk_name
+            )
     for line in Path("/proc/swaps").read_text().splitlines()[1:]:
         item = line.split()[0]
         try:
@@ -435,7 +446,8 @@ def check_owned_block(path, st, candidate, args, logical_pages):
     return {"device": actual, "owned_nullblk": args.owned_nullblk_name,
             "owned_disk": disk_name, "lower_major_minor": null_dev,
             "dm_uuid": args.expected_dm_uuid if candidate != "off" else None,
-            "swapz_config": swapz_config if candidate == "swapz" else None}
+            "swapz_config": swapz_config if candidate == "swapz" else None,
+            "dm_target": "linear" if candidate == "linear" else None}
 
 
 def check_device(args, logical_pages):
@@ -986,7 +998,7 @@ def run_native_replay(fd, fixture_fd, trace, manifest, path, identity):
 
 
 def packed_closes(path, identity):
-    if not identity.get("dm_uuid"):
+    if not identity.get("dm_uuid") or identity.get("dm_target") == "linear":
         return None
     out = subprocess.run(["dmsetup", "status", str(path)], text=True,
                          capture_output=True, check=False, timeout=8)
@@ -1033,7 +1045,7 @@ KERNEL_READ_FIELDS = KERNEL_READ_COUNTER_FIELDS + KERNEL_READ_GAUGE_FIELDS
 
 
 def kernel_read_snapshot(path, identity):
-    if not identity.get("dm_uuid"):
+    if not identity.get("dm_uuid") or identity.get("dm_target") == "linear":
         return None
     status = subprocess.run(["dmsetup", "status", str(path)], text=True,
                             capture_output=True, check=False, timeout=8)
@@ -1271,7 +1283,7 @@ WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
 
 def kernel_write_profile_epoch(path, identity):
     """Break passive sync4 predecessor linkage at a measurement boundary."""
-    if not identity.get("dm_uuid"):
+    if not identity.get("dm_uuid") or identity.get("dm_target") == "linear":
         return
     reset = subprocess.run(
         ["dmsetup", "message", str(path), "0", "profile_epoch"],
@@ -1283,7 +1295,7 @@ def kernel_write_profile_epoch(path, identity):
 
 
 def kernel_write_snapshot(path, identity):
-    if not identity.get("dm_uuid"):
+    if not identity.get("dm_uuid") or identity.get("dm_target") == "linear":
         return None
     status = subprocess.run(["dmsetup", "status", str(path)], text=True,
                             capture_output=True, check=False, timeout=8)
@@ -1688,6 +1700,8 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
 
 
 def replay(args):
+    if args.candidate == "linear" and args.packed_read:
+        raise ValueError("linear calibration cannot qualify swapz packed reads")
     mf = safe_load(args.manifest)
     if mf.get("schema") != SCHEMA or mf.get("page_bytes") != PAGE:
         raise ValueError("unsupported trace schema")
@@ -2024,7 +2038,9 @@ def replay(args):
 
 def compare(args):
     entries = [safe_load(name) for name in args.reports]
-    if set(x["candidate"] for x in entries) != set(CANDIDATES) or len(entries) != 2:
+    calibration = getattr(args, "linear_calibration", False)
+    expected = ("off", "linear") if calibration else CANDIDATES
+    if set(x["candidate"] for x in entries) != set(expected) or len(entries) != 2:
         raise ValueError("exactly one off and one swapz result required")
     immutable = ("fixture_sha256", "trace_sha256", "write_payload_stream_sha256",
                  "workload_opportunity", "prefill_sha256",
@@ -2059,7 +2075,7 @@ def compare(args):
         if packed[1].get("packed_close_delta") is not None and (
                 packed[1]["packed_close_delta"] <= 0):
             raise ValueError("INVALID COMPARISON: swapz packed write not proven")
-    normalized = sorted(entries, key=lambda entry: CANDIDATES.index(entry["candidate"]))
+    normalized = sorted(entries, key=lambda entry: expected.index(entry["candidate"]))
     first, second = normalized
     identities = [entry.get("device_identity") for entry in normalized]
     rootless = all(identity and "test_regular_file" in identity for identity in identities)
@@ -2119,6 +2135,16 @@ def compare(args):
             ):
                 raise ValueError("INVALID COMPARISON: missing independent lower I/O")
         off_bytes = first["lower_io"]["lower_write_bytes"]
+        if calibration:
+            if identities[1].get("dm_target") != "linear":
+                raise ValueError("linear calibration identity was not verified")
+            output["performance_qualification"] = "DM_LINEAR_CALIBRATION_ONLY"
+            output["logical_write_mbps_ratio_linear_to_off"] = (
+                throughput[1]["logical_write_mbps"] / throughput[0]["logical_write_mbps"])
+            output["claim_boundary"] = (
+                "same-host synthetic dm-linear reference, not an unavoidable DM overhead budget")
+            print(json.dumps(output, sort_keys=True))
+            return
         swapz_bytes = second["lower_io"]["lower_write_bytes"]
         output["lower_write_bytes_saved_fraction"] = (
             (off_bytes - swapz_bytes) / off_bytes if off_bytes else None
@@ -2200,7 +2226,7 @@ def main():
     run.add_argument("--fixture", required=True)
     run.add_argument("--trace", required=True)
     run.add_argument("--manifest", required=True)
-    run.add_argument("--candidate", choices=CANDIDATES, required=True)
+    run.add_argument("--candidate", choices=(*CANDIDATES, "linear"), required=True)
     run.add_argument("--source-sha", required=True)
     run.add_argument("--device", required=True)
     run.add_argument("--result", required=True)
@@ -2216,6 +2242,7 @@ def main():
     run.add_argument("--expected-dm-uuid")
     cmp = sub.add_parser("compare", help="fail closed unless all logical inputs match")
     cmp.add_argument("--reports", nargs=2, required=True)
+    cmp.add_argument("--linear-calibration", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
     try:
         if args.command == "prepare":

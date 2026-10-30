@@ -51,6 +51,13 @@ if [[ $# -gt 1 && ${!#} == --swapz-first ]]; then
     REPLAY_SWAPZ_FIRST=1
     set -- "${@:1:$(( $# - 1 ))}"
 fi
+LINEAR_CALIBRATION=0
+TARGET_CANDIDATE=swapz
+if [[ $# -gt 1 && ${!#} == --linear-calibration ]]; then
+    LINEAR_CALIBRATION=1
+    TARGET_CANDIDATE=linear
+    set -- "${@:1:$(( $# - 1 ))}"
+fi
 SHARED_PLAN=""
 # Only make test supplies its freshly made immutable workload directory.
 if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
@@ -226,6 +233,12 @@ fi
 if (( ASYNC_PREPARE || LOWER_MBPS || COMPLETION_NSEC )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
     echo 'BLOCKED: async/rate-cap trials require an owned unpaced QD32 profile' >&2
+    exit 2
+fi
+if (( LINEAR_CALIBRATION )) &&
+   [[ $RATE_MODE != unpaced || $PROFILE != medium ||
+      $RESOURCE_PRESSURE_SHORT != 0 || $DELTA64_POSITIVE_EXPERIMENT != 0 ]]; then
+    echo 'BLOCKED: linear calibration cannot substitute for product qualification' >&2
     exit 2
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -602,6 +615,7 @@ if (( RESOURCE_PRESSURE_SHORT )); then
         fail 'ID36 pressure start barrier timed out'
 fi
 modprobe dm_mod
+if (( !LINEAR_CALIBRATION )); then
 modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
     "delta64_rescue=$DELTA64_RESCUE" \
@@ -612,6 +626,7 @@ insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
     fail 'swapz target registration missing'
+fi
 token="$(od -An -N8 -tx1 /dev/urandom | tr -d '[:space:]')"
 [[ $token =~ ^[a-f0-9]{16}$ ]] || fail 'mapper token invalid'
 DMNAME="swapz-demo-$token"
@@ -622,8 +637,14 @@ DMUUID="SWAPZ-TEST-$token"
 # The explicit ninth policy field is 0 for default/control trials.
 # Retained unpaced sessions permit --retain-ms 1 OR 2; only the original
 # paced candidate permits 2. Both are pinned above before any setup.
+target_table="0 8192 swapz ${LOWERS[1]} 0 64 0 2 0 1 0 $RETAIN_MS"
+if (( LINEAR_CALIBRATION )); then
+    target_table="0 8192 linear ${DEVS[1]} 0"
+    PACKED_READ=0
+    note 'CALIBRATION_ONLY=dm-linear; no swapz or unavoidable-DM-overhead claim'
+fi
 if ! dmsetup create "$DMNAME" --uuid "$DMUUID" \
-    --table "0 8192 swapz ${LOWERS[1]} 0 64 0 2 0 1 0 $RETAIN_MS"; then
+    --table "$target_table"; then
     if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
              tr -d '[:space:]') == "$DMUUID" ]]; then
         OWN_DM=1
@@ -635,6 +656,7 @@ fi
 OWN_DM=1
 [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" |
       tr -d '[:space:]') == "$DMUUID" ]] || fail 'owned DM UUID mismatch'
+if (( !LINEAR_CALIBRATION )); then
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:space:]]|$)" ||
     fail 'unexpected swapz retained policy after owned DM creation'
 dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])lz4_acceleration=1([[:space:]]|$)' ||
@@ -671,6 +693,7 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])invalidate_cache_on_write_ad
     fail 'loaded swapz write-admission cache policy does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])parallel_reads_enabled=$expected_parallel([[:space:]]|$)" ||
     fail 'loaded swapz independent lower-READ fan-out gate does not match selected benchmark arm'
+fi
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'
 for (( n=0; n<50; ++n )); do
@@ -816,7 +839,7 @@ replay_swapz() {
         --fixture "$SESSION/fixture.bin" \
         --trace "$SESSION/plan/trace.jsonl" \
         --manifest "$SESSION/plan/manifest.json" \
-        --candidate swapz --source-sha "$SOURCE" \
+        --candidate "$TARGET_CANDIDATE" --source-sha "$SOURCE" \
         --device "/dev/mapper/$DMNAME" --result "$SESSION/swapz.json" \
         "${PACKED_ARGS[@]}" "${REPLAY_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[1]}" \
@@ -841,6 +864,7 @@ else
 fi
 swapz_status_after="$(dmsetup status "$DMNAME")"
 note "SWAPZ_STATUS_AFTER=$swapz_status_after"
+if (( !LINEAR_CALIBRATION )); then
 # Only the explicit delta64-positive fixture must show classifier passes and
 # adoptions; default-on sessions on ordinary content may legitimately have none.
 if (( DELTA64_POSITIVE_EXPERIMENT )); then
@@ -869,7 +893,11 @@ if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
         fail 'loaded swapz did not expose the asynchronous preparation counter'
     fi
 fi
+fi
+COMPARE_ARGS=()
+(( LINEAR_CALIBRATION )) && COMPARE_ARGS+=(--linear-calibration)
 python3 -B tests/runtime/benchmark/io-replay.py compare \
+    "${COMPARE_ARGS[@]}" \
     --reports "$SESSION/off.json" "$SESSION/swapz.json" |
     tee "$SESSION/pair.json" || fail 'pair verification rejected'
 note 'PASS: bounded same-work pilot, not sustained GC/CPU/p99 qualification'
