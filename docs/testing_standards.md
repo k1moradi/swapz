@@ -692,7 +692,11 @@ submitter wall/CPU/LZ4/copy/CRC counters. Claims/pages/timing are measurement
 deltas; `submitter_prepare_active_max` is deliberately the loaded-target
 high-water mark and is not reset by `profile_epoch`. Treat those clocks as
 attribution, not additive CPU totals. ID36 must remain within its resource-pressure gate;
-the extra scratch allocation is part of the candidate cost.
+the extra scratch allocation is part of the candidate cost. The source contract
+also permits the submitter helper between the final admission-lock release and
+`DM_MAPIO_SUBMITTED`: preparation must finish before `swapz_map()` returns,
+and the helper must not dereference per-BIO/prepared ownership after releasing
+the submitter-active gate.
 
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted

@@ -796,12 +796,16 @@ def timed_window_error(record):
         "submitter_copy_wall_ns", "submitter_copy_bytes",
         "submitter_crc_wall_ns",
     )
-    if type(record.get("submitter_prepare")) is not int or             record["submitter_prepare"] not in (0, 1):
+    if (type(record.get("submitter_prepare")) is not int or
+            record["submitter_prepare"] not in (0, 1)):
         return "missing or invalid timed submitter preparation policy"
-    if type(record.get("submitter_prepare_lanes")) is not int or not (
-            0 <= record["submitter_prepare_lanes"] <= 8) or             bool(record["submitter_prepare_lanes"]) !=             bool(record["submitter_prepare"]):
+    if (type(record.get("submitter_prepare_lanes")) is not int or
+            not 0 <= record["submitter_prepare_lanes"] <= 8 or
+            bool(record["submitter_prepare_lanes"]) !=
+            bool(record["submitter_prepare"])):
         return "invalid timed submitter preparation lanes"
-    if type(record.get("submitter_prepare_active")) is not int or             record["submitter_prepare_active"] != 0:
+    if (type(record.get("submitter_prepare_active")) is not int or
+            record["submitter_prepare_active"] != 0):
         return "submitter preparation active at timed boundary"
     if type(record.get("submitter_prepare_active_max")) is not int or not (
             0 <= record["submitter_prepare_active_max"] <=
@@ -815,8 +819,11 @@ def timed_window_error(record):
         return "disabled submitter preparation recorded activity"
     if record["submitter_prepare_pages"] > record["submitter_prepare_claims"]:
         return "inconsistent timed submitter preparation claims"
-    if record["submitter_copy_bytes"] !=             record["submitter_prepare_pages"] * 4096:
+    if (record["submitter_copy_bytes"] !=
+            record["submitter_prepare_pages"] * 4096):
         return "inconsistent timed submitter preparation copy bytes"
+    if record["submitter_copy_bytes"] > record["write_copy_bytes"]:
+        return "inconsistent timed submitter/global copy bytes"
     if (record["submitter_lz4_wall_ns"] +
             record["submitter_copy_wall_ns"] +
             record["submitter_crc_wall_ns"] >

@@ -421,10 +421,10 @@ class PairReplayContract(unittest.TestCase):
             "submitter_copy_wall_ns": 500,
             "submitter_copy_bytes": 8192,
             "submitter_crc_wall_ns": 100,
-            "lz4_wall_ns": 100,
+            "lz4_wall_ns": 900,
             "ordered_lz4_wall_ns": 60,
             "prep_lz4_wall_ns": 40,
-            "write_copy_wall_ns": 30,
+            "write_copy_wall_ns": 530,
             "write_copy_bytes": 4096,
             "ordered_write_copy_wall_ns": 20,
             "prep_write_copy_wall_ns": 10,
@@ -481,11 +481,11 @@ class PairReplayContract(unittest.TestCase):
             "submitter_copy_wall_ns": 2500,
             "submitter_copy_bytes": 40960,
             "submitter_crc_wall_ns": 700,
-            "lz4_wall_ns": 54100,
+            "lz4_wall_ns": 54900,
             "ordered_lz4_wall_ns": 30060,
             "prep_lz4_wall_ns": 20040,
-            "write_copy_wall_ns": 3030,
-            "write_copy_bytes": 8192,
+            "write_copy_wall_ns": 3530,
+            "write_copy_bytes": 40960,
             "ordered_write_copy_wall_ns": 620,
             "prep_write_copy_wall_ns": 410,
             "direct_lz4_input_pages": 5,
@@ -628,8 +628,9 @@ class PairReplayContract(unittest.TestCase):
                 ({"submitter_prepare_pages": 13}, "claims"),
                 ({"submitter_copy_bytes": 40961}, "copy bytes"),
                 ({"submitter_prepare_wall_ns": 4000}, "timing")):
-            with self.subTest(submitter=invalid),                     self.assertRaisesRegex(ValueError, message):
-                module.kernel_write_delta(before, dict(after, **invalid))
+            with self.subTest(submitter=invalid):
+                with self.assertRaisesRegex(ValueError, message):
+                    module.kernel_write_delta(before, dict(after, **invalid))
         submitter_disabled_before = {
             **before,
             "submitter_prepare": 0,
@@ -688,6 +689,7 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual([delta[key] for key in module.WRITE_WAIT_BINS],
                          [2, 2, 1])
         self.assertEqual(delta["write_copy_wall_ns"], 3000)
+        self.assertEqual(delta["write_copy_bytes"], 36864)
         self.assertEqual(delta["lz4_wall_ns"], 54000)
         self.assertEqual(delta["ordered_lz4_wall_ns"], 30000)
         self.assertEqual(delta["prep_lz4_wall_ns"], 20000)
