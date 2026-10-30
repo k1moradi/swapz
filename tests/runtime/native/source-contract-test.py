@@ -1402,6 +1402,18 @@ int main(void) {
             subprocess.run([str(path / "probe")], check=True)
 
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        live = deploy.split('UUID="SWAPZ-TEST-$TOKEN-completion"', 1)[1].split(
+            'dmsetup suspend "$DMNAME"', 1)[0]
+        # The live handoff probe repeats the fixed series (bounded), polls each
+        # writer until exit without a fixed poll budget, and needs a handoff
+        # newer than that pass's own baseline while the writer is alive.
+        self.assertIn("for completion_pass in {1..16}; do", live)
+        self.assertNotIn("{1..500}", live)
+        self.assertIn('while kill -0 "$writer_pid" 2>/dev/null; do', live)
+        self.assertIn("completion_batches > completion_pass_base", live)
+        self.assertLess(live.index('completion_before="$(dmsetup status'),
+                        live.index("--parallel-write-series 128 128"))
+        self.assertIn("(( completion_observed )) && break", live)
         completion_fault = deploy.split(
             'UUID="SWAPZ-TEST-$TOKEN-completionfault"', 1)[1].split(
             'PASS_LOADED_COMPLETION_HANDOFF=', 1)[0]

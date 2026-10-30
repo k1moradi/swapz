@@ -983,24 +983,38 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
     fail "cannot create completion-handoff mapping"
 OWN_DM=1
 swapz_verify_owned_dm_node
-completion_before="$(dmsetup status "$DMNAME")"
-timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
-    "/dev/mapper/$DMNAME" --parallel-write-series 128 128 \
-    >"$SESSION/completion-writer.log" 2>&1 &
-writer_pid=$!
+# Handoffs are timing-dependent; a slow four-CPU host can complete a whole
+# fixed series with none, or before a fixed poll budget sees one. Repeat the
+# same series (bounded) and poll each until its writer exits, so suspend/drain
+# always runs against a live writer after a real handoff. Every pass rewrites
+# the same final image; completed_writes counts only the observed pass.
 completion_observed=0
-for attempt in {1..500}; do
-    completion_running="$(dmsetup status "$DMNAME")" || break
-    completion_batches="$(status_u64 "$completion_running" completion_offloaded_batches)" || break
-    if (( completion_batches > 0 )) && kill -0 "$writer_pid" 2>/dev/null; then
-        completion_observed=1
-        break
-    fi
-    kill -0 "$writer_pid" 2>/dev/null || break
+completion_passes=0
+for completion_pass in {1..16}; do
+    completion_passes=$completion_pass
+    completion_before="$(dmsetup status "$DMNAME")"
+    completion_pass_base="$(status_u64 "$completion_before" completion_offloaded_batches)" ||
+        fail "completion-handoff status lacks offloaded batch count"
+    timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
+        "/dev/mapper/$DMNAME" --parallel-write-series 128 128 \
+        >>"$SESSION/completion-writer.log" 2>&1 &
+    writer_pid=$!
+    while kill -0 "$writer_pid" 2>/dev/null; do
+        completion_running="$(dmsetup status "$DMNAME")" || break
+        completion_batches="$(status_u64 "$completion_running" completion_offloaded_batches)" || break
+        if (( completion_batches > completion_pass_base )) && kill -0 "$writer_pid" 2>/dev/null; then
+            completion_observed=1
+            break
+        fi
+    done
+    (( completion_observed )) && break
+    writer_rc=0
+    wait "$writer_pid" || writer_rc=$?
+    (( writer_rc == 0 )) ||
+        fail "parallel completion writer failed before a live handoff: rc=$writer_rc pass=$completion_pass"
 done
 if (( !completion_observed )); then
-    wait "$writer_pid" 2>/dev/null || true
-    fail "parallel WRITE session did not expose a live published-ACK handoff"
+    fail "parallel WRITE session did not expose a live published-ACK handoff after $completion_passes passes"
 fi
 timeout --signal=TERM --kill-after=2s 10s dmsetup suspend "$DMNAME" ||
     fail "completion-handoff suspend/drain failed"
