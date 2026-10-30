@@ -2241,6 +2241,67 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("Simulated extent placement geometry", rendered)
         self.assertLess(len(rendered.splitlines()), 16)
 
+    def test_delta64_rescue_accepts_real_submitter_preparation(self):
+        # ID150 can own every prepared page. Exercise the same reporter
+        # verdict on matched positive fixtures with background prep at zero.
+        def sessions_with_submitter_preparation():
+            sessions = runner.parse_delta64_rescue_sessions(synthetic_log())
+            for session in sessions:
+                if not session["rescue"]:
+                    continue
+                kernel = session["arms"]["swapz"]["kernel_write_path"]
+                kernel.update({
+                    "delta64_prepare_pages": 0,
+                    "submitter_prepare": 1,
+                    "submitter_prepare_lanes": 8,
+                    "submitter_prepare_active": 0,
+                    "submitter_prepare_active_max": 1,
+                    "submitter_prepare_claims": 100,
+                    "submitter_prepare_pages": 100,
+                    "submitter_prepare_wall_ns": 100000,
+                    "submitter_copy_wall_ns": 20000,
+                    "submitter_copy_bytes": 100 * 4096,
+                })
+                kernel["write_copy_wall_ns"] += 20000
+                kernel["write_copy_bytes"] += 100 * 4096
+            return sessions
+
+        sessions = sessions_with_submitter_preparation()
+        self.assertEqual(
+            runner.delta64_rescue_verdict(sessions)["overall"],
+            "PASS_DELTA64_RESCUE_AB")
+        # Neither placement path may make a zero-work rescue arm pass.
+        for session in sessions:
+            if session["rescue"]:
+                kernel = session["arms"]["swapz"]["kernel_write_path"]
+                kernel["submitter_prepare_pages"] = 0
+                kernel["submitter_copy_bytes"] = 0
+                kernel["submitter_copy_wall_ns"] = 0
+                kernel["write_copy_bytes"] -= 100 * 4096
+                kernel["write_copy_wall_ns"] -= 20000
+        self.assertEqual(
+            runner.delta64_rescue_verdict(sessions)["overall"],
+            "INCOMPLETE")
+        # Positive submitted pages with missing classifier/adoption evidence
+        # still fail even though the submitter lane was active.
+        sessions = sessions_with_submitter_preparation()
+        for session in sessions:
+            if session["rescue"]:
+                session["arms"]["swapz"]["kernel_write_path"][
+                    "delta64_adopted"] = 0
+        self.assertEqual(
+            runner.delta64_rescue_verdict(sessions)["overall"],
+            "INCOMPLETE")
+        # Existing global telemetry checks reject unowned/missing activity.
+        sessions = sessions_with_submitter_preparation()
+        for session in sessions:
+            if session["rescue"]:
+                session["arms"]["swapz"]["kernel_write_path"][
+                    "submitter_prepare_claims"] = 0
+        self.assertEqual(
+            runner.delta64_rescue_verdict(sessions)["overall"],
+            "INCOMPLETE")
+
     def test_benchmark_console_is_compact_and_keeps_sync_control(self):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(

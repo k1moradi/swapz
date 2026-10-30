@@ -726,6 +726,21 @@ no work, disabled submitter policy, claim-count mismatch, and active ownership.
 This preserves test coverage of both valid placement paths without replacing
 the required owner-loaded byte-exact and lower-I/O checks.
 
+The positive delta64 rescue off/on A/B must likewise accept genuinely
+prepared pages from either the background producer
+(`delta64_prepare_pages`) or ID150 submitter context
+(`submitter_prepare_pages`), because the former field intentionally counts
+only the background producer. This is not an excuse to disable the positive
+control: every enabled rescue arm still requires nonzero classifier passes,
+attempts, adoptions, transform time and total rescue time; the normal timed
+telemetry contract checks submitter policy, ownership quiescence, claim/page
+conservation and complete WRITE-copy attribution. Disabled rescue arms must
+still have zero delta64 activity. Rootless reporter tests must prove the
+producer-only and submitter-only positive cases, zero-activity rejection,
+missing delta64-adoption rejection and invalid ownership accounting rejection.
+Do not claim this placement change itself improves service or endurance: the
+five-pair timed outcome remains the performance decision.
+
 Parallel READ service is separate: it requires private read scratch and must
 dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
 only for reads already waiting behind active lower work.

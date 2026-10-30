@@ -2516,10 +2516,16 @@ def delta64_rescue_verdict(sessions):
             return {"overall": "INCOMPLETE",
                     "reason": "delta64 rescue A/B policy/concurrency mismatch"}
         if rescue:
+            # ID150 can prepare every positive-fixture page in the submitting
+            # task. delta64_prepare_pages counts only the background producer;
+            # retain proof of actual delta64 execution and preparation on
+            # either path, not an obsolete producer-only scheduling mandate.
+            prepared_pages = (kernel["delta64_prepare_pages"] +
+                              kernel["submitter_prepare_pages"])
             if (not kernel["delta64_classifier_pass"] or
                     not kernel["delta64_attempts"] or
                     not kernel["delta64_adopted"] or
-                    not kernel["delta64_prepare_pages"] or
+                    not prepared_pages or
                     not kernel["delta64_transform_wall_ns"] or
                     not kernel["delta64_wall_ns"]):
                 return {"overall": "INCOMPLETE",
