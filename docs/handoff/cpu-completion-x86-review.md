@@ -92,6 +92,34 @@ for diagnosis, outside any performance sample family. No new owner report or
 plot was generated: history still ends at qualified source `545defa8`, report
 `3465b4c08987`, with three identified reports/42 points for this computer.
 
+## Loaded correctness continuation
+
+The archived production candidate (unchanged C SHA-256) subsequently passed the
+private loaded deployment gate through `make fast_test`. This includes real GC,
+DISCARD, retained lower WRITE/flush faults and suspend/drain/readback. The remote
+completion gate observed 14,248 remote WRITEs and 165 remote READs, zero callbacks
+active afterward, all 128 final pages verified and exactly 16,512 successful
+WRITEs in the observed writer pass. A separate mapping recorded 42,053 remote
+WRITEs before one injected lower failure; callback ownership drained, and a new
+WRITE returned EIO without adding a success. The existing unbound handoff also
+remained active (366 live-session and 1,087 fault-session batches).
+
+A validation-only source sends otherwise eligible remote completions to
+`nr_cpu_ids`, an invalid CPU index. The real kernel API rejected 18,712 calls;
+all fell back inline, readback passed, no remote calls remained and no upper
+WRITE error was recorded. No host CPU was offlined. This source is not a
+performance arm and is restored to the archived candidate before timing. Its
+initial native preflight stopped before loading because the API stub lacked
+`nr_cpu_ids`; adding the constant made all 93 source contracts pass. The native
+stub does not itself model the real kernel's CPU-validity check.
+
+[Loaded lifecycle and rejection evidence](cpu-completion-x86-lifecycle.json.gz)
+contains complete logs, reports, hashes and the validation-only source. These
+are development gates, not full owner/ID36 qualification or a live-hotplug test.
+The resolved prospective plan freezes all common-source/helper hashes and
+fixture/trace/manifest/image hashes before any performance sample. Its pilot
+remains pending at this documentation commit.
+
 ## Next gates
 
 1. Verify base/hash and apply the archived draft. Review callback context and
