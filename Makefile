@@ -31,7 +31,7 @@ build/kernel/experimental/dm-swapz.ko:
 
 build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile build/tests/direct-write-probe
 	@mkdir -p build/tests
-	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
+	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread $< -o $@
 
 build/tests/direct-write-probe: tests/tools/direct-write-probe.c Makefile
 	@mkdir -p build/tests

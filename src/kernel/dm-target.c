@@ -399,6 +399,11 @@ struct swapz_dm {
 	 */
 	struct bio_list deferred_upper_completions;
 	bool defer_upper_completions;
+	/* One published batch, owned exclusively by the unbound completion work. */
+	struct work_struct completion_work;
+	struct bio_list completion_bios;
+	atomic_t completion_active;
+	u64 completion_offloaded_batches;
 	u64 deferred_upper_completion_bios;
 	u64 deferred_upper_completion_wall_ns;
 	/* Diagnostic queue-depth samples at synchronous lower-WRITE boundaries. */
@@ -684,12 +689,12 @@ struct swapz_dm {
 	u64 logical_write_bytes;
 	/* Count actual upper WRITE BIO completions, including injected failure.
 	 * These are completion observations, not lower submitted bytes. */
-	u64 upper_write_completed_ok;
-	u64 upper_write_completed_err;
+	atomic64_t upper_write_completed_ok;
+	atomic64_t upper_write_completed_err;
 	/* DM clone->original completion boundary, never a media-write proxy. */
-	u64 endio_write_seen_ok;
-	u64 endio_write_seen_err;
-	u64 endio_write_forced_err;
+	atomic64_t endio_write_seen_ok;
+	atomic64_t endio_write_seen_err;
+	atomic64_t endio_write_forced_err;
 	u64 logical_read_bytes;
 	u64 physical_write_bytes;
 	u64 physical_write_reqs;
@@ -929,9 +934,9 @@ static void swapz_complete(struct bio *bio, int error)
 		bio->bi_status = errno_to_blk_status(error);
 	if (ctx && bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio)) {
 		if (bio->bi_status)
-			ctx->upper_write_completed_err++;
+			atomic64_inc(&ctx->upper_write_completed_err);
 		else
-			ctx->upper_write_completed_ok++;
+			atomic64_inc(&ctx->upper_write_completed_ok);
 	}
 	bio_endio(bio);
 }
@@ -949,12 +954,63 @@ static void swapz_defer_upper_completion(struct swapz_dm *ctx, struct bio *bio)
 	ctx->deferred_upper_completion_bios++;
 }
 
+/*
+ * Only terminal completion moves here: authority publication and prepared-slot
+ * release already happened on the ordered owner. No mapping or scratch access.
+ */
+static void swapz_completion_work(struct work_struct *work)
+{
+	struct swapz_dm *ctx = container_of(work, struct swapz_dm, completion_work);
+	struct bio *bio;
+
+	preempt_disable();
+	while ((bio = bio_list_pop(&ctx->completion_bios)))
+		swapz_complete(bio, 0);
+	/* No slot/list access after release. The same work item may be requeued
+	 * during its return; one workqueue never runs that item concurrently. */
+	atomic_set_release(&ctx->completion_active, 0);
+	preempt_enable();
+}
+
+static bool swapz_inflight_lower_pending(struct swapz_dm *ctx);
+
+static bool swapz_try_completion_handoff(struct swapz_dm *ctx)
+{
+	unsigned int count;
+	unsigned long flags;
+	bool handed = false;
+
+	if (!ctx->defer_upper_completions || !ctx->preparation_workqueue ||
+	    !swapz_inflight_lower_pending(ctx))
+		return false;
+	count = bio_list_size(&ctx->deferred_upper_completions);
+	if (count < SWAPZ_WORK_CONSERVING_HAND_RECORDS || count > SWAPZ_MAX_RECORDS)
+		return false;
+
+	/* Close admission and publish work under the same lifetime gate: drain
+	 * must see this queued item before it can mark the queue draining. */
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	if (ctx->accepting && !ctx->failed &&
+	    swapz_inflight_lower_pending(ctx) &&
+	    !atomic_cmpxchg(&ctx->completion_active, 0, 1)) {
+		ctx->completion_bios = ctx->deferred_upper_completions;
+		bio_list_init(&ctx->deferred_upper_completions);
+		ctx->completion_offloaded_batches++;
+		queue_work(ctx->preparation_workqueue, &ctx->completion_work);
+		handed = true;
+	}
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	return handed;
+}
+
 static void swapz_deliver_upper_completions(struct swapz_dm *ctx)
 {
 	struct bio *bio;
 	u64 start_ns;
 
 	if (bio_list_empty(&ctx->deferred_upper_completions))
+		return;
+	if (swapz_try_completion_handoff(ctx))
 		return;
 	start_ns = ktime_get_ns();
 	/*
@@ -985,14 +1041,14 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 	if (bio_op(bio) != REQ_OP_WRITE || !bio_sectors(bio))
 		return DM_ENDIO_DONE;
 	if (*error)
-		ctx->endio_write_seen_err++;
+		atomic64_inc(&ctx->endio_write_seen_err);
 	else
-		ctx->endio_write_seen_ok++;
+		atomic64_inc(&ctx->endio_write_seen_ok);
 	if (!*error && READ_ONCE(ctx->failed)) {
 		int failure = READ_ONCE(ctx->last_error);
 
 		*error = errno_to_blk_status(failure ? failure : -EIO);
-		ctx->endio_write_forced_err++;
+		atomic64_inc(&ctx->endio_write_forced_err);
 	}
 	return DM_ENDIO_DONE;
 }
@@ -6551,6 +6607,8 @@ static void swapz_drain(struct dm_target *ti)
 	    atomic_read(&ctx->preparation_ready_current) ||
 	    atomic_read(&ctx->preparation_slots_in_use) ||
 	    ctx->batch_count || swapz_has_inflight(ctx) ||
+	    atomic_read(&ctx->completion_active) ||
+	    !bio_list_empty(&ctx->completion_bios) ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		DMERR("swapz drain invariant: accepted BIOs remain after draining");
@@ -6594,6 +6652,7 @@ static void swapz_free(struct swapz_dm *ctx)
 		destroy_workqueue(ctx->workqueue);
 	}
 	if (ctx->preparation_workqueue) {
+		cancel_work_sync(&ctx->completion_work);
 		for (prep_lane = 0; prep_lane < ctx->preparation_worker_count;
 		     ++prep_lane)
 			cancel_work_sync(&ctx->preparation_lanes[prep_lane].work);
@@ -6741,6 +6800,14 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
 	bio_list_init(&ctx->deferred_upper_completions);
+	bio_list_init(&ctx->completion_bios);
+	INIT_WORK(&ctx->completion_work, swapz_completion_work);
+	atomic_set(&ctx->completion_active, 0);
+	atomic64_set(&ctx->upper_write_completed_ok, 0);
+	atomic64_set(&ctx->upper_write_completed_err, 0);
+	atomic64_set(&ctx->endio_write_seen_ok, 0);
+	atomic64_set(&ctx->endio_write_seen_err, 0);
+	atomic64_set(&ctx->endio_write_forced_err, 0);
 	atomic64_set(&ctx->preparation_free_mask,
 		     (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic64_set(&ctx->accepted_work_lower_idle_wake_ns, 0);
@@ -7785,14 +7852,17 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			prep.delta64.transform_wall_ns,
 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
 			prep.delta64.wall_ns);
+		DMEMIT(" completion_offloaded_batches=%llu completion_active=%d",
+		       READ_ONCE(ctx->completion_offloaded_batches),
+		       atomic_read(&ctx->completion_active));
 		DMEMIT(" upper_write_completed_ok=%llu upper_write_completed_err=%llu"
 		       " endio_write_seen_ok=%llu endio_write_seen_err=%llu"
 		       " endio_write_forced_err=%llu",
-		       ctx->upper_write_completed_ok,
-		       ctx->upper_write_completed_err,
-		       ctx->endio_write_seen_ok,
-		       ctx->endio_write_seen_err,
-		       ctx->endio_write_forced_err);
+		       (u64)atomic64_read(&ctx->upper_write_completed_ok),
+		       (u64)atomic64_read(&ctx->upper_write_completed_err),
+		       (u64)atomic64_read(&ctx->endio_write_seen_ok),
+		       (u64)atomic64_read(&ctx->endio_write_seen_err),
+		       (u64)atomic64_read(&ctx->endio_write_forced_err));
 		break;
 	case STATUSTYPE_TABLE:
 		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,

@@ -820,9 +820,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("error = READ_ONCE(ctx->last_error)", complete)
         self.assertIn("error = -EIO", complete)
         self.assertIn("bio->bi_status = errno_to_blk_status(error)", complete)
-        self.assertIn("ctx->upper_write_completed_err++", complete)
-        self.assertIn("ctx->upper_write_completed_ok++", complete)
-        self.assertLess(complete.index("ctx->upper_write_completed_err++"),
+        self.assertIn("atomic64_inc(&ctx->upper_write_completed_err)", complete)
+        self.assertIn("atomic64_inc(&ctx->upper_write_completed_ok)", complete)
+        self.assertLess(complete.index("atomic64_inc(&ctx->upper_write_completed_err)"),
                         complete.index("bio_endio(bio)"))
         self.assertIn("upper_write_completed_ok=%llu upper_write_completed_err=%llu",
                       status)
@@ -839,10 +839,10 @@ static swapz_u16 swapz_probe_set(
         status = body("swapz_status")
         self.assertIn("blk_status_t *error", DM)
         self.assertIn("if (*error)", endio)
-        self.assertIn("ctx->endio_write_seen_err++", endio)
+        self.assertIn("atomic64_inc(&ctx->endio_write_seen_err)", endio)
         self.assertIn("if (!*error && READ_ONCE(ctx->failed))", endio)
         self.assertIn("*error = errno_to_blk_status(failure ? failure : -EIO)", endio)
-        self.assertIn("ctx->endio_write_forced_err++", endio)
+        self.assertIn("atomic64_inc(&ctx->endio_write_forced_err)", endio)
         self.assertIn("return DM_ENDIO_DONE", endio)
         self.assertIn(".end_io = swapz_end_io", DM)
         self.assertIn("endio_write_seen_ok=%llu endio_write_seen_err=%llu", status)
@@ -1107,7 +1107,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->gc_write_bytes", gc)
         self.assertIn("a->gc_allocation = 0", gc)
 
-    def test_deferred_upper_completions_never_outlive_worker_or_wait(self):
+    def test_deferred_upper_completions_have_one_owner_and_join_before_drain(self):
         wrapper = body("swapz_worker")
         self.assertLess(wrapper.index("ctx->defer_upper_completions = true;"),
                         wrapper.index("swapz_worker_pass(ctx);"))
@@ -1141,6 +1141,169 @@ static swapz_u16 swapz_probe_set(
                       "\t\t\t    swapz_has_inflight(ctx))\n"
                       "\t\t\t\tswapz_deliver_upper_completions(ctx);", worker)
         self.assertIn("bio_list_init(&ctx->deferred_upper_completions);", DM)
+        handoff = body("swapz_try_completion_handoff")
+        self.assertLess(handoff.index("spin_lock_irqsave"),
+                        handoff.index("ctx->accepting && !ctx->failed"))
+        self.assertLess(handoff.index("queue_work("),
+                        handoff.index("spin_unlock_irqrestore"))
+        self.assertIn("count > SWAPZ_MAX_RECORDS", handoff)
+        self.assertIn("atomic_cmpxchg(&ctx->completion_active, 0, 1)", handoff)
+        drain = body("swapz_drain")
+        self.assertLess(drain.rindex("drain_workqueue(ctx->preparation_workqueue)"),
+                        drain.index("atomic_read(&ctx->completion_active)"))
+        self.assertIn("cancel_work_sync(&ctx->completion_work)", body("swapz_free"))
+
+    def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
+        """Exercise actual target C under controlled queue/close/reuse interleavings."""
+        import subprocess
+        import tempfile
+
+        source = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <errno.h>
+typedef uint64_t u64;
+typedef int blk_status_t;
+typedef int atomic_t;
+typedef uint64_t atomic64_t;
+#define READ_ONCE(x) (x)
+#define SWAPZ_MAX_RECORDS 64U
+#define SWAPZ_WORK_CONSERVING_HAND_RECORDS 4U
+#define REQ_OP_WRITE 1
+#define DM_ENDIO_DONE 0
+#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+struct swapz_dm;
+struct swapz_bio_ref { struct swapz_dm *preparation_ctx; };
+struct bio { struct bio *bi_next; struct swapz_bio_ref ref; unsigned id, ended; int bi_status; bool prepared; };
+struct bio_list { struct bio *head, *tail; };
+struct work_struct { void (*func)(struct work_struct *); };
+struct dm_target { struct swapz_dm *private; };
+struct swapz_dm {
+    bool defer_upper_completions, accepting, failed, lower_pending;
+    int last_error, queue_lock;
+    void *preparation_workqueue;
+    struct bio_list deferred_upper_completions, completion_bios;
+    struct work_struct completion_work;
+    atomic_t completion_active;
+    u64 completion_offloaded_batches, deferred_upper_completion_bios;
+    u64 deferred_upper_completion_wall_ns;
+    atomic64_t upper_write_completed_ok, upper_write_completed_err;
+    atomic64_t endio_write_seen_ok, endio_write_seen_err, endio_write_forced_err;
+};
+static struct work_struct *pending;
+static struct swapz_dm *close_at_lock;
+static void (*release_hook)(void);
+static int lock_depth, preempt_depth, released, fail_after=-1, fail_at_endio=-1;
+static int atomic_cmpxchg(atomic_t *p,int old,int new_value) { int v=*p; if(v==old)*p=new_value; return v; }
+static void atomic64_inc(atomic64_t *p) { ++*p; }
+static void atomic_set_release(atomic_t *p,int v) {
+    *p=v;
+    if(release_hook) { void (*hook)(void)=release_hook; release_hook=NULL; hook(); }
+}
+static void lock(void) { assert(!lock_depth); if(close_at_lock) {close_at_lock->accepting=false;close_at_lock=NULL;} ++lock_depth; }
+#define spin_lock_irqsave(p,f) do { (void)(p); (f)=0; lock(); } while(0)
+#define spin_unlock_irqrestore(p,f) do { (void)(p);assert(!(f));assert(lock_depth==1);--lock_depth; } while(0)
+static void preempt_disable(void) { ++preempt_depth; }
+static void preempt_enable(void) { assert(preempt_depth); --preempt_depth; }
+static void bio_list_init(struct bio_list *l) { l->head=l->tail=NULL; }
+static bool bio_list_empty(const struct bio_list *l) { return !l->head; }
+static void bio_list_add(struct bio_list *l,struct bio *b) { b->bi_next=NULL; if(l->tail)l->tail->bi_next=b;else l->head=b;l->tail=b; }
+static struct bio *bio_list_pop(struct bio_list *l) { struct bio *b=l->head; if(b) {l->head=b->bi_next;if(!l->head)l->tail=NULL;b->bi_next=NULL;}return b; }
+static unsigned bio_list_size(const struct bio_list *l) { unsigned n=0;for(struct bio *b=l->head;b;b=b->bi_next)++n;return n; }
+static bool queue_work(void *queue,struct work_struct *w) { assert(queue&&lock_depth&&!pending);pending=w;return true; }
+static struct swapz_bio_ref *dm_per_bio_data(struct bio *b,size_t size) { (void)size; return &b->ref; }
+static int bio_op(struct bio *b) { (void)b;return REQ_OP_WRITE; }
+static unsigned bio_sectors(struct bio *b) { (void)b;return 8; }
+static int errno_to_blk_status(int error) { return -error; }
+static void swapz_release_prepared(struct bio *b) { if(b->prepared) {b->prepared=false;++released;} }
+static u64 ktime_get_ns(void) { static u64 clock;return ++clock; }
+static u64 swapz_elapsed_ns(u64 a,u64 b) { return b-a; }
+static bool swapz_inflight_lower_pending(struct swapz_dm *ctx) { return ctx->lower_pending; }
+static int swapz_end_io(struct dm_target *,struct bio *,blk_status_t *);
+static void bio_endio(struct bio *b) {
+    struct swapz_dm *ctx=b->ref.preparation_ctx;
+    struct dm_target ti={ctx};
+    assert(!b->ended++);
+    if((int)b->id==fail_at_endio) {ctx->failed=true;ctx->last_error=-EIO;}
+    assert(swapz_end_io(&ti,b,&b->bi_status)==DM_ENDIO_DONE);
+    if((int)b->id==fail_after) {ctx->failed=true;ctx->last_error=-EIO;}
+}
+'''
+        for name, signature in (
+                ("swapz_end_io", "static int swapz_end_io(struct dm_target *ti, struct bio *bio, blk_status_t *error)"),
+                ("swapz_complete", "static void swapz_complete(struct bio *bio, int error)"),
+                ("swapz_defer_upper_completion", "static void swapz_defer_upper_completion(struct swapz_dm *ctx, struct bio *bio)"),
+                ("swapz_completion_work", "static void swapz_completion_work(struct work_struct *work)"),
+                ("swapz_try_completion_handoff", "static bool swapz_try_completion_handoff(struct swapz_dm *ctx)"),
+                ("swapz_deliver_upper_completions", "static void swapz_deliver_upper_completions(struct swapz_dm *ctx)")):
+            source += signature + " {\n" + body(name) + "\n}\n"
+        source += r'''
+static struct swapz_dm ctx;
+static struct bio bios[70];
+static void init(void) {
+    memset(&ctx,0,sizeof(ctx));memset(bios,0,sizeof(bios));
+    assert(!pending&&!preempt_depth&&!lock_depth);
+    ctx.defer_upper_completions=ctx.accepting=ctx.lower_pending=true;
+    ctx.preparation_workqueue=&ctx;ctx.completion_work.func=swapz_completion_work;
+    released=0;fail_after=fail_at_endio=-1;
+    for(unsigned i=0;i<70;++i) {bios[i].id=i;bios[i].ref.preparation_ctx=&ctx;bios[i].prepared=true;}
+}
+static void add(unsigned start,unsigned count) {
+    for(unsigned i=start;i<start+count;++i)swapz_defer_upper_completion(&ctx,&bios[i]);
+}
+static void run(void) { struct work_struct *w=pending;assert(w);pending=NULL;w->func(w); }
+static void reuse(void) { add(4,4);assert(swapz_try_completion_handoff(&ctx)); }
+int main(void) {
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));
+    assert(ctx.completion_active&&bio_list_empty(&ctx.deferred_upper_completions));
+    assert(released==4&&!bios[0].ended);
+    add(4,4);assert(!swapz_try_completion_handoff(&ctx));
+    swapz_deliver_upper_completions(&ctx); /* Occupied slot: original inline path. */
+    for(unsigned i=0;i<8;++i)assert(bios[i].ended==(i>=4));
+    run();assert(!ctx.completion_active&&released==8&&ctx.upper_write_completed_ok==8);
+    for(unsigned i=0;i<8;++i)assert(bios[i].ended==1&&!bios[i].bi_status);
+
+    /* Same work item is requeued after release, before its old call returns. */
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));release_hook=reuse;
+    run();assert(ctx.completion_active&&pending&&ctx.completion_offloaded_batches==2);
+    for(unsigned i=0;i<8;++i)assert(bios[i].ended==(i<4));
+    run();assert(!ctx.completion_active&&ctx.upper_write_completed_ok==8);
+
+    /* Closing admission between eligibility and lock acquisition rejects handoff. */
+    init();add(0,4);close_at_lock=&ctx;assert(!swapz_try_completion_handoff(&ctx));
+    assert(!pending&&!ctx.completion_active&&bio_list_size(&ctx.deferred_upper_completions)==4);
+    swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==4);
+    init();add(0,3);assert(!swapz_try_completion_handoff(&ctx));
+    swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==3);
+    init();add(0,65);assert(!swapz_try_completion_handoff(&ctx));
+    swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==65);
+    init();add(0,4);ctx.lower_pending=false;assert(!swapz_try_completion_handoff(&ctx));
+    swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==4);
+    init();add(0,4);ctx.defer_upper_completions=false;
+    swapz_deliver_upper_completions(&ctx);assert(!pending&&ctx.upper_write_completed_ok==4);
+
+    /* Already-published BIOs still fail closed if failure precedes delivery. */
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));fail_after=0;run();
+    assert(ctx.upper_write_completed_ok==1&&ctx.upper_write_completed_err==3);
+    for(unsigned i=1;i<4;++i)assert(bios[i].bi_status==EIO);
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));fail_at_endio=0;run();
+    assert(ctx.endio_write_forced_err==1&&bios[0].bi_status==EIO);
+    assert(ctx.upper_write_completed_err==3&&!ctx.completion_active);
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="swapz-completion-") as temp:
+            path = Path(temp)
+            (path / "probe.c").write_text(source)
+            built = subprocess.run(
+                ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+                 str(path / "probe.c"), "-o", str(path / "probe")],
+                capture_output=True, text=True)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            subprocess.run([str(path / "probe")], check=True)
 
     def test_worker_yields_after_finite_window_and_preserves_fifo(self):
         # Assert the finite-quantum semantics, not one obsolete decrement idiom.

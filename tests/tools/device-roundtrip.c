@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <linux/fs.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -247,6 +248,73 @@ static int series(int fd, unsigned char *buf, unsigned char *expected,
 		}
 	}
 	return 0;
+}
+
+/* Correctness-only persistent writers; each lane owns disjoint logical pages. */
+struct parallel_writer {
+	int fd;
+	unsigned int lane, count, round;
+	unsigned char *page;
+	int error;
+};
+
+static void *parallel_writer_main(void *argument)
+{
+	struct parallel_writer *writer = argument;
+	unsigned int round, page;
+
+	for (round = 0; round <= writer->round; ++round)
+		for (page = writer->lane; page < writer->count; page += 32U) {
+			pattern(writer->page, page, round);
+			if (transfer(writer->fd, writer->page, page, 1)) {
+				writer->error = 1;
+				return NULL;
+			}
+		}
+	return NULL;
+}
+
+static int parallel_series(int fd, unsigned int count, unsigned int round)
+{
+	struct parallel_writer writers[32] = {0};
+	pthread_t threads[32];
+	unsigned int lane, started = 0;
+	int error = 0;
+
+	if (count < 32U || count % 32U)
+		return -1;
+	for (lane = 0; lane < 32U; ++lane) {
+		writers[lane].fd = fd;
+		writers[lane].lane = lane;
+		writers[lane].count = count;
+		writers[lane].round = round;
+		if (posix_memalign((void **)&writers[lane].page, PAGE, PAGE)) {
+			error = 1;
+			goto out;
+		}
+	}
+	for (lane = 0; lane < 32U; ++lane) {
+		if (pthread_create(&threads[lane], NULL, parallel_writer_main,
+				   &writers[lane])) {
+			error = 1;
+			break;
+		}
+		started++;
+	}
+	for (lane = 0; lane < started; ++lane) {
+		if (pthread_join(threads[lane], NULL)) {
+			fprintf(stderr, "FAIL joining private parallel writer\n");
+			_exit(2);
+		}
+		if (writers[lane].error)
+			error = 1;
+	}
+	if (!error && fsync(fd))
+		error = 1;
+out:
+	for (lane = 0; lane < 32U; ++lane)
+		free(writers[lane].page);
+	return error ? -1 : 0;
 }
 
 #ifndef MADV_HUGEPAGE
@@ -564,6 +632,7 @@ int main(int argc, char **argv)
 	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
 	int raw_series = 0, discard_pages = 0, gc_mode = 0, churn_mode = 0;
 	int segmented_series_mode = 0, thp_series_mode = 0;
+	int parallel_series_mode = 0;
 	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
 
@@ -599,6 +668,10 @@ int main(int argc, char **argv)
 	if (argc == 5) {
 		if (!strcmp(argv[2], "--write-series"))
 			write_series = 1;
+		else if (!strcmp(argv[2], "--parallel-write-series")) {
+			write_series = 1;
+			parallel_series_mode = 1;
+		}
 		else if (!strcmp(argv[2], "--raw-write-series")) {
 			write_series = 1;
 			raw_series = 1;
@@ -679,6 +752,11 @@ int main(int argc, char **argv)
 			}
 			printf("PASS: owned swapz discard start=%u count=%u\n",
 			       round, count);
+		} else if (parallel_series_mode) {
+			if (parallel_series(fd, count, round))
+				goto out;
+			printf("PASS: owned swapz parallel series pages=%u round=%u\n",
+			       count, round);
 		} else if (segmented_series_mode) {
 			if (series_segmented(fd, buf, expected, count, round,
 					     write_series))

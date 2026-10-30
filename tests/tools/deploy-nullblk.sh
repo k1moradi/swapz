@@ -213,7 +213,7 @@ UUID="SWAPZ-TEST-$TOKEN"
 mkdir "$CONFIG" || fail "cannot create owned null_blk"
 OWN_NULL=1
 note "OWNED_CONFIG=$CONFIG UUID=$UUID"
-for attr in size memory_backed blocksize power index queue_mode submit_queues hw_queue_depth discard; do
+for attr in size memory_backed blocksize power index queue_mode submit_queues hw_queue_depth discard irqmode completion_nsec; do
 	[[ -e "$CONFIG/$attr" ]] || fail "missing configfs attribute $attr"
 done
 # Linux null_blk configfs size unit is MiB. Never use the module default!
@@ -224,9 +224,13 @@ echo 1 > "$CONFIG/discard"
 echo 2 > "$CONFIG/queue_mode"
 echo 1 > "$CONFIG/submit_queues"
 echo 1 > "$CONFIG/hw_queue_depth"
+echo 2 > "$CONFIG/irqmode"
+echo 14000 > "$CONFIG/completion_nsec"
 [[ "$(cat "$CONFIG/queue_mode")" == 2 &&
    "$(cat "$CONFIG/submit_queues")" == 1 &&
-   "$(cat "$CONFIG/hw_queue_depth")" == 1 ]] ||
+   "$(cat "$CONFIG/hw_queue_depth")" == 1 &&
+   "$(cat "$CONFIG/irqmode")" == 2 &&
+   "$(cat "$CONFIG/completion_nsec")" == 14000 ]] ||
     fail "owned RAM serial queue geometry rejected"
 echo 1 > "$CONFIG/power"
 [[ "$(cat "$CONFIG/memory_backed")" == 1 &&
@@ -966,4 +970,97 @@ packed_failed="$(status_u64 "$packed_after" failed)" ||
     fail "packed-placement smoke violated the zero-internal-hole invariant"
 note "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:$packed_holes run_splits:$packed_splits failed:$packed_failed"
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove packed-placement mapping"
+OWN_DM=0
+
+# The ordinary verify-after-write oracle uses synchronous lower I/O. Exercise
+# the separate published-ACK owner on the same newly owned timed RAM backing.
+note "START_LOADED_COMPLETION_HANDOFF"
+UUID="SWAPZ-TEST-$TOKEN-completion"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2" ||
+    fail "cannot create completion-handoff mapping"
+OWN_DM=1
+swapz_verify_owned_dm_node
+completion_before="$(dmsetup status "$DMNAME")"
+timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --parallel-write-series 128 128 \
+    >"$SESSION/completion-writer.log" 2>&1 &
+writer_pid=$!
+completion_observed=0
+for attempt in {1..500}; do
+    completion_running="$(dmsetup status "$DMNAME")" || break
+    completion_batches="$(status_u64 "$completion_running" completion_offloaded_batches)" || break
+    if (( completion_batches > 0 )) && kill -0 "$writer_pid" 2>/dev/null; then
+        completion_observed=1
+        break
+    fi
+    kill -0 "$writer_pid" 2>/dev/null || break
+done
+if (( !completion_observed )); then
+    wait "$writer_pid" 2>/dev/null || true
+    fail "parallel WRITE session did not expose a live published-ACK handoff"
+fi
+timeout --signal=TERM --kill-after=2s 10s dmsetup suspend "$DMNAME" ||
+    fail "completion-handoff suspend/drain failed"
+SUSPENDED=1
+timeout --signal=TERM --kill-after=2s 10s dmsetup resume "$DMNAME" ||
+    fail "completion-handoff resume failed"
+SUSPENDED=0
+writer_rc=0
+wait "$writer_pid" || writer_rc=$?
+(( writer_rc == 0 )) || fail "parallel completion writer failed: $writer_rc"
+timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --verify-series 128 128 ||
+    fail "completion-handoff bytes changed across suspend/resume"
+swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
+    fail "completion-handoff did not become quiescent"
+completion_after="$SWAPZ_QUIET_STATUS"
+completion_batches="$(status_u64 "$completion_after" completion_offloaded_batches)"
+(( completion_batches > 0 &&
+   $(status_u64 "$completion_after" completion_active) == 0 &&
+   $(status_u64 "$completion_after" failed) == 0 &&
+   $(status_u64 "$completion_after" upper_write_completed_ok) -
+   $(status_u64 "$completion_before" upper_write_completed_ok) == 16512 &&
+   $(status_u64 "$completion_after" upper_write_completed_err) == 0 )) ||
+    fail "completion-handoff lost completion ownership or failed drain"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
+    fail "cannot remove completion-handoff mapping"
+OWN_DM=0
+
+# A later lower fault follows actual successful handoffs; future syscalls must
+# see EIO even if a published ACK batch was concurrently being delivered.
+UUID="SWAPZ-TEST-$TOKEN-completionfault"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 32 2" ||
+    fail "cannot create completion-handoff fault mapping"
+OWN_DM=1
+swapz_verify_owned_dm_node
+fault_writer_rc=0
+timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --parallel-write-series 128 128 \
+    >"$SESSION/completion-fault-writer.log" 2>&1 || fault_writer_rc=$?
+(( fault_writer_rc == 1 )) ||
+    fail "completion-handoff lower fault did not stop parallel writer: $fault_writer_rc"
+swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
+    fail "completion-handoff fault did not become quiescent"
+completion_fault_before="$SWAPZ_QUIET_STATUS"
+fault_batches="$(status_u64 "$completion_fault_before" completion_offloaded_batches)"
+(( fault_batches > 0 &&
+   $(status_u64 "$completion_fault_before" completion_active) == 0 &&
+   $(status_u64 "$completion_fault_before" failed) == 1 &&
+   $(status_u64 "$completion_fault_before" write_fault_calls) == 32 &&
+   $(status_u64 "$completion_fault_before" write_fault_injected) == 1 &&
+   $(status_u64 "$completion_fault_before" upper_write_completed_err) > 0 )) ||
+    fail "completion-handoff fault did not fail closed after real handoffs"
+timeout --signal=TERM --kill-after=2s 20s "$WRITE_PROBE" "/dev/mapper/$DMNAME" ||
+    fail "post-handoff terminal target accepted a new WRITE"
+completion_fault_after="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$completion_fault_after" upper_write_completed_ok) ==
+   $(status_u64 "$completion_fault_before" upper_write_completed_ok) &&
+   $(status_u64 "$completion_fault_after" upper_write_completed_err) ==
+   $(status_u64 "$completion_fault_before" upper_write_completed_err) + 1 )) ||
+    fail "post-handoff terminal WRITE completion counters mismatch"
+note "PASS_LOADED_COMPLETION_HANDOFF=offloaded:$completion_batches verified_pages:128 completed_writes:16512 active_after:0 fault_offloaded:$fault_batches fault_injected:1 post_failure_eio:1"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
+    fail "cannot remove completion-handoff fault mapping"
 OWN_DM=0

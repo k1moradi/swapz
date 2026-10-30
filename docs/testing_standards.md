@@ -95,6 +95,29 @@ can still escape detection. A single repeat cannot establish raw-control drift.
 This screen does not apply to the deliberately contended ID36 gate and does not
 change `make test`, its exit codes, publication or qualification criteria.
 
+### Published completion ownership gate
+
+The owned serial smoke RAM device uses timer completion (irqmode 2, 14,000 ns),
+with its existing one-queue/depth-one geometry, so detached lower completion can
+exercise ACK ownership. This correctness-only model does not change the mixed
+performance envelopes. A dedicated no-verify/retain-ms-2 mapping runs 32 private
+persistent WRITE lanes on disjoint pages. The gate must observe a positive
+handoff while writes are ongoing, suspend/resume without force removal, verify
+all 128 final pages, account exactly 16,512 successful upper WRITEs, and finish
+with completion_active=0 and failed=0. It does not claim to freeze a particular
+helper instruction at the moment suspend starts.
+
+A fresh mapping injects lower WRITE fault 32 after actual successful handoffs.
+Parallel writes must fail, the target must become terminal with one injection,
+and completion ownership must drain. A fresh aligned direct WRITE must then
+return exactly -1/EIO and increment the error counter without a new success.
+The mandatory loaded marker binds these checks; missing, zero-activity,
+wrong-volume, still-active or missing-failure evidence blocks qualification.
+Actual target-body native tests cover busy-slot fallback, 4..64 bounds, close
+between eligibility and lock acquisition, reuse while an old work call returns,
+and failure before/during BIO delivery. Kernel queue scheduling and reclamation
+still require the loaded gate and ID36 resource-pressure qualification.
+
 ## Scope discipline
 
 This file specifies tests that current source must pass. It is not the archive

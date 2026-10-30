@@ -270,11 +270,22 @@ belong in the ROADMAP decision table and Git history.
   staged window or queued arrival exists at reap time, the run's successful
   acknowledgements are held on a worker-owned list until that next window has
   reached the lane (or nothing is staged, or the local FIFO is drained), so one
-  lower WRITE no longer waits behind ~20 wakeups. The list is delivered with
-  preemption disabled (`bio_endio()` is IRQ-safe), before any finalize wait on
-  the lower device, and always before the work item returns; failed runs are
-  acknowledged immediately with their error, and delivery re-checks terminal
-  failure. With nothing staged or queued (QD1) acknowledgements stay inline.
+  lower WRITE no longer waits behind ~20 wakeups. The worker-owned list is
+  emptied before any finalize wait and before the work item returns. Normally
+  delivery disables preemption (`bio_endio()` is IRQ-safe). While a new detached
+  lower WRITE is pending, one already-published 4..64-BIO batch may instead
+  transfer atomically to a completion work item on the existing unbound
+  preparation queue. That work owns its private list exclusively and releases
+  its single slot after its last list/BIO access, before enabling preemption;
+  it may outlive the owner callback, but never target drain/free. A busy slot,
+  small batch, closed admission, failure or completed lower WRITE keeps delivery
+  inline. Queue publication takes queue_lock and rechecks admission under the
+  same gate that closes drain; no work may be published to a draining queue.
+  Completion and DM-endio counters are atomic across these contexts. Failed
+  runs are acknowledged immediately with their error, and delivery re-checks
+  terminal failure at both target and DM boundaries. With nothing staged or
+  queued (QD1), acknowledgements stay inline. This adds no compression lane,
+  I/O buffer, lower-WRITE slot or early success acknowledgement.
   Tail sampling is gated on `swapz_has_inflight(ctx)` so unfinalized completions
   never produce false empty-tail measurements.
 - **Planner:** minimize lower bytes first, bounded cold-read cost second and
@@ -1036,7 +1047,9 @@ window may be packed into the immutable `bulk_scratch`/`bulk_txs` run and
 submitted with an asynchronous dm-io completion callback. The callback owns no mapping or
 upper BIO completion: it records the definitive lower result, ends the lower
 overlap interval, and wakes the single ordered worker. Only that worker calls
-`swapz_engine_complete_batched_run()` and completes the original upper BIOs.
+`swapz_engine_complete_batched_run()`. It may delegate already-published upper
+BIO delivery through the single bounded completion slot described above; the
+lower callback never receives that ownership.
 
 Once the full window has been copied into the sealed run, `batch_bytes` is
 immediately reusable as the active collector. New WRITEs may therefore perform
@@ -1637,3 +1650,16 @@ page through the authoritative CRC before copying it to an upper BIO. Callbacks
 report lower completion only; the ordered worker retains completion and mapping
 ownership. Merge read accounting once on success and failure. No extra READ
 workers, buffers, RAW cache or lower-WRITE depth is authorized by this path.
+
+### Published completion handoff verification
+
+The unbound completion item shares the preparation queue; its execution is not
+included in the ordered/preparation/read worker runtime diagnostics. Moving
+completion work is not proof of total CPU savings. Both completion loops can
+include IRQ service; timers ending after preempt_enable can include scheduling.
+Use explicit phase/scheduler evidence when attributing their cost. The private
+loaded gate must prove positive handoffs, bounded drain across suspend, exact
+upper completion counts, final bytes, and fail-closed writes after a later
+injected lower error. Native tests compile actual target bodies for the close-
+before-publication and release-before-reuse interleavings; fake queue primitives
+do not replace kernel lifecycle/resource qualification.

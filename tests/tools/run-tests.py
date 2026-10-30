@@ -1067,6 +1067,10 @@ def parse_loaded_correctness(output):
         "suspend": re.compile(
             r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
             r"observed_open:(\d+) verified_pages:(\d+)$"),
+        "completion_handoff": re.compile(
+            r"PASS_LOADED_COMPLETION_HANDOFF=offloaded:(\d+) verified_pages:(\d+) "
+            r"completed_writes:(\d+) active_after:(\d+) fault_offloaded:(\d+) "
+            r"fault_injected:(\d+) post_failure_eio:(\d+)$"),
         "write_fault": re.compile(
             r"PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:(\d+) "
             r"injected:(\d+) syscall_errno:EIO lower_write_delta:(\d+)$"),
@@ -1116,6 +1120,9 @@ def parse_loaded_correctness(output):
     (packed_enabled, packed_verified_pages, packed_holes,
      packed_run_splits, packed_failed) = found["packed_placement"]
     suspend_retain, observed_open, verified_pages = found["suspend"]
+    (completion_batches, completion_pages, completion_writes, completion_active,
+     completion_fault_batches, completion_faults,
+     completion_terminal_eio) = found["completion_handoff"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
     (id36_high_events, id36_peak_bytes, id36_cpu_some_usec,
@@ -1168,6 +1175,12 @@ def parse_loaded_correctness(output):
     if suspend_retain != 4 or observed_open != 1 or verified_pages != 128:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded suspend/drain evidence is incomplete"}
+    if (completion_batches <= 0 or completion_pages != 128 or
+            completion_writes != 16512 or completion_active != 0 or
+            completion_fault_batches <= 0 or completion_faults != 1 or
+            completion_terminal_eio != 1):
+        return {"overall": "INCOMPLETE",
+                "reason": "published completion handoff/drain/failure evidence is incomplete"}
     if write_retain != 2 or write_injected != 1 or write_lower_delta != 0:
         return {"overall": "INCOMPLETE",
                 "reason": "synthetic retained WRITE fault contract failed"}
@@ -1239,6 +1252,10 @@ def parse_loaded_correctness(output):
         "suspend_retain_ms": suspend_retain,
         "suspend_observed_open": observed_open,
         "suspend_verified_pages": verified_pages,
+        "completion_offloaded_batches": completion_batches,
+        "completion_verified_pages": completion_pages,
+        "completion_completed_writes": completion_writes,
+        "completion_fault_offloaded_batches": completion_fault_batches,
         "retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
         "retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
         "id36_memory_high_events": id36_high_events,
@@ -1329,6 +1346,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = "owned RAM retained synthetic FLUSH fault"
             elif line.startswith("START_LOADED_PACKED_PLACEMENT"):
                 phase = "owned RAM packed placement verification"
+            elif line.startswith("START_LOADED_COMPLETION_HANDOFF"):
+                phase = "owned RAM published completion handoff/drain/failure"
             elif line.startswith("START_ID36_RESOURCE_PRESSURE="):
                 phase = "ID36 low-RAM/heavy-CPU pressure"
             elif (match := re.fullmatch(
@@ -4778,7 +4797,7 @@ def benchmark_verdicts(sessions):
         "gc": "SEPARATE_LOADED_EVIDENCE_REQUIRED",
         "cpu_scope":
             "worker-boundary sum_exec_runtime is a scheduler-accounted diagnostic "
-            "that may omit pending runtime or charge earlier execution at boundaries; "
+            "that may omit pending runtime or charge earlier execution at boundaries; ACK helper execution is not included; "
             "phase timers measure partial wall time including preemption, not CPU bounds",
         "physical_media": "NOT_TESTED",
         "host_load_scope": "WHOLE_HOST_INCLUDING_BENCHMARK_AND_BACKGROUND",
