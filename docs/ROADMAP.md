@@ -646,6 +646,14 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
+Receiving-host update: the owned dm-linear calibration is now accessible through
+`make fast_test`; its fixed nine-pair screen and fresh ID150 serial-wall
+attribution are recorded in [the diagnostic note](handoff/dm-linear-x86-calibration.md).
+Persistent linear NVMe5 failed the raw-drift screen. Other results are
+inconclusive; complete exclusive serial attribution before the reviewer’s
+combined LZ4-state/submitter experiment, then completion delivery and admission.
+
+
 The receiving x86 ID148 baseline is now qualified and ID149's direct-BIO
 draft was removed after its bounded pilot did not justify retention. ID150 is
 the current single production-C candidate: move ordinary preparation into

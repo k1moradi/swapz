@@ -18,6 +18,30 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_linear_calibration_rejects_foreign_or_offset_backing(self):
+        import runpy
+        validate = runpy.run_path(str(SCRIPT))["validate_linear_table"]
+        validate("0 8192 linear 251:1 0", 1024, "251:1")
+        for table in ("0 8192 linear 251:2 0", "0 8192 linear 251:1 8",
+                      "0 8191 linear 251:1 0", "0 8192 swapz 251:1 0",
+                      "0 8192 linear 251:1 0\n8192 8 linear 251:1 0"):
+            with self.assertRaises(ValueError):
+                validate(table, 1024, "251:1")
+
+    def test_linear_calibration_keeps_product_arm_separate_and_suffixes_ordered(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "swapz_linear_fast", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        arguments = fast.scenario_arguments("nvme5-mixed-lanes", "/plan", 0, True, True)
+        self.assertEqual(arguments[-4:], ["--shared-plan", "/plan",
+                                         "--linear-calibration", "--swapz-first"][-5:])
+        output = "\n".join(json.dumps({"candidate": arm, "verdict": "PASS"})
+                            for arm in ("off", "swapz", "linear"))
+        self.assertEqual(set(fast.parse_arms(output)), {"off", "swapz"})
+        self.assertEqual(set(fast.parse_arms(output, "linear")), {"off", "linear"})
+
     def test_fast_development_noise_screen_does_not_reject_workload_cpu(self):
         import importlib.util
 

@@ -119,7 +119,7 @@ def reject_raw_drift(rows):
             validity["reasons"].append(f"raw repeat spread {spread:.1%}")
 
 
-def scenario_arguments(name, plan, delta64=1):
+def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first=False):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
         raise ValueError(f"unknown scenario {name!r}")
@@ -134,7 +134,12 @@ def scenario_arguments(name, plan, delta64=1):
     if not delta64:
         # Suffix order of benchmark-owned-pair.sh: rescue sits after async.
         arguments.append("--no-delta64-rescue")
-    return arguments + ["--shared-plan", str(plan)]
+    arguments += ["--shared-plan", str(plan)]
+    if calibration:
+        arguments.append("--linear-calibration")
+    if candidate_first:
+        arguments.append("--swapz-first")
+    return arguments
 
 
 def run(command, **kwargs):
@@ -142,6 +147,8 @@ def run(command, **kwargs):
 
 
 def build():
+    run([sys.executable, "-B", "tests/runtime/benchmark/io-replay-test.py"],
+        stdout=subprocess.DEVNULL)
     jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
     run(["make", jobs, "--no-print-directory"], stdout=subprocess.DEVNULL)
     run(["make", jobs, "--no-print-directory", "-C", "tests/suites",
@@ -186,7 +193,7 @@ def privileged(seconds, script, *arguments):
         cwd=ROOT, capture_output=True, text=True)
 
 
-def parse_arms(output):
+def parse_arms(output, candidate="swapz"):
     arms = {}
     for line in output.splitlines():
         line = line.strip()
@@ -196,7 +203,7 @@ def parse_arms(output):
             obj = json.loads(line)
         except ValueError:
             continue
-        if obj.get("candidate") in ("off", "swapz") and \
+        if obj.get("candidate") in ("off", candidate) and \
                 obj.get("verdict") == "PASS":
             arms[obj["candidate"]] = obj
     return arms
@@ -387,7 +394,11 @@ def main():
                         default=int(os.environ.get("DELTA64", "1") or 1))
     parser.add_argument("--content", choices=tuple(CONTENT_WEIGHTS),
                         default=os.environ.get("CONTENT", "medium"))
+    parser.add_argument("--calibration", choices=("none", "linear"),
+                        default=os.environ.get("CALIBRATION", "none"))
     args = parser.parse_args()
+    calibration = args.calibration == "linear"
+    candidate = "linear" if calibration else "swapz"
     scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
         or list(DEFAULT_SCENARIOS)
     if not 1 <= args.repeat <= 10:
@@ -429,11 +440,12 @@ def main():
                 quiet_before = quiet_host_sample()
                 begin = time.monotonic()
                 proc = privileged(720, PAIR, "--validated-source", head,
-                                  *scenario_arguments(name, plan, args.delta64))
+                                  *scenario_arguments(name, plan, args.delta64, calibration,
+                                                      calibration and attempt % 2 == 1))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
-                arms = parse_arms(proc.stdout)
-                if proc.returncode or set(arms) != {"off", "swapz"}:
+                arms = parse_arms(proc.stdout, candidate)
+                if proc.returncode or set(arms) != {"off", candidate}:
                     status = 1
                     tail = (proc.stdout + proc.stderr).strip().splitlines()[-12:]
                     rows.append({"scenario": label,
@@ -441,26 +453,41 @@ def main():
                     print(f"  {label}: FAIL ({elapsed:.1f}s)\n    " +
                           "\n    ".join(tail), flush=True)
                     continue
-                row = summarize(label, arms, elapsed)
+                if calibration:
+                    row = {"scenario": label, "pair_s": elapsed,
+                           "replay_order": "linear-first" if attempt % 2 else "raw-first",
+                           "raw_w": arms["off"]["throughput_mbps"]["logical_write_mbps"],
+                           "linear_w": arms["linear"]["throughput_mbps"]["logical_write_mbps"]}
+                else:
+                    row = summarize(label, arms, elapsed)
                 row["performance_validity"] = performance_validity(
                     quiet_before, quiet_after, arms)
                 rows.append(row)
                 raw_reports.append({"scenario": label, "arms": arms})
-                print(f"  {label}: raw W {row['raw_w']:.2f} swapz W "
-                      f"{row['swapz_w']:.2f} ({pct(row['swapz_w'], row['raw_w']).strip()}) "
+                measured = row["linear_w"] if calibration else row["swapz_w"]
+                print(f"  {label}: raw W {row['raw_w']:.2f} {candidate} W "
+                      f"{measured:.2f} ({pct(measured, row['raw_w']).strip()}) "
                       f"[{elapsed:.1f}s]", flush=True)
     finally:
         shutil.rmtree(plan, ignore_errors=True)
     reject_raw_drift(rows)
-    (OUT_DIR / "latest.json").write_text(
+    result_name = "latest-calibration.json" if calibration else "latest.json"
+    (OUT_DIR / result_name).write_text(
         json.dumps({"head": head, "dirty": bool(dirty),
+                    "calibration": args.calibration,
                     "delta64_rescue": args.delta64,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
                     "reports": raw_reports}, sort_keys=True) + "\n")
     print()
-    print_table(rows)
-    print_profile(rows)
-    print(f"\n  Detailed telemetry: {(OUT_DIR / 'latest.json').relative_to(ROOT)} "
+    if calibration:
+        print("DM-linear calibration only: same-host synthetic reference; "
+              "not an unavoidable DM overhead budget.")
+        for row in rows:
+            print(json.dumps(row, sort_keys=True))
+    else:
+        print_table(rows)
+        print_profile(rows)
+    print(f"\n  Detailed telemetry: {(OUT_DIR / result_name).relative_to(ROOT)} "
           f"(total {time.monotonic() - started:.0f}s)")
     return status
 
