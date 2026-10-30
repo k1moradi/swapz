@@ -1406,11 +1406,21 @@ int main(void) {
             'UUID="SWAPZ-TEST-$TOKEN-completionfault"', 1)[1].split(
             'PASS_LOADED_COMPLETION_HANDOFF=', 1)[0]
         self.assertIn(
-            '--table "0 32768 swapz $LOWER 0 64 0 2 0 1 256 2"',
+            '--table "0 32768 swapz $LOWER 0 64 0 2 0 1 4096 2"',
             completion_fault)
-        self.assertIn("fault_calls == 256", completion_fault)
+        self.assertIn("fault_calls == 4096", completion_fault)
+        # 16 passes x >=258 guaranteed attempts per fixed series >= 4096, so
+        # the bounded loop always reaches the late fault; it stops on the
+        # first non-success writer exit and then requires exit 1.
+        self.assertIn("for fault_pass in {1..16}; do", completion_fault)
+        self.assertGreaterEqual(16 * 258, 4096)
+        self.assertIn("(( fault_writer_rc == 0 )) || break", completion_fault)
+        self.assertIn("(( fault_writer_rc == 1 )) ||", completion_fault)
+        self.assertIn(">>\"$SESSION/completion-fault-writer.log\"",
+                      completion_fault)
         for field in ("fault_batches", "fault_active", "fault_failed",
-                      "fault_calls", "fault_injected", "fault_upper_err"):
+                      "fault_calls", "fault_injected", "fault_upper_err",
+                      "fault_passes"):
             self.assertIn(field, completion_fault)
         self.assertIn(
             "completion-handoff fault invariant mismatch:", completion_fault)

@@ -1031,22 +1031,31 @@ OWN_DM=0
 
 # A later lower fault follows actual successful handoffs; future syscalls must
 # see EIO even if a published ACK batch was concurrently being delivered.
-# This fixed series submits 16,512 logical WRITEs. With at most 64 records per
-# lower run and only the known zero-elided pages, at least 258 physical WRITE
-# attempts remain. Fault attempt 256 therefore gives the handoff path enough
-# loaded scheduling headroom while still guaranteeing that the fault is hit.
+# Handoffs are timing-dependent: a slow four-CPU host qualified with only six
+# per 16,512-WRITE series and one before attempt 256, and attempts 32 and 256
+# have each blocked once when preparation timing moved. Inject much later and
+# repeat the same fixed series until the fault stops the writer. Each series
+# submits 16,512 logical WRITEs; with at most 64 records per lower run and only
+# the eight known zero-elided pages, it makes at least 258 physical WRITE
+# attempts, so 16 bounded passes (>=4,128 attempts) always reach attempt 4096.
 UUID="SWAPZ-TEST-$TOKEN-completionfault"
 dmsetup create "$DMNAME" --uuid "$UUID" \
-    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 256 2" ||
+    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 4096 2" ||
     fail "cannot create completion-handoff fault mapping"
 OWN_DM=1
 swapz_verify_owned_dm_node
 fault_writer_rc=0
-timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
-    "/dev/mapper/$DMNAME" --parallel-write-series 128 128 \
-    >"$SESSION/completion-fault-writer.log" 2>&1 || fault_writer_rc=$?
+fault_passes=0
+for fault_pass in {1..16}; do
+    fault_passes=$fault_pass
+    fault_writer_rc=0
+    timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
+        "/dev/mapper/$DMNAME" --parallel-write-series 128 128 \
+        >>"$SESSION/completion-fault-writer.log" 2>&1 || fault_writer_rc=$?
+    (( fault_writer_rc == 0 )) || break
+done
 (( fault_writer_rc == 1 )) ||
-    fail "completion-handoff lower fault did not stop parallel writer: $fault_writer_rc"
+    fail "completion-handoff lower fault did not stop parallel writer: rc=$fault_writer_rc passes=$fault_passes"
 swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
     fail "completion-handoff fault did not become quiescent"
 completion_fault_before="$SWAPZ_QUIET_STATUS"
@@ -1059,10 +1068,10 @@ fault_upper_err="$(status_u64 "$completion_fault_before" upper_write_completed_e
 if ! (( fault_batches > 0 &&
        fault_active == 0 &&
        fault_failed == 1 &&
-       fault_calls == 256 &&
+       fault_calls == 4096 &&
        fault_injected == 1 &&
        fault_upper_err > 0 )); then
-    fail "completion-handoff fault invariant mismatch: offloaded=$fault_batches active=$fault_active failed=$fault_failed calls=$fault_calls injected=$fault_injected upper_err=$fault_upper_err"
+    fail "completion-handoff fault invariant mismatch: offloaded=$fault_batches active=$fault_active failed=$fault_failed calls=$fault_calls injected=$fault_injected upper_err=$fault_upper_err passes=$fault_passes"
 fi
 timeout --signal=TERM --kill-after=2s 20s "$WRITE_PROBE" "/dev/mapper/$DMNAME" ||
     fail "post-handoff terminal target accepted a new WRITE"
