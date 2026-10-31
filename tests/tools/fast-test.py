@@ -11,12 +11,14 @@ test_results.json and never replaces `make test`. Its numbers are single,
 unpaired observations; promotion still requires the full owner matrix.
 """
 import argparse
+import hashlib
 import json
 import os
 import re
 import runpy
 import shutil
 import statistics
+import struct
 import subprocess
 import sys
 import tempfile
@@ -28,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HOST_CPU = runpy.run_path(str(ROOT / "tests/runtime/benchmark/io-replay.py"))
 OUT_DIR = ROOT / "build/tests/fast-test"
 PAIR = "tests/tools/benchmark-owned-pair.sh"
+STRIPED_PAIR = "tests/tools/benchmark-striped-owned.sh"
 PREFLIGHT = "tests/tools/loaded-preflight.sh"
 COMMON = ["--run-owned-ram-pair", "--profile", "medium", "--retain-ms", "2",
           "--unpaced"]
@@ -52,6 +55,8 @@ CONTENT_WEIGHTS = {"medium": "medium=100", "entropy": "entropy=100",
 DEFAULT_SCENARIOS = (
     "sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8",
 )
+STRIPED_MODELS = ("nvme5", "sata")
+DEFAULT_STRIPE_COUNTS = (1, 2, 4)
 
 
 def quiet_host_sample():
@@ -119,6 +124,11 @@ def reject_raw_drift(rows):
             validity["reasons"].append(f"raw repeat spread {spread:.1%}")
 
 
+def striped_scenario(name):
+    model, _, kind = name.partition("-")
+    return model if kind == "stripes" and model in STRIPED_MODELS else None
+
+
 def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first=False):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
@@ -155,7 +165,7 @@ def build():
          "test-replay-helper", "test-lower-io"], stdout=subprocess.DEVNULL)
 
 
-def prepare_plan(content="medium"):
+def prepare_plan(content="medium", need_stripes=False):
     weights = CONTENT_WEIGHTS[content]
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
     plan = Path(tempfile.mkdtemp(prefix="benchmark-plan.",
@@ -175,12 +185,229 @@ def prepare_plan(content="medium"):
         run([*replay, "--output-dir", str(plan / f"plan-mixed-lanes-{mode}"),
              "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
              "--measure-ops", "16384", "--iops", "0", "--mixed-lanes", mode], **quiet)
+    if need_stripes:
+        run([*replay, "--output-dir", str(plan / "plan-striped-base"),
+             "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
+             "--measure-ops", "16384", "--iops", "0", "--mixed-lanes",
+             "persistent", "--stripe-partitionable"], **quiet)
     for qd in (1, 4, 8, 32):
         run([*replay, "--output-dir", str(plan / f"plan-write-qd{qd}"),
              "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
              "--measure-ops", "4096", "--iops", "0", "--sustained-write"],
             **quiet)
     return plan
+
+
+
+
+def prepare_striped_plans(plan, stripe_counts):
+    """Split one page/lane-owned QD32 trace without changing I/O payloads."""
+    base_dir = plan / "plan-striped-base"
+    manifest = json.loads((base_dir / "manifest.json").read_text())
+    rows = [json.loads(line) for line in
+            (base_dir / "trace.jsonl").read_text().splitlines()]
+    fixture_bytes = (plan / "fixture.bin").read_bytes()
+    page_bytes = manifest["page_bytes"]
+    fixture_pages = [
+        fixture_bytes[offset:offset + page_bytes]
+        for offset in range(0, len(fixture_bytes), page_bytes)
+    ]
+    if (manifest.get("replay_mode") != "persistent-mixed" or
+            not manifest.get("stripe_partitionable") or
+            manifest.get("qd") != 32 or
+            any(row.get("lane") != row["page"] % 32 for row in rows)):
+        raise ValueError("striped base plan is not page/lane partitionable")
+
+    for stripe_count in stripe_counts:
+        if stripe_count not in DEFAULT_STRIPE_COUNTS or 32 % stripe_count:
+            raise ValueError("stripe count must be one of 1,2,4")
+        stripe_root = plan / f"striped-{stripe_count}"
+        stripe_root.mkdir()
+        local_qd = manifest["qd"] // stripe_count
+        logical_pages = manifest["logical_pages"] // stripe_count
+        writer_pages = manifest["writer_pages"] // stripe_count
+        reader_start = manifest["reader_start"] // stripe_count
+        reader_pages = manifest["reader_pages"] // stripe_count
+        for stripe_index in range(stripe_count):
+            output = stripe_root / f"stripe-{stripe_index}"
+            output.mkdir()
+            selected = [row for row in rows
+                        if row["lane"] % stripe_count == stripe_index]
+            transformed = []
+            initial = [
+                (page * stripe_count + stripe_index) % len(fixture_pages)
+                for page in range(logical_pages)
+            ]
+            latest = list(initial)
+            write_hash = hashlib.sha256()
+            for local_seq, original in enumerate(selected):
+                if original["page"] % stripe_count != stripe_index:
+                    raise ValueError("stripeable base event escaped page partition")
+                row = dict(original)
+                row["seq"] = local_seq
+                row["wave"] = local_seq // local_qd
+                row["lane"] = original["lane"] // stripe_count
+                row["page"] = original["page"] // stripe_count
+                if row["op"] == "R" and row["fixture"] != latest[row["page"]]:
+                    raise ValueError("striped READ no longer matches deterministic prefill")
+                if row["op"] == "W":
+                    write_hash.update(struct.pack(
+                        "<QII", row["seq"], row["page"], row["fixture"]))
+                    write_hash.update(fixture_pages[row["fixture"]])
+                    latest[row["page"]] = row["fixture"]
+                transformed.append(row)
+            trace_bytes = "".join(
+                json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+                for row in transformed).encode()
+            (output / "trace.jsonl").write_bytes(trace_bytes)
+            prefill_hash = HOST_CPU["sha"](
+                b"".join(fixture_pages[index] for index in initial))
+            post_hash = HOST_CPU["sha"](
+                b"".join(fixture_pages[index] for index in latest))
+            child = dict(manifest)
+            child.update({
+                "logical_pages": logical_pages,
+                "writer_pages": writer_pages,
+                "reader_start": reader_start,
+                "reader_pages": reader_pages,
+                "qd": local_qd,
+                "warmup_ops": manifest["warmup_ops"] // stripe_count,
+                "measure_ops": manifest["measure_ops"] // stripe_count,
+                "trace_sha256": HOST_CPU["sha"](trace_bytes),
+                "prefill_sha256": prefill_hash,
+                "expected_post_sha256": post_hash,
+                "write_payload_stream_sha256": write_hash.hexdigest(),
+                "prefill_fixture_stride": stripe_count,
+                "prefill_fixture_offset": stripe_index,
+                "stripe_count": stripe_count,
+                "stripe_index": stripe_index,
+                "parent_trace_sha256": manifest["trace_sha256"],
+                "workload_opportunity": HOST_CPU["workload_opportunity"](
+                    transformed, fixture_pages, logical_pages, initial),
+                "algorithm": (
+                    "exact modulo-N partition of one persistent page/lane-owned "
+                    "mixed trace; aggregate QD and operation count conserved"),
+            })
+            (output / "manifest.json").write_text(
+                json.dumps(child, indent=2, sort_keys=True) + "\n")
+            checked, final_map = HOST_CPU["check_plan"](
+                output / "trace.jsonl", child, len(fixture_pages))
+            if checked != transformed or final_map != latest:
+                raise ValueError("striped plan failed byte-exact reconstruction")
+
+
+def parse_stripe_counts(value):
+    try:
+        counts = tuple(int(item) for item in re.split(r"[,\s]+", value) if item)
+    except ValueError as error:
+        raise ValueError("STRIPE_COUNTS must contain only 1,2,4") from error
+    if (not counts or len(set(counts)) != len(counts) or
+            any(count not in DEFAULT_STRIPE_COUNTS for count in counts)):
+        raise ValueError("STRIPE_COUNTS must be a unique subset of 1,2,4")
+    return counts
+
+
+def parse_striped_pair(output):
+    matches = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if record.get("experiment") == "multi-target-stripes":
+            matches.append(record)
+    if len(matches) != 1:
+        raise ValueError("striped helper did not emit exactly one result")
+    return matches[0]
+
+
+def summarize_striped(label, pair, seconds):
+    off, swapz = pair["arms"]["off"], pair["arms"]["swapz"]
+    return {
+        "scenario": label,
+        "model": pair["model"],
+        "stripes": pair["stripes"],
+        "pair_s": seconds,
+        "replay_order": pair["order"],
+        "raw_w": off["throughput_mbps"]["logical_write_mbps"],
+        "swapz_w": swapz["throughput_mbps"]["logical_write_mbps"],
+        "raw_r": off["throughput_mbps"]["logical_read_mbps"],
+        "swapz_r": swapz["throughput_mbps"]["logical_read_mbps"],
+        "raw_lw_bytes": off["lower_io"]["lower_write_bytes"],
+        "swapz_lw_bytes": swapz["lower_io"]["lower_write_bytes"],
+        "raw_lw_reqs": off["lower_io"]["lower_write_requests"],
+        "swapz_lw_reqs": swapz["lower_io"]["lower_write_requests"],
+        "raw_r_p99": (off.get("read_p99_ns") or 0) / 1e6,
+        "swapz_r_p99": (swapz.get("read_p99_ns") or 0) / 1e6,
+        "raw_w_p99": (off.get("write_p99_ns") or 0) / 1e6,
+        "swapz_w_p99": (swapz.get("write_p99_ns") or 0) / 1e6,
+        "raw_write_peaks": off["lower_inflight"]["per_stripe_write_peak"],
+        "swapz_write_peaks": swapz["lower_inflight"]["per_stripe_write_peak"],
+        "raw_simultaneous_write_devices":
+            off["lower_inflight"]["max_simultaneous_write_devices"],
+        "swapz_simultaneous_write_devices":
+            swapz["lower_inflight"]["max_simultaneous_write_devices"],
+        "swapz_aggregate_write_depth_peak":
+            swapz["lower_inflight"]["max_aggregate_write_depth"],
+        "source_sha": pair["source_sha"],
+        "parent_trace_sha256": pair["parent_trace_sha256"],
+        "arms": pair["arms"],
+    }
+
+
+def print_striped_table(rows):
+    if not rows:
+        return
+    print("\nMulti-target stripe experiment — development only")
+    print("  N independent existing K=1 swapz targets; aggregate QD, bandwidth "
+          "and lower queue capacity are held fixed.")
+    header = (f"{'scenario':<22} {'Q':>4} {'raw W':>9} {'swapz W':>9} "
+              f"{'S/raw':>8} {'save B':>8} {'save req':>9} {'simW':>6}")
+    print(header)
+    print("-" * len(header))
+    for row in rows:
+        quality = row["performance_validity"]["status"]
+        byte_save = (1 - row["swapz_lw_bytes"] / row["raw_lw_bytes"]
+                     if row["raw_lw_bytes"] else 0.0)
+        req_save = (1 - row["swapz_lw_reqs"] / row["raw_lw_reqs"]
+                    if row["raw_lw_reqs"] else 0.0)
+        ratio = row["swapz_w"] / row["raw_w"] if row["raw_w"] else 0.0
+        print(f"{row['scenario']:<22} {quality:>4} {row['raw_w']:9.2f} "
+              f"{row['swapz_w']:9.2f} {ratio:8.3f} {byte_save:8.1%} "
+              f"{req_save:9.1%} "
+              f"{row['swapz_simultaneous_write_devices']:6d}")
+
+    usable = [row for row in rows
+              if row["performance_validity"]["performance_usable"]]
+    groups = {}
+    for row in usable:
+        groups.setdefault((row["model"], row["stripes"]), []).append(row)
+    for model in STRIPED_MODELS:
+        counts = sorted(count for candidate, count in groups if candidate == model)
+        if not counts:
+            continue
+        print(f"  {model} usable normalized swapz/raw WRITE ratios:")
+        for count in counts:
+            group = groups[(model, count)]
+            ratios = [row["swapz_w"] / row["raw_w"] for row in group
+                      if row["raw_w"] > 0]
+            simultaneous = max(
+                row["swapz_simultaneous_write_devices"] for row in group)
+            print(f"    N={count}: mean={statistics.mean(ratios):.3f} "
+                  f"n={len(ratios)} observed simultaneous swapz lowers={simultaneous}")
+        if 1 in counts and counts[-1] > 1:
+            base = statistics.mean(
+                row["swapz_w"] / row["raw_w"] for row in groups[(model, 1)])
+            top = statistics.mean(
+                row["swapz_w"] / row["raw_w"] for row in groups[(model, counts[-1])])
+            print(f"    N=1 -> N={counts[-1]} normalized ratio shift: "
+                  f"{(top / base - 1) * 100:+.1f}%")
+    print("  A concurrency claim additionally requires observed simultaneous "
+          "swapz lower WRITEs for N>1; absence in the sampler is inconclusive, "
+          "not proof that overlap never occurred.")
 
 
 def privileged(seconds, script, *arguments):
@@ -396,16 +623,30 @@ def main():
                         default=os.environ.get("CONTENT", "medium"))
     parser.add_argument("--calibration", choices=("none", "linear"),
                         default=os.environ.get("CALIBRATION", "none"))
+    parser.add_argument("--stripe-counts",
+                        default=os.environ.get("STRIPE_COUNTS", "1,2,4"))
+    parser.add_argument("--stripe-repeat", type=int,
+                        default=int(os.environ.get("STRIPE_REPEAT", "5") or 5))
     args = parser.parse_args()
     calibration = args.calibration == "linear"
     candidate = "linear" if calibration else "swapz"
     scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
         or list(DEFAULT_SCENARIOS)
+    stripe_counts = parse_stripe_counts(args.stripe_counts)
+    striped_models = [striped_scenario(name) for name in scenarios
+                      if striped_scenario(name)]
+    ordinary_scenarios = [name for name in scenarios if not striped_scenario(name)]
     if not 1 <= args.repeat <= 10:
         parser.error("REPEAT must be 1..10")
     if args.content not in CONTENT_WEIGHTS:
         parser.error("CONTENT must be medium, entropy or balanced")
-    for name in scenarios:
+    if not 1 <= args.stripe_repeat <= 10:
+        parser.error("STRIPE_REPEAT must be 1..10")
+    if len(striped_models) != len(set(striped_models)):
+        parser.error("each striped model may be selected only once")
+    if calibration and striped_models:
+        parser.error("striped scenarios cannot use linear calibration")
+    for name in ordinary_scenarios:
         scenario_arguments(name, "/dev/null")
 
     if os.geteuid() != 0 and subprocess.run(
@@ -428,13 +669,15 @@ def main():
         print(preflight.stdout + preflight.stderr, file=sys.stderr)
         print("BLOCKED: loaded preflight failed", file=sys.stderr)
         return 2
-    plan = prepare_plan(args.content)
+    plan = prepare_plan(args.content, bool(striped_models))
+    if striped_models:
+        prepare_striped_plans(plan, stripe_counts)
     fixture = json.loads((plan / "fixture.json").read_text())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     rows, raw_reports = [], []
     status = 0
     try:
-        for name in scenarios:
+        for name in ordinary_scenarios:
             for attempt in range(args.repeat):
                 label = name if args.repeat == 1 else f"{name}#{attempt + 1}"
                 quiet_before = quiet_host_sample()
@@ -468,16 +711,78 @@ def main():
                 print(f"  {label}: raw W {row['raw_w']:.2f} {candidate} W "
                       f"{measured:.2f} ({pct(measured, row['raw_w']).strip()}) "
                       f"[{elapsed:.1f}s]", flush=True)
+
+        striped_rows = []
+        for model in striped_models:
+            for round_index in range(args.stripe_repeat):
+                offset = round_index % len(stripe_counts)
+                rotated = stripe_counts[offset:] + stripe_counts[:offset]
+                for stripe_count in rotated:
+                    label = f"{model}-stripes-n{stripe_count}#{round_index + 1}"
+                    quiet_before = quiet_host_sample()
+                    begin = time.monotonic()
+                    arguments = [
+                        "--validated-source", head, "--run-owned-striped",
+                        "--model", model, "--stripes", str(stripe_count),
+                        "--shared-plan", str(plan),
+                    ]
+                    if round_index % 2:
+                        arguments.append("--swapz-first")
+                    proc = privileged(720, STRIPED_PAIR, *arguments)
+                    elapsed = time.monotonic() - begin
+                    quiet_after = quiet_host_sample()
+                    if proc.returncode:
+                        status = 1
+                        tail = (proc.stdout + proc.stderr).strip().splitlines()[-12:]
+                        striped_rows.append({
+                            "scenario": label,
+                            "error": f"striped pair failed rc={proc.returncode}",
+                        })
+                        print(f"  {label}: FAIL ({elapsed:.1f}s)\n    " +
+                              "\n    ".join(tail), flush=True)
+                        continue
+                    try:
+                        pair = parse_striped_pair(proc.stdout)
+                        if (pair.get("model") != model or
+                                pair.get("stripes") != stripe_count):
+                            raise ValueError("striped helper result identity mismatch")
+                        row = summarize_striped(label, pair, elapsed)
+                    except (KeyError, TypeError, ValueError) as error:
+                        status = 1
+                        striped_rows.append({
+                            "scenario": label,
+                            "error": f"invalid striped result: {error}",
+                        })
+                        print(f"  {label}: FAIL invalid result ({error})", flush=True)
+                        continue
+                    row["performance_validity"] = performance_validity(
+                        quiet_before, quiet_after, pair["arms"])
+                    striped_rows.append(row)
+                    print(f"  {label}: raw W {row['raw_w']:.2f} swapz W "
+                          f"{row['swapz_w']:.2f} "
+                          f"({pct(row['swapz_w'], row['raw_w']).strip()}) "
+                          f"simultaneous-lowers="
+                          f"{row['swapz_simultaneous_write_devices']} "
+                          f"[{elapsed:.1f}s]", flush=True)
     finally:
         shutil.rmtree(plan, ignore_errors=True)
     reject_raw_drift(rows)
+    if striped_models:
+        reject_raw_drift(striped_rows)
     result_name = "latest-calibration.json" if calibration else "latest.json"
     (OUT_DIR / result_name).write_text(
         json.dumps({"head": head, "dirty": bool(dirty),
                     "calibration": args.calibration,
                     "delta64_rescue": args.delta64,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
-                    "reports": raw_reports}, sort_keys=True) + "\n")
+                    "reports": raw_reports,
+                    "striped_target_experiment": {
+                        "scope": "DEVELOPMENT_ONLY_MULTI_TARGET_K1_NO_KERNEL_C_CHANGE",
+                        "counts": list(stripe_counts),
+                        "repeats": args.stripe_repeat,
+                        "models": striped_models,
+                        "rows": striped_rows if striped_models else [],
+                    }}, sort_keys=True) + "\n")
     print()
     if calibration:
         print("DM-linear calibration only: same-host synthetic reference; "
@@ -487,6 +792,7 @@ def main():
     else:
         print_table(rows)
         print_profile(rows)
+        print_striped_table(striped_rows if striped_models else [])
     print(f"\n  Detailed telemetry: {(OUT_DIR / result_name).relative_to(ROOT)} "
           f"(total {time.monotonic() - started:.0f}s)")
     return status

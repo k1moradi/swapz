@@ -32,7 +32,8 @@ for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   packaging/sign-module.sh \
   tests/tools/deploy-nullblk.sh tests/tools/loaded-preflight.sh tests/tools/swap-inventory.sh \
   tests/tools/quiet-lower-io.sh \
-  tests/tools/benchmark-owned-pair.sh tests/tools/nullblk-identity.sh \
+  tests/tools/benchmark-owned-pair.sh tests/tools/benchmark-striped-owned.sh \
+  tests/tools/nullblk-identity.sh \
   tests/runtime/native/nullblk-identity-test.sh \
   tests/runtime/native/quiet-lower-io-test.sh \
   tests/runtime/native/swap-inventory-test.sh; do

@@ -1704,12 +1704,6 @@ def run_stage(title, command, result, *, parse_bench=False):
         storage_envelope_verdict(storage_envelope_sessions)
         if storage_envelope_sessions else
         {"overall": "NOT_RUN", "reason": "storage-envelope sweep not executed"})
-    serial_queue_sessions = (
-        parse_serial_queue_control_sessions(output) if parse_bench else [])
-    serial_queue_diagnostic = (
-        serial_queue_control_verdict(serial_queue_sessions, storage_envelope_sessions)
-        if serial_queue_sessions else
-        {"overall": "NOT_RUN", "reason": "no matched lower-queue control"})
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
@@ -1823,8 +1817,6 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["storage_envelope_sessions"] = (
             storage_envelope_sessions)
         result["benchmarks"]["storage_envelopes"] = storage_envelope_diagnostic
-        result["benchmarks"]["serial_queue_control_sessions"] = serial_queue_sessions
-        result["benchmarks"]["serial_queue_control"] = serial_queue_diagnostic
     print(f"  {len(result['stages']):>2}/5  {title:<29} "
           f"{status:<8} {record['elapsed_s']:>8.2f}s", flush=True)
     if rc and "diagnostic" in record:
@@ -2053,144 +2045,6 @@ def parse_storage_envelope_sessions(output):
         }
     return sessions
 
-
-
-def parse_serial_queue_control_sessions(output):
-    """Reuse the validated storage arm parser for a separately bracketed study."""
-    sessions, captured, order, replay_order = [], None, None, None
-    start = re.compile(r"START_SERIAL_QUEUE_CONTROL=(sata_ssd|nvme_gen5) ORDER=([01])")
-    end = re.compile(r"PASS_SERIAL_QUEUE_CONTROL=(sata_ssd|nvme_gen5) ORDER=([01])")
-    for original in output.splitlines():
-        line = original.strip()
-        beginning = start.fullmatch(line)
-        if beginning:
-            if captured is not None:
-                sessions.extend(parse_storage_envelope_sessions("\n".join(captured)))
-            order = int(beginning.group(2))
-            replay_order = None
-            captured = [f"START_STORAGE_ENVELOPE={beginning.group(1)} DELTA64_RESCUE=0"]
-            continue
-        if captured is None:
-            continue
-        ending = end.fullmatch(line)
-        if ending:
-            if (f"START_STORAGE_ENVELOPE={ending.group(1)} DELTA64_RESCUE=0" !=
-                    captured[0] or int(ending.group(2)) != order):
-                captured.append("MISMATCHED_SERIAL_CONTROL_END")
-            else:
-                captured.append(
-                    f"PASS_STORAGE_ENVELOPE={ending.group(1)} DELTA64_RESCUE=0")
-            parsed = parse_storage_envelope_sessions("\n".join(captured))
-            for session in parsed:
-                session["order"] = order
-                session["replay_order"] = replay_order
-            sessions.extend(parsed)
-            captured = None
-            continue
-        if line.startswith("REPLAY_ORDER="):
-            replay_order = line.partition("=")[2]
-        captured.append(original)
-    if captured is not None:
-        parsed = parse_storage_envelope_sessions("\n".join(captured))
-        for session in parsed:
-            session["order"] = order
-            session["replay_order"] = replay_order
-        sessions.extend(parsed)
-    return sessions
-
-
-def serial_queue_control_verdict(sessions, baseline_sessions):
-    """Descriptive queue sensitivity; not a K>1, striped-target or significance result."""
-    expected = {(name, order) for name in ("sata_ssd", "nvme_gen5")
-                for order in (0, 1)}
-    if (len(sessions) != len(expected) or
-            {(s.get("envelope"), s.get("order")) for s in sessions} != expected):
-        return {"overall": "INCOMPLETE", "reason": "four bracketed serial-control pairs required"}
-    rows = []
-    for envelope in ("sata_ssd", "nvme_gen5"):
-        baseline = next((s for s in baseline_sessions
-                         if s.get("envelope") == envelope and
-                         s.get("delta64_rescue") == 0 and
-                         s.get("status") == "PASS"), None)
-        if baseline is None or set(baseline.get("arms", {})) != {"off", "swapz"}:
-            return {"overall": "INCONCLUSIVE", "reason": envelope + " baseline missing"}
-        controls = sorted((s for s in sessions if s["envelope"] == envelope),
-                          key=lambda s: s["order"])
-        original = STORAGE_ENVELOPE_SPECS[envelope]
-        for control in controls:
-            if control.get("replay_order") != (
-                    "off-first" if control["order"] == 0 else "swapz-first"):
-                return {"overall": "INCONCLUSIVE",
-                        "reason": envelope + " replay order did not match control"}
-            model = control.get("device_model") or {}
-            if (control.get("status") != "PASS" or
-                    control.get("delta64_rescue") != 0 or
-                    any(model.get(field) != expected_value for field, expected_value in (
-                        ("cap_mib_s", original["cap_mib_s"]),
-                        ("completion_nsec", original["completion_nsec"]),
-                        ("irqmode", original["irqmode"]),
-                        ("queue_mode", original["queue_mode"]),
-                        ("submit_queues", 1), ("hw_queue_depth", 1))) or
-                    set(control.get("arms", {})) != {"off", "swapz"}):
-                return {"overall": "INCONCLUSIVE", "reason": envelope + " invalid owned model"}
-            for name in ("off", "swapz"):
-                arm = control["arms"][name]
-                original_arm = baseline["arms"][name]
-                if (arm.get("source_sha") != original_arm.get("source_sha") or
-                        arm.get("trace_sha256") != original_arm.get("trace_sha256") or
-                        arm.get("fixture_sha256") != original_arm.get("fixture_sha256") or
-                        arm.get("replay_engine") != "native-c"):
-                    return {"overall": "INCONCLUSIVE",
-                            "reason": envelope + " source/trace/replay mismatch"}
-                value = arm.get("input_write_mbps")
-                if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
-                    return {"overall": "INCONCLUSIVE", "reason": envelope + " throughput missing"}
-            if (control["arms"]["swapz"].get("kernel_write_path") or {}).get(
-                    "delta64_rescue") != 0:
-                return {"overall": "INCONCLUSIVE", "reason": envelope + " rescue policy mismatch"}
-        baseline_raw = baseline["arms"]["off"].get("input_write_mbps")
-        baseline_swapz = baseline["arms"]["swapz"].get("input_write_mbps")
-        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
-               for v in (baseline_raw, baseline_swapz)):
-            return {"overall": "INCONCLUSIVE", "reason": envelope + " baseline throughput invalid"}
-        raw = statistics.mean(c["arms"]["off"]["input_write_mbps"] for c in controls)
-        target = statistics.mean(c["arms"]["swapz"]["input_write_mbps"] for c in controls)
-        raw_peaks = [(c["arms"]["off"].get("lower_inflight") or {}).get("write_peak")
-                     for c in controls]
-        target_peaks = [(c["arms"]["swapz"].get("lower_inflight") or {}).get("write_peak")
-                        for c in controls]
-        # Depth-one configuration is not evidence of depth-one operation.
-        observed_one = all(type(v) is int and v == 1
-                           for v in raw_peaks + target_peaks)
-        rows.append({
-            "envelope": envelope, "scope": "BOTH_ARM_SYNTHETIC_QUEUE_GEOMETRY",
-            "canonical_model": baseline["device_model"],
-            "serial_model": controls[0]["device_model"],
-            "source_trace_fixture_matched": True,
-            "serial_order": ["raw-first", "swapz-first"],
-            "serial_pairs": controls,
-            "canonical_raw_write_mbps": baseline_raw,
-            "canonical_swapz_write_mbps": baseline_swapz,
-            "serial_raw_write_mbps": raw,
-            "serial_swapz_write_mbps": target,
-            "canonical_swapz_raw_ratio": baseline_swapz / baseline_raw,
-            "serial_swapz_raw_ratio": target / raw,
-            "relative_ratio_shift_pct": 100 * (
-                (target / raw) / (baseline_swapz / baseline_raw) - 1),
-            "raw_depth_peaks": raw_peaks,
-            "swapz_depth_peaks": target_peaks,
-            "observed_one_lower_write_per_arm": observed_one,
-        })
-    return {
-        "overall": ("OBSERVED_SERIAL_QUEUE_SENSITIVITY"
-                    if all(r["observed_one_lower_write_per_arm"] for r in rows)
-                    else "INCONCLUSIVE_DEPTH_ONE_NOT_OBSERVED"),
-        "scope": "DIRECTIONAL_NOT_K2_NOT_STRIPED_TARGET_NOT_PHYSICAL_SSD",
-        "warning": ("Queue topology differs between canonical and controlled "
-                    "runs; two serial-control pairs against one canonical run "
-                    "are not a causal or statistically confirmed K>1 benefit."),
-        "rows": rows,
-    }
 
 
 def storage_envelope_verdict(sessions):
@@ -6145,20 +5999,6 @@ def print_bench(result, *, detailed=False):
                   f"{interval['high'] * 100:+.1f}%]; {status}.")
             print("  Async-vs-sync measures scheduling; raw remains the product control.")
 
-    serial_control = benchmarks.get("serial_queue_control", {})
-    if serial_control.get("rows"):
-        print("\n  Serial lower-queue sensitivity (diagnostic, not K>1 evidence)")
-        for row in serial_control["rows"]:
-            print(f"  {row['envelope']}: canonical raw/swapz "
-                  f"{row['canonical_raw_write_mbps']:.1f}/"
-                  f"{row['canonical_swapz_write_mbps']:.1f} MB/s; "
-                  f"depth-one raw/swapz {row['serial_raw_write_mbps']:.1f}/"
-                  f"{row['serial_swapz_write_mbps']:.1f}; "
-                  f"ratio shift {row['relative_ratio_shift_pct']:+.1f}%; "
-                  f"observed-one={row['observed_one_lower_write_per_arm']}")
-        print("  Two counterordered serial pairs vs one canonical deep-queue "
-              "reference; not a significance claim or striped-target prediction.")
-
     saturation = benchmarks.get("write_saturation", {})
     if saturation.get("overall") == "PASS_WRITE_SATURATION_EVIDENCE":
         print("\n  Sustained lane-owned WRITE — MB/s, raw is the product control")
@@ -7769,9 +7609,7 @@ def main():
                        "write_pipeline_depth_sessions": [],
                        "write_pipeline_depth": {"overall": "NOT_RUN"},
                        "storage_envelope_sessions": [],
-                       "storage_envelopes": {"overall": "NOT_RUN"},
-                       "serial_queue_control_sessions": [],
-                       "serial_queue_control": {"overall": "NOT_RUN"}},
+                       "storage_envelopes": {"overall": "NOT_RUN"}},
         "overall": "INCOMPLETE"
     }
     make_cmd, parallelism = make_invocation()

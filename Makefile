@@ -57,6 +57,8 @@ test:
 # Development-only K=1 profiling loop: build, native checks and three
 # repeated owned-null_blk pairs for SATA mixed, NVMe4 mixed, fast mixed,
 # fast QD4 and fast QD8, with compact raw/swapz and critical-path tables.
+# SCENARIOS=nvme5-stripes (or sata-stripes) runs the separate N=1/2/4
+# independent-target development experiment without changing product C.
 # It accepts dirty trees, honors the noise screen, never writes
 # test_results.json and never qualifies a source. Override with
 # SCENARIOS=... and/or REPEAT=1..10 when narrowing a follow-up.

@@ -34,7 +34,9 @@ lower-I/O window-policy native checks, runs the root preflight, and then runs
 one counterbalance-free raw/swapz pair per selected scenario through the same
 private owned null_blk pair helper and exact device models used by `make test`
 (default: three repeats each of SATA mixed, NVMe Gen4 mixed, fast mixed,
-fast QD4 and fast QD8). It prints one table of useful READ/WRITE, lower WRITE bytes ratio
+fast QD4 and fast QD8). A selected `nvme5-stripes` or `sata-stripes`
+scenario instead runs the separate multi-target N=1/2/4 decision experiment
+described below. It prints one table of useful READ/WRITE, lower WRITE bytes ratio
 and requests, READ/WRITE p99, windows, deadline and idle-bound closes,
 accepted-work lower idle, lower-WRITE service and its EWMA, and keeps detailed
 telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
@@ -2562,21 +2564,41 @@ original scope. Real loaded development validation must observe mapped
 snapshots for submitter-prepared ordinary input and preserve the byte oracle.
 
 
-### Serial lower-queue sensitivity diagnostic
 
-`make test` includes two counterordered SATA and NVMe5 medium-mixed
-raw/swapz pairs at the same model bandwidth and completion delay, but with
-**both** newly owned lower devices configured to one submission queue of
-depth one. The canonical deep-queue results remain unchanged. The separate
-`benchmarks.serial_queue_control` reports per-arm useful WRITE and READ,
-latency, lower I/O, exact source/fixture/trace and **observed** lower-WRITE
-depth. A configured limit alone does not establish actual serialization.
-This is not a striped multi-target experiment, a physical SSD observation,
-a statistically confirmed throughput comparison or evidence that K=2 wins.
-Diagnostic interpretation is independent of official qualification; loaded
-byte-oracle or teardown errors still fail the ordinary `make test` stage.
+### Independent-target stripe development experiment
 
-The internal reporting contract additionally checks the **observed** replay
-order against each declared order marker, source/trace/fixture equality and
-actual lower WRITE depth. The source-contract suite separately accounts for
-the LZ4-only serial-control arm; no default compression policy is changed.
+The `*-stripes` `make fast_test` scenarios are the development-only test for a
+possible single-lower-WRITE-lane ceiling. They do **not** alter production C and
+never enter `test_results.json` or qualification history.
+
+One persistent mixed QD32 trace is generated with both WRITE and immutable READ
+pages owned by a lane. For N=1,2,4, the harness partitions that exact trace by
+`logical_page % N`. It renumbers only each target's local page/lane/sequence;
+the fixture payload selected by every original operation is preserved. A
+stride/offset prefill map preserves the original initial bytes after local-page
+renumbering, and every child plan passes the ordinary complete-image oracle.
+
+Each arm owns N separate RAM-backed `null_blk` devices. The swapz arm creates N
+independent ordinary K=1 targets, one per lower. The raw arm uses N equally
+modeled lower devices with the same page-to-stripe mapping. Aggregate offered QD
+stays 32. Per-device bandwidth is the model bandwidth divided by N; per-device
+hardware queue capacity is divided by N while preserving the model's submission
+queue count, so aggregate modeled bandwidth and queue capacity do not grow with
+N. NVMe5 is the primary model and SATA is a secondary control.
+
+All N native replays finish warmup before a private start gate is released.
+Aggregate useful throughput uses the earliest measured start and latest measured
+end, not a sum of per-process MB/s. An observational sampler reads only the exact
+owned lower devices and records maximum simultaneous WRITE-active devices and
+aggregate WRITE depth. Its finite sampling interval can miss short overlap:
+observing `>=2` swapz lower devices proves concurrent lower service; observing
+less is inconclusive.
+
+`STRIPE_COUNTS=` may select a unique subset of `1,2,4`;
+`STRIPE_REPEAT=` defaults to five. Count order rotates by round and raw/swapz
+arm order alternates. The existing quiet-host/raw-drift screens still apply.
+Results stay in `build/tests/fast-test/latest.json` under
+`striped_target_experiment`. Do not infer K=2 benefit merely from target-count
+scaling: a reopen requires a material improvement in normalized swapz/raw
+useful WRITE service, preserved lower-byte savings, and observed simultaneous
+swapz lower WRITEs for N>1.

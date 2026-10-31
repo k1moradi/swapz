@@ -1378,6 +1378,103 @@ class PairReplayContract(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "mixed-lane ownership"):
                     replay["check_plan"](bad_path, {**manifest, "trace_sha256": replay["sha"](data)}, 16)
 
+    def test_stripe_partitionable_mixed_plan_and_prefill_mapping(self):
+        import runpy
+        replay = runpy.run_path(str(SCRIPT))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(bytes([i + 1]) * PAGE for i in range(16)))
+            plan = root / "plan"
+            self.run_cmd(
+                "prepare", "--fixture", fixture, "--output-dir", plan,
+                "--qd", 4, "--logical-pages", 64, "--writer-pages", 16,
+                "--reader-start", 32, "--reader-pages", 16,
+                "--warmup-ops", 8, "--measure-ops", 32, "--read-pct", 50,
+                "--iops", 0, "--mixed-lanes", "persistent",
+                "--stripe-partitionable")
+            manifest = json.loads((plan / "manifest.json").read_text())
+            rows = [json.loads(line) for line in
+                    (plan / "trace.jsonl").read_text().splitlines()]
+            self.assertTrue(manifest["stripe_partitionable"])
+            self.assertTrue(all(row["page"] % 4 == row["lane"] for row in rows))
+            child = {**manifest, "prefill_fixture_stride": 2,
+                     "prefill_fixture_offset": 1}
+            self.assertEqual(replay["prefill_fixture_index"](child, 3, 16), 7)
+            child["prefill_fixture_offset"] = 2
+            with self.assertRaisesRegex(ValueError, "striped prefill"):
+                replay["prefill_fixture_index"](child, 3, 16)
+
+    def test_external_start_gate_uses_private_owned_directory(self):
+        import runpy
+        import threading
+        import time
+        replay = runpy.run_path(str(SCRIPT))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            root.chmod(0o700)
+            ready = root / "ready"
+            start = root / "start"
+
+            def release():
+                time.sleep(0.02)
+                start.write_text("GO\n")
+
+            worker = threading.Thread(target=release)
+            worker.start()
+            try:
+                replay["wait_for_external_start_gate"](ready, start)
+            finally:
+                worker.join()
+            self.assertEqual(ready.read_text(), "READY\n")
+            open_dir = root / "open"
+            open_dir.mkdir(mode=0o755)
+            with self.assertRaisesRegex(ValueError, "private and owned"):
+                replay["wait_for_external_start_gate"](
+                    open_dir / "ready", open_dir / "start")
+
+    def test_fast_striped_plan_split_reconstructs_parent_trace(self):
+        import importlib.util
+        import runpy
+        replay = runpy.run_path(str(SCRIPT))
+        spec = importlib.util.spec_from_file_location(
+            "swapz_striped_fast", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(bytes([i + 1]) * PAGE for i in range(16)))
+            base = root / "plan-striped-base"
+            self.run_cmd(
+                "prepare", "--fixture", fixture, "--output-dir", base,
+                "--qd", 32, "--logical-pages", 128, "--writer-pages", 64,
+                "--reader-start", 64, "--reader-pages", 64,
+                "--warmup-ops", 64, "--measure-ops", 128, "--read-pct", 50,
+                "--iops", 0, "--mixed-lanes", "persistent",
+                "--stripe-partitionable")
+            fast.prepare_striped_plans(root, (1, 2, 4))
+            parent = [json.loads(line) for line in
+                      (base / "trace.jsonl").read_text().splitlines()]
+            parent_projection = sorted(
+                (row["wave"], row["lane"], row["op"], row["page"],
+                 row["fixture"], row["phase"]) for row in parent)
+            for stripe_count in (1, 2, 4):
+                rebuilt = []
+                total_ops = 0
+                for stripe_index in range(stripe_count):
+                    child_dir = root / f"striped-{stripe_count}" / f"stripe-{stripe_index}"
+                    manifest = json.loads((child_dir / "manifest.json").read_text())
+                    child, _ = replay["check_plan"](
+                        child_dir / "trace.jsonl", manifest, 16)
+                    total_ops += len(child)
+                    rebuilt.extend(
+                        (row["wave"], row["lane"] * stripe_count + stripe_index,
+                         row["op"], row["page"] * stripe_count + stripe_index,
+                         row["fixture"], row["phase"]) for row in child)
+                self.assertEqual(total_ops, len(parent))
+                self.assertEqual(sorted(rebuilt), parent_projection)
+
     def test_sustained_write_uses_persistent_lane_owned_streams(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

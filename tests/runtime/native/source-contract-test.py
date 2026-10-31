@@ -412,11 +412,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("== --no-delta64-rescue", pair)
         self.assertIn("if (( DELTA64_POSITIVE_EXPERIMENT )); then", pair)
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
-        # Two original LZ4-only controls plus the matched serial-queue study.
-        self.assertEqual(loaded.count("--no-delta64-rescue"), 3)
-        self.assertIn("--serial-queue-control", loaded)
+        self.assertEqual(loaded.count("--no-delta64-rescue"), 2)
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
         self.assertIn("PRODUCTION_DELTA64_RESCUE = 1", runner)
+        fast = (ROOT / "tests/tools/fast-test.py").read_text()
+        striped = (ROOT / "tests/tools/benchmark-striped-owned.sh").read_text()
+        self.assertIn('STRIPED_PAIR = "tests/tools/benchmark-striped-owned.sh"', fast)
+        self.assertIn("--run-owned-striped", striped)
+        self.assertNotIn("START_SERIAL_QUEUE_CONTROL=", loaded)
+        self.assertNotIn("benchmark-striped-owned.sh", loaded)
 
     def test_reclaim_scratch_uses_kvmalloc_and_read_bypass_is_window_local(self):
         ctor = body("swapz_ctr")

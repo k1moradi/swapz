@@ -336,35 +336,6 @@ for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5; do
     done
 done
 
-# Matched one-hardware-queue/depth-one sensitivity on both RAW and swapz.
-# Original SATA/NVMe5 bandwidth and completion delays, source, medium QD32
-# replay, and the canonical deep-queue baseline above remain unchanged.
-# This is NOT striped targets or lower-WRITE K>1: neither is enabled.
-for envelope in sata_ssd nvme_gen5; do
-    case "$envelope" in
-        sata_ssd)
-            model_args=(--lower-mbps 500 --submit-queues 1
-                        --hw-queue-depth 32 --completion-nsec 100000)
-            ;;
-        nvme_gen5)
-            model_args=(--lower-mbps 12000 --submit-queues 4
-                        --hw-queue-depth 64 --completion-nsec 14000)
-            ;;
-    esac
-    for order in 0 1; do
-        arguments=(--run-owned-ram-pair --profile medium --retain-ms 2
-                   --unpaced "${model_args[@]}" --async-prepare
-                   --no-delta64-rescue --shared-plan "$shared_plan")
-        if (( order )); then
-            arguments+=(--swapz-first)
-        fi
-        printf 'START_SERIAL_QUEUE_CONTROL=%s ORDER=%s\n' "$envelope" "$order"
-        run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh \
-            --validated-source "$tested_source" --serial-queue-control "${arguments[@]}"
-        printf 'PASS_SERIAL_QUEUE_CONTROL=%s ORDER=%s\n' "$envelope" "$order"
-    done
-done
-
 # Delta64 rescue confirmation at fixed K=1 with second-LZ4 acceleration 4.
 # Five counterbalanced off/on pairs reuse the exact positive delta64 fixture
 # and SSD RAM model; the off arm also carries acceleration 4.
@@ -485,5 +456,5 @@ run_privileged_bounded 720 tests/tools/qualify-resource-pressure.sh \
 # remains depth=1 and routine qualification no longer spends ten sessions here.
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 8 directional modern-storage envelope sessions, 4 matched one-queue lower-depth sensitivity pairs, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 48 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 8 directional modern-storage envelope sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 48 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, predictor-first delta64, promoted independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'

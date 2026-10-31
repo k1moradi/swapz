@@ -79,9 +79,15 @@ def nonzero_same_filled_page(page):
     return word != b"\x00" * 8 and word * (PAGE // 8) == page
 
 
-def workload_opportunity(events, pages, logical_pages):
+def workload_opportunity(events, pages, logical_pages, prefill_indices=None):
     """Offline payload opportunity only; never a kernel performance claim."""
-    live = [pages[i % len(pages)] for i in range(logical_pages)]
+    if prefill_indices is None:
+        prefill_indices = [i % len(pages) for i in range(logical_pages)]
+    if (len(prefill_indices) != logical_pages or
+            any(type(index) is not int or not 0 <= index < len(pages)
+                for index in prefill_indices)):
+        raise ValueError("invalid opportunity prefill map")
+    live = [pages[index] for index in prefill_indices]
     resident = {}
     for payload in live:
         resident[payload] = resident.get(payload, 0) + 1
@@ -120,6 +126,16 @@ def workload_opportunity(events, pages, logical_pages):
     }
 
 
+def prefill_fixture_index(manifest, page, fixture_pages):
+    """Resolve the deterministic initial fixture page for one logical page."""
+    stride = manifest.get("prefill_fixture_stride", 1)
+    offset = manifest.get("prefill_fixture_offset", 0)
+    if (type(stride) is not int or stride < 1 or
+            type(offset) is not int or not 0 <= offset < stride):
+        raise ValueError("invalid striped prefill mapping")
+    return (page * stride + offset) % fixture_pages
+
+
 def prepare(args):
     fixture_pages, fixture_hash = fixture_info(args.fixture)
     if args.qd < 1 or args.qd > 32 or args.measure_ops < 1:
@@ -149,6 +165,11 @@ def prepare(args):
                             args.writer_pages % args.qd):
         raise ValueError("mixed lanes require unpaced disjoint input, striped writers, "
                          "and no sustained-write flag")
+    if args.stripe_partitionable and (
+            args.mixed_lanes != "persistent" or
+            args.reader_start % args.qd or args.reader_pages % args.qd):
+        raise ValueError("stripe-partitionable input requires persistent mixed lanes "
+                         "and a reader region divisible by QD")
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     if list(out.iterdir()):
@@ -182,8 +203,12 @@ def prepare(args):
                     fi = rng.randrange(fixture_pages)
                     kind = "W"
                 else:
-                    slot = choose_slot(rng, args.reader_start,
-                                       args.reader_pages, used)
+                    if args.stripe_partitionable:
+                        slot = (args.reader_start + pos + args.qd * rng.randrange(
+                            args.reader_pages // args.qd))
+                    else:
+                        slot = choose_slot(rng, args.reader_start,
+                                           args.reader_pages, used)
                     fi = latest[slot]
                     kind = "R"
             used.add(slot)
@@ -220,6 +245,7 @@ def prepare(args):
                 "warmup_ops": args.warmup_ops, "measure_ops": args.measure_ops,
                 "read_pct": args.read_pct, "qd": args.qd, "iops": args.iops,
                 "replay_mode": replay_mode,
+                "stripe_partitionable": bool(args.stripe_partitionable),
                 "seed": args.seed, "prefill_sha256": prefill_hash,
                 "expected_post_sha256": post_hash,
                 "write_payload_stream_sha256": h.hexdigest(),
@@ -244,6 +270,11 @@ def check_plan(trace_path, manifest, fixture_pages):
         raise ValueError("missing/extra logical operations")
     replay_mode = manifest.get("replay_mode", "qd-waves")
     lane_mixed = replay_mode in ("persistent-mixed", "lane-mixed-waves")
+    stripe_partitionable = manifest.get("stripe_partitionable", False)
+    if type(stripe_partitionable) is not bool:
+        raise ValueError("invalid stripe-partitionable manifest flag")
+    if stripe_partitionable and replay_mode != "persistent-mixed":
+        raise ValueError("stripe-partitionable manifest must be persistent mixed")
     if replay_mode not in ("qd-waves", "persistent-write") and not lane_mixed:
         raise ValueError("unsupported replay mode")
     if lane_mixed and (manifest["iops"] != 0 or
@@ -255,7 +286,8 @@ def check_plan(trace_path, manifest, fixture_pages):
             manifest["read_pct"] != 0 or manifest["iops"] != 0 or
             manifest["writer_pages"] % manifest["qd"]):
         raise ValueError("invalid persistent-write manifest")
-    latest = [i % fixture_pages for i in range(manifest["logical_pages"])]
+    latest = [prefill_fixture_index(manifest, i, fixture_pages)
+              for i in range(manifest["logical_pages"])]
     for first in range(0, total, manifest["qd"]):
         wave = rows[first:first + manifest["qd"]]
         if len(set(row["page"] for row in wave)) != len(wave):
@@ -275,6 +307,8 @@ def check_plan(trace_path, manifest, fixture_pages):
             if lane_mixed and (row.get("lane") != pos or
                                (row["op"] == "W" and page % manifest["qd"] != pos)):
                 raise ValueError("mixed-lane ownership/order mismatch")
+            if stripe_partitionable and page % manifest["qd"] != pos:
+                raise ValueError("stripe-partitionable page escaped its lane")
             if row["op"] == "W":
                 if page >= manifest["writer_pages"]:
                     raise ValueError("write escaped allowed logical region")
@@ -878,7 +912,44 @@ def process_cpu():
 
 
 
-def run_native_replay(fd, fixture_fd, trace, manifest, path, identity):
+def wait_for_external_start_gate(ready_file, start_file):
+    """Synchronize private multi-target development replays outside timed work."""
+    if ready_file is None and start_file is None:
+        return
+    if not ready_file or not start_file:
+        raise ValueError("external start gate requires both ready and start paths")
+    ready = Path(ready_file)
+    start = Path(start_file)
+    ready_parent = ready.parent.resolve(strict=True)
+    start_parent = start.parent.resolve(strict=True)
+    if ready_parent != start_parent:
+        raise ValueError("external start gate files must share one private directory")
+    parent_stat = ready_parent.stat()
+    if parent_stat.st_uid != os.geteuid() or parent_stat.st_mode & 0o077:
+        raise ValueError("external start gate directory must be private and owned")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    gate_fd = os.open(ready, flags, 0o600)
+    try:
+        os.write(gate_fd, b"READY\n")
+    finally:
+        os.close(gate_fd)
+    deadline = time.monotonic() + 60.0
+    while time.monotonic() < deadline:
+        try:
+            state = os.lstat(start)
+        except FileNotFoundError:
+            time.sleep(0.002)
+            continue
+        if not stat.S_ISREG(state.st_mode):
+            raise ValueError("external start gate is not a regular file")
+        return
+    raise ValueError("external start gate timed out")
+
+
+def run_native_replay(fd, fixture_fd, trace, manifest, path, identity,
+                      ready_file=None, start_file=None):
     """Run the exact validated trace through pre-created native worker lanes.
 
     Python keeps ownership/safety checks, provenance, counters and the final
@@ -926,6 +997,7 @@ def run_native_replay(fd, fixture_fd, trace, manifest, path, identity):
                 raise ValueError(
                     "native replay failed before measurement: " +
                     (stderr or ready or "no READY marker"))
+            wait_for_external_start_gate(ready_file, start_file)
             sampler.start()
             sampler_active = True
             kernel_write_profile_epoch(path, identity)
@@ -1755,6 +1827,10 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
 
 
 def replay(args):
+    if bool(args.stripe_ready_file) != bool(args.stripe_start_file):
+        raise ValueError("incomplete private striped start gate")
+    if args.stripe_ready_file and not args.native_replay:
+        raise ValueError("private striped start gate requires native replay")
     if args.candidate == "linear" and args.packed_read:
         raise ValueError("linear calibration cannot qualify swapz packed reads")
     mf = safe_load(args.manifest)
@@ -1804,13 +1880,16 @@ def replay(args):
             scratch = memoryview(bufmap)
             try:
                 for page in range(mf["logical_pages"]):
-                    full_write(fd, page, chunks[page % count])
+                    fixture_index = prefill_fixture_index(mf, page, count)
+                    full_write(fd, page, chunks[fixture_index])
                 os.fsync(fd)
                 for page in range(mf["logical_pages"]):
-                    full_read(fd, page, scratch, chunks[page % count])
+                    fixture_index = prefill_fixture_index(mf, page, count)
+                    full_read(fd, page, scratch, chunks[fixture_index])
                 prefill_digest = hashlib.sha256()
                 for page in range(mf["logical_pages"]):
-                    prefill_digest.update(chunks[page % count])
+                    prefill_digest.update(
+                        chunks[prefill_fixture_index(mf, page, count)])
                 if prefill_digest.hexdigest() != mf["prefill_sha256"]:
                     raise ValueError("prefill image digest mismatches shared trace")
             finally:
@@ -1833,7 +1912,8 @@ def replay(args):
             try:
                 if args.native_replay:
                     native = run_native_replay(
-                        fd, source.fileno(), trace, mf, path, identity)
+                        fd, source.fileno(), trace, mf, path, identity,
+                        args.stripe_ready_file, args.stripe_start_file)
                     samples = native["samples"]
                     measured_start_ns = native["measured_start_ns"]
                     measured_end_ns = native["measured_end_ns"]
@@ -2043,6 +2123,8 @@ def replay(args):
         "measure_ops": mf["measure_ops"], "write_ops": len(samples["W"]),
         "read_ops": len(samples["R"]), "verified_pages": mf["logical_pages"],
         "seconds": seconds, "achieved_iops": mf["measure_ops"] / seconds,
+        "measured_start_monotonic_ns": measured_start_ns,
+        "measured_end_monotonic_ns": measured_end_ns,
         "mixed_replay_cpu_user_s": max(0., cpu_after[0] - cpu_before[0]),
         "mixed_replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
         "mixed_replay_peak_rss_kb": cpu_after[2],
@@ -2277,6 +2359,8 @@ def main():
                       help="write-only persistent lane workers without per-wave barriers")
     prep.add_argument("--mixed-lanes", choices=("waves", "persistent"),
                       help="private matched mixed traces with lane-owned writes and disjoint reads")
+    prep.add_argument("--stripe-partitionable", action="store_true",
+                      help=argparse.SUPPRESS)
     run = sub.add_parser("run", help="replay one candidate and verify full image")
     run.add_argument("--fixture", required=True)
     run.add_argument("--trace", required=True)
@@ -2295,6 +2379,8 @@ def main():
     run.add_argument("--expected-dev")
     run.add_argument("--expected-lower-dev")
     run.add_argument("--expected-dm-uuid")
+    run.add_argument("--stripe-ready-file", help=argparse.SUPPRESS)
+    run.add_argument("--stripe-start-file", help=argparse.SUPPRESS)
     cmp = sub.add_parser("compare", help="fail closed unless all logical inputs match")
     cmp.add_argument("--reports", nargs=2, required=True)
     cmp.add_argument("--linear-calibration", action="store_true", help=argparse.SUPPRESS)

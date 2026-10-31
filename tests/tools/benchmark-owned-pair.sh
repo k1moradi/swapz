@@ -9,12 +9,6 @@ if [[ $# -ge 3 && $1 == --validated-source &&
     VALIDATED_SOURCE="$2"
     shift 2
 fi
-# Private matched control; both newly owned lower devices change together.
-SERIAL_QUEUE_CONTROL=0
-if [[ $# -gt 0 && $1 == --serial-queue-control ]]; then
-    SERIAL_QUEUE_CONTROL=1
-    shift
-fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
     echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--delta64-rescue|--no-delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
@@ -154,17 +148,6 @@ case "$LOWER_MBPS:$COMPLETION_NSEC:$SUBMIT_QUEUES:$HW_QUEUE_DEPTH" in
         ;;
     *) echo 'BLOCKED: unsupported owned-RAM storage service envelope' >&2; exit 2 ;;
 esac
-if (( SERIAL_QUEUE_CONTROL )); then
-    # Validate the canonical model before restricting both owned lower queues.
-    # One hardware queue of depth one avoids mistakenly counting four
-    # independent depth-one queues as globally serialized.
-    case "$LOWER_MBPS:$COMPLETION_NSEC:$SUBMIT_QUEUES:$HW_QUEUE_DEPTH" in
-        500:100000:1:32|12000:14000:4:64) ;;
-        *) echo 'BLOCKED: unsupported serial lower-queue control' >&2; exit 2 ;;
-    esac
-    SUBMIT_QUEUES=1
-    HW_QUEUE_DEPTH=1
-fi
 if (( NATIVE_REPLAY )) && [[ ! -x build/tests/native/io-replay-native ]]; then
     echo 'BLOCKED: native replay helper missing from the validated build' >&2
     exit 2
@@ -379,7 +362,6 @@ SWAPS_ID="$(printf '%s
 SOURCE="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
 note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=1 READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
-note "SERIAL_QUEUE_CONTROL=$SERIAL_QUEUE_CONTROL (matched both-arm sensitivity)"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
