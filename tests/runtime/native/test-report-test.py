@@ -851,6 +851,9 @@ def lone_raw_qd1_log():
     spec = runner.MODEL_SPECS["ssd_emulated"]
     off = write_arm("off", qd=1, regime="ssd_emulated", mode=1)
     swapz = write_arm("swapz", qd=1, regime="ssd_emulated", mode=1)
+    # Real io-replay run reports carry the manifest QD; the ID161 parser
+    # requires qd == 1 for both arms.
+    off["qd"] = swapz["qd"] = 1
     kernel = swapz["kernel_write_path"]
     kernel.update({
         "submitter_prepare": 0,
@@ -2453,7 +2456,7 @@ class ReportContract(unittest.TestCase):
         operator = summary.getvalue()
         self.assertIn("Product decision snapshot", operator)
         self.assertIn("Sustained lane-owned WRITE", operator)
-        self.assertIn("ID161 learned-singleton RAW", operator)
+        self.assertIn("Learned-singleton RAW (ID161)", operator)
         self.assertIn("accepted-work lower-idle", operator)
         self.assertIn("A/raw", operator)
         self.assertNotIn("Negative classifier profile breakdown", operator)

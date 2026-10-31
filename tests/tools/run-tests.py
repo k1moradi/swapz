@@ -6198,7 +6198,7 @@ def print_bench(result, *, detailed=False):
     if lone_raw.get("overall") == "PASS_LONE_RAW_QD1_CANDIDATE":
         row = lone_raw["row"]
         off, candidate = row["arms"]["off"], row["arms"]["swapz"]
-        print("\n  ID161 learned-singleton RAW — default-off QD1 candidate")
+        print("\n  Learned-singleton RAW (ID161) — default-off QD1 candidate")
         print_table(
             "Fast QD1 candidate; one directional owned-RAM pair",
             ("mode", "WRITE MB/s", "lower MB", "lower req", "WRITE p99 ms"),
@@ -6224,7 +6224,7 @@ def print_bench(result, *, detailed=False):
         print("  Directional correctness/telemetry evidence only; default remains off.")
     else:
         _print_table_note(
-            "ID161 lone-RAW QD1", "NOT QUALIFIED: " +
+            "Lone-RAW QD1 (ID161)", "NOT QUALIFIED: " +
             str(lone_raw.get("reason", lone_raw.get("overall", "NOT_RUN"))))
     print("  Resource, lifecycle, GC, lower READ and full telemetry: test_results.json.")
     if result.get("overall") not in (None, "PASS"):

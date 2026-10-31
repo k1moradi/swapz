@@ -916,6 +916,34 @@ class PublicMakeContract(unittest.TestCase):
                         ))
                         index += 1
                 records.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
+            # ID161: test-loaded.sh runs exactly one fast-QD1 lone-RAW pair
+            # after the saturation regimes; the reporter requires it.
+            lone_off = json.loads(mock_write_arm("off", 1, 1))
+            lone_swapz = json.loads(mock_write_arm("swapz", 1, 1))
+            for arm in (lone_off, lone_swapz):
+                arm["qd"] = 1
+            lone_swapz["kernel_write_path"].update({
+                "submitter_prepare": 0, "submitter_prepare_lanes": 0,
+                "submitter_prepare_active": 0,
+                "submitter_prepare_active_max": 0,
+                "lone_raw": 1, "lone_raw_candidates": 100,
+                "lone_raw_cancelled_followers": 4,
+                "lone_raw_selected": 96, "lone_raw_zero_elided": 2,
+                "lone_raw_multi_record_windows": 0,
+                "lone_raw_multi_record_pages": 0,
+            })
+            records.extend((
+                "START_LONE_RAW_QD1=1",
+                "REPLAY_ORDER=off-first",
+                "PASS_RAM_MODEL_LOWER_MBPS=80 COMPLETION_NSEC=150000 "
+                "IRQMODE=2 QUEUE_MODE=2 SUBMIT_QUEUES=1 HW_QUEUE_DEPTH=64",
+                json.dumps(lone_off, sort_keys=True),
+                json.dumps(lone_swapz, sort_keys=True),
+                "PASS_LONE_RAW_ACTIVITY=candidates:100 selected:96 "
+                "cancelled:4 zero_elided:2 multi_record_windows:0 "
+                "multi_record_pages:0",
+                "PASS_LONE_RAW_QD1=1",
+            ))
             depth_sequence = [
                 2 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
             for index, depth in enumerate(depth_sequence):
