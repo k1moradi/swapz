@@ -1,0 +1,1546 @@
+{
+  "plan": {
+    "status": "DECLARED_BEFORE_FIRST_SAMPLE",
+    "study": "Native RAM-backed-device materialization sensitivity; unchanged product C",
+    "source_head": "fbf9ce0ca3479d7ff2b72ffefa3c5eefde84cb58",
+    "host_identity_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
+    "host_configuration": {
+      "execution": "native x86_64",
+      "systemd_detect_virt": "none",
+      "platform": "Lenovo 82BG, Intel Core i7-1185G7",
+      "storage": "new owned RAM-backed null_blk service models; native host status does not establish physical NVMe fidelity"
+    },
+    "production_c_sha256": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+    "hypothesis": "Full backing-page writes before setup reduce first-touch null_blk allocation in swapz append traffic more than in the bounded raw working set; measure model sensitivity without treating it as a product gain.",
+    "states": {
+      "F": "Fresh newly owned devices, canonical setup/warmup only",
+      "M": "Both newly owned raw and swapz backing receive a full 64MiB direct zero write before any target setup, with exact lower-sector completion checks"
+    },
+    "rounds": 8,
+    "orders": [
+      "FM",
+      "MF",
+      "FM",
+      "MF",
+      "FM",
+      "MF",
+      "FM",
+      "MF"
+    ],
+    "blocks": 16,
+    "repeats_per_condition_block": 2,
+    "scenarios": [
+      "nvme5-mixed-lanes",
+      "sata-mixed",
+      "fast-mixed"
+    ],
+    "pairs": 96,
+    "arms": 192,
+    "raw_target_order": "raw-first odd rounds, swapz-first even rounds, same in both condition blocks",
+    "content": "medium",
+    "delta64": 0,
+    "async_prepare": 1,
+    "submitter_prepare": 1,
+    "matched_report_fields": {
+      "nvme5-mixed-lanes": {
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "trace_sha256": "c75e96bcb9a9567e9ded64f23ef60f017f08343e00f2eb331c82824fc2b9c298",
+        "write_payload_stream_sha256": "99c6a4ab08b0c9d37b5558dbf86b36549a216d764da39d3c378879d8eec89b9f",
+        "expected_post_sha256": "2f52a00d1fb8827a9e06fe047ca68c3981955bc1efeade57774f481fd7c6e475",
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "measure_ops": 16384,
+        "warmup_ops": 1024,
+        "qd": 32,
+        "layout": "disjoint",
+        "replay_mode": "persistent-mixed",
+        "manifest_sha256": "6d479947320796d2be8f2f0da8265269a670cf655b3f8676c7a81b86776f3c67",
+        "verified_post_sha256": "2f52a00d1fb8827a9e06fe047ca68c3981955bc1efeade57774f481fd7c6e475"
+      },
+      "sata-mixed": {
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "trace_sha256": "28b30607d40136ce2c15642c33869ddf7d6a4e77f4d9988239ec4ec3227c6245",
+        "write_payload_stream_sha256": "cf3d5ef979dc21e8ea12a4c6dc4ad9eec1c03e065fb01e45e211766b932bc67a",
+        "expected_post_sha256": "4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6",
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "measure_ops": 16384,
+        "warmup_ops": 1024,
+        "qd": 32,
+        "layout": "disjoint",
+        "replay_mode": "qd-waves",
+        "manifest_sha256": "eaae4daf0c899b7618c4e865259db94bccbc6cdac092ab7237e1180f67c81f54",
+        "verified_post_sha256": "4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6"
+      },
+      "fast-mixed": {
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "trace_sha256": "28b30607d40136ce2c15642c33869ddf7d6a4e77f4d9988239ec4ec3227c6245",
+        "write_payload_stream_sha256": "cf3d5ef979dc21e8ea12a4c6dc4ad9eec1c03e065fb01e45e211766b932bc67a",
+        "expected_post_sha256": "4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6",
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "measure_ops": 16384,
+        "warmup_ops": 1024,
+        "qd": 32,
+        "layout": "disjoint",
+        "replay_mode": "qd-waves",
+        "manifest_sha256": "eaae4daf0c899b7618c4e865259db94bccbc6cdac092ab7237e1180f67c81f54",
+        "verified_post_sha256": "4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6"
+      }
+    },
+    "primary_family": {
+      "size": 3,
+      "endpoint": "Per round, difference of mean log(swapz useful WRITE / own raw WRITE) in M and F; two repeats averaged within each block before pairing",
+      "confidence": 0.9833333333333333,
+      "sign_test": "Exact two-sided sign tests, adjusted p=min(1,3*p)",
+      "practical_effect_floor_percent": 5,
+      "minimum_usable_rounds": 7,
+      "interpretation": "Condition sensitivity only; a direction requires family interval excluding zero, adjusted sign p<0.05, absolute point effect >=5% and >=7 usable rounds. No equivalence or product optimization claim."
+    },
+    "exclusions": [
+      "Exclude both condition blocks for a scenario/round if either repetition has ERROR, NOISY, UNKNOWN, missing/incorrect ownership or materialization marker, source/input/CPU geometry mismatch",
+      "Within-condition repeat raw WRITE max/min spread >10% excludes both conditions for that scenario/round; fast_test retains and labels all data",
+      "Cross-condition raw rate differences are outcomes and are NOT screened as host drift",
+      "No replacement samples, adaptive extension or pooling with earlier experiments"
+    ],
+    "secondary": "Absolute raw/swapz useful READ/WRITE, READ/WRITE p95/p99, independent lower bytes/requests, GC and process/host resources; pointwise descriptive 95% paired intervals. Do not sum overlapping timers into CPU.",
+    "history_boundary": "No canonical make test protocol changes or qualified history points. All devices remain newly created/owned; no swap or physical backing.",
+    "entry_preflight": "Fixed two-second startup settling followed by three standard quiet windows before first observation",
+    "common_hashes": {
+      "Makefile": "b091fc779e36ad359838337aeb08fc59c5ccb491d5855a8d0450a1edf28aa222",
+      "packaging/package-dkms.sh": "ecc2c1c526ee4732d5ed243992ed0130e72d6db7b2921f50a667c22fe7a953f6",
+      "packaging/sign-module.sh": "19e8b95e69d62ff95e840a902bdeb39ef462899db8771c1a25db9b97e38f8dba",
+      "src/kernel/Makefile": "c46c5be5bcd9b6fa3fe3a127ec2d1710cc381986d7813e93abb1bd540cba9777",
+      "src/kernel/VERSION": "b304b6064a2b78dc6c445956fef1cd618305ba777d8ec911e3ed8dd26352892f",
+      "src/kernel/authority.c": "17581753dc21eefff0fc2324c32bbaf3fc756a981d19ba50eaf9bf9371ac8956",
+      "src/kernel/authority.h": "ff1818ed22e9c72296bbeaf38c4f908c60e05271d9be4494e8a65458cbc37ebf",
+      "src/kernel/codec.c": "bf2e2abfdb0729dcf59c83ce927d991bcfe38b8b722b0fc032eda4b64005cacf",
+      "src/kernel/codec.h": "e372ade90165a147705ae14db606bb4a72a6fc8a7a42a7e289499d510b0bef5e",
+      "src/kernel/dm-target.c": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+      "src/kernel/engine.c": "d792e1f6e916267e548767fad82921d9ddebd60554ddde74460a389aabfe252b",
+      "src/kernel/engine.h": "db9a08059f62fe9b430b52b85a7531d05daae982155fdc4ed740060e55223ce6",
+      "src/kernel/flush-qual.h": "20f274b49c80fb295052146b7a4bbf07c390c4eed12ed13e476b16532f20296a",
+      "src/kernel/gc-cost.h": "bf12df339822f666019c6ff8fe96b87bb46d54ae7171a391c67b13ff7f206464",
+      "src/kernel/predictor-avx2.c": "7c2388088b10803bfed5dc168fb96bbc2293d5056cbe000a289542eb752dc73e",
+      "src/kernel/predictor-avx512.c": "30e142641c845ef21694697744f90056f7285aa7d6dce3ddbaf2508b405acffb",
+      "src/kernel/predictor-internal.h": "ec5ecba95817d10548a9cbe806941523291709d948d3fda6a57388eeb9d255a3",
+      "src/kernel/predictor-neon.c": "af2e4960c80829514742c4e9baac105681a7c2bb4aef1ce065b67a79eceab079",
+      "src/kernel/predictor-route.h": "a1b6fe14f75cc94211044f0219eb4c44cdc15a7f5af5f69fbebcf01755431020",
+      "src/kernel/predictor-shuffle.h": "7ff08ede1bdd3aa79bdc7da568c7bf5bb2769b7d0b0d685748fcd88686ecddd8",
+      "src/kernel/predictor-sse2.c": "8d4cbf6e02e3daa178cef1db6b1f43f6bb043d994feefde6f5d1e86a3b028a70",
+      "src/kernel/predictor.c": "e5383e3513196b1b4d9395a323bbc4d15d70a4dfb45f28f6a88762f9f494c1db",
+      "src/kernel/predictor.h": "4f320ef7a84a47398a539690987610139da23b43f905946e53e68dff0892c089",
+      "src/kernel/preparation-slots.h": "4e404ff67e6ec96357236a6746810865580eaf7754053454ad9e9bc2cd963ff4",
+      "src/kernel/superblock.h": "44d6c9a1d81c74c01cc83973c71caf4fa495ebc347465194c18fbb04f32f17a7",
+      "src/kernel/window-policy.h": "d9fcd0f9285f84212e8568a14dda0fd4044569a8df79226151e028c8b8289622",
+      "src/userspace/swapzctl.c": "ffb5454a52ac26f00daa1f5d61877a8976b0eae613ad224f1afea113c1f63655",
+      "tests/Makefile": "a04ead42eb6d2d02c3b32aedc196f90ae301f8fcb732358034b89450fb3604d1",
+      "tests/runtime/benchmark/anon-page-fixture.py": "b7716778c480d86d8517a99d6b5773dcf50e9220bf5debcabe3b6da853b60b38",
+      "tests/runtime/benchmark/io-replay-native.c": "6f94f3d8a56984b86e0d6c5c8d78a894208cf6862c705e9e48699b740f8bad0c",
+      "tests/runtime/benchmark/io-replay-test.py": "83dbe2674c7fc189e5b99c8f4faf7721db4af1e312b7da0c0b762118fe5b4223",
+      "tests/runtime/benchmark/io-replay.py": "24008d9af7576a78a9c063d72399380d7dada783d86458998752331ea5fa1179",
+      "tests/runtime/benchmark/resource-pressure.py": "fa34374ad962c74e6a47be204bed430a5b301cd7fb5208f856030f6ba0982d40",
+      "tests/runtime/native/codec/extent-geometry.c": "5593a8f95efa86dd07fa01d68aa82b66fe87738807077096e718036d76b4caf1",
+      "tests/runtime/native/codec/predictor-qualification.c": "b82b813c80ac38a79a8532f5ae1456a72335b65627b2ffd7c3728b310c8fdccb",
+      "tests/runtime/native/codec/roundtrip.c": "19f3e59181c8b102efe6f1df7947e7d412faa43daafdeda3fbfc67e20a14d95d",
+      "tests/runtime/native/gc/cost-accounting.c": "a968a2067b88d388790373eaf79fb84b0ec653a914f4263af9818a25d793dbbf",
+      "tests/runtime/native/gc/engine-rotation.c": "1d29257f202bd485148e437cef2f4bf7196d174f99c7d8def6b3d803dabb86bf",
+      "tests/runtime/native/gc/forbidden-victim.c": "2435fa5bc491e49e658e0fe8a27c2f8442703028f73df57aebd5cdbc1c097605",
+      "tests/runtime/native/gc/rotation.c": "e10bcd4723a0de6069318bbd169f54266d2728f82ded273584cc1678c2ea1e71",
+      "tests/runtime/native/gc/scan-scaling.c": "c043360bf324271c640fd1153e51126399f6fa1bd19210155c17c5886b6b7135",
+      "tests/runtime/native/io/flush-ordering.c": "d68d5f95f24961196ce19228874f4a71fde6f4971da1d3ba84770dfc5b4892fa",
+      "tests/runtime/native/io/lower-write-aggregation.c": "c530730681b26c0f943ded9df465b8c058ca6def03e1879285c4bbafea9b5fc4",
+      "tests/runtime/native/io/preparation-slots.c": "8586fd41e30891faace98cf150f44d84d7395b731654036127b3a7692f9004aa",
+      "tests/runtime/native/io/window-policy.c": "c8d736bf3b09d9b278ceac436aff09cb36ff81c687202020d4192a0e10806c7c",
+      "tests/runtime/native/make-interface-test.py": "81abc6f3dfdf18004ae229f2d48f9d2a50e6e54f59f4eb8e915fd27ccfa7fe1e",
+      "tests/runtime/native/mapping/authority-throughput.c": "61329b2df860c73806c99c40401a59105010dd94ca899a0cae7c5f87fae31b85",
+      "tests/runtime/native/mapping/authority.c": "979db7fe932dfcdfb5b618ed56c07b8447648c5501a613968d1efbf223589ac1",
+      "tests/runtime/native/mapping/dead-segment.c": "4b759f1d3e2565036b8de4ead13ab7b44303c11e4863edf23727508480d7653c",
+      "tests/runtime/native/mapping/online-packing.c": "d582947a35941736b3c69f0cf23f750f8addef26ea1a1d603f32c58ff303903a",
+      "tests/runtime/native/mapping/randomized-authority.c": "0d93ddafb9194477dac0a8232b2c071363d20f48a952460d4913e535c343d51f",
+      "tests/runtime/native/mapping/raw-discard.c": "128598f7640a90ffd037232cdbec84b2c701da62dc609988fb47c39ec99c4300",
+      "tests/runtime/native/mapping/transaction-publication.c": "b7952e984343d7b548d681fce3bb1b4a4b4deb6ef82aa7b6f0e23726aa035582",
+      "tests/runtime/native/mapping/write-verification.c": "e50f4926e7ffc0c5887bdcfc3a0c724cbd35e90bc122f692e2833b3ad72a4b64",
+      "tests/runtime/native/mapping/zero-write.c": "e67f08826c3564732cfaf3fca3632bcdeb5515dfb165c277de2eb48545697eb5",
+      "tests/runtime/native/nullblk-identity-test.sh": "60114a1cd4dce8625a15636c580be88f23fdce0b7654767c9f65e6edf6ec7e37",
+      "tests/runtime/native/package-dkms-test.py": "fb131c0bb8120c5e4f153d48f5aa17289c1ef49a26f07672bdf8b02346de0b43",
+      "tests/runtime/native/quiet-lower-io-test.sh": "6564a75085bf5393d72ac131e58008c73a46d181117b9736016c5d3d8eb9c3ef",
+      "tests/runtime/native/source-contract-test.py": "692f9d059cdabb48ea0291fd26b7253f8304c1b04b7ec170e94abd36de5696f9",
+      "tests/runtime/native/swap-inventory-test.sh": "acb0f42f589b3457efb985f15e68a3bd73d6417d7c2be1a30bd61de54ae72882",
+      "tests/runtime/native/test-report-test.py": "91d1d54df75e8b5a93bb5ad9f46142ad50efb75a667d5fdbd278ed6da15309a8",
+      "tests/suites/Makefile": "35a31653872bc0ff80a7a75d4e4d1e96a80fed45d62b30feca80677e38559b17",
+      "tests/tools/benchmark-owned-pair.sh": "7e49d2e5ae50b0242f472302499edb5d4737d44a6a2d0120049ba91a924bf147",
+      "tests/tools/deploy-nullblk.sh": "f0270962e1ed863f93e1e68877ee63fee168170cca612f0e31fbb5d0c159a905",
+      "tests/tools/device-roundtrip.c": "1e3ea92302875102c843d28a8d92c97872b492354d17aa5eb670815128cac380",
+      "tests/tools/direct-write-probe.c": "f860ff1684b4bd5f6e25d0d6cc9ec50ac2c073970f72b2e4ae1a75f7a7e71416",
+      "tests/tools/fast-test.py": "8cd25ac4f0db2ffe6180002c2ecdf6d7365611946ed22488d27eb2b9222eb4e1",
+      "tests/tools/loaded-preflight.sh": "50700a8342b8017967c89cfeb5e0906761599041ba3841f67b49f1ce82a10ea6",
+      "tests/tools/nullblk-identity.sh": "b6b1f49823bb6a1925ed615cb384988fae93eceeea6b800248763bc0b005c1ff",
+      "tests/tools/plot-history.py": "a814e5694b15c3116d33b8b82e64a676256b32d6d0827fe98dbb5458a29919fe",
+      "tests/tools/qualify-logical-open-balance.sh": "67b6593d0776ac8526669b1927850c52398df20be9633c7cf333f7d6ced16a2d",
+      "tests/tools/qualify-resource-pressure.sh": "7cffce57cfc15ea5b651751b43076a91b8db8af8d2d35006fb749e96f7618fae",
+      "tests/tools/quiet-lower-io.sh": "288e03eb3040034e53c3b2fa47d216be17c61c34cf71c768df01805e48aae7cc",
+      "tests/tools/request-plateau.py": "0ee26234f0731693ce0f4831a4fe0bdaa2d9f1194b4709f74b4b38b8a7dd8ab9",
+      "tests/tools/run-tests.py": "cf4f12e74dca3cd12da45cbb6b5a4d4b473c423afca090a73ca655bfb18d9048",
+      "tests/tools/swap-inventory.sh": "9f7427d140b08ff35df7c6af835cb21cadf42ad1e2bda29aa6f5081ee3db42a2",
+      "tests/tools/test-loaded.sh": "7fb7682aed040b619b760f30da726efcdec723ac0482f216f5e2d12eeb6c485e",
+      "tests/tools/test-rootless.sh": "11460b532068e42df1bf5c7fdc21e4764241477fad2e288164971edbe39509df"
+    },
+    "orchestrator_sha256": "94b43338ee8e28439a984817e527021faf21b3ca4d44dd34d97ff535f87f9c75",
+    "pre_sample_correction": "First study attempt completed F block only; M stopped in native preflight before device creation because its environment leaked materialization into a linear-calibration argument contract. First attempt preserved separately, no paired effect examined or reused. Corrected protocol isolates calibration before the fixed restart."
+  },
+  "primary": [
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "confidence": 0.9833333333333333,
+      "n": 5,
+      "change_pct": 9.068352838499841,
+      "interval_pct": [
+        0.7808069597882874,
+        18.03741158423134
+      ],
+      "sign_p": 0.0625,
+      "positive": 5,
+      "negative": 0,
+      "family_adjusted_sign_p": 0.1875
+    },
+    {
+      "scenario": "sata-mixed",
+      "confidence": 0.9833333333333333,
+      "n": 7,
+      "change_pct": 1.1014466547460044,
+      "interval_pct": [
+        -1.8420995006100362,
+        4.133263483421562
+      ],
+      "sign_p": 0.453125,
+      "positive": 5,
+      "negative": 2,
+      "family_adjusted_sign_p": 1
+    },
+    {
+      "scenario": "fast-mixed",
+      "confidence": 0.9833333333333333,
+      "n": 8,
+      "change_pct": -0.19345949307003021,
+      "interval_pct": [
+        -0.8478142086207044,
+        0.46521363553776324
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 4,
+      "family_adjusted_sign_p": 1
+    }
+  ],
+  "secondary": [
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_logical_write_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -2.370133179379326,
+      "interval_pct": [
+        -8.1543613629962,
+        3.778372461247555
+      ],
+      "sign_p": 1.0,
+      "positive": 2,
+      "negative": 3
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_logical_read_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -2.3701331793793434,
+      "interval_pct": [
+        -8.154361362996214,
+        3.7783724612475327
+      ],
+      "sign_p": 1.0,
+      "positive": 2,
+      "negative": 3
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_read_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 0.6029025533899116,
+      "interval_pct": [
+        -9.724486825580167,
+        12.111730482355245
+      ],
+      "sign_p": 1.0,
+      "positive": 3,
+      "negative": 2
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_read_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -3.5408576594913055,
+      "interval_pct": [
+        -18.41756851212562,
+        14.04864958516746
+      ],
+      "sign_p": 1.0,
+      "positive": 2,
+      "negative": 3
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_write_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 0.07023878730873685,
+      "interval_pct": [
+        -9.818916861801712,
+        11.043828067610624
+      ],
+      "sign_p": 1.0,
+      "positive": 2,
+      "negative": 3
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_write_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -1.0579713074437933,
+      "interval_pct": [
+        -17.156971206031283,
+        18.169569417183475
+      ],
+      "sign_p": 1.0,
+      "positive": 3,
+      "negative": 2
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_mixed_replay_cpu_user_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 49.885760410731514,
+      "interval_pct": [
+        24.388744826181107,
+        80.6091154412442
+      ],
+      "sign_p": 0.0625,
+      "positive": 5,
+      "negative": 0
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_mixed_replay_cpu_system_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -5.568916143840733,
+      "interval_pct": [
+        -18.644998315964685,
+        9.608867477890472
+      ],
+      "sign_p": 0.375,
+      "positive": 1,
+      "negative": 4
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_mixed_replay_peak_rss_kb",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -0.1756906920304712,
+      "interval_pct": [
+        -0.3477283315345685,
+        -0.0033560502713263466
+      ],
+      "sign_p": 0.0625,
+      "positive": 0,
+      "negative": 5
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_lower_write_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_lower_write_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_lower_read_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "off_lower_read_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_logical_write_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 6.483287619672058,
+      "interval_pct": [
+        5.608183049443434,
+        7.365643597762481
+      ],
+      "sign_p": 0.0625,
+      "positive": 5,
+      "negative": 0
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_logical_read_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 6.483287619672039,
+      "interval_pct": [
+        5.608183049443434,
+        7.365643597762442
+      ],
+      "sign_p": 0.0625,
+      "positive": 5,
+      "negative": 0
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_read_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -8.019278163721793,
+      "interval_pct": [
+        -10.573272268767699,
+        -5.392342936328065
+      ],
+      "sign_p": 0.0625,
+      "positive": 0,
+      "negative": 5
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_read_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -4.450697544880748,
+      "interval_pct": [
+        -6.811440665217925,
+        -2.030149786291812
+      ],
+      "sign_p": 0.0625,
+      "positive": 0,
+      "negative": 5
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_write_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -8.444430861402786,
+      "interval_pct": [
+        -9.375191381300457,
+        -7.50411098178227
+      ],
+      "sign_p": 0.0625,
+      "positive": 0,
+      "negative": 5
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_write_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -8.758613991492918,
+      "interval_pct": [
+        -11.975574087920934,
+        -5.4240861613957625
+      ],
+      "sign_p": 0.0625,
+      "positive": 0,
+      "negative": 5
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_mixed_replay_cpu_user_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 37.82614103419695,
+      "interval_pct": [
+        -15.708127728364,
+        125.36034187450917
+      ],
+      "sign_p": 1.0,
+      "positive": 3,
+      "negative": 2
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_mixed_replay_cpu_system_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -2.3786848863736254,
+      "interval_pct": [
+        -5.99480729591019,
+        1.3765398525620638
+      ],
+      "sign_p": 1.0,
+      "positive": 2,
+      "negative": 3
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_mixed_replay_peak_rss_kb",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -0.040502277206077845,
+      "interval_pct": [
+        -0.27093342167259094,
+        0.1904612949082809
+      ],
+      "sign_p": 1.0,
+      "positive": 2,
+      "negative": 3
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_lower_write_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": -0.031692632672542506,
+      "interval_pct": [
+        -0.19417569482467126,
+        0.13105495057011504
+      ],
+      "sign_p": 1.0,
+      "positive": 2,
+      "negative": 3
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_lower_write_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 0.19097972024015175,
+      "interval_pct": [
+        -0.34438520615637996,
+        0.7292207074086579
+      ],
+      "sign_p": 1.0,
+      "positive": 3,
+      "negative": 2
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_lower_read_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 2.5449899701238716,
+      "interval_pct": [
+        -13.565590246155931,
+        21.658434388801297
+      ],
+      "sign_p": 1.0,
+      "positive": 1,
+      "negative": 1
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "metric": "swapz_lower_read_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 5,
+      "change_pct": 2.5449899701238667,
+      "interval_pct": [
+        -13.565590246155923,
+        21.658434388801272
+      ],
+      "sign_p": 1.0,
+      "positive": 1,
+      "negative": 1
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_logical_write_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 1.012425768939156,
+      "interval_pct": [
+        -1.0810659574670902,
+        3.1502235490948993
+      ],
+      "sign_p": 0.453125,
+      "positive": 5,
+      "negative": 2
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_logical_read_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 1.0124257689391303,
+      "interval_pct": [
+        -1.0810659574670884,
+        3.150223549094845
+      ],
+      "sign_p": 0.453125,
+      "positive": 5,
+      "negative": 2
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_read_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.04929634058860109,
+      "interval_pct": [
+        -0.2242026283335455,
+        0.3235450072127149
+      ],
+      "sign_p": 1.0,
+      "positive": 3,
+      "negative": 4
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_read_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -0.21891109043693444,
+      "interval_pct": [
+        -1.506309291797753,
+        1.0853145251161014
+      ],
+      "sign_p": 0.453125,
+      "positive": 5,
+      "negative": 2
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_write_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -0.03411968073001911,
+      "interval_pct": [
+        -0.40342564954794896,
+        0.33655568155845966
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 3
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_write_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -24.997058817540882,
+      "interval_pct": [
+        -63.19420523834698,
+        52.841182277102185
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 3
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_mixed_replay_cpu_user_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 24.863846459198218,
+      "interval_pct": [
+        -19.874389259063097,
+        94.58173246248535
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 3
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_mixed_replay_cpu_system_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -3.5923790888685003,
+      "interval_pct": [
+        -9.09506887718533,
+        2.2434014848704975
+      ],
+      "sign_p": 1.0,
+      "positive": 3,
+      "negative": 4
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_mixed_replay_peak_rss_kb",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.13821960656171262,
+      "interval_pct": [
+        -0.004900176086167688,
+        0.2815442319691006
+      ],
+      "sign_p": 0.453125,
+      "positive": 5,
+      "negative": 2
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_lower_write_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_lower_write_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.0011614469331350705,
+      "interval_pct": [
+        -0.0016804874526324231,
+        0.004003462086170378
+      ],
+      "sign_p": 1.0,
+      "positive": 1,
+      "negative": 0
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_lower_read_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "off_lower_read_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_logical_write_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 2.1250237534489473,
+      "interval_pct": [
+        1.4941139887760804,
+        2.7598553921647135
+      ],
+      "sign_p": 0.015625,
+      "positive": 7,
+      "negative": 0
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_logical_read_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 2.125023753448935,
+      "interval_pct": [
+        1.4941139887760788,
+        2.7598553921646887
+      ],
+      "sign_p": 0.015625,
+      "positive": 7,
+      "negative": 0
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_read_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -7.520347908028175,
+      "interval_pct": [
+        -9.8748897123625,
+        -5.1042930903875225
+      ],
+      "sign_p": 0.015625,
+      "positive": 0,
+      "negative": 7
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_read_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -6.578683293994785,
+      "interval_pct": [
+        -19.956429224296027,
+        9.034896001077005
+      ],
+      "sign_p": 0.453125,
+      "positive": 2,
+      "negative": 5
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_write_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -4.475178174445575,
+      "interval_pct": [
+        -10.523034320126284,
+        1.9814598703633384
+      ],
+      "sign_p": 0.453125,
+      "positive": 2,
+      "negative": 5
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_write_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -0.6389128485032538,
+      "interval_pct": [
+        -2.1971784950024857,
+        0.9441802190017781
+      ],
+      "sign_p": 0.453125,
+      "positive": 2,
+      "negative": 5
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_mixed_replay_cpu_user_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 17.497393068931853,
+      "interval_pct": [
+        6.027598918238375,
+        30.20796018064211
+      ],
+      "sign_p": 0.125,
+      "positive": 6,
+      "negative": 1
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_mixed_replay_cpu_system_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -1.1043313201794542,
+      "interval_pct": [
+        -2.919438864922323,
+        0.7447131462340505
+      ],
+      "sign_p": 0.453125,
+      "positive": 2,
+      "negative": 5
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_mixed_replay_peak_rss_kb",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.01753728094291435,
+      "interval_pct": [
+        -0.10611262024597769,
+        0.14134023752353322
+      ],
+      "sign_p": 0.453125,
+      "positive": 5,
+      "negative": 2
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_lower_write_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -0.0399877726210405,
+      "interval_pct": [
+        -0.15593826214508383,
+        0.07609737204209524
+      ],
+      "sign_p": 1.0,
+      "positive": 3,
+      "negative": 4
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_lower_write_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": -0.020338540364620978,
+      "interval_pct": [
+        -0.1591476299541278,
+        0.11866353599227891
+      ],
+      "sign_p": 1.0,
+      "positive": 3,
+      "negative": 3
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_lower_read_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "sata-mixed",
+      "metric": "swapz_lower_read_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 7,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_logical_write_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.18591099582525458,
+      "interval_pct": [
+        -0.11231652847431203,
+        0.48502891674989856
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 4
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_logical_read_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.18591099582526568,
+      "interval_pct": [
+        -0.11231652847430701,
+        0.48502891674991583
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 4
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_read_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -2.73711967581282,
+      "interval_pct": [
+        -6.7661540003966705,
+        1.4660265006916724
+      ],
+      "sign_p": 0.7265625,
+      "positive": 3,
+      "negative": 5
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_read_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.09606707793554403,
+      "interval_pct": [
+        -0.13967993680576504,
+        0.33237063660665694
+      ],
+      "sign_p": 0.7265625,
+      "positive": 5,
+      "negative": 3
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_write_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -1.3453645518797956,
+      "interval_pct": [
+        -5.5557205035055315,
+        3.052690404216065
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 4
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_write_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.18800503813186578,
+      "interval_pct": [
+        -0.12508698109286281,
+        0.5020785512026381
+      ],
+      "sign_p": 0.7265625,
+      "positive": 5,
+      "negative": 3
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_mixed_replay_cpu_user_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 2.8787943021424587,
+      "interval_pct": [
+        -0.9694187467275547,
+        6.876544428166649
+      ],
+      "sign_p": 0.2890625,
+      "positive": 6,
+      "negative": 2
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_mixed_replay_cpu_system_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -6.938620344987252,
+      "interval_pct": [
+        -12.548276145946549,
+        -0.9691290048480403
+      ],
+      "sign_p": 0.0703125,
+      "positive": 1,
+      "negative": 7
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_mixed_replay_peak_rss_kb",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -0.04181567458520676,
+      "interval_pct": [
+        -0.633396867881587,
+        0.5532875099761526
+      ],
+      "sign_p": 0.7265625,
+      "positive": 5,
+      "negative": 3
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_lower_write_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_lower_write_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.009657727374136137,
+      "interval_pct": [
+        -0.00011803610315252627,
+        0.01943444650806846
+      ],
+      "sign_p": 0.7265625,
+      "positive": 5,
+      "negative": 3
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_lower_read_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "off_lower_read_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -0.0045937939906060404,
+      "interval_pct": [
+        -0.020955416429335676,
+        0.011770506036111584
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 4
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_logical_write_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -0.007908159714839826,
+      "interval_pct": [
+        -0.397314526884385,
+        0.38302062944636056
+      ],
+      "sign_p": 0.7265625,
+      "positive": 5,
+      "negative": 3
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_logical_read_mbps",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -0.007908159714839826,
+      "interval_pct": [
+        -0.39731452688434615,
+        0.3830206294463213
+      ],
+      "sign_p": 0.7265625,
+      "positive": 5,
+      "negative": 3
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_read_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.006511968228539949,
+      "interval_pct": [
+        -1.139355023933081,
+        1.1656603947166655
+      ],
+      "sign_p": 0.7265625,
+      "positive": 3,
+      "negative": 5
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_read_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -1.234566779161712,
+      "interval_pct": [
+        -4.3986310582698,
+        2.0342167406136276
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 4
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_write_p95_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -1.292707270311041,
+      "interval_pct": [
+        -3.2761659537802883,
+        0.7314250318978202
+      ],
+      "sign_p": 0.0703125,
+      "positive": 1,
+      "negative": 7
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_write_p99_ns",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 5.792587588229223,
+      "interval_pct": [
+        2.535368347218857,
+        9.153278220185207
+      ],
+      "sign_p": 0.0703125,
+      "positive": 7,
+      "negative": 1
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_mixed_replay_cpu_user_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.721721008180164,
+      "interval_pct": [
+        -3.025653319610648,
+        4.613904915342191
+      ],
+      "sign_p": 0.7265625,
+      "positive": 5,
+      "negative": 3
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_mixed_replay_cpu_system_s",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -2.102688599779954,
+      "interval_pct": [
+        -6.345976271476555,
+        2.3328544555931168
+      ],
+      "sign_p": 0.7265625,
+      "positive": 3,
+      "negative": 5
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_mixed_replay_peak_rss_kb",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.03418550144033373,
+      "interval_pct": [
+        -0.49538372992414303,
+        0.5665731303960014
+      ],
+      "sign_p": 1.0,
+      "positive": 4,
+      "negative": 4
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_lower_write_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -0.06572605957755803,
+      "interval_pct": [
+        -0.16100735536484279,
+        0.029646167869656598
+      ],
+      "sign_p": 0.7265625,
+      "positive": 3,
+      "negative": 5
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_lower_write_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": -0.28763943183860785,
+      "interval_pct": [
+        -1.2923813756094649,
+        0.7273297505956993
+      ],
+      "sign_p": 0.2890625,
+      "positive": 2,
+      "negative": 6
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_lower_read_bytes",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    },
+    {
+      "scenario": "fast-mixed",
+      "metric": "swapz_lower_read_requests",
+      "confidence": 0.95,
+      "scope": "Descriptive paired block means; no new family direction or equivalence claim",
+      "n": 8,
+      "change_pct": 0.0,
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "sign_p": 1.0,
+      "positive": 0,
+      "negative": 0
+    }
+  ],
+  "absolute": [
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "state": "F",
+      "rounds": 5,
+      "off_logical_read_mbps": 1218.4855960212478,
+      "off_logical_write_mbps": 3670.975095923921,
+      "swapz_logical_read_mbps": 385.04830782178266,
+      "swapz_logical_write_mbps": 1160.0487961096617
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "state": "M",
+      "rounds": 5,
+      "off_logical_read_mbps": 1189.6030095946423,
+      "off_logical_write_mbps": 3583.959495719739,
+      "swapz_logical_read_mbps": 410.0014125776876,
+      "swapz_logical_write_mbps": 1235.2259064702755
+    },
+    {
+      "scenario": "sata-mixed",
+      "state": "F",
+      "rounds": 7,
+      "off_logical_read_mbps": 137.44464761256492,
+      "off_logical_write_mbps": 414.0844012447125,
+      "swapz_logical_read_mbps": 111.95908716047657,
+      "swapz_logical_write_mbps": 337.30314258168556
+    },
+    {
+      "scenario": "sata-mixed",
+      "state": "M",
+      "rounds": 7,
+      "off_logical_read_mbps": 138.837802276522,
+      "off_logical_write_mbps": 418.28160808314897,
+      "swapz_logical_read_mbps": 114.33632584456493,
+      "swapz_logical_write_mbps": 344.46513451236666
+    },
+    {
+      "scenario": "fast-mixed",
+      "state": "F",
+      "rounds": 8,
+      "off_logical_read_mbps": 20.876214329978794,
+      "off_logical_write_mbps": 62.89451689274287,
+      "swapz_logical_read_mbps": 39.399082187649185,
+      "swapz_logical_write_mbps": 118.69902277498718
+    },
+    {
+      "scenario": "fast-mixed",
+      "state": "M",
+      "rounds": 8,
+      "off_logical_read_mbps": 20.914747446597207,
+      "off_logical_write_mbps": 63.01060699010341,
+      "swapz_logical_read_mbps": 39.39590605934201,
+      "swapz_logical_write_mbps": 118.68945393974188
+    }
+  ],
+  "excluded": [
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "round": 2,
+      "reasons": [
+        "M:NOISY",
+        "M:within-condition raw drift"
+      ]
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "round": 5,
+      "reasons": [
+        "M:NOISY",
+        "M:within-condition raw drift"
+      ]
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "round": 8,
+      "reasons": [
+        "M:NOISY",
+        "M:within-condition raw drift"
+      ]
+    },
+    {
+      "scenario": "sata-mixed",
+      "round": 5,
+      "reasons": [
+        "M:NOISY"
+      ]
+    }
+  ],
+  "usable_rounds": {
+    "nvme5-mixed-lanes": [
+      1,
+      3,
+      4,
+      6,
+      7
+    ],
+    "sata-mixed": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8
+    ],
+    "fast-mixed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "scope": "Unchanged-C host/model sensitivity, not product improvement or physical media evidence; no cross-condition raw drift exclusion. Paired t/sign assumptions and chronological dependence remain limits.",
+  "disposition": "Model sensitivity suggestive on persistent NVMe5 but no primary passes all declared direction criteria. No product change, equivalence or physical-media claim. No added samples; canonical fresh-device protocol retained.",
+  "arms_passed": 192,
+  "timed_gc_victims": [
+    0
+  ],
+  "resource_scope": "Materialization writes 128MiB total data region per pair before setup/timing, on two new owned devices. Extra residency/metadata/allocator rounding and total CPU not measured; native RSS excludes kernel pages.",
+  "packet_sha256": "6b0c3f0c939239d385ea2a77c15f6315cfd3ad9d30d44c75f002a0d62918f861",
+  "concurrent_reports": [
+    {
+      "commit": "9d30bf11",
+      "architecture": "aarch64",
+      "overall": "PASS",
+      "stages": "all five PASS",
+      "scope": "different host; baseline protocol, not this study"
+    },
+    {
+      "commit": "42c6c9a1",
+      "architecture": "x86_64",
+      "overall": "PASS",
+      "stages": "all five PASS",
+      "scope": "different host; baseline protocol, not this study"
+    }
+  ]
+}

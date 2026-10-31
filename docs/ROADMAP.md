@@ -357,6 +357,7 @@ changes.
 | 155 | Systematic admission hold/notification sampling | **diagnostic hypothesis; probe removed** | Twelve fixed blocks/96 arm oracles pass. One-in-64 samples place owner notification at roughly 0.34..0.94 us versus 0.02..0.06 us preceding non-submitter work; clock checks 13..21 ns. Partial hold wall and systematic complete-session samples are not CPU or exact savings. Perturbation remains unresolved after exclusions. Investigate a lifetime-pinned out-of-lock owner wake, preserving acceptance/FIFO/producer locking and drain joins; [measurements and ownership requirements](handoff/admission-hold-x86.md). |
 | 156 | Lifetime-pinned owner notification outside admission lock | **native fixed comparison declined / removed** | Development/native concurrent lifetime and loaded GC/suspend/fault gates pass. Initial pilot unusable (71/72 exclusions). After competing work ended, a separately declared native-host pilot passes 288 arm oracles; NVMe5 n7 +1.63%, family interval -6.43..+10.39%, adjusted sign p1 misses +3%/minimum n9. SATA n11 -2.18% and fast n11 -0.09% remain inconclusive. Seven exclusions without replacement. Exploratory p95/CPU directions do not qualify retention; lower WRITE benefit unproved. Restore qualified production and helpers; [new result](handoff/admission-wake-quiet-x86-result.md). |
 | 157 | Resolve pack/submit ancestry to actual lower-backend work | **native diagnostic / model sensitivity next** | Three fixed owned pairs/six arm oracles and complete gates pass; source/ELF/live-section checks resolve 1,019 owner samples. 165 include null_blk backend allocation/initialization/locking, versus 39 dm_io-only and 815 other. Broad pack/stage labels are not a pure pack CPU budget; all rows NOISY on 16% raw-repeat drift. Do not infer RAM bandwidth or reopen rejected direct BIO from backend ancestry. Next matched both-arm full-backing materialization control with unchanged C and separate protocol history; [profile and limits](handoff/pack-owner-x86-profile.md). |
+| 158 | Matched both-arm RAM-backing materialization sensitivity | **native model study complete; no product change** | Eight fixed rounds/16 blocks/192 arm oracles pass with unchanged C. Materialized both-device setup yields persistent normalized +9.07%, family interval +0.78..+18.04%, but n5<7 and adjusted sign p0.1875 fail direction criteria. SATA +1.10% and fast -0.19% remain inconclusive. Four exclusions without replacement; cross-condition raw changes are outcomes. Exploratory absolute swapz service +6.48% NVMe/+2.13% SATA, fast unchanged with p99 trade-off. Preserve cold qualification/history; next isolate backend mechanism/residual C rather than claim RAM bandwidth or physical NVMe fidelity. [Results and packet](handoff/backing-materialization-x86-result.md). |
 
 
 ## What the pinned queue experiment establishes
@@ -669,9 +670,10 @@ resource limits; it does not establish a gain on every storage/QD/content arm.
    and prior noisy series distinct. Do not repeat the same admission-wake
    variant until significance appears; choose further C work only from a new
    measured opportunity, preserving all ownership and publication contracts.
-   ID157 now separates null_blk backing allocation from apparent pack/submit
-   ancestry. Run a fixed matched fresh/materialized-backing sensitivity study
-   on both raw and target arms before treating this as product C cost.
+   ID157 separates null_blk backing allocation from apparent pack/submit
+   ancestry. ID158 completed matched both-arm backing sensitivity with no
+   product-source change. Profile the backend mechanism and residual owner
+   operation before selecting further C work; preserve the canonical protocol.
 2. Before timing a candidate, fix source order, samples, matched inputs,
    primary family, practical floor and exclusions. Use service and p95/p99,
    independent lower bytes/requests, GC and resource costs together. Require

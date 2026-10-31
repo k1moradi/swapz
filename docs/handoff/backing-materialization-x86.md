@@ -1,4 +1,7 @@
-# Native RAM-backing materialization sensitivity: prospective study
+# Native RAM-backing materialization sensitivity: prospective protocol
+
+**Study complete:** see [the result](backing-materialization-x86-result.md).
+The text below preserves the pre-sample protocol.
 
 ID157 attributed 165/1,019 observed owner stacks to null_blk backend work.
 This study keeps production C unchanged and asks how first-touch allocation

@@ -731,3 +731,13 @@ study must treat raw and target backing identically before timing, preserve
 fresh target/allocator state and matched inputs, and retain a separate protocol
 series. Do not replace qualified history or claim physical NVMe fidelity or a
 RAM-bandwidth bottleneck from allocation ancestry alone.
+
+
+ID158's fixed matched materialization study passed all byte oracles with
+unchanged product C. Its persistent normalized estimate was +9.07%, but n5<7
+and adjusted sign p0.1875 failed the declared direction criterion despite a
+positive paired-t interval. SATA/fast were inconclusive; secondary latency
+trade-offs and resource limits remain explicit. Preserve fresh-backed canonical
+qualification and keep materialized observations in their separate protocol.
+The study motivates mechanism/residual-owner attribution, not a product gain,
+RAM-bandwidth diagnosis or a replacement of historical raw controls.
