@@ -14,7 +14,7 @@ Compression ratio, encoded-size diagrams, mock counters, green CI or a single sy
 
 There is one implementation and one public product identity. Production kernel code is C under `src/kernel/`; the administrative utility is under `src/userspace/`. SWZ is the current unversioned format name, not a product generation. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
-The format uses independently decodable 4KiB logical pages, ordinary LZ4 compression, default-on page-local delta64 plus byte-shuffle and LZ4 rescue, whole-page RAW fallback, 4/8/16KiB extents, CRC/generation authority, bounded write windows, and serialized publication only after required lower I/O succeeds. Delta64 rescue is experimental and on by default (load with `delta64_rescue=0` to disable); its scalar sampled classifier runs before ordinary LZ4 so high-score pages can try delta64 first, while lower-score pages retain the ordinary-LZ4 packing-cliff route. The shuffled payload has its own DELTA64_SHUF8 encoding; plain DELTA64 remains decodable. Delta64 never carries state across logical pages or extents.
+The format uses independently decodable 4KiB logical pages, ordinary LZ4 compression, page-local delta64 plus byte-shuffle and LZ4 rescue, whole-page RAW fallback, 4/8/16KiB extents, CRC/generation authority, bounded write windows, and serialized publication only after required lower I/O succeeds. **Main compression requirement:** every emulated device runs and is qualified with delta64 rescue enabled, `DELTA64_SHUF8` byte-plane shuffle (“bitshuffle” in the project requirement), and LZ4. Delta64-off is not a performance mode to benchmark, plot or compare. The module-level disable switch is retained only for debugging/compatibility and cannot qualify an emulated-device result. The scalar sampled classifier runs before ordinary LZ4 so high-score pages can try delta64 + shuffle + LZ4 first, while lower-score pages retain the ordinary-LZ4 packing-cliff route. The shuffled payload has its own DELTA64_SHUF8 encoding; plain DELTA64 remains decodable for format compatibility. Delta64 never carries state across logical pages or extents.
 
 ## Non-negotiable correctness
 
@@ -31,6 +31,7 @@ Current official loaded qualification is restricted to newly created, positively
 Most development effort belongs in production kernel C: measured bottlenecks, completion/ordering bugs, layout decisions, read/write paths and GC. Python and shell exist only to qualify the product. Rejected experiments and historical compatibility systems should be removed after their conclusion is captured; Git history is the archive.
 
 Current production policy keeps bounded asynchronous preparation enabled,
+the delta64 + `DELTA64_SHUF8` + LZ4 stack fixed on for every emulated device,
 lower-WRITE submission fixed at one immutable run, ordinary LZ4 fixed at
 acceleration one, delta64 preparation fixed at one producer lane, and exact
 adjacent READ coalescing bounded to eight 4KiB blocks. The existing eight
