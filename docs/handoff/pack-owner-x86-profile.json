@@ -1,0 +1,601 @@
+{
+  "plan": {
+    "kind": "Fixed production-C attribution, no performance promotion",
+    "pairs": 3,
+    "scenario": "nvme5-mixed-lanes",
+    "delta64": 0,
+    "content": "medium",
+    "source_head": "d93347f20d4c7a4621dcbf77a490f8598ca8ee82",
+    "production_c_sha256": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+    "module_sha256": "1b6ec2ac1104000c3ce1607f644812e046321c0bc767a97c3d3ce219b486069b",
+    "bpf_sha256": "39fde510dfe784aeee564bb13df8c9af801dff8bd5d06fdcbb0f3e65cce55f8e",
+    "hardware_cycle_period": 500000,
+    "gates": "root native stdin GO read to final fsync; six nonoverlapping gates, complete sample counts, no loss, exact live module sections/ELF required",
+    "purpose": "Resolve inline pack/stage and residual owner stack samples to source locations. Diagnostic only, not exact CPU or uninstrumented cost.",
+    "screen": "Preserve host screens/raw controls; exclude performance inference from NOISY/UNKNOWN. Do not add samples or infer gain from profiled means."
+  },
+  "module_sha256": "1b6ec2ac1104000c3ce1607f644812e046321c0bc767a97c3d3ce219b486069b",
+  "observations": [
+    {
+      "scenario": "nvme5-mixed-lanes#1",
+      "gate": 2,
+      "gate_wall_ns": 50357543,
+      "total_samples": 2328,
+      "workqueue_irq_inclusive_oncpu_ns": {
+        "rps_work": 4911,
+        "intel_frontbuffer_flush_work": 5423,
+        "active_work": 9089,
+        "psi_avgs_work": 12159,
+        "__intel_wakeref_put_work": 36517,
+        "engine_retire": 51940,
+        "swapz_completion_work": 16436394,
+        "swapz_worker": 40580695
+      },
+      "owner_exclusive_sample_categories": {
+        "other": 125,
+        "crc": 20,
+        "pack_or_stage": 89,
+        "read_decode": 14,
+        "lock_or_irq_restore": 43,
+        "read": 43,
+        "plan_or_sort": 9,
+        "interrupt": 5
+      },
+      "all_swapz_exclusive_sample_categories": {
+        "other": 353,
+        "crc": 38,
+        "pack_or_stage": 89,
+        "lz4_state_clear": 79,
+        "lz4_compress": 111,
+        "read_decode": 14,
+        "lock_or_irq_restore": 129,
+        "read": 43,
+        "interrupt": 18,
+        "plan_or_sort": 9
+      },
+      "owner_top_leaves": [
+        [
+          "memcpy",
+          33
+        ],
+        [
+          "swapz_worker",
+          21
+        ],
+        [
+          "crc32c_x86_3way",
+          19
+        ],
+        [
+          "_raw_spin_lock_irq",
+          19
+        ],
+        [
+          "LZ4_decompress_safe",
+          14
+        ],
+        [
+          "swapz_finish",
+          13
+        ],
+        [
+          "__raw_spin_lock_irqsave",
+          12
+        ],
+        [
+          "read_tsc",
+          11
+        ],
+        [
+          "native_queued_spin_lock_slowpath",
+          10
+        ],
+        [
+          "swapz_engine_plan_bounded_policy",
+          9
+        ],
+        [
+          "swapz_flush_window",
+          8
+        ],
+        [
+          "__rmqueue_pcplist",
+          8
+        ]
+      ],
+      "write_ops": 12301,
+      "read_ops": 4083,
+      "performance_validity": {
+        "performance_usable": false,
+        "quiet_after": {
+          "affinity_cpus": 8,
+          "busy_fraction": 0.06329113924050633,
+          "online_cpus": 8,
+          "pressure_some_fraction": 0.00725074000280053,
+          "status": "AVAILABLE",
+          "steal_fraction": 0.0,
+          "tick_hz": 100,
+          "wall_ns": 200669173
+        },
+        "quiet_before": {
+          "affinity_cpus": 8,
+          "busy_fraction": 0.050314465408805034,
+          "online_cpus": 8,
+          "pressure_some_fraction": 0.0028147760017199924,
+          "status": "AVAILABLE",
+          "steal_fraction": 0.0,
+          "tick_hz": 100,
+          "wall_ns": 200726452
+        },
+        "reasons": [
+          "raw repeat spread 16.0%"
+        ],
+        "status": "NOISY"
+      }
+    },
+    {
+      "scenario": "nvme5-mixed-lanes#2",
+      "gate": 4,
+      "gate_wall_ns": 50627854,
+      "total_samples": 2256,
+      "workqueue_irq_inclusive_oncpu_ns": {
+        "intel_frontbuffer_flush_work": 2744,
+        "rps_work": 4542,
+        "active_work": 5000,
+        "delayed_fput": 13395,
+        "__intel_wakeref_put_work": 31843,
+        "engine_retire": 66028,
+        "__i915_gem_free_work": 169590,
+        "swapz_completion_work": 15870839,
+        "swapz_worker": 40270880
+      },
+      "owner_exclusive_sample_categories": {
+        "other": 137,
+        "read": 39,
+        "crc": 15,
+        "lock_or_irq_restore": 24,
+        "read_decode": 17,
+        "pack_or_stage": 101,
+        "plan_or_sort": 3,
+        "interrupt": 3
+      },
+      "all_swapz_exclusive_sample_categories": {
+        "other": 393,
+        "lock_or_irq_restore": 104,
+        "read": 40,
+        "lz4_compress": 141,
+        "lz4_state_clear": 91,
+        "crc": 30,
+        "read_decode": 17,
+        "pack_or_stage": 101,
+        "interrupt": 13,
+        "plan_or_sort": 4
+      },
+      "owner_top_leaves": [
+        [
+          "memcpy",
+          32
+        ],
+        [
+          "LZ4_decompress_safe",
+          17
+        ],
+        [
+          "psi_group_change",
+          15
+        ],
+        [
+          "crc32c_x86_3way",
+          13
+        ],
+        [
+          "swapz_prepared_put",
+          12
+        ],
+        [
+          "_raw_spin_lock_irq",
+          12
+        ],
+        [
+          "read_tsc",
+          11
+        ],
+        [
+          "swapz_worker",
+          10
+        ],
+        [
+          "swapz_finish",
+          10
+        ],
+        [
+          "__raw_spin_lock_irqsave",
+          9
+        ],
+        [
+          "__rmqueue_pcplist",
+          9
+        ],
+        [
+          "enqueue_task_fair",
+          8
+        ]
+      ],
+      "write_ops": 12301,
+      "read_ops": 4083,
+      "performance_validity": {
+        "performance_usable": false,
+        "quiet_after": {
+          "affinity_cpus": 8,
+          "busy_fraction": 0.031446540880503145,
+          "online_cpus": 8,
+          "pressure_some_fraction": 0.003947813234561469,
+          "status": "AVAILABLE",
+          "steal_fraction": 0.0,
+          "tick_hz": 100,
+          "wall_ns": 200870698
+        },
+        "quiet_before": {
+          "affinity_cpus": 8,
+          "busy_fraction": 0.056962025316455694,
+          "online_cpus": 8,
+          "pressure_some_fraction": 0.003939928591160235,
+          "status": "AVAILABLE",
+          "steal_fraction": 0.0,
+          "tick_hz": 100,
+          "wall_ns": 200765060
+        },
+        "reasons": [
+          "raw repeat spread 16.0%"
+        ],
+        "status": "NOISY"
+      }
+    },
+    {
+      "scenario": "nvme5-mixed-lanes#3",
+      "gate": 6,
+      "gate_wall_ns": 49811553,
+      "total_samples": 2232,
+      "workqueue_irq_inclusive_oncpu_ns": {
+        "intel_frontbuffer_flush_work": 4864,
+        "rps_work": 4866,
+        "delayed_vfree_work": 5538,
+        "active_work": 10392,
+        "psi_avgs_work": 14268,
+        "__intel_wakeref_put_work": 32028,
+        "engine_retire": 45833,
+        "swapz_completion_work": 15834146,
+        "swapz_worker": 40010863
+      },
+      "owner_exclusive_sample_categories": {
+        "pack_or_stage": 76,
+        "read": 47,
+        "other": 123,
+        "lock_or_irq_restore": 32,
+        "read_decode": 22,
+        "plan_or_sort": 10,
+        "crc": 19,
+        "interrupt": 3
+      },
+      "all_swapz_exclusive_sample_categories": {
+        "pack_or_stage": 77,
+        "read": 48,
+        "other": 342,
+        "lz4_state_clear": 89,
+        "lock_or_irq_restore": 112,
+        "lz4_compress": 100,
+        "read_decode": 22,
+        "plan_or_sort": 10,
+        "interrupt": 16,
+        "crc": 36
+      },
+      "owner_top_leaves": [
+        [
+          "memcpy",
+          29
+        ],
+        [
+          "LZ4_decompress_safe",
+          22
+        ],
+        [
+          "crc32c_x86_3way",
+          14
+        ],
+        [
+          "swapz_finish",
+          14
+        ],
+        [
+          "_raw_spin_lock_irq",
+          13
+        ],
+        [
+          "read_tsc",
+          11
+        ],
+        [
+          "swapz_worker",
+          10
+        ],
+        [
+          "__raw_spin_lock_irqsave",
+          10
+        ],
+        [
+          "swapz_engine_plan_bounded_policy",
+          10
+        ],
+        [
+          "psi_group_change",
+          10
+        ],
+        [
+          "swapz_prepared_put",
+          9
+        ],
+        [
+          "enqueue_task_fair",
+          8
+        ]
+      ],
+      "write_ops": 12301,
+      "read_ops": 4083,
+      "performance_validity": {
+        "performance_usable": false,
+        "quiet_after": {
+          "affinity_cpus": 8,
+          "busy_fraction": 0.050955414012738856,
+          "online_cpus": 8,
+          "pressure_some_fraction": 0.0032979474038665147,
+          "status": "AVAILABLE",
+          "steal_fraction": 0.0,
+          "tick_hz": 100,
+          "wall_ns": 200730915
+        },
+        "quiet_before": {
+          "affinity_cpus": 8,
+          "busy_fraction": 0.03164556962025317,
+          "online_cpus": 8,
+          "pressure_some_fraction": 0.0027528359337461185,
+          "status": "AVAILABLE",
+          "steal_fraction": 0.0,
+          "tick_hz": 100,
+          "wall_ns": 200883748
+        },
+        "reasons": [
+          "raw repeat spread 16.0%"
+        ],
+        "status": "NOISY"
+      }
+    }
+  ],
+  "gates": {
+    "1": {
+      "start_ns": 38458738551948,
+      "pid": 576132,
+      "end_ns": 38458754584568,
+      "rc": 0
+    },
+    "2": {
+      "start_ns": 38459147069590,
+      "pid": 576201,
+      "end_ns": 38459197427133,
+      "rc": 0
+    },
+    "3": {
+      "start_ns": 38460613312785,
+      "pid": 576540,
+      "end_ns": 38460630963134,
+      "rc": 0
+    },
+    "4": {
+      "start_ns": 38461024520423,
+      "pid": 576610,
+      "end_ns": 38461075148277,
+      "rc": 0
+    },
+    "5": {
+      "start_ns": 38462460254565,
+      "pid": 576949,
+      "end_ns": 38462478853571,
+      "rc": 0
+    },
+    "6": {
+      "start_ns": 38462867252219,
+      "pid": 577019,
+      "end_ns": 38462917063772,
+      "rc": 0
+    }
+  },
+  "unresolved_module_frames": 0,
+  "backend_partition": {
+    "other_owner": 815,
+    "null_blk_backend": 165,
+    "dm_io_without_null_blk": 39
+  },
+  "backend_partition_per_gate": {
+    "2": {
+      "other_owner": 280,
+      "null_blk_backend": 61,
+      "dm_io_without_null_blk": 7
+    },
+    "4": {
+      "other_owner": 262,
+      "null_blk_backend": 58,
+      "dm_io_without_null_blk": 19
+    },
+    "6": {
+      "other_owner": 273,
+      "dm_io_without_null_blk": 13,
+      "null_blk_backend": 46
+    }
+  },
+  "backend_top_leaves": [
+    [
+      "_raw_spin_lock_irq",
+      44
+    ],
+    [
+      "__rmqueue_pcplist",
+      25
+    ],
+    [
+      "kernel_init_pages",
+      22
+    ],
+    [
+      "rmqueue_bulk",
+      11
+    ],
+    [
+      "memcpy",
+      8
+    ],
+    [
+      "__refill_objects_node",
+      6
+    ],
+    [
+      "__raw_spin_lock_irqsave",
+      4
+    ],
+    [
+      "__alloc_frozen_pages_noprof",
+      4
+    ],
+    [
+      "null_queue_rq",
+      4
+    ],
+    [
+      "get_page_from_freelist",
+      3
+    ],
+    [
+      "__radix_tree_lookup",
+      3
+    ],
+    [
+      "radix_tree_insert",
+      2
+    ],
+    [
+      "null_handle_data_transfer",
+      2
+    ],
+    [
+      "bio_endio",
+      2
+    ],
+    [
+      "__kmalloc_cache_noprof",
+      2
+    ],
+    [
+      "__radix_tree_preload",
+      1
+    ],
+    [
+      "__refill_objects_any",
+      1
+    ],
+    [
+      "clockevents_program_event",
+      1
+    ],
+    [
+      "its_return_thunk",
+      1
+    ],
+    [
+      "__blk_mq_free_request",
+      1
+    ],
+    [
+      "rmqueue_pcplist",
+      1
+    ],
+    [
+      "idle_cpu",
+      1
+    ],
+    [
+      "_raw_spin_unlock_irq",
+      1
+    ],
+    [
+      "blk_account_io_completion.part.0",
+      1
+    ],
+    [
+      "blk_add_timer",
+      1
+    ],
+    [
+      "kmem_cache_alloc_noprof",
+      1
+    ],
+    [
+      "__pcs_replace_empty_main",
+      1
+    ],
+    [
+      "allocate_slab",
+      1
+    ],
+    [
+      "blk_mq_start_request",
+      1
+    ],
+    [
+      "read_tsc",
+      1
+    ],
+    [
+      "hrtimer_reprogram.constprop.0",
+      1
+    ],
+    [
+      "rmqueue.isra.0",
+      1
+    ],
+    [
+      "radix_tree_preload",
+      1
+    ],
+    [
+      "timerqueue_add",
+      1
+    ],
+    [
+      "radix_tree_lookup",
+      1
+    ],
+    [
+      "null_insert_page",
+      1
+    ],
+    [
+      "_raw_spin_unlock",
+      1
+    ],
+    [
+      "blk_stat_add",
+      1
+    ]
+  ],
+  "scope": "Exclusive stack-presence partition, not nanoseconds or a causal removable budget. Includes IRQ time and profiler perturbation; all performance rows NOISY on raw-repeat drift. Inline return PCs are call-site context, not exact C-line cost.",
+  "hashes": {
+    "dm-swapz.ko": "1b6ec2ac1104000c3ce1607f644812e046321c0bc767a97c3d3ce219b486069b",
+    "stacks.log": "8480f5bda6304d8f1d88ccb1638caac93e38552fe29d714873b4ebb2cd631184",
+    "kernel-kallsyms.txt": "0ad61e2db6c549127c68998a9ae78006faa06d23400c22f5bad1473aa9a2cfa9",
+    "module-sections.json": "712f33586e158cffad9075dbd8efd2e6b2639cd6b2475dd017cf0b7c1cd847cf",
+    "profile.bt": "39fde510dfe784aeee564bb13df8c9af801dff8bd5d06fdcbb0f3e65cce55f8e",
+    "watch.py": "5362636aacc86c404f38dca284037019b983793ebd0a4a0c37bcf1c2c0be7e4a",
+    "source-lines.py": "61cca3e65d3f0f137c3c95e010b8139883b507f6142119e6b89c2317ee7e541e"
+  },
+  "profile_loss_diagnostic": "",
+  "findings": "Sampled backend allocation/initialization beneath null_insert_page accounts for substantial submit-path work. Existing direct-BIO rejected variant cannot remove lower-device allocation; do not reopen it solely from dm_io ancestry. Need matched both-arm backing-materialization sensitivity before further C policy choices.",
+  "packet_sha256": "af1894957871273d4c0541cf385469037b0d01484e0dcec8a5a0748d8db02b20"
+}

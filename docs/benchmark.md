@@ -718,3 +718,16 @@ the history identity; cloned systems need distinct `/etc/machine-id` values.
 Install Python Matplotlib on each test computer. Rendering failures are reported
 as `NOT UPDATED` with a local diagnostic log, independently of qualification.
 Plots are local generated artifacts; report publication keeps them reproducible.
+
+
+### Memory-backed lower-device allocation scope
+
+The ID157 native owner profile observes null_blk backing-page allocation,
+initialization and locking inside lower submission. These are part of attained
+RAM-model service, not automatically swapz packing or dm_io descriptor costs.
+Ordinary tests retain their fresh-owned-device protocol; ID36's both-device
+prewarm is a separate resource constraint. Any materialized-backing sensitivity
+study must treat raw and target backing identically before timing, preserve
+fresh target/allocator state and matched inputs, and retain a separate protocol
+series. Do not replace qualified history or claim physical NVMe fidelity or a
+RAM-bandwidth bottleneck from allocation ancestry alone.
