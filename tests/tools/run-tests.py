@@ -297,6 +297,8 @@ SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
 # Standard (non-A/B) sessions run the production module default: delta64
 # rescue on. Explicit A/B control arms pin it off with --no-delta64-rescue.
 PRODUCTION_DELTA64_RESCUE = 1
+# Production work-conserving hand width. Nondefault values are fast_test-only.
+PRODUCTION_WORK_CONSERVING_HAND_RECORDS = 8
 # Production second-pass LZ4 acceleration used only by delta64 rescue (ID67).
 PRODUCTION_DELTA64_LZ4_ACCELERATION = 4
 
@@ -784,6 +786,10 @@ def timed_window_error(record):
             0 <= record["delta64_prepare_active_max"] <=
             record["delta64_prepare_workers"]):
         return "invalid timed delta64 preparation concurrency"
+    if (type(record.get("work_conserving_hand_records")) is not int or
+            record["work_conserving_hand_records"] !=
+            PRODUCTION_WORK_CONSERVING_HAND_RECORDS):
+        return "missing or non-production timed work-conserving hand threshold"
     if (type(record.get("delta64_prepare_pages")) is not int or
             record["delta64_prepare_pages"] < 0):
         return "invalid timed delta64 preparation page count"
