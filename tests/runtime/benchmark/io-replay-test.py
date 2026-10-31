@@ -675,37 +675,23 @@ class PairReplayContract(unittest.TestCase):
             module.kernel_write_delta(
                 submitter_disabled_before,
                 dict(submitter_disabled_after, submitter_prepare_claims=1))
-        lone_raw_before = dict(submitter_disabled_before, lone_raw=1)
-        lone_raw_after = dict(
-            lone_raw_before,
-            lone_raw_candidates=10,
-            lone_raw_cancelled_followers=2,
-            lone_raw_selected=8,
-            lone_raw_zero_elided=1,
-            lone_raw_multi_record_windows=0,
-            lone_raw_multi_record_pages=0)
-        lone_raw_delta = module.kernel_write_delta(
-            lone_raw_before, lone_raw_after)
-        self.assertEqual(lone_raw_delta["lone_raw"], 1)
-        self.assertEqual(lone_raw_delta["lone_raw_selected"], 8)
-        for invalid in (
-                {"lone_raw_candidates": 11},
-                {"lone_raw_zero_elided": 9},
-                {"lone_raw_multi_record_windows": 9},
-                {"lone_raw_multi_record_pages": 9}):
-            with self.subTest(lone_raw=invalid), \
-                    self.assertRaisesRegex(ValueError, "lone RAW"):
+        for selected in (16, 64):
+            before_hand = dict(submitter_disabled_before,
+                               work_conserving_hand_records=selected)
+            hand_delta = module.kernel_write_delta(before_hand, before_hand)
+            self.assertEqual(hand_delta["work_conserving_hand_records"], selected)
+        for selected in (0, 9, 65):
+            with self.assertRaisesRegex(ValueError, "hand threshold"):
                 module.kernel_write_delta(
-                    lone_raw_before, dict(lone_raw_after, **invalid))
-        with self.assertRaisesRegex(ValueError, "lone RAW requires"):
-            module.kernel_write_delta(
-                dict(before, lone_raw=1),
-                dict(before, lone_raw=1))
-        with self.assertRaisesRegex(ValueError, "disabled.*lone RAW"):
+                    dict(submitter_disabled_before,
+                         work_conserving_hand_records=selected),
+                    dict(submitter_disabled_before,
+                         work_conserving_hand_records=selected))
+        with self.assertRaisesRegex(ValueError, "hand threshold"):
             module.kernel_write_delta(
                 submitter_disabled_before,
-                dict(submitter_disabled_after, lone_raw_selected=1,
-                     lone_raw_candidates=1))
+                dict(submitter_disabled_before,
+                     work_conserving_hand_records=16))
         with self.assertRaisesRegex(ValueError, "disabled.*delta64"):
             module.kernel_write_delta(disabled_before,
                                       dict(disabled_after, delta64_wall_ns=1))
@@ -1626,11 +1612,13 @@ class PairReplayContract(unittest.TestCase):
         self.assertNotIn("--submitter-prepare", fast.scenario_arguments(
             "fast-w4", "/plan"))
         self.assertEqual(fast.STRIPED_WRITE_QDS, (4, 8))
-        lone = fast.scenario_arguments(
-            "fast-w1", "/plan", submitter_prepare=0, lone_raw=1)
+        hand = fast.scenario_arguments("fast-w32", "/plan",
+                                       submitter_prepare=0, hand_records=16)
         self.assertEqual(
-            lone[-7:], ["--async-prepare", "--submitter-prepare", "0",
-                        "--lone-raw", "1", "--shared-plan", "/plan"])
+            hand[-7:], ["--async-prepare", "--submitter-prepare", "0",
+                        "--hand-records", "16", "--shared-plan", "/plan"])
+        self.assertNotIn("--hand-records", fast.scenario_arguments(
+            "fast-w32", "/plan"))
 
     def test_sustained_write_uses_persistent_lane_owned_streams(self):
         with tempfile.TemporaryDirectory() as temp:
