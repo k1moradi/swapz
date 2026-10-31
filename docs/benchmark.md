@@ -656,14 +656,15 @@ capacity, suspend/drain safety, immutable lower-run lifetime and no completion
 ownership cycle. Final publication payload CRC remains a settled integrity
 boundary and is not part of that experiment.
 
-Delta64 rescue is default-on by owner decision after the qualified
-positive-fixture A/B; representative swap content remains the evidence that
-keeps or reverts it. Standard sessions run the default, while the paired A/B
-off arm and the medium-mixed envelope control pin `--no-delta64-rescue`. Production
-ordinary LZ4 is fixed at acceleration one, delta64 preparation at one producer
-lane, lower-WRITE submission at one immutable slot, and ID63 coalescing at an
-eight-block cap. The depth-two path and the settled runtime selectors are
-retired from current source.
+Delta64 rescue + `DELTA64_SHUF8` + LZ4 is fixed on for every emulated device
+by owner decision after the qualified positive-fixture evidence. Standard,
+storage-envelope, sustained-WRITE and development sessions all verify that
+production policy; no current performance path pins rescue off. Production
+ordinary LZ4 is fixed at acceleration one, the delta64 second LZ4 pass at
+acceleration four, delta64 preparation at one producer lane, lower-WRITE
+submission at one immutable slot, and ID63 coalescing at an eight-block cap.
+The depth-two path and the settled runtime selectors are retired from current
+source.
 
 
 ## Alpha.29 work-conserving dispatcher benchmark
