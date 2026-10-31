@@ -1067,7 +1067,7 @@ class ReportContract(unittest.TestCase):
         swapz = {**raw, "input_write_mbps": 150, "swap_in_read_mbps": 60,
                  "swap_in_read_p99_ms": 2, "write_p99_ms": 4,
                  "lower_write_bytes": 700, "lower_write_requests": 20,
-                 "kernel_write_path": {"delta64_rescue": 0}}
+                 "kernel_write_path": {"delta64_rescue": 1}}
         session = {"status": "PASS", "async_prepare": 1, "regime": "sd_emulated",
                    "device_model": {"cap_mib_s": 10}, "arms": {"off": raw, "swapz": swapz}}
         report = {"overall": "PASS", "tested_commit_sha": "source", "kernel_release": "kernel",
@@ -1099,13 +1099,10 @@ class ReportContract(unittest.TestCase):
         bad = copy.deepcopy(report)
         bad["benchmarks"]["sessions"][0]["async_prepare"] = 0
         self.assertEqual(history.report_points(bad), [])
-        on = copy.deepcopy(report)
-        on["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
-        on_points = history.report_points(on)
-        self.assertEqual(len(on_points), 1)
-        self.assertEqual(on_points[0]["workload"], "mixed QD32, delta64 on")
-        self.assertEqual(points[0]["workload"], "mixed QD32, delta64 off")
-        self.assertNotEqual(on_points[0]["compatibility"], points[0]["compatibility"])
+        self.assertEqual(points[0]["workload"], "mixed QD32")
+        off_policy = copy.deepcopy(report)
+        off_policy["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
+        self.assertEqual(history.report_points(off_policy), [])
         bad = copy.deepcopy(report)
         bad["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = None
         self.assertEqual(history.report_points(bad), [])
@@ -1123,15 +1120,11 @@ class ReportContract(unittest.TestCase):
         sustained["benchmarks"]["write_saturation"]["replay_mode"] = "qd-waves"
         self.assertEqual(len(history.report_points(sustained)), 1)
         sustained["benchmarks"]["write_saturation"]["replay_mode"] = "persistent-write"
-        off_write = history.report_points(sustained)[-1]
-        write_session["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
-        on_write = history.report_points(sustained)
-        self.assertEqual(len(on_write), 2)
-        self.assertNotEqual(on_write[-1]["compatibility"], off_write["compatibility"])
-        mixed = copy.deepcopy(write_session)
-        mixed["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
-        sustained["benchmarks"]["write_saturation_sessions"].append(mixed)
-        self.assertEqual(len(history.report_points(sustained)), 1)
+        production_write = history.report_points(sustained)[-1]
+        self.assertEqual(production_write["workload"], "persistent WRITE")
+        off_policy_write = copy.deepcopy(sustained)
+        off_policy_write["benchmarks"]["write_saturation_sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
+        self.assertEqual(len(history.report_points(off_policy_write)), 1)
 
     def test_x86_history_requires_audited_reports_and_separate_isa_profile(self):
         import copy
@@ -1405,29 +1398,31 @@ class ReportContract(unittest.TestCase):
         lines = []
         for envelope in runner.STORAGE_ENVELOPE_ORDER:
             spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
-            for rescue in (0, 1):
-                raw = arm("off", mode=1, regime="ssd_emulated")
-                swapz = arm("swapz", mode=1, regime="ssd_emulated")
-                raw["replay_engine"] = "native-c"
-                swapz["replay_engine"] = "native-c"
-                swapz["kernel_write_path"]["delta64_rescue"] = rescue
-                lines.extend((
-                    f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={rescue}",
-                    "PASS_RAM_MODEL_LOWER_MBPS="
-                    f"{spec['cap_mib_s']} COMPLETION_NSEC={spec['completion_nsec']} "
-                    f"IRQMODE={spec['irqmode']} QUEUE_MODE={spec['queue_mode']} "
-                    f"SUBMIT_QUEUES={spec['submit_queues']} "
-                    f"HW_QUEUE_DEPTH={spec['hw_queue_depth']}",
-                    json.dumps(raw),
-                    json.dumps(swapz),
-                    f"PASS_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={rescue}",
-                ))
+            raw = arm("off", mode=1, regime="ssd_emulated")
+            swapz = arm("swapz", mode=1, regime="ssd_emulated")
+            raw["replay_engine"] = "native-c"
+            swapz["replay_engine"] = "native-c"
+            kernel = swapz["kernel_write_path"]
+            kernel["delta64_rescue"] = runner.PRODUCTION_DELTA64_RESCUE
+            kernel["delta64_lz4_acceleration"] = runner.PRODUCTION_DELTA64_LZ4_ACCELERATION
+            kernel["lz4_acceleration"] = 1
+            lines.extend((
+                f"START_STORAGE_ENVELOPE={envelope}",
+                "PASS_RAM_MODEL_LOWER_MBPS="
+                f"{spec['cap_mib_s']} COMPLETION_NSEC={spec['completion_nsec']} "
+                f"IRQMODE={spec['irqmode']} QUEUE_MODE={spec['queue_mode']} "
+                f"SUBMIT_QUEUES={spec['submit_queues']} "
+                f"HW_QUEUE_DEPTH={spec['hw_queue_depth']}",
+                json.dumps(raw),
+                json.dumps(swapz),
+                f"PASS_STORAGE_ENVELOPE={envelope}",
+            ))
         sessions = runner.parse_storage_envelope_sessions("\n".join(lines))
-        self.assertEqual(len(sessions), 8)
+        self.assertEqual(len(sessions), 4)
         verdict = runner.storage_envelope_verdict(sessions)
         self.assertEqual(
             verdict["overall"], "PASS_DIRECTIONAL_STORAGE_ENVELOPES")
-        self.assertEqual(len(verdict["rows"]), 8)
+        self.assertEqual(len(verdict["rows"]), 4)
         for row in verdict["rows"]:
             spec = runner.STORAGE_ENVELOPE_SPECS[row["envelope"]]
             self.assertEqual(
@@ -1439,6 +1434,7 @@ class ReportContract(unittest.TestCase):
                 row["bandwidth_opportunity_capture_fraction"], 0.0)
             self.assertAlmostEqual(row["post_lower_hold_fraction"], 0.004)
             self.assertEqual(row["replay_engine"], "native-c")
+            self.assertEqual(row["delta64_rescue"], 1)
 
         bad = [dict(session) for session in sessions]
         bad[0] = dict(bad[0], arms={
@@ -1448,6 +1444,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             runner.storage_envelope_verdict(bad)["overall"], "INCONCLUSIVE")
 
+        wrong_policy = copy.deepcopy(sessions)
+        wrong_policy[0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
+        self.assertEqual(
+            runner.storage_envelope_verdict(wrong_policy)["overall"], "INCONCLUSIVE")
 
     def test_predictor_evidence_is_sanitized(self):
         raw = predictor_evidence()
@@ -2315,9 +2315,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("LZ4 acceleration 1 vs 4", rendered)
         self.assertIn("Acceleration 4 minus 1 paired 95% confidence intervals",
                       rendered)
-        self.assertIn("Delta64 rescue off vs on", rendered)
-        self.assertIn("Rescue on minus off paired 95% confidence intervals",
-                      rendered)
+        self.assertNotIn("Delta64 rescue off vs on", rendered)
+        self.assertNotIn("Rescue on minus off paired 95% confidence intervals",
+                         rendered)
         self.assertIn("Delta64 preparation K=1 vs K=2", rendered)
         self.assertIn("K=2 minus K=1 paired 95% confidence intervals",
                       rendered)
