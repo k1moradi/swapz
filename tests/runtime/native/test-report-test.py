@@ -3653,6 +3653,29 @@ class ReportContract(unittest.TestCase):
                 runner.ROOT, runner.REPORT = previous_root, previous_report
 
 
+
+class SerialQueueEvidenceTests(unittest.TestCase):
+    def test_serial_control_requires_all_four_bracketed_pairs(self):
+        self.assertEqual(
+            runner.serial_queue_control_verdict([], [])["overall"], "INCOMPLETE")
+        capture = ("START_SERIAL_QUEUE_CONTROL=sata_ssd ORDER=0\n"
+                   "PASS_SERIAL_QUEUE_CONTROL=sata_ssd ORDER=0\n")
+        parsed = runner.parse_serial_queue_control_sessions(capture)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["status"], "PASS")
+        self.assertEqual(parsed[0]["order"], 0)
+        self.assertEqual(
+            runner.serial_queue_control_verdict(parsed, [])["overall"], "INCOMPLETE")
+
+    def test_serial_control_keeps_both_arm_device_ownership(self):
+        helper = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        self.assertIn("SERIAL_QUEUE_CONTROL=0", helper)
+        self.assertIn("SUBMIT_QUEUES=1\n    HW_QUEUE_DEPTH=1", helper)
+        self.assertIn("--serial-queue-control", loaded)
+        self.assertIn("START_SERIAL_QUEUE_CONTROL=", loaded)
+
+
 if __name__ == "__main__":
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
     unittest.main()

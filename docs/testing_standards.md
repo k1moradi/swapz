@@ -2560,3 +2560,18 @@ combined both categories under the direct-LZ4 label; do not infer copy savings
 from that historical field. Independent WRITE-copy bytes and wall retain their
 original scope. Real loaded development validation must observe mapped
 snapshots for submitter-prepared ordinary input and preserve the byte oracle.
+
+
+### Serial lower-queue sensitivity diagnostic
+
+`make test` includes two counterordered SATA and NVMe5 medium-mixed
+raw/swapz pairs at the same model bandwidth and completion delay, but with
+**both** newly owned lower devices configured to one submission queue of
+depth one. The canonical deep-queue results remain unchanged. The separate
+`benchmarks.serial_queue_control` reports per-arm useful WRITE and READ,
+latency, lower I/O, exact source/fixture/trace and **observed** lower-WRITE
+depth. A configured limit alone does not establish actual serialization.
+This is not a striped multi-target experiment, a physical SSD observation,
+a statistically confirmed throughput comparison or evidence that K=2 wins.
+Diagnostic interpretation is independent of official qualification; loaded
+byte-oracle or teardown errors still fail the ordinary `make test` stage.
