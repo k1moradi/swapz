@@ -762,17 +762,17 @@ no work, disabled submitter policy, claim-count mismatch, and active ownership.
 This preserves test coverage of both valid placement paths without replacing
 the required owner-loaded byte-exact and lower-I/O checks.
 
-The positive delta64 rescue off/on A/B must likewise accept genuinely
-prepared pages from either the background producer
-(`delta64_prepare_pages`) or ID150 submitter context
-(`submitter_prepare_pages`), because the former field intentionally counts
-only the background producer. This is not an excuse to disable the positive
-control: every enabled rescue arm still requires nonzero classifier passes,
-attempts, adoptions, transform time and total rescue time; the normal timed
-telemetry contract checks submitter policy, ownership quiescence, claim/page
-conservation and complete WRITE-copy attribution. Disabled rescue arms must
-still have zero delta64 activity. Rootless reporter tests must prove the
-producer-only and submitter-only positive cases, zero-activity rejection,
+Routine loaded qualification must not run a delta64 rescue off/on A/B. The
+production stack is fixed on, and every emulated-device performance record must
+report `delta64_rescue=1`, `delta64_lz4_acceleration=4`, and ordinary
+`lz4_acceleration=1`. Preparation ownership may still be background-producer or
+ID150 submitter context; the normal timed telemetry contract checks submitter
+policy, ownership quiescence, claim/page conservation and complete WRITE-copy
+attribution. Medium content may legitimately produce zero delta64 adoptions;
+byte-exact transform/codec tests provide the positive functional coverage
+without spending loaded benchmark sessions on a disabled performance arm.
+Rootless reporter tests must reject any emulated performance record whose
+production compression policy is disabled or mismatched,
 missing delta64-adoption rejection and invalid ownership accounting rejection.
 Do not claim this placement change itself improves service or endurance: the
 five-pair timed outcome remains the performance decision.
