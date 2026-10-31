@@ -166,10 +166,10 @@ def prepare(args):
         raise ValueError("mixed lanes require unpaced disjoint input, striped writers, "
                          "and no sustained-write flag")
     if args.stripe_partitionable and (
-            args.mixed_lanes != "persistent" or
+            not (args.sustained_write or args.mixed_lanes == "persistent") or
             args.reader_start % args.qd or args.reader_pages % args.qd):
-        raise ValueError("stripe-partitionable input requires persistent mixed lanes "
-                         "and a reader region divisible by QD")
+        raise ValueError("stripe-partitionable input requires persistent lane-owned "
+                         "writes or mixed lanes and a reader region divisible by QD")
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     if list(out.iterdir()):
@@ -273,8 +273,9 @@ def check_plan(trace_path, manifest, fixture_pages):
     stripe_partitionable = manifest.get("stripe_partitionable", False)
     if type(stripe_partitionable) is not bool:
         raise ValueError("invalid stripe-partitionable manifest flag")
-    if stripe_partitionable and replay_mode != "persistent-mixed":
-        raise ValueError("stripe-partitionable manifest must be persistent mixed")
+    if stripe_partitionable and replay_mode not in (
+            "persistent-mixed", "persistent-write"):
+        raise ValueError("stripe-partitionable manifest must be persistent lane-owned")
     if replay_mode not in ("qd-waves", "persistent-write") and not lane_mixed:
         raise ValueError("unsupported replay mode")
     if lane_mixed and (manifest["iops"] != 0 or

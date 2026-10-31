@@ -34,13 +34,23 @@ lower-I/O window-policy native checks, runs the root preflight, and then runs
 one counterbalance-free raw/swapz pair per selected scenario through the same
 private owned null_blk pair helper and exact device models used by `make test`
 (default: three repeats each of SATA mixed, NVMe Gen4 mixed, fast mixed,
-fast QD4 and fast QD8). A selected `nvme5-stripes` or `sata-stripes`
-scenario instead runs the separate multi-target N=1/2/4 decision experiment
-described below. It prints one table of useful READ/WRITE, lower WRITE bytes ratio
+fast QD4 and fast QD8). A selected `nvme5-stripes` or `sata-stripes` scenario runs the
+existing mixed-QD32 multi-target N=1/2/4 experiment. `fast-stripes-w4` and
+`fast-stripes-w8` run the same independent-target experiment with sustained
+WRITE-only QD4 or QD8, respectively, as described below. It prints one table of useful READ/WRITE, lower WRITE bytes ratio
 and requests, READ/WRITE p99, windows, deadline and idle-bound closes,
 accepted-work lower idle, lower-WRITE service and its EWMA, and keeps detailed
 telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
-select scenarios and repeats; `DELTA64=0` pins the LZ4-only control policy. It never writes or publishes `test_results.json`,
+select scenarios and repeats; `DELTA64=0` pins the LZ4-only control policy.
+`SUBMITTER_PREPARE=0` disables only the existing submitter-context path in
+ordinary asynchronous development pairs (background async preparation stays on);
+the product/default and official qualification remain `1`. The private helper
+passes the read-only module parameter and verifies its effective DM status,
+rejecting this opt-in for synchronous, linear and ID36 pressure controls.
+`HOST_LOAD_PROFILE=browser-video-144p` (or `quiet-intended`) annotates the
+development report only; it does not relax the pre/post CPU-PSI screens, raw
+drift exclusion, or allow a busy run to be promoted. Compare like-labeled
+host-load cohorts; no tag establishes an idle host. It never writes or publishes `test_results.json`,
 never records a qualification verdict and never substitutes for `make test`:
 single unpaired observations decide only which candidate deserves the full
 owner matrix.
@@ -2573,8 +2583,12 @@ The `*-stripes` `make fast_test` scenarios are the development-only test for a
 possible single-lower-WRITE-lane ceiling. They do **not** alter production C and
 never enter `test_results.json` or qualification history.
 
-One persistent mixed QD32 trace is generated with both WRITE and immutable READ
-pages owned by a lane. For N=1,2,4, the harness partitions that exact trace by
+The existing NVMe5/SATA study uses a persistent mixed QD32 trace with WRITE
+and immutable READ pages owned by a lane. The separate fast-model study uses
+the identical production service envelope as the ordinary fast 80 MiB/s,
+150-us synthetic lower, but persistent WRITE-only QD4 or QD8 with the existing
+fixed-lane native engine and immutable 256-warmup/4096-measured-operation trace.
+For N=1,2,4, each selected workload is partitioned exactly by
 `logical_page % N`. It renumbers only each target's local page/lane/sequence;
 the fixture payload selected by every original operation is preserved. A
 stride/offset prefill map preserves the original initial bytes after local-page
@@ -2582,11 +2596,14 @@ renumbering, and every child plan passes the ordinary complete-image oracle.
 
 Each arm owns N separate RAM-backed `null_blk` devices. The swapz arm creates N
 independent ordinary K=1 targets, one per lower. The raw arm uses N equally
-modeled lower devices with the same page-to-stripe mapping. Aggregate offered QD
-stays 32. Per-device bandwidth is the model bandwidth divided by N; per-device
-hardware queue capacity is divided by N while preserving the model's submission
-queue count, so aggregate modeled bandwidth and queue capacity do not grow with
-N. NVMe5 is the primary model and SATA is a secondary control.
+modeled lower devices with the same page-to-stripe mapping. Aggregate offered QD stays 32 for mixed and 4 or 8 for the corresponding
+fast WRITE workload; each target receives QD/N. Per-device bandwidth is the
+model bandwidth divided by N (80/40/20 MiB/s for fast); per-device hardware
+queue capacity is divided by N while preserving the model's submission queue
+count (64/32/16 for fast), so aggregate modeled bandwidth and queue capacity
+do not grow with N. NVMe5 remains the original mixed primary model and SATA
+its secondary control; fast WRITE QD4/QD8 are distinct model/workload cohorts
+and must never be pooled with mixed QD32.
 
 All N native replays finish warmup before a private start gate is released.
 Aggregate useful throughput uses the earliest measured start and latest measured
@@ -2600,7 +2617,14 @@ less is inconclusive.
 `STRIPE_REPEAT=` defaults to five. Count order rotates by round and raw/swapz
 arm order alternates. The existing quiet-host/raw-drift screens still apply.
 Results stay in `build/tests/fast-test/latest.json` under
-`striped_target_experiment`. Do not infer K=2 benefit merely from target-count
-scaling: a reopen requires a material improvement in normalized swapz/raw
-useful WRITE service, preserved lower-byte savings, and observed simultaneous
-swapz lower WRITEs for N>1.
+`striped_target_experiment`, including exact workload/QD, host-load profile,
+trace provenance, logical throughput, lower bytes/requests and worst-stripe
+WRITE p99. The next development invocation overwrites `latest.json`:
+operators must preserve separate run artifacts for cross-policy comparisons.
+The rootless oracle reconstructs every parent op, page, lane and payload from
+each child for N=1/2/4 at QD4 and QD8, and both-arm loaded validators require
+the expected replay mode, QD/N and zero reads for write-only mode.
+Do not infer K=2 benefit merely from target-count scaling: splitting independent
+targets shrinks each target's packing opportunity. A reopen requires a material
+improvement in normalized swapz/raw useful WRITE service, preserved lower-byte
+savings, and observed simultaneous swapz lower WRITEs for N>1.

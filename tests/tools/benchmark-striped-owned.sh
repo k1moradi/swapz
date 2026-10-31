@@ -15,6 +15,11 @@ if [[ $# -gt 0 && ${!#} == --swapz-first ]]; then
     SWAPZ_FIRST=1
     set -- "${@:1:$(( $# - 1 ))}"
 fi
+WORKLOAD=mixed
+if [[ $# -ge 2 && ${@: -2:1} == --workload ]]; then
+    WORKLOAD="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
 if [[ $# != 7 || $1 != --run-owned-striped || $2 != --model ||
       $4 != --stripes || $6 != --shared-plan ]]; then
     printf '%s\n' 'BLOCKED: exact private striped-development contract required' >&2
@@ -23,8 +28,16 @@ fi
 MODEL="$3"
 STRIPES="$5"
 SHARED_PLAN="$7"
-[[ $MODEL == nvme5 || $MODEL == sata ]] ||
-    { printf '%s\n' 'BLOCKED: striped model must be nvme5 or sata' >&2; exit 2; }
+[[ $MODEL == nvme5 || $MODEL == sata || $MODEL == fast ]] ||
+    { printf '%s\n' 'BLOCKED: striped model must be nvme5, sata or fast' >&2; exit 2; }
+if [[ $WORKLOAD == mixed && $MODEL != fast ]]; then
+    OFFERED_QD=32
+elif [[ $MODEL == fast && ( $WORKLOAD == write-q4 || $WORKLOAD == write-q8 ) ]]; then
+    OFFERED_QD="${WORKLOAD: -1}"
+else
+    printf '%s\n' 'BLOCKED: striped workload/model must be NVMe5/SATA mixed or fast WRITE QD4/QD8' >&2
+    exit 2
+fi
 [[ $STRIPES == 1 || $STRIPES == 2 || $STRIPES == 4 ]] ||
     { printf '%s\n' 'BLOCKED: striped count must be 1, 2 or 4' >&2; exit 2; }
 
@@ -35,6 +48,9 @@ case "$MODEL:$STRIPES" in
     sata:1)  LOWER_MBPS=500;   COMPLETION_NSEC=100000; SUBMIT_QUEUES=1; HW_QUEUE_DEPTH=32 ;;
     sata:2)  LOWER_MBPS=250;   COMPLETION_NSEC=100000; SUBMIT_QUEUES=1; HW_QUEUE_DEPTH=16 ;;
     sata:4)  LOWER_MBPS=125;   COMPLETION_NSEC=100000; SUBMIT_QUEUES=1; HW_QUEUE_DEPTH=8 ;;
+    fast:1)  LOWER_MBPS=80;    COMPLETION_NSEC=150000; SUBMIT_QUEUES=1; HW_QUEUE_DEPTH=64 ;;
+    fast:2)  LOWER_MBPS=40;    COMPLETION_NSEC=150000; SUBMIT_QUEUES=1; HW_QUEUE_DEPTH=32 ;;
+    fast:4)  LOWER_MBPS=20;    COMPLETION_NSEC=150000; SUBMIT_QUEUES=1; HW_QUEUE_DEPTH=16 ;;
 esac
 IRQMODE=2
 QUEUE_MODE=2
@@ -79,8 +95,10 @@ done
    -d $SHARED_PLAN && ! -L $SHARED_PLAN &&
    -f $SHARED_PLAN/fixture.bin && ! -L $SHARED_PLAN/fixture.bin ]] ||
     fail 'striped shared plan is missing or outside owned build root'
+STRIPE_PLAN_PREFIX=striped
+[[ $WORKLOAD == mixed ]] || STRIPE_PLAN_PREFIX="striped-$WORKLOAD"
 for (( stripe=0; stripe<STRIPES; ++stripe )); do
-    child="$SHARED_PLAN/striped-$STRIPES/stripe-$stripe"
+    child="$SHARED_PLAN/$STRIPE_PLAN_PREFIX-$STRIPES/stripe-$stripe"
     [[ -d $child && ! -L $child &&
        -f $child/trace.jsonl && ! -L $child/trace.jsonl &&
        -f $child/manifest.json && ! -L $child/manifest.json ]] ||
@@ -321,9 +339,9 @@ mkdir -m 700 "$SESSION/plans"
 cp -- "$SHARED_PLAN/fixture.bin" "$SESSION/fixture.bin"
 for (( stripe=0; stripe<STRIPES; ++stripe )); do
     mkdir -m 700 "$SESSION/plans/$stripe"
-    cp -- "$SHARED_PLAN/striped-$STRIPES/stripe-$stripe/trace.jsonl" \
+    cp -- "$SHARED_PLAN/$STRIPE_PLAN_PREFIX-$STRIPES/stripe-$stripe/trace.jsonl" \
         "$SESSION/plans/$stripe/trace.jsonl"
-    cp -- "$SHARED_PLAN/striped-$STRIPES/stripe-$stripe/manifest.json" \
+    cp -- "$SHARED_PLAN/$STRIPE_PLAN_PREFIX-$STRIPES/stripe-$stripe/manifest.json" \
         "$SESSION/plans/$stripe/manifest.json"
 done
 
@@ -507,15 +525,17 @@ run_arm() {
     wait "$sampler_pid" || rc=1
     (( rc == 0 )) || fail "$candidate striped replay or sampler failed"
 
-    python3 -B - "$candidate" "$MODEL" "$STRIPES" "$VALIDATED_SOURCE" \
-        "$sampler_result" "$SESSION" <<'PY'
+    python3 -B - "$candidate" "$MODEL" "$WORKLOAD" "$OFFERED_QD" \
+        "$STRIPES" "$VALIDATED_SOURCE" "$sampler_result" "$SESSION" <<'PY'
 import json
 import math
 from pathlib import Path
 import sys
 
-candidate, model, stripes_text, source, sampler_path, session_path = sys.argv[1:]
+candidate, model, workload, offered_qd_text, stripes_text, source, sampler_path, session_path = sys.argv[1:]
 stripes = int(stripes_text)
+offered_qd = int(offered_qd_text)
+expected_mode = "persistent-mixed" if workload == "mixed" else "persistent-write"
 session = Path(session_path)
 reports = [json.loads((session / f"{candidate}-{index}.json").read_text())
            for index in range(stripes)]
@@ -529,7 +549,9 @@ ends = [report.get("measured_end_monotonic_ns") for report in reports]
 if (len(parent_hashes) != 1 or len(fixtures) != 1 or
         any(report.get("candidate") != candidate or report.get("verdict") != "PASS" or
             report.get("source_sha") != source or report.get("replay_engine") != "native-c" or
-            report.get("replay_mode") != "persistent-mixed" or
+            report.get("replay_mode") != expected_mode or
+            report.get("qd") != offered_qd // stripes or
+            (workload != "mixed" and report.get("read_ops") != 0) or
             report.get("verified_post_sha256") != report.get("expected_post_sha256")
             for report in reports) or
         any(manifest.get("stripe_count") != stripes or
@@ -583,6 +605,8 @@ if candidate == "swapz":
 arm = {
     "candidate": candidate,
     "model": model,
+    "workload": workload,
+    "offered_qd": offered_qd,
     "stripes": stripes,
     "source_sha": source,
     "fixture_sha256": next(iter(fixtures)),
@@ -623,14 +647,15 @@ else
     ORDER=off-first
 fi
 
-python3 -B - "$MODEL" "$STRIPES" "$ORDER" "$LOWER_MBPS" "$SUBMIT_QUEUES" \
-    "$HW_QUEUE_DEPTH" "$COMPLETION_NSEC" "$VALIDATED_SOURCE" "$SESSION" <<'PY'
+python3 -B - "$MODEL" "$WORKLOAD" "$OFFERED_QD" "$STRIPES" "$ORDER" \
+    "$LOWER_MBPS" "$SUBMIT_QUEUES" "$HW_QUEUE_DEPTH" "$COMPLETION_NSEC" \
+    "$VALIDATED_SOURCE" "$SESSION" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-(model, stripes_text, order, lower_mbps, submit_queues, hw_depth,
- completion_nsec, source, session_path) = sys.argv[1:]
+(model, workload, offered_qd_text, stripes_text, order, lower_mbps,
+ submit_queues, hw_depth, completion_nsec, source, session_path) = sys.argv[1:]
 stripes = int(stripes_text)
 session = Path(session_path)
 off = json.loads((session / "off-aggregate.json").read_text())
@@ -639,12 +664,16 @@ if (off["source_sha"] != swapz["source_sha"] or off["source_sha"] != source or
         off["fixture_sha256"] != swapz["fixture_sha256"] or
         off["parent_trace_sha256"] != swapz["parent_trace_sha256"] or
         off["measure_ops"] != swapz["measure_ops"] or
+        off["workload"] != workload or swapz["workload"] != workload or
+        off["offered_qd"] != int(offered_qd_text) or
+        swapz["offered_qd"] != int(offered_qd_text) or
         off["stripes"] != stripes or swapz["stripes"] != stripes):
     raise SystemExit("striped raw/swapz pair provenance mismatch")
 result = {
     "experiment": "multi-target-stripes",
     "scope": "DEVELOPMENT_ONLY_INDEPENDENT_K1_TARGETS",
     "model": model,
+    "workload": workload,
     "stripes": stripes,
     "order": order,
     "source_sha": source,
@@ -654,7 +683,7 @@ result = {
         "cap_mib_s": int(lower_mbps) * stripes,
         "submit_queues_x_hw_depth": int(submit_queues) * int(hw_depth) * stripes,
         "completion_nsec": int(completion_nsec),
-        "offered_qd": 32,
+        "offered_qd": int(offered_qd_text),
     },
     "per_device_model": {
         "cap_mib_s": int(lower_mbps),

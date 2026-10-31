@@ -22,6 +22,8 @@ WARMUP_OPS=256
 MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
+SUBMITTER_PREPARE=1
+SUBMITTER_PREPARE_EXPLICIT=0
 # Production module default; --no-delta64-rescue pins LZ4-only control arms.
 DELTA64_RESCUE=1
 DELTA64_POSITIVE_EXPERIMENT=0
@@ -96,6 +98,14 @@ fi
 if [[ $# -ge 3 && ${@: -2:1} == --read-coalesce &&
       ( ${!#} == 0 || ${!#} == 1 ) ]]; then
     READ_COALESCE="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# Development-only selector for the existing submitter-context preparation
+# path. Keep the actual asynchronous preparation policy separately enabled.
+if [[ $# -ge 3 && ${@: -2:1} == --submitter-prepare &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    SUBMITTER_PREPARE="${!#}"
+    SUBMITTER_PREPARE_EXPLICIT=1
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Explicitly permit asynchronous preparation on the QD32 medium experiment.
@@ -178,6 +188,11 @@ elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
     IOPS=0
 else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
+    exit 2
+fi
+if (( SUBMITTER_PREPARE_EXPLICIT )) &&
+   (( !ASYNC_PREPARE || RESOURCE_PRESSURE_SHORT || LINEAR_CALIBRATION )); then
+    echo 'BLOCKED: submitter preparation control requires an ordinary async swapz pair' >&2
     exit 2
 fi
 if (( RESOURCE_PRESSURE_SHORT )); then
@@ -361,7 +376,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=1 READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE SUBMITTER_PREPARE=$SUBMITTER_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=1 READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -618,6 +633,7 @@ modprobe dm_mod
 if (( !LINEAR_CALIBRATION )); then
 modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
+    "submitter_prepare=$SUBMITTER_PREPARE" \
     "delta64_rescue=$DELTA64_RESCUE" \
     "delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION" \
     "read_coalesce=$READ_COALESCE" \
@@ -667,6 +683,9 @@ dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])write_pipeline_depth=1([[:sp
     fail 'loaded target lower-WRITE pipeline depth is not fixed at one'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
     fail 'loaded swapz async preparation does not match selected benchmark arm'
+expected_submitter_prepare=$(( ASYNC_PREPARE && SUBMITTER_PREPARE ))
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])submitter_prepare=$expected_submitter_prepare([[:space:]]|$)" ||
+    fail 'loaded swapz submitter preparation does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" ||
     fail 'loaded swapz delta64 rescue does not match selected benchmark arm'
 expected_delta64_workers=$ASYNC_PREPARE

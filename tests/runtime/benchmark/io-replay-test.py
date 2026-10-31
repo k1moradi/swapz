@@ -1525,6 +1525,77 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(total_ops, len(parent))
                 self.assertEqual(sorted(rebuilt), parent_projection)
 
+    def test_fast_striped_sustained_write_conserves_every_operation(self):
+        import importlib.util
+        import runpy
+        replay = runpy.run_path(str(SCRIPT))
+        spec = importlib.util.spec_from_file_location(
+            "swapz_striped_write_fast", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(bytes([i + 1]) * PAGE for i in range(16)))
+            for qd in (4, 8):
+                workload = f"write-q{qd}"
+                base = root / f"plan-striped-write-qd{qd}"
+                self.run_cmd(
+                    "prepare", "--fixture", fixture, "--output-dir", base,
+                    "--qd", qd, "--logical-pages", 128, "--writer-pages", 64,
+                    "--reader-start", 64, "--reader-pages", 64,
+                    "--warmup-ops", 64, "--measure-ops", 128, "--read-pct", 0,
+                    "--iops", 0, "--sustained-write", "--stripe-partitionable")
+                fast.prepare_striped_plans(root, (1, 2, 4), workload)
+                parent = [json.loads(line) for line in
+                          (base / "trace.jsonl").read_text().splitlines()]
+                projection = sorted(
+                    (row["wave"], row["lane"], row["op"], row["page"],
+                     row["fixture"], row["phase"]) for row in parent)
+                for stripe_count in (1, 2, 4):
+                    rebuilt = []
+                    for stripe_index in range(stripe_count):
+                        child_dir = (root / f"striped-{workload}-{stripe_count}" /
+                                     f"stripe-{stripe_index}")
+                        manifest = json.loads(
+                            (child_dir / "manifest.json").read_text())
+                        self.assertEqual(manifest["qd"], qd // stripe_count)
+                        self.assertEqual(manifest["replay_mode"], "persistent-write")
+                        self.assertEqual(manifest["read_pct"], 0)
+                        child, _ = replay["check_plan"](
+                            child_dir / "trace.jsonl", manifest, 16)
+                        rebuilt.extend(
+                            (row["wave"], row["lane"] * stripe_count + stripe_index,
+                             row["op"], row["page"] * stripe_count + stripe_index,
+                             row["fixture"], row["phase"]) for row in child)
+                    self.assertEqual(sorted(rebuilt), projection)
+                    self.assertEqual(len(rebuilt), len(parent))
+                    self.assertTrue(all(row[2] == "W" for row in rebuilt))
+                invalid = dict(json.loads((base / "manifest.json").read_text()))
+                invalid["replay_mode"] = "qd-waves"
+                with self.assertRaisesRegex(ValueError, "stripe-partitionable manifest"):
+                    replay["check_plan"](base / "trace.jsonl", invalid, 16)
+
+    def test_fast_submitter_switch_is_explicit_development_only(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "swapz_submitter_fast", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        self.assertEqual(fast.striped_scenario("fast-stripes-w4"),
+                         ("fast", "write-q4"))
+        self.assertEqual(fast.striped_scenario("fast-stripes-w8"),
+                         ("fast", "write-q8"))
+        self.assertIsNone(fast.striped_scenario("fast-stripes-w32"))
+        arguments = fast.scenario_arguments(
+            "fast-w4", "/plan", submitter_prepare=0)
+        self.assertEqual(
+            arguments[-5:], ["--async-prepare", "--submitter-prepare", "0",
+                             "--shared-plan", "/plan"])
+        self.assertNotIn("--submitter-prepare", fast.scenario_arguments(
+            "fast-w4", "/plan"))
+        self.assertEqual(fast.STRIPED_WRITE_QDS, (4, 8))
+
     def test_sustained_write_uses_persistent_lane_owned_streams(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

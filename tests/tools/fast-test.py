@@ -55,8 +55,9 @@ CONTENT_WEIGHTS = {"medium": "medium=100", "entropy": "entropy=100",
 DEFAULT_SCENARIOS = (
     "sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8",
 )
-STRIPED_MODELS = ("nvme5", "sata")
+STRIPED_MODELS = ("nvme5", "sata", "fast")
 DEFAULT_STRIPE_COUNTS = (1, 2, 4)
+STRIPED_WRITE_QDS = (4, 8)
 
 
 def quiet_host_sample():
@@ -126,10 +127,15 @@ def reject_raw_drift(rows):
 
 def striped_scenario(name):
     model, _, kind = name.partition("-")
-    return model if kind == "stripes" and model in STRIPED_MODELS else None
+    if kind == "stripes" and model in ("nvme5", "sata"):
+        return model, "mixed"
+    if model == "fast" and kind in ("stripes-w4", "stripes-w8"):
+        return model, "write-q" + kind[-1]
+    return None
 
 
-def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first=False):
+def scenario_arguments(name, plan, delta64=1, calibration=False,
+                       candidate_first=False, submitter_prepare=1):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
         raise ValueError(f"unknown scenario {name!r}")
@@ -141,6 +147,8 @@ def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first
     elif kind != "mixed":
         raise ValueError(f"unknown scenario {name!r}")
     arguments.append("--async-prepare")
+    if not submitter_prepare:
+        arguments += ["--submitter-prepare", "0"]
     if not delta64:
         # Suffix order of benchmark-owned-pair.sh: rescue sits after async.
         arguments.append("--no-delta64-rescue")
@@ -165,7 +173,7 @@ def build():
          "test-replay-helper", "test-lower-io"], stdout=subprocess.DEVNULL)
 
 
-def prepare_plan(content="medium", need_stripes=False):
+def prepare_plan(content="medium", need_stripes=False, striped_write_qds=()):
     weights = CONTENT_WEIGHTS[content]
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
     plan = Path(tempfile.mkdtemp(prefix="benchmark-plan.",
@@ -190,6 +198,13 @@ def prepare_plan(content="medium", need_stripes=False):
              "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
              "--measure-ops", "16384", "--iops", "0", "--mixed-lanes",
              "persistent", "--stripe-partitionable"], **quiet)
+    for qd in striped_write_qds:
+        if qd not in STRIPED_WRITE_QDS:
+            raise ValueError("striped WRITE QD must be 4 or 8")
+        run([*replay, "--output-dir", str(plan / f"plan-striped-write-qd{qd}"),
+             "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
+             "--measure-ops", "4096", "--iops", "0", "--sustained-write",
+             "--stripe-partitionable"], **quiet)
     for qd in (1, 4, 8, 32):
         run([*replay, "--output-dir", str(plan / f"plan-write-qd{qd}"),
              "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
@@ -200,9 +215,20 @@ def prepare_plan(content="medium", need_stripes=False):
 
 
 
-def prepare_striped_plans(plan, stripe_counts):
-    """Split one page/lane-owned QD32 trace without changing I/O payloads."""
-    base_dir = plan / "plan-striped-base"
+def prepare_striped_plans(plan, stripe_counts, workload="mixed"):
+    """Split a lane-owned immutable trace, conserving every original I/O."""
+    if workload == "mixed":
+        base_dir = plan / "plan-striped-base"
+        stripe_prefix = "striped"
+        expected_mode = "persistent-mixed"
+        expected_qd = 32
+    elif workload in ("write-q4", "write-q8"):
+        expected_qd = int(workload[-1])
+        base_dir = plan / f"plan-striped-write-qd{expected_qd}"
+        stripe_prefix = f"striped-{workload}"
+        expected_mode = "persistent-write"
+    else:
+        raise ValueError("unsupported striped workload")
     manifest = json.loads((base_dir / "manifest.json").read_text())
     rows = [json.loads(line) for line in
             (base_dir / "trace.jsonl").read_text().splitlines()]
@@ -212,16 +238,19 @@ def prepare_striped_plans(plan, stripe_counts):
         fixture_bytes[offset:offset + page_bytes]
         for offset in range(0, len(fixture_bytes), page_bytes)
     ]
-    if (manifest.get("replay_mode") != "persistent-mixed" or
+    if (manifest.get("replay_mode") != expected_mode or
             not manifest.get("stripe_partitionable") or
-            manifest.get("qd") != 32 or
-            any(row.get("lane") != row["page"] % 32 for row in rows)):
+            manifest.get("qd") != expected_qd or
+            any(row.get("lane") != row["page"] % expected_qd for row in rows) or
+            (expected_mode == "persistent-write" and
+             (manifest.get("read_pct") != 0 or
+              any(row["op"] != "W" for row in rows)))):
         raise ValueError("striped base plan is not page/lane partitionable")
 
     for stripe_count in stripe_counts:
         if stripe_count not in DEFAULT_STRIPE_COUNTS or 32 % stripe_count:
             raise ValueError("stripe count must be one of 1,2,4")
-        stripe_root = plan / f"striped-{stripe_count}"
+        stripe_root = plan / f"{stripe_prefix}-{stripe_count}"
         stripe_root.mkdir()
         local_qd = manifest["qd"] // stripe_count
         logical_pages = manifest["logical_pages"] // stripe_count
@@ -286,7 +315,7 @@ def prepare_striped_plans(plan, stripe_counts):
                     transformed, fixture_pages, logical_pages, initial),
                 "algorithm": (
                     "exact modulo-N partition of one persistent page/lane-owned "
-                    "mixed trace; aggregate QD and operation count conserved"),
+                    f"{workload} trace; aggregate QD and operation count conserved"),
             })
             (output / "manifest.json").write_text(
                 json.dumps(child, indent=2, sort_keys=True) + "\n")
@@ -329,6 +358,8 @@ def summarize_striped(label, pair, seconds):
     return {
         "scenario": label,
         "model": pair["model"],
+        "workload": pair["workload"],
+        "offered_qd": pair["aggregate_model"]["offered_qd"],
         "stripes": pair["stripes"],
         "pair_s": seconds,
         "replay_order": pair["order"],
@@ -384,14 +415,16 @@ def print_striped_table(rows):
               if row["performance_validity"]["performance_usable"]]
     groups = {}
     for row in usable:
-        groups.setdefault((row["model"], row["stripes"]), []).append(row)
-    for model in STRIPED_MODELS:
-        counts = sorted(count for candidate, count in groups if candidate == model)
+        groups.setdefault((row["model"], row["workload"], row["stripes"]), []).append(row)
+    for model, workload in (("nvme5", "mixed"), ("sata", "mixed"),
+                            ("fast", "write-q4"), ("fast", "write-q8")):
+        counts = sorted(count for candidate, kind, count in groups
+                        if candidate == model and kind == workload)
         if not counts:
             continue
-        print(f"  {model} usable normalized swapz/raw WRITE ratios:")
+        print(f"  {model} {workload} usable normalized swapz/raw WRITE ratios:")
         for count in counts:
-            group = groups[(model, count)]
+            group = groups[(model, workload, count)]
             ratios = [row["swapz_w"] / row["raw_w"] for row in group
                       if row["raw_w"] > 0]
             simultaneous = max(
@@ -400,9 +433,10 @@ def print_striped_table(rows):
                   f"n={len(ratios)} observed simultaneous swapz lowers={simultaneous}")
         if 1 in counts and counts[-1] > 1:
             base = statistics.mean(
-                row["swapz_w"] / row["raw_w"] for row in groups[(model, 1)])
+                row["swapz_w"] / row["raw_w"] for row in groups[(model, workload, 1)])
             top = statistics.mean(
-                row["swapz_w"] / row["raw_w"] for row in groups[(model, counts[-1])])
+                row["swapz_w"] / row["raw_w"]
+                for row in groups[(model, workload, counts[-1])])
             print(f"    N=1 -> N={counts[-1]} normalized ratio shift: "
                   f"{(top / base - 1) * 100:+.1f}%")
     print("  A concurrency claim additionally requires observed simultaneous "
@@ -627,14 +661,19 @@ def main():
                         default=os.environ.get("STRIPE_COUNTS", "1,2,4"))
     parser.add_argument("--stripe-repeat", type=int,
                         default=int(os.environ.get("STRIPE_REPEAT", "5") or 5))
+    parser.add_argument("--submitter-prepare", type=int, choices=(0, 1),
+                        default=int(os.environ.get("SUBMITTER_PREPARE", "1")))
+    parser.add_argument("--host-load-profile",
+                        choices=("uncontrolled", "quiet-intended", "browser-video-144p"),
+                        default=os.environ.get("HOST_LOAD_PROFILE", "uncontrolled"))
     args = parser.parse_args()
     calibration = args.calibration == "linear"
     candidate = "linear" if calibration else "swapz"
     scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
         or list(DEFAULT_SCENARIOS)
     stripe_counts = parse_stripe_counts(args.stripe_counts)
-    striped_models = [striped_scenario(name) for name in scenarios
-                      if striped_scenario(name)]
+    striped_specs = [striped_scenario(name) for name in scenarios
+                     if striped_scenario(name)]
     ordinary_scenarios = [name for name in scenarios if not striped_scenario(name)]
     if not 1 <= args.repeat <= 10:
         parser.error("REPEAT must be 1..10")
@@ -642,12 +681,14 @@ def main():
         parser.error("CONTENT must be medium, entropy or balanced")
     if not 1 <= args.stripe_repeat <= 10:
         parser.error("STRIPE_REPEAT must be 1..10")
-    if len(striped_models) != len(set(striped_models)):
-        parser.error("each striped model may be selected only once")
-    if calibration and striped_models:
+    if len(striped_specs) != len(set(striped_specs)):
+        parser.error("each striped model/workload may be selected only once")
+    if calibration and striped_specs:
         parser.error("striped scenarios cannot use linear calibration")
+    if not args.submitter_prepare and (calibration or striped_specs):
+        parser.error("SUBMITTER_PREPARE=0 requires ordinary swapz fast_test scenarios")
     for name in ordinary_scenarios:
-        scenario_arguments(name, "/dev/null")
+        scenario_arguments(name, "/dev/null", submitter_prepare=args.submitter_prepare)
 
     if os.geteuid() != 0 and subprocess.run(
             ["sudo", "-n", "true"], capture_output=True).returncode:
@@ -659,7 +700,9 @@ def main():
     dirty = subprocess.run(["git", "status", "--porcelain", "--", "src", "tests"],
                            cwd=ROOT, capture_output=True, text=True).stdout.strip()
     print(f"swapz fast_test (development only; not qualification) "
-          f"content={args.content} HEAD={head[:12]}{' +dirty' if dirty else ''}")
+          f"content={args.content} submitter_prepare={args.submitter_prepare} "
+          f"host_load={args.host_load_profile} "
+          f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
     started = time.monotonic()
     build()
     print(f"  build + window-policy native checks: PASS "
@@ -669,9 +712,13 @@ def main():
         print(preflight.stdout + preflight.stderr, file=sys.stderr)
         print("BLOCKED: loaded preflight failed", file=sys.stderr)
         return 2
-    plan = prepare_plan(args.content, bool(striped_models))
-    if striped_models:
-        prepare_striped_plans(plan, stripe_counts)
+    plan = prepare_plan(
+        args.content, ("nvme5", "mixed") in striped_specs or
+        ("sata", "mixed") in striped_specs,
+        tuple(qd for qd in STRIPED_WRITE_QDS
+              if ("fast", f"write-q{qd}") in striped_specs))
+    for _, workload in striped_specs:
+        prepare_striped_plans(plan, stripe_counts, workload)
     fixture = json.loads((plan / "fixture.json").read_text())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     rows, raw_reports = [], []
@@ -684,7 +731,8 @@ def main():
                 begin = time.monotonic()
                 proc = privileged(720, PAIR, "--validated-source", head,
                                   *scenario_arguments(name, plan, args.delta64, calibration,
-                                                      calibration and attempt % 2 == 1))
+                                                      calibration and attempt % 2 == 1,
+                                  args.submitter_prepare))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
                 arms = parse_arms(proc.stdout, candidate)
@@ -713,18 +761,22 @@ def main():
                       f"[{elapsed:.1f}s]", flush=True)
 
         striped_rows = []
-        for model in striped_models:
+        for model, workload in striped_specs:
             for round_index in range(args.stripe_repeat):
                 offset = round_index % len(stripe_counts)
                 rotated = stripe_counts[offset:] + stripe_counts[:offset]
                 for stripe_count in rotated:
-                    label = f"{model}-stripes-n{stripe_count}#{round_index + 1}"
+                    scenario_suffix = "stripes" if workload == "mixed" else (
+                        "stripes-w" + workload[-1])
+                    label = (f"{model}-{scenario_suffix}-n{stripe_count}"
+                             f"#{round_index + 1}")
                     quiet_before = quiet_host_sample()
                     begin = time.monotonic()
                     arguments = [
                         "--validated-source", head, "--run-owned-striped",
                         "--model", model, "--stripes", str(stripe_count),
                         "--shared-plan", str(plan),
+                        "--workload", workload,
                     ]
                     if round_index % 2:
                         arguments.append("--swapz-first")
@@ -744,6 +796,9 @@ def main():
                     try:
                         pair = parse_striped_pair(proc.stdout)
                         if (pair.get("model") != model or
+                                pair.get("workload") != workload or
+                                pair.get("aggregate_model", {}).get("offered_qd") !=
+                                (32 if workload == "mixed" else int(workload[-1])) or
                                 pair.get("stripes") != stripe_count):
                             raise ValueError("striped helper result identity mismatch")
                         row = summarize_striped(label, pair, elapsed)
@@ -767,21 +822,25 @@ def main():
     finally:
         shutil.rmtree(plan, ignore_errors=True)
     reject_raw_drift(rows)
-    if striped_models:
+    if striped_specs:
         reject_raw_drift(striped_rows)
     result_name = "latest-calibration.json" if calibration else "latest.json"
     (OUT_DIR / result_name).write_text(
         json.dumps({"head": head, "dirty": bool(dirty),
                     "calibration": args.calibration,
                     "delta64_rescue": args.delta64,
+                    "submitter_prepare": args.submitter_prepare,
+                    "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
                     "reports": raw_reports,
                     "striped_target_experiment": {
                         "scope": "DEVELOPMENT_ONLY_MULTI_TARGET_K1_NO_KERNEL_C_CHANGE",
                         "counts": list(stripe_counts),
                         "repeats": args.stripe_repeat,
-                        "models": striped_models,
-                        "rows": striped_rows if striped_models else [],
+                        "model_workloads": [
+                            {"model": model, "workload": workload}
+                            for model, workload in striped_specs],
+                        "rows": striped_rows if striped_specs else [],
                     }}, sort_keys=True) + "\n")
     print()
     if calibration:
@@ -792,7 +851,7 @@ def main():
     else:
         print_table(rows)
         print_profile(rows)
-        print_striped_table(striped_rows if striped_models else [])
+        print_striped_table(striped_rows if striped_specs else [])
     print(f"\n  Detailed telemetry: {(OUT_DIR / result_name).relative_to(ROOT)} "
           f"(total {time.monotonic() - started:.0f}s)")
     return status
