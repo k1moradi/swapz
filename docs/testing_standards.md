@@ -2639,8 +2639,9 @@ savings, and observed simultaneous swapz lower WRITEs for N>1.
 The early work-conserving hand retains its production eight-record threshold
 unless the private `make fast_test` loop explicitly selects 16 or 64 through
 `HAND_RECORDS`. The module parameter is read-only. Target construction rejects
-values outside 8/16/64 and nondefault values without identified `null_blk`
-backing. The private pair checks effective DM status before replay. `make test`
+values outside 8/16/64; a nondefault value additionally requires retained
+asynchronous preparation and identified `null_blk` backing. The private pair
+checks effective DM status before replay. `make test`
 remains at eight and does not add a new qualification pair or historical cohort.
 
 Compare matched same-source, same-model, same-trace sustained Fast-QD32 and
