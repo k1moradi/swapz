@@ -55,7 +55,7 @@ CONTENT_WEIGHTS = {"medium": "medium=100", "entropy": "entropy=100",
 DEFAULT_SCENARIOS = (
     "sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8",
 )
-STRIPED_MODELS = ("nvme5", "sata", "fast")
+STRIPED_MODELS = ("nvme5", "sata")
 DEFAULT_STRIPE_COUNTS = (1, 2, 4)
 STRIPED_WRITE_QDS = (4, 8)
 
@@ -127,7 +127,7 @@ def reject_raw_drift(rows):
 
 def striped_scenario(name):
     model, _, kind = name.partition("-")
-    if kind == "stripes" and model in ("nvme5", "sata"):
+    if kind == "stripes" and model in STRIPED_MODELS:
         return model, "mixed"
     if model == "fast" and kind in ("stripes-w4", "stripes-w8"):
         return model, "write-q" + kind[-1]
@@ -248,7 +248,7 @@ def prepare_striped_plans(plan, stripe_counts, workload="mixed"):
         raise ValueError("striped base plan is not page/lane partitionable")
 
     for stripe_count in stripe_counts:
-        if stripe_count not in DEFAULT_STRIPE_COUNTS or 32 % stripe_count:
+        if stripe_count not in DEFAULT_STRIPE_COUNTS or expected_qd % stripe_count:
             raise ValueError("stripe count must be one of 1,2,4")
         stripe_root = plan / f"{stripe_prefix}-{stripe_count}"
         stripe_root.mkdir()
@@ -371,8 +371,10 @@ def summarize_striped(label, pair, seconds):
         "swapz_lw_bytes": swapz["lower_io"]["lower_write_bytes"],
         "raw_lw_reqs": off["lower_io"]["lower_write_requests"],
         "swapz_lw_reqs": swapz["lower_io"]["lower_write_requests"],
-        "raw_r_p99": (off.get("read_p99_ns") or 0) / 1e6,
-        "swapz_r_p99": (swapz.get("read_p99_ns") or 0) / 1e6,
+        "raw_r_p99": (off["read_p99_ns"] / 1e6
+                      if off.get("read_p99_ns") is not None else None),
+        "swapz_r_p99": (swapz["read_p99_ns"] / 1e6
+                        if swapz.get("read_p99_ns") is not None else None),
         "raw_w_p99": (off.get("write_p99_ns") or 0) / 1e6,
         "swapz_w_p99": (swapz.get("write_p99_ns") or 0) / 1e6,
         "raw_write_peaks": off["lower_inflight"]["per_stripe_write_peak"],
@@ -415,7 +417,8 @@ def print_striped_table(rows):
               if row["performance_validity"]["performance_usable"]]
     groups = {}
     for row in usable:
-        groups.setdefault((row["model"], row["workload"], row["stripes"]), []).append(row)
+        key = (row["model"], row["workload"], row["stripes"])
+        groups.setdefault(key, []).append(row)
     for model, workload in (("nvme5", "mixed"), ("sata", "mixed"),
                             ("fast", "write-q4"), ("fast", "write-q8")):
         counts = sorted(count for candidate, kind, count in groups
@@ -837,6 +840,7 @@ def main():
                         "scope": "DEVELOPMENT_ONLY_MULTI_TARGET_K1_NO_KERNEL_C_CHANGE",
                         "counts": list(stripe_counts),
                         "repeats": args.stripe_repeat,
+                        "models": sorted(set(model for model, _ in striped_specs)),
                         "model_workloads": [
                             {"model": model, "workload": workload}
                             for model, workload in striped_specs],
