@@ -1463,6 +1463,9 @@ int main(void) {
             self.assertIn(field, completion_fault)
         self.assertIn(
             "completion-handoff fault invariant mismatch:", completion_fault)
+        # The live mapping above proves handoff execution. This fresh fault
+        # mapping may legitimately observe zero offloads before terminal failure.
+        self.assertNotIn("fault_batches > 0", completion_fault)
 
     def test_worker_yields_after_finite_window_and_preserves_fifo(self):
         # Assert the finite-quantum semantics, not one obsolete decrement idiom.

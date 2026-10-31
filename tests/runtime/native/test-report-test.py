@@ -1650,12 +1650,19 @@ class ReportContract(unittest.TestCase):
                 handoff.replace("verified_pages:128", "verified_pages:127"),
                 handoff.replace("completed_writes:16512", "completed_writes:16511"),
                 handoff.replace("active_after:0", "active_after:1"),
-                handoff.replace("fault_offloaded:2", "fault_offloaded:0"),
                 handoff.replace("fault_injected:1", "fault_injected:0"),
                 handoff.replace("post_failure_eio:1", "post_failure_eio:0")):
             self.assertEqual(runner.parse_loaded_correctness(
                 synthetic_log().replace(handoff, replacement))["overall"],
                 "INCOMPLETE")
+
+        # The fault mapping is independent of the preceding live handoff gate;
+        # zero fault-session offloads are valid when all failure invariants pass.
+        zero_fault_offload = handoff.replace(
+            "fault_offloaded:2", "fault_offloaded:0")
+        self.assertEqual(runner.parse_loaded_correctness(
+            synthetic_log().replace(handoff, zero_fault_offload))["overall"],
+            "PASS")
 
         # The exact loaded test now proves an aligned O_DIRECT pwrite(2)
         # returned -1/EIO, not just that the kernel injected a fault.

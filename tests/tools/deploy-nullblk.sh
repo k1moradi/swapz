@@ -1043,17 +1043,18 @@ timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
     fail "cannot remove completion-handoff mapping"
 OWN_DM=0
 
-# A later lower fault follows actual successful handoffs; future syscalls must
-# see EIO even if a published ACK batch was concurrently being delivered.
+# The preceding mapping independently proves a real published-ACK handoff and
+# safe suspend/drain. This fresh mapping isolates terminal lower-WRITE failure;
+# requiring another handoff here would make correctness depend on scheduling.
 # Handoffs are timing-dependent. Keep the ordinary no-fault probe above at the
-# product 64-record window, but make this correctness-only fault mapping use the
-# minimum handoff-capable four-record window so every fixed series has a strong,
-# deterministic lower-attempt floor. Each 16,512-WRITE series has only eight
-# known zero elisions, so at most four records per lower run guarantees at least
+# product 64-record window, while this correctness-only fault mapping retains
+# the minimum handoff-capable four-record window and its deterministic
+# lower-attempt floor. Each 16,512-WRITE series has only eight known zero
+# elisions, so at most four records per lower run guarantees at least
 # ceil(16,504 / 4) = 4,126 lower WRITE attempts. Sixteen bounded passes therefore
 # guarantee 66,016 attempts, which reaches the latest supported test ordinal
-# 65,535 while giving this same target up to fifteen complete passes to exercise
-# a real completion handoff before terminal failure.
+# 65,535. Any fault-session handoffs remain diagnostic only; native controlled
+# interleaving separately covers failure while an offloaded batch is delivered.
 completion_fault_window=4
 completion_fault_nth=65535
 completion_fault_max_passes=16
@@ -1084,8 +1085,7 @@ fault_failed="$(status_u64 "$completion_fault_before" failed)"
 fault_calls="$(status_u64 "$completion_fault_before" write_fault_calls)"
 fault_injected="$(status_u64 "$completion_fault_before" write_fault_injected)"
 fault_upper_err="$(status_u64 "$completion_fault_before" upper_write_completed_err)"
-if ! (( fault_batches > 0 &&
-       fault_active == 0 &&
+if ! (( fault_active == 0 &&
        fault_failed == 1 &&
        fault_calls == completion_fault_nth &&
        fault_injected == 1 &&
