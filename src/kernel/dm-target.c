@@ -91,11 +91,17 @@ MODULE_PARM_DESC(submitter_prepare,
 		 "Prepare accepted ordinary WRITEs in submitting task context using "
 		 "bounded preallocated scratch; requires async_prepare=1");
 
-/* Development-only null_blk policy; production retains its eight-record hand. */
-static unsigned int swapz_work_conserving_hand_records = SWAPZ_WORK_CONSERVING_HAND_RECORDS;
-module_param_named(work_conserving_hand_records, swapz_work_conserving_hand_records, uint, 0444);
+/*
+ * Development-only null_blk selector. Production retains the qualified
+ * eight-record work-conserving hand.
+ */
+static unsigned int swapz_work_conserving_hand_records =
+	SWAPZ_WORK_CONSERVING_HAND_RECORDS;
+module_param_named(work_conserving_hand_records,
+		   swapz_work_conserving_hand_records, uint, 0444);
 MODULE_PARM_DESC(work_conserving_hand_records,
-		 "Owned null_blk A/B: hand threshold 8, 16 or 64; default 8");
+		 "Owned retained-async null_blk A/B: hand threshold 8, 16 or 64; "
+		 "default 8");
 
 static bool swapz_allow_physical_backing;
 module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0444);
@@ -7125,6 +7131,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    swapz_work_conserving_hand_records != 16U &&
 	    swapz_work_conserving_hand_records != 64U) {
 		ti->error = "work_conserving_hand_records must be 8, 16 or 64";
+		return -EINVAL;
+	}
+	if (swapz_work_conserving_hand_records !=
+		    SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
+	    (!swapz_async_prepare || !retain)) {
+		ti->error =
+			"nondefault hand threshold requires async_prepare=1 retain_ms>0";
 		return -EINVAL;
 	}
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
