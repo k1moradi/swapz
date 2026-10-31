@@ -1,0 +1,311 @@
+diff --git a/src/kernel/dm-target.c b/src/kernel/dm-target.c
+index 810ccb37..5a419a45 100644
+--- a/src/kernel/dm-target.c
++++ b/src/kernel/dm-target.c
+@@ -468,6 +468,8 @@ struct swapz_dm {
+ 	/* Callback only queues the serialized worker; it never owns BIOs. */
+ 	struct hrtimer retention_timer;
+ 	spinlock_t queue_lock;
++	/* Pins non-submitter admission notification across queue_lock release. */
++	atomic_t admission_wakes_active;
+ 	struct list_head incoming;
+ 	bool accepting;
+ 	bool failed;
+@@ -6700,6 +6702,28 @@ static void swapz_worker(struct work_struct *work)
+ 	swapz_deliver_upper_completions(ctx);
+ }
+ 
++/* Admission pins the target before unlock publishes the descriptor.
++ * No BIO/entry access is permitted here: the owner may already have freed it.
++ * Drain joins this reference before draining/destroying either workqueue.
++ */
++static void swapz_admission_wake(struct swapz_dm *ctx, bool immediate)
++{
++	if (immediate) {
++		swapz_note_accepted_lower_idle_wake(ctx);
++		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
++	} else {
++		queue_delayed_work(ctx->workqueue, &ctx->worker, 0);
++	}
++	/* Final target access; drain may release the target immediately. */
++	atomic_dec_return_release(&ctx->admission_wakes_active);
++}
++
++static void swapz_join_admission_wakes(struct swapz_dm *ctx)
++{
++	while (atomic_read_acquire(&ctx->admission_wakes_active))
++		schedule_timeout_uninterruptible(1);
++}
++
+ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ {
+ 	struct swapz_dm *ctx = ti->private;
+@@ -6708,6 +6732,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ 	sector_t sector = bio->bi_iter.bi_sector;
+ 	sector_t count = bio_sectors(bio);
+ 	int submitter_lane = -1;
++	bool wake_immediate = false;
+ 
+ 	if (!READ_ONCE(ctx->accepting))
+ 		return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+@@ -6847,18 +6872,21 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ 	 * woken again: two owner passes and context switches per WRITE.
+ 	 */
+ 	if (submitter_lane >= 0) {
+-		/* swapz_submitter_prepare_entry() owns the wake. */
+-	} else if (bio_op(bio) != REQ_OP_WRITE ||
+-	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
+-	    !bio_sectors(bio) || ctx->retain_ms) {
+-		swapz_note_accepted_lower_idle_wake(ctx);
+-		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+-	} else
+-		queue_delayed_work(ctx->workqueue, &ctx->worker, 0);
++		/* The existing submitter lane pins its notification tail. */
++	} else {
++		/* Cache BIO-derived policy before the owner can free its descriptor.
++		 * Publication and the lifetime reference share admission's close gate. */
++		wake_immediate = bio_op(bio) != REQ_OP_WRITE ||
++			(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
++			!bio_sectors(bio) || ctx->retain_ms;
++		atomic_inc(&ctx->admission_wakes_active);
++	}
+ 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+ 	if (submitter_lane >= 0)
+ 		swapz_submitter_prepare_entry(ctx, entry,
+ 					     (unsigned int)submitter_lane);
++	else
++		swapz_admission_wake(ctx, wake_immediate);
+ 	return DM_MAPIO_SUBMITTED;
+ }
+ 
+@@ -6880,6 +6908,9 @@ static void swapz_drain(struct dm_target *ti)
+ 	/* The callback takes queue_lock. Close admission first, then cancel
+ 	 * outside that lock before waiting for any worker or freeing it. */
+ 	hrtimer_cancel(&ctx->retention_timer);
++	/* Closed admission cannot publish another tail. Join every accepted
++	 * queue call before marking a workqueue draining or destroying it. */
++	swapz_join_admission_wakes(ctx);
+ 	/*
+ 	 * ID150: a submitter may still be finishing its owner wake and lane
+ 	 * return after its upper BIO was already completed. Both are short,
+@@ -7143,6 +7174,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
+ 	ctx->delta64_lz4_acceleration =
+ 		(swapz_u8)swapz_delta64_lz4_acceleration;
+ 	spin_lock_init(&ctx->queue_lock);
++	atomic_set(&ctx->admission_wakes_active, 0);
+ 	INIT_LIST_HEAD(&ctx->incoming);
+ 	INIT_LIST_HEAD(&ctx->preparation_incoming);
+ 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
+@@ -8266,6 +8298,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
+ 			prep.delta64.transform_wall_ns + submitter.delta64.transform_wall_ns,
+ 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
+ 			prep.delta64.wall_ns + submitter.delta64.wall_ns);
++		DMEMIT(" admission_wakes_active=%d",
++		       atomic_read(&ctx->admission_wakes_active));
+ 		DMEMIT(" completion_offloaded_batches=%llu completion_active=%d",
+ 		       READ_ONCE(ctx->completion_offloaded_batches),
+ 		       atomic_read(&ctx->completion_active));
+diff --git a/tests/runtime/native/source-contract-test.py b/tests/runtime/native/source-contract-test.py
+index dca2fecf..50eebcb3 100644
+--- a/tests/runtime/native/source-contract-test.py
++++ b/tests/runtime/native/source-contract-test.py
+@@ -53,6 +53,59 @@ def source_body(symbol: str, source: str) -> str:
+ 
+ 
+ class SwapzProductionSourceQualification(unittest.TestCase):
++
++    def test_admission_wake_actual_bodies_join_and_final_release(self):
++        import subprocess
++        import tempfile
++        source = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdlib.h>
++struct swapz_dm { int admission_wakes_active; void *workqueue; int worker; bool accepting; };
++static struct swapz_dm *waiting;
++static int calls, notes, sleeps, released;
++static bool destroy_on_release, draining;
++static void swapz_admission_wake(struct swapz_dm *,bool);
++static int atomic_read_acquire(int *p) {return *p;}
++static int release(int *p) {assert(*p>0);int n=--*p;released++;if(destroy_on_release)free(waiting);return n;}
++#define atomic_dec_return_release(p) release(p)
++static void swapz_note_accepted_lower_idle_wake(struct swapz_dm *ctx) {assert(ctx->admission_wakes_active>0);notes++;}
++static void mod_delayed_work(void *q,int *w,int delay) {(void)w;assert(q&&!delay&&!draining);calls++;}
++static void queue_delayed_work(void *q,int *w,int delay) {mod_delayed_work(q,w,delay);}
++static void schedule_timeout_uninterruptible(int n) {assert(n==1&&!waiting->accepting);sleeps++;swapz_admission_wake(waiting,true);}
++'''
++        for name, signature in (
++            ("swapz_admission_wake", "static void swapz_admission_wake(struct swapz_dm *ctx, bool immediate)"),
++            ("swapz_join_admission_wakes", "static void swapz_join_admission_wakes(struct swapz_dm *ctx)")):
++            source += signature + " {\n" + body(name) + "\n}\n"
++        source += r'''
++int main(void) {
++ struct swapz_dm ctx={.admission_wakes_active=1,.workqueue=&ctx,.accepting=false};
++ waiting=&ctx;swapz_join_admission_wakes(&ctx);
++ assert(calls==1&&notes==1&&sleeps==1&&released==1&&!ctx.admission_wakes_active);
++ draining=true;swapz_join_admission_wakes(&ctx);assert(sleeps==1);draining=false;
++ ctx.admission_wakes_active=1;swapz_admission_wake(&ctx,false);
++ assert(calls==2&&notes==1&&released==2&&!ctx.admission_wakes_active);
++ waiting=calloc(1,sizeof(*waiting));assert(waiting);waiting->workqueue=waiting;
++ waiting->admission_wakes_active=1;destroy_on_release=true;
++ swapz_admission_wake(waiting,true); /* target freed at final release */
++ assert(calls==3&&notes==2&&released==3);
++ return 0;
++}
++'''
++        with tempfile.TemporaryDirectory() as directory:
++            path = Path(directory)
++            (path / "probe.c").write_text(source)
++            built = subprocess.run(["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
++                                    "-fsanitize=address,undefined", str(path / "probe.c"),
++                                    "-o", str(path / "probe")], capture_output=True, text=True)
++            self.assertEqual(built.returncode, 0, built.stderr)
++            ran = subprocess.run([str(path / "probe")], capture_output=True, text=True)
++            self.assertEqual(ran.returncode, 0, ran.stderr)
++        wake = body("swapz_admission_wake")
++        self.assertNotIn("ctx->", wake.split("atomic_dec_return_release(&ctx->admission_wakes_active);")[-1])
++        self.assertNotIn("bio", wake)
++
+     def test_pressure_hand_requires_completed_representation(self):
+         ready = body("swapz_next_local_write_ready")
+         policy = (ROOT / "src/kernel/window-policy.h").read_text()
+@@ -1765,8 +1818,8 @@ int main(void)
+         self.assertNotIn("msecs_to_jiffies", admitted)
+         self.assertIn("REQ_PREFLUSH | REQ_FUA", admitted)
+         self.assertIn("bio_op(bio) != REQ_OP_WRITE", admitted)
+-        self.assertIn("queue_delayed_work(ctx->workqueue", admitted)
+-        self.assertIn("mod_delayed_work(ctx->workqueue", admitted)
++        self.assertIn("queue_delayed_work(ctx->workqueue", body("swapz_admission_wake"))
++        self.assertIn("mod_delayed_work(ctx->workqueue", body("swapz_admission_wake"))
+         self.assertIn("INIT_DELAYED_WORK(&ctx->worker", ctor)
+         self.assertIn("ctx->window_size_counts[count]++", body("swapz_flush_window"))
+         self.assertIn("ctx->one_page_close_reasons[close_reason]++",
+@@ -3257,7 +3310,7 @@ int main(void)
+         self.assertIn("ctx->retain_timer_arms++", worker)
+         self.assertIn("SWAPZ_CLOSE_SHUTDOWN", worker)
+         self.assertIn("ctx->batch_count >= ctx->max_window", worker)
+-        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", mapping)
++        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", body("swapz_admission_wake"))
+         self.assertIn("WRITE_ONCE(ctx->accepting, false)", drain)
+         self.assertLess(drain.index("WRITE_ONCE(ctx->accepting, false)"),
+                         drain.index("hrtimer_cancel(&ctx->retention_timer)"))
+@@ -3292,8 +3345,8 @@ int main(void)
+         mapping = body("swapz_map")
+         self.assertIn("!bio_sectors(bio) || ctx->retain_ms", mapping)
+         self.assertLess(mapping.index("!bio_sectors(bio) || ctx->retain_ms"),
+-                        mapping.index("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)"))
+-        self.assertIn("queue_delayed_work(ctx->workqueue, &ctx->worker, 0)", mapping)
++                        mapping.index("swapz_admission_wake(ctx, wake_immediate)"))
++        self.assertIn("queue_delayed_work(ctx->workqueue, &ctx->worker, 0)", body("swapz_admission_wake"))
+         self.assertNotIn("msecs_to_jiffies", mapping)
+         self.assertNotIn("window_first_ns", mapping)
+         self.assertNotIn("hrtimer_start", mapping)
+@@ -4512,17 +4565,17 @@ int main(void)
+                         admitted.index("if (!ctx->accepting)"))
+         self.assertLess(admitted.index("if (!ctx->accepting)"),
+                         admitted.index("list_add_tail(&entry->list"))
+-        final_queue = admitted.index("queue_delayed_work(ctx->workqueue")
+-        final_unlock = admitted.index(
+-            "spin_unlock_irqrestore(&ctx->queue_lock, flags);", final_queue)
++        final_queue = admitted.index("swapz_admission_wake(ctx, wake_immediate)")
++        final_unlock = admitted.rindex("spin_unlock_irqrestore(&ctx->queue_lock, flags);")
+         submitter_call = admitted.rindex(
+             "swapz_submitter_prepare_entry(ctx, entry")
+         submitted = admitted.index("return DM_MAPIO_SUBMITTED")
+-        self.assertLess(final_queue, final_unlock)
++        self.assertLess(final_unlock, final_queue)
+         self.assertLess(final_unlock, submitter_call)
+         self.assertLess(submitter_call, submitted)
+         self.assertIn("return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;", admitted)
+-        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", admitted)
++        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)",
++                      body("swapz_admission_wake"))
+         self.assertIn("flush_delayed_work(&ctx->worker)", drained)
+         self.assertLess(drained.index("WRITE_ONCE(ctx->accepting, false)"),
+                         drained.index("drain_workqueue(ctx->workqueue)"))
+@@ -4609,12 +4662,17 @@ int main(void)
+         self.assertIn("if (submitter_lane >= 0) {", mapper,
+                       "submitter-owned admission must skip the owner wake")
+         skip_wake = mapper.index("if (submitter_lane >= 0) {")
+-        self.assertLess(skip_wake, mapper.index(
+-            "mod_delayed_work(ctx->workqueue, &ctx->worker, 0)"))
+-        self.assertLess(skip_wake, mapper.index(
+-            "queue_delayed_work(ctx->workqueue, &ctx->worker, 0)"))
+-        self.assertLess(skip_wake, mapper.index(
+-            "spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\tif (submitter_lane"))
++        pin = mapper.index("atomic_inc(&ctx->admission_wakes_active)")
++        unlock = mapper.rindex("spin_unlock_irqrestore(&ctx->queue_lock, flags)")
++        self.assertLess(skip_wake, pin)
++        self.assertLess(pin, unlock)
++        self.assertLess(unlock, mapper.index("swapz_admission_wake(ctx, wake_immediate)"))
++        self.assertNotIn("bio->", mapper[unlock:])
++        drain = body("swapz_drain")
++        self.assertLess(drain.index("WRITE_ONCE(ctx->accepting, false)"),
++                        drain.index("swapz_join_admission_wakes(ctx)"))
++        self.assertLess(drain.index("swapz_join_admission_wakes(ctx)"),
++                        drain.index("drain_workqueue(ctx->workqueue)"))
+ 
+         active_gate = re.search(
+             r"atomic_read_acquire\(\s*&entry->preparation_submitter_active\s*\)",
+diff --git a/tests/tools/deploy-nullblk.sh b/tests/tools/deploy-nullblk.sh
+index 42558582..e97c1d81 100755
+--- a/tests/tools/deploy-nullblk.sh
++++ b/tests/tools/deploy-nullblk.sh
+@@ -1032,6 +1032,10 @@ swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
+     fail "completion-handoff did not become quiescent"
+ completion_after="$SWAPZ_QUIET_STATUS"
+ completion_batches="$(status_u64 "$completion_after" completion_offloaded_batches)"
++(( $(status_u64 "$completion_after" admission_wakes_active) == 0 )) ||
++    fail "admission notification tails did not drain after suspend"
++note "ADMISSION_WAKE_SUSPEND_STATUS=$completion_after"
++
+ (( completion_batches > 0 &&
+    $(status_u64 "$completion_after" completion_active) == 0 &&
+    $(status_u64 "$completion_after" failed) == 0 &&
+@@ -1090,6 +1094,10 @@ fi
+ timeout --signal=TERM --kill-after=2s 20s "$WRITE_PROBE" "/dev/mapper/$DMNAME" ||
+     fail "post-handoff terminal target accepted a new WRITE"
+ completion_fault_after="$(dmsetup status "$DMNAME")"
++(( $(status_u64 "$completion_fault_after" admission_wakes_active) == 0 )) ||
++    fail "admission notification tails did not drain after lower failure"
++note "ADMISSION_WAKE_FAULT_STATUS=$completion_fault_after"
++
+ (( $(status_u64 "$completion_fault_after" upper_write_completed_ok) ==
+    $(status_u64 "$completion_fault_before" upper_write_completed_ok) &&
+    $(status_u64 "$completion_fault_after" upper_write_completed_err) ==
+diff --git a/tests/tools/fast-test.py b/tests/tools/fast-test.py
+index 9d8ef398..779d1376 100644
+--- a/tests/tools/fast-test.py
++++ b/tests/tools/fast-test.py
+@@ -137,7 +137,7 @@ def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first
+     arguments += ["--shared-plan", str(plan)]
+     if calibration:
+         arguments.append("--linear-calibration")
+-    if candidate_first:
++    if candidate_first or os.environ.get("PAIR_ORDER") == "candidate-first":
+         arguments.append("--swapz-first")
+     return arguments
+ 
+@@ -428,6 +428,11 @@ def main():
+         print(preflight.stdout + preflight.stderr, file=sys.stderr)
+         print("BLOCKED: loaded preflight failed", file=sys.stderr)
+         return 2
++    if os.environ.get("ADMISSION_WAKE_GATE") == "1":
++        gate = privileged(1200, "tests/tools/deploy-nullblk.sh", "--validated-source", head)
++        print(gate.stdout + gate.stderr, flush=True)
++        if gate.returncode:
++            return 2
+     plan = prepare_plan(args.content)
+     fixture = json.loads((plan / "fixture.json").read_text())
+     OUT_DIR.mkdir(parents=True, exist_ok=True)
+@@ -463,7 +468,9 @@ def main():
+                 row["performance_validity"] = performance_validity(
+                     quiet_before, quiet_after, arms)
+                 rows.append(row)
+-                raw_reports.append({"scenario": label, "arms": arms})
++                raw_reports.append({"scenario": label, "arms": arms,
++                                    "target_status": [line for line in proc.stdout.splitlines()
++                                                      if "SWAPZ_STATUS_" in line]})
+                 measured = row["linear_w"] if calibration else row["swapz_w"]
+                 print(f"  {label}: raw W {row['raw_w']:.2f} {candidate} W "
+                       f"{measured:.2f} ({pct(measured, row['raw_w']).strip()}) "
