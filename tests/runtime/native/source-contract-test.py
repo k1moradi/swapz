@@ -433,8 +433,8 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('submitter_prepare=$SUBMITTER_PREPARE', pair)
         self.assertIn('submitter_prepare=$expected_submitter_prepare', pair)
         self.assertIn("SUBMITTER_PREPARE_EXPLICIT ))", pair)
-        # The ordinary qualification matrix does not vary submitter preparation;
-        self.assertEqual(loaded.count("--submitter-prepare 0"), 1)
+        # ID161 is retired; ordinary qualification never varies submitter placement.
+        self.assertEqual(loaded.count("--submitter-prepare 0"), 0)
         self.assertIn('"host_load_profile": args.host_load_profile', fast)
         self.assertIn("reject_raw_drift(striped_rows)", fast)
 
@@ -4527,6 +4527,9 @@ int main(void)
         self.assertIn("module_param_named(work_conserving_hand_records,", DM)
         self.assertIn("swapz_work_conserving_hand_records != 16U", ctor)
         self.assertIn("swapz_work_conserving_hand_records != 64U", ctor)
+        self.assertIn(
+            "nondefault hand threshold requires async_prepare=1 retain_ms>0",
+            ctor)
         self.assertIn("nondefault hand threshold is restricted to null_blk", ctor)
         self.assertIn("ctx->work_conserving_hand_records", body("swapz_worker_pass"))
         self.assertIn("ctx->work_conserving_hand_records,", status)
