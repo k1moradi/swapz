@@ -1395,6 +1395,8 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("/dev/sdb", loaded)
 
     def test_storage_envelopes_report_capture_and_qd_limited_ceiling(self):
+        import copy
+
         lines = []
         for envelope in runner.STORAGE_ENVELOPE_ORDER:
             spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
