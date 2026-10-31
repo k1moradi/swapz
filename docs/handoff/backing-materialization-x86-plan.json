@@ -169,7 +169,7 @@
     "tests/tools/deploy-nullblk.sh": "f0270962e1ed863f93e1e68877ee63fee168170cca612f0e31fbb5d0c159a905",
     "tests/tools/device-roundtrip.c": "1e3ea92302875102c843d28a8d92c97872b492354d17aa5eb670815128cac380",
     "tests/tools/direct-write-probe.c": "f860ff1684b4bd5f6e25d0d6cc9ec50ac2c073970f72b2e4ae1a75f7a7e71416",
-    "tests/tools/fast-test.py": "84482d57421ba3170c0e93398e285543280f6cd4b432f51a91237dcd62f901af",
+    "tests/tools/fast-test.py": "8cd25ac4f0db2ffe6180002c2ecdf6d7365611946ed22488d27eb2b9222eb4e1",
     "tests/tools/loaded-preflight.sh": "50700a8342b8017967c89cfeb5e0906761599041ba3841f67b49f1ce82a10ea6",
     "tests/tools/nullblk-identity.sh": "b6b1f49823bb6a1925ed615cb384988fae93eceeea6b800248763bc0b005c1ff",
     "tests/tools/plot-history.py": "a814e5694b15c3116d33b8b82e64a676256b32d6d0827fe98dbb5458a29919fe",
@@ -182,5 +182,6 @@
     "tests/tools/test-loaded.sh": "7fb7682aed040b619b760f30da726efcdec723ac0482f216f5e2d12eeb6c485e",
     "tests/tools/test-rootless.sh": "11460b532068e42df1bf5c7fdc21e4764241477fad2e288164971edbe39509df"
   },
-  "orchestrator_sha256": "94b43338ee8e28439a984817e527021faf21b3ca4d44dd34d97ff535f87f9c75"
+  "orchestrator_sha256": "94b43338ee8e28439a984817e527021faf21b3ca4d44dd34d97ff535f87f9c75",
+  "pre_sample_correction": "First study attempt completed F block only; M stopped in native preflight before device creation because its environment leaked materialization into a linear-calibration argument contract. First attempt preserved separately, no paired effect examined or reused. Corrected protocol isolates calibration before the fixed restart."
 }

@@ -48,7 +48,7 @@ index b416e760..06730afd 100755
      id36_pair_dir="${ID36_PAIR_READY%/*}"
      [[ -n $ID36_PAIR_READY && -n $ID36_PAIR_GO &&
 diff --git a/tests/tools/fast-test.py b/tests/tools/fast-test.py
-index 9d8ef398..f2c586d7 100644
+index 9d8ef398..d26fa147 100644
 --- a/tests/tools/fast-test.py
 +++ b/tests/tools/fast-test.py
 @@ -137,8 +137,10 @@ def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first
@@ -58,12 +58,21 @@ index 9d8ef398..f2c586d7 100644
 -    if candidate_first:
 +    if candidate_first or os.environ.get("PAIR_ORDER") == "candidate-first":
          arguments.append("--swapz-first")
-+    if os.environ.get("BACKING_STATE", "fresh") == "materialized":
++    if not calibration and os.environ.get("BACKING_STATE", "fresh") == "materialized":
 +        arguments.append("--materialize-owned-ram")
      return arguments
  
  
-@@ -445,7 +447,9 @@ def main():
+@@ -398,6 +400,8 @@ def main():
+                         default=os.environ.get("CALIBRATION", "none"))
+     args = parser.parse_args()
+     calibration = args.calibration == "linear"
++    if calibration and os.environ.get("BACKING_STATE", "fresh") == "materialized":
++        raise ValueError("materialization study cannot use linear calibration")
+     candidate = "linear" if calibration else "swapz"
+     scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
+         or list(DEFAULT_SCENARIOS)
+@@ -445,7 +449,9 @@ def main():
                  elapsed = time.monotonic() - begin
                  quiet_after = quiet_host_sample()
                  arms = parse_arms(proc.stdout, candidate)
@@ -74,7 +83,7 @@ index 9d8ef398..f2c586d7 100644
                      status = 1
                      tail = (proc.stdout + proc.stderr).strip().splitlines()[-12:]
                      rows.append({"scenario": label,
-@@ -463,7 +467,10 @@ def main():
+@@ -463,7 +469,10 @@ def main():
                  row["performance_validity"] = performance_validity(
                      quiet_before, quiet_after, arms)
                  rows.append(row)

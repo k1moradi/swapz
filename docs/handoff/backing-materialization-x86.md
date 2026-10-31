@@ -29,3 +29,13 @@ mixing the study treatment with ID36/linear calibration. The ordinary public
 Make interface is unchanged. These controls will be removed after the study.
 The native host, hashed identity, C/input/helper hashes and quiet-entry policy
 are frozen in the plan before samples. Results are pending at publication.
+
+
+The first execution attempt completed only its F block; M failed a native
+argument contract before creating a device. Its environment had appended the
+study suffix to a separate linear-calibration contract. That attempt is retained
+separately and contributes no paired treatment result. Before restart, argument
+construction was isolated from calibration and mixed-mode use was rejected at
+the parent boundary. All 22 native replay contracts pass under the materialized
+environment after correction. The corrected helper hashes are frozen; the new
+fixed run does not reuse or selectively replace observations from attempt 1.
