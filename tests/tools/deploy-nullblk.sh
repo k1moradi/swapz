@@ -435,6 +435,38 @@ flush_injected="$(status_delta flush_injected)"
 (( flush_calls >= 2 && flush_ok == flush_calls &&
    flush_err == 0 && flush_injected == 0 )) ||
     fail "loaded oracle flush/barrier accounting changed"
+# Production delta64 + DELTA64_SHUF8 + LZ4 positive path (correctness only,
+# never an off/on benchmark). After the exact oracle accounting above, write
+# 128 counter-sequence pages that the classifier and direct rescue must adopt,
+# then read them back: every non-RAW read decompresses the stored extent and
+# runs the DELTA64_SHUF8 inverse, so this proves encode, store and decode on
+# the loaded kernel's selected transform backend.
+delta64_before="$(dmsetup status "$DMNAME")" ||
+    fail "cannot read status before delta64 positive path"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --delta64-write-series 128 1 ||
+    fail "delta64 positive-path write series failed"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --delta64-verify-series 128 1 ||
+    fail "delta64 positive-path byte-exact readback failed"
+delta64_after="$(dmsetup status "$DMNAME")" ||
+    fail "cannot read status after delta64 positive path"
+delta64_counter_delta() {
+    local before_value after_value
+    before_value="$(status_u64 "$delta64_before" "$1")" ||
+        fail "status missing pre-delta64 $1"
+    after_value="$(status_u64 "$delta64_after" "$1")" ||
+        fail "status missing post-delta64 $1"
+    (( after_value >= before_value )) || fail "status $1 regressed"
+    printf '%s\n' "$((after_value - before_value))"
+}
+delta64_pass="$(delta64_counter_delta delta64_classifier_pass)"
+delta64_adopted="$(delta64_counter_delta delta64_adopted)"
+(( delta64_pass >= 128 && delta64_adopted >= 128 &&
+   $(status_u64 "$delta64_after" delta64_rescue) == 1 &&
+   $(status_u64 "$delta64_after" failed) == 0 )) ||
+    fail "delta64 positive path not adopted: classifier_pass=$delta64_pass adopted=$delta64_adopted"
+note "LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:$delta64_pass adopted:$delta64_adopted"
 note "PASS_LOADED_ORACLE_PROFILE=raw_pages:$raw_writes zero_pages:$zero_writes flush_calls:$flush_calls"
 
 # Compound/folio multi-bvec and non-zero bv_offset BIO qualification.

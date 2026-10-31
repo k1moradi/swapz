@@ -45,6 +45,14 @@ select scenarios and repeats. Every emulated scenario must use the production
 delta64 + `DELTA64_SHUF8` byte-plane shuffle (“bitshuffle” requirement) + LZ4
 stack. Delta64-off benchmark arms are retired and must not be added to
 `make test`, `make fast_test`, report plots, or performance history.
+Retiring the comparison does not retire positive-path correctness: the loaded
+default-policy smoke writes and byte-exactly reads back 128 delta64-positive
+counter-sequence pages (`--delta64-write-series`/`--delta64-verify-series`) and
+requires at least 128 classifier passes and adoptions, proving encode, store and
+DELTA64_SHUF8 decode on the loaded kernel's selected backend. History plots
+keep only rescue-on mixed points; retired write-only delta64-positive envelope
+rows (no READ service) are excluded from mixed panels. A DM-linear calibration
+file reports `compression_policy=none-dm-linear`.
 `SUBMITTER_PREPARE=0` disables only the existing submitter-context path in
 ordinary asynchronous development pairs (background async preparation stays on);
 the product/default and official qualification remain `1`. The private helper

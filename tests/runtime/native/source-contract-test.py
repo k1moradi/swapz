@@ -408,6 +408,24 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('status_u64 "$packed_before" delta64_rescue) == 1', deploy)
         self.assertIn('require_delta64_default "$status_after"', deploy)
         self.assertNotIn("require_delta64_disabled", deploy)
+        # Retiring the off/on benchmark must not retire loaded positive-path
+        # coverage: the default-policy smoke writes and reads back 128
+        # delta64-positive pages and requires classifier passes and adoptions
+        # before the oracle profile is accepted.
+        oracle_phase = deploy.split('note "PASS_LOADED_ORACLE_PROFILE=', 1)[0]
+        for needle in ("--delta64-write-series 128 1",
+                       "--delta64-verify-series 128 1",
+                       "delta64_counter_delta delta64_classifier_pass",
+                       "delta64_counter_delta delta64_adopted",
+                       "delta64_pass >= 128 && delta64_adopted >= 128"):
+            self.assertIn(needle, oracle_phase)
+        self.assertLess(oracle_phase.index("--delta64-write-series"),
+                        oracle_phase.index("--delta64-verify-series"))
+        roundtrip = (ROOT / "tests/tools/device-roundtrip.c").read_text()
+        self.assertIn("static void delta64_pattern(", roundtrip)
+        self.assertIn('"--delta64-write-series"', roundtrip)
+        self.assertIn('"--delta64-verify-series"', roundtrip)
+        self.assertIn("raw_series == 2", roundtrip)
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         self.assertIn("\nDELTA64_RESCUE=1\n", pair)
         self.assertIn("\nDELTA64_LZ4_ACCELERATION=4\n", pair)

@@ -119,6 +119,34 @@ static void raw_pattern(unsigned char *p, unsigned int page,
 	p[PAGE - 6] = (unsigned char)round;
 }
 
+/*
+ * Production delta64+DELTA64_SHUF8+LZ4 positive control, mirroring the
+ * anon-page-fixture delta64 profile: a high-entropy 64-bit start value with
+ * nonzero adjacent deltas <= 256. Ordinary LZ4 sees roughly 2.3KiB, while the
+ * page-local delta64 transform exposes narrow deltas that the classifier and
+ * rescue adopt. Correctness smoke only; never an off/on benchmark.
+ */
+static void delta64_pattern(unsigned char *p, unsigned int page,
+			    unsigned int round)
+{
+	uint32_t s = 0x2545f491U ^ (page * 2654435761U) ^
+		     (round * 2246822519U);
+	uint64_t value;
+	unsigned int slot;
+
+	s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+	value = (uint64_t)s << 32;
+	s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+	value |= s;
+	for (slot = 0; slot < PAGE / 8U; ++slot) {
+		s ^= s << 13;
+		s ^= s >> 17;
+		s ^= s << 5;
+		value += 1U + (s & 0xffU);
+		memcpy(p + (size_t)slot * 8U, &value, sizeof(value));
+	}
+}
+
 static int transfer(int fd, void *buffer, unsigned int page, int write_data)
 {
 	ssize_t count;
@@ -233,7 +261,9 @@ static int series(int fd, unsigned char *buf, unsigned char *expected,
 	unsigned int i;
 
 	for (i = 0; i < count; ++i) {
-		if (raw_data)
+		if (raw_data == 2)
+			delta64_pattern(expected, i, round);
+		else if (raw_data)
 			raw_pattern(expected, i, round);
 		else
 			pattern(expected, i, round);
@@ -677,6 +707,11 @@ int main(int argc, char **argv)
 			raw_series = 1;
 		} else if (!strcmp(argv[2], "--raw-verify-series")) {
 			raw_series = 1;
+		} else if (!strcmp(argv[2], "--delta64-write-series")) {
+			write_series = 1;
+			raw_series = 2;
+		} else if (!strcmp(argv[2], "--delta64-verify-series")) {
+			raw_series = 2;
 		} else if (!strcmp(argv[2], "--segmented-write-series")) {
 			write_series = 1;
 			segmented_series_mode = 1;
@@ -773,6 +808,7 @@ int main(int argc, char **argv)
 				   write_series, raw_series))
 				goto out;
 			printf("PASS: owned swapz direct %s%s series count=%u round=%u\n",
+			       raw_series == 2 ? "delta64-" :
 			       raw_series ? "raw-" : "",
 			       write_series ? "write" : "verify", count, round);
 		}

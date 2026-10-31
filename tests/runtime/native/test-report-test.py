@@ -1106,6 +1106,23 @@ class ReportContract(unittest.TestCase):
         bad = copy.deepcopy(report)
         bad["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = None
         self.assertEqual(history.report_points(bad), [])
+        # Historical envelope rescue-on rows replayed the write-only
+        # delta64-positive fixture; they must never become mixed points.
+        envelope = {"status": "PASS", "envelope": "sata_ssd",
+                    "device_model": {"cap_mib_s": 500},
+                    "arms": {"off": {**raw, "input_read_mbps": 0.0},
+                             "swapz": {**swapz, "input_read_mbps": 0.0}}}
+        legacy = copy.deepcopy(report)
+        legacy["benchmarks"]["storage_envelope_sessions"] = [envelope]
+        self.assertEqual([p for p in history.report_points(legacy)
+                          if p["target"] == "sata_ssd"], [])
+        mixed_envelope = copy.deepcopy(envelope)
+        for arm in mixed_envelope["arms"].values():
+            arm["input_read_mbps"] = 30.0
+        current = copy.deepcopy(report)
+        current["benchmarks"]["storage_envelope_sessions"] = [mixed_envelope]
+        self.assertEqual(len([p for p in history.report_points(current)
+                              if p["target"] == "sata_ssd"]), 1)
         sustained = copy.deepcopy(report)
         write_session = copy.deepcopy(session)
         write_session["qd"] = 4

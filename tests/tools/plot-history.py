@@ -125,6 +125,14 @@ def report_points(report):
         # Current history intentionally excludes historical delta64-off runs.
         if (swapz.get("kernel_write_path") or {}).get("delta64_rescue") != 1:
             continue
+        # Historical envelope rescue-on rows replayed the write-only
+        # delta64-positive fixture, not the mixed workload; their arms carry
+        # no replay_mode. A mixed QD32 point must show READ service on both
+        # arms, so never draw a write-only row on the mixed panels.
+        if envelope and not all(
+                isinstance(arm.get("input_read_mbps"), (int, float)) and
+                arm["input_read_mbps"] > 0 for arm in (raw, swapz)):
+            continue
         target = envelope or session.get("regime")
         if target not in TARGETS:
             continue
@@ -328,7 +336,7 @@ def render(data):
         scale_note = ("Absolute decimal MB/s; higher is better for both raw and swapz"
                       if filename == "mixed-throughput" else
                       "0% = raw parity · positive = improvement")
-        fig.text(.5, .025, "Async mixed; production delta64+DELTA64_SHUF8+LZ4 only · " + scale_note + "\n"
+        fig.text(.5, .025, "Async mixed; delta64 rescue on only (DELTA64_SHUF8 since 005592d; earlier points plain DELTA64) · " + scale_note + "\n"
                  "Matched-arm means; panel scales differ. READ is mixed-load service. Line breaks = kernel/model/workload changes.\n"
                  "Historical host load varies; ratios are descriptive, not causal gains or physical NAND wear evidence.",
                  ha="center", fontsize=9, color="#555555")
@@ -408,8 +416,10 @@ def main():
                f"{len(data['reports'])} passing report revisions; latest source "
                f"`{data['reports'][-1]['source_sha']}`. " + data["identity_note"], "",
                "Each mixed point uses async sessions and its own raw controls. Current history includes "
-               "only the production delta64+DELTA64_SHUF8+LZ4 policy; historical delta64-off sessions are "
-               "intentionally excluded rather than plotted as a separate series. "
+               "only delta64-rescue-on sessions; historical delta64-off sessions and the retired write-only "
+               "delta64-positive envelope rows are intentionally excluded. Rescue-on points from sources "
+               "before 005592d used plain DELTA64 rather than DELTA64_SHUF8; the medium fixture adopts "
+               "neither, so those points are comparable but not evidence for the shuffle encoding. "
                "Rates are ratios of matched-arm arithmetic means, so rounded percentages may differ "
                "slightly from the official report's differently pooled raw column. Positive means "
                "improvement; zero is raw parity. p99 and lower I/O use percent reduction. "

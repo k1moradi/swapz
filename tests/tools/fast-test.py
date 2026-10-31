@@ -853,8 +853,11 @@ def main():
     (OUT_DIR / result_name).write_text(
         json.dumps({"head": head, "dirty": bool(dirty),
                     "calibration": args.calibration,
-                    "compression_policy": "delta64-shuf8-lz4",
-                    "delta64_rescue": 1,
+                    # CALIBRATION=linear replays a DM-linear target: no swapz
+                    # module or compression stack is involved in that file.
+                    "compression_policy": ("none-dm-linear" if calibration
+                                           else "delta64-shuf8-lz4"),
+                    "delta64_rescue": None if calibration else 1,
                     "submitter_prepare": args.submitter_prepare,
                     "hand_records": args.hand_records,
                     "host_load_profile": args.host_load_profile,
