@@ -2057,7 +2057,7 @@ def parse_storage_envelope_sessions(output):
 
 def parse_serial_queue_control_sessions(output):
     """Reuse the validated storage arm parser for a separately bracketed study."""
-    sessions, captured, order = [], None, None
+    sessions, captured, order, replay_order = [], None, None, None
     start = re.compile(r"START_SERIAL_QUEUE_CONTROL=(sata_ssd|nvme_gen5) ORDER=([01])")
     end = re.compile(r"PASS_SERIAL_QUEUE_CONTROL=(sata_ssd|nvme_gen5) ORDER=([01])")
     for original in output.splitlines():
@@ -2067,6 +2067,7 @@ def parse_serial_queue_control_sessions(output):
             if captured is not None:
                 sessions.extend(parse_storage_envelope_sessions("\n".join(captured)))
             order = int(beginning.group(2))
+            replay_order = None
             captured = [f"START_STORAGE_ENVELOPE={beginning.group(1)} DELTA64_RESCUE=0"]
             continue
         if captured is None:
@@ -2082,14 +2083,18 @@ def parse_serial_queue_control_sessions(output):
             parsed = parse_storage_envelope_sessions("\n".join(captured))
             for session in parsed:
                 session["order"] = order
+                session["replay_order"] = replay_order
             sessions.extend(parsed)
             captured = None
             continue
+        if line.startswith("REPLAY_ORDER="):
+            replay_order = line.partition("=")[2]
         captured.append(original)
     if captured is not None:
         parsed = parse_storage_envelope_sessions("\n".join(captured))
         for session in parsed:
             session["order"] = order
+            session["replay_order"] = replay_order
         sessions.extend(parsed)
     return sessions
 
@@ -2113,6 +2118,10 @@ def serial_queue_control_verdict(sessions, baseline_sessions):
                           key=lambda s: s["order"])
         original = STORAGE_ENVELOPE_SPECS[envelope]
         for control in controls:
+            if control.get("replay_order") != (
+                    "off-first" if control["order"] == 0 else "swapz-first"):
+                return {"overall": "INCONCLUSIVE",
+                        "reason": envelope + " replay order did not match control"}
             model = control.get("device_model") or {}
             if (control.get("status") != "PASS" or
                     control.get("delta64_rescue") != 0 or

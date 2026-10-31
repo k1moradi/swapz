@@ -2575,3 +2575,8 @@ This is not a striped multi-target experiment, a physical SSD observation,
 a statistically confirmed throughput comparison or evidence that K=2 wins.
 Diagnostic interpretation is independent of official qualification; loaded
 byte-oracle or teardown errors still fail the ordinary `make test` stage.
+
+The internal reporting contract additionally checks the **observed** replay
+order against each declared order marker, source/trace/fixture equality and
+actual lower WRITE depth. The source-contract suite separately accounts for
+the LZ4-only serial-control arm; no default compression policy is changed.

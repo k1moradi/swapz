@@ -3667,6 +3667,53 @@ class SerialQueueEvidenceTests(unittest.TestCase):
         self.assertEqual(
             runner.serial_queue_control_verdict(parsed, [])["overall"], "INCOMPLETE")
 
+
+    def test_serial_queue_control_validates_model_sources_and_actual_depth(self):
+        baseline_lines, serial_lines = [], []
+        for envelope in ("sata_ssd", "nvme_gen5"):
+            spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
+            model = (f"PASS_RAM_MODEL_LOWER_MBPS={spec['cap_mib_s']} "
+                     f"COMPLETION_NSEC={spec['completion_nsec']} "
+                     "IRQMODE=2 QUEUE_MODE=2 ")
+            raw = storage_envelope_arm("off", envelope=envelope, delta64_rescue=0)
+            swapz = storage_envelope_arm("swapz", envelope=envelope, delta64_rescue=0)
+            baseline_lines.extend((
+                f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE=0",
+                model + f"SUBMIT_QUEUES={spec['submit_queues']} "
+                f"HW_QUEUE_DEPTH={spec['hw_queue_depth']}",
+                json.dumps(raw), json.dumps(swapz),
+                f"PASS_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE=0",
+            ))
+            for order in (0, 1):
+                raw["lower_inflight"]["write_peak"] = 1
+                swapz["lower_inflight"]["write_peak"] = 1
+                serial_lines.extend((
+                    f"START_SERIAL_QUEUE_CONTROL={envelope} ORDER={order}",
+                    model + "SUBMIT_QUEUES=1 HW_QUEUE_DEPTH=1",
+                    "REPLAY_ORDER=off-first" if order == 0 else
+                    "REPLAY_ORDER=swapz-first",
+                    json.dumps(raw), json.dumps(swapz),
+                    f"PASS_SERIAL_QUEUE_CONTROL={envelope} ORDER={order}",
+                ))
+        baseline = runner.parse_storage_envelope_sessions("\n".join(baseline_lines))
+        serial = runner.parse_serial_queue_control_sessions("\n".join(serial_lines))
+        self.assertEqual(len(serial), 4)
+        verdict = runner.serial_queue_control_verdict(serial, baseline)
+        self.assertEqual(verdict["overall"], "OBSERVED_SERIAL_QUEUE_SENSITIVITY")
+        self.assertEqual(len(verdict["rows"]), 2)
+        self.assertTrue(all(row["observed_one_lower_write_per_arm"]
+                            for row in verdict["rows"]))
+        serial[0]["replay_order"] = "swapz-first"
+        self.assertEqual(
+            runner.serial_queue_control_verdict(serial, baseline)["overall"],
+            "INCONCLUSIVE")
+        serial[0]["replay_order"] = "off-first"
+        serial[0]["arms"]["off"]["lower_inflight"]["write_peak"] = 2
+        self.assertEqual(
+            runner.serial_queue_control_verdict(serial, baseline)["overall"],
+            "INCONCLUSIVE_DEPTH_ONE_NOT_OBSERVED")
+
+
     def test_serial_control_keeps_both_arm_device_ownership(self):
         helper = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
