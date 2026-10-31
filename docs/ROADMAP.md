@@ -658,6 +658,17 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
+The follow-up old-PC QD4 reissue diagnostic produced no valid causal timing
+partition: the final raw-syscall observer lost 22,281 events, missed independent
+operation/lower-request counts, failed host screening and exceeded its 10%
+descriptive perturbation screen. Earlier attempts selected the wrong replay
+engine and then silent named syscall tracepoints. All final benchmark byte
+oracles passed, but these observations cannot select a production optimization.
+The broad sync4 reissue timer includes acknowledgment, writer reissue,
+admission/preparation and retention. Preserve qualified C; first prove bounded,
+complete capture before attributing that whole interval to removable idle.
+[Diagnostic results and validity limits](handoff/qd4-reissue-oldpc-result.md).
+
 The old-PC owner run at `09e1cfaa` exposed zero fault-session handoffs.
 Inspection found completion handoff using the eight-record dispatch constant,
 although its contract requires four published BIOs. The native actual-body

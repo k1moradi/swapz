@@ -115,6 +115,14 @@ the byte oracle passes. Admission/completion CPU identity and instrumented
 interrupts and workload progress can confound it. Do not turn that association
 into a causal speedup, exact CPU cost or a raw-device comparison.
 
+Select observer gates from the actual replay-engine field: persistent lane
+ownership alone does not imply native C replay or its stdin GO protocol.
+Smoke-check the selected probe with the installed kernel/tool combination.
+An attached observer with no timed gates is invalid. Explicit event loss or
+missing independent syscall/lower counts rejects interval attribution; never
+infer a complete critical path from the surviving subset. Preserve failed
+captures and technical corrections separately from performance observations.
+
 These are conservative development screening thresholds, not statistical
 qualification or proof of causality. `SCREENED` means the checks passed, not
 that the host was idle throughout. Timed busy/PSI alone must never reject a run:
