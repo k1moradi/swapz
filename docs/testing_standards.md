@@ -42,7 +42,7 @@ and requests, READ/WRITE p99, windows, deadline and idle-bound closes,
 accepted-work lower idle, lower-WRITE service and its EWMA, and keeps detailed
 telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
 select scenarios and repeats. Every emulated scenario must use the production
-delta64 + `DELTA64_SHUF8` byte-plane shuffle (“bitshuffle” requirement) + LZ4
+delta64 + `DELTA64_SHUF8` byte-plane shuffle (byte shuffle) + LZ4
 stack. Delta64-off benchmark arms are retired and must not be added to
 `make test`, `make fast_test`, report plots, or performance history.
 Retiring the comparison does not retire positive-path correctness: the loaded

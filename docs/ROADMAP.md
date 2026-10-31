@@ -9,7 +9,7 @@ This file is the project's **rolling engineering blueprint**: active priorities,
 ## Current owner requirement: fixed production compression stack
 
 Every emulated device must run the production delta64 + `DELTA64_SHUF8`
-8-byte byte-plane shuffle (“bitshuffle” requirement) + LZ4 stack with delta64
+8-byte byte-plane shuffle (owner-confirmed byte shuffle, not bit-level) + LZ4 stack with delta64
 rescue enabled. This is a main product requirement, not an experiment selector.
 Do not spend qualification time on delta64-off benchmark arms, off/on A/Bs, or
 delta64-off plot/history series. Historical rescue-off results remain evidence

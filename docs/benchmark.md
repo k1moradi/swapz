@@ -21,8 +21,8 @@ benefits and regressions coexist, label the result a trade-off rather than a
 win. Internal sync/async comparisons may explain mechanism; they do not turn a
 result that still trails raw into a product-level performance win. Delta64 is
 no longer such a feature toggle: every emulated-device benchmark uses the
-production delta64 + `DELTA64_SHUF8` byte-plane shuffle (“bitshuffle”
-requirement) + LZ4 stack, and delta64-off arms/series are excluded from current
+production delta64 + `DELTA64_SHUF8` byte-plane shuffle (byte
+shuffle) + LZ4 stack, and delta64-off arms/series are excluded from current
 tests and plots. Historical off/on evidence remains archival only. Mean-value
 interpretations are directional only; matched confidence intervals remain the
 qualification evidence.
