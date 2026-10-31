@@ -3996,11 +3996,15 @@ def sd_read_coalesce_ab_verdict(sessions):
 def parse_lone_raw_qd1(output):
     """Parse the isolated ID161 QD1 candidate without touching saturation rows."""
     row = None
+    completed = None
     seen = 0
     for original in output.splitlines():
         line = original.strip()
         if line == "START_LONE_RAW_QD1=1":
             seen += 1
+            if row is not None:
+                return {"overall": "INCOMPLETE",
+                        "reason": "nested lone-RAW QD1 candidate markers"}
             row = {
                 "status": "INCOMPLETE", "order": "unknown",
                 "device_model": None, "arms": {}, "activity": None,
@@ -4041,7 +4045,8 @@ def parse_lone_raw_qd1(output):
                 obj = json.loads(line)
             except (ValueError, TypeError):
                 continue
-            if obj.get("candidate") not in ("off", "swapz") or                     obj.get("verdict") != "PASS":
+            if (obj.get("candidate") not in ("off", "swapz") or
+                    obj.get("verdict") != "PASS"):
                 continue
             rates = obj.get("throughput_mbps") or {}
             lower = obj.get("lower_io") or {}
@@ -4064,9 +4069,12 @@ def parse_lone_raw_qd1(output):
             }
         elif line == "PASS_LONE_RAW_QD1=1":
             row["status"] = "PASS"
-    if seen != 1 or row is None or row.get("status") != "PASS":
+            completed = row
+            row = None
+    if seen != 1 or completed is None or completed.get("status") != "PASS":
         return {"overall": "INCOMPLETE",
                 "reason": "exactly one completed lone-RAW QD1 candidate pair required"}
+    row = completed
     if row.get("order") != "off-first":
         return {"overall": "INCOMPLETE",
                 "reason": "lone-RAW QD1 replay order mismatch"}

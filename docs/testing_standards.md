@@ -2671,7 +2671,9 @@ intervals. Qualification fails closed unless the candidate is actually selected,
 its timed and full-session counters conserve, QD1 observes zero multi-record
 lone-RAW windows/pages, the byte oracle passes and teardown is clean. The report
 stores its useful WRITE ratio, lower WRITE byte/request ratios and p99 separately
-under `benchmarks.lone_raw_qd1`.
+under `benchmarks.lone_raw_qd1`. Its parser is strictly bracketed by the
+ID161 START/PASS markers; later ID36 or other off/swapz JSON may not mutate the
+closed candidate record.
 
 Passing that correctness gate does **not** promote the policy. Promotion requires
 matched development evidence showing useful-QD1 improvement with no lower-byte,

@@ -1933,6 +1933,13 @@ class ReportContract(unittest.TestCase):
             "multi_record_windows:0 multi_record_pages:0",
             "multi_record_windows:1 multi_record_pages:1", 1)
         self.assertEqual(runner.parse_lone_raw_qd1(bad)["overall"], "INCOMPLETE")
+        # ID36 and later loaded phases emit ordinary off/swapz JSON too.
+        # They must not overwrite the already closed ID161 bracket.
+        trailing = synthetic_log() + json.dumps(
+            write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)) + "\n"
+        isolated = runner.parse_lone_raw_qd1(trailing)
+        self.assertEqual(isolated["overall"], "PASS_LONE_RAW_QD1_CANDIDATE")
+        self.assertEqual(isolated["row"]["arms"]["swapz"]["qd"], 1)
 
 
     def test_write_saturation_evidence_repeats_fast_qd4_qd8_and_qd32(self):
