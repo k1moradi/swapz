@@ -794,6 +794,8 @@ def storage_envelope_arm(candidate, *, envelope, delta64_rescue):
         }
         record["kernel_write_path"].update({
             "delta64_rescue": delta64_rescue,
+            "work_conserving_hand_records":
+                runner.PRODUCTION_WORK_CONSERVING_HAND_RECORDS,
             "prep_lower_write_samples": 10,
             "prep_lower_write_start_queued": 2,
             "prep_lower_write_end_queued": 2,
@@ -2154,7 +2156,10 @@ class ReportContract(unittest.TestCase):
                 {"submitter_copy_bytes": 1},
                 {"submitter_prepare_wall_ns": 1000000},
                 {"lz4_wall_ns": 20000000},
-                {"write_copy_wall_ns": 3000000}):
+                {"write_copy_wall_ns": 3000000},
+                {"work_conserving_hand_records": 0},
+                {"work_conserving_hand_records": 16},
+                {"work_conserving_hand_records": 64}):
             with self.subTest(invalid=invalid):
                 self.assertIsNotNone(
                     runner.timed_window_error({**record, **invalid}))
