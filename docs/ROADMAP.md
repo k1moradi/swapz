@@ -667,7 +667,10 @@ resource limits; it does not establish a gain on every storage/QD/content arm.
    pairs under current host contention. Production is restored. Do source and
    ownership work while competing host work continues; a future comparison
    needs changed host-load conditions, quiet preflight and a new prospective
-   plan. Do not replace observations or weaken the completed pilot's screen. [ID153's completion pilot](handoff/cpu-completion-x86-result.md)
+   plan. Do not replace observations or weaken the completed pilot's screen.
+   The competing benchmark subsequently exited and native-host quiet checks
+   passed; a [new separately declared comparison](handoff/admission-wake-quiet-x86.md)
+   is pending. Preserve the original unusable pilot unchanged. [ID153's completion pilot](handoff/cpu-completion-x86-result.md)
    failed its declared benefit screen and is restored; ID147's list-only READ
    deferral remains closed. Preserve FIFO, producer/owner references and the
    admission-close/drain join. The host lacks CONFIG_LOCK_STAT; prior lock or
