@@ -2499,7 +2499,14 @@ scans report revisions, never assumes the current file belongs to this host.
 Outputs are isolated under `build/history/<architecture>-<full-host-digest>/`.
 A missing/invalid identity fails closed. Legacy reports without identity remain
 in their existing manually selected histories; ISA/CPU count cannot migrate them
-automatically. OS reinstalls start a new history, and cloned installations must
+automatically. After the exact-computer refresh, the ARM64 host also refreshes
+its pre-existing NEON/seven-CPU legacy-cohort history separately under
+`build/history/arm64-neon/`. The audited AVX-512 host additionally refreshes
+the explicit `docs/handoff/x86-host-history.json` allowlist under its own
+profile directory when its exact host digest matches. Neither reference chart
+adds unauthenticated reports to the exact-computer history; the four-CPU SSE2
+host receives no unverified automatic legacy selector. Reference refresh
+failure is reported separately and cannot alter qualification. OS reinstalls start a new history, and cloned installations must
 have unique machine IDs. Python Matplotlib must be installed for rendering.
 It prints the latest plotted source and the local index path. Failed/blocked,
 uncommitted and other-host runs never become this computer’s performance points. Plot

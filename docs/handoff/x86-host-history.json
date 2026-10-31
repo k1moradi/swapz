@@ -1,10 +1,13 @@
 {
   "id": "x86-i7-1185g7-avx512",
-  "title": "x86_64 / AVX-512 \u00b7 i7-1185G7",
+  "title": "x86_64 / AVX-512 · i7-1185G7",
   "online_cpus": 8,
   "host_id_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
   "report_shas": [
-    "c0feb2127c05ffde1826e250e1ade55918d21448"
+    "c0feb2127c05ffde1826e250e1ade55918d21448",
+    "d4626b633d620d3afbb48d9c328b4be6a51ccebd",
+    "3162abea3a4b1fcd013634e6f286f8d3a8d22191",
+    "3465b4c08987d6d98592f30622485ad5b872acb0"
   ],
   "host_audit": {
     "source_sha": "a2b556998a8554b4f64960c77d6818fce1d4e811",

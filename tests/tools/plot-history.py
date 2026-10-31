@@ -59,6 +59,15 @@ def validate_host_profile(profile):
 def selected_host_report(report, sha, profile=None):
     if profile is None:
         return host_matches(report)
+    # An explicitly audited legacy report may predate stable host identity.
+    # Never let a modern, differently identified report enter that allowlist.
+    reported_host = report.get("host_identity")
+    if reported_host is not None and (
+            not isinstance(reported_host, dict) or
+            reported_host.get("schema") != "swapz-host-v1" or
+            reported_host.get("architecture") != "x86_64" or
+            reported_host.get("id_sha256") != profile["host_id_sha256"]):
+        return False
     backends = {row.get("name") for row in report.get("evidence", {}).get(
         "predictor", {}).get("backend_benchmarks", []) or []}
     stages = report.get("stages", [])

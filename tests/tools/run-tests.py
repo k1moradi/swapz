@@ -7528,8 +7528,44 @@ def refresh_history(host_identity):
         if proc.returncode:
             return f"NOT UPDATED: history helper failed; see {log.relative_to(ROOT)}"
         summary = json.loads(proc.stdout)
-        return (f"UPDATED: {summary['reports']} this-computer PASS reports; latest source "
-                f"{summary['latest_source'][:12]}; {output.relative_to(ROOT)}/index.md")
+        result = (f"UPDATED: {summary['reports']} this-computer PASS reports; latest source "
+                  f"{summary['latest_source'][:12]}; {output.relative_to(ROOT)}/index.md")
+        # Historical cohorts without a stable machine ID remain separate
+        # references. Do not append them to the exact-computer series.
+        reference_command = None
+        if arch == "aarch64":
+            reference_command = [sys.executable, "-B",
+                                 str(ROOT / "tests/tools/plot-history.py")]
+        elif arch == "x86_64":
+            profile_path = ROOT / "docs/handoff/x86-host-history.json"
+            try:
+                profile = json.loads(profile_path.read_text())
+            except (OSError, ValueError):
+                profile = {}
+            if profile.get("host_id_sha256") == digest:
+                reference_command = [sys.executable, "-B",
+                                     str(ROOT / "tests/tools/plot-history.py"),
+                                     "--host-profile", str(profile_path)]
+        if reference_command is not None:
+            reference_log = output / "reference-refresh.log"
+            try:
+                reference_run = subprocess.run(
+                    reference_command, cwd=ROOT, env=env, capture_output=True,
+                    text=True, timeout=120)
+                reference_log.write_text(reference_run.stdout + reference_run.stderr)
+                if reference_run.returncode:
+                    result += (f"; separate historical reference NOT UPDATED "
+                               f"(see {reference_log.relative_to(ROOT)})")
+                else:
+                    reference = json.loads(reference_run.stdout)
+                    result += (f"; separate audited/cohort reference UPDATED: "
+                               f"{reference['reports']} PASS reports; "
+                               f"{Path(reference['output']).relative_to(ROOT)}/index.md")
+            except (OSError, ValueError, KeyError, TypeError,
+                    subprocess.TimeoutExpired) as error:
+                result += (f"; separate historical reference NOT UPDATED "
+                           f"({type(error).__name__}; see {reference_log.relative_to(ROOT)})")
+        return result
     except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
         return f"NOT UPDATED: {type(error).__name__}; see {log.relative_to(ROOT)}"
 
