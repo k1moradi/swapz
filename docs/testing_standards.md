@@ -50,9 +50,10 @@ rejecting this opt-in for synchronous, linear and ID36 pressure controls.
 `HOST_LOAD_PROFILE=browser-video-144p` (or `quiet-intended`) annotates the
 development report only; it does not relax the pre/post CPU-PSI screens, raw
 drift exclusion, or allow a busy run to be promoted. Compare like-labeled
-host-load cohorts; no tag establishes an idle host. `LONE_RAW=1` selects the
-ID161 learned-singleton RAW candidate in ordinary development pairs and
-requires `SUBMITTER_PREPARE=0`; default/product behavior remains off. It never writes or publishes `test_results.json`,
+host-load cohorts; no tag establishes an idle host. `HAND_RECORDS=8|16|64`
+selects an early async work-conserving hand threshold for ordinary owned-null_blk
+development pairs. Eight is the unchanged default; 16/64 are rejected for
+calibration, stripes and physical backing. It never writes or publishes `test_results.json`,
 never records a qualification verdict and never substitutes for `make test`:
 single unpaired observations decide only which candidate deserves the full
 owner matrix.
@@ -2633,53 +2634,24 @@ targets shrinks each target's packing opportunity. A reopen requires a material
 improvement in normalized swapz/raw useful WRITE service, preserved lower-byte
 savings, and observed simultaneous swapz lower WRITEs for N>1.
 
-### Learned singleton RAW development candidate
+### Development-only hand-threshold A/B
 
-ID161 is default-off production C plus one owned qualification candidate arm;
-the selector is restricted to owned `null_blk` while experimental. It does not
-change SWZ bytes, authority publication, K=1 lower-WRITE depth,
-PREFLUSH/FUA semantics, GC, DISCARD, drain or completion ownership. The
-hypothesis is narrow: after the established singleton learner has already seen
-two one-record deadline opportunities without a companion, an ordinary isolated
-WRITE gains no physical-block reduction from page-local compression, so skipping
-LZ4 may reduce QD1 CPU/service cost.
+The early work-conserving hand retains its production eight-record threshold
+unless the private `make fast_test` loop explicitly selects 16 or 64 through
+`HAND_RECORDS`. The module parameter is read-only. Target construction rejects
+values outside 8/16/64 and nondefault values without identified `null_blk`
+backing. The private pair checks effective DM status before replay. `make test`
+remains at eight and does not add a new qualification pair or historical cohort.
 
-The decision must use observed state, not an application-QD guess. With
-`async_prepare=1` and `submitter_prepare=0`, the ordered owner may mark the
-current WRITE as a lone-RAW candidate only while the lower lane is idle, no
-window is staged, exactly one unclaimed preparation descriptor exists, that BIO
-is the local FIFO tail, `incoming` is empty under `queue_lock`, and the BIO
-has no PREFLUSH/FUA. The existing `singleton_fast_close` signal is required;
-a cold first singleton is never enough. Immediately before processing, refresh
-already-accepted followers again; a follower cancels the candidate and ordinary
-inline LZ4 resumes. The policy never waits for future work.
-
-A selected lone RAW page still uses the ordinary stable-input copy, K=1 staging,
-lower-I/O completion and authority path. Before RAW staging, exact 4KiB zero
-detection must run so a zero page remains lower-I/O-free. Telemetry must conserve
-`lone_raw_candidates = lone_raw_selected + lone_raw_cancelled_followers`.
-Record selected zero elisions and count any selected RAW page that later shares
-a multi-record window; that latter counter is a representation-risk diagnostic,
-not a claim of physical media wear.
-
-The next owner `make test` runs exactly one separate fast-model sustained-QD1
-candidate pair after the canonical 48 write-saturation sessions and before ID36:
-`async_prepare=1 submitter_prepare=0 lone_raw=1`. It must use the same immutable
-QD1 trace and 80 MiB/s, 150-us, depth-64 owned-RAM model as the canonical fast
-QD1 point. This candidate pair does not enter the existing async/sync confidence
-intervals. Qualification fails closed unless the candidate is actually selected,
-its timed and full-session counters conserve, QD1 observes zero multi-record
-lone-RAW windows/pages, the byte oracle passes and teardown is clean. The report
-stores its useful WRITE ratio, lower WRITE byte/request ratios and p99 separately
-under `benchmarks.lone_raw_qd1`. Its parser is strictly bracketed by the
-ID161 START/PASS markers; later ID36 or other off/swapz JSON may not mutate the
-closed candidate record.
-
-Passing that correctness gate does **not** promote the policy. Promotion requires
-matched development evidence showing useful-QD1 improvement with no lower-byte,
-lower-request or p99 regression, plus guard runs at QD4/QD8 and mixed workloads
-showing that follower cancellation/multi-record RAW risk is acceptably bounded.
-The ID160 stripe experiment remains a concurrency diagnostic only: splitting
-aggregate QD across independent targets also splits packing opportunity (for
-example N=4 at aggregate QD4 gives QD1 per target), so its scaling cannot by
-itself justify an in-target K>1 implementation.
+Compare matched same-source, same-model, same-trace sustained Fast-QD32 and
+Serial-QD32, `SUBMITTER_PREPARE=1` versus `0`, counterbalancing
+`HAND_RECORDS=8,16,64` development pairs. Preserve per-arm useful WRITE,
+p99, independent lower bytes/requests, windows/pages per physical request,
+early-hand closes, idle attribution, ready-run wait, and host busy/PSI/quiet
+screens. Use the exact byte oracle. Do not pool noisy or cross-host controls.
+A larger threshold is not permission to wait for future arrivals, suppress a
+valid four-record boundary or open a second lower-WRITE owner. The hypothesis
+fails when increased pack size does not improve useful throughput alongside
+lower-I/O and latency guards. Any retained production candidate requires full
+same-source owner `make test` correctness, lifecycle, fault, resource-pressure
+and product workload qualification.

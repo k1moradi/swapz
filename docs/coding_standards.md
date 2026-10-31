@@ -260,25 +260,15 @@ belong in the ROADMAP decision table and Git history.
   inherit earlier READ evidence as a finite close target. A prior completed
   chain or deferred valid pack alone must never bypass the pure-WRITE four-record
   floor, and no path may manufacture a one-record PACK_READY close.
-- **Learned singleton RAW is candidate-only:** the ID161 selector is
-  default-off, restricted to owned `null_blk` qualification while experimental,
-  and may skip compression only after the existing
-  `singleton_fast_close` state has observed two complete one-page deadline
-  opportunities with no companion. The ordered owner must additionally prove,
-  under `queue_lock`, that no batch or lower WRITE is active, exactly the
-  current unclaimed preparation descriptor exists, the local FIFO has no
-  follower, `incoming` is empty, and the BIO is an ordinary WRITE without
-  PREFLUSH/FUA. Refresh already-accepted followers again immediately before
-  processing; any follower cancels RAW and restores ordinary compression.
-  Submitter-context preparation must be disabled for this experiment so LZ4
-  cannot run before the owner makes the representation decision. A selected
-  RAW page still follows the ordinary K=1 staging/publication/completion path.
-  Exact full-page zero detection must run before RAW staging so zero elision is
-  never traded for physical I/O. Count selected RAW records that later share a
-  multi-record window as representation-risk evidence; promotion requires that
-  useful service improve without worsening lower bytes/requests or p99 across
-  QD1 and the adjacent QD4/QD8/mixed controls. Never infer application QD from
-  one empty queue snapshot or wait for future arrivals to manufacture QD.
+- **Development hand-width control:** the production asynchronous
+  work-conserving hand remains eight records. For bounded owned-null_blk
+  development A/B only, a read-only module parameter may select 8, 16 or 64.
+  Reject other values before target allocation and nondefault values for
+  physical backing. The value is fixed for the target lifetime and exposed in
+  status. This changes async early-hand eligibility, not the independent
+  completion-handoff minimum, four-record service floor, ordering/fences,
+  K=1 lower-WRITE depth or authority publication. A 64-record threshold
+  is not a promise of a 64-record lower run.
 - **Pack-readiness conservation:** `single_pack_deferred` is monotonic within
   one open window once selective compressed geometry has been proved. The
   refuted total-count-four first-pack close remains forbidden, but after total
