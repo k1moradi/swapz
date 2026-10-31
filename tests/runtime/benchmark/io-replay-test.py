@@ -430,6 +430,7 @@ class PairReplayContract(unittest.TestCase):
             "write_pipeline_depth": 1,
             "pipeline_active_max": 0,
             "read_coalesce_max_blocks": 8,
+            "work_conserving_hand_records": 8,
             "submitter_prepare": 1,
             "submitter_prepare_lanes": 8,
             "submitter_prepare_active": 0,
