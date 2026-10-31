@@ -1,4 +1,8 @@
-# Out-of-lock owner notification: development-validated candidate
+# Out-of-lock owner notification: development-validated draft
+
+**Pilot disposition:** complete but performance unusable; 71/72 comparisons
+were excluded. Production is restored. See [the result](admission-wake-x86-result.md).
+The review below records the pre-pilot state.
 
 The [candidate bundle](admission-wake-x86.patch) keeps acceptance, FIFO insertion,
 preparation references and producer scheduling under `queue_lock`. It caches

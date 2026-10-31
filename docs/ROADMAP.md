@@ -355,7 +355,7 @@ changes.
 | 153 | CPU-targeted READ/WRITE completion | **5 fixed pilot / removed** | Actual-body native probes, owned suspend/fault/drain and invalid-destination fallback gates pass. Twelve counterbalanced rounds/24 blocks/288 arm oracles pass; persistent NVMe5 B/A +4.29%, 98.3333% interval -1.03..+9.89%, adjusted sign p 0.539 fails the declared benefit screen. SATA/fast remain inconclusive; persistent lower WRITE requests +2.03% is descriptive secondary evidence, not an endurance improvement. No replacement samples or owner qualification. Restore qualified production and all temporary helpers; [complete result and packets](handoff/cpu-completion-x86-result.md). |
 | 154 | Direct admission contention diagnostic | **measurement incomplete; probe removed** | Six fixed source blocks/48 arm oracles pass. Try-lock observations find 11..13% contention in persistent NVMe5/SATA and 2..4% in fast workloads; fallback wall is not total wait/hold or removable CPU. All three NVMe5 perturbation pairs fail the raw-drift screen, and remaining intervals are wide. No production change selected. Next bound hold/notification work and probe cost with stable controls; [packet and limitations](handoff/admission-x86-diagnostic.md). |
 | 155 | Systematic admission hold/notification sampling | **diagnostic hypothesis; probe removed** | Twelve fixed blocks/96 arm oracles pass. One-in-64 samples place owner notification at roughly 0.34..0.94 us versus 0.02..0.06 us preceding non-submitter work; clock checks 13..21 ns. Partial hold wall and systematic complete-session samples are not CPU or exact savings. Perturbation remains unresolved after exclusions. Investigate a lifetime-pinned out-of-lock owner wake, preserving acceptance/FIFO/producer locking and drain joins; [measurements and ownership requirements](handoff/admission-hold-x86.md). |
-| 156 | Lifetime-pinned owner notification outside admission lock | **development-validated candidate; pilot pending** | Acceptance/FIFO/preparation stay under queue_lock; cache BIO policy and pin a target wake reference before unlock, then notify outside and release as final target access. Drain closes and joins tails before queue drain. Actual-body ASan/UBSan, all 93 source contracts, build, owned pairs and loaded GC/suspend/fault gates pass. No service claim or owner/ID36 qualification; [candidate, validation and frozen plan](handoff/admission-wake-x86-review.md). |
+| 156 | Lifetime-pinned owner notification outside admission lock | **development correctness passes; performance pilot unusable / not retained** | Actual-body ASan/UBSan, 93 source contracts and loaded GC/suspend/fault gates pass. Twelve fixed rounds/24 blocks/288 arm byte oracles pass, but 71/72 comparisons are excluded for host noise/raw drift: every primary n=0. No performance conclusion, regression or equivalence; no replacement samples. Restore qualified source and all helpers. New prospective comparison requires changed host-load conditions, not weakened screening; [result and complete packet](handoff/admission-wake-x86-result.md). |
 
 
 ## What the pinned queue experiment establishes
@@ -662,10 +662,12 @@ existing bounded submitter policy. [ID152's result](handoff/lz4-state-x86-result
 records the positive current-policy persistent-NVMe5 direction and the guard/
 resource limits; it does not establish a gain on every storage/QD/content arm.
 
-1. Continue the reviewer's #3 from [ID155's notification hypothesis](handoff/admission-hold-x86.md).
-   Prove out-of-lock wake lifetime and drain ownership before selecting a
-   performance candidate; the existing probes do not establish an exact
-   removable admission cost. [ID153's completion pilot](handoff/cpu-completion-x86-result.md)
+1. Reviewer's #3 candidate [ID156](handoff/admission-wake-x86-result.md) passed
+   development lifetime/failure gates but its fixed pilot has no usable primary
+   pairs under current host contention. Production is restored. Do source and
+   ownership work while competing host work continues; a future comparison
+   needs changed host-load conditions, quiet preflight and a new prospective
+   plan. Do not replace observations or weaken the completed pilot's screen. [ID153's completion pilot](handoff/cpu-completion-x86-result.md)
    failed its declared benefit screen and is restored; ID147's list-only READ
    deferral remains closed. Preserve FIFO, producer/owner references and the
    admission-close/drain join. The host lacks CONFIG_LOCK_STAT; prior lock or
