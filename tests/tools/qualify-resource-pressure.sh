@@ -31,11 +31,12 @@ PRESSURE_RAMP_BYTES=$((PRESSURE_RAMP_MIB * 1024 * 1024))
 MEMORY_HEADROOM_BYTES=$((64 * 1024 * 1024))
 MEMORY_MAX_BYTES=$((896 * 1024 * 1024))
 # Two independently bounded candidate replays run inside this pair. Keep the
-# pair watchdog strictly outside both 280s replay bounds plus bounded barrier,
-# comparison and teardown slack, so the parent cannot manufacture a timeout
-# while a child is still within its own forward-progress contract.
+# pair watchdog strictly outside both 280s replay bounds plus one replay-bound
+# orchestration allowance for the private barrier, pressure-throttled target
+# setup, comparison and teardown. This does not extend either candidate's
+# forward-progress bound; it prevents the parent from preempting a legal child.
 PAIR_REPLAY_TIMEOUT_SECONDS=280
-PAIR_OUTER_SLACK_SECONDS=120
+PAIR_OUTER_SLACK_SECONDS=$PAIR_REPLAY_TIMEOUT_SECONDS
 PAIR_OUTER_SECONDS=$((PAIR_REPLAY_TIMEOUT_SECONDS * 2 + PAIR_OUTER_SLACK_SECONDS))
 MIN_AVAILABLE_KIB=$((1024 * 1024))
 PRESSURE_SCRIPT="$ROOT/tests/runtime/benchmark/resource-pressure.py"

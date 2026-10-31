@@ -1837,11 +1837,13 @@ online CPU count of integer burners, capped at 32. The shorter trace preserves
 mixed QD32 concurrency while preventing arbitrary benchmark-duration timeouts
 from being mistaken for a forward-progress failure; the per-candidate replay
 timeout under `--resource-pressure-short` remains bounded at 280s. Because the
-OFF and swapz candidates run sequentially, the pair watchdog is 680s
-(`2 * 280 + 120` seconds of bounded barrier/comparison/teardown slack), and the
-top-level ID36 helper watchdog is 720s. Parent bounds must remain strictly
-outside their bounded children; a parent timeout may not preempt a candidate
-that is still within its own forward-progress limit. The pressure-only mixed-QD32 replay uses the existing native-C wave helper
+OFF and swapz candidates run sequentially, the pair watchdog is 840s
+(`2 * 280 + 280`: both replay bounds plus one replay-bound orchestration
+allowance for the private barrier, pressure-throttled target setup, comparison
+and teardown), and the top-level ID36 helper watchdog is 960s. The extra parent
+time does not extend either replay's 280s forward-progress limit. Parent bounds
+must remain strictly outside their bounded children; a parent timeout may not
+preempt a candidate that is still within its own forward-progress limit. The pressure-only mixed-QD32 replay uses the existing native-C wave helper
 with pre-created worker lanes and fixed event/latency buffers, instead of
 creating Python Futures/WorkItems for every wave above `memory.high`. It
 retains the identical 128+2048 immutable read/write trace, direct I/O,
@@ -2476,7 +2478,7 @@ Every top-level privileged helper invoked by `test-loaded.sh` also has a
 root-owned outer watchdog in addition to its internal operation/replay
 timeouts. Preflight is capped at 60s, the loaded smoke/lifecycle helper at 600s,
 each owned-RAM benchmark pair at 720s, and the ID36 resource-pressure helper at
-720s. ID36 additionally keeps its internal 680s pair watchdog and two 280s
+960s. ID36 additionally keeps its internal 840s pair watchdog and two 280s
 per-candidate replay watchdogs. The watchdog runs inside the authorized root shell so it can terminate
 its privileged descendants and still execute ordinary helper cleanup. An outer
 watchdog expiration is BLOCKED/nonzero, never PASS and never silently retried.

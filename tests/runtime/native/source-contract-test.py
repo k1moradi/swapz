@@ -3861,7 +3861,8 @@ int main(void)
         self.assertIn("MEMORY_MAX_BYTES=$((896 * 1024 * 1024))", pressure)
         self.assertIn("MEMORY_HIGH_BYTES=$((pressure_current + MEMORY_HEADROOM_BYTES))", pressure)
         self.assertIn("PAIR_REPLAY_TIMEOUT_SECONDS=280", pressure)
-        self.assertIn("PAIR_OUTER_SLACK_SECONDS=120", pressure)
+        self.assertIn(
+            "PAIR_OUTER_SLACK_SECONDS=$PAIR_REPLAY_TIMEOUT_SECONDS", pressure)
         self.assertIn(
             "PAIR_OUTER_SECONDS=$((PAIR_REPLAY_TIMEOUT_SECONDS * 2 + PAIR_OUTER_SLACK_SECONDS))",
             pressure)
@@ -3908,7 +3909,7 @@ int main(void)
         self.assertIn("for _ in {1..1200}", benchmark)
         self.assertIn('"${PAIR_OUTER_SECONDS}s"', pressure)
         self.assertIn(
-            "run_privileged_bounded 720 tests/tools/qualify-resource-pressure.sh",
+            "run_privileged_bounded 960 tests/tools/qualify-resource-pressure.sh",
             loaded)
         self.assertIn("oflag=direct", benchmark)
         self.assertIn("--lower-mbps 80 --hw-queue-depth 64", pressure)
