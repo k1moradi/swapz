@@ -1672,11 +1672,11 @@ def run_stage(title, command, result, *, parse_bench=False):
         if lz4_acceleration_sessions else
         {"overall": "NOT_RUN",
          "reason": "retired; ordinary LZ4 is fixed at acceleration 1"})
-    delta64_rescue_sessions = (
-        parse_delta64_rescue_sessions(output) if parse_bench else [])
-    delta64_rescue_diagnostic = (
-        delta64_rescue_verdict(delta64_rescue_sessions)
-        if parse_bench else None)
+    delta64_rescue_sessions = []
+    delta64_rescue_diagnostic = {
+        "overall": "NOT_RUN",
+        "reason": "retired; production delta64+DELTA64_SHUF8+LZ4 is fixed on",
+    }
     delta64_prepare_sessions = (
         parse_delta64_prepare_sessions(output) if parse_bench else [])
     delta64_prepare_diagnostic = (
@@ -1715,8 +1715,6 @@ def run_stage(title, command, result, *, parse_bench=False):
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_coalesce_diagnostic.get("overall") !=
                        "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
-                       delta64_rescue_diagnostic.get("overall") !=
-                       "PASS_DELTA64_RESCUE_AB" or
                        storage_envelope_diagnostic.get("overall") !=
                        "PASS_DIRECTIONAL_STORAGE_ENVELOPES"))
     if marker_failure:
@@ -1763,11 +1761,6 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
                     "reason", "serial-depth adjacent-range READ coalescing evidence is incomplete")
-            elif delta64_rescue_diagnostic.get("overall") != (
-                    "PASS_DELTA64_RESCUE_AB"):
-                record["failed_phase"] = "delta64 rescue off/on A/B"
-                record["diagnostic"] = delta64_rescue_diagnostic.get(
-                    "reason", "paired delta64 rescue evidence is incomplete")
             elif storage_envelope_diagnostic.get("overall") != (
                     "PASS_DIRECTIONAL_STORAGE_ENVELOPES"):
                 record["failed_phase"] = "modern storage service-envelope evidence"
@@ -1970,11 +1963,9 @@ def parse_storage_envelope_sessions(output):
     """Parse directional modern-storage off/swapz pairs without host identity."""
     sessions, current = [], None
     start_re = re.compile(
-        r"START_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5) "
-        r"DELTA64_RESCUE=(0|1)")
+        r"START_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5)")
     pass_re = re.compile(
-        r"PASS_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5) "
-        r"DELTA64_RESCUE=(0|1)")
+        r"PASS_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5)")
     model_re = re.compile(
         r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) "
         r"IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) "
@@ -1985,7 +1976,7 @@ def parse_storage_envelope_sessions(output):
         if match:
             current = {
                 "envelope": match.group(1),
-                "delta64_rescue": int(match.group(2)),
+                "delta64_rescue": PRODUCTION_DELTA64_RESCUE,
                 "offered_qd": 32,
                 "status": "INCOMPLETE",
                 "device_model": None,
@@ -1995,9 +1986,7 @@ def parse_storage_envelope_sessions(output):
             continue
         match = pass_re.fullmatch(line)
         if match:
-            if current is not None and (
-                    current["envelope"] == match.group(1) and
-                    current["delta64_rescue"] == int(match.group(2))):
+            if current is not None and current["envelope"] == match.group(1):
                 current["status"] = "PASS"
             current = None
             continue
@@ -2053,16 +2042,14 @@ def parse_storage_envelope_sessions(output):
 
 
 def storage_envelope_verdict(sessions):
-    expected = {(name, rescue) for name in STORAGE_ENVELOPE_ORDER
-                for rescue in (0, 1)}
+    expected = set(STORAGE_ENVELOPE_ORDER)
     if len(sessions) != len(expected):
         return {"overall": "INCOMPLETE",
-                "reason": "eight directional storage-envelope sessions required"}
-    observed = {(row.get("envelope"), row.get("delta64_rescue"))
-                for row in sessions}
+                "reason": "four production-policy storage-envelope sessions required"}
+    observed = {row.get("envelope") for row in sessions}
     if observed != expected or len(observed) != len(sessions):
         return {"overall": "INCONCLUSIVE",
-                "reason": "storage-envelope model/rescue matrix mismatch"}
+                "reason": "storage-envelope model matrix mismatch"}
 
     rows = []
     for session in sessions:
@@ -2090,9 +2077,12 @@ def storage_envelope_verdict(sessions):
             return {"overall": "INCONCLUSIVE",
                     "reason": f"{envelope} did not compare identical source/work"}
         kernel = swapz.get("kernel_write_path") or {}
-        if kernel.get("delta64_rescue") != session["delta64_rescue"]:
+        if (kernel.get("delta64_rescue") != PRODUCTION_DELTA64_RESCUE or
+                kernel.get("delta64_lz4_acceleration") !=
+                PRODUCTION_DELTA64_LZ4_ACCELERATION or
+                kernel.get("lz4_acceleration") != 1):
             return {"overall": "INCONCLUSIVE",
-                    "reason": f"{envelope} delta64 policy did not match marker"}
+                    "reason": f"{envelope} did not use the production compression stack"}
         numeric = (
             off.get("input_write_mbps"), swapz.get("input_write_mbps"),
             off.get("lower_write_bytes"), swapz.get("lower_write_bytes"),
@@ -2159,9 +2149,7 @@ def storage_envelope_verdict(sessions):
             "prep_queue_end_nonempty_fraction": (
                 end_nonempty / samples if samples else 0.0),
         })
-    rows.sort(key=lambda row: (
-        STORAGE_ENVELOPE_ORDER.index(row["envelope"]),
-        row["delta64_rescue"]))
+    rows.sort(key=lambda row: STORAGE_ENVELOPE_ORDER.index(row["envelope"]))
     return {
         "overall": "PASS_DIRECTIONAL_STORAGE_ENVELOPES",
         "scope": "SYNTHETIC_NULL_BLK_DIRECTIONAL_NOT_PHYSICAL_MEDIA",
@@ -6289,10 +6277,9 @@ def print_bench(result, *, detailed=False):
         print("  Production delta64 during mixed I/O — mean foreground attempt counters")
         print_table(
             f"{model_label} mixed-I/O delta64 general attempt counters",
-            ("mode", "rescue", "eligible", "passed", "attempts", "adopted",
+            ("mode", "eligible", "passed", "attempts", "adopted",
              "direct", "LZ4-1 skip", "RAW+", "LZ4+"),
-            [(mode, {0: "off", 1: "on"}.get(columns[mode]['mixed_delta64_rescue'], "mixed"),
-              *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
+            [(mode, *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
                 "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
                 "delta64_adopted", "delta64_direct_adopted",
                 "delta64_first_lz4_skipped",
@@ -6747,44 +6734,7 @@ def print_bench(result, *, detailed=False):
         print("\n  LZ4 acceleration 1/4 A/B: NOT QUALIFIED "
               f"({lz4_sweep.get('reason', lz4_sweep.get('overall', 'NOT_RUN'))})")
 
-    delta64_rescue_ab = result["benchmarks"].get("delta64_rescue", {})
-    if delta64_rescue_ab.get("overall") == "PASS_DELTA64_RESCUE_AB":
-        print("\n  Delta64 rescue off vs on — five matched SSD-model K=1 rounds")
-        rows = []
-        for enabled in ("0", "1"):
-            mode = delta64_rescue_ab["modes"][enabled]
-            rows.append((
-                enabled,
-                f"{mode['write_mbps']:.2f}",
-                f"{mode['write_p99_ms']:.2f}",
-                f"{mode['lower_write_requests']:.1f}",
-                f"{mode['delta64_attempts']:.1f}",
-                f"{mode['delta64_adopted']:.1f}",
-                f"{mode['delta64_direct_adopted']:.1f}",
-                f"{mode['delta64_first_lz4_skipped']:.1f}",
-                f"{mode['delta64_wall_ns'] / 1e6:.2f}",
-            ))
-        print_table(
-            "Delta64 rescue means — positive fixture, fixed K=1",
-            ("rescue", "W MB/s", "p99", "lower req", "attempts",
-             "adopted", "direct", "LZ4-1 skip", "D64 ms"), rows)
-        ci_rows = []
-        for label, field in (
-                ("W %", "throughput_change_fraction"),
-                ("p99 %", "p99_change_fraction"),
-                ("lower B %", "lower_bytes_change_fraction"),
-                ("lower req %", "lower_requests_change_fraction"),
-                ("raw-control W %", "off_throughput_change_fraction")):
-            ci = delta64_rescue_ab["paired"][field]
-            ci_rows.append((label, f"{ci['mean'] * 100:+.1f}",
-                            f"{ci['low'] * 100:+.1f}",
-                            f"{ci['high'] * 100:+.1f}"))
-        print_table(
-            "Rescue on minus off paired 95% confidence intervals",
-            ("metric", "mean", "low", "high"), ci_rows)
-    else:
-        print("\n  Delta64 rescue off/on A/B: NOT QUALIFIED "
-              f"({delta64_rescue_ab.get('reason', delta64_rescue_ab.get('overall', 'NOT_RUN'))})")
+    print("\n  Delta64 rescue off/on A/B: RETIRED — production delta64+DELTA64_SHUF8+LZ4 is fixed on")
 
     delta64_ab = result["benchmarks"].get("delta64_prepare", {})
     if delta64_ab.get("overall") == "PASS_DELTA64_PREPARE_AB":
@@ -7213,7 +7163,6 @@ def print_bench(result, *, detailed=False):
             capture = row["bandwidth_opportunity_capture_fraction"]
             rows.append((
                 row["envelope"],
-                row["delta64_rescue"],
                 row["replay_engine"],
                 f"{row['byte_speedup']:.2f}x",
                 f"{row['request_speedup']:.2f}x",
@@ -7229,7 +7178,6 @@ def print_bench(result, *, detailed=False):
                 return ("n/a" if value is None else f"{value * 100:.1f}%")
             phase_rows.append((
                 row["envelope"],
-                row["delta64_rescue"],
                 pct("run_slot_active_fraction"),
                 pct("post_lower_hold_fraction"),
                 pct("k1_ready_wait_fraction"),
@@ -7242,13 +7190,13 @@ def print_bench(result, *, detailed=False):
             ))
         print_table(
             "Saved lower work versus useful WRITE service",
-            ("model", "D64", "engine", "byte x", "req x", "useful x",
+            ("model", "engine", "byte x", "req x", "useful x",
              "capture", "W peak", "W mean"), rows)
         print("  capture=(useful speedup-1)/(lower-WRITE byte speedup-1); "
               "low/negative values mean saved media work is not reaching useful service.")
         print_table(
             "Timed swapz WRITE-path occupancy versus replay wall",
-            ("model", "D64", "slot active", "post-lower", "K1 ready wait",
+            ("model", "slot active", "post-lower", "K1 ready wait",
              "prep wait", "commit nonio", "plan", "pack", "publish", "pub CRC"),
             phase_rows)
         print("  post-lower isolates callback-to-publication slot hold; K1 ready-wait isolates a ready window "
