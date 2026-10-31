@@ -412,7 +412,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("== --no-delta64-rescue", pair)
         self.assertIn("if (( DELTA64_POSITIVE_EXPERIMENT )); then", pair)
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
-        self.assertEqual(loaded.count("--no-delta64-rescue"), 2)
+        # Two original LZ4-only controls plus the matched serial-queue study.
+        self.assertEqual(loaded.count("--no-delta64-rescue"), 3)
+        self.assertIn("--serial-queue-control", loaded)
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
         self.assertIn("PRODUCTION_DELTA64_RESCUE = 1", runner)
 
