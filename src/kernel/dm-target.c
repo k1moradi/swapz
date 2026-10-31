@@ -103,6 +103,12 @@ MODULE_PARM_DESC(lone_raw,
 		 "A/B only: RAW for learned isolated singleton WRITEs; "
 		 "requires async_prepare=1 submitter_prepare=0");
 
+/* Development-only null_blk policy; production retains its eight-record hand. */
+static unsigned int swapz_work_conserving_hand_records = SWAPZ_WORK_CONSERVING_HAND_RECORDS;
+module_param_named(work_conserving_hand_records, swapz_work_conserving_hand_records, uint, 0444);
+MODULE_PARM_DESC(work_conserving_hand_records,
+		 "Owned null_blk A/B: hand threshold 8, 16 or 64; default 8");
+
 static bool swapz_allow_physical_backing;
 module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0444);
 MODULE_PARM_DESC(allow_physical_backing,
@@ -382,6 +388,8 @@ struct swapz_dm {
 	/* Bounded preparation lanes, separate from the ordered I/O worker.
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
+	/* Read-only per-target threshold; the default preserves the qualified hand. */
+	swapz_u8 work_conserving_hand_records;
 	bool delta64_rescue_enabled;
 	bool invalidate_cache_on_write_admit;
 	swapz_u8 delta64_lz4_acceleration;
@@ -6264,15 +6272,15 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 						 entry->list.next != &local ||
 						 !list_empty(&ctx->incoming)) &&
 						ctx->batch_count <
-							SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
+							ctx->work_conserving_hand_records &&
 						ctx->batch_count + ctx->preparation_queued >=
-							SWAPZ_WORK_CONSERVING_HAND_RECORDS;
+							ctx->work_conserving_hand_records;
 					raw_pressure_hand_dispatchable =
 						swapz_window_raw_pressure_hand_dispatchable(
 							ctx->retain_ms,
 							ctx->retained_burst_target,
 							ctx->retained_tail_target,
-							SWAPZ_WORK_CONSERVING_HAND_RECORDS);
+							ctx->work_conserving_hand_records);
 					lower_write_busy = swapz_has_inflight(ctx) ||
 						atomic_read(&ctx->lower_write_active);
 					if (!list_empty(&entry->preparation_list)) {
@@ -6492,7 +6500,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 				swapz_close_worker_pack(ctx);
 			else if (ctx->work_conserving_window &&
 				 !swapz_has_inflight(ctx) &&
-				 ctx->batch_count >= SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
+				 ctx->batch_count >= ctx->work_conserving_hand_records &&
 				 !swapz_next_local_write_ready(ctx, &local) &&
 				 swapz_window_work_conserving_close_ready(
 					 ctx->retain_ms,
@@ -6500,7 +6508,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 					 ctx->accepted_burst_pack_ready,
 					 ctx->batch_count, ctx->retained_burst_target,
 					 ctx->retained_tail_target,
-					 SWAPZ_WORK_CONSERVING_HAND_RECORDS,
+					 ctx->work_conserving_hand_records,
 					 swapz_local_head_is_plain_write(&local)) &&
 				 !ctx->failed && READ_ONCE(ctx->accepting)) {
 				ctx->work_conserving_hand_closes++;
@@ -6653,7 +6661,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 					ctx->accepted_burst_pack_ready,
 				ctx->batch_count, ctx->retained_burst_target,
 				ctx->retained_tail_target,
-				SWAPZ_WORK_CONSERVING_HAND_RECORDS, 0)) {
+				ctx->work_conserving_hand_records, 0)) {
 				ctx->work_conserving_dry_closes++;
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				if (ctx->single_pack_deferred ||
@@ -7213,6 +7221,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			"retain_ms>0 lower_bulk>0 verify=0";
 		return -EINVAL;
 	}
+	if (swapz_work_conserving_hand_records != 8U &&
+	    swapz_work_conserving_hand_records != 16U &&
+	    swapz_work_conserving_hand_records != 64U) {
+		ti->error = "work_conserving_hand_records must be 8, 16 or 64";
+		return -EINVAL;
+	}
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -7229,6 +7243,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.verify_after_write = verify;
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
+	ctx->work_conserving_hand_records =
+		(swapz_u8)swapz_work_conserving_hand_records;
 	ctx->submitter_prepare = ctx->async_prepare && swapz_submitter_prepare;
 	ctx->lone_raw = swapz_lone_raw;
 	ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled;
@@ -7291,6 +7307,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
+	if (ctx->work_conserving_hand_records != SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
+	    !is_nullb) {
+		ti->error = "nondefault hand threshold is restricted to null_blk";
+		error = -EOPNOTSUPP;
+		goto fail;
+	}
 	if (ctx->lone_raw && !is_nullb) {
 		ti->error = "lone_raw is restricted to null_blk qualification";
 		error = -EOPNOTSUPP;
@@ -8247,7 +8269,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "ordered_lz4_page_ewma_ns=%llu "
 		       "deferred_upper_completion_bios=%llu "
 		       "deferred_upper_completion_wall_ns=%llu",
-		       SWAPZ_WORK_CONSERVING_HAND_RECORDS,
+		       ctx->work_conserving_hand_records,
 		       ctx->work_conserving_hand_closes,
 		       ctx->work_conserving_dry_closes,
 		       ctx->work_conserving_raw_not_ready,

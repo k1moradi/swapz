@@ -24,6 +24,8 @@ IOPS=500
 ASYNC_PREPARE=0
 SUBMITTER_PREPARE=1
 SUBMITTER_PREPARE_EXPLICIT=0
+HAND_RECORDS=8
+HAND_RECORDS_EXPLICIT=0
 LONE_RAW=0
 LONE_RAW_EXPLICIT=0
 # Production module default; --no-delta64-rescue pins LZ4-only control arms.
@@ -100,6 +102,13 @@ fi
 if [[ $# -ge 3 && ${@: -2:1} == --read-coalesce &&
       ( ${!#} == 0 || ${!#} == 1 ) ]]; then
     READ_COALESCE="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# Parse the development-only hand selector before the submitter policy.
+if [[ $# -ge 3 && ${@: -2:1} == --hand-records &&
+      ( ${!#} == 8 || ${!#} == 16 || ${!#} == 64 ) ]]; then
+    HAND_RECORDS="${!#}"
+    HAND_RECORDS_EXPLICIT=1
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # ID161 development-only representation selector. Parse it before the
@@ -204,6 +213,11 @@ fi
 if (( SUBMITTER_PREPARE_EXPLICIT )) &&
    (( !ASYNC_PREPARE || RESOURCE_PRESSURE_SHORT || LINEAR_CALIBRATION )); then
     echo 'BLOCKED: submitter preparation control requires an ordinary async swapz pair' >&2
+    exit 2
+fi
+if (( HAND_RECORDS_EXPLICIT )) &&
+   (( !ASYNC_PREPARE || RESOURCE_PRESSURE_SHORT || LINEAR_CALIBRATION )); then
+    echo 'BLOCKED: hand threshold requires an ordinary async swapz pair' >&2
     exit 2
 fi
 if (( LONE_RAW )) &&
@@ -393,7 +407,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE SUBMITTER_PREPARE=$SUBMITTER_PREPARE LONE_RAW=$LONE_RAW DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=1 READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE SUBMITTER_PREPARE=$SUBMITTER_PREPARE HAND_RECORDS=$HAND_RECORDS LONE_RAW=$LONE_RAW DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=1 READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -651,6 +665,7 @@ if (( !LINEAR_CALIBRATION )); then
 modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
     "submitter_prepare=$SUBMITTER_PREPARE" \
+    "work_conserving_hand_records=$HAND_RECORDS" \
     "lone_raw=$LONE_RAW" \
     "delta64_rescue=$DELTA64_RESCUE" \
     "delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION" \
@@ -704,6 +719,8 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE
 expected_submitter_prepare=$(( ASYNC_PREPARE && SUBMITTER_PREPARE ))
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])submitter_prepare=$expected_submitter_prepare([[:space:]]|$)" ||
     fail 'loaded swapz submitter preparation does not match selected benchmark arm'
+    dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])work_conserving_hand_records=$HAND_RECORDS([[:space:]]|$)" ||
+        fail 'loaded swapz hand threshold does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])lone_raw=$LONE_RAW([[:space:]]|$)" ||
     fail 'loaded swapz lone RAW policy does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" ||

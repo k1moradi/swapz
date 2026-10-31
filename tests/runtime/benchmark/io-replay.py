@@ -1439,6 +1439,9 @@ def kernel_write_delta(before, after):
     if (before["delta64_prepare_workers"] != after["delta64_prepare_workers"] or
             not 0 <= after["delta64_prepare_workers"] <= 4):
         raise ValueError("invalid or changed swapz delta64 preparation width")
+    if (before["work_conserving_hand_records"] != after["work_conserving_hand_records"] or
+            after["work_conserving_hand_records"] not in (8, 16, 64)):
+        raise ValueError("invalid or changed swapz work-conserving hand threshold")
     if (before["submitter_prepare"] != after["submitter_prepare"] or
             after["submitter_prepare"] not in (0, 1)):
         raise ValueError("invalid or changed swapz submitter preparation policy")
