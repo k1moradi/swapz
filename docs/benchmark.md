@@ -386,18 +386,21 @@ the rescue LZ4 first; candidates <=2024 bytes may be adopted directly and skip
 ordinary LZ4, while larger candidates fall through to the strict ordinary-LZ4
 comparison. Lower-score pages run ordinary LZ4 first and may use threshold 16
 only when the production planner identifies an exact lower SWZ packing limit
-that the candidate crosses. Rescue is default-on; `delta64_rescue=0` disables it.
-Current rescue writes DELTA64_SHUF8 (delta64, eight byte planes, LZ4), while
+that the candidate crosses. Rescue is fixed on for emulated-device performance
+qualification; the module-level `delta64_rescue=0` remains debug/compatibility
+only. Current rescue writes DELTA64_SHUF8 (delta64, eight byte planes, LZ4), while
 the historical ID67 timings below measured plain delta64. ID117 records the
 shuffle evidence and pending full-matrix/x86 execution gates.
 
 Earlier loaded enabled-policy evidence observed eligible pages but zero
 classifier passes, transform attempts or adoptions, which justified the
-default-off policy. The current predictor-first route has since passed a
+default-off policy. The current predictor-first route later passed a
 controlled positive-fixture rescue A/B with 4096 direct adoptions, -27.04%
-lower WRITE bytes and +5.15% useful WRITE throughput. That is positive synthetic
-evidence rather than representative swap prevalence, so the default remains off.
-The following historical/native controls continue to measure routing quality
+lower WRITE bytes and +5.15% useful WRITE throughput. That is historical
+synthetic evidence rather than representative swap prevalence; the owner has
+since made the delta64 + DELTA64_SHUF8 + LZ4 stack a fixed-on requirement for
+all emulated-device performance work. The following historical/native controls
+continue to measure routing quality
 and backend cost. ID67a.3 uses
 `anon-page-fixture.py` SHAKE-generated entropy, mixed and medium pages plus
 generated zero/repeated-word controls. The sampled delta64 signpost runs only
@@ -480,7 +483,7 @@ they affect how new measurements are designed:
 | Direct single-bvec compression input | Qualified; keep direct input with safe fallback. | Only if ownership/page-mapping assumptions change. |
 | Final payload CRC removal | Rejected; it is an integrity boundary, not optional benchmark overhead. | Only with an equivalent fail-closed integrity design. |
 | Ordinary LZ4 acceleration | Fixed at 1; runtime selector and loaded promotion A/B are retired. | A materially different codec/library/CPU changes end-to-end service economics. |
-| Delta64 rescue | Default-on by owner decision; predictor-first route is qualified on controlled positive content. | Representative swap content or the default-on mixed matrix shows no prevalence, or a service/CPU regression versus `delta64_rescue=0`. |
+| Delta64 rescue | Fixed on for every emulated device with DELTA64_SHUF8 and LZ4; predictor-first route is qualified on controlled positive content. | Reopen only for a codec/format correctness issue or a repeatable absolute service/CPU regression; do not reinstate rescue-off performance A/Bs. |
 | Adjacent READ coalescing | Keep default-on, exact 2..8 ranges, zero padding, fixed eight-block cap. | New device/workload evidence shows a service regression or a larger cap has a measurable opportunity. |
 | Same-extent standalone READ grouping | Rejected/retired; shared caches remain. | A new cache/layout regime creates a measured request opportunity not covered by ID63. |
 
@@ -494,8 +497,10 @@ Current benchmark work must preserve these contracts:
 
 - **Ordinary LZ4:** production acceleration is fixed at one. The native
   1/2/3/4 sweep remains only a byte-exact codec/geometry regression check.
-- **Delta64:** rescue is default-on (`delta64_rescue=0` disables it). The
-  scalar classifier runs before ordinary LZ4; high-score pages may directly adopt a sufficiently small
+- **Delta64:** rescue + `DELTA64_SHUF8` + LZ4 is fixed on for emulated-device
+  performance qualification. The module disable switch is debug/compatibility
+  only and must not create a benchmark arm or plot series. The scalar classifier
+  runs before ordinary LZ4; high-score pages may directly adopt a sufficiently small
   delta64+shuffle8+LZ4 result. Scalar and every compiled SIMD backend must remain
   byte-identical, and loaded wrapper-inclusive timing remains authoritative.
   In console tables, a timing column that measures only compression of an
