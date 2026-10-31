@@ -658,6 +658,16 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
+The old-PC owner run at `09e1cfaa` exposed zero fault-session handoffs.
+Inspection found completion handoff using the eight-record dispatch constant,
+although its contract requires four published BIOs. The native actual-body
+test masked this with a private four-record definition of that dispatch
+constant. Restore a dedicated four-BIO completion floor and compile actual
+production constants in the regression. This repairs handoff eligibility;
+timing-dependent loaded activity and useful-service impact still require the
+same-source owner matrix. Remote fixture changes independently permit zero
+fault-session handoffs while preserving positive live suspend/drain activity.
+
 The receiving x86 baseline and ID151 input-copy telemetry are owner-qualified
 on modern x86 source `545defa8` (report `3465b4c08987`). The other x86 host passed
 on `61739796` (report `2a40d0973839`); its identity/history stay separate. These

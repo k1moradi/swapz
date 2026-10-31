@@ -144,7 +144,9 @@ all 128 final pages, account exactly 16,512 successful upper WRITEs, and finish
 with completion_active=0 and failed=0. It does not claim to freeze a particular
 helper instruction at the moment suspend starts.
 
-A fresh mapping injects lower WRITE fault 256 after actual successful handoffs.
+A fresh four-record-window mapping injects lower WRITE fault 65,535 within
+at most 16 fixed series. Live handoff activity is proved on the preceding
+suspend/drain mapping; fault-mapping handoff counts are diagnostic only.
 Parallel writes must fail, the target must become terminal with one injection,
 and completion ownership must drain. A fresh aligned direct WRITE must then
 return exactly -1/EIO and increment the error counter without a new success.
@@ -152,7 +154,15 @@ The mandatory loaded marker binds these checks; missing, zero-activity,
 wrong-volume, still-active or missing-failure evidence blocks qualification.
 Actual target-body native tests cover busy-slot fallback, 4..64 bounds, close
 between eligibility and lock acquisition, reuse while an old work call returns,
-and failure before/during BIO delivery. Kernel queue scheduling and reclamation
+and failure before/during BIO delivery. Those tests must compile the production
+completion and dispatch constants alongside the actual function bodies, rather
+than supply a private four-record dispatch constant that can hide threshold
+coupling. Four published BIOs must qualify while three remain inline, even
+though the production early-dispatch hand is eight records.
+Shell fixture assertions must include the window/ordinal/pass assignments
+before the fault mapping UUID; extracting only the text after that UUID drops
+the setup and fails qualification without exercising the intended contract.
+Kernel queue scheduling and reclamation
 still require the loaded gate and ID36 resource-pressure qualification.
 
 ## Scope discipline

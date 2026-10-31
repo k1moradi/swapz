@@ -51,6 +51,8 @@
 #include "swapz-version.h" /* generated from src/kernel/VERSION */
 #define SWAPZ_WORK_QUANTUM_BIOS 64U
 #define SWAPZ_WORK_CONSERVING_HAND_RECORDS 8U
+/* Published ACK cohorts have an independent four-BIO handoff floor. */
+#define SWAPZ_COMPLETION_HANDOFF_MIN_BIOS 4U
 #define SWAPZ_MAX_RETAIN_MS 4U
 /* Keep production/physical policy at 4ms. Owned null_blk lifecycle
  * qualification may use a longer explicit interval so a very slow userspace
@@ -1084,7 +1086,7 @@ static bool swapz_try_completion_handoff(struct swapz_dm *ctx)
 	    !swapz_inflight_lower_pending(ctx))
 		return false;
 	count = bio_list_size(&ctx->deferred_upper_completions);
-	if (count < SWAPZ_WORK_CONSERVING_HAND_RECORDS || count > SWAPZ_MAX_RECORDS)
+	if (count < SWAPZ_COMPLETION_HANDOFF_MIN_BIOS || count > SWAPZ_MAX_RECORDS)
 		return false;
 
 	/* Close admission and publish work under the same lifetime gate: drain

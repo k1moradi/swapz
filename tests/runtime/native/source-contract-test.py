@@ -1289,7 +1289,6 @@ typedef int atomic_t;
 typedef uint64_t atomic64_t;
 #define READ_ONCE(x) (x)
 #define SWAPZ_MAX_RECORDS 64U
-#define SWAPZ_WORK_CONSERVING_HAND_RECORDS 4U
 #define REQ_OP_WRITE 1
 #define DM_ENDIO_DONE 0
 #define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
@@ -1350,6 +1349,14 @@ static void bio_endio(struct bio *b) {
     if((int)b->id==fail_after) {ctx->failed=true;ctx->last_error=-EIO;}
 }
 '''
+        # Use the real policy constants as well as the actual function bodies.
+        # A private four-record stub previously hid the product's eight-record
+        # dispatch threshold accidentally gating completion handoff as well.
+        for name in ("SWAPZ_WORK_CONSERVING_HAND_RECORDS",
+                     "SWAPZ_COMPLETION_HANDOFF_MIN_BIOS"):
+            definition = re.search(r"^#define " + name + r" .+$", DM, re.M)
+            self.assertIsNotNone(definition, name)
+            source = definition.group(0) + "\n" + source
         for name, signature in (
                 ("swapz_end_io", "static int swapz_end_io(struct dm_target *ti, struct bio *bio, blk_status_t *error)"),
                 ("swapz_complete", "static void swapz_complete(struct bio *bio, int error)"),
@@ -1436,8 +1443,10 @@ int main(void) {
         self.assertLess(live.index('completion_before="$(dmsetup status'),
                         live.index("--parallel-write-series 128 128"))
         self.assertIn("(( completion_observed )) && break", live)
+        # Include setup before the UUID: window/ordinal/pass bounds belong to
+        # this fixture and must be checked within the same extracted region.
         completion_fault = deploy.split(
-            'UUID="SWAPZ-TEST-$TOKEN-completionfault"', 1)[1].split(
+            "# The preceding mapping independently proves", 1)[1].split(
             'PASS_LOADED_COMPLETION_HANDOFF=', 1)[0]
         self.assertIn("completion_fault_window=4", completion_fault)
         self.assertIn("completion_fault_nth=65535", completion_fault)

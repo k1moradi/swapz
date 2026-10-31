@@ -1726,6 +1726,11 @@ workers, buffers, RAW cache or lower-WRITE depth is authorized by this path.
 
 ### Published completion handoff verification
 
+Published completion handoff accepts cohorts of 4 through 64 BIOs. Its minimum
+is independent of the eight-record early-dispatch hand and its development
+overrides. Keep a dedicated completion constant; changes to dispatch width
+must not silently suppress already-published ACK handoffs.
+
 The unbound completion item shares the preparation queue and has no dedicated
 CPU measurement. Scheduler boundary deltas may misattribute its execution to
 later callbacks on that pool worker. Moving
