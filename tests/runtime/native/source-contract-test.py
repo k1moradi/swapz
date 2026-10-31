@@ -1439,15 +1439,20 @@ int main(void) {
         completion_fault = deploy.split(
             'UUID="SWAPZ-TEST-$TOKEN-completionfault"', 1)[1].split(
             'PASS_LOADED_COMPLETION_HANDOFF=', 1)[0]
+        self.assertIn("completion_fault_window=4", completion_fault)
+        self.assertIn("completion_fault_nth=65535", completion_fault)
+        self.assertIn("completion_fault_max_passes=16", completion_fault)
         self.assertIn(
-            '--table "0 32768 swapz $LOWER 0 64 0 2 0 1 4096 2"',
+            '--table "0 32768 swapz $LOWER 0 $completion_fault_window 0 2 0 1 $completion_fault_nth 2"',
             completion_fault)
-        self.assertIn("fault_calls == 4096", completion_fault)
-        # 16 passes x >=258 guaranteed attempts per fixed series >= 4096, so
-        # the bounded loop always reaches the late fault; it stops on the
-        # first non-success writer exit and then requires exit 1.
-        self.assertIn("for fault_pass in {1..16}; do", completion_fault)
-        self.assertGreaterEqual(16 * 258, 4096)
+        self.assertIn("fault_calls == completion_fault_nth", completion_fault)
+        # Eight known zero elisions leave 16,504 nonzero WRITEs. A four-record
+        # window therefore guarantees ceil(16,504 / 4) = 4,126 lower attempts
+        # per pass, so 16 bounded passes always reach fault ordinal 65,535.
+        self.assertIn(
+            "for ((fault_pass = 1; fault_pass <= completion_fault_max_passes; ++fault_pass)); do",
+            completion_fault)
+        self.assertGreaterEqual(16 * 4126, 65535)
         self.assertIn("(( fault_writer_rc == 0 )) || break", completion_fault)
         self.assertIn("(( fault_writer_rc == 1 )) ||", completion_fault)
         self.assertIn(">>\"$SESSION/completion-fault-writer.log\"",
