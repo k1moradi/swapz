@@ -135,7 +135,7 @@ def striped_scenario(name):
 
 
 def scenario_arguments(name, plan, delta64=1, calibration=False,
-                       candidate_first=False, submitter_prepare=1, lone_raw=0,
+                       candidate_first=False, submitter_prepare=1,
                        hand_records=8):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
@@ -150,8 +150,6 @@ def scenario_arguments(name, plan, delta64=1, calibration=False,
     arguments.append("--async-prepare")
     if not submitter_prepare:
         arguments += ["--submitter-prepare", "0"]
-    if lone_raw:
-        arguments += ["--lone-raw", "1"]
     if hand_records != 8:
         arguments += ["--hand-records", str(hand_records)]
     if not delta64:
@@ -676,8 +674,6 @@ def main():
                         default=os.environ.get("HOST_LOAD_PROFILE", "uncontrolled"))
     parser.add_argument("--hand-records", type=int, choices=(8, 16, 64),
                         default=int(os.environ.get("HAND_RECORDS", "8")))
-    parser.add_argument("--lone-raw", type=int, choices=(0, 1),
-                        default=int(os.environ.get("LONE_RAW", "0")))
     args = parser.parse_args()
     calibration = args.calibration == "linear"
     candidate = "linear" if calibration else "swapz"
@@ -701,12 +697,9 @@ def main():
         parser.error("SUBMITTER_PREPARE=0 requires ordinary swapz fast_test scenarios")
     if args.hand_records != 8 and (calibration or striped_specs):
         parser.error("HAND_RECORDS requires an ordinary swapz fast_test scenario")
-    if args.lone_raw and (args.submitter_prepare or calibration or striped_specs):
-        parser.error("LONE_RAW=1 requires SUBMITTER_PREPARE=0 and ordinary swapz scenarios")
     for name in ordinary_scenarios:
         scenario_arguments(name, "/dev/null",
                            submitter_prepare=args.submitter_prepare,
-                           lone_raw=args.lone_raw,
                            hand_records=args.hand_records)
 
     if os.geteuid() != 0 and subprocess.run(
@@ -720,7 +713,7 @@ def main():
                            cwd=ROOT, capture_output=True, text=True).stdout.strip()
     print(f"swapz fast_test (development only; not qualification) "
           f"content={args.content} submitter_prepare={args.submitter_prepare} "
-          f"lone_raw={args.lone_raw} hand_records={args.hand_records} "
+          f"hand_records={args.hand_records} "
           f"host_load={args.host_load_profile} "
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
     started = time.monotonic()
@@ -753,7 +746,7 @@ def main():
                                   *scenario_arguments(name, plan, args.delta64, calibration,
                                                       calibration and attempt % 2 == 1,
                                                       args.submitter_prepare,
-                                                      args.lone_raw, args.hand_records))
+                                                      args.hand_records))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
                 arms = parse_arms(proc.stdout, candidate)
@@ -851,7 +844,6 @@ def main():
                     "calibration": args.calibration,
                     "delta64_rescue": args.delta64,
                     "submitter_prepare": args.submitter_prepare,
-                    "lone_raw": args.lone_raw,
                     "hand_records": args.hand_records,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,

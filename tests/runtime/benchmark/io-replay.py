@@ -1339,9 +1339,6 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
     "work_conserving_raw_ready", "prep_late_results_discarded",
-    "lone_raw_candidates", "lone_raw_cancelled_followers",
-    "lone_raw_selected", "lone_raw_zero_elided",
-    "lone_raw_multi_record_windows", "lone_raw_multi_record_pages",
     "idle_bound_closes", "deferred_upper_completion_bios",
     "deferred_upper_completion_wall_ns",
     "submitter_prepare_claims", "submitter_prepare_lane_misses",
@@ -1361,7 +1358,7 @@ KERNEL_WRITE_GAUGE_FIELDS = (
     "prep_slots_in_use", "prep_slots_in_use_max",
     "submitter_prepare", "submitter_prepare_lanes",
     "submitter_prepare_active", "submitter_prepare_active_max",
-    "lone_raw", "lower_write_service_ewma_ns", "lower_write_block_service_ewma_ns",
+    "lower_write_service_ewma_ns", "lower_write_block_service_ewma_ns",
     "ordered_lz4_page_ewma_ns")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
@@ -1445,11 +1442,6 @@ def kernel_write_delta(before, after):
     if (before["submitter_prepare"] != after["submitter_prepare"] or
             after["submitter_prepare"] not in (0, 1)):
         raise ValueError("invalid or changed swapz submitter preparation policy")
-    if (before["lone_raw"] != after["lone_raw"] or
-            after["lone_raw"] not in (0, 1)):
-        raise ValueError("invalid or changed swapz lone RAW policy")
-    if after["lone_raw"] and after["submitter_prepare"]:
-        raise ValueError("lone RAW requires submitter preparation disabled")
     if (before["submitter_prepare_lanes"] != after["submitter_prepare_lanes"] or
             not 0 <= after["submitter_prepare_lanes"] <= 8 or
             bool(after["submitter_prepare_lanes"]) !=
@@ -1486,22 +1478,6 @@ def kernel_write_delta(before, after):
     if not after["submitter_prepare"] and any(
             counters[field] for field in submitter_activity):
         raise ValueError("disabled swapz submitter preparation recorded activity")
-    lone_raw_fields = (
-        "lone_raw_candidates", "lone_raw_cancelled_followers",
-        "lone_raw_selected", "lone_raw_zero_elided",
-        "lone_raw_multi_record_windows", "lone_raw_multi_record_pages",
-    )
-    if not after["lone_raw"] and any(counters[field] for field in lone_raw_fields):
-        raise ValueError("disabled swapz lone RAW recorded activity")
-    if (counters["lone_raw_candidates"] !=
-            counters["lone_raw_cancelled_followers"] +
-            counters["lone_raw_selected"] or
-            counters["lone_raw_zero_elided"] > counters["lone_raw_selected"] or
-            counters["lone_raw_multi_record_windows"] >
-            counters["lone_raw_selected"] or
-            counters["lone_raw_multi_record_pages"] >
-            counters["lone_raw_selected"]):
-        raise ValueError("inconsistent swapz lone RAW accounting")
     if counters["submitter_prepare_pages"] > counters["submitter_prepare_claims"]:
         raise ValueError("inconsistent swapz submitter preparation claims")
     if (counters["submitter_copy_bytes"] !=

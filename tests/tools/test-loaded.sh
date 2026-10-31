@@ -444,19 +444,6 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
-# ID161 development candidate: after the existing learned-QD1 singleton
-# signal, skip LZ4 only for an observed isolated WRITE. This one owned fast-QD1
-# pair is a correctness/telemetry gate, not promotion evidence. Product/default
-# arms above remain lone_raw=0 and their 48-session statistics are unchanged.
-printf 'START_LONE_RAW_QD1=1\n'
-run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh \
-    --validated-source "$tested_source" \
-    --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced \
-    --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000 \
-    --write-only-qd 1 --async-prepare --submitter-prepare 0 --lone-raw 1 \
-    --shared-plan "$shared_plan"
-printf 'PASS_LONE_RAW_QD1=1\n'
-
 # ID36 release gate: constrain one production async pair to a cgroup-v2
 # memory.high/memory.max domain while oversubscribing CPU. The helper itself
 # owns only null_blk-backed resources and requires observable reclaim/throttle
@@ -469,5 +456,5 @@ run_privileged_bounded 960 tests/tools/qualify-resource-pressure.sh \
 # remains depth=1 and routine qualification no longer spends ten sessions here.
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 8 directional modern-storage envelope sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 48 sustained write-only sessions, one ID161 lone-RAW QD1 candidate pair, and the ID36 resource-pressure gate completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 8 directional modern-storage envelope sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 48 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, predictor-first delta64, promoted independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'
