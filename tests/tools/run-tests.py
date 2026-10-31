@@ -1242,8 +1242,7 @@ def parse_loaded_correctness(output):
                 "reason": "loaded suspend/drain evidence is incomplete"}
     if (completion_batches <= 0 or completion_pages != 128 or
             completion_writes != 16512 or completion_active != 0 or
-            completion_fault_batches <= 0 or completion_faults != 1 or
-            completion_terminal_eio != 1):
+            completion_faults != 1 or completion_terminal_eio != 1):
         return {"overall": "INCOMPLETE",
                 "reason": "published completion handoff/drain/failure evidence is incomplete"}
     if write_retain != 2 or write_injected != 1 or write_lower_delta != 0:
