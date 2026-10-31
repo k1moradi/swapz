@@ -1,9 +1,10 @@
-# Old-PC preparation placement: pilots and frozen candidate
+# Old-PC preparation placement: pilots and independent confirmation
 
 Keep the submitter-preparation module default enabled. A global off-mode pilot
-missed its QD4 primary target. A separate conditional C candidate has a promising
-QD8 signal but unresolved latency/other-workload guards. It is restored/unapplied
-pending independent confirmation, not a qualified production improvement.
+missed its QD4 primary target. Independent confirmation of the conditional C
+candidate establishes its QD8 service signal and resolves QD8/QD32 guards,
+but mixed-I/O coverage, service and latency guards remain unresolved. The
+candidate is restored/unapplied, not a qualified production improvement.
 
 ## Same-source placement pilot
 
@@ -89,18 +90,76 @@ n=4 gives p=0.125. The small-sample t interval alone is not promotion evidence.
 In one primary sample, submitter claims remain 301 and producer starts during
 lower WRITE reach 3711 versus zero in control: conditional placement engages.
 
+## Independent frozen-source confirmation
+
+Source: `c0b0954406d859c0971ce5aa658315bc123819da`; control and candidate C
+hashes remain exactly those above. Before collection, freeze eight cycles of
+control/candidate/candidate/control, two repeats each on fast QD8, QD32 and
+mixed. This gives 32 blocks and 192 raw/swapz pairs in 48 minutes 24 seconds.
+All 192 pass the byte oracle and exact preparation-actor accounting. The
+compression stack, module flags, hand threshold, fixture and replay identities
+stay fixed. No pilot observations enter these estimates.
+
+Match repeat numbers within the two source-order strata, then give those strata
+equal weight on log ratios. The independent unit is a cycle: delete-one-cycle
+jackknife uncertainty with Student-t critical values, plus an exact two-sided
+cycle sign-flip test for the primary under a symmetric-null assumption. Each
+endpoint requires at least six usable cycles, three contributing cycles per
+source-order stratum and 12 usable comparisons. The primary requires a >=5%
+QD8 normalized useful-WRITE gain, a positive lower 95% bound and p<=0.05.
+Guards retain the declared <=3% nonprimary service loss, <=1% lower-byte
+increase, <=5% request increase and <=10% available p99 increase.
+
+| Workload | Usable comparisons / cycles | Conditional/control WRITE | Cluster 95% interval |
+| --- | ---: | ---: | ---: |
+| Fast QD8, primary | 24 / 8 | +5.61% | +3.83% to +7.41% |
+| Fast QD32 | 22 / 8 | +0.65% | -1.69% to +3.05% |
+| Fast mixed | 11 / 5 | +0.75% | -5.98% to +7.96% |
+
+QD8 passes the primary, including cycle sign-flip p=0.0078125. Its lower
+requests change -0.98% (-1.61% to -0.34%); lower bytes -0.074% (-0.149% to
+approximately zero); WRITE p99 -1.13% (-4.72% to +2.59%). QD32 also passes
+all guards: WRITE-p99 upper bound +1.52%, lower-byte upper +0.151% and
+request upper +0.708%. Every usable candidate primary observation shows both
+submitter claims and producer preparation starting during lower WRITE service.
+
+Mixed does not meet minimum coverage, and the remaining descriptive intervals
+do not establish service or latency noninferiority: normalized service lower
+-5.98%, WRITE-p99 upper +24.90%, READ-p99 upper +26.39%. Its lower-byte
+upper +0.603% and request upper +4.14% fit the numeric guards, but insufficient
+coverage prevents those endpoints passing too. This is unresolved evidence,
+not proof that the candidate regresses mixed I/O.
+
+The unchanged screens exclude 46 of 192 observations. Requiring both members
+of a comparison and <=10% matched-raw drift leaves 57 of 96 comparisons usable
+across the three scenarios. Preserve all exclusions, with no replacements or
+significance-driven extension. The 200ms CPU/PSI samples do not identify the
+responsible task or prove operator activity, even with exclusive computer access;
+the source of these bursts is unestablished. Raw repeat drift also excludes
+mixed observations. Do not relax the screens after seeing the result.
+
+The [machine-readable confirmation summary](submitter-during-io-confirmation.json)
+includes the frozen plan, every endpoint's coverage/interval, acceptance results
+and screen-reason counts. Full local block logs, JSON, actor checks, native
+probe, source copies, patch and analysis remain under
+`build/optimization-round/submitter-during-io-confirmation/` with SHA-256 manifest.
+
 ## Decision and artifacts
 
-Keep the current source/default. Freeze this exact conditional candidate for
-an independent, fixed-size guard confirmation; do not pool that future data
-with this hypothesis-generating pilot. A retained source still needs exact-source
+Keep the current source/default. The fixed confirmation supports the primary
+mechanism but does not authorize retention while mixed guards remain unresolved.
+Do not add replacement observations to this completed protocol. Any follow-up
+needs a prospective protocol and a reasoned account of the screening/coverage
+problem, keeping this result separate. A retained source still needs exact-source
 owner `make test`, positive-content/lifecycle/resource-pressure coverage, and
 honest host/protocol limits. Modern-host performance is unmeasured here. The
 primary is improvement over swapz control, not parity with raw: QD8 still trails
 raw, and the broader useful READ/WRITE and lower-I/O goal is incomplete.
 
-Local evidence: `build/optimization-round/preparation-placement-oldpc/` and
+Pilot evidence: `build/optimization-round/preparation-placement-oldpc/` and
 `build/optimization-round/submitter-during-io-oldpc/`, including plans, all block
 logs/JSON, analysis, actor-conservation checks, exact C/patch/native probe for
 the conditional variant and SHA-256 manifests. Original C is restored and
 owned mappings removed; `test_results.json` and qualified history are unchanged.
+Refreshed this-host history still ends at qualified source `b336754e` and report
+`8b67a942`; development confirmation observations are excluded from its plots.

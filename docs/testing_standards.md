@@ -2729,3 +2729,10 @@ before lane/page ownership and preserves the established mapper fallback.
 Independent confirmation must declare its fixed count and acceptance bounds
 before collection, keep the exact candidate hash, and exclude pilot data from
 confirmatory inference. Pinned source owner qualification remains mandatory.
+The completed [ID169 confirmation](handoff/preparation-placement-oldpc-result.md)
+passes its QD8 primary and QD8/QD32 guards, but insufficient mixed coverage and
+wide mixed service/p99 intervals prevent retention. A passed primary cannot
+override unresolved safety/performance guards. Preserve all excluded observations;
+do not extend the completed fixed sample or relax its screen after inspection.
+Pre/post CPU counters cannot identify task ownership or establish operator
+activity. Any follow-up protocol must address the coverage limitation prospectively.
