@@ -34,7 +34,7 @@ class PairReplayContract(unittest.TestCase):
             "swapz_linear_fast", SCRIPT.parents[2] / "tools/fast-test.py")
         fast = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fast)
-        arguments = fast.scenario_arguments("nvme5-mixed-lanes", "/plan", 0, True, True)
+        arguments = fast.scenario_arguments("nvme5-mixed-lanes", "/plan", True, True)
         self.assertEqual(arguments[-4:], ["--shared-plan", "/plan",
                                          "--linear-calibration", "--swapz-first"][-5:])
         output = "\n".join(json.dumps({"candidate": arm, "verdict": "PASS"})
