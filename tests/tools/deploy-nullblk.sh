@@ -1043,12 +1043,15 @@ timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
     fail "cannot remove completion-handoff mapping"
 OWN_DM=0
 
-# A later lower fault follows actual successful handoffs; future syscalls must
-# see EIO even if a published ACK batch was concurrently being delivered.
+# The preceding mapping independently proves a real published-ACK handoff and
+# safe suspend/drain. This fresh mapping isolates terminal lower-WRITE failure:
+# requiring another handoff here would make correctness depend on scheduling.
 # Handoffs are timing-dependent: a slow four-CPU host qualified with only six
 # per 16,512-WRITE series and one before attempt 256, and attempts 32 and 256
-# have each blocked once when preparation timing moved. Inject much later and
-# repeat the same fixed series until the fault stops the writer. Each series
+# have each blocked once when preparation timing moved. Native controlled
+# interleaving separately covers failure while an offloaded batch is delivered.
+# Inject much later and repeat the same fixed series until the fault stops the
+# writer. Each series
 # submits 16,512 logical WRITEs; with at most 64 records per lower run and only
 # the eight known zero-elided pages, it makes at least 258 physical WRITE
 # attempts, so 16 bounded passes (>=4,128 attempts) always reach attempt 4096.
@@ -1079,8 +1082,7 @@ fault_failed="$(status_u64 "$completion_fault_before" failed)"
 fault_calls="$(status_u64 "$completion_fault_before" write_fault_calls)"
 fault_injected="$(status_u64 "$completion_fault_before" write_fault_injected)"
 fault_upper_err="$(status_u64 "$completion_fault_before" upper_write_completed_err)"
-if ! (( fault_batches > 0 &&
-       fault_active == 0 &&
+if ! (( fault_active == 0 &&
        fault_failed == 1 &&
        fault_calls == 4096 &&
        fault_injected == 1 &&
