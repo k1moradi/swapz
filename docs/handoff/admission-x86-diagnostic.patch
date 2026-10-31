@@ -1,0 +1,82 @@
+diff --git a/src/kernel/dm-target.c b/src/kernel/dm-target.c
+index 810ccb37..b82c8d42 100644
+--- a/src/kernel/dm-target.c
++++ b/src/kernel/dm-target.c
+@@ -468,6 +468,11 @@ struct swapz_dm {
+ 	/* Callback only queues the serialized worker; it never owns BIOs. */
+ 	struct hrtimer retention_timer;
+ 	spinlock_t queue_lock;
++	/* Temporary admission contention diagnostic; protected by queue_lock. */
++	u64 admission_lock_attempts;
++	u64 admission_lock_contended;
++	u64 admission_lock_wait_wall_ns;
++	u64 admission_lock_wait_max_ns;
+ 	struct list_head incoming;
+ 	bool accepting;
+ 	bool failed;
+@@ -6774,7 +6779,18 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ 			}
+ 		segs_done: ;
+ 		}
+-		spin_lock_irqsave(&ctx->queue_lock, flags);
++		if (!spin_trylock_irqsave(&ctx->queue_lock, flags)) {
++			u64 start_ns = ktime_get_ns();
++			u64 elapsed;
++
++			spin_lock_irqsave(&ctx->queue_lock, flags);
++			elapsed = swapz_elapsed_ns(start_ns, ktime_get_ns());
++			ctx->admission_lock_contended++;
++			ctx->admission_lock_wait_wall_ns += elapsed;
++			if (elapsed > ctx->admission_lock_wait_max_ns)
++				ctx->admission_lock_wait_max_ns = elapsed;
++		}
++		ctx->admission_lock_attempts++;
+ 		/*
+ 		 * Admission and shutdown share queue_lock: presuspend cannot finish
+ 		 * draining while a previously admitted BIO is added after the drain.
+@@ -8266,6 +8282,12 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
+ 			prep.delta64.transform_wall_ns + submitter.delta64.transform_wall_ns,
+ 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
+ 			prep.delta64.wall_ns + submitter.delta64.wall_ns);
++		DMEMIT(" admission_lock_attempts=%llu admission_lock_contended=%llu "
++		       "admission_lock_wait_wall_ns=%llu admission_lock_wait_max_ns=%llu",
++		       READ_ONCE(ctx->admission_lock_attempts),
++		       READ_ONCE(ctx->admission_lock_contended),
++		       READ_ONCE(ctx->admission_lock_wait_wall_ns),
++		       READ_ONCE(ctx->admission_lock_wait_max_ns));
+ 		DMEMIT(" completion_offloaded_batches=%llu completion_active=%d",
+ 		       READ_ONCE(ctx->completion_offloaded_batches),
+ 		       atomic_read(&ctx->completion_active));
+diff --git a/tests/tools/fast-test.py b/tests/tools/fast-test.py
+index 9d8ef398..b5856755 100644
+--- a/tests/tools/fast-test.py
++++ b/tests/tools/fast-test.py
+@@ -137,7 +137,7 @@ def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first
+     arguments += ["--shared-plan", str(plan)]
+     if calibration:
+         arguments.append("--linear-calibration")
+-    if candidate_first:
++    if candidate_first or os.environ.get("PAIR_ORDER") == "candidate-first":
+         arguments.append("--swapz-first")
+     return arguments
+ 
+@@ -147,6 +147,8 @@ def run(command, **kwargs):
+ 
+ 
+ def build():
++    run([sys.executable, "-B", "tests/runtime/native/source-contract-test.py"],
++        stdout=subprocess.DEVNULL)
+     run([sys.executable, "-B", "tests/runtime/benchmark/io-replay-test.py"],
+         stdout=subprocess.DEVNULL)
+     jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
+@@ -463,7 +465,9 @@ def main():
+                 row["performance_validity"] = performance_validity(
+                     quiet_before, quiet_after, arms)
+                 rows.append(row)
+-                raw_reports.append({"scenario": label, "arms": arms})
++                raw_reports.append({"scenario": label, "arms": arms,
++                                    "target_status": [line for line in proc.stdout.splitlines()
++                                                      if "SWAPZ_STATUS_" in line]})
+                 measured = row["linear_w"] if calibration else row["swapz_w"]
+                 print(f"  {label}: raw W {row['raw_w']:.2f} {candidate} W "
+                       f"{measured:.2f} ({pct(measured, row['raw_w']).strip()}) "
