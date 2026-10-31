@@ -1,0 +1,578 @@
+{
+  "plan": {
+    "kind": "Diagnostic perturbation and contention observation; not performance confirmation",
+    "orders": [
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA"
+    ],
+    "scenarios": [
+      "nvme5-mixed-lanes",
+      "sata-mixed",
+      "fast-mixed",
+      "fast-w8"
+    ],
+    "content": "medium",
+    "delta64": 0,
+    "repeat": 1,
+    "head": "55286d7f5d9e65e759936cb2eff40201529f83f9",
+    "c_hashes": {
+      "A": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+      "B": "819661f36cdb0c293ffed54f5c409c7e89a9ad09fb8350b83455ef86500bebbd"
+    },
+    "helper_sha256": "139ae0a9c57f43db85333ab007312135f98767563735f48ca46e74dad878a67a",
+    "raw_order": "raw-first odd rounds, candidate-first even rounds",
+    "primary": "No promotion endpoint. Systematic 1/64 accepted admissions: pre-owner-notification and owner-notification wall, separately for submitter-claimed and other BIOs. Back-to-back clock observations are overhead context, never subtracted as exact correction. Hold tails, lock wait and untouched acquisition cost excluded. Paired throughput intervals describe perturbation only, not significance/equivalence.",
+    "exclusions": "Both blocks excluded for performance perturbation if either performance_usable is false, inputs/CPU geometry differ, or paired raw WRITE max/min spread >10%. No replacement sampling. Counts remain diagnostic on perturbed source."
+  },
+  "counts": [
+    {
+      "round": 1,
+      "scenario": "nvme5-mixed-lanes",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 7409,
+        "admission_probe_wake_samples": 126,
+        "admission_probe_wake_pre_ns": 6290,
+        "admission_probe_wake_notify_ns": 83877,
+        "admission_probe_skip_samples": 242,
+        "admission_probe_skip_pre_ns": 53827,
+        "admission_probe_skip_notify_ns": 4873
+      },
+      "clock_ns_per_sample": 20.133152173913043,
+      "wake_pre_ns_per_sample": 49.92063492063492,
+      "wake_notify_ns_per_sample": 665.6904761904761,
+      "skip_pre_ns_per_sample": 222.42561983471074,
+      "skip_notify_ns_per_sample": 20.136363636363637
+    },
+    {
+      "round": 1,
+      "scenario": "sata-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5914,
+        "admission_probe_wake_samples": 122,
+        "admission_probe_wake_pre_ns": 4129,
+        "admission_probe_wake_notify_ns": 73064,
+        "admission_probe_skip_samples": 246,
+        "admission_probe_skip_pre_ns": 35676,
+        "admission_probe_skip_notify_ns": 4049
+      },
+      "clock_ns_per_sample": 16.070652173913043,
+      "wake_pre_ns_per_sample": 33.84426229508197,
+      "wake_notify_ns_per_sample": 598.8852459016393,
+      "skip_pre_ns_per_sample": 145.02439024390245,
+      "skip_notify_ns_per_sample": 16.459349593495936
+    },
+    {
+      "round": 1,
+      "scenario": "fast-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5443,
+        "admission_probe_wake_samples": 135,
+        "admission_probe_wake_pre_ns": 5152,
+        "admission_probe_wake_notify_ns": 82612,
+        "admission_probe_skip_samples": 233,
+        "admission_probe_skip_pre_ns": 29698,
+        "admission_probe_skip_notify_ns": 3493
+      },
+      "clock_ns_per_sample": 14.790760869565217,
+      "wake_pre_ns_per_sample": 38.162962962962965,
+      "wake_notify_ns_per_sample": 611.9407407407407,
+      "skip_pre_ns_per_sample": 127.45922746781116,
+      "skip_notify_ns_per_sample": 14.991416309012875
+    },
+    {
+      "round": 1,
+      "scenario": "fast-w8",
+      "counters": {
+        "admission_probe_attempts": 7485,
+        "admission_probe_clock_ns": 1569,
+        "admission_probe_wake_samples": 32,
+        "admission_probe_wake_pre_ns": 1048,
+        "admission_probe_wake_notify_ns": 11540,
+        "admission_probe_skip_samples": 84,
+        "admission_probe_skip_pre_ns": 11183,
+        "admission_probe_skip_notify_ns": 1175
+      },
+      "clock_ns_per_sample": 13.525862068965518,
+      "wake_pre_ns_per_sample": 32.75,
+      "wake_notify_ns_per_sample": 360.625,
+      "skip_pre_ns_per_sample": 133.13095238095238,
+      "skip_notify_ns_per_sample": 13.988095238095237
+    },
+    {
+      "round": 2,
+      "scenario": "nvme5-mixed-lanes",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 7871,
+        "admission_probe_wake_samples": 128,
+        "admission_probe_wake_pre_ns": 5748,
+        "admission_probe_wake_notify_ns": 87527,
+        "admission_probe_skip_samples": 240,
+        "admission_probe_skip_pre_ns": 53823,
+        "admission_probe_skip_notify_ns": 5051
+      },
+      "clock_ns_per_sample": 21.38858695652174,
+      "wake_pre_ns_per_sample": 44.90625,
+      "wake_notify_ns_per_sample": 683.8046875,
+      "skip_pre_ns_per_sample": 224.2625,
+      "skip_notify_ns_per_sample": 21.045833333333334
+    },
+    {
+      "round": 2,
+      "scenario": "sata-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 7849,
+        "admission_probe_wake_samples": 138,
+        "admission_probe_wake_pre_ns": 7624,
+        "admission_probe_wake_notify_ns": 129170,
+        "admission_probe_skip_samples": 230,
+        "admission_probe_skip_pre_ns": 44266,
+        "admission_probe_skip_notify_ns": 4916
+      },
+      "clock_ns_per_sample": 21.328804347826086,
+      "wake_pre_ns_per_sample": 55.2463768115942,
+      "wake_notify_ns_per_sample": 936.0144927536232,
+      "skip_pre_ns_per_sample": 192.4608695652174,
+      "skip_notify_ns_per_sample": 21.37391304347826
+    },
+    {
+      "round": 2,
+      "scenario": "fast-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 6072,
+        "admission_probe_wake_samples": 137,
+        "admission_probe_wake_pre_ns": 6200,
+        "admission_probe_wake_notify_ns": 113908,
+        "admission_probe_skip_samples": 231,
+        "admission_probe_skip_pre_ns": 37786,
+        "admission_probe_skip_notify_ns": 3851
+      },
+      "clock_ns_per_sample": 16.5,
+      "wake_pre_ns_per_sample": 45.25547445255474,
+      "wake_notify_ns_per_sample": 831.4452554744526,
+      "skip_pre_ns_per_sample": 163.57575757575756,
+      "skip_notify_ns_per_sample": 16.67099567099567
+    },
+    {
+      "round": 2,
+      "scenario": "fast-w8",
+      "counters": {
+        "admission_probe_attempts": 7485,
+        "admission_probe_clock_ns": 1527,
+        "admission_probe_wake_samples": 32,
+        "admission_probe_wake_pre_ns": 608,
+        "admission_probe_wake_notify_ns": 10786,
+        "admission_probe_skip_samples": 84,
+        "admission_probe_skip_pre_ns": 10163,
+        "admission_probe_skip_notify_ns": 1133
+      },
+      "clock_ns_per_sample": 13.163793103448276,
+      "wake_pre_ns_per_sample": 19.0,
+      "wake_notify_ns_per_sample": 337.0625,
+      "skip_pre_ns_per_sample": 120.98809523809524,
+      "skip_notify_ns_per_sample": 13.488095238095237
+    },
+    {
+      "round": 3,
+      "scenario": "nvme5-mixed-lanes",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 6255,
+        "admission_probe_wake_samples": 135,
+        "admission_probe_wake_pre_ns": 4316,
+        "admission_probe_wake_notify_ns": 73685,
+        "admission_probe_skip_samples": 233,
+        "admission_probe_skip_pre_ns": 37820,
+        "admission_probe_skip_notify_ns": 3718
+      },
+      "clock_ns_per_sample": 16.997282608695652,
+      "wake_pre_ns_per_sample": 31.97037037037037,
+      "wake_notify_ns_per_sample": 545.8148148148148,
+      "skip_pre_ns_per_sample": 162.3175965665236,
+      "skip_notify_ns_per_sample": 15.957081545064378
+    },
+    {
+      "round": 3,
+      "scenario": "sata-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5910,
+        "admission_probe_wake_samples": 122,
+        "admission_probe_wake_pre_ns": 4167,
+        "admission_probe_wake_notify_ns": 72873,
+        "admission_probe_skip_samples": 246,
+        "admission_probe_skip_pre_ns": 35612,
+        "admission_probe_skip_notify_ns": 3978
+      },
+      "clock_ns_per_sample": 16.059782608695652,
+      "wake_pre_ns_per_sample": 34.15573770491803,
+      "wake_notify_ns_per_sample": 597.3196721311475,
+      "skip_pre_ns_per_sample": 144.7642276422764,
+      "skip_notify_ns_per_sample": 16.170731707317074
+    },
+    {
+      "round": 3,
+      "scenario": "fast-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 6109,
+        "admission_probe_wake_samples": 136,
+        "admission_probe_wake_pre_ns": 4783,
+        "admission_probe_wake_notify_ns": 82179,
+        "admission_probe_skip_samples": 232,
+        "admission_probe_skip_pre_ns": 32770,
+        "admission_probe_skip_notify_ns": 3862
+      },
+      "clock_ns_per_sample": 16.60054347826087,
+      "wake_pre_ns_per_sample": 35.169117647058826,
+      "wake_notify_ns_per_sample": 604.2573529411765,
+      "skip_pre_ns_per_sample": 141.25,
+      "skip_notify_ns_per_sample": 16.646551724137932
+    },
+    {
+      "round": 3,
+      "scenario": "fast-w8",
+      "counters": {
+        "admission_probe_attempts": 7485,
+        "admission_probe_clock_ns": 1919,
+        "admission_probe_wake_samples": 32,
+        "admission_probe_wake_pre_ns": 721,
+        "admission_probe_wake_notify_ns": 15613,
+        "admission_probe_skip_samples": 84,
+        "admission_probe_skip_pre_ns": 13340,
+        "admission_probe_skip_notify_ns": 1391
+      },
+      "clock_ns_per_sample": 16.54310344827586,
+      "wake_pre_ns_per_sample": 22.53125,
+      "wake_notify_ns_per_sample": 487.90625,
+      "skip_pre_ns_per_sample": 158.8095238095238,
+      "skip_notify_ns_per_sample": 16.55952380952381
+    },
+    {
+      "round": 4,
+      "scenario": "nvme5-mixed-lanes",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5745,
+        "admission_probe_wake_samples": 141,
+        "admission_probe_wake_pre_ns": 4309,
+        "admission_probe_wake_notify_ns": 69705,
+        "admission_probe_skip_samples": 227,
+        "admission_probe_skip_pre_ns": 37414,
+        "admission_probe_skip_notify_ns": 3628
+      },
+      "clock_ns_per_sample": 15.611413043478262,
+      "wake_pre_ns_per_sample": 30.56028368794326,
+      "wake_notify_ns_per_sample": 494.36170212765956,
+      "skip_pre_ns_per_sample": 164.8193832599119,
+      "skip_notify_ns_per_sample": 15.982378854625551
+    },
+    {
+      "round": 4,
+      "scenario": "sata-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5883,
+        "admission_probe_wake_samples": 133,
+        "admission_probe_wake_pre_ns": 4583,
+        "admission_probe_wake_notify_ns": 77566,
+        "admission_probe_skip_samples": 235,
+        "admission_probe_skip_pre_ns": 33767,
+        "admission_probe_skip_notify_ns": 3906
+      },
+      "clock_ns_per_sample": 15.986413043478262,
+      "wake_pre_ns_per_sample": 34.45864661654135,
+      "wake_notify_ns_per_sample": 583.203007518797,
+      "skip_pre_ns_per_sample": 143.68936170212766,
+      "skip_notify_ns_per_sample": 16.621276595744682
+    },
+    {
+      "round": 4,
+      "scenario": "fast-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5967,
+        "admission_probe_wake_samples": 138,
+        "admission_probe_wake_pre_ns": 5067,
+        "admission_probe_wake_notify_ns": 83247,
+        "admission_probe_skip_samples": 230,
+        "admission_probe_skip_pre_ns": 32108,
+        "admission_probe_skip_notify_ns": 3763
+      },
+      "clock_ns_per_sample": 16.214673913043477,
+      "wake_pre_ns_per_sample": 36.71739130434783,
+      "wake_notify_ns_per_sample": 603.2391304347826,
+      "skip_pre_ns_per_sample": 139.6,
+      "skip_notify_ns_per_sample": 16.360869565217392
+    },
+    {
+      "round": 4,
+      "scenario": "fast-w8",
+      "counters": {
+        "admission_probe_attempts": 7485,
+        "admission_probe_clock_ns": 1967,
+        "admission_probe_wake_samples": 32,
+        "admission_probe_wake_pre_ns": 678,
+        "admission_probe_wake_notify_ns": 12478,
+        "admission_probe_skip_samples": 84,
+        "admission_probe_skip_pre_ns": 14430,
+        "admission_probe_skip_notify_ns": 1451
+      },
+      "clock_ns_per_sample": 16.95689655172414,
+      "wake_pre_ns_per_sample": 21.1875,
+      "wake_notify_ns_per_sample": 389.9375,
+      "skip_pre_ns_per_sample": 171.78571428571428,
+      "skip_notify_ns_per_sample": 17.273809523809526
+    },
+    {
+      "round": 5,
+      "scenario": "nvme5-mixed-lanes",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 6106,
+        "admission_probe_wake_samples": 134,
+        "admission_probe_wake_pre_ns": 4544,
+        "admission_probe_wake_notify_ns": 79992,
+        "admission_probe_skip_samples": 234,
+        "admission_probe_skip_pre_ns": 40983,
+        "admission_probe_skip_notify_ns": 3804
+      },
+      "clock_ns_per_sample": 16.592391304347824,
+      "wake_pre_ns_per_sample": 33.91044776119403,
+      "wake_notify_ns_per_sample": 596.955223880597,
+      "skip_pre_ns_per_sample": 175.14102564102564,
+      "skip_notify_ns_per_sample": 16.256410256410255
+    },
+    {
+      "round": 5,
+      "scenario": "sata-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 6053,
+        "admission_probe_wake_samples": 137,
+        "admission_probe_wake_pre_ns": 4585,
+        "admission_probe_wake_notify_ns": 89436,
+        "admission_probe_skip_samples": 231,
+        "admission_probe_skip_pre_ns": 31642,
+        "admission_probe_skip_notify_ns": 3706
+      },
+      "clock_ns_per_sample": 16.44836956521739,
+      "wake_pre_ns_per_sample": 33.46715328467153,
+      "wake_notify_ns_per_sample": 652.8175182481751,
+      "skip_pre_ns_per_sample": 136.978354978355,
+      "skip_notify_ns_per_sample": 16.043290043290042
+    },
+    {
+      "round": 5,
+      "scenario": "fast-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 6284,
+        "admission_probe_wake_samples": 137,
+        "admission_probe_wake_pre_ns": 5053,
+        "admission_probe_wake_notify_ns": 87857,
+        "admission_probe_skip_samples": 231,
+        "admission_probe_skip_pre_ns": 34457,
+        "admission_probe_skip_notify_ns": 3992
+      },
+      "clock_ns_per_sample": 17.07608695652174,
+      "wake_pre_ns_per_sample": 36.88321167883212,
+      "wake_notify_ns_per_sample": 641.2919708029198,
+      "skip_pre_ns_per_sample": 149.16450216450215,
+      "skip_notify_ns_per_sample": 17.28138528138528
+    },
+    {
+      "round": 5,
+      "scenario": "fast-w8",
+      "counters": {
+        "admission_probe_attempts": 7485,
+        "admission_probe_clock_ns": 1916,
+        "admission_probe_wake_samples": 32,
+        "admission_probe_wake_pre_ns": 674,
+        "admission_probe_wake_notify_ns": 13025,
+        "admission_probe_skip_samples": 84,
+        "admission_probe_skip_pre_ns": 13726,
+        "admission_probe_skip_notify_ns": 1421
+      },
+      "clock_ns_per_sample": 16.517241379310345,
+      "wake_pre_ns_per_sample": 21.0625,
+      "wake_notify_ns_per_sample": 407.03125,
+      "skip_pre_ns_per_sample": 163.4047619047619,
+      "skip_notify_ns_per_sample": 16.916666666666668
+    },
+    {
+      "round": 6,
+      "scenario": "nvme5-mixed-lanes",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5682,
+        "admission_probe_wake_samples": 139,
+        "admission_probe_wake_pre_ns": 7399,
+        "admission_probe_wake_notify_ns": 77811,
+        "admission_probe_skip_samples": 229,
+        "admission_probe_skip_pre_ns": 35268,
+        "admission_probe_skip_notify_ns": 3521
+      },
+      "clock_ns_per_sample": 15.440217391304348,
+      "wake_pre_ns_per_sample": 53.23021582733813,
+      "wake_notify_ns_per_sample": 559.7913669064748,
+      "skip_pre_ns_per_sample": 154.00873362445415,
+      "skip_notify_ns_per_sample": 15.375545851528384
+    },
+    {
+      "round": 6,
+      "scenario": "sata-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5872,
+        "admission_probe_wake_samples": 130,
+        "admission_probe_wake_pre_ns": 4273,
+        "admission_probe_wake_notify_ns": 77924,
+        "admission_probe_skip_samples": 238,
+        "admission_probe_skip_pre_ns": 30970,
+        "admission_probe_skip_notify_ns": 3699
+      },
+      "clock_ns_per_sample": 15.956521739130435,
+      "wake_pre_ns_per_sample": 32.86923076923077,
+      "wake_notify_ns_per_sample": 599.4153846153846,
+      "skip_pre_ns_per_sample": 130.12605042016807,
+      "skip_notify_ns_per_sample": 15.542016806722689
+    },
+    {
+      "round": 6,
+      "scenario": "fast-mixed",
+      "counters": {
+        "admission_probe_attempts": 23615,
+        "admission_probe_clock_ns": 5737,
+        "admission_probe_wake_samples": 134,
+        "admission_probe_wake_pre_ns": 4801,
+        "admission_probe_wake_notify_ns": 73091,
+        "admission_probe_skip_samples": 234,
+        "admission_probe_skip_pre_ns": 31613,
+        "admission_probe_skip_notify_ns": 3665
+      },
+      "clock_ns_per_sample": 15.589673913043478,
+      "wake_pre_ns_per_sample": 35.82835820895522,
+      "wake_notify_ns_per_sample": 545.455223880597,
+      "skip_pre_ns_per_sample": 135.0982905982906,
+      "skip_notify_ns_per_sample": 15.662393162393162
+    },
+    {
+      "round": 6,
+      "scenario": "fast-w8",
+      "counters": {
+        "admission_probe_attempts": 7485,
+        "admission_probe_clock_ns": 1782,
+        "admission_probe_wake_samples": 32,
+        "admission_probe_wake_pre_ns": 755,
+        "admission_probe_wake_notify_ns": 14088,
+        "admission_probe_skip_samples": 84,
+        "admission_probe_skip_pre_ns": 11817,
+        "admission_probe_skip_notify_ns": 1355
+      },
+      "clock_ns_per_sample": 15.362068965517242,
+      "wake_pre_ns_per_sample": 23.59375,
+      "wake_notify_ns_per_sample": 440.25,
+      "skip_pre_ns_per_sample": 140.67857142857142,
+      "skip_notify_ns_per_sample": 16.13095238095238
+    }
+  ],
+  "perturbation": [
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "n": 2,
+      "normalized_service_change_percent": 5.4873160566724355,
+      "descriptive_95_interval_percent": [
+        -52.168153771049845,
+        132.63943849412513
+      ],
+      "scope": "Probe perturbation only; no significance or equivalence claim"
+    },
+    {
+      "scenario": "sata-mixed",
+      "n": 5,
+      "normalized_service_change_percent": 2.144510037959009,
+      "descriptive_95_interval_percent": [
+        -5.763871924888224,
+        10.716570640281299
+      ],
+      "scope": "Probe perturbation only; no significance or equivalence claim"
+    },
+    {
+      "scenario": "fast-mixed",
+      "n": 5,
+      "normalized_service_change_percent": 2.970732203159853,
+      "descriptive_95_interval_percent": [
+        -9.436924421203111,
+        17.078308379991523
+      ],
+      "scope": "Probe perturbation only; no significance or equivalence claim"
+    },
+    {
+      "scenario": "fast-w8",
+      "n": 6,
+      "normalized_service_change_percent": -1.3412468627773364,
+      "descriptive_95_interval_percent": [
+        -3.31934449528464,
+        0.6773228809636385
+      ],
+      "scope": "Probe perturbation only; no significance or equivalence claim"
+    }
+  ],
+  "excluded": [
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "round": 1,
+      "reasons": [
+        "raw drift"
+      ]
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "round": 2,
+      "reasons": [
+        "raw drift"
+      ]
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "round": 3,
+      "reasons": [
+        "raw drift"
+      ]
+    },
+    {
+      "scenario": "nvme5-mixed-lanes",
+      "round": 6,
+      "reasons": [
+        "raw drift"
+      ]
+    },
+    {
+      "scenario": "sata-mixed",
+      "round": 2,
+      "reasons": [
+        "B:quality"
+      ]
+    },
+    {
+      "scenario": "fast-mixed",
+      "round": 2,
+      "reasons": [
+        "B:quality",
+        "raw drift"
+      ]
+    }
+  ],
+  "arms_passed": 96,
+  "scope": "Systematic complete-session 1/64 samples; setup/readback included. Partial IRQ-disabled hold wall, not lock wait, exact CPU, whole lock cost or removable budget. Clock checks not subtracted."
+}

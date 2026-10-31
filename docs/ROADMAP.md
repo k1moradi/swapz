@@ -354,6 +354,7 @@ changes.
 | 152 | Independent LZ4 state reuse with submitter preparation | **5 development pilot / removed** | Exported continuation API plus zero-length dictionary forget preserved independent blocks and passed actual-helper, kernel owner-class, RAW fallback, delta64 and >1 GiB successful-reuse checks. Fixed 12-round three-arm pilot passed 432 byte-oracle arms; persistent B/C -3.60% with 99.4444% interval -9.45..+2.63% missed the declared +3% floor. Stateless production and all temporary controls restored. Current submitter C/A +15.46% on persistent NVMe5, adjusted sign p 0.0352, carries scoped CPU/memory and fast-QD8 guard trade-offs. [Result and packets](handoff/lz4-state-x86-result.md). |
 | 153 | CPU-targeted READ/WRITE completion | **5 fixed pilot / removed** | Actual-body native probes, owned suspend/fault/drain and invalid-destination fallback gates pass. Twelve counterbalanced rounds/24 blocks/288 arm oracles pass; persistent NVMe5 B/A +4.29%, 98.3333% interval -1.03..+9.89%, adjusted sign p 0.539 fails the declared benefit screen. SATA/fast remain inconclusive; persistent lower WRITE requests +2.03% is descriptive secondary evidence, not an endurance improvement. No replacement samples or owner qualification. Restore qualified production and all temporary helpers; [complete result and packets](handoff/cpu-completion-x86-result.md). |
 | 154 | Direct admission contention diagnostic | **measurement incomplete; probe removed** | Six fixed source blocks/48 arm oracles pass. Try-lock observations find 11..13% contention in persistent NVMe5/SATA and 2..4% in fast workloads; fallback wall is not total wait/hold or removable CPU. All three NVMe5 perturbation pairs fail the raw-drift screen, and remaining intervals are wide. No production change selected. Next bound hold/notification work and probe cost with stable controls; [packet and limitations](handoff/admission-x86-diagnostic.md). |
+| 155 | Systematic admission hold/notification sampling | **diagnostic hypothesis; probe removed** | Twelve fixed blocks/96 arm oracles pass. One-in-64 samples place owner notification at roughly 0.34..0.94 us versus 0.02..0.06 us preceding non-submitter work; clock checks 13..21 ns. Partial hold wall and systematic complete-session samples are not CPU or exact savings. Perturbation remains unresolved after exclusions. Investigate a lifetime-pinned out-of-lock owner wake, preserving acceptance/FIFO/producer locking and drain joins; [measurements and ownership requirements](handoff/admission-hold-x86.md). |
 
 
 ## What the pinned queue experiment establishes
@@ -660,8 +661,10 @@ existing bounded submitter policy. [ID152's result](handoff/lz4-state-x86-result
 records the positive current-policy persistent-NVMe5 direction and the guard/
 resource limits; it does not establish a gain on every storage/QD/content arm.
 
-1. Continue the reviewer's #3: establish actual admission contention before
-   choosing a lighter admission design. [ID153's completion pilot](handoff/cpu-completion-x86-result.md)
+1. Continue the reviewer's #3 from [ID155's notification hypothesis](handoff/admission-hold-x86.md).
+   Prove out-of-lock wake lifetime and drain ownership before selecting a
+   performance candidate; the existing probes do not establish an exact
+   removable admission cost. [ID153's completion pilot](handoff/cpu-completion-x86-result.md)
    failed its declared benefit screen and is restored; ID147's list-only READ
    deferral remains closed. Preserve FIFO, producer/owner references and the
    admission-close/drain join. The host lacks CONFIG_LOCK_STAT; prior lock or

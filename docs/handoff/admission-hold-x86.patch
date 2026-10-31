@@ -1,0 +1,141 @@
+diff --git a/src/kernel/dm-target.c b/src/kernel/dm-target.c
+index 810ccb37..60b330f9 100644
+--- a/src/kernel/dm-target.c
++++ b/src/kernel/dm-target.c
+@@ -468,6 +468,12 @@ struct swapz_dm {
+ 	/* Callback only queues the serialized worker; it never owns BIOs. */
+ 	struct hrtimer retention_timer;
+ 	spinlock_t queue_lock;
++	/* Temporary systematic hold sampling; all fields owned by queue_lock. */
++	u64 admission_probe_attempts;
++	u64 admission_probe_clock_ns;
++	u64 admission_probe_samples[2];
++	u64 admission_probe_pre_ns[2];
++	u64 admission_probe_notify_ns[2];
+ 	struct list_head incoming;
+ 	bool accepting;
+ 	bool failed;
+@@ -6708,6 +6714,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ 	sector_t sector = bio->bi_iter.bi_sector;
+ 	sector_t count = bio_sectors(bio);
+ 	int submitter_lane = -1;
++	bool admission_sample = false;
++	u64 admission_start = 0, admission_wake = 0;
+ 
+ 	if (!READ_ONCE(ctx->accepting))
+ 		return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+@@ -6783,6 +6791,14 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+ 			return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+ 		}
++		if (!(++ctx->admission_probe_attempts & 63ULL)) {
++			u64 first = ktime_get_ns();
++			u64 second = ktime_get_ns();
++
++			ctx->admission_probe_clock_ns += swapz_elapsed_ns(first, second);
++			admission_start = ktime_get_ns();
++			admission_sample = true;
++		}
+ 		if (count && (bio_op(bio) == REQ_OP_READ ||
+ 			      bio_op(bio) == REQ_OP_WRITE)) {
+ 			if (bio_segs > 1) {
+@@ -6846,6 +6862,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ 	 * preempt this task, find the head still submitter-active, defer and be
+ 	 * woken again: two owner passes and context switches per WRITE.
+ 	 */
++	if (admission_sample)
++		admission_wake = ktime_get_ns();
+ 	if (submitter_lane >= 0) {
+ 		/* swapz_submitter_prepare_entry() owns the wake. */
+ 	} else if (bio_op(bio) != REQ_OP_WRITE ||
+@@ -6855,6 +6873,16 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ 		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+ 	} else
+ 		queue_delayed_work(ctx->workqueue, &ctx->worker, 0);
++	if (admission_sample) {
++		u64 end = ktime_get_ns();
++		unsigned int group = submitter_lane >= 0;
++
++		ctx->admission_probe_samples[group]++;
++		ctx->admission_probe_pre_ns[group] +=
++			swapz_elapsed_ns(admission_start, admission_wake);
++		ctx->admission_probe_notify_ns[group] +=
++			swapz_elapsed_ns(admission_wake, end);
++	}
+ 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+ 	if (submitter_lane >= 0)
+ 		swapz_submitter_prepare_entry(ctx, entry,
+@@ -8266,6 +8294,18 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
+ 			prep.delta64.transform_wall_ns + submitter.delta64.transform_wall_ns,
+ 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
+ 			prep.delta64.wall_ns + submitter.delta64.wall_ns);
++		DMEMIT(" admission_probe_attempts=%llu admission_probe_clock_ns=%llu "
++		       "admission_probe_wake_samples=%llu admission_probe_wake_pre_ns=%llu "
++		       "admission_probe_wake_notify_ns=%llu admission_probe_skip_samples=%llu "
++		       "admission_probe_skip_pre_ns=%llu admission_probe_skip_notify_ns=%llu",
++		       READ_ONCE(ctx->admission_probe_attempts),
++		       READ_ONCE(ctx->admission_probe_clock_ns),
++		       READ_ONCE(ctx->admission_probe_samples[0]),
++		       READ_ONCE(ctx->admission_probe_pre_ns[0]),
++		       READ_ONCE(ctx->admission_probe_notify_ns[0]),
++		       READ_ONCE(ctx->admission_probe_samples[1]),
++		       READ_ONCE(ctx->admission_probe_pre_ns[1]),
++		       READ_ONCE(ctx->admission_probe_notify_ns[1]));
+ 		DMEMIT(" completion_offloaded_batches=%llu completion_active=%d",
+ 		       READ_ONCE(ctx->completion_offloaded_batches),
+ 		       atomic_read(&ctx->completion_active));
+diff --git a/tests/runtime/native/source-contract-test.py b/tests/runtime/native/source-contract-test.py
+index dca2fecf..229af961 100644
+--- a/tests/runtime/native/source-contract-test.py
++++ b/tests/runtime/native/source-contract-test.py
+@@ -53,6 +53,17 @@ def source_body(symbol: str, source: str) -> str:
+ 
+ 
+ class SwapzProductionSourceQualification(unittest.TestCase):
++    def test_temporary_admission_sample_is_inside_acceptance_lock(self):
++        if "admission_probe_attempts" not in DM:
++            self.skipTest("temporary hold probe not applied")
++        mapper = body("swapz_map")
++        sample = mapper.index("++ctx->admission_probe_attempts")
++        self.assertGreater(sample, mapper.index("spin_lock_irqsave(&ctx->queue_lock"))
++        self.assertGreater(sample, mapper.index("if (!ctx->accepting)"))
++        self.assertLess(sample, mapper.index("list_add_tail(&entry->list"))
++        self.assertLess(mapper.index("admission_probe_notify_ns[group]"),
++                        mapper.rindex("spin_unlock_irqrestore(&ctx->queue_lock"))
++
+     def test_pressure_hand_requires_completed_representation(self):
+         ready = body("swapz_next_local_write_ready")
+         policy = (ROOT / "src/kernel/window-policy.h").read_text()
+diff --git a/tests/tools/fast-test.py b/tests/tools/fast-test.py
+index 9d8ef398..b5856755 100644
+--- a/tests/tools/fast-test.py
++++ b/tests/tools/fast-test.py
+@@ -137,7 +137,7 @@ def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first
+     arguments += ["--shared-plan", str(plan)]
+     if calibration:
+         arguments.append("--linear-calibration")
+-    if candidate_first:
++    if candidate_first or os.environ.get("PAIR_ORDER") == "candidate-first":
+         arguments.append("--swapz-first")
+     return arguments
+ 
+@@ -147,6 +147,8 @@ def run(command, **kwargs):
+ 
+ 
+ def build():
++    run([sys.executable, "-B", "tests/runtime/native/source-contract-test.py"],
++        stdout=subprocess.DEVNULL)
+     run([sys.executable, "-B", "tests/runtime/benchmark/io-replay-test.py"],
+         stdout=subprocess.DEVNULL)
+     jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
+@@ -463,7 +465,9 @@ def main():
+                 row["performance_validity"] = performance_validity(
+                     quiet_before, quiet_after, arms)
+                 rows.append(row)
+-                raw_reports.append({"scenario": label, "arms": arms})
++                raw_reports.append({"scenario": label, "arms": arms,
++                                    "target_status": [line for line in proc.stdout.splitlines()
++                                                      if "SWAPZ_STATUS_" in line]})
+                 measured = row["linear_w"] if calibration else row["swapz_w"]
+                 print(f"  {label}: raw W {row['raw_w']:.2f} {candidate} W "
+                       f"{measured:.2f} ({pct(measured, row['raw_w']).strip()}) "
