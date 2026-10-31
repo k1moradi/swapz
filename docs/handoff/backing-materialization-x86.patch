@@ -1,0 +1,88 @@
+diff --git a/tests/tools/benchmark-owned-pair.sh b/tests/tools/benchmark-owned-pair.sh
+index b416e760..06730afd 100755
+--- a/tests/tools/benchmark-owned-pair.sh
++++ b/tests/tools/benchmark-owned-pair.sh
+@@ -46,6 +46,12 @@ SUBMIT_QUEUES=1
+ HW_QUEUE_DEPTH=0
+ NATIVE_REPLAY=0
+ REPLAY_SWAPZ_FIRST=0
++MATERIALIZE_OWNED_RAM=0
++# Private model-sensitivity treatment; both freshly owned lower devices only.
++if [[ $# -gt 1 && ${!#} == --materialize-owned-ram ]]; then
++    MATERIALIZE_OWNED_RAM=1
++    set -- "${@:1:$(( $# - 1 ))}"
++fi
+ # The final internal suffix controls safe replay order only.
+ if [[ $# -gt 1 && ${!#} == --swapz-first ]]; then
+     REPLAY_SWAPZ_FIRST=1
+@@ -241,6 +247,10 @@ if (( LINEAR_CALIBRATION )) &&
+     echo 'BLOCKED: linear calibration cannot substitute for product qualification' >&2
+     exit 2
+ fi
++if (( MATERIALIZE_OWNED_RAM && (RESOURCE_PRESSURE_SHORT || LINEAR_CALIBRATION) )); then
++    echo 'BLOCKED: materialization study is separate from ID36/linear protocols' >&2
++    exit 2
++fi
+ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+ source "$ROOT/tests/tools/nullblk-identity.sh"
+ source "$ROOT/tests/tools/swap-inventory.sh"
+@@ -582,6 +592,20 @@ create_owned_ram  # bare uncompressed
+ create_owned_ram  # swapz backing, separate device
+ [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
+ note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
++if (( MATERIALIZE_OWNED_RAM )); then
++    for i in 0 1; do
++        read -r -a materialize_before < "/sys/block/${DISKS[i]}/stat"
++        dd if=/dev/zero of="${LOWERS[i]}" bs=1M count=64 oflag=direct status=none ||
++            fail 'owned both-arm backing materialization failed'
++        read -r -a materialize_after < "/sys/block/${DISKS[i]}/stat"
++        (( materialize_after[6] - materialize_before[6] == 131072 &&
++           materialize_after[8] == 0 )) ||
++            fail 'materialization did not complete exactly 64MiB on owned lower'
++    done
++    note 'PASS_BOTH_ARM_MATERIALIZATION=devices:2 bytes_each:67108864'
++else
++    note 'MODEL_BACKING_STATE=fresh'
++fi
+ if (( RESOURCE_PRESSURE_SHORT )); then
+     id36_pair_dir="${ID36_PAIR_READY%/*}"
+     [[ -n $ID36_PAIR_READY && -n $ID36_PAIR_GO &&
+diff --git a/tests/tools/fast-test.py b/tests/tools/fast-test.py
+index 9d8ef398..f2c586d7 100644
+--- a/tests/tools/fast-test.py
++++ b/tests/tools/fast-test.py
+@@ -137,8 +137,10 @@ def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first
+     arguments += ["--shared-plan", str(plan)]
+     if calibration:
+         arguments.append("--linear-calibration")
+-    if candidate_first:
++    if candidate_first or os.environ.get("PAIR_ORDER") == "candidate-first":
+         arguments.append("--swapz-first")
++    if os.environ.get("BACKING_STATE", "fresh") == "materialized":
++        arguments.append("--materialize-owned-ram")
+     return arguments
+ 
+ 
+@@ -445,7 +447,9 @@ def main():
+                 elapsed = time.monotonic() - begin
+                 quiet_after = quiet_host_sample()
+                 arms = parse_arms(proc.stdout, candidate)
+-                if proc.returncode or set(arms) != {"off", candidate}:
++                want_materialized = os.environ.get("BACKING_STATE", "fresh") == "materialized"
++                materialized = "PASS_BOTH_ARM_MATERIALIZATION=devices:2 bytes_each:67108864" in proc.stdout
++                if proc.returncode or set(arms) != {"off", candidate} or want_materialized != materialized:
+                     status = 1
+                     tail = (proc.stdout + proc.stderr).strip().splitlines()[-12:]
+                     rows.append({"scenario": label,
+@@ -463,7 +467,10 @@ def main():
+                 row["performance_validity"] = performance_validity(
+                     quiet_before, quiet_after, arms)
+                 rows.append(row)
+-                raw_reports.append({"scenario": label, "arms": arms})
++                raw_reports.append({"scenario": label, "arms": arms,
++                                    "backing_state": "materialized" if materialized else "fresh",
++                                    "model_notes": [line for line in proc.stdout.splitlines()
++                                                    if "MATERIALIZATION=" in line or "MODEL_BACKING_STATE=" in line]})
+                 measured = row["linear_w"] if calibration else row["swapz_w"]
+                 print(f"  {label}: raw W {row['raw_w']:.2f} {candidate} W "
+                       f"{measured:.2f} ({pct(measured, row['raw_w']).strip()}) "
