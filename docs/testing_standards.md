@@ -631,14 +631,12 @@ counters themselves do not establish a performance gain.
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
   continue proving the temporary live-reference decrement is exactly restored
   before return/commit, including an error after a validated shared-extent page.
-- **ID67 predictive rescue:** rescue is default-on by owner decision; the
-  paired A/B off arm pins `--no-delta64-rescue`. The second LZ4 pass
-  has a separate read-only `delta64_lz4_acceleration` control, default 4 (the
-  value the A/B qualified; `PRODUCTION_DELTA64_LZ4_ACCELERATION` in the
-  reporter). Standard sessions run that default. The standard rescue A/B fixes
-  that control at 4 in both arms so rescue remains the
-  only changed policy while testing whether lower second-pass CPU cost closes
-  the idle-SSE2 service regression. RAW or >2024-byte LZ4 baselines use
+- **ID67 predictive rescue:** the production delta64 + `DELTA64_SHUF8` + LZ4
+  stack is fixed on for every emulated device by owner decision. The second LZ4
+  pass has a read-only `delta64_lz4_acceleration` control, default 4 (the
+  qualified value; `PRODUCTION_DELTA64_LZ4_ACCELERATION` in the reporter).
+  Routine rescue off/on A/Bs are retired; performance qualification must verify
+  the production defaults rather than override them. RAW or >2024-byte LZ4 baselines use
   threshold 24 and require a strictly smaller candidate. A
   baseline at or below 2024 bytes is eligible only when the production planner
   identifies the exact next uniform SWZ packing limit; that route uses threshold
