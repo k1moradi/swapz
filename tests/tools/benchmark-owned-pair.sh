@@ -11,7 +11,7 @@ if [[ $# -ge 3 && $1 == --validated-source &&
 fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--submitter-prepare 0|1] [--delta64-rescue|--no-delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--submitter-prepare 0|1] [--hand-records 8|16|64] [--delta64-rescue|--no-delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make orchestration)'
     exit 0
 fi
 PROFILE=default
