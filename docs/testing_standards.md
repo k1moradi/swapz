@@ -49,7 +49,10 @@ Retiring the comparison does not retire positive-path correctness: the loaded
 default-policy smoke writes and byte-exactly reads back 128 delta64-positive
 counter-sequence pages (`--delta64-write-series`/`--delta64-verify-series`) and
 requires at least 128 classifier passes and adoptions, proving encode, store and
-DELTA64_SHUF8 decode on the loaded kernel's selected backend. History plots
+DELTA64_SHUF8 decode on the loaded kernel's selected backend. The owner script
+emits `PASS_LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:N adopted:N`, and
+the report parser requires and persists those counts in `loaded_correctness`
+(a missing or short marker is INCOMPLETE). History plots
 keep only rescue-on mixed points; retired write-only delta64-positive envelope
 rows (no READ service) are excluded from mixed panels. A DM-linear calibration
 file reports `compression_policy=none-dm-linear`.

@@ -466,7 +466,7 @@ delta64_adopted="$(delta64_counter_delta delta64_adopted)"
    $(status_u64 "$delta64_after" delta64_rescue) == 1 &&
    $(status_u64 "$delta64_after" failed) == 0 )) ||
     fail "delta64 positive path not adopted: classifier_pass=$delta64_pass adopted=$delta64_adopted"
-note "LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:$delta64_pass adopted:$delta64_adopted"
+note "PASS_LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:$delta64_pass adopted:$delta64_adopted"
 note "PASS_LOADED_ORACLE_PROFILE=raw_pages:$raw_writes zero_pages:$zero_writes flush_calls:$flush_calls"
 
 # Compound/folio multi-bvec and non-zero bv_offset BIO qualification.

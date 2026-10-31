@@ -669,6 +669,23 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
+ARM64 owner report `e73614c` (source `6c33294`, production delta64 +
+DELTA64_SHUF8 + LZ4 everywhere) passed all five stages; the loaded delta64
+positive path passed its hard gate, and its counts are now persisted as
+`PASS_LOADED_DELTA64_POSITIVE`. The fast QD4 change from -25.7% (report
+`9d30bf1`) to -12.4%/-12.9% is host load, not code: QD4 runs the sync4 path
+with zero deferred ACKs, and host busy fell from 0.52-0.58 to 0.05-0.13 while
+sync4 lower time per window fell 191-194 -> 179 us and the reissue gap
+54-56 -> 40-41 us. A fast QD4 wave is 179 us lower WRITE + 40 us reissue +
+3 us non-I/O; raw is bandwidth-capped at 84 MB/s, so a zero-gap K=1 ceiling is
+about 90 MB/s (+7%) and parity needs a gap of 13 us or less. QD1 is latency-bound
+(22 MB/s versus the 84 MB/s cap), so compression cannot win it while success
+is tied to lower completion. On the SATA/NVMe4/NVMe5 envelopes (QD32 mixed,
+compression 1.40-1.44x), the K=1 lane is busy only 64/47/37%, and 51-66 ms per
+session pass with the lane idle and no admitted WRITE. Raw NVMe5 (538 MB/s)
+below raw NVMe4 (612 MB/s) shows the raw arm is host-bound on this 7-vCPU VM.
+The striped (ID160) and hand-threshold experiments remain the next measurements.
+
 The follow-up old-PC QD4 reissue diagnostic produced no valid causal timing
 partition: the final raw-syscall observer lost 22,281 events, missed independent
 operation/lower-request counts, failed host screening and exceeded its 10%

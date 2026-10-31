@@ -1101,6 +1101,9 @@ def parse_loaded_correctness(output):
         "oracle": re.compile(
             r"PASS_LOADED_ORACLE_PROFILE=raw_pages:(\d+) zero_pages:(\d+) "
             r"flush_calls:(\d+)$"),
+        "delta64_positive": re.compile(
+            r"PASS_LOADED_DELTA64_POSITIVE=pages:(\d+) "
+            r"classifier_pass:(\d+) adopted:(\d+)$"),
         "gc": re.compile(
             r"PASS_LOADED_LIVE_GC=victims:(\d+) rotations:(\d+) "
             r"pages:(\d+) read_bytes:(\d+) write_bytes:(\d+) "
@@ -1165,6 +1168,8 @@ def parse_loaded_correctness(output):
         return {"overall": "INCOMPLETE",
                 "reason": "RAW/mixed asynchronous READ evidence is incomplete"}
     raw_pages, zero_pages, flush_calls = found["oracle"]
+    (delta64_positive_pages, delta64_positive_pass,
+     delta64_positive_adopted) = found["delta64_positive"]
     (gc_victims, gc_rotations, gc_pages, gc_read_bytes, gc_write_bytes,
      gc_read_reqs, gc_write_reqs, gc_distinct_victims,
      gc_victim_min_evictions, gc_victim_max_evictions,
@@ -1196,6 +1201,13 @@ def parse_loaded_correctness(output):
     if raw_pages != 64 or zero_pages != 9 or flush_calls < 2:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded RAW/zero/flush oracle counters are inconsistent"}
+    # Production delta64 + DELTA64_SHUF8 + LZ4 positive path: every counter
+    # page must pass the classifier and be adopted, then verify byte-exactly.
+    if (delta64_positive_pages != 128 or
+            delta64_positive_pass < delta64_positive_pages or
+            delta64_positive_adopted < delta64_positive_pages):
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded delta64 positive-path adoption is incomplete"}
     if (gc_victims < 2 or gc_rotations != gc_victims or gc_pages <= 0 or
             gc_read_bytes <= 0 or gc_write_bytes <= 0 or gc_read_reqs <= 0 or
             gc_write_reqs <= 0 or gc_distinct_victims < 3 or
@@ -1266,6 +1278,9 @@ def parse_loaded_correctness(output):
         "raw_pages": raw_pages,
         "zero_pages": zero_pages,
         "flush_calls": flush_calls,
+        "delta64_positive_pages": delta64_positive_pages,
+        "delta64_positive_classifier_pass": delta64_positive_pass,
+        "delta64_positive_adopted": delta64_positive_adopted,
         "gc_victims": gc_victims,
         "gc_rotations": gc_rotations,
         "gc_pages": gc_pages,
@@ -6794,6 +6809,10 @@ def print_bench(result, *, detailed=False):
                 ("upper DISCARD TRIM",
                  f"{loaded['discard_trim_immediate']} immediate; "
                  f"{loaded['discard_trim_reuse_skips']} reuse skips"),
+                ("delta64 positive",
+                 f"{loaded['delta64_positive_pages']} pages; "
+                 f"pass {loaded['delta64_positive_classifier_pass']}; "
+                 f"adopted {loaded['delta64_positive_adopted']}"),
                 ("packed smoke",
                  f"{loaded['packed_placement_verified_pages']} pages; "
                  f"holes {loaded['packed_placement_holes']}; "
