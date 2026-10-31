@@ -747,7 +747,6 @@ class PublicMakeContract(unittest.TestCase):
                     f"PASS_STORAGE_ENVELOPE={envelope}",
                 ))
             lz4_sequence = [
-            lz4_sequence = [
                 4 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
             for index, acceleration in enumerate(lz4_sequence):
                 records.extend((
@@ -835,7 +834,6 @@ class PublicMakeContract(unittest.TestCase):
                     ))
             cap, ns, irq, queue_mode, submit_queues, hw_depth = (
                 80, 150000, 2, 2, 1, 64)
-            delta64_sequence = [
             delta64_sequence = [
                 2 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
             for index, workers in enumerate(delta64_sequence):
