@@ -2720,3 +2720,12 @@ nonretained ready-head wake checks. The [ID167 private-FIFO pilot](handoff/submi
 failed its service/deferral targets and is removed. Generic deferral counts
 are not proof of unnecessary wakes; further wake policies require attributed
 evidence and may not weaken ownership or change packing to manufacture a win.
+
+Preparation placement comparisons must keep the production compression stack
+on and account for each timed WRITE across submitter, producer and ordered
+preparation exactly once. ID169's lower-WRITE-active bypass is a frozen pilot
+candidate, not a default change: guard/resource tests must prove it returns
+before lane/page ownership and preserves the established mapper fallback.
+Independent confirmation must declare its fixed count and acceptance bounds
+before collection, keep the exact candidate hash, and exclude pilot data from
+confirmatory inference. Pinned source owner qualification remains mandatory.
