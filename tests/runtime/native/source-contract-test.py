@@ -4050,7 +4050,7 @@ int main(void)
                       loaded)
         self.assertIn("run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh",
                       loaded)
-        self.assertIn("run_privileged_bounded 720 tests/tools/qualify-resource-pressure.sh",
+        self.assertIn("run_privileged_bounded 960 tests/tools/qualify-resource-pressure.sh",
                       loaded)
         self.assertNotIn('dmsetup remove --force', preflight)
         self.assertIn('dmsetup remove --retry "$DMNAME"', pair)

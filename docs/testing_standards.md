@@ -2490,7 +2490,9 @@ Every top-level privileged helper invoked by `test-loaded.sh` also has a
 root-owned outer watchdog in addition to its internal operation/replay
 timeouts. Preflight is capped at 60s, the loaded smoke/lifecycle helper at 600s,
 each owned-RAM benchmark pair at 720s, and the ID36 resource-pressure helper at
-960s. ID36 additionally keeps its internal 840s pair watchdog and two 280s
+960s. Rootless source contracts that audit the loaded wrapper must pin this
+same 960s ID36 bound everywhere; a stale generic 720s pair bound must not make
+qualification fail before the loaded stage. ID36 additionally keeps its internal 840s pair watchdog and two 280s
 per-candidate replay watchdogs. The watchdog runs inside the authorized root shell so it can terminate
 its privileged descendants and still execute ordinary helper cleanup. An outer
 watchdog expiration is BLOCKED/nonzero, never PASS and never silently retried.
