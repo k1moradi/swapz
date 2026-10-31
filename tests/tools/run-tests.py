@@ -6734,8 +6734,6 @@ def print_bench(result, *, detailed=False):
         print("\n  LZ4 acceleration 1/4 A/B: NOT QUALIFIED "
               f"({lz4_sweep.get('reason', lz4_sweep.get('overall', 'NOT_RUN'))})")
 
-    print("\n  Delta64 rescue off/on A/B: RETIRED — production delta64+DELTA64_SHUF8+LZ4 is fixed on")
-
     delta64_ab = result["benchmarks"].get("delta64_prepare", {})
     if delta64_ab.get("overall") == "PASS_DELTA64_PREPARE_AB":
         print("\n  Delta64 preparation K=1 vs K=2 — five matched SSD-model rounds")
