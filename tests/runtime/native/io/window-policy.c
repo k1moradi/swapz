@@ -424,6 +424,17 @@ static int test_work_conserving_close_respects_retained_target(void)
 	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 4, 32, 8, 8, 0));
 	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 7, 32, 8, 8, 0));
 	CHECK(swapz_window_work_conserving_close_ready(2, 0, 8, 32, 8, 8, 0));
+
+	/* Changing only the hand width cannot bypass the four-record floor
+	 * or demand new arrivals; it delays early close for a queued plain WRITE. */
+	CHECK(swapz_window_work_conserving_close_ready(2, 1, 8, 8, 0, 8, 1));
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 8, 8, 0, 16, 1));
+	CHECK(swapz_window_work_conserving_close_ready(2, 1, 16, 8, 0, 16, 1));
+	CHECK(!swapz_window_work_conserving_close_ready(2, 1, 16, 8, 0, 64, 1));
+	CHECK(swapz_window_work_conserving_close_ready(2, 1, 64, 8, 0, 64, 1));
+	CHECK(!swapz_window_raw_pressure_hand_dispatchable(2, 32, 0, 16));
+	CHECK(swapz_window_raw_pressure_hand_dispatchable(2, 16, 0, 16));
+	CHECK(swapz_window_raw_pressure_hand_dispatchable(2, 32, 0, 64));
 	return 0;
 }
 
