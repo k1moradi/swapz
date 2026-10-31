@@ -491,6 +491,10 @@ def summarize(name, arms, seconds):
 
     kernel = swapz.get("kernel_write_path") or {}
     windows = kernel.get("windows") or 0
+    logical_write_bytes = (
+        (swapz.get("throughput_mbps") or {}).get("logical_write_bytes") or 0)
+    swapz_lower_write_requests = lower(swapz, "lower_write_requests")
+    logical_write_pages = logical_write_bytes / 4096.0
     return {
         "scenario": name,
         "raw_w": rate(off, "logical_write_mbps"),
@@ -500,7 +504,12 @@ def summarize(name, arms, seconds):
         "raw_lw_bytes": lower(off, "lower_write_bytes"),
         "swapz_lw_bytes": lower(swapz, "lower_write_bytes"),
         "raw_lw_reqs": lower(off, "lower_write_requests"),
-        "swapz_lw_reqs": lower(swapz, "lower_write_requests"),
+        "swapz_lw_reqs": swapz_lower_write_requests,
+        "hand_records": kernel.get("work_conserving_hand_records") or 0,
+        "hand_closes": kernel.get("work_conserving_hand_closes") or 0,
+        "pages_per_lower_write": (
+            logical_write_pages / swapz_lower_write_requests
+            if swapz_lower_write_requests else 0.0),
         "raw_r_p99": ms(off, "read_p99_ns"),
         "swapz_r_p99": ms(swapz, "read_p99_ns"),
         "raw_w_p99": ms(off, "write_p99_ns"),
@@ -509,6 +518,8 @@ def summarize(name, arms, seconds):
         "deadline": kernel.get("close_deadline") or 0,
         "idle_bound": kernel.get("idle_bound_closes") or 0,
         "service_us": (kernel.get("lower_write_service_ewma_ns") or 0) / 1e3,
+        "block_service_us":
+            (kernel.get("lower_write_block_service_ewma_ns") or 0) / 1e3,
         "idle_ms": (kernel.get("accepted_work_lower_idle_ns") or 0) / 1e6,
         "lw_busy_ms": (kernel.get("lower_write_wall_ns") or 0) / 1e6,
         "admit_samples": kernel.get("write_admit_worker_samples") or 0,
@@ -547,8 +558,9 @@ def print_table(rows):
     header = (f"{'scenario':<12} {'raw W':>7} {'swapz W':>8} {'dW':>7} "
               f"{'raw R':>6} {'swapz R':>7} {'lowW B':>7} {'reqs raw>swapz':>15} "
               f"{'R p99 raw>swapz':>16} {'W p99 raw>swapz':>16} "
-              f"{'win':>5} {'dl':>4} {'ib':>4} {'idle':>6} {'lwbusy':>7} "
-              f"{'svc':>6} {'wall':>6} {'quality':>8}")
+              f"{'win':>5} {'hand':>4} {'hc':>4} {'pg/lw':>6} "
+              f"{'dl':>4} {'ib':>4} {'idle':>6} {'lwbusy':>7} "
+              f"{'svc':>6} {'blk':>6} {'wall':>6} {'quality':>8}")
     print(header)
     print("-" * len(header))
     for row in rows:
@@ -564,17 +576,22 @@ def print_table(rows):
               f"{pct(row['swapz_w'], row['raw_w']):>7} {row['raw_r']:6.2f} "
               f"{row['swapz_r']:7.2f} {bytes_ratio:7.3f} {reqs:>15} "
               f"{rp99:>16} {wp99:>16} {row['windows']:5d} "
+              f"{row['hand_records']:4d} {row['hand_closes']:4d} "
+              f"{row['pages_per_lower_write']:6.2f} "
               f"{row['deadline']:4d} {row['idle_bound']:4d} {row['idle_ms']:6.1f} "
               f"{row['lw_busy_ms']:7.1f} {row['service_us']:6.0f} "
-              f"{row['wall_s']:6.3f} {row['performance_validity']['status']:>8}")
+              f"{row['block_service_us']:6.0f} {row['wall_s']:6.3f} "
+              f"{row['performance_validity']['status']:>8}")
         if row["performance_validity"]["reasons"]:
             print("  excluded: " + "; ".join(row["performance_validity"]["reasons"]))
     print("Legend: W/R useful MB/s; dW swapz vs raw useful WRITE; lowW B "
           "swapz/raw lower WRITE bytes (endurance proxy, lower is better);\n"
-          "        reqs lower WRITE requests; p99 in ms; win/dl/ib swapz windows, "
-          "deadline closes and idle-bound closes among them;\n"
-          "        idle accepted-work lower-idle ms; lwbusy lower-WRITE service ms; "
-          "svc lower-WRITE service EWMA us;\n"
+          "        reqs lower WRITE requests; p99 in ms; win swapz windows; "
+          "hand selected hand width; hc early hand closes; pg/lw useful pages per "
+          "lower WRITE;\n"
+          "        dl/ib deadline and idle-bound closes; idle accepted-work lower-idle "
+          "ms; lwbusy lower-WRITE service ms; svc/blk lower-WRITE run/block "
+          "service EWMA us;\n"
           "        wall swapz measured seconds. "
           "Single unpaired observations; only make test qualifies.\n"
           "        quality: SCREENED passes the noise screen; NOISY/UNKNOWN "
