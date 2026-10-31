@@ -11,7 +11,7 @@ if [[ $# -ge 3 && $1 == --validated-source &&
 fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--submitter-prepare 0|1] [--hand-records 8|16|64] [--delta64-rescue|--no-delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--submitter-prepare 0|1] [--hand-records 8|16|64] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make orchestration; production delta64+DELTA64_SHUF8+LZ4 is fixed on)'
     exit 0
 fi
 PROFILE=default
@@ -26,10 +26,9 @@ SUBMITTER_PREPARE=1
 SUBMITTER_PREPARE_EXPLICIT=0
 HAND_RECORDS=8
 HAND_RECORDS_EXPLICIT=0
-# Production module default; --no-delta64-rescue pins LZ4-only control arms.
+# Required production defaults for every emulated-device pair. Do not pass
+# module overrides: loading defaults and then checking status proves the default.
 DELTA64_RESCUE=1
-DELTA64_POSITIVE_EXPERIMENT=0
-# Production module default for the delta64-only second LZ4 pass.
 DELTA64_LZ4_ACCELERATION=4
 READ_COALESCE=1
 INVALIDATE_CACHE_ON_WRITE_ADMIT=0
@@ -74,20 +73,9 @@ if [[ $# -gt 1 && ${!#} == --resource-pressure-short ]]; then
     RESOURCE_PRESSURE_SHORT=1
     set -- "${@:1:$(( $# - 1 ))}"
 fi
-# Second LZ4 pass used only by delta64 rescue.
-if [[ $# -ge 3 && ${@: -2:1} == --delta64-lz4-acceleration &&
-      ( ${!#} == 1 || ${!#} == 2 || ${!#} == 3 || ${!#} == 4 ) ]]; then
-    DELTA64_LZ4_ACCELERATION="${!#}"
-    set -- "${@:1:$(( $# - 2 ))}"
-fi
-if [[ $# -gt 1 && ${!#} == --delta64-rescue ]]; then
-    DELTA64_RESCUE=1
-    DELTA64_POSITIVE_EXPERIMENT=1
-    set -- "${@:1:$(( $# - 1 ))}"
-elif [[ $# -gt 1 && ${!#} == --no-delta64-rescue ]]; then
-    DELTA64_RESCUE=0
-    set -- "${@:1:$(( $# - 1 ))}"
-fi
+# Delta64 + DELTA64_SHUF8 + LZ4 is fixed on for emulated-device benchmarks.
+# The module retains debug parameters, but this helper intentionally exposes no
+# selector for rescue state or the qualified second-LZ4 acceleration.
 # Test-only policy controls. They are accepted only from make test's private
 # orchestration and remain read-only module parameters after insertion.
 if [[ $# -ge 3 && ${@: -2:1} == --invalidate-cache-on-write-admit &&
@@ -266,7 +254,7 @@ if (( ASYNC_PREPARE || LOWER_MBPS || COMPLETION_NSEC )) &&
 fi
 if (( LINEAR_CALIBRATION )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ||
-      $RESOURCE_PRESSURE_SHORT != 0 || $DELTA64_POSITIVE_EXPERIMENT != 0 ]]; then
+      $RESOURCE_PRESSURE_SHORT != 0 ]]; then
     echo 'BLOCKED: linear calibration cannot substitute for product qualification' >&2
     exit 2
 fi
@@ -649,8 +637,6 @@ modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
     "submitter_prepare=$SUBMITTER_PREPARE" \
     "work_conserving_hand_records=$HAND_RECORDS" \
-    "delta64_rescue=$DELTA64_RESCUE" \
-    "delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION" \
     "read_coalesce=$READ_COALESCE" \
     "invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT" ||
     fail 'swapz module insertion rejected'
@@ -704,7 +690,7 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])submitter_prepare=$expected_
     dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])work_conserving_hand_records=$HAND_RECORDS([[:space:]]|$)" ||
         fail 'loaded swapz hand threshold does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" ||
-    fail 'loaded swapz delta64 rescue does not match selected benchmark arm'
+    fail 'loaded swapz delta64 rescue is not the required production default'
 expected_delta64_workers=$ASYNC_PREPARE
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_prepare_workers=$expected_delta64_workers([[:space:]]|$)" ||
     fail 'loaded swapz delta64 preparation width does not match selected arm'
@@ -901,25 +887,12 @@ fi
 swapz_status_after="$(dmsetup status "$DMNAME")"
 note "SWAPZ_STATUS_AFTER=$swapz_status_after"
 if (( !LINEAR_CALIBRATION )); then
-# Only the explicit delta64-positive fixture must show classifier passes and
-# adoptions; default-on sessions on ordinary content may legitimately have none.
-if (( DELTA64_POSITIVE_EXPERIMENT )); then
-    [[ "$swapz_status_after" =~ delta64_classifier_pass=([0-9]+) ]] ||
-        fail 'delta64 experiment did not expose classifier activity'
-    (( ${BASH_REMATCH[1]} > 0 )) ||
-        fail 'delta64-positive experiment recorded zero classifier passes'
-    [[ "$swapz_status_after" =~ delta64_adopted=([0-9]+) ]] ||
-        fail 'delta64 experiment did not expose adoption activity'
-    (( ${BASH_REMATCH[1]} > 0 )) ||
-        fail 'delta64-positive experiment recorded zero adoptions'
-fi
-if (( DELTA64_RESCUE )); then
-    [[ "$swapz_status_after" =~ delta64_prepare_active_max=([0-9]+) ]] ||
-        fail 'delta64 experiment did not expose preparation concurrency'
-    active_max=${BASH_REMATCH[1]}
-    (( active_max <= expected_delta64_workers )) ||
-        fail 'delta64 preparation exceeded configured concurrency'
-fi
+# Delta64 rescue is required even when ordinary content produces no adoption.
+[[ "$swapz_status_after" =~ delta64_prepare_active_max=([0-9]+) ]] ||
+    fail 'delta64 status did not expose preparation concurrency'
+active_max=${BASH_REMATCH[1]}
+(( active_max <= expected_delta64_workers )) ||
+    fail 'delta64 preparation exceeded configured concurrency'
 # ID150 async preparation activity gate: background producer overlap is not
 # submitter-context preparation. Require real work on at least one path without
 # misreporting producer-only overlap as a property of submitter preparation.
