@@ -18,9 +18,12 @@ useful I/O and/or lower latency, or less lower-device traffic. Lower WRITE
 bytes/requests are the host-I/O endurance proxy; lower READ traffic primarily
 supports swap-in efficiency. Neither is direct NAND lifetime evidence. If
 benefits and regressions coexist, label the result a trade-off rather than a
-win. Internal
-sync/async or feature off/on comparisons explain mechanism; they do not turn a
-result that still trails raw into a product-level performance win. Mean-value
+win. Internal sync/async comparisons may explain mechanism; they do not turn a
+result that still trails raw into a product-level performance win. Delta64 is
+no longer such a feature toggle: every emulated-device benchmark uses the
+production delta64 + `DELTA64_SHUF8` byte-plane shuffle (“bitshuffle”
+requirement) + LZ4 stack, and delta64-off arms/series are excluded from current
+tests and plots. Historical off/on evidence remains archival only. Mean-value
 interpretations are directional only; matched confidence intervals remain the
 qualification evidence.
 
