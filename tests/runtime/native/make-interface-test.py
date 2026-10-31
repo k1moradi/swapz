@@ -614,8 +614,10 @@ class PublicMakeContract(unittest.TestCase):
                 record["fixture_sha256"] = "b" * 64
                 record["trace_sha256"] = "c" * 64
                 if candidate == "swapz":
-                    # Retired LZ4 A/B arms pin LZ4-only delta64 policy.
-                    record["kernel_write_path"]["delta64_rescue"] = 0
+                    # Retired ordinary-LZ4 A/B keeps the production delta64
+                    # stack enabled; only ordinary LZ4 acceleration varies.
+                    record["kernel_write_path"]["delta64_rescue"] = (
+                        runner_contract.PRODUCTION_DELTA64_RESCUE)
                     record["kernel_write_path"]["lz4_acceleration"] = acceleration
                 return json.dumps(record, sort_keys=True)
 
@@ -654,24 +656,11 @@ class PublicMakeContract(unittest.TestCase):
                 record["trace_sha256"] = "f" * 64
                 return json.dumps(record, sort_keys=True)
 
-            def mock_delta64_rescue_arm(enabled):
-                if enabled:
-                    record = json.loads(mock_delta64_arm(1))
-                    record["throughput_mbps"]["logical_write_mbps"] = 20.0
-                    record["write_p99_ns"] = 2300000
-                else:
-                    record = json.loads(mock_write_arm("swapz", 32, 1))
-                    record["kernel_write_path"]["delta64_rescue"] = 0
-                    record["kernel_write_path"]["delta64_prepare_workers"] = 1
-                record["kernel_write_path"]["delta64_lz4_acceleration"] = 4
-                record["fixture_sha256"] = "e" * 64
-                record["trace_sha256"] = "f" * 64
-                return json.dumps(record, sort_keys=True)
-
             def mock_write_pipeline_arm(depth):
                 record = json.loads(mock_write_arm("swapz", 32, 1))
                 kernel = record["kernel_write_path"]
-                kernel["delta64_rescue"] = 0
+                kernel["delta64_rescue"] = (
+                    runner_contract.PRODUCTION_DELTA64_RESCUE)
                 kernel["write_pipeline_depth"] = depth
                 kernel["pipeline_active_max"] = depth
                 if depth == 2:
@@ -734,29 +723,30 @@ class PublicMakeContract(unittest.TestCase):
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
             for envelope in runner_contract.STORAGE_ENVELOPE_ORDER:
                 env_spec = runner_contract.STORAGE_ENVELOPE_SPECS[envelope]
-                for delta64_rescue in (0, 1):
-                    off = json.loads(mock_write_arm("off", 32, 0))
-                    off["fixture_sha256"] = "b" * 64
-                    off["trace_sha256"] = "c" * 64
-                    off["replay_engine"] = "native-c"
-                    swapz = json.loads(mock_write_arm("swapz", 32, 0))
-                    swapz["fixture_sha256"] = "b" * 64
-                    swapz["trace_sha256"] = "c" * 64
-                    swapz["replay_engine"] = "native-c"
-                    swapz["kernel_write_path"]["delta64_rescue"] = delta64_rescue
-                    swapz["kernel_write_path"]["pipeline_post_lower_wall_ns"] = 1000
-                    swapz["kernel_write_path"]["pipeline_active_wall_ns"] = 5000
-                    records.extend((
-                        f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={delta64_rescue}",
-                        "REPLAY_ORDER=off-first",
-                        f"PASS_RAM_MODEL_LOWER_MBPS={env_spec['cap_mib_s']} "
-                        f"COMPLETION_NSEC={env_spec['completion_nsec']} IRQMODE={env_spec['irqmode']} "
-                        f"QUEUE_MODE={env_spec['queue_mode']} SUBMIT_QUEUES={env_spec['submit_queues']} "
-                        f"HW_QUEUE_DEPTH={env_spec['hw_queue_depth']}",
-                        json.dumps(off, sort_keys=True),
-                        json.dumps(swapz, sort_keys=True),
-                        f"PASS_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={delta64_rescue}",
-                    ))
+                off = json.loads(mock_write_arm("off", 32, 0))
+                off["fixture_sha256"] = "b" * 64
+                off["trace_sha256"] = "c" * 64
+                off["replay_engine"] = "native-c"
+                swapz = json.loads(mock_write_arm("swapz", 32, 0))
+                swapz["fixture_sha256"] = "b" * 64
+                swapz["trace_sha256"] = "c" * 64
+                swapz["replay_engine"] = "native-c"
+                swapz["kernel_write_path"]["pipeline_post_lower_wall_ns"] = 1000
+                swapz["kernel_write_path"]["pipeline_active_wall_ns"] = 5000
+                records.extend((
+                    f"START_STORAGE_ENVELOPE={envelope}",
+                    "REPLAY_ORDER=off-first",
+                    f"PASS_RAM_MODEL_LOWER_MBPS={env_spec['cap_mib_s']} "
+                    f"COMPLETION_NSEC={env_spec['completion_nsec']} "
+                    f"IRQMODE={env_spec['irqmode']} "
+                    f"QUEUE_MODE={env_spec['queue_mode']} "
+                    f"SUBMIT_QUEUES={env_spec['submit_queues']} "
+                    f"HW_QUEUE_DEPTH={env_spec['hw_queue_depth']}",
+                    json.dumps(off, sort_keys=True),
+                    json.dumps(swapz, sort_keys=True),
+                    f"PASS_STORAGE_ENVELOPE={envelope}",
+                ))
+            lz4_sequence = [
             lz4_sequence = [
                 4 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
             for index, acceleration in enumerate(lz4_sequence):
@@ -845,24 +835,7 @@ class PublicMakeContract(unittest.TestCase):
                     ))
             cap, ns, irq, queue_mode, submit_queues, hw_depth = (
                 80, 150000, 2, 2, 1, 64)
-            for index, enabled in enumerate(
-                    runner_contract.CONFIRMATION_SEQUENCE):
-                off = json.loads(mock_write_arm("off", 32, 0))
-                off["fixture_sha256"] = "e" * 64
-                off["trace_sha256"] = "f" * 64
-                swapz = json.loads(mock_delta64_rescue_arm(enabled))
-                records.extend((
-                    f"START_DELTA64_RESCUE={enabled}",
-                    "REPLAY_ORDER=swapz-first" if index % 2 else
-                    "REPLAY_ORDER=off-first",
-                    f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} "
-                    f"IRQMODE={irq} QUEUE_MODE={queue_mode} "
-                    f"SUBMIT_QUEUES={submit_queues} "
-                    f"HW_QUEUE_DEPTH={hw_depth}",
-                    json.dumps(swapz if index % 2 else off, sort_keys=True),
-                    json.dumps(off if index % 2 else swapz, sort_keys=True),
-                    f"PASS_DELTA64_RESCUE={enabled}",
-                ))
+            delta64_sequence = [
             delta64_sequence = [
                 2 if bit else 1 for bit in runner_contract.CONFIRMATION_SEQUENCE]
             for index, workers in enumerate(delta64_sequence):
@@ -1157,7 +1130,12 @@ class PublicMakeContract(unittest.TestCase):
         self.assertNotIn("--write-pipeline-depth", loaded)
         self.assertIn("def parse_write_pipeline_depth", reporter)
         self.assertIn("PASS_WRITE_PIPELINE_DEPTH_EVIDENCE", reporter)
-        self.assertIn("--delta64-lz4-acceleration 4", loaded)
+        self.assertNotIn("--delta64-lz4-acceleration", loaded)
+        self.assertNotIn("--delta64-rescue", loaded)
+        self.assertNotIn("--no-delta64-rescue", loaded)
+        self.assertNotIn("START_DELTA64_RESCUE=", loaded)
+        self.assertNotIn("PASS_DELTA64_RESCUE=", loaded)
+        self.assertIn("START_STORAGE_ENVELOPE=%s", loaded)
         self.assertLess(loaded.index("tests/tools/deploy-nullblk.sh"),
                         loaded.index("tests/tools/benchmark-owned-pair.sh"))
         self.assertNotIn("swapon ", loaded)
