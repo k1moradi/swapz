@@ -294,8 +294,8 @@ TIMED_WINDOW_COUNTER_FIELDS = (
         "accepted_work_lower_idle_post_lower_ns"))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
-# Standard (non-A/B) sessions run the production module default: delta64
-# rescue on. Explicit A/B control arms pin it off with --no-delta64-rescue.
+# Product requirement: every emulated-device performance session runs with
+# delta64 rescue + DELTA64_SHUF8 + LZ4 fixed on.
 PRODUCTION_DELTA64_RESCUE = 1
 # Production work-conserving hand width. Nondefault values are fast_test-only.
 PRODUCTION_WORK_CONSERVING_HAND_RECORDS = 8
@@ -777,8 +777,8 @@ def lower_inflight_record(obj):
 def timed_window_error(record):
     if not isinstance(record, dict):
         return "missing timed swapz window telemetry"
-    if type(record.get("delta64_rescue")) is not int or record["delta64_rescue"] not in (0, 1):
-        return "missing or invalid timed delta64 policy"
+    if record.get("delta64_rescue") != PRODUCTION_DELTA64_RESCUE:
+        return "timed delta64 policy is not the required production default"
     if type(record.get("delta64_prepare_workers")) is not int or not (
             0 <= record["delta64_prepare_workers"] <= 4):
         return "missing or invalid timed delta64 preparation width"
@@ -1415,10 +1415,9 @@ def failure_context(output, *, loaded=True, default_phase=None):
             elif line.startswith("START_ID36_RESOURCE_PRESSURE="):
                 phase = "ID36 low-RAM/heavy-CPU pressure"
             elif (match := re.fullmatch(
-                    r"START_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5) "
-                    r"DELTA64_RESCUE=(0|1)", line)):
-                mode = "delta64-positive write" if match.group(2) == "1" else "mixed"
-                phase = f"{match.group(1)} synthetic service envelope ({mode})"
+                    r"START_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5)",
+                    line)):
+                phase = f"{match.group(1)} synthetic service envelope"
             elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "shared fixture allocation and workload generation"
             elif line.startswith("START_OWNED_RAM_REGIME="):
@@ -1579,7 +1578,6 @@ LOADED_PROGRESS_PREFIXES = (
     "START_OWNED_RAM_REGIME=", "PASS_OWNED_RAM_REGIME=",
     "START_OWNED_RAM_PAIR_ASYNC_PREPARE=", "PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=",
     "START_STORAGE_ENVELOPE=", "PASS_STORAGE_ENVELOPE=",
-    "START_DELTA64_RESCUE=", "PASS_DELTA64_RESCUE=",
     "START_READ_COALESCE_AB=", "PASS_READ_COALESCE_AB=",
     "START_SD_READ_COALESCE_AB=", "PASS_SD_READ_COALESCE_AB=",
     "START_WRITE_SATURATION_REGIME=", "PASS_WRITE_SATURATION_REGIME=",
@@ -2275,7 +2273,7 @@ def lz4_acceleration_verdict(sessions):
             return {"overall": "NOT_QUALIFIED",
                     "reason": "loaded LZ4 A/B telemetry: " + error}
         if (kernel["lz4_acceleration"] != row["lz4_acceleration"] or
-                kernel["delta64_rescue"] != 0):
+                kernel["delta64_rescue"] != PRODUCTION_DELTA64_RESCUE):
             return {"overall": "NOT_QUALIFIED",
                     "reason": "loaded LZ4 A/B policy does not match its arm"}
         arm_provenance = tuple(swapz.get(key) for key in
@@ -2407,214 +2405,7 @@ def lz4_acceleration_verdict(sessions):
         "paired": {name: paired_ci95(values)
                    for name, values in changes.items()},
         "interpretation":
-            "SAME_SOURCE_ACCEL1_ACCEL4_COUNTERBALANCED_ASYNC_DELTA64_OFF",
-    }
-
-
-def parse_delta64_rescue_sessions(output):
-    """Parse the counterbalanced SSD-model delta64 rescue off/on A/B."""
-    sessions, current = [], None
-    for line in output.splitlines():
-        line = line.strip()
-        match = re.fullmatch(r"START_DELTA64_RESCUE=(0|1)", line)
-        if match:
-            current = {
-                "rescue": int(match.group(1)), "status": "INCOMPLETE",
-                "device_model": None, "arms": {}, "order": "unknown",
-            }
-            sessions.append(current)
-            continue
-        if current is None:
-            continue
-        if line.startswith("REPLAY_ORDER="):
-            current["order"] = line.partition("=")[2].strip()
-        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
-            model = re.fullmatch(
-                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
-                line)
-            if model:
-                current["device_model"] = {
-                    "cap_mib_s": int(model.group(1)),
-                    "completion_nsec": int(model.group(2)),
-                    "irqmode": int(model.group(3)),
-                    "queue_mode": int(model.group(4)),
-                    "submit_queues": int(model.group(5)),
-                    "hw_queue_depth": int(model.group(6)),
-                }
-        elif line.startswith("{"):
-            try:
-                obj = json.loads(line)
-            except (ValueError, TypeError):
-                continue
-            if obj.get("candidate") not in ("off", "swapz") or \
-                    obj.get("verdict") != "PASS":
-                continue
-            candidate = obj["candidate"]
-            rates = obj.get("throughput_mbps") or {}
-            lower = obj.get("lower_io") or {}
-            current["arms"][candidate] = {
-                "source_sha": obj.get("source_sha"),
-                "fixture_sha256": obj.get("fixture_sha256"),
-                "trace_sha256": obj.get("trace_sha256"),
-                "write_mbps": rates.get("logical_write_mbps"),
-                "lower_write_bytes": lower.get("lower_write_bytes"),
-                "lower_write_requests": lower.get("lower_write_requests"),
-                "write_p99_ms": (obj.get("write_p99_ns") / 1e6
-                                 if type(obj.get("write_p99_ns")) in
-                                 (int, float) else None),
-                "host_cpu": host_cpu_record(obj),
-                "kernel_write_path": obj.get("kernel_write_path"),
-            }
-        else:
-            done = re.fullmatch(r"PASS_DELTA64_RESCUE=(0|1)", line)
-            if done and int(done.group(1)) == current["rescue"] and \
-                    set(current["arms"]) == {"off", "swapz"}:
-                current["status"] = "PASS"
-                current = None
-    return sessions
-
-
-def delta64_rescue_verdict(sessions):
-    """Require five matched rescue-off/on pairs at fixed async K=1."""
-    try:
-        pairs = matched_binary_pairs(sessions, "rescue")
-    except ValueError as exc:
-        return {"overall": "INCOMPLETE", "reason": str(exc)}
-
-    expected = MODEL_SPECS["ssd_emulated"]
-    provenance = None
-    for index, row in enumerate(sessions):
-        if row.get("status") != "PASS" or row.get("order") != (
-                "swapz-first" if index % 2 else "off-first"):
-            return {"overall": "INCOMPLETE",
-                    "reason": "delta64 rescue A/B order/status mismatch"}
-        model = row.get("device_model")
-        if not isinstance(model, dict) or any(
-                model.get(key) != expected[key]
-                for key in ("cap_mib_s", "completion_nsec", "irqmode",
-                            "queue_mode", "submit_queues", "hw_queue_depth")):
-            return {"overall": "INCOMPLETE",
-                    "reason": "delta64 rescue A/B device model mismatch"}
-        arm, off = row["arms"]["swapz"], row["arms"]["off"]
-        kernel = arm.get("kernel_write_path")
-        error = timed_window_error(kernel)
-        if error:
-            return {"overall": "INCOMPLETE",
-                    "reason": "delta64 rescue A/B: " + error}
-        rescue = row["rescue"]
-        if (kernel["delta64_rescue"] != rescue or
-                kernel["delta64_lz4_acceleration"] != 4 or
-                kernel["write_pipeline_depth"] != 1 or
-                kernel["pipeline_active_max"] > 1 or
-                kernel["delta64_prepare_workers"] != 1 or
-                kernel["delta64_prepare_active_max"] > 1 or
-                kernel["delta64_prepare_parallel_starts"]):
-            return {"overall": "INCOMPLETE",
-                    "reason": "delta64 rescue A/B policy/concurrency mismatch"}
-        if rescue:
-            # ID150 can prepare every positive-fixture page in the submitting
-            # task. delta64_prepare_pages counts only the background producer;
-            # retain proof of actual delta64 execution and preparation on
-            # either path, not an obsolete producer-only scheduling mandate.
-            prepared_pages = (kernel["delta64_prepare_pages"] +
-                              kernel["submitter_prepare_pages"])
-            if (not kernel["delta64_classifier_pass"] or
-                    not kernel["delta64_attempts"] or
-                    not kernel["delta64_adopted"] or
-                    not prepared_pages or
-                    not kernel["delta64_transform_wall_ns"] or
-                    not kernel["delta64_wall_ns"]):
-                return {"overall": "INCOMPLETE",
-                        "reason": "enabled delta64 rescue arm did not exercise rescue"}
-        elif any(kernel[field] for field in DELTA64_FIELDS):
-            return {"overall": "INCOMPLETE",
-                    "reason": "disabled delta64 rescue arm recorded rescue activity"}
-        arm_prov = tuple(arm.get(key) for key in BENCHMARK_PROVENANCE_FIELDS)
-        off_prov = tuple(off.get(key) for key in BENCHMARK_PROVENANCE_FIELDS)
-        if (not isinstance(arm_prov[0], str) or
-                not re.fullmatch(r"[0-9a-f]{40}", arm_prov[0]) or
-                not isinstance(arm_prov[1], str) or
-                not re.fullmatch(r"[0-9a-f]{64}", arm_prov[1]) or
-                not isinstance(arm_prov[2], str) or
-                not re.fullmatch(r"[0-9a-f]{64}", arm_prov[2]) or
-                arm_prov != off_prov):
-            return {"overall": "INCONCLUSIVE",
-                    "reason": "delta64 rescue paired provenance mismatch"}
-        if provenance is None:
-            provenance = arm_prov
-        elif arm_prov != provenance:
-            return {"overall": "INCONCLUSIVE",
-                    "reason": "delta64 rescue workload differs across sessions"}
-        for candidate in (off, arm):
-            if (type(candidate.get("write_mbps")) not in (int, float) or
-                    candidate["write_mbps"] <= 0 or
-                    type(candidate.get("write_p99_ms")) not in (int, float) or
-                    candidate["write_p99_ms"] <= 0 or
-                    type(candidate.get("lower_write_bytes")) is not int or
-                    candidate["lower_write_bytes"] <= 0 or
-                    type(candidate.get("lower_write_requests")) is not int or
-                    candidate["lower_write_requests"] <= 0):
-                return {"overall": "INCOMPLETE",
-                        "reason": "delta64 rescue performance counters missing"}
-
-    modes = {}
-    for rescue in (0, 1):
-        rows = [row for row in sessions if row["rescue"] == rescue]
-        modes[str(rescue)] = {
-            "observations": len(rows),
-            "write_mbps": statistics.mean(
-                row["arms"]["swapz"]["write_mbps"] for row in rows),
-            "write_p99_ms": statistics.mean(
-                row["arms"]["swapz"]["write_p99_ms"] for row in rows),
-            "lower_write_bytes": statistics.mean(
-                row["arms"]["swapz"]["lower_write_bytes"] for row in rows),
-            "lower_write_requests": statistics.mean(
-                row["arms"]["swapz"]["lower_write_requests"] for row in rows),
-            "delta64_attempts": statistics.mean(
-                row["arms"]["swapz"]["kernel_write_path"]["delta64_attempts"]
-                for row in rows),
-            "delta64_adopted": statistics.mean(
-                row["arms"]["swapz"]["kernel_write_path"]["delta64_adopted"]
-                for row in rows),
-            "delta64_direct_adopted": statistics.mean(
-                row["arms"]["swapz"]["kernel_write_path"]["delta64_direct_adopted"]
-                for row in rows),
-            "delta64_first_lz4_skipped": statistics.mean(
-                row["arms"]["swapz"]["kernel_write_path"]["delta64_first_lz4_skipped"]
-                for row in rows),
-            "delta64_wall_ns": statistics.mean(
-                row["arms"]["swapz"]["kernel_write_path"]["delta64_wall_ns"]
-                for row in rows),
-        }
-    changes = {name: [] for name in (
-        "throughput_change_fraction", "p99_change_fraction",
-        "lower_bytes_change_fraction", "lower_requests_change_fraction",
-        "off_throughput_change_fraction")}
-    for pair in pairs:
-        disabled, enabled = pair[0], pair[1]
-        lo, hi = disabled["arms"]["swapz"], enabled["arms"]["swapz"]
-        changes["throughput_change_fraction"].append(
-            hi["write_mbps"] / lo["write_mbps"] - 1.0)
-        changes["p99_change_fraction"].append(
-            hi["write_p99_ms"] / lo["write_p99_ms"] - 1.0)
-        changes["lower_bytes_change_fraction"].append(
-            hi["lower_write_bytes"] / lo["lower_write_bytes"] - 1.0)
-        changes["lower_requests_change_fraction"].append(
-            hi["lower_write_requests"] / lo["lower_write_requests"] - 1.0)
-        changes["off_throughput_change_fraction"].append(
-            enabled["arms"]["off"]["write_mbps"] /
-            disabled["arms"]["off"]["write_mbps"] - 1.0)
-    return {
-        "overall": "PASS_DELTA64_RESCUE_AB",
-        "scope": "PAIRED_SYNTHETIC_RAM_MODEL_ONLY",
-        "confidence": "FIVE_PAIRED_ROUNDS_SSD_MODEL",
-        "matched_pairs": 5,
-        "device_model": expected,
-        "modes": modes,
-        "paired": {name: paired_ci95(values)
-                   for name, values in changes.items()},
-        "interpretation":
-            "SAME_SOURCE_K1_DELTA64_RESCUE_OFF_ON_POSITIVE_FIXTURE_SECOND_LZ4_ACCEL4",
+            "SAME_SOURCE_ACCEL1_ACCEL4_COUNTERBALANCED_ASYNC_PRODUCTION_DELTA64",
     }
 
 
@@ -4419,7 +4210,7 @@ def write_pipeline_depth_verdict(sessions):
                 kernel["lz4_acceleration"] != 1 or
                 kernel["delta64_lz4_acceleration"] !=
                 PRODUCTION_DELTA64_LZ4_ACCELERATION or
-                kernel["delta64_rescue"] != 0 or
+                kernel["delta64_rescue"] != PRODUCTION_DELTA64_RESCUE or
                 kernel["delta64_prepare_workers"] != 1):
             return {"overall": "INCOMPLETE",
                     "reason": "lower-WRITE depth A/B policy mismatch"}
@@ -5042,7 +4833,6 @@ TABLE_HEADER_LEGEND = {
     "hand/wait": "preparation handoffs / blocking waits",
     "target": "retained burst target in records",
     "eligible": "RAW or >2024-byte LZ4 baselines, plus smaller LZ4 pages with a uniform packing limit",
-    "rescue": "delta64 policy: off=default bypass, on=opted in, mixed=unmatched policy",
     "passed": "eligible pages passing threshold 24, or threshold 16 on the smaller-LZ4 packing path",
     "attempts": "full-page delta64 transform attempts",
     "adopted": "attempts selecting a strictly smaller delta64 payload",
@@ -5790,10 +5580,6 @@ def _table_project_reasoning(title, headers, rows, interpretation):
          (("swap W", "useful WRITE", False), ("p99", "WRITE p99", True),
           ("lower KiB", "lower WRITE bytes", True), ("lower req", "lower WRITE requests", True)),
          "acceleration=4 versus production acceleration=1"),
-        ("delta64 rescue means", "rescue", "0", "1",
-         (("W MB/s", "useful WRITE", False), ("p99", "WRITE p99", True),
-          ("lower req", "lower WRITE requests", True)),
-         "rescue on versus off"),
         ("delta64 preparation means", "K", "1", "2",
          (("W MB/s", "useful WRITE", False), ("p99", "WRITE p99", True),
           ("lower req", "lower WRITE requests", True)),
