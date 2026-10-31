@@ -1,0 +1,476 @@
+diff --git a/src/kernel/dm-target.c b/src/kernel/dm-target.c
+index 810ccb37..277d4d78 100644
+--- a/src/kernel/dm-target.c
++++ b/src/kernel/dm-target.c
+@@ -29,6 +29,8 @@
+ #include <linux/refcount.h>
+ #include <linux/slab.h>
+ #include <linux/sched.h>
++#include <linux/smp.h>
++#include <linux/wait.h>
+ #include <linux/vmalloc.h>
+ #include <linux/version.h>
+ #include <linux/workqueue.h>
+@@ -50,6 +52,7 @@
+ #define SWAPZ_BATCH_BYTES (SWAPZ_MAX_RECORDS * SWAPZ_BLOCK_BYTES)
+ #include "swapz-version.h" /* generated from src/kernel/VERSION */
+ #define SWAPZ_WORK_QUANTUM_BIOS 64U
++#define SWAPZ_REMOTE_COMPLETION_SLOTS 64U
+ #define SWAPZ_WORK_CONSERVING_HAND_RECORDS 8U
+ #define SWAPZ_MAX_RETAIN_MS 4U
+ /* Keep production/physical policy at 4ms. Owned null_blk lifecycle
+@@ -267,6 +270,13 @@ struct swapz_read_slot {
+ 	u64 decode_wall_ns;
+ };
+ 
++/* Fixed callback storage, independent of the BIO freed by bio_endio(). */
++struct swapz_remote_completion {
++	call_single_data_t call;
++	struct swapz_dm *ctx;
++	struct bio *bio;
++};
++
+ struct swapz_bio_ref {
+ 	struct list_head list;
+ 	struct bio *bio;
+@@ -286,6 +296,8 @@ struct swapz_bio_ref {
+ 	/* Passive profiling: accepted WRITE -> first ordered-worker ownership. */
+ 	u64 admitted_ns;
+ 	int preparation_error;
++	int admission_cpu;
++	bool remote_delivery;
+ };
+ 
+ /* The worker attributes exactly one primary reason to each real window. */
+@@ -456,6 +468,14 @@ struct swapz_dm {
+ 	struct work_struct completion_work;
+ 	struct bio_list completion_bios;
+ 	atomic_t completion_active;
++	struct swapz_remote_completion remote_completions[SWAPZ_REMOTE_COMPLETION_SLOTS];
++	wait_queue_head_t remote_completion_wait;
++	u64 remote_completion_busy;
++	atomic_t remote_completion_active;
++	u64 remote_completion_reads;
++	u64 remote_completion_writes;
++	u64 remote_completion_fallback;
++	u64 remote_completion_full;
+ 	u64 completion_offloaded_batches;
+ 	u64 deferred_upper_completion_bios;
+ 	u64 deferred_upper_completion_wall_ns;
+@@ -1002,12 +1022,19 @@ static void swapz_release_prepared(struct bio *bio)
+ 	swapz_prepared_put(ctx, prepared);
+ }
+ 
++static bool swapz_try_remote_completion(struct swapz_dm *ctx, struct bio *bio);
++
+ static void swapz_complete(struct bio *bio, int error)
+ {
+ 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+ 	struct swapz_dm *ctx = entry ? entry->preparation_ctx : NULL;
+ 
++	/* Drop the ordered owner's preparation reference before handing off
++	 * notification; remote delivery must not extend producer-slot pressure. */
+ 	swapz_release_prepared(bio);
++	if (!error && ctx && !entry->remote_delivery &&
++	    swapz_try_remote_completion(ctx, bio))
++		return;
+ 	/* Any BIO still owned when the target becomes terminally failed must
+ 	 * never receive a fresh success, even if its caller missed the error.
+ 	 * Preserve the preexisting BIO error (if any) rather than clearing it. */
+@@ -1027,6 +1054,77 @@ static void swapz_complete(struct bio *bio, int error)
+ 	bio_endio(bio);
+ }
+ 
++/*
++ * The BIO may disappear in swapz_complete(). Only the target-owned callback
++ * cell survives it. Publish cell reuse and wake drain under queue_lock, then
++ * never touch target/cell memory after the final unlock.
++ */
++static void swapz_remote_completion(void *data)
++{
++	struct swapz_remote_completion *slot = data;
++	struct swapz_dm *ctx = slot->ctx;
++	unsigned int index = slot - ctx->remote_completions;
++	unsigned long flags;
++
++	swapz_complete(slot->bio, 0);
++	spin_lock_irqsave(&ctx->queue_lock, flags);
++	slot->bio = NULL;
++	ctx->remote_completion_busy &= ~(1ULL << index);
++	atomic_dec(&ctx->remote_completion_active);
++	wake_up_all(&ctx->remote_completion_wait);
++	spin_unlock_irqrestore(&ctx->queue_lock, flags);
++}
++
++static bool swapz_try_remote_completion(struct swapz_dm *ctx, struct bio *bio)
++{
++	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
++	struct swapz_remote_completion *slot;
++	unsigned long flags;
++	unsigned int index;
++	bool handed = false;
++	int error;
++	bool write = bio_op(bio) == REQ_OP_WRITE;
++
++	if (!bio_sectors(bio) ||
++	    (bio_op(bio) != REQ_OP_READ && bio_op(bio) != REQ_OP_WRITE))
++		return false;
++	spin_lock_irqsave(&ctx->queue_lock, flags);
++	/* Same-CPU delivery must remain inline: the SMP API invokes local
++	 * callbacks synchronously, which would recurse into queue_lock. */
++	if (!ctx->accepting || ctx->failed ||
++	    entry->admission_cpu == smp_processor_id())
++		goto unlock;
++	if (ctx->remote_completion_busy == ~0ULL) {
++		ctx->remote_completion_full++;
++		goto unlock;
++	}
++	index = __ffs64(~ctx->remote_completion_busy);
++	slot = &ctx->remote_completions[index];
++	slot->bio = bio;
++	entry->remote_delivery = true;
++	ctx->remote_completion_busy |= 1ULL << index;
++	atomic_inc(&ctx->remote_completion_active);
++	/* No BIO/entry access after successful enqueue: it may already be freed.
++	 * A failed enqueue transfers no ownership; restore inline delivery. */
++	error = smp_call_function_single_async(entry->admission_cpu, &slot->call);
++	if (error) {
++		entry->remote_delivery = false;
++		slot->bio = NULL;
++		ctx->remote_completion_busy &= ~(1ULL << index);
++		atomic_dec(&ctx->remote_completion_active);
++		ctx->remote_completion_fallback++;
++	} else {
++		if (write)
++			ctx->remote_completion_writes++;
++		else
++			ctx->remote_completion_reads++;
++		handed = true;
++	}
++unlock:
++	spin_unlock_irqrestore(&ctx->queue_lock, flags);
++	return handed;
++}
++
+ /*
+  * A finalized run's mappings are already published, so its successful upper
+  * BIOs may be acknowledged a few microseconds later. Release the preparation
+@@ -6741,6 +6839,9 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
+ 	entry->preparation_ctx = ctx;
+ 	entry->admitted_ns = 0;
+ 	entry->preparation_error = 0;
++	entry->admission_cpu = get_cpu();
++	put_cpu();
++	entry->remote_delivery = false;
+ 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
+ 		init_completion(&entry->preparation_snapshot_ready);
+ 	entry->bio = bio;
+@@ -6926,8 +7027,11 @@ static void swapz_drain(struct dm_target *ti)
+ 	 * quiescent, and the producer never queues ordered work itself. */
+ 	if (ctx->preparation_workqueue)
+ 		drain_workqueue(ctx->preparation_workqueue);
++	wait_event(ctx->remote_completion_wait,
++		   !atomic_read(&ctx->remote_completion_active));
++	/* Pair with callback's final unlock before examining/freeing cells. */
+ 	spin_lock_irqsave(&ctx->queue_lock, flags);
+-	if (!list_empty(&ctx->incoming) ||
++	if (ctx->remote_completion_busy || !list_empty(&ctx->incoming) ||
+ 	    !list_empty(&ctx->preparation_incoming) || ctx->preparation_queued ||
+ 	    (u64)atomic64_read(&ctx->preparation_free_mask) !=
+ 					SWAPZ_PREPARATION_FREE_MASK ||
+@@ -7150,6 +7254,18 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
+ 	bio_list_init(&ctx->completion_bios);
+ 	INIT_WORK(&ctx->completion_work, swapz_completion_work);
+ 	atomic_set(&ctx->completion_active, 0);
++	init_waitqueue_head(&ctx->remote_completion_wait);
++	atomic_set(&ctx->remote_completion_active, 0);
++	{
++		unsigned int index;
++
++		for (index = 0; index < SWAPZ_REMOTE_COMPLETION_SLOTS; ++index) {
++			struct swapz_remote_completion *slot = &ctx->remote_completions[index];
++
++			slot->ctx = ctx;
++			INIT_CSD(&slot->call, swapz_remote_completion, slot);
++		}
++	}
+ 	atomic64_set(&ctx->upper_write_completed_ok, 0);
+ 	atomic64_set(&ctx->upper_write_completed_err, 0);
+ 	atomic64_set(&ctx->endio_write_seen_ok, 0);
+@@ -8266,6 +8382,14 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
+ 			prep.delta64.transform_wall_ns + submitter.delta64.transform_wall_ns,
+ 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
+ 			prep.delta64.wall_ns + submitter.delta64.wall_ns);
++		DMEMIT(" remote_completion_reads=%llu remote_completion_writes=%llu "
++		       "remote_completion_fallback=%llu remote_completion_full=%llu "
++		       "remote_completion_active=%d",
++		       READ_ONCE(ctx->remote_completion_reads),
++		       READ_ONCE(ctx->remote_completion_writes),
++		       READ_ONCE(ctx->remote_completion_fallback),
++		       READ_ONCE(ctx->remote_completion_full),
++		       atomic_read(&ctx->remote_completion_active));
+ 		DMEMIT(" completion_offloaded_batches=%llu completion_active=%d",
+ 		       READ_ONCE(ctx->completion_offloaded_batches),
+ 		       atomic_read(&ctx->completion_active));
+diff --git a/tests/runtime/native/source-contract-test.py b/tests/runtime/native/source-contract-test.py
+index dca2fecf..6015057c 100644
+--- a/tests/runtime/native/source-contract-test.py
++++ b/tests/runtime/native/source-contract-test.py
+@@ -1249,6 +1249,146 @@ int main(void) {
+                 ran = subprocess.run([str(path / "probe")], capture_output=True, text=True)
+                 self.assertEqual(ran.returncode, 0, f"ABI {index}: {ran.stderr}")
+ 
++
++    def test_cpu_completion_real_bodies_bound_fallback_failure_and_reuse(self):
++        if "static bool swapz_try_remote_completion" not in DM:
++            self.skipTest("CPU completion draft is not applied")
++        import subprocess
++        import tempfile
++
++        source = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++#include <errno.h>
++typedef uint64_t u64;
++typedef int atomic_t;
++typedef uint64_t atomic64_t;
++#define READ_ONCE(x) (x)
++#define REQ_OP_WRITE 1
++#define REQ_OP_READ 0
++#define SWAPZ_REMOTE_COMPLETION_SLOTS 64U
++struct swapz_dm;
++struct bio;
++struct call { void (*func)(void *); void *info; };
++typedef struct call call_single_data_t;
++struct swapz_remote_completion { call_single_data_t call; struct swapz_dm *ctx; struct bio *bio; };
++struct swapz_bio_ref { struct swapz_dm *preparation_ctx; bool remote_delivery; int admission_cpu; };
++struct bio { struct swapz_bio_ref ref; int op, sectors, bi_status, ended; bool released; };
++struct swapz_dm {
++    bool accepting, failed;
++    int last_error, queue_lock, remote_completion_wait;
++    struct swapz_remote_completion remote_completions[64];
++    u64 remote_completion_busy, remote_completion_reads, remote_completion_writes;
++    u64 remote_completion_full, remote_completion_fallback;
++    atomic_t remote_completion_active;
++    atomic64_t upper_write_completed_ok, upper_write_completed_err;
++};
++static int locked, current_cpu, enqueue_error, pending_count, delivered, wakeups;
++static bool destroy_at_unlock;
++static call_single_data_t *pending[64];
++#define spin_lock_irqsave(l,f) do { (void)(l);(f)=0;assert(!locked);locked=1; } while(0)
++#define spin_unlock_irqrestore(l,f) do { (void)(f);assert(locked);locked=0; if(destroy_at_unlock) memset((char *)(l)-offsetof(struct swapz_dm,queue_lock),0xa5,sizeof(struct swapz_dm)); } while(0)
++#define atomic_inc(p) (++*(p))
++#define atomic_dec(p) (--*(p))
++#define atomic64_inc(p) (++*(p))
++#define smp_processor_id() current_cpu
++#define nr_cpu_ids 8
++#define __ffs64(x) ((unsigned)__builtin_ctzll(x))
++static void wake_up_all(int *wait) { (void)wait;assert(locked);wakeups++; }
++static struct swapz_bio_ref *dm_per_bio_data(struct bio *b,size_t size) { (void)size;assert(!b->ended);return &b->ref; }
++static unsigned bio_sectors(struct bio *b) { assert(!b->ended);return b->sectors; }
++static int bio_op(struct bio *b) { assert(!b->ended);return b->op; }
++static int errno_to_blk_status(int e) { return -e; }
++static void swapz_release_prepared(struct bio *b) { assert(!b->ended);b->released=true; }
++static void bio_endio(struct bio *b) { assert(!b->ended);b->ended=1;delivered++;memset(&b->ref,0xa5,sizeof(b->ref)); }
++static int smp_call_function_single_async(int cpu,call_single_data_t *call) {
++    assert(locked&&cpu!=current_cpu);
++    if(enqueue_error) return enqueue_error;
++    assert(pending_count<64);pending[pending_count++]=call;return 0;
++}
++static bool swapz_try_remote_completion(struct swapz_dm *,struct bio *);
++'''
++        for name, signature in (
++                ("swapz_complete", "static void swapz_complete(struct bio *bio, int error)"),
++                ("swapz_remote_completion", "static void swapz_remote_completion(void *data)"),
++                ("swapz_try_remote_completion", "static bool swapz_try_remote_completion(struct swapz_dm *ctx, struct bio *bio)")):
++            source += signature + " {\n" + body(name) + "\n}\n"
++        source += r'''
++static struct swapz_dm ctx;
++static struct bio bios[66];
++static void init(void) {
++    memset(&ctx,0,sizeof(ctx));memset(bios,0,sizeof(bios));
++    locked=current_cpu=enqueue_error=pending_count=delivered=wakeups=0;
++    destroy_at_unlock=false;ctx.accepting=true;
++    for(unsigned i=0;i<64;i++) {
++        ctx.remote_completions[i].ctx=&ctx;
++        ctx.remote_completions[i].call.func=swapz_remote_completion;
++        ctx.remote_completions[i].call.info=&ctx.remote_completions[i];
++    }
++    for(unsigned i=0;i<66;i++) {
++        bios[i].ref.preparation_ctx=&ctx;bios[i].ref.admission_cpu=1;
++        bios[i].op=i%2;bios[i].sectors=8;
++    }
++}
++static void run_one(void) {
++    assert(pending_count);call_single_data_t *call=pending[0];
++    memmove(pending,pending+1,sizeof(*pending)*--pending_count);
++    call->func(call->info);
++}
++int main(void) {
++    init();
++    for(unsigned i=0;i<64;i++) swapz_complete(&bios[i],0);
++    assert(ctx.remote_completion_active==64&&ctx.remote_completion_busy==~0ULL);
++    assert(ctx.remote_completion_reads==32&&ctx.remote_completion_writes==32&&!delivered);
++    swapz_complete(&bios[64],0);assert(delivered==1&&ctx.remote_completion_full==1);
++    run_one();assert(ctx.remote_completion_active==63&&wakeups==1);
++    swapz_complete(&bios[65],0);assert(ctx.remote_completion_active==64);
++    while(pending_count)run_one();
++    assert(delivered==66&&!ctx.remote_completion_active&&!ctx.remote_completion_busy);
++    for(unsigned i=0;i<66;i++)assert(bios[i].ended&&bios[i].released);
++    init();enqueue_error=-ENXIO;swapz_complete(&bios[1],0);
++    assert(delivered==1&&!ctx.remote_completion_active&&!ctx.remote_completion_busy);
++    assert(ctx.remote_completion_fallback==1&&!pending_count&&ctx.upper_write_completed_ok==1);
++    init();enqueue_error=-EBUSY;swapz_complete(&bios[0],0);
++    assert(delivered==1&&ctx.remote_completion_fallback==1&&!pending_count);
++    init();bios[0].ref.admission_cpu=0;swapz_complete(&bios[0],0);
++    assert(delivered==1&&!pending_count&&!ctx.remote_completion_active);
++    init();ctx.accepting=false;swapz_complete(&bios[0],0);
++    assert(delivered==1&&!pending_count);
++    init();swapz_complete(&bios[1],-EIO);
++    assert(delivered==1&&!pending_count&&ctx.upper_write_completed_err==1);
++    init();swapz_complete(&bios[1],0);ctx.failed=true;ctx.last_error=-EIO;
++    run_one();assert(delivered==1&&bios[1].bi_status==EIO&&ctx.upper_write_completed_err==1);
++    assert(!ctx.upper_write_completed_ok&&!ctx.remote_completion_active);
++    init();swapz_complete(&bios[0],0);ctx.accepting=false;
++    run_one();assert(delivered==1&&!ctx.remote_completion_active&&!ctx.remote_completion_busy);
++    init();bios[0].sectors=0;swapz_complete(&bios[0],0);assert(delivered==1&&!pending_count);
++    init();bios[0].op=3;swapz_complete(&bios[0],0);assert(delivered==1&&!pending_count);
++    init();swapz_complete(&bios[0],0);destroy_at_unlock=true;run_one();
++    assert(delivered==1&&!locked&&wakeups==1);
++    return 0;
++}
++'''
++        with tempfile.TemporaryDirectory() as directory:
++            path = Path(directory)
++            (path / "probe.c").write_text(source)
++            built = subprocess.run(["cc", "-std=c11", "-O1", "-g", "-Wall",
++                                    "-Wextra", "-Werror", "-fsanitize=address,undefined",
++                                    str(path / "probe.c"), "-o", str(path / "probe")],
++                                   capture_output=True, text=True)
++            self.assertEqual(built.returncode, 0, built.stderr)
++            ran = subprocess.run([str(path / "probe")], capture_output=True, text=True)
++            self.assertEqual(ran.returncode, 0, ran.stderr)
++        callback = body("swapz_remote_completion")
++        self.assertNotIn("ctx->", callback.split("spin_unlock_irqrestore(&ctx->queue_lock, flags);")[-1])
++        self.assertNotIn("slot->", callback.split("spin_unlock_irqrestore(&ctx->queue_lock, flags);")[-1])
++        drain = body("swapz_drain")
++        self.assertLess(drain.index("wait_event(ctx->remote_completion_wait"),
++                        drain.index("if (ctx->remote_completion_busy"))
++
+     def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
+         """Exercise actual target C under controlled queue/close/reuse interleavings."""
+         import subprocess
+@@ -1272,7 +1412,7 @@ typedef uint64_t atomic64_t;
+ #define DM_ENDIO_DONE 0
+ #define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+ struct swapz_dm;
+-struct swapz_bio_ref { struct swapz_dm *preparation_ctx; };
++struct swapz_bio_ref { struct swapz_dm *preparation_ctx; bool remote_delivery; };
+ struct bio { struct bio *bi_next; struct swapz_bio_ref ref; unsigned id, ended; int bi_status; bool prepared; };
+ struct bio_list { struct bio *head, *tail; };
+ struct work_struct { void (*func)(struct work_struct *); };
+@@ -1318,6 +1458,7 @@ static void swapz_release_prepared(struct bio *b) { if(b->prepared) {b->prepared
+ static u64 ktime_get_ns(void) { static u64 clock;return ++clock; }
+ static u64 swapz_elapsed_ns(u64 a,u64 b) { return b-a; }
+ static bool swapz_inflight_lower_pending(struct swapz_dm *ctx) { return ctx->lower_pending; }
++static bool __attribute__((unused)) swapz_try_remote_completion(struct swapz_dm *ctx, struct bio *b) { (void)ctx; (void)b;return false; }
+ static int swapz_end_io(struct dm_target *,struct bio *,blk_status_t *);
+ static void bio_endio(struct bio *b) {
+     struct swapz_dm *ctx=b->ref.preparation_ctx;
+diff --git a/tests/tools/deploy-nullblk.sh b/tests/tools/deploy-nullblk.sh
+index 42558582..84d359ed 100755
+--- a/tests/tools/deploy-nullblk.sh
++++ b/tests/tools/deploy-nullblk.sh
+@@ -1032,6 +1032,13 @@ swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
+     fail "completion-handoff did not become quiescent"
+ completion_after="$SWAPZ_QUIET_STATUS"
+ completion_batches="$(status_u64 "$completion_after" completion_offloaded_batches)"
++completion_remote_writes="$(status_u64 "$completion_after" remote_completion_writes)"
++completion_remote_reads="$(status_u64 "$completion_after" remote_completion_reads)"
++(( completion_remote_writes > 0 &&
++   $(status_u64 "$completion_after" remote_completion_active) == 0 )) ||
++    fail "CPU-targeted completion did not deliver/drain real WRITEs across suspend"
++note "CPU_COMPLETION_SUSPEND_STATUS=$completion_after"
++
+ (( completion_batches > 0 &&
+    $(status_u64 "$completion_after" completion_active) == 0 &&
+    $(status_u64 "$completion_after" failed) == 0 &&
+@@ -1074,6 +1081,12 @@ swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
+     fail "completion-handoff fault did not become quiescent"
+ completion_fault_before="$SWAPZ_QUIET_STATUS"
+ fault_batches="$(status_u64 "$completion_fault_before" completion_offloaded_batches)"
++fault_remote_writes="$(status_u64 "$completion_fault_before" remote_completion_writes)"
++(( fault_remote_writes > 0 &&
++   $(status_u64 "$completion_fault_before" remote_completion_active) == 0 )) ||
++    fail "CPU-targeted completion fault lacked prior remote delivery or callback drain"
++note "CPU_COMPLETION_FAULT_STATUS=$completion_fault_before"
++
+ fault_active="$(status_u64 "$completion_fault_before" completion_active)"
+ fault_failed="$(status_u64 "$completion_fault_before" failed)"
+ fault_calls="$(status_u64 "$completion_fault_before" write_fault_calls)"
+@@ -1095,6 +1108,8 @@ completion_fault_after="$(dmsetup status "$DMNAME")"
+    $(status_u64 "$completion_fault_after" upper_write_completed_err) ==
+    $(status_u64 "$completion_fault_before" upper_write_completed_err) + 1 )) ||
+     fail "post-handoff terminal WRITE completion counters mismatch"
++note "CPU_COMPLETION_POST_FAULT_STATUS=$completion_fault_after"
++note "PASS_CPU_COMPLETION_LIFECYCLE=remote_writes:$completion_remote_writes remote_reads:$completion_remote_reads active_after:0 fault_remote_writes:$fault_remote_writes post_failure_eio:1"
+ note "PASS_LOADED_COMPLETION_HANDOFF=offloaded:$completion_batches verified_pages:128 completed_writes:16512 active_after:0 fault_offloaded:$fault_batches fault_injected:1 post_failure_eio:1"
+ timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
+     fail "cannot remove completion-handoff fault mapping"
+diff --git a/tests/tools/fast-test.py b/tests/tools/fast-test.py
+index 9d8ef398..8b4f3aac 100644
+--- a/tests/tools/fast-test.py
++++ b/tests/tools/fast-test.py
+@@ -130,14 +130,15 @@ def scenario_arguments(name, plan, delta64=1, calibration=False, candidate_first
+         arguments += ["--mixed-lanes", "persistent" if kind == "mixed-lanes" else "waves"]
+     elif kind != "mixed":
+         raise ValueError(f"unknown scenario {name!r}")
+-    arguments.append("--async-prepare")
++    if os.environ.get("ASYNC", "1") == "1":
++        arguments.append("--async-prepare")
+     if not delta64:
+         # Suffix order of benchmark-owned-pair.sh: rescue sits after async.
+         arguments.append("--no-delta64-rescue")
+     arguments += ["--shared-plan", str(plan)]
+     if calibration:
+         arguments.append("--linear-calibration")
+-    if candidate_first:
++    if candidate_first or os.environ.get("PAIR_ORDER") == "candidate-first":
+         arguments.append("--swapz-first")
+     return arguments
+ 
+@@ -147,6 +148,8 @@ def run(command, **kwargs):
+ 
+ 
+ def build():
++    run([sys.executable, "-B", "tests/runtime/native/source-contract-test.py"],
++        stdout=subprocess.DEVNULL)
+     run([sys.executable, "-B", "tests/runtime/benchmark/io-replay-test.py"],
+         stdout=subprocess.DEVNULL)
+     jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
+@@ -428,6 +431,11 @@ def main():
+         print(preflight.stdout + preflight.stderr, file=sys.stderr)
+         print("BLOCKED: loaded preflight failed", file=sys.stderr)
+         return 2
++    if os.environ.get("CPU_COMPLETION_GATE") == "1":
++        gate = privileged(1200, "tests/tools/deploy-nullblk.sh", "--validated-source", head)
++        print(gate.stdout + gate.stderr, flush=True)
++        if gate.returncode:
++            return 2
+     plan = prepare_plan(args.content)
+     fixture = json.loads((plan / "fixture.json").read_text())
+     OUT_DIR.mkdir(parents=True, exist_ok=True)
+@@ -463,7 +471,9 @@ def main():
+                 row["performance_validity"] = performance_validity(
+                     quiet_before, quiet_after, arms)
+                 rows.append(row)
+-                raw_reports.append({"scenario": label, "arms": arms})
++                raw_reports.append({"scenario": label, "arms": arms,
++                                    "target_status": [line for line in proc.stdout.splitlines()
++                                                      if "SWAPZ_STATUS_" in line]})
+                 measured = row["linear_w"] if calibration else row["swapz_w"]
+                 print(f"  {label}: raw W {row['raw_w']:.2f} {candidate} W "
+                       f"{measured:.2f} ({pct(measured, row['raw_w']).strip()}) "

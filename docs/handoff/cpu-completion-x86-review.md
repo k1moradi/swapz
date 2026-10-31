@@ -1,4 +1,8 @@
-# CPU-targeted completion: validated draft, not qualified
+# CPU-targeted completion: draft audit and development validation
+
+**Final disposition:** the fixed pilot is complete and declined. Production and
+all temporary helpers are restored; see [the result](cpu-completion-x86-result.md).
+The draft audit below records the pre-pilot state.
 
 Reviewer stage #4 now has a compiled kernel C candidate and direct delivery
 validation. It remains **unapplied** in [the archived patch](cpu-completion-x86.patch).

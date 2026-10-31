@@ -1,0 +1,1720 @@
+{
+  "absolute": [
+    {
+      "arm": "A",
+      "n": 9,
+      "raw_w": 3682.5227921859487,
+      "scenario": "nvme5-mixed-lanes",
+      "swapz_w": 1181.021430678698
+    },
+    {
+      "arm": "B",
+      "n": 9,
+      "raw_w": 3669.8547400891352,
+      "scenario": "nvme5-mixed-lanes",
+      "swapz_w": 1227.169545426599
+    },
+    {
+      "arm": "A",
+      "n": 12,
+      "raw_w": 415.65321794896215,
+      "scenario": "sata-mixed",
+      "swapz_w": 338.95227159002053
+    },
+    {
+      "arm": "B",
+      "n": 12,
+      "raw_w": 412.1455982719053,
+      "scenario": "sata-mixed",
+      "swapz_w": 338.92282946775896
+    },
+    {
+      "arm": "A",
+      "n": 12,
+      "raw_w": 62.9288097366666,
+      "scenario": "fast-mixed",
+      "swapz_w": 118.71434448902157
+    },
+    {
+      "arm": "B",
+      "n": 12,
+      "raw_w": 63.02322013765061,
+      "scenario": "fast-mixed",
+      "swapz_w": 118.51033250441755
+    },
+    {
+      "arm": "A",
+      "n": 12,
+      "raw_w": 25.804917411025258,
+      "scenario": "fast-w1",
+      "swapz_w": 25.373469585053776
+    },
+    {
+      "arm": "B",
+      "n": 12,
+      "raw_w": 25.811585917971108,
+      "scenario": "fast-w1",
+      "swapz_w": 25.33575161932027
+    },
+    {
+      "arm": "A",
+      "n": 12,
+      "raw_w": 84.38733337804318,
+      "scenario": "fast-w4",
+      "swapz_w": 88.97406579907516
+    },
+    {
+      "arm": "B",
+      "n": 12,
+      "raw_w": 84.33039222816224,
+      "scenario": "fast-w4",
+      "swapz_w": 89.50123136586066
+    },
+    {
+      "arm": "A",
+      "n": 12,
+      "raw_w": 85.67593155520265,
+      "scenario": "fast-w8",
+      "swapz_w": 115.01969922858541
+    },
+    {
+      "arm": "B",
+      "n": 12,
+      "raw_w": 86.21991673892461,
+      "scenario": "fast-w8",
+      "swapz_w": 113.13822568394795
+    }
+  ],
+  "absolute_service_and_lower_io": [
+    {
+      "arm": "A",
+      "lower_read_bytes": 36864,
+      "lower_read_requests": 9,
+      "lower_write_bytes": 35441322.666666664,
+      "lower_write_requests": 1286.8333333333333,
+      "n": 12,
+      "off_logical_read_mbps": 20.887596955923073,
+      "off_logical_write_mbps": 62.9288097366666,
+      "scenario": "fast-mixed",
+      "swapz_logical_read_mbps": 39.40416783584059,
+      "swapz_logical_write_mbps": 118.71434448902157
+    },
+    {
+      "arm": "B",
+      "lower_read_bytes": 36864,
+      "lower_read_requests": 9,
+      "lower_write_bytes": 35437909.333333336,
+      "lower_write_requests": 1286.75,
+      "n": 12,
+      "off_logical_read_mbps": 20.91893405593264,
+      "off_logical_write_mbps": 63.02322013765061,
+      "scenario": "fast-mixed",
+      "swapz_logical_read_mbps": 39.33645131416444,
+      "swapz_logical_write_mbps": 118.51033250441755
+    },
+    {
+      "arm": "A",
+      "lower_read_bytes": 0,
+      "lower_read_requests": 0,
+      "lower_write_bytes": 16777216,
+      "lower_write_requests": 4096,
+      "n": 12,
+      "off_logical_read_mbps": 0.0,
+      "off_logical_write_mbps": 25.804917411025258,
+      "scenario": "fast-w1",
+      "swapz_logical_read_mbps": 0.0,
+      "swapz_logical_write_mbps": 25.373469585053776
+    },
+    {
+      "arm": "B",
+      "lower_read_bytes": 0,
+      "lower_read_requests": 0,
+      "lower_write_bytes": 16777216,
+      "lower_write_requests": 4096,
+      "n": 12,
+      "off_logical_read_mbps": 0.0,
+      "off_logical_write_mbps": 25.811585917971108,
+      "scenario": "fast-w1",
+      "swapz_logical_read_mbps": 0.0,
+      "swapz_logical_write_mbps": 25.33575161932027
+    },
+    {
+      "arm": "A",
+      "lower_read_bytes": 0,
+      "lower_read_requests": 0,
+      "lower_write_bytes": 12584960,
+      "lower_write_requests": 1035.9166666666667,
+      "n": 12,
+      "off_logical_read_mbps": 0.0,
+      "off_logical_write_mbps": 84.38733337804318,
+      "scenario": "fast-w4",
+      "swapz_logical_read_mbps": 0.0,
+      "swapz_logical_write_mbps": 88.97406579907516
+    },
+    {
+      "arm": "B",
+      "lower_read_bytes": 0,
+      "lower_read_requests": 0,
+      "lower_write_bytes": 12585301.333333334,
+      "lower_write_requests": 1036,
+      "n": 12,
+      "off_logical_read_mbps": 0.0,
+      "off_logical_write_mbps": 84.33039222816224,
+      "scenario": "fast-w4",
+      "swapz_logical_read_mbps": 0.0,
+      "swapz_logical_write_mbps": 89.50123136586066
+    },
+    {
+      "arm": "A",
+      "lower_read_bytes": 0,
+      "lower_read_requests": 0,
+      "lower_write_bytes": 12581205.333333334,
+      "lower_write_requests": 529.5,
+      "n": 12,
+      "off_logical_read_mbps": 0.0,
+      "off_logical_write_mbps": 85.67593155520265,
+      "scenario": "fast-w8",
+      "swapz_logical_read_mbps": 0.0,
+      "swapz_logical_write_mbps": 115.01969922858541
+    },
+    {
+      "arm": "B",
+      "lower_read_bytes": 0,
+      "lower_read_requests": 0,
+      "lower_write_bytes": 12582229.333333334,
+      "lower_write_requests": 582.5,
+      "n": 12,
+      "off_logical_read_mbps": 0.0,
+      "off_logical_write_mbps": 86.21991673892461,
+      "scenario": "fast-w8",
+      "swapz_logical_read_mbps": 0.0,
+      "swapz_logical_write_mbps": 113.13822568394795
+    },
+    {
+      "arm": "A",
+      "lower_read_bytes": 36864,
+      "lower_read_requests": 9,
+      "lower_write_bytes": 34861056,
+      "lower_write_requests": 942.5555555555555,
+      "n": 9,
+      "off_logical_read_mbps": 1222.318556255201,
+      "off_logical_write_mbps": 3682.5227921859487,
+      "scenario": "nvme5-mixed-lanes",
+      "swapz_logical_read_mbps": 392.0096334819221,
+      "swapz_logical_write_mbps": 1181.021430678698
+    },
+    {
+      "arm": "B",
+      "lower_read_bytes": 36864,
+      "lower_read_requests": 9,
+      "lower_write_bytes": 34876074.666666664,
+      "lower_write_requests": 961.6666666666666,
+      "n": 9,
+      "off_logical_read_mbps": 1218.1137227692009,
+      "off_logical_write_mbps": 3669.8547400891352,
+      "scenario": "nvme5-mixed-lanes",
+      "swapz_logical_read_mbps": 407.3273111110319,
+      "swapz_logical_write_mbps": 1227.169545426599
+    },
+    {
+      "arm": "A",
+      "lower_read_bytes": 36864,
+      "lower_read_requests": 9,
+      "lower_write_bytes": 35059370.666666664,
+      "lower_write_requests": 1054.3333333333333,
+      "n": 12,
+      "off_logical_read_mbps": 137.96537589509896,
+      "off_logical_write_mbps": 415.65321794896215,
+      "scenario": "sata-mixed",
+      "swapz_logical_read_mbps": 112.50647304300901,
+      "swapz_logical_write_mbps": 338.95227159002053
+    },
+    {
+      "arm": "B",
+      "lower_read_bytes": 36864,
+      "lower_read_requests": 9,
+      "lower_write_bytes": 35074048,
+      "lower_write_requests": 1055.9166666666667,
+      "n": 12,
+      "off_logical_read_mbps": 136.80111192132262,
+      "off_logical_write_mbps": 412.1455982719053,
+      "scenario": "sata-mixed",
+      "swapz_logical_read_mbps": 112.49670048913582,
+      "swapz_logical_write_mbps": 338.92282946775896
+    }
+  ],
+  "assumptions": "paired log t intervals and exact two-sided sign tests; chronological rounds may retain host-load dependence. Noise screens are not an idle-host proof. Secondary 95% intervals are descriptive.",
+  "concurrent_remote_report": {
+    "all_five_stages": "PASS",
+    "commit": "3190f39b123990b9b338759f77bda52b559a505c",
+    "host_identity_sha256": "a1bff0d86667b9d4b97445e376e25078035d882f3edbbf6a126b6c092bb16fe5",
+    "overall": "PASS",
+    "scope": "Other computer; baseline source 7ce0e269. Fast-forwarded without touching source. Not candidate qualification or a local history point."
+  },
+  "disposition": "DECLINED: NVMe5 family interval crosses zero and adjusted sign p exceeds 0.05; declared screen failed. No replacement samples or further confirmation for this variant.",
+  "evidence_hashes": {
+    "as_run_patch_sha256": "56145ab94107f976a1be18749677c14766d13aa3945b13fc3b31e71af12aca9e",
+    "complete_packet_sha256": "6a4bf881f741c55a102d25bd568df9c2a7fb45156a71245f78acac7fa022952f",
+    "frozen_plan_sha256": "d018de78ef7ed8c0b5d355ef166801e144aaaa1e818a588d4ef93d010bcb096d"
+  },
+  "excluded": [
+    {
+      "raw_spread": 0.10653366100138162,
+      "reasons": [
+        "raw WRITE spread 10.65%"
+      ],
+      "round": 5,
+      "scenario": "nvme5-mixed-lanes"
+    },
+    {
+      "raw_spread": 0.10627066522953066,
+      "reasons": [
+        "raw WRITE spread 10.63%"
+      ],
+      "round": 8,
+      "scenario": "nvme5-mixed-lanes"
+    },
+    {
+      "raw_spread": 0.1823105178125355,
+      "reasons": [
+        "raw WRITE spread 18.23%"
+      ],
+      "round": 9,
+      "scenario": "nvme5-mixed-lanes"
+    }
+  ],
+  "plan": {
+    "architecture": "x86_64",
+    "arms": {
+      "A": {
+        "c_sha256": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+        "description": "Qualified production source unchanged; existing WRITE ACK helper"
+      },
+      "B": {
+        "c_sha256": "af438e26b01f854ef99194815e47cbd74250de7efc9bb057ea0d9242f02c8d69",
+        "description": "Archived CPU-targeted completion candidate, default placement to admission CPU; existing WRITE ACK batching unchanged"
+      }
+    },
+    "base": "57a1469df7ccecafcc3886b9f908d866c70c1c81",
+    "candidate_c_sha256": "af438e26b01f854ef99194815e47cbd74250de7efc9bb057ea0d9242f02c8d69",
+    "common_hashes": {
+      "Makefile": "b091fc779e36ad359838337aeb08fc59c5ccb491d5855a8d0450a1edf28aa222",
+      "packaging/package-dkms.sh": "ecc2c1c526ee4732d5ed243992ed0130e72d6db7b2921f50a667c22fe7a953f6",
+      "packaging/sign-module.sh": "19e8b95e69d62ff95e840a902bdeb39ef462899db8771c1a25db9b97e38f8dba",
+      "src/kernel/Makefile": "c46c5be5bcd9b6fa3fe3a127ec2d1710cc381986d7813e93abb1bd540cba9777",
+      "src/kernel/VERSION": "b304b6064a2b78dc6c445956fef1cd618305ba777d8ec911e3ed8dd26352892f",
+      "src/kernel/authority.c": "17581753dc21eefff0fc2324c32bbaf3fc756a981d19ba50eaf9bf9371ac8956",
+      "src/kernel/authority.h": "ff1818ed22e9c72296bbeaf38c4f908c60e05271d9be4494e8a65458cbc37ebf",
+      "src/kernel/codec.c": "bf2e2abfdb0729dcf59c83ce927d991bcfe38b8b722b0fc032eda4b64005cacf",
+      "src/kernel/codec.h": "e372ade90165a147705ae14db606bb4a72a6fc8a7a42a7e289499d510b0bef5e",
+      "src/kernel/engine.c": "d792e1f6e916267e548767fad82921d9ddebd60554ddde74460a389aabfe252b",
+      "src/kernel/engine.h": "db9a08059f62fe9b430b52b85a7531d05daae982155fdc4ed740060e55223ce6",
+      "src/kernel/flush-qual.h": "20f274b49c80fb295052146b7a4bbf07c390c4eed12ed13e476b16532f20296a",
+      "src/kernel/gc-cost.h": "bf12df339822f666019c6ff8fe96b87bb46d54ae7171a391c67b13ff7f206464",
+      "src/kernel/predictor-avx2.c": "7c2388088b10803bfed5dc168fb96bbc2293d5056cbe000a289542eb752dc73e",
+      "src/kernel/predictor-avx512.c": "30e142641c845ef21694697744f90056f7285aa7d6dce3ddbaf2508b405acffb",
+      "src/kernel/predictor-internal.h": "ec5ecba95817d10548a9cbe806941523291709d948d3fda6a57388eeb9d255a3",
+      "src/kernel/predictor-neon.c": "af2e4960c80829514742c4e9baac105681a7c2bb4aef1ce065b67a79eceab079",
+      "src/kernel/predictor-route.h": "a1b6fe14f75cc94211044f0219eb4c44cdc15a7f5af5f69fbebcf01755431020",
+      "src/kernel/predictor-shuffle.h": "7ff08ede1bdd3aa79bdc7da568c7bf5bb2769b7d0b0d685748fcd88686ecddd8",
+      "src/kernel/predictor-sse2.c": "8d4cbf6e02e3daa178cef1db6b1f43f6bb043d994feefde6f5d1e86a3b028a70",
+      "src/kernel/predictor.c": "e5383e3513196b1b4d9395a323bbc4d15d70a4dfb45f28f6a88762f9f494c1db",
+      "src/kernel/predictor.h": "4f320ef7a84a47398a539690987610139da23b43f905946e53e68dff0892c089",
+      "src/kernel/preparation-slots.h": "4e404ff67e6ec96357236a6746810865580eaf7754053454ad9e9bc2cd963ff4",
+      "src/kernel/superblock.h": "44d6c9a1d81c74c01cc83973c71caf4fa495ebc347465194c18fbb04f32f17a7",
+      "src/kernel/window-policy.h": "d9fcd0f9285f84212e8568a14dda0fd4044569a8df79226151e028c8b8289622",
+      "src/userspace/swapzctl.c": "ffb5454a52ac26f00daa1f5d61877a8976b0eae613ad224f1afea113c1f63655",
+      "tests/Makefile": "a04ead42eb6d2d02c3b32aedc196f90ae301f8fcb732358034b89450fb3604d1",
+      "tests/runtime/benchmark/anon-page-fixture.py": "b7716778c480d86d8517a99d6b5773dcf50e9220bf5debcabe3b6da853b60b38",
+      "tests/runtime/benchmark/io-replay-native.c": "6f94f3d8a56984b86e0d6c5c8d78a894208cf6862c705e9e48699b740f8bad0c",
+      "tests/runtime/benchmark/io-replay-test.py": "83dbe2674c7fc189e5b99c8f4faf7721db4af1e312b7da0c0b762118fe5b4223",
+      "tests/runtime/benchmark/io-replay.py": "24008d9af7576a78a9c063d72399380d7dada783d86458998752331ea5fa1179",
+      "tests/runtime/benchmark/resource-pressure.py": "fa34374ad962c74e6a47be204bed430a5b301cd7fb5208f856030f6ba0982d40",
+      "tests/runtime/native/codec/extent-geometry.c": "5593a8f95efa86dd07fa01d68aa82b66fe87738807077096e718036d76b4caf1",
+      "tests/runtime/native/codec/predictor-qualification.c": "b82b813c80ac38a79a8532f5ae1456a72335b65627b2ffd7c3728b310c8fdccb",
+      "tests/runtime/native/codec/roundtrip.c": "19f3e59181c8b102efe6f1df7947e7d412faa43daafdeda3fbfc67e20a14d95d",
+      "tests/runtime/native/gc/cost-accounting.c": "a968a2067b88d388790373eaf79fb84b0ec653a914f4263af9818a25d793dbbf",
+      "tests/runtime/native/gc/engine-rotation.c": "1d29257f202bd485148e437cef2f4bf7196d174f99c7d8def6b3d803dabb86bf",
+      "tests/runtime/native/gc/forbidden-victim.c": "2435fa5bc491e49e658e0fe8a27c2f8442703028f73df57aebd5cdbc1c097605",
+      "tests/runtime/native/gc/rotation.c": "e10bcd4723a0de6069318bbd169f54266d2728f82ded273584cc1678c2ea1e71",
+      "tests/runtime/native/gc/scan-scaling.c": "c043360bf324271c640fd1153e51126399f6fa1bd19210155c17c5886b6b7135",
+      "tests/runtime/native/io/flush-ordering.c": "d68d5f95f24961196ce19228874f4a71fde6f4971da1d3ba84770dfc5b4892fa",
+      "tests/runtime/native/io/lower-write-aggregation.c": "c530730681b26c0f943ded9df465b8c058ca6def03e1879285c4bbafea9b5fc4",
+      "tests/runtime/native/io/preparation-slots.c": "8586fd41e30891faace98cf150f44d84d7395b731654036127b3a7692f9004aa",
+      "tests/runtime/native/io/window-policy.c": "c8d736bf3b09d9b278ceac436aff09cb36ff81c687202020d4192a0e10806c7c",
+      "tests/runtime/native/make-interface-test.py": "81abc6f3dfdf18004ae229f2d48f9d2a50e6e54f59f4eb8e915fd27ccfa7fe1e",
+      "tests/runtime/native/mapping/authority-throughput.c": "61329b2df860c73806c99c40401a59105010dd94ca899a0cae7c5f87fae31b85",
+      "tests/runtime/native/mapping/authority.c": "979db7fe932dfcdfb5b618ed56c07b8447648c5501a613968d1efbf223589ac1",
+      "tests/runtime/native/mapping/dead-segment.c": "4b759f1d3e2565036b8de4ead13ab7b44303c11e4863edf23727508480d7653c",
+      "tests/runtime/native/mapping/online-packing.c": "d582947a35941736b3c69f0cf23f750f8addef26ea1a1d603f32c58ff303903a",
+      "tests/runtime/native/mapping/randomized-authority.c": "0d93ddafb9194477dac0a8232b2c071363d20f48a952460d4913e535c343d51f",
+      "tests/runtime/native/mapping/raw-discard.c": "128598f7640a90ffd037232cdbec84b2c701da62dc609988fb47c39ec99c4300",
+      "tests/runtime/native/mapping/transaction-publication.c": "b7952e984343d7b548d681fce3bb1b4a4b4deb6ef82aa7b6f0e23726aa035582",
+      "tests/runtime/native/mapping/write-verification.c": "e50f4926e7ffc0c5887bdcfc3a0c724cbd35e90bc122f692e2833b3ad72a4b64",
+      "tests/runtime/native/mapping/zero-write.c": "e67f08826c3564732cfaf3fca3632bcdeb5515dfb165c277de2eb48545697eb5",
+      "tests/runtime/native/nullblk-identity-test.sh": "60114a1cd4dce8625a15636c580be88f23fdce0b7654767c9f65e6edf6ec7e37",
+      "tests/runtime/native/package-dkms-test.py": "fb131c0bb8120c5e4f153d48f5aa17289c1ef49a26f07672bdf8b02346de0b43",
+      "tests/runtime/native/quiet-lower-io-test.sh": "6564a75085bf5393d72ac131e58008c73a46d181117b9736016c5d3d8eb9c3ef",
+      "tests/runtime/native/source-contract-test.py": "b4c0a18061d83ea4ff91416340c78902da62c9065d1085a93926a68decc2221a",
+      "tests/runtime/native/swap-inventory-test.sh": "acb0f42f589b3457efb985f15e68a3bd73d6417d7c2be1a30bd61de54ae72882",
+      "tests/runtime/native/test-report-test.py": "91d1d54df75e8b5a93bb5ad9f46142ad50efb75a667d5fdbd278ed6da15309a8",
+      "tests/suites/Makefile": "35a31653872bc0ff80a7a75d4e4d1e96a80fed45d62b30feca80677e38559b17",
+      "tests/tools/benchmark-owned-pair.sh": "25e5009a82a58328d59d6cda8a3f79f474269c6493aace6de9203ecda3442c5b",
+      "tests/tools/deploy-nullblk.sh": "45784abefbfff44ef08693228e037739728c83c76890852e7156c419ee7b9c4b",
+      "tests/tools/device-roundtrip.c": "1e3ea92302875102c843d28a8d92c97872b492354d17aa5eb670815128cac380",
+      "tests/tools/direct-write-probe.c": "f860ff1684b4bd5f6e25d0d6cc9ec50ac2c073970f72b2e4ae1a75f7a7e71416",
+      "tests/tools/fast-test.py": "bd166dfbe078023b666fad7f40a1530c530f25ce59cbb7df806b44cc6d5423bb",
+      "tests/tools/loaded-preflight.sh": "50700a8342b8017967c89cfeb5e0906761599041ba3841f67b49f1ce82a10ea6",
+      "tests/tools/nullblk-identity.sh": "b6b1f49823bb6a1925ed615cb384988fae93eceeea6b800248763bc0b005c1ff",
+      "tests/tools/plot-history.py": "a814e5694b15c3116d33b8b82e64a676256b32d6d0827fe98dbb5458a29919fe",
+      "tests/tools/qualify-logical-open-balance.sh": "67b6593d0776ac8526669b1927850c52398df20be9633c7cf333f7d6ced16a2d",
+      "tests/tools/qualify-resource-pressure.sh": "7cffce57cfc15ea5b651751b43076a91b8db8af8d2d35006fb749e96f7618fae",
+      "tests/tools/quiet-lower-io.sh": "288e03eb3040034e53c3b2fa47d216be17c61c34cf71c768df01805e48aae7cc",
+      "tests/tools/request-plateau.py": "0ee26234f0731693ce0f4831a4fe0bdaa2d9f1194b4709f74b4b38b8a7dd8ab9",
+      "tests/tools/run-tests.py": "cf4f12e74dca3cd12da45cbb6b5a4d4b473c423afca090a73ca655bfb18d9048",
+      "tests/tools/swap-inventory.sh": "9f7427d140b08ff35df7c6af835cb21cadf42ad1e2bda29aa6f5081ee3db42a2",
+      "tests/tools/test-loaded.sh": "7fb7682aed040b619b760f30da726efcdec723ac0482f216f5e2d12eeb6c485e",
+      "tests/tools/test-rootless.sh": "11460b532068e42df1bf5c7fdc21e4764241477fad2e288164971edbe39509df"
+    },
+    "exclusions": [
+      "Exclude both source blocks of a scenario/round if either has ERROR, NOISY or UNKNOWN, missing counters/oracles, or source/input/CPU geometry mismatch",
+      "Exclude both blocks if paired raw WRITE max/min spread exceeds 10%",
+      "No replacement observations, extra repeats or adaptive stopping for significance; preserve every measurement"
+    ],
+    "gate": "Do not run performance pilot until loaded lifecycle/failure and rejected-destination fallback coverage passes. Apply archived patch only after verifying base and hashes.",
+    "guard_material_harm_screen": "Flag a guard with point <= -3% useful throughput and pointwise 95% upper bound below zero; review before retention. This is descriptive screening, not a new family-adjusted harm claim.",
+    "host_identity_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
+    "lifecycle_packet_sha256": "86579d748601b7998ccc5faa10e1e329a60ca1555dc45da60d97da3681aa1a9e",
+    "matched_inputs": {
+      "async_prepare": 1,
+      "content": "medium",
+      "delta64_rescue": 0,
+      "fixture_and_plan_hashes": "Must match across sources; record before first timed sample",
+      "mixed_ops": 16384,
+      "models": "Unchanged make fast_test RAM null_blk models; configured NVMe rates do not imply physical fidelity",
+      "submitter_prepare": 1,
+      "sustained_write_ops": 4096
+    },
+    "matched_report_fields": {
+      "fast-mixed": {
+        "expected_post_sha256": "4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6",
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "layout": "disjoint",
+        "manifest_sha256": "eaae4daf0c899b7618c4e865259db94bccbc6cdac092ab7237e1180f67c81f54",
+        "measure_ops": 16384,
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "qd": 32,
+        "replay_mode": "qd-waves",
+        "trace_sha256": "28b30607d40136ce2c15642c33869ddf7d6a4e77f4d9988239ec4ec3227c6245",
+        "verified_post_sha256": "4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6",
+        "warmup_ops": 1024,
+        "write_payload_stream_sha256": "cf3d5ef979dc21e8ea12a4c6dc4ad9eec1c03e065fb01e45e211766b932bc67a"
+      },
+      "fast-w1": {
+        "expected_post_sha256": "38c30bfce355bd7e78c6eaf35f76e188b00bc7c488acf9d1a0f550d83a1ca2dc",
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "layout": "disjoint",
+        "manifest_sha256": "8b47d75617bb24cc4f96f6da6dfd71d2ffa322e1569c4d3fe70eba95d7fabe72",
+        "measure_ops": 4096,
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "qd": 1,
+        "replay_mode": "persistent-write",
+        "trace_sha256": "3dbb171715cfadb55d5e7ce2425e1f409f8b835805f66679693a89e409ff753f",
+        "verified_post_sha256": "38c30bfce355bd7e78c6eaf35f76e188b00bc7c488acf9d1a0f550d83a1ca2dc",
+        "warmup_ops": 256,
+        "write_payload_stream_sha256": "09a85f178498bc9d5563048971144ea18255e72c806e0bf6c742ed2aa013aa9c"
+      },
+      "fast-w4": {
+        "expected_post_sha256": "355c1229e99493b13b9c0fb406d2c8dff682eca52ac411977c50a7f9186d051a",
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "layout": "disjoint",
+        "manifest_sha256": "b66dbf6d59a41c8b5f6ace01efa1e3992f4b172c6f378090b6208705334a6d36",
+        "measure_ops": 4096,
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "qd": 4,
+        "replay_mode": "persistent-write",
+        "trace_sha256": "0ee2b72bb960af89cce6dd247727d109ef347bfec7eb17371b56cfb92c908e89",
+        "verified_post_sha256": "355c1229e99493b13b9c0fb406d2c8dff682eca52ac411977c50a7f9186d051a",
+        "warmup_ops": 256,
+        "write_payload_stream_sha256": "5ecc1497a5f7fd1ef49ea9b66ee566ff00c64ec39353ad6408bf20d499bfd76e"
+      },
+      "fast-w8": {
+        "expected_post_sha256": "51d9995e9cba30082a9b018a72f8619d43c73b5e0af35b1b65c92937d69d8117",
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "layout": "disjoint",
+        "manifest_sha256": "f045e4fe4bd5311683ba7629cd82bd42727b30f9bc47451df3b0a09a29b74672",
+        "measure_ops": 4096,
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "qd": 8,
+        "replay_mode": "persistent-write",
+        "trace_sha256": "e0f4aee9651e0dfd8147b38b8daf5256ede66fc444d1fd7f09dd8fc677c5a7a8",
+        "verified_post_sha256": "51d9995e9cba30082a9b018a72f8619d43c73b5e0af35b1b65c92937d69d8117",
+        "warmup_ops": 256,
+        "write_payload_stream_sha256": "10cb86eb7e2ea960c95494b66f98aeaf775b9807fa089a0486a9630e018c683c"
+      },
+      "nvme5-mixed-lanes": {
+        "expected_post_sha256": "2f52a00d1fb8827a9e06fe047ca68c3981955bc1efeade57774f481fd7c6e475",
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "layout": "disjoint",
+        "manifest_sha256": "6d479947320796d2be8f2f0da8265269a670cf655b3f8676c7a81b86776f3c67",
+        "measure_ops": 16384,
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "qd": 32,
+        "replay_mode": "persistent-mixed",
+        "trace_sha256": "c75e96bcb9a9567e9ded64f23ef60f017f08343e00f2eb331c82824fc2b9c298",
+        "verified_post_sha256": "2f52a00d1fb8827a9e06fe047ca68c3981955bc1efeade57774f481fd7c6e475",
+        "warmup_ops": 1024,
+        "write_payload_stream_sha256": "99c6a4ab08b0c9d37b5558dbf86b36549a216d764da39d3c378879d8eec89b9f"
+      },
+      "sata-mixed": {
+        "expected_post_sha256": "4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6",
+        "fixture_sha256": "c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2",
+        "layout": "disjoint",
+        "manifest_sha256": "eaae4daf0c899b7618c4e865259db94bccbc6cdac092ab7237e1180f67c81f54",
+        "measure_ops": 16384,
+        "prefill_sha256": "77da6f9a4a3fae1dfcb1562c81f43e30bc6510df83ef453654d053ac5de2080b",
+        "qd": 32,
+        "replay_mode": "qd-waves",
+        "trace_sha256": "28b30607d40136ce2c15642c33869ddf7d6a4e77f4d9988239ec4ec3227c6245",
+        "verified_post_sha256": "4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6",
+        "warmup_ops": 1024,
+        "write_payload_stream_sha256": "cf3d5ef979dc21e8ea12a4c6dc4ad9eec1c03e065fb01e45e211766b932bc67a"
+      }
+    },
+    "next_correctness_gates": [
+      "Positive remote READ/WRITE delivery on concurrent and synchronous paths (initial four owned pairs pass)",
+      "Loaded suspend/resume and ordinary teardown with exact upper completion accounting and callback count zero",
+      "Lower WRITE fault after actual remote deliveries, terminal failure preserved at callback and DM boundaries",
+      "Real kernel rejected-destination API fallback without offlining a host CPU; native already covers ENXIO and EBUSY",
+      "Review remote callback hardirq context and bounded pool reuse, callback-final-unlock lifetime join, constructor-failure teardown"
+    ],
+    "observations_per_source_scenario_block": 1,
+    "online_cpus": 8,
+    "orchestrator_sha256": "197f63b95a152dfdf7eab086b9fb91199bfad3763c31550a3305229dc30352db",
+    "patch_sha256": "4432985852f7b8c11c140d6342dd7bbe55ba98d9449b22f09e934247421cd27e",
+    "pre_sample_harness_correction": "Marked the candidate-helper stub unused for the unchanged baseline body; the new candidate-specific native test is skipped on baseline. Corrected before any pilot sample.",
+    "primary_family": {
+      "direction_test": "Exact two-sided signs; alpha=0.05/3, adjusted p=min(1,3*p)",
+      "endpoint": "Within-round B/A change in useful WRITE normalized by each source block own raw WRITE, using paired log ratios",
+      "interval": "98.3333333333% paired log-t interval per endpoint",
+      "minimum_valid_pairs": 9,
+      "practical_floor_percent": 3,
+      "scenarios": [
+        "nvme5-mixed-lanes",
+        "sata-mixed",
+        "fast-mixed"
+      ],
+      "size": 3
+    },
+    "raw_target_order": "raw-first in odd rounds, target-first in even rounds in both source blocks",
+    "rounds": 12,
+    "scenarios": [
+      "nvme5-mixed-lanes",
+      "sata-mixed",
+      "fast-mixed",
+      "fast-w1",
+      "fast-w4",
+      "fast-w8"
+    ],
+    "screen_decision": "Advance only if NVMe5 point reaches +3%, its family interval is above zero and its family-adjusted sign p is below 0.05, with at least nine valid pairs. Any primary/guard material harm, unresolved correctness/resource issue or unexpected lower-IO geometry requires review before retention. Otherwise decline this variant without replacement sampling. Exact-source make test remains mandatory before retention.",
+    "secondary": "Pointwise descriptive 95% paired log intervals for useful READ, READ/WRITE p95/p99, independent lower bytes/requests, fast WRITE QD1/4/8, GC, CPU and memory. No new direction claims; do not add overlapping CPU/wall timers. Native task CPU excludes kernel workers.",
+    "source_orders": [
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA"
+    ],
+    "status": "FROZEN_BEFORE_FIRST_SAMPLE",
+    "validation_packet_sha256": "8d99b1b3cbbde2e4f5bc269444d6df2a2b8b88012530e0353a6056638beaf57d"
+  },
+  "primary": [
+    {
+      "change_pct": 4.285552428618234,
+      "confidence": 0.9833333333333333,
+      "contrast": "B/A",
+      "family_adjusted_sign_p": 0.5390625,
+      "interval_pct": [
+        -1.0307407778032025,
+        9.88741888959126
+      ],
+      "n": 9,
+      "negative": 2,
+      "positive": 7,
+      "scenario": "nvme5-mixed-lanes",
+      "sign_p": 0.1796875
+    },
+    {
+      "change_pct": 0.7383611856344822,
+      "confidence": 0.9833333333333333,
+      "contrast": "B/A",
+      "family_adjusted_sign_p": 1,
+      "interval_pct": [
+        -3.760371678044673,
+        5.447387851686208
+      ],
+      "n": 12,
+      "negative": 5,
+      "positive": 7,
+      "scenario": "sata-mixed",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": -0.3225370503641569,
+      "confidence": 0.9833333333333333,
+      "contrast": "B/A",
+      "family_adjusted_sign_p": 1,
+      "interval_pct": [
+        -0.9996187540964658,
+        0.3591753389045072
+      ],
+      "n": 12,
+      "negative": 8,
+      "positive": 4,
+      "scenario": "fast-mixed",
+      "sign_p": 0.3876953125
+    }
+  ],
+  "resource_context": {
+    "bio_descriptor_extra_bytes": 8,
+    "cpu_limit": "Native process CPU excludes kworkers, can include interrupt work; total kernel CPU not established. Host noise screens are heuristic.",
+    "kernel_IRQ_TIME_ACCOUNTING": false,
+    "kernel_LOCK_STAT": false,
+    "scope": "DWARF structure sizes, not measured physical RAM/allocator rounding",
+    "target_requested_extra_bytes": 4224
+  },
+  "restored_production_c_sha256": "78f2d7de073a644c9c4182a0865e57ebdfce8b6d07cc02a4ae5578a8cd3d569a",
+  "secondary": [
+    {
+      "change_pct": -1.5570680074949061,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -5.908467411316388,
+        2.9955681734375403
+      ],
+      "metric": "read_p95_ns",
+      "n": 9,
+      "negative": 4,
+      "positive": 5,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": -1.872794297399142,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -6.750366142695159,
+        3.2599067759904674
+      ],
+      "metric": "read_p99_ns",
+      "n": 9,
+      "negative": 6,
+      "positive": 3,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.5078125
+    },
+    {
+      "change_pct": -2.490004991038093,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -4.059365315309512,
+        -0.8949736689095963
+      ],
+      "metric": "write_p95_ns",
+      "n": 9,
+      "negative": 7,
+      "positive": 2,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.1796875
+    },
+    {
+      "change_pct": -0.16650766958156854,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -1.7976057383050799,
+        1.4916822122264977
+      ],
+      "metric": "write_p99_ns",
+      "n": 9,
+      "negative": 5,
+      "positive": 4,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 0.04310626483421087,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.040028161498983236,
+        0.12630983217169534
+      ],
+      "metric": "lower_write_bytes",
+      "n": 9,
+      "negative": 4,
+      "positive": 5,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 2.027482933778211,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        1.4130668557533077,
+        2.6456214819801827
+      ],
+      "metric": "lower_write_requests",
+      "n": 9,
+      "negative": 0,
+      "positive": 9,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.00390625
+    },
+    {
+      "change_pct": 0.0,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "metric": "lower_read_bytes",
+      "n": 9,
+      "negative": 0,
+      "positive": 0,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 0.0,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "metric": "lower_read_requests",
+      "n": 9,
+      "negative": 0,
+      "positive": 0,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": -2.9015215090570377,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -30.345940288809746,
+        35.356281663241546
+      ],
+      "metric": "mixed_replay_cpu_user_s",
+      "n": 9,
+      "negative": 7,
+      "positive": 2,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.1796875
+    },
+    {
+      "change_pct": 3.78162799482997,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.36963402643326404,
+        7.309610259421017
+      ],
+      "metric": "mixed_replay_cpu_system_s",
+      "n": 9,
+      "negative": 2,
+      "positive": 7,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.1796875
+    },
+    {
+      "change_pct": -0.0801552567694714,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.4274481169048148,
+        0.26834890435615494
+      ],
+      "metric": "mixed_replay_peak_rss_kb",
+      "n": 9,
+      "negative": 4,
+      "positive": 5,
+      "scenario": "nvme5-mixed-lanes",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": -6.409873643082288,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -15.00188163764548,
+        3.0506547705321307
+      ],
+      "metric": "read_p95_ns",
+      "n": 12,
+      "negative": 11,
+      "positive": 1,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.00634765625
+    },
+    {
+      "change_pct": -10.167160417149884,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -24.71857766485636,
+        7.196952677005836
+      ],
+      "metric": "read_p99_ns",
+      "n": 12,
+      "negative": 11,
+      "positive": 1,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.00634765625
+    },
+    {
+      "change_pct": 1.2174053064520223,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -6.1817796838419525,
+        9.200143665548948
+      ],
+      "metric": "write_p95_ns",
+      "n": 12,
+      "negative": 7,
+      "positive": 5,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": -2.1166343775058816,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -4.773176682794512,
+        0.61401747773886
+      ],
+      "metric": "write_p99_ns",
+      "n": 12,
+      "negative": 10,
+      "positive": 2,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.03857421875
+    },
+    {
+      "change_pct": 0.04184001625989554,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.08610956742144395,
+        0.16995345199317044
+      ],
+      "metric": "lower_write_bytes",
+      "n": 12,
+      "negative": 5,
+      "positive": 6,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 0.14526162068053863,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.5990698424486052,
+        0.8951667673368471
+      ],
+      "metric": "lower_write_requests",
+      "n": 12,
+      "negative": 7,
+      "positive": 4,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.548828125
+    },
+    {
+      "change_pct": 0.0,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "metric": "lower_read_bytes",
+      "n": 12,
+      "negative": 0,
+      "positive": 0,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 0.0,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "metric": "lower_read_requests",
+      "n": 12,
+      "negative": 0,
+      "positive": 0,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": -8.835418069435615,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -26.331707648650376,
+        12.816256944529632
+      ],
+      "metric": "mixed_replay_cpu_user_s",
+      "n": 12,
+      "negative": 7,
+      "positive": 5,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": 6.693195866722164,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        4.573723245369696,
+        8.855625399746621
+      ],
+      "metric": "mixed_replay_cpu_system_s",
+      "n": 12,
+      "negative": 0,
+      "positive": 12,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.00048828125
+    },
+    {
+      "change_pct": -0.07236106529667981,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.2315247668065583,
+        0.08705655493671446
+      ],
+      "metric": "mixed_replay_peak_rss_kb",
+      "n": 12,
+      "negative": 9,
+      "positive": 3,
+      "scenario": "sata-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.14599609375
+    },
+    {
+      "change_pct": 1.504202120948388,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.841913569240737,
+        3.9058277451215173
+      ],
+      "metric": "read_p95_ns",
+      "n": 12,
+      "negative": 3,
+      "positive": 9,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.14599609375
+    },
+    {
+      "change_pct": -0.8977665147017677,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -9.890392856263643,
+        8.99229275418337
+      ],
+      "metric": "read_p99_ns",
+      "n": 12,
+      "negative": 5,
+      "positive": 7,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": 2.5934896796530875,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        1.0630401329638792,
+        4.147115610229814
+      ],
+      "metric": "write_p95_ns",
+      "n": 12,
+      "negative": 2,
+      "positive": 10,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.03857421875
+    },
+    {
+      "change_pct": 0.40864938026089836,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -2.1571306931629057,
+        3.0417131242456463
+      ],
+      "metric": "write_p99_ns",
+      "n": 12,
+      "negative": 6,
+      "positive": 6,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": -0.009620228713936712,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.10338288305534603,
+        0.08423043096341759
+      ],
+      "metric": "lower_write_bytes",
+      "n": 12,
+      "negative": 6,
+      "positive": 5,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": -0.00864403380069693,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.7110600052386286,
+        0.698741153714646
+      ],
+      "metric": "lower_write_requests",
+      "n": 12,
+      "negative": 6,
+      "positive": 6,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 0.0,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "metric": "lower_read_bytes",
+      "n": 12,
+      "negative": 0,
+      "positive": 0,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 0.0,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "metric": "lower_read_requests",
+      "n": 12,
+      "negative": 0,
+      "positive": 0,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": -0.25771511662826513,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -4.41349149688394,
+        4.078740290334699
+      ],
+      "metric": "mixed_replay_cpu_user_s",
+      "n": 12,
+      "negative": 4,
+      "positive": 8,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.3876953125
+    },
+    {
+      "change_pct": -0.35979799148534136,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -5.657849879023188,
+        5.2357810752301
+      ],
+      "metric": "mixed_replay_cpu_system_s",
+      "n": 12,
+      "negative": 5,
+      "positive": 7,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": 0.038967163178074284,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.7012122028473186,
+        0.7846638724263163
+      ],
+      "metric": "mixed_replay_peak_rss_kb",
+      "n": 12,
+      "negative": 5,
+      "positive": 7,
+      "scenario": "fast-mixed",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": -0.17493001166856553,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.463911497619518,
+        0.11489046946974978
+      ],
+      "n": 12,
+      "negative": 9,
+      "positive": 3,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no family direction or equivalence claim",
+      "sign_p": 0.14599609375
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "read_p95_ns",
+      "n": 0,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "read_p99_ns",
+      "n": 0,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": 0.8568218553860774,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -1.0748709450215137,
+        2.8262344658236636
+      ],
+      "metric": "write_p95_ns",
+      "n": 12,
+      "negative": 4,
+      "positive": 8,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.3876953125
+    },
+    {
+      "change_pct": 0.08854204958956181,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.305936811635375,
+        0.4845818219357486
+      ],
+      "metric": "write_p99_ns",
+      "n": 12,
+      "negative": 4,
+      "positive": 8,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.3876953125
+    },
+    {
+      "change_pct": 0.0,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "metric": "lower_write_bytes",
+      "n": 12,
+      "negative": 0,
+      "positive": 0,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 0.0,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        0.0,
+        0.0
+      ],
+      "metric": "lower_write_requests",
+      "n": 12,
+      "negative": 0,
+      "positive": 0,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "lower_read_bytes",
+      "n": 0,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "lower_read_requests",
+      "n": 0,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": 13.419197168730765,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -15.010885517942482,
+        51.35955192373714
+      ],
+      "metric": "mixed_replay_cpu_user_s",
+      "n": 12,
+      "negative": 4,
+      "positive": 8,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.3876953125
+    },
+    {
+      "change_pct": -9.378284000758173,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -24.874582235018437,
+        9.31447245109716
+      ],
+      "metric": "mixed_replay_cpu_system_s",
+      "n": 12,
+      "negative": 8,
+      "positive": 4,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.3876953125
+    },
+    {
+      "change_pct": -0.044186494319534635,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.5742880770515092,
+        0.4887413964426275
+      ],
+      "metric": "mixed_replay_peak_rss_kb",
+      "n": 12,
+      "negative": 6,
+      "positive": 6,
+      "scenario": "fast-w1",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": 0.6631973299496989,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.4292276698239687,
+        1.7676076980418245
+      ],
+      "n": 12,
+      "negative": 6,
+      "positive": 6,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no family direction or equivalence claim",
+      "sign_p": 1.0
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "read_p95_ns",
+      "n": 0,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "read_p99_ns",
+      "n": 0,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": -1.5084354422928494,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -3.707131403137277,
+        0.7404642771338728
+      ],
+      "metric": "write_p95_ns",
+      "n": 12,
+      "negative": 7,
+      "positive": 5,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": -5.187490878437926,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -14.478919138813765,
+        5.113403565577925
+      ],
+      "metric": "write_p99_ns",
+      "n": 12,
+      "negative": 7,
+      "positive": 5,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": 0.0027193242326206514,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.02838126573791857,
+        0.033829589416072905
+      ],
+      "metric": "lower_write_bytes",
+      "n": 12,
+      "negative": 2,
+      "positive": 5,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.453125
+    },
+    {
+      "change_pct": 0.008017074796178135,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.3368702629189008,
+        0.35409790579237305
+      ],
+      "metric": "lower_write_requests",
+      "n": 12,
+      "negative": 4,
+      "positive": 6,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.75390625
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "lower_read_bytes",
+      "n": 0,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "lower_read_requests",
+      "n": 0,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": -5.653099070687015,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -23.16421328087877,
+        15.848852403959663
+      ],
+      "metric": "mixed_replay_cpu_user_s",
+      "n": 12,
+      "negative": 7,
+      "positive": 5,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": -4.727278893986544,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -14.028825435880549,
+        5.580637149192944
+      ],
+      "metric": "mixed_replay_cpu_system_s",
+      "n": 12,
+      "negative": 7,
+      "positive": 5,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": -0.14630909439167064,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.5006791531816602,
+        0.20932306485788038
+      ],
+      "metric": "mixed_replay_peak_rss_kb",
+      "n": 12,
+      "negative": 8,
+      "positive": 4,
+      "scenario": "fast-w4",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.3876953125
+    },
+    {
+      "change_pct": -2.2804758336831608,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -4.666623281573913,
+        0.16539570915801338
+      ],
+      "n": 12,
+      "negative": 9,
+      "positive": 3,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no family direction or equivalence claim",
+      "sign_p": 0.14599609375
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "read_p95_ns",
+      "n": 0,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "read_p99_ns",
+      "n": 0,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": 5.845705515382894,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -9.431877405939762,
+        23.700404238962413
+      ],
+      "metric": "write_p95_ns",
+      "n": 12,
+      "negative": 5,
+      "positive": 7,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": -35.563663475509976,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -63.44362581609499,
+        13.579137903818234
+      ],
+      "metric": "write_p99_ns",
+      "n": 12,
+      "negative": 8,
+      "positive": 4,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.3876953125
+    },
+    {
+      "change_pct": 0.008137910139640336,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.009776169493826163,
+        0.026055199229359862
+      ],
+      "metric": "lower_write_bytes",
+      "n": 12,
+      "negative": 2,
+      "positive": 4,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.6875
+    },
+    {
+      "change_pct": 8.712564704815676,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -1.6282728994083653,
+        20.140431331591984
+      ],
+      "metric": "lower_write_requests",
+      "n": 12,
+      "negative": 5,
+      "positive": 7,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "lower_read_bytes",
+      "n": 0,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": null,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": null,
+      "metric": "lower_read_requests",
+      "n": 0,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": null
+    },
+    {
+      "change_pct": 3.526753829846565,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -9.098369129649784,
+        17.905351707408354
+      ],
+      "metric": "mixed_replay_cpu_user_s",
+      "n": 12,
+      "negative": 4,
+      "positive": 8,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.3876953125
+    },
+    {
+      "change_pct": -1.0282111879485347,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -11.816141490769958,
+        11.079455427004788
+      ],
+      "metric": "mixed_replay_cpu_system_s",
+      "n": 12,
+      "negative": 7,
+      "positive": 5,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 0.7744140625
+    },
+    {
+      "change_pct": -0.09852860727666149,
+      "confidence": 0.95,
+      "contrast": "B/A",
+      "interval_pct": [
+        -0.4921773126257468,
+        0.29667735557276975
+      ],
+      "metric": "mixed_replay_peak_rss_kb",
+      "n": 12,
+      "negative": 6,
+      "positive": 6,
+      "scenario": "fast-w8",
+      "scope": "descriptive secondary; no equivalence inference",
+      "sign_p": 1.0
+    }
+  ],
+  "usable_rounds": {
+    "fast-mixed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "fast-w1": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "fast-w4": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "fast-w8": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "nvme5-mixed-lanes": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      10,
+      11,
+      12
+    ],
+    "sata-mixed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ]
+  }
+}
