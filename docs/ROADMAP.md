@@ -374,6 +374,7 @@ changes.
 | 161 | Learned isolated-singleton RAW representation | **5 old-PC owner-refuted / removed** | Source `8c8f8c6233d2` passed all five `make test` stages. ID161 selected 5,372 pages across the full session, with no cancellations or multi-record mistakes. Timed Fast QD1 RAW useful WRITE was 14.48 MB/s versus same-pair raw 16.59 (−12.7%), with exactly 4,096 lower WRITE requests and identical 16,777,216 lower bytes; p99 worsened to 0.437 vs 0.383 ms. Timed LZ4 work was zero yet the candidate did not outperform the ordinary async 14.67 MB/s from another pair. Skipping compression does not remove fixed ordered/window/commit overhead. Remove experimental code, counters, qualification pair, parser and reporting; Git retains evidence. Reopen only with a different singleton completion path that preserves generation/CRC/fence ownership and demonstrates service benefit. |
 | 162 | Work-conserving early-hand threshold A/B | **2 development-only selector / performance unknown** | Fast sustained QD32 asynchronous preparation often closes via the eight-record hand, fragmenting windows and lower requests versus sync. Same-source two-host observations support that scheduling signature, but host CPU pressure confounds historical throughput changes. Keep K=1, SWZ, the four-record floor and immutable completion ownership. `HAND_RECORDS=8|16|64` (default 8) is an opt-in ordinary retained-async `make fast_test` null_blk-only control; nondefault thresholds are rejected for synchronous/non-retained or physical targets and checked in DM status. Compare Fast/Serial QD32 with submitter on/off and controlled host load: useful throughput/p99, lower bytes/requests, windows/pages per request, early hand closes, accepted-work idle, ready-run wait, byte oracle and screening. The 64 threshold does not guarantee a 64-record physical run: other closes remain valid. Drop the hypothesis if greater packing does not co-improve useful service. No promotion without exact-source owner `make test`. |
 | 163 | Four-record async detachment without queued preparation | **fixed old-PC pilot did not justify retention / removed** | On qualified b336754e C, change only the async-detach count gate from >4 to >=4. Prespecified control/candidate/candidate/control, two repeats on fast QD8/QD4/mixed and serial QD8: 32 byte-exact raw/swapz pairs; six screened exclusions without replacement. Two usable QD8 pairs give normalized useful WRITE +0.4% (95% CI -37.8..+61.9%), below the 5% practical criterion; QD4 point service -4.4% and WRITE p99 +22.8% do not meet guards, with broad intervals. All-observation diagnostics show QD8 synchronous four-record commits 790 -> 0, windows 968 -> 828 and requests 975.5 -> 836.5, but idle 21.5 -> 77.8 ms. Activity and packing improve without an established service gain. Restore production C exactly; do not infer equivalence or causal regression, or keep an unsupported selector. [Design, exclusions, estimates and artifact hashes](handoff/four-record-detach-oldpc-result.md). |
+| 164 | Bounded early acknowledgement from staging | **0 unapproved architecture proposal / not implemented** | The only identified mechanism that changes the QD1/QD4 algebra: ARM64 `e73614c` shows QD1 latency-bound (raw 22.1 MB/s) and a fast QD4 zero-gap K=1 ceiling of about 90 MB/s versus raw 84. It would change the storage-success contract: v7.0 swap WRITEs carry no PREFLUSH/FUA, and a failed swap WRITE re-dirties the folio, a recovery path early success removes. Lower-I/O-confirmed acknowledgement remains the production invariant. Tracked outside the immediate work queue; requires an owner contract decision before any code. [Proposal and required evidence](handoff/early-ack-staging-proposal.md). |
 
 ## What the pinned queue experiment establishes
 
@@ -684,7 +685,7 @@ is tied to lower completion. On the SATA/NVMe4/NVMe5 envelopes (QD32 mixed,
 compression 1.40-1.44x), the K=1 lane is busy only 64/47/37%, and 51-66 ms per
 session pass with the lane idle and no admitted WRITE. Raw NVMe5 (538 MB/s)
 below raw NVMe4 (612 MB/s) shows the raw arm is host-bound on this 7-vCPU VM.
-The striped (ID160) and hand-threshold experiments remain the next measurements.
+The striped (ID160) and hand-threshold (ID162) experiments remain the next measurements.
 
 The follow-up old-PC QD4 reissue diagnostic produced no valid causal timing
 partition: the final raw-syscall observer lost 22,281 events, missed independent
@@ -778,7 +779,8 @@ A cached READ in admission requires pinned immutable cache/authority views plus
 pending same-page WRITE, GC, DISCARD and fence safety; a generation check alone
 is insufficient. Early ACK from staging remains a separate architecture
 proposal requiring an explicit change to the lower-success publication and
-failure contract; it is not authorized as a scheduling optimization.
+failure contract; it is not authorized as a scheduling optimization. It is
+tracked as unapproved ID164 ([proposal](handoff/early-ack-staging-proposal.md)).
 
 ## Deferred asynchronous segment TRIM design for review
 
