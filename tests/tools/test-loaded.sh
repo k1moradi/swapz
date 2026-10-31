@@ -28,8 +28,15 @@ tested_source="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
 [[ $(git branch --show-current) == main ]] ||
     { printf '%s\n' 'BLOCKED: loaded qualification requires main' >&2; exit 2; }
 git diff --quiet -- . ':(exclude)test_results.json' &&
-    git diff --cached --quiet -- . ':(exclude)test_results.json' ||
-    { printf '%s\n' 'BLOCKED: dirty tracked source; commit or preserve changes first' >&2; exit 2; }
+    git diff --cached --quiet -- . ':(exclude)test_results.json' || {
+    printf '%s\n' 'BLOCKED: dirty tracked source; commit or preserve changes first' >&2
+    # Report only repository-relative paths; the generated report is not source.
+    printf '%s\n' 'Unstaged tracked paths:' >&2
+    git diff --name-only -- . ':(exclude)test_results.json' >&2
+    printf '%s\n' 'Staged tracked paths:' >&2
+    git diff --cached --name-only -- . ':(exclude)test_results.json' >&2
+    exit 2
+}
 git merge-base --is-ancestor "$tested_source" HEAD >/dev/null 2>&1 &&
     git diff --quiet "$tested_source..HEAD" -- . ':(exclude)test_results.json' ||
     { printf '%s\n' 'BLOCKED: tested source does not match checkout code' >&2; exit 2; }

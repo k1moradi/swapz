@@ -7110,7 +7110,9 @@ def publish(source_sha):
         return "SKIPPED_GIT_SYNC: origin is not k1moradi/swapz"
 
     tracked = run("diff", "--quiet", "--", ".", f":(exclude){GIT_RESULT}")
-    cached = run("diff", "--cached", "--quiet")
+    # The generated report is not source, even when a previous run staged it.
+    cached = run("diff", "--cached", "--quiet", "--", ".",
+                 f":(exclude){GIT_RESULT}")
     report_tracked = run("ls-files", "--error-unmatch", "--", GIT_RESULT)
     if any(item is None or item.returncode
            for item in (tracked, cached, report_tracked)):
@@ -7223,7 +7225,8 @@ def publish(source_sha):
         head_now = run("rev-parse", "HEAD")
         tracked_now = run("diff", "--quiet", "--", ".",
                           f":(exclude){GIT_RESULT}")
-        cached_now = run("diff", "--cached", "--quiet")
+        cached_now = run("diff", "--cached", "--quiet", "--", ".",
+                         f":(exclude){GIT_RESULT}")
         clean_for_refresh = (
             head_now is not None and not head_now.returncode and
             head_now.stdout.decode("ascii", "replace").strip() == head_sha and

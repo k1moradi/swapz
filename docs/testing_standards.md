@@ -1590,7 +1590,12 @@ root path from its tracked/staged source-cleanliness check before crossing the
 privilege boundary. This permits a previous local report to remain until the
 current run finishes, including after an earlier publication failure. Every
 other tracked or staged change still blocks loaded qualification before
-module/device work.
+module/device work. On that failure, the unprivileged parent prints the
+repository-relative unstaged and staged tracked paths, excluding the report,
+without touching privileged devices or disclosing host-specific Git metadata.
+Report-only publication uses the same exclusion for both the tracked worktree
+and staged index, including the concurrent-remote refresh gate. Genuine source
+changes must never be ignored to obtain a qualification PASS.
 
 
 Immutable-run native qualification must accept a bounded prepared prefix rather

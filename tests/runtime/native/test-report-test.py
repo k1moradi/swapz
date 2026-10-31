@@ -1387,6 +1387,8 @@ class ReportContract(unittest.TestCase):
                      "--expected-dm-uuid", "timeout --signal=TERM"):
             self.assertIn(gate, source)
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        self.assertIn("git diff --cached --quiet -- . ':(exclude)test_results.json'", loaded)
+        self.assertIn("git diff --cached --name-only -- . ':(exclude)test_results.json'", loaded)
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertIn("for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5", loaded)
         self.assertIn("START_STORAGE_ENVELOPE=", loaded)
@@ -3050,6 +3052,9 @@ class ReportContract(unittest.TestCase):
                         "overall": "BLOCKED",
                     }
                     runner.write_report(original)
+                    # A staged previous/generated report is not a source edit.
+                    # Publication must replace it without masking real C changes.
+                    git("add", runner.GIT_RESULT, cwd=checkout)
                     first = runner.publish(source_sha)
                     self.assertIn("SYNCED_GIT", first)
                     first_head = git("rev-parse", "HEAD",
