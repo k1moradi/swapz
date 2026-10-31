@@ -770,8 +770,11 @@ attribution. Medium content may legitimately produce zero delta64 adoptions;
 byte-exact transform/codec tests provide the positive functional coverage
 without spending loaded benchmark sessions on a disabled performance arm.
 Rootless reporter tests must reject any emulated performance record whose
-production compression policy is disabled or mismatched,
-missing delta64-adoption rejection and invalid ownership accounting rejection.
+production compression policy is disabled or mismatched. Synthetic loaded
+transcripts used by rootless Make/report contracts must mirror the same
+production-on storage-envelope markers and must not manufacture rescue-off
+benchmark arms. Keep negative disabled-policy fixtures only where they prove
+that such a performance record is rejected.
 Do not claim this placement change itself improves service or endurance: the
 five-pair timed outcome remains the performance decision.
 
