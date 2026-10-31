@@ -248,6 +248,8 @@ def timed_kernel_write(*, mode, target=8):
         "k1_allow_after_read_bypass": 0,
         "read_coalesce_max_blocks": 8,
         "invalidate_cache_on_write_admit": 0,
+        "work_conserving_hand_records":
+            runner.PRODUCTION_WORK_CONSERVING_HAND_RECORDS,
         "delta64_rescue": 1,
         "delta64_eligible": 10,
         "delta64_classifier_pass": 5,
