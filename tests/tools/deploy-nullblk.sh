@@ -1045,22 +1045,27 @@ OWN_DM=0
 
 # A later lower fault follows actual successful handoffs; future syscalls must
 # see EIO even if a published ACK batch was concurrently being delivered.
-# Handoffs are timing-dependent: a slow four-CPU host qualified with only six
-# per 16,512-WRITE series and one before attempt 256, and attempts 32 and 256
-# have each blocked once when preparation timing moved. Inject much later and
-# repeat the same fixed series until the fault stops the writer. Each series
-# submits 16,512 logical WRITEs; with at most 64 records per lower run and only
-# the eight known zero-elided pages, it makes at least 258 physical WRITE
-# attempts, so 16 bounded passes (>=4,128 attempts) always reach attempt 4096.
+# Handoffs are timing-dependent. Keep the ordinary no-fault probe above at the
+# product 64-record window, but make this correctness-only fault mapping use the
+# minimum handoff-capable four-record window so every fixed series has a strong,
+# deterministic lower-attempt floor. Each 16,512-WRITE series has only eight
+# known zero elisions, so at most four records per lower run guarantees at least
+# ceil(16,504 / 4) = 4,126 lower WRITE attempts. Sixteen bounded passes therefore
+# guarantee 66,016 attempts, which reaches the latest supported test ordinal
+# 65,535 while giving this same target up to fifteen complete passes to exercise
+# a real completion handoff before terminal failure.
+completion_fault_window=4
+completion_fault_nth=65535
+completion_fault_max_passes=16
 UUID="SWAPZ-TEST-$TOKEN-completionfault"
 dmsetup create "$DMNAME" --uuid "$UUID" \
-    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 4096 2" ||
+    --table "0 32768 swapz $LOWER 0 $completion_fault_window 0 2 0 1 $completion_fault_nth 2" ||
     fail "cannot create completion-handoff fault mapping"
 OWN_DM=1
 swapz_verify_owned_dm_node
 fault_writer_rc=0
 fault_passes=0
-for fault_pass in {1..16}; do
+for ((fault_pass = 1; fault_pass <= completion_fault_max_passes; ++fault_pass)); do
     fault_passes=$fault_pass
     fault_writer_rc=0
     timeout --signal=TERM --kill-after=2s 30s "$ORACLE" \
@@ -1082,7 +1087,7 @@ fault_upper_err="$(status_u64 "$completion_fault_before" upper_write_completed_e
 if ! (( fault_batches > 0 &&
        fault_active == 0 &&
        fault_failed == 1 &&
-       fault_calls == 4096 &&
+       fault_calls == completion_fault_nth &&
        fault_injected == 1 &&
        fault_upper_err > 0 )); then
     fail "completion-handoff fault invariant mismatch: offloaded=$fault_batches active=$fault_active failed=$fault_failed calls=$fault_calls injected=$fault_injected upper_err=$fault_upper_err passes=$fault_passes"
