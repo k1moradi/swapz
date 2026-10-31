@@ -433,7 +433,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn('submitter_prepare=$SUBMITTER_PREPARE', pair)
         self.assertIn('submitter_prepare=$expected_submitter_prepare', pair)
         self.assertIn("SUBMITTER_PREPARE_EXPLICIT ))", pair)
-        self.assertNotIn("--submitter-prepare", loaded)
+        # The ordinary qualification matrix does not vary submitter preparation;
+        # ID161 has one explicitly separate candidate pair below that matrix.
+        self.assertEqual(loaded.count("--submitter-prepare 0"), 1)
         self.assertIn('"host_load_profile": args.host_load_profile', fast)
         self.assertIn("reject_raw_drift(striped_rows)", fast)
 
@@ -4517,6 +4519,84 @@ int main(void)
         self.assertIn("io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c",
                       suites)
         self.assertIn('off.get("replay_engine") != "native-c"', runner)
+
+    def test_lone_raw_candidate_is_learned_bounded_and_default_off(self):
+        worker = body("swapz_worker_pass")
+        accept = body("swapz_accept_write")
+        flush = body("swapz_flush_window")
+        ctor = body("swapz_ctr")
+        status = body("swapz_status")
+        benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        fast = (ROOT / "tests/tools/fast-test.py").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        native = (ROOT / "tests/runtime/native/io/window-policy.c").read_text()
+
+        self.assertRegex(DM, r"static\s+bool\s+swapz_lone_raw\s*;")
+        self.assertIn(
+            "module_param_named(lone_raw, swapz_lone_raw, bool, 0444)", DM)
+        self.assertIn(
+            "lone_raw requires async_prepare=1 submitter_prepare=0", ctor)
+        self.assertIn("retain_ms>0 lower_bulk>0 verify=0", ctor)
+        self.assertIn("lone_raw is restricted to null_blk qualification", ctor)
+        self.assertIn("ctx->lone_raw = swapz_lone_raw", ctor)
+        self.assertIn("swapz_window_lone_raw_candidate(", policy)
+        self.assertIn(
+            "test_lone_raw_requires_learned_truly_isolated_write", native)
+
+        candidate = worker.index("swapz_window_lone_raw_candidate(")
+        refresh = worker.index("swapz_refresh_accepted_followup(ctx)", candidate)
+        selection = worker.index("entry->preparation_lone_raw = true", refresh)
+        processing = worker.index("swapz_process(ctx, entry->bio)", selection)
+        self.assertLess(candidate, refresh)
+        self.assertLess(refresh, selection)
+        self.assertLess(selection, processing)
+        candidate_block = worker[candidate:refresh]
+        for required in (
+                "ctx->singleton_fast_close", "ctx->batch_count",
+                "ctx->preparation_queued", "entry->list.next == &local",
+                "list_empty(&ctx->incoming)", "swapz_plain_retained_write"):
+            self.assertIn(required, candidate_block)
+        selection_block = worker[refresh:processing]
+        self.assertIn("ctx->worker_has_immediate_followup", selection_block)
+        self.assertIn("ctx->lone_raw_cancelled_followers++", selection_block)
+        self.assertIn("ctx->lone_raw_selected++", selection_block)
+
+        raw_gate = accept.index("if (force_raw && bulk_raw_eligible)")
+        zero_check = accept.index(
+            "if (lone_raw && swapz_page_is_zero(input))", raw_gate)
+        raw_length = accept.index("length = 0;", zero_check)
+        self.assertLess(zero_check, raw_length)
+        self.assertIn("ctx->lone_raw_zero_elided++",
+                      accept[zero_check:raw_length])
+        self.assertIn("ctx->lone_raw_window_records++", accept)
+        self.assertIn("ctx->lone_raw_multi_record_windows++", flush)
+        self.assertIn("ctx->lone_raw_multi_record_pages +=", flush)
+        for token in (
+                "lone_raw=%u", "lone_raw_candidates=%llu",
+                "lone_raw_cancelled_followers=%llu",
+                "lone_raw_selected=%llu", "lone_raw_zero_elided=%llu",
+                "lone_raw_multi_record_windows=%llu",
+                "lone_raw_multi_record_pages=%llu"):
+            self.assertIn(token, status)
+
+        self.assertIn("LONE_RAW=0", benchmark)
+        self.assertIn("== --lone-raw", benchmark)
+        self.assertIn('"lone_raw=$LONE_RAW"', benchmark)
+        self.assertIn("PASS_LONE_RAW_ACTIVITY=", benchmark)
+        self.assertIn("--submitter-prepare 0 --lone-raw 1", loaded)
+        self.assertIn("START_LONE_RAW_QD1=1", loaded)
+        self.assertIn("PASS_LONE_RAW_QD1=1", loaded)
+        self.assertIn('default=int(os.environ.get("LONE_RAW", "0"))', fast)
+        self.assertIn('arguments += ["--lone-raw", "1"]', fast)
+        self.assertIn('"lone_raw": args.lone_raw', fast)
+        self.assertIn('"lone_raw_candidates"', replay)
+        self.assertIn("def parse_lone_raw_qd1(output):", runner)
+        self.assertIn('"PASS_LONE_RAW_QD1_CANDIDATE"', runner)
+        self.assertIn('benchmarks.get("lone_raw_qd1", {})', runner)
+
 
     def test_map_and_teardown_are_owned(self):
         admitted = body("swapz_map")

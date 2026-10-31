@@ -91,6 +91,18 @@ MODULE_PARM_DESC(submitter_prepare,
 		 "Prepare accepted ordinary WRITEs in submitting task context using "
 		 "bounded preallocated scratch; requires async_prepare=1");
 
+/*
+ * ID161 development selector. Default off: promotion requires loaded owner
+ * evidence. The target constructor rejects it unless async preparation stays
+ * enabled and submitter-context LZ4 is disabled, because the representation
+ * decision belongs to the ordered owner after learned singleton evidence.
+ */
+static bool swapz_lone_raw;
+module_param_named(lone_raw, swapz_lone_raw, bool, 0444);
+MODULE_PARM_DESC(lone_raw,
+		 "A/B only: RAW for learned isolated singleton WRITEs; "
+		 "requires async_prepare=1 submitter_prepare=0");
+
 static bool swapz_allow_physical_backing;
 module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0444);
 MODULE_PARM_DESC(allow_physical_backing,
@@ -277,6 +289,7 @@ struct swapz_bio_ref {
 	struct swapz_prepared_page *prepared_page;
 	bool preparation_inline;
 	bool preparation_force_raw;
+	bool preparation_lone_raw;
 	/*
 	 * Set while ->map owns submitter-side preparation. The ordered owner
 	 * returns without touching this descriptor until the release store.
@@ -381,6 +394,20 @@ struct swapz_dm {
 	 * lower I/O. Claim failure falls back to the established producer/owner.
 	 */
 	bool submitter_prepare;
+	/*
+	 * ID161 candidate: after the existing two-deadline singleton signal,
+	 * the ordered owner may select RAW only for an observed isolated WRITE.
+	 * This remains a representation choice; publication and completion stay
+	 * on the established ordered/K=1 path.
+	 */
+	bool lone_raw;
+	swapz_u8 lone_raw_window_records;
+	u64 lone_raw_candidates;
+	u64 lone_raw_cancelled_followers;
+	u64 lone_raw_selected;
+	u64 lone_raw_zero_elided;
+	u64 lone_raw_multi_record_windows;
+	u64 lone_raw_multi_record_pages;
 	struct swapz_submitter_lane *submitter_lanes;
 	swapz_u8 submitter_lane_count;
 	u64 submitter_lane_full_mask;
@@ -3359,6 +3386,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		!ctx->retained_tail_target && !ctx->retained_window_read_bypasses &&
 		ctx->retained_wave_interrupted;
 	bool accepted_burst_extended = ctx->accepted_burst_pack_ready;
+	swapz_u8 lone_raw_records = ctx->lone_raw_window_records;
 	enum swapz_window_close_reason close_reason = ctx->next_window_close;
 	swapz_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record;
 	u64 end_ns, open_age_ns, section_start;
@@ -3458,6 +3486,18 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 */
 	atomic_set(&ctx->preparation_tail_credit, 0);
 	ctx->work_conserving_window = false;
+	if (lone_raw_records) {
+		/*
+		 * Geometry-only harm signal: a RAW decision that later shares this
+		 * window lost a compression opportunity. Count before I/O so faults
+		 * cannot hide the scheduling decision; do not call it media wear.
+		 */
+		if (count > 1U) {
+			ctx->lone_raw_multi_record_windows++;
+			ctx->lone_raw_multi_record_pages += lone_raw_records;
+		}
+		ctx->lone_raw_window_records = 0;
+	}
 
 	/*
 	 * DUPLICATE/FULL flush older writes before the current WRITE continues.
@@ -4452,6 +4492,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				 !ctx->engine.verify_after_write;
 	bool prepared_async = ctx->async_prepare && !entry->preparation_inline;
 	bool force_raw = entry->preparation_force_raw;
+	bool lone_raw = entry->preparation_lone_raw;
 	int prepared_state = SWAPZ_PREPARATION_EMPTY;
 	int length;
 	int error;
@@ -4522,9 +4563,22 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			input = ctx->input_page;
 		}
 		if (force_raw && bulk_raw_eligible) {
-			length = 0;
-			ctx->work_conserving_raw_not_ready++;
-			ctx->work_conserving_window = true;
+			/*
+			 * A learned singleton RAW selection must preserve zero-page
+			 * elision. The exact full-page scan is cheaper than running LZ4
+			 * merely to discover zero and cannot produce a false positive.
+			 */
+			if (lone_raw && swapz_page_is_zero(input)) {
+				length = 1;
+				inline_zero = true;
+				ctx->lone_raw_zero_elided++;
+			} else {
+				length = 0;
+			}
+			if (!lone_raw) {
+				ctx->work_conserving_raw_not_ready++;
+				ctx->work_conserving_window = true;
+			}
 		} else {
 			u64 lz4_before = ctx->lz4_wall_ns;
 
@@ -4663,6 +4717,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			.length = SWAPZ_BLOCK_BYTES,
 			.raw = 1,
 		};
+		if (lone_raw)
+			ctx->lone_raw_window_records++;
 		swapz_record_pack_geometry(ctx);
 		swapz_resolve_single_tail_companion(ctx);
 		if (swapz_has_inflight(ctx))
@@ -6143,6 +6199,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 
 		while (remaining && !list_empty(&local)) {
 			bool inline_preparation = false;
+			bool lone_raw_candidate = false;
 			unsigned int processed_bios = 1;
 
 			if (remaining > 1U &&
@@ -6219,6 +6276,21 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 					lower_write_busy = swapz_has_inflight(ctx) ||
 						atomic_read(&ctx->lower_write_active);
 					if (!list_empty(&entry->preparation_list)) {
+						lone_raw_candidate =
+							swapz_window_lone_raw_candidate(
+								ctx->lone_raw,
+								ctx->singleton_fast_close,
+								ctx->engine.bulk_enabled &&
+									!ctx->engine.verify_after_write,
+								!lower_write_busy,
+								ctx->batch_count,
+								ctx->preparation_queued,
+								entry->list.next == &local,
+								list_empty(&ctx->incoming),
+								swapz_plain_retained_write(
+									entry->bio));
+						if (lone_raw_candidate)
+							ctx->lone_raw_candidates++;
 						/*
 						 * queue_work() is only a request, not an ownership
 						 * transfer. Never return with this FIFO head still
@@ -6232,7 +6304,9 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 						list_del_init(&entry->preparation_list);
 						entry->preparation_inline = true;
 						inline_preparation = true;
-						if (ctx->engine.bulk_enabled &&
+						if (lone_raw_candidate) {
+							/* Decide only after the second follower refresh. */
+						} else if (ctx->engine.bulk_enabled &&
 						    !ctx->engine.verify_after_write &&
 						    ctx->batch_count >=
 							SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS - 1U &&
@@ -6335,6 +6409,23 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 			ctx->worker_has_immediate_followup =
 				entry->list.next != &local;
 			swapz_refresh_accepted_followup(ctx);
+			if (lone_raw_candidate) {
+				/*
+				 * Compression/copy time is deliberately excluded from the
+				 * prediction. Recheck all already-admitted work immediately
+				 * before processing; a follower cancels RAW and restores the
+				 * ordinary inline compression path.
+				 */
+				if (ctx->worker_has_immediate_followup) {
+					ctx->lone_raw_cancelled_followers++;
+					ctx->preparation_ordered_inline++;
+				} else {
+					entry->preparation_force_raw = true;
+					entry->preparation_lone_raw = true;
+					ctx->lone_raw_selected++;
+					ctx->preparation_ordered_raw++;
+				}
+			}
 			list_del_init(&entry->list);
 			swapz_process(ctx, entry->bio);
 			/*
@@ -6737,6 +6828,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	entry->prepared_page = NULL;
 	entry->preparation_inline = false;
 	entry->preparation_force_raw = false;
+	entry->preparation_lone_raw = false;
 	atomic_set(&entry->preparation_submitter_active, 0);
 	entry->preparation_ctx = ctx;
 	entry->admitted_ns = 0;
@@ -7113,6 +7205,14 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "delta64_lz4_acceleration must be in 1..4";
 		return -EINVAL;
 	}
+	if (swapz_lone_raw &&
+	    (!swapz_async_prepare || swapz_submitter_prepare || !retain ||
+	     !lower_bulk || verify)) {
+		ti->error =
+			"lone_raw requires async_prepare=1 submitter_prepare=0 "
+			"retain_ms>0 lower_bulk>0 verify=0";
+		return -EINVAL;
+	}
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -7130,6 +7230,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
 	ctx->submitter_prepare = ctx->async_prepare && swapz_submitter_prepare;
+	ctx->lone_raw = swapz_lone_raw;
 	ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled;
 	ctx->invalidate_cache_on_write_admit =
 		swapz_invalidate_cache_on_write_admit;
@@ -7190,6 +7291,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
+	if (ctx->lone_raw && !is_nullb) {
+		ti->error = "lone_raw is restricted to null_blk qualification";
+		error = -EOPNOTSUPP;
+		goto fail;
+	}
 	if (!is_nullb && retain > SWAPZ_MAX_RETAIN_MS) {
 		ti->error = "retain_ms above 4 is restricted to null_blk qualification";
 		error = -EINVAL;
@@ -8166,6 +8272,18 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->ordered_lz4_page_ewma_ns,
 		       ctx->deferred_upper_completion_bios,
 		       ctx->deferred_upper_completion_wall_ns);
+		DMEMIT(" lone_raw=%u lone_raw_candidates=%llu "
+		       "lone_raw_cancelled_followers=%llu "
+		       "lone_raw_selected=%llu lone_raw_zero_elided=%llu "
+		       "lone_raw_multi_record_windows=%llu "
+		       "lone_raw_multi_record_pages=%llu",
+		       ctx->lone_raw ? 1U : 0U,
+		       ctx->lone_raw_candidates,
+		       ctx->lone_raw_cancelled_followers,
+		       ctx->lone_raw_selected,
+		       ctx->lone_raw_zero_elided,
+		       ctx->lone_raw_multi_record_windows,
+		       ctx->lone_raw_multi_record_pages);
 		DMEMIT(" submitter_prepare=%u submitter_prepare_lanes=%u "
 		       "submitter_prepare_claims=%llu "
 		       "submitter_prepare_lane_misses=%llu "

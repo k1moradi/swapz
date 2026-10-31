@@ -357,7 +357,10 @@ KERNEL_WRITE_FIELDS = (
     "submitter_prepare_pages", "submitter_prepare_wall_ns",
     "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
     "submitter_copy_wall_ns", "submitter_copy_bytes",
-    "submitter_crc_wall_ns"
+    "submitter_crc_wall_ns", "lone_raw",
+    "lone_raw_candidates", "lone_raw_cancelled_followers",
+    "lone_raw_selected", "lone_raw_zero_elided",
+    "lone_raw_multi_record_windows", "lone_raw_multi_record_pages"
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + (
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
@@ -1579,6 +1582,7 @@ LOADED_PROGRESS_PREFIXES = (
     "START_SD_READ_COALESCE_AB=", "PASS_SD_READ_COALESCE_AB=",
     "START_WRITE_SATURATION_REGIME=", "PASS_WRITE_SATURATION_REGIME=",
     "START_WRITE_SATURATION_PAIR_QD=", "PASS_WRITE_SATURATION_PAIR_QD=",
+    "START_LONE_RAW_QD1=", "PASS_LONE_RAW_QD1=",
     "START_ID36_RESOURCE_PRESSURE=", "PASS_ID36_RESOURCE_PRESSURE=",
 )
 
@@ -1704,6 +1708,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         storage_envelope_verdict(storage_envelope_sessions)
         if storage_envelope_sessions else
         {"overall": "NOT_RUN", "reason": "storage-envelope sweep not executed"})
+    lone_raw_qd1 = (parse_lone_raw_qd1(output) if parse_bench else
+                    {"overall": "NOT_RUN"})
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
@@ -1713,7 +1719,9 @@ def run_stage(title, command, result, *, parse_bench=False):
                        delta64_rescue_diagnostic.get("overall") !=
                        "PASS_DELTA64_RESCUE_AB" or
                        storage_envelope_diagnostic.get("overall") !=
-                       "PASS_DIRECTIONAL_STORAGE_ENVELOPES"))
+                       "PASS_DIRECTIONAL_STORAGE_ENVELOPES" or
+                       lone_raw_qd1.get("overall") !=
+                       "PASS_LONE_RAW_QD1_CANDIDATE"))
     if marker_failure:
         rc = 1
     secure_boot_signing_blocked = (
@@ -1768,6 +1776,10 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "modern storage service-envelope evidence"
                 record["diagnostic"] = storage_envelope_diagnostic.get(
                     "reason", "storage-envelope evidence is incomplete")
+            elif lone_raw_qd1.get("overall") != "PASS_LONE_RAW_QD1_CANDIDATE":
+                record["failed_phase"] = "ID161 lone-RAW QD1 candidate"
+                record["diagnostic"] = lone_raw_qd1.get(
+                    "reason", "lone-RAW QD1 candidate evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1817,6 +1829,7 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["storage_envelope_sessions"] = (
             storage_envelope_sessions)
         result["benchmarks"]["storage_envelopes"] = storage_envelope_diagnostic
+        result["benchmarks"]["lone_raw_qd1"] = lone_raw_qd1
     print(f"  {len(result['stages']):>2}/5  {title:<29} "
           f"{status:<8} {record['elapsed_s']:>8.2f}s", flush=True)
     if rc and "diagnostic" in record:
@@ -3980,6 +3993,152 @@ def sd_read_coalesce_ab_verdict(sessions):
 
 
 
+def parse_lone_raw_qd1(output):
+    """Parse the isolated ID161 QD1 candidate without touching saturation rows."""
+    row = None
+    seen = 0
+    for original in output.splitlines():
+        line = original.strip()
+        if line == "START_LONE_RAW_QD1=1":
+            seen += 1
+            row = {
+                "status": "INCOMPLETE", "order": "unknown",
+                "device_model": None, "arms": {}, "activity": None,
+            }
+            continue
+        if row is None:
+            continue
+        if line.startswith("REPLAY_ORDER="):
+            row["order"] = line.partition("=")[2]
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            match = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) "
+                r"IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) "
+                r"HW_QUEUE_DEPTH=(\d+)", line)
+            if match:
+                row["device_model"] = {
+                    "cap_mib_s": int(match.group(1)),
+                    "completion_nsec": int(match.group(2)),
+                    "irqmode": int(match.group(3)),
+                    "queue_mode": int(match.group(4)),
+                    "submit_queues": int(match.group(5)),
+                    "hw_queue_depth": int(match.group(6)),
+                }
+        elif line.startswith("PASS_LONE_RAW_ACTIVITY="):
+            match = re.fullmatch(
+                r"PASS_LONE_RAW_ACTIVITY=candidates:(\d+) selected:(\d+) "
+                r"cancelled:(\d+) zero_elided:(\d+) "
+                r"multi_record_windows:(\d+) multi_record_pages:(\d+)", line)
+            if match:
+                row["activity"] = {
+                    key: int(value) for key, value in zip(
+                        ("candidates", "selected", "cancelled", "zero_elided",
+                         "multi_record_windows", "multi_record_pages"),
+                        match.groups())
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") not in ("off", "swapz") or                     obj.get("verdict") != "PASS":
+                continue
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            row["arms"][obj["candidate"]] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "qd": obj.get("qd"),
+                "replay_mode": obj.get("replay_mode"),
+                "logical_write_mbps": rates.get("logical_write_mbps"),
+                "logical_write_bytes": rates.get("logical_write_bytes"),
+                "logical_read_bytes": rates.get("logical_read_bytes"),
+                "lower_write_bytes": lower.get("lower_write_bytes"),
+                "lower_write_requests": lower.get("lower_write_requests"),
+                "write_p99_ms": (obj.get("write_p99_ns") / 1e6
+                                 if isinstance(obj.get("write_p99_ns"),
+                                               (int, float)) else None),
+                "kernel_write_path": obj.get("kernel_write_path"),
+                "host_cpu": host_cpu_record(obj),
+            }
+        elif line == "PASS_LONE_RAW_QD1=1":
+            row["status"] = "PASS"
+    if seen != 1 or row is None or row.get("status") != "PASS":
+        return {"overall": "INCOMPLETE",
+                "reason": "exactly one completed lone-RAW QD1 candidate pair required"}
+    if row.get("order") != "off-first":
+        return {"overall": "INCOMPLETE",
+                "reason": "lone-RAW QD1 replay order mismatch"}
+    expected = MODEL_SPECS["ssd_emulated"]
+    model = row.get("device_model")
+    if not isinstance(model, dict) or any(
+            model.get(key) != expected[key]
+            for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                        "queue_mode", "submit_queues", "hw_queue_depth")):
+        return {"overall": "INCOMPLETE",
+                "reason": "lone-RAW QD1 device model mismatch"}
+    if set(row.get("arms", {})) != {"off", "swapz"}:
+        return {"overall": "INCOMPLETE",
+                "reason": "lone-RAW QD1 pair missing raw/swapz arm"}
+    off, swapz = row["arms"]["off"], row["arms"]["swapz"]
+    if any(off.get(field) != swapz.get(field)
+           for field in BENCHMARK_PROVENANCE_FIELDS):
+        return {"overall": "INCONCLUSIVE",
+                "reason": "lone-RAW QD1 arm provenance mismatch"}
+    if not re.fullmatch(r"[0-9a-f]{40}", swapz.get("source_sha") or ""):
+        return {"overall": "INCONCLUSIVE",
+                "reason": "lone-RAW QD1 source unavailable"}
+    for arm in (off, swapz):
+        if (arm.get("qd") != 1 or arm.get("replay_mode") != "persistent-write" or
+                arm.get("logical_read_bytes") != 0 or
+                not isinstance(arm.get("logical_write_mbps"), (int, float)) or
+                not isinstance(arm.get("logical_write_bytes"), int) or
+                arm["logical_write_bytes"] <= 0 or
+                not isinstance(arm.get("lower_write_bytes"), int) or
+                arm["lower_write_bytes"] <= 0 or
+                not isinstance(arm.get("lower_write_requests"), int) or
+                arm["lower_write_requests"] <= 0 or
+                not isinstance(arm.get("write_p99_ms"), (int, float))):
+            return {"overall": "INCOMPLETE",
+                    "reason": "lone-RAW QD1 arm metrics invalid"}
+    timed = swapz.get("kernel_write_path")
+    if not isinstance(timed, dict) or any(
+            type(timed.get(field)) is not int or timed[field] < 0
+            for field in KERNEL_WRITE_FIELDS):
+        return {"overall": "INCOMPLETE",
+                "reason": "lone-RAW QD1 kernel telemetry incomplete"}
+    if (timed["lone_raw"] != 1 or timed["submitter_prepare"] != 0 or
+            timed["write_pipeline_depth"] != 1 or
+            timed["lone_raw_candidates"] !=
+            timed["lone_raw_selected"] + timed["lone_raw_cancelled_followers"] or
+            timed["lone_raw_selected"] <= 0 or
+            timed["lone_raw_zero_elided"] > timed["lone_raw_selected"] or
+            timed["lone_raw_multi_record_windows"] != 0 or
+            timed["lone_raw_multi_record_pages"] != 0):
+        return {"overall": "INCOMPLETE",
+                "reason": "lone-RAW QD1 policy/activity invariant failed"}
+    activity = row.get("activity")
+    if (not isinstance(activity, dict) or activity["selected"] <= 0 or
+            activity["candidates"] !=
+            activity["selected"] + activity["cancelled"] or
+            activity["zero_elided"] > activity["selected"] or
+            activity["multi_record_windows"] or activity["multi_record_pages"]):
+        return {"overall": "INCOMPLETE",
+                "reason": "lone-RAW QD1 full-session activity invalid"}
+    return {
+        "overall": "PASS_LONE_RAW_QD1_CANDIDATE",
+        "scope": "DEVELOPMENT_CANDIDATE_DEFAULT_OFF",
+        "row": row,
+        "swapz_to_raw_write_ratio":
+            swapz["logical_write_mbps"] / off["logical_write_mbps"],
+        "lower_write_bytes_ratio":
+            swapz["lower_write_bytes"] / off["lower_write_bytes"],
+        "lower_write_requests_ratio":
+            swapz["lower_write_requests"] / off["lower_write_requests"],
+    }
+
+
 def parse_write_saturation(output):
     """Parse only the bounded sustained write-only QD pilot."""
     sessions, current, regime = [], None, None
@@ -6026,6 +6185,39 @@ def print_bench(result, *, detailed=False):
         _print_table_note(
             "Sustained QD", "NOT QUALIFIED: " +
             str(saturation.get("reason", saturation.get("overall", "NOT_RUN"))))
+
+    lone_raw = benchmarks.get("lone_raw_qd1", {})
+    if lone_raw.get("overall") == "PASS_LONE_RAW_QD1_CANDIDATE":
+        row = lone_raw["row"]
+        off, candidate = row["arms"]["off"], row["arms"]["swapz"]
+        print("\n  ID161 learned-singleton RAW — default-off QD1 candidate")
+        print_table(
+            "Fast QD1 candidate; one directional owned-RAM pair",
+            ("mode", "WRITE MB/s", "lower MB", "lower req", "WRITE p99 ms"),
+            [
+                ("raw", f"{off['logical_write_mbps']:.2f}",
+                 f"{off['lower_write_bytes'] / 1_000_000:.3f}",
+                 off["lower_write_requests"], f"{off['write_p99_ms']:.3f}"),
+                ("lone-RAW", f"{candidate['logical_write_mbps']:.2f}",
+                 f"{candidate['lower_write_bytes'] / 1_000_000:.3f}",
+                 candidate["lower_write_requests"],
+                 f"{candidate['write_p99_ms']:.3f}"),
+            ])
+        print(f"  Useful WRITE vs raw: "
+              f"{(lone_raw['swapz_to_raw_write_ratio'] - 1) * 100:+.1f}%; "
+              f"lower bytes ratio={lone_raw['lower_write_bytes_ratio']:.3f}; "
+              f"lower requests ratio={lone_raw['lower_write_requests_ratio']:.3f}.")
+        activity = row["activity"]
+        print("  Candidate activity: "
+              f"selected={activity['selected']} cancelled={activity['cancelled']} "
+              f"zero-elided={activity['zero_elided']} "
+              f"multi-record windows/pages="
+              f"{activity['multi_record_windows']}/{activity['multi_record_pages']}.")
+        print("  Directional correctness/telemetry evidence only; default remains off.")
+    else:
+        _print_table_note(
+            "ID161 lone-RAW QD1", "NOT QUALIFIED: " +
+            str(lone_raw.get("reason", lone_raw.get("overall", "NOT_RUN"))))
     print("  Resource, lifecycle, GC, lower READ and full telemetry: test_results.json.")
     if result.get("overall") not in (None, "PASS"):
         print(f"  Overall gate remains {result['overall']}; partial performance is not promotion.")
@@ -7584,7 +7776,9 @@ def required_benchmark_gates_pass(benchmarks):
     return (
         benchmarks["verdicts"].get("overall") == "PASS_BOUNDED_RAM_MATRIX" and
         benchmarks["write_saturation"].get("overall") ==
-        "PASS_WRITE_SATURATION_EVIDENCE"
+        "PASS_WRITE_SATURATION_EVIDENCE" and
+        benchmarks.get("lone_raw_qd1", {}).get("overall") ==
+        "PASS_LONE_RAW_QD1_CANDIDATE"
     )
 
 

@@ -11,7 +11,7 @@ if [[ $# -ge 3 && $1 == --validated-source &&
 fi
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--delta64-rescue|--no-delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [exact make-test storage envelope] [--async-prepare] [--submitter-prepare 0|1] [--lone-raw 0|1] [--delta64-rescue|--no-delta64-rescue] [--delta64-lz4-acceleration 1|2|3|4] [--read-coalesce 0|1] [--invalidate-cache-on-write-admit 0|1] [--resource-pressure-short] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -24,6 +24,8 @@ IOPS=500
 ASYNC_PREPARE=0
 SUBMITTER_PREPARE=1
 SUBMITTER_PREPARE_EXPLICIT=0
+LONE_RAW=0
+LONE_RAW_EXPLICIT=0
 # Production module default; --no-delta64-rescue pins LZ4-only control arms.
 DELTA64_RESCUE=1
 DELTA64_POSITIVE_EXPERIMENT=0
@@ -98,6 +100,15 @@ fi
 if [[ $# -ge 3 && ${@: -2:1} == --read-coalesce &&
       ( ${!#} == 0 || ${!#} == 1 ) ]]; then
     READ_COALESCE="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# ID161 development-only representation selector. Parse it before the
+# submitter selector so an ordinary pair may use --async-prepare,
+# --submitter-prepare 0, --lone-raw 1 in that order.
+if [[ $# -ge 3 && ${@: -2:1} == --lone-raw &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    LONE_RAW="${!#}"
+    LONE_RAW_EXPLICIT=1
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Development-only selector for the existing submitter-context preparation
@@ -193,6 +204,12 @@ fi
 if (( SUBMITTER_PREPARE_EXPLICIT )) &&
    (( !ASYNC_PREPARE || RESOURCE_PRESSURE_SHORT || LINEAR_CALIBRATION )); then
     echo 'BLOCKED: submitter preparation control requires an ordinary async swapz pair' >&2
+    exit 2
+fi
+if (( LONE_RAW )) &&
+   (( !LONE_RAW_EXPLICIT || !ASYNC_PREPARE || SUBMITTER_PREPARE ||
+       RESOURCE_PRESSURE_SHORT || LINEAR_CALIBRATION || RETAIN_MS == 0 )); then
+    echo 'BLOCKED: lone RAW requires retained ordinary async swapz with submitter preparation disabled' >&2
     exit 2
 fi
 if (( RESOURCE_PRESSURE_SHORT )); then
@@ -376,7 +393,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE SUBMITTER_PREPARE=$SUBMITTER_PREPARE DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=1 READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE SUBMITTER_PREPARE=$SUBMITTER_PREPARE LONE_RAW=$LONE_RAW DELTA64_RESCUE=$DELTA64_RESCUE DELTA64_LZ4_ACCELERATION=$DELTA64_LZ4_ACCELERATION PARALLEL_READS=1 READ_COALESCE=$READ_COALESCE K1_ALLOW_AFTER_READ_BYPASS=0 INVALIDATE_CACHE_ON_WRITE_ADMIT=$INVALIDATE_CACHE_ON_WRITE_ADMIT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -634,6 +651,7 @@ if (( !LINEAR_CALIBRATION )); then
 modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
     "submitter_prepare=$SUBMITTER_PREPARE" \
+    "lone_raw=$LONE_RAW" \
     "delta64_rescue=$DELTA64_RESCUE" \
     "delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION" \
     "read_coalesce=$READ_COALESCE" \
@@ -686,6 +704,8 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE
 expected_submitter_prepare=$(( ASYNC_PREPARE && SUBMITTER_PREPARE ))
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])submitter_prepare=$expected_submitter_prepare([[:space:]]|$)" ||
     fail 'loaded swapz submitter preparation does not match selected benchmark arm'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])lone_raw=$LONE_RAW([[:space:]]|$)" ||
+    fail 'loaded swapz lone RAW policy does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" ||
     fail 'loaded swapz delta64 rescue does not match selected benchmark arm'
 expected_delta64_workers=$ASYNC_PREPARE
@@ -895,6 +915,37 @@ if (( DELTA64_POSITIVE_EXPERIMENT )); then
         fail 'delta64 experiment did not expose adoption activity'
     (( ${BASH_REMATCH[1]} > 0 )) ||
         fail 'delta64-positive experiment recorded zero adoptions'
+fi
+if (( LONE_RAW )); then
+    [[ "$swapz_status_after" =~ lone_raw_candidates=([0-9]+) ]] ||
+        fail 'lone RAW candidate counter missing'
+    lone_raw_candidates="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ lone_raw_cancelled_followers=([0-9]+) ]] ||
+        fail 'lone RAW cancellation counter missing'
+    lone_raw_cancelled="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ lone_raw_selected=([0-9]+) ]] ||
+        fail 'lone RAW selection counter missing'
+    lone_raw_selected="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ lone_raw_zero_elided=([0-9]+) ]] ||
+        fail 'lone RAW zero-elision counter missing'
+    lone_raw_zero="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ lone_raw_multi_record_windows=([0-9]+) ]] ||
+        fail 'lone RAW multi-record counter missing'
+    lone_raw_multi="${BASH_REMATCH[1]}"
+    [[ "$swapz_status_after" =~ lone_raw_multi_record_pages=([0-9]+) ]] ||
+        fail 'lone RAW multi-record page counter missing'
+    lone_raw_multi_pages="${BASH_REMATCH[1]}"
+    (( lone_raw_candidates == lone_raw_cancelled + lone_raw_selected &&
+       lone_raw_zero <= lone_raw_selected &&
+       lone_raw_multi <= lone_raw_selected &&
+       lone_raw_multi_pages <= lone_raw_selected )) ||
+        fail 'lone RAW accounting inconsistent'
+    if (( WRITE_ONLY_QD == 1 )); then
+        (( lone_raw_candidates > 0 && lone_raw_selected > 0 &&
+           lone_raw_multi == 0 && lone_raw_multi_pages == 0 )) ||
+            fail 'QD1 lone RAW candidate was not isolated and exercised'
+    fi
+    note "PASS_LONE_RAW_ACTIVITY=candidates:$lone_raw_candidates selected:$lone_raw_selected cancelled:$lone_raw_cancelled zero_elided:$lone_raw_zero multi_record_windows:$lone_raw_multi multi_record_pages:$lone_raw_multi_pages"
 fi
 if (( DELTA64_RESCUE )); then
     [[ "$swapz_status_after" =~ delta64_prepare_active_max=([0-9]+) ]] ||

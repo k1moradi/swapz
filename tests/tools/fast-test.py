@@ -135,7 +135,7 @@ def striped_scenario(name):
 
 
 def scenario_arguments(name, plan, delta64=1, calibration=False,
-                       candidate_first=False, submitter_prepare=1):
+                       candidate_first=False, submitter_prepare=1, lone_raw=0):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
         raise ValueError(f"unknown scenario {name!r}")
@@ -149,6 +149,8 @@ def scenario_arguments(name, plan, delta64=1, calibration=False,
     arguments.append("--async-prepare")
     if not submitter_prepare:
         arguments += ["--submitter-prepare", "0"]
+    if lone_raw:
+        arguments += ["--lone-raw", "1"]
     if not delta64:
         # Suffix order of benchmark-owned-pair.sh: rescue sits after async.
         arguments.append("--no-delta64-rescue")
@@ -669,6 +671,8 @@ def main():
     parser.add_argument("--host-load-profile",
                         choices=("uncontrolled", "quiet-intended", "browser-video-144p"),
                         default=os.environ.get("HOST_LOAD_PROFILE", "uncontrolled"))
+    parser.add_argument("--lone-raw", type=int, choices=(0, 1),
+                        default=int(os.environ.get("LONE_RAW", "0")))
     args = parser.parse_args()
     calibration = args.calibration == "linear"
     candidate = "linear" if calibration else "swapz"
@@ -690,8 +694,12 @@ def main():
         parser.error("striped scenarios cannot use linear calibration")
     if not args.submitter_prepare and (calibration or striped_specs):
         parser.error("SUBMITTER_PREPARE=0 requires ordinary swapz fast_test scenarios")
+    if args.lone_raw and (args.submitter_prepare or calibration or striped_specs):
+        parser.error("LONE_RAW=1 requires SUBMITTER_PREPARE=0 and ordinary swapz scenarios")
     for name in ordinary_scenarios:
-        scenario_arguments(name, "/dev/null", submitter_prepare=args.submitter_prepare)
+        scenario_arguments(name, "/dev/null",
+                           submitter_prepare=args.submitter_prepare,
+                           lone_raw=args.lone_raw)
 
     if os.geteuid() != 0 and subprocess.run(
             ["sudo", "-n", "true"], capture_output=True).returncode:
@@ -704,7 +712,7 @@ def main():
                            cwd=ROOT, capture_output=True, text=True).stdout.strip()
     print(f"swapz fast_test (development only; not qualification) "
           f"content={args.content} submitter_prepare={args.submitter_prepare} "
-          f"host_load={args.host_load_profile} "
+          f"lone_raw={args.lone_raw} host_load={args.host_load_profile} "
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
     started = time.monotonic()
     build()
@@ -735,7 +743,8 @@ def main():
                 proc = privileged(720, PAIR, "--validated-source", head,
                                   *scenario_arguments(name, plan, args.delta64, calibration,
                                                       calibration and attempt % 2 == 1,
-                                  args.submitter_prepare))
+                                                      args.submitter_prepare,
+                                                      args.lone_raw))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
                 arms = parse_arms(proc.stdout, candidate)
@@ -833,6 +842,7 @@ def main():
                     "calibration": args.calibration,
                     "delta64_rescue": args.delta64,
                     "submitter_prepare": args.submitter_prepare,
+                    "lone_raw": args.lone_raw,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
                     "reports": raw_reports,

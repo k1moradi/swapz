@@ -847,6 +847,42 @@ def lz4_acceleration_log():
     return out
 
 
+def lone_raw_qd1_log():
+    spec = runner.MODEL_SPECS["ssd_emulated"]
+    off = write_arm("off", qd=1, regime="ssd_emulated", mode=1)
+    swapz = write_arm("swapz", qd=1, regime="ssd_emulated", mode=1)
+    kernel = swapz["kernel_write_path"]
+    kernel.update({
+        "submitter_prepare": 0,
+        "submitter_prepare_lanes": 0,
+        "submitter_prepare_active": 0,
+        "submitter_prepare_active_max": 0,
+        "lone_raw": 1,
+        "lone_raw_candidates": 100,
+        "lone_raw_cancelled_followers": 4,
+        "lone_raw_selected": 96,
+        "lone_raw_zero_elided": 2,
+        "lone_raw_multi_record_windows": 0,
+        "lone_raw_multi_record_pages": 0,
+    })
+    swapz["throughput_mbps"]["logical_write_mbps"] = 18.0
+    swapz["lower_io"]["lower_write_bytes"] = off["lower_io"]["lower_write_bytes"]
+    swapz["lower_io"]["lower_write_requests"] = off["lower_io"]["lower_write_requests"]
+    return [
+        "START_LONE_RAW_QD1=1",
+        "REPLAY_ORDER=off-first",
+        ("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+         "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+         "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+         "HW_QUEUE_DEPTH={hw_queue_depth}").format(**spec),
+        json.dumps(off),
+        json.dumps(swapz),
+        ("PASS_LONE_RAW_ACTIVITY=candidates:100 selected:96 cancelled:4 "
+         "zero_elided:2 multi_record_windows:0 multi_record_pages:0"),
+        "PASS_LONE_RAW_QD1=1",
+    ]
+
+
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
@@ -1060,6 +1096,7 @@ def synthetic_log():
         for record in ((swapz, off) if index % 2 else (off, swapz)):
             out.append(json.dumps(record))
         out.append(f"PASS_WRITE_PIPELINE_DEPTH={depth}")
+    out.extend(lone_raw_qd1_log())
     return "\n".join(out) + "\n"
 
 
@@ -1883,6 +1920,21 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
         self.assertTrue(all("kernel_status" not in session for session in sessions))
 
+    def test_lone_raw_qd1_candidate_is_separate_and_conserved(self):
+        result = runner.parse_lone_raw_qd1(synthetic_log())
+        self.assertEqual(result["overall"], "PASS_LONE_RAW_QD1_CANDIDATE")
+        self.assertGreater(result["row"]["activity"]["selected"], 0)
+        self.assertEqual(result["row"]["activity"]["multi_record_windows"], 0)
+        self.assertEqual(result["row"]["activity"]["multi_record_pages"], 0)
+        self.assertEqual(result["row"]["arms"]["swapz"]["qd"], 1)
+        self.assertEqual(
+            result["row"]["arms"]["swapz"]["kernel_write_path"]["lone_raw"], 1)
+        bad = synthetic_log().replace(
+            "multi_record_windows:0 multi_record_pages:0",
+            "multi_record_windows:1 multi_record_pages:1", 1)
+        self.assertEqual(runner.parse_lone_raw_qd1(bad)["overall"], "INCOMPLETE")
+
+
     def test_write_saturation_evidence_repeats_fast_qd4_qd8_and_qd32(self):
         sessions = runner.parse_write_saturation(synthetic_log())
         self.assertEqual(len(sessions), 48)
@@ -2385,6 +2437,7 @@ class ReportContract(unittest.TestCase):
             "delta64_prepare": runner.delta64_prepare_verdict(
                 runner.parse_delta64_prepare_sessions(synthetic_log())),
             "write_saturation": saturation,
+            "lone_raw_qd1": runner.parse_lone_raw_qd1(synthetic_log()),
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
         # The operator view is short and puts the product control first.
@@ -2393,6 +2446,7 @@ class ReportContract(unittest.TestCase):
         operator = summary.getvalue()
         self.assertIn("Product decision snapshot", operator)
         self.assertIn("Sustained lane-owned WRITE", operator)
+        self.assertIn("ID161 learned-singleton RAW", operator)
         self.assertIn("accepted-work lower-idle", operator)
         self.assertIn("A/raw", operator)
         self.assertNotIn("Negative classifier profile breakdown", operator)
@@ -2768,6 +2822,7 @@ class ReportContract(unittest.TestCase):
         benchmarks = {
             "verdicts": {"overall": "PASS_BOUNDED_RAM_MATRIX"},
             "write_saturation": {"overall": "PASS_WRITE_SATURATION_EVIDENCE"},
+            "lone_raw_qd1": {"overall": "PASS_LONE_RAW_QD1_CANDIDATE"},
             "lz4_acceleration": {
                 "overall": "NOT_RUN",
                 "reason": "retired; ordinary LZ4 is fixed at acceleration 1",
@@ -2778,6 +2833,9 @@ class ReportContract(unittest.TestCase):
         self.assertFalse(runner.required_benchmark_gates_pass(benchmarks))
         benchmarks["verdicts"]["overall"] = "PASS_BOUNDED_RAM_MATRIX"
         benchmarks["write_saturation"]["overall"] = "INCOMPLETE"
+        self.assertFalse(runner.required_benchmark_gates_pass(benchmarks))
+        benchmarks["write_saturation"]["overall"] = "PASS_WRITE_SATURATION_EVIDENCE"
+        benchmarks["lone_raw_qd1"]["overall"] = "INCOMPLETE"
         self.assertFalse(runner.required_benchmark_gates_pass(benchmarks))
 
     def test_overall_status_follows_stage_semantics_not_raw_exit_code(self):

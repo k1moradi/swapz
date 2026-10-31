@@ -61,7 +61,9 @@ test:
 # independent-target experiment; fast-stripes-w4/fast-stripes-w8 exercise
 # sustained WRITE QD4/QD8 with the same unchanged production K=1 target.
 # SUBMITTER_PREPARE=0 selects the existing opt-out in ordinary fast_test
-# pairs; HOST_LOAD_PROFILE=browser-video-144p labels background-load results.
+# pairs. LONE_RAW=1 additionally selects the ID161 learned-singleton RAW
+# candidate and therefore requires SUBMITTER_PREPARE=0. HOST_LOAD_PROFILE=
+# browser-video-144p labels background-load results without relaxing screens.
 # It accepts dirty trees, honors the noise screen, never writes
 # test_results.json and never qualifies a source. Override with
 # SCENARIOS=... and/or REPEAT=1..10 when narrowing a follow-up.
