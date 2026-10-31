@@ -1,4 +1,8 @@
-# New native-host admission-wake comparison
+# Native-host admission-wake comparison: prospective plan
+
+**Final disposition:** the fixed comparison completed and the candidate was
+declined/restored. See [the result](admission-wake-quiet-x86-result.md).
+The text below preserves the pre-sample plan.
 
 The owner reported low host load. Live checks confirmed the competing tracing
 benchmark had exited and three quiet windows passed the existing thresholds.
