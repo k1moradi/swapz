@@ -75,24 +75,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 625,
-"legacy_dead_probe_ns": 75627,
-"legacy_score_scan_ns": 455676,
+"incremental_select_ns": 1670,
+"legacy_dead_probe_ns": 201155,
+"legacy_score_scan_ns": 1574535,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 750,
-"relocation_list_ns": 375,
-"relocation_scan_ns": 90627,
+"mapped_dead_probe_ns": 1158,
+"relocation_list_ns": 802,
+"relocation_scan_ns": 704236,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2458,
-"legacy_dead_probe_ns": 292048,
-"legacy_score_scan_ns": 1826496,
+"incremental_select_ns": 3256,
+"legacy_dead_probe_ns": 514860,
+"legacy_score_scan_ns": 3732442,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2084,
-"relocation_list_ns": 500,
-"relocation_scan_ns": 364674,
+"mapped_dead_probe_ns": 2007,
+"relocation_list_ns": 836,
+"relocation_scan_ns": 1928703,
 "segments": 4096,
 "victim_records": 256
 }
@@ -102,14 +102,24 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 154,
+"inverse_ns_per_page": 230,
 "name": "scalar",
-"transform_ns_per_page": 137
+"transform_ns_per_page": 355
 },
 {
-"inverse_ns_per_page": 83,
-"name": "neon",
-"transform_ns_per_page": 85
+"inverse_ns_per_page": 275,
+"name": "sse2",
+"transform_ns_per_page": 176
+},
+{
+"inverse_ns_per_page": 127,
+"name": "avx2",
+"transform_ns_per_page": 83
+},
+{
+"inverse_ns_per_page": 92,
+"name": "avx512",
+"transform_ns_per_page": 70
 }
 ],
 "classifier": {
@@ -119,9 +129,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 29,
+"ns_per_page": 81,
 "sample_pairs": 32,
-"scalar_ns_per_page": 29,
+"scalar_ns_per_page": 81,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -136,7 +146,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1832
+"wall_ns_per_page": 2385
 },
 {
 "acceleration": 2,
@@ -144,7 +154,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1706
+"wall_ns_per_page": 2319
 },
 {
 "acceleration": 3,
@@ -152,7 +162,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1662
+"wall_ns_per_page": 2197
 },
 {
 "acceleration": 4,
@@ -160,7 +170,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1645
+"wall_ns_per_page": 2199
 }
 ],
 "negative_pages": 256,
@@ -177,9 +187,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1357,
-"modeled_wall_ns_total": 782080,
-"ns_per_saved_block": 15040,
+"modeled_wall_ns_per_page": 1708,
+"modeled_wall_ns_total": 984064,
+"ns_per_saved_block": 18924,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -200,7 +210,38 @@
 }
 ],
 "scope": "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY",
-"sse2_forward_ab": null,
+"sse2_forward_ab": {
+"pages": 576,
+"pairs": [
+{
+"baseline_ns_per_page": 182,
+"order": "baseline_first",
+"unrolled_ns_per_page": 174
+},
+{
+"baseline_ns_per_page": 182,
+"order": "unrolled_first",
+"unrolled_ns_per_page": 174
+},
+{
+"baseline_ns_per_page": 180,
+"order": "baseline_first",
+"unrolled_ns_per_page": 173
+},
+{
+"baseline_ns_per_page": 181,
+"order": "unrolled_first",
+"unrolled_ns_per_page": 173
+},
+{
+"baseline_ns_per_page": 229,
+"order": "baseline_first",
+"unrolled_ns_per_page": 297
+}
+],
+"repeats_per_arm": 64,
+"scope": "SAME_HOST_NATIVE_BASELINE_VS_PROMOTED_PRODUCTION"
+},
 "structured_pages": 320,
 "thresholds": [
 {
@@ -244,14 +285,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15455,
+"ns_per_saved_block": 19395,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1529,
-"routed_cpu_ns_total": 880981,
+"routed_cpu_ns_per_page": 1919,
+"routed_cpu_ns_total": 1105570,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -299,14 +340,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15527,
+"ns_per_saved_block": 19498,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1482,
-"routed_cpu_ns_total": 854008,
+"routed_cpu_ns_per_page": 1861,
+"routed_cpu_ns_total": 1072432,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -354,14 +395,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15040,
+"ns_per_saved_block": 18924,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1357,
-"routed_cpu_ns_total": 782080,
+"routed_cpu_ns_per_page": 1708,
+"routed_cpu_ns_total": 984064,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -409,14 +450,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15040,
+"ns_per_saved_block": 18924,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1357,
-"routed_cpu_ns_total": 782080,
+"routed_cpu_ns_per_page": 1708,
+"routed_cpu_ns_total": 984064,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -464,14 +505,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15040,
+"ns_per_saved_block": 18924,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1357,
-"routed_cpu_ns_total": 782080,
+"routed_cpu_ns_per_page": 1708,
+"routed_cpu_ns_total": 984064,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -487,51 +528,69 @@
 "candidate_blocks": 192,
 "candidate_extents": 84,
 "cliff_2024": 160,
-"inverse_backend": "neon",
-"inverse_ns_per_page": 83,
+"inverse_backend": "avx512",
+"inverse_ns_per_page": 92,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 154,
-"scalar_transform_ns_per_page": 137,
-"second_lz4_ns_per_page": 2912,
-"transform_backend": "neon",
-"transform_ns_per_page": 85
+"scalar_inverse_ns_per_page": 230,
+"scalar_transform_ns_per_page": 355,
+"second_lz4_ns_per_page": 3612,
+"transform_backend": "avx512",
+"transform_ns_per_page": 70
 }
 ]
 }
 },
 "host_identity": {
-"architecture": "aarch64",
-"id_sha256": "43f723098b379e58edb2d96ceaeeb20eef02f722cba0b16c7d0328011a160f21",
+"architecture": "x86_64",
+"id_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
 "schema": "swapz-host-v1"
 },
 "kernel_release": "7.0.0-42-generic",
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "schema": "swapz-test-results-v1",
-"source_sha": "5eb6fc7db5ad855bee7efaeb0b940546e4a28e15",
+"source_sha": "f7a24e342e036ffcffce48bd7ae82a01ea94830d",
 "stages": [
 {
-"elapsed_s": 0.412,
+"elapsed_s": 36.938,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_loaded_preflight_recovers_only_proven_stale_owned_mapping",
-"elapsed_s": 4.88,
+"diagnostic": "Unit test failed: test_parallel_build_is_incremental_and_test_stages_stay_ordered; nested ID161 lone-RAW QD1 candidate: exactly one completed lone-RAW QD1 candidate pair required",
+"elapsed_s": 17.04,
 "exit_code": 1,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
 "signals": [
-"PASS",
-"FAIL"
+"FAIL",
+"PASS_LOADED_RAW_READ_FANOUT",
+"PASS_LOADED_ORACLE_PROFILE",
+"PASS_LOADED_LIVE_GC",
+"PASS_LOADED_GC_PRESSURE",
+"PASS_LOADED_DISCARD_TRIM",
+"PASS_LOADED_PACKED_PLACEMENT",
+"PASS_LOADED_SUSPEND_DRAIN",
+"PASS_LOADED_COMPLETION_HANDOFF",
+"PASS_RETAINED_SYNTHETIC_WRITE_FAULT",
+"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT",
+"PASS_ID36_RESOURCE_PRESSURE",
+"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE",
+"PASS_OWNED_RAM_REGIME",
+"PASS_STORAGE_ENVELOPE",
+"PASS_READ_COALESCE_AB",
+"PASS_SD_READ_COALESCE_AB",
+"PASS_DELTA64_RESCUE",
+"PASS_WRITE_SATURATION_PAIR_QD",
+"PASS_WRITE_SATURATION_REGIME"
 ],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "5eb6fc7db5ad855bee7efaeb0b940546e4a28e15"
+"tested_commit_sha": "f7a24e342e036ffcffce48bd7ae82a01ea94830d"
 }
