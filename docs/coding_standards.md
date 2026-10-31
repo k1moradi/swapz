@@ -1060,6 +1060,12 @@ benchmarking; neither policy remains in production. IDLE and DEADLINE retain
 the pre-ID80 eligibility semantics. Do not add another shallow-count threshold
 without a separately reviewed ownership model and owner-loaded evidence.
 
+The ID163 fixed old-PC pilot of `count >= 4U` without queued preparation did
+not establish a service gain: four-record async activity increased and QD8
+requests fell, but accepted-work idle rose and the shallow-QD guards remained
+unproved. Keep the existing strict count/backlog gate. A lower request count
+or more async callbacks alone is not a reason to reopen this variant.
+
 Idle asynchronous preparation must be self-gating. With no lower WRITE active,
 a tail-credit workqueue wake requires at least four unclaimed preparation
 descriptors. The initial accepted-wave starter observes the ordered head as
