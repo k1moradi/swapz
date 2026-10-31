@@ -50,3 +50,23 @@ This draft is development-tested, not owner/ID36 qualified. Committed production
 remains source `545defa8`; local experiments may apply the patch. Retention needs
 useful READ/WRITE, p95/p99, independent lower I/O, GC and resource review plus
 exact-source make test. No new qualification plot/history point was generated.
+
+## Concurrent notification-tail review
+
+A later bounded native review compiled the same candidate helper bodies with
+C11 release/acquire atomics, real pthread callers and controlled queue primitives.
+In 64 fixed interleavings, two already-admitted notification tails raced a drain
+waiter. Both immediate and ordinary queue paths were exercised, including an
+ordinary queue reporting already pending. After only the first caller returned,
+one reference remained and drain could not pass. After both queue calls finished,
+drain passed and freed the target while the last caller could still be returning.
+ASan/UBSan reported no errors. A deliberately incorrect variant releasing before
+notification was rejected by assertions for premature zero references or a join
+before queue completion. The [complete review packet](admission-wake-lifetime-review.json.gz)
+contains source, exact candidate/body hashes, driver and captured results.
+
+This strengthens the multiple-caller/final-release coverage beyond the original
+single-tail native probe. It does not execute Linux workqueues, prove the full
+map/admission gate, qualify weak-memory hosts, or replace kernel fault/suspend/
+ID36 coverage. Product C and the frozen pilot sources are unchanged. The
+competing host workload was still active; no performance sampling was repeated.
