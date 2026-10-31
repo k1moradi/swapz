@@ -254,6 +254,8 @@ class PublicMakeContract(unittest.TestCase):
                     "write_pipeline_depth": 1,
                     "pipeline_active_max": 1 if mode else 0,
                     "read_coalesce_max_blocks": 8,
+                    "work_conserving_hand_records":
+                        runner_contract.PRODUCTION_WORK_CONSERVING_HAND_RECORDS,
                     "lz4_wall_ns": 20000000,
                     "ordered_lz4_wall_ns": 15000000,
                     "prep_lz4_wall_ns": 5000000,
