@@ -1660,19 +1660,23 @@ RAW_SELECTED and a late compressed result is discarded. READY state observation
 is acquire-ordered.
 
 The ordered worker may force an unclaimed accepted WRITE to RAW only while the
-lower WRITE path is actually idle, before the first eight-record pressure hand,
-and only when the active batch plus unclaimed preparation queue already prove at
-least eight records of accepted backlog. For retained operation, the current
-effective learned/sampled target must also be no larger than that pressure hand;
-if policy will keep the wave open beyond eight records, forcing an early record
-RAW cannot start lower I/O and only sacrifices compression. Non-retained
+lower WRITE path is actually idle, before the selected pressure hand, and only
+when the active batch plus unclaimed preparation queue already prove at least
+that many accepted records. Production/default selects eight records; the
+owned-null_blk development A/B may select 16 or 64. For retained operation, the
+current effective learned/sampled target must also be no larger than that
+pressure hand; if policy will keep the wave open beyond the selected hand,
+forcing an early record RAW cannot start lower I/O and only sacrifices
+compression. Non-retained
 operation remains immediately dispatchable. QD1/QD4 and later records in a
 larger wave therefore retain their inline compression opportunity. Once K=1 is
 in flight, remaining accepted work keeps its compression opportunity so
 producer/ordered preparation can overlap lower service.
 
-Eight records are the minimum pressure hand, not a maximum run size. The worker
-refreshes accepted followers from incoming before evaluating local readiness.
+Eight records are the qualified production pressure hand, not a maximum run
+size. The development selector may raise that hand to 16 or 64 without changing
+the four-record floor. The worker refreshes accepted followers from incoming
+before evaluating local readiness.
 A retained work-conserving hand may not split an already-accepted plain-WRITE
 FIFO below the effective learned/sampled target merely because the next
 representation is not READY. When the accepted FIFO is genuinely dry, an
