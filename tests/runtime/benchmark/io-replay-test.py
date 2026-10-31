@@ -1620,6 +1620,48 @@ class PairReplayContract(unittest.TestCase):
                         "--hand-records", "16", "--shared-plan", "/plan"])
         self.assertNotIn("--hand-records", fast.scenario_arguments(
             "fast-w32", "/plan"))
+        arms = {
+            "off": {
+                "throughput_mbps": {
+                    "logical_write_mbps": 80.0,
+                    "logical_read_mbps": 0.0,
+                    "logical_write_bytes": 4096 * 4096,
+                },
+                "lower_io": {
+                    "lower_write_bytes": 4096 * 4096,
+                    "lower_write_requests": 4096,
+                },
+                "read_p99_ns": 0,
+                "write_p99_ns": 1000000,
+            },
+            "swapz": {
+                "throughput_mbps": {
+                    "logical_write_mbps": 96.0,
+                    "logical_read_mbps": 0.0,
+                    "logical_write_bytes": 4096 * 4096,
+                },
+                "lower_io": {
+                    "lower_write_bytes": 12 * 1024 * 1024,
+                    "lower_write_requests": 400,
+                },
+                "read_p99_ns": 0,
+                "write_p99_ns": 1200000,
+                "seconds": 1.0,
+                "kernel_write_path": {
+                    "windows": 390,
+                    "work_conserving_hand_records": 16,
+                    "work_conserving_hand_closes": 200,
+                    "lower_write_service_ewma_ns": 300000,
+                    "lower_write_block_service_ewma_ns": 150000,
+                },
+            },
+        }
+        summary = fast.summarize("fast-w32", arms, 2.0)
+        self.assertEqual(summary["hand_records"], 16)
+        self.assertEqual(summary["hand_closes"], 200)
+        self.assertAlmostEqual(summary["pages_per_lower_write"], 10.24)
+        self.assertEqual(summary["service_us"], 300.0)
+        self.assertEqual(summary["block_service_us"], 150.0)
 
     def test_sustained_write_uses_persistent_lane_owned_streams(self):
         with tempfile.TemporaryDirectory() as temp:
