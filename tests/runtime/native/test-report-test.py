@@ -825,7 +825,7 @@ def lz4_acceleration_log():
             26.0 if acceleration == 1 else 27.0)
         swapz["write_p99_ns"] = 4_000_000 if acceleration == 1 else 3_800_000
         kernel = swapz["kernel_write_path"]
-        kernel["delta64_rescue"] = 0  # retired LZ4 A/B pins LZ4-only arms
+        kernel["delta64_rescue"] = runner.PRODUCTION_DELTA64_RESCUE
         kernel["lz4_acceleration"] = acceleration
         kernel["lz4_wall_ns"] = 1_000_000 if acceleration == 1 else 800_000
         kernel["ordered_lz4_wall_ns"] = (
@@ -2160,7 +2160,7 @@ class ReportContract(unittest.TestCase):
             del missing[field]
             self.assertIsNotNone(runner.timed_window_error(missing))
         zero["delta64_rescue"] = 0
-        self.assertIsNone(runner.timed_window_error(zero))
+        self.assertIsNotNone(runner.timed_window_error(zero))
         missing = dict(zero)
         del missing["delta64_rescue"]
         self.assertIsNotNone(runner.timed_window_error(missing))
@@ -2169,9 +2169,6 @@ class ReportContract(unittest.TestCase):
             headers, [("async", "10", "0", "0", "0", "0", "0")])
         self.assertIn("No delta64 payload was adopted", interpretation)
         self.assertIn("no loaded delta64 savings evidence", interpretation)
-        disabled_headers = ("mode", "rescue", *headers[1:])
-        self.assertIn("disabled", runner._table_interpretation(
-            disabled_headers, [("async", "off", "0", "0", "0", "0", "0", "0")]))
         self.assertIn("not committed mappings", runner._table_interpretation(
             headers, [("async", "10", "5", "5", "3", "1", "2")]))
 
@@ -2290,8 +2287,10 @@ class ReportContract(unittest.TestCase):
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
             "lz4_acceleration": runner.lz4_acceleration_verdict(
                 runner.parse_lz4_acceleration(synthetic_log())),
-            "delta64_rescue": runner.delta64_rescue_verdict(
-                runner.parse_delta64_rescue_sessions(synthetic_log())),
+            "delta64_rescue": {
+                "overall": "NOT_RUN",
+                "reason": "retired; production delta64+DELTA64_SHUF8+LZ4 is fixed on",
+            },
             "delta64_prepare": runner.delta64_prepare_verdict(
                 runner.parse_delta64_prepare_sessions(synthetic_log())),
             "write_saturation": saturation,
