@@ -230,23 +230,6 @@ static inline int swapz_window_pack_ready(
  * four-record floor; a transient two/three-record deadline must not recreate
  * first-pack chopping. QD1 remains separate.
  */
-/*
- * ID161 development candidate: skip compression only after the retained
- * singleton policy has already observed two complete one-record deadline
- * opportunities with no companion. The caller supplies authoritative queue
- * observations taken under queue_lock. This predicate never predicts future
- * arrivals, changes ownership or authorizes a fence-bearing WRITE.
- */
-static inline int swapz_window_lone_raw_candidate(
-		int enabled, int learned_singleton, int bulk_raw_eligible,
-		int lower_idle, swapz_u8 batch_count, swapz_u32 preparation_queued,
-		int local_tail, int incoming_empty, int plain_write)
-{
-	return enabled && learned_singleton && bulk_raw_eligible && lower_idle &&
-		!batch_count && preparation_queued == 1U && local_tail &&
-		incoming_empty && plain_write;
-}
-
 static inline swapz_u8 swapz_window_initial_burst_target(swapz_u8 max_window)
 {
 	if (!max_window)
