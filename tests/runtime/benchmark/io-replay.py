@@ -940,7 +940,7 @@ def wait_for_external_start_gate(ready_file, start_file):
         try:
             state = os.lstat(start)
         except FileNotFoundError:
-            time.sleep(0.002)
+            time.sleep(0.0005)
             continue
         if not stat.S_ISREG(state.st_mode):
             raise ValueError("external start gate is not a regular file")
@@ -997,7 +997,6 @@ def run_native_replay(fd, fixture_fd, trace, manifest, path, identity,
                 raise ValueError(
                     "native replay failed before measurement: " +
                     (stderr or ready or "no READY marker"))
-            wait_for_external_start_gate(ready_file, start_file)
             sampler.start()
             sampler_active = True
             kernel_write_profile_epoch(path, identity)
@@ -1005,6 +1004,10 @@ def run_native_replay(fd, fixture_fd, trace, manifest, path, identity,
             kernel_write_before = kernel_write_snapshot(path, identity)
             kernel_read_before = kernel_read_snapshot(path, identity)
             host_before = host_cpu_snapshot()
+            # Striped development runs release all targets together only after
+            # every replay has finished its pre-measurement dmsetup snapshots;
+            # otherwise swapz-only subprocess latency staggers stripe starts.
+            wait_for_external_start_gate(ready_file, start_file)
             measured_start_ns = sampler.begin()
             proc.stdin.write("GO\n")
             proc.stdin.flush()

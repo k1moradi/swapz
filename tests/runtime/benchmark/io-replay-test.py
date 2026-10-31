@@ -1433,6 +1433,56 @@ class PairReplayContract(unittest.TestCase):
                 replay["wait_for_external_start_gate"](
                     open_dir / "ready", open_dir / "start")
 
+    def test_striped_helper_targets_satisfy_replay_owned_checks(self):
+        """The loaded swapz arm validates UUID shape and exact mapped size.
+
+        CI cannot run the privileged striped helper, so pin the helper's
+        mapper contract against the replay's own validators instead.
+        """
+        import re
+        import runpy
+        replay = runpy.run_path(str(SCRIPT))
+        source = SCRIPT.read_text()
+        helper = (SCRIPT.parents[2] / "tools/benchmark-striped-owned.sh").read_text()
+        uuid_pattern = re.search(
+            r're\.fullmatch\(\s*r"(SWAPZ-TEST-[^"]+)",\s*args\.expected_dm_uuid',
+            source).group(1)
+        template = re.search(r'^\s*uuid="([^"]+)"', helper, re.M).group(1)
+        self.assertIsNotNone(re.fullmatch(
+            uuid_pattern, template.replace("$token", "0123456789abcdef")))
+        self.assertNotIn("0 8192 swapz", helper)
+        table = re.search(r'^\s*table="([^"]+)"', helper, re.M).group(1)
+        self.assertTrue(table.startswith("0 $STRIPE_SECTORS swapz "))
+        self.assertIn('["logical_pages"]', helper)
+        # The replay's own table validator accepts one stripe of each count.
+        for stripes in (1, 2, 4):
+            pages = 1024 // stripes
+            row = table.replace("$STRIPE_SECTORS", str(pages * 8)).replace(
+                "${LOWERS[lower_index]}", "251:7")
+            replay["validate_swapz_table"](row, pages, "251:7", "nullb7")
+
+    def test_external_start_gate_follows_all_pre_measurement_work(self):
+        import ast
+        tree = ast.parse(SCRIPT.read_text())
+        body = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                    and node.name == "run_native_replay")
+        calls = [node.func.id if isinstance(node.func, ast.Name) else
+                 node.func.attr for node in ast.walk(body)
+                 if isinstance(node, ast.Call) and
+                 isinstance(node.func, (ast.Name, ast.Attribute))]
+        lines = {name: min(node.lineno for node in ast.walk(body)
+                           if isinstance(node, ast.Call) and
+                           getattr(node.func, "id", getattr(node.func, "attr", None)) == name)
+                 for name in ("wait_for_external_start_gate",
+                              "kernel_write_profile_epoch",
+                              "kernel_write_snapshot", "kernel_read_snapshot",
+                              "host_cpu_snapshot", "begin")}
+        self.assertEqual(calls.count("wait_for_external_start_gate"), 1)
+        for earlier in ("kernel_write_profile_epoch", "kernel_write_snapshot",
+                        "kernel_read_snapshot", "host_cpu_snapshot"):
+            self.assertLess(lines[earlier], lines["wait_for_external_start_gate"])
+        self.assertLess(lines["wait_for_external_start_gate"], lines["begin"])
+
     def test_fast_striped_plan_split_reconstructs_parent_trace(self):
         import importlib.util
         import runpy

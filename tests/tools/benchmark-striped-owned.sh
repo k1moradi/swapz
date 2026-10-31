@@ -335,13 +335,28 @@ OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
     fail 'swapz target registration missing'
 
+# io-replay.py requires the swapz mapping to be exactly the stripe's logical
+# working range and accepts only SWAPZ-TEST-<16 hex> trial UUIDs.
+STRIPE_SECTORS="$(python3 -B - "$SESSION/plans" "$STRIPES" <<'PY'
+import json, sys
+from pathlib import Path
+root, stripes = Path(sys.argv[1]), int(sys.argv[2])
+pages = {json.loads((root / str(i) / "manifest.json").read_text())["logical_pages"]
+         for i in range(stripes)}
+if len(pages) != 1 or next(iter(pages)) <= 0:
+    raise SystemExit("striped child plans disagree on logical pages")
+print(next(iter(pages)) * 4096 // 512)
+PY
+)" || fail 'cannot derive striped logical range'
+[[ $STRIPE_SECTORS =~ ^[1-9][0-9]*$ ]] && (( STRIPE_SECTORS <= 8192 )) ||
+    fail 'striped logical range invalid or larger than the canonical 8192 sectors'
 for (( stripe=0; stripe<STRIPES; ++stripe )); do
     token="$(od -An -N8 -tx1 /dev/urandom | tr -d '[:space:]')"
     [[ $token =~ ^[a-f0-9]{16}$ ]] || fail 'random mapper identity invalid'
     name="swapz-stripe-$token-$stripe"
-    uuid="SWAPZ-STRIPE-$token-$stripe"
+    uuid="SWAPZ-TEST-$token"
     lower_index=$(( STRIPES + stripe ))
-    table="0 8192 swapz ${LOWERS[lower_index]} 0 64 0 2 0 1 0 2"
+    table="0 $STRIPE_SECTORS swapz ${LOWERS[lower_index]} 0 64 0 2 0 1 0 2"
     dmsetup create "$name" --uuid "$uuid" --table "$table" ||
         fail 'striped swapz mapper creation failed'
     OWN_DMS[stripe]=1
