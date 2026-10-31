@@ -2705,3 +2705,11 @@ whole-worker/lifecycle qualification. The [fixed ID165 pilot](handoff/submitter-
 rejected this specific change: lower idle or more early hands cannot override
 failed useful-service or lower-request guards. Keep rejected C/probes only in
 local experiment artifacts and immutable history, outside active product code.
+
+Submitter wake-suppression experiments must test release before the worker's
+locked ownership recheck, during FIFO handback and after handback. A negative
+control removing that recheck must fail the lost-wake assertion. Controlled
+interleavings do not replace LKMM/concurrency and loaded lifecycle gates. The
+[ID166 queued-head pilot](handoff/submitter-queued-wake-oldpc-result.md) is removed
+without a service gain; its preserved empty-incoming wake is not evidence for
+suppressing wakes while the ordered worker owns a private local FIFO.
