@@ -723,26 +723,10 @@ def delta64_prepare_arm(workers):
     return record
 
 
-def delta64_rescue_arm(enabled):
-    if enabled:
-        record = delta64_prepare_arm(1)
-        record["throughput_mbps"]["logical_write_mbps"] = 20.0
-        record["write_p99_ns"] = 2_300_000
-    else:
-        # The A/B off arm is pinned with --no-delta64-rescue.
-        record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
-        record["kernel_write_path"]["delta64_rescue"] = 0
-        record["kernel_write_path"]["delta64_prepare_workers"] = 1
-    record["kernel_write_path"]["delta64_lz4_acceleration"] = 4
-    record["fixture_sha256"] = "e" * 64
-    record["trace_sha256"] = "f" * 64
-    return record
-
-
 def write_pipeline_arm(depth):
     record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=1)
     kernel = record["kernel_write_path"]
-    kernel["delta64_rescue"] = 0  # retired depth A/B pins LZ4-only arms
+    kernel["delta64_rescue"] = runner.PRODUCTION_DELTA64_RESCUE
     kernel["write_pipeline_depth"] = depth
     kernel["pipeline_active_max"] = depth
     if depth == 2:
@@ -754,12 +738,12 @@ def write_pipeline_arm(depth):
     return record
 
 
-def storage_envelope_arm(candidate, *, envelope, delta64_rescue):
+def storage_envelope_arm(candidate, *, envelope):
     swapz = candidate == "swapz"
     spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
     cap = spec["cap_mib_s"]
     raw = min(cap, 50.0)
-    swapz_rate = raw * (1.1 if delta64_rescue else 1.05)
+    swapz_rate = raw * 1.1
     logical = 4096 * 4096
     lower = int(logical / 1.5) if swapz else logical
     record = {
@@ -793,7 +777,10 @@ def storage_envelope_arm(candidate, *, envelope, delta64_rescue):
             field: 0 for field in runner.KERNEL_WRITE_FIELDS
         }
         record["kernel_write_path"].update({
-            "delta64_rescue": delta64_rescue,
+            "delta64_rescue": runner.PRODUCTION_DELTA64_RESCUE,
+            "delta64_lz4_acceleration":
+                runner.PRODUCTION_DELTA64_LZ4_ACCELERATION,
+            "lz4_acceleration": 1,
             "work_conserving_hand_records":
                 runner.PRODUCTION_WORK_CONSERVING_HAND_RECORDS,
             "prep_lower_write_samples": 10,
@@ -838,7 +825,7 @@ def lz4_acceleration_log():
             26.0 if acceleration == 1 else 27.0)
         swapz["write_p99_ns"] = 4_000_000 if acceleration == 1 else 3_800_000
         kernel = swapz["kernel_write_path"]
-        kernel["delta64_rescue"] = 0  # retired LZ4 A/B pins LZ4-only arms
+        kernel["delta64_rescue"] = runner.PRODUCTION_DELTA64_RESCUE
         kernel["lz4_acceleration"] = acceleration
         kernel["lz4_wall_ns"] = 1_000_000 if acceleration == 1 else 800_000
         kernel["ordered_lz4_wall_ns"] = (
@@ -885,19 +872,18 @@ def synthetic_log():
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
     for envelope in runner.STORAGE_ENVELOPE_ORDER:
         envelope_spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
-        for delta64_rescue in (0, 1):
-            out.append(f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={delta64_rescue}")
-            out.append("REPLAY_ORDER=off-first")
-            out.append(
-                "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
-                "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
-                "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
-                "HW_QUEUE_DEPTH={hw_queue_depth}".format(**envelope_spec))
-            off = storage_envelope_arm("off", envelope=envelope, delta64_rescue=delta64_rescue)
-            swapz = storage_envelope_arm("swapz", envelope=envelope, delta64_rescue=delta64_rescue)
-            out.append(json.dumps(off))
-            out.append(json.dumps(swapz))
-            out.append(f"PASS_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={delta64_rescue}")
+        out.append(f"START_STORAGE_ENVELOPE={envelope}")
+        out.append("REPLAY_ORDER=off-first")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**envelope_spec))
+        off = storage_envelope_arm("off", envelope=envelope)
+        swapz = storage_envelope_arm("swapz", envelope=envelope)
+        out.append(json.dumps(off))
+        out.append(json.dumps(swapz))
+        out.append(f"PASS_STORAGE_ENVELOPE={envelope}")
     out.extend(lz4_acceleration_log())
     for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
         out.append(f"START_READ_COALESCE_AB={enabled}")
@@ -976,22 +962,6 @@ def synthetic_log():
                 out.append(json.dumps(record))
             out.append(f"PASS_READ_COALESCE_CAP_AB={regime}:{read_cap}")
     spec = runner.MODEL_SPECS["ssd_emulated"]
-    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
-        out.append(f"START_DELTA64_RESCUE={enabled}")
-        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
-                   "REPLAY_ORDER=off-first")
-        out.append(
-            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
-            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
-            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
-            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
-        off = write_arm("off", qd=32, regime="ssd_emulated", mode=0)
-        off["fixture_sha256"] = "e" * 64
-        off["trace_sha256"] = "f" * 64
-        swapz = delta64_rescue_arm(enabled)
-        for record in ((swapz, off) if index % 2 else (off, swapz)):
-            out.append(json.dumps(record))
-        out.append(f"PASS_DELTA64_RESCUE={enabled}")
     delta64_sequence = [2 if bit else 1
                         for bit in runner.CONFIRMATION_SEQUENCE]
     for index, workers in enumerate(delta64_sequence):
@@ -1097,7 +1067,7 @@ class ReportContract(unittest.TestCase):
         swapz = {**raw, "input_write_mbps": 150, "swap_in_read_mbps": 60,
                  "swap_in_read_p99_ms": 2, "write_p99_ms": 4,
                  "lower_write_bytes": 700, "lower_write_requests": 20,
-                 "kernel_write_path": {"delta64_rescue": 0}}
+                 "kernel_write_path": {"delta64_rescue": 1}}
         session = {"status": "PASS", "async_prepare": 1, "regime": "sd_emulated",
                    "device_model": {"cap_mib_s": 10}, "arms": {"off": raw, "swapz": swapz}}
         report = {"overall": "PASS", "tested_commit_sha": "source", "kernel_release": "kernel",
@@ -1129,13 +1099,10 @@ class ReportContract(unittest.TestCase):
         bad = copy.deepcopy(report)
         bad["benchmarks"]["sessions"][0]["async_prepare"] = 0
         self.assertEqual(history.report_points(bad), [])
-        on = copy.deepcopy(report)
-        on["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
-        on_points = history.report_points(on)
-        self.assertEqual(len(on_points), 1)
-        self.assertEqual(on_points[0]["workload"], "mixed QD32, delta64 on")
-        self.assertEqual(points[0]["workload"], "mixed QD32, delta64 off")
-        self.assertNotEqual(on_points[0]["compatibility"], points[0]["compatibility"])
+        self.assertEqual(points[0]["workload"], "mixed QD32")
+        off_policy = copy.deepcopy(report)
+        off_policy["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
+        self.assertEqual(history.report_points(off_policy), [])
         bad = copy.deepcopy(report)
         bad["benchmarks"]["sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = None
         self.assertEqual(history.report_points(bad), [])
@@ -1153,15 +1120,11 @@ class ReportContract(unittest.TestCase):
         sustained["benchmarks"]["write_saturation"]["replay_mode"] = "qd-waves"
         self.assertEqual(len(history.report_points(sustained)), 1)
         sustained["benchmarks"]["write_saturation"]["replay_mode"] = "persistent-write"
-        off_write = history.report_points(sustained)[-1]
-        write_session["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 1
-        on_write = history.report_points(sustained)
-        self.assertEqual(len(on_write), 2)
-        self.assertNotEqual(on_write[-1]["compatibility"], off_write["compatibility"])
-        mixed = copy.deepcopy(write_session)
-        mixed["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
-        sustained["benchmarks"]["write_saturation_sessions"].append(mixed)
-        self.assertEqual(len(history.report_points(sustained)), 1)
+        production_write = history.report_points(sustained)[-1]
+        self.assertEqual(production_write["workload"], "persistent WRITE")
+        off_policy_write = copy.deepcopy(sustained)
+        off_policy_write["benchmarks"]["write_saturation_sessions"][0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
+        self.assertEqual(len(history.report_points(off_policy_write)), 1)
 
     def test_x86_history_requires_audited_reports_and_separate_isa_profile(self):
         import copy
@@ -1432,32 +1395,36 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("/dev/sdb", loaded)
 
     def test_storage_envelopes_report_capture_and_qd_limited_ceiling(self):
+        import copy
+
         lines = []
         for envelope in runner.STORAGE_ENVELOPE_ORDER:
             spec = runner.STORAGE_ENVELOPE_SPECS[envelope]
-            for rescue in (0, 1):
-                raw = arm("off", mode=1, regime="ssd_emulated")
-                swapz = arm("swapz", mode=1, regime="ssd_emulated")
-                raw["replay_engine"] = "native-c"
-                swapz["replay_engine"] = "native-c"
-                swapz["kernel_write_path"]["delta64_rescue"] = rescue
-                lines.extend((
-                    f"START_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={rescue}",
-                    "PASS_RAM_MODEL_LOWER_MBPS="
-                    f"{spec['cap_mib_s']} COMPLETION_NSEC={spec['completion_nsec']} "
-                    f"IRQMODE={spec['irqmode']} QUEUE_MODE={spec['queue_mode']} "
-                    f"SUBMIT_QUEUES={spec['submit_queues']} "
-                    f"HW_QUEUE_DEPTH={spec['hw_queue_depth']}",
-                    json.dumps(raw),
-                    json.dumps(swapz),
-                    f"PASS_STORAGE_ENVELOPE={envelope} DELTA64_RESCUE={rescue}",
-                ))
+            raw = arm("off", mode=1, regime="ssd_emulated")
+            swapz = arm("swapz", mode=1, regime="ssd_emulated")
+            raw["replay_engine"] = "native-c"
+            swapz["replay_engine"] = "native-c"
+            kernel = swapz["kernel_write_path"]
+            kernel["delta64_rescue"] = runner.PRODUCTION_DELTA64_RESCUE
+            kernel["delta64_lz4_acceleration"] = runner.PRODUCTION_DELTA64_LZ4_ACCELERATION
+            kernel["lz4_acceleration"] = 1
+            lines.extend((
+                f"START_STORAGE_ENVELOPE={envelope}",
+                "PASS_RAM_MODEL_LOWER_MBPS="
+                f"{spec['cap_mib_s']} COMPLETION_NSEC={spec['completion_nsec']} "
+                f"IRQMODE={spec['irqmode']} QUEUE_MODE={spec['queue_mode']} "
+                f"SUBMIT_QUEUES={spec['submit_queues']} "
+                f"HW_QUEUE_DEPTH={spec['hw_queue_depth']}",
+                json.dumps(raw),
+                json.dumps(swapz),
+                f"PASS_STORAGE_ENVELOPE={envelope}",
+            ))
         sessions = runner.parse_storage_envelope_sessions("\n".join(lines))
-        self.assertEqual(len(sessions), 8)
+        self.assertEqual(len(sessions), 4)
         verdict = runner.storage_envelope_verdict(sessions)
         self.assertEqual(
             verdict["overall"], "PASS_DIRECTIONAL_STORAGE_ENVELOPES")
-        self.assertEqual(len(verdict["rows"]), 8)
+        self.assertEqual(len(verdict["rows"]), 4)
         for row in verdict["rows"]:
             spec = runner.STORAGE_ENVELOPE_SPECS[row["envelope"]]
             self.assertEqual(
@@ -1469,6 +1436,7 @@ class ReportContract(unittest.TestCase):
                 row["bandwidth_opportunity_capture_fraction"], 0.0)
             self.assertAlmostEqual(row["post_lower_hold_fraction"], 0.004)
             self.assertEqual(row["replay_engine"], "native-c")
+            self.assertEqual(row["delta64_rescue"], 1)
 
         bad = [dict(session) for session in sessions]
         bad[0] = dict(bad[0], arms={
@@ -1478,6 +1446,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             runner.storage_envelope_verdict(bad)["overall"], "INCONCLUSIVE")
 
+        wrong_policy = copy.deepcopy(sessions)
+        wrong_policy[0]["arms"]["swapz"]["kernel_write_path"]["delta64_rescue"] = 0
+        self.assertEqual(
+            runner.storage_envelope_verdict(wrong_policy)["overall"], "INCONCLUSIVE")
 
     def test_predictor_evidence_is_sanitized(self):
         raw = predictor_evidence()
@@ -1829,21 +1801,6 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             sd_coalesce_diag["modes"]["1"]["sequential"][
                 "parallel_read_coalesce_skip_other"], 0)
-
-        delta64_rescue = runner.parse_delta64_rescue_sessions(
-            synthetic_log())
-        self.assertEqual([row["rescue"] for row in delta64_rescue],
-                         list(runner.CONFIRMATION_SEQUENCE))
-        rescue_diag = runner.delta64_rescue_verdict(delta64_rescue)
-        self.assertEqual(rescue_diag["overall"],
-                         "PASS_DELTA64_RESCUE_AB", rescue_diag)
-        self.assertEqual(rescue_diag["matched_pairs"], 5)
-        self.assertEqual(rescue_diag["modes"]["0"]["delta64_attempts"], 0)
-        self.assertGreater(rescue_diag["modes"]["1"]["delta64_attempts"], 0)
-        self.assertIn("throughput_change_fraction", rescue_diag["paired"])
-        self.assertEqual(
-            rescue_diag["interpretation"],
-            "SAME_SOURCE_K1_DELTA64_RESCUE_OFF_ON_POSITIVE_FIXTURE_SECOND_LZ4_ACCEL4")
 
         write_depth = runner.parse_write_pipeline_depth(synthetic_log())
         self.assertEqual(
@@ -2203,7 +2160,7 @@ class ReportContract(unittest.TestCase):
             del missing[field]
             self.assertIsNotNone(runner.timed_window_error(missing))
         zero["delta64_rescue"] = 0
-        self.assertIsNone(runner.timed_window_error(zero))
+        self.assertIsNotNone(runner.timed_window_error(zero))
         missing = dict(zero)
         del missing["delta64_rescue"]
         self.assertIsNotNone(runner.timed_window_error(missing))
@@ -2212,9 +2169,6 @@ class ReportContract(unittest.TestCase):
             headers, [("async", "10", "0", "0", "0", "0", "0")])
         self.assertIn("No delta64 payload was adopted", interpretation)
         self.assertIn("no loaded delta64 savings evidence", interpretation)
-        disabled_headers = ("mode", "rescue", *headers[1:])
-        self.assertIn("disabled", runner._table_interpretation(
-            disabled_headers, [("async", "off", "0", "0", "0", "0", "0", "0")]))
         self.assertIn("not committed mappings", runner._table_interpretation(
             headers, [("async", "10", "5", "5", "3", "1", "2")]))
 
@@ -2316,67 +2270,6 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("Simulated extent placement geometry", rendered)
         self.assertLess(len(rendered.splitlines()), 16)
 
-    def test_delta64_rescue_accepts_real_submitter_preparation(self):
-        # ID150 can own every prepared page. Exercise the same reporter
-        # verdict on matched positive fixtures with background prep at zero.
-        def sessions_with_submitter_preparation():
-            sessions = runner.parse_delta64_rescue_sessions(synthetic_log())
-            for session in sessions:
-                if not session["rescue"]:
-                    continue
-                kernel = session["arms"]["swapz"]["kernel_write_path"]
-                kernel.update({
-                    "delta64_prepare_pages": 0,
-                    "submitter_prepare": 1,
-                    "submitter_prepare_lanes": 8,
-                    "submitter_prepare_active": 0,
-                    "submitter_prepare_active_max": 1,
-                    "submitter_prepare_claims": 100,
-                    "submitter_prepare_pages": 100,
-                    "submitter_prepare_wall_ns": 100000,
-                    "submitter_copy_wall_ns": 20000,
-                    "submitter_copy_bytes": 100 * 4096,
-                })
-                kernel["write_copy_wall_ns"] += 20000
-                kernel["write_copy_bytes"] += 100 * 4096
-            return sessions
-
-        sessions = sessions_with_submitter_preparation()
-        self.assertEqual(
-            runner.delta64_rescue_verdict(sessions)["overall"],
-            "PASS_DELTA64_RESCUE_AB")
-        # Neither placement path may make a zero-work rescue arm pass.
-        for session in sessions:
-            if session["rescue"]:
-                kernel = session["arms"]["swapz"]["kernel_write_path"]
-                kernel["submitter_prepare_pages"] = 0
-                kernel["submitter_copy_bytes"] = 0
-                kernel["submitter_copy_wall_ns"] = 0
-                kernel["write_copy_bytes"] -= 100 * 4096
-                kernel["write_copy_wall_ns"] -= 20000
-        self.assertEqual(
-            runner.delta64_rescue_verdict(sessions)["overall"],
-            "INCOMPLETE")
-        # Positive submitted pages with missing classifier/adoption evidence
-        # still fail even though the submitter lane was active.
-        sessions = sessions_with_submitter_preparation()
-        for session in sessions:
-            if session["rescue"]:
-                session["arms"]["swapz"]["kernel_write_path"][
-                    "delta64_adopted"] = 0
-        self.assertEqual(
-            runner.delta64_rescue_verdict(sessions)["overall"],
-            "INCOMPLETE")
-        # Existing global telemetry checks reject unowned/missing activity.
-        sessions = sessions_with_submitter_preparation()
-        for session in sessions:
-            if session["rescue"]:
-                session["arms"]["swapz"]["kernel_write_path"][
-                    "submitter_prepare_claims"] = 0
-        self.assertEqual(
-            runner.delta64_rescue_verdict(sessions)["overall"],
-            "INCOMPLETE")
-
     def test_benchmark_console_is_compact_and_keeps_sync_control(self):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
@@ -2394,8 +2287,10 @@ class ReportContract(unittest.TestCase):
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
             "lz4_acceleration": runner.lz4_acceleration_verdict(
                 runner.parse_lz4_acceleration(synthetic_log())),
-            "delta64_rescue": runner.delta64_rescue_verdict(
-                runner.parse_delta64_rescue_sessions(synthetic_log())),
+            "delta64_rescue": {
+                "overall": "NOT_RUN",
+                "reason": "retired; production delta64+DELTA64_SHUF8+LZ4 is fixed on",
+            },
             "delta64_prepare": runner.delta64_prepare_verdict(
                 runner.parse_delta64_prepare_sessions(synthetic_log())),
             "write_saturation": saturation,
@@ -2421,9 +2316,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("LZ4 acceleration 1 vs 4", rendered)
         self.assertIn("Acceleration 4 minus 1 paired 95% confidence intervals",
                       rendered)
-        self.assertIn("Delta64 rescue off vs on", rendered)
-        self.assertIn("Rescue on minus off paired 95% confidence intervals",
-                      rendered)
+        self.assertNotIn("Delta64 rescue off vs on", rendered)
+        self.assertNotIn("Rescue on minus off paired 95% confidence intervals",
+                         rendered)
         self.assertIn("Delta64 preparation K=1 vs K=2", rendered)
         self.assertIn("K=2 minus K=1 paired 95% confidence intervals",
                       rendered)

@@ -107,7 +107,7 @@ def paired_inputs_match(session, source):
 
 
 def report_points(report):
-    """Keep async mixed sessions by rescue policy; separate persistent WRITE QDs."""
+    """Keep only production-on async mixed sessions and persistent WRITE QDs."""
     if report.get("overall") != "PASS":
         return []
     benchmarks = report.get("benchmarks", {})
@@ -118,17 +118,12 @@ def report_points(report):
         if session.get("status") != "PASS":
             continue
         envelope = session.get("envelope")
-        if envelope:
-            if session.get("delta64_rescue") != 0:
-                continue
-        elif session.get("async_prepare") != 1:
+        if not envelope and session.get("async_prepare") != 1:
             continue
         arms = session.get("arms", {})
         raw, swapz = arms.get("off", {}), arms.get("swapz", {})
-        # Delta64 policy is part of series identity: the production default
-        # changed to rescue-on, so never join it to LZ4-only history.
-        delta64 = (swapz.get("kernel_write_path") or {}).get("delta64_rescue")
-        if delta64 not in (0, 1):
+        # Current history intentionally excludes historical delta64-off runs.
+        if (swapz.get("kernel_write_path") or {}).get("delta64_rescue") != 1:
             continue
         target = envelope or session.get("regime")
         if target not in TARGETS:
@@ -139,14 +134,13 @@ def report_points(report):
         # Never join different device geometry, content, replay or kernels.
         identity = (session.get("device_model"), fixture, trace,
                     raw.get("replay_engine"), raw.get("replay_mode"),
-                    report.get("kernel_release"), delta64)
+                    report.get("kernel_release"))
         compatibility = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         groups[(target, compatibility)].append((raw, swapz))
         metadata[(target, compatibility)] = {
             "device_model": json.dumps(identity[0], sort_keys=True),
             "fixture_sha256": fixture, "trace_sha256": trace,
-            "replay_engine": raw.get("replay_engine"), "replay_mode": raw.get("replay_mode"),
-            "delta64_rescue": delta64}
+            "replay_engine": raw.get("replay_engine"), "replay_mode": raw.get("replay_mode")}
 
     points = []
     fields = {
@@ -158,9 +152,8 @@ def report_points(report):
         "lower_write_requests": ("lower_write_requests", "lower_write_requests"),
     }
     for (target, compatibility), sessions in groups.items():
-        delta64 = metadata[(target, compatibility)]["delta64_rescue"]
         point = {"target": target,
-                 "workload": "mixed QD32, delta64 " + ("on" if delta64 else "off"),
+                 "workload": "mixed QD32",
                  "compatibility": compatibility, "observations": len(sessions),
                  **metadata[(target, compatibility)]}
         for metric, keys in fields.items():
@@ -188,16 +181,14 @@ def report_points(report):
                     continue
                 gain = change(row.get("swapz_write_mbps"), row.get("raw_write_mbps"))
                 identities = {json.dumps((s.get("device_model"), s.get("fixture_sha256"),
-                                          s.get("trace_sha256"), report.get("kernel_release"),
-                                          (s.get("arms", {}).get("swapz", {}).get(
-                                              "kernel_write_path") or {}).get("delta64_rescue")),
+                                          s.get("trace_sha256"), report.get("kernel_release")),
                                          sort_keys=True)
                               for s in benchmarks.get("write_saturation_sessions", [])
                               if s.get("status") == "PASS" and s.get("async_prepare") == 1 and
                               s.get("regime") == target and s.get("qd") == row["qd"] and
                               paired_inputs_match(s, source) and
                               (s.get("arms", {}).get("swapz", {}).get("kernel_write_path") or {}).get(
-                                  "delta64_rescue") in (0, 1) and
+                                  "delta64_rescue") == 1 and
                               all((s.get("arms", {}).get(arm) or {}).get("replay_mode") ==
                                   "persistent-write" for arm in ("off", "swapz"))}
                 if gain is not None and len(identities) == 1:
@@ -207,7 +198,6 @@ def report_points(report):
                                    "swapz_write_mbps": row["swapz_write_mbps"],
                                    "compatibility": hashlib.sha256(
                                        json.dumps(sorted(identities)).encode()).hexdigest(),
-                                   "delta64_rescue": json.loads(next(iter(identities)))[-1],
                                    "observations": row.get("observations")})
     return points
 
@@ -316,12 +306,7 @@ def render(data):
         for ax, (target, name) in zip(axes.flat, TARGETS.items()):
             rows = [r for r in data["points"] if r["target"] == target and r["workload"].startswith("mixed")]
             for metric, label, color, style in metrics:
-                for policy in (0, 1):
-                    selected = [r for r in rows if r["delta64_rescue"] == policy]
-                    if selected:
-                        draw_line(ax, selected, metric,
-                                  label + " · delta64 " + ("on" if policy else "off"),
-                                  color, style)
+                draw_line(ax, rows, metric, label, color, style)
             ax.axhline(0, color="#888888", linewidth=.8)
             ax.set_title(name)
             ax.set_xlim(.5, total + 1)
@@ -343,7 +328,7 @@ def render(data):
         scale_note = ("Absolute decimal MB/s; higher is better for both raw and swapz"
                       if filename == "mixed-throughput" else
                       "0% = raw parity · positive = improvement")
-        fig.text(.5, .025, "Async mixed; delta64 on/off shown separately · " + scale_note + "\n"
+        fig.text(.5, .025, "Async mixed; production delta64+DELTA64_SHUF8+LZ4 only · " + scale_note + "\n"
                  "Matched-arm means; panel scales differ. READ is mixed-load service. Line breaks = kernel/model/workload changes.\n"
                  "Historical host load varies; ratios are descriptive, not causal gains or physical NAND wear evidence.",
                  ha="center", fontsize=9, color="#555555")
@@ -357,12 +342,7 @@ def render(data):
             ax = axes[row_index, column]
             rows = [r for r in data["points"] if r["target"] == target and
                     r["workload"] == "persistent WRITE" and r["qd"] == qd]
-            for policy in (0, 1):
-                selected = [r for r in rows if r["delta64_rescue"] == policy]
-                if selected:
-                    draw_line(ax, selected, "write_mbps_gain_pct",
-                              "WRITE · delta64 " + ("on" if policy else "off"),
-                              "#1764ad")
+            draw_line(ax, rows, "write_mbps_gain_pct", "WRITE", "#1764ad")
             ax.axhline(0, color="#888888", linewidth=.8)
             ax.set_title(("Serial" if row_index == 0 else "Fast") + f" · QD{qd}")
             ax.grid(axis="y", alpha=.2)
@@ -427,9 +407,9 @@ def main():
     summary = ["# " + data["title"] + " performance history", "", data["scope"], "",
                f"{len(data['reports'])} passing report revisions; latest source "
                f"`{data['reports'][-1]['source_sha']}`. " + data["identity_note"], "",
-               "Each mixed point uses async sessions and its own raw controls; delta64-on and "
-               "delta64-off policies have separate labels and lines. Modern envelope mixed controls "
-               "remain LZ4-only; delta-positive write-only envelopes are a different workload and excluded. "
+               "Each mixed point uses async sessions and its own raw controls. Current history includes "
+               "only the production delta64+DELTA64_SHUF8+LZ4 policy; historical delta64-off sessions are "
+               "intentionally excluded rather than plotted as a separate series. "
                "Rates are ratios of matched-arm arithmetic means, so rounded percentages may differ "
                "slightly from the official report's differently pooled raw column. Positive means "
                "improvement; zero is raw parity. p99 and lower I/O use percent reduction. "

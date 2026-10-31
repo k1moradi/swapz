@@ -115,8 +115,6 @@ cleanup_shared_plan() {
             "$shared_plan/plan-write-qd$qd/manifest.json"
         rmdir -- "$shared_plan/plan-write-qd$qd" 2>/dev/null || true
     done
-    rm -f -- "$shared_plan/delta64/fixture.bin"         "$shared_plan/delta64/fixture.json"         "$shared_plan/delta64/plan-write-qd32/trace.jsonl"         "$shared_plan/delta64/plan-write-qd32/manifest.json"
-    rmdir -- "$shared_plan/delta64/plan-write-qd32"         "$shared_plan/delta64" 2>/dev/null || true
     for content in entropy balanced; do
         rm -f -- "$shared_plan/raw-read-$content/fixture.bin" \
             "$shared_plan/raw-read-$content/fixture.json" \
@@ -171,27 +169,8 @@ assert fixture["raw_pages"] == 0
 assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
 PY
 
-# Delta64 CPU-parallelism positive control. The fixture is deliberately
-# synthetic: every page is a 64-bit counter/timestamp-like sequence whose
-# adjacent deltas are small and nonzero. This makes classifier passes and
-# adoptions mandatory evidence instead of benchmarking worker overhead on the
-# historical medium fixture, which produced zero production rescue attempts.
-mkdir -p "$shared_plan/delta64"
-python3 -B tests/runtime/benchmark/anon-page-fixture.py     --output-prefix "$shared_plan/delta64/fixture" --pages 128     --seed 0x51a0a9 --weights delta64=100
-python3 -B tests/runtime/benchmark/io-replay.py prepare     --fixture "$shared_plan/delta64/fixture.bin"     --output-dir "$shared_plan/delta64/plan-write-qd32"     --logical-pages 1024 --writer-pages 256 --reader-start 512     --reader-pages 256 --qd 32 --read-pct 0     --warmup-ops 256 --measure-ops 4096 --iops 0 --sustained-write
-python3 -B - "$shared_plan/delta64/fixture.json" <<'PY'
-import json
-import sys
-with open(sys.argv[1], encoding="utf-8") as inp:
-    fixture = json.load(inp)
-assert fixture["pages"] == 128
-assert fixture["profile_pages"] == {"delta64": 128}
-assert fixture["lz4_size_buckets"] == {"2049_3072": 128}
-assert fixture["raw_pages"] == 0
-assert 2200 <= fixture["lz4_min_accepted_payload_bytes"]
-assert fixture["lz4_max_accepted_payload_bytes"] <= 2450
-PY
-
+# Delta64 + DELTA64_SHUF8 + LZ4 remains fixed on for every emulated-device
+# workload; the former positive-fixture off/on benchmark is retired.
 # Exercise the RAW-aware slots on cold reads as a correctness gate, separate
 # from the fixed medium performance matrix. The balanced case also decodes SWZ.
 printf '%s\n' 'START_LOADED_RAW_READ_FANOUT'
@@ -287,11 +266,10 @@ for regime in sd_emulated ssd_emulated; do
 done
 
 # Directional storage-service envelope sweep. These remain synthetic null_blk
-# models, not claims about a specific physical product. Each envelope runs the
-# same immutable mixed workload with production async preparation, then the
-# positive delta64 write-only fixture so reports can distinguish lower-byte
-# opportunity from CPU/serialization capture. QD32 is the offered concurrency;
-# the reporter therefore caps analytical 4KiB latency service at min(QD32, hwq).
+# models, not claims about a specific physical product. Every envelope uses the
+# same immutable medium mixed workload and the production-on delta64 +
+# DELTA64_SHUF8 + LZ4 stack. QD32 is the offered concurrency; the reporter caps
+# analytical 4KiB latency service at min(QD32, hwq).
 for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5; do
     case "$envelope" in
         sd_card)
@@ -312,55 +290,12 @@ for envelope in sd_card sata_ssd nvme_gen4 nvme_gen5; do
             ;;
         *) echo 'BLOCKED: unsupported storage service envelope' >&2; exit 2 ;;
     esac
-    for delta64_rescue in 0 1; do
-        arguments=(--run-owned-ram-pair --profile medium
-                   --retain-ms 2 --unpaced "${model_args[@]}")
-        if (( delta64_rescue )); then
-            # Suffix order mirrors benchmark-owned-pair.sh's bounded parser:
-            # shared plan, delta acceleration, rescue, async, write-only,
-            # completion, hwq, submit queues, then lower MiB/s.
-            arguments+=(--write-only-qd 32 --async-prepare
-                        --delta64-rescue --delta64-lz4-acceleration 4
-                        --shared-plan "$shared_plan/delta64")
-        else
-            # Explicit LZ4-only control row on the medium mixed fixture.
-            arguments+=(--async-prepare --no-delta64-rescue
-                        --shared-plan "$shared_plan")
-        fi
-        printf 'START_STORAGE_ENVELOPE=%s DELTA64_RESCUE=%s\n' \
-            "$envelope" "$delta64_rescue"
-        run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh \
-            --validated-source "$tested_source" "${arguments[@]}"
-        printf 'PASS_STORAGE_ENVELOPE=%s DELTA64_RESCUE=%s\n' \
-            "$envelope" "$delta64_rescue"
-    done
-done
-
-# Delta64 rescue confirmation at fixed K=1 with second-LZ4 acceleration 4.
-# Five counterbalanced off/on pairs reuse the exact positive delta64 fixture
-# and SSD RAM model; the off arm also carries acceleration 4.
-index=0
-for delta64_rescue in "${confirmation_modes[@]}"; do
-    arguments=(--run-owned-ram-pair --profile medium
-               --retain-ms 2 --unpaced
-               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
-               --write-only-qd 32 --async-prepare)
-    # benchmark-owned-pair.sh peels private suffixes from the tail:
-    # shared plan, workers, second-LZ4 acceleration, then rescue.
-    if (( delta64_rescue )); then
-        arguments+=(--delta64-rescue)
-    else
-        arguments+=(--no-delta64-rescue)
-    fi
-    arguments+=(--delta64-lz4-acceleration 4
-               --shared-plan "$shared_plan/delta64")
-    if (( index % 2 )); then
-        arguments+=(--swapz-first)
-    fi
-    printf 'START_DELTA64_RESCUE=%s\n' "$delta64_rescue"
-    run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh --validated-source "$tested_source" "${arguments[@]}"
-    printf 'PASS_DELTA64_RESCUE=%s\n' "$delta64_rescue"
-    (( index += 1 ))
+    printf 'START_STORAGE_ENVELOPE=%s\n' "$envelope"
+    run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh \
+        --validated-source "$tested_source" --run-owned-ram-pair --profile medium \
+        --retain-ms 2 --unpaced "${model_args[@]}" --async-prepare \
+        --shared-plan "$shared_plan"
+    printf 'PASS_STORAGE_ENVELOPE=%s\n' "$envelope"
 done
 
 # ID63 adjacent distinct-extent confirmation: vary only exact zero-extra
@@ -456,5 +391,5 @@ run_privileged_bounded 960 tests/tools/qualify-resource-pressure.sh \
 # remains depth=1 and routine qualification no longer spends ten sessions here.
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 8 directional modern-storage envelope sessions, 10 paired delta64 rescue/second-LZ4 sessions, 20 ID63 toggle sessions, 48 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
-    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, predictor-first delta64, promoted independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 4 directional modern-storage envelope sessions, 20 ID63 toggle sessions, 48 sustained write-only sessions, and the ID36 resource-pressure gate completed.' \
+    'PERFORMANCE_WIN=EVIDENCE_ONLY: all emulated devices use production delta64+DELTA64_SHUF8+LZ4; fast mixed, ID63, promoted independent READ fan-out, and fast QD4/QD8/QD32 carry bounded matched evidence; delta64 off/on, ordinary LZ4 acceleration, coalescing-cap selection, lower-WRITE depth 1/2, K1 read-bypass and delta64 preparation-width A/Bs are retired from routine qualification.'

@@ -134,7 +134,7 @@ def striped_scenario(name):
     return None
 
 
-def scenario_arguments(name, plan, delta64=1, calibration=False,
+def scenario_arguments(name, plan, calibration=False,
                        candidate_first=False, submitter_prepare=1,
                        hand_records=8):
     model, _, kind = name.partition("-")
@@ -152,9 +152,6 @@ def scenario_arguments(name, plan, delta64=1, calibration=False,
         arguments += ["--submitter-prepare", "0"]
     if hand_records != 8:
         arguments += ["--hand-records", str(hand_records)]
-    if not delta64:
-        # Suffix order of benchmark-owned-pair.sh: rescue sits after async.
-        arguments.append("--no-delta64-rescue")
     arguments += ["--shared-plan", str(plan)]
     if calibration:
         arguments.append("--linear-calibration")
@@ -673,9 +670,6 @@ def main():
     parser.add_argument("--scenarios", default=os.environ.get("SCENARIOS", ""))
     parser.add_argument("--repeat", type=int,
                         default=int(os.environ.get("REPEAT", "3") or 3))
-    # Delta64 rescue is the production default; DELTA64=0 measures LZ4-only.
-    parser.add_argument("--delta64", type=int, choices=(0, 1),
-                        default=int(os.environ.get("DELTA64", "1") or 1))
     parser.add_argument("--content", choices=tuple(CONTENT_WEIGHTS),
                         default=os.environ.get("CONTENT", "medium"))
     parser.add_argument("--calibration", choices=("none", "linear"),
@@ -760,7 +754,7 @@ def main():
                 quiet_before = quiet_host_sample()
                 begin = time.monotonic()
                 proc = privileged(720, PAIR, "--validated-source", head,
-                                  *scenario_arguments(name, plan, args.delta64, calibration,
+                                  *scenario_arguments(name, plan, calibration,
                                                       calibration and attempt % 2 == 1,
                                                       args.submitter_prepare,
                                                       args.hand_records))
@@ -859,7 +853,8 @@ def main():
     (OUT_DIR / result_name).write_text(
         json.dumps({"head": head, "dirty": bool(dirty),
                     "calibration": args.calibration,
-                    "delta64_rescue": args.delta64,
+                    "compression_policy": "delta64-shuf8-lz4",
+                    "delta64_rescue": 1,
                     "submitter_prepare": args.submitter_prepare,
                     "hand_records": args.hand_records,
                     "host_load_profile": args.host_load_profile,

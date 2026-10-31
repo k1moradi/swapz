@@ -41,7 +41,10 @@ WRITE-only QD4 or QD8, respectively, as described below. It prints one table of 
 and requests, READ/WRITE p99, windows, deadline and idle-bound closes,
 accepted-work lower idle, lower-WRITE service and its EWMA, and keeps detailed
 telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
-select scenarios and repeats; `DELTA64=0` pins the LZ4-only control policy.
+select scenarios and repeats. Every emulated scenario must use the production
+delta64 + `DELTA64_SHUF8` byte-plane shuffle (“bitshuffle” requirement) + LZ4
+stack. Delta64-off benchmark arms are retired and must not be added to
+`make test`, `make fast_test`, report plots, or performance history.
 `SUBMITTER_PREPARE=0` disables only the existing submitter-context path in
 ordinary asynchronous development pairs (background async preparation stays on);
 the product/default and official qualification remain `1`. The private helper
@@ -628,14 +631,12 @@ counters themselves do not establish a performance gain.
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
   continue proving the temporary live-reference decrement is exactly restored
   before return/commit, including an error after a validated shared-extent page.
-- **ID67 predictive rescue:** rescue is default-on by owner decision; the
-  paired A/B off arm pins `--no-delta64-rescue`. The second LZ4 pass
-  has a separate read-only `delta64_lz4_acceleration` control, default 4 (the
-  value the A/B qualified; `PRODUCTION_DELTA64_LZ4_ACCELERATION` in the
-  reporter). Standard sessions run that default. The standard rescue A/B fixes
-  that control at 4 in both arms so rescue remains the
-  only changed policy while testing whether lower second-pass CPU cost closes
-  the idle-SSE2 service regression. RAW or >2024-byte LZ4 baselines use
+- **ID67 predictive rescue:** the production delta64 + `DELTA64_SHUF8` + LZ4
+  stack is fixed on for every emulated device by owner decision. The second LZ4
+  pass has a read-only `delta64_lz4_acceleration` control, default 4 (the
+  qualified value; `PRODUCTION_DELTA64_LZ4_ACCELERATION` in the reporter).
+  Routine rescue off/on A/Bs are retired; performance qualification must verify
+  the production defaults rather than override them. RAW or >2024-byte LZ4 baselines use
   threshold 24 and require a strictly smaller candidate. A
   baseline at or below 2024 bytes is eligible only when the production planner
   identifies the exact next uniform SWZ packing limit; that route uses threshold
@@ -759,17 +760,17 @@ no work, disabled submitter policy, claim-count mismatch, and active ownership.
 This preserves test coverage of both valid placement paths without replacing
 the required owner-loaded byte-exact and lower-I/O checks.
 
-The positive delta64 rescue off/on A/B must likewise accept genuinely
-prepared pages from either the background producer
-(`delta64_prepare_pages`) or ID150 submitter context
-(`submitter_prepare_pages`), because the former field intentionally counts
-only the background producer. This is not an excuse to disable the positive
-control: every enabled rescue arm still requires nonzero classifier passes,
-attempts, adoptions, transform time and total rescue time; the normal timed
-telemetry contract checks submitter policy, ownership quiescence, claim/page
-conservation and complete WRITE-copy attribution. Disabled rescue arms must
-still have zero delta64 activity. Rootless reporter tests must prove the
-producer-only and submitter-only positive cases, zero-activity rejection,
+Routine loaded qualification must not run a delta64 rescue off/on A/B. The
+production stack is fixed on, and every emulated-device performance record must
+report `delta64_rescue=1`, `delta64_lz4_acceleration=4`, and ordinary
+`lz4_acceleration=1`. Preparation ownership may still be background-producer or
+ID150 submitter context; the normal timed telemetry contract checks submitter
+policy, ownership quiescence, claim/page conservation and complete WRITE-copy
+attribution. Medium content may legitimately produce zero delta64 adoptions;
+byte-exact transform/codec tests provide the positive functional coverage
+without spending loaded benchmark sessions on a disabled performance arm.
+Rootless reporter tests must reject any emulated performance record whose
+production compression policy is disabled or mismatched,
 missing delta64-adoption rejection and invalid ownership accounting rejection.
 Do not claim this placement change itself improves service or endurance: the
 five-pair timed outcome remains the performance decision.

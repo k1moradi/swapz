@@ -347,7 +347,7 @@ done
 
 modprobe dm_mod
 modprobe lz4_compress || fail 'kernel LZ4 compressor unavailable'
-insmod "$MODULE" async_prepare=1 delta64_rescue=1 ||
+insmod "$MODULE" async_prepare=1 ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -391,6 +391,10 @@ for (( stripe=0; stripe<STRIPES; ++stripe )); do
         fail 'striped target async preparation mismatch'
     grep -Eq '(^|[[:space:]])delta64_rescue=1([[:space:]]|$)' <<<"$status" ||
         fail 'striped target delta64 production policy mismatch'
+    grep -Eq '(^|[[:space:]])delta64_lz4_acceleration=4([[:space:]]|$)' <<<"$status" ||
+        fail 'striped target delta64 LZ4 policy mismatch'
+    grep -Eq '(^|[[:space:]])lz4_acceleration=1([[:space:]]|$)' <<<"$status" ||
+        fail 'striped target ordinary LZ4 policy mismatch'
     for _ in {1..50}; do
         [[ -b /dev/mapper/$name ]] && break
         sleep 0.1
