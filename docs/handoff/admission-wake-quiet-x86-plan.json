@@ -242,7 +242,7 @@
     "tests/tools/test-loaded.sh": "7fb7682aed040b619b760f30da726efcdec723ac0482f216f5e2d12eeb6c485e",
     "tests/tools/test-rootless.sh": "11460b532068e42df1bf5c7fdc21e4764241477fad2e288164971edbe39509df"
   },
-  "orchestrator_sha256": "ea9b467b57ed059b5ac77c9207c743520e0ffe72e1af33c748805575e870227f",
+  "orchestrator_sha256": "31744a8088d60a9f7ef058b5cc40178c473eee3331945f9a771c86d256263014",
   "native_validation_scope": "Full source contracts passed before pilot; each make fast_test block runs its standard window/native preflight, not repeated full source contracts. Common source files remain frozen.",
   "series": "new native-host comparison after competing workload ended",
   "host_configuration": {
@@ -288,5 +288,6 @@
     ],
     "policy": "Previous 24 blocks remain excluded in their original series. This is a new prospective experiment after a verified host-load change, with no pooling or replacement of old observations."
   },
-  "hypothesis": "Pinned owner notification outside the admission lock improves useful service by reducing notification-related serialization without changing FIFO, ownership, representation or lower-success publication."
+  "hypothesis": "Pinned owner notification outside the admission lock improves useful service by reducing notification-related serialization without changing FIFO, ownership, representation or lower-success publication.",
+  "entry_initialization": "Fixed two-second settling interval after interpreter/import startup, then three consecutive standard quiet windows. Thresholds unchanged. Added before any performance sample; two rejected entry attempts are preserved and contain zero benchmark observations."
 }

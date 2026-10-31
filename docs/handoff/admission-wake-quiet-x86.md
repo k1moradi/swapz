@@ -30,3 +30,11 @@ The preceding 24-block noisy pilot and its 71/72 exclusions remain intact in
 change motivates a new prospective study; no observations are pooled, replaced
 or selectively reused from that completed pilot. Results are pending at this
 plan's publication.
+
+Before any performance sample, two entry attempts rejected their first startup
+window while subsequent windows were low. Both preflight records are preserved
+locally; neither created a device or a benchmark observation. The entry protocol
+now includes a fixed two-second interpreter/import settling interval before all
+three quiet windows, matching the distinction between initialization and quiet
+measurement. Thresholds and the fixed performance sample count are unchanged;
+this amendment precedes every performance sample in the new series.
