@@ -6,6 +6,17 @@
 
 This file is the project's **rolling engineering blueprint**: active priorities, proposals, decisions and acceptance gates. Linux MM/swap/zswap semantics and implementation context live in [context.md](context.md). Completed experimental transcripts belong in Git history.
 
+## Current owner requirement: fixed production compression stack
+
+Every emulated device must run the production delta64 + `DELTA64_SHUF8`
+8-byte byte-plane shuffle (“bitshuffle” requirement) + LZ4 stack with delta64
+rescue enabled. This is a main product requirement, not an experiment selector.
+Do not spend qualification time on delta64-off benchmark arms, off/on A/Bs, or
+delta64-off plot/history series. Historical rescue-off results remain evidence
+of past decisions only. Low-level decode/debug compatibility coverage may still
+exercise legacy/disabled states, but no disabled state can qualify or represent
+an emulated-device performance result.
+
 ## Previous comparison baseline
 
 The prior official owner `make test` passed all five stages on production
