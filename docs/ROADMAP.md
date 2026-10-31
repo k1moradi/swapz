@@ -663,10 +663,20 @@ Inspection found completion handoff using the eight-record dispatch constant,
 although its contract requires four published BIOs. The native actual-body
 test masked this with a private four-record definition of that dispatch
 constant. Restore a dedicated four-BIO completion floor and compile actual
-production constants in the regression. This repairs handoff eligibility;
-timing-dependent loaded activity and useful-service impact still require the
-same-source owner matrix. Remote fixture changes independently permit zero
-fault-session handoffs while preserving positive live suspend/drain activity.
+production constants in the regression. Source `b336754e3acb` passed all five
+old-PC owner stages (report `8b67a9425025`), observing 16 live handoffs, eight
+fault-session handoffs and 16,512 exact successful WRITEs across suspend/drain.
+ID36 passed with eight CPU-pressure workers and 23,587 memory.high events.
+Remote fixture changes independently permit zero fault-session handoffs while
+preserving positive live suspend/drain activity. This qualifies the repair;
+it does not establish a causal performance improvement from the threshold.
+The fast async mixed arm still records 252 ms accepted-work lower idle,
+including 188 ms undersized-batch attribution, and zero K=1 ready-run wait.
+It performs no delta64 attempts on the medium fixture. Investigate the small-
+batch/owner path before reopening concurrency or blaming delta64 for this
+workload's service deficit. The separate five-pair positive-fixture rescue A/B
+saves 68.5% lower WRITE bytes (95% CI 67.9..69.2% reduction); useful WRITE
+changes +13.1% (CI -3.4..+29.7%), so throughput improvement remains unresolved.
 
 The receiving x86 baseline and ID151 input-copy telemetry are owner-qualified
 on modern x86 source `545defa8` (report `3465b4c08987`). The other x86 host passed
