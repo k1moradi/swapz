@@ -618,9 +618,10 @@ four-record `sync4_*` counters. For every interval,
 `sync4_reissue_samples <= sync4_windows`. Admission timing is accepted WRITE
 to first ordered-worker ownership; accepted-idle
 `accepted_work_lower_idle_worker_unscheduled_ns` remains the narrower
-wake-to-worker scheduling attribution. Ordered-worker scheduler-update runtime samples are separate diagnostics;
-they do not establish an exact split among CPU, lower-I/O sleep and off-CPU wall
-time. After warmup and before the timed status snapshot, the replay harness sends
+wake-to-worker scheduling attribution. Ordered-worker scheduler-update runtime samples and phase wall clocks are
+separate diagnostics. Their scopes may overlap, so they must not be summed into
+a serialized or removable-CPU budget; they do not establish an exact split
+among CPU, lower-I/O sleep and off-CPU wall time. After warmup and before the timed status snapshot, the replay harness sends
 the internal `profile_epoch` DM message. That message clears only the passive
 previous-sync4 timestamp, so the first timed reissue sample cannot bridge the
 warmup/status-snapshot boundary; it must not reset cumulative counters or any
