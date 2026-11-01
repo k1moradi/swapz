@@ -1160,6 +1160,17 @@ different task if useful service, p99, lower-I/O or resource pressure worsens.
 
 ### Work-conserving opportunistic representation
 
+The compression-cost EWMA is owned by the ordered worker and must include
+completed preparation from submitter, background and inline owners. Each
+asynchronous prepared page publishes its own LZ4 elapsed delta before READY;
+the consumer observes it only for READY_COMPRESSED/READY_RAW. PREPARING,
+RAW_SELECTED, EMPTY and ERROR do not authorize reading mutable timing metadata.
+Do not update shared estimator state from concurrent preparation lanes or use a
+cumulative lane total as one page's sample. Zero/unknown samples preserve the
+existing EWMA. The historical `ordered_lz4_page_ewma_ns` status name identifies
+its update owner, not an inline-only coverage limit. Its scope remains elapsed
+LZ4 time, including scheduling, rather than measured CPU or total rescue time.
+
 A fast-media scheduling experiment may treat compression as speculative
 preparation rather than a mandatory gate to lower submission. The lower path is
 work-conserving only when accepted independent WRITE work exists, no ordering or

@@ -375,7 +375,7 @@ static swapz_u16 swapz_probe_set(
                       "swapz_delta64_rescue_enabled, bool, 0444)", DM)
         self.assertIn("ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled",
                       ctor)
-        self.assertIn("prepared->length = swapz_compress_page(", producer)
+        self.assertIn("prepared->length = swapz_compress_prepared_page(", producer)
         self.assertIn("prepared->raw_bytes", producer)
         self.assertIn("swapz_preparation_publish_result(", producer)
         self.assertIn("length = swapz_compress_page(", ordered)
@@ -2491,7 +2491,8 @@ int main(void)
         compressor = body("swapz_compress_page")
         producer = body("swapz_preparation_worker")
         ordered = body("swapz_accept_write")
-        self.assertIn("swapz_compress_page(", producer)
+        self.assertIn("swapz_compress_prepared_page(", producer)
+        self.assertIn("swapz_compress_page(", body("swapz_compress_prepared_page"))
         self.assertIn("swapz_compress_page(", ordered)
         self.assertIn("swapz_predict_delta64_sample_score(input)", compressor)
         self.assertIn("candidate <= (int)SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH",
@@ -3690,7 +3691,7 @@ int main(void)
                         producer.index("spin_lock_irqsave(&ctx->queue_lock, flags)"))
         self.assertLess(producer.index("swapz_preparation_claim_slot("),
                         producer.index("list_del_init(&entry->preparation_list)"))
-        self.assertIn("prepared->length = swapz_compress_page(", producer)
+        self.assertIn("prepared->length = swapz_compress_prepared_page(", producer)
         self.assertIn("lane->lz4_workmem", producer)
         self.assertNotIn("lane->input_page", producer)
         self.assertIn("lane->predictor_page", producer)
@@ -4494,7 +4495,7 @@ int main(void)
         self.assertNotIn("memcpy(output, candidate_output", high_score)
         self.assertIn("memcpy(candidate_output, output, (size_t)candidate)",
                       high_score)
-        self.assertIn("prepared->length = swapz_compress_page(", producer)
+        self.assertIn("prepared->length = swapz_compress_prepared_page(", producer)
         self.assertIn("length = swapz_compress_page(", accept)
         self.assertIn("prepared->length > 0 && !prepared->zero", producer)
         self.assertIn("if (!prepared->zero)", accept)
@@ -4642,12 +4643,131 @@ int main(void)
 
 
 
+    def test_prepared_lz4_cost_reaches_the_single_owner_after_ready(self):
+        import subprocess
+        import tempfile
+
+        compressor = body("swapz_compress_prepared_page")
+        observer = body("swapz_observe_prepared_lz4_cost")
+        for name in ("swapz_preparation_worker", "swapz_submitter_prepare_entry"):
+            preparing = body(name)
+            self.assertIn("prepared->length = swapz_compress_prepared_page(", preparing)
+            self.assertLess(preparing.index("swapz_compress_prepared_page("),
+                            preparing.index("swapz_preparation_publish_result("))
+        accept = body("swapz_accept_write")
+        self.assertIn("swapz_observe_prepared_lz4_cost(ctx, prepared, prepared_state)",
+                      accept)
+        self.assertLess(accept.index("swapz_preparation_select_raw("),
+                        accept.index("swapz_observe_prepared_lz4_cost("))
+        # Execute the actual writer/consumer bodies. A poisoned unready page
+        # catches reads of metadata that an optional producer may still mutate.
+        states = re.search(r"enum swapz_preparation_state\s*\{.*?\};",
+                           (ROOT / "src/kernel/preparation-slots.h").read_text(),
+                           re.S).group(0)
+        prefix = r'''
+#define _GNU_SOURCE
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#include "window-policy.h"
+typedef uint64_t u64;
+typedef unsigned char u8;
+struct swapz_dm { u64 ordered_lz4_page_ewma_ns; };
+struct swapz_delta64_stats { unsigned calls; };
+struct swapz_prepared_page {
+ u8 raw_bytes[4096], bytes[4096], encoding;
+ bool zero;
+ u64 lz4_wall_ns;
+};
+static struct swapz_dm ctx;
+static struct swapz_prepared_page page;
+static struct swapz_delta64_stats stats;
+static u8 predictor[4096], candidate[4096], workmem[16];
+static int selected_length;
+static u64 charge;
+static int swapz_compress_page(struct swapz_dm *c,const u8 *in,u8 *out,
+ u8 *p,u8 *d,void *w,u64 *wall,u8 *encoding,
+ struct swapz_delta64_stats *s,bool *zero) {
+ assert(c==&ctx && in==page.raw_bytes && out==page.bytes);
+ assert(p==predictor && d==candidate && w==workmem && s==&stats);
+ *wall+=charge;*encoding=SWAPZ_ENCODING_LZ4;*zero=selected_length==16;
+ memset(out,0x5a,32);s->calls++;return selected_length;
+}
+'''
+        writer = "static int swapz_compress_prepared_page(\n" \
+                 "struct swapz_dm *ctx, struct swapz_prepared_page *prepared,\n" \
+                 "u8 *predictor_page, u8 *delta64_candidate_page, void *lz4_workmem,\n" \
+                 "u64 *lz4_wall_ns, struct swapz_delta64_stats *delta64) {\n"
+        reader = "static void swapz_observe_prepared_lz4_cost(\n" \
+                 "struct swapz_dm *ctx, const struct swapz_prepared_page *prepared,\n" \
+                 "int state) {\n"
+        suffix = r'''
+int main(void) {
+ struct rlimit no_core={0,0};assert(setrlimit(RLIMIT_CORE,&no_core)==0);
+ u64 wall=100000;
+ selected_length=128;charge=1600;
+ assert(swapz_compress_prepared_page(&ctx,&page,predictor,candidate,workmem,
+        &wall,&stats)==128);
+ assert(wall==101600 && page.lz4_wall_ns==1600 && !page.zero);
+ swapz_observe_prepared_lz4_cost(&ctx,&page,SWAPZ_PREPARATION_READY_COMPRESSED);
+ assert(ctx.ordered_lz4_page_ewma_ns==1600);
+ selected_length=0;charge=800;
+ assert(swapz_compress_prepared_page(&ctx,&page,predictor,candidate,workmem,
+        &wall,&stats)==0);
+ assert(page.lz4_wall_ns==800 && wall==102400);
+ swapz_observe_prepared_lz4_cost(&ctx,&page,SWAPZ_PREPARATION_READY_RAW);
+ assert(ctx.ordered_lz4_page_ewma_ns==1500);
+ selected_length=16;charge=0;
+ assert(swapz_compress_prepared_page(&ctx,&page,predictor,candidate,workmem,
+        &wall,&stats)==16 && page.zero && page.lz4_wall_ns==0);
+ swapz_observe_prepared_lz4_cost(&ctx,&page,SWAPZ_PREPARATION_READY_COMPRESSED);
+ assert(ctx.ordered_lz4_page_ewma_ns==1500 && stats.calls==3);
+ size_t granule=(size_t)sysconf(_SC_PAGESIZE);
+ size_t bytes=(sizeof(struct swapz_prepared_page)+granule-1)/granule*granule;
+ void *poison=mmap(NULL,bytes,PROT_NONE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
+ assert(poison!=MAP_FAILED);
+ int invalid[]={SWAPZ_PREPARATION_EMPTY,SWAPZ_PREPARATION_PREPARING,
+                SWAPZ_PREPARATION_RAW_SELECTED,SWAPZ_PREPARATION_ERROR};
+ for(unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);i++) {
+  swapz_observe_prepared_lz4_cost(&ctx,poison,invalid[i]);
+  assert(ctx.ordered_lz4_page_ewma_ns==1500);
+ }
+ assert(munmap(poison,bytes)==0);return 0;
+}
+'''
+        guard = ("if (state != SWAPZ_PREPARATION_READY_COMPRESSED &&\n"
+                 "\t    state != SWAPZ_PREPARATION_READY_RAW)\n\t\treturn;")
+        self.assertIn(guard, observer)
+        variants = [(compressor, observer, True),
+                    (compressor.replace("*lz4_wall_ns - before",
+                                        "*lz4_wall_ns - before + before"), observer, False),
+                    (compressor, observer.replace(guard, "(void)state;"), False)]
+        with tempfile.TemporaryDirectory(prefix="swapz-prepared-cost-") as temp:
+            path = Path(temp)
+            for compress_body, observe_body, passes in variants:
+                (path / "probe.c").write_text(prefix + states + "\n" + writer +
+                    compress_body + "}\n" + reader + observe_body + "}\n" + suffix)
+                subprocess.run(["cc", "-std=c11", "-O2", "-Wall", "-Wextra",
+                                "-Werror", "-I", str(ROOT / "src/kernel"),
+                                str(path / "probe.c"), "-o", str(path / "probe")],
+                               check=True, capture_output=True, text=True, timeout=15)
+                result = subprocess.run([str(path / "probe")], capture_output=True,
+                                        text=True, timeout=5)
+                self.assertEqual(result.returncode == 0, passes,
+                                 result.stdout + result.stderr)
+
     def test_snapshot_inputs_are_not_reported_as_direct_lz4(self):
         for name in ("swapz_preparation_worker", "swapz_submitter_prepare_entry"):
             preparing = body(name)
             self.assertIn("lane->mapped_snapshot_pages++", preparing)
             self.assertNotIn("direct_lz4_pages", preparing)
-            self.assertIn("ctx, prepared->raw_bytes, prepared->bytes", preparing)
+            self.assertIn("swapz_compress_prepared_page(", preparing)
+        self.assertIn("ctx, prepared->raw_bytes, prepared->bytes",
+                      body("swapz_compress_prepared_page"))
         status = body("swapz_status")
         self.assertIn("mapped_snapshot_input_pages=%llu", status)
         self.assertIn("prep.mapped_snapshot_pages + submitter.mapped_snapshot_pages", status)
@@ -4733,7 +4853,7 @@ int main(void)
 
         self.assertIn("complete_all(&entry->preparation_snapshot_ready)",
                       submitter)
-        self.assertIn("prepared->length = swapz_compress_page(", submitter)
+        self.assertIn("prepared->length = swapz_compress_prepared_page(", submitter)
         self.assertIn("swapz_preparation_publish_result(", submitter)
         release_call = (
             "atomic_set_release(&entry->preparation_submitter_active, 0)")

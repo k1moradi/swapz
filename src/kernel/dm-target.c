@@ -169,6 +169,7 @@ struct swapz_prepared_page {
 	bool payload_crc32c_valid;
 	swapz_u8 encoding;
 	swapz_u32 payload_crc32c;
+	u64 lz4_wall_ns;
 	u8 raw_bytes[SWAPZ_BLOCK_BYTES];
 	u8 bytes[SWAPZ_BLOCK_BYTES];
 } __aligned(64);
@@ -2385,6 +2386,23 @@ out:
 }
 
 
+/* Both asynchronous owners publish this sample with their READY state. */
+static int swapz_compress_prepared_page(
+	struct swapz_dm *ctx, struct swapz_prepared_page *prepared,
+	u8 *predictor_page, u8 *delta64_candidate_page, void *lz4_workmem,
+	u64 *lz4_wall_ns, struct swapz_delta64_stats *delta64)
+{
+	u64 before = *lz4_wall_ns;
+	int length;
+
+	length = swapz_compress_page(
+		ctx, prepared->raw_bytes, prepared->bytes,
+		predictor_page, delta64_candidate_page, lz4_workmem,
+		lz4_wall_ns, &prepared->encoding, delta64, &prepared->zero);
+	prepared->lz4_wall_ns = *lz4_wall_ns - before;
+	return length;
+}
+
 /*
  * Claim both resources while admission is serialized. The prepared page has
  * one reference because the submitting task finishes touching it before the
@@ -2496,11 +2514,10 @@ static void swapz_submitter_prepare_entry(struct swapz_dm *ctx,
 	prepared->payload_crc32c = 0;
 	complete_all(&entry->preparation_snapshot_ready);
 
-	prepared->length = swapz_compress_page(
-		ctx, prepared->raw_bytes, prepared->bytes,
+	prepared->length = swapz_compress_prepared_page(
+		ctx, prepared,
 		lane->predictor_page, lane->delta64_candidate_page,
-		lane->lz4_workmem, &lane->lz4_wall_ns, &prepared->encoding,
-		&lane->delta64, &prepared->zero);
+		lane->lz4_workmem, &lane->lz4_wall_ns, &lane->delta64);
 	lane->lz4_attempts++;
 	if (prepared->length <= 0) {
 		lane->lz4_size_bins[5]++;
@@ -2718,11 +2735,10 @@ static void swapz_preparation_worker(struct work_struct *work)
 		if (lower_write_overlap)
 			lane->prepared_during_lower_write++;
 		section_start = lower_write_overlap ? ktime_get_ns() : 0;
-		prepared->length = swapz_compress_page(
-			ctx, prepared->raw_bytes, prepared->bytes,
+		prepared->length = swapz_compress_prepared_page(
+			ctx, prepared,
 			lane->predictor_page, lane->delta64_candidate_page,
-			lane->lz4_workmem, &lane->lz4_wall_ns, &prepared->encoding,
-			&lane->delta64, &prepared->zero);
+			lane->lz4_workmem, &lane->lz4_wall_ns, &lane->delta64);
 		lane->lz4_attempts++;
 		if (prepared->length <= 0) {
 			lane->lz4_size_bins[5]++;
@@ -4451,6 +4467,18 @@ static void swapz_record_pack_geometry(struct swapz_dm *ctx)
 	}
 }
 
+/* The ordered owner alone updates the adaptive cost, across all preparers. */
+static void swapz_observe_prepared_lz4_cost(
+	struct swapz_dm *ctx, const struct swapz_prepared_page *prepared, int state)
+{
+	/* PREPARING/RAW_SELECTED metadata may still be written by its producer. */
+	if (state != SWAPZ_PREPARATION_READY_COMPRESSED &&
+	    state != SWAPZ_PREPARATION_READY_RAW)
+		return;
+	ctx->ordered_lz4_page_ewma_ns = swapz_window_ewma_update(
+		ctx->ordered_lz4_page_ewma_ns, prepared->lz4_wall_ns);
+}
+
 static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
@@ -4495,6 +4523,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		prepared_state = bulk_raw_eligible ?
 			swapz_preparation_select_raw(&prepared->state) :
 			atomic_read(&prepared->state);
+		swapz_observe_prepared_lz4_cost(ctx, prepared, prepared_state);
 		if (prepared_state == SWAPZ_PREPARATION_READY_COMPRESSED) {
 			atomic_dec(&ctx->preparation_ready_current);
 			ctx->work_conserving_compressed_ready++;

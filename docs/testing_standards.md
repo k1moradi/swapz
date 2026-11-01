@@ -2757,3 +2757,15 @@ The nested rootless replay-suite watchdog is 90 seconds (formerly 40) to cover
 the measured ~44-second suite including the longer deterministic-plan oracle
 checks on the two-core host. This changes no loaded replay, privileged helper,
 kernel-progress or teardown deadline.
+
+Prepared compression-cost coverage must execute the actual production wrapper
+and ordered observer against the existing EWMA helper. Check a nonzero lane
+baseline, consecutive compressed/RAW samples, a zero/unknown sample, preserved
+encoding/zero outputs and the complete mutable-state exclusion. A protected
+mapping must cover the full prepared object: testing only its first page could
+miss an invalid timing-field read beyond that mapping. Compiled mutants using
+cumulative lane time or removing the READY guard must fail. Source wiring must
+cover both asynchronous owners and publication before READY; loaded evidence
+must show a nonzero estimator with submitter claims and zero inline work.
+The rejected [early-snapshot pilot](handoff/submitter-snapshot-oldpc-result.md)
+does not authorize early descriptor release or a second submitter reference.
