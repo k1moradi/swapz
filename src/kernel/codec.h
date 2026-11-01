@@ -15,11 +15,13 @@
 typedef u8 swapz_u8;
 typedef u16 swapz_u16;
 typedef u32 swapz_u32;
+typedef u64 swapz_u64;
 #else
 #include <stdint.h>
 typedef uint8_t swapz_u8;
 typedef uint16_t swapz_u16;
 typedef uint32_t swapz_u32;
+typedef uint64_t swapz_u64;
 #endif
 
 #define SWAPZ_BLOCK_BYTES 4096U

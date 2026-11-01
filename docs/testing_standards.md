@@ -546,6 +546,36 @@ the seven-CPU ARM64 history.
 Representative-content prevalence, long-run churn, actual
 kernel swap and physical media remain separate qualification gates.
 
+
+### Lower-lane gap attribution: native and replay qualification (ID178)
+
+The observational ID178 module compiles the pure `src/kernel/lane-gap.h`
+helpers directly in `tests/runtime/native/io/lane-gap.c`; test every
+timestamp-order permutation on the bounded grid, invalid/zero marks and the
+successor/dwell bin transitions. Rootless source contracts forbid scheduling,
+lock, wait, queue, or allocation calls inside the accounting helpers; require
+the new per-BIO timestamp fields without changing ID114's marks, sole
+ordered-domain chronology, `profile_epoch` invalidation, and sampling
+publication-to-ACK before `bio_endio()`.
+
+Timed `io-replay.py` K=1 WRITE counter deltas require every ID178 status
+token: absence is an error, never zero. Replay/report validators require
+`lane_gap_invalid == 0`, sum of the six phases equal to
+`lane_gap_wall_ns`, and submission conservation across paired, foreign,
+unpaired, and invalid outcomes. Both successor-count families must sum to
+paired plus foreign gaps; for every threshold, the owned-tail count cannot
+exceed the admitted-tail count. Deferred and immediate ACK dwell bins must
+each sum to their count, deferred count must not exceed successful deferred
+upper completions, and the total sampled count must not exceed successful
+upper WRITE completions. Counter deltas may not be negative. The descriptive
+`benchmarks.lane_gap_attribution` rows and the single console table
+**SSD lower-lane gap attribution** cover SATA, NVMe4, NVMe5, and fast mixed;
+the same table is printed and retained by `make fast_test`, with host busy,
+six phase shares, successor availability, and deferred ACK p99 reported as
+an inclusive histogram-bin bound. None of these fields decides a policy,
+publication or qualification scorecard. `plot-history.py` ignores these
+new properties until an owner-approved history design exists.
+
 ## Immediate K=1 critical-path profiling gate (ID114)
 
 The profiling-only source keeps K=1, the existing four-record service rule, one

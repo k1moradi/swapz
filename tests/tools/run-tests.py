@@ -319,6 +319,125 @@ DELTA64_FIELDS = (
     "delta64_lz4_payload_bytes_saved", "delta64_transform_calls",
     "delta64_transform_wall_ns", "delta64_wall_ns",
 )
+
+# The ID178 field schema matches the actual dmsetup status token names.
+LANE_GAP_PARTS = (
+    "lane_gap_completion_wake_ns", "lane_gap_publication_ns",
+    "lane_gap_no_work_ns", "lane_gap_admitted_unowned_ns",
+    "lane_gap_staged_held_ns", "lane_gap_seal_ns",
+)
+LANE_SUCCESSOR_BINS = ("0", "1", "2_3", "4_7", "8_15", "16_plus")
+LANE_DWELL_BINS = (
+    "le_1us", "le_4us", "le_16us", "le_64us",
+    "le_256us", "le_1ms", "gt_1ms",
+)
+LANE_GAP_FIELDS = (
+    "lane_runs_submitted", "lane_gap_runs", "lane_gap_wall_ns",
+    *LANE_GAP_PARTS, "lane_gap_foreign_runs", "lane_gap_foreign_ns",
+    "lane_gap_unpaired_runs", "lane_gap_invalid",
+    "lane_gap_owner_read_ns", "lane_gap_owner_reads",
+    *(f"lane_successor_{kind}_by_completion_{suffix}"
+      for kind in ("admitted", "owned") for suffix in LANE_SUCCESSOR_BINS),
+    *(f"ack_dwell_{kind}_{field}"
+      for kind in ("deferred", "immediate")
+      for field in ("count", "ns", *LANE_DWELL_BINS)),
+    "upper_write_completed_ok",
+)
+
+
+def lane_gap_record(kernel):
+    """Return a descriptive timed snapshot or None for a raw/no-data arm."""
+    if not isinstance(kernel, dict):
+        return None
+    missing = [key for key in LANE_GAP_FIELDS if key not in kernel]
+    if missing:
+        raise ValueError("missing ID178 attribution fields: " + ", ".join(missing))
+    return {key: kernel[key] for key in LANE_GAP_FIELDS}
+
+
+def lane_gap_dwell_p99_bound(kernel):
+    if not kernel:
+        return "n/a"
+    total = kernel["ack_dwell_deferred_count"]
+    if not total:
+        return "n/a"
+    rank = (total * 99 + 99) // 100
+    running = 0
+    for suffix, bound in zip(
+            LANE_DWELL_BINS,
+            ("<=1us", "<=4us", "<=16us", "<=64us",
+             "<=256us", "<=1ms", ">1ms")):
+        running += kernel[f"ack_dwell_deferred_{suffix}"]
+        if running >= rank:
+            return bound
+    return "INVALID"
+
+
+def lane_gap_attribution_rows(benchmarks):
+    """One descriptive row per requested storage/fast-mixed swapz arm."""
+    selected = []
+    envelope_sessions = benchmarks.get("storage_envelope_sessions", [])
+    for name, key in (("SATA", "sata_ssd"), ("NVMe4", "nvme_gen4"),
+                      ("NVMe5", "nvme_gen5")):
+        session = next((row for row in envelope_sessions
+                        if row.get("envelope") == key), None)
+        arm = (session or {}).get("arms", {}).get("swapz", {})
+        selected.append((name, arm))
+    fast = next((row for row in benchmarks.get("sessions", [])
+                 if row.get("regime") == "ssd_emulated" and
+                 row.get("async_prepare") == 1), None)
+    selected.append(("fast mixed", (fast or {}).get("arms", {}).get("swapz", {})))
+    rows = []
+    for name, arm in selected:
+        counters = arm.get("lane_gap")
+        if not counters:
+            continue
+        runs = counters["lane_gap_runs"]
+        total_gap = counters["lane_gap_wall_ns"]
+        paired_foreign = runs + counters["lane_gap_foreign_runs"]
+        admitted_zero = counters["lane_successor_admitted_by_completion_0"]
+        host = (arm.get("host_cpu") or {}).get("busy_fraction")
+        rows.append({
+            "envelope": name,
+            "runs": runs,
+            "gap_per_run_us": total_gap / runs / 1000 if runs else None,
+            "part_shares": {
+                key: counters[key] / total_gap * 100 if total_gap else None
+                for key in LANE_GAP_PARTS
+            },
+            "successor_admitted_at_t0_pct": (
+                (paired_foreign - admitted_zero) / paired_foreign * 100
+                if paired_foreign else None),
+            "deferred_ack_p99_bin_bound": lane_gap_dwell_p99_bound(counters),
+            "host_busy_pct": host * 100 if type(host) in (float, int) else None,
+        })
+    return rows
+
+
+def print_lane_gap_attribution(rows):
+    """Descriptive only: no goal, policy or qualification verdict."""
+    if not rows:
+        return
+    def number(value, suffix=""):
+        return "n/a" if value is None else f"{value:.1f}{suffix}"
+    table_rows = []
+    for row in rows:
+        shares = row["part_shares"]
+        table_rows.append((
+            row["envelope"], row["runs"], number(row["gap_per_run_us"]),
+            *[number(shares[key], "%") for key in LANE_GAP_PARTS],
+            number(row["successor_admitted_at_t0_pct"], "%"),
+            row["deferred_ack_p99_bin_bound"],
+            number(row["host_busy_pct"], "%"),
+        ))
+    print_table(
+        "SSD lower-lane gap attribution",
+        ("envelope", "runs", "gap/run us", "wake", "publish", "no work",
+         "unowned", "staged", "seal", "admit@t0", "ACK p99 bin", "host busy"),
+        table_rows)
+    print("  Six phases as % of paired gap; ACK p99 is an inclusive bin "
+          "upper bound (>1ms is open-ended). Descriptive, not a gate.")
+
 KERNEL_WRITE_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
@@ -365,7 +484,7 @@ KERNEL_WRITE_FIELDS = (
     "submitter_copy_wall_ns", "submitter_copy_bytes",
     "submitter_crc_wall_ns", "submitter_dispatches",
     "submitter_dispatch_declines"
-) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + (
+) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + LANE_GAP_FIELDS + (
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
     "work_conserving_raw_ready", "prep_late_results_discarded")
@@ -1939,6 +2058,7 @@ def parse_sessions(output):
                     "host_cpu": host_cpu_record(obj),
                     "workload_opportunity": workload_opportunity_record(obj),
                     "kernel_write_path": obj.get("kernel_write_path"),
+                    "lane_gap": lane_gap_record(obj.get("kernel_write_path")),
                     "kernel_read_path": obj.get("kernel_read_path"),
                     "packed_read": None,
                 }
@@ -2057,7 +2177,9 @@ def parse_storage_envelope_sessions(output):
             "seconds": obj.get("seconds"),
             "replay_engine": obj.get("replay_engine"),
             "lower_inflight": lower_inflight_record(obj),
+            "host_cpu": host_cpu_record(obj),
             "kernel_write_path": obj.get("kernel_write_path"),
+            "lane_gap": lane_gap_record(obj.get("kernel_write_path")),
         }
     return sessions
 
@@ -2247,6 +2369,7 @@ def parse_lz4_acceleration(output):
                 "lower_write_bytes": lower.get("lower_write_bytes"),
                 "lower_write_requests": lower.get("lower_write_requests"),
                 "host_cpu": host_cpu_record(obj),
+                "lane_gap": lane_gap_record(obj.get("kernel_write_path")),
                 "kernel_write_path": ({
                     field: obj["kernel_write_path"].get(field)
                     for field in KERNEL_WRITE_FIELDS
@@ -2486,6 +2609,7 @@ def parse_delta64_prepare_sessions(output):
                                  (int, float) else None),
                 "host_cpu": host_cpu_record(obj),
                 "kernel_write_path": obj.get("kernel_write_path"),
+                "lane_gap": lane_gap_record(obj.get("kernel_write_path")),
             }
         else:
             done = re.fullmatch(r"PASS_DELTA64_PREPARE_WORKERS=(1|2)", line)
@@ -2783,6 +2907,7 @@ def _parse_policy_evidence_sessions(output, marker, values):
                 "lower_write_requests": lower.get("lower_write_requests"),
                 "lower_read_requests": lower.get("lower_read_requests"),
                 "kernel_write_path": obj.get("kernel_write_path"),
+                "lane_gap": lane_gap_record(obj.get("kernel_write_path")),
                 "packed_passes": packed_passes,
             }
         else:
@@ -3862,6 +3987,7 @@ def parse_write_saturation(output):
                 "lower_inflight": lower_inflight_record(obj),
                 "host_cpu": host_cpu_record(obj),
                 "kernel_write_path": obj.get("kernel_write_path"),
+                "lane_gap": lane_gap_record(obj.get("kernel_write_path")),
             }
             for field in ("source_sha", "fixture_sha256", "trace_sha256"):
                 if obj.get(field):
@@ -4189,6 +4315,7 @@ def parse_write_pipeline_depth(output):
                                  if type(obj.get("write_p99_ns")) in
                                  (int, float) else None),
                 "kernel_write_path": obj.get("kernel_write_path"),
+                "lane_gap": lane_gap_record(obj.get("kernel_write_path")),
             }
         else:
             done = re.fullmatch(r"PASS_WRITE_PIPELINE_DEPTH=(1|2)", line)
@@ -7066,6 +7193,9 @@ def print_bench(result, *, detailed=False):
               f"({storage.get('reason', 'directional sweep unavailable')})")
 
 
+    print_lane_gap_attribution(
+        result["benchmarks"].get("lane_gap_attribution", []))
+
     write_depth = result["benchmarks"].get("write_pipeline_depth", {})
     if write_depth.get("overall") == "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE":
         print("\n  Lower-WRITE submission depth 1 vs 2 — five matched fast QD32 rounds")
@@ -7447,7 +7577,8 @@ def main():
                        "write_pipeline_depth_sessions": [],
                        "write_pipeline_depth": {"overall": "NOT_RUN"},
                        "storage_envelope_sessions": [],
-                       "storage_envelopes": {"overall": "NOT_RUN"}},
+                       "storage_envelopes": {"overall": "NOT_RUN"},
+                       "lane_gap_attribution": []},
         "overall": "INCOMPLETE"
     }
     make_cmd, parallelism = make_invocation()
@@ -7517,6 +7648,8 @@ def main():
         if not required_benchmark_gates_pass(result["benchmarks"]):
             result["overall"] = "FAIL"
             exit_code = 1
+    result["benchmarks"]["lane_gap_attribution"] = lane_gap_attribution_rows(
+        result["benchmarks"])
     result["benchmarks"]["goal_scorecard"] = goal_scorecard(result)
     write_report(result)
     print_bench(result)

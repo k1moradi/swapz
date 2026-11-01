@@ -53,6 +53,71 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_lane_gap_observation_only_and_single_owner(self):
+        header = (ROOT / "src/kernel/lane-gap.h").read_text()
+        helper_names = (
+            "swapz_lane_gap_foreign_write", "swapz_lane_gap_publish",
+            "swapz_lane_gap_submit", "swapz_lane_gap_note_owner_read",
+            "swapz_lane_gap_ack",
+        )
+        for symbol in helper_names:
+            source = body(symbol)
+            for forbidden in ("wait_for_completion(", "mutex_lock(",
+                              "spin_lock(", "queue_work(", "kmalloc(",
+                              "kzalloc(", "vmalloc("):
+                self.assertNotIn(forbidden, source)
+        self.assertIn('#include "codec.h"', header)
+        self.assertIn("struct swapz_lane_gap_parts", header)
+        self.assertNotIn("mutex_", header)
+        self.assertNotIn("wait_for_completion(", header)
+        self.assertIn("struct swapz_bio_ref {", DM)
+        for field in ("lane_admitted_ns", "lane_owned_ns", "published_ns",
+                      "published_deferred"):
+            self.assertIn(field + ";", DM)
+        self.assertIn("entry->lane_admitted_ns = entry->admitted_ns;",
+                      body("swapz_map"))
+        self.assertIn("entry->lane_owned_ns = owned_ns;",
+                      body("swapz_worker_pass"))
+        self.assertIn("entry->lane_owned_ns = ktime_get_ns();",
+                      body("swapz_submitter_dispatch"))
+        self.assertIn("ctx->write_admit_worker_samples++;",
+                      body("swapz_worker_pass"))
+        self.assertIn("ctx->write_admit_worker_wall_ns +=",
+                      body("swapz_worker_pass"))
+        epoch = body("swapz_message")
+        self.assertIn("WRITE_ONCE(ctx->lane_prev_valid, false)", epoch)
+        self.assertIn("WRITE_ONCE(ctx->sync4_last_done_ns, 0)", epoch)
+        self.assertNotIn("lane_runs_submitted =", epoch)
+        self.assertIn("READ_ONCE(ctx->lane_prev_valid)",
+                      body("swapz_lane_gap_submit"))
+        worker = body("swapz_worker")
+        self.assertIn("mutex_lock(&ctx->ordered_owner)", worker)
+        self.assertIn("swapz_worker_pass(ctx)", worker)
+        self.assertIn("mutex_unlock(&ctx->ordered_owner)", worker)
+        submitter = body("swapz_submitter_dispatch")
+        self.assertIn("mutex_unlock(&ctx->ordered_owner)", submitter)
+        completion = body("swapz_async_lower_write_done")
+        self.assertNotIn("lane_prev_", completion)
+        complete = body("swapz_complete")
+        self.assertLess(complete.index("swapz_lane_gap_ack(ctx, entry);"),
+                        complete.index("bio_endio(bio);"))
+        self.assertIn("atomic64_inc(count)", body("swapz_lane_gap_ack"))
+        self.assertIn("atomic64_add(", body("swapz_lane_gap_ack"))
+        self.assertIn("ctx->lane_sync_window", body("swapz_lower"))
+        self.assertIn("swapz_lane_gap_foreign_write(ctx)",
+                      body("swapz_lower"))
+        self.assertIn("swapz_lane_gap_submit(ctx, inflight->commit_start_ns",
+                      body("swapz_submit_inflight_write"))
+        self.assertIn("ctx->lane_sync_done_ns", body("swapz_flush_window"))
+        status = body("swapz_status")
+        for key in ("lane_gap_wall_ns", "lane_gap_invalid",
+                    "ack_dwell_deferred_gt_1ms",
+                    "lane_successor_admitted_by_completion_16_plus"):
+            self.assertIn(key + "=%llu", status)
+        for forbidden in ("if (ctx->lane_gap_", "if (ctx->ack_dwell_"):
+            self.assertNotIn(forbidden, body("swapz_worker_pass"))
+
+
     def test_pressure_hand_requires_completed_representation(self):
         ready = body("swapz_next_local_write_ready")
         policy = (ROOT / "src/kernel/window-policy.h").read_text()

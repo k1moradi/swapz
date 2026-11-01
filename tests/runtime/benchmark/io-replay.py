@@ -1308,6 +1308,70 @@ DELTA64_FIELDS = (
     "delta64_lz4_payload_bytes_saved", "delta64_transform_calls",
     "delta64_transform_wall_ns", "delta64_wall_ns",
 )
+
+# ID178: passive lower-lane partition, successor and acknowledgement dwell.
+LANE_GAP_PART_FIELDS = (
+    "lane_gap_completion_wake_ns", "lane_gap_publication_ns",
+    "lane_gap_no_work_ns", "lane_gap_admitted_unowned_ns",
+    "lane_gap_staged_held_ns", "lane_gap_seal_ns",
+)
+LANE_SUCCESSOR_BIN_NAMES = ("0", "1", "2_3", "4_7", "8_15", "16_plus")
+LANE_DWELL_BIN_NAMES = (
+    "le_1us", "le_4us", "le_16us", "le_64us",
+    "le_256us", "le_1ms", "gt_1ms",
+)
+LANE_GAP_COUNTER_FIELDS = (
+    "lane_runs_submitted", "lane_gap_runs", "lane_gap_wall_ns",
+    *LANE_GAP_PART_FIELDS, "lane_gap_foreign_runs",
+    "lane_gap_foreign_ns", "lane_gap_unpaired_runs", "lane_gap_invalid",
+    "lane_gap_owner_read_ns", "lane_gap_owner_reads",
+    *(f"lane_successor_{kind}_by_completion_{name}"
+      for kind in ("admitted", "owned") for name in LANE_SUCCESSOR_BIN_NAMES),
+    *(f"ack_dwell_{kind}_{field}"
+      for kind in ("deferred", "immediate")
+      for field in ("count", "ns", *LANE_DWELL_BIN_NAMES)),
+    "upper_write_completed_ok",
+)
+
+
+def validate_lane_gap_counters(counters):
+    """Fail closed on missing/misaligned observational accounting tokens."""
+    required = ("deferred_upper_completion_bios", *LANE_GAP_COUNTER_FIELDS)
+    if any(key not in counters or type(counters[key]) is not int or
+           counters[key] < 0 for key in required):
+        raise ValueError("missing or invalid ID178 lower-lane accounting")
+    if counters["lane_gap_invalid"]:
+        raise ValueError("invalid ID178 gap timestamps")
+    if (counters["lane_gap_wall_ns"] !=
+            sum(counters[key] for key in LANE_GAP_PART_FIELDS)):
+        raise ValueError("inconsistent ID178 six-part conservation")
+    if (counters["lane_gap_runs"] + counters["lane_gap_foreign_runs"] +
+            counters["lane_gap_unpaired_runs"] +
+            counters["lane_gap_invalid"] != counters["lane_runs_submitted"]):
+        raise ValueError("inconsistent ID178 submission accounting")
+    expected = counters["lane_gap_runs"] + counters["lane_gap_foreign_runs"]
+    families = [
+        [counters[f"lane_successor_{kind}_by_completion_{suffix}"]
+         for suffix in LANE_SUCCESSOR_BIN_NAMES]
+        for kind in ("admitted", "owned")
+    ]
+    if any(sum(family) != expected for family in families):
+        raise ValueError("inconsistent ID178 successor histogram")
+    for threshold in range(1, len(LANE_SUCCESSOR_BIN_NAMES)):
+        if sum(families[1][threshold:]) > sum(families[0][threshold:]):
+            raise ValueError("ID178 ordered successor exceeds admission")
+    for kind in ("deferred", "immediate"):
+        count = counters[f"ack_dwell_{kind}_count"]
+        if (sum(counters[f"ack_dwell_{kind}_{suffix}"]
+                for suffix in LANE_DWELL_BIN_NAMES) != count):
+            raise ValueError("inconsistent ID178 acknowledgement dwell histogram")
+    if (counters["ack_dwell_deferred_count"] >
+            counters["deferred_upper_completion_bios"] or
+            counters["ack_dwell_deferred_count"] +
+            counters["ack_dwell_immediate_count"] >
+            counters["upper_write_completed_ok"]):
+        raise ValueError("inconsistent ID178 acknowledgement ownership")
+
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
@@ -1348,7 +1412,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "submitter_copy_wall_ns", "submitter_copy_bytes",
     "submitter_crc_wall_ns", "submitter_dispatches",
     "submitter_dispatch_declines"
-) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
+) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + LANE_GAP_COUNTER_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",
     "delta64_prepare_active_max", "lz4_acceleration",
@@ -1405,6 +1469,7 @@ def kernel_write_delta(before, after):
                 for key in KERNEL_WRITE_COUNTER_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
+    validate_lane_gap_counters(counters)
     idle_parts = (
         "accepted_work_lower_idle_undersized_batch_ns",
         "accepted_work_lower_idle_worker_unscheduled_ns",

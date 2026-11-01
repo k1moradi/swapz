@@ -199,6 +199,41 @@ of the production callback's reply and rejected-command behavior; checking only
 the acknowledgement string in source cannot verify the DM output contract.
 Production policy cannot change from this profiling commit alone.
 
+
+### Lower-lane gap attribution (ID178)
+
+ID178 is observational only. No policy, ACK-delivery time, retained window,
+K=1 lower-WRITE depth, on-disk SWZ representation, module parameter, queue,
+allocation, lock, or wait may consult or change due to these diagnostics.
+The native-tested `lane-gap.h` is pure integer arithmetic: clamp ordered
+timestamps into [t0,t4], compute completion/wakeup, publication, no-work,
+admitted-but-unowned, staged/held, and seal/submit phases, and preserve the
+identity that the six phases sum exactly to the paired gap. A missing timestamp
+or reversed completion/submit pair is invalid, not silently zero.
+
+`struct swapz_bio_ref` retains `lane_admitted_ns`, `lane_owned_ns`,
+`published_ns`, and `published_deferred` independently from the existing
+ID114 `admitted_ns` and `write_admit_worker_*` counter semantics. The
+ordered worker holds `ordered_owner` for its entire pass; ID175 submitter
+dispatch may only take the same domain via its existing bounded trylock.
+Only this ordered domain updates predecessor t0/t1/t2, foreign-WRITE
+classification, gap partitions, and successor histograms. The asynchronous
+completion callback writes `inflight->lower_end_ns` before completing
+`lower_done`, and never owns the chronology. `profile_epoch` may
+`WRITE_ONCE(lane_prev_valid, false)`; t4 reads that flag once with
+`READ_ONCE` and can discard a sample but cannot combine epochs. Failure,
+drain, and suspend invalidate a predecessor under ordered ownership.
+
+A successful upper WRITE stores publication time and deferred/immediate
+classification before any completion or handoff. Because `swapz_complete()`
+can run on the worker or its separate `completion_work`, acknowledgement
+dwell count, nanoseconds, and histograms are `atomic64_t`, sampled before
+`bio_endio()`. Histogram bounds are inclusive; `>1ms` is open-ended.
+Foreign lower WRITEs are not K=1 run submissions and consume whole gaps
+without six-part attribution. All counters are cumulative and only differenced
+at already-established timed benchmark boundaries. Do not route results into
+device policy, acceptance thresholds, or scorecards.
+
 Any future K>1 experiment is a new architecture change, not a dormant knob. It
 must restore disjoint immutable run ownership, same-page generation/order
 fences, FIFO authority publication and upper-BIO completion despite out-of-order

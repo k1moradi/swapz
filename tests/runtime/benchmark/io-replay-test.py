@@ -18,6 +18,92 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_id178_replay_conservation_and_fail_closed_fields(self):
+        import runpy
+        replay = runpy.run_path(str(SCRIPT))
+        check = replay["validate_lane_gap_counters"]
+        values = {field: 0 for field in replay["LANE_GAP_COUNTER_FIELDS"]}
+        values["deferred_upper_completion_bios"] = 1
+        values["upper_write_completed_ok"] = 1
+        values["lane_runs_submitted"] = 1
+        values["lane_gap_runs"] = 1
+        values["lane_gap_wall_ns"] = 60
+        for field in replay["LANE_GAP_PART_FIELDS"]:
+            values[field] = 10
+        values["lane_successor_admitted_by_completion_1"] = 1
+        values["lane_successor_owned_by_completion_0"] = 1
+        values["ack_dwell_deferred_count"] = 1
+        values["ack_dwell_deferred_ns"] = 1001
+        values["ack_dwell_deferred_le_4us"] = 1
+        check(values)
+        for key, bad in (
+                ("lane_gap_wall_ns", 61),
+                ("lane_gap_invalid", 1),
+                ("lane_runs_submitted", 2),
+                ("lane_successor_owned_by_completion_16_plus", 1),
+                ("ack_dwell_deferred_count", 2),
+                ("ack_dwell_deferred_le_4us", 0),
+                ("ack_dwell_immediate_count", 1)):
+            trial = {**values, key: bad}
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                check(trial)
+        for key in replay["LANE_GAP_COUNTER_FIELDS"]:
+            trial = values.copy()
+            del trial[key]
+            with self.subTest(missing=key), self.assertRaises(ValueError):
+                check(trial)
+        # Foreign gaps have successor bins but no six-part contribution.
+        foreign = values.copy()
+        foreign.update(lane_gap_runs=0, lane_gap_wall_ns=0,
+                       lane_gap_foreign_runs=1, lane_gap_foreign_ns=70)
+        for key in replay["LANE_GAP_PART_FIELDS"]:
+            foreign[key] = 0
+        check(foreign)
+
+    def test_id178_report_table_bins_and_host_cpu(self):
+        import contextlib
+        import importlib.util
+        import io
+        spec = importlib.util.spec_from_file_location(
+            "swapz_lane_gap_reporter", SCRIPT.parents[2] / "tools/run-tests.py")
+        reporter = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reporter)
+        values = {field: 0 for field in reporter.LANE_GAP_FIELDS}
+        values.update(lane_gap_runs=2, lane_gap_wall_ns=20000,
+                      lane_gap_completion_wake_ns=2000,
+                      lane_gap_publication_ns=2000,
+                      lane_gap_no_work_ns=4000,
+                      lane_gap_admitted_unowned_ns=4000,
+                      lane_gap_staged_held_ns=4000,
+                      lane_gap_seal_ns=4000,
+                      lane_successor_admitted_by_completion_0=1,
+                      lane_successor_admitted_by_completion_1=1,
+                      lane_successor_owned_by_completion_0=2,
+                      ack_dwell_deferred_count=2,
+                      ack_dwell_deferred_le_16us=1,
+                      ack_dwell_deferred_le_64us=1)
+        arm = {"lane_gap": values, "host_cpu": {"busy_fraction": .45}}
+        benchmarks = {
+            "storage_envelope_sessions": [
+                {"envelope": "sata_ssd", "arms": {"swapz": arm}},
+                {"envelope": "nvme_gen4", "arms": {"swapz": arm}},
+                {"envelope": "nvme_gen5", "arms": {"swapz": arm}}],
+            "sessions": [{"regime": "ssd_emulated", "async_prepare": 1,
+                          "arms": {"swapz": arm}}],
+        }
+        rows = reporter.lane_gap_attribution_rows(benchmarks)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0]["gap_per_run_us"], 10)
+        self.assertEqual(rows[0]["successor_admitted_at_t0_pct"], 50)
+        self.assertEqual(rows[0]["deferred_ack_p99_bin_bound"], "<=64us")
+        self.assertEqual(rows[0]["host_busy_pct"], 45)
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            reporter.print_lane_gap_attribution(rows)
+        self.assertIn("SSD lower-lane gap attribution", stream.getvalue())
+        self.assertIn("<=64us", stream.getvalue())
+
+
     def test_linear_calibration_rejects_foreign_or_offset_backing(self):
         import runpy
         validate = runpy.run_path(str(SCRIPT))["validate_linear_table"]

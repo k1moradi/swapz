@@ -16,7 +16,7 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor test-replay-helper clean
-PROGRAMS := io-replay-native codec-roundtrip extent-geometry zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots
+PROGRAMS := io-replay-native codec-roundtrip extent-geometry zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots lane-gap
 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
@@ -56,6 +56,8 @@ window-policy_HDR := $(KERNEL)/window-policy.h $(KERNEL)/codec.h
 preparation-slots_SRC := $(NATIVE)/io/preparation-slots.c
 preparation-slots_HDR := $(KERNEL)/preparation-slots.h $(KERNEL)/codec.h
 preparation-slots_LDLIBS := -pthread
+lane-gap_SRC := $(NATIVE)/io/lane-gap.c
+lane-gap_HDR := $(KERNEL)/lane-gap.h $(KERNEL)/codec.h
 
 $(OUT):
 	@mkdir -p "$@"
@@ -115,8 +117,8 @@ test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/authorit
 test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-scan-scaling $(OUT)/gc-rotation $(OUT)/gc-engine-rotation
 	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-scan-scaling"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"
 
-test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots
-	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"; "$(OUT)/preparation-slots"
+test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots $(OUT)/lane-gap
+	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"; "$(OUT)/preparation-slots"; "$(OUT)/lane-gap"
 
 test-replay-helper: $(OUT)/io-replay-native
 	@test -x "$(OUT)/io-replay-native"

@@ -547,8 +547,90 @@ def summarize(name, arms, seconds):
         "sync4_reissue_ms": (kernel.get("sync4_reissue_gap_ns") or 0) / 1e6,
         "wall_s": swapz.get("seconds") or 0.0,
         "pair_s": seconds,
+        "lane_gap": (
+            {key: kernel[key] for key in HOST_CPU["LANE_GAP_COUNTER_FIELDS"]}
+            if all(key in kernel for key in HOST_CPU["LANE_GAP_COUNTER_FIELDS"])
+            else None),
+        "host_busy_pct": (
+            swapz.get("host_cpu", {}).get("busy_fraction", 0) * 100
+            if isinstance(swapz.get("host_cpu", {}).get("busy_fraction"), (int, float))
+            else None),
     }
 
+
+
+def lane_gap_table_rows(rows):
+    """Same ID178 descriptive attribution as make test; skip unmeasured rows."""
+    phase_fields = HOST_CPU["LANE_GAP_PART_FIELDS"]
+    suffixes = HOST_CPU["LANE_DWELL_BIN_NAMES"]
+    bounds = ("<=1us", "<=4us", "<=16us", "<=64us",
+              "<=256us", "<=1ms", ">1ms")
+    selected = ("sata-mixed", "nvme4-mixed", "nvme5-mixed", "fast-mixed")
+    result = []
+    for row in rows:
+        if row.get("scenario", "").split("#")[0] not in selected:
+            continue
+        kernel = row.get("lane_gap")
+        if not kernel:
+            continue
+        runs, total = kernel["lane_gap_runs"], kernel["lane_gap_wall_ns"]
+        paired = runs + kernel["lane_gap_foreign_runs"]
+        count = kernel["ack_dwell_deferred_count"]
+        rank, cumulative, bound = (count * 99 + 99) // 100, 0, "n/a"
+        for suffix, upper in zip(suffixes, bounds):
+            cumulative += kernel[f"ack_dwell_deferred_{suffix}"]
+            if count and cumulative >= rank:
+                bound = upper
+                break
+        result.append({
+            "scenario": row["scenario"],
+            "runs": runs,
+            "gap_per_run_us": total / runs / 1000 if runs else None,
+            "part_shares": {
+                key: kernel[key] * 100 / total if total else None
+                for key in phase_fields},
+            "successor_admitted_at_t0_pct": (
+                100 * (paired - kernel["lane_successor_admitted_by_completion_0"])
+                / paired if paired else None),
+            "deferred_ack_p99_bin_bound": bound,
+            "host_busy_pct": row.get("host_busy_pct"),
+        })
+    return result
+
+
+def print_lane_gap_table(rows):
+    """Single diagnostic table; never used for exclusion or selection."""
+    if not rows:
+        return
+    phases = HOST_CPU["LANE_GAP_PART_FIELDS"]
+    def fmt(value):
+        return "n/a" if value is None else f"{value:.1f}"
+    headers = ("scenario", "runs", "gap/run us", "wake", "publish",
+               "no work", "unowned", "staged", "seal", "admit@t0",
+               "ACK p99 bin", "host busy")
+    records = []
+    for row in rows:
+        records.append((
+            row["scenario"], row["runs"], fmt(row["gap_per_run_us"]),
+            *(fmt(row["part_shares"][key]) + "%" if
+              row["part_shares"][key] is not None else "n/a"
+              for key in phases),
+            fmt(row["successor_admitted_at_t0_pct"]) + "%",
+            row["deferred_ack_p99_bin_bound"],
+            fmt(row["host_busy_pct"]) + "%",
+        ))
+    widths = [max(len(headers[index]),
+                  *(len(str(row[index])) for row in records))
+              for index in range(len(headers))]
+    print("\nSSD lower-lane gap attribution")
+    print("  " + " | ".join(f"{name:<{widths[i]}}"
+                           for i, name in enumerate(headers)))
+    print("  " + "-+-".join("-" * widths[i] for i in range(len(headers))))
+    for row in records:
+        print("  " + " | ".join(f"{str(value):<{widths[i]}}"
+                               for i, value in enumerate(row)))
+    print("  Six percentages partition paired gaps; ACK p99 is an inclusive "
+          "bin bound (>1ms open-ended). Descriptive, not a gate.")
 
 def pct(candidate, baseline):
     if not baseline:
@@ -879,6 +961,7 @@ def main():
                     "mixed_measure_ops": args.mixed_ops,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
+                    "lane_gap_attribution": lane_gap_table_rows(rows),
                     "reports": raw_reports,
                     "striped_target_experiment": {
                         "scope": "DEVELOPMENT_ONLY_MULTI_TARGET_K1_NO_KERNEL_C_CHANGE",
@@ -898,6 +981,7 @@ def main():
             print(json.dumps(row, sort_keys=True))
     else:
         print_table(rows)
+        print_lane_gap_table(lane_gap_table_rows(rows))
         print_profile(rows)
         print_striped_table(striped_rows if striped_specs else [])
     print(f"\n  Detailed telemetry: {(OUT_DIR / result_name).relative_to(ROOT)} "
