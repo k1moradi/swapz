@@ -2817,13 +2817,14 @@ lower-I/O and latency guards. Any retained production candidate requires full
 same-source owner `make test` correctness, lifecycle, fault, resource-pressure
 and product workload qualification.
 
-The fixed old-PC production-stack hand8/16/16/8 pilot is recorded in
-[the hand16 result](handoff/hand16-production-stack-result.md). Fewer requests
-and lower bytes alone do not establish useful service: fast-QD32 accepted-work
-idle increased while the normalized throughput interval crossed zero. Preserve
-the eight-record production threshold; do not promote or collect replacement
-observations to resolve this pilot's failed service/guard evidence. Any new
-threshold experiment needs a distinct prospective mechanism and fixed protocol.
+The fixed old-PC production-stack hand8/16/16/8 pilot reduced window
+fragmentation and lower-WRITE requests but did not establish the required useful
+service: fast-QD32 accepted-work idle increased while the normalized throughput
+interval crossed zero. Preserve the eight-record production threshold; do not
+promote or collect replacement observations to resolve this pilot's failed
+service/guard evidence. Threshold64 and submitter-off interactions were not
+tested by that pilot and remain separate questions. Any new threshold experiment
+needs a distinct prospective mechanism and fixed protocol.
 
 A dispatch candidate that flushes before a submitter-owned FIFO head must keep
 that head queued and untouched, serialize the existing prefix publisher, and
