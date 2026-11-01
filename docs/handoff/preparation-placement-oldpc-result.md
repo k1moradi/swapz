@@ -156,6 +156,23 @@ honest host/protocol limits. Modern-host performance is unmeasured here. The
 primary is improvement over swapz control, not parity with raw: QD8 still trails
 raw, and the broader useful READ/WRITE and lower-I/O goal is incomplete.
 
+For a separate prospective mixed follow-up, the development loop now supports
+`MIXED_OPS=65536` on ordinary mixed-only scenarios. Rootless tests prove the
+original 16384-operation measured stream is an exact prefix and validate the
+extended plans' final-image oracle. Two loaded control pairs pass at 65536
+operations per arm (49060 WRITEs and 16476 READs), with both unchanged screens
+passing. These are harness-validation pairs, excluded from candidate inference.
+The default and official qualification traces remain unchanged. A new plan must
+state how a longer steady-state workload addresses guard evidence and preserve
+the distinction from the completed shorter-trace cohort.
+
+A separate fresh idle diagnostic captured two >25%-busy intervals among 50
+enclosing process/host snapshots, with ChatGPT/Codex process activity observed.
+This supplies a plausible source of interference under exclusive access, not
+attribution of the earlier exclusions; the diagnostic observer also consumes
+CPU and its process windows enclose the host sample. Evidence for this
+measurement preparation remains in `build/optimization-round/quiet-screen-audit/`.
+
 Pilot evidence: `build/optimization-round/preparation-placement-oldpc/` and
 `build/optimization-round/submitter-during-io-oldpc/`, including plans, all block
 logs/JSON, analysis, actor-conservation checks, exact C/patch/native probe for

@@ -700,8 +700,11 @@ static swapz_u16 swapz_probe_set(
         import subprocess
         import sys
         script = ROOT / "tests/runtime/benchmark/io-replay-test.py"
+        # The bounded 65536-op mixed oracle/prefix checks bring this CPU-only
+        # suite to ~44s on the two-core qualification host. This is separate
+        # from every loaded-I/O and kernel-progress watchdog.
         result = subprocess.run([sys.executable, str(script)],
-                                capture_output=True, text=True, timeout=40)
+                                capture_output=True, text=True, timeout=90)
         self.assertEqual(result.returncode, 0,
                          result.stdout + "\\n" + result.stderr)
         self.assertIn("OK", result.stderr)

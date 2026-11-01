@@ -58,6 +58,7 @@ DEFAULT_SCENARIOS = (
 STRIPED_MODELS = ("nvme5", "sata")
 DEFAULT_STRIPE_COUNTS = (1, 2, 4)
 STRIPED_WRITE_QDS = (4, 8)
+MIXED_MEASURE_OPS = (16384, 65536)
 
 
 def quiet_host_sample():
@@ -173,7 +174,10 @@ def build():
          "test-replay-helper", "test-lower-io"], stdout=subprocess.DEVNULL)
 
 
-def prepare_plan(content="medium", need_stripes=False, striped_write_qds=()):
+def prepare_plan(content="medium", need_stripes=False, striped_write_qds=(),
+                 mixed_ops=16384):
+    if mixed_ops not in MIXED_MEASURE_OPS:
+        raise ValueError("MIXED_OPS must be 16384 or 65536")
     weights = CONTENT_WEIGHTS[content]
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
     plan = Path(tempfile.mkdtemp(prefix="benchmark-plan.",
@@ -188,11 +192,12 @@ def prepare_plan(content="medium", need_stripes=False, striped_write_qds=()):
          "--seed", "0x51a0a9", "--weights", weights], **quiet)
     run([*replay, "--output-dir", str(plan / "plan"), "--qd", "32",
          "--read-pct", "25", "--warmup-ops", "1024", "--measure-ops",
-         "16384", "--iops", "0"], **quiet)
+         str(mixed_ops), "--iops", "0"], **quiet)
     for mode in ("waves", "persistent"):
         run([*replay, "--output-dir", str(plan / f"plan-mixed-lanes-{mode}"),
              "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
-             "--measure-ops", "16384", "--iops", "0", "--mixed-lanes", mode], **quiet)
+             "--measure-ops", str(mixed_ops), "--iops", "0",
+             "--mixed-lanes", mode], **quiet)
     if need_stripes:
         run([*replay, "--output-dir", str(plan / "plan-striped-base"),
              "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
@@ -685,6 +690,8 @@ def main():
                         default=os.environ.get("HOST_LOAD_PROFILE", "uncontrolled"))
     parser.add_argument("--hand-records", type=int, choices=(8, 16, 64),
                         default=int(os.environ.get("HAND_RECORDS", "8")))
+    parser.add_argument("--mixed-ops", type=int, choices=MIXED_MEASURE_OPS,
+                        default=int(os.environ.get("MIXED_OPS", "16384")))
     args = parser.parse_args()
     calibration = args.calibration == "linear"
     candidate = "linear" if calibration else "swapz"
@@ -708,6 +715,13 @@ def main():
         parser.error("SUBMITTER_PREPARE=0 requires ordinary swapz fast_test scenarios")
     if args.hand_records != 8 and (calibration or striped_specs):
         parser.error("HAND_RECORDS requires an ordinary swapz fast_test scenario")
+    if args.mixed_ops not in MIXED_MEASURE_OPS:
+        parser.error("MIXED_OPS must be 16384 or 65536")
+    if args.mixed_ops != 16384 and (calibration or striped_specs or any(
+            name.partition("-")[2] not in
+            ("mixed", "mixed-lanes", "mixed-lanes-waves")
+            for name in ordinary_scenarios)):
+        parser.error("MIXED_OPS=65536 requires ordinary mixed-only scenarios")
     for name in ordinary_scenarios:
         scenario_arguments(name, "/dev/null",
                            submitter_prepare=args.submitter_prepare,
@@ -725,6 +739,7 @@ def main():
     print(f"swapz fast_test (development only; not qualification) "
           f"content={args.content} submitter_prepare={args.submitter_prepare} "
           f"hand_records={args.hand_records} "
+          f"mixed_ops={args.mixed_ops} "
           f"host_load={args.host_load_profile} "
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
     started = time.monotonic()
@@ -740,7 +755,8 @@ def main():
         args.content, ("nvme5", "mixed") in striped_specs or
         ("sata", "mixed") in striped_specs,
         tuple(qd for qd in STRIPED_WRITE_QDS
-              if ("fast", f"write-q{qd}") in striped_specs))
+              if ("fast", f"write-q{qd}") in striped_specs),
+        mixed_ops=args.mixed_ops)
     for _, workload in striped_specs:
         prepare_striped_plans(plan, stripe_counts, workload)
     fixture = json.loads((plan / "fixture.json").read_text())
@@ -860,6 +876,7 @@ def main():
                     "delta64_rescue": None if calibration else 1,
                     "submitter_prepare": args.submitter_prepare,
                     "hand_records": args.hand_records,
+                    "mixed_measure_ops": args.mixed_ops,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
                     "reports": raw_reports,

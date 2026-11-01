@@ -70,5 +70,7 @@ test:
 # It accepts dirty trees, honors the noise screen, never writes
 # test_results.json and never qualifies a source. Override with
 # SCENARIOS=... and/or REPEAT=1..10 when narrowing a follow-up.
+# MIXED_OPS=65536 extends ordinary mixed-only development traces; the default
+# remains 16384. It changes neither make test nor the performance screens.
 fast_test:
 	@+python3 -B tests/tools/fast-test.py

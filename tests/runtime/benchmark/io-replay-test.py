@@ -134,6 +134,70 @@ class PairReplayContract(unittest.TestCase):
                 shutil.rmtree(plan)
         self.assertEqual(len(set(fixtures.values())), 3)
 
+    def test_long_mixed_development_plan_preserves_prefix_and_oracle(self):
+        import hashlib
+        import importlib.util
+        import shutil
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_fast_long_mixed", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        with self.assertRaises(ValueError):
+            fast.prepare_plan(mixed_ops=32768)
+        plan = fast.prepare_plan(mixed_ops=65536)
+        try:
+            check = fast.HOST_CPU["check_plan"]
+            fixture = (plan / "fixture.bin").read_bytes()
+            for name in ("plan", "plan-mixed-lanes-waves",
+                         "plan-mixed-lanes-persistent"):
+                manifest = json.loads((plan / name / "manifest.json").read_text())
+                self.assertEqual(manifest["measure_ops"], 65536)
+                self.assertEqual(manifest["warmup_ops"], 1024)
+                _, latest = check(plan / name / "trace.jsonl", manifest, 128)
+                expected = b"".join(fixture[i * PAGE:(i + 1) * PAGE]
+                                    for i in latest)
+                self.assertEqual(hashlib.sha256(expected).hexdigest(),
+                                 manifest["expected_post_sha256"])
+            for qd in (1, 4, 8, 32):
+                manifest = json.loads(
+                    (plan / f"plan-write-qd{qd}" / "manifest.json").read_text())
+                self.assertEqual(manifest["measure_ops"], 4096)
+            baseline = plan / "short-prefix"
+            subprocess.run([
+                sys.executable, "-B", str(SCRIPT), "prepare", "--fixture",
+                str(plan / "fixture.bin"), "--output-dir", str(baseline),
+                "--logical-pages", "1024", "--writer-pages", "256",
+                "--reader-start", "512", "--reader-pages", "256", "--qd",
+                "32", "--read-pct", "25", "--warmup-ops", "1024",
+                "--measure-ops", "16384", "--iops", "0"],
+                check=True, stdout=subprocess.DEVNULL)
+            short = (baseline / "trace.jsonl").read_bytes().splitlines()
+            long = (plan / "plan" / "trace.jsonl").read_bytes().splitlines()
+            self.assertEqual(long[:len(short)], short)
+        finally:
+            shutil.rmtree(plan)
+
+    def test_long_mixed_selector_rejects_other_cohorts_before_privilege(self):
+        import importlib.util
+        from unittest.mock import patch
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_fast_long_scope", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        for scenario, extra in (("fast-w8", []), ("fast-stripes-w4", []),
+                                ("fast-mixed", ["--calibration", "linear"])):
+            with patch.object(sys, "argv", ["fast-test", "--mixed-ops",
+                    "65536", "--scenarios", scenario, *extra]), \
+                    patch.object(fast, "privileged") as privileged, \
+                    patch.object(fast, "build") as build:
+                with self.assertRaises(SystemExit) as error:
+                    fast.main()
+                self.assertEqual(error.exception.code, 2)
+                privileged.assert_not_called()
+                build.assert_not_called()
+
     def test_host_cpu_boundaries_expose_contention_without_idle_inference(self):
         import importlib.util
         from unittest.mock import patch

@@ -2741,3 +2741,19 @@ override unresolved safety/performance guards. Preserve all excluded observation
 do not extend the completed fixed sample or relax its screen after inspection.
 Pre/post CPU counters cannot identify task ownership or establish operator
 activity. Any follow-up protocol must address the coverage limitation prospectively.
+
+The development loop may set `MIXED_OPS=65536` for ordinary mixed-only
+scenarios, extending the deterministic 16384-operation measured stream fourfold
+with the same 1024 warmup operations, fixture, QD and generator seed. Both arms
+consume one immutable plan and must pass the ordinary complete-image oracle.
+The default remains 16384; WRITE-only, striped and calibration comparisons
+reject the nondefault selector. Reports identify `mixed_measure_ops` and the
+actual per-arm operation counts and trace hashes. Longer traces form a separate
+cohort: never pool them with ID169's completed confirmation or reinterpret
+that result. Quiet-host/raw-drift screens and source/ordering checks remain
+unchanged. A longer trace can improve tail sampling and amortize interruptions;
+it cannot prove an idle host or eliminate the need for fixed prospective guards.
+The nested rootless replay-suite watchdog is 90 seconds (formerly 40) to cover
+the measured ~44-second suite including the longer deterministic-plan oracle
+checks on the two-core host. This changes no loaded replay, privileged helper,
+kernel-progress or teardown deadline.
