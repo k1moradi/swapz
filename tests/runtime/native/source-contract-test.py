@@ -122,6 +122,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(complete.index("swapz_lane_gap_ack(ctx, entry);"),
                         complete.index("bio_endio(bio);"))
         self.assertIn("atomic64_inc(count)", body("swapz_lane_gap_ack"))
+        self.assertIn("entry->ack_batch->bins[mode][bin]++",
+                      body("swapz_lane_gap_ack"))
+        self.assertIn("swapz_lane_gap_ack_flush(ctx, &acknowledgements)",
+                      body("swapz_completion_work"))
+        self.assertIn("swapz_lane_gap_ack_flush(ctx, &acknowledgements)",
+                      body("swapz_deliver_bio_list"))
+        self.assertIn("entry->ack_batch = NULL;", body("swapz_map"))
         self.assertIn("atomic64_add(", body("swapz_lane_gap_ack"))
         lower = body("swapz_lower")
         self.assertIn("lane_epoch_before", lower)
@@ -1731,7 +1738,11 @@ typedef uint64_t atomic64_t;
 #define DM_ENDIO_DONE 0
 #define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
 struct swapz_dm;
-struct swapz_bio_ref { struct swapz_dm *preparation_ctx; };
+struct swapz_ack_dwell_batch { unsigned count[2]; };
+struct swapz_bio_ref {
+    struct swapz_dm *preparation_ctx;
+    struct swapz_ack_dwell_batch *ack_batch;
+};
 struct bio { struct bio *bi_next; struct swapz_bio_ref ref; unsigned id, ended; int bi_status; bool prepared; };
 struct bio_list { struct bio *head, *tail; };
 struct work_struct { void (*func)(struct work_struct *); };
@@ -1780,6 +1791,9 @@ static void swapz_release_prepared(struct bio *b) { if(b->prepared) {b->prepared
 static void swapz_lane_gap_ack(struct swapz_dm *ctx,
                                const struct swapz_bio_ref *entry)
 { (void)ctx; (void)entry; }
+static void swapz_lane_gap_ack_flush(struct swapz_dm *ctx,
+                                    const struct swapz_ack_dwell_batch *batch)
+{ (void)ctx; (void)batch; }
 static u64 ktime_get_ns(void) { static u64 clock;return ++clock; }
 static u64 swapz_elapsed_ns(u64 a,u64 b) { return b-a; }
 static bool swapz_inflight_lower_pending(struct swapz_dm *ctx) { return ctx->lower_pending; }

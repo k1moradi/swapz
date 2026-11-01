@@ -547,6 +547,16 @@ Representative-content prevalence, long-run churn, actual
 kernel swap and physical media remain separate qualification gates.
 
 
+### ID178 ACK-batch accounting validation
+
+The actual completion loops must keep the batch record stack-local, assign it
+before each successful BIO delivery, never dereference a BIO after
+`bio_endio()`, and aggregate all per-BIO bins before releasing the completion
+slot. Validate deferred/immediate bin conservation, successful-only dwell,
+publication-to-delivery timestamps and failure injection, comparing old
+per-BIO accounting with the aggregated result on an exact sample sequence.
+The fast and official replay status schema remains unchanged.
+
 ### ID181 development controls and qualification
 
 `make fast_test ID181_POLICY=control|A|B|AB` selects the ordinary retained

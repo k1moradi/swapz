@@ -704,6 +704,15 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 - **ID61:** add foreground-GC stall/reserve-headroom evidence under bounded useful pressure.
 - **ID62:** physical devices remain outside the current development safety scope.
 
+**ID178 instrumentation cost hypothesis (2026-11-01):** ARM64 cross-report
+fast-mixed service fell from roughly 71.9 to 69.0 MB/s after ID178, with
+suspected per-ACK time/atomic overhead; this is not a same-source controlled
+instrumentation A/B. ACK delivery now retains per-BIO clocks and exact dwell
+bins but accumulates them within existing delivery loops before a bounded
+atomic flush, reducing atomic contention without changing acceptance or ACK
+timing. Validate ARM64 performance prospectively; do not claim the 4-6%
+difference is proven ID178 overhead.
+
 ## Immediate work queue
 
 **Current round (2026-11-01, lane-gap diagnostics).** Source `9123b811`

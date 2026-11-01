@@ -297,6 +297,17 @@ struct swapz_read_slot {
 	u64 decode_wall_ns;
 };
 
+/*
+ * Owner-local ID178 ACK histogram collection. A pointer to this stack record
+ * is attached only while its completed BIO is exclusively owned by one ACK
+ * delivery loop; it is never consulted after bio_endio() frees that BIO.
+ */
+struct swapz_ack_dwell_batch {
+	u64 count[2];
+	u64 duration_ns[2];
+	u64 bins[2][SWAPZ_LANE_DWELL_BINS];
+};
+
 struct swapz_bio_ref {
 	struct list_head list;
 	struct bio *bio;
@@ -320,6 +331,7 @@ struct swapz_bio_ref {
 	u64 lane_owned_ns;
 	u64 published_ns;
 	bool published_deferred;
+	struct swapz_ack_dwell_batch *ack_batch;
 	int preparation_error;
 };
 
@@ -1396,9 +1408,42 @@ static void swapz_lane_gap_ack(struct swapz_dm *ctx,
 		histogram = ctx->ack_dwell_immediate_bins;
 	}
 	bin = swapz_lane_gap_dwell_bin(now_ns - entry->published_ns);
+	if (entry->ack_batch) {
+		/* No other thread may touch this BIO or the delivery stack slot. */
+		unsigned int mode = entry->published_deferred ? 1U : 0U;
+
+		entry->ack_batch->count[mode]++;
+		entry->ack_batch->duration_ns[mode] += now_ns - entry->published_ns;
+		entry->ack_batch->bins[mode][bin]++;
+		return;
+	}
 	atomic64_inc(count);
 	atomic64_add(now_ns - entry->published_ns, duration);
 	atomic64_inc(&histogram[bin]);
+}
+
+/* Publish each completed batch once; individual BIO clocks remain exact. */
+static void swapz_lane_gap_ack_flush(struct swapz_dm *ctx,
+				    const struct swapz_ack_dwell_batch *batch)
+{
+	unsigned int mode, bin;
+
+	for (mode = 0; mode < 2U; ++mode) {
+		atomic64_t *count = mode ? &ctx->ack_dwell_deferred_count :
+			&ctx->ack_dwell_immediate_count;
+		atomic64_t *duration = mode ? &ctx->ack_dwell_deferred_ns :
+			&ctx->ack_dwell_immediate_ns;
+		atomic64_t *histogram = mode ? ctx->ack_dwell_deferred_bins :
+			ctx->ack_dwell_immediate_bins;
+
+		if (!batch->count[mode])
+			continue;
+		atomic64_add(batch->count[mode], count);
+		atomic64_add(batch->duration_ns[mode], duration);
+		for (bin = 0; bin < SWAPZ_LANE_DWELL_BINS; ++bin)
+			if (batch->bins[mode][bin])
+				atomic64_add(batch->bins[mode][bin], &histogram[bin]);
+	}
 }
 
 static void swapz_complete(struct bio *bio, int error)
@@ -1449,11 +1494,17 @@ static void swapz_defer_upper_completion(struct swapz_dm *ctx, struct bio *bio)
 static void swapz_completion_work(struct work_struct *work)
 {
 	struct swapz_dm *ctx = container_of(work, struct swapz_dm, completion_work);
+	struct swapz_ack_dwell_batch acknowledgements = {};
 	struct bio *bio;
 
 	preempt_disable();
-	while ((bio = bio_list_pop(&ctx->completion_bios)))
+	while ((bio = bio_list_pop(&ctx->completion_bios))) {
+		struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+		entry->ack_batch = &acknowledgements;
 		swapz_complete(bio, 0);
+	}
+	swapz_lane_gap_ack_flush(ctx, &acknowledgements);
 	/* No slot/list access after release. The same work item may be requeued
 	 * during its return; one workqueue never runs that item concurrently. */
 	atomic_set_release(&ctx->completion_active, 0);
@@ -1499,6 +1550,7 @@ static bool swapz_try_completion_handoff(struct swapz_dm *ctx)
  */
 static void swapz_deliver_bio_list(struct swapz_dm *ctx, struct bio_list *bios)
 {
+	struct swapz_ack_dwell_batch acknowledgements = {};
 	struct bio *bio;
 	u64 start_ns;
 
@@ -1511,8 +1563,13 @@ static void swapz_deliver_bio_list(struct swapz_dm *ctx, struct bio_list *bios)
 	 * context switch per BIO; the writers run once the batch is delivered.
 	 */
 	preempt_disable();
-	while ((bio = bio_list_pop(bios)))
+	while ((bio = bio_list_pop(bios))) {
+		struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+		entry->ack_batch = &acknowledgements;
 		swapz_complete(bio, 0);
+	}
+	swapz_lane_gap_ack_flush(ctx, &acknowledgements);
 	preempt_enable();
 	ctx->deferred_upper_completion_wall_ns +=
 		swapz_elapsed_ns(start_ns, ktime_get_ns());
@@ -7475,6 +7532,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	entry->lane_owned_ns = 0;
 	entry->published_ns = 0;
 	entry->published_deferred = false;
+	entry->ack_batch = NULL;
 	entry->preparation_error = 0;
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
 		init_completion(&entry->preparation_snapshot_ready);
