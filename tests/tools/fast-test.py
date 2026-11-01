@@ -138,7 +138,7 @@ def striped_scenario(name):
 
 def scenario_arguments(name, plan, calibration=False,
                        candidate_first=False, submitter_prepare=1,
-                       hand_records=8):
+                       hand_records=8, id181_policy="control"):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
         raise ValueError(f"unknown scenario {name!r}")
@@ -154,6 +154,10 @@ def scenario_arguments(name, plan, calibration=False,
         arguments += ["--submitter-prepare", "0"]
     if hand_records != 8:
         arguments += ["--hand-records", str(hand_records)]
+    if id181_policy in ("A", "AB"):
+        arguments += ["--id181-successor-first", "1"]
+    if id181_policy in ("B", "AB"):
+        arguments += ["--id181-publication-handoff", "1"]
     arguments += ["--shared-plan", str(plan)]
     if calibration:
         arguments.append("--linear-calibration")
@@ -796,6 +800,8 @@ def main():
                         default=os.environ.get("HOST_LOAD_PROFILE", "uncontrolled"))
     parser.add_argument("--hand-records", type=int, choices=(8, 16, 64),
                         default=int(os.environ.get("HAND_RECORDS", "8")))
+    parser.add_argument("--id181-policy", choices=("control", "A", "B", "AB"),
+                        default=os.environ.get("ID181_POLICY", "control"))
     parser.add_argument("--mixed-ops", type=int, choices=MIXED_MEASURE_OPS,
                         default=int(os.environ.get("MIXED_OPS", "16384")))
     args = parser.parse_args()
@@ -821,6 +827,8 @@ def main():
         parser.error("SUBMITTER_PREPARE=0 requires ordinary swapz fast_test scenarios")
     if args.hand_records != 8 and (calibration or striped_specs):
         parser.error("HAND_RECORDS requires an ordinary swapz fast_test scenario")
+    if args.id181_policy != "control" and (calibration or striped_specs):
+        parser.error("ID181_POLICY requires ordinary swapz scenarios")
     if args.mixed_ops not in MIXED_MEASURE_OPS:
         parser.error("MIXED_OPS must be 16384 or 65536")
     if args.mixed_ops != 16384 and (calibration or striped_specs or any(
@@ -831,7 +839,8 @@ def main():
     for name in ordinary_scenarios:
         scenario_arguments(name, "/dev/null",
                            submitter_prepare=args.submitter_prepare,
-                           hand_records=args.hand_records)
+                           hand_records=args.hand_records,
+                           id181_policy=args.id181_policy)
 
     if os.geteuid() != 0 and subprocess.run(
             ["sudo", "-n", "true"], capture_output=True).returncode:
@@ -844,7 +853,7 @@ def main():
                            cwd=ROOT, capture_output=True, text=True).stdout.strip()
     print(f"swapz fast_test (development only; not qualification) "
           f"content={args.content} submitter_prepare={args.submitter_prepare} "
-          f"hand_records={args.hand_records} "
+          f"hand_records={args.hand_records} id181_policy={args.id181_policy} "
           f"mixed_ops={args.mixed_ops} "
           f"host_load={args.host_load_profile} "
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
@@ -879,7 +888,8 @@ def main():
                                   *scenario_arguments(name, plan, calibration,
                                                       calibration and attempt % 2 == 1,
                                                       args.submitter_prepare,
-                                                      args.hand_records))
+                                                      args.hand_records,
+                                                      args.id181_policy))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
                 arms = parse_arms(proc.stdout, candidate)
@@ -982,6 +992,7 @@ def main():
                     "delta64_rescue": None if calibration else 1,
                     "submitter_prepare": args.submitter_prepare,
                     "hand_records": args.hand_records,
+                    "id181_policy": args.id181_policy,
                     "mixed_measure_ops": args.mixed_ops,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,

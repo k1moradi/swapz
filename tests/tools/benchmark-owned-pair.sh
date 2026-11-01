@@ -26,6 +26,9 @@ SUBMITTER_PREPARE=1
 SUBMITTER_PREPARE_EXPLICIT=0
 HAND_RECORDS=8
 HAND_RECORDS_EXPLICIT=0
+ID181_SUCCESSOR_FIRST=0
+ID181_PUBLICATION_HANDOFF=0
+ID181_EXPLICIT=0
 # Required production defaults for every emulated-device pair. Do not pass
 # module overrides: loading defaults and then checking status proves the default.
 DELTA64_RESCUE=1
@@ -88,6 +91,19 @@ fi
 if [[ $# -ge 3 && ${@: -2:1} == --read-coalesce &&
       ( ${!#} == 0 || ${!#} == 1 ) ]]; then
     READ_COALESCE="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# Suffix-only experimental selectors, parsed in reverse argument order.
+if [[ $# -ge 3 && ${@: -2:1} == --id181-publication-handoff &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    ID181_PUBLICATION_HANDOFF="${!#}"
+    ID181_EXPLICIT=1
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+if [[ $# -ge 3 && ${@: -2:1} == --id181-successor-first &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    ID181_SUCCESSOR_FIRST="${!#}"
+    ID181_EXPLICIT=1
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Parse the development-only hand selector before the submitter policy.
@@ -190,6 +206,12 @@ fi
 if (( SUBMITTER_PREPARE_EXPLICIT )) &&
    (( !ASYNC_PREPARE || RESOURCE_PRESSURE_SHORT || LINEAR_CALIBRATION )); then
     echo 'BLOCKED: submitter preparation control requires an ordinary async swapz pair' >&2
+    exit 2
+fi
+if (( ID181_EXPLICIT )) &&
+   (( !ASYNC_PREPARE || !RETAIN_MS || RESOURCE_PRESSURE_SHORT ||
+      LINEAR_CALIBRATION )); then
+    echo 'BLOCKED: ID181 requires ordinary retained-async swapz pairs' >&2
     exit 2
 fi
 if (( HAND_RECORDS_EXPLICIT )) &&
@@ -659,6 +681,8 @@ modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" \
     "submitter_prepare=$SUBMITTER_PREPARE" \
     "work_conserving_hand_records=$HAND_RECORDS" \
+    "id181_successor_first=$ID181_SUCCESSOR_FIRST" \
+    "id181_publication_handoff=$ID181_PUBLICATION_HANDOFF" \
     "read_coalesce=$READ_COALESCE" \
     "invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT" ||
     fail 'swapz module insertion rejected'
@@ -711,6 +735,10 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])submitter_prepare=$expected_
     fail 'loaded swapz submitter preparation does not match selected benchmark arm'
     dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])work_conserving_hand_records=$HAND_RECORDS([[:space:]]|$)" ||
         fail 'loaded swapz hand threshold does not match selected benchmark arm'
+    dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])id181_successor_first=$ID181_SUCCESSOR_FIRST([[:space:]]|$)" ||
+        fail 'ID181 successor selector mismatch'
+    dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])id181_publication_handoff=$ID181_PUBLICATION_HANDOFF([[:space:]]|$)" ||
+        fail 'ID181 publication selector mismatch'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" ||
     fail 'loaded swapz delta64 rescue is not the required production default'
 expected_delta64_workers=$ASYNC_PREPARE

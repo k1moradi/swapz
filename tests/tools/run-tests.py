@@ -6034,6 +6034,9 @@ def print_bench(result, *, detailed=False):
     print("  Resource, lifecycle, GC, lower READ and full telemetry: test_results.json.")
     if result.get("overall") not in (None, "PASS"):
         print(f"  Overall gate remains {result['overall']}; partial performance is not promotion.")
+    # ID178 attribution is required in the normal operator output too.
+    print_lane_gap_attribution(
+        result["benchmarks"].get("lane_gap_attribution", []))
     if not detailed:
         return
 
@@ -7219,9 +7222,6 @@ def print_bench(result, *, detailed=False):
               f"{storage.get('overall', 'NOT_RUN')} "
               f"({storage.get('reason', 'directional sweep unavailable')})")
 
-
-    print_lane_gap_attribution(
-        result["benchmarks"].get("lane_gap_attribution", []))
 
     write_depth = result["benchmarks"].get("write_pipeline_depth", {})
     if write_depth.get("overall") == "PASS_WRITE_PIPELINE_DEPTH_EVIDENCE":

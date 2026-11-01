@@ -1738,6 +1738,7 @@ struct work_struct { void (*func)(struct work_struct *); };
 struct dm_target { struct swapz_dm *private; };
 struct swapz_dm {
     bool defer_upper_completions, accepting, failed, lower_pending;
+    bool id181_publication_handoff;
     int last_error, queue_lock;
     void *preparation_workqueue;
     struct bio_list deferred_upper_completions, completion_bios;
@@ -1851,6 +1852,13 @@ int main(void) {
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==65);
     init();add(0,4);ctx.lower_pending=false;assert(!swapz_try_completion_handoff(&ctx));
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==4);
+    /* ID181: publication-time handoff is still bounded and exact-once. */
+    init();add(0,4);ctx.lower_pending=false;ctx.id181_publication_handoff=true;
+    assert(swapz_try_completion_handoff(&ctx));run();
+    assert(ctx.upper_write_completed_ok==4&&!ctx.completion_active);
+    init();add(0,3);ctx.lower_pending=false;ctx.id181_publication_handoff=true;
+    assert(!swapz_try_completion_handoff(&ctx));
+    swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==3);
     init();add(0,4);ctx.defer_upper_completions=false;
     swapz_deliver_upper_completions(&ctx);assert(!pending&&ctx.upper_write_completed_ok==4);
 

@@ -547,6 +547,19 @@ Representative-content prevalence, long-run churn, actual
 kernel swap and physical media remain separate qualification gates.
 
 
+### ID181 development controls and qualification
+
+`make fast_test ID181_POLICY=control|A|B|AB` selects the ordinary retained
+asynchronous owned-null_blk comparison. The default `control` is unchanged;
+stripes/calibration cannot select experimental policies. Do balanced repeated
+controls on NVMe5/NVMe4/SATA/fast mixed/fast QD8 on each quiet host. Compare
+useful WRITE/raw, READ p99, lower bytes/requests, CPU, gap partition, record
+size and ACK dwell. Three repeats screen a hypothesis; prospective paired
+confidence intervals are required before promotion. The actual completion
+handoff probe must cover a published cohort without a pending successor,
+the 4..64 bound, busy slot, failure and exact-once completion. Official
+`make test` always uses disabled selectors.
+
 ### Lower-lane gap attribution: native and replay qualification (ID178)
 
 The observational ID178 module compiles the pure `src/kernel/lane-gap.h`

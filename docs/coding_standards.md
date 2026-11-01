@@ -209,6 +209,19 @@ the acknowledgement string in source cannot verify the DM output contract.
 Production policy cannot change from this profiling commit alone.
 
 
+### ID181 successor-first and publication-ACK development A/B
+
+Two read-only selectors default off: `id181_successor_first` and
+`id181_publication_handoff`. Only positively identified null_blk retained-async
+targets may enable them. The ordered owner may submit an already-staged
+>=hand-sized successor immediately after the prior run is published, before
+later FIFO admissions and independent READs. It must use the unchanged flush
+logic (all barriers, CRC/generation, GC/failure ownership). Publication-time
+ACK handoff uses the one existing bounded 4..64 completion slot and queue-lock
+drain gate; occupied handoff falls back to ordered delivery. No early success,
+second lower WRITE, new queue/lock, changed SWZ or physical-device admission.
+Controls are development-only; the qualified production defaults remain off.
+
 ### Lower-lane gap attribution (ID178)
 
 ID178 is observational only. No policy, ACK-delivery time, retained window,
