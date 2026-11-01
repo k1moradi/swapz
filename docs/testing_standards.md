@@ -2849,10 +2849,11 @@ the ordered worker owns a private local FIFO.
 
 Empty-incoming wake suppression needs release-before-recheck and
 release-during-handback cases with a private local FIFO, plus retained and
-nonretained ready-head wake checks. The [ID167 private-FIFO pilot](handoff/submitter-private-wake-oldpc-result.md)
-failed its service/deferral targets and is removed. Generic deferral counts
-are not proof of unnecessary wakes; further wake policies require attributed
-evidence and may not weaken ownership or change packing to manufacture a win.
+nonretained ready-head wake checks. The ID167 private-FIFO pilot failed its service/deferral targets and is
+removed. Generic deferral counts are not proof of unnecessary wakes; do not
+add another wake predicate without evidence attributed to a specific
+unnecessary-wake population and a complete progress proof. Any future wake
+policy must preserve ownership and may not change packing to manufacture a win.
 
 Preparation placement comparisons must keep the production compression stack
 on and account for each timed WRITE across submitter, producer and ordered
