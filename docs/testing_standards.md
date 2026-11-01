@@ -1937,6 +1937,17 @@ The test uses only positively owned `null_blk` backings and never authorizes
 physical media or active swap. Performance under this gate is observational:
 record it, but do not tune a scheduling threshold from one pressure run.
 
+If an ID36 owned pair has already failed (including an OFF/control replay
+timeout), its shell exit path may release only its proven, private
+`pressure.stop` barrier before ordinary positively identified device cleanup.
+Successful pairs must keep the same pressure helper and burners alive through
+all byte-exact verification and teardown; failure release never changes the
+failed verdict, replay bounds, pressure admission or required evidence. Early
+failures without a positively identified pair barrier leave stop ownership to
+the enclosing ID36 helper. An outer timeout or uncertain live mapping still
+quarantines rather than forcing removal; unattended cleanup must be separately
+confirmed by loaded owner evidence.
+
 Rootless contracts must lint both the pressure helper and shell wrapper, and the
 loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`
 marker. Missing cgroup-v2 controllers, insufficient host safety headroom,

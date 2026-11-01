@@ -4040,6 +4040,55 @@ int main(void)
         self.assertIn('"id36": re.compile(', runner)
         self.assertIn("ID36 low-RAM/heavy-CPU evidence is incomplete", runner)
 
+    def test_id36_failed_pair_pressure_stop_is_private_and_failure_only(self):
+        """Execute the actual shell helper without cgroups or privileged devices."""
+        import subprocess
+        import tempfile
+
+        benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        start = benchmark.index("id36_release_failed_pair_pressure() {")
+        end = benchmark.index("\n}\n", start) + 2
+        helper = benchmark[start:end]
+        script = ("set -euo pipefail\n"
+                  "note() { :; }\n"
+                  "RESOURCE_PRESSURE_SHORT=$1\n"
+                  "id36_pair_dir=$2\n"
+                  "ID36_PAIR_READY=$id36_pair_dir/pair.ready\n"
+                  "ID36_PAIR_GO=$id36_pair_dir/pair.go\n" +
+                  helper + "\n"
+                  'id36_release_failed_pair_pressure "$3"\n')
+        with tempfile.TemporaryDirectory(prefix="swapz-id36-stop-") as folder:
+            private = Path(folder) / "owned"
+            private.mkdir()
+            (private / "pair.ready").write_text("pid=1\n")
+            stop = private / "pressure.stop"
+
+            def invoke(pressure, failed):
+                result = subprocess.run(
+                    ["bash", "-c", script, "_", str(pressure), str(private),
+                     str(failed)],
+                    capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+            invoke(1, 0)
+            self.assertFalse(stop.exists())
+            invoke(0, 1)
+            self.assertFalse(stop.exists())
+            invoke(1, 1)
+            self.assertTrue(stop.exists())
+            stop.unlink()
+
+            # Never follow an attacker-controlled stop-file symlink.
+            foreign = Path(folder) / "foreign"
+            foreign.write_text("unchanged\n")
+            stop.symlink_to(foreign)
+            invoke(1, 1)
+            self.assertEqual(foreign.read_text(), "unchanged\n")
+            stop.unlink()
+            (private / "pair.ready").unlink()
+            invoke(1, 1)
+            self.assertFalse(stop.exists())
+
     def test_loaded_preflight_recovers_only_proven_stale_owned_mapping(self):
         preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()

@@ -679,6 +679,21 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
+The old-PC source `3ef72d9f67d6` passed native acquire-race coverage but its owner
+`make test` report `fd5ed47e398e` is **BLOCKED at ID36**: the raw control
+hit its existing 280-second limit before swapz ran under pressure. Read-only
+stack evidence identifies filemap faults and `memory.high` throttling in raw
+startup, not a proven swapz I/O stall. After the preserved failure, operator
+intervention created this fixture's `pressure.stop` barrier to free ordinary
+teardown. The narrow follow-up makes an already-failed owned ID36 pair signal
+only its proven private stop barrier **before** starting safe device cleanup;
+on success, full pressure remains active through teardown. Rootless simulation
+covers failure-only signalling and symlink/unproven-path rejection. This does
+not cure the raw startup slowdown, establish unattended privileged cleanup, or
+qualify source/performance. Recheck unattended failure teardown on the owner
+host, then investigate pre-replay harness fault charging without preloading
+away the pressure test or extending its 280/840/960-second bounds.
+
 ARM64 owner report `e73614c` (source `6c33294`, production delta64 +
 DELTA64_SHUF8 + LZ4 everywhere) passed all five stages; the loaded delta64
 positive path passed its hard gate, and its counts are now persisted as

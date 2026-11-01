@@ -384,6 +384,24 @@ note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
 note "EVIDENCE_DIR=$SESSION"
 
+# If an ID36 replay has already failed, stop only this pair's verified
+# pressure helper before device cleanup. This cannot turn the failed replay
+# into a PASS; successful runs retain memory.high and CPU pressure through
+# byte verification and teardown.
+id36_release_failed_pair_pressure() {
+    local pair_result=$1
+    (( pair_result != 0 && RESOURCE_PRESSURE_SHORT )) || return 0
+    # Early failures have no proven private barrier. Their parent owns stop.
+    [[ -n ${id36_pair_dir:-} &&
+       $ID36_PAIR_READY == "$id36_pair_dir/pair.ready" &&
+       $ID36_PAIR_GO == "$id36_pair_dir/pair.go" &&
+       -d $id36_pair_dir && ! -L $id36_pair_dir &&
+       -f $ID36_PAIR_READY && ! -L $ID36_PAIR_READY &&
+       ! -L $id36_pair_dir/pressure.stop ]] || return 0
+    : > "$id36_pair_dir/pressure.stop" || return 1
+    note 'ID36_FAILED_PAIR_PRESSURE_RELEASE=1'
+}
+
 # Never force removal: first close the exact DM UUID, then prove every RAM
 # config/index/rdev/holder is still ours. Partial setup is quarantined.
 cleanup() {
@@ -391,6 +409,10 @@ cleanup() {
     local mapper_uuid open_before_remove open_after_remove holder_rc remove_rc
     trap - EXIT HUP INT TERM
     set +e
+    # Preserve the failed verdict while allowing normal owned-device cleanup
+    # to run without the pressure load that already defeated the replay bound.
+    id36_release_failed_pair_pressure "$result" ||
+        note 'FAIL: ID36 failed-pair pressure barrier could not be released'
     # Genuine inventory changes forbid teardown. Ignore ONLY volatile
     # swap Used; path/type/size/priority must remain exactly the same.
     if ! current_id="$(swapz_swap_inventory_identity /proc/swaps)" ||
