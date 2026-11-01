@@ -556,7 +556,12 @@ successor/dwell bin transitions. Rootless source contracts forbid scheduling,
 lock, wait, queue, or allocation calls inside the accounting helpers; require
 the new per-BIO timestamp fields without changing ID114's marks, sole
 ordered-domain chronology, `profile_epoch` invalidation, and sampling
-publication-to-ACK before `bio_endio()`.
+publication-to-ACK before `bio_endio()`. Existing rootless C probes that
+extract full production function bodies must provide harmless ID178 helper
+stubs or the new passive epoch flag in their local miniature test structures;
+they must continue asserting their original completion, FIFO and quantum
+semantics. Those probe stubs are not substitutes for the separate ID178
+accounting source/native tests.
 
 Timed `io-replay.py` K=1 WRITE counter deltas require every ID178 status
 token: absence is an error, never zero. Replay/report validators require

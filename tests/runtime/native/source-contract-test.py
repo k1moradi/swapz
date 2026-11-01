@@ -1462,6 +1462,11 @@ static int bio_op(struct bio *b) { (void)b;return REQ_OP_WRITE; }
 static unsigned bio_sectors(struct bio *b) { (void)b;return 8; }
 static int errno_to_blk_status(int error) { return -error; }
 static void swapz_release_prepared(struct bio *b) { if(b->prepared) {b->prepared=false;++released;} }
+/* The completion probe asserts BIO ownership; ID178 atomic dwell is covered
+ * by its separate source contract and native accounting test. */
+static void swapz_lane_gap_ack(struct swapz_dm *ctx,
+                               const struct swapz_bio_ref *entry)
+{ (void)ctx; (void)entry; }
 static u64 ktime_get_ns(void) { static u64 clock;return ++clock; }
 static u64 swapz_elapsed_ns(u64 a,u64 b) { return b-a; }
 static bool swapz_inflight_lower_pending(struct swapz_dm *ctx) { return ctx->lower_pending; }
@@ -1817,6 +1822,13 @@ int main(void)
 struct probe {
     unsigned int batch, slots, rejected, slot_calls, batch_calls, op;
 };
+/* The real dispatch source includes observational ID178 READ timing only;
+ * this probe verifies the unchanged BIO quantum and reject/success gotos. */
+typedef unsigned long long u64;
+static u64 ktime_get_ns(void) { return 1; }
+static void swapz_lane_gap_note_owner_read(struct probe *ctx,
+                                            u64 start, u64 end, unsigned int count)
+{ (void)ctx; (void)start; (void)end; (void)count; }
 struct bio { unsigned int op; };
 struct swapz_bio_ref { struct bio *bio; };
 #define REQ_OP_READ 0U
@@ -3304,9 +3316,11 @@ int main(void)
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 struct swapz_dm {
     unsigned long long sync4_last_done_ns;
     unsigned long long sync4_windows;
+    bool lane_prev_valid;
 };
 struct dm_target { void *private; };
 #define WRITE_ONCE(value, new_value) ((value) = (new_value))
@@ -3316,7 +3330,7 @@ static int swapz_message(struct dm_target *ti, unsigned int argc, char **argv,
 {CALLBACK}
 int main(void)
 {
-    struct swapz_dm ctx = {123, 7};
+    struct swapz_dm ctx = {123, 7, true};
     struct dm_target ti = {&ctx};
     char *valid[] = {"profile_epoch"};
     char *invalid[] = {"unknown"};
@@ -3326,10 +3340,12 @@ int main(void)
     assert(swapz_message(&ti, 2, valid, result, sizeof(result)) == -EINVAL);
     assert(swapz_message(&ti, 1, invalid, result, sizeof(result)) == -EINVAL);
     assert(ctx.sync4_last_done_ns == 123 && ctx.sync4_windows == 7);
+    assert(ctx.lane_prev_valid);
     assert(!strcmp(result, "unchanged"));
     assert(swapz_message(&ti, 1, valid, result, sizeof(result)) == 1);
     assert(!strcmp(result, "profile_epoch=1"));
     assert(ctx.sync4_last_done_ns == 0 && ctx.sync4_windows == 7);
+    assert(!ctx.lane_prev_valid);
     return 0;
 }
 '''.replace("CALLBACK", message)
