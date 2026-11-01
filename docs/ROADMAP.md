@@ -770,7 +770,7 @@ oracles passed, but these observations cannot select a production optimization.
 The broad sync4 reissue timer includes acknowledgment, writer reissue,
 admission/preparation and retention. Preserve qualified C; first prove bounded,
 complete capture before attributing that whole interval to removable idle.
-[Diagnostic results and validity limits](handoff/qd4-reissue-oldpc-result.md).
+
 
 The old-PC owner run at `09e1cfaa` exposed zero fault-session handoffs.
 Inspection found completion handoff using the eight-record dispatch constant,
