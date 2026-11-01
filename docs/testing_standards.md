@@ -371,7 +371,7 @@ Benchmark telemetry and storage-envelope parsers must safely handle directional 
 
 ### Direct-I/O and memory input qualification boundary (ID43)
 
-Direct-I/O tests covering segmented and offset user buffers (via `transfer_segmented()` and `series_segmented()` with `pwritev`/`preadv`) qualify user buffer alignment, non-zero `bv_offset` translation, and multi-segment BIO boundary handling through the Linux block layer. In addition, explicit Transparent Huge Page (THP / `MADV_HUGEPAGE`) compound folio backing (via `series_thp()` with `--thp-write-series` and `--thp-verify-series`) exercises incoming direct I/O from 2MiB compound memory regions. Kernel-level passive inspection counters in `dm-target.c` observe:
+Direct-I/O tests covering segmented and offset user buffers (via `transfer_segmented()` and `series_segmented()` with `pwritev`/`preadv`) qualify user buffer alignment, non-zero `bv_offset` translation, and multi-segment BIO boundary handling through the Linux block layer. In addition, explicit Transparent Huge Page (THP) compound folio backing (via `series_thp()` with `--thp-write-series` and `--thp-verify-series`) exercises incoming direct I/O from 2MiB compound memory regions. The fixture populates an aligned anonymous range, requests `MADV_HUGEPAGE`, then requires `MADV_COLLAPSE` to succeed before I/O; the hint alone does not prove that the kernel supplied a compound folio. Kernel-level passive inspection counters in `dm-target.c` observe:
 - `bio_segments_gt1`: admitted BIOs spanning multiple bvec segments.
 - `bio_segments_max`: maximum segment count observed on an admitted BIO.
 - `bio_nonzero_offset`: admitted BIOs with non-zero within-page `bv_offset`.

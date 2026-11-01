@@ -350,23 +350,45 @@ out:
 #ifndef MADV_HUGEPAGE
 #define MADV_HUGEPAGE 14
 #endif
+#ifndef MADV_COLLAPSE
+#define MADV_COLLAPSE 25
+#endif
 
 static int series_thp(int fd, unsigned char *expected,
 		      unsigned int count, unsigned int round,
 		      int write_data)
 {
 	size_t thp_size = 2U * 1024U * 1024U;
+	size_t map_size = 2U * thp_size;
+	unsigned char *thp_map;
 	unsigned char *thp_buf;
+	uintptr_t aligned_addr;
 	unsigned int i;
 
-	thp_buf = mmap(NULL, thp_size, PROT_READ | PROT_WRITE,
+	thp_map = mmap(NULL, map_size, PROT_READ | PROT_WRITE,
 		       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if (thp_buf == MAP_FAILED) {
+	if (thp_map == MAP_FAILED) {
 		perror("mmap THP buffer");
 		return -1;
 	}
-	madvise(thp_buf, thp_size, MADV_HUGEPAGE);
+	/* MADV_COLLAPSE needs a complete, PMD-aligned anonymous range. */
+	aligned_addr = ((uintptr_t)thp_map + thp_size - 1) &
+		       ~((uintptr_t)thp_size - 1);
+	thp_buf = (unsigned char *)aligned_addr;
+	if (madvise(thp_buf, thp_size, MADV_HUGEPAGE)) {
+		perror("madvise(MADV_HUGEPAGE)");
+		munmap(thp_map, map_size);
+		return -1;
+	}
 	memset(thp_buf, 0, thp_size);
+	/* MADV_HUGEPAGE is only a hint; collapse now so the following direct-I/O
+	 * BIOs are guaranteed to carry pages from an actual compound folio.
+	 */
+	if (madvise(thp_buf, thp_size, MADV_COLLAPSE)) {
+		perror("madvise(MADV_COLLAPSE)");
+		munmap(thp_map, map_size);
+		return -1;
+	}
 
 	for (i = 0; i < count; ++i) {
 		unsigned char *page_ptr = thp_buf + ((size_t)(i % 512U) * PAGE);
@@ -375,7 +397,7 @@ static int series_thp(int fd, unsigned char *expected,
 		if (write_data) {
 			memcpy(page_ptr, expected, PAGE);
 			if (transfer(fd, page_ptr, i, 1)) {
-				munmap(thp_buf, thp_size);
+				munmap(thp_map, map_size);
 				return -1;
 			}
 		} else {
@@ -384,12 +406,12 @@ static int series_thp(int fd, unsigned char *expected,
 				fprintf(stderr,
 					"FAIL byte-exact THP page=%u round=%u\n",
 					i, round);
-				munmap(thp_buf, thp_size);
+				munmap(thp_map, map_size);
 				return -1;
 			}
 		}
 	}
-	munmap(thp_buf, thp_size);
+	munmap(thp_map, map_size);
 	return 0;
 }
 

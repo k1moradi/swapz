@@ -190,7 +190,7 @@
 "k1_read_bypass_sessions": [],
 "loaded_correctness": {
 "overall": "INCOMPLETE",
-"reason": "missing loaded correctness markers: raw_read,gc,gc_pressure,discard_trim,packed_placement,suspend,completion_handoff,write_fault,flush_fault,id36"
+"reason": "missing loaded correctness markers: raw_read,oracle,delta64_positive,gc,gc_pressure,discard_trim,packed_placement,suspend,completion_handoff,write_fault,flush_fault,id36"
 },
 "lz4_acceleration": {
 "overall": "NOT_RUN",
@@ -289,24 +289,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 884,
-"legacy_dead_probe_ns": 130824,
-"legacy_score_scan_ns": 879564,
+"incremental_select_ns": 967,
+"legacy_dead_probe_ns": 128018,
+"legacy_score_scan_ns": 897985,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 669,
-"relocation_list_ns": 667,
-"relocation_scan_ns": 303079,
+"mapped_dead_probe_ns": 560,
+"relocation_list_ns": 657,
+"relocation_scan_ns": 329438,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 3527,
-"legacy_dead_probe_ns": 512929,
-"legacy_score_scan_ns": 4339626,
+"incremental_select_ns": 3377,
+"legacy_dead_probe_ns": 514411,
+"legacy_score_scan_ns": 3745367,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2212,
-"relocation_list_ns": 806,
-"relocation_scan_ns": 1963501,
+"mapped_dead_probe_ns": 2084,
+"relocation_list_ns": 804,
+"relocation_scan_ns": 1852405,
 "segments": 4096,
 "victim_records": 256
 }
@@ -316,24 +316,24 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 206,
+"inverse_ns_per_page": 183,
 "name": "scalar",
-"transform_ns_per_page": 261
+"transform_ns_per_page": 245
 },
 {
-"inverse_ns_per_page": 312,
+"inverse_ns_per_page": 273,
 "name": "sse2",
-"transform_ns_per_page": 197
+"transform_ns_per_page": 175
 },
 {
-"inverse_ns_per_page": 151,
+"inverse_ns_per_page": 123,
 "name": "avx2",
-"transform_ns_per_page": 87
+"transform_ns_per_page": 79
 },
 {
-"inverse_ns_per_page": 101,
+"inverse_ns_per_page": 88,
 "name": "avx512",
-"transform_ns_per_page": 88
+"transform_ns_per_page": 69
 }
 ],
 "classifier": {
@@ -343,9 +343,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 82,
+"ns_per_page": 74,
 "sample_pairs": 32,
-"scalar_ns_per_page": 82,
+"scalar_ns_per_page": 74,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -360,7 +360,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2568
+"wall_ns_per_page": 2343
 },
 {
 "acceleration": 2,
@@ -368,7 +368,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2373
+"wall_ns_per_page": 2272
 },
 {
 "acceleration": 3,
@@ -376,7 +376,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2261
+"wall_ns_per_page": 2116
 },
 {
 "acceleration": 4,
@@ -384,7 +384,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2273
+"wall_ns_per_page": 2031
 }
 ],
 "negative_pages": 256,
@@ -401,9 +401,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1776,
-"modeled_wall_ns_total": 1022976,
-"ns_per_saved_block": 19672,
+"modeled_wall_ns_per_page": 1573,
+"modeled_wall_ns_total": 906496,
+"ns_per_saved_block": 17432,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -428,29 +428,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 205,
+"baseline_ns_per_page": 181,
 "order": "baseline_first",
-"unrolled_ns_per_page": 196
+"unrolled_ns_per_page": 173
 },
 {
-"baseline_ns_per_page": 201,
+"baseline_ns_per_page": 180,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 201
+"unrolled_ns_per_page": 175
 },
 {
-"baseline_ns_per_page": 203,
+"baseline_ns_per_page": 179,
 "order": "baseline_first",
-"unrolled_ns_per_page": 214
+"unrolled_ns_per_page": 175
 },
 {
-"baseline_ns_per_page": 218,
+"baseline_ns_per_page": 181,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 198
+"unrolled_ns_per_page": 171
 },
 {
-"baseline_ns_per_page": 204,
+"baseline_ns_per_page": 180,
 "order": "baseline_first",
-"unrolled_ns_per_page": 198
+"unrolled_ns_per_page": 173
 }
 ],
 "repeats_per_arm": 64,
@@ -499,14 +499,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20165,
+"ns_per_saved_block": 17867,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1995,
-"routed_cpu_ns_total": 1149432,
+"routed_cpu_ns_per_page": 1768,
+"routed_cpu_ns_total": 1018465,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -554,14 +554,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20271,
+"ns_per_saved_block": 17962,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1935,
-"routed_cpu_ns_total": 1114944,
+"routed_cpu_ns_per_page": 1715,
+"routed_cpu_ns_total": 987928,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -609,14 +609,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19672,
+"ns_per_saved_block": 17432,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1776,
-"routed_cpu_ns_total": 1022976,
+"routed_cpu_ns_per_page": 1573,
+"routed_cpu_ns_total": 906496,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -664,14 +664,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19672,
+"ns_per_saved_block": 17432,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1776,
-"routed_cpu_ns_total": 1022976,
+"routed_cpu_ns_per_page": 1573,
+"routed_cpu_ns_total": 906496,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -719,14 +719,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19672,
+"ns_per_saved_block": 17432,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1776,
-"routed_cpu_ns_total": 1022976,
+"routed_cpu_ns_per_page": 1573,
+"routed_cpu_ns_total": 906496,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -743,17 +743,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "avx512",
-"inverse_ns_per_page": 101,
+"inverse_ns_per_page": 88,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 206,
-"scalar_transform_ns_per_page": 261,
-"second_lz4_ns_per_page": 3744,
+"scalar_inverse_ns_per_page": 183,
+"scalar_transform_ns_per_page": 245,
+"second_lz4_ns_per_page": 3324,
 "transform_backend": "avx512",
-"transform_ns_per_page": 88
+"transform_ns_per_page": 69
 }
 ]
 }
@@ -770,47 +770,37 @@
 "source_sha": "54ea3bdb8238c7a455de7c026f5892be3406dc80",
 "stages": [
 {
-"elapsed_s": 3.457,
+"elapsed_s": 0.505,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 39.754,
+"elapsed_s": 35.143,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 3.177,
+"elapsed_s": 1.166,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 3.251,
+"elapsed_s": 0.464,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
-"diagnostic": "BLOCKED: compound/segmented BIO observation counters invariant mismatch: segs_gt1=384 segs_max=4 nonzero_off=384 compound=0 copy_fallbacks=128",
-"elapsed_s": 1.312,
-"exit_code": 1,
-"failed_phase": "owned RAM compound/segmented BIO observation",
+"diagnostic": "BLOCKED: dirty tracked source; commit or preserve changes first",
+"elapsed_s": 0.019,
+"exit_code": 2,
+"failed_phase": "preflight / administrator authorization",
 "name": "Owned RAM smoke + mixed/QD pilot",
 "signals": [
-"PASS_DEFAULT_ASYNC_PREPARE",
-"PASS_DEFAULT_DELTA64_RESCUE",
-"PASS",
-"PASS_WINDOW_CLOSE_REASONS",
-"PASS_WINDOW_OPEN_AGE",
-"PASS_ZERO_WRITE_LOWER_IO",
-"PASS_ORACLE_LOWER_READ",
-"PASS_LOADED_DELTA64_POSITIVE",
-"PASS_LOADED_ORACLE_PROFILE",
-"BLOCKED",
-"FAIL"
+"BLOCKED"
 ],
 "status": "BLOCKED"
 }
