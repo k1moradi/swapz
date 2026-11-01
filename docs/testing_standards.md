@@ -2829,10 +2829,13 @@ needs a distinct prospective mechanism and fixed protocol.
 A dispatch candidate that flushes before a submitter-owned FIFO head must keep
 that head queued and untouched, serialize the existing prefix publisher, and
 preserve K=1 and the four-record floor. Direct helper tests do not replace
-whole-worker/lifecycle qualification. The [fixed ID165 pilot](handoff/submitter-blocked-prefix-oldpc-result.md)
-rejected this specific change: lower idle or more early hands cannot override
-failed useful-service or lower-request guards. Keep rejected C/probes only in
-local experiment artifacts and immutable history, outside active product code.
+whole-worker/lifecycle qualification. The fixed ID165 pilot rejected this
+specific change: it split useful aggregation, missed the fast-QD8 useful-service
+target, and violated lower-WRITE request guards. A submitter deferral is not
+automatically removable idle, and lower idle or more early hands cannot override
+failed service/request guards. Reopen only for a distinct measured mechanism
+that preserves useful aggregation. Keep rejected C/probes only in local
+experiment artifacts and immutable history, outside active product code.
 
 Submitter wake-suppression experiments must retain the worker's locked
 ownership recheck before FIFO handback; removing it permits a lost wake. Tests
