@@ -409,7 +409,13 @@ belong in the ROADMAP decision table and Git history.
 - **Diagnostics:** PACK_READY causes, exact target-2/3/4 attribution,
   ready-wait counters and accepted-work lower-idle attribution are observational
   unless a separately qualified policy explicitly consumes them. Adding a
-  counter is not permission to change a scheduling decision. The refuted ID83
+  counter is not permission to change a scheduling decision. Read them by
+  their exact scope: `k1_ready_wait_*` counts only completed windows that had
+  to wait for a pending lower WRITE, so zero does not mean no accepted work
+  existed during lower I/O; `accepted_work_lower_idle_*` starts only when the
+  owner retains a staged window with the lane idle, so it does not cover owner
+  pickup, publication, sealing or the upper round trip (ROADMAP ID178 measures
+  the whole completion-to-next-submit gap). The refuted ID83
   suppressed-tail lifetime state and its timer/pivot counters are removed rather
   than retained as dead policy scaffolding. Mixed-wave classification is one
   worker-owned boolean plus the sampler's existing prefix state; neither may add

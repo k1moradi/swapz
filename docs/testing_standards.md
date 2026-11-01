@@ -2731,7 +2731,10 @@ The rootless oracle reconstructs every parent op, page, lane and payload from
 each child for N=1/2/4 at QD4 and QD8, and both-arm loaded validators require
 the expected replay mode, QD/N and zero reads for write-only mode.
 Do not infer K=2 benefit merely from target-count scaling: splitting independent
-targets shrinks each target's packing opportunity. A reopen requires a material
+targets shrinks each target's packing opportunity. Nor does a positive N=2
+result identify owner serialization: stripes change owners, batching domains
+and targets together, so it shows only that more independent execution can
+raise normalized service (ROADMAP ID176). A reopen requires a material
 improvement in normalized swapz/raw useful WRITE service, preserved lower-byte
 savings, and observed simultaneous swapz lower WRITEs for N>1.
 

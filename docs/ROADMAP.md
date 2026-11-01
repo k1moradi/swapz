@@ -159,23 +159,54 @@ not a causal speedup over the preceding source.
 
 ## Current bottleneck ranking
 
-1. **SATA/NVMe mixed (-36..-45%).** Traced SATA waves (median, 545 waves):
-   32 replay threads arrive over ~99 us (raw: ~61 us, less CPU contention); the
-   first K=1 lower WRITE leaves at ~56 us, stragglers stage behind it and the
-   second WRITE leaves ~17 us after the first completes but ~100 us after the
-   last straggler arrived; ~37 us of finalize/wakeup/acknowledgement trails the
-   last completion. Wave ~368 us versus raw ~184 us. A single merged WRITE per
-   wave would at best tie raw here (fixed 100 us device latency dominates both),
-   so the remaining loss is the serialized second WRITE plus ordered-worker CPU.
-   Waiting for stragglers (ID109) trades the same time it saves. The fresh
-   post-ID107/ID108 K=2 experiment (ID110) reached depth two but did not improve
-   useful service and increased requests. Profile ordered-worker CPU and
-   arrival-to-dispatch timing before changing concurrency again.
-2. **Fast QD4 (-12..-15%, bimodal).** K=1 completes all four writers together,
-   so their reissue spread sits on every cycle while raw overlaps it. Parity
-   was hypothesized to need overlapping lower WRITEs; ID110 did not improve
-   it because four-record windows without followers still dispatch synchronously.
-   Reopening needs a separately justified shallow-window ownership policy.
+1. **SATA/NVMe mixed envelopes (owner reports for `9123b811` x86 and
+   `7ff94fd4` ARM64: SATA -22.5/-33.8%, NVMe4 -54.0/-39.7%, NVMe5
+   -47.8/-40.1%).** Lower savings stay intact (bytes saved 28-30%, requests
+   saved 84-91%), so the loss is lower-WRITE service time on one lane, not I/O
+   volume. **Leading hypothesis, not a proven diagnosis: single-lane pipeline
+   recovery.** The interval from one lower WRITE completing to the next one
+   starting is roughly a fixed per-run cost (~31-35 us on x86, ~40-59 us on
+   ARM64) while device service per run ranges 21-122 us, so the faster the
+   device the larger the idle share. Existing counters, measured window:
+
+   | Host / envelope | swapz vs raw | Lane busy | Runs | Pages/run | Service/run | Gap/run | Completion→publication/run | Accepted-work idle | Deferred ACKs | READ p99 raw/swapz |
+   | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+   | x86 SATA | -22.5% | 76% | 1053 | 11.7 | 108 us | 34 us | 4.5 us | 0.3 ms | 5348 | 114/240 us |
+   | x86 NVMe4 | -54.0% | 51% | 1157 | 10.6 | 33 us | 31 us | 3.9 us | 2.3 ms | 6547 | 38/97 us |
+   | x86 NVMe5 | -47.8% | 38% | 1335 | 9.2 | 21 us | 35 us | 3.9 us | 5.1 ms | 8611 | 36/102 us |
+   | ARM64 SATA | -33.8% | 68% | 1057 | 11.6 | 122 us | 59 us | 5.9 us | 7.4 ms | 4443 | 260/187 us |
+   | ARM64 NVMe4 | -39.7% | 48% | 1510 | 8.1 | 39 us | 42 us | 4.4 us | 12.8 ms | 8736 | 110/136 us |
+   | ARM64 NVMe5 | -40.1% | 38% | 1905 | 6.5 | 25 us | 40 us | 4.6 us | 18.2 ms | 8951 | 88/145 us |
+
+   Busy is `lower_write_wall_ns` over measured wall; gap/run is the remaining
+   wall per lower-WRITE request; completion→publication is
+   `pipeline_post_lower_wall_ns` per request. `1 / busy` (1.3-2.65x) is a
+   **ceiling** at 100% utilization and unchanged run size, not an expected gain;
+   closing any gap can expose another bottleneck. Interpretation limits:
+   `k1_ready_wait_windows=0` means only that no completed window had to wait
+   for a pending lower WRITE (the policy never sealed while the lane was busy),
+   not that no accepted work existed during lower I/O. `accepted_work_lower_idle_*`
+   starts only when the owner retains a staged window with the lane idle; its
+   small totals (0.3-18 ms against 36-77 ms of lane idle) say that retained
+   staged work explains little of the idle: 65-86% of each gap has no
+   attributing counter (owner pickup, upper round trip of ACK, writer reissue
+   and admission, READ service on the owner, and sealing, which has no per-gap
+   counter). Owner CPU/wall
+   (19-25%) does not show where the owner is off-CPU, and admission→owner
+   (15-21 us per WRITE) may overlap lower service. ID178 partitions exactly
+   the completion→next-submit interval before any architecture change.
+   Envelope arms still lack `host_cpu`, so host-bound NVMe rows cannot yet be
+   separated from host contention. History: pre-ID108 SATA wave traces showed
+   stragglers staged behind the first K=1 WRITE leaving ~17 us after its
+   completion; ID109 straggler waiting traded the same time it saved and the
+   post-ID107/ID108 K=2 trial (ID110) reached depth two without useful-service
+   gain and with more requests.
+2. **Fast QD4 (latency guard; x86 +4.4% MET, ARM64 -14.7% MISSED).** K=1
+   completes all four writers together, so their reissue spread sits on every
+   cycle while raw overlaps it. ID110 did not improve it because four-record
+   windows without followers still dispatch synchronously. Reopening needs a
+   separately justified shallow-window ownership policy; deprioritized behind
+   item 1.
 3. **QD8 bimodality and the 8KiB READ-amplification cap.** Unchanged from the
    ID101–ID104 analysis: merged eight-record windows win, and accepted-burst
    extents are capped at 8KiB, holding QD8 lower bytes near 0.75.
@@ -379,15 +410,18 @@ changes.
 | 166 | Suppress submitter-release wakes behind an active visible FIFO head | **5 fixed old-PC pilot unpromising / removed** | Peek the current incoming head under queue_lock after release, preserving wakes for empty incoming; pair suppression with a locked worker ownership recheck before handback to prevent a lost wake. Actual C interleaving probe passes and rejects a missing-recheck mutant. Fixed control/candidate/candidate/control, two repeats on five scenarios: all 40 raw/swapz pairs byte-exact. Four screened primary fast-QD32 comparisons give normalized useful WRITE -0.2% (95% CI -6.6..+6.5%) and owner deferrals +1.4% (-6.1..+9.6%); no established service/mechanism gain. Restore C exactly. Empty incoming/private-FIFO wake suppression was explicitly not tested; reopening needs a distinct measured mechanism and complete wake proof. [Result](handoff/submitter-queued-wake-oldpc-result.md). |
 | 167 | Suppress submitter-release wakes for a private ordered FIFO | **5 fixed old-PC pilot unpromising / removed** | Extend ID166 to wake only a nonempty ready incoming head, suppressing empty/private-FIFO wakes too; keep the locked ownership recheck and prove release/handback cases plus a rejecting mutant. Fixed control/candidate/candidate/control, two repeats on five scenarios; all 40 pairs byte-exact. Four screened primary fast-QD32 pairs give normalized useful WRITE -2.1% (95% CI -5.0..+0.8%) and deferrals -4.5% (-11.1..+2.6%), missing the +5% service/-25% deferral targets. Restore C exactly. Both suppression variants lack service evidence; reopen only with a specifically attributed unnecessary-wake population, new mechanism and complete wake proof. [Result](handoff/submitter-private-wake-oldpc-result.md). |
 | 168 | Submitter on/off placement on the two-core old PC | **5 QD4 primary missed / default unchanged** | Same-source on/off/off/on, two repeats on five medium scenarios, production compression fixed on, all 40 pairs byte-exact. Background/submitter raw-normalized QD4 +0.8% (95% CI -0.8..+2.5%) misses the 5% floor; QD8 secondary +4.4% (+2.8..+6.1%) with producer/lower-WRITE overlap motivates ID169, not a global disable. Mixed/latency guards unresolved. [Result](handoff/preparation-placement-oldpc-result.md). |
-| 169 | Use producer preparation during active lower WRITE service | **4 promoted by owner decision (2026-11-01) / exact-source owner `make test` pending** | Bypass only the submitter resource claim while lower_write_active; retain idle-lane submitters, existing fallback ownership and module default. Actual claim-body resource/I/O-state checks pass and reject a missing-guard mutant. After the 40-pair hypothesis-generating pilot, freeze exact C for eight independent ABBA cycles on QD8/QD32/mixed: all 192 raw/swapz pairs byte-exact and actor-conserved. Primary QD8 has 24 usable comparisons over eight cycles: normalized useful WRITE +5.61% (cycle-cluster 95% CI +3.83..+7.41%), sign-flip p=0.0078125; QD8/QD32 guards pass. Mixed has only 11 comparisons/five cycles, below the 12/six minimum, with service and p99 bounds unresolved. Forty-six screened observations excluded without replacement; no pilot pooling or extension. Restore C exactly; primary benefit alone does not authorize retention. Do not infer a mixed regression or portable-host gain. [Result and machine summary](handoff/preparation-placement-oldpc-result.md). Owner decision 2026-11-01: apply the frozen guard to production on the confirmed QD8 result; the unresolved mixed/p99 guards become owner-run watchpoints rather than a reason to keep it unapplied. Reject again if exact-source owner mixed service, lower bytes/requests or p99 regress beyond their guards. |
+| 169 | Use producer preparation during active lower WRITE service | **4 promoted / x86 and ARM64 owner PASS (`9123b811`, `7ff94fd4`); i3 pending** | Owner reports (x86 `5a66c7ec`, ARM64 `3faa3914`) pass all stages with the frozen guard; Fast QD8 +36.2/+27.8% and Fast mixed +88.7/+14.4% with lower bytes/requests saved. Same-run evidence is directional, not a causal A/B. Prior record: Bypass only the submitter resource claim while lower_write_active; retain idle-lane submitters, existing fallback ownership and module default. Actual claim-body resource/I/O-state checks pass and reject a missing-guard mutant. After the 40-pair hypothesis-generating pilot, freeze exact C for eight independent ABBA cycles on QD8/QD32/mixed: all 192 raw/swapz pairs byte-exact and actor-conserved. Primary QD8 has 24 usable comparisons over eight cycles: normalized useful WRITE +5.61% (cycle-cluster 95% CI +3.83..+7.41%), sign-flip p=0.0078125; QD8/QD32 guards pass. Mixed has only 11 comparisons/five cycles, below the 12/six minimum, with service and p99 bounds unresolved. Forty-six screened observations excluded without replacement; no pilot pooling or extension. Restore C exactly; primary benefit alone does not authorize retention. Do not infer a mixed regression or portable-host gain. [Result and machine summary](handoff/preparation-placement-oldpc-result.md). Owner decision 2026-11-01: apply the frozen guard to production on the confirmed QD8 result; the unresolved mixed/p99 guards become owner-run watchpoints rather than a reason to keep it unapplied. Reject again if exact-source owner mixed service, lower bytes/requests or p99 regress beyond their guards. |
 | 170 | Longer mixed development traces for guard measurement | **2 harness validated / no product-policy change** | `MIXED_OPS=65536` extends ordinary mixed-only `make fast_test` streams fourfold; default/official traces remain 16384. Reject WRITE-only, stripe and calibration misuse before privilege. Actual rootless plans preserve the original exact trace prefix and final-image oracle; two loaded control pairs pass 65536 ops per arm. Quiet/raw-drift screens stay unchanged; new duration is a separate cohort and cannot relabel or pool ID169's completed evidence. The nested rootless suite needs a bounded 90s allowance on this CPU (~44s measured); loaded watchdogs are unchanged. Fresh idle process observations show possible agent/app interference but do not attribute historical exclusions. A prospective mixed guard protocol remains required. |
 | 171 | Release submitter snapshot before optional compression | **5 unconditional pilot rejected / removed** | Fixed four-block old-PC ABBA with two repeats on five scenarios: all 40 pairs byte-exact and actor-conserved; 16 screened exclusions, no replacements. Only two usable primary QD4 comparisons: normalized WRITE +4.14% (unadjusted 95% CI -8.17..+18.11%), below 5%; lower bytes +2.73% exceeds 1% guard. Descriptor-poison/ASan/UBSan probes and four rejecting mutants support bounded two-reference ownership, not production qualification. RAW-before-ready/late discards engage and deferrals fall, but neither justifies extra I/O. A report-only remote advance interrupted before final control; source equivalence was proved before administratively completing that one unstarted block without changing the sample or criteria. Control C restored; no retention. [Result](handoff/submitter-snapshot-oldpc-result.md). |
 | 172 | Include completed asynchronous LZ4 cost in adaptive EWMA | **1 owner-qualified (`bb665730`, report `48a1580f`)** | ID171 controls report zero EWMA despite 4096 submitter compressions and 25.6–27.0 ms LZ4 wall. Publish a per-page LZ4 elapsed delta from both asynchronous owners before READY, then let only the ordered owner update the existing estimator for READY_COMPRESSED/READY_RAW. Ignore mutable/unready/error metadata and preserve zero/unknown samples. Keep original submitter lifetime, slot references, RAW policy, encodings and K=1. Actual-body writer/observer tests reject cumulative-time/missing-guard mutants. Three loaded validation pairs are byte-exact and drained with zero inline work: QD4/QD8/mixed EWMAs 7284/5222/4938 ns. Kernel DWARF size remains 8256 bytes per slot. Full owner make test passes five stages; all 66 recorded swapz WRITE arms retain required compression and positive EWMA. Resource-pressure startup under memory.high extends the complete run to 35m59s without relaxed limits. Seven this-host PASS reports/74 history points; low-QD fast and SATA/NVMe service gaps remain. This repairs a missing input, not an attributed throughput gain. [Qualification and history assessment](handoff/prepared-cost-coverage-result.md). |
 | 173 | Acquire READY after losing the RAW-selection race | **2 implemented; owner run BLOCKED at raw pressure control (`3ef72d9f`, report `fd5ed47e`)** | Linux conditional RMW failure is unordered. Reacquire stable READY after losing PREPARING-to-RAW cmpxchg; the consumer reference prevents reuse. Ordinary READY/RAW-win paths keep one acquire, with no wait, ownership, codec or depth change. Old header and compiled relaxed-reread mutant fail; fixed native threaded reuse and ASan/UBSan pass. Owner stages 1–4 and pre-pressure loaded checks pass; ID36 raw startup times out at 280s in memory.high charging. Preserve BLOCKED; stop only test-owned pressure after terminal failure to allow cleanup, no retry or relaxed gate. All 66 recorded WRITE arms keep compression on, positive EWMA and drained gauges. Partial fast QD4/8/32 normalized service declines 5/5/7% are watchpoints, not causal estimates; history excludes this run. [Round closeout](handoff/preparation-ready-acquire-result.md). |
 | 174 | Per-device-class product goals | **1 owner-adopted acceptance criteria / descriptive scorecard** | Compression can only shorten service that waits on device bandwidth or queueing. Device-bound classes (serial/fast mixed, serial QD4/8/32, fast QD8/32, SD card, SATA) must beat raw useful WRITE and save lower WRITE bytes and requests. Latency-bound (serial/fast QD1, fast QD4) and host-bound (NVMe Gen4/Gen5 mixed) classes are guards within 5% of raw that must not add lower WRITE work. Linux v7.0 swap-out to a DM target is asynchronous, so closed-loop QD1/QD4 rows are guards, not targets. `tests/tools/product_goals.py` classifies once for the report scorecard (`benchmarks.goal_scorecard`) and the history plots. Descriptive only: never a gate. Stop polishing guard rows that already sit at their single-lane ceiling (i7 QD4 measured +5.9%/-2.2% against a computed ~+7% ceiling). |
-| 175 | Idle-lane submitter dispatch | **4 implemented / exact-source owner `make test` pending** | A QD1 write paid two extra thread hops (submitter to ordered worker, then lower completion to worker); the measured per-write overhead tracked each host's own host-side time (about 6/21/86 us on i7/ARM/i3). Remove the submit hop: when a learned isolated stream (`singleton_fast_close`) admits a lone plain WRITE with an idle lower lane, the submitting task trylocks the ordered-domain mutex, prepares the page in its ID150 lane, re-proves eligibility (nonzero READY representation, no staged/in-flight/queued work, open-segment placement with no GC or segment-recycle DISCARD) and detaches the one-record K=1 run itself. `->map` never waits: lower BIOs only queue on `current->bio_list`; an undetached dispatch fails closed. Completion, publication and ACK stay with the ordered worker; a dispatched run is ACKed after the worker releases ownership so the next closed-loop write can dispatch again. No new queue, slot, lane, timer, format or module parameter. Telemetry: `submitter_dispatches`, `submitter_dispatch_declines`. Target: move the i3 QD1 (-25%) toward the 5% guard without regressing QD4+ or mixed rows. Reject if loaded lifecycle/fault/suspend/ID36 gates fail or QD1 does not improve with positive dispatches. |
-| 176 | Two lower-WRITE lanes behind one authority | **6 gated on the ID160 i7 screen** | SSD envelopes are the largest recoverable loss: on i7 NVMe5 the single lane is idle ~60% of wall, windows average 8.7 pages and each takes ~54 us against ~25 us of device service while raw overlaps ~5 requests. First run `make fast_test SCENARIOS=nvme5-stripes,sata-stripes` on the quiet i7 only, as a screen (striping cannot prove in-target K=2). Only if N=2 materially improves normalized useful WRITE with observed simultaneous lower WRITEs and preserved byte savings, design two lanes behind one authority. The design must first remove ID110's blocker: the authority keeps one paused batch group (`batch_pending`, `batch_segment`, `batch_first_sequence`, `batch_hashes` are singletons), so a second in-flight run needs a second paused group or segment-disjoint ownership, plus FIFO publication and same-page fences. Targets: NVMe parity (~2x current swapz service) and SATA at or above raw. |
+| 175 | Idle-lane submitter dispatch | **4 implemented / x86 and ARM64 owner PASS; i3 QD1 evidence pending** | Owner reports for `9123b811` (x86) and `7ff94fd4` (ARM64) pass all stages; 4032 of 4096 timed QD1 writes dispatched from the submitter on both hosts, and Serial/Fast QD1 stay inside the 5% guard (x86 -1.7/-2.6%, ARM64 -0.4/-4.7%). Not finished: its stated target is the i3 QD1 (-25%), which still needs an exact-source i3 report. Design: a QD1 write paid two extra thread hops (submitter to ordered worker, then lower completion to worker); the measured per-write overhead tracked each host's own host-side time (about 6/21/86 us on i7/ARM/i3). Remove the submit hop: when a learned isolated stream (`singleton_fast_close`) admits a lone plain WRITE with an idle lower lane, the submitting task trylocks the ordered-domain mutex, prepares the page in its ID150 lane, re-proves eligibility (nonzero READY representation, no staged/in-flight/queued work, open-segment placement with no GC or segment-recycle DISCARD) and detaches the one-record K=1 run itself. `->map` never waits: lower BIOs only queue on `current->bio_list`; an undetached dispatch fails closed. Completion, publication and ACK stay with the ordered worker; a dispatched run is ACKed after the worker releases ownership so the next closed-loop write can dispatch again. No new queue, slot, lane, timer, format or module parameter. Telemetry: `submitter_dispatches`, `submitter_dispatch_declines`. Reject if loaded lifecycle/fault/suspend/ID36 gates fail or i3 QD1 does not improve with positive dispatches. Generalizing it to append into an active window is ID180, not this row. |
+| 176 | Two lower-WRITE lanes behind one authority | **6 deprioritized, not refuted** | Busy fractions (38-76%) bound what any pipelining can recover, but they do not show that a second lane would have work: ID178 must first show how often a successor run exists before the active lower WRITE finishes. The ID160 screen (`make fast_test SCENARIOS=nvme5-stripes,sata-stripes` on the quiet x86) stays descriptive: a positive N=2 result shows that more independent execution can raise normalized service, but stripes change owners, batching domains and targets together, so it cannot identify owner serialization or prove in-target K=2. Reopen design only if ID178/ID179 show the single-lane pipeline routinely has a sealed successor before the active lower WRITE completes, with lower-byte/request savings and READ p99 preserved. Design prerequisite unchanged: the authority keeps one paused batch group (`batch_pending`, `batch_segment`, `batch_first_sequence`, `batch_hashes` are singletons), so a second in-flight run needs a second paused group or segment-disjoint ownership, plus FIFO publication and same-page fences. |
 | 177 | Representative swap content | **6 measurement design / no product change** | The benchmark fixture compresses ~1.43x while reported LZ4 ratios on real swap are ~1.5-2.6x. Better ratios grow device-bound wins but do not change NVMe or QD1 rows. Sample real anonymous pages offline (no swapon) through an owner-run, privacy-preserving analyzer that records only aggregate LZ4/delta64/zero/same-filled statistics and planner geometry, never page bytes, then add a matched content cohort to `make fast_test` before any policy change. |
+| 178 | Lower-lane gap attribution (passive) | **2 specified / external implementation pending** | Observational only; no policy, wait, queue, allocation, format or ACK-timing change. Per K=1 gap (predecessor lower completion t0 → successor lower submit t4) record an exact partition: completion→owner observes (t0..t1), publication (t1..t2), then for the successor run: no admitted work (t2..a), admitted but not yet ordered-owned (a..s), staged and held (s..t3), seal/plan/pack/submit (t3..t4), with marks clamped so the parts sum exactly to the gap; gaps containing other lower WRITEs are counted as foreign. Also: successor availability at t0 (records admitted / ordered-owned by t0, bins 0, 1, 2-3, 4-7, 8-15, 16+), publication→`bio_endio` dwell bins for deferred and immediate ACKs (ID108), owner READ service inside gaps (annotation, not a part), and `host_cpu` on storage-envelope arms. [Work order](handoff/lane-gap-diagnostics.md). Decision rules after both-host owner reports: staged-held + seal dominant with a successor commonly present at t0 → ID179; admitted-not-owned dominant → owner pickup/wake/READ-ahead path; no-work dominant with no successor at t0 → upper round trip (ACK dwell, ID164 early ACK, or K=2 with split runs); completion/publication dominant → shorten finalization. |
+| 179 | Seal-ahead at K=1 | **6 conditional on ID178** | Candidate only if ID178 shows a successor is commonly present by lower completion but sealed after it. Seal (plan, pack, CRC) the successor while the active lower WRITE is in flight and submit it at completion, keeping one lower WRITE in flight and one publication authority. Not a second buffer: the sealed successor must preserve FIFO publication, reservation ownership, same-page fences, failure rollback of both runs, GC boundaries and suspend/drain, while the authority's paused batch group is a singleton. Must keep lower bytes/requests and READ p99 within guards. |
+| 180 | Submitter append to an active window; cached-READ submitter bypass | **0 deferred / not justified** | Appending ID175-style into an open window under load adds FIFO and concurrency hazards, and the submitter mostly fails `mutex_trylock()` while the worker owns the domain. Serving cached READs in submitter context would bypass the owner, but the x86 READ p99 loss includes lookup, decode, verification, copy, locking and scheduling, not pure queueing. Reconsider only if ID178 shows admission→owner or owner READ service as a dominant, avoidable part of lane idle. |
 
 ## What the pinned queue experiment establishes
 
@@ -683,20 +717,29 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-**Current round (2026-11-01, owner plan).** Source after `3478aec` (which passed
-all five stages on i7, ARM64 and i3) adopts the ID174 per-device-class goals,
-promotes ID169 and implements ID175. Order of work:
+**Current round (2026-11-01, lane-gap diagnostics).** Source `9123b811`
+passed all five stages on x86 (report `5a66c7ec`) and source `7ff94fd4` on
+ARM64 (report `3faa3914`). Scorecard: every device-bound serial, fast and SD
+row MET; SATA mixed MISSED (-22.5/-33.8%); the NVMe4/NVMe5 host-bound guards
+MISSED (-39.7..-54.0%); Fast QD4 MISSED on ARM64 only (-14.7%). Lower bytes
+and requests are saved on every device-bound row. Order of work:
 
-1. Run exact-source `make test` on all three PCs; the console and saved report
-   now carry the class scorecard, and history plots draw each class goal.
-2. ID176: run the ID160 stripe screen on the quiet i7 only before any
-   two-lane design work.
-3. ID175: confirm positive QD1 `submitter_dispatches` and QD1 movement toward
-   the 5% guard on the i3/ARM hosts without QD4+/mixed regressions. If the
-   submit hop is removed and QD1 still misses, measure the completion hop next.
-4. ID177: representative-content measurement.
-5. ID164 early acknowledgement stays an unapproved contract change; consider it
-   only if the owner wants more than parity at low QD.
+1. ID178 passive lane-gap attribution, implemented by an external agent from
+   [the work order](handoff/lane-gap-diagnostics.md), then lead review and
+   fixes before owner runs.
+2. Owner: exact-source `make test` on the ARM64 VM and the x86 AVX-512 PC, and
+   `make fast_test SCENARIOS=nvme5-stripes,sata-stripes` on the quiet x86
+   (ID160, descriptive only).
+3. Choose one optimization from the dominant measured component (ID178
+   decision rules); ID179 seal-ahead is the conditional first architecture
+   candidate. ID176 K=2 and ID180 stay closed until their reopen conditions.
+4. ID175/ID169: exact-source i3 report when the old PC is available.
+5. ID177 representative-content measurement; ID164 early acknowledgement
+   remains an unapproved contract change.
+
+**Previous round (owner plan, after `3478aec`).** Adopted the ID174
+per-device-class goals, promoted ID169 and implemented ID175; both now pass
+on x86 and ARM64, with the i3 report outstanding.
 
 The old-PC source `3ef72d9f67d6` passed native acquire-race coverage but its owner
 `make test` report `fd5ed47e398e` is **BLOCKED at ID36**: the raw control
