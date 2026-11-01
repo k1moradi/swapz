@@ -2631,6 +2631,51 @@ snapshots for submitter-prepared ordinary input and preserve the byte oracle.
 
 
 
+### Idle-lane submitter dispatch and ID169 qualification
+
+Native window-policy tests cover every input of
+`swapz_window_submitter_dispatch_ready()`; native authority tests prove
+`swapz_open_segment_fits()` is read-only, refuses an unopened, exhausted, GC,
+staged or batch-pending cursor and illegal classes, and that whenever it holds
+the real stage path places at the cursor without calling the recycle hook.
+Source contracts pin the mapper trylock (never `mutex_lock`) before
+`queue_lock`, the hint gates, FIFO-head restoration on decline, the forced
+detach and `-EUCLEAN` no-sync guard in `swapz_flush_window()`, no wait/GC/
+flush/discard call in the dispatch body, mutex release before the lane return,
+the worker's whole-pass ownership with private-list delivery after release, and
+the ID169 `lower_write_active` guard before any claim state. The completion
+probe executes the actual list-delivery body. Replay and report validators
+require `submitter_dispatches + submitter_dispatch_declines <=
+submitter_prepare_claims` and zero activity when submitter preparation is off.
+
+These checks support review only. Exact-source owner `make test` must pass the
+loaded lifecycle, suspend/drain, retained WRITE fault, GC and ID36 gates with
+the defaults on. QD1 service evidence requires positive timed
+`submitter_dispatches` in sustained QD1 arms; QD4+ and mixed rows must not
+regress lower bytes/requests or p99 beyond their guards. ID169 and ID175 change
+disjoint regimes (active versus idle lower lane), so attribute QD8 movement to
+ID169 and QD1 movement to ID175 only directionally, never causally from one run.
+
+### Per-device-class goal scorecard and plots
+
+`tests/tools/product_goals.py` is the single classification shared by the
+reporter and the history plotter. Device-bound classes (serial/fast/SD/SATA
+mixed, serial QD4/8/32, fast QD8/32) must beat raw useful WRITE and save lower
+WRITE bytes and requests. Latency-bound (serial QD1, fast QD1/QD4) and
+host-bound (NVMe Gen4/Gen5 mixed) rows are guards within 5% of raw that must
+not add lower WRITE work. `test_results.json` records
+`benchmarks.goal_scorecard`; the console prints one compliant table. Missing
+inputs are UNAVAILABLE, never zero. The scorecard is descriptive: no gate,
+exit code or publication decision may read it. Rootless tests cover target and
+guard edges, epsilon, latest-point selection, persistent-row lower-I/O
+derivation, table width and the plot goal helpers.
+
+Gain plots title every panel with its class goal and draw the guard floor only
+on guard panels; latest-value captions sit below each axis so no point is
+hidden. The per-computer `index.md` carries a valid GFM summary table and the
+latest scorecard. History refresh keeps its bounded per-helper timeout
+(600 seconds) because every refresh re-reads all committed reports.
+
 ### Independent-target stripe development experiment
 
 The `*-stripes` `make fast_test` scenarios are the development-only test for a

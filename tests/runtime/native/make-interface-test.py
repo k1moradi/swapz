@@ -219,6 +219,9 @@ class PublicMakeContract(unittest.TestCase):
                 "\t@rm -f '$(M)/.module-candidate'\n")
             (fixture / "tests/tools/run-tests.py").write_text(
                 (ROOT / "tests/tools/run-tests.py").read_text())
+            # The reporter imports the shared per-device-class goal module.
+            (fixture / "tests/tools/product_goals.py").write_text(
+                (ROOT / "tests/tools/product_goals.py").read_text())
             (fixture / "tests/tools/test-rootless.sh").write_text(
                 "#!/bin/bash\n"
                 "set -eu\n"

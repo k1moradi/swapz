@@ -396,6 +396,9 @@ belong in the ROADMAP decision table and Git history.
   permits an already-admitting task to claim one preallocated scratch lane and
   one existing prepared-array slot after FIFO admission; claim failure must
   fall back immediately to the established producer/owner path without waiting.
+  ID169: the claim returns before touching any lane, slot or counter while a
+  lower WRITE is active, so the bounded producer overlaps that preparation
+  with lower service; idle-lane admissions keep submitter preparation.
 - **GC destination probing:** preserve the authority's circular
   `next_segment_probe`; collection must not restart at segment zero. A
   destination remains reusable only after the existing deadness, mapping and
@@ -1157,6 +1160,46 @@ CRC time separately from the background producer's worker timing. These are
 diagnostics only. Do not add overlapping phase walls to manufacture a CPU
 budget, and do not retain the candidate merely because preparation moved to a
 different task if useful service, p99, lower-I/O or resource pressure worsens.
+
+### Idle-lane submitter dispatch (ID175)
+
+The ordered domain (FIFO consumption, window staging, planning, allocation,
+lower-WRITE submission, authority publication and upper completion) has exactly
+one owner at a time, represented by `ctx->ordered_owner`. The ordered work item
+holds it with `mutex_lock()` for its whole pass. A submitting task may take it
+only with `mutex_trylock()` from `swapz_map()`, never by sleeping, and only for
+a plain task-context WRITE (no PREFLUSH/FUA/NOWAIT, IRQs enabled) of a retained
+stream that has already learned isolated closed-loop behavior
+(`singleton_fast_close`) while no lower WRITE is active. Lock order is
+`ordered_owner` before `queue_lock`; never take the mutex under the spinlock.
+
+`->map` runs inside the block layer's `current->bio_list` recursion guard: a
+lower BIO submitted there is only queued until `->map` returns. The dispatch
+path must therefore never wait for lower I/O, a completion, a producer or the
+worker. Under the owner mutex and `queue_lock` it re-proves: admission open, no
+failure, a nonzero READY_COMPRESSED or READY_RAW representation (zero elision
+may issue a synchronous segment DISCARD), bulk mode without verify-after-write,
+no staged window, no in-flight run to finalize, no deferred single tail or
+pending post-PACK sample, no other accepted or preparation-queued work, and
+`swapz_open_segment_fits(&ctx->authority, SWAPZ_MAX_BLOCKS)` so placement cannot
+pick or recycle a segment (GC and recycle DISCARD are synchronous). Only then
+may it run the ordinary `swapz_process()` staging and an IDLE close with
+`submitter_dispatch_active` set, which forces asynchronous K=1 detachment and
+forbids the synchronous/GC fallback: an undetached dispatch is an invariant
+violation that fails closed with `-EUCLEAN`. Any failed proof restores the
+untouched descriptor at the FIFO head (`list_add`) and releases it through the
+ordinary ID150 tail. The submitter lane and drain-visible active count stay held
+until after the mutex is released, so `swapz_drain()` excludes dispatch.
+
+Lower completion still wakes the ordered worker, which finalizes, publishes and
+acknowledges. A dispatched run's successes are deferred to the worker tail and
+delivered from a private list after `ordered_owner` is released, so a woken
+closed-loop writer finds an idle owner. Acknowledgement still follows confirmed
+lower completion and authority publication; failures are completed at once.
+Dispatch adds no allocation, queue, timer, lower-WRITE slot, preparation lane,
+SWZ change or module parameter. `submitter_dispatches` and
+`submitter_dispatch_declines` are observational counters whose sum is bounded
+by `submitter_prepare_claims`.
 
 ### Work-conserving opportunistic representation
 

@@ -24,6 +24,7 @@
 #include <linux/ktime.h>
 #include <linux/lz4.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/cpumask.h>
 #include <linux/preempt.h>
 #include <linux/refcount.h>
@@ -189,6 +190,8 @@ struct swapz_inflight_write {
 	u64 lower_end_ns;
 	u64 commit_start_ns;
 	u64 prepare_nonio_ns;
+	/* ID175: staged and detached by the submitting task, not the worker. */
+	bool submitter_dispatched;
 };
 
 struct swapz_preparation_lane {
@@ -408,6 +411,17 @@ struct swapz_dm {
 	u64 submitter_preparation_lane_misses;
 	u64 submitter_preparation_page_misses;
 	u64 submitter_owner_deferrals;
+	/*
+	 * ID175 ordered-domain owner. The ordered work item holds this mutex for
+	 * its whole pass; an idle-lane submitter may only mutex_trylock() it from
+	 * ->map. Whoever holds it is the sole planner/publisher/lower-WRITE owner.
+	 * Lock order: ordered_owner before queue_lock; never the reverse.
+	 */
+	struct mutex ordered_owner;
+	/* Set only by the ordered-domain owner while a submitter dispatch flushes. */
+	bool submitter_dispatch_active;
+	u64 submitter_dispatches;
+	u64 submitter_dispatch_declines;
 	struct list_head preparation_incoming;
 	/* Exact unclaimed preparation descriptors, protected by queue_lock. */
 	swapz_u32 preparation_queued;
@@ -1106,14 +1120,16 @@ static bool swapz_try_completion_handoff(struct swapz_dm *ctx)
 	return handed;
 }
 
-static void swapz_deliver_upper_completions(struct swapz_dm *ctx)
+/*
+ * Acknowledge already-published successful upper BIOs. The list belongs to
+ * the calling ordered work item; swapz_complete() re-checks terminal failure.
+ */
+static void swapz_deliver_bio_list(struct swapz_dm *ctx, struct bio_list *bios)
 {
 	struct bio *bio;
 	u64 start_ns;
 
-	if (bio_list_empty(&ctx->deferred_upper_completions))
-		return;
-	if (swapz_try_completion_handoff(ctx))
+	if (bio_list_empty(bios))
 		return;
 	start_ns = ktime_get_ns();
 	/*
@@ -1122,11 +1138,20 @@ static void swapz_deliver_upper_completions(struct swapz_dm *ctx)
 	 * context switch per BIO; the writers run once the batch is delivered.
 	 */
 	preempt_disable();
-	while ((bio = bio_list_pop(&ctx->deferred_upper_completions)))
+	while ((bio = bio_list_pop(bios)))
 		swapz_complete(bio, 0);
 	preempt_enable();
 	ctx->deferred_upper_completion_wall_ns +=
 		swapz_elapsed_ns(start_ns, ktime_get_ns());
+}
+
+static void swapz_deliver_upper_completions(struct swapz_dm *ctx)
+{
+	if (bio_list_empty(&ctx->deferred_upper_completions))
+		return;
+	if (swapz_try_completion_handoff(ctx))
+		return;
+	swapz_deliver_bio_list(ctx, &ctx->deferred_upper_completions);
 }
 
 /*
@@ -1530,7 +1555,7 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	u64 lower_end, lower_elapsed, commit_elapsed, finalize_end;
 	swapz_u8 committed = 0, index;
 	int lower_error, error;
-	bool defer;
+	bool defer, submitter_dispatched;
 
 	if (!inflight)
 		return 0;
@@ -1622,6 +1647,8 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 
 	WRITE_ONCE(inflight->active, false);
 	ctx->inflight_count--;
+	submitter_dispatched = inflight->submitter_dispatched;
+	inflight->submitter_dispatched = false;
 	if (ctx->retained_single_tail_deferred)
 		ctx->single_tail_lower_done_seen = true;
 	if (error || committed != inflight->count) {
@@ -1637,8 +1664,10 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	 * the idle lane first; with neither (QD1) wake the writers now. The
 	 * unlocked FIFO peek is a hint: either answer is correct.
 	 */
+	/* ID175 runs ACK after swapz_worker() frees the ordered domain. */
 	defer = ctx->defer_upper_completions &&
-		(ctx->batch_count || !list_empty(&ctx->incoming));
+		(ctx->batch_count || !list_empty(&ctx->incoming) ||
+		 submitter_dispatched);
 	for (index = 0; index < inflight->count; ++index) {
 		ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 		if (inflight->raw[index])
@@ -2415,7 +2444,14 @@ static int swapz_claim_submitter_preparation_locked(
 	struct swapz_prepared_page *prepared;
 	int active, lane_slot, observed, page_slot, peak;
 
-	if (!ctx->submitter_prepare || !ctx->submitter_lanes)
+	/*
+	 * ID169: while a lower WRITE is in flight the bounded background producer
+	 * overlaps preparation with lower service, so leave the descriptor to it.
+	 * Idle-lane admissions keep submitter preparation. No ownership, queue,
+	 * allocation or module-default change; the mapper's fallback is unchanged.
+	 */
+	if (!ctx->submitter_prepare || !ctx->submitter_lanes ||
+	    atomic_read(&ctx->lower_write_active))
 		return -1;
 	lane_slot = swapz_preparation_claim_slot(&ctx->submitter_lane_free_mask);
 	if (lane_slot < 0) {
@@ -2460,16 +2496,15 @@ static int swapz_claim_submitter_preparation_locked(
 }
 
 /*
- * The descriptor is already admitted in FIFO order. The ordered worker may be
- * queued concurrently but cannot consume this entry while the active flag is
- * set. Publish every payload field before the terminal preparation state, then
- * release the descriptor as the last entry/prepared-page access in this task.
+ * Fill this task's claimed prepared slot from its still-owned upper BIO:
+ * stable RAW snapshot, optional LZ4/delta64 payload and payload CRC, then one
+ * terminal READY/ERROR publication. Never publishes a mapping, issues lower
+ * I/O or completes a BIO. Shared by ID150 preparation and ID175 dispatch.
  */
-static void swapz_submitter_prepare_entry(struct swapz_dm *ctx,
-					   struct swapz_bio_ref *entry,
-					   unsigned int lane_slot)
+static void swapz_submitter_prepare_payload(struct swapz_dm *ctx,
+					    struct swapz_bio_ref *entry,
+					    struct swapz_submitter_lane *lane)
 {
-	struct swapz_submitter_lane *lane = &ctx->submitter_lanes[lane_slot];
 	struct swapz_prepared_page *prepared = READ_ONCE(entry->prepared_page);
 	const u8 *input;
 	void *mapped_input = NULL;
@@ -2482,7 +2517,7 @@ static void swapz_submitter_prepare_entry(struct swapz_dm *ctx,
 		WRITE_ONCE(entry->preparation_error, -EUCLEAN);
 		complete_all(&entry->preparation_snapshot_ready);
 		swapz_fail(ctx, -EUCLEAN);
-		goto out_release_owner;
+		goto out_account;
 	}
 
 	input = swapz_map_single_bio_input(entry->bio, &mapped_input);
@@ -2503,7 +2538,7 @@ static void swapz_submitter_prepare_entry(struct swapz_dm *ctx,
 			WRITE_ONCE(entry->preparation_error, error);
 			complete_all(&entry->preparation_snapshot_ready);
 			complete(&prepared->result_ready);
-			goto out_release_owner;
+			goto out_account;
 		}
 	}
 
@@ -2564,9 +2599,24 @@ static void swapz_submitter_prepare_entry(struct swapz_dm *ctx,
 	complete(&prepared->result_ready);
 	lane->prepared_pages++;
 
-out_release_owner:
+out_account:
 	swapz_account_worker_runtime(&lane->wall_ns, wall_start_ns,
 				     &lane->cpu_ns, cpu_start_ns);
+}
+
+/*
+ * The descriptor is already admitted in FIFO order. The ordered worker may be
+ * queued concurrently but cannot consume this entry while the active flag is
+ * set. swapz_submitter_prepare_payload() publishes every payload field before
+ * the terminal preparation state; this task then releases the descriptor as
+ * its last entry/prepared-page access.
+ */
+static void swapz_submitter_prepare_entry(struct swapz_dm *ctx,
+					   struct swapz_bio_ref *entry,
+					   unsigned int lane_slot)
+{
+	swapz_submitter_prepare_payload(ctx, entry,
+					&ctx->submitter_lanes[lane_slot]);
 	/*
 	 * After this release store, the worker may complete the BIO and invalidate
 	 * dm_per_bio_data. Do not dereference entry or prepared below this point.
@@ -3624,10 +3674,15 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
+	/*
+	 * ID175: a submitter-owned lone WRITE runs inside ->map, where a lower BIO
+	 * is only queued until ->map returns. It must detach; it can never wait.
+	 */
 	async_detach_ready =
 		ctx->async_prepare && READ_ONCE(ctx->accepting) &&
 		(count > SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS ||
-		 READ_ONCE(ctx->preparation_queued) > 0U) &&
+		 READ_ONCE(ctx->preparation_queued) > 0U ||
+		 ctx->submitter_dispatch_active) &&
 		!needs_fua && ctx->engine.bulk_enabled &&
 		!ctx->engine.verify_after_write &&
 		(close_reason == SWAPZ_CLOSE_FULL ||
@@ -3721,6 +3776,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 				committed = count; /* ownership detached, not ACKed */
 				async_submitted = true;
 				detached_inflight = inflight;
+				inflight->submitter_dispatched =
+					ctx->submitter_dispatch_active;
 			} else {
 				u64 complete_start = ktime_get_ns();
 				int complete_error;
@@ -3797,6 +3854,16 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			goto commit_done;
 		if (error == -ENOSPC)
 			error = 0; /* existing loop/GC path retries unchanged */
+	}
+	/*
+	 * ID175 eligibility proved one open-segment extent with no GC, segment
+	 * recycle, FUA or in-flight predecessor. The synchronous loop below would
+	 * wait for lower I/O queued behind this very ->map call: fail closed.
+	 */
+	if (ctx->submitter_dispatch_active && !async_submitted && !error) {
+		WARN_ON_ONCE(1);
+		error = -EUCLEAN;
+		goto commit_done;
 	}
 	if (async_submitted || count != 4U || committed)
 		WRITE_ONCE(ctx->sync4_last_done_ns, 0);
@@ -6738,11 +6805,118 @@ static void swapz_worker(struct work_struct *work)
 {
 	struct swapz_dm *ctx =
 		container_of(to_delayed_work(work), struct swapz_dm, worker);
+	struct bio_list ready;
 
+	/*
+	 * ID175: a lone idle-lane submitter may own the ordered domain for one
+	 * bounded, I/O-wait-free dispatch. Wait for it rather than duplicating
+	 * any worker-owned state; it never waits for this work item.
+	 */
+	mutex_lock(&ctx->ordered_owner);
 	ctx->defer_upper_completions = true;
 	swapz_worker_pass(ctx);
 	ctx->defer_upper_completions = false;
-	swapz_deliver_upper_completions(ctx);
+	/*
+	 * Published successes are acknowledged after the ordered domain is free,
+	 * so a woken closed-loop writer finds an idle owner for its next WRITE.
+	 * Only this non-reentrant work item touches the private list; delivery
+	 * reads no mapping, inflight or batch state.
+	 */
+	bio_list_init(&ready);
+	bio_list_merge(&ready, &ctx->deferred_upper_completions);
+	bio_list_init(&ctx->deferred_upper_completions);
+	mutex_unlock(&ctx->ordered_owner);
+	swapz_deliver_bio_list(ctx, &ready);
+}
+
+/*
+ * ID175 idle-lane submitter dispatch. swapz_map() admitted this lone plain
+ * WRITE, claimed a submitter lane, won ordered_owner and unlinked the
+ * descriptor from incoming under queue_lock, so neither the ordered worker
+ * nor the producer can observe it. This task is therefore the serialized
+ * ordered-domain owner, exactly as the worker would be.
+ *
+ * It runs inside ->map: a lower BIO submitted here stays on current->bio_list
+ * until ->map returns, so nothing below may wait for lower I/O. Eligibility
+ * (under the owner mutex and queue_lock) proves: no staged window, no in-flight
+ * run to finalize, no queued follower to aggregate, a learned isolated stream
+ * the ordinary policy would close at once, a nonzero READY representation
+ * (zero elision may issue a synchronous segment DISCARD) and placement inside
+ * the open segment (no GC or segment-recycle DISCARD). The one-record window
+ * then detaches as an immutable K=1 run; lower completion wakes the ordered
+ * worker, which finalizes, publishes and acknowledges as for any detached run.
+ * Any other outcome restores the untouched descriptor at the FIFO head and
+ * releases it to the ordinary ID150 owner path.
+ */
+static void swapz_submitter_dispatch(struct swapz_dm *ctx,
+				     struct swapz_bio_ref *entry,
+				     unsigned int lane_slot)
+{
+	struct swapz_prepared_page *prepared;
+	unsigned long flags;
+	bool dispatch;
+	int state;
+
+	swapz_submitter_prepare_payload(ctx, entry,
+					&ctx->submitter_lanes[lane_slot]);
+	prepared = READ_ONCE(entry->prepared_page);
+	state = prepared ? swapz_preparation_read_state(&prepared->state) :
+		SWAPZ_PREPARATION_ERROR;
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	dispatch = ctx->accepting && !ctx->failed && prepared &&
+		!READ_ONCE(entry->preparation_error) &&
+		((state == SWAPZ_PREPARATION_READY_COMPRESSED &&
+		  !prepared->zero) ||
+		 state == SWAPZ_PREPARATION_READY_RAW) &&
+		ctx->engine.bulk_enabled && !ctx->engine.verify_after_write &&
+		!atomic_read(&ctx->lower_write_active) &&
+		swapz_window_submitter_dispatch_ready(
+			ctx->retain_ms, ctx->singleton_fast_close,
+			ctx->retained_single_tail_deferred,
+			ctx->pack_close_pending_tail_sample, ctx->batch_count,
+			swapz_has_inflight(ctx),
+			list_empty(&ctx->incoming) &&
+			list_empty(&ctx->preparation_incoming) &&
+			!ctx->preparation_queued ? 0U : 1U) &&
+		swapz_open_segment_fits(&ctx->authority, SWAPZ_MAX_BLOCKS);
+	if (!dispatch)
+		/* Older than any later admission: restore it at the FIFO head. */
+		list_add(&entry->list, &ctx->incoming);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+
+	if (dispatch) {
+		struct bio *bio = entry->bio;
+
+		/* Unlinked from every FIFO: the active gate has no other reader. */
+		atomic_set(&entry->preparation_submitter_active, 0);
+		entry->admitted_ns = 0;
+		ctx->submitter_dispatches++;
+		/* Same per-BIO follower evidence the worker sets for a lone head. */
+		ctx->worker_has_immediate_followup = false;
+		swapz_process(ctx, bio);
+		/* swapz_process() may already have completed the BIO: no entry access. */
+		if (ctx->batch_count) {
+			ctx->submitter_dispatch_active = true;
+			ctx->next_window_close = SWAPZ_CLOSE_IDLE;
+			swapz_flush_window(ctx);
+			ctx->submitter_dispatch_active = false;
+		}
+		ctx->worker_has_immediate_followup = false;
+		mutex_unlock(&ctx->ordered_owner);
+	} else {
+		ctx->submitter_dispatch_declines++;
+		mutex_unlock(&ctx->ordered_owner);
+		/*
+		 * After this release store the worker may complete the BIO and
+		 * invalidate dm_per_bio_data; same tail as the ID150 owner path.
+		 */
+		atomic_set_release(&entry->preparation_submitter_active, 0);
+		swapz_note_accepted_lower_idle_wake(ctx);
+		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	}
+	/* The drain-visible lane is held through every ordered-domain access. */
+	atomic_dec(&ctx->submitter_preparation_active);
+	swapz_preparation_release_slot(&ctx->submitter_lane_free_mask, lane_slot);
 }
 
 static int swapz_map(struct dm_target *ti, struct bio *bio)
@@ -6753,6 +6927,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	sector_t sector = bio->bi_iter.bi_sector;
 	sector_t count = bio_sectors(bio);
 	int submitter_lane = -1;
+	bool ordered_owned = false, submitter_dispatch = false;
 
 	if (!READ_ONCE(ctx->accepting))
 		return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
@@ -6819,6 +6994,17 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 			}
 		segs_done: ;
 		}
+		/*
+		 * ID175 hint: only a plain task-context WRITE of a learned isolated
+		 * stream with an idle lower lane tries to own the ordered domain.
+		 * Never sleeps; the decision is re-proved under the owner mutex.
+		 */
+		if (bio_op(bio) == REQ_OP_WRITE && count && ctx->submitter_prepare &&
+		    ctx->retain_ms && in_task() && !irqs_disabled() &&
+		    !(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA | REQ_NOWAIT)) &&
+		    READ_ONCE(ctx->singleton_fast_close) &&
+		    !atomic_read(&ctx->lower_write_active))
+			ordered_owned = mutex_trylock(&ctx->ordered_owner);
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		/*
 		 * Admission and shutdown share queue_lock: presuspend cannot finish
@@ -6826,6 +7012,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		 */
 		if (!ctx->accepting) {
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			if (ordered_owned)
+				mutex_unlock(&ctx->ordered_owner);
 			return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		}
 		if (count && (bio_op(bio) == REQ_OP_READ ||
@@ -6862,6 +7050,17 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		    !(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
 			submitter_lane =
 				swapz_claim_submitter_preparation_locked(ctx, entry);
+		/*
+		 * ID175: with the ordered domain owned and this descriptor the only
+		 * accepted work, unlink it so no other owner can observe it.
+		 */
+		if (submitter_lane >= 0 && ordered_owned &&
+		    list_is_singular(&ctx->incoming) &&
+		    list_empty(&ctx->preparation_incoming) &&
+		    !ctx->preparation_queued) {
+			list_del_init(&entry->list);
+			submitter_dispatch = true;
+		}
 		if (submitter_lane < 0) {
 			/*
 			 * A cold lone head belongs to the ordered worker first. A retained
@@ -6901,7 +7100,11 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	} else
 		queue_delayed_work(ctx->workqueue, &ctx->worker, 0);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
-	if (submitter_lane >= 0)
+	if (ordered_owned && !submitter_dispatch)
+		mutex_unlock(&ctx->ordered_owner);
+	if (submitter_dispatch)
+		swapz_submitter_dispatch(ctx, entry, (unsigned int)submitter_lane);
+	else if (submitter_lane >= 0)
 		swapz_submitter_prepare_entry(ctx, entry,
 					     (unsigned int)submitter_lane);
 	return DM_MAPIO_SUBMITTED;
@@ -7203,6 +7406,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->delta64_lz4_acceleration =
 		(swapz_u8)swapz_delta64_lz4_acceleration;
 	spin_lock_init(&ctx->queue_lock);
+	mutex_init(&ctx->ordered_owner);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
@@ -8245,7 +8449,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "submitter_lz4_wall_ns=%llu "
 		       "submitter_copy_wall_ns=%llu "
 		       "submitter_copy_bytes=%llu "
-		       "submitter_crc_wall_ns=%llu",
+		       "submitter_crc_wall_ns=%llu "
+		       "submitter_dispatches=%llu "
+		       "submitter_dispatch_declines=%llu",
 		       ctx->submitter_prepare ? 1U : 0U,
 		       (unsigned int)ctx->submitter_lane_count,
 		       ctx->submitter_preparation_claims,
@@ -8260,7 +8466,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       submitter.lz4_wall_ns,
 		       submitter.copy_wall_ns,
 		       submitter.copy_bytes,
-		       submitter.crc_wall_ns);
+		       submitter.crc_wall_ns,
+		       ctx->submitter_dispatches,
+		       ctx->submitter_dispatch_declines);
 		DMEMIT(" write_admit_worker_samples=%llu "
 		       "write_admit_worker_wall_ns=%llu "
 		       "sync4_windows=%llu sync4_wall_ns=%llu "

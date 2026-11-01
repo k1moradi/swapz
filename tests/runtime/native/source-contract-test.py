@@ -1168,20 +1168,37 @@ static swapz_u16 swapz_probe_set(
 
     def test_deferred_upper_completions_have_one_owner_and_join_before_drain(self):
         wrapper = body("swapz_worker")
+        # ID175: the work item owns the ordered domain for its whole pass and
+        # acknowledges its detached private list only after releasing it.
+        self.assertLess(wrapper.index("mutex_lock(&ctx->ordered_owner);"),
+                        wrapper.index("ctx->defer_upper_completions = true;"))
         self.assertLess(wrapper.index("ctx->defer_upper_completions = true;"),
                         wrapper.index("swapz_worker_pass(ctx);"))
         self.assertLess(wrapper.index("swapz_worker_pass(ctx);"),
                         wrapper.index("ctx->defer_upper_completions = false;"))
         self.assertLess(wrapper.index("ctx->defer_upper_completions = false;"),
-                        wrapper.rindex("swapz_deliver_upper_completions(ctx);"))
+                        wrapper.index(
+                            "bio_list_merge(&ready, &ctx->deferred_upper_completions);"))
+        self.assertLess(wrapper.index(
+                            "bio_list_init(&ctx->deferred_upper_completions);"),
+                        wrapper.index("mutex_unlock(&ctx->ordered_owner);"))
+        self.assertLess(wrapper.index("mutex_unlock(&ctx->ordered_owner);"),
+                        wrapper.index("swapz_deliver_bio_list(ctx, &ready);"))
+        self.assertNotIn("swapz_deliver_upper_completions(ctx);", wrapper)
+        self.assertNotIn("mutex_trylock", wrapper)
         finalize = body("swapz_finalize_inflight_write")
         # Deliver before sleeping on the lower device, never after.
         self.assertLess(finalize.index("swapz_deliver_upper_completions(ctx);"),
                         finalize.index("wait_for_completion(&inflight->lower_done)"))
         success = finalize[finalize.rindex("for (index = 0; index < inflight->count"):]
         self.assertIn("defer = ctx->defer_upper_completions &&\n"
-                      "\t\t(ctx->batch_count || !list_empty(&ctx->incoming));",
+                      "\t\t(ctx->batch_count || !list_empty(&ctx->incoming) ||\n"
+                      "\t\t submitter_dispatched);",
                       finalize)
+        # The ID175 marker is consumed exactly once, before either outcome.
+        self.assertLess(finalize.index(
+                            "inflight->submitter_dispatched = false;"),
+                        finalize.index("if (error || committed != inflight->count)"))
         self.assertIn("if (defer)", success)
         self.assertIn("swapz_defer_upper_completion(ctx,", success)
         # Failed runs are still acknowledged immediately with their error.
@@ -1193,8 +1210,15 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(defer.index("swapz_release_prepared(bio);"),
                         defer.index("bio_list_add(&ctx->deferred_upper_completions"))
         deliver = body("swapz_deliver_upper_completions")
-        self.assertIn("bio_list_pop(&ctx->deferred_upper_completions)", deliver)
-        self.assertIn("swapz_complete(bio, 0)", deliver)
+        self.assertIn("swapz_deliver_bio_list(ctx, &ctx->deferred_upper_completions)",
+                      deliver)
+        self.assertLess(deliver.index("swapz_try_completion_handoff(ctx)"),
+                        deliver.index("swapz_deliver_bio_list("))
+        delivered = body("swapz_deliver_bio_list")
+        self.assertIn("bio_list_pop(bios)", delivered)
+        self.assertIn("swapz_complete(bio, 0)", delivered)
+        self.assertLess(delivered.index("preempt_disable();"),
+                        delivered.index("bio_list_pop(bios)"))
         worker = body("swapz_worker_pass")
         self.assertIn("if (list_empty(&local) || !ctx->batch_count ||\n"
                       "\t\t\t    swapz_has_inflight(ctx))\n"
@@ -1400,6 +1424,7 @@ static void bio_endio(struct bio *b) {
                 ("swapz_defer_upper_completion", "static void swapz_defer_upper_completion(struct swapz_dm *ctx, struct bio *bio)"),
                 ("swapz_completion_work", "static void swapz_completion_work(struct work_struct *work)"),
                 ("swapz_try_completion_handoff", "static bool swapz_try_completion_handoff(struct swapz_dm *ctx)"),
+                ("swapz_deliver_bio_list", "static void swapz_deliver_bio_list(struct swapz_dm *ctx, struct bio_list *bios)"),
                 ("swapz_deliver_upper_completions", "static void swapz_deliver_upper_completions(struct swapz_dm *ctx)")):
             source += signature + " {\n" + body(name) + "\n}\n"
         source += r'''
@@ -1446,6 +1471,19 @@ int main(void) {
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==4);
     init();add(0,4);ctx.defer_upper_completions=false;
     swapz_deliver_upper_completions(&ctx);assert(!pending&&ctx.upper_write_completed_ok==4);
+
+    /* ID175 worker tail: a detached private list is acknowledged exactly once,
+       with balanced preemption and no handoff or deferred-list access. */
+    init();add(0,5);ctx.defer_upper_completions=false;
+    {
+        struct bio_list ready=ctx.deferred_upper_completions;
+        bio_list_init(&ctx.deferred_upper_completions);
+        swapz_deliver_bio_list(&ctx,&ready);
+        assert(bio_list_empty(&ready)&&!pending&&!preempt_depth);
+        assert(ctx.upper_write_completed_ok==5&&released==5);
+        for(unsigned i=0;i<5;++i)assert(bios[i].ended==1);
+        swapz_deliver_bio_list(&ctx,&ready);assert(ctx.upper_write_completed_ok==5);
+    }
 
     /* Already-published BIOs still fail closed if failure precedes delivery. */
     init();add(0,4);assert(swapz_try_completion_handoff(&ctx));fail_after=0;run();
@@ -4704,7 +4742,7 @@ int main(void)
 
         compressor = body("swapz_compress_prepared_page")
         observer = body("swapz_observe_prepared_lz4_cost")
-        for name in ("swapz_preparation_worker", "swapz_submitter_prepare_entry"):
+        for name in ("swapz_preparation_worker", "swapz_submitter_prepare_payload"):
             preparing = body(name)
             self.assertIn("prepared->length = swapz_compress_prepared_page(", preparing)
             self.assertLess(preparing.index("swapz_compress_prepared_page("),
@@ -4816,7 +4854,7 @@ int main(void) {
                                  result.stdout + result.stderr)
 
     def test_snapshot_inputs_are_not_reported_as_direct_lz4(self):
-        for name in ("swapz_preparation_worker", "swapz_submitter_prepare_entry"):
+        for name in ("swapz_preparation_worker", "swapz_submitter_prepare_payload"):
             preparing = body(name)
             self.assertIn("lane->mapped_snapshot_pages++", preparing)
             self.assertNotIn("direct_lz4_pages", preparing)
@@ -4837,6 +4875,7 @@ int main(void) {
         mapper = body("swapz_map")
         claim = body("swapz_claim_submitter_preparation_locked")
         submitter = body("swapz_submitter_prepare_entry")
+        payload = body("swapz_submitter_prepare_payload")
         ordered = body("swapz_worker_pass")
         ctor = body("swapz_ctr")
         drain = body("swapz_drain")
@@ -4867,10 +4906,18 @@ int main(void) {
         self.assertIn("refcount_set(&prepared->refs, 1)", claim)
         self.assertIn(
             "atomic_set(&entry->preparation_submitter_active, 1)", claim)
+        # ID169: an active lower WRITE leaves preparation to the bounded
+        # producer before any lane, slot or ownership state is touched.
+        guard = claim.index("atomic_read(&ctx->lower_write_active)")
+        self.assertLess(guard, claim.index("return -1;"))
+        self.assertLess(guard, claim.index(
+            "swapz_preparation_claim_slot(&ctx->submitter_lane_free_mask)"))
+        self.assertLess(guard, claim.index("ctx->submitter_preparation_claims++"))
         for allocation in ("kmalloc(", "kzalloc(", "vzalloc(", "kvmalloc(",
                            "kvcalloc(", "mempool_alloc("):
             self.assertNotIn(allocation, claim)
             self.assertNotIn(allocation, submitter)
+            self.assertNotIn(allocation, payload)
 
         self.assertLess(
             mapper.index("list_add_tail(&entry->list, &ctx->incoming)"),
@@ -4895,7 +4942,8 @@ int main(void) {
         self.assertLess(skip_wake, mapper.index(
             "queue_delayed_work(ctx->workqueue, &ctx->worker, 0)"))
         self.assertLess(skip_wake, mapper.index(
-            "spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\tif (submitter_lane"))
+            "spin_unlock_irqrestore(&ctx->queue_lock, flags);\n"
+            "\tif (ordered_owned && !submitter_dispatch)"))
 
         active_gate = re.search(
             r"atomic_read_acquire\(\s*&entry->preparation_submitter_active\s*\)",
@@ -4907,14 +4955,17 @@ int main(void) {
         self.assertIn("ctx->submitter_owner_deferrals++", ordered)
 
         self.assertIn("complete_all(&entry->preparation_snapshot_ready)",
-                      submitter)
-        self.assertIn("prepared->length = swapz_compress_prepared_page(", submitter)
-        self.assertIn("swapz_preparation_publish_result(", submitter)
+                      payload)
+        self.assertIn("prepared->length = swapz_compress_prepared_page(", payload)
+        self.assertIn("swapz_preparation_publish_result(", payload)
+        self.assertNotIn("preparation_submitter_active", payload)
+        self.assertNotIn("_delayed_work(", payload)
+        self.assertNotIn("swapz_preparation_release_slot(", payload)
         release_call = (
             "atomic_set_release(&entry->preparation_submitter_active, 0)")
         self.assertIn(release_call, submitter)
         self.assertLess(
-            submitter.index("swapz_preparation_publish_result("),
+            submitter.index("swapz_submitter_prepare_payload(ctx, entry,"),
             submitter.index(release_call))
         release = submitter.index(release_call) + len(release_call)
         self.assertNotIn("entry->", submitter[release:])
@@ -4951,6 +5002,7 @@ int main(void) {
                           "swapz_flush_window(", "dm_io(", "bio_endio(",
                           "swapz_engine_write_window"):
             self.assertNotIn(forbidden, submitter)
+            self.assertNotIn(forbidden, payload)
 
         self.assertIn("ctx->submitter_lane_free_mask", drain)
         self.assertIn("ctx->submitter_lane_full_mask", drain)
@@ -4965,10 +5017,112 @@ int main(void) {
                 "submitter_prepare_pages", "submitter_prepare_wall_ns",
                 "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
                 "submitter_copy_wall_ns", "submitter_copy_bytes",
-                "submitter_crc_wall_ns"):
+                "submitter_crc_wall_ns", "submitter_dispatches",
+                "submitter_dispatch_declines"):
             self.assertRegex(status, rf"{field}=%[ul]+")
             self.assertIn(f'"{field}"', replay)
             self.assertIn(f'"{field}"', reporter)
+
+    def test_idle_lane_submitter_dispatch_never_waits_inside_map(self):
+        """ID175: a submitter may own the ordered domain only I/O-wait-free."""
+        mapper = body("swapz_map")
+        dispatch = body("swapz_submitter_dispatch")
+        flush = body("swapz_flush_window")
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        fits = authority[authority.index("int swapz_open_segment_fits("):
+                         authority.index("int swapz_stage(")]
+
+        # Mapper: never sleeps for ownership; a trylock precedes queue_lock and
+        # every non-dispatch or closed-admission path releases it.
+        self.assertIn("mutex_trylock(&ctx->ordered_owner)", mapper)
+        self.assertNotIn("mutex_lock(&ctx->ordered_owner)", mapper)
+        self.assertLess(mapper.index("mutex_trylock(&ctx->ordered_owner)"),
+                        mapper.index("spin_lock_irqsave(&ctx->queue_lock, flags);"))
+        hint = mapper[mapper.index("ID175 hint"):
+                      mapper.index("mutex_trylock(&ctx->ordered_owner)")]
+        for gate in ("in_task()", "!irqs_disabled()", "REQ_NOWAIT",
+                     "REQ_PREFLUSH | REQ_FUA", "ctx->submitter_prepare",
+                     "ctx->retain_ms",
+                     "READ_ONCE(ctx->singleton_fast_close)",
+                     "!atomic_read(&ctx->lower_write_active)"):
+            self.assertIn(gate, hint)
+        closed = mapper[mapper.index("if (!ctx->accepting) {"):]
+        closed = closed[:closed.index("}")]
+        self.assertIn("mutex_unlock(&ctx->ordered_owner);", closed)
+        unlink = mapper[mapper.index("if (submitter_lane >= 0 && ordered_owned &&"):]
+        unlink = unlink[:unlink.index("}")]
+        for gate in ("list_is_singular(&ctx->incoming)",
+                     "list_empty(&ctx->preparation_incoming)",
+                     "!ctx->preparation_queued", "list_del_init(&entry->list);"):
+            self.assertIn(gate, unlink)
+        tail = mapper[mapper.rindex("spin_unlock_irqrestore(&ctx->queue_lock, flags);"):]
+        self.assertLess(tail.index("if (ordered_owned && !submitter_dispatch)"),
+                        tail.index("swapz_submitter_dispatch(ctx, entry"))
+        self.assertIn("mutex_unlock(&ctx->ordered_owner);", tail)
+
+        # Dispatch: the payload is prepared before eligibility is re-proved
+        # under the owner mutex and queue_lock; every proof is explicit.
+        self.assertLess(dispatch.index("swapz_submitter_prepare_payload(ctx, entry,"),
+                        dispatch.index("spin_lock_irqsave(&ctx->queue_lock, flags);"))
+        for proof in ("swapz_window_submitter_dispatch_ready(",
+                      "swapz_open_segment_fits(&ctx->authority, SWAPZ_MAX_BLOCKS)",
+                      "!prepared->zero", "SWAPZ_PREPARATION_READY_RAW",
+                      "ctx->engine.bulk_enabled",
+                      "!ctx->engine.verify_after_write",
+                      "!atomic_read(&ctx->lower_write_active)",
+                      "swapz_has_inflight(ctx)", "ctx->accepting",
+                      "!ctx->failed"):
+            self.assertIn(proof, dispatch)
+        self.assertIn("list_add(&entry->list, &ctx->incoming);", dispatch)
+        self.assertNotIn("list_add_tail(&entry->list", dispatch)
+        active = dispatch.index("ctx->submitter_dispatch_active = true;")
+        self.assertLess(active, dispatch.index("swapz_flush_window(ctx);"))
+        self.assertLess(dispatch.index("swapz_flush_window(ctx);"),
+                        dispatch.index("ctx->submitter_dispatch_active = false;"))
+        self.assertLess(dispatch.index("swapz_process(ctx, bio);"), active)
+        self.assertLess(dispatch.rindex("mutex_unlock(&ctx->ordered_owner);"),
+                        dispatch.index("atomic_dec(&ctx->submitter_preparation_active)"))
+        lane_release = ("swapz_preparation_release_slot("
+                        "&ctx->submitter_lane_free_mask, lane_slot);")
+        self.assertEqual(dispatch[dispatch.index(lane_release):]
+                         .strip().rstrip("}").strip(), lane_release)
+        declined = dispatch[dispatch.index("ctx->submitter_dispatch_declines++"):]
+        self.assertLess(declined.index("mutex_unlock(&ctx->ordered_owner);"),
+                        declined.index(
+                            "atomic_set_release(&entry->preparation_submitter_active, 0)"))
+        for forbidden in ("wait_for_completion", "swapz_issue_flush",
+                          "swapz_gc_compact_one", "swapz_finalize",
+                          "mutex_lock(", "msleep", "schedule", "swapz_raw_write",
+                          "swapz_discard_dead_segment"):
+            self.assertNotIn(forbidden, dispatch)
+
+        # Flush: dispatch detaches, records its marker and never falls back to
+        # the synchronous loop or GC retry from ->map.
+        detach = flush[flush.index("async_detach_ready ="):]
+        detach = detach[:detach.index(";")]
+        self.assertIn("ctx->submitter_dispatch_active", detach)
+        self.assertIn("inflight->submitter_dispatched =\n"
+                      "\t\t\t\t\tctx->submitter_dispatch_active;", flush)
+        guard = flush.index(
+            "if (ctx->submitter_dispatch_active && !async_submitted && !error)")
+        self.assertLess(guard, flush.index("while (!async_submitted && committed < count)"))
+        self.assertIn("error = -EUCLEAN;", flush[guard:guard + 200])
+
+        # Policy and placement proofs stay pure and read-only.
+        ready = policy[policy.index("swapz_window_submitter_dispatch_ready("):]
+        ready = ready[:ready.index("}")]
+        for term in ("retain_ms", "singleton_fast_close", "!single_tail_deferred",
+                     "!pending_tail_sample", "!batch_count",
+                     "!lower_write_inflight", "!queued_followers"):
+            self.assertIn(term, ready)
+        for term in ("a->in_flight", "a->batch_pending", "a->gc_allocation",
+                     "a->open_segment", "SWAPZ_SEGMENT_BLOCKS"):
+            self.assertIn(term, fits)
+        for mutation in ("a->next_block =", "swapz_pick_dead_segment",
+                         "dead_segment_recycle", "++", "+="):
+            self.assertNotIn(mutation, fits)
+        self.assertIn("mutex_init(&ctx->ordered_owner);", body("swapz_ctr"))
 
 
 if __name__ == "__main__":

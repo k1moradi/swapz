@@ -1346,7 +1346,8 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "submitter_prepare_pages", "submitter_prepare_wall_ns",
     "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
     "submitter_copy_wall_ns", "submitter_copy_bytes",
-    "submitter_crc_wall_ns"
+    "submitter_crc_wall_ns", "submitter_dispatches",
+    "submitter_dispatch_declines"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = (
     "retained_burst_target", "delta64_rescue", "delta64_prepare_workers",
@@ -1473,13 +1474,19 @@ def kernel_write_delta(before, after):
         "submitter_prepare_pages", "submitter_prepare_wall_ns",
         "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
         "submitter_copy_wall_ns", "submitter_copy_bytes",
-        "submitter_crc_wall_ns",
+        "submitter_crc_wall_ns", "submitter_dispatches",
+        "submitter_dispatch_declines",
     )
     if not after["submitter_prepare"] and any(
             counters[field] for field in submitter_activity):
         raise ValueError("disabled swapz submitter preparation recorded activity")
     if counters["submitter_prepare_pages"] > counters["submitter_prepare_claims"]:
         raise ValueError("inconsistent swapz submitter preparation claims")
+    # ID175: every idle-lane dispatch attempt first claimed a submitter lane.
+    if (counters["submitter_dispatches"] +
+            counters["submitter_dispatch_declines"] >
+            counters["submitter_prepare_claims"]):
+        raise ValueError("inconsistent swapz submitter dispatch claims")
     if (counters["submitter_copy_bytes"] !=
             counters["submitter_prepare_pages"] * 4096):
         raise ValueError("inconsistent swapz submitter preparation copy bytes")

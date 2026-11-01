@@ -693,6 +693,27 @@ static int test_late_clock_does_not_wrap_remaining_budget(void)
 	return 0;
 }
 
+/* ID175: only a learned isolated idle stream may skip the ordered worker. */
+static int test_submitter_dispatch_requires_proven_idle_singleton(void)
+{
+	CHECK(swapz_window_submitter_dispatch_ready(2, 1, 0, 0, 0, 0, 0));
+	CHECK(swapz_window_submitter_dispatch_ready(4, 1, 0, 0, 0, 0, 0));
+	/* Retention off or not yet learned: the ordinary owner decides. */
+	CHECK(!swapz_window_submitter_dispatch_ready(0, 1, 0, 0, 0, 0, 0));
+	CHECK(!swapz_window_submitter_dispatch_ready(2, 0, 0, 0, 0, 0, 0));
+	/* Each pending scheduling or ownership state keeps the worker path. */
+	CHECK(!swapz_window_submitter_dispatch_ready(2, 1, 1, 0, 0, 0, 0));
+	CHECK(!swapz_window_submitter_dispatch_ready(2, 1, 0, 1, 0, 0, 0));
+	CHECK(!swapz_window_submitter_dispatch_ready(2, 1, 0, 0, 1, 0, 0));
+	CHECK(!swapz_window_submitter_dispatch_ready(2, 1, 0, 0, SWAPZ_MAX_RECORDS,
+						      0, 0));
+	CHECK(!swapz_window_submitter_dispatch_ready(2, 1, 0, 0, 0, 1, 0));
+	/* A queued follower must be offered to the ordinary aggregation policy. */
+	CHECK(!swapz_window_submitter_dispatch_ready(2, 1, 0, 0, 0, 0, 1));
+	CHECK(!swapz_window_submitter_dispatch_ready(2, 1, 0, 0, 0, 0, 64));
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -729,6 +750,7 @@ int main(void)
 	CHECK(test_expiry_remains_pinned_after_later_arrivals() == 0); passed++;
 	CHECK(test_backwards_clock_has_zero_age() == 0); passed++;
 	CHECK(test_late_clock_does_not_wrap_remaining_budget() == 0); passed++;
+	CHECK(test_submitter_dispatch_requires_proven_idle_singleton() == 0); passed++;
 	printf("SWAPZ_WINDOW_POLICY_TESTS_PASS=%d\n", passed);
 	return 0;
 }

@@ -621,4 +621,24 @@ static inline int swapz_window_retention_expired(unsigned long long first_ns,
 	return now_ns - first_ns >= (unsigned long long)retain_ms * 1000000ULL;
 }
 
+/*
+ * ID175 idle-lane submitter dispatch: the ordered owner's scheduling state
+ * already proves the existing policy would close this lone WRITE at once.
+ * The retained stream must have learned isolated closed-loop behavior
+ * (singleton fast close), nothing may be staged or in flight, no deferred
+ * single-tail or post-PACK sample may be pending, and no other accepted
+ * work may be queued behind it. Any other state keeps the ordinary worker
+ * path. Ordering/FUA/capacity/authority fences remain caller owned.
+ */
+static inline int swapz_window_submitter_dispatch_ready(
+		swapz_u8 retain_ms, int singleton_fast_close,
+		int single_tail_deferred, int pending_tail_sample,
+		swapz_u8 batch_count, int lower_write_inflight,
+		unsigned int queued_followers)
+{
+	return retain_ms && singleton_fast_close && !single_tail_deferred &&
+	       !pending_tail_sample && !batch_count && !lower_write_inflight &&
+	       !queued_followers;
+}
+
 #endif

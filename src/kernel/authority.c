@@ -855,6 +855,37 @@ static int swapz_stage_policy(struct swapz_authority *a,
 	return 0;
 }
 
+/*
+ * Read-only placement proof for a caller that must never wait for lower I/O.
+ * Returns 1 only when swapz_stage_policy() would place one `blocks` extent in
+ * the CURRENT open segment: no dead-segment pick (whose recycle callback may
+ * issue a synchronous DISCARD), no append-only tail skip and no -ENOSPC.
+ * Any staged/in-flight transaction, GC allocation or unknown cursor returns 0.
+ * The caller owns the serialized authority; this mutates nothing.
+ */
+int swapz_open_segment_fits(const struct swapz_authority *a, swapz_u8 blocks)
+{
+	swapz_u32 limit, start;
+
+	if (!a || !a->maps || !swapz_legal_class(blocks) || a->in_flight ||
+	    a->batch_pending || a->gc_allocation ||
+	    !a->next_sequence || a->next_sequence == ~(swapz_u32)0)
+		return 0;
+	start = a->next_block;
+	if (!a->reuse_dead_segments) {
+		limit = a->physical_blocks - a->reserve_blocks;
+		return start <= limit && blocks <= limit - start &&
+		       start % SWAPZ_SEGMENT_BLOCKS + blocks <= SWAPZ_SEGMENT_BLOCKS;
+	}
+	limit = a->segment_foreground ? a->physical_blocks :
+		((a->physical_blocks - a->reserve_blocks) /
+		 SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
+	return a->open_segment != ~(swapz_u32)0 && start < limit &&
+	       blocks <= limit - start &&
+	       start / SWAPZ_SEGMENT_BLOCKS == a->open_segment &&
+	       start % SWAPZ_SEGMENT_BLOCKS + blocks <= SWAPZ_SEGMENT_BLOCKS;
+}
+
 int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 		swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out)
 {

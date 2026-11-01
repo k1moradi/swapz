@@ -248,6 +248,13 @@ int swapz_authority_init(struct swapz_authority *authority,
 int swapz_stage(struct swapz_authority *authority, const swapz_u32 *logical_pages,
 	      swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out);
 /*
+ * Read-only: 1 only if staging one `blocks` extent now reuses the open segment
+ * with no segment pick/recycle (synchronous DISCARD callback) and no -ENOSPC.
+ * Lets a caller that may not wait for lower I/O prove allocation is I/O-free.
+ */
+int swapz_open_segment_fits(const struct swapz_authority *authority,
+			    swapz_u8 blocks);
+/*
  * IMPORTANT: success requires full extent I/O completion (not submission).
  * The caller must provide the exact completed on-media bytes. Verify all
  * record CRC32Cs and old-authority invariants BEFORE publishing any mapping.

@@ -2,6 +2,7 @@
 """Rootless contract tests for the sole make test plain JSON reporting pipeline."""
 import contextlib
 import importlib.util
+import inspect
 import io
 import json
 from pathlib import Path
@@ -1310,6 +1311,132 @@ class ReportContract(unittest.TestCase):
             {"sequence": 5, "compatibility": "b", "gain": 4},
         ], "gain", "gain", "blue")
         self.assertEqual(axes.chunks, [[1, 2], [3], [5]])
+
+    def test_per_device_class_goals_classify_targets_and_guards(self):
+        """ID174: one shared, descriptive scorecard for reporter and plots."""
+        import contextlib
+        import copy
+        import io
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_goal_history", ROOT / "tests/tools/plot-history.py")
+        history = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(history)
+        goals = runner.product_goals
+        self.assertEqual(goals.GUARD_FLOOR_PCT, -5.0)
+        self.assertEqual(len(goals.GOALS), 14)
+        self.assertEqual(len({(g["target"], g["workload"], g["qd"])
+                              for g in goals.GOALS}), 14)
+        self.assertEqual(goals.goal_for("nvme_gen5", goals.MIXED)["bound"],
+                         goals.HOST_BOUND)
+        self.assertEqual(goals.goal_for("ssd_emulated", goals.PERSISTENT, 4)["bound"],
+                         goals.LATENCY_BOUND)
+        self.assertEqual(goals.goal_for("ssd_emulated", goals.PERSISTENT, 8)["bound"],
+                         goals.DEVICE_BOUND)
+        self.assertIsNone(goals.goal_for("ssd_emulated", goals.PERSISTENT, 2))
+
+        def point(target, workload, qd, gain, saved_bytes, saved_requests):
+            return {"target": target, "workload": workload, "qd": qd,
+                    "write_mbps_gain_pct": gain,
+                    "lower_write_bytes_gain_pct": saved_bytes,
+                    "lower_write_requests_gain_pct": saved_requests}
+
+        points = [
+            point("sd_emulated", goals.MIXED, None, 0.1, 1, 1),        # MET
+            point("ssd_emulated", goals.MIXED, None, 0.0, 30, 70),     # parity: MISSED
+            point("sd_card", goals.MIXED, None, 50, 0.0, 10),          # no byte save
+            point("nvme_gen4", goals.MIXED, None, -5.0, 0.0, 0.0),     # guard edge: MET
+            point("nvme_gen5", goals.MIXED, None, -5.01, 20, 80),      # below floor
+            point("sd_emulated", goals.PERSISTENT, 1, -1, 0.0, 0.0),   # guard: MET
+            point("ssd_emulated", goals.PERSISTENT, 1, -1, -0.5, 0.0), # adds bytes
+            point("ssd_emulated", goals.PERSISTENT, 4, -1, None, 1),   # unavailable
+            point("ssd_emulated", goals.PERSISTENT, 8, -9, 1, 1),      # stale point
+            point("ssd_emulated", goals.PERSISTENT, 8, 9, 1, 1),       # latest wins
+        ]
+        rows = {row["label"]: row for row in goals.scorecard(points)}
+        expected = {"Serial mixed": "MET", "Fast mixed": "MISSED",
+                    "SD card mixed": "MISSED", "NVMe4 mixed": "MET",
+                    "NVMe5 mixed": "MISSED", "Serial QD1": "MET",
+                    "Fast QD1": "MISSED", "Fast QD4": "UNAVAILABLE",
+                    "Fast QD8": "MET", "SATA mixed": "UNAVAILABLE",
+                    "Fast QD32": "UNAVAILABLE"}
+        for label, status in expected.items():
+            self.assertEqual(rows[label]["status"], status, label)
+        self.assertEqual(rows["Fast QD8"]["write_gain_pct"], 9)
+        self.assertEqual(rows["NVMe4 mixed"]["service_floor_pct"], -5.0)
+        self.assertEqual(rows["Serial mixed"]["service_floor_pct"], 0.0)
+        self.assertEqual(goals.scorecard([])[0]["status"], "UNAVAILABLE")
+
+        # Persistent WRITE points carry exact lower-WRITE savings for the scorecard.
+        raw = {"source_sha": "source", "fixture_sha256": "fixture",
+               "trace_sha256": "trace", "replay_mode": "persistent-write"}
+        swapz = {**raw, "kernel_write_path": {"delta64_rescue": 1}}
+        report = {"overall": "PASS", "tested_commit_sha": "source",
+                  "kernel_release": "kernel", "benchmarks": {
+                      "write_saturation": {"replay_mode": "persistent-write", "regimes": {
+                          "ssd_emulated": [{"mode": "async", "qd": 8, "raw_write_mbps": 100,
+                                            "swapz_write_mbps": 125,
+                                            "swapz_logical_to_lower_ratio": 4 / 3,
+                                            "raw_lower_write_requests": 400,
+                                            "swapz_lower_write_requests": 100,
+                                            "observations": 5}]}},
+                      "write_saturation_sessions": [{
+                          "status": "PASS", "async_prepare": 1, "regime": "ssd_emulated",
+                          "qd": 8, "device_model": {"cap_mib_s": 80},
+                          "arms": {"off": raw, "swapz": swapz}}]}}
+        sustained = goals.report_points(report)
+        self.assertEqual(len(sustained), 1)
+        self.assertAlmostEqual(sustained[0]["write_mbps_gain_pct"], 25)
+        self.assertAlmostEqual(sustained[0]["lower_write_bytes_gain_pct"], 25)
+        self.assertAlmostEqual(sustained[0]["lower_write_requests_gain_pct"], 75)
+        broken = copy.deepcopy(report)
+        broken["benchmarks"]["write_saturation"]["regimes"]["ssd_emulated"][0][
+            "swapz_logical_to_lower_ratio"] = 0
+        self.assertIsNone(goals.report_points(broken)[0]["lower_write_bytes_gain_pct"])
+
+        # The reporter stores it as descriptive evidence and renders a valid table.
+        scored = runner.goal_scorecard(report)
+        self.assertEqual(scored["overall"], "DESCRIPTIVE")
+        self.assertEqual(
+            {row["label"]: row["status"] for row in scored["rows"]}["Fast QD8"], "MET")
+        self.assertEqual(runner.goal_scorecard({"overall": "FAIL"})["overall"], "UNAVAILABLE")
+        self.assertNotIn("goal_scorecard", inspect.getsource(runner.required_benchmark_gates_pass))
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            runner.print_table(
+                "Per-device-class product goals versus raw",
+                ("class", "bound", "goal", "W vs raw", "bytes saved", "req saved", "status"),
+                [("Fast QD8", "device-bound", ">0%", "+25.0%", "+25.0%", "+75.0%", "MET"),
+                 ("Fast QD1", "latency-bound", ">=-5%", "-25.0%", "+0.0%", "+0.0%",
+                  "MISSED")])
+        text = buffer.getvalue()
+        flat = " ".join(text.split())
+        self.assertIn("1 of 2 classes met their goal", flat)
+        self.assertIn("missed: Fast QD1", flat)
+        self.assertIn("Verdict: DESCRIPTIVE SCORECARD", flat)
+        self.assertTrue(all(len(line) < 96 for line in text.splitlines()))
+        self.assertTrue(text.rstrip().endswith("---"))
+
+        # Plots name each class goal and draw the floor only on guard panels.
+        self.assertIn("Target: beat raw (>0%)", history.goal_title(
+            "Fast QD8", goals.goal_for("ssd_emulated", goals.PERSISTENT, 8)))
+        self.assertIn("Guard: within 5% of raw (latency-bound)", history.goal_title(
+            "Fast QD1", goals.goal_for("ssd_emulated", goals.PERSISTENT, 1)))
+        self.assertEqual(history.goal_title("Other", None), "Other")
+
+        class Axes:
+            def __init__(self):
+                self.lines = []
+
+            def axhline(self, value, **kwargs):
+                self.lines.append(value)
+
+        axes = Axes()
+        history.draw_goal(axes, goals.goal_for("ssd_emulated", goals.PERSISTENT, 8))
+        history.draw_goal(axes, None)
+        self.assertEqual(axes.lines, [])
+        history.draw_goal(axes, goals.goal_for("nvme_gen5", goals.MIXED))
+        self.assertEqual(axes.lines, [-5.0])
 
     def test_loaded_progress_stream_hides_bulk_evidence_but_keeps_phase_and_failure(self):
         self.assertIsNone(runner.loaded_progress_line(

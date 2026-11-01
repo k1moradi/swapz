@@ -302,6 +302,71 @@ static int test_circular_allocator_fairness_applies_to_gc_destination(void)
 	return 0;
 }
 
+/*
+ * ID175: an idle-lane submitter may stage inside ->map only when placement
+ * provably reuses the open segment. Whenever the read-only proof holds, the
+ * real stage path places at the cursor without picking/recycling a segment
+ * (whose hook may issue a synchronous DISCARD); every other state refuses.
+ */
+static int test_open_segment_fit_proves_io_free_placement(void)
+{
+	struct swapz_authority before;
+	swapz_u32 logical = 1, start;
+	struct swapz_tx tx;
+	int calls;
+
+	CHECK(setup() == 0);
+	CHECK(!swapz_open_segment_fits(&a, 1));	/* no open segment yet */
+	CHECK(!swapz_open_segment_fits(NULL, 1));
+	CHECK(write_page(0) == 0);
+	CHECK(a.open_segment == 0 && recycle_hook_calls == 0);
+	CHECK(swapz_open_segment_fits(&a, 1));
+	CHECK(swapz_open_segment_fits(&a, SWAPZ_MAX_BLOCKS));
+	CHECK(!swapz_open_segment_fits(&a, 0));
+	CHECK(!swapz_open_segment_fits(&a, 3));	/* not an SWZ class */
+	CHECK(!swapz_open_segment_fits(&a, SWAPZ_MAX_BLOCKS + 1U));
+	/* A staged transaction owns the cursor: no second owner may plan. */
+	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+	CHECK(!swapz_open_segment_fits(&a, 1));
+	CHECK(swapz_abort(&a, &tx) == 0);
+	CHECK(swapz_open_segment_fits(&a, 1));
+	while (a.next_block < SWAPZ_SEGMENT_BLOCKS - 3U)
+		CHECK(write_page(0) == 0);
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS - 3U && a.open_segment == 0);
+	/* Three blocks remain: classes 1/2 fit, the 4-block class does not. */
+	memcpy(&before, &a, sizeof(before));
+	CHECK(swapz_open_segment_fits(&a, 1));
+	CHECK(swapz_open_segment_fits(&a, 2));
+	CHECK(!swapz_open_segment_fits(&a, SWAPZ_MAX_BLOCKS));
+	CHECK(!memcmp(&before, &a, sizeof(before)));	/* read-only proof */
+	calls = recycle_hook_calls;
+	start = a.next_block;
+	CHECK(swapz_stage(&a, &logical, 1, 2, &tx) == 0);
+	CHECK(tx.start_block == start && recycle_hook_calls == calls);
+	CHECK(a.open_segment == 0);
+	CHECK(swapz_abort(&a, &tx) == 0);
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(swapz_open_segment_fits(&a, 1) && !swapz_open_segment_fits(&a, 2));
+	CHECK(write_page(0) == 0);
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	/* The open segment is exhausted: the next stage must pick a segment. */
+	CHECK(!swapz_open_segment_fits(&a, 1));
+	CHECK(swapz_discard_page(&a, 0) == 0);
+	CHECK(!swapz_open_segment_fits(&a, 1));
+	CHECK(write_page(1) == 0);
+	CHECK(recycle_hook_calls == calls + 1);	/* the refused case recycled */
+	CHECK(swapz_open_segment_fits(&a, 1));
+	/* GC allocation and a pending lower-write group are never I/O-free. */
+	a.gc_allocation = 1;
+	CHECK(!swapz_open_segment_fits(&a, 1));
+	a.gc_allocation = 0;
+	a.batch_pending = 1;
+	CHECK(!swapz_open_segment_fits(&a, 1));
+	a.batch_pending = 0;
+	CHECK(swapz_open_segment_fits(&a, 1));
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -314,6 +379,7 @@ int main(void)
 	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
 	CHECK(test_circular_allocator_fairness_probes_sequentially() == 0); passed++;
 	CHECK(test_circular_allocator_fairness_applies_to_gc_destination() == 0); passed++;
+	CHECK(test_open_segment_fit_proves_io_free_placement() == 0); passed++;
 	printf("SWAPZ_DEAD_SEGMENT_REUSE_TESTS_PASS=%d\n", passed);
 	return 0;
 }

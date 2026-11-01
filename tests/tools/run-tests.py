@@ -13,6 +13,10 @@ import sys
 import textwrap
 import time
 
+# The per-device-class goal module is shared with the private history plotter.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import product_goals  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
 GIT_RESULT = "test_results.json"
 REPORT = ROOT / GIT_RESULT
@@ -359,7 +363,8 @@ KERNEL_WRITE_FIELDS = (
     "submitter_prepare_pages", "submitter_prepare_wall_ns",
     "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
     "submitter_copy_wall_ns", "submitter_copy_bytes",
-    "submitter_crc_wall_ns"
+    "submitter_crc_wall_ns", "submitter_dispatches",
+    "submitter_dispatch_declines"
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS + (
     "work_conserving_hand_closes", "work_conserving_dry_closes",
     "work_conserving_raw_not_ready", "work_conserving_compressed_ready",
@@ -802,7 +807,8 @@ def timed_window_error(record):
         "submitter_prepare_pages", "submitter_prepare_wall_ns",
         "submitter_prepare_cpu_ns", "submitter_lz4_wall_ns",
         "submitter_copy_wall_ns", "submitter_copy_bytes",
-        "submitter_crc_wall_ns",
+        "submitter_crc_wall_ns", "submitter_dispatches",
+        "submitter_dispatch_declines",
     )
     if (type(record.get("submitter_prepare")) is not int or
             record["submitter_prepare"] not in (0, 1)):
@@ -827,6 +833,9 @@ def timed_window_error(record):
         return "disabled submitter preparation recorded activity"
     if record["submitter_prepare_pages"] > record["submitter_prepare_claims"]:
         return "inconsistent timed submitter preparation claims"
+    if (record["submitter_dispatches"] + record["submitter_dispatch_declines"] >
+            record["submitter_prepare_claims"]):
+        return "inconsistent timed submitter dispatch claims"
     if (record["submitter_copy_bytes"] !=
             record["submitter_prepare_pages"] * 4096):
         return "inconsistent timed submitter preparation copy bytes"
@@ -4689,6 +4698,13 @@ def benchmark_verdicts(sessions):
 
 
 TABLE_HEADER_LEGEND = {
+    "class": "owner-adopted device class and workload",
+    "bound": "what limits raw service: the device, per-I/O latency or the host",
+    "goal": "useful-WRITE goal versus raw: >0% target or the parity guard floor",
+    "W vs raw": "async swapz useful WRITE percent change versus raw/off",
+    "bytes saved": "lower WRITE bytes saved versus raw, percent",
+    "req saved": "lower WRITE requests saved versus raw, percent",
+    "status": "MET, MISSED or UNAVAILABLE for the class service plus lower-WRITE goal",
     "A/raw": "async swapz useful WRITE percent change versus raw/off",
     "scope": "evidence area",
     "value": "scope limit or result detail",
@@ -4887,6 +4903,9 @@ TABLE_HEADER_LEGEND = {
 }
 
 TABLE_HEADER_GOAL = {
+    "W vs raw": "higher is better; must clear the goal column",
+    "bytes saved": "higher is better; targets need >0, guards need >=0",
+    "req saved": "higher is better; targets need >0, guards need >=0",
     "A/raw": "positive is better; requires correct lower-I/O and latency tradeoffs",
     "ns/page": "lower for equal work",
     "payload B": "lower for equal input",
@@ -5014,6 +5033,14 @@ def _ci_metric_preference(metric):
 def _table_interpretation(headers, rows):
     """Summarize table data without turning descriptive rows into a verdict."""
     header_index = {str(header): index for index, header in enumerate(headers)}
+    if "bound" in header_index and "status" in header_index:
+        states = [str(row[header_index["status"]]) for row in rows]
+        missed = [str(row[header_index["class"]]) for row in rows
+                  if row[header_index["status"]] == "MISSED"]
+        return (f"{states.count('MET')} of {len(rows)} classes met their goal, "
+                f"{states.count('MISSED')} missed and {states.count('UNAVAILABLE')} "
+                "were unavailable" + (f"; missed: {', '.join(missed)}" if missed else "") +
+                ". Each row is one report's matched-arm means, not a paired interval.")
     if "set hit %" in header_index:
         summary = ", ".join(
             f"{row[0]} {row[header_index['set hit %']]}% hits / "
@@ -5471,6 +5498,14 @@ def _table_project_reasoning(title, headers, rows, interpretation):
                 "behavior held; segment-open spread is logical allocator fairness -> "
                 "Verdict: CORRECTNESS ALIGNED, while physical-media endurance remains unproven.")
 
+    if lower_title.startswith("per-device-class product goals"):
+        return ("Evidence: each class row compares useful WRITE and lower-WRITE work "
+                "against its own raw control -> Goal implication: device-bound classes "
+                "must beat raw and save lower bytes/requests; latency- and host-bound "
+                "guards must stay within the parity floor without adding lower work -> "
+                "Verdict: DESCRIPTIVE SCORECARD; it never changes qualification, and "
+                "cross-report movement is not a causal gain.")
+
     if lower_title.startswith("qualification scope and evidence limitations"):
         return ("Evidence: qualification is RAM-backed and the listed scope limits still "
                 "apply -> Goal implication: lower-WRITE bytes/requests are a host-I/O "
@@ -5821,6 +5856,26 @@ def print_bench(result, *, detailed=False):
         _print_table_note(
             "Sustained QD", "NOT QUALIFIED: " +
             str(saturation.get("reason", saturation.get("overall", "NOT_RUN"))))
+
+    goals = benchmarks.get("goal_scorecard", {})
+    if goals.get("rows"):
+        print("\n  Owner-adopted class goals: device-bound must beat raw; latency/host-bound")
+        print(f"  rows are guards within {abs(product_goals.GUARD_FLOOR_PCT):g}% of raw. "
+              "Every class must not add lower WRITE work.")
+
+        def scorecard_percent(value):
+            return "n/a" if value is None else f"{value:+.1f}%"
+
+        print_table(
+            "Per-device-class product goals versus raw",
+            ("class", "bound", "goal", "W vs raw", "bytes saved", "req saved", "status"),
+            [(row["label"], row["bound"],
+              ">0%" if row["bound"] == product_goals.DEVICE_BOUND
+              else f">={row['service_floor_pct']:g}%",
+              scorecard_percent(row["write_gain_pct"]),
+              scorecard_percent(row["lower_write_bytes_saved_pct"]),
+              scorecard_percent(row["lower_write_requests_saved_pct"]),
+              row["status"]) for row in goals["rows"]])
 
     print("  Resource, lifecycle, GC, lower READ and full telemetry: test_results.json.")
     if result.get("overall") not in (None, "PASS"):
@@ -7269,6 +7324,11 @@ def report_host_identity():
         return {"schema": "swapz-host-v1", "status": "UNAVAILABLE"}
 
 
+# Each refresh re-reads every committed report (~1.3 MB JSON per run, growing by
+# one per qualification on each computer); slow two-core hosts need headroom.
+HISTORY_REFRESH_TIMEOUT_S = 600
+
+
 def refresh_history(host_identity):
     """Render only this run's computer after publication, independently of verdict."""
     digest = host_identity.get("id_sha256", "")
@@ -7285,7 +7345,8 @@ def refresh_history(host_identity):
         proc = subprocess.run(
             [sys.executable, "-B", str(ROOT / "tests/tools/plot-history.py"),
              "--host-id", digest, "--host-architecture", arch],
-            cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            cwd=ROOT, env=env, capture_output=True, text=True,
+            timeout=HISTORY_REFRESH_TIMEOUT_S)
         log.write_text(proc.stdout + proc.stderr)
         if proc.returncode:
             return f"NOT UPDATED: history helper failed; see {log.relative_to(ROOT)}"
@@ -7313,7 +7374,7 @@ def refresh_history(host_identity):
             try:
                 reference_run = subprocess.run(
                     reference_command, cwd=ROOT, env=env, capture_output=True,
-                    text=True, timeout=120)
+                    text=True, timeout=HISTORY_REFRESH_TIMEOUT_S)
                 reference_log.write_text(reference_run.stdout + reference_run.stderr)
                 if reference_run.returncode:
                     result += (f"; separate historical reference NOT UPDATED "
@@ -7330,6 +7391,18 @@ def refresh_history(host_identity):
         return result
     except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
         return f"NOT UPDATED: {type(error).__name__}; see {log.relative_to(ROOT)}"
+
+
+def goal_scorecard(result):
+    """Descriptive ID174 class goals; never an input to any qualification gate."""
+    try:
+        rows = product_goals.scorecard(product_goals.report_points(result))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as error:
+        return {"overall": "UNAVAILABLE", "reason": type(error).__name__, "rows": []}
+    if not any(row["status"] != "UNAVAILABLE" for row in rows):
+        return {"overall": "UNAVAILABLE", "rows": rows}
+    return {"overall": "DESCRIPTIVE",
+            "guard_floor_pct": product_goals.GUARD_FLOOR_PCT, "rows": rows}
 
 
 def qualification_overall(exit_code, stages):
@@ -7440,6 +7513,7 @@ def main():
         if not required_benchmark_gates_pass(result["benchmarks"]):
             result["overall"] = "FAIL"
             exit_code = 1
+    result["benchmarks"]["goal_scorecard"] = goal_scorecard(result)
     write_report(result)
     print_bench(result)
     print(f"\n  Overall qualification: {result['overall']}")

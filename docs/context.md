@@ -221,7 +221,31 @@ authority/generations, physical segment and GC accounting, immutable lower-run
 buffers/transaction snapshots, and read/metadata caches. That metadata is
 swapz authority, not a directory of RAM objects.
 
+### 4.1 What the submitting task may do inside `->map`
+
+`swapz_map()` runs in the task that submitted the upper BIO: a writer, kswapd
+or a direct reclaimer. Linux's `submit_bio_noacct()` protects stacked drivers
+with `current->bio_list`: any BIO submitted while a `->submit_bio`/`->map` call
+is active is only queued and is dispatched after that call returns. A target
+therefore must never wait inside `->map` for lower I/O it submitted there, or
+for anything that depends on it; such a wait cannot complete. A mempool-backed
+asynchronous `dm_io` submission is safe because it only queues.
+
+In Linux v7.0 `mm/page_io.c:__swap_writepage()` uses
+`swap_writepage_bdev_async()` (`REQ_OP_WRITE | REQ_SWAP`) unless the device
+advertises synchronous I/O (`SWP_SYNCHRONOUS_IO`, as zram-style devices do); a
+Device Mapper target does not, so real reclaim produces asynchronous,
+potentially deep swap writes rather than closed-loop QD1 traffic. QD1 and QD4
+closed-loop rows are latency guards for that reason (ROADMAP ID174).
+
+ID175's idle-lane dispatch follows from both facts: an isolated idle WRITE may
+be staged and detached by its submitting task only after proving that nothing
+on that path can wait (no in-flight run to finalize, no GC, no segment recycle
+DISCARD, no FUA/flush, no zero-page DISCARD). Lower completion still returns to
+the ordered worker for publication and acknowledgement.
+
 Source anchors:
+- [Linux v7.0 swap write submission](https://github.com/torvalds/linux/blob/v7.0/mm/page_io.c)
 - [swapz DM admission and page validation](../src/kernel/dm-target.c)
 - [SWZ compressed extent and record layout](../src/kernel/codec.h)
 - [volatile mapping authority](../src/kernel/authority.h)

@@ -8,6 +8,16 @@
 
 swapz should reduce host-visible lower-storage traffic caused by swapping compressible 4KiB pages. Success means fewer independently measured lower READ and WRITE bytes **and** requests for the same verified logical workload, including flush and GC costs, while preserving correctness and keeping read latency, CPU and memory acceptable.
 
+**Per-device-class goals (owner-adopted, ROADMAP ID174).** Compression can
+only shorten service that waits on device bandwidth or queueing. Device-bound
+classes (the serial and fast models' mixed and deep-QD rows, SD card and SATA)
+must beat raw useful WRITE service. Latency-bound classes (closed-loop QD1 and
+fast QD4) and host-bound classes (NVMe Gen4/Gen5 envelopes, where raw is
+limited by host CPU) are guards that must stay within 5% of raw. Every class
+must also reduce lower-device WRITE bytes and requests, and guards must never
+add them. Real reclaim writes to a Device Mapper target asynchronously, so the
+synchronous QD1/QD4 rows are guards rather than targets.
+
 Compression ratio, encoded-size diagrams, mock counters, green CI or a single synthetic throughput win do not establish success. The decisive evidence is matched useful work plus independent lower-device accounting and byte-exact readback.
 
 ## Product
