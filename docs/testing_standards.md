@@ -586,7 +586,7 @@ negative. The descriptive `benchmarks.lane_gap_attribution` rows and the
 single console table **SSD lower-lane gap attribution** cover SATA, NVMe4,
 NVMe5, and fast mixed. They report paired/foreign/unpaired coverage, foreign
 wall time, all six phase shares, the full admitted and ordered-owned successor
-histograms (0/1/2-3/4-7/8-15/16+), owner READ milliseconds/count, deferred ACK
+histograms (0/1/2-3/4-7/8-15/16+), owner READ milliseconds/count at three-decimal-ms precision, deferred ACK
 p99 as an inclusive histogram-bin bound, and host busy. The same table is
 printed and retained by `make fast_test`; its default ID178 mixed set includes
 SATA, NVMe4, NVMe5, and fast mixed. None of these fields decides a policy,

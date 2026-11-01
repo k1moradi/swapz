@@ -634,7 +634,7 @@ def print_lane_gap_table(rows):
               for key in phases),
             distribution(row["successor_admitted_distribution"]),
             distribution(row["successor_owned_distribution"]),
-            f"{row['owner_read_ms']:.2f}/{row['owner_reads']}",
+            f"{row['owner_read_ms']:.3f}/{row['owner_reads']}",
             row["deferred_ack_p99_bin_bound"],
             fmt(row["host_busy_pct"]) + "%",
         ))

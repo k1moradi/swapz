@@ -443,7 +443,7 @@ def print_lane_gap_attribution(rows):
             *[number(shares[key], "%") for key in LANE_GAP_PARTS],
             distribution(row["successor_admitted_distribution"]),
             distribution(row["successor_owned_distribution"]),
-            f"{row['owner_read_ms']:.2f}/{row['owner_reads']}",
+            f"{row['owner_read_ms']:.3f}/{row['owner_reads']}",
             row["deferred_ack_p99_bin_bound"],
             number(row["host_busy_pct"], "%"),
         ))

@@ -123,7 +123,7 @@ class PairReplayContract(unittest.TestCase):
             reporter.print_lane_gap_attribution(rows)
         self.assertIn("SSD lower-lane gap attribution", stream.getvalue())
         self.assertIn("1/1/1/0/0/0", stream.getvalue())
-        self.assertIn("3.00/2", stream.getvalue())
+        self.assertIn("0.003/2", stream.getvalue())
         self.assertIn("<=64us", stream.getvalue())
 
         fast_spec = importlib.util.spec_from_file_location(
