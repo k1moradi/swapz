@@ -558,8 +558,11 @@ shared-clock path without per-BIO clock reads, synchronous-window cohort
 coverage, direct fallback and invalid timestamps; completion failure injection
 remains covered by the ownership probe. A missing synchronous publication
 observer mark must use the same cohort timestamp as a conservative zero-dwell
-fallback, never a fresh per-BIO clock. The cohort timestamp intentionally
-replaces per-BIO delivery clocks, so absolute
+fallback, never a fresh per-BIO clock. Any actual-body completion-handoff
+harness that extracts the production delivery loops must mirror every ACK-batch
+field those bodies consume (currently the cohort `delivered_ns` mark), so a
+structural telemetry change cannot fail only because the mock layout is stale.
+The cohort timestamp intentionally replaces per-BIO delivery clocks, so absolute
 ID178 ACK-dwell values may shift by at most the delivery-loop span and must not
 be pooled as byte-for-byte-equivalent telemetry across this boundary. The fast
 and official replay status schema remains unchanged except for new ID181

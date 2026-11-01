@@ -1984,6 +1984,7 @@ typedef uint64_t atomic64_t;
 #define DM_ENDIO_DONE 0
 #define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
 struct swapz_dm;
+/* Keep fields consumed by extracted production completion bodies in sync. */
 struct swapz_ack_dwell_batch { u64 delivered_ns; unsigned count[2]; };
 struct swapz_bio_ref {
     struct swapz_dm *preparation_ctx;
