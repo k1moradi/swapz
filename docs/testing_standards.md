@@ -575,7 +575,10 @@ actual early-close attempts, confirmed asynchronous early submissions,
 publication-handoff counts, paired policy-vs-control lower bytes/requests,
 pages per lower WRITE and READ p99. Compare candidate lower work with BOTH
 the per-pair raw baseline and same-block default swapz, never raw alone.
-A result with a >=10% point estimate but lower 95% bound below 10% is
+An all-excluded scenario must remain visible with zero complete usable blocks;
+it must not disappear from the result. Disabled-policy nonzero activity must
+fail with an explicit disabled-policy error before secondary conservation
+checks. A result with a >=10% point estimate but lower 95% bound below 10% is
 `PROMISING_10PCT_POINT_ESTIMATE`, not a verified >=10% improvement; a
 lower bound >=10% is only `SCREEN_10PCT_CI`, still not qualified.
 Test the actual pure Python factorial analyzer on synthetic known 2x2 blocks,

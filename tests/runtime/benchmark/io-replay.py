@@ -1519,13 +1519,13 @@ def kernel_write_delta(before, after):
     for field in ("id181_successor_first", "id181_publication_handoff"):
         if before[field] != after[field] or after[field] not in (0, 1):
             raise ValueError("invalid or changed swapz " + field + " policy")
-    if (counters["id181_successor_first_submissions"] >
-            counters["id181_successor_first_closes"]):
-        raise ValueError("ID181 successful submissions exceed close attempts")
     if (not after["id181_successor_first"] and
             (counters["id181_successor_first_closes"] or
              counters["id181_successor_first_submissions"])):
         raise ValueError("disabled ID181 successor-first recorded activity")
+    if (counters["id181_successor_first_submissions"] >
+            counters["id181_successor_first_closes"]):
+        raise ValueError("ID181 successful submissions exceed close attempts")
     if (not after["id181_publication_handoff"] and
             counters["id181_publication_handoffs"]):
         raise ValueError("disabled ID181 publication handoff recorded activity")

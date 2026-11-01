@@ -715,11 +715,17 @@ def id181_factorial_analysis(rows):
     policies = ("control", "A", "B", "AB")
     by_scenario = {}
     for row in rows:
+        scenario = base_scenario(row.get("scenario", ""))
+        if not scenario:
+            continue
+        # Retain the workload label even if all its arms are excluded, so
+        # the result explicitly reports zero complete screened blocks.
+        rounds = by_scenario.setdefault(scenario, {})
         if ("error" in row or
                 not row["performance_validity"]["performance_usable"]):
             continue
-        by_scenario.setdefault(base_scenario(row["scenario"]), {}).setdefault(
-            row.get("id181_round"), {})[row.get("id181_policy")] = row
+        rounds.setdefault(row.get("id181_round"), {})[
+            row.get("id181_policy")] = row
 
     analyses = []
     for scenario, rounds in sorted(by_scenario.items()):
