@@ -1,6 +1,6 @@
 # Handoff migration plan
 
-Status: **in progress — rows 1-2 and 5 complete**.
+Status: **in progress — rows 1-2 and 4-5 complete**.
 
 This plan applies the `docs/coding_standards.md` **Change discipline** rule to
 the current `docs/handoff/` directory. It is intentionally outside
