@@ -1834,6 +1834,43 @@ int main(void) {
                                  capture_output=True, text=True)
             self.assertEqual(ran.returncode, 0, ran.stderr)
 
+    def test_striped_plans_are_shared_by_same_workload_models(self):
+        """Build the real plan split once for two models and clean failures."""
+        import json
+        import runpy
+        import shutil
+        import tempfile
+
+        fast = runpy.run_path(str(ROOT / "tests/tools/fast-test.py"))
+        plan = fast["prepare_plan"]("medium", need_stripes=True)
+        try:
+            fast["prepare_striped_workload_plans"](
+                plan, (1, 2, 4), (("nvme5", "mixed"), ("sata", "mixed")))
+            parent_manifest = json.loads(
+                (plan / "plan-striped-base" / "manifest.json").read_text())
+            for stripe_count in (1, 2, 4):
+                stripe_root = plan / f"striped-{stripe_count}"
+                self.assertTrue(stripe_root.is_dir())
+                for stripe_index in range(stripe_count):
+                    child = stripe_root / f"stripe-{stripe_index}"
+                    manifest = json.loads(
+                        (child / "manifest.json").read_text())
+                    self.assertEqual(manifest["stripe_count"], stripe_count)
+                    self.assertEqual(manifest["stripe_index"], stripe_index)
+                    self.assertEqual(manifest["parent_trace_sha256"],
+                                     parent_manifest["trace_sha256"])
+        finally:
+            shutil.rmtree(plan, ignore_errors=True)
+
+        with tempfile.TemporaryDirectory(prefix="swapz-striped-plan-") as temp:
+            owned_plan = Path(temp) / "plan"
+            owned_plan.mkdir()
+            with self.assertRaisesRegex(ValueError,
+                                        "unsupported striped workload"):
+                fast["prepare_striped_workload_plans"](
+                    owned_plan, (1,), (("nvme5", "invalid"),))
+            self.assertFalse(owned_plan.exists())
+
     def test_id181_policy_covers_all_finalize_sites_and_preserves_id175(self):
         helper = body("swapz_id181_submit_staged_successor")
         worker = body("swapz_worker_pass")

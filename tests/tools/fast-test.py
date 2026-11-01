@@ -349,6 +349,19 @@ def prepare_striped_plans(plan, stripe_counts, workload="mixed"):
                 raise ValueError("striped plan failed byte-exact reconstruction")
 
 
+def prepare_striped_workload_plans(plan, stripe_counts, striped_specs):
+    """Build one shared trace split per selected workload, not per model."""
+    try:
+        workloads = dict.fromkeys(workload for _, workload in striped_specs)
+        for workload in workloads:
+            prepare_striped_plans(plan, stripe_counts, workload)
+    except BaseException:
+        # The caller owns this fresh temporary plan; do not leave a partial
+        # directory that can confuse later development runs after setup fails.
+        shutil.rmtree(plan, ignore_errors=True)
+        raise
+
+
 def parse_stripe_counts(value):
     try:
         counts = tuple(int(item) for item in re.split(r"[,\s]+", value) if item)
@@ -1102,8 +1115,7 @@ def main():
         tuple(qd for qd in STRIPED_WRITE_QDS
               if ("fast", f"write-q{qd}") in striped_specs),
         mixed_ops=args.mixed_ops)
-    for _, workload in striped_specs:
-        prepare_striped_plans(plan, stripe_counts, workload)
+    prepare_striped_workload_plans(plan, stripe_counts, striped_specs)
     fixture = json.loads((plan / "fixture.json").read_text())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     rows, raw_reports = [], []
