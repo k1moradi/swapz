@@ -1413,6 +1413,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "work_conserving_raw_ready", "prep_late_results_discarded",
     "idle_bound_closes", "deferred_upper_completion_bios",
     "deferred_upper_completion_wall_ns",
+    "id181_successor_first_closes", "id181_publication_handoffs",
     "submitter_prepare_claims", "submitter_prepare_lane_misses",
     "submitter_prepare_page_misses", "submitter_owner_deferrals",
     "submitter_prepare_pages", "submitter_prepare_wall_ns",
@@ -1432,7 +1433,8 @@ KERNEL_WRITE_GAUGE_FIELDS = (
     "submitter_prepare", "submitter_prepare_lanes",
     "submitter_prepare_active", "submitter_prepare_active_max",
     "lower_write_service_ewma_ns", "lower_write_block_service_ewma_ns",
-    "ordered_lz4_page_ewma_ns")
+    "ordered_lz4_page_ewma_ns",
+    "id181_successor_first", "id181_publication_handoff")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
@@ -1513,6 +1515,15 @@ def kernel_write_delta(before, after):
     if (before["work_conserving_hand_records"] != after["work_conserving_hand_records"] or
             after["work_conserving_hand_records"] not in (8, 16, 64)):
         raise ValueError("invalid or changed swapz work-conserving hand threshold")
+    for field in ("id181_successor_first", "id181_publication_handoff"):
+        if before[field] != after[field] or after[field] not in (0, 1):
+            raise ValueError("invalid or changed swapz " + field + " policy")
+    if (not after["id181_successor_first"] and
+            counters["id181_successor_first_closes"]):
+        raise ValueError("disabled ID181 successor-first recorded activity")
+    if (not after["id181_publication_handoff"] and
+            counters["id181_publication_handoffs"]):
+        raise ValueError("disabled ID181 publication handoff recorded activity")
     if (before["submitter_prepare"] != after["submitter_prepare"] or
             after["submitter_prepare"] not in (0, 1)):
         raise ValueError("invalid or changed swapz submitter preparation policy")

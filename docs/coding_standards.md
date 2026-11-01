@@ -226,12 +226,19 @@ new queue, or approximate batch timestamp is permitted.
 
 Two read-only selectors default off: `id181_successor_first` and
 `id181_publication_handoff`. Only positively identified null_blk retained-async
-targets may enable them. The ordered owner may submit an already-staged
->=hand-sized successor immediately after the prior run is published, before
-later FIFO admissions and independent READs. It must use the unchanged flush
-logic (all barriers, CRC/generation, GC/failure ownership). Publication-time
-ACK handoff uses the one existing bounded 4..64 completion slot and queue-lock
-drain gate; occupied handoff falls back to ordered delivery. No early success,
+targets may enable them. The ordered owner may submit any nonempty
+already-staged work-conserving successor immediately after the prior run is
+published, before later FIFO admissions and independent READs. This
+development arm intentionally does not apply the production eight-record hand:
+the experiment measures whether earlier closure helps, and an eight-record
+gate is a later fallback only if measured aggregation loss requires it. Both
+worker finalize sites must invoke the same helper so lower-completion timing
+cannot change policy. It must use the unchanged flush logic (all barriers,
+CRC/generation, GC/failure ownership). Publication-time ACK handoff uses the
+one existing bounded 4..64 completion slot and queue-lock drain gate; occupied
+handoff falls back to ordered delivery. A run deferred solely because ID175
+submitter dispatch occurred is excluded: its writers must still wake only
+after the ordered owner is released. No early success,
 second lower WRITE, new queue/lock, changed SWZ or physical-device admission.
 Controls are development-only; the qualified production defaults remain off.
 

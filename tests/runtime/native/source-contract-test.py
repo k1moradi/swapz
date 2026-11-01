@@ -1716,6 +1716,112 @@ int main(void) {
                 ran = subprocess.run([str(path / "probe")], capture_output=True, text=True)
                 self.assertEqual(ran.returncode, 0, f"ABI {index}: {ran.stderr}")
 
+    def test_ack_batch_executes_actual_accounting_helpers(self):
+        """Batched atomics must equal exact per-BIO dwell accounting."""
+        import subprocess
+        import tempfile
+
+        source = r"""
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include "lane-gap.h"
+typedef uint64_t u64;
+typedef int64_t s64;
+typedef struct { s64 counter; } atomic64_t;
+struct swapz_ack_dwell_batch {
+    u64 count[2], duration_ns[2], bins[2][SWAPZ_LANE_DWELL_BINS];
+};
+struct swapz_bio_ref {
+    u64 published_ns;
+    bool published_deferred;
+    struct swapz_ack_dwell_batch *ack_batch;
+};
+struct swapz_dm {
+    atomic64_t ack_dwell_deferred_count, ack_dwell_deferred_ns;
+    atomic64_t ack_dwell_immediate_count, ack_dwell_immediate_ns;
+    atomic64_t ack_dwell_deferred_bins[SWAPZ_LANE_DWELL_BINS];
+    atomic64_t ack_dwell_immediate_bins[SWAPZ_LANE_DWELL_BINS];
+};
+static u64 clock_ns;
+static u64 ktime_get_ns(void) { return clock_ns; }
+static void atomic64_inc(atomic64_t *p) { ++p->counter; }
+static void atomic64_add(u64 value, atomic64_t *p) { p->counter += (s64)value; }
+"""
+        for name, signature in (
+                ("swapz_lane_gap_ack",
+                 "static void swapz_lane_gap_ack(struct swapz_dm *ctx, const struct swapz_bio_ref *entry)"),
+                ("swapz_lane_gap_ack_flush",
+                 "static void swapz_lane_gap_ack_flush(struct swapz_dm *ctx, const struct swapz_ack_dwell_batch *batch)")):
+            source += signature + " {\n" + body(name) + "\n}\n"
+        source += r"""
+int main(void) {
+    struct swapz_dm ctx = {0};
+    struct swapz_ack_dwell_batch batch = {0};
+    struct swapz_bio_ref entry = {.published_ns=1000, .ack_batch=&batch};
+
+    clock_ns=2000; swapz_lane_gap_ack(&ctx,&entry);
+    assert(batch.count[0]==1 && batch.duration_ns[0]==1000 && batch.bins[0][0]==1);
+    assert(ctx.ack_dwell_immediate_count.counter==0);
+    entry.published_deferred=true;
+    clock_ns=5001; swapz_lane_gap_ack(&ctx,&entry);
+    entry.published_ns=4000; clock_ns=5000; swapz_lane_gap_ack(&ctx,&entry);
+    assert(batch.count[1]==2 && batch.duration_ns[1]==5001);
+    assert(batch.bins[1][0]==1 && batch.bins[1][2]==1);
+    swapz_lane_gap_ack_flush(&ctx,&batch);
+    assert(ctx.ack_dwell_immediate_count.counter==1);
+    assert(ctx.ack_dwell_immediate_ns.counter==1000);
+    assert(ctx.ack_dwell_immediate_bins[0].counter==1);
+    assert(ctx.ack_dwell_deferred_count.counter==2);
+    assert(ctx.ack_dwell_deferred_ns.counter==5001);
+    assert(ctx.ack_dwell_deferred_bins[0].counter==1);
+    assert(ctx.ack_dwell_deferred_bins[2].counter==1);
+
+    memset(&entry,0,sizeof(entry));
+    entry.published_ns=1000;
+    clock_ns=65001; swapz_lane_gap_ack(&ctx,&entry);
+    assert(ctx.ack_dwell_immediate_count.counter==2);
+    assert(ctx.ack_dwell_immediate_ns.counter==65001);
+    assert(ctx.ack_dwell_immediate_bins[4].counter==1);
+    entry.published_ns=70000; clock_ns=69999;
+    swapz_lane_gap_ack(&ctx,&entry);
+    assert(ctx.ack_dwell_immediate_count.counter==2);
+    return 0;
+}
+"""
+        with tempfile.TemporaryDirectory(prefix="swapz-ack-batch-") as temp:
+            path = Path(temp)
+            (path / "probe.c").write_text(source)
+            built = subprocess.run(
+                ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+                 "-I", str(ROOT / "src/kernel"), str(path / "probe.c"),
+                 "-o", str(path / "probe")], capture_output=True, text=True)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            ran = subprocess.run([str(path / "probe")],
+                                 capture_output=True, text=True)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+
+    def test_id181_policy_has_two_finalize_hooks_and_preserves_id175(self):
+        helper = body("swapz_id181_submit_staged_successor")
+        worker = body("swapz_worker_pass")
+        finalize = body("swapz_finalize_inflight_write")
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        fast = (ROOT / "tests/tools/fast-test.py").read_text()
+
+        self.assertIn("ctx->batch_count", helper)
+        self.assertIn("ctx->work_conserving_window", helper)
+        self.assertNotIn("work_conserving_hand_records", helper)
+        self.assertEqual(
+            worker.count("swapz_id181_submit_staged_successor(ctx)"), 2)
+        self.assertIn("defer_for_successor =", finalize)
+        self.assertIn(
+            "ctx->id181_publication_handoff && defer_for_successor", finalize)
+        self.assertIn('"id181_successor_first_closes"', replay)
+        self.assertIn('"id181_publication_handoffs"', replay)
+        self.assertIn("def id181_factorial_analysis(rows):", fast)
+        self.assertIn("base_scenario(row[\"scenario\"])", fast)
+
     def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
         """Exercise actual target C under controlled queue/close/reuse interleavings."""
         import subprocess

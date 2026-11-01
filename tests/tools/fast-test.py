@@ -13,6 +13,7 @@ unpaired observations; promotion still requires the full owner matrix.
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import runpy
@@ -109,11 +110,16 @@ def performance_validity(before, after, arms):
             "reasons": reasons, "quiet_before": before, "quiet_after": after}
 
 
+def base_scenario(label):
+    """Strip repeat/policy suffixes without changing workload identity."""
+    return label.split("#", 1)[0].split("@", 1)[0]
+
+
 def reject_raw_drift(rows):
     groups = {}
     for row in rows:
         if "error" not in row:
-            groups.setdefault(row["scenario"].split("#")[0], []).append(row)
+            groups.setdefault(base_scenario(row["scenario"]), []).append(row)
     for group in groups.values():
         rates = [row["raw_w"] for row in group]
         if min(rates) <= 0:
@@ -522,6 +528,13 @@ def summarize(name, arms, seconds):
         "swapz_lw_reqs": swapz_lower_write_requests,
         "hand_records": kernel.get("work_conserving_hand_records") or 0,
         "hand_closes": kernel.get("work_conserving_hand_closes") or 0,
+        "id181_successor_first": kernel.get("id181_successor_first") or 0,
+        "id181_publication_handoff":
+            kernel.get("id181_publication_handoff") or 0,
+        "id181_successor_first_closes":
+            kernel.get("id181_successor_first_closes") or 0,
+        "id181_publication_handoffs":
+            kernel.get("id181_publication_handoffs") or 0,
         "pages_per_lower_write": (
             logical_write_pages / swapz_lower_write_requests
             if swapz_lower_write_requests else 0.0),
@@ -582,7 +595,7 @@ def lane_gap_table_rows(rows):
     selected = ("sata-mixed", "nvme4-mixed", "nvme5-mixed", "fast-mixed")
     result = []
     for row in rows:
-        if row.get("scenario", "").split("#")[0] not in selected:
+        if base_scenario(row.get("scenario", "")) not in selected:
             continue
         kernel = row.get("lane_gap")
         if not kernel:
@@ -674,8 +687,154 @@ def pct(candidate, baseline):
     return f"{(candidate / baseline - 1.0) * 100.0:+6.1f}%"
 
 
+T95 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776,
+    5: 2.571, 6: 2.447, 7: 2.365,
+}
+
+
+def log_effect_summary(values):
+    """Return multiplicative mean and t-based 95% CI from paired log effects."""
+    if not values:
+        return {"n": 0, "mean": None, "low": None, "high": None}
+    mean = statistics.mean(values)
+    low = high = None
+    if len(values) >= 2:
+        critical = T95.get(len(values) - 1, 1.96)
+        margin = critical * statistics.stdev(values) / math.sqrt(len(values))
+        low = math.exp(mean - margin) - 1.0
+        high = math.exp(mean + margin) - 1.0
+    return {"n": len(values), "mean": math.exp(mean) - 1.0,
+            "low": low, "high": high}
+
+
+def id181_factorial_analysis(rows):
+    """Analyze complete SCREENED 2x2 blocks using raw-normalized WRITE ratios."""
+    policies = ("control", "A", "B", "AB")
+    by_scenario = {}
+    for row in rows:
+        if ("error" in row or
+                not row["performance_validity"]["performance_usable"]):
+            continue
+        by_scenario.setdefault(base_scenario(row["scenario"]), {}).setdefault(
+            row.get("id181_round"), {})[row.get("id181_policy")] = row
+
+    analyses = []
+    for scenario, rounds in sorted(by_scenario.items()):
+        complete = [
+            block for _, block in sorted(rounds.items())
+            if set(block) == set(policies) and
+            all(block[policy]["raw_w"] > 0 and block[policy]["swapz_w"] > 0
+                for policy in policies)
+        ]
+        if not complete:
+            analyses.append({"scenario": scenario, "complete_rounds": 0})
+            continue
+
+        policy_shifts = {policy: [] for policy in policies[1:]}
+        read_p99_shifts = {policy: [] for policy in policies[1:]}
+        lower_guards = {policy: True for policy in policies[1:]}
+        a_effects, b_effects, interactions = [], [], []
+        for block in complete:
+            log_ratio = {
+                policy: math.log(block[policy]["swapz_w"] /
+                                 block[policy]["raw_w"])
+                for policy in policies
+            }
+            control = log_ratio["control"]
+            for policy in policies[1:]:
+                policy_shifts[policy].append(log_ratio[policy] - control)
+                lower_guards[policy] = lower_guards[policy] and (
+                    block[policy]["swapz_lw_bytes"] <= block[policy]["raw_lw_bytes"] and
+                    block[policy]["swapz_lw_reqs"] <= block[policy]["raw_lw_reqs"])
+                control_p99 = block["control"]["swapz_r_p99"]
+                policy_p99 = block[policy]["swapz_r_p99"]
+                if control_p99 > 0 and policy_p99 > 0:
+                    read_p99_shifts[policy].append(
+                        math.log(policy_p99 / control_p99))
+            a_effects.append(
+                (log_ratio["A"] + log_ratio["AB"] -
+                 log_ratio["control"] - log_ratio["B"]) / 2.0)
+            b_effects.append(
+                (log_ratio["B"] + log_ratio["AB"] -
+                 log_ratio["control"] - log_ratio["A"]) / 2.0)
+            interactions.append(
+                log_ratio["AB"] + log_ratio["control"] -
+                log_ratio["A"] - log_ratio["B"])
+
+        candidates = {}
+        for policy in policies[1:]:
+            service = log_effect_summary(policy_shifts[policy])
+            read_p99 = log_effect_summary(read_p99_shifts[policy])
+            activity = sum(
+                (block[policy]["id181_successor_first_closes"]
+                 if policy in ("A", "AB") else 0) +
+                (block[policy]["id181_publication_handoffs"]
+                 if policy in ("B", "AB") else 0)
+                for block in complete)
+            if service["low"] is None:
+                verdict = "INSUFFICIENT"
+            elif not activity:
+                verdict = "NO_ACTIVITY"
+            elif not lower_guards[policy]:
+                verdict = "LOWER_IO_REGRESSION"
+            elif read_p99["high"] is not None and read_p99["high"] > 0.05:
+                verdict = "READ_P99_UNRESOLVED"
+            elif service["mean"] >= 0.10 and service["low"] > 0:
+                verdict = "PASS_10PCT_SCREEN"
+            else:
+                verdict = "NO_10PCT_GAIN"
+            candidates[policy] = {
+                "write_vs_control": service,
+                "read_p99_vs_control": read_p99,
+                "lower_io_no_added_work": lower_guards[policy],
+                "activity": activity,
+                "verdict": verdict,
+            }
+
+        analyses.append({
+            "scenario": scenario,
+            "complete_rounds": len(complete),
+            "a_main_effect": log_effect_summary(a_effects),
+            "b_main_effect": log_effect_summary(b_effects),
+            "a_by_b_interaction": log_effect_summary(interactions),
+            "candidates": candidates,
+        })
+    return analyses
+
+
+def print_id181_factorial(analyses):
+    if not analyses:
+        return
+
+    def effect(summary):
+        if not summary or summary.get("mean") is None:
+            return "n/a"
+        if summary.get("low") is None:
+            return f"{summary['mean'] * 100:+.1f}%"
+        return (f"{summary['mean'] * 100:+.1f}% "
+                f"[{summary['low'] * 100:+.1f},{summary['high'] * 100:+.1f}]")
+
+    print("\nID181 2x2 factorial — SCREENED complete blocks only")
+    print(f"{'scenario':<12} {'n':>2} {'A main':>24} {'B main':>24} {'A×B':>24}")
+    for row in analyses:
+        print(f"{row['scenario']:<12} {row['complete_rounds']:2d} "
+              f"{effect(row.get('a_main_effect')):>24} "
+              f"{effect(row.get('b_main_effect')):>24} "
+              f"{effect(row.get('a_by_b_interaction')):>24}")
+        for policy, candidate in row.get("candidates", {}).items():
+            print(f"  {policy:<2} vs control: "
+                  f"{effect(candidate['write_vs_control'])}; "
+                  f"activity={candidate['activity']} "
+                  f"lowerIO={'OK' if candidate['lower_io_no_added_work'] else 'REGRESS'} "
+                  f"R-p99={effect(candidate['read_p99_vs_control'])} "
+                  f"{candidate['verdict']}")
+    print("  Effects use paired log(swapz/raw WRITE) within each counterbalanced "
+          "round; brackets are t-based 95% CIs. Development screen only.")
+
+
 def print_table(rows):
-    header = (f"{'scenario':<12} {'raw W':>7} {'swapz W':>8} {'dW':>7} "
+    header = (f"{'scenario':<24} {'raw W':>7} {'swapz W':>8} {'dW':>7} "
               f"{'raw R':>6} {'swapz R':>7} {'lowW B':>7} {'reqs raw>swapz':>15} "
               f"{'R p99 raw>swapz':>16} {'W p99 raw>swapz':>16} "
               f"{'win':>5} {'hand':>4} {'hc':>4} {'pg/lw':>6} "
@@ -685,14 +844,14 @@ def print_table(rows):
     print("-" * len(header))
     for row in rows:
         if "error" in row:
-            print(f"{row['scenario']:<12} ERROR: {row['error']}")
+            print(f"{row['scenario']:<24} ERROR: {row['error']}")
             continue
         bytes_ratio = (row["swapz_lw_bytes"] / row["raw_lw_bytes"]
                        if row["raw_lw_bytes"] else 0.0)
         reqs = f"{row['raw_lw_reqs']}>{row['swapz_lw_reqs']}"
         rp99 = f"{row['raw_r_p99']:.2f}>{row['swapz_r_p99']:.2f}"
         wp99 = f"{row['raw_w_p99']:.2f}>{row['swapz_w_p99']:.2f}"
-        print(f"{row['scenario']:<12} {row['raw_w']:7.2f} {row['swapz_w']:8.2f} "
+        print(f"{row['scenario']:<24} {row['raw_w']:7.2f} {row['swapz_w']:8.2f} "
               f"{pct(row['swapz_w'], row['raw_w']):>7} {row['raw_r']:6.2f} "
               f"{row['swapz_r']:7.2f} {bytes_ratio:7.3f} {reqs:>15} "
               f"{rp99:>16} {wp99:>16} {row['windows']:5d} "
@@ -728,7 +887,7 @@ def print_profile(rows):
     for row in rows:
         if "error" in row:
             continue
-        groups.setdefault(row["scenario"].split("#")[0], []).append(row)
+        groups.setdefault(base_scenario(row["scenario"]), []).append(row)
 
     print("\nK=1 critical-path profile (SCREENED repeats only)")
     header = (f"{'scenario':<12} {'n':>3} {'admit us':>9} {'sched diag':>10} "
@@ -1025,6 +1184,9 @@ def main():
                     "id181_factorial": bool(args.id181_factorial),
                     "id181_order": (ID181_FACTORIAL_ORDERS if args.id181_factorial
                                     else None),
+                    "id181_factorial_analysis": (
+                        id181_factorial_analysis(rows)
+                        if args.id181_factorial else []),
                     "mixed_measure_ops": args.mixed_ops,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
@@ -1050,6 +1212,8 @@ def main():
         print_table(rows)
         print_lane_gap_table(lane_gap_table_rows(rows))
         print_profile(rows)
+        if args.id181_factorial:
+            print_id181_factorial(id181_factorial_analysis(rows))
         print_striped_table(striped_rows if striped_specs else [])
     print(f"\n  Detailed telemetry: {(OUT_DIR / result_name).relative_to(ROOT)} "
           f"(total {time.monotonic() - started:.0f}s)")

@@ -2002,7 +2002,7 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	u64 lower_end, lower_elapsed, commit_elapsed, finalize_end;
 	swapz_u8 committed = 0, index;
 	int lower_error, error;
-	bool defer, submitter_dispatched;
+	bool defer, defer_for_successor, submitter_dispatched;
 
 	if (!inflight)
 		return 0;
@@ -2117,9 +2117,10 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	 * unlocked FIFO peek is a hint: either answer is correct.
 	 */
 	/* ID175 runs ACK after swapz_worker() frees the ordered domain. */
+	defer_for_successor =
+		ctx->batch_count || !list_empty(&ctx->incoming);
 	defer = ctx->defer_upper_completions &&
-		(ctx->batch_count || !list_empty(&ctx->incoming) ||
-		 submitter_dispatched);
+		(defer_for_successor || submitter_dispatched);
 	for (index = 0; index < inflight->count; ++index) {
 		struct swapz_bio_ref *entry =
 			dm_per_bio_data(inflight->bios[index], sizeof(*entry));
@@ -2145,7 +2146,12 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	 * queue lock even when no successor lower WRITE is pending yet.
 	 * Failure or a busy slot falls back to the ordered worker.
 	 */
-	if (ctx->id181_publication_handoff &&
+	/*
+	 * ID175 submitter-dispatched runs intentionally wake only after the
+	 * ordered owner is released. ID181 B may move ACK work earlier only
+	 * when actual successor/queued work independently caused deferral.
+	 */
+	if (ctx->id181_publication_handoff && defer_for_successor &&
 	    swapz_try_completion_handoff(ctx))
 		ctx->id181_publication_handoffs++;
 	return 0;
@@ -4570,6 +4576,25 @@ accounted:
 	return 0;
 }
 
+/*
+ * ID181 A is deliberately more aggressive than the production work-conserving
+ * hand: once a predecessor is published, dispatch any already-staged eligible
+ * successor before admitting newer FIFO work or serving unrelated READs.
+ * The existing flush path remains the sole seal/submit authority and therefore
+ * preserves K=1, barriers, GC ownership and failure rollback.
+ */
+static int swapz_id181_submit_staged_successor(struct swapz_dm *ctx)
+{
+	if (!ctx->id181_successor_first || !ctx->work_conserving_window ||
+	    !ctx->batch_count || swapz_has_inflight(ctx) || ctx->failed ||
+	    !READ_ONCE(ctx->accepting))
+		return 0;
+
+	ctx->next_window_close = SWAPZ_CLOSE_IDLE;
+	ctx->id181_successor_first_closes++;
+	return swapz_flush_window(ctx);
+}
+
 static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logical)
 {
 	struct swapz_tx tx;
@@ -6746,21 +6771,9 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 			if (!head || !completion_done(&head->lower_done))
 				break;
 			inflight_error = swapz_finalize_inflight_write(ctx, false);
-			/*
-			 * ID181 A: an already-owned staged successor predates incoming
-			 * BIOs. Once its predecessor is published, close at the existing
-			 * >=hand threshold before accepting more or serving READs.
-			 * The ordinary flush enforces all fences, K=1 and GC failure.
-			 */
-			if (!inflight_error && ctx->id181_successor_first &&
-			    ctx->work_conserving_window &&
-			    ctx->batch_count >= ctx->work_conserving_hand_records &&
-			    !swapz_has_inflight(ctx) && !ctx->failed &&
-			    READ_ONCE(ctx->accepting)) {
-				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
-				ctx->id181_successor_first_closes++;
-				inflight_error = swapz_flush_window(ctx);
-			}
+			if (!inflight_error)
+				inflight_error =
+					swapz_id181_submit_staged_successor(ctx);
 			if (inflight_error) {
 				swapz_finalize_all_inflight(ctx, true);
 				if (ctx->batch_count) {
@@ -7027,6 +7040,9 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 				int inflight_error =
 					swapz_finalize_inflight_write(ctx, false);
 
+				if (!inflight_error)
+					inflight_error =
+						swapz_id181_submit_staged_successor(ctx);
 				if (inflight_error && ctx->batch_count) {
 					ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 					swapz_flush_window(ctx);

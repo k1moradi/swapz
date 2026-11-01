@@ -552,10 +552,13 @@ kernel swap and physical media remain separate qualification gates.
 The actual completion loops must keep the batch record stack-local, assign it
 before each successful BIO delivery, never dereference a BIO after
 `bio_endio()`, and aggregate all per-BIO bins before releasing the completion
-slot. Validate deferred/immediate bin conservation, successful-only dwell,
-publication-to-delivery timestamps and failure injection, comparing old
-per-BIO accounting with the aggregated result on an exact sample sequence.
-The fast and official replay status schema remains unchanged.
+slot. An executable actual-body probe must validate immediate/deferred counts,
+duration sums, bin edges, direct fallback and invalid timestamps; completion
+failure injection remains covered by the ownership probe. Preserve the
+per-BIO timestamp semantics: this optimization batches atomics only, not
+`ktime_get_ns()`, so old/new ID178 dwell values remain comparable. The fast
+and official replay status schema remains unchanged except for new ID181
+selector/activity fields.
 
 ### ID181 development controls and qualification
 
@@ -565,7 +568,11 @@ stripes/calibration cannot select experimental policies. The opt-in
 `ID181_FACTORIAL=1 REPEAT=4|8` schedules each policy once per block and
 rotates four block orders with balanced raw/swapz within-pair order; every
 policy has a same-fixture raw control, its own policy identity and round in
-`latest.json`. A partial block is rejected before privilege. Do balanced repeated
+`latest.json`. Base-scenario raw drift must span all four policies rather
+than being screened per policy. The report must include paired log-ratio
+A and B main effects, A-by-B interaction, policy-vs-control 95% intervals,
+actual successor-close/publication-handoff counts, lower-I/O checks and READ
+p99 watchpoints. A partial block is rejected before privilege. Do balanced repeated
 controls on NVMe5/NVMe4/SATA/fast mixed/fast QD8 on each quiet host. Compare
 useful WRITE/raw, READ p99, lower bytes/requests, CPU, gap partition, record
 size and ACK dwell. Three repeats screen a hypothesis; prospective paired
