@@ -230,6 +230,31 @@ def _git(*args, check=True):
     return result.stdout.strip()
 
 
+def _remote_main_sha():
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=8")
+    git_args = ["git", "-C", str(ROOT), "ls-remote", "origin",
+                "refs/heads/main"]
+    sudo_user = os.environ.get("SUDO_USER")
+    if os.geteuid() == 0 and sudo_user and sudo_user != "root":
+        runuser = shutil.which("runuser")
+        if not runuser:
+            raise ProbeError("runuser is required to verify origin as the operator")
+        git_args = [
+            runuser, "--user", sudo_user, "--", *git_args,
+        ]
+    result = _run(git_args, timeout=20, check=False, env=env)
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise ProbeError(f"cannot verify origin/main: {detail}")
+    rows = [line.split() for line in result.stdout.splitlines()]
+    if len(rows) != 1 or len(rows[0]) != 2 or \
+            rows[0][1] != "refs/heads/main":
+        raise ProbeError("origin did not return exactly one main ref")
+    return rows[0][0]
+
+
 def current_source_evidence():
     if platform.machine() != "x86_64":
         raise ProbeError("physical swap smoke is currently limited to x86_64")
@@ -241,9 +266,7 @@ def current_source_evidence():
     head = _git("rev-parse", "HEAD")
     if head != _git("rev-parse", "origin/main"):
         raise ProbeError("local main must be synchronized with origin/main")
-    remote_refs = _git("ls-remote", "origin", "refs/heads/main").splitlines()
-    if len(remote_refs) != 1 or remote_refs[0].split() != [
-            head, "refs/heads/main"]:
+    if _remote_main_sha() != head:
         raise ProbeError("origin/main is not synchronized with local main")
     try:
         report = json.loads((ROOT / "test_results.json").read_text())

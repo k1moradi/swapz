@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -116,6 +117,21 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "dm_name": f"swapz-demo-physical-{token}",
                 "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{'0' * 16}",
             })
+
+    def test_remote_branch_check_uses_sudo_invoking_users_ssh_identity(self):
+        sha = "c" * 40
+        result = subprocess.CompletedProcess(
+            [], 0, stdout=f"{sha}\trefs/heads/main\n", stderr="")
+        with mock.patch.dict(os.environ, {"SUDO_USER": "keivan"}), \
+                mock.patch.object(probe.os, "geteuid", return_value=0), \
+                mock.patch.object(probe.shutil, "which",
+                                   return_value="/usr/sbin/runuser"), \
+                mock.patch.object(probe, "_run", return_value=result) as run:
+            self.assertEqual(probe._remote_main_sha(), sha)
+        args = run.call_args.args[0]
+        self.assertEqual(args[:4], [
+            "/usr/sbin/runuser", "--user", "keivan", "--"])
+        self.assertIn("ls-remote", args)
 
     def test_probe_is_not_wired_into_make_test_and_never_swapons_mapper(self):
         runner = (ROOT / "tools/run-tests.py").read_text()
