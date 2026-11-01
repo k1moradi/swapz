@@ -72,4 +72,4 @@ RAM traffic savings are not physical NAND lifetime evidence.
 Full local validation, immutable source copies, object-layout measurements,
 qualification log/state and machine-readable audit remain under
 `build/optimization-round/prepared-cost-coverage/`. The rejected unconditional
-[early-snapshot prototype](submitter-snapshot-oldpc-result.md) is not retained.
+ROADMAP ID 171's early-snapshot prototype is not retained.

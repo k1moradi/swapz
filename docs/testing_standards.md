@@ -2892,8 +2892,12 @@ miss an invalid timing-field read beyond that mapping. Compiled mutants using
 cumulative lane time or removing the READY guard must fail. Source wiring must
 cover both asynchronous owners and publication before READY; loaded evidence
 must show a nonzero estimator with submitter claims and zero inline work.
-The rejected [early-snapshot pilot](handoff/submitter-snapshot-oldpc-result.md)
-does not authorize early descriptor release or a second submitter reference.
+ROADMAP ID 171's rejected early-snapshot pilot passed bounded two-reference
+ownership probes (including descriptor-poison/ASan/UBSan coverage), but missed
+the 5% service floor and increased lower bytes beyond the 1% guard; control C
+was restored. It does not authorize early descriptor release or a second
+submitter reference. Its zero asynchronous-LZ4 EWMA observation motivated
+ID172's estimator-coverage repair; that observation does not retain ID171.
 
 Prepared-state native qualification must inject producer READY_COMPRESSED and
 READY_RAW publication between the consumer's initial PREPARING read and its
