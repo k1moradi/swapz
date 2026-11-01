@@ -2834,13 +2834,15 @@ rejected this specific change: lower idle or more early hands cannot override
 failed useful-service or lower-request guards. Keep rejected C/probes only in
 local experiment artifacts and immutable history, outside active product code.
 
-Submitter wake-suppression experiments must test release before the worker's
-locked ownership recheck, during FIFO handback and after handback. A negative
-control removing that recheck must fail the lost-wake assertion. Controlled
-interleavings do not replace LKMM/concurrency and loaded lifecycle gates. The
-[ID166 queued-head pilot](handoff/submitter-queued-wake-oldpc-result.md) is removed
-without a service gain; its preserved empty-incoming wake is not evidence for
-suppressing wakes while the ordered worker owns a private local FIFO.
+Submitter wake-suppression experiments must retain the worker's locked
+ownership recheck before FIFO handback; removing it permits a lost wake. Tests
+must cover release before that recheck, during FIFO handback and after handback.
+A negative control removing the recheck must fail the lost-wake assertion.
+Controlled interleavings do not replace LKMM/concurrency and loaded lifecycle
+gates. ID166's visible queued-head suppression variant did not establish either
+a useful-service gain or an owner-deferral reduction and was removed. It
+preserved the empty-incoming wake, so it did not test suppressing wakes while
+the ordered worker owns a private local FIFO.
 
 Empty-incoming wake suppression needs release-before-recheck and
 release-during-handback cases with a private local FIFO, plus retained and
