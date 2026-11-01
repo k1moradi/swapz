@@ -60,8 +60,11 @@ zero inline work and submitter claims matching all measured WRITEs: QD4
 Every final image is exact and every ownership gauge drains to zero. Native
 actual-body tests reject cumulative lane time and unready-field access. Real
 kernel-object DWARF shows the prepared-slot size remains 8256 bytes before/after.
-These observations validate cost coverage, not throughput improvement or full
-qualification; artifacts are in `build/optimization-round/prepared-cost-coverage/`.
+Those development observations validate cost coverage, not throughput improvement.
+The subsequent clean-source full owner qualification passes all five stages on
+`bb665730` (report `48a1580f`); see the separate
+[qualified cost-coverage result](prepared-cost-coverage-result.md). Artifacts are
+in `build/optimization-round/prepared-cost-coverage/`.
 
 The [machine-readable summary](submitter-snapshot-oldpc.json) preserves all
 estimates, exclusions, source identities, administrative resume and diagnostic
