@@ -1384,6 +1384,8 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 		 * mappings unless ALL blocks completed.
 		 */
 		engine->submitted_blocks += blocks;
+		if (engine->io.write_sealed)
+			engine->io.write_sealed(engine->io.opaque, take);
 		error = engine->io.write_extent(engine->io.opaque,
 						tx->start_block, blocks,
 						engine->write_scratch, &completed);
@@ -1424,6 +1426,8 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 			phase_start, swapz_engine_now_ns());
 		if (error)
 			return error;
+		if (engine->io.write_published)
+			engine->io.write_published(engine->io.opaque, take);
 		entry += take;
 		*committed_pages = entry;
 		continue;
@@ -1857,6 +1861,8 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 			return -EUCLEAN;
 
 		e->submitted_blocks += run.blocks;
+		if (e->io.write_sealed)
+			e->io.write_sealed(e->io.opaque, prepared);
 		error = e->io.write_run(e->io.opaque, run.start_block, run.blocks,
 					run.bytes, &completed);
 		if (completed > run.blocks) {
@@ -1874,6 +1880,8 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 		}
 		if (published != prepared)
 			return -EUCLEAN;
+		if (e->io.write_published)
+			e->io.write_published(e->io.opaque, published);
 		total += published;
 		*committed_pages = total;
 	}

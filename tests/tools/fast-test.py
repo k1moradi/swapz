@@ -53,7 +53,8 @@ MODELS = {
 CONTENT_WEIGHTS = {"medium": "medium=100", "entropy": "entropy=100",
                    "balanced": "medium=50,entropy=50"}
 DEFAULT_SCENARIOS = (
-    "sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8",
+    "sata-mixed", "nvme4-mixed", "nvme5-mixed",
+    "fast-mixed", "fast-w4", "fast-w8",
 )
 STRIPED_MODELS = ("nvme5", "sata")
 DEFAULT_STRIPE_COUNTS = (1, 2, 4)
@@ -562,6 +563,7 @@ def summarize(name, arms, seconds):
 def lane_gap_table_rows(rows):
     """Same ID178 descriptive attribution as make test; skip unmeasured rows."""
     phase_fields = HOST_CPU["LANE_GAP_PART_FIELDS"]
+    successor_bins = HOST_CPU["LANE_SUCCESSOR_BIN_NAMES"]
     suffixes = HOST_CPU["LANE_DWELL_BIN_NAMES"]
     bounds = ("<=1us", "<=4us", "<=16us", "<=64us",
               "<=256us", "<=1ms", ">1ms")
@@ -574,7 +576,6 @@ def lane_gap_table_rows(rows):
         if not kernel:
             continue
         runs, total = kernel["lane_gap_runs"], kernel["lane_gap_wall_ns"]
-        paired = runs + kernel["lane_gap_foreign_runs"]
         count = kernel["ack_dwell_deferred_count"]
         rank, cumulative, bound = (count * 99 + 99) // 100, 0, "n/a"
         for suffix, upper in zip(suffixes, bounds):
@@ -585,13 +586,21 @@ def lane_gap_table_rows(rows):
         result.append({
             "scenario": row["scenario"],
             "runs": runs,
+            "foreign_runs": kernel["lane_gap_foreign_runs"],
+            "foreign_gap_ms": kernel["lane_gap_foreign_ns"] / 1e6,
+            "unpaired_runs": kernel["lane_gap_unpaired_runs"],
             "gap_per_run_us": total / runs / 1000 if runs else None,
             "part_shares": {
                 key: kernel[key] * 100 / total if total else None
                 for key in phase_fields},
-            "successor_admitted_at_t0_pct": (
-                100 * (paired - kernel["lane_successor_admitted_by_completion_0"])
-                / paired if paired else None),
+            "successor_admitted_distribution": [
+                kernel[f"lane_successor_admitted_by_completion_{suffix}"]
+                for suffix in successor_bins],
+            "successor_owned_distribution": [
+                kernel[f"lane_successor_owned_by_completion_{suffix}"]
+                for suffix in successor_bins],
+            "owner_read_ms": kernel["lane_gap_owner_read_ns"] / 1e6,
+            "owner_reads": kernel["lane_gap_owner_reads"],
             "deferred_ack_p99_bin_bound": bound,
             "host_busy_pct": row.get("host_busy_pct"),
         })
@@ -603,19 +612,29 @@ def print_lane_gap_table(rows):
     if not rows:
         return
     phases = HOST_CPU["LANE_GAP_PART_FIELDS"]
+
     def fmt(value):
         return "n/a" if value is None else f"{value:.1f}"
-    headers = ("scenario", "runs", "gap/run us", "wake", "publish",
-               "no work", "unowned", "staged", "seal", "admit@t0",
+
+    def distribution(values):
+        return "/".join(str(value) for value in values)
+
+    headers = ("scenario", "paired", "foreign", "unpaired", "gap/run us",
+               "foreign ms", "wake", "publish", "no work", "unowned",
+               "staged", "seal", "succ admit", "succ owned", "READ ms/#",
                "ACK p99 bin", "host busy")
     records = []
     for row in rows:
         records.append((
-            row["scenario"], row["runs"], fmt(row["gap_per_run_us"]),
+            row["scenario"], row["runs"], row["foreign_runs"],
+            row["unpaired_runs"], fmt(row["gap_per_run_us"]),
+            fmt(row["foreign_gap_ms"]),
             *(fmt(row["part_shares"][key]) + "%" if
               row["part_shares"][key] is not None else "n/a"
               for key in phases),
-            fmt(row["successor_admitted_at_t0_pct"]) + "%",
+            distribution(row["successor_admitted_distribution"]),
+            distribution(row["successor_owned_distribution"]),
+            f"{row['owner_read_ms']:.2f}/{row['owner_reads']}",
             row["deferred_ack_p99_bin_bound"],
             fmt(row["host_busy_pct"]) + "%",
         ))
@@ -629,8 +648,12 @@ def print_lane_gap_table(rows):
     for row in records:
         print("  " + " | ".join(f"{str(value):<{widths[i]}}"
                                for i, value in enumerate(row)))
-    print("  Six percentages partition paired gaps; ACK p99 is an inclusive "
-          "bin bound (>1ms open-ended). Descriptive, not a gate.")
+    print("  Six phases are % of paired gaps; successor bins are "
+          "0/1/2-3/4-7/8-15/16+; foreign gaps are whole-gap exclusions; "
+          "READ ms/# overlaps the partition; ACK p99 is an inclusive bin "
+          "bound (>1ms open-ended). Descriptive, not a gate.")
+
+
 
 def pct(candidate, baseline):
     if not baseline:

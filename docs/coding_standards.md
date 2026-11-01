@@ -219,19 +219,38 @@ dispatch may only take the same domain via its existing bounded trylock.
 Only this ordered domain updates predecessor t0/t1/t2, foreign-WRITE
 classification, gap partitions, and successor histograms. The asynchronous
 completion callback writes `inflight->lower_end_ns` before completing
-`lower_done`, and never owns the chronology. `profile_epoch` may
-`WRITE_ONCE(lane_prev_valid, false)`; t4 reads that flag once with
-`READ_ONCE` and can discard a sample but cannot combine epochs. Failure,
-drain, and suspend invalidate a predecessor under ordered ownership.
+`lower_done`, and never owns the chronology. Each prospective run captures
+the atomic `lane_profile_epoch` around t4; a generation change across that
+timestamp makes the run unpaired. Publication may create a predecessor only
+when the run's captured generation still equals the current epoch. The
+`profile_epoch` message increments that generation before invalidating the
+previous sample, so a racing old finalizer cannot resurrect a cross-epoch
+predecessor. Failure, drain, and suspend still invalidate the boolean hint
+under ordered ownership.
+
+For an asynchronous prepared run, t3 is sampled only after
+`swapz_engine_prepare_batched_run()` has returned the immutable run; do not
+reuse the earlier plan/pack start as t3. Synchronous engine-owned WRITE paths expose two passive observation
+hooks around each real lower run, including multi-run synchronous windows:
+`write_sealed` runs after the exact logical run is immutable and before lower
+submission, while `write_published` runs only after successful authority
+publication. Those callbacks may record timestamps, the exact run-page range,
+and per-BIO publication marks only; they must not fail, wait, allocate, lock,
+change policy, or alter engine results. The explicit prepared-prefix fallback
+invokes the same sealed observation after its own successful prepare. Gap
+admission/ownership scans must be restricted to that exact successor run range;
+already-published prefixes are never successor evidence.
 
 A successful upper WRITE stores publication time and deferred/immediate
 classification before any completion or handoff. Because `swapz_complete()`
 can run on the worker or its separate `completion_work`, acknowledgement
 dwell count, nanoseconds, and histograms are `atomic64_t`, sampled before
-`bio_endio()`. Histogram bounds are inclusive; `>1ms` is open-ended.
-Foreign lower WRITEs are not K=1 run submissions and consume whole gaps
-without six-part attribution. All counters are cumulative and only differenced
-at already-established timed benchmark boundaries. Do not route results into
+`bio_endio()`. Synchronous lower-backed BIOs inherit the exact engine
+publication timestamp instead of being stamped immediately before completion.
+Histogram bounds are inclusive; `>1ms` is open-ended. Foreign lower WRITEs
+are not K=1 run submissions and consume whole gaps without six-part
+attribution. All counters are cumulative and only differenced at
+already-established timed benchmark boundaries. Do not route results into
 device policy, acceptance thresholds, or scorecards.
 
 Any future K>1 experiment is a new architecture change, not a dormant knob. It

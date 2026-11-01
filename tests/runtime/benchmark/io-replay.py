@@ -1345,6 +1345,14 @@ def validate_lane_gap_counters(counters):
     if (counters["lane_gap_wall_ns"] !=
             sum(counters[key] for key in LANE_GAP_PART_FIELDS)):
         raise ValueError("inconsistent ID178 six-part conservation")
+    if ((not counters["lane_gap_runs"] and counters["lane_gap_wall_ns"]) or
+            (not counters["lane_gap_foreign_runs"] and
+             counters["lane_gap_foreign_ns"])):
+        raise ValueError("inconsistent ID178 empty gap bucket")
+    measured_gap_ns = (counters["lane_gap_wall_ns"] +
+                       counters["lane_gap_foreign_ns"])
+    if counters["lane_gap_owner_read_ns"] > measured_gap_ns:
+        raise ValueError("ID178 READ overlap exceeds measured gaps")
     if (counters["lane_gap_runs"] + counters["lane_gap_foreign_runs"] +
             counters["lane_gap_unpaired_runs"] +
             counters["lane_gap_invalid"] != counters["lane_runs_submitted"]):

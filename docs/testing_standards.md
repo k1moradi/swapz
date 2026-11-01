@@ -555,8 +555,15 @@ timestamp-order permutation on the bounded grid, invalid/zero marks and the
 successor/dwell bin transitions. Rootless source contracts forbid scheduling,
 lock, wait, queue, or allocation calls inside the accounting helpers; require
 the new per-BIO timestamp fields without changing ID114's marks, sole
-ordered-domain chronology, `profile_epoch` invalidation, and sampling
-publication-to-ACK before `bio_endio()`. Existing rootless C probes that
+ordered-domain chronology, generation-safe `profile_epoch` invalidation,
+post-prepare asynchronous t3, exact synchronous per-run sealed ranges,
+per-run synchronous post-publication observation, and sampling publication-to-
+ACK before `bio_endio()`. The native lower-WRITE aggregation test must
+exercise both synchronous observers in planned and batched paths, prove that
+the sealed observer runs before lower I/O, and prove that authority is already
+visible when the publication observer runs. Source contracts must also require
+gap submission to scan only the exact run's planned-page range so an already-
+published prefix cannot inflate successor availability. Existing rootless C probes that
 extract full production function bodies must provide harmless ID178 helper
 stubs or the new passive epoch flag in their local miniature test structures;
 they must continue asserting their original completion, FIFO and quantum
@@ -572,12 +579,17 @@ paired plus foreign gaps; for every threshold, the owned-tail count cannot
 exceed the admitted-tail count. Deferred and immediate ACK dwell bins must
 each sum to their count, deferred count must not exceed successful deferred
 upper completions, and the total sampled count must not exceed successful
-upper WRITE completions. Counter deltas may not be negative. The descriptive
-`benchmarks.lane_gap_attribution` rows and the single console table
-**SSD lower-lane gap attribution** cover SATA, NVMe4, NVMe5, and fast mixed;
-the same table is printed and retained by `make fast_test`, with host busy,
-six phase shares, successor availability, and deferred ACK p99 reported as
-an inclusive histogram-bin bound. None of these fields decides a policy,
+upper WRITE completions. Owner READ overlap may annotate paired and foreign
+gaps but must not exceed their combined measured wall time. Empty paired or
+foreign buckets cannot carry nonzero wall time. Counter deltas may not be
+negative. The descriptive `benchmarks.lane_gap_attribution` rows and the
+single console table **SSD lower-lane gap attribution** cover SATA, NVMe4,
+NVMe5, and fast mixed. They report paired/foreign/unpaired coverage, foreign
+wall time, all six phase shares, the full admitted and ordered-owned successor
+histograms (0/1/2-3/4-7/8-15/16+), owner READ milliseconds/count, deferred ACK
+p99 as an inclusive histogram-bin bound, and host busy. The same table is
+printed and retained by `make fast_test`; its default ID178 mixed set includes
+SATA, NVMe4, NVMe5, and fast mixed. None of these fields decides a policy,
 publication or qualification scorecard. `plot-history.py` ignores these
 new properties until an owner-approved history design exists.
 
@@ -586,7 +598,7 @@ new properties until an owner-approved history design exists.
 The profiling-only source keeps K=1, the existing four-record service rule, one
 unbound preparation producer, the 64-slot reservoir, ordinary LZ4 acceleration
 one and current SWZ geometry. `make fast_test` defaults to three repeats each
-of SATA mixed, NVMe4 mixed, fast mixed, fast QD4 and fast QD8. The existing
+of SATA mixed, NVMe4 mixed, NVMe5 mixed, fast mixed, fast QD4 and fast QD8. The existing
 pre/post host-noise and raw-repeat-spread screens remain exclusion gates:
 NOISY/UNKNOWN runs may verify correctness and telemetry plumbing but cannot
 support a performance keep/remove decision.

@@ -28,6 +28,8 @@ class PairReplayContract(unittest.TestCase):
         values["lane_runs_submitted"] = 1
         values["lane_gap_runs"] = 1
         values["lane_gap_wall_ns"] = 60
+        values["lane_gap_owner_read_ns"] = 20
+        values["lane_gap_owner_reads"] = 2
         for field in replay["LANE_GAP_PART_FIELDS"]:
             values[field] = 10
         values["lane_successor_admitted_by_completion_1"] = 1
@@ -38,6 +40,7 @@ class PairReplayContract(unittest.TestCase):
         check(values)
         for key, bad in (
                 ("lane_gap_wall_ns", 61),
+                ("lane_gap_owner_read_ns", 61),
                 ("lane_gap_invalid", 1),
                 ("lane_runs_submitted", 2),
                 ("lane_successor_owned_by_completion_16_plus", 1),
@@ -51,6 +54,11 @@ class PairReplayContract(unittest.TestCase):
             trial = values.copy()
             del trial[key]
             with self.subTest(missing=key), self.assertRaises(ValueError):
+                check(trial)
+        for trial in (
+                {**values, "lane_gap_runs": 0},
+                {**values, "lane_gap_foreign_ns": 1}):
+            with self.assertRaises(ValueError):
                 check(trial)
         # Foreign gaps have successor bins but no six-part contribution.
         foreign = values.copy()
@@ -76,9 +84,14 @@ class PairReplayContract(unittest.TestCase):
                       lane_gap_admitted_unowned_ns=4000,
                       lane_gap_staged_held_ns=4000,
                       lane_gap_seal_ns=4000,
+                      lane_gap_foreign_runs=1, lane_gap_foreign_ns=5000,
+                      lane_gap_unpaired_runs=1,
+                      lane_gap_owner_read_ns=3000, lane_gap_owner_reads=2,
                       lane_successor_admitted_by_completion_0=1,
                       lane_successor_admitted_by_completion_1=1,
+                      lane_successor_admitted_by_completion_2_3=1,
                       lane_successor_owned_by_completion_0=2,
+                      lane_successor_owned_by_completion_1=1,
                       ack_dwell_deferred_count=2,
                       ack_dwell_deferred_le_16us=1,
                       ack_dwell_deferred_le_64us=1)
@@ -94,14 +107,35 @@ class PairReplayContract(unittest.TestCase):
         rows = reporter.lane_gap_attribution_rows(benchmarks)
         self.assertEqual(len(rows), 4)
         self.assertEqual(rows[0]["gap_per_run_us"], 10)
-        self.assertEqual(rows[0]["successor_admitted_at_t0_pct"], 50)
+        self.assertEqual(rows[0]["foreign_runs"], 1)
+        self.assertEqual(rows[0]["foreign_gap_ms"], .005)
+        self.assertEqual(rows[0]["unpaired_runs"], 1)
+        self.assertEqual(rows[0]["successor_admitted_distribution"],
+                         [1, 1, 1, 0, 0, 0])
+        self.assertEqual(rows[0]["successor_owned_distribution"],
+                         [2, 1, 0, 0, 0, 0])
+        self.assertEqual(rows[0]["owner_read_ms"], .003)
+        self.assertEqual(rows[0]["owner_reads"], 2)
         self.assertEqual(rows[0]["deferred_ack_p99_bin_bound"], "<=64us")
         self.assertEqual(rows[0]["host_busy_pct"], 45)
         stream = io.StringIO()
         with contextlib.redirect_stdout(stream):
             reporter.print_lane_gap_attribution(rows)
         self.assertIn("SSD lower-lane gap attribution", stream.getvalue())
+        self.assertIn("1/1/1/0/0/0", stream.getvalue())
+        self.assertIn("3.00/2", stream.getvalue())
         self.assertIn("<=64us", stream.getvalue())
+
+        fast_spec = importlib.util.spec_from_file_location(
+            "swapz_lane_gap_fast", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(fast_spec)
+        fast_spec.loader.exec_module(fast)
+        fast_rows = fast.lane_gap_table_rows([{
+            "scenario": "nvme5-mixed", "lane_gap": values,
+            "host_busy_pct": 45.0}])
+        self.assertEqual(fast_rows[0]["successor_owned_distribution"],
+                         [2, 1, 0, 0, 0, 0])
+        self.assertEqual(fast_rows[0]["owner_reads"], 2)
 
 
     def test_linear_calibration_rejects_foreign_or_offset_backing(self):

@@ -30,6 +30,14 @@ struct swapz_io {
 	 * full confirmed completion. See swapz_batch_pause()/resume(). */
 	int (*write_run)(void *opaque, swapz_u32 start_block, swapz_u16 blocks,
 			 const swapz_u8 *bytes, swapz_u16 *completed_blocks);
+	/*
+	 * Optional observation hooks for synchronous engine-owned WRITE paths.
+	 * write_sealed runs after the exact logical run is immutable and before
+	 * lower submission; write_published runs only after authority publication
+	 * succeeds. Neither may fail, block, allocate or influence engine policy.
+	 */
+	void (*write_sealed)(void *opaque, swapz_u8 sealed_pages);
+	void (*write_published)(void *opaque, swapz_u8 published_pages);
 	int (*read_blocks)(void *opaque, swapz_u32 start_block, swapz_u8 blocks,
 			    swapz_u8 *destination);
 };

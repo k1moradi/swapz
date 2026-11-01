@@ -55,9 +55,11 @@ def source_body(symbol: str, source: str) -> str:
 class SwapzProductionSourceQualification(unittest.TestCase):
     def test_lane_gap_observation_only_and_single_owner(self):
         header = (ROOT / "src/kernel/lane-gap.h").read_text()
+        engine_header = (ROOT / "src/kernel/engine.h").read_text()
         helper_names = (
             "swapz_lane_gap_foreign_write", "swapz_lane_gap_publish",
             "swapz_lane_gap_submit", "swapz_lane_gap_note_owner_read",
+            "swapz_lane_gap_sync_sealed", "swapz_lane_gap_sync_published",
             "swapz_lane_gap_ack",
         )
         for symbol in helper_names:
@@ -70,10 +72,18 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("struct swapz_lane_gap_parts", header)
         self.assertNotIn("mutex_", header)
         self.assertNotIn("wait_for_completion(", header)
+        self.assertIn("write_sealed", engine_header)
+        self.assertIn("write_published", engine_header)
+        self.assertGreaterEqual(ENGINE.count("io.write_sealed"), 2)
+        self.assertGreaterEqual(ENGINE.count("io.write_published"), 2)
         self.assertIn("struct swapz_bio_ref {", DM)
         for field in ("lane_admitted_ns", "lane_owned_ns", "published_ns",
                       "published_deferred"):
             self.assertIn(field + ";", DM)
+        self.assertIn("atomic64_t lane_profile_epoch;", DM)
+        self.assertIn("u64 lane_prev_epoch;", DM)
+        self.assertIn("u64 lane_epoch;", DM)
+        self.assertIn("u64 lane_seal_ns;", DM)
         self.assertIn("entry->lane_admitted_ns = entry->admitted_ns;",
                       body("swapz_map"))
         self.assertIn("entry->lane_owned_ns = owned_ns;",
@@ -85,11 +95,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->write_admit_worker_wall_ns +=",
                       body("swapz_worker_pass"))
         epoch = body("swapz_message")
+        self.assertIn("atomic64_inc(&ctx->lane_profile_epoch)", epoch)
         self.assertIn("WRITE_ONCE(ctx->lane_prev_valid, false)", epoch)
         self.assertIn("WRITE_ONCE(ctx->sync4_last_done_ns, 0)", epoch)
         self.assertNotIn("lane_runs_submitted =", epoch)
-        self.assertIn("READ_ONCE(ctx->lane_prev_valid)",
-                      body("swapz_lane_gap_submit"))
+        submit = body("swapz_lane_gap_submit")
+        self.assertIn("atomic64_read(&ctx->lane_profile_epoch)", submit)
+        self.assertIn("READ_ONCE(ctx->lane_prev_epoch) == epoch", submit)
+        self.assertIn("page_count > ctx->batch_count - first_page", submit)
+        self.assertIn("ctx->planned_to_batch[planned_index]", submit)
+        self.assertIn("WRITE_ONCE(ctx->lane_prev_valid, false)", submit)
         worker = body("swapz_worker")
         self.assertIn("mutex_lock(&ctx->ordered_owner)", worker)
         self.assertIn("swapz_worker_pass(ctx)", worker)
@@ -103,12 +118,37 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         complete.index("bio_endio(bio);"))
         self.assertIn("atomic64_inc(count)", body("swapz_lane_gap_ack"))
         self.assertIn("atomic64_add(", body("swapz_lane_gap_ack"))
-        self.assertIn("ctx->lane_sync_window", body("swapz_lower"))
-        self.assertIn("swapz_lane_gap_foreign_write(ctx)",
-                      body("swapz_lower"))
-        self.assertIn("swapz_lane_gap_submit(ctx, inflight->commit_start_ns",
-                      body("swapz_submit_inflight_write"))
-        self.assertIn("ctx->lane_sync_done_ns", body("swapz_flush_window"))
+        lower = body("swapz_lower")
+        self.assertIn("lane_epoch_before", lower)
+        self.assertIn("ctx->lane_sync_window", lower)
+        self.assertIn("swapz_lane_gap_foreign_write(ctx)", lower)
+        async_submit = body("swapz_submit_inflight_write")
+        self.assertIn("swapz_lane_gap_submit(ctx, inflight->lane_epoch, 0,",
+                      async_submit)
+        self.assertIn("inflight->count, inflight->lane_seal_ns",
+                      async_submit)
+        self.assertIn("inflight->lane_seal_ns", async_submit)
+        flush = body("swapz_flush_window")
+        self.assertIn("inflight->lane_seal_ns = prepare_end;", flush)
+        self.assertIn("ctx->lane_sync_published_pages = committed;", flush)
+        self.assertIn("swapz_lane_gap_sync_sealed(ctx, prepared);", flush)
+        sync_sealed = body("swapz_lane_gap_sync_sealed")
+        self.assertIn("ctx->lane_sync_run_pages = sealed_pages;", sync_sealed)
+        lower = body("swapz_lower")
+        self.assertIn("ctx->lane_sync_published_pages", lower)
+        self.assertIn("ctx->lane_sync_run_pages", lower)
+        sync_publish = body("swapz_lane_gap_sync_published")
+        self.assertIn("published_pages != ctx->lane_sync_run_pages",
+                      sync_publish)
+        self.assertIn("entry->published_ns = published_ns;", sync_publish)
+        self.assertIn("ctx->lane_gap_owner_read_ns +=", submit)
+        constructor = body("swapz_ctr")
+        self.assertIn("ctx->engine.io.write_sealed = "
+                      "swapz_lane_gap_sync_sealed;", constructor)
+        self.assertIn("ctx->engine.io.write_published = "
+                      "swapz_lane_gap_sync_published;", constructor)
+        self.assertIn("atomic64_set(&ctx->lane_profile_epoch, 1);",
+                      constructor)
         status = body("swapz_status")
         for key in ("lane_gap_wall_ns", "lane_gap_invalid",
                     "ack_dwell_deferred_gt_1ms",
@@ -3282,7 +3322,8 @@ int main(void)
         self.assertIn(
             "Never use full-process window counters for the QD pilot", runner)
         fast = (ROOT / "tests/tools/fast-test.py").read_text()
-        self.assertIn('"sata-mixed", "nvme4-mixed", "fast-mixed", "fast-w4", "fast-w8"', fast)
+        self.assertIn('"sata-mixed", "nvme4-mixed", "nvme5-mixed"', fast)
+        self.assertIn('"fast-mixed", "fast-w4", "fast-w8"', fast)
         self.assertIn('os.environ.get("REPEAT", "3")', fast)
         self.assertIn("K=1 critical-path profile", fast)
         dm = (ROOT / "src/kernel/dm-target.c").read_text()
@@ -3317,10 +3358,13 @@ int main(void)
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+typedef unsigned long long atomic64_t;
+static void atomic64_inc(atomic64_t *value) { ++*value; }
 struct swapz_dm {
     unsigned long long sync4_last_done_ns;
     unsigned long long sync4_windows;
     bool lane_prev_valid;
+    atomic64_t lane_profile_epoch;
 };
 struct dm_target { void *private; };
 #define WRITE_ONCE(value, new_value) ((value) = (new_value))
@@ -3330,7 +3374,12 @@ static int swapz_message(struct dm_target *ti, unsigned int argc, char **argv,
 {CALLBACK}
 int main(void)
 {
-    struct swapz_dm ctx = {123, 7, true};
+    struct swapz_dm ctx = {
+        .sync4_last_done_ns = 123,
+        .sync4_windows = 7,
+        .lane_prev_valid = true,
+        .lane_profile_epoch = 9,
+    };
     struct dm_target ti = {&ctx};
     char *valid[] = {"profile_epoch"};
     char *invalid[] = {"unknown"};
@@ -3340,12 +3389,12 @@ int main(void)
     assert(swapz_message(&ti, 2, valid, result, sizeof(result)) == -EINVAL);
     assert(swapz_message(&ti, 1, invalid, result, sizeof(result)) == -EINVAL);
     assert(ctx.sync4_last_done_ns == 123 && ctx.sync4_windows == 7);
-    assert(ctx.lane_prev_valid);
+    assert(ctx.lane_prev_valid && ctx.lane_profile_epoch == 9);
     assert(!strcmp(result, "unchanged"));
     assert(swapz_message(&ti, 1, valid, result, sizeof(result)) == 1);
     assert(!strcmp(result, "profile_epoch=1"));
     assert(ctx.sync4_last_done_ns == 0 && ctx.sync4_windows == 7);
-    assert(!ctx.lane_prev_valid);
+    assert(!ctx.lane_prev_valid && ctx.lane_profile_epoch == 10);
     return 0;
 }
 '''.replace("CALLBACK", message)

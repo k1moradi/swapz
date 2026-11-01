@@ -36,6 +36,11 @@ static unsigned int corrupt_on_run;
 static unsigned int short_on_run;
 static unsigned int maps_visible_during_run;
 static unsigned int ownership_violation;
+static unsigned int sealed_calls, sealed_pages;
+static unsigned int published_calls, published_pages;
+static unsigned int sealed_missing_before_lower;
+static unsigned int publication_visibility_errors;
+static swapz_u8 sealed_pending_pages;
 static unsigned long long lower_written_bytes;
 
 static int read_blocks(void *opaque, swapz_u32 block, swapz_u8 blocks, swapz_u8 *out)
@@ -54,6 +59,9 @@ static int write_extent(void *opaque, swapz_u32 block, swapz_u8 blocks,
 {
 	(void)opaque;
 	*completed = 0;
+	if (!sealed_pending_pages)
+		sealed_missing_before_lower++;
+	sealed_pending_pages = 0;
 	if (block >= PHYSICAL || blocks > PHYSICAL - block)
 		return -ERANGE;
 	memcpy(media + (size_t)block * SWAPZ_BLOCK_BYTES, src,
@@ -64,6 +72,29 @@ static int write_extent(void *opaque, swapz_u32 block, swapz_u8 blocks,
 	return 0;
 }
 
+static void write_sealed(void *opaque, swapz_u8 pages_count)
+{
+	(void)opaque;
+	sealed_calls++;
+	sealed_pages += pages_count;
+	sealed_pending_pages = pages_count;
+}
+
+static void write_published(void *opaque, swapz_u8 pages_count)
+{
+	unsigned int valid = 0;
+	unsigned int index;
+
+	(void)opaque;
+	for (index = 0; index < 128; ++index)
+		if (maps[index].valid)
+			valid++;
+	published_calls++;
+	published_pages += pages_count;
+	if (valid < published_pages)
+		publication_visibility_errors++;
+}
+
 static int write_run(void *opaque, swapz_u32 block, swapz_u16 blocks,
 		     const swapz_u8 *src, swapz_u16 *completed)
 {
@@ -71,6 +102,9 @@ static int write_run(void *opaque, swapz_u32 block, swapz_u16 blocks,
 
 	(void)opaque;
 	*completed = 0;
+	if (!sealed_pending_pages)
+		sealed_missing_before_lower++;
+	sealed_pending_pages = 0;
 	if (!blocks || blocks > SWAPZ_BULK_BLOCKS ||
 	    block >= PHYSICAL || blocks > PHYSICAL - block ||
 	    block / SWAPZ_SEGMENT_BLOCKS !=
@@ -137,6 +171,8 @@ static int setup(void)
 	e.authority = &a;
 	e.io.write_extent = write_extent;
 	e.io.write_run = write_run;
+	e.io.write_sealed = write_sealed;
+	e.io.write_published = write_published;
 	e.io.read_blocks = read_blocks;
 	e.write_scratch = scratch;
 	e.read_scratch = reader;
@@ -147,6 +183,11 @@ static int setup(void)
 	fail_on_run = short_on_run = corrupt_on_run = 0;
 	maps_visible_during_run = 0;
 	ownership_violation = 0;
+	sealed_calls = sealed_pages = 0;
+	published_calls = published_pages = 0;
+	sealed_missing_before_lower = 0;
+	publication_visibility_errors = 0;
+	sealed_pending_pages = 0;
 	lower_written_bytes = 0;
 	for (i = 0; i < SWAPZ_MAX_RECORDS; ++i) {
 		swapz_u16 length = i % 3 == 0 ? 2089 : i % 3 == 1 ? 1032 : 2200;
@@ -239,6 +280,28 @@ static int test_overwrite_failed_run_preserves_old_pages(void)
 		for (j = 0; j < length; ++j)
 			CHECK(output[j] == (swapz_u8)(i + 1U));
 	}
+	return 0;
+}
+
+static int test_publication_observer_follows_authority_publish(void)
+{
+	swapz_u8 committed = 0;
+
+	CHECK(setup() == 0);
+	e.bulk_enabled = 0;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 4, &committed) == 0);
+	CHECK(committed == 4 && published_pages == 4 && published_calls > 0);
+	CHECK(sealed_pages == 4 && sealed_calls == published_calls);
+	CHECK(!sealed_missing_before_lower && !sealed_pending_pages);
+	CHECK(!publication_visibility_errors && !maps_visible_during_run);
+
+	CHECK(setup() == 0);
+	committed = 0;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 16, &committed) == 0);
+	CHECK(committed == 16 && published_pages == 16 && published_calls > 0);
+	CHECK(sealed_pages == 16 && sealed_calls == published_calls);
+	CHECK(!sealed_missing_before_lower && !sealed_pending_pages);
+	CHECK(!publication_visibility_errors && !maps_visible_during_run);
 	return 0;
 }
 
@@ -1259,6 +1322,7 @@ int main(void)
 	CHECK(test_real_aggregation_and_readback() == 0); passed++;
 	CHECK(test_failed_run_acks_nothing() == 0); passed++;
 	CHECK(test_overwrite_failed_run_preserves_old_pages() == 0); passed++;
+	CHECK(test_publication_observer_follows_authority_publish() == 0); passed++;
 	CHECK(test_successful_bulk_overwrite_publishes_after_completion() == 0); passed++;
 	CHECK(test_short_run_acks_nothing() == 0); passed++;
 	CHECK(test_corrupted_completed_run_detected_on_read() == 0); passed++;

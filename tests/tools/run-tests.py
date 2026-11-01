@@ -394,20 +394,28 @@ def lane_gap_attribution_rows(benchmarks):
             continue
         runs = counters["lane_gap_runs"]
         total_gap = counters["lane_gap_wall_ns"]
-        paired_foreign = runs + counters["lane_gap_foreign_runs"]
-        admitted_zero = counters["lane_successor_admitted_by_completion_0"]
         host = (arm.get("host_cpu") or {}).get("busy_fraction")
         rows.append({
             "envelope": name,
             "runs": runs,
+            "foreign_runs": counters["lane_gap_foreign_runs"],
+            "foreign_gap_ms": counters["lane_gap_foreign_ns"] / 1e6,
+            "unpaired_runs": counters["lane_gap_unpaired_runs"],
             "gap_per_run_us": total_gap / runs / 1000 if runs else None,
             "part_shares": {
                 key: counters[key] / total_gap * 100 if total_gap else None
                 for key in LANE_GAP_PARTS
             },
-            "successor_admitted_at_t0_pct": (
-                (paired_foreign - admitted_zero) / paired_foreign * 100
-                if paired_foreign else None),
+            "successor_admitted_distribution": [
+                counters[f"lane_successor_admitted_by_completion_{suffix}"]
+                for suffix in LANE_SUCCESSOR_BINS
+            ],
+            "successor_owned_distribution": [
+                counters[f"lane_successor_owned_by_completion_{suffix}"]
+                for suffix in LANE_SUCCESSOR_BINS
+            ],
+            "owner_read_ms": counters["lane_gap_owner_read_ns"] / 1e6,
+            "owner_reads": counters["lane_gap_owner_reads"],
             "deferred_ack_p99_bin_bound": lane_gap_dwell_p99_bound(counters),
             "host_busy_pct": host * 100 if type(host) in (float, int) else None,
         })
@@ -418,25 +426,39 @@ def print_lane_gap_attribution(rows):
     """Descriptive only: no goal, policy or qualification verdict."""
     if not rows:
         return
+
     def number(value, suffix=""):
         return "n/a" if value is None else f"{value:.1f}{suffix}"
+
+    def distribution(values):
+        return "/".join(str(value) for value in values)
+
     table_rows = []
     for row in rows:
         shares = row["part_shares"]
         table_rows.append((
-            row["envelope"], row["runs"], number(row["gap_per_run_us"]),
+            row["envelope"], row["runs"], row["foreign_runs"],
+            row["unpaired_runs"], number(row["gap_per_run_us"]),
+            number(row["foreign_gap_ms"]),
             *[number(shares[key], "%") for key in LANE_GAP_PARTS],
-            number(row["successor_admitted_at_t0_pct"], "%"),
+            distribution(row["successor_admitted_distribution"]),
+            distribution(row["successor_owned_distribution"]),
+            f"{row['owner_read_ms']:.2f}/{row['owner_reads']}",
             row["deferred_ack_p99_bin_bound"],
             number(row["host_busy_pct"], "%"),
         ))
     print_table(
         "SSD lower-lane gap attribution",
-        ("envelope", "runs", "gap/run us", "wake", "publish", "no work",
-         "unowned", "staged", "seal", "admit@t0", "ACK p99 bin", "host busy"),
+        ("envelope", "paired", "foreign", "unpaired", "gap/run us",
+         "foreign ms", "wake", "publish", "no work", "unowned", "staged",
+         "seal", "succ admit", "succ owned", "READ ms/#", "ACK p99 bin",
+         "host busy"),
         table_rows)
-    print("  Six phases as % of paired gap; ACK p99 is an inclusive bin "
-          "upper bound (>1ms is open-ended). Descriptive, not a gate.")
+    print("  Six phases are % of paired gaps. Successor bins are "
+          "0/1/2-3/4-7/8-15/16+ at prior t0; foreign gaps are whole-gap "
+          "exclusions. READ ms/# overlaps the gap partition. ACK p99 is an "
+          "inclusive bin upper bound (>1ms is open-ended). Descriptive only.")
+
 
 KERNEL_WRITE_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
