@@ -40,6 +40,8 @@ def host_matches(report, online_cpus=7, backend="neon"):
 
 def validate_host_profile(profile):
     """x86 cohorts require an audited immutable report allowlist, not ISA guessing."""
+    owner_confirmed = (profile.get("owner_confirmed_same_computer_report_shas", [])
+                       if isinstance(profile, dict) else None)
     if not isinstance(profile, dict) or not re.fullmatch(
             r"x86-[a-z0-9-]+", str(profile.get("id", ""))) or \
             not isinstance(profile.get("title"), str) or \
@@ -48,7 +50,11 @@ def validate_host_profile(profile):
             not re.fullmatch(r"[0-9a-f]{64}", str(profile.get("host_id_sha256", ""))) or \
             not isinstance(profile.get("report_shas"), list) or not profile["report_shas"] or \
             any(not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
-                for sha in profile["report_shas"]):
+                for sha in profile["report_shas"]) or \
+            not isinstance(owner_confirmed, list) or \
+            any(not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or
+                sha not in profile["report_shas"] for sha in owner_confirmed) or \
+            len(set(owner_confirmed)) != len(owner_confirmed):
         raise ValueError("x86 profile needs id/title, CPU count, host digest and full audited report SHAs")
     return profile
 
@@ -78,15 +84,29 @@ def selected_host_report(report, sha, profile=None):
         len(stages) == 5 and all(stage.get("status") == "PASS" for stage in stages)
 
 
-def same_computer_report(report, identity):
+def same_computer_report(report, identity, sha=None, legacy_profile=None):
     stages = report.get("stages", [])
-    return report.get("host_identity") == identity and report.get("overall") == "PASS" and \
-        len(stages) == 5 and all(stage.get("status") == "PASS" for stage in stages)
+    passed = report.get("overall") == "PASS" and len(stages) == 5 and \
+        all(stage.get("status") == "PASS" for stage in stages)
+    if not passed:
+        return False
+    if report.get("host_identity") == identity:
+        return True
+    if legacy_profile is None or sha not in legacy_profile.get(
+            "owner_confirmed_same_computer_report_shas", []):
+        return False
+    return selected_host_report(report, sha, legacy_profile)
 
 
-def collect(profile=None, computer=None):
+def collect(profile=None, computer=None, legacy_profile=None):
     if profile is not None:
         validate_host_profile(profile)
+    if legacy_profile is not None:
+        validate_host_profile(legacy_profile)
+        if computer is None or legacy_profile["host_id_sha256"] != computer.get("id_sha256"):
+            raise ValueError("legacy host profile must match the selected computer identity")
+        if profile is not None:
+            raise ValueError("select either a profile history or a computer history")
     history = subprocess.check_output(
         ["git", "log", "--reverse", "--format=%H %cI", "--", "test_results.json"],
         cwd=ROOT, text=True).splitlines()
@@ -102,7 +122,8 @@ def collect(profile=None, computer=None):
         except (ValueError, subprocess.CalledProcessError):
             excluded["unreadable report"] += 1
             continue
-        if not (same_computer_report(report, computer) if computer is not None
+        if not (same_computer_report(report, computer, sha, legacy_profile)
+                if computer is not None
                 else selected_host_report(report, sha, profile)):
             excluded["other or unproven host"] += 1
             continue
@@ -119,6 +140,11 @@ def collect(profile=None, computer=None):
                     (profile["id"] if profile else "arm64-neon"),
                     "host_id_sha256": computer["id_sha256"] if computer else
                     (profile["host_id_sha256"] if profile else None),
+                    "host_identity_basis": (
+                        "exact host identity" if report.get("host_identity") == computer else
+                        "owner-confirmed legacy report SHA") if computer else
+                        ("exact host identity" if report.get("host_identity") else
+                         "audited report allowlist"),
                     "date": datetime.fromisoformat(stamp).astimezone(
                         ZoneInfo("America/Los_Angeles")).isoformat(),
                     "kernel": report.get("kernel_release")}
@@ -130,9 +156,20 @@ def collect(profile=None, computer=None):
                 if profile else "NEON/seven-CPU VM cohort; old reports lack an immutable VM ID.")
     if computer is not None:
         title = computer["architecture"] + " · host " + computer["id_sha256"][:12]
-        identity = "Exact OS installation identity and architecture; unidentified legacy reports excluded."
+        legacy_count = sum(row["host_identity_basis"] == "owner-confirmed legacy report SHA"
+                           for row in reports)
+        identity = "Exact OS installation identity and architecture."
+        if legacy_count == 1:
+            identity += (" Includes 1 user-confirmed legacy report by immutable SHA; its report file "
+                         "lacks host_identity and is explicitly marked in history.json.")
+        elif legacy_count:
+            identity += (f" Includes {legacy_count} user-confirmed legacy reports by immutable SHA; "
+                         "their report files lack host_identity and are explicitly marked in history.json.")
+    else:
+        legacy_count = 0
     return {"reports": reports, "points": points, "excluded": dict(excluded),
-            "title": title, "host_profile": profile,
+            "title": title, "host_profile": legacy_profile or profile,
+            "owner_confirmed_legacy_reports": legacy_count,
             "identity_note": identity,
             "scope": "Historical descriptive " + title + " owner PASS reports. " + identity +
                      " No quiet-window noise screen in official reports; no causal cross-report "
@@ -291,6 +328,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host-profile", type=Path,
                         help="audited x86 host JSON; omission preserves the ARM64 cohort")
+    parser.add_argument("--legacy-host-profile", type=Path,
+                        help="owner-confirmed legacy report SHAs to add to a matching exact host")
     parser.add_argument("--host-id", help="exact report machine identity digest")
     parser.add_argument("--host-architecture", help="exact report architecture")
     args = parser.parse_args()
@@ -303,9 +342,15 @@ def main():
         OUT = ROOT / "build/history" / (args.host_architecture + "-" + args.host_id)
     profile = validate_host_profile(json.loads(args.host_profile.read_text())) \
         if args.host_profile else None
+    legacy_profile = validate_host_profile(json.loads(args.legacy_host_profile.read_text())) \
+        if args.legacy_host_profile else None
     if profile is not None:
         OUT = ROOT / "build/history" / profile["id"]
-    data = collect(profile, computer)
+    if legacy_profile is not None:
+        if computer is None or legacy_profile["host_id_sha256"] != computer["id_sha256"] or \
+                profile is not None:
+            parser.error("--legacy-host-profile requires its matching --host-id and no --host-profile")
+    data = collect(profile, computer, legacy_profile)
     if not data["reports"]:
         raise SystemExit("No proven PASS history for the selected host profile")
     render(data)
@@ -366,6 +411,7 @@ def main():
     if not (snapshot / "index.md").exists():
         (snapshot / "index.md").write_text(index)
     print(json.dumps({"reports": len(data["reports"]), "points": len(data["points"]),
+                      "owner_confirmed_legacy_reports": data["owner_confirmed_legacy_reports"],
                       "excluded": data["excluded"], "output": str(OUT),
                       "latest_source": data["reports"][-1]["source_sha"],
                       "latest_report": data["reports"][-1]["report_sha"],

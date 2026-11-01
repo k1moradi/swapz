@@ -86,7 +86,7 @@ confirms AVX-512 xstate and selected transform/inverse. This is not measured
 RAM bandwidth or physical NVMe fidelity. The direct-BIO pilot below was removed,
 and production C remains byte-identical to that baseline. The [receiving-host
 result](handoff/x86-continuation-result.md) records absolute raw/swapz service,
-latency/lower-I/O trade-offs, host identity and the separate x86 history profile.
+latency/lower-I/O trade-offs, host identity and the audited x86 history selection.
 
 Main now also contains the ID148 lower-callback lifetime repair in
 `2aa3ba06520fbf3a723294d7d7dd09cdd45e6502`. Its owner run was deliberately

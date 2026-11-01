@@ -117,17 +117,21 @@ Those remain mandatory before any future retention; passing ordinary byte
 oracles is not a substitute. Production returns to the already-qualified
 lifetime repair with unchanged ownership, publication, allocator and GC policy.
 
-## Separate history artifacts
+## x86 history selection
 
-The thin history helper now supports an explicit audited x86 host profile and a
-distinct `build/history/x86-i7-1185g7-avx512/` output. It requires full selected
-report SHAs, host digest, matching CPU count, executable scalar/SSE2/AVX2/AVX-512
-evidence and five passing stages. Old matching ISA/CPU counts alone cannot
-admit a report. ARM selection, outputs, snapshot immutability and line-break
-rules remain covered. Automatic ARM refresh is skipped on x86; receiving-host
-refresh uses the explicit profile and never labels ARM points as new x86 data.
-Matplotlib was missing here and was installed from the distribution packages
-before the pilot; no package installation or plot rendering overlapped it.
+The thin history helper selects the receiving host by exact OS installation
+identity and architecture under
+`build/history/x86_64-3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071/`.
+The owner-confirmed earlier report `c0feb2127c05ffde1826e250e1ade55918d21448`
+has no embedded host digest, so the audited profile admits it by immutable
+report SHA after matching the i7-1185G7, eight-CPU, AVX-512 and five-stage-pass
+checks. It is pooled into the same history and marked as owner-confirmed legacy
+provenance; the other three profile reports already have the exact host digest.
+The old `build/history/x86-i7-1185g7-avx512/` profile view is a duplicate subset,
+not a separate computer series. ARM selection, output, snapshot immutability and
+line-break rules remain separate. Matplotlib was missing here and was installed
+from the distribution packages before the pilot; no package installation or
+plot rendering overlapped it.
 
 All newly rendered plots are displayed inline in the continuation chat. The
 stable local index points to immutable image/data snapshots. No unqualified

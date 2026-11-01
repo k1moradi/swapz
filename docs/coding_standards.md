@@ -90,16 +90,14 @@ performance plots from committed `test_results.json` reports and display every
 generated or refreshed plot inline to the owner. The current private
 `tests/tools/plot-history.py` helper defaults to the ARM64/NEON VM's seven-CPU profile;
 preserve its plots, source/report SHA mapping and CSV/JSON under
-`build/history/arm64-neon/` with its documented identity limitations. It does not
-select x86 history without an explicit audited host profile. The private
-`--host-profile` artifact option reads full attested report SHAs, a host digest
-and the online-CPU count; x86 currently requires executable scalar/SSE2/AVX2/AVX-512
-evidence and five passing stages. Its `x86-*` output cannot overwrite ARM history.
-Use `docs/handoff/x86-host-history.json` for the receiving i7-1185G7 host. Treat
-old reports without a confirmed host/protocol match as separate references,
-not connected comparison points. Exclude failed/blocked reports and unqualified
-fast-test trials. Keep default-LZ4 mixed, optional policies and sustained WRITE
-QDs separate.
+`build/history/arm64-neon/` with its documented identity limitations. X86
+history uses the exact host digest; `docs/handoff/x86-host-history.json` may add
+an owner-confirmed legacy report by full SHA when the digest matches. That
+report must also match the audited CPU count, scalar/SSE2/AVX2/AVX-512 evidence
+and five passing stages, and its legacy identity basis remains explicit in the
+history data. ISA/CPU count alone does not establish a host match. Exclude
+failed/blocked reports and unqualified fast-test trials. Keep default-LZ4 mixed,
+optional policies and sustained WRITE QDs separate.
 Use each report's own raw controls and break lines at kernel/model/content/replay
 changes. History is descriptive, not causal attribution or physical wear evidence.
 If no new owner report exists, state that the plots still end at the prior

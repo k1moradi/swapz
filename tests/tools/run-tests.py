@@ -7340,35 +7340,39 @@ def refresh_history(host_identity):
     env = os.environ.copy()
     env["MPLBACKEND"] = "Agg"
     env.setdefault("MPLCONFIGDIR", str(output / "matplotlib-cache"))
+    plot_command = [sys.executable, "-B", str(ROOT / "tests/tools/plot-history.py"),
+                    "--host-id", digest, "--host-architecture", arch]
+    if arch == "x86_64":
+        profile_path = ROOT / "docs/handoff/x86-host-history.json"
+        try:
+            profile = json.loads(profile_path.read_text())
+        except (OSError, ValueError):
+            profile = {}
+        if profile.get("host_id_sha256") == digest:
+            plot_command.extend(["--legacy-host-profile", str(profile_path)])
     try:
         output.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
-            [sys.executable, "-B", str(ROOT / "tests/tools/plot-history.py"),
-             "--host-id", digest, "--host-architecture", arch],
+            plot_command,
             cwd=ROOT, env=env, capture_output=True, text=True,
             timeout=HISTORY_REFRESH_TIMEOUT_S)
         log.write_text(proc.stdout + proc.stderr)
         if proc.returncode:
             return f"NOT UPDATED: history helper failed; see {log.relative_to(ROOT)}"
         summary = json.loads(proc.stdout)
-        result = (f"UPDATED: {summary['reports']} this-computer PASS reports; latest source "
+        legacy_count = summary.get("owner_confirmed_legacy_reports", 0)
+        legacy_note = (f", including {legacy_count} owner-confirmed legacy report"
+                       if legacy_count == 1 else
+                       f", including {legacy_count} owner-confirmed legacy reports"
+                       if legacy_count else "")
+        result = (f"UPDATED: {summary['reports']} this-computer PASS reports{legacy_note}; latest source "
                   f"{summary['latest_source'][:12]}; {output.relative_to(ROOT)}/index.md")
-        # Historical cohorts without a stable machine ID remain separate
-        # references. Do not append them to the exact-computer series.
+        # ARM's historical cohort remains separate. The x86 legacy SHA is
+        # included above only through its owner-confirmed, matching-host profile.
         reference_command = None
         if arch == "aarch64":
             reference_command = [sys.executable, "-B",
                                  str(ROOT / "tests/tools/plot-history.py")]
-        elif arch == "x86_64":
-            profile_path = ROOT / "docs/handoff/x86-host-history.json"
-            try:
-                profile = json.loads(profile_path.read_text())
-            except (OSError, ValueError):
-                profile = {}
-            if profile.get("host_id_sha256") == digest:
-                reference_command = [sys.executable, "-B",
-                                     str(ROOT / "tests/tools/plot-history.py"),
-                                     "--host-profile", str(profile_path)]
         if reference_command is not None:
             reference_log = output / "reference-refresh.log"
             try:

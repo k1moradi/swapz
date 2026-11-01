@@ -2565,16 +2565,18 @@ Git report history preserves each computer's measurements even though the
 shared `test_results.json` is overwritten by the latest upload. The plotter
 scans report revisions, never assumes the current file belongs to this host.
 Outputs are isolated under `build/history/<architecture>-<full-host-digest>/`.
-A missing/invalid identity fails closed. Legacy reports without identity remain
-in their existing manually selected histories; ISA/CPU count cannot migrate them
-automatically. After the exact-computer refresh, the ARM64 host also refreshes
+A missing/invalid identity fails closed. Legacy reports without identity stay
+excluded unless their immutable report SHA is explicitly owner-confirmed for
+that computer and passes the audited host-profile checks; included legacy
+points are labeled with that provenance in `history.json`. ISA/CPU count alone
+cannot migrate them. After the exact-computer refresh, the ARM64 host also refreshes
 its pre-existing NEON/seven-CPU legacy-cohort history separately under
 `build/history/arm64-neon/`. The audited AVX-512 host additionally refreshes
-the explicit `docs/handoff/x86-host-history.json` allowlist under its own
-profile directory when its exact host digest matches. Neither reference chart
-adds unauthenticated reports to the exact-computer history; the four-CPU SSE2
-host receives no unverified automatic legacy selector. Reference refresh
-failure is reported separately and cannot alter qualification. OS reinstalls start a new history, and cloned installations must
+the explicit `docs/handoff/x86-host-history.json` owner-confirmed legacy SHA
+in the same exact-host history rather than generating a duplicate cohort chart.
+The four-CPU SSE2 host receives no unverified automatic legacy selector. ARM
+reference refresh failure is reported separately and cannot alter
+qualification. OS reinstalls start a new history, and cloned installations must
 have unique machine IDs. Python Matplotlib must be installed for rendering.
 It prints the latest plotted source and the local index path. Failed/blocked,
 uncommitted and other-host runs never become this computer’s performance points. Plot
@@ -2590,13 +2592,15 @@ rendered chat images are snapshots; refreshed files live under the stable index.
 
 For work moved to x86, the private history helper accepts an explicit audited
 host JSON with full report SHAs and host identity digest. The receiving host's
-profile is `docs/handoff/x86-host-history.json`; output stays under its distinct
-`build/history/x86-*` directory. Selection also requires all five stages PASS,
-eight-CPU identity for this profile and scalar/SSE2/AVX2/AVX-512 execution evidence.
-Rootless report tests reject unlisted, incomplete, missing-CPU and wrong-ISA reports,
+profile is `docs/handoff/x86-host-history.json`; its confirmed legacy report is
+added to the matching exact-identity `build/history/x86-*` series and tagged by
+report SHA. Selection also requires all five stages PASS, eight-CPU identity
+for this profile and scalar/SSE2/AVX2/AVX-512 execution evidence. Rootless
+report tests reject unlisted, incomplete, missing-CPU and wrong-ISA reports,
 unsafe output names and missing host digests, while retaining ARM selector and
-snapshot/line-break coverage. Verify legacy host/protocol before adding its SHA;
-backend names and CPU count alone do not establish the same physical machine.
+snapshot/line-break coverage. Verify legacy host/protocol before adding its
+SHA; backend names and CPU count alone do not establish the same physical
+machine.
 Show every newly generated/refreshed
 plot inline. Keep configured emulation rates and achieved raw controls visible;
 host-limited RAM emulation is synthetic software evidence, not a physical
