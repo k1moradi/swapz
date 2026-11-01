@@ -346,12 +346,15 @@ LANE_GAP_FIELDS = (
 
 
 def lane_gap_record(kernel):
-    """Return a descriptive timed snapshot or None for a raw/no-data arm."""
-    if not isinstance(kernel, dict):
+    """Return a descriptive timed snapshot, or None when unavailable.
+
+    io-replay already fails a session closed on missing or inconsistent ID178
+    tokens, and the timed-telemetry gates require every KERNEL_WRITE_FIELDS
+    entry. A descriptive copy must never abort report generation itself.
+    """
+    if not isinstance(kernel, dict) or any(
+            type(kernel.get(key)) is not int for key in LANE_GAP_FIELDS):
         return None
-    missing = [key for key in LANE_GAP_FIELDS if key not in kernel]
-    if missing:
-        raise ValueError("missing ID178 attribution fields: " + ", ".join(missing))
     return {key: kernel[key] for key in LANE_GAP_FIELDS}
 
 
@@ -380,12 +383,14 @@ def lane_gap_attribution_rows(benchmarks):
     for name, key in (("SATA", "sata_ssd"), ("NVMe4", "nvme_gen4"),
                       ("NVMe5", "nvme_gen5")):
         session = next((row for row in envelope_sessions
-                        if row.get("envelope") == key), None)
+                        if row.get("envelope") == key and
+                        row.get("status") == "PASS"), None)
         arm = (session or {}).get("arms", {}).get("swapz", {})
         selected.append((name, arm))
     fast = next((row for row in benchmarks.get("sessions", [])
                  if row.get("regime") == "ssd_emulated" and
-                 row.get("async_prepare") == 1), None)
+                 row.get("async_prepare") == 1 and
+                 row.get("status") == "PASS"), None)
     selected.append(("fast mixed", (fast or {}).get("arms", {}).get("swapz", {})))
     rows = []
     for name, arm in selected:

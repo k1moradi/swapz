@@ -190,8 +190,8 @@ struct swapz_inflight_write {
 	u64 lower_start_ns;
 	u64 lower_end_ns;
 	u64 commit_start_ns;
+	/* ID178 profiling generation captured around lower_start_ns (t4). */
 	u64 lane_epoch;
-	u64 lane_seal_ns;
 	u64 prepare_nonio_ns;
 	/* ID175: staged and detached by the submitting task, not the worker. */
 	bool submitter_dispatched;
@@ -488,9 +488,14 @@ struct swapz_dm {
 	u64 lane_prev_owner_ns;
 	u64 lane_prev_published_ns;
 	bool lane_prev_valid;
-	bool lane_prev_foreign;
+	/* End of the latest non-run lower WRITE (GC, single-page RAW, other). */
+	u64 lane_foreign_write_end_ns;
+	/* A foreground window flush is driving the synchronous engine. */
 	bool lane_sync_window;
+	/* The engine sealed lane_sync_run_pages; the next lower WRITE is it. */
+	bool lane_sync_run_pending;
 	u64 lane_sync_epoch;
+	/* t3: when sealing of the next synchronous run started. */
 	u64 lane_sync_seal_ns;
 	u64 lane_sync_done_ns;
 	swapz_u8 lane_sync_published_pages;
@@ -1091,13 +1096,17 @@ static void swapz_release_prepared(struct bio *bio)
  * calls these chronology helpers. The callback sets lower_end_ns, never the
  * predecessor or any partition counter. There are no new waits or locks.
  */
-static void swapz_lane_gap_foreign_write(struct swapz_dm *ctx)
+/*
+ * A lower WRITE that is not a K=1 window run (GC relocation, the single-page
+ * RAW fallback) occupies the lane. Record when it ended: a gap whose
+ * predecessor completed before that end is foreign as a whole. A timestamp,
+ * unlike a flag, also covers a foreign WRITE issued after a predecessor's
+ * lower completion but before its publication, while no predecessor is valid.
+ */
+static void swapz_lane_gap_note_foreign_write(struct swapz_dm *ctx,
+					      u64 end_ns)
 {
-	u64 epoch = (u64)atomic64_read(&ctx->lane_profile_epoch);
-
-	if (READ_ONCE(ctx->lane_prev_valid) &&
-	    READ_ONCE(ctx->lane_prev_epoch) == epoch)
-		ctx->lane_prev_foreign = true;
+	ctx->lane_foreign_write_end_ns = end_ns;
 }
 
 static void swapz_lane_gap_publish(struct swapz_dm *ctx, u64 epoch,
@@ -1126,7 +1135,6 @@ static void swapz_lane_gap_publish(struct swapz_dm *ctx, u64 epoch,
 	ctx->lane_prev_done_ns = done_ns;
 	ctx->lane_prev_owner_ns = observed_ns;
 	ctx->lane_prev_published_ns = published_ns;
-	ctx->lane_prev_foreign = false;
 	ctx->lane_gap_pending_owner_read_ns = 0;
 	ctx->lane_gap_pending_owner_reads = 0;
 	WRITE_ONCE(ctx->lane_prev_valid, true);
@@ -1148,24 +1156,22 @@ static void swapz_lane_gap_submit(struct swapz_dm *ctx, u64 epoch,
 		READ_ONCE(ctx->lane_prev_epoch) == epoch;
 
 	ctx->lane_runs_submitted++;
+	/*
+	 * Every outcome below ends by invalidating the predecessor: whatever was
+	 * published before this submission is older than this run, so it can
+	 * never pair with a later run, even if this run itself is unpaired
+	 * (unsampled generation) or invalid.
+	 */
 	if (!page_count || first_page > ctx->batch_count ||
 	    page_count > ctx->batch_count - first_page ||
 	    !seal_ns || !submit_ns) {
 		ctx->lane_gap_invalid++;
-		if (epoch && epoch == current_epoch)
-			WRITE_ONCE(ctx->lane_prev_valid, false);
-		return;
-	}
-	if (!epoch || epoch != current_epoch) {
-		ctx->lane_gap_unpaired_runs++;
-		return;
+		goto invalidate_predecessor;
 	}
 	if (!predecessor_valid) {
+		/* Includes an unsampled (0) or superseded generation. */
 		ctx->lane_gap_unpaired_runs++;
-		if (!READ_ONCE(ctx->lane_prev_epoch) ||
-		    READ_ONCE(ctx->lane_prev_epoch) == epoch)
-			WRITE_ONCE(ctx->lane_prev_valid, false);
-		return;
+		goto invalidate_predecessor;
 	}
 	previous_done_ns = ctx->lane_prev_done_ns;
 	for (index = 0; index < page_count; ++index) {
@@ -1191,7 +1197,7 @@ static void swapz_lane_gap_submit(struct swapz_dm *ctx, u64 epoch,
 		swapz_lane_gap_successor_bin(admitted_by_completion)]++;
 	ctx->lane_gap_successor_owned_by_completion[
 		swapz_lane_gap_successor_bin(owned_by_completion)]++;
-	if (ctx->lane_prev_foreign) {
+	if (ctx->lane_foreign_write_end_ns > previous_done_ns) {
 		if (submit_ns >= previous_done_ns) {
 			ctx->lane_gap_foreign_runs++;
 			ctx->lane_gap_foreign_ns += submit_ns - previous_done_ns;
@@ -1221,7 +1227,13 @@ static void swapz_lane_gap_submit(struct swapz_dm *ctx, u64 epoch,
 		ctx->lane_gap_owner_read_ns += ctx->lane_gap_pending_owner_read_ns;
 		ctx->lane_gap_owner_reads += ctx->lane_gap_pending_owner_reads;
 	}
-	/* In-flight data is not the next predecessor until publication. */
+invalidate_predecessor:
+	/*
+	 * In-flight data is not the next predecessor until publication. Since
+	 * every submission clears the predecessor and only publication sets it,
+	 * a valid predecessor proves that no run was submitted in between: the
+	 * measured interval is an idle-lane gap of the K=1 pipeline.
+	 */
 	WRITE_ONCE(ctx->lane_prev_valid, false);
 }
 
@@ -1243,24 +1255,29 @@ static void swapz_lane_gap_note_owner_read(struct swapz_dm *ctx,
 }
 
 /*
- * The synchronous engine knows the logical-page count at the exact point a
- * lower run becomes immutable. Record that one-shot boundary before it enters
- * the lower adapter; the adapter consumes the timestamp at t4.
+ * Engine observation hook: the synchronous engine has made one exact logical
+ * run immutable and is about to submit it; the next lower WRITE is that run.
+ * Only foreground window flushes (lane_sync_window) are K=1 runs. GC
+ * compaction drives the same engine with no window open; its WRITEs are
+ * foreign (see swapz_lower()), so the hook ignores them. t3 is not sampled
+ * here: sealing started at the window flush or at the previous publication.
  */
 static void swapz_lane_gap_sync_sealed(void *opaque, swapz_u8 sealed_pages)
 {
 	struct swapz_dm *ctx = opaque;
 
-	if (!ctx->lane_sync_window || !sealed_pages ||
+	if (!ctx->lane_sync_window)
+		return;
+	if (!sealed_pages || ctx->lane_sync_run_pending ||
 	    ctx->lane_sync_published_pages > ctx->batch_count ||
 	    sealed_pages > ctx->batch_count - ctx->lane_sync_published_pages) {
 		ctx->lane_gap_invalid++;
-		ctx->lane_sync_seal_ns = 0;
+		ctx->lane_sync_run_pending = false;
 		ctx->lane_sync_run_pages = 0;
 		return;
 	}
-	ctx->lane_sync_seal_ns = ktime_get_ns();
 	ctx->lane_sync_run_pages = sealed_pages;
+	ctx->lane_sync_run_pending = true;
 }
 
 /*
@@ -1272,20 +1289,26 @@ static void swapz_lane_gap_sync_published(void *opaque,
 					  swapz_u8 published_pages)
 {
 	struct swapz_dm *ctx = opaque;
-	u64 published_ns = ktime_get_ns();
-	swapz_u8 first = ctx->lane_sync_published_pages;
-	swapz_u8 index;
+	u64 published_ns;
+	swapz_u8 first, index;
 
-	if (!ctx->lane_sync_window || !ctx->lane_sync_epoch ||
-	    !ctx->lane_sync_done_ns || !published_pages ||
-	    published_pages != ctx->lane_sync_run_pages ||
+	if (!ctx->lane_sync_window)
+		return;
+	published_ns = ktime_get_ns();
+	first = ctx->lane_sync_published_pages;
+	if (ctx->lane_sync_run_pending || !ctx->lane_sync_done_ns ||
+	    !published_pages || published_pages != ctx->lane_sync_run_pages ||
 	    first > ctx->batch_count ||
 	    published_pages > ctx->batch_count - first) {
 		ctx->lane_gap_invalid++;
+		WRITE_ONCE(ctx->lane_prev_valid, false);
+		ctx->lane_sync_run_pending = false;
 		ctx->lane_sync_epoch = 0;
 		ctx->lane_sync_done_ns = 0;
+		ctx->lane_sync_run_pages = 0;
 		return;
 	}
+	/* An unsampled generation (0, profile_epoch race) is inert there. */
 	swapz_lane_gap_publish(ctx, ctx->lane_sync_epoch,
 			       ctx->lane_sync_done_ns, ctx->lane_sync_done_ns,
 			       published_ns, true);
@@ -1299,7 +1322,42 @@ static void swapz_lane_gap_sync_published(void *opaque,
 		entry->published_deferred = false;
 	}
 	ctx->lane_sync_published_pages = first + published_pages;
+	/* The engine starts sealing the window's next run right away. */
+	ctx->lane_sync_seal_ns = published_ns;
 	ctx->lane_sync_epoch = 0;
+	ctx->lane_sync_done_ns = 0;
+	ctx->lane_sync_run_pages = 0;
+}
+
+/* Open one synchronous window observation; t3 of its first run is seal_ns. */
+static void swapz_lane_gap_sync_window_begin(struct swapz_dm *ctx,
+					     swapz_u8 committed, u64 seal_ns)
+{
+	ctx->lane_sync_window = true;
+	ctx->lane_sync_run_pending = false;
+	ctx->lane_sync_epoch = 0;
+	ctx->lane_sync_seal_ns = seal_ns;
+	ctx->lane_sync_done_ns = 0;
+	ctx->lane_sync_published_pages = committed;
+	ctx->lane_sync_run_pages = 0;
+}
+
+/*
+ * Close the observation. A run sealed but never submitted, or submitted but
+ * never published, can never become a predecessor. Without an engine error
+ * that state means a missing observer, so it is also an accounting anomaly.
+ */
+static void swapz_lane_gap_sync_window_end(struct swapz_dm *ctx, int error)
+{
+	if (ctx->lane_sync_run_pending || ctx->lane_sync_done_ns) {
+		if (!error)
+			ctx->lane_gap_invalid++;
+		WRITE_ONCE(ctx->lane_prev_valid, false);
+	}
+	ctx->lane_sync_window = false;
+	ctx->lane_sync_run_pending = false;
+	ctx->lane_sync_epoch = 0;
+	ctx->lane_sync_seal_ns = 0;
 	ctx->lane_sync_done_ns = 0;
 	ctx->lane_sync_run_pages = 0;
 }
@@ -1822,9 +1880,6 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	if (inflight->lane_epoch !=
 	    (u64)atomic64_read(&ctx->lane_profile_epoch))
 		inflight->lane_epoch = 0;
-	swapz_lane_gap_submit(ctx, inflight->lane_epoch, 0,
-			      inflight->count, inflight->lane_seal_ns,
-			      inflight->lower_start_ns);
 	swapz_end_accepted_lower_idle(ctx, inflight->lower_start_ns);
 	inflight->lower_end_ns = 0;
 	WRITE_ONCE(inflight->active, true);
@@ -1855,6 +1910,14 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	ctx->pipeline_active_max =
 		max_t(swapz_u8, ctx->pipeline_active_max, ctx->inflight_count);
 	ctx->pipeline_async_runs++;
+	/*
+	 * ID178 accounting runs only for a submitted run and after the lower
+	 * WRITE left, so it adds nothing before submission. The callback never
+	 * touches the window, so its BIOs stay readable under ordered_owner.
+	 * t3 is the seal start: plan, stage, pack and CRC belong to "seal".
+	 */
+	swapz_lane_gap_submit(ctx, inflight->lane_epoch, 0, inflight->count,
+			      inflight->commit_start_ns, inflight->lower_start_ns);
 	return 0;
 }
 
@@ -2048,6 +2111,7 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	unsigned long bitmap = 0;
 	u64 section_start, section_end, elapsed_ns;
 	u64 lane_epoch = 0, lane_epoch_before = 0, lane_seal_ns = 0;
+	bool lane_run = false;
 	int error;
 
 	if (!blocks || block >= ctx->physical_blocks ||
@@ -2080,30 +2144,22 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 			(u64)blocks * SWAPZ_BLOCK_BYTES;
 		ctx->lower_write_submitted_reqs++;
 	}
-	if (op == REQ_OP_WRITE && ctx->lane_sync_window) {
-		/* The engine callback is entered only after the run is immutable. */
-		lane_epoch_before = (u64)atomic64_read(&ctx->lane_profile_epoch);
+	if (op == REQ_OP_WRITE && ctx->lane_sync_window &&
+	    ctx->lane_sync_run_pending) {
+		/* Exactly the run the engine just sealed; consume it once. */
+		lane_run = true;
+		ctx->lane_sync_run_pending = false;
 		lane_seal_ns = ctx->lane_sync_seal_ns;
-		ctx->lane_sync_seal_ns = 0;
+		lane_epoch_before = (u64)atomic64_read(&ctx->lane_profile_epoch);
 	}
 	section_start = ktime_get_ns();
-	if (op == REQ_OP_WRITE) {
-		if (ctx->lane_sync_window) {
-			lane_epoch = (u64)atomic64_read(&ctx->lane_profile_epoch);
-			if (lane_epoch != lane_epoch_before)
-				lane_epoch = 0;
-			ctx->lane_sync_epoch = lane_epoch;
-			ctx->lane_sync_done_ns = 0;
-			swapz_lane_gap_submit(ctx, lane_epoch,
-					      ctx->lane_sync_published_pages,
-					      ctx->lane_sync_run_pages,
-					      lane_seal_ns ? lane_seal_ns : section_start,
-					      section_start);
-		} else {
-			swapz_lane_gap_foreign_write(ctx);
-		}
-		swapz_end_accepted_lower_idle(ctx, section_start);
+	if (lane_run) {
+		lane_epoch = (u64)atomic64_read(&ctx->lane_profile_epoch);
+		if (lane_epoch != lane_epoch_before)
+			lane_epoch = 0;
 	}
+	if (op == REQ_OP_WRITE)
+		swapz_end_accepted_lower_idle(ctx, section_start);
 	/* The producer observes only this atomic diagnostic; lower I/O
 	 * completion and mapping publication remain owned by this caller.
 	 * If an inline-steal head left preparation work queued, a real lower
@@ -2133,8 +2189,22 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 		spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
 	}
 	section_end = ktime_get_ns();
-	if (op == REQ_OP_WRITE && ctx->lane_sync_window)
+	/*
+	 * ID178 accounting after the synchronous WRITE returns, so it never
+	 * delays submission. A sealed run becomes t0 for its own publication;
+	 * any other lower WRITE makes overlapping gaps foreign.
+	 */
+	if (lane_run) {
+		ctx->lane_sync_epoch = lane_epoch;
 		ctx->lane_sync_done_ns = section_end;
+		swapz_lane_gap_submit(ctx, lane_epoch,
+				      ctx->lane_sync_published_pages,
+				      ctx->lane_sync_run_pages,
+				      lane_seal_ns ? lane_seal_ns : section_start,
+				      section_start);
+	} else if (op == REQ_OP_WRITE) {
+		swapz_lane_gap_note_foreign_write(ctx, section_end);
+	}
 	elapsed_ns = swapz_elapsed_ns(section_start, section_end);
 	if (op == REQ_OP_READ)
 		ctx->lower_read_wall_ns += elapsed_ns;
@@ -4099,7 +4169,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		u64 plan_before = ctx->engine.plan_wall_ns;
 		u64 pack_before = ctx->engine.pack_wall_ns;
 		u64 prepare_start = ktime_get_ns();
-		u64 prepare_end;
 		u64 prepare_elapsed;
 
 		if (!inflight) {
@@ -4110,15 +4179,12 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		error = swapz_engine_prepare_batched_run(
 			&ctx->engine, ctx->planned, count, &inflight->run,
 			&prepared, planning_read_cap);
-		prepare_end = ktime_get_ns();
-		prepare_elapsed = swapz_elapsed_ns(prepare_start, prepare_end);
+		prepare_elapsed = swapz_elapsed_ns(prepare_start, ktime_get_ns());
 		ctx->engine_plan_wall_ns +=
 			ctx->engine.plan_wall_ns - plan_before;
 		ctx->engine_pack_wall_ns +=
 			ctx->engine.pack_wall_ns - pack_before;
 		if (!error && prepared == count) {
-			/* t3 is after prepare returns: the run is now immutable. */
-			inflight->lane_seal_ns = prepare_end;
 			inflight->prepare_nonio_ns = prepare_elapsed;
 			inflight->count = count;
 			error = swapz_submit_inflight_write(ctx, inflight);
@@ -4176,12 +4242,9 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			}
 			ctx->engine.submitted_blocks += inflight->run.blocks;
 			/* ID178: a successful prepared prefix is a foreground run,
-			 * not a GC/metadata foreign WRITE. */
-			ctx->lane_sync_window = true;
-			ctx->lane_sync_epoch = 0;
-			ctx->lane_sync_done_ns = 0;
-			ctx->lane_sync_published_pages = committed;
-			ctx->lane_sync_run_pages = 0;
+			 * not a GC/metadata foreign WRITE; it began sealing at
+			 * prepare_start and covers planned pages [0, prepared). */
+			swapz_lane_gap_sync_window_begin(ctx, 0, prepare_start);
 			swapz_lane_gap_sync_sealed(ctx, prepared);
 			io_error = swapz_lower_write_run(
 				ctx, inflight->run.start_block,
@@ -4193,16 +4256,9 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 				io_error, &published);
 			if (!error && published == prepared)
 				swapz_lane_gap_sync_published(ctx, published);
-			else if (ctx->lane_sync_done_ns)
-				swapz_lane_gap_publish(ctx, ctx->lane_sync_epoch,
-						       ctx->lane_sync_done_ns,
-						       ctx->lane_sync_done_ns,
-						       ktime_get_ns(), false);
-			ctx->lane_sync_epoch = 0;
-			ctx->lane_sync_done_ns = 0;
-			ctx->lane_sync_seal_ns = 0;
-			ctx->lane_sync_run_pages = 0;
-			ctx->lane_sync_window = false;
+			swapz_lane_gap_sync_window_end(
+				ctx, error ? error : (published == prepared ?
+						      0 : -EIO));
 			ctx->window_commit_nonio_wall_ns +=
 				prepare_elapsed +
 				swapz_elapsed_ns(complete_start, ktime_get_ns());
@@ -4253,35 +4309,19 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		u64 lower_write_elapsed;
 
 		section_start = ktime_get_ns();
-		ctx->lane_sync_window = true;
-		ctx->lane_sync_epoch = 0;
-		ctx->lane_sync_seal_ns = 0;
-		ctx->lane_sync_done_ns = 0;
-		ctx->lane_sync_published_pages = committed;
-		ctx->lane_sync_run_pages = 0;
+		/* Sealing of the window's first run starts with this flush. */
+		swapz_lane_gap_sync_window_begin(ctx, committed, section_start);
 		error = swapz_engine_write_window_batched_read_cap(&ctx->engine,
 				ctx->planned + committed,
 				count - committed, &succeeded,
 				planning_read_cap);
 		commit_end = ktime_get_ns();
-		ctx->lane_sync_window = false;
 		/*
-		 * A successful synchronous publication consumes lane_sync_done_ns
-		 * through the engine observer. A residual timestamp means failure,
-		 * or a missing observer, which must not become a predecessor.
+		 * A successful synchronous publication consumes each run through
+		 * the engine observer; any residue is a failure or missing observer
+		 * and must not become a predecessor.
 		 */
-		if (ctx->lane_sync_done_ns) {
-			if (!error)
-				ctx->lane_gap_invalid++;
-			swapz_lane_gap_publish(ctx, ctx->lane_sync_epoch,
-					       ctx->lane_sync_done_ns,
-					       ctx->lane_sync_done_ns,
-					       commit_end, false);
-			ctx->lane_sync_epoch = 0;
-			ctx->lane_sync_done_ns = 0;
-		}
-		ctx->lane_sync_seal_ns = 0;
-		ctx->lane_sync_run_pages = 0;
+		swapz_lane_gap_sync_window_end(ctx, error);
 		commit_elapsed = swapz_elapsed_ns(section_start, commit_end);
 		lower_write_elapsed = ctx->lower_write_wall_ns - lower_write_before;
 		ctx->window_commit_wall_ns += commit_elapsed;
@@ -7647,6 +7687,8 @@ static void swapz_resume(struct dm_target *ti)
 	struct swapz_dm *ctx = ti->private;
 	unsigned long flags;
 
+	/* ID178: a predecessor from before suspend is a stale generation. */
+	atomic64_inc(&ctx->lane_profile_epoch);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!ctx->failed)
 		WRITE_ONCE(ctx->accepting, true);

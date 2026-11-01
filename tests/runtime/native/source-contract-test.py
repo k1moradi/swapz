@@ -57,10 +57,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         header = (ROOT / "src/kernel/lane-gap.h").read_text()
         engine_header = (ROOT / "src/kernel/engine.h").read_text()
         helper_names = (
-            "swapz_lane_gap_foreign_write", "swapz_lane_gap_publish",
+            "swapz_lane_gap_note_foreign_write", "swapz_lane_gap_publish",
             "swapz_lane_gap_submit", "swapz_lane_gap_note_owner_read",
             "swapz_lane_gap_sync_sealed", "swapz_lane_gap_sync_published",
-            "swapz_lane_gap_ack",
+            "swapz_lane_gap_sync_window_begin",
+            "swapz_lane_gap_sync_window_end", "swapz_lane_gap_ack",
         )
         for symbol in helper_names:
             source = body(symbol)
@@ -83,7 +84,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("atomic64_t lane_profile_epoch;", DM)
         self.assertIn("u64 lane_prev_epoch;", DM)
         self.assertIn("u64 lane_epoch;", DM)
-        self.assertIn("u64 lane_seal_ns;", DM)
+        # t3 is the seal start (commit_start_ns), never a post-prepare mark.
+        self.assertNotIn("lane_seal_ns;", DM)
+        self.assertNotIn("lane_prev_foreign", DM)
+        self.assertIn("u64 lane_foreign_write_end_ns;", DM)
+        self.assertIn("bool lane_sync_run_pending;", DM)
         self.assertIn("entry->lane_admitted_ns = entry->admitted_ns;",
                       body("swapz_map"))
         self.assertIn("entry->lane_owned_ns = owned_ns;",
@@ -120,27 +125,62 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("atomic64_add(", body("swapz_lane_gap_ack"))
         lower = body("swapz_lower")
         self.assertIn("lane_epoch_before", lower)
-        self.assertIn("ctx->lane_sync_window", lower)
-        self.assertIn("swapz_lane_gap_foreign_write(ctx)", lower)
-        async_submit = body("swapz_submit_inflight_write")
-        self.assertIn("swapz_lane_gap_submit(ctx, inflight->lane_epoch, 0,",
-                      async_submit)
-        self.assertIn("inflight->count, inflight->lane_seal_ns",
-                      async_submit)
-        self.assertIn("inflight->lane_seal_ns", async_submit)
-        flush = body("swapz_flush_window")
-        self.assertIn("inflight->lane_seal_ns = prepare_end;", flush)
-        self.assertIn("ctx->lane_sync_published_pages = committed;", flush)
-        self.assertIn("swapz_lane_gap_sync_sealed(ctx, prepared);", flush)
-        sync_sealed = body("swapz_lane_gap_sync_sealed")
-        self.assertIn("ctx->lane_sync_run_pages = sealed_pages;", sync_sealed)
-        lower = body("swapz_lower")
+        # Only the one run the engine sealed is consumed; every other lower
+        # WRITE (GC relocation, single-page RAW) is foreign by its end time.
+        self.assertIn("ctx->lane_sync_window &&\n\t    ctx->lane_sync_run_pending", lower)
+        self.assertIn("ctx->lane_sync_run_pending = false;", lower)
+        self.assertIn("swapz_lane_gap_note_foreign_write(ctx, section_end)",
+                      lower)
+        # Accounting follows the synchronous lower WRITE, never precedes it.
+        self.assertLess(lower.index("swapz_dm_io(&req, &region, &bitmap)"),
+                        lower.index("swapz_lane_gap_submit(ctx, lane_epoch,"))
         self.assertIn("ctx->lane_sync_published_pages", lower)
         self.assertIn("ctx->lane_sync_run_pages", lower)
+        self.assertIn("lane_seal_ns ? lane_seal_ns : section_start", lower)
+        submit = body("swapz_lane_gap_submit")
+        self.assertIn("ctx->lane_foreign_write_end_ns > previous_done_ns",
+                      submit)
+        async_submit = body("swapz_submit_inflight_write")
+        self.assertIn("swapz_lane_gap_submit(ctx, inflight->lane_epoch, 0, "
+                      "inflight->count,\n\t\t\t      inflight->commit_start_ns, "
+                      "inflight->lower_start_ns);", async_submit)
+        # Only a submitted run is counted, after the asynchronous dm_io.
+        self.assertLess(async_submit.index("swapz_dm_io(&req, &region, NULL)"),
+                        async_submit.index("swapz_lane_gap_submit("))
+        self.assertLess(async_submit.index("ctx->pipeline_async_runs++;"),
+                        async_submit.index("swapz_lane_gap_submit("))
+        flush = body("swapz_flush_window")
+        self.assertLess(flush.index("inflight->commit_start_ns = prepare_start;"),
+                        flush.index("swapz_engine_prepare_batched_run("))
+        self.assertNotIn("prepare_end", flush)
+        self.assertIn("swapz_lane_gap_sync_window_begin(ctx, committed, "
+                      "section_start);", flush)
+        self.assertIn("swapz_lane_gap_sync_window_begin(ctx, 0, prepare_start);",
+                      flush)
+        self.assertIn("swapz_lane_gap_sync_sealed(ctx, prepared);", flush)
+        self.assertEqual(flush.count("swapz_lane_gap_sync_window_end("), 2)
+        begin = body("swapz_lane_gap_sync_window_begin")
+        self.assertIn("ctx->lane_sync_published_pages = committed;", begin)
+        self.assertIn("ctx->lane_sync_seal_ns = seal_ns;", begin)
+        window_end = body("swapz_lane_gap_sync_window_end")
+        self.assertIn("ctx->lane_sync_run_pending || ctx->lane_sync_done_ns",
+                      window_end)
+        self.assertIn("WRITE_ONCE(ctx->lane_prev_valid, false);", window_end)
+        sync_sealed = body("swapz_lane_gap_sync_sealed")
+        # GC compaction drives the same engine with no window open.
+        self.assertIn("if (!ctx->lane_sync_window)\n\t\treturn;", sync_sealed)
+        self.assertIn("ctx->lane_sync_run_pages = sealed_pages;", sync_sealed)
+        self.assertIn("ctx->lane_sync_run_pending = true;", sync_sealed)
+        self.assertNotIn("ktime_get_ns()", sync_sealed)
         sync_publish = body("swapz_lane_gap_sync_published")
+        self.assertIn("if (!ctx->lane_sync_window)\n\t\treturn;", sync_publish)
         self.assertIn("published_pages != ctx->lane_sync_run_pages",
                       sync_publish)
+        self.assertNotIn("!ctx->lane_sync_epoch", sync_publish)
         self.assertIn("entry->published_ns = published_ns;", sync_publish)
+        self.assertIn("ctx->lane_sync_seal_ns = published_ns;", sync_publish)
+        self.assertIn("atomic64_inc(&ctx->lane_profile_epoch);",
+                      body("swapz_resume"))
         self.assertIn("ctx->lane_gap_owner_read_ns +=", submit)
         constructor = body("swapz_ctr")
         self.assertIn("ctx->engine.io.write_sealed = "
@@ -156,6 +196,238 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             self.assertIn(key + "=%llu", status)
         for forbidden in ("if (ctx->lane_gap_", "if (ctx->ack_dwell_"):
             self.assertNotIn(forbidden, body("swapz_worker_pass"))
+
+    def test_lane_gap_chronology_executes_actual_helpers(self):
+        """Run the real ID178 chronology bodies through boundary sequences."""
+        import subprocess
+        import tempfile
+        signatures = {
+            "swapz_lane_gap_note_foreign_write":
+                "static void swapz_lane_gap_note_foreign_write("
+                "struct swapz_dm *ctx, u64 end_ns)",
+            "swapz_lane_gap_publish":
+                "static void swapz_lane_gap_publish(struct swapz_dm *ctx, "
+                "u64 epoch, u64 done_ns, u64 observed_ns, u64 published_ns, "
+                "bool success)",
+            "swapz_lane_gap_submit":
+                "static void swapz_lane_gap_submit(struct swapz_dm *ctx, "
+                "u64 epoch, swapz_u8 first_page, swapz_u8 page_count, "
+                "u64 seal_ns, u64 submit_ns)",
+            "swapz_lane_gap_sync_sealed":
+                "static void swapz_lane_gap_sync_sealed(void *opaque, "
+                "swapz_u8 sealed_pages)",
+            "swapz_lane_gap_sync_published":
+                "static void swapz_lane_gap_sync_published(void *opaque, "
+                "swapz_u8 published_pages)",
+            "swapz_lane_gap_sync_window_begin":
+                "static void swapz_lane_gap_sync_window_begin("
+                "struct swapz_dm *ctx, swapz_u8 committed, u64 seal_ns)",
+            "swapz_lane_gap_sync_window_end":
+                "static void swapz_lane_gap_sync_window_end("
+                "struct swapz_dm *ctx, int error)",
+        }
+        functions = "\n".join(
+            signature + "\n{" + body(name) + "}\n"
+            for name, signature in signatures.items())
+        source = r"""
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include "lane-gap.h"
+typedef unsigned long long u64;
+typedef long long s64;
+typedef struct { s64 counter; } atomic64_t;
+#define U64_MAX UINT64_MAX
+#define READ_ONCE(value) (value)
+#define WRITE_ONCE(value, new_value) ((value) = (new_value))
+static s64 atomic64_read(const atomic64_t *value) { return value->counter; }
+static u64 clock_ns;
+static u64 ktime_get_ns(void) { return clock_ns; }
+struct swapz_bio_ref {
+    u64 lane_admitted_ns, lane_owned_ns, published_ns;
+    bool published_deferred;
+};
+struct bio { struct swapz_bio_ref ref; };
+struct swapz_pending_bio { struct bio *bio; };
+#define dm_per_bio_data(bio, size) (&(bio)->ref)
+struct swapz_dm {
+    atomic64_t lane_profile_epoch;
+    u64 lane_prev_epoch, lane_prev_done_ns, lane_prev_owner_ns;
+    u64 lane_prev_published_ns, lane_foreign_write_end_ns;
+    bool lane_prev_valid, lane_sync_window, lane_sync_run_pending;
+    u64 lane_sync_epoch, lane_sync_seal_ns, lane_sync_done_ns;
+    swapz_u8 lane_sync_published_pages, lane_sync_run_pages, batch_count;
+    u64 lane_gap_pending_owner_read_ns, lane_gap_pending_owner_reads;
+    u64 lane_runs_submitted, lane_gap_runs, lane_gap_wall_ns;
+    u64 lane_gap_completion_wake_ns, lane_gap_publication_ns;
+    u64 lane_gap_no_work_ns, lane_gap_admitted_unowned_ns;
+    u64 lane_gap_staged_held_ns, lane_gap_seal_ns;
+    u64 lane_gap_foreign_runs, lane_gap_foreign_ns;
+    u64 lane_gap_unpaired_runs, lane_gap_invalid;
+    u64 lane_gap_owner_read_ns, lane_gap_owner_reads;
+    u64 lane_gap_successor_admitted_by_completion[SWAPZ_LANE_SUCCESSOR_BINS];
+    u64 lane_gap_successor_owned_by_completion[SWAPZ_LANE_SUCCESSOR_BINS];
+    struct swapz_pending_bio batch[4];
+    swapz_u8 planned_to_batch[4];
+};
+FUNCTIONS
+static struct bio bios[4];
+static void window(struct swapz_dm *ctx, u64 admitted0, u64 owned0,
+                   u64 admitted1, u64 owned1)
+{
+    unsigned int index;
+    for (index = 0; index < 4; ++index) {
+        bios[index].ref = (struct swapz_bio_ref){0};
+        ctx->batch[index].bio = &bios[index];
+        /* Planned order differs from batch order on purpose. */
+        ctx->planned_to_batch[index] = (swapz_u8)(3 - index);
+    }
+    ctx->batch_count = 4;
+    bios[3].ref.lane_admitted_ns = admitted0;
+    bios[3].ref.lane_owned_ns = owned0;
+    bios[2].ref.lane_admitted_ns = admitted1;
+    bios[2].ref.lane_owned_ns = owned1;
+    /* Already-published prefix pages carry earlier marks. */
+    bios[1].ref.lane_admitted_ns = 1;
+    bios[1].ref.lane_owned_ns = 1;
+}
+static u64 parts(const struct swapz_dm *ctx)
+{
+    return ctx->lane_gap_completion_wake_ns + ctx->lane_gap_publication_ns +
+        ctx->lane_gap_no_work_ns + ctx->lane_gap_admitted_unowned_ns +
+        ctx->lane_gap_staged_held_ns + ctx->lane_gap_seal_ns;
+}
+int main(void)
+{
+    static struct swapz_dm zero;
+    struct swapz_dm ctx = zero;
+
+    ctx.lane_profile_epoch.counter = 1;
+    /* Paired: t0=100 t1=110 t2=120 a=125 s=140 t3=150 t4=160. */
+    swapz_lane_gap_publish(&ctx, 1, 100, 110, 120, true);
+    assert(ctx.lane_prev_valid);
+    window(&ctx, 130, 140, 125, 150);
+    swapz_lane_gap_submit(&ctx, 1, 0, 2, 150, 160);
+    assert(ctx.lane_gap_runs == 1 && ctx.lane_gap_wall_ns == 60);
+    assert(ctx.lane_gap_completion_wake_ns == 10);
+    assert(ctx.lane_gap_publication_ns == 10);
+    assert(ctx.lane_gap_no_work_ns == 5);
+    assert(ctx.lane_gap_admitted_unowned_ns == 15);
+    assert(ctx.lane_gap_staged_held_ns == 10 && ctx.lane_gap_seal_ns == 10);
+    assert(parts(&ctx) == ctx.lane_gap_wall_ns);
+    assert(ctx.lane_gap_successor_admitted_by_completion[0] == 1);
+    assert(!ctx.lane_prev_valid && ctx.lane_runs_submitted == 1);
+
+    /* Successor work admitted/owned by t0 lands in the 2-3 bins. */
+    swapz_lane_gap_publish(&ctx, 1, 200, 205, 210, true);
+    window(&ctx, 180, 190, 195, 220);
+    swapz_lane_gap_submit(&ctx, 1, 0, 2, 230, 240);
+    assert(ctx.lane_gap_successor_admitted_by_completion[2] == 1);
+    assert(ctx.lane_gap_successor_owned_by_completion[1] == 1);
+    assert(ctx.lane_gap_no_work_ns == 5 && parts(&ctx) == ctx.lane_gap_wall_ns);
+
+    /* A planned range starting after a published prefix ignores it. */
+    swapz_lane_gap_publish(&ctx, 1, 250, 251, 252, true);
+    window(&ctx, 260, 261, 262, 263);
+    swapz_lane_gap_submit(&ctx, 1, 1, 1, 264, 265);
+    assert(ctx.lane_gap_runs == 3 && parts(&ctx) == ctx.lane_gap_wall_ns);
+
+    /* A foreign WRITE ending inside the gap makes it foreign as a whole,
+     * even when it ran before the predecessor was published. */
+    ctx.lane_foreign_write_end_ns = 305;
+    swapz_lane_gap_publish(&ctx, 1, 300, 310, 320, true);
+    window(&ctx, 330, 331, 332, 333);
+    swapz_lane_gap_submit(&ctx, 1, 0, 2, 340, 350);
+    assert(ctx.lane_gap_foreign_runs == 1 && ctx.lane_gap_foreign_ns == 50);
+    assert(ctx.lane_gap_runs == 3);
+    /* A foreign WRITE that ended before t0 does not. */
+    swapz_lane_gap_note_foreign_write(&ctx, 360);
+    swapz_lane_gap_publish(&ctx, 1, 400, 401, 402, true);
+    window(&ctx, 403, 404, 405, 406);
+    swapz_lane_gap_submit(&ctx, 1, 0, 2, 407, 408);
+    assert(ctx.lane_gap_runs == 4);
+
+    /* profile_epoch between publication and submission: unpaired; a stale
+     * finalizer can neither create nor clear a newer predecessor. */
+    swapz_lane_gap_publish(&ctx, 1, 500, 501, 502, true);
+    ctx.lane_profile_epoch.counter = 2;         /* swapz_message() */
+    ctx.lane_prev_valid = false;
+    window(&ctx, 503, 504, 505, 506);
+    swapz_lane_gap_submit(&ctx, 2, 0, 2, 507, 508);
+    assert(ctx.lane_gap_unpaired_runs == 1 && !ctx.lane_prev_valid);
+    swapz_lane_gap_publish(&ctx, 1, 510, 511, 512, true);
+    assert(!ctx.lane_prev_valid);
+    swapz_lane_gap_publish(&ctx, 2, 520, 521, 522, true);
+    swapz_lane_gap_publish(&ctx, 1, 530, 531, 532, false);
+    assert(ctx.lane_prev_valid && ctx.lane_prev_done_ns == 520);
+    window(&ctx, 525, 526, 527, 528);
+    swapz_lane_gap_submit(&ctx, 0, 0, 2, 529, 540);
+    assert(ctx.lane_gap_unpaired_runs == 2);
+
+    /* GC drives the engine with no window open: hooks are inert. */
+    ctx.lane_sync_window = false;
+    swapz_lane_gap_sync_sealed(&ctx, 3);
+    swapz_lane_gap_sync_published(&ctx, 3);
+    assert(!ctx.lane_sync_run_pending && !ctx.lane_gap_invalid);
+
+    /* Synchronous two-run window: second run seals at the first publish. */
+    swapz_lane_gap_publish(&ctx, 2, 600, 601, 602, true);
+    window(&ctx, 610, 611, 612, 613);
+    swapz_lane_gap_sync_window_begin(&ctx, 0, 615);
+    swapz_lane_gap_sync_sealed(&ctx, 1);
+    assert(ctx.lane_sync_run_pending && ctx.lane_sync_run_pages == 1);
+    ctx.lane_sync_run_pending = false;          /* swapz_lower consumes */
+    ctx.lane_sync_epoch = 2;
+    ctx.lane_sync_done_ns = 640;
+    swapz_lane_gap_submit(&ctx, 2, ctx.lane_sync_published_pages,
+                          ctx.lane_sync_run_pages, ctx.lane_sync_seal_ns, 620);
+    assert(ctx.lane_gap_runs == 5 && parts(&ctx) == ctx.lane_gap_wall_ns);
+    clock_ns = 650;
+    swapz_lane_gap_sync_published(&ctx, 1);
+    assert(bios[3].ref.published_ns == 650 && !bios[3].ref.published_deferred);
+    assert(ctx.lane_prev_valid && ctx.lane_prev_done_ns == 640);
+    assert(ctx.lane_sync_seal_ns == 650 && ctx.lane_sync_published_pages == 1);
+    swapz_lane_gap_sync_sealed(&ctx, 1);
+    ctx.lane_sync_run_pending = false;
+    ctx.lane_sync_epoch = 0;                    /* profile_epoch race */
+    ctx.lane_sync_done_ns = 680;
+    swapz_lane_gap_submit(&ctx, 0, ctx.lane_sync_published_pages,
+                          ctx.lane_sync_run_pages, ctx.lane_sync_seal_ns, 660);
+    clock_ns = 690;
+    swapz_lane_gap_sync_published(&ctx, 1);
+    assert(bios[2].ref.published_ns == 690 && !ctx.lane_gap_invalid);
+    assert(!ctx.lane_prev_valid);
+    swapz_lane_gap_sync_window_end(&ctx, 0);
+    assert(!ctx.lane_sync_window && !ctx.lane_gap_invalid);
+
+    /* A sealed run that was never submitted without an engine error is an
+     * accounting anomaly; with an error it only drops the predecessor. */
+    swapz_lane_gap_publish(&ctx, 2, 700, 701, 702, true);
+    swapz_lane_gap_sync_window_begin(&ctx, 0, 705);
+    swapz_lane_gap_sync_sealed(&ctx, 1);
+    swapz_lane_gap_sync_window_end(&ctx, -5);
+    assert(!ctx.lane_gap_invalid && !ctx.lane_prev_valid);
+    swapz_lane_gap_sync_window_begin(&ctx, 0, 710);
+    swapz_lane_gap_sync_sealed(&ctx, 1);
+    swapz_lane_gap_sync_window_end(&ctx, 0);
+    assert(ctx.lane_gap_invalid == 1 && !ctx.lane_sync_run_pending);
+    assert(ctx.lane_runs_submitted == ctx.lane_gap_runs +
+           ctx.lane_gap_foreign_runs + ctx.lane_gap_unpaired_runs);
+    return 0;
+}
+""".replace("FUNCTIONS", functions)
+        with tempfile.TemporaryDirectory(prefix="swapz-lane-gap-") as temp:
+            binary = Path(temp) / "lane-gap-chronology"
+            compiled = subprocess.run(
+                ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                 "-I", str(ROOT / "src/kernel"), "-x", "c", "-", "-o",
+                 str(binary)], input=source, text=True,
+                capture_output=True, timeout=30)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            executed = subprocess.run([str(binary)], cwd=temp,
+                                      capture_output=True, text=True,
+                                      timeout=5)
+            self.assertEqual(executed.returncode, 0, executed.stderr)
 
 
     def test_pressure_hand_requires_completed_representation(self):

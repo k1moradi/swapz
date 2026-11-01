@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include "lane-gap.h"
 #define CHECK(condition) do { if (!(condition)) { \
-	fprintf(stderr, "%s:%d failed %s\\n", __FILE__, __LINE__, #condition); \
+	fprintf(stderr, "%s:%d failed %s\n", __FILE__, __LINE__, #condition); \
 	return 1; } } while (0)
 static swapz_u64 sum(const struct swapz_lane_gap_parts *part)
 {

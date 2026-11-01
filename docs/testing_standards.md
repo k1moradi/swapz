@@ -556,9 +556,17 @@ successor/dwell bin transitions. Rootless source contracts forbid scheduling,
 lock, wait, queue, or allocation calls inside the accounting helpers; require
 the new per-BIO timestamp fields without changing ID114's marks, sole
 ordered-domain chronology, generation-safe `profile_epoch` invalidation,
-post-prepare asynchronous t3, exact synchronous per-run sealed ranges,
-per-run synchronous post-publication observation, and sampling publication-to-
-ACK before `bio_endio()`. The native lower-WRITE aggregation test must
+seal-start t3 (`commit_start_ns` before prepare; window start or previous
+publication for synchronous runs), accounting only after the lower WRITE left,
+inert engine hooks outside a foreground window (GC), exact synchronous per-run
+sealed ranges, per-run synchronous post-publication observation, and sampling
+publication-to-ACK before `bio_endio()`. An executable probe compiles the
+actual chronology helpers (publish, submit, foreign note, both engine hooks,
+window begin/end) and drives paired, successor-bin, published-prefix, foreign
+before/after t0, generation-race, stale-finalizer, GC-hook, two-run
+synchronous and unsubmitted-seal sequences; mutants that drop the GC guard,
+skip predecessor invalidation on an unpaired submission, or compare foreign
+writes against publication instead of t0 must fail it. The native lower-WRITE aggregation test must
 exercise both synchronous observers in planned and batched paths, prove that
 the sealed observer runs before lower I/O, and prove that authority is already
 visible when the publication observer runs. Source contracts must also require

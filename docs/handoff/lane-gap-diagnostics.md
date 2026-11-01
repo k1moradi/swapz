@@ -173,3 +173,11 @@ Work directly on `main`: fetch first, fast-forward only, never force-push.
 `make test` on the ARM64 VM and the x86 AVX-512 PC, and on the quiet x86
 `make fast_test SCENARIOS=nvme5-stripes,sata-stripes` (ID160, descriptive).
 The lead then applies the ROADMAP ID178 decision rules.
+
+## When the round closes
+
+After the owner reports are recorded and the lead takes the ID178 decision, an
+implementing agent (not the lead) checks that the standards and ROADMAP row 178
+already carry everything durable from this file (definitions, invariants,
+decision rules), merges anything missing, repoints the ROADMAP link, and
+deletes this file (see "Change discipline" in `docs/coding_standards.md`).

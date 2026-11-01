@@ -85,6 +85,15 @@ Work directly on `main` unless the owner explicitly authorizes another branch. C
 
 Every implementation task updates the relevant governing standard in the same commit. README/VISION change only when user-facing structure or acceptance criteria change.
 
+Files under `docs/handoff/` are temporary: work orders and round results for
+one optimization round. When the round closes (owner results recorded in the
+ROADMAP and the decision taken), an implementing agent, not the lead reviewer,
+merges anything still essential into `context.md`, VISION, the coding/testing
+standards or the ROADMAP row, repoints or removes links to the file, and
+deletes it; immutable Git history keeps the original. Machine-read data that
+code opens (currently `docs/handoff/host-history.json`) is not a handoff
+document and moves only together with its reader.
+
 At the end of every optimization round, refresh the active host's historical
 performance plots from committed `test_results.json` reports and display every
 generated or refreshed plot inline to the owner. The private
@@ -207,8 +216,12 @@ K=1 lower-WRITE depth, on-disk SWZ representation, module parameter, queue,
 allocation, lock, or wait may consult or change due to these diagnostics.
 The native-tested `lane-gap.h` is pure integer arithmetic: clamp ordered
 timestamps into [t0,t4], compute completion/wakeup, publication, no-work,
-admitted-but-unowned, staged/held, and seal/submit phases, and preserve the
-identity that the six phases sum exactly to the paired gap. A missing timestamp
+admitted-but-unowned, staged/held, and seal phases, and preserve the
+identity that the six phases sum exactly to the paired gap. t3 is the seal
+*start*: "seal" is plan, stage, pack, CRC and lower submission of the
+successor, i.e. the work a seal-ahead design (ROADMAP ID179) would move off the
+critical path; "staged/held" is owned records waiting before sealing starts
+(retention, owner busy, preparation). A missing timestamp
 or reversed completion/submit pair is invalid, not silently zero.
 
 `struct swapz_bio_ref` retains `lane_admitted_ns`, `lane_owned_ns`,
@@ -225,21 +238,38 @@ timestamp makes the run unpaired. Publication may create a predecessor only
 when the run's captured generation still equals the current epoch. The
 `profile_epoch` message increments that generation before invalidating the
 previous sample, so a racing old finalizer cannot resurrect a cross-epoch
-predecessor. Failure, drain, and suspend still invalidate the boolean hint
-under ordered ownership.
+predecessor. Every submission invalidates the predecessor whatever its
+outcome (paired, foreign, unpaired or invalid), so a valid predecessor proves
+that no run was submitted since its publication. Failure and drain invalidate
+the boolean hint under ordered ownership, and resume increments the generation
+so a predecessor from before suspend can never pair.
 
-For an asynchronous prepared run, t3 is sampled only after
-`swapz_engine_prepare_batched_run()` has returned the immutable run; do not
-reuse the earlier plan/pack start as t3. Synchronous engine-owned WRITE paths expose two passive observation
-hooks around each real lower run, including multi-run synchronous windows:
-`write_sealed` runs after the exact logical run is immutable and before lower
-submission, while `write_published` runs only after successful authority
-publication. Those callbacks may record timestamps, the exact run-page range,
-and per-BIO publication marks only; they must not fail, wait, allocate, lock,
-change policy, or alter engine results. The explicit prepared-prefix fallback
-invokes the same sealed observation after its own successful prepare. Gap
-admission/ownership scans must be restricted to that exact successor run range;
-already-published prefixes are never successor evidence.
+For an asynchronous run, t3 is `commit_start_ns`, taken before
+`swapz_engine_prepare_batched_run()`. Its gap accounting runs only after the
+asynchronous `dm_io` submission succeeded, so it adds nothing before the lower
+WRITE leaves and never counts an unsubmitted run. Synchronous engine-owned
+WRITE paths expose two passive observation hooks around each real lower run,
+including multi-run synchronous windows: `write_sealed` marks that the exact
+logical run is immutable and that the next lower WRITE is that run, while
+`write_published` runs only after successful authority publication. For a
+synchronous run, t3 is the window flush start for its first run (the
+prepared-prefix fallback uses its prepare start) and the previous run's
+publication for each later run, because the engine starts sealing the next run
+immediately. `swapz_lower()` consumes exactly one sealed run and accounts it
+after the synchronous WRITE returns. The hooks are inert unless a foreground
+window flush opened the observation: GC compaction drives the same engine
+with no window open, and its WRITEs are foreign. Those callbacks may record the
+exact run-page range, a publication timestamp and per-BIO publication marks
+only; they must not fail, wait, allocate, lock, change policy, or alter engine
+results. An unsampled generation (a `profile_epoch` race) is inert, never an
+anomaly. Gap admission/ownership scans must be restricted to that exact
+successor run range; already-published prefixes are never successor evidence.
+
+Any lower WRITE that is not a sealed window run (GC relocation, the single-page
+RAW fallback) records its end time. A gap whose predecessor completed before
+that end is foreign as a whole. A timestamp rather than a flag also covers a
+foreign WRITE issued between a predecessor's lower completion and its
+publication, while no predecessor is valid yet.
 
 A successful upper WRITE stores publication time and deferred/immediate
 classification before any completion or handoff. Because `swapz_complete()`

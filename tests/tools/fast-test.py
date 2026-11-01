@@ -636,6 +636,7 @@ def print_lane_gap_table(rows):
             distribution(row["successor_owned_distribution"]),
             f"{row['owner_read_ms']:.3f}/{row['owner_reads']}",
             row["deferred_ack_p99_bin_bound"],
+            "n/a" if row["host_busy_pct"] is None else
             fmt(row["host_busy_pct"]) + "%",
         ))
     widths = [max(len(headers[index]),

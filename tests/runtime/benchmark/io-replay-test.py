@@ -96,16 +96,32 @@ class PairReplayContract(unittest.TestCase):
                       ack_dwell_deferred_le_16us=1,
                       ack_dwell_deferred_le_64us=1)
         arm = {"lane_gap": values, "host_cpu": {"busy_fraction": .45}}
+        failed = {"lane_gap": {**values, "lane_gap_runs": 99},
+                  "host_cpu": {"busy_fraction": .9}}
         benchmarks = {
+            # A failed session never supplies a descriptive row.
             "storage_envelope_sessions": [
-                {"envelope": "sata_ssd", "arms": {"swapz": arm}},
-                {"envelope": "nvme_gen4", "arms": {"swapz": arm}},
-                {"envelope": "nvme_gen5", "arms": {"swapz": arm}}],
+                {"envelope": "sata_ssd", "status": "FAIL",
+                 "arms": {"swapz": failed}},
+                {"envelope": "sata_ssd", "status": "PASS",
+                 "arms": {"swapz": arm}},
+                {"envelope": "nvme_gen4", "status": "PASS",
+                 "arms": {"swapz": arm}},
+                {"envelope": "nvme_gen5", "status": "PASS",
+                 "arms": {"swapz": arm}}],
             "sessions": [{"regime": "ssd_emulated", "async_prepare": 1,
-                          "arms": {"swapz": arm}}],
+                          "status": "PASS", "arms": {"swapz": arm}}],
         }
         rows = reporter.lane_gap_attribution_rows(benchmarks)
         self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0]["runs"], 2)
+        # Descriptive parsing is UNAVAILABLE on a missing token, never fatal;
+        # io-replay and the timed-telemetry gates fail such sessions closed.
+        incomplete = dict(values)
+        del incomplete["lane_gap_seal_ns"]
+        self.assertIsNone(reporter.lane_gap_record(incomplete))
+        self.assertIsNone(reporter.lane_gap_record(None))
+        self.assertEqual(reporter.lane_gap_record(values)["lane_gap_runs"], 2)
         self.assertEqual(rows[0]["gap_per_run_us"], 10)
         self.assertEqual(rows[0]["foreign_runs"], 1)
         self.assertEqual(rows[0]["foreign_gap_ms"], .005)
