@@ -1057,7 +1057,29 @@ matched loaded lower-request, throughput and p99 evidence.
 
 ## Release gates
 
-A release or physical-media trial remains blocked until the same pinned source has repeated byte-exact loaded correctness, genuine lower error coverage, sustained GC, bounded resource behavior, acceptable read p95/p99 and CPU/RAM, statistically defensible matched performance, and an independent safety review. Physical-device admission is not part of the current roadmap implementation.
+A release or physical-media trial remains blocked until the same pinned source has repeated byte-exact loaded correctness, genuine lower error coverage, sustained GC, bounded resource behavior, acceptable read p95/p99 and CPU/RAM, statistically defensible matched performance, and an independent safety review. Physical-device admission is not part of ordinary make test.
+
+### Owner-requested physical swap-partition smoke — preparation only
+
+The owner authorized a separate physical correctness smoke using the active
+swap partition, with swapoff limited to that explicitly selected partition.
+This does not add physical devices to routine qualification. On this x86 host,
+the synced source `5523e66f4af0` passed all five make test stages; report
+`3dff79d01d16` records the run. That baseline predates the physical helper,
+so it cannot qualify a later helper commit. The helper requires two PASS
+reports for the exact current source from this computer. No independent safety
+review has been recorded, and no physical partition write or swapoff has been
+performed.
+
+The private `tests/tools/physical-swap-probe.py` helper prepares a bounded
+byte-exact correctness smoke around the existing physical-backing opt-in and
+device-roundtrip oracle. It remains outside make test, requires two committed
+same-host PASS reports for the exact current source and a separate review
+record bound to the selected partition and helper hash, and uses durable
+header backup/recovery. It must restore and verify the original swap header
+and re-enable only the original partition. It never enables the swapz mapper
+as system swap and cannot make a performance claim. The actual physical trial
+remains blocked until both evidence gates are met.
 
 
 ### Alpha.29 loaded qualification observability repair

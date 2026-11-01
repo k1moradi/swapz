@@ -2570,6 +2570,29 @@ the opt-in superblock gate, reserved data offset, and exclusion of block 0 from
 all data/discard paths. Exact-current-main must still pass ordinary `make test`
 before any physical-media evidence is considered.
 
+A separately owner-authorized physical swap-partition correctness smoke is
+implemented only as the private tests/tools/physical-swap-probe.py helper; it
+is never called by `make test` and does not qualify performance or
+physical-media behavior. Before it can write, it requires the same x86 host to
+have two committed PASS reports for the exact current source, a separate
+safety-review record bound to the source, helper hash and selected partition,
+an explicitly repeated /dev/disk/by-uuid/ path, and an active swap partition
+with zero used KiB, no mount and no block holders. It saves the original 4KiB
+swap header in a root-only state directory, disables only that selected swap
+partition, uses the existing physical-backing opt-in and byte-exact
+device-roundtrip oracle, then removes only its UUID-owned mapper, restores and
+verifies the original header, and re-enables the original swap partition. Its
+recovery action uses the saved device identity and never force-removes a
+mapper. The physical correctness smoke must not activate the swapz mapper as
+system swap, and its results remain separate from the RAM-backed report and
+performance history.
+
+The review record is JSON with approved=true, a reviewer other than the
+operator, scope=physical swap backing correctness smoke only, the qualified
+source SHA, the selected partition's major:minor identity, and the helper's
+SHA-256. The private read-only plan output prints the source and helper hashes
+for review binding. A missing or mismatched field blocks the write path.
+
 Capacity-exhaustion evidence must preserve committed reads: a write may return
 `-ENOSPC`, but `ctx->failed` must stay clear unless a separate integrity or
 lower-I/O error occurs.
