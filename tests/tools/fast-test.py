@@ -60,6 +60,14 @@ STRIPED_MODELS = ("nvme5", "sata")
 DEFAULT_STRIPE_COUNTS = (1, 2, 4)
 STRIPED_WRITE_QDS = (4, 8)
 MIXED_MEASURE_OPS = (16384, 65536)
+# Four counterbalanced blocks: each policy appears once in each position
+# and twice in each raw/swapz order. Repeat in complete four-block cycles.
+ID181_FACTORIAL_ORDERS = (
+    ("control", "A", "AB", "B"),
+    ("B", "AB", "A", "control"),
+    ("A", "control", "B", "AB"),
+    ("AB", "B", "control", "A"),
+)
 
 
 def quiet_host_sample():
@@ -802,6 +810,8 @@ def main():
                         default=int(os.environ.get("HAND_RECORDS", "8")))
     parser.add_argument("--id181-policy", choices=("control", "A", "B", "AB"),
                         default=os.environ.get("ID181_POLICY", "control"))
+    parser.add_argument("--id181-factorial", type=int, choices=(0, 1),
+                        default=int(os.environ.get("ID181_FACTORIAL", "0")))
     parser.add_argument("--mixed-ops", type=int, choices=MIXED_MEASURE_OPS,
                         default=int(os.environ.get("MIXED_OPS", "16384")))
     args = parser.parse_args()
@@ -829,6 +839,11 @@ def main():
         parser.error("HAND_RECORDS requires an ordinary swapz fast_test scenario")
     if args.id181_policy != "control" and (calibration or striped_specs):
         parser.error("ID181_POLICY requires ordinary swapz scenarios")
+    if args.id181_factorial and (calibration or striped_specs or
+                                 args.id181_policy != "control"):
+        parser.error("ID181_FACTORIAL requires ordinary scenarios and ID181_POLICY=control")
+    if args.id181_factorial and (args.repeat < 4 or args.repeat % 4):
+        parser.error("ID181_FACTORIAL requires REPEAT=4 or 8 full counterbalanced blocks")
     if args.mixed_ops not in MIXED_MEASURE_OPS:
         parser.error("MIXED_OPS must be 16384 or 65536")
     if args.mixed_ops != 16384 and (calibration or striped_specs or any(
@@ -854,6 +869,7 @@ def main():
     print(f"swapz fast_test (development only; not qualification) "
           f"content={args.content} submitter_prepare={args.submitter_prepare} "
           f"hand_records={args.hand_records} id181_policy={args.id181_policy} "
+          f"id181_factorial={args.id181_factorial} "
           f"mixed_ops={args.mixed_ops} "
           f"host_load={args.host_load_profile} "
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
@@ -880,16 +896,26 @@ def main():
     status = 0
     try:
         for name in ordinary_scenarios:
-            for attempt in range(args.repeat):
-                label = name if args.repeat == 1 else f"{name}#{attempt + 1}"
+            policy_count = 4 if args.id181_factorial else 1
+            for measurement_index in range(args.repeat * policy_count):
+                attempt = measurement_index // policy_count
+                policy = (ID181_FACTORIAL_ORDERS[attempt % 4][
+                    measurement_index % policy_count] if args.id181_factorial
+                    else args.id181_policy)
+                candidate_first = bool(
+                    (args.id181_factorial and measurement_index % 2) or
+                    (calibration and attempt % 2))
+                label = (f"{name}@{policy}#{attempt + 1}"
+                         if args.id181_factorial else
+                         name if args.repeat == 1 else f"{name}#{attempt + 1}")
                 quiet_before = quiet_host_sample()
                 begin = time.monotonic()
                 proc = privileged(720, PAIR, "--validated-source", head,
                                   *scenario_arguments(name, plan, calibration,
-                                                      calibration and attempt % 2 == 1,
+                                                      candidate_first,
                                                       args.submitter_prepare,
                                                       args.hand_records,
-                                                      args.id181_policy))
+                                                      policy))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
                 arms = parse_arms(proc.stdout, candidate)
@@ -910,6 +936,9 @@ def main():
                     row = summarize(label, arms, elapsed)
                 row["performance_validity"] = performance_validity(
                     quiet_before, quiet_after, arms)
+                row["id181_policy"] = policy
+                row["id181_round"] = attempt + 1
+                row["id181_candidate_first"] = candidate_first
                 rows.append(row)
                 raw_reports.append({"scenario": label, "arms": arms})
                 measured = row["linear_w"] if calibration else row["swapz_w"]
@@ -993,6 +1022,9 @@ def main():
                     "submitter_prepare": args.submitter_prepare,
                     "hand_records": args.hand_records,
                     "id181_policy": args.id181_policy,
+                    "id181_factorial": bool(args.id181_factorial),
+                    "id181_order": (ID181_FACTORIAL_ORDERS if args.id181_factorial
+                                    else None),
                     "mixed_measure_ops": args.mixed_ops,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,

@@ -561,7 +561,11 @@ The fast and official replay status schema remains unchanged.
 
 `make fast_test ID181_POLICY=control|A|B|AB` selects the ordinary retained
 asynchronous owned-null_blk comparison. The default `control` is unchanged;
-stripes/calibration cannot select experimental policies. Do balanced repeated
+stripes/calibration cannot select experimental policies. The opt-in
+`ID181_FACTORIAL=1 REPEAT=4|8` schedules each policy once per block and
+rotates four block orders with balanced raw/swapz within-pair order; every
+policy has a same-fixture raw control, its own policy identity and round in
+`latest.json`. A partial block is rejected before privilege. Do balanced repeated
 controls on NVMe5/NVMe4/SATA/fast mixed/fast QD8 on each quiet host. Compare
 useful WRITE/raw, READ p99, lower bytes/requests, CPU, gap partition, record
 size and ACK dwell. Three repeats screen a hypothesis; prospective paired
