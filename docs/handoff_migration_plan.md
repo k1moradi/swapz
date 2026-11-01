@@ -26,12 +26,24 @@ archive.
 
 ## Execution contract for every row
 
-1. Work directly on `main`. Fetch the current remote head immediately before
-   writing, preserve concurrent work, and update the branch only with a
-   lease-protected fast-forward. Never force-push.
+1. **All migration edits must be made directly on the existing `main` branch.**
+   Do not create or use a new branch (including a temporary migration, review,
+   or work branch), and do not create a pull request as a substitute for a
+   direct `main` update. This includes migration-document updates, code,
+   comments, tests, scripts, link fixes and deletions. Fetch the current remote
+   head immediately before each write, preserve concurrent work, and update
+   `main` only with a lease-protected fast-forward. Never force-push, rewrite
+   history, or overwrite concurrent work. If the lease fails, re-read the new
+   remote HEAD and reconcile before trying another fast-forward.
 2. Read every source file named by the row plus its canonical destination.
    Treat companion `.json`, `.json.gz`, and `.patch` files as evidence,
-   not as automatic canonical content.
+   not as automatic canonical content. **Inspect all relevant executable
+   consumers and active references across the entire tracked repository**, not
+   only the named handoff bundle or `docs/`: production code, inline comments,
+   headers, tests, Python/shell scripts, Makefiles, CI workflows, YAML/JSON,
+   README and other documentation. Read the referenced context before editing
+   or deleting; a machine-consumed path must be repointed safely and its reader
+   checked rather than silently broken.
 3. Migrate only **durable** material that is not already canonical:
    production/ownership invariants, accepted or rejected decisions and their
    reusable reason, exact qualification boundaries that still govern future
@@ -42,19 +54,45 @@ archive.
    unconfirmed historical-candidate lists unless a canonical rule explicitly
    depends on them.
 5. Repoint a surviving reference to a canonical document or replace it with
-   plain `ROADMAP ID NNN` text. Never redirect one deleted handoff link to
-   another temporary handoff file. Remove links whose only purpose was to
-   expose the raw packet.
-6. Before deleting the row's files, run `git grep -n` for every basename in
-   the row. Every surviving reference must be deliberately repointed or
-   removed. Then delete the whole row bundle in the same commit.
-7. Keep each row as one reviewable commit and update this plan's Status/commit
-   cell in that commit. A row is not complete if its files are gone but a
-   dangling link remains, or if durable content was copied without removing
-   the temporary source.
-8. Row-level validation is `git diff --check` plus the row's link/deletion
-   checks. The exact requested `tests/tools/test-rootless.sh` run is the
-   final gate in row 22 after all migrations are assembled.
+   plain `ROADMAP ID NNN` text. **Update every active reference in code,
+   comments, tests, scripts, Makefiles, CI and documentation as needed**;
+   changing only Markdown links is not sufficient. Preserve executable
+   behavior and ownership guarantees when a reader's input path changes.
+   Never redirect one deleted handoff link to another temporary handoff file.
+   Remove references whose only purpose was to expose a superseded raw packet.
+6. Before editing and again after editing, **search the entire tracked tree**
+   for every source file's basename, path, stem, and applicable relative
+   Markdown/URL forms, using `git grep -n -F` (and inspect detected indirect
+   directory/path construction in scripts). Include hidden tracked files such
+   as `.github/`; do not restrict searches to `docs/` or exclude source
+   comments. Classify each match as a live code/path dependency, an active
+   link/instruction, or an inert historical mention. Repoint/remove all live
+   dependencies and active references; review their callers/tests when changed.
+   A remaining machine reader is a **blocker** unless safely migrated.
+7. **Delete every file assigned to the row**, including the corresponding
+   handoff document and any associated packets/patches, **in the same commit**
+   as its canonical migration and reference updates. A completed row must
+   show both the deleted paths and all reference fixes in `git diff --name-status`
+   and must show no assigned path in `git ls-files`. Do not merely deprecate,
+   rename, move to another archive directory, or leave a migrated handoff
+   document behind. The only exceptions for the entire project are the two
+   explicitly excluded files in Scope; do not delete either.
+8. Keep each row as one reviewable commit and update this plan's Status/commit
+   cell in that commit. A row is not complete if its files are gone but an
+   active reference remains, a migrated handoff file still exists, or durable
+   content was copied without deleting its temporary source.
+9. Row-level validation is `git diff --check`, assigned-path absence, and the
+   repository-wide reference audit; run targeted rootless checks when a row
+   changes code or scripts. The exact requested `tests/tools/test-rootless.sh`
+   run is the final gate in row 22 after all migrations are assembled.
+
+**Historical-inventory exception:** This plan intentionally names the original
+handoff files in its migration table and may retain their names as an inert
+audit ledger after deletion. Those `docs/handoff_migration_plan.md` entries
+and immutable Git history are **not** active references or dangling links.
+Every other tracked occurrence must be examined and justified; an active
+link, reader, instruction, or code comment pointing to a deleted file is never
+exempt merely because the name also appears here.
 
 ## Migration rows
 
@@ -80,8 +118,8 @@ archive.
 | 18 | **ID172 completed asynchronous LZ4 cost coverage**: `prepared-cost-coverage-result.md` | Reconcile with ROADMAP ID **172** and the existing work-conserving-preparation standard. Preserve inline if missing: both asynchronous owners publish per-page LZ4 elapsed only before terminal READY; only ordered owner updates estimator from READY_COMPRESSED/READY_RAW; zero/unknown/unready/error samples do not train it; owner `make test` passed and this is an estimator-coverage correctness repair, not a throughput claim. Remove the ROADMAP link. | Qualification narrative, host timing/history counts and local artifact path already represented by the qualified report and ROADMAP. | ID172/standards remain sufficient to implement/interpret the estimator; file/link removed. | Pending |
 | 19 | **ID173 acquire READY after lost RAW-selection race + superseded next-agent handoff**: `preparation-ready-acquire-result.md`; `next-agent-preparation-and-pressure.md` | Reconcile with ROADMAP ID **173** and testing-standard memory-order section. Preserve inline: failed conditional RMW is unordered; after losing PREPARING→RAW selection, reacquire stable READY while the consumer reference prevents reuse; ordinary READY/RAW-win paths do not gain extra reads. Preserve the qualification boundary: owner run is BLOCKED because the raw ID36 control timed out under `memory.high`; do not retry, relax pressure, or relabel it PASS; a test-owned stop used only after terminal failure is cleanup evidence, not unattended acceptance. Remove the ROADMAP result link and any cross-link to the next-agent file. | Detailed pressure stack, partial performance watchpoints, operating prompt, local artifact inventory and duplicated main/test rules. | ID173/testing standards contain memory-order + BLOCKED interpretation; both files gone. | Pending |
 | 20 | **Old-PC QD4 reissue diagnostic**: `qd4-reissue-oldpc-result.md` | Reconcile with the ROADMAP narrative immediately following the old-PC QD4 analysis. Preserve inline: final capture lost events/missed independent counts/failed screening and cannot guide C; earlier captures used wrong/silent tracepoints; `sync4_reissue_gap_ns` spans ACK, writer reissue, admission/preparation and retention and is not wholly removable idle. Remove the ROADMAP diagnostic link. | Invalid/corrected capture chronology, exact event counts, tool versions and local manifest details after the invalidation rule is canonical. | ROADMAP keeps the invalid-capture lesson and timer scope; file/link removed. | Pending |
-| 21 | **Repository-wide handoff link/deletion audit** | Run an exact tracked-tree sweep after rows 1-20. `git grep -n 'handoff/'` and basename-specific searches must show only deliberate references to `docs/handoff/host-history.json` and `docs/handoff/lane-gap-diagnostics.md`, plus the Change-discipline rule describing the directory itself. Fix any missed canonical or cross-handoff link before proceeding. Confirm `find docs/handoff -maxdepth 1 -type f` lists exactly the two excluded files. Do not delete or rewrite either excluded file. | Any overlooked stale reference or orphaned temporary handoff file discovered by the sweep. | Zero dangling links; exactly two files remain in `docs/handoff/`; `git diff --check` passes. | Pending |
-| 22 | **Final validation and closeout** | Update this plan's overall status and per-row ledger, then run exactly `tests/tools/test-rootless.sh` from the repository root. The migration is complete only on exit 0. Record the final migration commit range and a concise ledger of **merged** canonical facts/rules versus **dropped** evidence/work-order material. Re-fetch `origin/main` immediately before the final write and fast-forward with a lease; never force. | Nothing else. If rootless fails, keep the migration unclosed and fix the failure in the responsible row rather than weakening the test. | `tests/tools/test-rootless.sh` exit 0; clean tracked tree; remote `main` equals the final local commit; only the two excluded handoff files remain. | Pending |
+| 21 | **Repository-wide handoff link/deletion audit** | Sweep **all tracked text** after rows 1-20, including C/headers and comments, tests, shell/Python scripts, Makefiles, `.github/` workflows, JSON/YAML, README and other docs, not just `docs/`. Search `git grep -n -F` for all 69 deleted paths/basenames plus `handoff/`, review path construction and check links to already-deleted files. Active references must point only to canonical docs or the two excluded files; the Change-discipline directory description and this plan's inert historical inventory are allowed. Resolve every other occurrence deliberately. Check `git ls-files docs/handoff/` and `find docs/handoff -maxdepth 1 -type f`: each must list exactly the two exclusions. Never delete or rewrite either excluded file. | Any overlooked live reader, stale code comment, script path, dead link, or orphaned handoff file. | Zero **active** dangling references in the entire tracked repository; 69 source files deleted and exactly two excluded files remain; `git diff --check` passes. | Pending |
+| 22 | **Final validation and closeout** | Update this plan's overall status and per-row ledger, then run exactly `tests/tools/test-rootless.sh` from the repository root. The migration is complete only on exit 0. Record the final migration commit range and a concise ledger of **merged** canonical facts/rules versus **dropped** evidence/work-order material. Recheck the **entire tracked repository** for active references and confirm all 69 migrations were deleted, with only the two excluded files remaining. Re-fetch `origin/main` immediately before the final write and fast-forward **directly on `main`** with a lease; never create another branch or force-push. | Nothing else. If rootless fails, keep the migration unclosed and fix the failure in the responsible row rather than weakening the test. | `tests/tools/test-rootless.sh` exit 0; no active dangling references; clean tracked tree; remote `main` equals the final local commit; only the two excluded handoff files remain. | Pending |
 
 ## Expected merged-versus-dropped ledger
 
