@@ -301,8 +301,10 @@ struct swapz_read_slot {
  * Owner-local ID178 ACK histogram collection. A pointer to this stack record
  * is attached only while its completed BIO is exclusively owned by one ACK
  * delivery loop; it is never consulted after bio_endio() frees that BIO.
+ * One cohort timestamp avoids a hot per-BIO clock read on delivery.
  */
 struct swapz_ack_dwell_batch {
+	u64 delivered_ns;
 	u64 count[2];
 	u64 duration_ns[2];
 	u64 bins[2][SWAPZ_LANE_DWELL_BINS];
@@ -1395,10 +1397,11 @@ static void swapz_lane_gap_ack(struct swapz_dm *ctx,
 			       const struct swapz_bio_ref *entry)
 {
 	atomic64_t *count, *duration, *histogram;
-	u64 now_ns = ktime_get_ns();
+	u64 now_ns = entry->ack_batch ?
+		entry->ack_batch->delivered_ns : ktime_get_ns();
 	unsigned int bin;
 
-	if (!entry->published_ns || now_ns < entry->published_ns)
+	if (!entry->published_ns || !now_ns || now_ns < entry->published_ns)
 		return;
 	if (entry->published_deferred) {
 		count = &ctx->ack_dwell_deferred_count;
@@ -1424,7 +1427,7 @@ static void swapz_lane_gap_ack(struct swapz_dm *ctx,
 	atomic64_inc(&histogram[bin]);
 }
 
-/* Publish each completed batch once; individual BIO clocks remain exact. */
+/* Publish each completed cohort once after its shared delivery timestamp. */
 static void swapz_lane_gap_ack_flush(struct swapz_dm *ctx,
 				    const struct swapz_ack_dwell_batch *batch)
 {
@@ -1500,6 +1503,7 @@ static void swapz_completion_work(struct work_struct *work)
 	struct bio *bio;
 
 	preempt_disable();
+	acknowledgements.delivered_ns = ktime_get_ns();
 	while ((bio = bio_list_pop(&ctx->completion_bios))) {
 		struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 
@@ -1560,6 +1564,7 @@ static void swapz_deliver_bio_list(struct swapz_dm *ctx, struct bio_list *bios)
 	if (bio_list_empty(bios))
 		return;
 	start_ns = ktime_get_ns();
+	acknowledgements.delivered_ns = start_ns;
 	/*
 	 * bio_endio() is IRQ-safe. Without this, each woken writer sharing the
 	 * worker's CPU preempts it mid-batch, turning one wakeup loop into a
@@ -2000,6 +2005,7 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 {
 	struct swapz_inflight_write *inflight = swapz_inflight_head_slot(ctx);
+	struct swapz_ack_dwell_batch acknowledgements = {};
 	u64 lane_observed_ns;
 	u64 publish_before, publish_crc_before, complete_start, complete_elapsed;
 	u64 lower_end, lower_elapsed, commit_elapsed, finalize_end;
@@ -2124,6 +2130,8 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		ctx->batch_count || !list_empty(&ctx->incoming);
 	defer = ctx->defer_upper_completions &&
 		(defer_for_successor || submitter_dispatched);
+	if (!defer)
+		acknowledgements.delivered_ns = ktime_get_ns();
 	for (index = 0; index < inflight->count; ++index) {
 		struct swapz_bio_ref *entry =
 			dm_per_bio_data(inflight->bios[index], sizeof(*entry));
@@ -2138,9 +2146,13 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		if (defer)
 			swapz_defer_upper_completion(ctx,
 						     inflight->bios[index]);
-		else
+		else {
+			entry->ack_batch = &acknowledgements;
 			swapz_complete(inflight->bios[index], 0);
+		}
 	}
+	if (!defer)
+		swapz_lane_gap_ack_flush(ctx, &acknowledgements);
 	ctx->pipeline_completed_runs++;
 	inflight->count = 0;
 	/*

@@ -1719,9 +1719,22 @@ int main(void) {
                 self.assertEqual(ran.returncode, 0, f"ABI {index}: {ran.stderr}")
 
     def test_ack_batch_executes_actual_accounting_helpers(self):
-        """Batched atomics must equal exact per-BIO dwell accounting."""
+        """One cohort clock plus batched atomics must preserve dwell accounting."""
         import subprocess
         import tempfile
+
+        completion_work = body("swapz_completion_work")
+        ordered_delivery = body("swapz_deliver_bio_list")
+        finalize = body("swapz_finalize_inflight_write")
+        self.assertIn("acknowledgements.delivered_ns = ktime_get_ns();",
+                      completion_work)
+        self.assertIn("acknowledgements.delivered_ns = start_ns;",
+                      ordered_delivery)
+        self.assertIn("acknowledgements.delivered_ns = ktime_get_ns();",
+                      finalize)
+        self.assertIn("entry->ack_batch = &acknowledgements", finalize)
+        self.assertIn("swapz_lane_gap_ack_flush(ctx, &acknowledgements);",
+                      finalize)
 
         source = r"""
 #include <assert.h>
@@ -1733,6 +1746,7 @@ typedef uint64_t u64;
 typedef int64_t s64;
 typedef struct { s64 counter; } atomic64_t;
 struct swapz_ack_dwell_batch {
+    u64 delivered_ns;
     u64 count[2], duration_ns[2], bins[2][SWAPZ_LANE_DWELL_BINS];
 };
 struct swapz_bio_ref {
@@ -1747,7 +1761,8 @@ struct swapz_dm {
     atomic64_t ack_dwell_immediate_bins[SWAPZ_LANE_DWELL_BINS];
 };
 static u64 clock_ns;
-static u64 ktime_get_ns(void) { return clock_ns; }
+static unsigned int clock_reads;
+static u64 ktime_get_ns(void) { ++clock_reads; return clock_ns; }
 static void atomic64_inc(atomic64_t *p) { ++p->counter; }
 static void atomic64_add(u64 value, atomic64_t *p) { p->counter += (s64)value; }
 """
@@ -1760,17 +1775,21 @@ static void atomic64_add(u64 value, atomic64_t *p) { p->counter += (s64)value; }
         source += r"""
 int main(void) {
     struct swapz_dm ctx = {0};
-    struct swapz_ack_dwell_batch batch = {0};
-    struct swapz_bio_ref entry = {.published_ns=1000, .ack_batch=&batch};
+    struct swapz_ack_dwell_batch batch = {.delivered_ns=5001};
+    struct swapz_bio_ref entry = {.published_ns=4001, .ack_batch=&batch};
 
-    clock_ns=2000; swapz_lane_gap_ack(&ctx,&entry);
+    clock_ns=999999; swapz_lane_gap_ack(&ctx,&entry);
+    assert(clock_reads==0);
     assert(batch.count[0]==1 && batch.duration_ns[0]==1000 && batch.bins[0][0]==1);
     assert(ctx.ack_dwell_immediate_count.counter==0);
     entry.published_deferred=true;
-    clock_ns=5001; swapz_lane_gap_ack(&ctx,&entry);
-    entry.published_ns=4000; clock_ns=5000; swapz_lane_gap_ack(&ctx,&entry);
+    entry.published_ns=1000; swapz_lane_gap_ack(&ctx,&entry);
+    entry.published_ns=4001; swapz_lane_gap_ack(&ctx,&entry);
+    assert(clock_reads==0);
     assert(batch.count[1]==2 && batch.duration_ns[1]==5001);
     assert(batch.bins[1][0]==1 && batch.bins[1][2]==1);
+    entry.published_ns=6000; swapz_lane_gap_ack(&ctx,&entry);
+    assert(batch.count[1]==2 && clock_reads==0);
     swapz_lane_gap_ack_flush(&ctx,&batch);
     assert(ctx.ack_dwell_immediate_count.counter==1);
     assert(ctx.ack_dwell_immediate_ns.counter==1000);
@@ -1783,11 +1802,13 @@ int main(void) {
     memset(&entry,0,sizeof(entry));
     entry.published_ns=1000;
     clock_ns=65001; swapz_lane_gap_ack(&ctx,&entry);
+    assert(clock_reads==1);
     assert(ctx.ack_dwell_immediate_count.counter==2);
     assert(ctx.ack_dwell_immediate_ns.counter==65001);
     assert(ctx.ack_dwell_immediate_bins[4].counter==1);
     entry.published_ns=70000; clock_ns=69999;
     swapz_lane_gap_ack(&ctx,&entry);
+    assert(clock_reads==2);
     assert(ctx.ack_dwell_immediate_count.counter==2);
     return 0;
 }
@@ -1831,7 +1852,7 @@ int main(void) {
         self.assertIn('"id181_successor_first_submissions"', replay)
         self.assertIn('"id181_publication_handoffs"', replay)
         self.assertIn("def id181_factorial_analysis(rows):", fast)
-        self.assertIn("base_scenario(row[\"scenario\"])", fast)
+        self.assertIn('base_scenario(row.get("scenario", ""))', fast)
 
     def test_id181_factorial_calculations_and_guards(self):
         """Exercise the actual pure analysis functions, without a device."""

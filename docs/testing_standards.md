@@ -549,14 +549,16 @@ kernel swap and physical media remain separate qualification gates.
 
 ### ID178 ACK-batch accounting validation
 
-The actual completion loops must keep the batch record stack-local, assign it
-before each successful BIO delivery, never dereference a BIO after
-`bio_endio()`, and aggregate all per-BIO bins before releasing the completion
-slot. An executable actual-body probe must validate immediate/deferred counts,
-duration sums, bin edges, direct fallback and invalid timestamps; completion
-failure injection remains covered by the ownership probe. Preserve the
-per-BIO timestamp semantics: this optimization batches atomics only, not
-`ktime_get_ns()`, so old/new ID178 dwell values remain comparable. The fast
+The actual completion loops must keep the batch record stack-local, sample one
+delivery timestamp before the cohort, assign the record before each successful
+BIO delivery, never dereference a BIO after `bio_endio()`, and aggregate all
+per-BIO bins before releasing the completion slot. An executable actual-body
+probe must validate immediate/deferred counts, duration sums, bin edges, the
+shared-clock path without per-BIO clock reads, direct fallback and invalid
+timestamps; completion failure injection remains covered by the ownership probe.
+The cohort timestamp intentionally replaces per-BIO delivery clocks, so absolute
+ID178 ACK-dwell values may shift by at most the delivery-loop span and must not
+be pooled as byte-for-byte-equivalent telemetry across this boundary. The fast
 and official replay status schema remains unchanged except for new ID181
 selector/activity fields.
 

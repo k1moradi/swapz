@@ -214,13 +214,16 @@ Production policy cannot change from this profiling commit alone.
 The worker and the existing completion work each own a separate stack-local
 acknowledgement batch. An individual BIO is stamped with that batch pointer
 only inside the final `bio_endio()` delivery loop and may never be touched
-after completion. The original per-BIO `ktime_get_ns()` mark, publication
-timestamp, successful-completion predicate and dwell histogram bins are
-unchanged. Add per-BIO counts/durations/bins to that owner-local record and
-publish the exact aggregates to the existing `atomic64_t` counters before
+after completion. Sample one `ktime_get_ns()` delivery timestamp immediately
+before each owned ACK cohort and use it for every successful BIO in that cohort;
+publication timestamps, the successful-completion predicate and dwell histogram
+bins remain unchanged. Add per-BIO counts/durations/bins to the owner-local
+record and publish the aggregates to the existing `atomic64_t` counters before
 the completion slot is released or preemption is restored. Direct unbatched
-completions keep their original atomic path. No unprotected shared accumulator,
-new queue, or approximate batch timestamp is permitted.
+completions keep their per-BIO clock and atomic fallback. The cohort mark is
+diagnostic only: its timestamp error is bounded by the ACK delivery-loop span
+and it must never move `bio_endio()`, publication, failure checks or ownership.
+No unprotected shared accumulator or new queue is permitted.
 
 ### ID181 successor-first and publication-ACK development A/B
 

@@ -714,11 +714,14 @@ not source qualification or a causal speedup result.
 **ID178 instrumentation cost hypothesis (2026-11-01):** ARM64 cross-report
 fast-mixed service fell from roughly 71.9 to 69.0 MB/s after ID178, with
 suspected per-ACK time/atomic overhead; this is not a same-source controlled
-instrumentation A/B. ACK delivery now retains per-BIO clocks and exact dwell
-bins but accumulates them within existing delivery loops before a bounded
-atomic flush, reducing atomic contention without changing acceptance or ACK
-timing. Validate ARM64 performance prospectively; do not claim the 4-6%
-difference is proven ID178 overhead.
+instrumentation A/B. ACK delivery now samples one timestamp per owned delivery
+cohort and accumulates dwell bins within that existing loop before a bounded
+atomic flush, removing both per-BIO clock reads and per-BIO telemetry atomics
+without changing acceptance or ACK timing. Direct unbatched completion keeps
+its exact fallback clock. Treat ACK-dwell values across this instrumentation
+boundary as comparable only within the bounded delivery-loop timestamp error.
+Validate ARM64 performance prospectively; do not claim the 4-6% difference is
+proven ID178 overhead.
 
 ## Immediate work queue
 
