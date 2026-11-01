@@ -2853,17 +2853,23 @@ evidence and may not weaken ownership or change packing to manufacture a win.
 
 Preparation placement comparisons must keep the production compression stack
 on and account for each timed WRITE across submitter, producer and ordered
-preparation exactly once. ID169's lower-WRITE-active bypass is a frozen pilot
-candidate, not a default change: guard/resource tests must prove it returns
-before lane/page ownership and preserves the established mapper fallback.
-Independent confirmation must declare its fixed count and acceptance bounds
-before collection, keep the exact candidate hash, and exclude pilot data from
-confirmatory inference. Pinned source owner qualification remains mandatory.
-The completed [ID169 confirmation](handoff/preparation-placement-oldpc-result.md)
-passes its QD8 primary and QD8/QD32 guards, but insufficient mixed coverage and
-wide mixed service/p99 intervals prevent retention. A passed primary cannot
-override unresolved safety/performance guards. Preserve all excluded observations;
-do not extend the completed fixed sample or relax its screen after inspection.
+preparation exactly once. ID169's lower-WRITE-active bypass is now production
+after the owner's later promotion of the frozen guard: guard/resource tests
+must prove it returns before lane/page ownership and preserves the established
+mapper fallback. Independent confirmation remains a fixed historical cohort:
+declare its count and acceptance bounds before collection, keep the exact
+candidate hash, and exclude pilot data from confirmatory inference. Pinned
+source owner qualification remains mandatory.
+
+The completed ID169 confirmation passes its QD8 primary and QD8/QD32 guards,
+while the fixed shorter mixed cohort has only 11 usable comparisons from five
+cycles, below the declared 12-comparison/six-cycle minimum, with service and
+p99 bounds unresolved. That confirmation alone did not authorize retention.
+The owner later promoted the same frozen guard after exact-source x86 and
+ARM64 `make test` PASS results; mixed service, lower bytes/requests and p99
+remain watchpoints, and an exact-source owner run must reject the guard if
+those regress beyond their guards. Preserve all excluded observations; do not
+extend the completed fixed sample or relax its screen after inspection.
 Pre/post CPU counters cannot identify task ownership or establish operator
 activity. Any follow-up protocol must address the coverage limitation prospectively.
 
