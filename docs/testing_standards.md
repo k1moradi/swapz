@@ -2769,3 +2769,13 @@ cover both asynchronous owners and publication before READY; loaded evidence
 must show a nonzero estimator with submitter claims and zero inline work.
 The rejected [early-snapshot pilot](handoff/submitter-snapshot-oldpc-result.md)
 does not authorize early descriptor release or a second submitter reference.
+
+Prepared-state native qualification must inject producer READY_COMPRESSED and
+READY_RAW publication between the consumer's initial PREPARING read and its
+RAW-selection compare/exchange. The failed-CAS shim uses relaxed failure
+ordering, matching the kernel API's lack of an acquire guarantee. Require an
+acquire observation of READY before metadata consumption; already-READY and
+successful RAW claims keep one acquire read. A compiled relaxed-reread mutant
+must fail. These API-level interleavings and threaded reuse checks are not an
+LKMM proof or an observed weak-memory hardware failure. A retained production
+change still needs exact-source owner qualification with the full codec stack.

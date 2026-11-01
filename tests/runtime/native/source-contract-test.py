@@ -3794,6 +3794,12 @@ int main(void)
         self.assertIn("atomic_read_acquire(state)", prep_slots)
         self.assertIn("memory_order_relaxed", prep_slots_native)
         self.assertIn("static int atomic_read_acquire(", prep_slots_native)
+        # A failed conditional kernel RMW does not guarantee acquire ordering.
+        # Keep the native shim honest so it cannot conceal the READY race.
+        raw_cas_shim = source_body("atomic_cmpxchg", prep_slots_native)
+        self.assertIn("memory_order_seq_cst, memory_order_relaxed", raw_cas_shim)
+        self.assertNotIn("memory_order_acquire", raw_cas_shim)
+        self.assertIn("test_ready_publication_wins_raw_cas", prep_slots_native)
         self.assertNotIn("ordered_worker_busy", DM)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 1)", ordered)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 0)", ordered)

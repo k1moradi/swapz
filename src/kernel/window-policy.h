@@ -573,7 +573,7 @@ static inline int swapz_window_raw_hand_pays(
 	return lz4_page_ewma_ns * 2U > block_service_ewma_ns;
 }
 
-/* 1/8 EWMA for ordered-worker lower-WRITE service and inline LZ4 samples. */
+/* 1/8 EWMA for ordered-owner lower service and observed LZ4 page samples. */
 static inline unsigned long long swapz_window_ewma_update(
 		unsigned long long ewma_ns, unsigned long long sample_ns)
 {

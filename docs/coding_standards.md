@@ -1198,6 +1198,12 @@ PREPARING -> READY_COMPRESSED or RAW_SELECTED -> SEALED -> COMMITTED/ABORTED.
 A producer publishes READY_COMPRESSED only after its payload, length, encoding
 and CRC are complete. READY observation must use acquire ordering; a relaxed
 state load is insufficient on weakly ordered CPUs. If the dispatcher atomically
+loses its PREPARING-to-RAW compare/exchange to READY publication, it must acquire
+the resulting stable state before reading payload metadata. A failed conditional
+RMW does not guarantee acquire ordering, including when its return value is
+READY. The consumer's existing page reference prevents state recycling during
+this bounded reread; neither waiting nor a retry loop is required.
+If the dispatcher atomically
 selects RAW first, a late producer result is discarded and its reservoir slot
 is recycled; it must never republish or replace that generation. The dispatcher
 never waits for a PREPARING descriptor solely to improve representation quality.

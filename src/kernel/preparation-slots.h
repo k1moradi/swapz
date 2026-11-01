@@ -36,9 +36,17 @@ static inline int swapz_preparation_select_raw(atomic_t *state)
 {
 	int observed = swapz_preparation_read_state(state);
 
-	if (observed == SWAPZ_PREPARATION_PREPARING)
+	if (observed == SWAPZ_PREPARATION_PREPARING) {
 		observed = atomic_cmpxchg(state, SWAPZ_PREPARATION_PREPARING,
 					 SWAPZ_PREPARATION_RAW_SELECTED);
+		/*
+		 * A failed conditional RMW need not acquire READY publication.
+		 * The consumer still holds its page reference: acquire that stable
+		 * state before using the producer's immutable payload metadata.
+		 */
+		if (observed != SWAPZ_PREPARATION_PREPARING)
+			return swapz_preparation_read_state(state);
+	}
 	return observed == SWAPZ_PREPARATION_PREPARING ?
 		SWAPZ_PREPARATION_RAW_SELECTED : observed;
 }

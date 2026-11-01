@@ -11,6 +11,18 @@ typedef int64_t s64;
 typedef struct { _Atomic int64_t value; } atomic64_t;
 typedef struct { _Atomic int value; } atomic_t;
 
+/* A deterministic producer publication between the first read and raw CAS.
+ * Counts API-level acquire observations; it is not a hardware reordering or
+ * LKMM proof. The contract allows an unordered failed conditional RMW. */
+static struct {
+	const atomic_t *state;
+	int ready_state;
+	int publish_before_cas;
+	unsigned int acquire_reads;
+	unsigned int ready_acquires;
+	unsigned int failed_cas;
+} publication;
+
 static int atomic_read(atomic_t *value)
 {
 	return atomic_load_explicit(&value->value, memory_order_relaxed);
@@ -18,13 +30,30 @@ static int atomic_read(atomic_t *value)
 
 static int atomic_read_acquire(const atomic_t *value)
 {
-	return atomic_load_explicit(&value->value, memory_order_acquire);
+	int observed = atomic_load_explicit(&value->value, memory_order_acquire);
+
+	if (value == publication.state) {
+		publication.acquire_reads++;
+		if (observed == publication.ready_state)
+			publication.ready_acquires++;
+	}
+	return observed;
 }
 
 static int atomic_cmpxchg(atomic_t *value, int old, int replacement)
 {
+	int expected = old;
+
+	if (value == publication.state && publication.publish_before_cas) {
+		atomic_store_explicit(&value->value, publication.ready_state,
+				      memory_order_release);
+		publication.publish_before_cas = 0;
+	}
+	/* Do not give Linux's failed-CAS path stronger ordering in this shim. */
 	atomic_compare_exchange_strong_explicit(&value->value, &old, replacement,
-			memory_order_seq_cst, memory_order_acquire);
+			memory_order_seq_cst, memory_order_relaxed);
+	if (value == publication.state && old != expected)
+		publication.failed_cas++;
 	return old;
 }
 
@@ -109,6 +138,49 @@ static int test_capacity_high_bit_and_reuse(void)
 		CHECK((uint64_t)atomic64_read(&mask) ==
 		      SWAPZ_PREPARATION_FREE_MASK);
 	}
+	return 0;
+}
+
+static int test_ready_publication_wins_raw_cas(void)
+{
+	const int states[] = { SWAPZ_PREPARATION_READY_COMPRESSED,
+			       SWAPZ_PREPARATION_READY_RAW };
+	atomic_t state;
+	unsigned int i;
+
+	for (i = 0; i < sizeof(states) / sizeof(states[0]); ++i) {
+		atomic_init(&state.value, SWAPZ_PREPARATION_PREPARING);
+		publication.state = &state;
+		publication.ready_state = states[i];
+		publication.publish_before_cas = 1;
+		publication.acquire_reads = 0;
+		publication.ready_acquires = 0;
+		publication.failed_cas = 0;
+		CHECK(swapz_preparation_select_raw(&state) == states[i]);
+		CHECK(publication.failed_cas == 1);
+		CHECK(publication.ready_acquires == 1);
+		CHECK(publication.acquire_reads == 2);
+		CHECK(atomic_read(&state) == states[i]);
+
+		/* Already-READY is the ordinary one-acquire fast path. */
+		publication.acquire_reads = 0;
+		publication.ready_acquires = 0;
+		publication.failed_cas = 0;
+		CHECK(swapz_preparation_select_raw(&state) == states[i]);
+		CHECK(publication.acquire_reads == 1);
+		CHECK(publication.ready_acquires == 1);
+		CHECK(publication.failed_cas == 0);
+	}
+	/* A successful RAW claim likewise needs no extra state read. */
+	atomic_store(&state.value, SWAPZ_PREPARATION_PREPARING);
+	publication.acquire_reads = 0;
+	publication.ready_acquires = 0;
+	publication.failed_cas = 0;
+	CHECK(swapz_preparation_select_raw(&state) == SWAPZ_PREPARATION_RAW_SELECTED);
+	CHECK(publication.acquire_reads == 1);
+	CHECK(publication.ready_acquires == 0);
+	CHECK(publication.failed_cas == 0);
+	publication.state = NULL;
 	return 0;
 }
 
@@ -200,8 +272,9 @@ static int test_concurrent_reuse(void)
 int main(void)
 {
 	CHECK(!test_representation_race());
+	CHECK(!test_ready_publication_wins_raw_cas());
 	CHECK(!test_capacity_high_bit_and_reuse());
 	CHECK(!test_concurrent_reuse());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=3");
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=4");
 	return 0;
 }
