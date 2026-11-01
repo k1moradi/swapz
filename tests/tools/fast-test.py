@@ -533,6 +533,8 @@ def summarize(name, arms, seconds):
             kernel.get("id181_publication_handoff") or 0,
         "id181_successor_first_closes":
             kernel.get("id181_successor_first_closes") or 0,
+        "id181_successor_first_submissions":
+            kernel.get("id181_successor_first_submissions") or 0,
         "id181_publication_handoffs":
             kernel.get("id181_publication_handoffs") or 0,
         "pages_per_lower_write": (
@@ -724,7 +726,12 @@ def id181_factorial_analysis(rows):
         complete = [
             block for _, block in sorted(rounds.items())
             if set(block) == set(policies) and
-            all(block[policy]["raw_w"] > 0 and block[policy]["swapz_w"] > 0
+            all(block[policy]["raw_w"] > 0 and block[policy]["swapz_w"] > 0 and
+                block[policy]["raw_lw_bytes"] > 0 and
+                block[policy]["raw_lw_reqs"] > 0 and
+                block[policy]["swapz_lw_bytes"] > 0 and
+                block[policy]["swapz_lw_reqs"] > 0 and
+                block[policy]["pages_per_lower_write"] > 0
                 for policy in policies)
         ]
         if not complete:
@@ -733,6 +740,9 @@ def id181_factorial_analysis(rows):
 
         policy_shifts = {policy: [] for policy in policies[1:]}
         read_p99_shifts = {policy: [] for policy in policies[1:]}
+        lower_byte_shifts = {policy: [] for policy in policies[1:]}
+        lower_request_shifts = {policy: [] for policy in policies[1:]}
+        records_per_request_shifts = {policy: [] for policy in policies[1:]}
         lower_guards = {policy: True for policy in policies[1:]}
         a_effects, b_effects, interactions = [], [], []
         for block in complete:
@@ -744,9 +754,24 @@ def id181_factorial_analysis(rows):
             control = log_ratio["control"]
             for policy in policies[1:]:
                 policy_shifts[policy].append(log_ratio[policy] - control)
+                # Same trace and fixture: guard both the raw baseline and
+                # the production-policy swapz control from this block.
                 lower_guards[policy] = lower_guards[policy] and (
-                    block[policy]["swapz_lw_bytes"] <= block[policy]["raw_lw_bytes"] and
-                    block[policy]["swapz_lw_reqs"] <= block[policy]["raw_lw_reqs"])
+                    block[policy]["swapz_lw_bytes"] <= min(
+                        block[policy]["raw_lw_bytes"],
+                        block["control"]["swapz_lw_bytes"]) and
+                    block[policy]["swapz_lw_reqs"] <= min(
+                        block[policy]["raw_lw_reqs"],
+                        block["control"]["swapz_lw_reqs"]))
+                lower_byte_shifts[policy].append(math.log(
+                    block[policy]["swapz_lw_bytes"] /
+                    block["control"]["swapz_lw_bytes"]))
+                lower_request_shifts[policy].append(math.log(
+                    block[policy]["swapz_lw_reqs"] /
+                    block["control"]["swapz_lw_reqs"]))
+                records_per_request_shifts[policy].append(math.log(
+                    block[policy]["pages_per_lower_write"] /
+                    block["control"]["pages_per_lower_write"]))
                 control_p99 = block["control"]["swapz_r_p99"]
                 policy_p99 = block[policy]["swapz_r_p99"]
                 if control_p99 > 0 and policy_p99 > 0:
@@ -769,13 +794,16 @@ def id181_factorial_analysis(rows):
             successor_closes = sum(
                 block[policy]["id181_successor_first_closes"]
                 for block in complete if policy in ("A", "AB"))
+            successor_submissions = sum(
+                block[policy]["id181_successor_first_submissions"]
+                for block in complete if policy in ("A", "AB"))
             publication_handoffs = sum(
                 block[policy]["id181_publication_handoffs"]
                 for block in complete if policy in ("B", "AB"))
             activity_ok = (
-                successor_closes > 0 if policy == "A" else
+                successor_submissions > 0 if policy == "A" else
                 publication_handoffs > 0 if policy == "B" else
-                successor_closes > 0 and publication_handoffs > 0)
+                successor_submissions > 0 and publication_handoffs > 0)
             if service["low"] is None:
                 verdict = "INSUFFICIENT"
             elif not activity_ok:
@@ -784,15 +812,24 @@ def id181_factorial_analysis(rows):
                 verdict = "LOWER_IO_REGRESSION"
             elif read_p99["high"] is not None and read_p99["high"] > 0.05:
                 verdict = "READ_P99_UNRESOLVED"
+            elif service["low"] >= 0.10:
+                verdict = "SCREEN_10PCT_CI"
             elif service["mean"] >= 0.10 and service["low"] > 0:
-                verdict = "PASS_10PCT_SCREEN"
+                verdict = "PROMISING_10PCT_POINT_ESTIMATE"
             else:
                 verdict = "NO_10PCT_GAIN"
             candidates[policy] = {
                 "write_vs_control": service,
                 "read_p99_vs_control": read_p99,
                 "lower_io_no_added_work": lower_guards[policy],
+                "lower_bytes_vs_control":
+                    log_effect_summary(lower_byte_shifts[policy]),
+                "lower_requests_vs_control":
+                    log_effect_summary(lower_request_shifts[policy]),
+                "pages_per_request_vs_control":
+                    log_effect_summary(records_per_request_shifts[policy]),
                 "successor_closes": successor_closes,
+                "successor_submissions": successor_submissions,
                 "publication_handoffs": publication_handoffs,
                 "verdict": verdict,
             }
@@ -831,12 +868,18 @@ def print_id181_factorial(analyses):
             print(f"  {policy:<2} vs control: "
                   f"{effect(candidate['write_vs_control'])}; "
                   f"Aclose={candidate['successor_closes']} "
+                  f"Asubmit={candidate['successor_submissions']} "
                   f"Bhandoff={candidate['publication_handoffs']} "
                   f"lowerIO={'OK' if candidate['lower_io_no_added_work'] else 'REGRESS'} "
+                  f"bytes={effect(candidate['lower_bytes_vs_control'])} "
+                  f"reqs={effect(candidate['lower_requests_vs_control'])} "
+                  f"pages/req={effect(candidate['pages_per_request_vs_control'])} "
                   f"R-p99={effect(candidate['read_p99_vs_control'])} "
                   f"{candidate['verdict']}")
     print("  Effects use paired log(swapz/raw WRITE) within each counterbalanced "
-          "round; brackets are t-based 95% CIs. Development screen only.")
+          "round; lower-I/O changes compare paired swapz policies. "
+          "Brackets are t-based 95% CIs; these are development screens, "
+          "not product-goal qualification.")
 
 
 def print_table(rows):

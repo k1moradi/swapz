@@ -231,9 +231,15 @@ already-staged work-conserving successor immediately after the prior run is
 published, before later FIFO admissions and independent READs. This
 development arm intentionally does not apply the production eight-record hand:
 the experiment measures whether earlier closure helps, and an eight-record
-gate is a later fallback only if measured aggregation loss requires it. Both
-worker finalize sites must invoke the same helper so lower-completion timing
-cannot change policy. It must use the unchanged flush logic (all barriers,
+gate is a later fallback only if measured aggregation loss requires it. All
+three ordered-worker completion/finalize sites (entry, in-loop, end-of-pass)
+must invoke the same helper so lower-completion timing cannot change policy.
+The early-close counter denotes attempts; only an actual successful K=1
+asynchronous lower-WRITE dispatch increments
+`id181_successor_first_submissions` (measured against the existing ordered
+`pipeline_async_runs` counter). A synchronous close or failed flush must not
+count as an asynchronous submission. It must use the unchanged flush logic
+(all barriers,
 CRC/generation, GC/failure ownership). Publication-time ACK handoff uses the
 one existing bounded 4..64 completion slot and queue-lock drain gate; occupied
 handoff falls back to ordered delivery. The shared handoff helper receives an

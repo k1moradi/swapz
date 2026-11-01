@@ -842,6 +842,30 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["submitter_copy_wall_ns"], 2000)
         self.assertEqual(delta["submitter_copy_bytes"], 32768)
         self.assertEqual(delta["submitter_crc_wall_ns"], 600)
+        # ID181 counters have to be monotone, bounded by attempts, and
+        # silent on default-off policies. These fields are not advisory when
+        # a loaded policy is selected.
+        before_id181 = dict(
+            before, id181_successor_first=1, id181_publication_handoff=1)
+        after_id181 = dict(
+            after, id181_successor_first=1, id181_publication_handoff=1,
+            id181_successor_first_closes=3,
+            id181_successor_first_submissions=2,
+            id181_publication_handoffs=2)
+        id181_delta = module.kernel_write_delta(before_id181, after_id181)
+        self.assertEqual(id181_delta["id181_successor_first_closes"], 3)
+        self.assertEqual(id181_delta["id181_successor_first_submissions"], 2)
+        self.assertEqual(id181_delta["id181_publication_handoffs"], 2)
+        with self.assertRaisesRegex(ValueError, "submissions exceed"):
+            module.kernel_write_delta(
+                before_id181,
+                dict(after_id181, id181_successor_first_submissions=4))
+        with self.assertRaisesRegex(ValueError, "disabled ID181"):
+            module.kernel_write_delta(
+                before, dict(after, id181_successor_first_submissions=1))
+        with self.assertRaisesRegex(ValueError, "changed swapz id181"):
+            module.kernel_write_delta(
+                before_id181, dict(after_id181, id181_successor_first=0))
         disabled_before = dict(before, delta64_rescue=0)
         disabled_after = dict(after, delta64_rescue=0,
                               **{field: 0 for field in module.DELTA64_FIELDS})

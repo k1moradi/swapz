@@ -571,8 +571,18 @@ policy has a same-fixture raw control, its own policy identity and round in
 `latest.json`. Base-scenario raw drift must span all four policies rather
 than being screened per policy. The report must include paired log-ratio
 A and B main effects, A-by-B interaction, policy-vs-control 95% intervals,
-actual successor-close/publication-handoff counts, lower-I/O checks and READ
-p99 watchpoints. A partial block is rejected before privilege. Do balanced repeated
+actual early-close attempts, confirmed asynchronous early submissions,
+publication-handoff counts, paired policy-vs-control lower bytes/requests,
+pages per lower WRITE and READ p99. Compare candidate lower work with BOTH
+the per-pair raw baseline and same-block default swapz, never raw alone.
+A result with a >=10% point estimate but lower 95% bound below 10% is
+`PROMISING_10PCT_POINT_ESTIMATE`, not a verified >=10% improvement; a
+lower bound >=10% is only `SCREEN_10PCT_CI`, still not qualified.
+Test the actual pure Python factorial analyzer on synthetic known 2x2 blocks,
+missing/noisy arms, inactivity, p99 and lower-I/O regression. An experiment
+with no confirmed asynchronous successor submission is `NO_ACTIVITY`, even
+when there were early-close attempts. A partial block is rejected before
+privilege. Do balanced repeated
 controls on NVMe5/NVMe4/SATA/fast mixed/fast QD8 on each quiet host. Compare
 useful WRITE/raw, READ p99, lower bytes/requests, CPU, gap partition, record
 size and ACK dwell. Three repeats screen a hypothesis; prospective paired

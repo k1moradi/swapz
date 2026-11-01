@@ -1413,7 +1413,8 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "work_conserving_raw_ready", "prep_late_results_discarded",
     "idle_bound_closes", "deferred_upper_completion_bios",
     "deferred_upper_completion_wall_ns",
-    "id181_successor_first_closes", "id181_publication_handoffs",
+    "id181_successor_first_closes", "id181_successor_first_submissions",
+    "id181_publication_handoffs",
     "submitter_prepare_claims", "submitter_prepare_lane_misses",
     "submitter_prepare_page_misses", "submitter_owner_deferrals",
     "submitter_prepare_pages", "submitter_prepare_wall_ns",
@@ -1518,8 +1519,12 @@ def kernel_write_delta(before, after):
     for field in ("id181_successor_first", "id181_publication_handoff"):
         if before[field] != after[field] or after[field] not in (0, 1):
             raise ValueError("invalid or changed swapz " + field + " policy")
-    if (not after["id181_successor_first"] and
+    if (counters["id181_successor_first_submissions"] >
             counters["id181_successor_first_closes"]):
+        raise ValueError("ID181 successful submissions exceed close attempts")
+    if (not after["id181_successor_first"] and
+            (counters["id181_successor_first_closes"] or
+             counters["id181_successor_first_submissions"])):
         raise ValueError("disabled ID181 successor-first recorded activity")
     if (not after["id181_publication_handoff"] and
             counters["id181_publication_handoffs"]):

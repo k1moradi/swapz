@@ -1804,7 +1804,7 @@ int main(void) {
                                  capture_output=True, text=True)
             self.assertEqual(ran.returncode, 0, ran.stderr)
 
-    def test_id181_policy_has_two_finalize_hooks_and_preserves_id175(self):
+    def test_id181_policy_covers_all_finalize_sites_and_preserves_id175(self):
         helper = body("swapz_id181_submit_staged_successor")
         worker = body("swapz_worker_pass")
         finalize = body("swapz_finalize_inflight_write")
@@ -1815,7 +1815,12 @@ int main(void) {
         self.assertIn("ctx->work_conserving_window", helper)
         self.assertNotIn("work_conserving_hand_records", helper)
         self.assertEqual(
-            worker.count("swapz_id181_submit_staged_successor(ctx)"), 2)
+            worker.count("swapz_id181_submit_staged_successor(ctx)"), 3)
+        self.assertEqual(
+            worker.count("swapz_finalize_inflight_write(ctx, false)"), 3)
+        self.assertIn("id181_successor_first_submissions++", helper)
+        self.assertLess(helper.index("error = swapz_flush_window(ctx);"),
+                        helper.index("id181_successor_first_submissions++"))
         self.assertIn("defer_for_successor =", finalize)
         self.assertIn(
             "ctx->id181_publication_handoff && defer_for_successor", finalize)
@@ -1823,9 +1828,109 @@ int main(void) {
         self.assertIn("swapz_try_completion_handoff(ctx, false)",
                       body("swapz_deliver_upper_completions"))
         self.assertIn('"id181_successor_first_closes"', replay)
+        self.assertIn('"id181_successor_first_submissions"', replay)
         self.assertIn('"id181_publication_handoffs"', replay)
         self.assertIn("def id181_factorial_analysis(rows):", fast)
         self.assertIn("base_scenario(row[\"scenario\"])", fast)
+
+    def test_id181_factorial_calculations_and_guards(self):
+        """Exercise the actual pure analysis functions, without a device."""
+        import runpy
+
+        analysis = runpy.run_path(str(ROOT / "tests/tools/fast-test.py"))
+        measure = analysis["id181_factorial_analysis"]
+        base_name = analysis["base_scenario"]
+        self.assertEqual(base_name("nvme5-mixed@AB#3"), "nvme5-mixed")
+        rates = {"control": 100, "A": 120, "B": 110, "AB": 132}
+
+        def make_rows():
+            rows = []
+            for round_number in range(1, 5):
+                for policy, write_rate in rates.items():
+                    rows.append({
+                        "scenario": f"nvme5-mixed@{policy}#{round_number}",
+                        "id181_round": round_number,
+                        "id181_policy": policy,
+                        "performance_validity": {"performance_usable": True},
+                        "raw_w": 100.0, "swapz_w": float(write_rate),
+                        "raw_lw_bytes": 4000, "raw_lw_reqs": 400,
+                        "swapz_lw_bytes": 1000, "swapz_lw_reqs": 100,
+                        "pages_per_lower_write": 8.0,
+                        "swapz_r_p99": 1.0,
+                        "id181_successor_first_closes": (
+                            2 if policy in ("A", "AB") else 0),
+                        "id181_successor_first_submissions": (
+                            1 if policy in ("A", "AB") else 0),
+                        "id181_publication_handoffs": (
+                            1 if policy in ("B", "AB") else 0),
+                    })
+            return rows
+
+        rows = make_rows()
+        result = measure(rows)[0]
+        self.assertEqual(result["complete_rounds"], 4)
+        self.assertAlmostEqual(result["a_main_effect"]["mean"], 0.2)
+        self.assertAlmostEqual(result["b_main_effect"]["mean"], 0.1)
+        self.assertAlmostEqual(result["a_by_b_interaction"]["mean"], 0.0)
+        a_candidate = result["candidates"]["A"]
+        self.assertEqual(a_candidate["verdict"], "SCREEN_10PCT_CI")
+        self.assertEqual(a_candidate["successor_submissions"], 4)
+        self.assertAlmostEqual(
+            a_candidate["lower_requests_vs_control"]["mean"], 0.0)
+        self.assertAlmostEqual(
+            a_candidate["pages_per_request_vs_control"]["mean"], 0.0)
+
+        # Against raw this would still pass; against the paired default
+        # swapz it correctly flags the increased physical lower work.
+        for row in rows:
+            if row["id181_policy"] == "A":
+                row["swapz_lw_reqs"] = 150
+                row["swapz_lw_bytes"] = 1200
+                row["pages_per_lower_write"] = 6.0
+        candidate = measure(rows)[0]["candidates"]["A"]
+        self.assertEqual(candidate["verdict"], "LOWER_IO_REGRESSION")
+        self.assertGreater(candidate["lower_bytes_vs_control"]["mean"], 0)
+        self.assertGreater(candidate["lower_requests_vs_control"]["mean"], 0)
+        self.assertLess(candidate["pages_per_request_vs_control"]["mean"], 0)
+
+        rows = make_rows()
+        for row in rows:
+            if row["id181_policy"] == "A":
+                row["id181_successor_first_submissions"] = 0
+        self.assertEqual(
+            measure(rows)[0]["candidates"]["A"]["verdict"], "NO_ACTIVITY")
+        rows = make_rows()
+        for row in rows:
+            if row["id181_policy"] == "AB":
+                row["id181_publication_handoffs"] = 0
+        self.assertEqual(
+            measure(rows)[0]["candidates"]["AB"]["verdict"], "NO_ACTIVITY")
+
+        rows = make_rows()
+        for row in rows:
+            if row["id181_policy"] == "A":
+                row["swapz_r_p99"] = 1.2
+        self.assertEqual(
+            measure(rows)[0]["candidates"]["A"]["verdict"],
+            "READ_P99_UNRESOLVED")
+
+        # A +10% point estimate with an interval including <10% is not
+        # a demonstrated >=10% CI improvement.
+        rows = make_rows()
+        for row in rows:
+            if row["id181_policy"] == "A":
+                row["swapz_w"] = 100 * (
+                    1.08 + (row["id181_round"] - 1) * 0.04)
+        self.assertEqual(
+            measure(rows)[0]["candidates"]["A"]["verdict"],
+            "PROMISING_10PCT_POINT_ESTIMATE")
+
+        rows = make_rows()
+        rows[0]["performance_validity"]["performance_usable"] = False
+        self.assertEqual(measure(rows)[0]["complete_rounds"], 3)
+        for row in rows:
+            row["performance_validity"]["performance_usable"] = False
+        self.assertEqual(measure(rows)[0]["complete_rounds"], 0)
 
     def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
         """Exercise actual target C under controlled queue/close/reuse interleavings."""

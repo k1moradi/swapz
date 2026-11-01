@@ -486,6 +486,8 @@ struct swapz_dm {
 	bool id181_successor_first;
 	bool id181_publication_handoff;
 	u64 id181_successor_first_closes;
+	/* Confirmed new asynchronous lower WRITE, not just a close attempt. */
+	u64 id181_successor_first_submissions;
 	u64 id181_publication_handoffs;
 	u64 work_conserving_hand_closes;
 	u64 work_conserving_dry_closes;
@@ -4586,14 +4588,23 @@ accounted:
  */
 static int swapz_id181_submit_staged_successor(struct swapz_dm *ctx)
 {
+	u64 submitted_before;
+	int error;
+
 	if (!ctx->id181_successor_first || !ctx->work_conserving_window ||
 	    !ctx->batch_count || swapz_has_inflight(ctx) || ctx->failed ||
 	    !READ_ONCE(ctx->accepting))
 		return 0;
 
+	/* Attempts can synchronously close or fail without dispatching a K=1
+	 * successor. Count a successful asynchronous lower submit separately. */
+	submitted_before = ctx->pipeline_async_runs;
 	ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 	ctx->id181_successor_first_closes++;
-	return swapz_flush_window(ctx);
+	error = swapz_flush_window(ctx);
+	if (!error && ctx->pipeline_async_runs > submitted_before)
+		ctx->id181_successor_first_submissions++;
+	return error;
 }
 
 static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logical)
@@ -7206,8 +7217,24 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 		}
 
 		if (swapz_has_inflight(ctx) &&
-		    !swapz_inflight_lower_pending(ctx))
-			swapz_finalize_inflight_write(ctx, false);
+		    !swapz_inflight_lower_pending(ctx)) {
+			int inflight_error =
+				swapz_finalize_inflight_write(ctx, false);
+
+			/*
+			 * Complete the ID181 owner policy at the end-of-pass site
+			 * too: a lower completion may arrive after the local loop
+			 * but before the next FIFO sample. The existing fail-closed
+			 * flush handles an uncleared staged window on error.
+			 */
+			if (!inflight_error)
+				inflight_error =
+					swapz_id181_submit_staged_successor(ctx);
+			if (inflight_error && ctx->batch_count) {
+				ctx->next_window_close = SWAPZ_CLOSE_OTHER;
+				swapz_flush_window(ctx);
+			}
+		}
 
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		swapz_sample_pack_tail_locked(ctx, &local);
@@ -9004,9 +9031,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			       prep.copy_fallback_pages +
 			       submitter.copy_fallback_pages);
 		DMEMIT(" id181_successor_first=%u id181_publication_handoff=%u"
-		       " id181_successor_first_closes=%llu id181_publication_handoffs=%llu",
+		       " id181_successor_first_closes=%llu"
+		       " id181_successor_first_submissions=%llu"
+		       " id181_publication_handoffs=%llu",
 		       ctx->id181_successor_first, ctx->id181_publication_handoff,
-		       ctx->id181_successor_first_closes, ctx->id181_publication_handoffs);
+		       ctx->id181_successor_first_closes,
+		       ctx->id181_successor_first_submissions,
+		       ctx->id181_publication_handoffs);
 		DMEMIT(" work_conserving_hand_records=%u "
 		       "work_conserving_hand_closes=%llu "
 		       "work_conserving_dry_closes=%llu "
