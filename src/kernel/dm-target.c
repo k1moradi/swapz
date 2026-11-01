@@ -1513,14 +1513,15 @@ static void swapz_completion_work(struct work_struct *work)
 
 static bool swapz_inflight_lower_pending(struct swapz_dm *ctx);
 
-static bool swapz_try_completion_handoff(struct swapz_dm *ctx)
+static bool swapz_try_completion_handoff(struct swapz_dm *ctx,
+					 bool allow_without_lower_pending)
 {
 	unsigned int count;
 	unsigned long flags;
 	bool handed = false;
 
 	if (!ctx->defer_upper_completions || !ctx->preparation_workqueue ||
-	    (!ctx->id181_publication_handoff &&
+	    (!allow_without_lower_pending &&
 	     !swapz_inflight_lower_pending(ctx)))
 		return false;
 	count = bio_list_size(&ctx->deferred_upper_completions);
@@ -1531,7 +1532,7 @@ static bool swapz_try_completion_handoff(struct swapz_dm *ctx)
 	 * must see this queued item before it can mark the queue draining. */
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (ctx->accepting && !ctx->failed &&
-	    (ctx->id181_publication_handoff ||
+	    (allow_without_lower_pending ||
 	     swapz_inflight_lower_pending(ctx)) &&
 	    !atomic_cmpxchg(&ctx->completion_active, 0, 1)) {
 		ctx->completion_bios = ctx->deferred_upper_completions;
@@ -1579,7 +1580,7 @@ static void swapz_deliver_upper_completions(struct swapz_dm *ctx)
 {
 	if (bio_list_empty(&ctx->deferred_upper_completions))
 		return;
-	if (swapz_try_completion_handoff(ctx))
+	if (swapz_try_completion_handoff(ctx, false))
 		return;
 	swapz_deliver_bio_list(ctx, &ctx->deferred_upper_completions);
 }
@@ -2152,7 +2153,7 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	 * when actual successor/queued work independently caused deferral.
 	 */
 	if (ctx->id181_publication_handoff && defer_for_successor &&
-	    swapz_try_completion_handoff(ctx))
+	    swapz_try_completion_handoff(ctx, true))
 		ctx->id181_publication_handoffs++;
 	return 0;
 }

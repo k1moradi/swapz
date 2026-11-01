@@ -236,9 +236,12 @@ worker finalize sites must invoke the same helper so lower-completion timing
 cannot change policy. It must use the unchanged flush logic (all barriers,
 CRC/generation, GC/failure ownership). Publication-time ACK handoff uses the
 one existing bounded 4..64 completion slot and queue-lock drain gate; occupied
-handoff falls back to ordered delivery. A run deferred solely because ID175
-submitter dispatch occurred is excluded: its writers must still wake only
-after the ordered owner is released. No early success,
+handoff falls back to ordered delivery. The shared handoff helper receives an
+explicit call-site permission to operate without a pending lower WRITE:
+ordinary delivery always passes false and only the publication-time ID181 B
+call passes true. A run deferred solely because ID175 submitter dispatch
+occurred is excluded: its writers must still wake only after the ordered owner
+is released. No early success,
 second lower WRITE, new queue/lock, changed SWZ or physical-device admission.
 Controls are development-only; the qualified production defaults remain off.
 

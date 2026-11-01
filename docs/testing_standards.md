@@ -578,7 +578,8 @@ useful WRITE/raw, READ p99, lower bytes/requests, CPU, gap partition, record
 size and ACK dwell. Three repeats screen a hypothesis; prospective paired
 confidence intervals are required before promotion. The actual completion
 handoff probe must cover a published cohort without a pending successor,
-the 4..64 bound, busy slot, failure and exact-once completion. Official
+the explicit allow-without-lower permission, ordinary false-permission
+rejection, the 4..64 bound, busy slot, failure and exact-once completion. Official
 `make test` always uses disabled selectors.
 
 ### Lower-lane gap attribution: native and replay qualification (ID178)

@@ -1596,7 +1596,7 @@ static swapz_u16 swapz_probe_set(
         deliver = body("swapz_deliver_upper_completions")
         self.assertIn("swapz_deliver_bio_list(ctx, &ctx->deferred_upper_completions)",
                       deliver)
-        self.assertLess(deliver.index("swapz_try_completion_handoff(ctx)"),
+        self.assertLess(deliver.index("swapz_try_completion_handoff(ctx, false)"),
                         deliver.index("swapz_deliver_bio_list("))
         delivered = body("swapz_deliver_bio_list")
         self.assertIn("bio_list_pop(bios)", delivered)
@@ -1817,6 +1817,9 @@ int main(void) {
         self.assertIn("defer_for_successor =", finalize)
         self.assertIn(
             "ctx->id181_publication_handoff && defer_for_successor", finalize)
+        self.assertIn("swapz_try_completion_handoff(ctx, true)", finalize)
+        self.assertIn("swapz_try_completion_handoff(ctx, false)",
+                      body("swapz_deliver_upper_completions"))
         self.assertIn('"id181_successor_first_closes"', replay)
         self.assertIn('"id181_publication_handoffs"', replay)
         self.assertIn("def id181_factorial_analysis(rows):", fast)
@@ -1926,7 +1929,7 @@ static void bio_endio(struct bio *b) {
                 ("swapz_complete", "static void swapz_complete(struct bio *bio, int error)"),
                 ("swapz_defer_upper_completion", "static void swapz_defer_upper_completion(struct swapz_dm *ctx, struct bio *bio)"),
                 ("swapz_completion_work", "static void swapz_completion_work(struct work_struct *work)"),
-                ("swapz_try_completion_handoff", "static bool swapz_try_completion_handoff(struct swapz_dm *ctx)"),
+                ("swapz_try_completion_handoff", "static bool swapz_try_completion_handoff(struct swapz_dm *ctx, bool allow_without_lower_pending)"),
                 ("swapz_deliver_bio_list", "static void swapz_deliver_bio_list(struct swapz_dm *ctx, struct bio_list *bios)"),
                 ("swapz_deliver_upper_completions", "static void swapz_deliver_upper_completions(struct swapz_dm *ctx)")):
             source += signature + " {\n" + body(name) + "\n}\n"
@@ -1945,39 +1948,40 @@ static void add(unsigned start,unsigned count) {
     for(unsigned i=start;i<start+count;++i)swapz_defer_upper_completion(&ctx,&bios[i]);
 }
 static void run(void) { struct work_struct *w=pending;assert(w);pending=NULL;w->func(w); }
-static void reuse(void) { add(4,4);assert(swapz_try_completion_handoff(&ctx)); }
+static void reuse(void) { add(4,4);assert(swapz_try_completion_handoff(&ctx, false)); }
 int main(void) {
-    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx, false));
     assert(ctx.completion_active&&bio_list_empty(&ctx.deferred_upper_completions));
     assert(released==4&&!bios[0].ended);
-    add(4,4);assert(!swapz_try_completion_handoff(&ctx));
+    add(4,4);assert(!swapz_try_completion_handoff(&ctx, false));
     swapz_deliver_upper_completions(&ctx); /* Occupied slot: original inline path. */
     for(unsigned i=0;i<8;++i)assert(bios[i].ended==(i>=4));
     run();assert(!ctx.completion_active&&released==8&&ctx.upper_write_completed_ok==8);
     for(unsigned i=0;i<8;++i)assert(bios[i].ended==1&&!bios[i].bi_status);
 
     /* Same work item is requeued after release, before its old call returns. */
-    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));release_hook=reuse;
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx, false));release_hook=reuse;
     run();assert(ctx.completion_active&&pending&&ctx.completion_offloaded_batches==2);
     for(unsigned i=0;i<8;++i)assert(bios[i].ended==(i<4));
     run();assert(!ctx.completion_active&&ctx.upper_write_completed_ok==8);
 
     /* Closing admission between eligibility and lock acquisition rejects handoff. */
-    init();add(0,4);close_at_lock=&ctx;assert(!swapz_try_completion_handoff(&ctx));
+    init();add(0,4);close_at_lock=&ctx;assert(!swapz_try_completion_handoff(&ctx, false));
     assert(!pending&&!ctx.completion_active&&bio_list_size(&ctx.deferred_upper_completions)==4);
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==4);
-    init();add(0,3);assert(!swapz_try_completion_handoff(&ctx));
+    init();add(0,3);assert(!swapz_try_completion_handoff(&ctx, false));
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==3);
-    init();add(0,65);assert(!swapz_try_completion_handoff(&ctx));
+    init();add(0,65);assert(!swapz_try_completion_handoff(&ctx, false));
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==65);
-    init();add(0,4);ctx.lower_pending=false;assert(!swapz_try_completion_handoff(&ctx));
+    init();add(0,4);ctx.lower_pending=false;assert(!swapz_try_completion_handoff(&ctx, false));
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==4);
-    /* ID181: publication-time handoff is still bounded and exact-once. */
+    /* ID181: only the explicit publication call may bypass lower-pending. */
     init();add(0,4);ctx.lower_pending=false;ctx.id181_publication_handoff=true;
-    assert(swapz_try_completion_handoff(&ctx));run();
+    assert(!swapz_try_completion_handoff(&ctx, false));
+    assert(swapz_try_completion_handoff(&ctx, true));run();
     assert(ctx.upper_write_completed_ok==4&&!ctx.completion_active);
     init();add(0,3);ctx.lower_pending=false;ctx.id181_publication_handoff=true;
-    assert(!swapz_try_completion_handoff(&ctx));
+    assert(!swapz_try_completion_handoff(&ctx, true));
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==3);
     init();add(0,4);ctx.defer_upper_completions=false;
     swapz_deliver_upper_completions(&ctx);assert(!pending&&ctx.upper_write_completed_ok==4);
@@ -1996,10 +2000,10 @@ int main(void) {
     }
 
     /* Already-published BIOs still fail closed if failure precedes delivery. */
-    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));fail_after=0;run();
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx, false));fail_after=0;run();
     assert(ctx.upper_write_completed_ok==1&&ctx.upper_write_completed_err==3);
     for(unsigned i=1;i<4;++i)assert(bios[i].bi_status==EIO);
-    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));fail_at_endio=0;run();
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx, false));fail_at_endio=0;run();
     assert(ctx.endio_write_forced_err==1&&bios[0].bi_status==EIO);
     assert(ctx.upper_write_completed_err==3&&!ctx.completion_active);
     return 0;

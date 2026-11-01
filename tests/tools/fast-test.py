@@ -766,15 +766,19 @@ def id181_factorial_analysis(rows):
         for policy in policies[1:]:
             service = log_effect_summary(policy_shifts[policy])
             read_p99 = log_effect_summary(read_p99_shifts[policy])
-            activity = sum(
-                (block[policy]["id181_successor_first_closes"]
-                 if policy in ("A", "AB") else 0) +
-                (block[policy]["id181_publication_handoffs"]
-                 if policy in ("B", "AB") else 0)
-                for block in complete)
+            successor_closes = sum(
+                block[policy]["id181_successor_first_closes"]
+                for block in complete if policy in ("A", "AB"))
+            publication_handoffs = sum(
+                block[policy]["id181_publication_handoffs"]
+                for block in complete if policy in ("B", "AB"))
+            activity_ok = (
+                successor_closes > 0 if policy == "A" else
+                publication_handoffs > 0 if policy == "B" else
+                successor_closes > 0 and publication_handoffs > 0)
             if service["low"] is None:
                 verdict = "INSUFFICIENT"
-            elif not activity:
+            elif not activity_ok:
                 verdict = "NO_ACTIVITY"
             elif not lower_guards[policy]:
                 verdict = "LOWER_IO_REGRESSION"
@@ -788,7 +792,8 @@ def id181_factorial_analysis(rows):
                 "write_vs_control": service,
                 "read_p99_vs_control": read_p99,
                 "lower_io_no_added_work": lower_guards[policy],
-                "activity": activity,
+                "successor_closes": successor_closes,
+                "publication_handoffs": publication_handoffs,
                 "verdict": verdict,
             }
 
@@ -825,7 +830,8 @@ def print_id181_factorial(analyses):
         for policy, candidate in row.get("candidates", {}).items():
             print(f"  {policy:<2} vs control: "
                   f"{effect(candidate['write_vs_control'])}; "
-                  f"activity={candidate['activity']} "
+                  f"Aclose={candidate['successor_closes']} "
+                  f"Bhandoff={candidate['publication_handoffs']} "
                   f"lowerIO={'OK' if candidate['lower_io_no_added_work'] else 'REGRESS'} "
                   f"R-p99={effect(candidate['read_p99_vs_control'])} "
                   f"{candidate['verdict']}")
@@ -887,7 +893,7 @@ def print_profile(rows):
     for row in rows:
         if "error" in row:
             continue
-        groups.setdefault(base_scenario(row["scenario"]), []).append(row)
+        groups.setdefault(row["scenario"].split("#", 1)[0], []).append(row)
 
     print("\nK=1 critical-path profile (SCREENED repeats only)")
     header = (f"{'scenario':<12} {'n':>3} {'admit us':>9} {'sched diag':>10} "
