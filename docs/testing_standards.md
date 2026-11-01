@@ -554,9 +554,12 @@ delivery timestamp before the cohort, assign the record before each successful
 BIO delivery, never dereference a BIO after `bio_endio()`, and aggregate all
 per-BIO bins before releasing the completion slot. An executable actual-body
 probe must validate immediate/deferred counts, duration sums, bin edges, the
-shared-clock path without per-BIO clock reads, direct fallback and invalid
-timestamps; completion failure injection remains covered by the ownership probe.
-The cohort timestamp intentionally replaces per-BIO delivery clocks, so absolute
+shared-clock path without per-BIO clock reads, synchronous-window cohort
+coverage, direct fallback and invalid timestamps; completion failure injection
+remains covered by the ownership probe. A missing synchronous publication
+observer mark must use the same cohort timestamp as a conservative zero-dwell
+fallback, never a fresh per-BIO clock. The cohort timestamp intentionally
+replaces per-BIO delivery clocks, so absolute
 ID178 ACK-dwell values may shift by at most the delivery-loop span and must not
 be pooled as byte-for-byte-equivalent telemetry across this boundary. The fast
 and official replay status schema remains unchanged except for new ID181

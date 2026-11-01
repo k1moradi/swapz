@@ -1726,6 +1726,7 @@ int main(void) {
         completion_work = body("swapz_completion_work")
         ordered_delivery = body("swapz_deliver_bio_list")
         finalize = body("swapz_finalize_inflight_write")
+        synchronous_flush = body("swapz_flush_window")
         self.assertIn("acknowledgements.delivered_ns = ktime_get_ns();",
                       completion_work)
         self.assertIn("acknowledgements.delivered_ns = start_ns;",
@@ -1735,6 +1736,14 @@ int main(void) {
         self.assertIn("entry->ack_batch = &acknowledgements", finalize)
         self.assertIn("swapz_lane_gap_ack_flush(ctx, &acknowledgements);",
                       finalize)
+        self.assertIn("acknowledgements.delivered_ns = ktime_get_ns();",
+                      synchronous_flush)
+        self.assertIn("entry->published_ns = acknowledgements.delivered_ns;",
+                      synchronous_flush)
+        self.assertIn("entry->ack_batch = &acknowledgements;",
+                      synchronous_flush)
+        self.assertIn("swapz_lane_gap_ack_flush(ctx, &acknowledgements);",
+                      synchronous_flush)
 
         source = r"""
 #include <assert.h>

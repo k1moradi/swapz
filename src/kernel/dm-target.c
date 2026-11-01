@@ -3942,6 +3942,7 @@ static void swapz_account_single_tail_terminal(struct swapz_dm *ctx,
 
 static int swapz_flush_window(struct swapz_dm *ctx)
 {
+	struct swapz_ack_dwell_batch acknowledgements = {};
 	swapz_u8 committed = 0, index, count = ctx->batch_count;
 	swapz_u8 gc_attempts = 0;
 	bool needs_fua = false;
@@ -4490,6 +4491,14 @@ commit_done:
 		error = swapz_issue_flush(ctx);
 	if (error && needs_fua)
 		swapz_fail(ctx, error);
+	/*
+	 * Successful synchronous records are one terminal ACK cohort. The engine
+	 * normally stamps publication; if an exceptional successful mapping lacks
+	 * that observer mark, reuse this delivery mark as a conservative zero-dwell
+	 * fallback instead of taking another clock reading for each BIO.
+	 */
+	if (!async_submitted && committed && !ctx->failed)
+		acknowledgements.delivered_ns = ktime_get_ns();
 	for (index = 0; index < count; ++index) {
 		struct bio *bio = ctx->batch[ctx->planned_to_batch[index]].bio;
 
@@ -4506,8 +4515,9 @@ commit_done:
 			 * that complete without a lower-WRITE publication callback.
 			 */
 			if (!entry->published_ns)
-				entry->published_ns = ktime_get_ns();
+				entry->published_ns = acknowledgements.delivered_ns;
 			entry->published_deferred = false;
+			entry->ack_batch = &acknowledgements;
 			ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 			if (ctx->planned[index].raw)
 				ctx->raw_pages++;
@@ -4518,6 +4528,8 @@ commit_done:
 			swapz_complete(bio, error ? error : -EIO);
 		}
 	}
+	if (acknowledgements.delivered_ns)
+		swapz_lane_gap_ack_flush(ctx, &acknowledgements);
 accounted:
 	ctx->windows++;
 	ctx->window_records_total += count;

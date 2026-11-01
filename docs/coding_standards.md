@@ -220,7 +220,10 @@ publication timestamps, the successful-completion predicate and dwell histogram
 bins remain unchanged. Add per-BIO counts/durations/bins to the owner-local
 record and publish the aggregates to the existing `atomic64_t` counters before
 the completion slot is released or preemption is restored. Direct unbatched
-completions keep their per-BIO clock and atomic fallback. The cohort mark is
+completions keep their per-BIO clock and atomic fallback. Successful synchronous
+window completions are also one cohort; if the engine did not stamp a rare
+successful mapping's publication time, reuse the cohort mark as a conservative
+zero-dwell fallback rather than add a per-BIO clock read. The cohort mark is
 diagnostic only: its timestamp error is bounded by the ACK delivery-loop span
 and it must never move `bio_endio()`, publication, failure checks or ownership.
 No unprotected shared accumulator or new queue is permitted.
