@@ -103,6 +103,14 @@ only when it is safe to release that folio; submitting a BIO is not completion.
 Exact locking, PTE replacement and folio lifetime vary across swap paths and
 kernel releases.
 
+In Linux v7.0, a failed block-backed swap WRITE completion follows a
+kernel recovery path in `__end_swap_bio_write()`: the folio is re-dirtied
+and `PG_reclaim` is cleared, retaining the RAM copy instead of treating the
+backing write as successful. If a stacked target reports success before its
+lower WRITE actually succeeds, Linux may later reclaim that folio and this
+kernel-visible recovery path is gone. Early success acknowledgement is
+therefore a storage-contract change, not a scheduling optimization.
+
 The normal block-backed swap-out path is approximately:
 
 ```text
@@ -220,6 +228,13 @@ payloads, atomic states and references), logical-page-to-extent mapping
 authority/generations, physical segment and GC accounting, immutable lower-run
 buffers/transaction snapshots, and read/metadata caches. That metadata is
 swapz authority, not a directory of RAM objects.
+
+Because that mapping, generation and segment authority exists only in RAM
+and swapz has no persistent reconstruction mechanism, it does not survive a
+reboot. swapz is therefore not a hibernation resume device: a hibernation
+image that depends on swapz's volatile authority cannot be reconstructed
+after power-off/reboot. This limitation exists independently of any early-
+acknowledgement proposal.
 
 ### 4.1 What the submitting task may do inside `->map`
 

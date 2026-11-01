@@ -1289,6 +1289,9 @@ acknowledges. A dispatched run's successes are deferred to the worker tail and
 delivered from a private list after `ordered_owner` is released, so a woken
 closed-loop writer finds an idle owner. Acknowledgement still follows confirmed
 lower completion and authority publication; failures are completed at once.
+This success contract may change only with explicit owner approval; an early-
+acknowledgement design must not be introduced as a scheduling or performance
+optimization.
 Dispatch adds no allocation, queue, timer, lower-WRITE slot, preparation lane,
 SWZ change or module parameter. `submitter_dispatches` and
 `submitter_dispatch_declines` are observational counters whose sum is bounded
