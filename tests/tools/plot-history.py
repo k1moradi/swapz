@@ -84,33 +84,141 @@ def selected_host_report(report, sha, profile=None):
         len(stages) == 5 and all(stage.get("status") == "PASS" for stage in stages)
 
 
-def same_computer_report(report, identity, sha=None, legacy_profile=None):
+def validate_host_registry(registry):
+    """Validate per-computer legacy SHA approvals without ISA-based auto-merging."""
+    if not isinstance(registry, dict) or \
+            registry.get("schema") != "swapz-host-history-v1" or \
+            not isinstance(registry.get("hosts"), list):
+        raise ValueError("host history registry has an invalid schema")
+    identities, report_shas = set(), set()
+    for entry in registry["hosts"]:
+        identity = entry.get("identity") if isinstance(entry, dict) else None
+        if not isinstance(identity, dict) or \
+                identity.get("schema") != "swapz-host-v1" or \
+                not re.fullmatch(r"[a-zA-Z0-9_-]+", str(identity.get("architecture", ""))) or \
+                not re.fullmatch(r"[0-9a-f]{64}", str(identity.get("id_sha256", ""))) or \
+                type(entry.get("online_cpus")) is not int or entry["online_cpus"] < 1 or \
+                not isinstance(entry.get("required_backends"), list) or \
+                not entry["required_backends"] or \
+                any(not isinstance(name, str) or not name for name in entry["required_backends"]) or \
+                len(set(entry["required_backends"])) != len(entry["required_backends"]) or \
+                not isinstance(entry.get("label"), str) or not entry["label"].strip() or \
+                "\n" in entry["label"] or \
+                not isinstance(entry.get("owner_confirmation"), str) or \
+                not entry["owner_confirmation"].strip() or \
+                not isinstance(entry.get("owner_confirmed_legacy_report_shas"), list):
+            raise ValueError("host history entry needs identity, CPU/backend profile and report SHAs")
+        identity_key = (identity["architecture"], identity["id_sha256"])
+        if identity_key in identities:
+            raise ValueError("host history registry contains a duplicate computer identity")
+        identities.add(identity_key)
+        shas = entry["owner_confirmed_legacy_report_shas"]
+        if any(not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
+               for sha in shas) or len(set(shas)) != len(shas):
+            raise ValueError("legacy history approvals must be unique full report SHAs")
+        if any(sha in report_shas for sha in shas):
+            raise ValueError("a legacy report SHA cannot be assigned to multiple computers")
+        report_shas.update(shas)
+    return registry
+
+
+def host_registry_entry(registry, identity):
+    if registry is None or identity is None:
+        return None
+    return next((entry for entry in registry["hosts"]
+                 if entry["identity"] == identity), None)
+
+
+def report_passed_all_stages(report):
     stages = report.get("stages", [])
-    passed = report.get("overall") == "PASS" and len(stages) == 5 and \
+    return report.get("overall") == "PASS" and len(stages) == 5 and \
         all(stage.get("status") == "PASS" for stage in stages)
-    if not passed:
+
+
+def report_signature(report):
+    """Extract coarse legacy-host attributes for candidate discovery only."""
+    backends = sorted({row.get("name") for row in report.get("evidence", {}).get(
+        "predictor", {}).get("backend_benchmarks", []) or []
+        if isinstance(row, dict) and isinstance(row.get("name"), str)})
+    counts = {arm.get("host_cpu", {}).get("online_cpus")
+              for session in report.get("benchmarks", {}).get("sessions", [])
+              for arm in (session.get("arms") or {}).values()
+              if isinstance(arm, dict) and
+              isinstance(arm.get("host_cpu"), dict) and
+              type(arm["host_cpu"].get("online_cpus")) is int}
+    identity = report.get("host_identity")
+    architecture = identity.get("architecture") if isinstance(identity, dict) and \
+        identity.get("schema") == "swapz-host-v1" else None
+    if architecture is None:
+        if "neon" in backends:
+            architecture = "aarch64"
+        elif {"sse2", "avx2", "avx512"}.intersection(backends):
+            architecture = "x86_64"
+    return {"architecture": architecture,
+            "online_cpus": next(iter(counts)) if len(counts) == 1 else None,
+            "kernel_release": report.get("kernel_release"),
+            "backends": backends}
+
+
+def legacy_report_matches(report, sha, identity, entry):
+    if sha not in entry["owner_confirmed_legacy_report_shas"] or \
+            not report_passed_all_stages(report):
+        return False
+    reported_identity = report.get("host_identity")
+    if isinstance(reported_identity, dict) and \
+            re.fullmatch(r"[0-9a-f]{64}", str(reported_identity.get("id_sha256", ""))) and \
+            reported_identity != identity:
+        return False
+    signature = report_signature(report)
+    return signature["architecture"] == identity["architecture"] and \
+        signature["online_cpus"] == entry["online_cpus"] and \
+        set(entry["required_backends"]).issubset(signature["backends"])
+
+
+def same_computer_report(report, identity, sha=None, legacy_entry=None):
+    if not report_passed_all_stages(report):
         return False
     if report.get("host_identity") == identity:
         return True
-    if legacy_profile is None or sha not in legacy_profile.get(
-            "owner_confirmed_same_computer_report_shas", []):
-        return False
-    return selected_host_report(report, sha, legacy_profile)
+    return legacy_entry is not None and \
+        legacy_report_matches(report, sha, identity, legacy_entry)
 
 
-def collect(profile=None, computer=None, legacy_profile=None):
+def signatures_match(left, right):
+    """Return legacy candidate evidence; candidate matches still need owner approval.
+
+    Kernel changes and backend availability can change between reports from the
+    same installation. Keep those as ranked evidence rather than hard filters;
+    architecture, online CPU count and at least one executed backend must agree.
+    """
+    if left.get("architecture") is None or \
+            left.get("architecture") != right.get("architecture") or \
+            left.get("online_cpus") is None or \
+            left.get("online_cpus") != right.get("online_cpus"):
+        return None
+    shared_backends = sorted(set(left.get("backends", [])) &
+                             set(right.get("backends", [])))
+    if not shared_backends:
+        return None
+    return {"architecture_matches": True, "online_cpus_match": True,
+            "kernel_matches": bool(left.get("kernel_release") and
+                                    left.get("kernel_release") == right.get("kernel_release")),
+            "shared_backends": shared_backends}
+
+
+def collect(profile=None, computer=None, host_registry=None):
     if profile is not None:
         validate_host_profile(profile)
-    if legacy_profile is not None:
-        validate_host_profile(legacy_profile)
-        if computer is None or legacy_profile["host_id_sha256"] != computer.get("id_sha256"):
-            raise ValueError("legacy host profile must match the selected computer identity")
-        if profile is not None:
-            raise ValueError("select either a profile history or a computer history")
+    if host_registry is not None:
+        validate_host_registry(host_registry)
+    if profile is not None and computer is not None:
+        raise ValueError("select either a profile history or an exact computer history")
+    legacy_entry = host_registry_entry(host_registry, computer)
     history = subprocess.check_output(
         ["git", "log", "--reverse", "--format=%H %cI", "--", "test_results.json"],
         cwd=ROOT, text=True).splitlines()
     reports, points, excluded = [], [], Counter()
+    exact_signatures, unidentified_reports = [], []
     for entry in history:
         sha, stamp = entry.split()
         if profile is not None and sha not in profile["report_shas"]:
@@ -122,9 +230,27 @@ def collect(profile=None, computer=None, legacy_profile=None):
         except (ValueError, subprocess.CalledProcessError):
             excluded["unreadable report"] += 1
             continue
-        if not (same_computer_report(report, computer, sha, legacy_profile)
-                if computer is not None
-                else selected_host_report(report, sha, profile)):
+        signature = report_signature(report)
+        report_identity = report.get("host_identity")
+        passed = report_passed_all_stages(report)
+        if computer is not None and report_identity == computer and passed:
+            exact_signatures.append((sha, signature))
+        elif computer is not None and not (
+                isinstance(report_identity, dict) and
+                re.fullmatch(r"[0-9a-f]{64}", str(report_identity.get("id_sha256", "")))) and \
+                passed:
+            unidentified_reports.append({
+                "report_sha": sha,
+                "source_sha": report.get("tested_commit_sha") or report.get("source_sha"),
+                "date": datetime.fromisoformat(stamp).astimezone(
+                    ZoneInfo("America/Los_Angeles")).isoformat(),
+                "kernel": report.get("kernel_release"),
+                "signature": signature,
+            })
+        selected = (same_computer_report(report, computer, sha, legacy_entry)
+                    if computer is not None
+                    else selected_host_report(report, sha, profile))
+        if not selected:
             excluded["other or unproven host"] += 1
             continue
         if report.get("overall") != "PASS":
@@ -155,7 +281,8 @@ def collect(profile=None, computer=None, legacy_profile=None):
                 "; legacy reports without a host match stay separate."
                 if profile else "NEON/seven-CPU VM cohort; old reports lack an immutable VM ID.")
     if computer is not None:
-        title = computer["architecture"] + " · host " + computer["id_sha256"][:12]
+        title = (legacy_entry.get("label") if legacy_entry else None) or (
+            computer["architecture"] + " · host " + computer["id_sha256"][:12])
         legacy_count = sum(row["host_identity_basis"] == "owner-confirmed legacy report SHA"
                            for row in reports)
         identity = "Exact OS installation identity and architecture."
@@ -167,9 +294,40 @@ def collect(profile=None, computer=None, legacy_profile=None):
                          "their report files lack host_identity and are explicitly marked in history.json.")
     else:
         legacy_count = 0
+    legacy_candidates = []
+    if computer is not None:
+        assigned_shas = {sha for entry in (host_registry or {}).get("hosts", [])
+                         for sha in entry["owner_confirmed_legacy_report_shas"]}
+        for candidate in unidentified_reports:
+            if candidate["report_sha"] in assigned_shas:
+                continue
+            matches = []
+            for exact_sha, exact_signature in exact_signatures:
+                evidence = signatures_match(candidate["signature"], exact_signature)
+                if evidence is not None:
+                    matches.append({"report_sha": exact_sha, **evidence})
+            if matches:
+                matches.sort(key=lambda item: (not item["kernel_matches"],
+                                               -len(item["shared_backends"]),
+                                               item["report_sha"]))
+                legacy_candidates.append({
+                    **candidate,
+                    "status": "candidate only; owner confirmation required",
+                    "matched_exact_reports": matches,
+                })
+        legacy_candidates.sort(key=lambda item: (
+            not item["matched_exact_reports"][0]["kernel_matches"],
+            -len(item["matched_exact_reports"][0]["shared_backends"]),
+            item["date"], item["report_sha"]))
+    if legacy_entry is not None:
+        legacy_count = sum(row["host_identity_basis"] == "owner-confirmed legacy report SHA"
+                           for row in reports)
+    else:
+        legacy_count = 0
     return {"reports": reports, "points": points, "excluded": dict(excluded),
-            "title": title, "host_profile": legacy_profile or profile,
+            "title": title, "host_profile": legacy_entry or profile,
             "owner_confirmed_legacy_reports": legacy_count,
+            "legacy_candidates": legacy_candidates,
             "identity_note": identity,
             "scope": "Historical descriptive " + title + " owner PASS reports. " + identity +
                      " No quiet-window noise screen in official reports; no causal cross-report "
@@ -316,9 +474,10 @@ def snapshot_history(data):
     snapshot = OUT / "snapshots" / data["reports"][-1]["report_sha"] / identity
     snapshot.mkdir(parents=True, exist_ok=True)
     for name in ("mixed-service.png", "mixed-throughput.png", "mixed-latency.png",
-                 "lower-write-savings.png", "sustained-write.png", "history.csv", "history.json"):
+                 "lower-write-savings.png", "sustained-write.png", "history.csv", "history.json",
+                 "legacy-candidates.json"):
         target = snapshot / name
-        if not target.exists():
+        if not target.exists() and (OUT / name).exists():
             shutil.copyfile(OUT / name, target)
     return snapshot
 
@@ -327,9 +486,7 @@ def main():
     global OUT
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--host-profile", type=Path,
-                        help="audited x86 host JSON; omission preserves the ARM64 cohort")
-    parser.add_argument("--legacy-host-profile", type=Path,
-                        help="owner-confirmed legacy report SHAs to add to a matching exact host")
+                        help="audited report cohort; omission preserves the ARM64 cohort")
     parser.add_argument("--host-id", help="exact report machine identity digest")
     parser.add_argument("--host-architecture", help="exact report architecture")
     args = parser.parse_args()
@@ -342,15 +499,16 @@ def main():
         OUT = ROOT / "build/history" / (args.host_architecture + "-" + args.host_id)
     profile = validate_host_profile(json.loads(args.host_profile.read_text())) \
         if args.host_profile else None
-    legacy_profile = validate_host_profile(json.loads(args.legacy_host_profile.read_text())) \
-        if args.legacy_host_profile else None
     if profile is not None:
         OUT = ROOT / "build/history" / profile["id"]
-    if legacy_profile is not None:
-        if computer is None or legacy_profile["host_id_sha256"] != computer["id_sha256"] or \
-                profile is not None:
-            parser.error("--legacy-host-profile requires its matching --host-id and no --host-profile")
-    data = collect(profile, computer, legacy_profile)
+    host_registry = None
+    if computer is not None:
+        registry_path = ROOT / "docs/handoff/host-history.json"
+        try:
+            host_registry = validate_host_registry(json.loads(registry_path.read_text()))
+        except (OSError, ValueError) as error:
+            raise SystemExit(f"Invalid or unavailable host history registry {registry_path}: {error}")
+    data = collect(profile, computer, host_registry)
     if not data["reports"]:
         raise SystemExit("No proven PASS history for the selected host profile")
     render(data)
@@ -360,6 +518,18 @@ def main():
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         writer.writerows(data["points"])
+    if computer is not None:
+        candidates_data = {
+            "schema": "swapz-host-history-candidates-v1",
+            "host_identity": computer,
+            "host_label": data["title"],
+            "selection_policy": ("Suggestions only. Add a full report SHA to "
+                                 "host-history.json only after owner confirmation."),
+            "candidate_count": len(data["legacy_candidates"]),
+            "candidates": data["legacy_candidates"],
+        }
+        (OUT / "legacy-candidates.json").write_text(
+            json.dumps(candidates_data, indent=2) + "\n")
     snapshot = snapshot_history(data)
     summary = ["# " + data["title"] + " performance history", "", data["scope"], "",
                f"{len(data['reports'])} passing report revisions; latest source "
@@ -402,16 +572,35 @@ def main():
                              "lower_write_requests_saved_pct")]
         summary.append(f"| {row['label']} | {row['bound']} | {goal} | " +
                        " | ".join(cells) + f" | {row['status']} |")
+    if data["legacy_candidates"]:
+        summary.extend(["", f"## Older report candidates ({len(data['legacy_candidates'])})", "",
+                        "These reports resemble this host by architecture, online CPU count and "
+                        "executed backend evidence. They are not pooled; confirm a report SHA "
+                        "before adding it to `docs/handoff/host-history.json`.", "",
+                        "| Report SHA | Date | Kernel | Backend evidence | Exact-host matches | Kernel match |",
+                        "| :--- | :--- | :--- | :--- | ---: | :---: |"])
+        for candidate in data["legacy_candidates"]:
+            sig = candidate["signature"]
+            best = candidate["matched_exact_reports"][0]
+            kernel = sig.get("kernel_release") or "unknown"
+            summary.append(
+                f"| `{candidate['report_sha']}` | {candidate['date'][:10]} | `{kernel}` | "
+                f"{', '.join(sig['backends']) or 'unknown'} | "
+                f"{len(candidate['matched_exact_reports'])} | "
+                f"{'yes' if best['kernel_matches'] else 'no'} |")
+    artifacts = ["mixed-service.png", "mixed-throughput.png", "mixed-latency.png",
+                 "lower-write-savings.png", "sustained-write.png", "history.csv", "history.json"]
+    if computer is not None:
+        artifacts.append("legacy-candidates.json")
     summary.extend(["", "Plots and source data:", ""] +
-                   [f"- [{name}]({snapshot / name})" for name in
-                    ("mixed-service.png", "mixed-throughput.png", "mixed-latency.png", "lower-write-savings.png",
-                     "sustained-write.png", "history.csv", "history.json")])
+                   [f"- [{name}]({snapshot / name})" for name in artifacts])
     index = "\n".join(summary) + "\n"
     (OUT / "index.md").write_text(index)
     if not (snapshot / "index.md").exists():
         (snapshot / "index.md").write_text(index)
     print(json.dumps({"reports": len(data["reports"]), "points": len(data["points"]),
                       "owner_confirmed_legacy_reports": data["owner_confirmed_legacy_reports"],
+                      "legacy_candidates": len(data["legacy_candidates"]),
                       "excluded": data["excluded"], "output": str(OUT),
                       "latest_source": data["reports"][-1]["source_sha"],
                       "latest_report": data["reports"][-1]["report_sha"],

@@ -14,8 +14,8 @@ before timing; no other agent should edit the same checkout concurrently.
 supersedes the first-action status below. Unchanged baseline `a2b5569` passed
 in report `c0feb2127c05`. The direct-BIO draft compiled and passed development
 byte/ownership checks, but its fixed pilot did not justify retention; it is
-unapplied again. The [audited x86 profile](x86-host-history.json) supplies an
-owner-confirmed same-computer report SHA for the exact-host history; other
+unapplied again. The generic [host history registry](host-history.json) supplies
+an owner-confirmed same-computer report SHA for the exact-host history; other
 unconfirmed legacy candidates remain separate. Do not apply
 the removed draft again as a new idea without a materially different hypothesis.
 

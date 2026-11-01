@@ -2567,17 +2567,22 @@ scans report revisions, never assumes the current file belongs to this host.
 Outputs are isolated under `build/history/<architecture>-<full-host-digest>/`.
 A missing/invalid identity fails closed. Legacy reports without identity stay
 excluded unless their immutable report SHA is explicitly owner-confirmed for
-that computer and passes the audited host-profile checks; included legacy
-points are labeled with that provenance in `history.json`. ISA/CPU count alone
-cannot migrate them. After the exact-computer refresh, the ARM64 host also refreshes
-its pre-existing NEON/seven-CPU legacy-cohort history separately under
-`build/history/arm64-neon/`. The audited AVX-512 host additionally refreshes
-the explicit `docs/handoff/x86-host-history.json` owner-confirmed legacy SHA
-in the same exact-host history rather than generating a duplicate cohort chart.
-The four-CPU SSE2 host receives no unverified automatic legacy selector. ARM
-reference refresh failure is reported separately and cannot alter
-qualification. OS reinstalls start a new history, and cloned installations must
-have unique machine IDs. Python Matplotlib must be installed for rendering.
+that computer in `docs/handoff/host-history.json` and passes that entry's CPU,
+backend and five-stage checks; included legacy points are labeled with that
+provenance in `history.json`. The plotter also creates `legacy-candidates.json`
+for unidentified PASS reports with matching architecture and online CPU count
+plus at least one overlapping executed backend. Matching kernel evidence ranks
+candidates higher. The stable index links this file and lists candidates for
+review, but candidate discovery never pools a report. A full report SHA must be
+added to the generic registry with an owner-confirmation record before it can
+join a host's history. Report SHAs assigned to another registered host are not
+suggested again. ISA/CPU count alone cannot migrate reports. After the
+exact-computer refresh, the ARM64 host also refreshes its pre-existing
+NEON/seven-CPU legacy-cohort history separately under
+`build/history/arm64-neon/`. ARM reference refresh failure is reported
+separately and cannot alter qualification. OS reinstalls start a new history,
+and cloned installations must have unique machine IDs. Python Matplotlib must
+be installed for rendering.
 It prints the latest plotted source and the local index path. Failed/blocked,
 uncommitted and other-host runs never become this computer’s performance points. Plot
 failure prints `NOT UPDATED` and diagnostics separately from the qualification
@@ -2590,17 +2595,15 @@ Keep the absolute raw/swapz useful-WRITE MB/s chart alongside relative gains so
 a changing raw control cannot masquerade as a product speed change. Previously
 rendered chat images are snapshots; refreshed files live under the stable index.
 
-For work moved to x86, the private history helper accepts an explicit audited
-host JSON with full report SHAs and host identity digest. The receiving host's
-profile is `docs/handoff/x86-host-history.json`; its confirmed legacy report is
-added to the matching exact-identity `build/history/x86-*` series and tagged by
-report SHA. Selection also requires all five stages PASS, eight-CPU identity
-for this profile and scalar/SSE2/AVX2/AVX-512 execution evidence. Rootless
-report tests reject unlisted, incomplete, missing-CPU and wrong-ISA reports,
-unsafe output names and missing host digests, while retaining ARM selector and
-snapshot/line-break coverage. Verify legacy host/protocol before adding its
-SHA; backend names and CPU count alone do not establish the same physical
-machine.
+The x86 i7-1185G7 audit and its owner-confirmed legacy SHA are recorded in the
+generic `docs/handoff/host-history.json` registry, alongside the inspected CPU,
+kernel, virtualization, firmware-memory inventory and backend details. That
+entry adds the confirmed legacy report to the matching exact-identity history
+and tags its report SHA. Selection requires all five stages PASS, the audited
+eight-CPU count and scalar/SSE2/AVX2/AVX-512 execution evidence. Other computers
+use the same registry schema; they do not inherit the x86 profile. Verify
+legacy host/protocol before adding a SHA; backend names and CPU count alone do
+not establish the same physical machine.
 Show every newly generated/refreshed
 plot inline. Keep configured emulation rates and achieved raw controls visible;
 host-limited RAM emulation is synthetic software evidence, not a physical

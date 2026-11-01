@@ -21,8 +21,9 @@ Linux exposes 16,099,928 KiB total RAM. This is inventory, not a memory-bandwidt
 measurement. The CPU governor was powersave with turbo enabled. Secure Boot is
 enabled and the normal module was signed with the configured MOK. No host
 power, memory, swap or device-model settings were changed for comparisons.
-The [host profile](x86-host-history.json) records domain-separated OS and firmware
-identity digests without publishing their raw identifiers.
+The i7-1185G7 audit in the generic [host history registry](host-history.json)
+records domain-separated OS and firmware identity digests without publishing
+their raw identifiers.
 
 Exact source `a2b556998a8554b4f64960c77d6818fce1d4e811` passed all five
 `make test` stages; report-only commit

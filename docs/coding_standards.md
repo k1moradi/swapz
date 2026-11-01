@@ -87,17 +87,22 @@ Every implementation task updates the relevant governing standard in the same co
 
 At the end of every optimization round, refresh the active host's historical
 performance plots from committed `test_results.json` reports and display every
-generated or refreshed plot inline to the owner. The current private
-`tests/tools/plot-history.py` helper defaults to the ARM64/NEON VM's seven-CPU profile;
-preserve its plots, source/report SHA mapping and CSV/JSON under
-`build/history/arm64-neon/` with its documented identity limitations. X86
-history uses the exact host digest; `docs/handoff/x86-host-history.json` may add
-an owner-confirmed legacy report by full SHA when the digest matches. That
-report must also match the audited CPU count, scalar/SSE2/AVX2/AVX-512 evidence
-and five passing stages, and its legacy identity basis remains explicit in the
-history data. ISA/CPU count alone does not establish a host match. Exclude
-failed/blocked reports and unqualified fast-test trials. Keep default-LZ4 mixed,
-optional policies and sustained WRITE QDs separate.
+generated or refreshed plot inline to the owner. The private
+`tests/tools/plot-history.py` helper pools PASS reports with the exact host
+identity digest into `build/history/<architecture>-<digest>/`. Its default
+ARM64/NEON seven-CPU cohort remains a separate descriptive reference under
+`build/history/arm64-neon/`, with its documented identity limitations. The
+generic `docs/handoff/host-history.json` registry holds per-computer owner-
+confirmed legacy report SHAs and audited host metadata. The plotter also writes
+`legacy-candidates.json` for older unidentified PASS reports whose architecture,
+online CPU count and executed backend evidence resemble exact-host reports;
+matching kernel evidence ranks a candidate higher. Candidates are suggestions
+only and never enter a pooled series automatically. A legacy report is included
+only after owner confirmation by immutable SHA and the registry's CPU/backend/
+five-stage checks; its provenance stays explicit in `history.json`. ISA/CPU
+count alone does not establish a host match. Exclude failed/blocked reports and
+unqualified fast-test trials. Keep default-LZ4 mixed, optional policies and
+sustained WRITE QDs separate.
 Use each report's own raw controls and break lines at kernel/model/content/replay
 changes. History is descriptive, not causal attribution or physical wear evidence.
 If no new owner report exists, state that the plots still end at the prior

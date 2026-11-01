@@ -7342,14 +7342,6 @@ def refresh_history(host_identity):
     env.setdefault("MPLCONFIGDIR", str(output / "matplotlib-cache"))
     plot_command = [sys.executable, "-B", str(ROOT / "tests/tools/plot-history.py"),
                     "--host-id", digest, "--host-architecture", arch]
-    if arch == "x86_64":
-        profile_path = ROOT / "docs/handoff/x86-host-history.json"
-        try:
-            profile = json.loads(profile_path.read_text())
-        except (OSError, ValueError):
-            profile = {}
-        if profile.get("host_id_sha256") == digest:
-            plot_command.extend(["--legacy-host-profile", str(profile_path)])
     try:
         output.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
@@ -7361,14 +7353,22 @@ def refresh_history(host_identity):
             return f"NOT UPDATED: history helper failed; see {log.relative_to(ROOT)}"
         summary = json.loads(proc.stdout)
         legacy_count = summary.get("owner_confirmed_legacy_reports", 0)
+        candidate_count = summary.get("legacy_candidates", 0)
         legacy_note = (f", including {legacy_count} owner-confirmed legacy report"
                        if legacy_count == 1 else
                        f", including {legacy_count} owner-confirmed legacy reports"
                        if legacy_count else "")
+        candidates_path = (output / "legacy-candidates.json").relative_to(ROOT)
+        candidate_note = (f"; {candidate_count} older report candidate needs owner confirmation "
+                          f"in {candidates_path}"
+                          if candidate_count == 1 else
+                          f"; {candidate_count} older report candidates need owner confirmation "
+                          f"in {candidates_path}"
+                          if candidate_count else "")
         result = (f"UPDATED: {summary['reports']} this-computer PASS reports{legacy_note}; latest source "
-                  f"{summary['latest_source'][:12]}; {output.relative_to(ROOT)}/index.md")
-        # ARM's historical cohort remains separate. The x86 legacy SHA is
-        # included above only through its owner-confirmed, matching-host profile.
+                  f"{summary['latest_source'][:12]}; {output.relative_to(ROOT)}/index.md"
+                  f"{candidate_note}")
+        # ARM's historical NEON cohort remains a separate descriptive reference.
         reference_command = None
         if arch == "aarch64":
             reference_command = [sys.executable, "-B",
