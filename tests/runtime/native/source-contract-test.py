@@ -1575,9 +1575,11 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(finalize.index("swapz_deliver_upper_completions(ctx);"),
                         finalize.index("wait_for_completion(&inflight->lower_done)"))
         success = finalize[finalize.rindex("for (index = 0; index < inflight->count"):]
+        self.assertIn("defer_for_successor =\n"
+                      "\t\tctx->batch_count || !list_empty(&ctx->incoming);",
+                      finalize)
         self.assertIn("defer = ctx->defer_upper_completions &&\n"
-                      "\t\t(ctx->batch_count || !list_empty(&ctx->incoming) ||\n"
-                      "\t\t submitter_dispatched);",
+                      "\t\t(defer_for_successor || submitter_dispatched);",
                       finalize)
         # The ID175 marker is consumed exactly once, before either outcome.
         self.assertLess(finalize.index(
