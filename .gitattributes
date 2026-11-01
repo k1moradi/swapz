@@ -1,3 +1,0 @@
-# A stored unified diff needs its context prefixes, including space-before-tab.
-# Applied C/Python still receive normal whitespace checking.
-docs/handoff/direct-lower-write.patch -whitespace
