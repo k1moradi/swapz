@@ -1168,9 +1168,9 @@ def main():
     scenarios = [item for item in re.split(r"[,\s]+", args.scenarios) if item] \
         or list(DEFAULT_SCENARIOS)
     stripe_counts = parse_stripe_counts(args.stripe_counts)
-    striped_specs = [striped_scenario(name) for name in scenarios
-                     if striped_scenario(name)]
-    ordinary_scenarios = [name for name in scenarios if not striped_scenario(name)]
+    scenario_specs = [(name, striped_scenario(name)) for name in scenarios]
+    striped_specs = [spec for _, spec in scenario_specs if spec]
+    ordinary_scenarios = [name for name, spec in scenario_specs if not spec]
     if not 1 <= args.repeat <= 10:
         parser.error("REPEAT must be 1..10")
     if args.content == "representative" and not args.anon_page_sample:
@@ -1194,8 +1194,6 @@ def main():
         parser.error("ID181_FACTORIAL requires ordinary scenarios and ID181_POLICY=control")
     if args.id181_factorial and (args.repeat < 4 or args.repeat % 4):
         parser.error("ID181_FACTORIAL requires REPEAT=4 or 8 full counterbalanced blocks")
-    if args.mixed_ops not in MIXED_MEASURE_OPS:
-        parser.error("MIXED_OPS must be 16384 or 65536")
     if args.mixed_ops != 16384 and (calibration or striped_specs or any(
             name.partition("-")[2] not in
             ("mixed", "mixed-lanes", "mixed-lanes-waves")
@@ -1253,9 +1251,9 @@ def main():
         raise
     rows, raw_reports = [], []
     status = 0
+    policy_count = 4 if args.id181_factorial else 1
     try:
         for name in ordinary_scenarios:
-            policy_count = 4 if args.id181_factorial else 1
             for measurement_index in range(args.repeat * policy_count):
                 attempt = measurement_index // policy_count
                 policy = (ID181_FACTORIAL_ORDERS[attempt % 4][
@@ -1374,6 +1372,9 @@ def main():
     reject_raw_drift(rows)
     if striped_specs:
         reject_raw_drift(striped_rows)
+    # Derived summaries are identical in the JSON and console paths.
+    id181_analysis = id181_factorial_analysis(rows) if args.id181_factorial else []
+    lane_gap_rows = lane_gap_table_rows(rows)
     result_name = "latest-calibration.json" if calibration else "latest.json"
     (OUT_DIR / result_name).write_text(
         json.dumps({"head": head, "dirty": bool(dirty),
@@ -1389,13 +1390,11 @@ def main():
                     "id181_factorial": bool(args.id181_factorial),
                     "id181_order": (ID181_FACTORIAL_ORDERS if args.id181_factorial
                                     else None),
-                    "id181_factorial_analysis": (
-                        id181_factorial_analysis(rows)
-                        if args.id181_factorial else []),
+                    "id181_factorial_analysis": id181_analysis,
                     "mixed_measure_ops": args.mixed_ops,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
-                    "lane_gap_attribution": lane_gap_table_rows(rows),
+                    "lane_gap_attribution": lane_gap_rows,
                     "reports": raw_reports,
                     "striped_target_experiment": {
                         "scope": "DEVELOPMENT_ONLY_MULTI_TARGET_K1_NO_KERNEL_C_CHANGE",
@@ -1415,10 +1414,10 @@ def main():
             print(json.dumps(row, sort_keys=True))
     else:
         print_table(rows)
-        print_lane_gap_table(lane_gap_table_rows(rows))
+        print_lane_gap_table(lane_gap_rows)
         print_profile(rows)
         if args.id181_factorial:
-            print_id181_factorial(id181_factorial_analysis(rows))
+            print_id181_factorial(id181_analysis)
         print_striped_table(striped_rows if striped_specs else [])
     print(f"\n  Detailed telemetry: {(OUT_DIR / result_name).relative_to(ROOT)} "
           f"(total {time.monotonic() - started:.0f}s)")

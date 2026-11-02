@@ -635,6 +635,13 @@ selector/activity fields.
 
 ### ID181 development controls and qualification
 
+The repeated x86 fixed four-round factorial on exact-source `705589f`
+confirmed NO PROMOTION for A/B/AB; NVMe4/NVMe5 noise-excluded blocks are
+not to be replaced to chase significance. Keep the default-off selectors
+and their regression tests until ARM64 closes the cross-host decision.
+Development-runner code deduplication must preserve scenario identity,
+counterbalanced order, predeclared screens and emitted report fields.
+
 `make fast_test ID181_POLICY=control|A|B|AB` selects the ordinary retained
 asynchronous owned-null_blk comparison. The default `control` is unchanged;
 stripes/calibration cannot select experimental policies. The opt-in
