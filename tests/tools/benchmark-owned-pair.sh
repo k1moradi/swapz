@@ -70,6 +70,11 @@ if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
     SHARED_PLAN="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
+PRIVATE_FIXTURE=0
+if [[ $# -gt 1 && ${!#} == --private-fixture ]]; then
+    PRIVATE_FIXTURE=1
+    set -- "${@:1:$(( $# - 1 ))}"
+fi
 # ID36 uses a shorter immutable mixed trace because it qualifies bounded
 # forward progress/correctness under pressure, not throughput promotion.
 if [[ $# -gt 1 && ${!#} == --resource-pressure-short ]]; then
@@ -201,6 +206,10 @@ elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
     IOPS=0
 else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
+    exit 2
+fi
+if (( PRIVATE_FIXTURE )) && [[ -z $SHARED_PLAN ]]; then
+    echo 'BLOCKED: private fixture requires an immutable shared plan' >&2
     exit 2
 fi
 if (( SUBMITTER_PREPARE_EXPLICIT )) &&
@@ -802,10 +811,13 @@ if [[ -n $SHARED_PLAN ]]; then
     cp -- "$SHARED_PLAN/fixture.json" "$SESSION/fixture.json"
     # Preserve the original immutable snapshot semantics without letting a
     # generic copy process read representative bytes outside the privacy gate.
+    private_copy_args=()
+    (( PRIVATE_FIXTURE )) && private_copy_args+=(--private)
     python3 -B tests/runtime/benchmark/private_memory.py copy-fixture \
         --source "$SHARED_PLAN/fixture.bin" \
-        --destination "$SESSION/fixture.bin"
+        --destination "$SESSION/fixture.bin" "${private_copy_args[@]}"
     FIXTURE_PATH="$SESSION/fixture.bin"
+    (( PRIVATE_FIXTURE )) && export SWAPZ_PRIVATE_FIXTURE=1
     cp -- "$plan_dir/trace.jsonl" "$SESSION/plan/trace.jsonl"
     cp -- "$plan_dir/manifest.json" "$SESSION/plan/manifest.json"
     note 'IMMUTABLE_PLAN_REUSED=1'

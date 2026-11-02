@@ -111,8 +111,10 @@ do not erase immutable Python copies before process exit; do not use highly
 sensitive page corpora without separately reviewing that retention boundary.
 Privileged ordinary and striped pair helpers snapshot the validated shared
 fixture with `private_memory.py copy-fixture`, never generic cp/dd/cat. For
-representative content that helper disables dumps and locks memory before
-opening the source, rejects symlink/nonregular or changing sources, creates a
+representative content the unprivileged fast-test orchestrator passes an
+explicit `--private-fixture` classification across sudo. The helper still
+checks metadata as a second signal, disables dumps and locks memory before
+opening private bytes, rejects symlink/nonregular or changing sources, creates a
 mode-0600 destination with exclusive creation, fsyncs it, removes only partial
 snapshots it actually created on failure, and preserves any pre-existing path. This retains the root helper's immutable-input boundary
 without exposing bytes to an unprotected copy process. The striped helper also

@@ -20,6 +20,11 @@ if [[ $# -ge 2 && ${@: -2:1} == --workload ]]; then
     WORKLOAD="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
+PRIVATE_FIXTURE=0
+if [[ $# -gt 0 && ${!#} == --private-fixture ]]; then
+    PRIVATE_FIXTURE=1
+    set -- "${@:1:$(( $# - 1 ))}"
+fi
 if [[ $# != 7 || $1 != --run-owned-striped || $2 != --model ||
       $4 != --stripes || $6 != --shared-plan ]]; then
     printf '%s\n' 'BLOCKED: exact private striped-development contract required' >&2
@@ -341,10 +346,13 @@ mkdir -m 700 "$SESSION/plans"
 cp -- "$SHARED_PLAN/fixture.json" "$SESSION/fixture.json"
 # Preserve a root-owned immutable fixture snapshot. The helper locks/disables
 # dumps before reading representative bytes and rejects a changing source.
+private_copy_args=()
+(( PRIVATE_FIXTURE )) && private_copy_args+=(--private)
 python3 -B tests/runtime/benchmark/private_memory.py copy-fixture \
     --source "$SHARED_PLAN/fixture.bin" \
-    --destination "$SESSION/fixture.bin"
+    --destination "$SESSION/fixture.bin" "${private_copy_args[@]}"
 FIXTURE_PATH="$SESSION/fixture.bin"
+(( PRIVATE_FIXTURE )) && export SWAPZ_PRIVATE_FIXTURE=1
 for (( stripe=0; stripe<STRIPES; ++stripe )); do
     mkdir -m 700 "$SESSION/plans/$stripe"
     cp -- "$SHARED_PLAN/$STRIPE_PLAN_PREFIX-$STRIPES/stripe-$stripe/trace.jsonl" \

@@ -159,7 +159,8 @@ def striped_scenario(name):
 
 def scenario_arguments(name, plan, calibration=False,
                        candidate_first=False, submitter_prepare=1,
-                       hand_records=8, id181_policy="control"):
+                       hand_records=8, id181_policy="control",
+                       private_fixture=False):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
         raise ValueError(f"unknown scenario {name!r}")
@@ -179,6 +180,8 @@ def scenario_arguments(name, plan, calibration=False,
         arguments += ["--id181-successor-first", "1"]
     if id181_policy in ("B", "AB"):
         arguments += ["--id181-publication-handoff", "1"]
+    if private_fixture:
+        arguments.append("--private-fixture")
     arguments += ["--shared-plan", str(plan)]
     if calibration:
         arguments.append("--linear-calibration")
@@ -1202,7 +1205,8 @@ def main():
         scenario_arguments(name, "/dev/null",
                            submitter_prepare=args.submitter_prepare,
                            hand_records=args.hand_records,
-                           id181_policy=args.id181_policy)
+                           id181_policy=args.id181_policy,
+                           private_fixture=args.content == "representative")
 
     if os.geteuid() != 0 and subprocess.run(
             ["sudo", "-n", "true"], capture_output=True).returncode:
@@ -1270,7 +1274,8 @@ def main():
                                                       candidate_first,
                                                       args.submitter_prepare,
                                                       args.hand_records,
-                                                      policy))
+                                                      policy,
+                                                      args.content == "representative"))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
                 arms = parse_arms(proc.stdout, candidate)
@@ -1317,6 +1322,10 @@ def main():
                         "--validated-source", head, "--run-owned-striped",
                         "--model", model, "--stripes", str(stripe_count),
                         "--shared-plan", str(plan),
+                    ]
+                    if args.content == "representative":
+                        arguments.append("--private-fixture")
+                    arguments += [
                         "--workload", workload,
                     ]
                     if round_index % 2:

@@ -59,11 +59,11 @@ def protect_private_memory():
 
 
 
-def copy_fixture(source_path, destination_path):
-    """Create one stable private fixture snapshot; protect first if representative."""
+def copy_fixture(source_path, destination_path, force_private=False):
+    """Create one stable fixture snapshot; protect before private bytes are read."""
     source_path = Path(source_path)
     destination_path = Path(destination_path)
-    representative = fixture_is_representative(source_path)
+    representative = fixture_is_representative(source_path) or force_private
     if representative:
         protect_private_memory()
 
@@ -129,9 +129,12 @@ def main(argv=None):
         "copy-fixture", help="create a stable private fixture snapshot")
     copy_parser.add_argument("--source", required=True)
     copy_parser.add_argument("--destination", required=True)
+    copy_parser.add_argument(
+        "--private", action="store_true",
+        help="force protection from the already-classified representative cohort")
     args = parser.parse_args(argv)
     if args.command == "copy-fixture":
-        copy_fixture(args.source, args.destination)
+        copy_fixture(args.source, args.destination, args.private)
         return 0
     raise AssertionError(args.command)
 
