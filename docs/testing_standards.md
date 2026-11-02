@@ -122,8 +122,10 @@ requires and copies the nonsensitive, nonsymlink `fixture.json` beside the
 snapshot so each replay can reestablish privacy before reading page bytes.
 Privacy metadata itself must be a regular file; symlinked metadata is rejected.
 Rootless tests must prove that a pre-existing snapshot path survives O_EXCL
-failure, that explicit private classification forces the protection hook even
-when metadata says a synthetic profile, and that both privileged helpers carry
+failure after the privacy hook has run, without depending on the CI host's
+actual RLIMIT_MEMLOCK; they must also prove that explicit private classification
+forces the protection hook even when metadata says a synthetic profile, and
+that both privileged helpers carry
 that classification across sudo into protected snapshot/replay processes.
 The paired `make fast_test` plan uses the same page file and immutable trace for
 raw and swapz arms; its local ignored `latest.json` keeps the fixture digest for

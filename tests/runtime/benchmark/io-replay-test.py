@@ -71,8 +71,11 @@ class PairReplayContract(unittest.TestCase):
 
             destination.unlink()
             destination.write_bytes(b"pre-existing")
-            with self.assertRaises(FileExistsError):
-                private_memory.copy_fixture(source, destination)
+            with mock.patch.object(
+                    private_memory, "protect_private_memory") as protect:
+                with self.assertRaises(FileExistsError):
+                    private_memory.copy_fixture(source, destination)
+                protect.assert_called_once_with()
             self.assertEqual(destination.read_bytes(), b"pre-existing")
 
             destination.unlink()
