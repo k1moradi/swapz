@@ -20,6 +20,9 @@ Normal artifacts live only under `build/`:
 - `build/kernel/w2/dm-swapz.ko`: W=2 warning build.
 - `build/userspace/`: supported userspace binary.
 - `build/tests/native/`: native production-C test executables.
+- `build/tests/native/anon-page-analyzer`: private streaming analyzer built
+  during `make test` and `make fast_test`; it accepts owner-supplied page data
+  only through the ID177 representative-content workflow.
 
 The one generated qualification artifact outside `build/` is the root
 `test_results.json`. This is UTF-8 JSON with newlines, without compression or indentation. It is

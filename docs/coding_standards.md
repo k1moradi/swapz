@@ -14,6 +14,20 @@ Active product C/C++ and headers live under `src/`; test-only code lives under `
 
 Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ may appear only when discussing the current unversioned disk format.
 
+### Representative-memory tooling
+
+Representative-memory analysis must be explicitly owner supplied and offline.
+Do not harvest from process memory, `/proc`, live swap, physical partitions or
+block devices. Stream bounded page records; keep raw samples out of Git and
+published reports; emit aggregate statistics only, without page bytes,
+per-page records, page hashes or source paths. Keep transient sample buffers
+out of swap and core dumps where the platform permits, clear them after use,
+and place temporary fixture copies in private directories with restrictive
+file modes. A local ignored benchmark artifact may keep its existing fixture
+digest only to prove the raw/target arms shared identical inputs; never publish
+that artifact or the sample. This tooling does not qualify kernel swap
+semantics or physical storage behavior.
+
 ## Kernel C rules
 
 Use Linux-kernel-style C, kernel types/APIs, explicit ownership and checked arithmetic. Keep functions cohesive, allocations bounded, stack use modest and concurrency ownership obvious. Avoid recursion, hidden allocations, libc/C++ in the module and duplicated state machines.

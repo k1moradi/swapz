@@ -15,8 +15,8 @@ CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 endif
 CPPFLAGS += -I$(KERNEL)
 
-.PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor test-replay-helper clean
-PROGRAMS := io-replay-native codec-roundtrip extent-geometry zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots lane-gap
+.PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor test-anon-page-analyzer test-replay-helper clean
+PROGRAMS := io-replay-native codec-roundtrip extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots lane-gap
 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
@@ -58,6 +58,9 @@ preparation-slots_HDR := $(KERNEL)/preparation-slots.h $(KERNEL)/codec.h
 preparation-slots_LDLIBS := -pthread
 lane-gap_SRC := $(NATIVE)/io/lane-gap.c
 lane-gap_HDR := $(KERNEL)/lane-gap.h $(KERNEL)/codec.h
+anon-page-analyzer_SRC := $(NATIVE)/codec/anon-page-analyzer.c $(ENGINE) $(AUTH) $(CODEC) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS)
+anon-page-analyzer_HDR := $(KERNEL)/engine.h $(KERNEL)/predictor-route.h $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/codec.h
+anon-page-analyzer_LDLIBS := -llz4
 
 $(OUT):
 	@mkdir -p "$@"
@@ -94,7 +97,10 @@ $(OUT)/predictor-qualification: $(NATIVE)/codec/predictor-qualification.c \
 test-codec: $(OUT)/codec-roundtrip $(OUT)/extent-geometry
 	@set -e; "$(OUT)/codec-roundtrip"; "$(OUT)/extent-geometry"
 
-test-predictor: $(OUT)/predictor-qualification
+test-anon-page-analyzer: $(OUT)/anon-page-analyzer
+	@python3 -B "$(NATIVE)/codec/anon-page-analyzer-test.py" "$(OUT)/anon-page-analyzer"
+
+test-predictor: $(OUT)/predictor-qualification test-anon-page-analyzer
 	@set -e; \
 	  python3 -B "$(ROOT)/tests/runtime/benchmark/anon-page-fixture.py" \
 	    --output-prefix "$(OUT)/predictor-entropy" --pages 64 --weights entropy=100 >/dev/null; \

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Development-only quick decision loop behind `make fast_test`.
 
-It builds the working tree, runs the window-policy native checks and a small
+It builds the working tree, runs native/replay contract checks and a small
 single-pair subset of the owned null_blk benchmark matrix, then prints one
 compact raw-versus-swapz table. Dirty trees are allowed so a policy change can
 be measured before it is committed.
@@ -18,6 +18,7 @@ import os
 import re
 import runpy
 import shutil
+import stat
 import statistics
 import struct
 import subprocess
@@ -53,6 +54,9 @@ MODELS = {
 }
 CONTENT_WEIGHTS = {"medium": "medium=100", "entropy": "entropy=100",
                    "balanced": "medium=50,entropy=50"}
+CONTENT_PROFILES = (*CONTENT_WEIGHTS, "representative")
+ANON_PAGE_ANALYZER = ROOT / "build/tests/native/anon-page-analyzer"
+REPRESENTATIVE_PAGE_LIMIT = 8192
 DEFAULT_SCENARIOS = (
     "sata-mixed", "nvme4-mixed", "nvme5-mixed",
     "fast-mixed", "fast-w4", "fast-w8",
@@ -185,56 +189,160 @@ def run(command, **kwargs):
 
 
 def build():
-    run([sys.executable, "-B", "tests/runtime/benchmark/io-replay-test.py"],
-        stdout=subprocess.DEVNULL)
     jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
     run(["make", jobs, "--no-print-directory"], stdout=subprocess.DEVNULL)
     run(["make", jobs, "--no-print-directory", "-C", "tests/suites",
-         "test-replay-helper", "test-lower-io"], stdout=subprocess.DEVNULL)
+         "test-replay-helper", "test-lower-io", "test-anon-page-analyzer"],
+        stdout=subprocess.DEVNULL)
+    run([sys.executable, "-B", "tests/runtime/benchmark/io-replay-test.py"],
+        stdout=subprocess.DEVNULL)
+
+
+def prepare_representative_fixture(plan, sample_path):
+    if not sample_path:
+        raise ValueError("representative content requires an owner-supplied page sample")
+
+    flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+             getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    try:
+        source_fd = os.open(os.fspath(sample_path), flags)
+    except OSError:
+        raise ValueError("cannot open representative page sample safely") from None
+
+    fixture_path = plan / "fixture.bin"
+    output_fd = -1
+    try:
+        with os.fdopen(source_fd, "rb") as source:
+            source_fd = -1
+            before = os.fstat(source.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("representative page sample must be a regular file")
+            if before.st_size % 4096:
+                raise ValueError("representative page sample has a partial 4 KiB page")
+            page_count = before.st_size // 4096
+            if not 128 <= page_count <= REPRESENTATIVE_PAGE_LIMIT:
+                raise ValueError("representative page sample must contain 128..8192 pages")
+
+            output_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                            getattr(os, "O_CLOEXEC", 0) |
+                            getattr(os, "O_NOFOLLOW", 0))
+            output_fd = os.open(fixture_path, output_flags, 0o600)
+            os.fchmod(output_fd, 0o600)
+            digest = hashlib.sha256()
+            remaining = before.st_size
+            with os.fdopen(output_fd, "wb") as destination:
+                output_fd = -1
+                while remaining:
+                    chunk = source.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise ValueError("representative page sample changed while copying")
+                    destination.write(chunk)
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+                if source.read(1):
+                    raise ValueError("representative page sample changed while copying")
+                after = os.fstat(source.fileno())
+                before_identity = (before.st_dev, before.st_ino, before.st_size,
+                                   before.st_mtime_ns, before.st_ctime_ns)
+                after_identity = (after.st_dev, after.st_ino, after.st_size,
+                                  after.st_mtime_ns, after.st_ctime_ns)
+                if before_identity != after_identity:
+                    raise ValueError("representative page sample changed while copying")
+                destination.flush()
+                os.fsync(destination.fileno())
+
+        with fixture_path.open("rb") as sample_stream:
+            analyzed = subprocess.run(
+                [str(ANON_PAGE_ANALYZER)], stdin=sample_stream,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        if analyzed.returncode:
+            raise ValueError("representative page analyzer rejected the sample")
+        analysis = json.loads(analyzed.stdout)
+        if (analysis.get("schema") != "swapz-anon-page-analysis-v1" or
+                analysis.get("pages") != page_count or
+                analysis.get("page_bytes") != 4096):
+            raise ValueError("representative page analyzer returned invalid aggregates")
+
+        lz4 = analysis["lz4"]
+        return {
+            "definition": "owner-supplied anonymous pages; offline analysis; no swapon",
+            "content_profile": "representative",
+            "pages": page_count,
+            "page_bytes": 4096,
+            "profile_pages": {"representative": page_count},
+            "raw_pages": lz4["raw_pages"],
+            "raw_page_bytes": lz4["raw_pages"] * 4096,
+            "lz4_size_buckets": lz4["size_buckets"],
+            "lz4_accepted_payload_bytes": lz4["payload_bytes"],
+            "fixture_sha256": digest.hexdigest(),
+            "offline_page_analysis": analysis,
+        }
+    except OSError:
+        raise ValueError("cannot prepare representative page sample safely") from None
+    finally:
+        if source_fd >= 0:
+            os.close(source_fd)
+        if output_fd >= 0:
+            os.close(output_fd)
 
 
 def prepare_plan(content="medium", need_stripes=False, striped_write_qds=(),
-                 mixed_ops=16384):
+                 mixed_ops=16384, sample_path=None):
     if mixed_ops not in MIXED_MEASURE_OPS:
         raise ValueError("MIXED_OPS must be 16384 or 65536")
-    weights = CONTENT_WEIGHTS[content]
+    if content not in CONTENT_PROFILES:
+        raise ValueError("unsupported benchmark content profile")
+    if content == "representative" and not sample_path:
+        raise ValueError("representative content requires an owner-supplied page sample")
+    if content != "representative" and sample_path:
+        raise ValueError("an anonymous page sample requires CONTENT=representative")
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
     plan = Path(tempfile.mkdtemp(prefix="benchmark-plan.",
                                  dir=ROOT / "build/tests"))
-    replay = ["python3", "-B", "tests/runtime/benchmark/io-replay.py",
-              "prepare", "--fixture", str(plan / "fixture.bin"),
-              "--logical-pages", "1024", "--writer-pages", "256",
-              "--reader-start", "512", "--reader-pages", "256"]
-    quiet = {"stdout": subprocess.DEVNULL}
-    run(["python3", "-B", "tests/runtime/benchmark/anon-page-fixture.py",
-         "--output-prefix", str(plan / "fixture"), "--pages", "128",
-         "--seed", "0x51a0a9", "--weights", weights], **quiet)
-    run([*replay, "--output-dir", str(plan / "plan"), "--qd", "32",
-         "--read-pct", "25", "--warmup-ops", "1024", "--measure-ops",
-         str(mixed_ops), "--iops", "0"], **quiet)
-    for mode in ("waves", "persistent"):
-        run([*replay, "--output-dir", str(plan / f"plan-mixed-lanes-{mode}"),
-             "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
-             "--measure-ops", str(mixed_ops), "--iops", "0",
-             "--mixed-lanes", mode], **quiet)
-    if need_stripes:
-        run([*replay, "--output-dir", str(plan / "plan-striped-base"),
-             "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
-             "--measure-ops", "16384", "--iops", "0", "--mixed-lanes",
-             "persistent", "--stripe-partitionable"], **quiet)
-    for qd in striped_write_qds:
-        if qd not in STRIPED_WRITE_QDS:
-            raise ValueError("striped WRITE QD must be 4 or 8")
-        run([*replay, "--output-dir", str(plan / f"plan-striped-write-qd{qd}"),
-             "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
-             "--measure-ops", "4096", "--iops", "0", "--sustained-write",
-             "--stripe-partitionable"], **quiet)
-    for qd in (1, 4, 8, 32):
-        run([*replay, "--output-dir", str(plan / f"plan-write-qd{qd}"),
-             "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
-             "--measure-ops", "4096", "--iops", "0", "--sustained-write"],
-            **quiet)
-    return plan
+    try:
+        replay = ["python3", "-B", "tests/runtime/benchmark/io-replay.py",
+                  "prepare", "--fixture", str(plan / "fixture.bin"),
+                  "--logical-pages", "1024", "--writer-pages", "256",
+                  "--reader-start", "512", "--reader-pages", "256"]
+        quiet = {"stdout": subprocess.DEVNULL}
+        if content == "representative":
+            fixture = prepare_representative_fixture(plan, sample_path)
+            (plan / "fixture.json").write_text(
+                json.dumps(fixture, indent=2, sort_keys=True) + "\n")
+        else:
+            weights = CONTENT_WEIGHTS[content]
+            run(["python3", "-B", "tests/runtime/benchmark/anon-page-fixture.py",
+                 "--output-prefix", str(plan / "fixture"), "--pages", "128",
+                 "--seed", "0x51a0a9", "--weights", weights], **quiet)
+        run([*replay, "--output-dir", str(plan / "plan"), "--qd", "32",
+             "--read-pct", "25", "--warmup-ops", "1024", "--measure-ops",
+             str(mixed_ops), "--iops", "0"], **quiet)
+        for mode in ("waves", "persistent"):
+            run([*replay, "--output-dir", str(plan / f"plan-mixed-lanes-{mode}"),
+                 "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
+                 "--measure-ops", str(mixed_ops), "--iops", "0",
+                 "--mixed-lanes", mode], **quiet)
+        if need_stripes:
+            run([*replay, "--output-dir", str(plan / "plan-striped-base"),
+                 "--qd", "32", "--read-pct", "25", "--warmup-ops", "1024",
+                 "--measure-ops", "16384", "--iops", "0", "--mixed-lanes",
+                 "persistent", "--stripe-partitionable"], **quiet)
+        for qd in striped_write_qds:
+            if qd not in STRIPED_WRITE_QDS:
+                raise ValueError("striped WRITE QD must be 4 or 8")
+            run([*replay, "--output-dir", str(plan / f"plan-striped-write-qd{qd}"),
+                 "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
+                 "--measure-ops", "4096", "--iops", "0", "--sustained-write",
+                 "--stripe-partitionable"], **quiet)
+        for qd in (1, 4, 8, 32):
+            run([*replay, "--output-dir", str(plan / f"plan-write-qd{qd}"),
+                 "--qd", str(qd), "--read-pct", "0", "--warmup-ops", "256",
+                 "--measure-ops", "4096", "--iops", "0", "--sustained-write"],
+                **quiet)
+        return plan
+    except BaseException:
+        shutil.rmtree(plan, ignore_errors=True)
+        raise
 
 
 
@@ -1020,8 +1128,11 @@ def main():
     parser.add_argument("--scenarios", default=os.environ.get("SCENARIOS", ""))
     parser.add_argument("--repeat", type=int,
                         default=int(os.environ.get("REPEAT", "3") or 3))
-    parser.add_argument("--content", choices=tuple(CONTENT_WEIGHTS),
+    parser.add_argument("--content", choices=CONTENT_PROFILES,
                         default=os.environ.get("CONTENT", "medium"))
+    parser.add_argument("--anon-page-sample",
+                        default=os.environ.get("ANON_PAGE_SAMPLE"),
+                        help="private regular file of owner-supplied 4 KiB pages; used only with representative content")
     parser.add_argument("--calibration", choices=("none", "linear"),
                         default=os.environ.get("CALIBRATION", "none"))
     parser.add_argument("--stripe-counts",
@@ -1052,8 +1163,10 @@ def main():
     ordinary_scenarios = [name for name in scenarios if not striped_scenario(name)]
     if not 1 <= args.repeat <= 10:
         parser.error("REPEAT must be 1..10")
-    if args.content not in CONTENT_WEIGHTS:
-        parser.error("CONTENT must be medium, entropy or balanced")
+    if args.content == "representative" and not args.anon_page_sample:
+        parser.error("CONTENT=representative requires --anon-page-sample or ANON_PAGE_SAMPLE")
+    if args.content != "representative" and args.anon_page_sample:
+        parser.error("--anon-page-sample requires CONTENT=representative")
     if not 1 <= args.stripe_repeat <= 10:
         parser.error("STRIPE_REPEAT must be 1..10")
     if len(striped_specs) != len(set(striped_specs)):
@@ -1102,22 +1215,31 @@ def main():
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
     started = time.monotonic()
     build()
-    print(f"  build + window-policy native checks: PASS "
+    print(f"  build + native/replay contract checks: PASS "
           f"({time.monotonic() - started:.1f}s)", flush=True)
     preflight = privileged(60, PREFLIGHT)
     if preflight.returncode:
         print(preflight.stdout + preflight.stderr, file=sys.stderr)
         print("BLOCKED: loaded preflight failed", file=sys.stderr)
         return 2
-    plan = prepare_plan(
-        args.content, ("nvme5", "mixed") in striped_specs or
-        ("sata", "mixed") in striped_specs,
-        tuple(qd for qd in STRIPED_WRITE_QDS
-              if ("fast", f"write-q{qd}") in striped_specs),
-        mixed_ops=args.mixed_ops)
-    prepare_striped_workload_plans(plan, stripe_counts, striped_specs)
-    fixture = json.loads((plan / "fixture.json").read_text())
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        plan = prepare_plan(
+            args.content, ("nvme5", "mixed") in striped_specs or
+            ("sata", "mixed") in striped_specs,
+            tuple(qd for qd in STRIPED_WRITE_QDS
+                  if ("fast", f"write-q{qd}") in striped_specs),
+            mixed_ops=args.mixed_ops, sample_path=args.anon_page_sample)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"BLOCKED: content plan preparation failed: {error}",
+              file=sys.stderr)
+        return 2
+    try:
+        prepare_striped_workload_plans(plan, stripe_counts, striped_specs)
+        fixture = json.loads((plan / "fixture.json").read_text())
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+    except BaseException:
+        shutil.rmtree(plan, ignore_errors=True)
+        raise
     rows, raw_reports = [], []
     status = 0
     try:

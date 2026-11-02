@@ -30,7 +30,8 @@ qualification entrypoint.
 
 `make fast_test` is the owner-approved development loop, not a qualification
 command. It builds the current working tree (dirty trees allowed), runs the
-lower-I/O window-policy native checks, runs the root preflight, and then runs
+native and replay contract checks (including the lower-I/O window policy and
+offline page analyzer), runs the root preflight, and then runs
 one counterbalance-free raw/swapz pair per selected scenario through the same
 private owned null_blk pair helper and exact device models used by `make test`
 (default: three repeats each of SATA mixed, NVMe Gen4 mixed, fast mixed,
@@ -75,13 +76,44 @@ owner matrix.
 `CONTENT=medium` keeps the existing fixture. `CONTENT=entropy` supplies only
 incompressible pages; `CONTENT=balanced` supplies equal numbers of medium and
 entropy pages. These are synthetic content controls, not representative swap
-populations. Each private pair loads the kernel LZ4 dependency before inserting
+populations. `CONTENT=representative` is an opt-in owner-supplied content cohort
+for `make fast_test`; it requires `ANON_PAGE_SAMPLE` to name a local regular
+file of 128..8192 concatenated 4 KiB pages. Invoke it as
+`CONTENT=representative ANON_PAGE_SAMPLE=/private/path/pages.bin make fast_test`.
+The sample is read without following
+symlinks, copied with mode 0600 into the mode-0700 temporary plan directory,
+and deleted with that directory after the run. The input's device, inode, size,
+mtime and ctime must remain stable while it is copied. The owner supplies the
+sample; neither the analyzer nor the benchmark reads process memory, `/proc`, a
+swap partition, or any block device, and it never activates swap.
+
+The native `anon-page-analyzer` consumes the temporary sample as a page stream.
+It uses the production predictor, predictor-first direct-adoption path, later
+packing route and 64-page extent planner. Its LZ4 settings match the production
+defaults: acceleration 1 for ordinary pages and 4 for DELTA64_SHUF8 candidates.
+It emits only aggregate size buckets, zero and exact same-filled counts, route
+totals, selected predictor backends, LZ4 version and planner geometry. It
+reports payload bytes saved and added so direct-adoption trade-offs remain
+visible. It emits no page bytes, per-page records, page hashes or sample path.
+Its working buffers are locked against swapping, dumpability is disabled, core
+dumps are disabled, and sample buffers are explicitly cleared.
+The paired `make fast_test` plan uses the same page file and immutable trace for
+raw and swapz arms; its local ignored `latest.json` keeps the fixture digest for
+pair identity and the aggregate analysis, but never the sample bytes or path.
+This is representative-content emulation only: it does not qualify swap
+semantics, source policy or physical-media behavior. A forced termination may
+leave a private temporary plan under `build/tests/benchmark-plan.*`; remove it
+before sharing build artifacts.
+
+Each private pair loads the kernel LZ4 dependency before inserting
 the product module, including the first development pair after a boot. Keep the selected content and the actual fixture metadata (weights,
 page counts, measured LZ4 sizes and hash) in the development JSON, alongside the
 immutable plan hashes consumed by both arms. A private helper's medium protocol
 selects queue geometry; the shared fixture remains the content authority. Never
 attribute a content change to a source optimization or mix these controls into
-the qualified medium history.
+the qualified medium history. Representative-content results remain separate
+from synthetic `medium`, `entropy` and `balanced` controls and from qualification
+history.
 An all-RAW shared fixture omits the separate compressed-pack population/readback
 phase because it has no compressed pack to qualify; mixed replay and complete
 image verification remain mandatory. The omitted phase is explicit in the

@@ -4618,7 +4618,8 @@ int main(void)
                          benchmark)
         self.assertRegex(benchmark, r"(?m)^DELTA64_LZ4_ACCELERATION=4$")
         self.assertRegex(
-            DM, r"static unsigned int swapz_delta64_lz4_acceleration = 4U;")
+            DM, r"static unsigned int swapz_delta64_lz4_acceleration =\s*"
+            r"SWAPZ_LZ4_DELTA64_ACCELERATION_DEFAULT;")
         self.assertIn("PRODUCTION_DELTA64_LZ4_ACCELERATION = 4",
                       (ROOT / "tests/tools/run-tests.py").read_text())
         self.assertNotRegex(benchmark, r"(?m)^PARALLEL_READS=")
@@ -5286,9 +5287,14 @@ int main(void)
         # delta64 rescue LZ4 setting. Zero recognition stays inside the shared
         # compressor so producer and ordered paths cannot diverge.
         self.assertNotIn("module_param_named(lz4_acceleration,", DM)
-        self.assertIn("#define SWAPZ_ORDINARY_LZ4_ACCELERATION 1U", DM)
+        predictor_header = (ROOT / "src/kernel/predictor.h").read_text()
+        self.assertIn("SWAPZ_LZ4_ORDINARY_ACCELERATION_DEFAULT 1U",
+                      predictor_header)
+        self.assertIn("SWAPZ_LZ4_DELTA64_ACCELERATION_DEFAULT 4U",
+                      predictor_header)
+        self.assertNotIn("#define SWAPZ_ORDINARY_LZ4_ACCELERATION", DM)
         self.assertNotIn("ctx->lz4_acceleration", DM)
-        self.assertIn("SWAPZ_ORDINARY_LZ4_ACCELERATION", compressor)
+        self.assertIn("SWAPZ_LZ4_ORDINARY_ACCELERATION_DEFAULT", compressor)
         self.assertIn("ctx->delta64_lz4_acceleration", compressor)
         high_score_start = compressor.index("if (high_score)")
         ordinary_start = compressor.index("\nordinary:")

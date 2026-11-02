@@ -54,7 +54,7 @@ uninstall:
 test:
 	@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)"
 
-# Development-only K=1 profiling loop: build, native checks and three
+# Development-only K=1 profiling loop: build, native/replay checks and three
 # repeated owned-null_blk pairs for SATA mixed, NVMe4 mixed, fast mixed,
 # fast QD4 and fast QD8, with compact raw/swapz and critical-path tables.
 # SCENARIOS=nvme5-stripes (or sata-stripes) runs the mixed N=1/2/4

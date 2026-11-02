@@ -270,6 +270,61 @@ class PairReplayContract(unittest.TestCase):
                 shutil.rmtree(plan)
         self.assertEqual(len(set(fixtures.values())), 3)
 
+    def test_representative_content_is_private_matched_and_analyzed(self):
+        import hashlib
+        import importlib.util
+        import shutil
+        import struct
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_fast_representative", SCRIPT.parents[2] / "tools/fast-test.py")
+        fast = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fast)
+        analyzer = fast.ANON_PAGE_ANALYZER
+        self.assertTrue(analyzer.is_file(), "native analyzer must be built first")
+
+        marker = b"PRIVATE_REPRESENTATIVE_PAGE_5d741fc2"
+        zero = bytes(PAGE)
+        same = bytes([0x6b]) * PAGE
+        counter = b"".join(struct.pack("<Q", 0x8317 + index)
+                            for index in range(PAGE // 8))
+        varied = marker + bytes((index * 47 + 31) & 0xff
+                                for index in range(PAGE - len(marker)))
+        sample_bytes = b"".join((zero, same, counter, varied) * 32)
+
+        with tempfile.TemporaryDirectory(prefix="swapz-page-sample-") as temp:
+            sample = Path(temp) / "pages.bin"
+            sample.write_bytes(sample_bytes)
+            sample.chmod(0o600)
+            plan = fast.prepare_plan("representative", sample_path=sample)
+            try:
+                fixture = (plan / "fixture.bin").read_bytes()
+                metadata_text = (plan / "fixture.json").read_text()
+                metadata = json.loads(metadata_text)
+                self.assertEqual(fixture, sample_bytes)
+                self.assertEqual(metadata["pages"], 128)
+                self.assertEqual(metadata["profile_pages"], {"representative": 128})
+                self.assertEqual(metadata["fixture_sha256"],
+                                 hashlib.sha256(sample_bytes).hexdigest())
+                self.assertEqual(metadata["offline_page_analysis"]["zero_pages"], 32)
+                self.assertEqual(
+                    metadata["offline_page_analysis"]["nonzero_same_filled_pages"], 32)
+                self.assertEqual(metadata["offline_page_analysis"]["pages"], 128)
+                self.assertNotIn(str(sample), metadata_text)
+                self.assertNotIn(marker.decode(), metadata_text)
+                for name in ("plan", "plan-write-qd4"):
+                    manifest = json.loads((plan / name / "manifest.json").read_text())
+                    self.assertEqual(manifest["fixture_sha256"],
+                                     metadata["fixture_sha256"])
+                    self.assertEqual(manifest["fixture_pages"], 128)
+            finally:
+                shutil.rmtree(plan)
+
+            symlink = Path(temp) / "sample-link"
+            symlink.symlink_to(sample)
+            with self.assertRaisesRegex(ValueError, "open representative page sample"):
+                fast.prepare_plan("representative", sample_path=symlink)
+
     def test_long_mixed_development_plan_preserves_prefix_and_oracle(self):
         import hashlib
         import importlib.util

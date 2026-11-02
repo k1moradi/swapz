@@ -75,7 +75,6 @@
 #define SWAPZ_WRITE_PIPELINE_DEPTH 1U
 #define SWAPZ_DELTA64_PREPARATION_WORKERS 1U
 #define SWAPZ_SUBMITTER_PREPARATION_LANES_MAX 8U
-#define SWAPZ_ORDINARY_LZ4_ACCELERATION 1U
 #define SWAPZ_READ_COALESCE_MAX_BLOCKS (2U * SWAPZ_MAX_BLOCKS)
 /*
  * A separate bounded LZ4 producer may prepare future writes while synchronous
@@ -127,7 +126,8 @@ MODULE_PARM_DESC(delta64_rescue,
 		 "Page-local delta64 rescue with predictor-first high-score path; default on (0 disables)");
 
 /* 4 is the ID67-qualified second pass; ordinary first-pass LZ4 stays at 1. */
-static unsigned int swapz_delta64_lz4_acceleration = 4U;
+static unsigned int swapz_delta64_lz4_acceleration =
+	SWAPZ_LZ4_DELTA64_ACCELERATION_DEFAULT;
 module_param_named(delta64_lz4_acceleration, swapz_delta64_lz4_acceleration,
 		   uint, 0444);
 MODULE_PARM_DESC(delta64_lz4_acceleration,
@@ -2834,7 +2834,8 @@ static int swapz_compress_page(struct swapz_dm *ctx, const u8 *input,
 ordinary:
 	start = (ctx->delta64_rescue_enabled && now) ? now : ktime_get_ns();
 	baseline = LZ4_compress_fast(input, output, SWAPZ_BLOCK_BYTES,
-				     SWAPZ_MAX_COMPRESSED, SWAPZ_ORDINARY_LZ4_ACCELERATION,
+				     SWAPZ_MAX_COMPRESSED,
+				     SWAPZ_LZ4_ORDINARY_ACCELERATION_DEFAULT,
 				     lz4_workmem);
 	*lz4_wall_ns += swapz_elapsed_ns(start, ktime_get_ns());
 	if (baseline > 0 && baseline <= 64 && swapz_page_is_zero(input)) {
@@ -8763,7 +8764,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->physical_read_reqs, ctx->compressed_pages,
 		       ctx->raw_pages, ctx->zero_elided_pages,
 		       ctx->discard_pages,
-		       SWAPZ_ORDINARY_LZ4_ACCELERATION, ctx->delta64_lz4_acceleration,
+		       SWAPZ_LZ4_ORDINARY_ACCELERATION_DEFAULT,
+		       ctx->delta64_lz4_acceleration,
 		       ctx->lz4_attempts + prep.lz4_attempts + submitter.lz4_attempts,
 		       ctx->lz4_accepted_bytes + prep.lz4_accepted_bytes + submitter.lz4_accepted_bytes,
 		       ctx->lz4_size_bins[0] + prep.lz4_size_bins[0] + submitter.lz4_size_bins[0],
