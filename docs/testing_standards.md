@@ -629,53 +629,7 @@ field those bodies consume (currently the cohort `delivered_ns` mark), so a
 structural telemetry change cannot fail only because the mock layout is stale.
 The cohort timestamp intentionally replaces per-BIO delivery clocks, so absolute
 ID178 ACK-dwell values may shift by at most the delivery-loop span and must not
-be pooled as byte-for-byte-equivalent telemetry across this boundary. The fast
-and official replay status schema remains unchanged except for new ID181
-selector/activity fields.
-
-### ID181 development controls and qualification
-
-The repeated x86 fixed four-round factorial on exact-source `705589f`
-confirmed NO PROMOTION for A/B/AB; NVMe4/NVMe5 noise-excluded blocks are
-not to be replaced to chase significance. Keep the default-off selectors
-and their regression tests until ARM64 closes the cross-host decision.
-Development-runner code deduplication must preserve scenario identity,
-counterbalanced order, predeclared screens and emitted report fields.
-
-`make fast_test ID181_POLICY=control|A|B|AB` selects the ordinary retained
-asynchronous owned-null_blk comparison. The default `control` is unchanged;
-stripes/calibration cannot select experimental policies. The opt-in
-`ID181_FACTORIAL=1 REPEAT=4|8` schedules each policy once per block and
-rotates four block orders with balanced raw/swapz within-pair order; every
-policy has a same-fixture raw control, its own policy identity and round in
-`latest.json`. Base-scenario raw drift must span all four policies rather
-than being screened per policy. The report must include paired log-ratio
-A and B main effects, A-by-B interaction, policy-vs-control 95% intervals,
-actual early-close attempts, confirmed asynchronous early submissions,
-publication-handoff counts, paired policy-vs-control lower bytes/requests,
-pages per lower WRITE and READ p99. Compare candidate lower work with BOTH
-the per-pair raw baseline and same-block default swapz, never raw alone.
-An all-excluded scenario must remain visible with zero complete usable blocks;
-it must not disappear from the result. Disabled-policy nonzero activity must
-fail with an explicit disabled-policy error before secondary conservation
-checks. A result with a >=10% point estimate but lower 95% bound below 10% is
-`PROMISING_10PCT_POINT_ESTIMATE`, not a verified >=10% improvement; a
-lower bound >=10% is only `SCREEN_10PCT_CI`, still not qualified.
-Test the actual pure Python factorial analyzer on synthetic known 2x2 blocks,
-missing/noisy arms, inactivity, p99 and lower-I/O regression. An experiment
-with no confirmed asynchronous successor submission is `NO_ACTIVITY`, even
-when there were early-close attempts. A partial block is rejected before
-privilege. Do balanced repeated
-controls on NVMe5/NVMe4/SATA/fast mixed/fast QD8 on each quiet host. Compare
-useful WRITE/raw, READ p99, lower bytes/requests, CPU, gap partition, record
-size and ACK dwell. Three repeats screen a hypothesis; prospective paired
-confidence intervals are required before promotion. The actual completion
-handoff probe must cover a published cohort without a pending successor,
-the explicit allow-without-lower permission, ordinary false-permission
-rejection, and the separate `defer_for_successor` reason that preserves
-ID175 submitter-only wake ordering; also cover the 4..64 bound, busy slot,
-failure and exact-once completion. Official
-`make test` always uses disabled selectors.
+be pooled as byte-for-byte-equivalent telemetry across this boundary.
 
 ### Lower-lane gap attribution: native and replay qualification (ID178)
 

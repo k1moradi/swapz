@@ -1892,134 +1892,6 @@ int main(void) {
                     owned_plan, (1,), (("nvme5", "invalid"),))
             self.assertFalse(owned_plan.exists())
 
-    def test_id181_policy_covers_all_finalize_sites_and_preserves_id175(self):
-        helper = body("swapz_id181_submit_staged_successor")
-        worker = body("swapz_worker_pass")
-        finalize = body("swapz_finalize_inflight_write")
-        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
-        fast = (ROOT / "tests/tools/fast-test.py").read_text()
-
-        self.assertIn("ctx->batch_count", helper)
-        self.assertIn("ctx->work_conserving_window", helper)
-        self.assertNotIn("work_conserving_hand_records", helper)
-        self.assertEqual(
-            worker.count("swapz_id181_submit_staged_successor(ctx)"), 3)
-        self.assertEqual(
-            worker.count("swapz_finalize_inflight_write(ctx, false)"), 3)
-        self.assertIn("id181_successor_first_submissions++", helper)
-        self.assertLess(helper.index("error = swapz_flush_window(ctx);"),
-                        helper.index("id181_successor_first_submissions++"))
-        self.assertIn("defer_for_successor =", finalize)
-        self.assertIn(
-            "ctx->id181_publication_handoff && defer_for_successor", finalize)
-        self.assertIn("swapz_try_completion_handoff(ctx, true)", finalize)
-        self.assertIn("swapz_try_completion_handoff(ctx, false)",
-                      body("swapz_deliver_upper_completions"))
-        self.assertIn('"id181_successor_first_closes"', replay)
-        self.assertIn('"id181_successor_first_submissions"', replay)
-        self.assertIn('"id181_publication_handoffs"', replay)
-        self.assertIn("def id181_factorial_analysis(rows):", fast)
-        self.assertIn('base_scenario(row.get("scenario", ""))', fast)
-
-    def test_id181_factorial_calculations_and_guards(self):
-        """Exercise the actual pure analysis functions, without a device."""
-        import runpy
-
-        analysis = runpy.run_path(str(ROOT / "tests/tools/fast-test.py"))
-        measure = analysis["id181_factorial_analysis"]
-        base_name = analysis["base_scenario"]
-        self.assertEqual(base_name("nvme5-mixed@AB#3"), "nvme5-mixed")
-        rates = {"control": 100, "A": 120, "B": 110, "AB": 132}
-
-        def make_rows():
-            rows = []
-            for round_number in range(1, 5):
-                for policy, write_rate in rates.items():
-                    rows.append({
-                        "scenario": f"nvme5-mixed@{policy}#{round_number}",
-                        "id181_round": round_number,
-                        "id181_policy": policy,
-                        "performance_validity": {"performance_usable": True},
-                        "raw_w": 100.0, "swapz_w": float(write_rate),
-                        "raw_lw_bytes": 4000, "raw_lw_reqs": 400,
-                        "swapz_lw_bytes": 1000, "swapz_lw_reqs": 100,
-                        "pages_per_lower_write": 8.0,
-                        "swapz_r_p99": 1.0,
-                        "id181_successor_first_closes": (
-                            2 if policy in ("A", "AB") else 0),
-                        "id181_successor_first_submissions": (
-                            1 if policy in ("A", "AB") else 0),
-                        "id181_publication_handoffs": (
-                            1 if policy in ("B", "AB") else 0),
-                    })
-            return rows
-
-        rows = make_rows()
-        result = measure(rows)[0]
-        self.assertEqual(result["complete_rounds"], 4)
-        self.assertAlmostEqual(result["a_main_effect"]["mean"], 0.2)
-        self.assertAlmostEqual(result["b_main_effect"]["mean"], 0.1)
-        self.assertAlmostEqual(result["a_by_b_interaction"]["mean"], 0.0)
-        a_candidate = result["candidates"]["A"]
-        self.assertEqual(a_candidate["verdict"], "SCREEN_10PCT_CI")
-        self.assertEqual(a_candidate["successor_submissions"], 4)
-        self.assertAlmostEqual(
-            a_candidate["lower_requests_vs_control"]["mean"], 0.0)
-        self.assertAlmostEqual(
-            a_candidate["pages_per_request_vs_control"]["mean"], 0.0)
-
-        # Against raw this would still pass; against the paired default
-        # swapz it correctly flags the increased physical lower work.
-        for row in rows:
-            if row["id181_policy"] == "A":
-                row["swapz_lw_reqs"] = 150
-                row["swapz_lw_bytes"] = 1200
-                row["pages_per_lower_write"] = 6.0
-        candidate = measure(rows)[0]["candidates"]["A"]
-        self.assertEqual(candidate["verdict"], "LOWER_IO_REGRESSION")
-        self.assertGreater(candidate["lower_bytes_vs_control"]["mean"], 0)
-        self.assertGreater(candidate["lower_requests_vs_control"]["mean"], 0)
-        self.assertLess(candidate["pages_per_request_vs_control"]["mean"], 0)
-
-        rows = make_rows()
-        for row in rows:
-            if row["id181_policy"] == "A":
-                row["id181_successor_first_submissions"] = 0
-        self.assertEqual(
-            measure(rows)[0]["candidates"]["A"]["verdict"], "NO_ACTIVITY")
-        rows = make_rows()
-        for row in rows:
-            if row["id181_policy"] == "AB":
-                row["id181_publication_handoffs"] = 0
-        self.assertEqual(
-            measure(rows)[0]["candidates"]["AB"]["verdict"], "NO_ACTIVITY")
-
-        rows = make_rows()
-        for row in rows:
-            if row["id181_policy"] == "A":
-                row["swapz_r_p99"] = 1.2
-        self.assertEqual(
-            measure(rows)[0]["candidates"]["A"]["verdict"],
-            "READ_P99_UNRESOLVED")
-
-        # A +10% point estimate with an interval including <10% is not
-        # a demonstrated >=10% CI improvement.
-        rows = make_rows()
-        for row in rows:
-            if row["id181_policy"] == "A":
-                row["swapz_w"] = 100 * (
-                    1.08 + (row["id181_round"] - 1) * 0.04)
-        self.assertEqual(
-            measure(rows)[0]["candidates"]["A"]["verdict"],
-            "PROMISING_10PCT_POINT_ESTIMATE")
-
-        rows = make_rows()
-        rows[0]["performance_validity"]["performance_usable"] = False
-        self.assertEqual(measure(rows)[0]["complete_rounds"], 3)
-        for row in rows:
-            row["performance_validity"]["performance_usable"] = False
-        self.assertEqual(measure(rows)[0]["complete_rounds"], 0)
-
     def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
         """Exercise actual target C under controlled queue/close/reuse interleavings."""
         import subprocess
@@ -2054,7 +1926,6 @@ struct work_struct { void (*func)(struct work_struct *); };
 struct dm_target { struct swapz_dm *private; };
 struct swapz_dm {
     bool defer_upper_completions, accepting, failed, lower_pending;
-    bool id181_publication_handoff;
     int last_error, queue_lock;
     void *preparation_workqueue;
     struct bio_list deferred_upper_completions, completion_bios;
@@ -2125,7 +1996,7 @@ static void bio_endio(struct bio *b) {
                 ("swapz_complete", "static void swapz_complete(struct bio *bio, int error)"),
                 ("swapz_defer_upper_completion", "static void swapz_defer_upper_completion(struct swapz_dm *ctx, struct bio *bio)"),
                 ("swapz_completion_work", "static void swapz_completion_work(struct work_struct *work)"),
-                ("swapz_try_completion_handoff", "static bool swapz_try_completion_handoff(struct swapz_dm *ctx, bool allow_without_lower_pending)"),
+                ("swapz_try_completion_handoff", "static bool swapz_try_completion_handoff(struct swapz_dm *ctx)"),
                 ("swapz_deliver_bio_list", "static void swapz_deliver_bio_list(struct swapz_dm *ctx, struct bio_list *bios)"),
                 ("swapz_deliver_upper_completions", "static void swapz_deliver_upper_completions(struct swapz_dm *ctx)")):
             source += signature + " {\n" + body(name) + "\n}\n"
@@ -2144,41 +2015,33 @@ static void add(unsigned start,unsigned count) {
     for(unsigned i=start;i<start+count;++i)swapz_defer_upper_completion(&ctx,&bios[i]);
 }
 static void run(void) { struct work_struct *w=pending;assert(w);pending=NULL;w->func(w); }
-static void reuse(void) { add(4,4);assert(swapz_try_completion_handoff(&ctx, false)); }
+static void reuse(void) { add(4,4);assert(swapz_try_completion_handoff(&ctx)); }
 int main(void) {
-    init();add(0,4);assert(swapz_try_completion_handoff(&ctx, false));
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));
     assert(ctx.completion_active&&bio_list_empty(&ctx.deferred_upper_completions));
     assert(released==4&&!bios[0].ended);
-    add(4,4);assert(!swapz_try_completion_handoff(&ctx, false));
+    add(4,4);assert(!swapz_try_completion_handoff(&ctx));
     swapz_deliver_upper_completions(&ctx); /* Occupied slot: original inline path. */
     for(unsigned i=0;i<8;++i)assert(bios[i].ended==(i>=4));
     run();assert(!ctx.completion_active&&released==8&&ctx.upper_write_completed_ok==8);
     for(unsigned i=0;i<8;++i)assert(bios[i].ended==1&&!bios[i].bi_status);
 
     /* Same work item is requeued after release, before its old call returns. */
-    init();add(0,4);assert(swapz_try_completion_handoff(&ctx, false));release_hook=reuse;
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));release_hook=reuse;
     run();assert(ctx.completion_active&&pending&&ctx.completion_offloaded_batches==2);
     for(unsigned i=0;i<8;++i)assert(bios[i].ended==(i<4));
     run();assert(!ctx.completion_active&&ctx.upper_write_completed_ok==8);
 
     /* Closing admission between eligibility and lock acquisition rejects handoff. */
-    init();add(0,4);close_at_lock=&ctx;assert(!swapz_try_completion_handoff(&ctx, false));
+    init();add(0,4);close_at_lock=&ctx;assert(!swapz_try_completion_handoff(&ctx));
     assert(!pending&&!ctx.completion_active&&bio_list_size(&ctx.deferred_upper_completions)==4);
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==4);
-    init();add(0,3);assert(!swapz_try_completion_handoff(&ctx, false));
+    init();add(0,3);assert(!swapz_try_completion_handoff(&ctx));
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==3);
-    init();add(0,65);assert(!swapz_try_completion_handoff(&ctx, false));
+    init();add(0,65);assert(!swapz_try_completion_handoff(&ctx));
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==65);
-    init();add(0,4);ctx.lower_pending=false;assert(!swapz_try_completion_handoff(&ctx, false));
+    init();add(0,4);ctx.lower_pending=false;assert(!swapz_try_completion_handoff(&ctx));
     swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==4);
-    /* ID181: only the explicit publication call may bypass lower-pending. */
-    init();add(0,4);ctx.lower_pending=false;ctx.id181_publication_handoff=true;
-    assert(!swapz_try_completion_handoff(&ctx, false));
-    assert(swapz_try_completion_handoff(&ctx, true));run();
-    assert(ctx.upper_write_completed_ok==4&&!ctx.completion_active);
-    init();add(0,3);ctx.lower_pending=false;ctx.id181_publication_handoff=true;
-    assert(!swapz_try_completion_handoff(&ctx, true));
-    swapz_deliver_upper_completions(&ctx);assert(ctx.upper_write_completed_ok==3);
     init();add(0,4);ctx.defer_upper_completions=false;
     swapz_deliver_upper_completions(&ctx);assert(!pending&&ctx.upper_write_completed_ok==4);
 
@@ -2196,10 +2059,10 @@ int main(void) {
     }
 
     /* Already-published BIOs still fail closed if failure precedes delivery. */
-    init();add(0,4);assert(swapz_try_completion_handoff(&ctx, false));fail_after=0;run();
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));fail_after=0;run();
     assert(ctx.upper_write_completed_ok==1&&ctx.upper_write_completed_err==3);
     for(unsigned i=1;i<4;++i)assert(bios[i].bi_status==EIO);
-    init();add(0,4);assert(swapz_try_completion_handoff(&ctx, false));fail_at_endio=0;run();
+    init();add(0,4);assert(swapz_try_completion_handoff(&ctx));fail_at_endio=0;run();
     assert(ctx.endio_write_forced_err==1&&bios[0].bi_status==EIO);
     assert(ctx.upper_write_completed_err==3&&!ctx.completion_active);
     return 0;

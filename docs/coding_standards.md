@@ -257,35 +257,6 @@ diagnostic only: its timestamp error is bounded by the ACK delivery-loop span
 and it must never move `bio_endio()`, publication, failure checks or ownership.
 No unprotected shared accumulator or new queue is permitted.
 
-### ID181 successor-first and publication-ACK development A/B
-
-Two read-only selectors default off: `id181_successor_first` and
-`id181_publication_handoff`. Only positively identified null_blk retained-async
-targets may enable them. The ordered owner may submit any nonempty
-already-staged work-conserving successor immediately after the prior run is
-published, before later FIFO admissions and independent READs. This
-development arm intentionally does not apply the production eight-record hand:
-the experiment measures whether earlier closure helps, and an eight-record
-gate is a later fallback only if measured aggregation loss requires it. All
-three ordered-worker completion/finalize sites (entry, in-loop, end-of-pass)
-must invoke the same helper so lower-completion timing cannot change policy.
-The early-close counter denotes attempts; only an actual successful K=1
-asynchronous lower-WRITE dispatch increments
-`id181_successor_first_submissions` (measured against the existing ordered
-`pipeline_async_runs` counter). A synchronous close or failed flush must not
-count as an asynchronous submission. It must use the unchanged flush logic
-(all barriers,
-CRC/generation, GC/failure ownership). Publication-time ACK handoff uses the
-one existing bounded 4..64 completion slot and queue-lock drain gate; occupied
-handoff falls back to ordered delivery. The shared handoff helper receives an
-explicit call-site permission to operate without a pending lower WRITE:
-ordinary delivery always passes false and only the publication-time ID181 B
-call passes true. A run deferred solely because ID175 submitter dispatch
-occurred is excluded: its writers must still wake only after the ordered owner
-is released. No early success,
-second lower WRITE, new queue/lock, changed SWZ or physical-device admission.
-Controls are development-only; the qualified production defaults remain off.
-
 ### Lower-lane gap attribution (ID178)
 
 ID178 is observational only. No policy, ACK-delivery time, retained window,

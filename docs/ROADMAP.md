@@ -409,7 +409,7 @@ changes.
 | 177 | Representative swap content | **Analyzer and matched-cohort tooling implemented; owner sample measurement pending / no product policy change** | The benchmark fixture compresses ~1.43x while reported LZ4 ratios on real swap are ~1.5-2.6x. `make fast_test` now accepts an owner-supplied file of 128..8192 concatenated 4 KiB pages through `CONTENT=representative ANON_PAGE_SAMPLE=/private/path/pages.bin`; it copies the sample into a private temporary plan, runs the aggregate-only offline analyzer, then gives the same fixture and trace to raw and swapz arms. The analyzer models production's predictor-first direct adoption, fallback/packing route, acceleration defaults and 64-page extent planner, and reports aggregate content/route/planner statistics without page bytes, per-page records, hashes or source paths. Native tests cover aggregate-only output, representative plan identity and symlink refusal. The owner sample and matched hardware cohort have not yet been measured. This remains offline emulation: no swapon, physical partition, policy change or qualification claim. |
 | 178 | Lower-lane gap attribution (passive) | **4 owner PASS on x86 + ARM64 (`1a527d46`; reports `fbd6c1f2`, `95430926`) / decision evidence consumed by ID181** | Observational only; no policy, wait, queue, allocation, format or ACK-timing change. Implemented by external agents (`6170f59d`, `5329aae3`, `2787ffa6`, `f6599bb8`); lead review fixed: engine observer hooks fired during GC compaction and counted `lane_gap_invalid` (which fails every timed session closed), an unpaired submission left an older predecessor valid, a profile_epoch race on a synchronous run counted as invalid, and foreign WRITEs between a predecessor's completion and publication went unnoticed; t3 was restored to the seal start (the second agent had moved it after prepare, folding plan/pack/CRC into staged/held), and accounting now follows the lower submission. Per K=1 gap (predecessor lower completion t0 → successor lower submit t4) record an exact partition: completion→owner observes (t0..t1), publication (t1..t2), then for the successor run: no admitted work (t2..a), admitted but not yet ordered-owned (a..s), staged and held before sealing (s..t3), seal = plan/stage/pack/CRC/submit (t3..t4), with marks clamped so the parts sum exactly to the gap; gaps overlapped by any other lower WRITE (GC, single-page RAW) are foreign. Report paired/foreign/unpaired coverage, admitted and ordered-owned successor histograms at t0 (0, 1, 2-3, 4-7, 8-15, 16+), publication→`bio_endio` dwell bins for deferred/immediate ACKs, owner READ service inside measured gaps (annotation, not a part), and `host_cpu` on SATA/NVMe4/NVMe5/fast-mixed arms. [Work order](handoff/lane-gap-diagnostics.md). Decision rules after both-host owner reports: staged-held + seal dominant with a successor commonly present at t0 → ID179; admitted-not-owned dominant → owner pickup/wake/READ-ahead path; no-work dominant with no successor at t0 → upper round trip (ACK dwell, ID164 early ACK, or K=2 with split runs); completion/publication dominant → shorten finalization. |
 | 179 | Seal-ahead at K=1 | **6 conditional on ID178** | Candidate only if ID178 shows a successor is commonly present by lower completion but sealed after it. Seal (plan, pack, CRC) the successor while the active lower WRITE is in flight and submit it at completion, keeping one lower WRITE in flight and one publication authority. Not a second buffer: the sealed successor must preserve FIFO publication, reservation ownership, same-page fences, failure rollback of both runs, GC boundaries and suspend/drain, while the authority's paused batch group is a singleton. Must keep lower bytes/requests and READ p99 within guards. |
-| 181 | Successor-first dispatch (A) and publication-time ACK handoff (B) | **x86 NO PROMOTION; ARM64 exact-source qualification PASS, factorial pending** | Default-off owned-null_blk experiment. Fixed x86 factorial at `6730ef7c` found no promotable policy. On exact source `705589f`, owner `make test` passed 5/5 (report `c56dfdc`); the repeat four-block factorial at the report-only descendant `c56dfdc` found no >=10% normalized useful-WRITE gain: A/B/AB vs control SATA -1.3/-2.7/-2.6%, fast mixed +0.1/+0.2/+0.8%, fast QD4 -0.8/+0.4/-1.1%, QD8 -1.7/-2.0/-4.0%. SATA A/AB added lower WRITE requests; fast QD8 A added +17.7% (CI +4.3..+32.7%). NVMe4/5 were excluded by fixed raw-spread screens (18.8/28.7%). On 2026-11-02, the ARM64 owner `make test` passed all five stages for exact source `604866c1` (report `e760e91`, AArch64 host identity); this qualifies lifecycle/reporting, not ID181 performance. Do not rerun x86 or promote A/B/AB; run the fixed quiet ARM64 factorial, then retire the selectors/tests if the cross-host decision stays negative. ID179 conditional; ID176/ID164/ID180 remain closed. |
+| 181 | Successor-first dispatch (A) and publication-time ACK handoff (B) | **REJECTED / REMOVED: x86 no promotion, ARM64 production PASS with selectors disabled** | Default-off owned-null_blk experiment. Fixed x86 factorial at `6730ef7c` found no promotable policy. On exact source `705589f`, owner `make test` passed 5/5 (report `c56dfdc`); the repeat four-block factorial at the report-only descendant `c56dfdc` found no >=10% normalized useful-WRITE gain: A/B/AB vs control SATA -1.3/-2.7/-2.6%, fast mixed +0.1/+0.2/+0.8%, fast QD4 -0.8/+0.4/-1.1%, QD8 -1.7/-2.0/-4.0%. SATA A/AB added lower WRITE requests; fast QD8 A added +17.7% (CI +4.3..+32.7%). NVMe4/5 were excluded by fixed raw-spread screens (18.8/28.7%). On 2026-11-02, the ARM64 owner `make test` passed all five stages for exact source `604866c1` (report `e760e91`, AArch64 host identity); this qualifies lifecycle/reporting, not ID181 performance. Owner decision 2026-11-02: retire the A/B/AB development policy without an ARM64 factorial; x86's fixed screening rules show no generally promotable result, and ARM64 default-off production qualifies. Remove selector fields, policy branches, counters, factorial tooling and dedicated tests while retaining shared ID143/ID175 completion handoff. ARM64 mechanism-specific performance remains untested; do not misstate the x86 results as cross-host refutation. A cleaned source requires fresh x86 and ARM64 owner qualification. ID162 remains separate; ID179/ID176/ID164/ID180 stay deferred. |
 | 180 | Submitter append to an active window; cached-READ submitter bypass | **0 deferred / not justified** | Appending ID175-style into an open window under load adds FIFO and concurrency hazards, and the submitter mostly fails `mutex_trylock()` while the worker owns the domain. Serving cached READs in submitter context would bypass the owner, but the x86 READ p99 loss includes lookup, decode, verification, copy, locking and scheduling, not pure queueing. Reconsider only if ID178 shows admission→owner or owner READ service as a dominant, avoidable part of lane idle. |
 
 ## What the pinned queue experiment establishes
@@ -704,13 +704,6 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 - **ID61:** add foreground-GC stall/reserve-headroom evidence under bounded useful pressure.
 - **ID62:** physical devices remain outside the current development safety scope.
 
-**ID181 development factorial controls:** `make fast_test ID181_FACTORIAL=1
-REPEAT=4` runs control/A/B/AB as four complete position-balanced blocks per
-ordinary scenario. The per-pair candidate/raw order alternates; every
-candidate keeps the same fixture/trace, noise screen and byte oracle.
-`REPEAT=8` repeats the full design. These are development-only measurements,
-not source qualification or a causal speedup result.
-
 **ID178 instrumentation cost hypothesis (2026-11-01):** ARM64 cross-report
 fast-mixed service fell from roughly 71.9 to 69.0 MB/s after ID178, with
 suspected per-ACK time/atomic overhead; this is not a same-source controlled
@@ -725,38 +718,42 @@ proven ID178 overhead.
 
 ## Immediate work queue
 
-**Current round (2026-11-02, ID181 scheduling A/B).** ID178 source
-`1a527d46` passed all five owner stages on x86 (report `fbd6c1f2`) and
-ARM64 (report `95430926`). The exact gap partition shows staged/held as a
-large NVMe component, sealing itself small, and ARM SATA/no-work large. The
-next source therefore tests ordering/ACK scheduling before structural
-seal-ahead. The newer x86 `make test` passed all five stages on `705589f` (report
-`c56dfdc`), and a second fixed four-round ID181 factorial again found
-no promotable A/B/AB policy. Both NVMe4 and NVMe5 were noise-excluded.
-Earlier x86 evidence at `f297c889`/`6730ef7c` is retained above.
-The ARM64 owner `make test` passed all five stages for exact source `604866c1`
-(report `e760e91`; AArch64 host identity). The x86 ID181 decision is NO
-PROMOTION; cross-host closure still needs the ARM64 factorial.
-Order of remaining work:
+**Current round (2026-11-02, ID181 retirement and clean baseline).**
+Owner decision: retire ID181 as a general production candidate without an
+ARM64 factorial. The fixed x86 counterbalanced factorial showed no A/B/AB
+policy meeting the >=10% normalized useful-WRITE objective, with added
+lower-I/O requests in selected arms. This is failed promotion evidence, not
+proof of universal regression. ARM64 already passed all five owner stages
+with ID181 disabled on exact source `604866c1` (report `e760e91`);
+x86 passed exact source `705589f` (report `c56dfdc`). Neither
+qualification covers the cleaned removal commit. Preserve the historical
+ID181 evidence above, and remove its default-off code, selectors, counters,
+factorial tools and dedicated tests. Retain the production ID143/ID175
+completion handoff and all other accepted scheduling/authority semantics.
 
-1. Quiet ARM64: run the planned `make fast_test ID181_FACTORIAL=1 REPEAT=4`
-   with the fixed ordinary scenarios and counterbalanced protocol. The
-   exact-source ARM64 owner `make test` is complete at `604866c1`; keep ID181
-   selectors default-off. Report activity, useful WRITE, lower bytes/requests,
-   READ p99, CPU, gap phases, and ACK dwell. The x86 factorial is complete; do
-   not rerun it to replace the excluded NVMe5 block or chase significance.
-2. After ARM64 evidence, close the cross-host policy decision. Promote
-   nothing unless both the practical useful-WRITE objective and product
-   guards are supported; x86 alone showed no candidate meeting the target.
-3. Build ID179 only if earlier successor dispatch wins but publication/seal
-   remains material; reopen ID176 only with strong stripe scaling plus residual
-   ready-work idle. ID164 and ID180 remain closed.
-4. On the appropriate i3 host, collect the outstanding ID175/ID169 report;
-   x86 results from a different machine are not i3 evidence. On an available
-   x86 host, collect the owner-supplied ID177 representative anonymous-page
-   sample using the existing aggregate-only private `make fast_test` path.
-   Neither work item is ID181 promotion or physical-media qualification.
-   Synthetic pages must not be relabeled as representative.
+Next work, in order:
+
+1. Run CI on the narrow ID181 cleanup. Then run official owner `make test`
+   on both x86 and ARM64 against the **same exact cleaned source SHA**.
+   Both full five-stage results and their reports must pass before this
+   source is a newly qualified baseline; do not infer PASS from rootless
+   checks, older host reports or CI alone.
+2. ID177: use the existing `CONTENT=representative` owner-supplied offline
+   anonymous-page sampling and aggregate-only analyzer on the available
+   host. Compare the same fixture/trace controls; never collect process
+   RAM, enable swap, or publish raw representative page data.
+3. Diagnose Fast QD4 (ARM64 -10.5% versus x86 +5.6% on the latest
+   owner-host observations) before any policy change. Measure admission
+   to ordered-owner service, preparation/deferral, window width,
+   pages/lower request, ACK and completion delays, host CPU and lower
+   service. Cross-host results are descriptive, not causal.
+4. Collect ID175/ID169 exact-host evidence on the actual i3 when it is
+   available. Preserve both mechanisms and their mixed/QD8 watchpoints.
+5. Keep ID179, ID176, ID180 and ID164 closed/deferred. ID179 is weaker
+   because measured seal time is small and earlier ID181 dispatch showed
+   no material service win. ID162's nondefault hand threshold is a
+   **separate possible cleanup**; do not remove it in this commit.
+
 **Previous round (owner plan, after `3478aec`).** Adopted the ID174
 per-device-class goals, promoted ID169 and implemented ID175; both now pass
 on x86 and ARM64, with the i3 report outstanding.

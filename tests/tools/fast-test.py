@@ -13,7 +13,6 @@ unpaired observations; promotion still requires the full owner matrix.
 import argparse
 import hashlib
 import json
-import math
 import os
 import re
 import runpy
@@ -68,14 +67,6 @@ STRIPED_MODELS = ("nvme5", "sata")
 DEFAULT_STRIPE_COUNTS = (1, 2, 4)
 STRIPED_WRITE_QDS = (4, 8)
 MIXED_MEASURE_OPS = (16384, 65536)
-# Four counterbalanced blocks: each policy appears once in each position
-# and twice in each raw/swapz order. Repeat in complete four-block cycles.
-ID181_FACTORIAL_ORDERS = (
-    ("control", "A", "AB", "B"),
-    ("B", "AB", "A", "control"),
-    ("A", "control", "B", "AB"),
-    ("AB", "B", "control", "A"),
-)
 
 
 def quiet_host_sample():
@@ -159,8 +150,7 @@ def striped_scenario(name):
 
 def scenario_arguments(name, plan, calibration=False,
                        candidate_first=False, submitter_prepare=1,
-                       hand_records=8, id181_policy="control",
-                       private_fixture=False):
+                       hand_records=8, private_fixture=False):
     model, _, kind = name.partition("-")
     if model not in MODELS or not kind:
         raise ValueError(f"unknown scenario {name!r}")
@@ -176,10 +166,6 @@ def scenario_arguments(name, plan, calibration=False,
         arguments += ["--submitter-prepare", "0"]
     if hand_records != 8:
         arguments += ["--hand-records", str(hand_records)]
-    if id181_policy in ("A", "AB"):
-        arguments += ["--id181-successor-first", "1"]
-    if id181_policy in ("B", "AB"):
-        arguments += ["--id181-publication-handoff", "1"]
     if private_fixture:
         arguments.append("--private-fixture")
     arguments += ["--shared-plan", str(plan)]
@@ -659,15 +645,6 @@ def summarize(name, arms, seconds):
         "swapz_lw_reqs": swapz_lower_write_requests,
         "hand_records": kernel.get("work_conserving_hand_records") or 0,
         "hand_closes": kernel.get("work_conserving_hand_closes") or 0,
-        "id181_successor_first": kernel.get("id181_successor_first") or 0,
-        "id181_publication_handoff":
-            kernel.get("id181_publication_handoff") or 0,
-        "id181_successor_first_closes":
-            kernel.get("id181_successor_first_closes") or 0,
-        "id181_successor_first_submissions":
-            kernel.get("id181_successor_first_submissions") or 0,
-        "id181_publication_handoffs":
-            kernel.get("id181_publication_handoffs") or 0,
         "pages_per_lower_write": (
             logical_write_pages / swapz_lower_write_requests
             if swapz_lower_write_requests else 0.0),
@@ -820,205 +797,6 @@ def pct(candidate, baseline):
     return f"{(candidate / baseline - 1.0) * 100.0:+6.1f}%"
 
 
-T95 = {
-    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776,
-    5: 2.571, 6: 2.447, 7: 2.365,
-}
-
-
-def log_effect_summary(values):
-    """Return multiplicative mean and t-based 95% CI from paired log effects."""
-    if not values:
-        return {"n": 0, "mean": None, "low": None, "high": None}
-    mean = statistics.mean(values)
-    low = high = None
-    if len(values) >= 2:
-        critical = T95.get(len(values) - 1, 1.96)
-        margin = critical * statistics.stdev(values) / math.sqrt(len(values))
-        low = math.exp(mean - margin) - 1.0
-        high = math.exp(mean + margin) - 1.0
-    return {"n": len(values), "mean": math.exp(mean) - 1.0,
-            "low": low, "high": high}
-
-
-def id181_factorial_analysis(rows):
-    """Analyze complete SCREENED 2x2 blocks using raw-normalized WRITE ratios."""
-    policies = ("control", "A", "B", "AB")
-    by_scenario = {}
-    for row in rows:
-        scenario = base_scenario(row.get("scenario", ""))
-        if not scenario:
-            continue
-        # Retain the workload label even if all its arms are excluded, so
-        # the result explicitly reports zero complete screened blocks.
-        rounds = by_scenario.setdefault(scenario, {})
-        if ("error" in row or
-                not row["performance_validity"]["performance_usable"]):
-            continue
-        rounds.setdefault(row.get("id181_round"), {})[
-            row.get("id181_policy")] = row
-
-    analyses = []
-    for scenario, rounds in sorted(by_scenario.items()):
-        complete = [
-            block for _, block in sorted(rounds.items())
-            if set(block) == set(policies) and
-            all(block[policy]["raw_w"] > 0 and block[policy]["swapz_w"] > 0 and
-                block[policy]["raw_lw_bytes"] > 0 and
-                block[policy]["raw_lw_reqs"] > 0 and
-                block[policy]["swapz_lw_bytes"] > 0 and
-                block[policy]["swapz_lw_reqs"] > 0 and
-                block[policy]["pages_per_lower_write"] > 0
-                for policy in policies)
-        ]
-        if not complete:
-            analyses.append({"scenario": scenario, "complete_rounds": 0})
-            continue
-
-        policy_shifts = {policy: [] for policy in policies[1:]}
-        read_p99_shifts = {policy: [] for policy in policies[1:]}
-        lower_byte_shifts = {policy: [] for policy in policies[1:]}
-        lower_request_shifts = {policy: [] for policy in policies[1:]}
-        records_per_request_shifts = {policy: [] for policy in policies[1:]}
-        lower_guards = {policy: True for policy in policies[1:]}
-        a_effects, b_effects, interactions = [], [], []
-        for block in complete:
-            log_ratio = {
-                policy: math.log(block[policy]["swapz_w"] /
-                                 block[policy]["raw_w"])
-                for policy in policies
-            }
-            control = log_ratio["control"]
-            for policy in policies[1:]:
-                policy_shifts[policy].append(log_ratio[policy] - control)
-                # Same trace and fixture: guard both the raw baseline and
-                # the production-policy swapz control from this block.
-                lower_guards[policy] = lower_guards[policy] and (
-                    block[policy]["swapz_lw_bytes"] <= min(
-                        block[policy]["raw_lw_bytes"],
-                        block["control"]["swapz_lw_bytes"]) and
-                    block[policy]["swapz_lw_reqs"] <= min(
-                        block[policy]["raw_lw_reqs"],
-                        block["control"]["swapz_lw_reqs"]))
-                lower_byte_shifts[policy].append(math.log(
-                    block[policy]["swapz_lw_bytes"] /
-                    block["control"]["swapz_lw_bytes"]))
-                lower_request_shifts[policy].append(math.log(
-                    block[policy]["swapz_lw_reqs"] /
-                    block["control"]["swapz_lw_reqs"]))
-                records_per_request_shifts[policy].append(math.log(
-                    block[policy]["pages_per_lower_write"] /
-                    block["control"]["pages_per_lower_write"]))
-                control_p99 = block["control"]["swapz_r_p99"]
-                policy_p99 = block[policy]["swapz_r_p99"]
-                if control_p99 > 0 and policy_p99 > 0:
-                    read_p99_shifts[policy].append(
-                        math.log(policy_p99 / control_p99))
-            a_effects.append(
-                (log_ratio["A"] + log_ratio["AB"] -
-                 log_ratio["control"] - log_ratio["B"]) / 2.0)
-            b_effects.append(
-                (log_ratio["B"] + log_ratio["AB"] -
-                 log_ratio["control"] - log_ratio["A"]) / 2.0)
-            interactions.append(
-                log_ratio["AB"] + log_ratio["control"] -
-                log_ratio["A"] - log_ratio["B"])
-
-        candidates = {}
-        for policy in policies[1:]:
-            service = log_effect_summary(policy_shifts[policy])
-            read_p99 = log_effect_summary(read_p99_shifts[policy])
-            successor_closes = sum(
-                block[policy]["id181_successor_first_closes"]
-                for block in complete if policy in ("A", "AB"))
-            successor_submissions = sum(
-                block[policy]["id181_successor_first_submissions"]
-                for block in complete if policy in ("A", "AB"))
-            publication_handoffs = sum(
-                block[policy]["id181_publication_handoffs"]
-                for block in complete if policy in ("B", "AB"))
-            activity_ok = (
-                successor_submissions > 0 if policy == "A" else
-                publication_handoffs > 0 if policy == "B" else
-                successor_submissions > 0 and publication_handoffs > 0)
-            if service["low"] is None:
-                verdict = "INSUFFICIENT"
-            elif not activity_ok:
-                verdict = "NO_ACTIVITY"
-            elif not lower_guards[policy]:
-                verdict = "LOWER_IO_REGRESSION"
-            elif read_p99["high"] is not None and read_p99["high"] > 0.05:
-                verdict = "READ_P99_UNRESOLVED"
-            elif service["low"] >= 0.10:
-                verdict = "SCREEN_10PCT_CI"
-            elif service["mean"] >= 0.10 and service["low"] > 0:
-                verdict = "PROMISING_10PCT_POINT_ESTIMATE"
-            else:
-                verdict = "NO_10PCT_GAIN"
-            candidates[policy] = {
-                "write_vs_control": service,
-                "read_p99_vs_control": read_p99,
-                "lower_io_no_added_work": lower_guards[policy],
-                "lower_bytes_vs_control":
-                    log_effect_summary(lower_byte_shifts[policy]),
-                "lower_requests_vs_control":
-                    log_effect_summary(lower_request_shifts[policy]),
-                "pages_per_request_vs_control":
-                    log_effect_summary(records_per_request_shifts[policy]),
-                "successor_closes": successor_closes,
-                "successor_submissions": successor_submissions,
-                "publication_handoffs": publication_handoffs,
-                "verdict": verdict,
-            }
-
-        analyses.append({
-            "scenario": scenario,
-            "complete_rounds": len(complete),
-            "a_main_effect": log_effect_summary(a_effects),
-            "b_main_effect": log_effect_summary(b_effects),
-            "a_by_b_interaction": log_effect_summary(interactions),
-            "candidates": candidates,
-        })
-    return analyses
-
-
-def print_id181_factorial(analyses):
-    if not analyses:
-        return
-
-    def effect(summary):
-        if not summary or summary.get("mean") is None:
-            return "n/a"
-        if summary.get("low") is None:
-            return f"{summary['mean'] * 100:+.1f}%"
-        return (f"{summary['mean'] * 100:+.1f}% "
-                f"[{summary['low'] * 100:+.1f},{summary['high'] * 100:+.1f}]")
-
-    print("\nID181 2x2 factorial — SCREENED complete blocks only")
-    print(f"{'scenario':<12} {'n':>2} {'A main':>24} {'B main':>24} {'A×B':>24}")
-    for row in analyses:
-        print(f"{row['scenario']:<12} {row['complete_rounds']:2d} "
-              f"{effect(row.get('a_main_effect')):>24} "
-              f"{effect(row.get('b_main_effect')):>24} "
-              f"{effect(row.get('a_by_b_interaction')):>24}")
-        for policy, candidate in row.get("candidates", {}).items():
-            print(f"  {policy:<2} vs control: "
-                  f"{effect(candidate['write_vs_control'])}; "
-                  f"Aclose={candidate['successor_closes']} "
-                  f"Asubmit={candidate['successor_submissions']} "
-                  f"Bhandoff={candidate['publication_handoffs']} "
-                  f"lowerIO={'OK' if candidate['lower_io_no_added_work'] else 'REGRESS'} "
-                  f"bytes={effect(candidate['lower_bytes_vs_control'])} "
-                  f"reqs={effect(candidate['lower_requests_vs_control'])} "
-                  f"pages/req={effect(candidate['pages_per_request_vs_control'])} "
-                  f"R-p99={effect(candidate['read_p99_vs_control'])} "
-                  f"{candidate['verdict']}")
-    print("  Effects use paired log(swapz/raw WRITE) within each counterbalanced "
-          "round; lower-I/O changes compare paired swapz policies. "
-          "Brackets are t-based 95% CIs; these are development screens, "
-          "not product-goal qualification.")
-
-
 def print_table(rows):
     header = (f"{'scenario':<24} {'raw W':>7} {'swapz W':>8} {'dW':>7} "
               f"{'raw R':>6} {'swapz R':>7} {'lowW B':>7} {'reqs raw>swapz':>15} "
@@ -1156,10 +934,6 @@ def main():
                         default=os.environ.get("HOST_LOAD_PROFILE", "uncontrolled"))
     parser.add_argument("--hand-records", type=int, choices=(8, 16, 64),
                         default=int(os.environ.get("HAND_RECORDS", "8")))
-    parser.add_argument("--id181-policy", choices=("control", "A", "B", "AB"),
-                        default=os.environ.get("ID181_POLICY", "control"))
-    parser.add_argument("--id181-factorial", type=int, choices=(0, 1),
-                        default=int(os.environ.get("ID181_FACTORIAL", "0")))
     parser.add_argument("--mixed-ops", type=int, choices=MIXED_MEASURE_OPS,
                         default=int(os.environ.get("MIXED_OPS", "16384")))
     args = parser.parse_args()
@@ -1187,13 +961,6 @@ def main():
         parser.error("SUBMITTER_PREPARE=0 requires ordinary swapz fast_test scenarios")
     if args.hand_records != 8 and (calibration or striped_specs):
         parser.error("HAND_RECORDS requires an ordinary swapz fast_test scenario")
-    if args.id181_policy != "control" and (calibration or striped_specs):
-        parser.error("ID181_POLICY requires ordinary swapz scenarios")
-    if args.id181_factorial and (calibration or striped_specs or
-                                 args.id181_policy != "control"):
-        parser.error("ID181_FACTORIAL requires ordinary scenarios and ID181_POLICY=control")
-    if args.id181_factorial and (args.repeat < 4 or args.repeat % 4):
-        parser.error("ID181_FACTORIAL requires REPEAT=4 or 8 full counterbalanced blocks")
     if args.mixed_ops != 16384 and (calibration or striped_specs or any(
             name.partition("-")[2] not in
             ("mixed", "mixed-lanes", "mixed-lanes-waves")
@@ -1203,7 +970,6 @@ def main():
         scenario_arguments(name, "/dev/null",
                            submitter_prepare=args.submitter_prepare,
                            hand_records=args.hand_records,
-                           id181_policy=args.id181_policy,
                            private_fixture=args.content == "representative")
 
     if os.geteuid() != 0 and subprocess.run(
@@ -1217,8 +983,7 @@ def main():
                            cwd=ROOT, capture_output=True, text=True).stdout.strip()
     print(f"swapz fast_test (development only; not qualification) "
           f"content={args.content} submitter_prepare={args.submitter_prepare} "
-          f"hand_records={args.hand_records} id181_policy={args.id181_policy} "
-          f"id181_factorial={args.id181_factorial} "
+          f"hand_records={args.hand_records} "
           f"mixed_ops={args.mixed_ops} "
           f"host_load={args.host_load_profile} "
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
@@ -1251,20 +1016,11 @@ def main():
         raise
     rows, raw_reports = [], []
     status = 0
-    policy_count = 4 if args.id181_factorial else 1
     try:
         for name in ordinary_scenarios:
-            for measurement_index in range(args.repeat * policy_count):
-                attempt = measurement_index // policy_count
-                policy = (ID181_FACTORIAL_ORDERS[attempt % 4][
-                    measurement_index % policy_count] if args.id181_factorial
-                    else args.id181_policy)
-                candidate_first = bool(
-                    (args.id181_factorial and measurement_index % 2) or
-                    (calibration and attempt % 2))
-                label = (f"{name}@{policy}#{attempt + 1}"
-                         if args.id181_factorial else
-                         name if args.repeat == 1 else f"{name}#{attempt + 1}")
+            for attempt in range(args.repeat):
+                candidate_first = bool(calibration and attempt % 2)
+                label = name if args.repeat == 1 else f"{name}#{attempt + 1}"
                 quiet_before = quiet_host_sample()
                 begin = time.monotonic()
                 proc = privileged(720, PAIR, "--validated-source", head,
@@ -1272,7 +1028,6 @@ def main():
                                                       candidate_first,
                                                       args.submitter_prepare,
                                                       args.hand_records,
-                                                      policy,
                                                       args.content == "representative"))
                 elapsed = time.monotonic() - begin
                 quiet_after = quiet_host_sample()
@@ -1294,9 +1049,6 @@ def main():
                     row = summarize(label, arms, elapsed)
                 row["performance_validity"] = performance_validity(
                     quiet_before, quiet_after, arms)
-                row["id181_policy"] = policy
-                row["id181_round"] = attempt + 1
-                row["id181_candidate_first"] = candidate_first
                 rows.append(row)
                 raw_reports.append({"scenario": label, "arms": arms})
                 measured = row["linear_w"] if calibration else row["swapz_w"]
@@ -1373,7 +1125,6 @@ def main():
     if striped_specs:
         reject_raw_drift(striped_rows)
     # Derived summaries are identical in the JSON and console paths.
-    id181_analysis = id181_factorial_analysis(rows) if args.id181_factorial else []
     lane_gap_rows = lane_gap_table_rows(rows)
     result_name = "latest-calibration.json" if calibration else "latest.json"
     (OUT_DIR / result_name).write_text(
@@ -1386,11 +1137,6 @@ def main():
                     "delta64_rescue": None if calibration else 1,
                     "submitter_prepare": args.submitter_prepare,
                     "hand_records": args.hand_records,
-                    "id181_policy": args.id181_policy,
-                    "id181_factorial": bool(args.id181_factorial),
-                    "id181_order": (ID181_FACTORIAL_ORDERS if args.id181_factorial
-                                    else None),
-                    "id181_factorial_analysis": id181_analysis,
                     "mixed_measure_ops": args.mixed_ops,
                     "host_load_profile": args.host_load_profile,
                     "content_profile": args.content, "fixture": fixture, "rows": rows,
@@ -1416,8 +1162,6 @@ def main():
         print_table(rows)
         print_lane_gap_table(lane_gap_rows)
         print_profile(rows)
-        if args.id181_factorial:
-            print_id181_factorial(id181_analysis)
         print_striped_table(striped_rows if striped_specs else [])
     print(f"\n  Detailed telemetry: {(OUT_DIR / result_name).relative_to(ROOT)} "
           f"(total {time.monotonic() - started:.0f}s)")

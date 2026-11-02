@@ -70,9 +70,6 @@ test:
 # It accepts dirty trees, honors the noise screen, never writes
 # test_results.json and never qualifies a source. Override with
 # SCENARIOS=... and/or REPEAT=1..10 when narrowing a follow-up.
-# ID181_POLICY=control|A|B|AB selects default-off null_blk scheduling A/B.
-# ID181_FACTORIAL=1 REPEAT=4 or 8 runs each policy in complete balanced
-# blocks against its own raw control, retaining ID178 and noise-screen data.
 # MIXED_OPS=65536 extends ordinary mixed-only development traces; the default
 # remains 16384. It changes neither make test nor the performance screens.
 fast_test:

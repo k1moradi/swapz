@@ -106,15 +106,6 @@ MODULE_PARM_DESC(work_conserving_hand_records,
 		 "Owned retained-async null_blk A/B: hand threshold 8, 16 or 64; "
 		 "default 8");
 
-/* ID181: read-only, default-off, owned-null_blk development A/B. */
-static bool swapz_id181_successor_first;
-module_param_named(id181_successor_first, swapz_id181_successor_first, bool, 0444);
-MODULE_PARM_DESC(id181_successor_first,
-		 "Null_blk A/B: dispatch an already-staged successor after publication");
-static bool swapz_id181_publication_handoff;
-module_param_named(id181_publication_handoff, swapz_id181_publication_handoff, bool, 0444);
-MODULE_PARM_DESC(id181_publication_handoff,
-		 "Null_blk A/B: hand off published ACKs before successor dispatch");
 static bool swapz_allow_physical_backing;
 module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0444);
 MODULE_PARM_DESC(allow_physical_backing,
@@ -484,13 +475,6 @@ struct swapz_dm {
 	atomic_t preparation_slots_in_use;
 	atomic_t preparation_slots_in_use_max;
 	bool work_conserving_window;
-	/* Ordered-domain development policy; flags immutable after construction. */
-	bool id181_successor_first;
-	bool id181_publication_handoff;
-	u64 id181_successor_first_closes;
-	/* Confirmed new asynchronous lower WRITE, not just a close attempt. */
-	u64 id181_successor_first_submissions;
-	u64 id181_publication_handoffs;
 	u64 work_conserving_hand_closes;
 	u64 work_conserving_dry_closes;
 	u64 work_conserving_raw_not_ready;
@@ -1519,16 +1503,14 @@ static void swapz_completion_work(struct work_struct *work)
 
 static bool swapz_inflight_lower_pending(struct swapz_dm *ctx);
 
-static bool swapz_try_completion_handoff(struct swapz_dm *ctx,
-					 bool allow_without_lower_pending)
+static bool swapz_try_completion_handoff(struct swapz_dm *ctx)
 {
 	unsigned int count;
 	unsigned long flags;
 	bool handed = false;
 
 	if (!ctx->defer_upper_completions || !ctx->preparation_workqueue ||
-	    (!allow_without_lower_pending &&
-	     !swapz_inflight_lower_pending(ctx)))
+	    !swapz_inflight_lower_pending(ctx))
 		return false;
 	count = bio_list_size(&ctx->deferred_upper_completions);
 	if (count < SWAPZ_COMPLETION_HANDOFF_MIN_BIOS || count > SWAPZ_MAX_RECORDS)
@@ -1538,8 +1520,7 @@ static bool swapz_try_completion_handoff(struct swapz_dm *ctx,
 	 * must see this queued item before it can mark the queue draining. */
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (ctx->accepting && !ctx->failed &&
-	    (allow_without_lower_pending ||
-	     swapz_inflight_lower_pending(ctx)) &&
+	    swapz_inflight_lower_pending(ctx) &&
 	    !atomic_cmpxchg(&ctx->completion_active, 0, 1)) {
 		ctx->completion_bios = ctx->deferred_upper_completions;
 		bio_list_init(&ctx->deferred_upper_completions);
@@ -1587,7 +1568,7 @@ static void swapz_deliver_upper_completions(struct swapz_dm *ctx)
 {
 	if (bio_list_empty(&ctx->deferred_upper_completions))
 		return;
-	if (swapz_try_completion_handoff(ctx, false))
+	if (swapz_try_completion_handoff(ctx))
 		return;
 	swapz_deliver_bio_list(ctx, &ctx->deferred_upper_completions);
 }
@@ -2155,20 +2136,6 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		swapz_lane_gap_ack_flush(ctx, &acknowledgements);
 	ctx->pipeline_completed_runs++;
 	inflight->count = 0;
-	/*
-	 * ID181 B: mappings are published and preparation slots released.
-	 * Use the existing 4..64 bounded completion slot and drain-visible
-	 * queue lock even when no successor lower WRITE is pending yet.
-	 * Failure or a busy slot falls back to the ordered worker.
-	 */
-	/*
-	 * ID175 submitter-dispatched runs intentionally wake only after the
-	 * ordered owner is released. ID181 B may move ACK work earlier only
-	 * when actual successor/queued work independently caused deferral.
-	 */
-	if (ctx->id181_publication_handoff && defer_for_successor &&
-	    swapz_try_completion_handoff(ctx, true))
-		ctx->id181_publication_handoffs++;
 	return 0;
 }
 
@@ -4604,34 +4571,6 @@ accounted:
 	return 0;
 }
 
-/*
- * ID181 A is deliberately more aggressive than the production work-conserving
- * hand: once a predecessor is published, dispatch any already-staged eligible
- * successor before admitting newer FIFO work or serving unrelated READs.
- * The existing flush path remains the sole seal/submit authority and therefore
- * preserves K=1, barriers, GC ownership and failure rollback.
- */
-static int swapz_id181_submit_staged_successor(struct swapz_dm *ctx)
-{
-	u64 submitted_before;
-	int error;
-
-	if (!ctx->id181_successor_first || !ctx->work_conserving_window ||
-	    !ctx->batch_count || swapz_has_inflight(ctx) || ctx->failed ||
-	    !READ_ONCE(ctx->accepting))
-		return 0;
-
-	/* Attempts can synchronously close or fail without dispatching a K=1
-	 * successor. Count a successful asynchronous lower submit separately. */
-	submitted_before = ctx->pipeline_async_runs;
-	ctx->next_window_close = SWAPZ_CLOSE_IDLE;
-	ctx->id181_successor_first_closes++;
-	error = swapz_flush_window(ctx);
-	if (!error && ctx->pipeline_async_runs > submitted_before)
-		ctx->id181_successor_first_submissions++;
-	return error;
-}
-
 static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logical)
 {
 	struct swapz_tx tx;
@@ -6808,9 +6747,6 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 			if (!head || !completion_done(&head->lower_done))
 				break;
 			inflight_error = swapz_finalize_inflight_write(ctx, false);
-			if (!inflight_error)
-				inflight_error =
-					swapz_id181_submit_staged_successor(ctx);
 			if (inflight_error) {
 				swapz_finalize_all_inflight(ctx, true);
 				if (ctx->batch_count) {
@@ -7077,9 +7013,6 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 				int inflight_error =
 					swapz_finalize_inflight_write(ctx, false);
 
-				if (!inflight_error)
-					inflight_error =
-						swapz_id181_submit_staged_successor(ctx);
 				if (inflight_error && ctx->batch_count) {
 					ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 					swapz_flush_window(ctx);
@@ -7246,15 +7179,6 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 			int inflight_error =
 				swapz_finalize_inflight_write(ctx, false);
 
-			/*
-			 * Complete the ID181 owner policy at the end-of-pass site
-			 * too: a lower completion may arrive after the local loop
-			 * but before the next FIFO sample. The existing fail-closed
-			 * flush handles an uncleared staged window on error.
-			 */
-			if (!inflight_error)
-				inflight_error =
-					swapz_id181_submit_staged_successor(ctx);
 			if (inflight_error && ctx->batch_count) {
 				ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 				swapz_flush_window(ctx);
@@ -8038,8 +7962,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->async_prepare = swapz_async_prepare;
 	ctx->work_conserving_hand_records =
 		(swapz_u8)swapz_work_conserving_hand_records;
-	ctx->id181_successor_first = swapz_id181_successor_first;
-	ctx->id181_publication_handoff = swapz_id181_publication_handoff;
 	ctx->submitter_prepare = ctx->async_prepare && swapz_submitter_prepare;
 	ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled;
 	ctx->invalidate_cache_on_write_admit =
@@ -8112,12 +8034,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
-	if ((ctx->id181_successor_first || ctx->id181_publication_handoff) &&
-	    (!is_nullb || !ctx->async_prepare || !ctx->retain_ms)) {
-		ti->error = "ID181 requires owned null_blk with retained async";
-		error = -EOPNOTSUPP;
-		goto fail;
-	}
 	if (ctx->work_conserving_hand_records != SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
 	    !is_nullb) {
 		ti->error = "nondefault hand threshold is restricted to null_blk";
@@ -9056,14 +8972,6 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->ordered_copy_fallback_pages +
 			       prep.copy_fallback_pages +
 			       submitter.copy_fallback_pages);
-		DMEMIT(" id181_successor_first=%u id181_publication_handoff=%u"
-		       " id181_successor_first_closes=%llu"
-		       " id181_successor_first_submissions=%llu"
-		       " id181_publication_handoffs=%llu",
-		       ctx->id181_successor_first, ctx->id181_publication_handoff,
-		       ctx->id181_successor_first_closes,
-		       ctx->id181_successor_first_submissions,
-		       ctx->id181_publication_handoffs);
 		DMEMIT(" work_conserving_hand_records=%u "
 		       "work_conserving_hand_closes=%llu "
 		       "work_conserving_dry_closes=%llu "
