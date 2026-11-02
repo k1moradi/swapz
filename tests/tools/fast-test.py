@@ -206,7 +206,6 @@ def prepare_representative_fixture(plan, sample_path):
         raise ValueError("representative content requires an owner-supplied page sample")
     # Python bytes, hashes and striped plans are protected before any page read.
     private_memory.protect_private_memory()
-    os.environ["SWAPZ_PRIVATE_FIXTURE"] = "1"
 
     flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
              getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
