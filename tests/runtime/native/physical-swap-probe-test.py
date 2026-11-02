@@ -828,10 +828,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
             base = root / "base"
             base.mkdir(mode=0o700)
-            real_lstat = probe.Path.lstat
-
             def root_owned_lstat(path):
-                info = real_lstat(path)
+                info = os.lstat(path)
                 fields = list(info)
                 fields[4] = 0
                 if path != base:
@@ -856,9 +854,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe, "RECOVERY_BASE", base), \
                     mock.patch.object(probe.Path, "lstat",
                                       root_owned_lstat), \
-                    mock.patch.object(probe.Path, "stat",
-                                      side_effect=lambda path:
-                                      root_owned_lstat(path)), \
                     mock.patch.object(probe, "_run", side_effect=run):
                 with self.assertRaisesRegex(
                         probe.ProbeError, "verified persistent block source"):

@@ -2722,7 +2722,10 @@ boundary and prove the next formatter, mapper-create or oracle action is not
 reached. Recovery command mocks must prove mapper removal contains no force
 flag and that only the saved original partition, never the SWZ mapper, is
 passed to swapon. Missing recovery parents and apparently persistent filesystems
-with no verified persistent block source are explicit negative cases.
+with no verified persistent block source are explicit negative cases. Rootless
+fixtures for this gate mock only the ownership/inventory boundary they need;
+they must not replace generic `Path.stat()` behavior and thereby hide Python
+runtime or symlink semantics.
 Isolate each mocked physical attempt in its own private approval
 ledger so a prior consumed review cannot mask a later mapper-identity failure.
 Require proof that a post-create mismatch prevents oracle invocation, even
