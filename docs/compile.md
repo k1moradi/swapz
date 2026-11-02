@@ -41,8 +41,12 @@ Exactly five commands are public:
 - `make uninstall`: remove only the matching owned installation.
 - `make test`: execute the complete supported qualification.
 - `make fast_test`: development-only decision loop: build the working tree,
-  run window-policy native checks and a single-pair owned null_blk subset, and
-  print one raw/swapz table. It never qualifies a source or writes the report.
+  run native/replay contract checks and the selected owned-null_blk scenarios
+  (three paired repeats per scenario by default), and print compact raw/swapz,
+  critical-path and synchronous-cycle tables. It never qualifies a source or
+  writes the report. `CONTENT=representative` additionally requires the
+  owner-supplied `ANON_PAGE_SAMPLE` described under ID177 in the testing
+  standards.
 
 No other root aliases or public test targets are permitted.
 
