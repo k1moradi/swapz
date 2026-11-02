@@ -694,7 +694,7 @@ class PublicMakeContract(unittest.TestCase):
                 return json.dumps(record, sort_keys=True)
 
             records = [
-                "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3355136 logical_bytes:13742637056 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 mapper_read_bytes:4096 lower_io_delta:0",
+                "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3355136 logical_bytes:13742637056 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 initial_mapper_read_bytes:4096 constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:8192 boundary_lower_write_bytes:8192",
                 "PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 async_batches:64 lower_read_reqs:512",
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:128 adopted:128",

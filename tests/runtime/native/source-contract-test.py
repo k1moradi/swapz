@@ -4817,15 +4817,15 @@ int main(void)
         self.assertIn("settle_udev", pair)
         self.assertNotIn('dmsetup remove --force', pair)
 
-    def test_loaded_maximum_capacity_probe_is_owned_and_lower_io_free(self):
+    def test_loaded_maximum_capacity_boundary_probe_is_owned_and_bounded(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
-        self.assertIn('--validated-source "$tested_source" --capacity-only', loaded)
+        self.assertIn('--validated-source "$tested_source" --max-boundary-probe', loaded)
         self.assertLess(
-            loaded.index("--capacity-only"),
+            loaded.index("--max-boundary-probe"),
             loaded.index("START_LOADED_OWNED_NULLBLK_SMOKE"))
         capacity = deploy.split(
-            "if (( CAPACITY_ONLY )); then", 1)[1].split(
+            "if (( MAX_BOUNDARY_PROBE )); then", 1)[1].split(
                 "\nfi\n# 16 MiB upper table", 1)[0]
         for evidence in (
                 "NULLBLK_SIZE_MIB=16383",
@@ -4839,12 +4839,24 @@ int main(void)
                 "physical_read physical_read_reqs",
                 "capacity_logical_read_bytes=\"$(status_u64 \"$capacity_status\" logical_read)\"",
                 "[[ \"$lower_stats_after\" == \"$lower_stats_before\" ]]",
+                '"$ORACLE" "/dev/mapper/$DMNAME" --maximum-capacity-boundary "$UUID"',
+                "boundary_logical_write_bytes == 8192",
+                "boundary_logical_read_bytes >= 8192",
+                "boundary_target_read_bytes == boundary_lower_read_bytes",
+                "boundary_target_write_bytes == boundary_lower_write_bytes",
+                'boundary_failed_count="$(status_u64 "$capacity_status_after_io" failed)"',
+                "boundary_failed_count == 0",
                 "dmsetup remove --retry \"$DMNAME\"",
                 "PASS_LOADED_MAXIMUM_CAPACITY="):
             self.assertIn(evidence, capacity)
         self.assertNotIn("logical_read; do", capacity)
-        for forbidden in ("$ORACLE", "mkswap", "swapon", "swapoff", "dd "):
+        for forbidden in ("mkswap", "swapon", "swapoff", "dd "):
             self.assertNotIn(forbidden, capacity)
+        roundtrip = (ROOT / "tests/tools/device-roundtrip.c").read_text()
+        self.assertIn('"--maximum-capacity-boundary"', roundtrip)
+        self.assertIn("MAX_CAPACITY_LOGICAL_PAGES = 3355136U", roundtrip)
+        self.assertIn("maximum_capacity_boundary_roundtrip", roundtrip)
+        self.assertIn("verify_dm_uuid_exact", roundtrip)
 
     def test_dkms_sandbox_does_not_depend_on_host_module_state(self):
         package = (ROOT / "packaging/package-dkms.sh").read_text()

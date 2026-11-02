@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #define PHYSICAL_DM_UUID_PREFIX "SWAPZ-TEST-PHYSICAL-"
+#define OWNED_DM_UUID_PREFIX "SWAPZ-TEST-"
 
 enum {
 	PHYSICAL_DM_UUID_TOKEN_LENGTH = 16,
@@ -33,6 +34,7 @@ enum {
 	CHURN_COLD_PAGES = 2294,
 	CHURN_HOT_PAGES = 573,
 	CHURN_HOT_WRITES = 40960,
+	MAX_CAPACITY_LOGICAL_PAGES = 3355136U,
 	CHURN_FSYNC_INTERVAL = 256
 };
 
@@ -248,17 +250,78 @@ static int parse_uint(const char *text, unsigned int maximum,
 	return 0;
 }
 
-static int validate_owned_device(int fd, dev_t *opened_device)
+static int validate_owned_device(int fd, dev_t *opened_device,
+				uint64_t expected_size)
 {
 	struct stat st;
 	uint64_t size = 0;
 
 	if (fd < 0 || fstat(fd, &st) || !S_ISBLK(st.st_mode) ||
 	    ioctl(fd, BLKGETSIZE64, &size) ||
-	    size != UINT64_C(16) * 1024 * 1024)
+	    size != expected_size)
 		return -1;
 	*opened_device = st.st_rdev;
 	return 0;
+}
+
+static int valid_owned_dm_uuid(const char *uuid)
+{
+	const size_t prefix_length = sizeof(OWNED_DM_UUID_PREFIX) - 1U;
+	size_t index;
+
+	if (strnlen(uuid, prefix_length + PHYSICAL_DM_UUID_TOKEN_LENGTH + 1U) !=
+	    prefix_length + PHYSICAL_DM_UUID_TOKEN_LENGTH ||
+	    memcmp(uuid, OWNED_DM_UUID_PREFIX, prefix_length))
+		return 0;
+	for (index = prefix_length;
+	     index < prefix_length + PHYSICAL_DM_UUID_TOKEN_LENGTH; ++index) {
+		if ((uuid[index] < '0' || uuid[index] > '9') &&
+		    (uuid[index] < 'a' || uuid[index] > 'f'))
+			return 0;
+	}
+	return 1;
+}
+
+static int verify_dm_uuid_exact(dev_t opened_device, const char *expected_uuid)
+{
+	char sysfs_path[128];
+	char reported_uuid[96];
+	size_t expected_length = strlen(expected_uuid);
+	size_t total_bytes = 0;
+	int sysfs_fd = -1, result = -1;
+	int path_length;
+
+	if (!expected_length || expected_length + 1U >= sizeof(reported_uuid))
+		return -1;
+	path_length = snprintf(sysfs_path, sizeof(sysfs_path),
+			       "/sys/dev/block/%u:%u/dm/uuid",
+			       major(opened_device), minor(opened_device));
+	if (path_length < 0 || (size_t)path_length >= sizeof(sysfs_path))
+		return -1;
+	sysfs_fd = open(sysfs_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	if (sysfs_fd < 0)
+		return -1;
+	while (total_bytes < sizeof(reported_uuid)) {
+		ssize_t read_bytes = read(sysfs_fd, reported_uuid + total_bytes,
+					  sizeof(reported_uuid) - total_bytes);
+
+		if (read_bytes < 0) {
+			if (errno == EINTR)
+				continue;
+			goto out;
+		}
+		if (!read_bytes)
+			break;
+		total_bytes += (size_t)read_bytes;
+	}
+	if (total_bytes == expected_length + 1U &&
+	    reported_uuid[total_bytes - 1U] == '\n' &&
+	    !memcmp(reported_uuid, expected_uuid, expected_length))
+		result = 0;
+out:
+	if (close(sysfs_fd))
+		return -1;
+	return result;
 }
 
 /*
@@ -347,6 +410,37 @@ static int series(int fd, unsigned char *buf, unsigned char *expected,
 			   memcmp(buf, expected, PAGE)) {
 			fprintf(stderr, "FAIL byte-exact page=%u round=%u\n",
 				i, round);
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static int maximum_capacity_boundary_roundtrip(int fd, unsigned char *buf,
+					       unsigned char *expected)
+{
+	const unsigned int pages[] = {
+		0U,
+		MAX_CAPACITY_LOGICAL_PAGES - 1U,
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(pages) / sizeof(pages[0]); ++index) {
+		raw_pattern(expected, pages[index], 0U);
+		if (transfer(fd, expected, pages[index], 1))
+			return -1;
+	}
+	if (fsync(fd)) {
+		perror("FAIL maximum-capacity boundary fsync");
+		return -1;
+	}
+	for (index = 0; index < sizeof(pages) / sizeof(pages[0]); ++index) {
+		raw_pattern(expected, pages[index], 0U);
+		if (transfer(fd, buf, pages[index], 0) ||
+		    memcmp(buf, expected, PAGE)) {
+			fprintf(stderr,
+				"FAIL maximum-capacity boundary byte-exact page=%u\n",
+				pages[index]);
 			return -1;
 		}
 	}
@@ -761,11 +855,14 @@ int main(int argc, char **argv)
 	int segmented_series_mode = 0, thp_series_mode = 0;
 	int parallel_series_mode = 0;
 	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
+	int maximum_capacity_mode = 0;
+	uint64_t expected_device_bytes = UINT64_C(16) * 1024 * 1024;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
 
 	if (argc != 2 && argc != 3 && argc != 5 && argc != 4) {
 		fprintf(stderr,
-			"Usage: device-roundtrip /dev/mapper/swapz-demo-<owned-id> [private series mode]\n");
+		"Usage: device-roundtrip /dev/mapper/swapz-demo-<owned-id> "
+		"[private series mode | --maximum-capacity-boundary SWAPZ-TEST-<owned-id>]\n");
 		return 2;
 	}
 	if (strncmp(argv[1], prefix, strlen(prefix)) ||
@@ -789,6 +886,14 @@ int main(int argc, char **argv)
 				return 2;
 			}
 			expected_dm_uuid = argv[3];
+		} else if (!strcmp(argv[2], "--maximum-capacity-boundary")) {
+			if (!valid_owned_dm_uuid(argv[3])) {
+				fprintf(stderr, "FAIL invalid owned maximum-capacity DM UUID\n");
+				return 2;
+			}
+			maximum_capacity_mode = 1;
+			expected_dm_uuid = argv[3];
+			expected_device_bytes = UINT64_C(13742637056);
 		} else {
 			if (strcmp(argv[2], "--gc-stress") ||
 			    parse_uint(argv[3], 8U, &gc_rounds) ||
@@ -858,13 +963,24 @@ int main(int argc, char **argv)
 	fd = open(argv[1], open_flags);
 	if (fd < 0 && errno == ELOOP)
 		fd = open(argv[1], open_flags & ~O_NOFOLLOW);
-	if (validate_owned_device(fd, &opened_mapper_device)) {
-		fprintf(stderr, "FAIL expected owned 16MiB DM block target\n");
+	if (validate_owned_device(fd, &opened_mapper_device,
+				  expected_device_bytes)) {
+		fprintf(stderr, "FAIL opened owned DM block target has unexpected size\n");
 		goto out;
 	}
 	if (expected_dm_uuid &&
-	    verify_physical_dm_uuid(opened_mapper_device, expected_dm_uuid)) {
-		fprintf(stderr, "FAIL opened DM UUID missing or not the expected physical identity\n");
+	    (maximum_capacity_mode ?
+	     verify_dm_uuid_exact(opened_mapper_device, expected_dm_uuid) :
+	     verify_physical_dm_uuid(opened_mapper_device, expected_dm_uuid))) {
+		fprintf(stderr, "FAIL opened DM UUID missing or not the expected identity\n");
+		goto out;
+	}
+	if (maximum_capacity_mode) {
+		if (maximum_capacity_boundary_roundtrip(fd, buf, expected))
+			goto out;
+		printf("PASS: maximum-capacity boundary byte-exact pages=2 highest_page=%u\n",
+		       MAX_CAPACITY_LOGICAL_PAGES - 1U);
+		rc = 0;
 		goto out;
 	}
 

@@ -1259,7 +1259,10 @@ def parse_loaded_correctness(output):
         "maximum_capacity": re.compile(
             r"PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:(\d+) "
             r"logical_bytes:(\d+) lower_bytes:(\d+) physical_blocks:(\d+) "
-            r"segments:(\d+) mapper_read_bytes:(\d+) lower_io_delta:(\d+)$"),
+            r"segments:(\d+) initial_mapper_read_bytes:(\d+) "
+            r"constructor_lower_io_delta:(\d+) boundary_pages:(\d+) "
+            r"boundary_page_bytes:(\d+) boundary_lower_read_bytes:(\d+) "
+            r"boundary_lower_write_bytes:(\d+)$"),
         "raw_read": re.compile(
             r"PASS_LOADED_RAW_READ_FANOUT=profiles:(\d+) verified_pages:(\d+) "
             r"async_batches:(\d+) lower_read_reqs:(\d+)$"),
@@ -1329,14 +1332,20 @@ def parse_loaded_correctness(output):
 
     (capacity_pages, capacity_logical_bytes, capacity_lower_bytes,
      capacity_physical_blocks, capacity_segments, capacity_mapper_read_bytes,
-     capacity_lower_io_delta) = found["maximum_capacity"]
+     capacity_lower_io_delta, capacity_boundary_pages,
+     capacity_boundary_page_bytes, capacity_boundary_read_bytes,
+     capacity_boundary_write_bytes) = found["maximum_capacity"]
     if (capacity_pages != 3355136 or
             capacity_logical_bytes != 13742637056 or
             capacity_lower_bytes != 17178820608 or
             capacity_physical_blocks != 4194048 or
-            capacity_segments != 16383 or capacity_lower_io_delta != 0):
+            capacity_segments != 16383 or capacity_lower_io_delta != 0 or
+            capacity_boundary_pages != 2 or
+            capacity_boundary_page_bytes != 4096 or
+            capacity_boundary_read_bytes <= 0 or
+            capacity_boundary_write_bytes <= 0):
         return {"overall": "INCOMPLETE",
-                "reason": "loaded maximum-capacity constructor evidence is incomplete"}
+                "reason": "loaded maximum-capacity boundary evidence is incomplete"}
 
     raw_read_profiles, raw_read_pages, raw_read_batches, raw_read_reqs = found["raw_read"]
     if (raw_read_profiles != 2 or raw_read_pages != 2048 or
@@ -1454,6 +1463,10 @@ def parse_loaded_correctness(output):
         "maximum_segments": capacity_segments,
         "maximum_mapper_read_bytes": capacity_mapper_read_bytes,
         "maximum_lower_io_delta": capacity_lower_io_delta,
+        "maximum_boundary_pages": capacity_boundary_pages,
+        "maximum_boundary_page_bytes": capacity_boundary_page_bytes,
+        "maximum_boundary_lower_read_bytes": capacity_boundary_read_bytes,
+        "maximum_boundary_lower_write_bytes": capacity_boundary_write_bytes,
         "raw_read_profiles": raw_read_profiles,
         "raw_read_verified_pages": raw_read_pages,
         "raw_read_async_batches": raw_read_batches,
@@ -7057,11 +7070,10 @@ def print_bench(result, *, detailed=False):
             ("check", "result"),
             [
                 ("max capacity",
-                 f"{loaded['maximum_logical_pages']:,} pages/"
+                 f"{loaded['maximum_logical_pages']:,} pages, "
                  f"{loaded['maximum_mapper_bytes'] / (1024 ** 3):.2f} GiB; "
-                 f"lower {loaded['maximum_lower_bytes'] / (1024 ** 3):.0f} GiB; "
-                 f"READ {loaded['maximum_mapper_read_bytes']} B; "
-                 f"I/O {loaded['maximum_lower_io_delta']}"),
+                 f"{loaded['maximum_boundary_pages']} edge pages verified; "
+                 "lower I/O checked"),
                 ("RAW/zero pages",
                  f"{loaded['raw_pages']}/{loaded['zero_pages']}"),
                 ("flushes", loaded["flush_calls"]),

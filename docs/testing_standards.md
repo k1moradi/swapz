@@ -333,10 +333,13 @@ verify the exact DM UUID, table, mapper size and lower identity. Device discover
 may issue logical reads after the mapper is published, so record the observed
 mapper READ bytes without attributing them to a particular process. Require zero
 logical writes, zero lower physical read/write counters, unchanged lower
-statistics and ordinary non-force teardown. The probe itself submits no
-intentional data I/O and does not qualify maximum-size writes, reads, allocation
-churn or GC. Until both the loaded maximum-size
-constructor and worst-case RAW/GC tests pass, report the value as the
+statistics at construction, then use the opened-UUID-checked oracle to write and
+read only logical page 0 and the final logical page byte-for-byte. Record the
+resulting target and lower READ/WRITE bytes and require them to agree. This two
+page boundary check proves indexing at the advertised size; it does not fill the
+volume or qualify maximum-size occupancy, RAW-heavy sustained writes, allocation
+churn or GC. Require the target's failed-I/O counter to remain zero. Until loaded
+worst-case RAW/GC tests pass, report the value as a
 source-derived authority admission limit and keep maximum-capacity operation
 unqualified.
 

@@ -4,18 +4,18 @@
 set -Eeuo pipefail
 umask 077
 VALIDATED_SOURCE=""
-CAPACITY_ONLY=0
-if [[ ( $# == 2 || ( $# == 3 && ${3:-} == --capacity-only ) ) &&
+MAX_BOUNDARY_PROBE=0
+if [[ ( $# == 2 || ( $# == 3 && ${3:-} == --max-boundary-probe ) ) &&
       ${1:-} == --validated-source &&
       ${2:-} =~ ^[0-9a-f]{40}$ &&
-      ( $# == 2 || ${3:-} == --capacity-only ) ]]; then
+      ( $# == 2 || ${3:-} == --max-boundary-probe ) ]]; then
     VALIDATED_SOURCE="$2"
     if (( $# == 3 )); then
-        CAPACITY_ONLY=1
+        MAX_BOUNDARY_PROBE=1
     fi
 else
     printf '%s\n' \
-        'BLOCKED: validated source revision and optional capacity-only mode required' >&2
+        'BLOCKED: validated source revision and optional max-boundary probe required' >&2
     exit 2
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -195,8 +195,8 @@ cleanup() {
 		exit 1
 	fi
 	if (( rc == 0 )); then
-		if (( CAPACITY_ONLY )); then
-			note "PASS: loaded maximum-capacity constructor, no lower I/O, clean teardown"
+		if (( MAX_BOUNDARY_PROBE )); then
+			note "PASS: loaded maximum-capacity constructor and boundary roundtrip, clean teardown"
 		else
 			note "PASS: loaded isolated swapz byte-exact I/O, clean teardown"
 		fi
@@ -234,11 +234,11 @@ for attr in size memory_backed blocksize power index queue_mode submit_queues hw
 	[[ -e "$CONFIG/$attr" ]] || fail "missing configfs attribute $attr"
 done
 # Linux null_blk configfs size unit is MiB. Never use the module default!
-# The capacity-only probe advertises the exact full-partition data geometry
-# (16383 MiB after the SWZ header/segment boundary). It submits no intentional
-# data I/O; userspace device discovery may issue logical reads after creation.
+# The maximum-boundary probe advertises the exact full-partition data geometry
+# (16383 MiB after the SWZ header/segment boundary), then writes and reads only
+# the first and last logical pages. Userspace discovery may first issue reads.
 NULLBLK_SIZE_MIB=64
-if (( CAPACITY_ONLY )); then
+if (( MAX_BOUNDARY_PROBE )); then
 	NULLBLK_SIZE_MIB=16383
 fi
 echo "$NULLBLK_SIZE_MIB" > "$CONFIG/size"
@@ -310,14 +310,14 @@ insmod "$MODULE" || fail "swapz kernel module rejected"
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
 	fail "swapz target registration missing"
-if (( CAPACITY_ONLY )); then
+if (( MAX_BOUNDARY_PROBE )); then
 	MAX_LOGICAL_PAGES=3355136
 	MAX_LOGICAL_SECTORS=26841088
 	MAX_LOGICAL_BYTES=13742637056
 	EXPECTED_PHYSICAL_BLOCKS=4194048
 	EXPECTED_SEGMENTS=16383
 	[[ "$EXPECTED_LOWER_BYTES" == 17178820608 ]] ||
-		fail "capacity-only null_blk lower geometry mismatch"
+		fail "maximum-boundary null_blk lower geometry mismatch"
 	note "START_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES"
 	lower_stats_before="$(cat "/sys/block/$DISK/stat")" ||
 		fail "cannot read capacity-probe lower statistics before create"
@@ -356,21 +356,94 @@ if (( CAPACITY_ONLY )); then
 	for key in logical_write physical_write physical_write_reqs \
 		   physical_read physical_read_reqs; do
 		[[ "$(status_u64 "$capacity_status" "$key")" == 0 ]] ||
-			fail "maximum-capacity constructor probe issued writes or lower I/O: $key"
+			fail "maximum-capacity constructor issued writes or lower I/O: $key"
 	done
 	lower_stats_after="$(cat "/sys/block/$DISK/stat")" ||
 		fail "cannot read capacity-probe lower statistics after create"
 	[[ "$lower_stats_after" == "$lower_stats_before" ]] ||
-		fail "maximum-capacity constructor probe changed lower I/O counters"
-	[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
-	      tr -d '[:space:]')" == "$UUID" ]] ||
-		fail "maximum-capacity mapper identity changed before removal"
+		fail "maximum-capacity constructor changed lower I/O counters"
+	verify_maximum_capacity_mapping() {
+		local current_uuid current_table current_size current_deps
+		current_uuid="$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+			tr -d '[:space:]')" ||
+			fail "cannot re-read maximum-capacity mapper UUID"
+		[[ "$current_uuid" == "$UUID" ]] ||
+			fail "maximum-capacity mapper UUID changed"
+		swapz_verify_owned_dm_node
+		current_table="$(dmsetup table "$DMNAME")" ||
+			fail "cannot re-read maximum-capacity mapper table"
+		[[ "$current_table" == "$capacity_table" ]] ||
+			fail "maximum-capacity mapper table changed"
+		current_size="$(blockdev --getsize64 "/dev/mapper/$DMNAME")" ||
+			fail "cannot re-read maximum-capacity mapper size"
+		[[ "$current_size" == "$MAX_LOGICAL_BYTES" ]] ||
+			fail "maximum-capacity mapper size changed"
+		current_deps="$(dmsetup deps -o devname "$DMNAME")" ||
+			fail "cannot re-read maximum-capacity mapper dependency"
+		grep -Fq "$DISK" <<< "$current_deps" ||
+			fail "maximum-capacity mapper lower identity changed"
+	}
+	capacity_status_delta() {
+		local before="$1" after="$2" key="$3" old_value new_value
+		old_value="$(status_u64 "$before" "$key")" ||
+			fail "maximum-capacity status missing pre-I/O $key"
+		new_value="$(status_u64 "$after" "$key")" ||
+			fail "maximum-capacity status missing post-I/O $key"
+		(( new_value >= old_value )) ||
+			fail "maximum-capacity status $key regressed"
+		printf '%s\n' "$((new_value - old_value))"
+	}
+	capacity_status_before_io="$(dmsetup status "$DMNAME")" ||
+		fail "cannot snapshot maximum-capacity status before boundary I/O"
+	capacity_lower_before_io="$(cat "/sys/block/$DISK/stat")" ||
+		fail "cannot snapshot maximum-capacity lower before boundary I/O"
+	verify_maximum_capacity_mapping
+	timeout --signal=TERM --kill-after=5s 30s \
+		"$ORACLE" "/dev/mapper/$DMNAME" --maximum-capacity-boundary "$UUID" ||
+		fail "maximum-capacity first/last logical-page roundtrip failed or timed out"
+	verify_maximum_capacity_mapping
+	capacity_status_after_io="$(dmsetup status "$DMNAME")" ||
+		fail "cannot snapshot maximum-capacity status after boundary I/O"
+	capacity_lower_after_io="$(cat "/sys/block/$DISK/stat")" ||
+		fail "cannot snapshot maximum-capacity lower after boundary I/O"
+	read -r -a capacity_lower_before_fields <<< "$capacity_lower_before_io"
+	read -r -a capacity_lower_after_fields <<< "$capacity_lower_after_io"
+	(( ${#capacity_lower_before_fields[@]} >= 7 &&
+	   ${#capacity_lower_after_fields[@]} >= 7 )) ||
+		fail "maximum-capacity lower statistics are malformed"
+	for stat_field in 0 2 4 6; do
+		(( capacity_lower_after_fields[stat_field] >=
+		   capacity_lower_before_fields[stat_field] )) ||
+			fail "maximum-capacity lower statistics regressed"
+	done
+	boundary_lower_read_bytes="$(((capacity_lower_after_fields[2] -
+		capacity_lower_before_fields[2]) * 512))"
+	boundary_lower_write_bytes="$(((capacity_lower_after_fields[6] -
+		capacity_lower_before_fields[6]) * 512))"
+	boundary_logical_write_bytes="$(capacity_status_delta \
+		"$capacity_status_before_io" "$capacity_status_after_io" logical_write)"
+	boundary_logical_read_bytes="$(capacity_status_delta \
+		"$capacity_status_before_io" "$capacity_status_after_io" logical_read)"
+	boundary_target_write_bytes="$(capacity_status_delta \
+		"$capacity_status_before_io" "$capacity_status_after_io" physical_write)"
+	boundary_target_read_bytes="$(capacity_status_delta \
+		"$capacity_status_before_io" "$capacity_status_after_io" physical_read)"
+	boundary_failed_count="$(status_u64 "$capacity_status_after_io" failed)" ||
+		fail "maximum-capacity status missing post-I/O failure counter"
+	(( boundary_logical_write_bytes == 8192 &&
+	   boundary_logical_read_bytes >= 8192 &&
+	   boundary_lower_read_bytes > 0 &&
+	   boundary_lower_write_bytes > 0 &&
+	   boundary_target_read_bytes == boundary_lower_read_bytes &&
+	   boundary_target_write_bytes == boundary_lower_write_bytes &&
+	   boundary_failed_count == 0 )) ||
+		fail "maximum-capacity boundary I/O accounting mismatch"
 	timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
 		fail "cannot remove maximum-capacity DM mapping"
 	OWN_DM=0
 	[[ -z "$(ls -A "/sys/block/$DISK/holders" 2>/dev/null)" ]] ||
 		fail "maximum-capacity mapper left an unexpected lower holder"
-	note "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES logical_bytes:$MAX_LOGICAL_BYTES lower_bytes:$EXPECTED_LOWER_BYTES physical_blocks:$EXPECTED_PHYSICAL_BLOCKS segments:$EXPECTED_SEGMENTS mapper_read_bytes:$capacity_logical_read_bytes lower_io_delta:0"
+	note "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES logical_bytes:$MAX_LOGICAL_BYTES lower_bytes:$EXPECTED_LOWER_BYTES physical_blocks:$EXPECTED_PHYSICAL_BLOCKS segments:$EXPECTED_SEGMENTS initial_mapper_read_bytes:$capacity_logical_read_bytes constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:$boundary_lower_read_bytes boundary_lower_write_bytes:$boundary_lower_write_bytes"
 	exit 0
 fi
 # 16 MiB upper table; current constructor arguments, no injected errors.
