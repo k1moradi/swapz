@@ -1040,8 +1040,17 @@ def _dm_inventory_snapshot(owned_name=None, owned_uuid=None):
     ], check=False)
     if result.returncode:
         raise ProbeError("cannot snapshot Device Mapper inventory")
+    # With no maps, dmsetup may return success and this exact diagnostic
+    # rather than an empty table. Normalize it for both pre/post snapshots.
+    output = result.stdout.strip()
+    if output == "No devices found":
+        lines = ()
+    elif not output:
+        raise ProbeError("empty Device Mapper inventory is ambiguous")
+    else:
+        lines = result.stdout.splitlines()
     rows = []
-    for line in result.stdout.splitlines():
+    for line in lines:
         fields = line.split()
         if len(fields) not in (1, 2):
             raise ProbeError("cannot parse Device Mapper inventory")

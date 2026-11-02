@@ -2776,6 +2776,15 @@ approval remains consumed. Post-reactivation swap usage is an observation.
 
 #### Physical-swap rootless regression gate
 
+The helper's read-only Device Mapper inventory must treat a successful
+`dmsetup info -c --noheadings -o name,uuid` response containing only the
+exact `No devices found` diagnostic (surrounding whitespace allowed) as an
+empty inventory. The normalized empty inventory must hash identically
+before and after the bounded run. A command failure, blank response,
+extra diagnostics, or malformed mapper rows must continue to block.
+Rootless regression must cover the empty-inventory response, malformed
+variants, nonzero exit, and unrelated-mapper identity/hash preservation.
+
 Keep tests/runtime/native/physical-swap-probe-test.py in the existing
 rootless safety regression path; do not wire the private helper or a real
 device into routine make test. Rootless tests use temporary files,

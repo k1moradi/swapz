@@ -78,6 +78,61 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             json.dumps(marker))
         return state, header
 
+    def test_dm_inventory_accepts_canonical_empty_dmsetup_output(self):
+        expected = {
+            "other_mapper_count": 0,
+            "other_mapper_sha256": hashlib.sha256(b"[]").hexdigest(),
+        }
+        for output in ("No devices found\n", "  No devices found  \n"):
+            with self.subTest(output=output), mock.patch.object(
+                    probe, "_run",
+                    return_value=subprocess.CompletedProcess(
+                        args=[], returncode=0, stdout=output, stderr="")) as run:
+                self.assertEqual(probe._dm_inventory_snapshot(), expected)
+                self.assertEqual(
+                    probe._dm_inventory_snapshot(
+                        "swapz-demo-physical-owned",
+                        "SWAPZ-TEST-PHYSICAL-owned"),
+                    expected)
+                self.assertEqual(run.call_count, 2)
+                run.assert_called_with(
+                    ["dmsetup", "info", "-c", "--noheadings", "-o",
+                     "name,uuid"], check=False)
+
+    def test_dm_inventory_rejects_ambiguous_success_or_command_failure(self):
+        for output in ("", "  \n", "No devices found\nother map-uuid\n",
+                       "No devices found now\n", "broken too many columns\n"):
+            with self.subTest(output=output), mock.patch.object(
+                    probe, "_run",
+                    return_value=subprocess.CompletedProcess(
+                        args=[], returncode=0, stdout=output, stderr="")):
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "Device Mapper inventory"):
+                    probe._dm_inventory_snapshot()
+        with mock.patch.object(
+                probe, "_run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="No devices found\n",
+                    stderr="device-mapper failure")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "cannot snapshot Device Mapper inventory"):
+                probe._dm_inventory_snapshot()
+
+    def test_dm_inventory_still_tracks_unrelated_mappers(self):
+        inventory = "swapz-physical-owned SWAPZ-TEST-PHYSICAL-owned\nother-map other-uuid\n"
+        with mock.patch.object(
+                probe, "_run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=inventory, stderr="")):
+            actual = probe._dm_inventory_snapshot(
+                "swapz-physical-owned", "SWAPZ-TEST-PHYSICAL-owned")
+        expected_rows = [["other-map", "other-uuid"]]
+        self.assertEqual(actual, {
+            "other_mapper_count": 1,
+            "other_mapper_sha256": hashlib.sha256(json.dumps(
+                expected_rows, separators=(",", ":")).encode()).hexdigest(),
+        })
+
     def test_only_supported_4k_linux_swap_header_is_accepted(self):
         header = bytearray(probe.PAGE_BYTES)
         header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE

@@ -1071,7 +1071,21 @@ zero-used swap partition, with swapoff limited to that exact selected partition.
 This remains outside ordinary make test and establishes no performance,
 endurance, NAND-lifetime or general physical-media qualification.
 
-**Current disposition (2026-11-02): POLICY CLEANUP COMMITTED; CI PASS; PHYSICAL RUN BLOCKED. The read-only plan found the selected active swap in use (448,748 KiB). This voids the verbal approval under its stated conditions. No swapoff, physical oracle phase, or block-zero write occurred. The one-use review record remains unconsumed as audit evidence and must not be reused.**
+**Current disposition (2026-11-02): OWNER QUALIFICATION PASS ON 651c35bb;
+PHYSICAL RUN STILL BLOCKED BEFORE DESTRUCTIVE WORK.** The latest x86_64
+five-stage owner PASS is published by report-only commit e88c3038.
+At last inspection the selected normal swap was active with 0 KiB used,
+its original size/priority and matching block-zero digest. The first
+approved invocation stopped before swapoff because a successful
+`dmsetup info -c --noheadings -o name,uuid` returned `No devices found`,
+which the helper incorrectly parsed as a malformed mapper row. No swapz
+mapping, formatter, module or physical oracle ran; restoration was not
+required. The approval for run 5e7d0aa53634b792f5b399cf7ced2d2e is
+void and must not be reused. Fix only the empty-inventory parser, add
+rootless regressions, then require green current-HEAD CI, a fresh
+device-bound one-use verbal approval and a positive read-only plan.
+No additional owner `make test` is required if the qualified production
+binaries and source-to-HEAD exemption remain valid.
 
 Admission is limited to bare-metal x86_64; the helper must reject VM and
 container execution and fail closed if `systemd-detect-virt` is missing or
