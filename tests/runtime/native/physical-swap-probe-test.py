@@ -829,8 +829,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_remove_test_objects",
                                   side_effect=lambda *_: events.append(("recover",))), \
                 mock.patch.object(probe, "_run", side_effect=run):
-            probe.run_probe(target["device_arg"], target["device_arg"],
-                            directory, "/reviewed/review.json")
+            if wrong_mapper:
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "mapper|UUID|identity|table|backing"):
+                    probe.run_probe(target["device_arg"], target["device_arg"],
+                                    directory, "/reviewed/review.json")
+            else:
+                probe.run_probe(target["device_arg"], target["device_arg"],
+                                directory, "/reviewed/review.json")
         return events, state, target
 
     def test_formatter_and_oracle_use_exact_reviewed_identity_arguments(self):
@@ -965,6 +971,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                              "two concurrent attempts acquired the same physical device")
             self.assertEqual(sum(isinstance(value, probe.ProbeError)
                                  for value in outcomes), 1)
+
+
+    def test_failed_backup_fsync_cannot_publish_saved_state(self):
+        target, evidence = self.physical_preparation_fixture()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(probe, "_allocate_dm_identity",
+                                  return_value=("swapz-demo-physical-1234567890abcdef",
+                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+            base = Path(directory)
+            base.chmod(0o700)
+            with mock.patch.object(probe.os, "fsync",
+                                   side_effect=OSError("injected backup fsync failure")):
+                with self.assertRaisesRegex(Exception, "backup fsync failure"):
+                    probe._prepare_state(target, base / "attempt", evidence,
+                                         "independent-reviewer")
+            self.assertFalse((base / "attempt" / probe.STATE_NAME).exists(),
+                             "an unflushed backup cannot authorize swapoff")
 
 
 if __name__ == "__main__":
