@@ -1288,3 +1288,30 @@ stats. This preserves the same positive-ownership boundary while converting
 malformed or unexpected state into explicit `BLOCKED:` results instead of an
 opaque shell-runtime status. The numeric internal-error trap remains as a
 last-resort diagnostic. A subsequent owner run exposed one stale native interface assertion that still required the removed regex literals; that contract is aligned with the exact-token ownership checks and now explicitly rejects reintroduction of `BASH_REMATCH`. The following loaded owner rerun still returned shell status 2 before a safety verdict, so the remaining runtime `=~` expressions and C-style arithmetic commands are removed from privileged preflight as well. Canonical decimal validation, exact shell patterns and fixed bounded retry iteration now cover the path end-to-end without weakening positive ownership checks. The following native rerun exposed three stale harness assertions that still required the removed arithmetic spellings (source contract, Make interface contract, and rootless literal grep); all three are aligned to the non-arithmetic preflight forms in one change. The following loaded qualification run exposed that the multi-line `case` pattern in `loaded-preflight.sh` omitted trailing backslashes on continuation lines, triggering a Bash syntax error (unexpected newline) and exit status 2 before execution. The continuation lines are escaped with `\`, and `test-rootless.sh` is updated to invoke `bash -n` individually across every shell harness script so future syntax regressions fail in Stage 2 rather than during privileged loaded execution.
+
+### Experimental Linux live-swap supervisor — Phase A only
+
+Issue #76's Phase-A implementation is present directly on `main` as a separate
+experimental supervisor. It has a read-only admission plan, a
+reviewable inert operation trace, durable one-use state/backup/result records,
+exact fallback and mapper identity gates, conservative staged cleanup, and
+mock-only lifecycle regressions. The privileged `run` and `recover` commands
+remain disabled. This code is outside the old physical-helper qualification
+exemption; it does not change the qualified production module or the completed
+11/11 physical correctness-smoke evidence.
+
+Read-only host observations identify F2FS on `/dev/sda3` as a possible location
+for a dedicated fallback swapfile. That candidate is neither allocated nor
+activated and has not been tested with `swapon`. It shares disk 8:0 with
+`/dev/sda4`, so it is additional capacity, not independent-media protection.
+The coordinator requires a pre-existing allocated fallback with at least
+512 MiB free and explicit priority 0 through 32766, and it leaves that fallback
+active after restoration. The exact F2FS behavior and fallback lifecycle need
+separate review.
+
+Remaining gates before any live trial: external source/recovery review, current
+main CI, a disposable-VM substitute-device cold-boot/recovery test, a verified
+fallback provisioned under separate authorization, a fresh read-only plan, and
+a new explicit owner decision. Do not perform swapoff, swapon, mkswap, module
+insertion, mapper creation/removal, formatting or a physical trial while these
+gates are pending.

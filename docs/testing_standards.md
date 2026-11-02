@@ -3235,3 +3235,40 @@ successful RAW claims keep one acquire read. A compiled relaxed-reread mutant
 must fail. These API-level interleavings and threaded reuse checks are not an
 LKMM proof or an observed weak-memory hardware failure. A retained production
 change still needs exact-source owner qualification with the full codec stack.
+
+## Experimental live-swap supervisor
+
+The experimental live-swap coordinator is separate from the physical-backed
+correctness helper. Its design and tests do not change the latter's prohibition
+on enabling its 16 MiB mapper as system swap. The new coordinator must default
+to read-only operation; until the exact change has passed independent source
+and recovery review plus a separate owner decision, its privileged `run` and
+`recover` commands must fail closed.
+
+The eventual trial is limited to one 256 MiB mapper and 30 minutes. Admission
+requires the exact bare-metal x86_64 target, unchanged qualified production
+artifact hashes, clean synchronized `main`, current non-privileged CI, zero-used
+original swap at priority -1, no conflicting mapper/module/recovery owner,
+durable recovery storage, conservative memory/PSI gates, a one-use review, and
+an already active, fully allocated fallback with at least 512 MiB free. The
+fallback must use an explicit priority from 0 through 32766 so reactivation of
+the sole default-priority original swap returns at -1. Same-USB fallback is
+additional capacity only; disclose that it does not protect against whole-device
+failure or loss of swapz's volatile mapping authority. Do not create or enable
+fallback swap as part of the coordinator.
+
+The read-only plan may print a mutation trace, but it must never invoke the
+mutation channel. `mkswap` may target only the exact verified mapper, without
+force. `swapon` must not request discard. Never remove an active swap mapper or
+unload a module while it may contain pages. A failed mapper `swapoff`, uncertain
+mapper/module ownership, ambiguous header, or recovery uncertainty leaves the
+mapping, module, fallback and recovery evidence in place for supervised review.
+Do not reboot, force-remove, overwrite an unrecognized header or retry a failed
+phase automatically.
+
+The plan, lifecycle mocks and CI do not establish live-swap correctness. Before
+enabling privileged commands, run the cold-boot recovery path in a disposable
+VM using substitute block devices and review every interrupted durable stage.
+Document that loss of the volatile swapz mapping authority loses access to
+pages already stored through that mapping. Never describe a fallback swapfile
+on another partition of the same physical disk as independent-media redundancy.
