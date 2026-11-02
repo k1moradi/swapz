@@ -1071,7 +1071,7 @@ zero-used swap partition, with swapoff limited to that exact selected partition.
 This remains outside ordinary make test and establishes no performance,
 endurance, NAND-lifetime or general physical-media qualification.
 
-**Current disposition (2026-11-02): POLICY CLEANUP AND CI GATE. No physical write or swapoff has occurred.**
+**Current disposition (2026-11-02): POLICY CLEANUP COMMITTED; CI PASS; PHYSICAL RUN BLOCKED. The read-only plan found the selected active swap in use (448,748 KiB). This voids the verbal approval under its stated conditions. No swapoff, physical oracle phase, or block-zero write occurred. The one-use review record remains unconsumed as audit evidence and must not be reused.**
 
 Admission is limited to bare-metal x86_64; the helper must reject VM and
 container execution and fail closed if `systemd-detect-virt` is missing or
