@@ -2717,7 +2717,11 @@ The oracle invocation must bind "--expect-dm-uuid
 <SWAPZ-TEST-PHYSICAL-token>", and the oracle must independently verify the
 opened mapper FD and its /sys/dev/block major:minor UUID before writing.
 Test wrong-UUID/table/size/lower and mapper-substitution cases as controlled
-failures. Where mocked sysfs behavior cannot reproduce actual kernel device
+failures. Isolate each mocked physical attempt in its own private approval
+ledger so a prior consumed review cannot mask a later mapper-identity failure.
+Require proof that a post-create mismatch prevents oracle invocation, even
+when an earlier same-size mapper verification succeeded.
+Where mocked sysfs behavior cannot reproduce actual kernel device
 nodes, explicitly report that limitation; do not label the mock as a real
 device qualification.
 

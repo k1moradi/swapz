@@ -921,6 +921,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 return iter([Path("/sys/dev/block/253:0/slaves/synthetic")])
             raise AssertionError(f"unexpected sysfs listing: {path}")
 
+        # Isolate each synthetic attempt from one-use approvals claimed earlier.
+        # Otherwise, an approval-replay failure can mask a mapper-identity bug.
         # ExitStack avoids Python's limit on statically nested with-blocks.
         with tempfile.TemporaryDirectory() as directory:
             patches = (
