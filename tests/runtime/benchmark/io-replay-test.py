@@ -334,7 +334,15 @@ class PairReplayContract(unittest.TestCase):
             sample = Path(temp) / "pages.bin"
             sample.write_bytes(sample_bytes)
             sample.chmod(0o600)
-            plan = fast.prepare_plan("representative", sample_path=sample)
+            try:
+                plan = fast.prepare_plan("representative", sample_path=sample)
+            except ValueError as exc:
+                if "representative page protection unavailable" not in str(exc):
+                    raise
+                # CI frequently lacks sufficient RLIMIT_MEMLOCK even for the
+                # Python interpreter. This is an expected fail-closed BLOCKED,
+                # never authorization to run representative pages unprotected.
+                self.skipTest("representative plan BLOCKED: mlockall budget unavailable")
             try:
                 fixture = (plan / "fixture.bin").read_bytes()
                 metadata_text = (plan / "fixture.json").read_text()

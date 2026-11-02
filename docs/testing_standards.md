@@ -103,7 +103,10 @@ representative pages. The fixture.json content profile reestablishes this
 requirement across sudo; native replay must independently enforce it before
 mmap and allocating workers. If memory locking is unavailable or RLIMIT_MEMLOCK
 is insufficient, report BLOCKED rather than replay sensitive pages. Rootless
-tests cover privacy-metadata detection and rejected lock setup. These protections
+tests cover privacy-metadata detection and rejected lock setup. A rootless
+fixture-plan test may SKIP its full replay on a runner without sufficient
+RLIMIT_MEMLOCK only after observing the expected fail-closed protection error;
+this is not an operator bypass or a passing representative replay. These protections
 do not erase immutable Python copies before process exit; do not use highly
 sensitive page corpora without separately reviewing that retention boundary.
 The paired `make fast_test` plan uses the same page file and immutable trace for
