@@ -487,14 +487,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 return "first\nsecond"
             raise AssertionError(args)
 
-        def run(args, **kwargs):
-            self.assertEqual(kwargs.get("cwd"), root)
-            if args[:2] == ["git", "merge-base"]:
+        def git_result(*args, **kwargs):
+            del kwargs
+            if args[0] == "merge-base":
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-            if args[:2] == ["git", "show"]:
+            if args[0] == "show":
                 return subprocess.CompletedProcess(
                     args, 0, stdout=json.dumps(
-                        history[args[2].split(":")[0]]), stderr="")
+                        history[args[1].split(":")[0]]), stderr="")
             raise AssertionError(args)
 
         with tempfile.TemporaryDirectory() as temp:
@@ -504,7 +504,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe.platform, "machine",
                                       return_value="x86_64"), \
                     mock.patch.object(probe, "_git", side_effect=git), \
-                    mock.patch.object(probe, "_run", side_effect=run), \
+                    mock.patch.object(probe, "_git_result",
+                                      side_effect=git_result), \
                     mock.patch.object(probe, "_remote_main_sha", return_value=head), \
                     mock.patch.object(probe, "live_host_identity",
                                       return_value=local_host):

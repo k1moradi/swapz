@@ -17,17 +17,28 @@ from pathlib import Path
 def fixture_is_representative(fixture_path):
     """Read nonsensitive fixture metadata before opening sample content."""
     metadata_path = Path(fixture_path).parent / "fixture.json"
+    # Open once: an lstat/read_text pair can follow a substituted symlink.
+    flags = (os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW |
+             getattr(os, "O_CLOEXEC", 0))
     try:
-        metadata_info = metadata_path.lstat()
+        with os.fdopen(os.open(metadata_path, flags), "rb") as metadata_file:
+            before = os.fstat(metadata_file.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("fixture privacy metadata must be a regular file")
+            if before.st_size > 1024 * 1024:
+                raise ValueError("invalid fixture privacy metadata")
+            metadata = json.loads(metadata_file.read(1024 * 1024 + 1))
+            after = os.fstat(metadata_file.fileno())
+            if (before.st_dev, before.st_ino, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns):
+                raise ValueError("fixture privacy metadata changed while reading")
     except FileNotFoundError:
         return False
-    except OSError as exc:
-        raise ValueError("invalid fixture privacy metadata") from exc
-    if not stat.S_ISREG(metadata_info.st_mode):
-        raise ValueError("fixture privacy metadata must be a regular file")
-    try:
-        metadata = json.loads(metadata_path.read_text())
     except (OSError, ValueError) as exc:
+        if isinstance(exc, ValueError) and "regular file" in str(exc):
+            raise
         raise ValueError("invalid fixture privacy metadata") from exc
     if not isinstance(metadata, dict):
         raise ValueError("invalid fixture privacy metadata")
@@ -67,8 +78,9 @@ def copy_fixture(source_path, destination_path, force_private=False):
     if representative:
         protect_private_memory()
 
-    source_flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
-                    getattr(os, "O_NOFOLLOW", 0))
+    # A replaced FIFO must not block before the regular-file check.
+    source_flags = (os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW |
+                    getattr(os, "O_CLOEXEC", 0))
     destination_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
                          getattr(os, "O_CLOEXEC", 0) |
                          getattr(os, "O_NOFOLLOW", 0))

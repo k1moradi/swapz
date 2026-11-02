@@ -120,7 +120,10 @@ snapshots it actually created on failure, and preserves any pre-existing path. T
 without exposing bytes to an unprotected copy process. The striped helper also
 requires and copies the nonsensitive, nonsymlink `fixture.json` beside the
 snapshot so each replay can reestablish privacy before reading page bytes.
-Privacy metadata itself must be a regular file; symlinked metadata is rejected.
+Privacy metadata is opened once with O_NOFOLLOW/O_NONBLOCK and validated
+on its file descriptor; a substituted symlink or FIFO is rejected without
+following it or blocking. The protected snapshot source also opens nonblocking
+to reject a substituted FIFO before its regular-file check.
 Rootless tests must prove that a pre-existing snapshot path survives O_EXCL
 failure after the privacy hook has run, without depending on the CI host's
 actual RLIMIT_MEMLOCK; they must also prove that explicit private classification
@@ -2678,7 +2681,8 @@ changed PARTUUID, unrecognized header state, duplicate PASS content and
 historical reports that do not match the live host. Tests of the x86-only
 physical-admission state machine must mock the admitted x86_64 architecture so
 the rootless contract remains architecture-neutral and can run unchanged on
-ARM64 qualification hosts.
+ARM64 qualification hosts. The mocked historical Git evidence runner must
+also stub _git_result directly instead of depending on process sudo identity.
 
 The review record is JSON with approved=true, a reviewer other than the
 operator, scope=physical swap backing correctness smoke only, the qualified

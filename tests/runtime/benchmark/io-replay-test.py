@@ -36,6 +36,11 @@ class PairReplayContract(unittest.TestCase):
             metadata_target = path.parent / "metadata-target.json"
             metadata_target.write_text(json.dumps({"content_profile": "representative"}))
             metadata_path.symlink_to(metadata_target)
+            with self.assertRaisesRegex(ValueError, "privacy metadata"):
+                private_memory.fixture_is_representative(path)
+            # A FIFO at the metadata path must not stall privacy classification.
+            metadata_path.unlink()
+            os.mkfifo(metadata_path)
             with self.assertRaisesRegex(ValueError, "regular file"):
                 private_memory.fixture_is_representative(path)
 
@@ -100,6 +105,13 @@ class PairReplayContract(unittest.TestCase):
             target.write_bytes(payload)
             source.symlink_to(target)
             with self.assertRaises(OSError):
+                private_memory.copy_fixture(source, destination)
+            self.assertFalse(destination.exists())
+
+            # O_NONBLOCK must reject an unexpected FIFO without waiting for a writer.
+            source.unlink()
+            os.mkfifo(source)
+            with self.assertRaisesRegex(ValueError, "regular file"):
                 private_memory.copy_fixture(source, destination)
             self.assertFalse(destination.exists())
 
