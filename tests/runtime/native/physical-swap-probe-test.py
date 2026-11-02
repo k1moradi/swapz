@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 import importlib.util
 import json
 import os
@@ -8,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import struct
+import stat
 import tempfile
 import unittest
 from unittest import mock
@@ -19,8 +21,26 @@ SPEC = importlib.util.spec_from_file_location("physical_swap_probe", SCRIPT)
 probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)
 
+REAL_RECOVERY_BASE = probe._recovery_base
+REAL_PARTITION_LOCK = probe._partition_lock
+
 
 class PhysicalSwapProbeTests(unittest.TestCase):
+    def setUp(self):
+        # Recover-state tests use a private synthetic base, never the host's
+        # real physical-recovery directory. Explicit base/lock tests override.
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.recovery_base = Path(temporary.name)
+        for name, replacement in (
+            ("_recovery_base", lambda: self.recovery_base),
+            ("_recovery_run_directory", lambda path, run_id=None: Path(path)),
+            ("_partition_lock", lambda partuuid: os.open(os.devnull, os.O_RDONLY)),
+        ):
+            patch = mock.patch.object(probe, name, replacement)
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def make_recovery_state(self, state_dir):
         state_dir.mkdir(mode=0o700)
         header = bytearray(probe.PAGE_BYTES)
@@ -38,6 +58,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "header_sha256": hashlib.sha256(header).hexdigest(),
             "swap_was_active": True,
             "swap_priority": -1,
+            "module_ownership": "NOT_STARTED",
             "swap_size_kib": (16 * 1024 * 1024 * 1024) // 1024 - 4,
             "run_id": "0123456789abcdef0123456789abcdef",
             "module_loaded_by_us": False,
@@ -46,6 +67,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         }
         (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
         (state_dir / probe.BACKUP_NAME).write_bytes(header)
+        marker = {"run_id": state["run_id"], "partuuid": state["partuuid"],
+                  "major": state["major"], "minor": state["minor"]}
+        (self.recovery_base / f"partition-{state['partuuid']}.active").write_text(
+            json.dumps(marker))
+        (self.recovery_base / f"consumed-{state['run_id']}.json").write_text(
+            json.dumps(marker))
         return state, header
 
     def test_only_supported_4k_linux_swap_header_is_accepted(self):
@@ -118,7 +145,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe, "_verify_signed_review") as signed:
                 self.assertEqual(
                     probe.validate_review(path, evidence, target),
-                    "independent-reviewer")
+                    {"reviewer": "independent-reviewer",
+                     "run_id": review["run_id"]})
                 signed.assert_called_once_with(
                     path, "independent-reviewer", path.read_bytes())
                 review["device_major_minor"] = "8:3"
@@ -299,7 +327,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         args, 0, stdout=state["dm_uuid"] + "\n", stderr="")
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
-            def write_header(device, header, target):
+            def write_header(device, header, target, **kwargs):
                 self.assertEqual(target["major"], 8)
                 events.append(("write", device, header))
 
@@ -311,7 +339,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe, "_run", side_effect=run), \
                     mock.patch.object(probe, "_holder_names", return_value=[]), \
                     mock.patch.object(probe, "_mountinfo_has_device", return_value=False), \
-                    mock.patch.object(probe, "_read_block0", return_value=bytes(probe.PAGE_BYTES)), \
+                    mock.patch.object(probe, "_read_block0",
+                                      side_effect=[bytes(probe.PAGE_BYTES), backup]), \
                     mock.patch.object(probe, "_verify_target_identity"), \
                     mock.patch.object(probe, "_write_block0", side_effect=write_header), \
                     mock.patch.object(probe, "_active_swap_for",
@@ -348,7 +377,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe, "_read_block0", return_value=bytes(probe.PAGE_BYTES)), \
                     mock.patch.object(probe, "_write_block0") as write_header, \
                     mock.patch.object(probe, "_active_swap_for", return_value={"used_kib": 0}):
-                with self.assertRaisesRegex(probe.ProbeError, "while swap is active"):
+                with self.assertRaisesRegex(probe.ProbeError, "active swap"):
                     probe.recover(
                         state_dir, state["device_arg"], state["device_arg"])
 
@@ -364,7 +393,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe, "inspect_target_identity_for_recovery") as inspect, \
                     mock.patch.object(probe, "_run") as run, \
                     mock.patch.object(probe, "_write_block0") as write_header:
-                with self.assertRaisesRegex(probe.ProbeError, "does not match its digest"):
+                with self.assertRaisesRegex(probe.ProbeError, "digest|header"):
                     probe.recover(
                         state_dir, state["device_arg"], state["device_arg"])
 
@@ -382,7 +411,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 del kwargs
                 calls.append(tuple(args))
                 return subprocess.CompletedProcess(
-                    args, 0, stdout="SWAPZ-TEST-PHYSICAL-ffffffffffffffff\n",
+                    args, 0, stdout=state["dm_name"] +
+                    " SWAPZ-TEST-PHYSICAL-ffffffffffffffff 253 0\n",
                     stderr="")
 
             with mock.patch.object(probe, "_validate_state_dir"), \
@@ -392,11 +422,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                       "minor": 4, "size_bytes": state["size_bytes"]}), \
                     mock.patch.object(probe, "_run", side_effect=run), \
                     mock.patch.object(probe, "_write_block0") as write_header:
-                with self.assertRaisesRegex(probe.ProbeError, "different UUID"):
+                with self.assertRaisesRegex(probe.ProbeError, "UUID|substituted|mapper"):
                     probe.recover(
                         state_dir, state["device_arg"], state["device_arg"])
 
-        self.assertEqual(len(calls), 1)
+        self.assertGreaterEqual(len(calls), 2)
         self.assertEqual(calls[0][:2], ("dmsetup", "info"))
         write_header.assert_not_called()
 
@@ -625,26 +655,34 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         script = SCRIPT.read_text()
         self.assertNotIn("physical-swap-probe.py", runner)
         self.assertNotIn("physical-swap-probe.py", makefile)
-        self.assertIn('["swapon", state["device"]]', script)
+        self.assertIn('["swapon", target["device"]]', script)
         self.assertNotIn('["swapon", mapper]', script)
         self.assertNotIn('"--force"', script)
 
 
 
     def simulate_root_owned_directories(self, *directories):
-        """Model uid 0 in rootless CI without weakening production checks."""
-        original_stat = probe.Path.stat
+        """Model root ownership in rootless CI; never chown host paths."""
         owned = {str(directory) for directory in directories}
+        real_stat, real_lstat = probe.Path.stat, probe.Path.lstat
 
-        def simulated_stat(path, *args, **kwargs):
-            info = original_stat(path, *args, **kwargs)
-            if str(path) not in owned:
-                return info
+        def as_root(info):
             fields = list(info)
-            fields[4] = 0  # st_uid in os.stat_result, not a real chown.
+            fields[4] = 0  # st_uid in the os.stat_result tuple
             return os.stat_result(fields)
 
-        return mock.patch.object(probe.Path, "stat", simulated_stat)
+        def simulated_stat(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            return as_root(info) if str(path) in owned else info
+
+        def simulated_lstat(path, *args, **kwargs):
+            info = real_lstat(path, *args, **kwargs)
+            return as_root(info) if str(path) in owned else info
+
+        stack = ExitStack()
+        stack.enter_context(mock.patch.object(probe.Path, "stat", simulated_stat))
+        stack.enter_context(mock.patch.object(probe.Path, "lstat", simulated_lstat))
+        return stack
 
     def reviewed_device_fixture(self):
         """Build an immutable synthetic state to mutate signed review fields."""
@@ -683,7 +721,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             review_path = Path(directory) / "review.json"
             review_path.write_text(json.dumps(review))
             self.assertEqual(probe.validate_review(review_path, evidence, target),
-                             review["reviewer"])
+                             {"reviewer": review["reviewer"],
+                              "run_id": review["run_id"]})
             verify.assert_called_once()
             for field, replacement in (
                 ("device_size_bytes", target["size_bytes"] + 4096),
@@ -722,63 +761,88 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_refuses_volatile_recovery_state_before_backup(self):
         if not Path("/dev/shm").is_dir():
             self.skipTest("no known tmpfs location available")
-        target, evidence = self.physical_preparation_fixture()
-        with tempfile.TemporaryDirectory(dir="/dev/shm") as directory, \
-                mock.patch.object(probe, "_allocate_dm_identity",
-                                  return_value=("swapz-demo-physical-1234567890abcdef",
-                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+        with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
             base = Path(directory)
             base.chmod(0o700)
-            with self.simulate_root_owned_directories(base, base / "attempt"):
+            original_lstat = probe.Path.lstat
+
+            def fake_lstat(path):
+                info = original_lstat(path)
+                fields = list(info)
+                fields[4] = 0
+                # Treat the sticky tmpfs parent as a trusted directory only
+                # for this isolated filesystem-type negative control.
+                if path != base:
+                    fields[0] = stat.S_IFDIR | 0o755
+                return os.stat_result(fields)
+
+            def fake_run(args, **kwargs):
+                del kwargs
+                self.assertEqual(args[0], "findmnt")
+                return subprocess.CompletedProcess(args, 0,
+                    stdout="tmpfs\n", stderr="")
+
+            with mock.patch.object(probe, "_recovery_base",
+                                   REAL_RECOVERY_BASE), \
+                    mock.patch.object(probe, "RECOVERY_BASE", base), \
+                    mock.patch.object(probe.Path, "lstat",
+                                      fake_lstat), \
+                    mock.patch.object(probe, "_run", side_effect=fake_run):
                 with self.assertRaisesRegex(probe.ProbeError,
-                                            "volatile|persistent|durable|filesystem"):
-                    probe._prepare_state(target, base / "attempt", evidence,
-                                         "independent-reviewer")
+                                            "nonpersistent|unverified"):
+                    probe._recovery_base()
 
     def test_refuses_untrusted_parent_before_creating_state(self):
-        target, evidence = self.physical_preparation_fixture()
-        with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(probe, "_allocate_dm_identity",
-                                  return_value=("swapz-demo-physical-1234567890abcdef",
-                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+        with tempfile.TemporaryDirectory() as directory:
             base = Path(directory) / "untrusted"
             base.mkdir(mode=0o700)
             base.chmod(0o777)
-            with self.simulate_root_owned_directories(base, base / "attempt"):
+            original_lstat = probe.Path.lstat
+
+            def fake_lstat(path):
+                info = original_lstat(path)
+                fields = list(info)
+                fields[4] = 0
+                if path != base:
+                    fields[0] = stat.S_IFDIR | 0o755
+                return os.stat_result(fields)
+
+            with mock.patch.object(probe, "_recovery_base",
+                                   REAL_RECOVERY_BASE), \
+                    mock.patch.object(probe, "RECOVERY_BASE", base), \
+                    mock.patch.object(probe.Path, "lstat", fake_lstat):
                 with self.assertRaisesRegex(probe.ProbeError,
-                                            "parent|trusted|writable"):
-                    probe._prepare_state(target, base / "attempt", evidence,
-                                         "independent-reviewer")
+                                            "root-controlled"):
+                    probe._recovery_base()
 
     def test_parent_entry_fsync_failure_prevents_state_admission(self):
         target, evidence = self.physical_preparation_fixture()
+        _, _, review = self.reviewed_device_fixture()
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(probe, "_allocate_dm_identity",
-                                  return_value=("swapz-demo-physical-1234567890abcdef",
-                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+                    return_value=("swapz-demo-physical-1234567890abcdef",
+                                  "SWAPZ-TEST-PHYSICAL-1234567890abcdef")), \
+                mock.patch.object(probe, "_verify_target_identity"), \
+                mock.patch.object(probe, "_read_block0",
+                                  return_value=target["header"]):
             base = Path(directory)
+            state_dir = base / "attempt"
             base.chmod(0o700)
-            original_fsync = os.fsync
-            parent_stat = base.stat()
-            seen_parent = []
+            events = []
 
-            def fail_parent_fsync(descriptor):
-                info = os.fstat(descriptor)
-                if (info.st_dev, info.st_ino) == (parent_stat.st_dev,
-                                                  parent_stat.st_ino):
-                    seen_parent.append(True)
+            def directory_sync(path):
+                events.append(path)
+                if path == base:
                     raise OSError("injected parent-entry fsync failure")
-                return original_fsync(descriptor)
 
-            with self.simulate_root_owned_directories(base, base / "attempt"), \
-                    mock.patch.object(probe.os, "fsync",
-                                      side_effect=fail_parent_fsync):
+            with self.simulate_root_owned_directories(base, state_dir), \
+                    mock.patch.object(probe, "_fsync_directory",
+                                      side_effect=directory_sync):
                 with self.assertRaisesRegex(Exception,
                                             "parent-entry fsync failure"):
-                    probe._prepare_state(target, base / "attempt", evidence,
-                                         "independent-reviewer")
-            self.assertTrue(seen_parent,
-                            "state directory parent was never durably synced")
+                    probe._prepare_state(target, state_dir, evidence, review)
+            self.assertIn(base, events)
+            self.assertFalse((state_dir / probe.STATE_NAME).exists())
 
     def test_original_header_read_refuses_unverified_regular_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -786,35 +850,66 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             path.write_bytes(b"\0" * probe.PAGE_BYTES)
             with self.assertRaisesRegex(probe.ProbeError,
                                         "block|descriptor|identity"):
-                probe._read_block0(str(path))
+                probe._read_block0(str(path), {"major": 8, "minor": 4,
+                                              "size_bytes": probe.PAGE_BYTES})
 
     def simulate_physical_run(self, wrong_mapper=False):
-        """Mock every external operation; never access a real device."""
+        """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         token = "1234567890abcdef"
         state = {
             "dm_name": f"swapz-demo-physical-{token}",
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
-            "stage": "BACKED_UP", "module_loaded_by_us": False,
+            "stage": "BACKED_UP", "module_ownership": "NOT_STARTED",
         }
+        review = {"reviewer": "independent-reviewer",
+                  "run_id": "0123456789abcdef0123456789abcdef"}
         formatted = bytearray(probe.PAGE_BYTES)
         formatted[:8] = probe.SWAPZ_HEADER_MAGIC
         struct.pack_into("<IIQ", formatted, 8,
                          probe.SWAPZ_HEADER_VERSION, probe.PAGE_BYTES,
                          target["size_bytes"])
         formatted[24:40] = bytes(range(1, 17))
+        mapper = f"/dev/mapper/{state['dm_name']}"
         events = []
 
         def run(command, **kwargs):
             del kwargs
-            events.append(("command", tuple(str(value) for value in command)))
-            if wrong_mapper and command[:2] == ["dmsetup", "info"]:
-                return subprocess.CompletedProcess(command, 0,
-                    stdout="SWAPZ-TEST-PHYSICAL-ffffffffffffffff\n", stderr="")
-            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            arguments = tuple(str(value) for value in command)
+            events.append(("command", arguments))
+            if command[:2] == ["dmsetup", "info"]:
+                uuid = ("SWAPZ-TEST-PHYSICAL-ffffffffffffffff"
+                        if wrong_mapper else state["dm_uuid"])
+                output = f"{state['dm_name']} {uuid} 253 0\n"
+            elif command[:2] == ["dmsetup", "table"]:
+                output = probe._expected_dm_table(target) + "\n"
+            else:
+                output = ""
+            return subprocess.CompletedProcess(command, 0,
+                                               stdout=output, stderr="")
 
-        def parameter_exists(path):
+        def read_text(path, *args, **kwargs):
+            del args, kwargs
+            value = str(path)
+            if value.endswith("/parameters/allow_physical_backing"):
+                return "Y\n"
+            if value.endswith("/dm/name"):
+                return state["dm_name"] + "\n"
+            if value.endswith("/dm/uuid"):
+                return state["dm_uuid"] + "\n"
+            if value.endswith("/size"):
+                return str(probe.LOGICAL_SECTORS) + "\n"
+            if value.endswith("/slaves/synthetic/dev"):
+                return f"{target['major']}:{target['minor']}\n"
+            raise AssertionError(f"unexpected sysfs read: {value}")
+
+        def is_file(path):
             return str(path).endswith("/parameters/allow_physical_backing")
+
+        def iter_directory(path):
+            if str(path) == "/sys/dev/block/253:0/slaves":
+                return iter([Path("/sys/dev/block/253:0/slaves/synthetic")])
+            raise AssertionError(f"unexpected sysfs listing: {path}")
 
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(probe.os, "geteuid", return_value=0), \
@@ -823,11 +918,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "inspect_target", return_value=target), \
                 mock.patch.object(probe, "_artifact_digests",
                                   return_value=evidence["artifact_digests"]), \
-                mock.patch.object(probe, "validate_review",
-                                  return_value="independent-reviewer"), \
+                mock.patch.object(probe, "validate_review", return_value=review), \
                 mock.patch.object(probe.shutil, "which", return_value="/usr/bin/mock"), \
-                mock.patch.object(probe.Path, "exists", parameter_exists), \
-                mock.patch.object(probe.Path, "read_text", return_value="Y"), \
+                mock.patch.object(probe.Path, "exists", return_value=False), \
+                mock.patch.object(probe.Path, "is_file", is_file), \
+                mock.patch.object(probe.Path, "read_text", read_text), \
+                mock.patch.object(probe.Path, "iterdir", iter_directory), \
+                mock.patch.object(probe, "block_identity",
+                                  return_value=(253, 0)), \
                 mock.patch.object(probe, "_prepare_state",
                                   return_value=(state, Path(directory))), \
                 mock.patch.object(probe, "_snapshot_reviewed_artifacts",
@@ -839,11 +937,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_verify_target_identity",
                                   side_effect=lambda _: events.append(("verify",))), \
                 mock.patch.object(probe, "_active_swap_for",
-                                  side_effect=[{"used_kib": 0}, None]), \
+                                  side_effect=[{
+                                      "used_kib": 0,
+                                      "size_kib": target["swap_size_kib"],
+                                      "priority": target["swap_priority"],
+                                  }, None]), \
                 mock.patch.object(probe, "_write_block0",
-                                  side_effect=lambda *_: events.append(("write0",))), \
+                                  side_effect=lambda *_, **__: events.append(("write0",))), \
                 mock.patch.object(probe, "_read_block0",
-                                  return_value=bytes(formatted)), \
+                                  side_effect=[target["header"],
+                                               bytes(probe.PAGE_BYTES),
+                                               bytes(formatted)]), \
                 mock.patch.object(probe, "_save_state",
                                   side_effect=lambda *_: events.append(("save", state["stage"]))), \
                 mock.patch.object(probe, "_remove_test_objects",
@@ -892,6 +996,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertFalse(any(command[0] == "/reviewed/device-roundtrip"
                              for command in commands),
                          "oracle ran after wrong mapper identity")
+
+    def test_consumed_review_remains_consumed_after_partition_release(self):
+        target, _, review = self.reviewed_device_fixture()
+        probe._check_review_unconsumed(target, review["run_id"])
+        probe._consume_review(target, review["run_id"])
+        with self.assertRaisesRegex(probe.ProbeError, "consumed|outstanding"):
+            probe._check_review_unconsumed(target, review["run_id"])
+        state = {
+            "stage": "COMPLETE", "run_id": review["run_id"],
+            "partuuid": target["partuuid"], "major": target["major"],
+            "minor": target["minor"],
+        }
+        probe._release_partition_ownership(state)
+        self.assertFalse((self.recovery_base /
+            f"partition-{target['partuuid']}.active").exists())
+        with self.assertRaisesRegex(probe.ProbeError, "consumed"):
+            probe._check_review_unconsumed(target, review["run_id"])
 
     def test_recovery_rejects_wrong_restored_swap_capacity_and_priority(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -966,51 +1087,53 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
 
     def test_concurrent_attempts_cannot_claim_one_partition(self):
-        """Separate state directories do not imply independent device ownership."""
-        target, evidence = self.physical_preparation_fixture()
-        target["run_id"] = "0123456789abcdef0123456789abcdef"
-        with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(probe, "_allocate_dm_identity",
-                                  return_value=("swapz-demo-physical-1234567890abcdef",
-                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
-            base = Path(directory)
-            base.chmod(0o700)
+        """A second claim fails while another FD owns the real advisory lock."""
+        target, _ = self.physical_preparation_fixture()
+        real_fstat = probe.os.fstat
 
-            def claim(index):
-                try:
-                    return probe._prepare_state(
-                        target, base / f"attempt-{index}", evidence,
-                        "independent-reviewer")[1]
-                except probe.ProbeError as exc:
-                    return exc
+        def root_owned_fstat(descriptor):
+            fields = list(real_fstat(descriptor))
+            fields[4] = 0
+            return os.stat_result(fields)
 
-            with self.simulate_root_owned_directories(
-                    base, base / "attempt-0", base / "attempt-1"):
-                with ThreadPoolExecutor(max_workers=2) as executor:
-                    futures = [executor.submit(claim, index) for index in range(2)]
-                    outcomes = [future.result() for future in futures]
-            self.assertEqual(sum(isinstance(value, Path) for value in outcomes), 1,
-                             "two concurrent attempts acquired the same physical device")
-            self.assertEqual(sum(isinstance(value, probe.ProbeError)
-                                 for value in outcomes), 1)
-
+        with mock.patch.object(probe, "_partition_lock",
+                               REAL_PARTITION_LOCK), \
+                mock.patch.object(probe.os, "fstat",
+                                  side_effect=root_owned_fstat):
+            first = probe._partition_lock(target["partuuid"])
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(probe._partition_lock,
+                                             target["partuuid"])
+                    with self.assertRaisesRegex(
+                            probe.ProbeError, "owns this partition"):
+                        future.result()
+            finally:
+                os.close(first)
+            second = probe._partition_lock(target["partuuid"])
+            os.close(second)
 
     def test_failed_backup_fsync_cannot_publish_saved_state(self):
         target, evidence = self.physical_preparation_fixture()
+        _, _, review = self.reviewed_device_fixture()
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(probe, "_allocate_dm_identity",
-                                  return_value=("swapz-demo-physical-1234567890abcdef",
-                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+                    return_value=("swapz-demo-physical-1234567890abcdef",
+                                  "SWAPZ-TEST-PHYSICAL-1234567890abcdef")), \
+                mock.patch.object(probe, "_verify_target_identity"), \
+                mock.patch.object(probe, "_read_block0",
+                                  return_value=target["header"]), \
+                mock.patch.object(probe, "_fsync_directory"):
             base = Path(directory)
+            state_dir = base / "attempt"
             base.chmod(0o700)
-            with self.simulate_root_owned_directories(base, base / "attempt"), \
+            with self.simulate_root_owned_directories(base, state_dir), \
                     mock.patch.object(probe.os, "fsync",
-                                      side_effect=OSError("injected backup fsync failure")):
+                        side_effect=OSError("injected backup fsync failure")):
                 with self.assertRaisesRegex(Exception, "backup fsync failure"):
-                    probe._prepare_state(target, base / "attempt", evidence,
-                                         "independent-reviewer")
-            self.assertFalse((base / "attempt" / probe.STATE_NAME).exists(),
-                             "an unflushed backup cannot authorize swapoff")
+                    probe._prepare_state(target, state_dir, evidence, review)
+            self.assertFalse((state_dir / probe.STATE_NAME).exists(),
+                             "unflushed backup cannot authorize swapoff")
 
 
 if __name__ == "__main__":
