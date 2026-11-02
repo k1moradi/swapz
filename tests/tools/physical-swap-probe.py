@@ -296,19 +296,9 @@ def inspect_target(device_arg, confirm_arg):
     if size_bytes < 3 * 1024 * 1024 + PAGE_BYTES:
         raise ProbeError("selected swap partition is too small for swapz")
 
-    swaps = parse_swap_rows(Path("/proc/swaps").read_text())
-    matching = []
-    for swap in swaps:
-        try:
-            identity = block_identity(swap["path"])
-        except ProbeError as exc:
-            raise ProbeError(
-                "cannot verify every active swap entry during target preflight") from exc
-        if identity == (major, minor):
-            matching.append(swap)
-    if len(matching) != 1:
+    active = _active_swap_for(major, minor)
+    if active is None:
         raise ProbeError("selected partition must be exactly one active system swap")
-    active = matching[0]
     if active["used_kib"] != 0:
         raise ProbeError("selected swap partition is in use; require zero used KiB")
     header = _read_block0(device, {
@@ -795,28 +785,24 @@ def _burn_review(target, run_id):
         raise ProbeError("signed physical review was already consumed") from exc
 
 
-def _consume_review(target, run_id):
-    """Claim partition recovery after the signed run has been durably burned."""
+def _consume_review(target, run_id, *, preburned=False):
+    """Claim partition recovery exactly once, including for direct callers."""
     base = _recovery_base()
     record = _review_consumption_record(target, run_id)
     active_path = base / f"partition-{target['partuuid']}.active"
     used_path = base / f"consumed-{run_id}.json"
     if active_path.exists():
         raise ProbeError("physical partition recovery is already outstanding")
+    if not preburned:
+        # Direct callers cannot reinterpret an old consumed review as a fresh
+        # run. run_probe() explicitly burns its review before preparation.
+        _burn_review(target, run_id)
     try:
         used = _load_unique_json(used_path.read_bytes())
-    except FileNotFoundError:
-        # Direct callers retain the fail-closed one-shot behavior; run_probe()
-        # burns the review earlier, before recovery preparation begins.
-        try:
-            _durable_exclusive_record(used_path, record)
-        except FileExistsError as exc:
-            raise ProbeError("signed physical review was already consumed") from exc
     except (OSError, ValueError) as exc:
-        raise ProbeError("consumed review record is unreadable") from exc
-    else:
-        if used != record:
-            raise ProbeError("consumed review record belongs to another device")
+        raise ProbeError("consumed review record is missing or unreadable") from exc
+    if used != record:
+        raise ProbeError("consumed review record belongs to another device")
     try:
         _durable_exclusive_record(active_path, record)
     except FileExistsError as exc:
@@ -944,13 +930,23 @@ def _write_block0(device, data, target, expected_current=None):
 
 
 def _active_swap_for(major, minor):
+    """Resolve all active swap entries without mistaking swapfiles for devices."""
     matching = []
     for row in parse_swap_rows(Path("/proc/swaps").read_text()):
+        if row["kind"] == "file":
+            try:
+                info = os.stat(row["path"])
+            except OSError as exc:
+                raise ProbeError("cannot verify active swapfile identity") from exc
+            if not stat.S_ISREG(info.st_mode):
+                raise ProbeError("active swapfile is not a regular file")
+            continue
+        if row["kind"] != "partition":
+            raise ProbeError("unsupported active swap entry type")
         try:
             identity = block_identity(row["path"])
         except ProbeError as exc:
-            raise ProbeError(
-                "cannot verify every active swap entry during recovery") from exc
+            raise ProbeError("cannot verify active swap block identity") from exc
         if identity == (major, minor):
             matching.append(row)
     if len(matching) > 1:
@@ -1291,7 +1287,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             if _read_block0(target["device"], target) != target["header"]:
                 raise ProbeError("original block zero changed after backup")
             partition_claim_attempted = True
-            _consume_review(target, review["run_id"])
+            _consume_review(target, review["run_id"], preburned=True)
             # The consumed review, active partition claim and backup are durable.
             _verify_target_identity(target)
             _run(["swapoff", "--", target["device"]], timeout=120)

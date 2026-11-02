@@ -2799,7 +2799,9 @@ Once the active claim is attempted, uncertainty is recovery state and blocks
 another physical run. A different base cannot silently reset either ledger.
 Rootless mocks must inject a preparation failure after the burn and prove the
 consumed record survives, no active claim or destructive command is created,
-and replay of that signed run is rejected.
+and replay of that signed run is rejected. Direct review consumption must
+also reject replay after durable COMPLETE releases the active claim; only the
+current run's explicitly preburned transition may create that claim.
 
 After dmsetup create, and immediately before oracle invocation, verify
 the exact helper-generated DM name/UUID, mapper block major:minor, kernel
@@ -2822,10 +2824,13 @@ force removal is permitted.
 
 Recovery accepts only the saved original, an expected zero header at a
 recognized stage, or a digest-matched valid SWZ header with a durably
-recorded formatter digest. Every /proc/swaps row must have a resolvable block
-identity during preflight and recovery; an unreadable row is uncertainty and
-must fail closed rather than being ignored as unrelated. It must verify exact
-original bytes through a new identity-checked descriptor before swapon. After reactivation, verify
+recorded formatter digest. Every /proc/swaps partition entry must have a
+verified block identity during preflight and recovery. An unrelated swapfile
+may coexist, but its path must resolve to a regular file; unreadable,
+substituted or unknown entry types fail closed. The preflight and recovery
+use one shared swap-inventory rule rather than treating a valid swapfile as
+a block-device identity failure. Recovery verifies exact original bytes
+through a new identity-checked descriptor before swapon. After reactivation, verify
 the saved block identity through /proc/swaps together with the exact
 original size and priority before recording COMPLETE and retiring the active
 ownership marker. Wrong or ambiguous identity, unknown header, missing
