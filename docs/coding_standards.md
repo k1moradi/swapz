@@ -1851,6 +1851,34 @@ there but must leave any existing failure unchanged, and must not treat a
 completion counter as proof of the user's write() return value.
 
 
+### Physical-smoke byte-exact oracle: opened DM identity
+
+The private physical correctness-smoke invocation is
+`device-roundtrip <mapper-path> --expect-dm-uuid <expected-uuid>`.
+The UUID argument must be exactly `SWAPZ-TEST-PHYSICAL-` followed by
+16 lowercase hexadecimal characters. Reject malformed or contradictory
+arguments before opening the mapper; do not interpret this option as a
+GC, series or default mode. Existing RAM-backed oracle invocations and
+their I/O semantics remain unchanged.
+
+The oracle preserves its existing owned-mapper pathname restriction, but
+must not treat the pathname or symlink resolution as proof of identity.
+After opening the mapper with its existing aligned `O_DIRECT` flags,
+require `fstat()` on the actual descriptor to identify a block device
+and `BLKGETSIZE64` to confirm exactly 16 MiB. In the physical
+invocation, read `/sys/dev/block/<opened-major>:<opened-minor>/dm/uuid`
+using that descriptor's `st_rdev` identity. Require the kernel
+metadata to contain exactly the expected UUID and its terminating newline,
+followed by EOF. Missing, unreadable, oversized, malformed and mismatched
+metadata are all failures. Use bounded stack storage, no allocation or
+per-page checks, and close every opened FD on failure.
+
+This gate completes before any write, discard, flush or other potentially
+destructive oracle operation; a same-sized but wrong-UUID mapper must never
+reach the byte-exact workload. The helper independently owns mapper
+creation, post-create identity checks and separately authorized physical
+qualification. This oracle gate does not itself authorize physical I/O.
+
 ### Alpha.29 work-conserving dispatcher candidate
 
 Alpha.29 keeps one unbound producer lane, K=1 and the existing 64 preparation

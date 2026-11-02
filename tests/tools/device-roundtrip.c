@@ -16,11 +16,15 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
 
+#define PHYSICAL_DM_UUID_PREFIX "SWAPZ-TEST-PHYSICAL-"
+
 enum {
+	PHYSICAL_DM_UUID_TOKEN_LENGTH = 16,
 	PAGE = 4096,
 	NPAGES = 128,
 	GC_PAGES = 4096,
@@ -252,6 +256,67 @@ static int validate_owned_device(int fd)
 	return fd >= 0 && !fstat(fd, &st) && S_ISBLK(st.st_mode) &&
 		!ioctl(fd, BLKGETSIZE64, &size) &&
 		size == UINT64_C(16) * 1024 * 1024 ? 0 : -1;
+}
+
+/*
+ * Physical-smoke metadata is trusted only after checking the actual opened
+ * block descriptor. The helper-generated UUID has a fixed, lowercase token.
+ */
+static int valid_physical_dm_uuid(const char *uuid)
+{
+	const size_t prefix_length = sizeof(PHYSICAL_DM_UUID_PREFIX) - 1U;
+	size_t index;
+
+	if (strlen(uuid) != prefix_length + PHYSICAL_DM_UUID_TOKEN_LENGTH ||
+	    memcmp(uuid, PHYSICAL_DM_UUID_PREFIX, prefix_length))
+		return 0;
+	for (index = prefix_length;
+	     index < prefix_length + PHYSICAL_DM_UUID_TOKEN_LENGTH; ++index) {
+		if ((uuid[index] < '0' || uuid[index] > '9') &&
+		    (uuid[index] < 'a' || uuid[index] > 'f'))
+			return 0;
+	}
+	return 1;
+}
+
+static int verify_physical_dm_uuid(dev_t opened_device, const char *expected_uuid)
+{
+	char sysfs_path[128];
+	char reported_uuid[sizeof(PHYSICAL_DM_UUID_PREFIX) +
+			   PHYSICAL_DM_UUID_TOKEN_LENGTH + 1U];
+	size_t total_bytes = 0;
+	int sysfs_fd = -1, result = -1;
+	int path_length;
+
+	path_length = snprintf(sysfs_path, sizeof(sysfs_path),
+			       "/sys/dev/block/%u:%u/dm/uuid",
+			       major(opened_device), minor(opened_device));
+	if (path_length < 0 || (size_t)path_length >= sizeof(sysfs_path))
+		return -1;
+	sysfs_fd = open(sysfs_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	if (sysfs_fd < 0)
+		return -1;
+	while (total_bytes < sizeof(reported_uuid)) {
+		ssize_t read_bytes = read(sysfs_fd, reported_uuid + total_bytes,
+					  sizeof(reported_uuid) - total_bytes);
+
+		if (read_bytes < 0) {
+			if (errno == EINTR)
+				continue;
+			goto out;
+		}
+		if (!read_bytes)
+			break;
+		total_bytes += (size_t)read_bytes;
+	}
+	if (total_bytes == strlen(expected_uuid) + 1U &&
+	    reported_uuid[total_bytes - 1U] == '\n' &&
+	    !memcmp(reported_uuid, expected_uuid, total_bytes - 1U))
+		result = 0;
+out:
+	if (close(sysfs_fd))
+		return -1;
+	return result;
 }
 
 static int series(int fd, unsigned char *buf, unsigned char *expected,
@@ -680,6 +745,8 @@ out:
 int main(int argc, char **argv)
 {
 	const char *prefix = "/dev/mapper/swapz-demo-";
+	const char *expected_dm_uuid = NULL;
+	struct stat opened_mapper_stat;
 	unsigned char *buf = NULL, *expected = NULL;
 	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
 	int raw_series = 0, discard_pages = 0, gc_mode = 0, churn_mode = 0;
@@ -708,14 +775,22 @@ int main(int argc, char **argv)
 		}
 	}
 	if (argc == 4) {
-		if (strcmp(argv[2], "--gc-stress") ||
-		    parse_uint(argv[3], 8U, &gc_rounds) ||
-		    gc_rounds < 4U) {
-			fprintf(stderr, "FAIL invalid private GC mode\n");
-			return 2;
+		if (!strcmp(argv[2], "--expect-dm-uuid")) {
+			if (!valid_physical_dm_uuid(argv[3])) {
+				fprintf(stderr, "FAIL invalid physical DM UUID\n");
+				return 2;
+			}
+			expected_dm_uuid = argv[3];
+		} else {
+			if (strcmp(argv[2], "--gc-stress") ||
+			    parse_uint(argv[3], 8U, &gc_rounds) ||
+			    gc_rounds < 4U) {
+				fprintf(stderr, "FAIL invalid private GC mode\n");
+				return 2;
+			}
+			gc_mode = 1;
+			open_flags &= ~O_SYNC;
 		}
-		gc_mode = 1;
-		open_flags &= ~O_SYNC;
 	}
 	if (argc == 5) {
 		if (!strcmp(argv[2], "--write-series"))
@@ -777,6 +852,13 @@ int main(int argc, char **argv)
 		fd = open(argv[1], open_flags & ~O_NOFOLLOW);
 	if (validate_owned_device(fd)) {
 		fprintf(stderr, "FAIL expected owned 16MiB DM block target\n");
+		goto out;
+	}
+	if (expected_dm_uuid &&
+	    (fstat(fd, &opened_mapper_stat) ||
+	     !S_ISBLK(opened_mapper_stat.st_mode) ||
+	     verify_physical_dm_uuid(opened_mapper_stat.st_rdev, expected_dm_uuid))) {
+		fprintf(stderr, "FAIL opened DM UUID missing or not the expected physical identity\n");
 		goto out;
 	}
 
