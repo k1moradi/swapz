@@ -93,8 +93,10 @@ done
     fail 'native replay helper missing from validated build'
 [[ $SHARED_PLAN == "$ROOT/build/tests/benchmark-plan."* &&
    -d $SHARED_PLAN && ! -L $SHARED_PLAN &&
-   -f $SHARED_PLAN/fixture.bin && ! -L $SHARED_PLAN/fixture.bin ]] ||
-    fail 'striped shared plan is missing or outside owned build root'
+   -f $SHARED_PLAN/fixture.bin && ! -L $SHARED_PLAN/fixture.bin &&
+   -f $SHARED_PLAN/fixture.json && ! -L $SHARED_PLAN/fixture.json ]] ||
+    fail 'striped shared plan is missing, lacks privacy metadata, or is outside owned build root'
+FIXTURE_PATH="$SHARED_PLAN/fixture.bin"
 STRIPE_PLAN_PREFIX=striped
 [[ $WORKLOAD == mixed ]] || STRIPE_PLAN_PREFIX="striped-$WORKLOAD"
 for (( stripe=0; stripe<STRIPES; ++stripe )); do
@@ -336,7 +338,8 @@ for (( index=0; index<2*STRIPES; ++index )); do
 done
 
 mkdir -m 700 "$SESSION/plans"
-cp -- "$SHARED_PLAN/fixture.bin" "$SESSION/fixture.bin"
+# Reuse the validated shared fixture so no unprotected copy process reads
+# representative page bytes. Each replay classifies the adjacent fixture.json.
 for (( stripe=0; stripe<STRIPES; ++stripe )); do
     mkdir -m 700 "$SESSION/plans/$stripe"
     cp -- "$SHARED_PLAN/$STRIPE_PLAN_PREFIX-$STRIPES/stripe-$stripe/trace.jsonl" \
@@ -479,7 +482,7 @@ run_arm() {
             extra=(--expected-dm-uuid "${DMUUIDS[stripe]}")
         fi
         python3 -B tests/runtime/benchmark/io-replay.py run \
-            --fixture "$SESSION/fixture.bin" \
+            --fixture "$FIXTURE_PATH" \
             --trace "$SESSION/plans/$stripe/trace.jsonl" \
             --manifest "$SESSION/plans/$stripe/manifest.json" \
             --candidate "$candidate" --source-sha "$VALIDATED_SOURCE" \

@@ -7,6 +7,7 @@ lifetime; all child processes accessing pages independently protect themselves.
 import ctypes
 import json
 import resource
+import stat
 import sys
 from pathlib import Path
 
@@ -14,8 +15,14 @@ from pathlib import Path
 def fixture_is_representative(fixture_path):
     """Read nonsensitive fixture metadata before opening sample content."""
     metadata_path = Path(fixture_path).parent / "fixture.json"
-    if not metadata_path.exists():
+    try:
+        metadata_info = metadata_path.lstat()
+    except FileNotFoundError:
         return False
+    except OSError as exc:
+        raise ValueError("invalid fixture privacy metadata") from exc
+    if not stat.S_ISREG(metadata_info.st_mode):
+        raise ValueError("fixture privacy metadata must be a regular file")
     try:
         metadata = json.loads(metadata_path.read_text())
     except (OSError, ValueError) as exc:

@@ -778,6 +778,7 @@ dm_sysfs="$(readlink -f "/sys/dev/block/$DMDEV")"
 DMKNAME="${dm_sysfs##*/}"
 [[ "$DMKNAME" =~ ^dm-[0-9]+$ ]] ||
     fail 'owned DM kernel identity is ambiguous'
+FIXTURE_PATH="$SESSION/fixture.bin"
 if [[ -n $SHARED_PLAN ]]; then
     plan_dir="$SHARED_PLAN/plan"
     if [[ -n $MIXED_LANES ]]; then
@@ -798,7 +799,9 @@ if [[ -n $SHARED_PLAN ]]; then
        -f $plan_dir/manifest.json ]] ||
         fail 'shared immutable replay plan missing or outside owned build root'
     mkdir -p "$SESSION/plan"
-    cp -- "$SHARED_PLAN/fixture.bin" "$SESSION/fixture.bin"
+    # Reuse the validated fixture in place. An external cp process is not part
+    # of the representative-memory lock/core-dump protection boundary.
+    FIXTURE_PATH="$SHARED_PLAN/fixture.bin"
     cp -- "$SHARED_PLAN/fixture.json" "$SESSION/fixture.json"
     cp -- "$plan_dir/trace.jsonl" "$SESSION/plan/trace.jsonl"
     cp -- "$plan_dir/manifest.json" "$SESSION/plan/manifest.json"
@@ -849,7 +852,7 @@ prepare_replay_args=()
 [[ -n $MIXED_LANES ]] &&
     prepare_replay_args+=(--mixed-lanes "$MIXED_LANES")
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
-    --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
+    --fixture "$FIXTURE_PATH" --output-dir "$SESSION/plan" \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
     --reader-pages 256 --qd "$QD" --read-pct "$READ_PCT" \
     --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS" \
@@ -887,7 +890,7 @@ replay_off() {
 
     if timeout --signal=TERM --kill-after=5s "$REPLAY_TIMEOUT" python3 -B \
         tests/runtime/benchmark/io-replay.py run \
-        --fixture "$SESSION/fixture.bin" \
+        --fixture "$FIXTURE_PATH" \
         --trace "$SESSION/plan/trace.jsonl" \
         --manifest "$SESSION/plan/manifest.json" \
         --candidate off --source-sha "$SOURCE" \
@@ -908,7 +911,7 @@ replay_swapz() {
 
     if timeout --signal=TERM --kill-after=5s "$REPLAY_TIMEOUT" python3 -B \
         tests/runtime/benchmark/io-replay.py run \
-        --fixture "$SESSION/fixture.bin" \
+        --fixture "$FIXTURE_PATH" \
         --trace "$SESSION/plan/trace.jsonl" \
         --manifest "$SESSION/plan/manifest.json" \
         --candidate "$TARGET_CANDIDATE" --source-sha "$SOURCE" \

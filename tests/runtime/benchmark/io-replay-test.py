@@ -28,8 +28,15 @@ class PairReplayContract(unittest.TestCase):
             (path.parent / "fixture.json").write_text(
                 json.dumps({"content_profile": "representative"}))
             self.assertTrue(private_memory.fixture_is_representative(path))
-            (path.parent / "fixture.json").write_text("not json")
+            metadata_path = path.parent / "fixture.json"
+            metadata_path.write_text("not json")
             with self.assertRaisesRegex(ValueError, "privacy metadata"):
+                private_memory.fixture_is_representative(path)
+            metadata_path.unlink()
+            metadata_target = path.parent / "metadata-target.json"
+            metadata_target.write_text(json.dumps({"content_profile": "representative"}))
+            metadata_path.symlink_to(metadata_target)
+            with self.assertRaisesRegex(ValueError, "regular file"):
                 private_memory.fixture_is_representative(path)
 
         libc = mock.Mock()

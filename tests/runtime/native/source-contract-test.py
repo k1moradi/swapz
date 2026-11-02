@@ -1078,6 +1078,18 @@ static swapz_u16 swapz_probe_set(
         self.assertGreater(info["lz4_accepted_payload_bytes"], 0)
         self.assertGreater(info["raw_pages"], 0)
 
+    def test_representative_fixture_never_crosses_unprotected_copy_process(self):
+        owned_pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        striped_pair = (ROOT / "tests/tools/benchmark-striped-owned.sh").read_text()
+        for helper in (owned_pair, striped_pair):
+            self.assertNotIn(
+                'cp -- "$SHARED_PLAN/fixture.bin" "$SESSION/fixture.bin"', helper)
+            self.assertIn('FIXTURE_PATH="$SHARED_PLAN/fixture.bin"', helper)
+            self.assertIn('--fixture "$FIXTURE_PATH"', helper)
+        self.assertIn(
+            '-f $SHARED_PLAN/fixture.json && ! -L $SHARED_PLAN/fixture.json',
+            striped_pair)
+
     def test_identical_off_swapz_replay_contract(self):
         # Rootless regular files exercise the immutable plan and full-image
         # oracle. They do NOT claim a loaded swapz module test.
