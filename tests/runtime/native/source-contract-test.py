@@ -1619,7 +1619,7 @@ static swapz_u16 swapz_probe_set(
         deliver = body("swapz_deliver_upper_completions")
         self.assertIn("swapz_deliver_bio_list(ctx, &ctx->deferred_upper_completions)",
                       deliver)
-        self.assertLess(deliver.index("swapz_try_completion_handoff(ctx, false)"),
+        self.assertLess(deliver.index("swapz_try_completion_handoff(ctx)"),
                         deliver.index("swapz_deliver_bio_list("))
         delivered = body("swapz_deliver_bio_list")
         self.assertIn("bio_list_pop(bios)", delivered)
