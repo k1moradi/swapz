@@ -82,10 +82,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             probe.inspect_target("/dev/sda4", "/dev/sda4")
 
     def test_review_record_is_bound_to_helper_source_and_device(self):
-        evidence = {"source_sha": "a" * 40}
-        target = {"major": 8, "minor": 4, "partuuid": "deadbeef-04"}
         artifact_digests = {key: str(index) * 64 for index, (key, _, _)
                             in enumerate(probe.PHYSICAL_ARTIFACTS, start=1)}
+        evidence = {
+            "source_sha": "a" * 40,
+            "artifact_digests": artifact_digests,
+        }
+        target = {"major": 8, "minor": 4, "partuuid": "deadbeef-04"}
         review = {
             **artifact_digests,
             "approved": True,
@@ -102,31 +105,31 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"SUDO_USER": "keivan", "USER": "root"}), \
                     mock.patch.object(probe, "_verify_signed_review") as signed:
                 self.assertEqual(
-                    probe.validate_review(path, evidence, target, artifact_digests),
+                    probe.validate_review(path, evidence, target),
                     "independent-reviewer")
                 signed.assert_called_once_with(
                     path, "independent-reviewer", path.read_bytes())
                 review["device_major_minor"] = "8:3"
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
-                    probe.validate_review(path, evidence, target, artifact_digests)
+                    probe.validate_review(path, evidence, target)
                 review["device_major_minor"] = "8:4"
                 review["device_partuuid"] = "cafebabe-04"
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
-                    probe.validate_review(path, evidence, target, artifact_digests)
+                    probe.validate_review(path, evidence, target)
                 review["device_partuuid"] = "deadbeef-04"
                 review["module_sha256"] = "f" * 64
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "binary artifacts"):
-                    probe.validate_review(path, evidence, target, artifact_digests)
+                    probe.validate_review(path, evidence, target)
                 review["module_sha256"] = artifact_digests["module_sha256"]
                 duplicate = json.dumps(review)[:-1] + \
                     ',"reviewer":"second-reviewer"}'
                 path.write_text(duplicate)
                 with self.assertRaisesRegex(
                         probe.ProbeError, "duplicate JSON key"):
-                    probe.validate_review(path, evidence, target, artifact_digests)
+                    probe.validate_review(path, evidence, target)
 
     def test_physical_artifact_snapshot_binds_signed_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -511,9 +514,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "architecture": "x86_64",
             "id_sha256": "1" * 64,
         }
+        artifact_digests = {
+            key: str(index) * 64
+            for index, (key, _, _) in enumerate(
+                probe.PHYSICAL_ARTIFACTS, start=1)
+        }
         current = {
             "overall": "PASS", "tested_commit_sha": source,
             "source_sha": source, "host_identity": dict(local_host),
+            "qualified_artifacts": {
+                "status": "AVAILABLE", **artifact_digests,
+            },
             "stages": [{"name": name, "status": "PASS", "exit_code": 0}
                        for name in probe.QUALIFICATION_STAGE_NAMES],
         }
@@ -571,12 +582,25 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     *current["stages"][:-1],
                     dict(current["stages"][-1], status="BLOCKED")])
                 self.assertEqual(probe.current_source_evidence()["pass_reports"], 1)
+                history["second"] = dict(
+                    current, duration=2,
+                    qualified_artifacts={"status": "UNAVAILABLE"})
+                self.assertEqual(
+                    probe.current_source_evidence()["pass_reports"], 1)
                 history["second"] = dict(current, duration=2)
                 current["stages"] = current["stages"][:-1]
                 (root / "test_results.json").write_text(json.dumps(current))
                 with self.assertRaisesRegex(probe.ProbeError, "five-stage"):
                     probe.current_source_evidence()
                 current["stages"] = history["second"]["stages"]
+                current["qualified_artifacts"] = {"status": "UNAVAILABLE"}
+                (root / "test_results.json").write_text(json.dumps(current))
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "qualified artifact digests"):
+                    probe.current_source_evidence()
+                current["qualified_artifacts"] = {
+                    "status": "AVAILABLE", **artifact_digests,
+                }
                 current["host_identity"] = dict(local_host, id_sha256="2" * 64)
                 (root / "test_results.json").write_text(json.dumps(current))
                 with self.assertRaisesRegex(probe.ProbeError, "not produced on this host"):

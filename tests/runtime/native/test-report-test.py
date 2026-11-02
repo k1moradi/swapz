@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rootless contract tests for the sole make test plain JSON reporting pipeline."""
 import contextlib
+import hashlib
 import importlib.util
 import inspect
 import io
@@ -2842,6 +2843,42 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(path.name, "test_results.json")
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
+
+    def test_qualification_report_hashes_exact_final_artifact_bytes(self):
+        previous_root = runner.ROOT
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                runner.ROOT = Path(directory)
+                expected = {}
+                sources = {}
+                for index, (key, relative_path, executable) in enumerate(
+                        runner.QUALIFIED_ARTIFACTS, start=1):
+                    source = runner.ROOT / relative_path
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    payload = (f"qualified-{index}-{key}").encode()
+                    source.write_bytes(payload)
+                    source.chmod(0o700 if executable else 0o600)
+                    sources[key] = source
+                    expected[key] = hashlib.sha256(payload).hexdigest()
+                self.assertEqual(
+                    runner.qualification_artifact_digests(),
+                    {"status": "AVAILABLE", **expected})
+
+                sources["module_sha256"].write_bytes(b"replacement")
+                changed = runner.qualification_artifact_digests()
+                self.assertEqual(changed["status"], "AVAILABLE")
+                self.assertNotEqual(
+                    changed["module_sha256"], expected["module_sha256"])
+
+                sources["module_sha256"].unlink()
+                sources["module_sha256"].symlink_to(
+                    sources["formatter_sha256"])
+                unavailable = runner.qualification_artifact_digests()
+                self.assertEqual(unavailable["status"], "UNAVAILABLE")
+                self.assertEqual(
+                    unavailable["reason"], "module_sha256 unavailable")
+        finally:
+            runner.ROOT = previous_root
 
     def test_retired_lz4_ab_does_not_gate_overall_qualification(self):
         benchmarks = {

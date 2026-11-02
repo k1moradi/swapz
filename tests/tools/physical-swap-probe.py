@@ -364,6 +364,19 @@ def _has_five_passing_stages(report):
                 for stage, name in zip(stages, QUALIFICATION_STAGE_NAMES)))
 
 
+def _report_artifact_digests(report):
+    record = report.get("qualified_artifacts")
+    if not isinstance(record, dict) or record.get("status") != "AVAILABLE":
+        return None
+    digests = {}
+    for key, _, _ in PHYSICAL_ARTIFACTS:
+        value = record.get(key)
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            return None
+        digests[key] = value
+    return digests
+
+
 def current_source_evidence():
     if platform.machine() != "x86_64":
         raise ProbeError("physical swap smoke is currently limited to x86_64")
@@ -390,6 +403,10 @@ def current_source_evidence():
             not re.fullmatch(r"[0-9a-f]{40}", source) or \
             not _has_five_passing_stages(report):
         raise ProbeError("current test_results.json is not an exact-source five-stage PASS")
+    artifact_digests = _report_artifact_digests(report)
+    if artifact_digests is None:
+        raise ProbeError(
+            "current test_results.json lacks qualified artifact digests")
     ancestor = _git_result(
         "merge-base", "--is-ancestor", source, head, check=False)
     if ancestor.returncode:
@@ -421,7 +438,8 @@ def current_source_evidence():
                 historical.get("overall") != "PASS" or \
                 historical.get("source_sha") != source or \
                 historical.get("tested_commit_sha") != source or \
-                not _has_five_passing_stages(historical):
+                not _has_five_passing_stages(historical) or \
+                _report_artifact_digests(historical) is None:
             continue
         old_host = historical.get("host_identity")
         if isinstance(old_host, dict) and json.dumps(
@@ -433,6 +451,7 @@ def current_source_evidence():
     return {
         "source_sha": source,
         "host_identity": host_identity,
+        "artifact_digests": artifact_digests,
         "pass_reports": len(distinct_reports),
         "head": head,
     }
@@ -587,7 +606,7 @@ def _load_unique_json(record_bytes):
     return json.loads(record_bytes, object_pairs_hook=unique_object)
 
 
-def validate_review(review_path, evidence, target, artifact_digests=None):
+def validate_review(review_path, evidence, target):
     try:
         record_bytes = Path(review_path).read_bytes()
         review = _load_unique_json(record_bytes)
@@ -609,11 +628,11 @@ def validate_review(review_path, evidence, target, artifact_digests=None):
             review.get("helper_sha256") != hashlib.sha256(
                 Path(__file__).read_bytes()).hexdigest():
         raise ProbeError("review record does not match this source, helper and device")
-    if artifact_digests is None:
-        artifact_digests = _artifact_digests()
-    if any(not isinstance(review.get(key), str) or
+    artifact_digests = evidence.get("artifact_digests")
+    if not isinstance(artifact_digests, dict) or any(
+           not isinstance(review.get(key), str) or
            not re.fullmatch(r"[0-9a-f]{64}", review[key]) or
-           review[key] != artifact_digests[key]
+           review[key] != artifact_digests.get(key)
            for key, _, _ in PHYSICAL_ARTIFACTS):
         raise ProbeError("review record does not match the tested binary artifacts")
     _verify_signed_review(review_path, reviewer, record_bytes)
@@ -932,7 +951,10 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
     target = inspect_target(device_arg, confirm_arg)
     target["device_arg"] = device_arg
     artifact_digests = _artifact_digests()
-    reviewer = validate_review(review_path, evidence, target, artifact_digests)
+    if artifact_digests != evidence["artifact_digests"]:
+        raise ProbeError(
+            "current build artifacts differ from the qualified make-test report")
+    reviewer = validate_review(review_path, evidence, target)
     if Path("/sys/module/dm_swapz").exists():
         raise ProbeError("dm_swapz is already loaded; refusing an ambiguous module owner")
     for command in ("blockdev", "dmsetup", "insmod", "modprobe", "rmmod",
@@ -943,7 +965,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
         target, state_dir_arg, evidence, reviewer)
     failure = None
     try:
-        artifacts = _snapshot_reviewed_artifacts(state_dir, artifact_digests)
+        artifacts = _snapshot_reviewed_artifacts(
+            state_dir, evidence["artifact_digests"])
         formatter = artifacts["formatter_sha256"]
         module = artifacts["module_sha256"]
         oracle = artifacts["oracle_sha256"]
@@ -1025,14 +1048,21 @@ def plan(device_arg, confirm_arg, review_path=None):
     artifact_message = "reviewed binaries: unavailable"
     try:
         artifact_digests = _artifact_digests()
-        artifact_message = "reviewed binaries: digests ready for independent review"
+        if evidence is None:
+            raise ProbeError("source qualification is not current")
+        if artifact_digests != evidence["artifact_digests"]:
+            raise ProbeError(
+                "build artifacts differ from the qualified make-test report")
+        artifact_message = (
+            "reviewed binaries: live bytes match qualified report digests")
     except ProbeError as exc:
+        artifact_digests = None
         artifact_message = f"reviewed binaries: BLOCKED ({exc})"
     if review_path:
         try:
             if evidence is None or artifact_digests is None:
                 raise ProbeError("source qualification or binary artifacts are not current")
-            reviewer = validate_review(review_path, evidence, target, artifact_digests)
+            reviewer = validate_review(review_path, evidence, target)
             review_message = f"independent review: present ({reviewer})"
         except ProbeError as exc:
             review_message = f"independent review: BLOCKED ({exc})"

@@ -7,6 +7,7 @@ import math
 import os
 import re
 from pathlib import Path
+import stat
 import statistics
 import subprocess
 import sys
@@ -24,6 +25,11 @@ HOST_CPU_INT_FIELDS = ("wall_ns", "online_cpus", "affinity_cpus", "tick_hz")
 HOST_CPU_FLOAT_FIELDS = ("busy_fraction", "steal_fraction", "pressure_some_fraction")
 HOST_CPU_FIELDS = HOST_CPU_INT_FIELDS + HOST_CPU_FLOAT_FIELDS
 REPO = "k1moradi/swapz"
+QUALIFIED_ARTIFACTS = (
+    ("formatter_sha256", "build/userspace/swapzctl", True),
+    ("module_sha256", "build/kernel/experimental/dm-swapz.ko", False),
+    ("oracle_sha256", "build/tests/device-roundtrip", True),
+)
 COLUMNS = ("off", "sync", "async")
 # Cap values are kernel null_blk MiB/s units; request delay is nanoseconds.
 # Labels describe SYNTHETIC profiles, never a real SD/SSD device.
@@ -1499,6 +1505,45 @@ def parse_loaded_correctness(output):
         "id36_pressure_mib": id36_pressure_mib,
         "scope": "OWNED_RAM_NULL_BLK_SYNTHETIC_FAILURE_AND_RESOURCE_PRESSURE",
     }
+
+
+def qualification_artifact_digests():
+    """Hash the exact final build artifacts without following path substitutions."""
+    digests = {}
+    for key, relative_path, executable in QUALIFIED_ARTIFACTS:
+        path = ROOT / relative_path
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW |
+                getattr(os, "O_CLOEXEC", 0))
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or (
+                    executable and not before.st_mode & 0o111):
+                raise ValueError("artifact is not a usable regular file")
+            digest = hashlib.sha256()
+            remaining = before.st_size
+            while remaining:
+                chunk = os.read(descriptor, min(1024 * 1024, remaining))
+                if not chunk:
+                    raise ValueError("artifact changed while hashing")
+                digest.update(chunk)
+                remaining -= len(chunk)
+            if os.read(descriptor, 1):
+                raise ValueError("artifact changed while hashing")
+            after = os.fstat(descriptor)
+            if (before.st_dev, before.st_ino, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns):
+                raise ValueError("artifact changed while hashing")
+            digests[key] = digest.hexdigest()
+        except (OSError, ValueError):
+            return {"status": "UNAVAILABLE", "reason": f"{key} unavailable"}
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    return {"status": "AVAILABLE", **digests}
 
 
 def write_report(result):
@@ -7626,6 +7671,16 @@ def main():
         if code:
             exit_code = code
             break
+    if result["stages"] and result["stages"][0].get("status") == "PASS":
+        # Record the bytes left by the complete qualification sequence. Physical
+        # smoke later requires this report identity, the signed review identity,
+        # and the private snapshot identity to agree exactly.
+        result["qualified_artifacts"] = qualification_artifact_digests()
+    else:
+        result["qualified_artifacts"] = {
+            "status": "UNAVAILABLE",
+            "reason": "build stage did not pass",
+        }
     result["overall"] = qualification_overall(exit_code, result["stages"])
     if not exit_code:
         benchmark = result["benchmarks"]["verdicts"]

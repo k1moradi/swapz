@@ -2644,8 +2644,12 @@ the committed report identity and both historical identities must equal a fresh
 canonical digest of the running host's /etc/machine-id and architecture.
 Only first-parent report publications on main after the
 tested source count, and each current/historical report must individually pass
-all five build, native/rootless, W=1, W=2 and loaded-RAM stages. When the
-physical helper is entered through sudo, every local Git qualification command
+all five build, native/rootless, W=1, W=2 and loaded-RAM stages. The official
+report also records a qualified_artifacts object after the stage sequence,
+containing SHA-256 values for swapzctl, dm-swapz.ko and device-roundtrip when
+those final files are stable, regular and usable. Missing artifact provenance
+does not change ordinary RAM-backed qualification, but it blocks physical smoke.
+When the physical helper is entered through sudo, every local Git qualification command
 execute as SUDO_USER rather than root. The remote-main query instead uses
 the canonical HTTPS GitHub repository from outside the checkout, with
 system/global/injected Git configuration disabled; rewrites of origin cannot
@@ -2691,10 +2695,15 @@ operator, scope=physical swap backing correctness smoke only, the qualified
 source SHA, the selected partition's major:minor identity and persistent PARTUUID, the helper's
 SHA-256 and the formatter_sha256, module_sha256 and oracle_sha256 of the
 three reviewed build artifacts. The read-only plan prints these digest values.
-The helper requires exact digest equality before swapoff, then snapshots the
-reviewed bytes under the root-owned state directory and executes/loads only
-those snapshots. This binds reviewed artifact bytes to the approved source but
-is not, by itself, a proof of reproducible compilation. Duplicate JSON object keys are rejected so the signed attestation has
+The helper requires a three-way exact match before swapoff: the artifact
+digests published by the exact-source make-test report, the hashes in the
+signed independent review, and the bytes currently present in the build tree.
+It then snapshots those same bytes under the root-owned state directory and
+executes/loads only the snapshots; the copy itself rehashes against the report
+identity. This directly binds the physical trial to artifacts observed by the
+qualifying run and prevents post-qualification or post-review substitution.
+It is still not a claim that two independent toolchains produce reproducible
+binary bytes. Duplicate JSON object keys are rejected so the signed attestation has
 one unambiguous interpretation. The exact JSON bytes additionally require a
 detached SSH signature at `<review-record>.sig` under namespace
 `swapz-physical-review`, verified
