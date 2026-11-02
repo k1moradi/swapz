@@ -3,10 +3,12 @@
 
 This is not part of make test and produces no performance qualification.
 Before any write it requires an explicitly repeated stable device path, an
-unused active swap partition, two current-source PASS reports from this host,
-and an independent review record bound to the source, helper and device.
+unused active swap partition, a latest-source owner PASS and identical
+qualified-artifact evidence, plus a verbal review record bound to source,
+helper and device.
 """
 import argparse
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -31,9 +33,26 @@ LOGICAL_SECTORS = 32768
 EXPECTED_SCOPE = "physical swap backing correctness smoke only"
 STATE_NAME = "state.json"
 BACKUP_NAME = "block0.bin"
-REVIEW_SIGNERS = Path("/etc/swapz/physical-review.allowed_signers")
-REVIEW_NAMESPACE = "swapz-physical-review"
+RESULTS_NAME = "results.json"
 CANONICAL_MAIN_REMOTE = "https://github.com/k1moradi/swapz.git"
+VERBAL_REVIEWER = "openai-chatgpt-external-reviewer"
+VERBAL_APPROVAL_TEXT = (
+    "Approved for one bounded physical swap-partition correctness round-trip only, "
+    "provided the exact qualified artifacts remain unchanged, the current "
+    "helper-policy commit passes its non-privileged CI, the selected partition "
+    "passes every read-only identity/safety check, recovery state is durably "
+    "stored on persistent media, and the helper restores and verifies the "
+    "original swap partition before completion. Any mismatch, unexpected state, "
+    "or recovery uncertainty voids this approval and requires the run to stop."
+)
+MAX_RECORDED_OUTPUT_CHARS = 4096
+POST_QUALIFICATION_PATHS = frozenset({
+    "tests/tools/physical-swap-probe.py",
+    "tests/runtime/native/physical-swap-probe-test.py",
+    "docs/testing_standards.md",
+    "docs/ROADMAP.md",
+    "test_results.json",
+})
 # The independent reviewer attests the exact binaries used, not merely their names.
 PHYSICAL_ARTIFACTS = (
     ("formatter_sha256", "build/userspace/swapzctl", True),
@@ -242,6 +261,24 @@ def live_host_identity():
         raise ProbeError("cannot identify the current host for physical smoke") from exc
 
 
+def _require_physical_host():
+    """Reject VM and container execution; unknown detection fails closed."""
+    detector = shutil.which("systemd-detect-virt")
+    if not detector:
+        raise ProbeError("systemd-detect-virt is required to verify a physical host")
+    for mode in ("--vm", "--container"):
+        result = _run([detector, mode], check=False)
+        detected = result.stdout.strip()
+        if result.returncode == 0:
+            raise ProbeError(
+                f"physical swap smoke is not allowed in a {mode[2:]}: "
+                f"{detected or 'virtualized environment'}")
+        if result.returncode != 1 or detected not in {"", "none"}:
+            raise ProbeError(
+                f"cannot establish a physical host with {mode}: "
+                f"{_bounded_text(result.stderr or detected)}")
+
+
 def _verify_target_identity(target):
     if block_identity(target["device"]) != (target["major"], target["minor"]):
         raise ProbeError("selected block identity changed during the operation")
@@ -396,9 +433,51 @@ def _report_artifact_digests(report):
     return digests
 
 
+def _report_is_owner_pass(report, host_identity):
+    return (
+        isinstance(report, dict)
+        and report.get("overall") == "PASS"
+        and report.get("tested_commit_sha") == report.get("source_sha")
+        and isinstance(report.get("source_sha"), str)
+        and re.fullmatch(r"[0-9a-f]{40}", report["source_sha"])
+        and _has_five_passing_stages(report)
+        and report.get("host_identity") == host_identity
+        and host_identity.get("architecture") == "x86_64"
+        and _report_artifact_digests(report) is not None
+    )
+
+
+def _check_post_qualification_paths(source, head):
+    """Allow only non-binary physical policy/report changes after qualification."""
+    ancestor = _git_result(
+        "merge-base", "--is-ancestor", source, head, check=False)
+    if ancestor.returncode:
+        raise ProbeError("qualified source is not an ancestor of main")
+    commits = _git("rev-list", "--reverse", "--first-parent",
+                   f"{source}..{head}").splitlines()
+    for commit in commits:
+        parents = _git("rev-list", "--parents", "-n", "1", commit).split()
+        if len(parents) != 2:
+            raise ProbeError(
+                "merge commits after qualified source block physical admission")
+        names = _git("diff-tree", "--no-commit-id", "--name-only", "-r",
+                     parents[1], commit).splitlines()
+        unexpected = sorted(set(names) - POST_QUALIFICATION_PATHS)
+        if unexpected:
+            raise ProbeError(
+                "post-qualification change can affect qualified artifacts: "
+                + ", ".join(unexpected))
+
+
+def _distinct_report_digest(report):
+    encoded = json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def current_source_evidence():
     if platform.machine() != "x86_64":
         raise ProbeError("physical swap smoke is currently limited to x86_64")
+    _require_physical_host()
     branch = _git("symbolic-ref", "--quiet", "--short", "HEAD")
     if branch != "main":
         raise ProbeError("physical smoke is restricted to main")
@@ -425,26 +504,22 @@ def current_source_evidence():
     if _report_artifact_digests(report) is None:
         raise ProbeError(
             "current test_results.json lacks qualified artifact digests")
-    ancestor = _git_result(
-        "merge-base", "--is-ancestor", source, head, check=False)
-    if ancestor.returncode:
-        raise ProbeError("qualified source is not an ancestor of main")
-    for commit in _git("rev-list", f"{source}..{head}").splitlines():
-        names = _git("diff-tree", "--no-commit-id", "--name-only", "-r",
-                     commit).splitlines()
-        if names != ["test_results.json"]:
-            raise ProbeError("main has changes after the qualified source")
-
     host_identity = live_host_identity()
-    host_json = json.dumps(host_identity, sort_keys=True, separators=(",", ":"))
+    if not _report_is_owner_pass(report, host_identity):
+        raise ProbeError(
+            "current report is not a five-stage PASS from this x86_64 host")
+    _check_post_qualification_paths(source, head)
+
+    artifact_digests = _report_artifact_digests(report)
     distinct_reports = set()
-    artifact_digests = None
-    # Authenticate the first-parent publication chain. test_results.json is a
-    # shared overwriteable artifact, so a later PASS from another host must not
-    # hide this host's exact-source evidence or substitute its build artifacts.
-    for commit in _git("log", "--first-parent", "--format=%H",
-                       f"{source}..origin/main", "--",
-                       "test_results.json").splitlines():
+    latest_source_reports = set()
+    prior_matching_reports = set()
+    # test_results.json is overwriteable and shared by hosts. Read each
+    # first-parent publication as committed, count distinct owner reports with
+    # the live host identity, and accept earlier production sources only when
+    # their three final artifact bytes equal the latest qualification.
+    for commit in _git("log", "--first-parent", "--format=%H", head,
+                       "--", "test_results.json").splitlines():
         result = _git_result(
             "show", f"{commit}:test_results.json", timeout=10, check=False)
         if result.returncode:
@@ -453,34 +528,33 @@ def current_source_evidence():
             historical = json.loads(result.stdout)
         except ValueError:
             continue
-        historical_digests = (
-            _report_artifact_digests(historical)
-            if isinstance(historical, dict) else None)
-        if not isinstance(historical, dict) or \
-                historical.get("overall") != "PASS" or \
-                historical.get("source_sha") != source or \
-                historical.get("tested_commit_sha") != source or \
-                not _has_five_passing_stages(historical) or \
-                historical_digests is None:
+        if not _report_is_owner_pass(historical, host_identity):
             continue
-        old_host = historical.get("host_identity")
-        if isinstance(old_host, dict) and json.dumps(
-                old_host, sort_keys=True, separators=(",", ":")) == host_json:
-            # git log is newest-first: bind artifacts to this host's latest
-            # qualifying run while counting distinct report content.
-            if artifact_digests is None:
-                artifact_digests = historical_digests
-            distinct_reports.add(hashlib.sha256(
-                json.dumps(historical, sort_keys=True,
-                           separators=(",", ":")).encode()).hexdigest())
-    if artifact_digests is None:
+        historical_source = historical["source_sha"]
+        if _git_result("merge-base", "--is-ancestor", historical_source,
+                       source, check=False).returncode:
+            continue
+        historical_digests = _report_artifact_digests(historical)
+        if historical_digests != artifact_digests:
+            continue
+        report_digest = _distinct_report_digest(historical)
+        if historical_source == source:
+            latest_source_reports.add(report_digest)
+        else:
+            prior_matching_reports.add(report_digest)
+        distinct_reports.add(report_digest)
+    if not latest_source_reports:
         raise ProbeError(
-            "no exact-source five-stage PASS report from this host")
+            "no complete owner x86_64 PASS report for the latest qualified source")
+    helper_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     return {
         "source_sha": source,
         "host_identity": host_identity,
         "artifact_digests": artifact_digests,
         "pass_reports": len(distinct_reports),
+        "latest_source_reports": len(latest_source_reports),
+        "prior_matching_reports": len(prior_matching_reports),
+        "helper_sha256": helper_sha256,
         "head": head,
     }
 
@@ -562,7 +636,7 @@ def _snapshot_reviewed_artifacts(state_dir, expected_digests):
                     after.st_mtime_ns, after.st_ctime_ns):
                 raise ProbeError(f"physical artifact changed during snapshot: {source_path.name}")
             if digest.hexdigest() != expected_digests[key]:
-                raise ProbeError(f"physical artifact differs from signed review: {source_path.name}")
+                raise ProbeError(f"physical artifact differs from reviewed bytes: {source_path.name}")
             os.fchmod(destination_fd, 0o500 if executable else 0o400)
             os.fsync(destination_fd)
             succeeded = True
@@ -582,47 +656,8 @@ def _snapshot_reviewed_artifacts(state_dir, expected_digests):
     return snapshots
 
 
-def _trusted_review_signers():
-    """Only independently provisioned root-controlled reviewer keys are trusted."""
-    try:
-        directory = REVIEW_SIGNERS.parent.lstat()
-        signers = REVIEW_SIGNERS.lstat()
-    except OSError as exc:
-        raise ProbeError("trusted reviewer signers are not provisioned") from exc
-    for entry, kind in ((directory, stat.S_ISDIR), (signers, stat.S_ISREG)):
-        if not kind(entry.st_mode) or entry.st_uid != 0 or \
-                entry.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-            raise ProbeError("reviewer trust store must be root-owned and not writable by others")
-    return REVIEW_SIGNERS
-
-
-def _verify_signed_review(review_path, reviewer, record_bytes):
-    """Authenticate the exact JSON bytes with an external reviewer signature."""
-    signature = Path(str(review_path) + ".sig")
-    try:
-        signature_info = signature.lstat()
-    except OSError as exc:
-        raise ProbeError("independent review signature is missing") from exc
-    if not stat.S_ISREG(signature_info.st_mode):
-        raise ProbeError("independent review signature must be a regular file")
-    signers = _trusted_review_signers()
-    keygen = shutil.which("ssh-keygen")
-    if not keygen:
-        raise ProbeError("ssh-keygen is required for independent review verification")
-    try:
-        verified = subprocess.run(
-            [keygen, "-Y", "verify", "-f", str(signers), "-I", reviewer,
-             "-n", REVIEW_NAMESPACE, "-s", str(signature)],
-            input=record_bytes, stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE, timeout=10, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProbeError("independent review signature verification failed") from exc
-    if verified.returncode:
-        raise ProbeError("independent review signature is not authenticated")
-
-
 def _load_unique_json(record_bytes):
-    """Signed safety records must have one unambiguous value per JSON key."""
+    """Safety records must have one unambiguous value per JSON key."""
     def unique_object(pairs):
         result = {}
         for key, value in pairs:
@@ -639,18 +674,23 @@ def validate_review(review_path, evidence, target):
         record_bytes = Path(review_path).read_bytes()
         review = _load_unique_json(record_bytes)
     except (OSError, ValueError) as exc:
-        raise ProbeError(f"cannot read independent safety review: {exc}") from exc
+        raise ProbeError(f"cannot read verbal safety review: {exc}") from exc
     if not isinstance(review, dict):
-        raise ProbeError("independent safety review must be an object")
+        raise ProbeError("verbal safety review must be an object")
     reviewer = review.get("reviewer")
     operator = os.environ.get("SUDO_USER") or os.environ.get("USER") or "root"
     if review.get("approved") is not True or not isinstance(reviewer, str) or \
+            review.get("approval_mode") != "verbal" or \
+            review.get("approval_text") != VERBAL_APPROVAL_TEXT or \
+            reviewer != VERBAL_REVIEWER or \
             (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@+-]{0,127}", reviewer) or
              reviewer.lower() in {"root", operator.lower()}):
-        raise ProbeError("review record must name a separate approving reviewer")
+        raise ProbeError(
+            "review record must contain the exact verbal approval and a separate reviewer")
     run_id = review.get("run_id")
     if review.get("scope") != EXPECTED_SCOPE or \
             review.get("source_sha") != evidence["source_sha"] or \
+            review.get("helper_git_sha") != evidence["head"] or \
             review.get("device_major_minor") != \
             f"{target['major']}:{target['minor']}" or \
             review.get("device_partuuid") != target["partuuid"] or \
@@ -662,7 +702,8 @@ def validate_review(review_path, evidence, target):
             not isinstance(run_id, str) or \
             not re.fullmatch(r"[0-9a-f]{32}", run_id) or \
             review.get("helper_sha256") != hashlib.sha256(
-                Path(__file__).read_bytes()).hexdigest():
+                Path(__file__).read_bytes()).hexdigest() or \
+            review.get("helper_sha256") != evidence.get("helper_sha256"):
         raise ProbeError("review record does not match this source, helper and device")
     artifact_digests = evidence.get("artifact_digests")
     if not isinstance(artifact_digests, dict) or any(
@@ -671,8 +712,8 @@ def validate_review(review_path, evidence, target):
            review[key] != artifact_digests.get(key)
            for key, _, _ in PHYSICAL_ARTIFACTS):
         raise ProbeError("review record does not match the tested binary artifacts")
-    _verify_signed_review(review_path, reviewer, record_bytes)
-    return {"reviewer": reviewer, "run_id": run_id}
+    return {"reviewer": reviewer, "run_id": run_id,
+            "approval_mode": "verbal"}
 
 
 def _fsync_directory(directory):
@@ -684,7 +725,7 @@ def _fsync_directory(directory):
         os.close(fd)
 
 
-def _recovery_base():
+def _recovery_base(target=None):
     """Require an operator-provisioned, non-symlink, root-controlled location."""
     base = RECOVERY_BASE
     for directory in (base, *base.parents):
@@ -713,14 +754,18 @@ def _recovery_base():
         raise ProbeError("recovery filesystem has no verified persistent block source")
     ancestry = _run([
         "lsblk", "--inverse", "--raw", "--noheadings",
-        "--output", "TYPE,NAME", source_device,
+        "--output", "MAJ:MIN,TYPE,NAME", source_device,
     ]).stdout.splitlines()
     devices = [line.split() for line in ancestry if line.strip()]
-    if not devices or any(len(row) != 2 or row[0] in {
+    if not devices or any(len(row) != 3 or not re.fullmatch(
+            r"[0-9]+:[0-9]+", row[0]) or row[1] in {
             "loop", "ram", "zram"} or re.match(
-            r"^(?:loop|ram|zram|nullb)", row[1]) for row in devices) or (
-            not any(row[0] == "disk" for row in devices)):
+            r"^(?:loop|ram|zram|nullb)", row[2]) for row in devices) or (
+            not any(row[1] == "disk" for row in devices)):
         raise ProbeError("recovery backing chain is volatile or unverifiable")
+    if target is not None and f"{target['major']}:{target['minor']}" in {
+            row[0] for row in devices}:
+        raise ProbeError("recovery storage is on the selected swap partition")
     return base
 
 
@@ -731,7 +776,7 @@ def _recovery_run_directory(state_dir, run_id=None):
         raise ProbeError("recovery run directory must be a direct child of the fixed base")
     if run_id is not None:
         if directory.name != f"swapz-physical-{run_id}":
-            raise ProbeError("run directory must match the one-use signed run_id")
+            raise ProbeError("run directory must match the one-use approval run_id")
     elif not re.fullmatch(r"swapz-physical-[0-9a-f]{32}", directory.name):
         raise ProbeError("invalid recovery run directory name")
     return directory
@@ -776,27 +821,27 @@ def _review_consumption_record(target, run_id):
 
 
 def _check_review_unconsumed(target, run_id):
-    base = _recovery_base()
+    base = _recovery_base(target)
     if (base / f"consumed-{run_id}.json").exists() or (
             base / f"partition-{target['partuuid']}.active").exists():
         raise ProbeError("review consumed or partition recovery outstanding")
 
 
 def _burn_review(target, run_id):
-    """Permanently consume one signed run before any preparation can fail."""
-    base = _recovery_base()
+    """Permanently consume one approved run before any preparation can fail."""
+    base = _recovery_base(target)
     record = _review_consumption_record(target, run_id)
     if (base / f"partition-{target['partuuid']}.active").exists():
         raise ProbeError("partition recovery is already outstanding")
     try:
         _durable_exclusive_record(base / f"consumed-{run_id}.json", record)
     except FileExistsError as exc:
-        raise ProbeError("signed physical review was already consumed") from exc
+        raise ProbeError("verbal physical review was already consumed") from exc
 
 
 def _consume_review(target, run_id, *, preburned=False):
     """Claim partition recovery exactly once, including for direct callers."""
-    base = _recovery_base()
+    base = _recovery_base(target)
     record = _review_consumption_record(target, run_id)
     active_path = base / f"partition-{target['partuuid']}.active"
     used_path = base / f"consumed-{run_id}.json"
@@ -822,7 +867,7 @@ def _release_partition_ownership(state):
     """Release an active marker only after durable COMPLETE, never the consumption."""
     if state.get("stage") != "COMPLETE":
         raise ProbeError("cannot release ownership before full restoration")
-    base = _recovery_base()
+    base = _recovery_base(state)
     active_path = base / f"partition-{state['partuuid']}.active"
     try:
         marker = _load_unique_json(active_path.read_bytes())
@@ -835,7 +880,7 @@ def _release_partition_ownership(state):
     try:
         used = _load_unique_json(used_path.read_bytes())
     except (OSError, ValueError) as exc:
-        raise ProbeError("one-use signed approval consumption is missing") from exc
+        raise ProbeError("one-use verbal approval consumption is missing") from exc
     if used != marker:
         raise ProbeError("consumed review identity does not match partition owner")
     active_path.unlink()
@@ -893,6 +938,180 @@ def _save_state(state_dir, state):
             os.unlink(temp_name)
         except FileNotFoundError:
             pass
+
+
+def _utc_timestamp():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z")
+
+
+def _bounded_text(value):
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if not isinstance(value, str):
+        value = str(value)
+    if len(value) <= MAX_RECORDED_OUTPUT_CHARS:
+        return value
+    suffix = "\n...[truncated]"
+    return value[:MAX_RECORDED_OUTPUT_CHARS - len(suffix)] + suffix
+
+
+def _save_results(state_dir, results):
+    """Atomically persist bounded metadata/output and its directory entry."""
+    state_dir = Path(state_dir)
+    fd, temp_name = tempfile.mkstemp(prefix=".results-", dir=state_dir)
+    try:
+        os.fchmod(fd, 0o600)
+        payload = (json.dumps(results, sort_keys=True, indent=2) + "\n").encode()
+        _write_all(fd, payload)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.replace(temp_name, state_dir / RESULTS_NAME)
+        _fsync_directory(state_dir)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
+def _captured_command(args, timeout=15):
+    """Return a small command record even when a diagnostic command fails."""
+    try:
+        result = _run(args, timeout=timeout, check=False)
+    except ProbeError as exc:
+        message = _bounded_text(exc)
+        return {"return_code": None, "stdout": "", "stderr": message,
+                "timed_out": "timed out" in message.lower()}
+    return {"return_code": result.returncode,
+            "stdout": _bounded_text(result.stdout),
+            "stderr": _bounded_text(result.stderr),
+            "timed_out": False}
+
+
+def _block_stat_snapshot(target):
+    path = Path(f"/sys/dev/block/{target['major']}:{target['minor']}/stat")
+    try:
+        fields = [int(value) for value in path.read_text().split()]
+        if not fields:
+            raise ValueError("empty block statistics")
+        return {"available": True, "values": fields}
+    except (OSError, ValueError) as exc:
+        return {"available": False, "error": _bounded_text(exc)}
+
+
+def _kernel_swapz_messages(start_timestamp):
+    """Retain only bounded swapz-related kernel lines for this attempt."""
+    journalctl = shutil.which("journalctl")
+    if journalctl:
+        source = "journalctl"
+        args = [journalctl, "--boot", "--kernel", "--no-pager",
+                "--output=short-iso", f"--since={start_timestamp}"]
+    else:
+        dmesg = shutil.which("dmesg")
+        if not dmesg:
+            return {"available": False,
+                    "error": "journalctl and dmesg are unavailable"}
+        source = "dmesg"
+        args = [dmesg, "--color=never", "--time-format=iso"]
+    try:
+        result = _run(args, timeout=20, check=False)
+    except ProbeError as exc:
+        return {"available": False, "source": source,
+                "error": _bounded_text(exc)}
+    if result.returncode:
+        return {"available": False, "source": source,
+                "return_code": result.returncode,
+                "error": _bounded_text(result.stderr or result.stdout)}
+    matching = [line for line in result.stdout.splitlines()
+                if re.search(r"swapz", line, re.IGNORECASE)]
+    text = "\n".join(matching[-32:])
+    return {"available": True, "source": source,
+            "matching_line_count": len(matching),
+            "messages": _bounded_text(text)}
+
+
+def _dm_inventory_snapshot(owned_name=None, owned_uuid=None):
+    result = _run([
+        "dmsetup", "info", "-c", "--noheadings", "-o", "name,uuid",
+    ], check=False)
+    if result.returncode:
+        raise ProbeError("cannot snapshot Device Mapper inventory")
+    rows = []
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) not in (1, 2):
+            raise ProbeError("cannot parse Device Mapper inventory")
+        name = fields[0]
+        uuid = fields[1] if len(fields) == 2 else ""
+        if name == owned_name or uuid == owned_uuid:
+            continue
+        rows.append([name, uuid])
+    rows.sort()
+    digest = hashlib.sha256(json.dumps(
+        rows, separators=(",", ":")).encode()).hexdigest()
+    return {"other_mapper_count": len(rows), "other_mapper_sha256": digest}
+
+
+def _final_observations(results, state_dir, state, target):
+    """Collect final identity-only observations; never read test page contents."""
+    try:
+        header = _read_block0(target["device"], target)
+        results["final_block0_sha256"] = hashlib.sha256(header).hexdigest()
+        results["original_header_matches_final"] = (
+            results["final_block0_sha256"] == results.get(
+                "original_header_sha256"))
+    except ProbeError as exc:
+        results["final_block0_sha256"] = None
+        results["original_header_matches_final"] = False
+        results["final_block0_error"] = _bounded_text(exc)
+    try:
+        results["final_swap_row"] = _active_swap_for(
+            target["major"], target["minor"])
+    except ProbeError as exc:
+        results["final_swap_row"] = None
+        results["final_swap_error"] = _bounded_text(exc)
+    results["block_stats_after"] = _block_stat_snapshot(target)
+    results["kernel_swapz_messages"] = _kernel_swapz_messages(
+        results.get("start_timestamp", "now"))
+    row = results.get("final_swap_row")
+    results["restored_swap_verified"] = (
+        isinstance(row, dict)
+        and row.get("size_kib") == target.get("swap_size_kib")
+        and row.get("priority") == target.get("swap_priority"))
+    try:
+        results["final_mapper_present"] = _mapper_exists(state)
+    except ProbeError as exc:
+        results["final_mapper_present"] = None
+        results["final_mapper_error"] = _bounded_text(exc)
+    results["final_module_present"] = Path("/sys/module/dm_swapz").exists()
+    active = _recovery_base(target) / f"partition-{state['partuuid']}.active"
+    results["active_partition_marker_present"] = active.exists()
+    consumed = _recovery_base(target) / f"consumed-{state['run_id']}.json"
+    results["approval_consumed"] = consumed.is_file()
+    results["final_recovery_state"] = state.get("stage")
+    results["mapper_removal_succeeded"] = (
+        results["final_mapper_present"] is False)
+    results["module_cleanup_succeeded"] = (
+        results["final_module_present"] is False)
+    try:
+        results["dm_inventory_after"] = _dm_inventory_snapshot(
+            state.get("dm_name"), state.get("dm_uuid"))
+        before = results.get("dm_inventory_before")
+        after = results["dm_inventory_after"]
+        results["unrelated_mapper_inventory_unchanged"] = (
+            isinstance(before, dict)
+            and before.get("other_mapper_count") == after["other_mapper_count"]
+            and before.get("other_mapper_sha256") == after["other_mapper_sha256"])
+    except ProbeError as exc:
+        results["dm_inventory_after"] = None
+        results["unrelated_mapper_inventory_unchanged"] = None
+        results["dm_inventory_error"] = _bounded_text(exc)
+    results["end_timestamp"] = _utc_timestamp()
+    _save_results(state_dir, results)
 
 
 def _allocate_dm_identity():
@@ -1028,6 +1247,79 @@ def _verify_owned_mapper(state, target):
     return mapper
 
 
+def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
+                               results, phase, options=()):
+    command = [oracle, mapper, *options]
+    entry = {
+        "phase": phase,
+        "argv": [str(value) for value in command],
+        "status": "IDENTITY_CHECK_PENDING",
+        "started_at": _utc_timestamp(),
+        "return_code": None,
+        "stdout": "",
+        "stderr": "",
+        "dmsetup_status_before": None,
+        "dmsetup_status_after": None,
+        "block_stats_before": None,
+        "block_stats_after": None,
+    }
+    results["physical_oracle_phases"].append(entry)
+    _save_results(state_dir, results)
+    try:
+        verified_mapper = _verify_owned_mapper(state, target)
+        if verified_mapper != mapper:
+            raise ProbeError("verified mapper path changed before oracle phase")
+    except ProbeError as exc:
+        entry["status"] = "BLOCKED_BEFORE_ORACLE"
+        entry["pre_oracle_identity_error"] = _bounded_text(exc)
+        entry["ended_at"] = _utc_timestamp()
+        _save_results(state_dir, results)
+        raise
+
+    entry["dmsetup_status_before"] = _captured_command(
+        ["dmsetup", "status", state["dm_name"]])
+    entry["block_stats_before"] = _block_stat_snapshot(target)
+    if entry["dmsetup_status_before"]["return_code"] != 0:
+        entry["status"] = "BLOCKED_BEFORE_ORACLE"
+        entry["pre_oracle_status_error"] = "dmsetup status failed"
+        entry["ended_at"] = _utc_timestamp()
+        _save_results(state_dir, results)
+        raise ProbeError("dmsetup status failed before physical oracle phase")
+
+    entry["status"] = "RUNNING"
+    entry["oracle_started_at"] = _utc_timestamp()
+    _save_results(state_dir, results)
+    captured = _captured_command(command, timeout=180)
+    entry["return_code"] = captured["return_code"]
+    entry["stdout"] = captured["stdout"]
+    entry["stderr"] = captured["stderr"]
+    entry["timed_out"] = captured["timed_out"]
+
+    try:
+        verified_mapper = _verify_owned_mapper(state, target)
+        if verified_mapper != mapper:
+            raise ProbeError("verified mapper path changed after oracle phase")
+        entry["post_oracle_identity"] = "PASS"
+    except ProbeError as exc:
+        entry["post_oracle_identity"] = "FAIL"
+        entry["post_oracle_identity_error"] = _bounded_text(exc)
+    entry["dmsetup_status_after"] = _captured_command(
+        ["dmsetup", "status", state["dm_name"]])
+    entry["block_stats_after"] = _block_stat_snapshot(target)
+    entry["ended_at"] = _utc_timestamp()
+
+    passed = (
+        entry["return_code"] == 0
+        and entry.get("post_oracle_identity") == "PASS"
+        and entry["dmsetup_status_after"]["return_code"] == 0
+    )
+    entry["status"] = "PASS" if passed else "FAIL"
+    _save_results(state_dir, results)
+    if not passed:
+        raise ProbeError(
+            f"physical oracle phase {phase} failed; later phases stopped")
+
+
 def _mapper_exists(state):
     """Distinguish proven absence from a failed individual info query."""
     result = _run([
@@ -1075,7 +1367,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         raise ProbeError("cannot load unambiguous saved physical recovery state") from exc
     if not isinstance(state, dict) or not re.fullmatch(
             r"[0-9a-f]{32}", str(state.get("run_id", ""))):
-        raise ProbeError("saved recovery state lacks signed one-use run identity")
+        raise ProbeError("saved recovery state lacks one-use run identity")
     _recovery_run_directory(state_dir, state["run_id"])
     if len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() != (
             state.get("header_sha256")):
@@ -1098,6 +1390,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             raise ProbeError("saved recovery state does not own partition marker")
         target = inspect_target_identity_for_recovery(
             state, device_arg, confirm_arg)
+        _recovery_base(target)
         module_present = Path("/sys/module/dm_swapz").exists()
         if module_present and state["module_ownership"] != "MODULE_OWNED":
             raise ProbeError(
@@ -1109,6 +1402,9 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         if _mapper_exists(state):
             _verify_owned_mapper(state, target)
             _run(["dmsetup", "remove", state["dm_name"]], timeout=60)
+        if _mapper_exists(state):
+            raise ProbeError("helper-owned mapper remains after removal")
+        state["mapper_removal_succeeded"] = True
         if state["module_ownership"] == "MODULE_OWNED" and module_present:
             parameter = Path(
                 "/sys/module/dm_swapz/parameters/allow_physical_backing")
@@ -1116,6 +1412,10 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
                     parameter.read_text().strip().lower() not in {"y", "1"}):
                 raise ProbeError("module identity/physical opt-in cannot be proven")
             _run(["rmmod", "dm_swapz"], timeout=30)
+        if Path("/sys/module/dm_swapz").exists():
+            raise ProbeError("dm_swapz remains loaded after helper cleanup")
+        state["module_cleanup_succeeded"] = True
+        _save_state(state_dir, state)
         if _holder_names(target["major"], target["minor"]):
             raise ProbeError("recovery refused while partition has holders")
         if _mountinfo_has_device(target["major"], target["minor"]):
@@ -1135,6 +1435,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
                           expected_current=current_header)
         if _read_block0(target["device"], target) != backup:
             raise ProbeError("original 4 KiB header not restored exactly")
+        state["final_block0_sha256"] = hashlib.sha256(backup).hexdigest()
 
         if state.get("swap_was_active"):
             if _active_swap_for(target["major"], target["minor"]) is None:
@@ -1151,7 +1452,18 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
                     "original swap major, size or priority was not restored")
         state["stage"] = "COMPLETE"
         _save_state(state_dir, state)
+        results_path = state_dir / RESULTS_NAME
+        if results_path.is_file():
+            try:
+                results = _load_unique_json(results_path.read_bytes())
+            except (OSError, ValueError) as exc:
+                raise ProbeError("saved physical results record is unreadable") from exc
+            if not isinstance(results, dict):
+                raise ProbeError("saved physical results record is not an object")
+            _final_observations(results, state_dir, state, target)
         _release_partition_ownership(state)
+        if results_path.is_file():
+            _final_observations(results, state_dir, state, target)
         return state
     finally:
         if lock_fd is not None:
@@ -1198,7 +1510,7 @@ def _prepare_state(target, state_dir, evidence, review):
         raise ProbeError("one-use recovery run directory already exists")
     _verify_target_identity(target)
     if _read_block0(target["device"], target) != target["header"]:
-        raise ProbeError("original header changed since signed device review")
+        raise ProbeError("original header changed since device review")
     state_dir.mkdir(mode=0o700)  # Deliberately no recursive parent creation.
     _fsync_directory(state_dir.parent)
     info = state_dir.lstat()
@@ -1231,6 +1543,8 @@ def _prepare_state(target, state_dir, evidence, review):
         "swap_size_kib": target["swap_size_kib"],
         "swap_used_kib": target["swap_used_kib"],
         "source_sha": evidence["source_sha"],
+        "helper_git_sha": evidence["head"],
+        "helper_sha256": evidence["helper_sha256"],
         "host_report_count": evidence["pass_reports"],
         "reviewer": review["reviewer"],
         "run_id": review["run_id"],
@@ -1244,21 +1558,20 @@ def _prepare_state(target, state_dir, evidence, review):
 
 
 def _remove_test_objects(state, state_dir):
-    recover(state_dir, state["device_arg"], state["device_arg"], lock_held=True,
-            module_owned_by_process=True)
+    return recover(state_dir, state["device_arg"], state["device_arg"],
+                   lock_held=True, module_owned_by_process=True)
 
 
 def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
     if os.geteuid() != 0:
         raise ProbeError("run action requires root")
+    start_timestamp = _utc_timestamp()
     evidence = current_source_evidence()
-    if evidence["pass_reports"] < 2:
-        raise ProbeError(
-            "requires two current-source PASS reports from this computer; "
-            f"found {evidence['pass_reports']}")
     target = inspect_target(device_arg, confirm_arg)
     target["device_arg"] = device_arg
-    if _artifact_digests() != evidence["artifact_digests"]:
+    _recovery_base(target)
+    live_artifact_digests = _artifact_digests()
+    if live_artifact_digests != evidence["artifact_digests"]:
         raise ProbeError(
             "current build artifacts differ from the qualified make-test report")
     review = validate_review(review_path, evidence, target)
@@ -1270,14 +1583,55 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                     "swapoff", "swapon", "findmnt", "udevadm"):
         if not shutil.which(command):
             raise ProbeError(f"required command is missing: {command}")
+    dm_inventory_before = _dm_inventory_snapshot()
 
     lock_fd = _partition_lock(target["partuuid"])
     try:
-        # Burn the signed one-run approval before state preparation. A crash,
+        # Burn the one-use verbal approval before state preparation. A crash,
         # fsync failure or artifact-snapshot failure can never make it reusable.
         _burn_review(target, review["run_id"])
         state, state_dir = _prepare_state(
             target, state_dir_arg, evidence, review)
+        results = {
+            "schema": "swapz-physical-results-v1",
+            "start_timestamp": start_timestamp,
+            "end_timestamp": None,
+            "current_git_head": evidence["head"],
+            "qualified_production_source_sha": evidence["source_sha"],
+            "helper_git_sha": evidence["head"],
+            "helper_sha256": evidence["helper_sha256"],
+            "qualified_artifact_sha256": dict(evidence["artifact_digests"]),
+            "live_artifact_sha256_before_run": dict(live_artifact_digests),
+            "run_id": review["run_id"],
+            "approval_mode": "verbal",
+            "reviewer": review["reviewer"],
+            "device_uuid_path": device_arg,
+            "major_minor": f"{target['major']}:{target['minor']}",
+            "partuuid": target["partuuid"],
+            "device_size_bytes": target["size_bytes"],
+            "original_header_sha256": hashlib.sha256(
+                target["header"]).hexdigest(),
+            "original_swap_row": {
+                "path": target["swap_path"],
+                "kind": "partition",
+                "size_kib": target["swap_size_kib"],
+                "used_kib": target["swap_used_kib"],
+                "priority": target["swap_priority"],
+            },
+            "qualification_evidence": {
+                "latest_source_reports": evidence["latest_source_reports"],
+                "earlier_matching_artifact_reports": evidence[
+                    "prior_matching_reports"],
+                "total_distinct_matching_reports": evidence["pass_reports"],
+            },
+            "dm_name": state["dm_name"],
+            "dm_uuid": state["dm_uuid"],
+            "dm_inventory_before": dm_inventory_before,
+            "block_stats_before": _block_stat_snapshot(target),
+            "physical_oracle_phases": [],
+            "final_recovery_state": "BACKED_UP",
+        }
+        _save_results(state_dir, results)
         failure = None
         partition_claim_attempted = False
         try:
@@ -1287,6 +1641,14 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             formatter = artifacts["formatter_sha256"]
             module = artifacts["module_sha256"]
             oracle = artifacts["oracle_sha256"]
+            if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != \
+                    evidence["helper_sha256"] or \
+                    _git("rev-parse", "HEAD") != evidence["head"] or \
+                    _git("rev-parse", "origin/main") != evidence["head"] or \
+                    _git("status", "--porcelain") or \
+                    _remote_main_sha() != evidence["head"]:
+                raise ProbeError(
+                    "main or the bound helper changed before physical execution")
             _verify_target_identity(target)
             current_swap = _active_swap_for(target["major"], target["minor"])
             if current_swap is None or current_swap["used_kib"] != 0 or (
@@ -1295,6 +1657,13 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                 raise ProbeError("selected swap state changed after preflight")
             if _read_block0(target["device"], target) != target["header"]:
                 raise ProbeError("original block zero changed after backup")
+            live_before_swapoff = _artifact_digests()
+            if live_before_swapoff != evidence["artifact_digests"]:
+                raise ProbeError(
+                    "qualified artifacts changed before physical execution")
+            results["live_artifact_sha256_before_swapoff"] = dict(
+                live_before_swapoff)
+            _save_results(state_dir, results)
             partition_claim_attempted = True
             _consume_review(target, review["run_id"], preburned=True)
             # The consumed review, active partition claim and backup are durable.
@@ -1359,22 +1728,72 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
 
             _verify_target_identity(target)
             mapper = _verify_owned_mapper(state, target)
-            _run([
-                oracle, mapper, "--expect-dm-uuid", state["dm_uuid"],
-            ], timeout=180)
+            phases = [
+                ("byte-exact-opened-dm", ("--expect-dm-uuid", state["dm_uuid"])),
+                ("delta64-write-series-128-round-1",
+                 ("--delta64-write-series", "128", "1")),
+                ("delta64-verify-series-128-round-1",
+                 ("--delta64-verify-series", "128", "1")),
+                ("segmented-write-series-128-round-5",
+                 ("--segmented-write-series", "128", "5")),
+                ("segmented-verify-series-128-round-5",
+                 ("--segmented-verify-series", "128", "5")),
+                ("ordinary-verify-series-128-round-5",
+                 ("--verify-series", "128", "5")),
+                ("ordinary-write-series-128-round-6",
+                 ("--write-series", "128", "6")),
+                ("segmented-verify-series-128-round-6",
+                 ("--segmented-verify-series", "128", "6")),
+                ("thp-write-series-128-round-7",
+                 ("--thp-write-series", "128", "7")),
+                ("thp-verify-series-128-round-7",
+                 ("--thp-verify-series", "128", "7")),
+                ("ordinary-verify-series-128-round-7",
+                 ("--verify-series", "128", "7")),
+            ]
+            for phase_name, options in phases:
+                _run_positive_oracle_phase(
+                    oracle, mapper, state, target, state_dir, results,
+                    phase_name, options)
             state["stage"] = "ORACLE_PASS"
             _save_state(state_dir, state)
-            print("PHYSICAL_SMOKE=BYTE_EXACT_CORRECTNESS_ONLY")
+            results["oracle_suite"] = "PASS"
+            results["final_recovery_state"] = "ORACLE_PASS"
+            _save_results(state_dir, results)
+            print("PHYSICAL_SMOKE=BOUNDED_POSITIVE_CORRECTNESS_ONLY")
         except BaseException as exc:
             failure = exc
         if partition_claim_attempted:
             try:
-                _remove_test_objects(state, state_dir)
+                state = _remove_test_objects(state, state_dir)
             except BaseException as cleanup_exc:
-                state["stage_before_recovery"] = state["stage"]
-                state["stage"] = "RECOVERY_REQUIRED"
+                try:
+                    saved_state = _load_unique_json(
+                        (state_dir / STATE_NAME).read_bytes())
+                    if isinstance(saved_state, dict):
+                        state = saved_state
+                except (OSError, ValueError):
+                    pass
+                if state.get("stage") != "RECOVERY_REQUIRED":
+                    state["stage_before_recovery"] = state["stage"]
+                    state["stage"] = "RECOVERY_REQUIRED"
                 state["recovery_error"] = str(cleanup_exc)
                 _save_state(state_dir, state)
+                results["end_timestamp"] = _utc_timestamp()
+                try:
+                    saved_results = _load_unique_json(
+                        (state_dir / RESULTS_NAME).read_bytes())
+                    if isinstance(saved_results, dict):
+                        results = saved_results
+                except (OSError, ValueError):
+                    pass
+                results["final_recovery_state"] = state["stage"]
+                results["recovery_error"] = _bounded_text(cleanup_exc)
+                results["end_timestamp"] = _utc_timestamp()
+                try:
+                    _save_results(state_dir, results)
+                except ProbeError:
+                    pass
                 print(f"RECOVERY_REQUIRED: state preserved at {state_dir}",
                       file=sys.stderr)
                 if failure is None:
@@ -1383,9 +1802,40 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             state["stage"] = "PRE_DESTRUCTIVE_FAILED"
             state["recovery_error"] = str(failure)
             _save_state(state_dir, state)
+            results["final_recovery_state"] = "PRE_DESTRUCTIVE_FAILED"
+            results["recovery_error"] = _bounded_text(failure)
+            try:
+                _final_observations(results, state_dir, state, target)
+            except ProbeError as result_exc:
+                results["results_save_error"] = _bounded_text(result_exc)
+        if state.get("stage") == "COMPLETE":
+            try:
+                results = _load_unique_json(
+                    (state_dir / RESULTS_NAME).read_bytes())
+            except (OSError, ValueError) as exc:
+                if failure is None:
+                    failure = ProbeError(
+                        f"cannot reload final physical results: {exc}")
+            if isinstance(results, dict):
+                required_true = (
+                    "original_header_matches_final",
+                    "restored_swap_verified",
+                    "mapper_removal_succeeded",
+                    "module_cleanup_succeeded",
+                    "approval_consumed",
+                )
+                if any(results.get(key) is not True for key in required_true) or \
+                        results.get("active_partition_marker_present") is not False or \
+                        results.get("final_recovery_state") != "COMPLETE" or \
+                        results.get("unrelated_mapper_inventory_unchanged") is not True:
+                    if failure is None:
+                        failure = ProbeError(
+                            "final physical restoration/evidence checks failed")
         if failure is not None:
+            print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}", file=sys.stderr)
             raise ProbeError(str(failure)) from failure
         print(f"PHYSICAL_SMOKE_RESTORED=swap-enabled state={state_dir}")
+        print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
     finally:
         os.close(lock_fd)
 
@@ -1393,14 +1843,24 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
 def plan(device_arg, confirm_arg, review_path=None):
     target = inspect_target(device_arg, confirm_arg)
     target["device_arg"] = device_arg
+    try:
+        _recovery_base(target)
+        recovery_message = (
+            "persistent recovery filesystem verified; selected swap excluded")
+    except ProbeError as exc:
+        recovery_message = f"recovery storage: BLOCKED ({exc})"
     evidence = None
     try:
         evidence = current_source_evidence()
         evidence_message = (
-            f"same-host current-source PASS reports: {evidence['pass_reports']}/2")
+            "bare-metal latest-source owner x86_64 PASS accepted; "
+            f"matching artifact reports={evidence['pass_reports']} "
+            f"(latest={evidence['latest_source_reports']}, "
+            f"earlier={evidence['prior_matching_reports']})")
     except ProbeError as exc:
         evidence_message = f"source qualification: BLOCKED ({exc})"
-    review_message = "independent review: missing"
+    review_message = "verbal review: missing"
+    consumption_message = "one-use approval: unavailable"
     artifact_digests = None
     artifact_message = "reviewed binaries: unavailable"
     try:
@@ -1422,23 +1882,29 @@ def plan(device_arg, confirm_arg, review_path=None):
             review = validate_review(review_path, evidence, target)
             _check_review_unconsumed(target, review["run_id"])
             review_message = (
-                f"independent review: present ({review['reviewer']}, "
+                f"verbal approval: present ({review['reviewer']}, "
                 f"one-use run {review['run_id']})")
+            consumption_message = "one-use approval: not consumed"
         except ProbeError as exc:
-            review_message = f"independent review: BLOCKED ({exc})"
+            review_message = f"verbal review: BLOCKED ({exc})"
+            if "consumed" in str(exc).lower() or "outstanding" in str(exc).lower():
+                consumption_message = f"one-use approval: BLOCKED ({exc})"
     print(f"DEVICE_PREFLIGHT=PASS major_minor={target['major']}:{target['minor']} "
           f"partuuid={target['partuuid']} bytes={target['size_bytes']} "
           f"used_kib={target['swap_used_kib']}")
+    print(f"RECOVERY_GATE={recovery_message}")
     print(f"SOURCE_GATE={evidence_message}")
     if evidence is not None:
-        helper_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         print(f"QUALIFIED_SOURCE_SHA={evidence['source_sha']}")
-        print(f"HELPER_SHA256={helper_sha}")
+        print(f"HELPER_GIT_SHA={evidence['head']}")
+        print(f"HELPER_SHA256={evidence['helper_sha256']}")
     print(f"ARTIFACT_GATE={artifact_message}")
     if artifact_digests is not None:
         for key, _, _ in PHYSICAL_ARTIFACTS:
             print(f"{key.upper()}={artifact_digests[key]}")
     print(f"REVIEW_GATE={review_message}")
+    print(f"RUN_CONSUMPTION_GATE={consumption_message}")
+    print("VERBAL_APPROVAL_AUTHENTICATION=PROCEDURAL_NOT_CRYPTOGRAPHIC")
     print("MAKE_TEST_PHYSICAL=NO")
     print("PHYSICAL_WRITE=NOT_PERFORMED")
 

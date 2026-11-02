@@ -2597,268 +2597,180 @@ all data/discard paths. Exact-current-main must still pass ordinary `make test`
 before any physical-media evidence is considered.
 
 A separately owner-authorized physical swap-partition correctness smoke is
-implemented only as the private tests/tools/physical-swap-probe.py helper; it
-is never called by `make test` and does not qualify performance or
-physical-media behavior. Before it can write, it requires the same x86 host to
-have two committed, distinct-content PASS reports for the exact current source:
-the committed report identity and both historical identities must equal a fresh
-canonical digest of the running host's /etc/machine-id and architecture.
-Only first-parent report publications on main after the
-tested source count, and each current/historical report must individually pass
-all five build, native/rootless, W=1, W=2 and loaded-RAM stages. The official
-report also records a qualified_artifacts object after the stage sequence,
-containing SHA-256 values for swapzctl, dm-swapz.ko and device-roundtrip when
-those final files are stable, regular and usable. Missing artifact provenance
-does not change ordinary RAM-backed qualification, but it blocks physical smoke.
-When the physical helper is entered through sudo, every local Git qualification command
-execute as SUDO_USER rather than root. The remote-main query instead uses
-the canonical HTTPS GitHub repository from outside the checkout, with
-system/global/injected Git configuration disabled; rewrites of origin cannot
-satisfy the source gate. Missing canonical remote evidence blocks physical smoke.
-Duplicate publications of identical JSON cannot satisfy both counts.
-This is a conservative distinct-report gate, not cryptographic proof of two
-independently executed runs. It additionally requires a separately signed
-safety-review record bound to the source, helper hash and selected partition,
-an explicitly
-repeated /dev/disk/by-uuid/ path, and an active swap partition with zero used
-KiB, no mount and no block holders. Before a destructive operation the helper
-must prove a nonempty partition-table PARTUUID and matching
-/dev/disk/by-partuuid/ symlink; recover checks the persisted canonical block
-path, major:minor, size and PARTUUID without resolving the original swap UUID
-symlink, which can disappear when the header is overwritten. It saves the
-original 4KiB swap header in a root-only state directory, disables only that
-selected swap partition, uses the existing physical-backing opt-in and byte-exact
-device-roundtrip oracle, then removes only its UUID-owned mapper, restores and
-verifies the original header, and re-enables the original swap partition.
-Recovery must read the current block-0 header and accept only the saved
-original, a zero header at SWAP_OFF or HEADER_CLEARED (never BACKED_UP), or an exact
-digest-matched valid SWZ v1 header after the formatter digest is saved.
-Unknown, modified or unrelated headers must stop before any overwrite and
-require manual review. A crash after the formatter writes SWZ but before its
-header digest is durably recorded is deliberately manual-recovery-only, not
-permission to overwrite an unverified partition. Before any header write the
-opened block-device descriptor must match the expected major:minor identity.
-The zero-used-KiB preflight is advisory; the authoritative swapoff and
-post-swapoff inactivity check must both succeed before destructive writes.
-The recovery action uses the saved device identity and never force-removes a
-mapper. The physical correctness smoke must not activate the swapz mapper as
-system swap, and its results remain separate from the RAM-backed report and
-performance history. Rootless tests must reject a disappeared-UUID dependency,
-changed PARTUUID, unrecognized header state, duplicate PASS content and
-historical reports that do not match the live host. Because test_results.json
-is a shared overwriteable artifact, a later exact-source PASS from another host
-must not hide valid live-host evidence. Physical admission validates the current
-report and report-only ancestry, then scans the authenticated first-parent
-publication chain, counts only distinct-content exact-source five-stage PASS
-reports matching the live host, and binds reviewed artifacts to the newest such
-live-host report. Never substitute artifact digests from whichever host
-published last. Tests of the x86-only physical-admission state machine must
-mock the admitted x86_64 architecture so
-the rootless contract remains architecture-neutral and can run unchanged on
-ARM64 qualification hosts. The mocked historical Git evidence runner must
-also stub _git_result directly instead of depending on process sudo identity.
+implemented only by the private tests/tools/physical-swap-probe.py helper. It
+is never called by make test and does not qualify performance, endurance or
+general physical-media behavior. Owner-provided make test reports are read
+and verified; do not rerun make test or make fast_test for this physical
+smoke.
 
-The review record is JSON with approved=true, a reviewer other than the
-operator, scope=physical swap backing correctness smoke only, the qualified
-source SHA, the selected partition's major:minor identity and persistent PARTUUID, the helper's
-SHA-256 and the formatter_sha256, module_sha256 and oracle_sha256 of the
-three reviewed build artifacts. The read-only plan prints these digest values.
-The helper requires a three-way exact match before swapoff: the artifact
-digests published by the exact-source make-test report, the hashes in the
-signed independent review, and the bytes currently present in the build tree.
-It then snapshots those same bytes under the root-owned state directory and
-executes/loads only the snapshots; the copy itself rehashes against the report
-identity. This directly binds the physical trial to artifacts observed by the
-qualifying run and prevents post-qualification or post-review substitution.
-It is still not a claim that two independent toolchains produce reproducible
-binary bytes. Duplicate JSON object keys are rejected so the signed attestation has
-one unambiguous interpretation. The exact JSON bytes additionally require a
-detached SSH signature at `<review-record>.sig` under namespace
-`swapz-physical-review`, verified
-for the named reviewer against independently provisioned
-`/etc/swapz/physical-review.allowed_signers`. The trust file and its parent
-must be root-owned and not group/world writable; the operator cannot override
-the trust path. An unsigned reviewer name cannot authorize physical writes.
-The private read-only plan output prints the PARTUUID, source and helper hashes
-for review binding. A missing or mismatched field blocks the write path.
+#### Physical admission and qualified-artifact policy
 
+Physical admission is bare-metal x86_64-only. Before qualification evidence is
+accepted, the helper must establish that neither VM nor container execution is
+active with `systemd-detect-virt`; missing or inconclusive detection blocks
+admission. It requires a clean, synchronized main,
+ancestry from the canonical GitHub main, and at least one complete owner
+five-stage PASS report for the latest qualified production source. That report
+must identify the exact source in both source_sha and tested_commit_sha,
+match the live x86_64 host identity, show all five stages passed, and publish
+usable SHA-256 hashes for swapzctl, dm-swapz.ko and device-roundtrip.
 
-### Physical-swap rootless safety regression gate
+Earlier successful owner x86_64 qualifications count as repeated evidence for
+the same production implementation only when all three artifact hashes are
+identical to the latest qualification. Distinct-content reports are read from
+the committed first-parent test_results.json publication history and must
+match the live host. A different source SHA is allowed for these earlier
+reports; a different artifact hash is not. At least one report for the latest
+qualified source remains mandatory.
 
-Rootless Stage 2 retains the private physical-admission regression suite
-tests/runtime/native/physical-swap-probe-test.py and compiles the real
-freestanding src/kernel/superblock.h from a native C test in the existing
-test-codec dependency of tests/suites/Makefile. This adds no public test
-command, and does not enroll the private physical helper or a real device in
-ordinary make test. New contract tests are deliberately fail-first until
-all physical-safety implementation owners have integrated their changes;
-they must not be interpreted as official PASS or as physical-media evidence.
+After the qualified source, admit only changes to
+tests/tools/physical-swap-probe.py,
+tests/runtime/native/physical-swap-probe-test.py,
+docs/testing_standards.md, docs/ROADMAP.md and report-only
+test_results.json publications. Reject merge commits and every other changed
+path. In particular, any change to src/, tests/tools/device-roundtrip.c,
+build rules or another qualified-artifact input requires a new owner
+qualification. This exemption is only for physical-admission policy,
+regression and documentation work that cannot alter the three binaries.
 
-Safety tests use temporary regular files, a known tmpfs mount when available,
-controlled command mocks and operation-order assertions. Prove root-owned,
-nonvolatile, pre-existing trusted recovery-state parent admission; a durable
-parent-entry fsync and fsynced backup/state before swapoff or any block-0
-write; fail-closed behavior for failed persistence and for header-read
-descriptors whose block identity and BLKGETSIZE64 geometry are not verified.
-The original selected block-device major:minor, PARTUUID, geometry and
-byte-exact original header must be checked again at every destructive
-boundary. No pathname-only preflight can license a later substituted FD.
+Immediately before the physical run, rehash the live artifacts and require
+exact equality with the latest owner report. Snapshot those same bytes under
+the persistent recovery directory, rehash the snapshots and execute/load only
+the snapshots. The helper itself is bound by its SHA-256 and current Git commit.
+The current helper-policy commit must have green non-privileged GitHub CI
+before the read-only plan can authorize a run. CI does not replace owner
+qualification.
 
-The exact independent signed review binds source, helper, reviewer, qualified
-artifacts, device major:minor/PARTUUID, decimal device_size_bytes, original
-4096-byte header SHA-256, repeated device_uuid_path and a unique run_id of
-exactly 32 lowercase hexadecimal characters. Reject missing, invalid or
-mismatched fields, replay of consumed approval and concurrent claims to either
-the same run or physical partition. Preserve duplicate-key JSON rejection,
-exact-byte detached signature verification, root-controlled trust and separate
-reviewer identity. Approval consumption and per-device exclusion must be
-durable across interruption, not merely in-memory flags.
+#### Verbal-review record
 
-The helper's formatter invocation must include exactly
-"format <device> --expect-major-minor <major>:<minor> --expect-bytes
-<decimal-bytes>" and be preceded by fresh verified identity checks.
-Verify after mapper creation and again before oracle I/O that the actual DM
-UUID, table, mapped 16MiB geometry, and underlying block identity match
-the helper-owned reviewed device; no failed check may reach the oracle.
-The oracle invocation must bind "--expect-dm-uuid
-<SWAPZ-TEST-PHYSICAL-token>", and the oracle must independently verify the
-opened mapper FD and its /sys/dev/block major:minor UUID before writing.
-Test wrong-UUID/table/size/lower and mapper-substitution cases as controlled
-failures. Inject major/geometry identity changes at each later destructive
-boundary and prove the next formatter, mapper-create or oracle action is not
-reached. Recovery command mocks must prove mapper removal contains no force
-flag and that only the saved original partition, never the SWZ mapper, is
-passed to swapon. Missing recovery parents and apparently persistent filesystems
-with no verified persistent block source are explicit negative cases. Rootless
-fixtures for this gate mock only the ownership/inventory boundary they need;
-they must not replace generic `Path.stat()` behavior and thereby hide Python
-runtime or symlink semantics.
-Isolate each mocked physical attempt in its own private approval
-ledger so a prior consumed review cannot mask a later mapper-identity failure.
-Require proof that a post-create mismatch prevents oracle invocation, even
-when an earlier same-size mapper verification succeeded.
-Where mocked sysfs behavior cannot reproduce actual kernel device
-nodes, explicitly report that limitation; do not label the mock as a real
-device qualification.
+The review record remains strict JSON and rejects duplicate keys. It must bind
+approved: true, approval_mode: verbal, reviewer
+openai-chatgpt-external-reviewer, the exact approval text below, the latest
+qualified production source SHA, current helper Git commit SHA, helper SHA-256,
+formatter/module/oracle SHA-256 values, exact repeated
+/dev/disk/by-uuid/... path, partition major:minor, PARTUUID, exact byte size,
+original full 4096-byte header SHA-256, a unique 32-character lowercase hex
+run_id, and scope physical swap backing correctness smoke only.
 
-Recovery tests cover interruption around module installation and ownership
-persistence, ambiguous module owners, unexpected active swap, torn or
-unknown block-zero states, wrong restored swap capacity/priority and failure
-to verify exact restored header. Recovery may only remove the proven helper-
-owned mapper, may never force-remove or activate the mapper as swap, and
-must fail closed for uncertain ownership or media. The shared SWZ validator
-must accept exactly the 4096-byte version-1 magic/geometry/nonzero-UUID
-header and reject every nonzero byte in offsets 40..4095, in addition to
-wrong magic, version, UUID or geometry. Rootless source checks and mock
-observations support review, not physical qualification: a separately
-authorized owner/device safety gate, fresh exact-source make test results,
-a final device-specific signed review and real FD/sysfs checks remain
-mandatory before any physical attempt.
+> Approved for one bounded physical swap-partition correctness round-trip only, provided the exact qualified artifacts remain unchanged, the current helper-policy commit passes its non-privileged CI, the selected partition passes every read-only identity/safety check, recovery state is durably stored on persistent media, and the helper restores and verifies the original swap partition before completion. Any mismatch, unexpected state, or recovery uncertainty voids this approval and requires the run to stop.
 
+Verbal approval is procedural. The JSON binds the supplied wording and exact
+run/device/artifact state, but it does not cryptographically authenticate the
+speaker or provide cryptographic proof. No .sig, SSH signature, signer key or
+/etc/swapz/physical-review.allowed_signers is used. The helper permanently
+consumes each run_id before state preparation, retains its consumed record
+after success, and serializes each PARTUUID with a permanent lock inode and
+durable active-recovery marker.
 
+#### Read-only plan and device safety
 
-### Physical swap helper: exact-device, one-use recovery contract
+Before run, inspect the helper's read-only plan output field by field:
+device preflight, qualification/source, live artifact bytes, verbal review,
+unconsumed run ID and recovery storage must all be positive. A successful
+process exit alone is insufficient. The selected object must be the explicitly
+repeated by-UUID path resolving to one real partition with a valid persistent
+PARTUUID and matching by-partuuid link, Linux swap identity, exactly one
+matching active swap entry, zero used KiB, no mounts or holders, and no
+dependency in the root filesystem backing chain. The original block zero is
+read through an opened and identity-checked block descriptor; BLKGETSIZE64
+must match the reviewed exact geometry.
 
-The private physical helper exclusively owns this subsection; it is not an
-additional qualification interface or authority to test a real device. The
-operator must pre-provision `/var/lib/swapz/physical-recovery` as an existing
-root-owned 0700 directory, beneath root-controlled non-symlink parents, on
-a known persistent block-backed filesystem. No caller may create its parents
-implicitly. Volatile, loop/RAM-backed, network, overlay and unverified file
-systems are rejected. A run's `--state-dir` is a *nonexistent direct child*
-`swapz-physical-<signed-run-id>` of that fixed base. The helper must fsync
-the parent after creating the root-only run directory, then fsync the
-descriptor-verified original 4096-byte header backup, root-owned state file,
-all reviewed artifact snapshots and their directory entries before swapoff.
-A failed durability step must not reach any destructive action; uncertain
-saved records are retained for manual inspection rather than silently deleted.
+The fixed recovery base /var/lib/swapz/physical-recovery must be root-owned
+mode 0700 beneath root-controlled non-symlink parents, on a verified persistent
+physical-block filesystem and not on the selected swap partition. If absent, an
+operator may create only this fixed base with root ownership and mode 0700; the
+helper then validates the complete backing chain. Volatile, network, loop/RAM,
+zram, null_blk, overlay and selected-swap recovery storage is rejected. The
+state directory is a nonexistent direct child named
+swapz-physical-<run_id>. Fsync the parent after its creation, then fsync the
+exact original 4096-byte backup, state, reviewed binary snapshots and
+directory entries before swapoff or any block-zero write. Failed durability
+must stop before destructive work and preserve uncertain records.
 
-Every original-header read, post-format verification and recovery-header
-read must open the canonical partition, verify the opened descriptor with
-fstat major:minor and BLKGETSIZE64 reviewed geometry, then perform one
-exact-length 4096-byte read. The exclusive block-zero writer must perform
-those same FD-level checks, compare expected current bytes when supplied,
-fsync the write and verify its exact readback. Selection, PARTUUID, size,
-holders, mount/root dependency and post-swapoff non-activation continue to
-gate the destructive path. Just before formatting, the helper must recheck
-the partition identity and exact cleared block zero and call the reviewed
-formatter interface with `--expect-major-minor` and `--expect-bytes`.
-The formatter itself independently verifies its exclusive opened descriptor
-and retains refusal of unexpected nonzero block zero.
+Keep the existing fail-closed protections: exclusive and identity-checked
+block-zero reads/writes, major:minor and geometry checks at every destructive
+boundary, persistent PARTUUID checks, root/mount/holder checks, descriptor-
+and-geometry-bound formatting, exact SWZ header validation, post-swapoff
+inactivity verification, exact helper-owned mapper UUID/table/16 MiB geometry
+and lower major:minor, oracle verification of its independently opened DM UUID,
+conservative module ownership, and no force-removal. Unknown or torn headers
+require manual recovery. Never activate the SWZ mapper as system swap.
 
-A signed approval binds exact `device_size_bytes` (JSON integer),
-`original_header_sha256` (lowercase digest of the verified full 4096-byte
-header), `device_uuid_path` (the repeated literal /dev/disk/by-uuid
-selection) and `run_id` (exactly 32 lowercase hex characters), in addition
-to the prior independent identity, source, helper, major:minor, PARTUUID,
-scope, artifact and signature checks. One permanent root-owned partition
-lock inode is flocked nonblocking for a run or recovery. The fixed base
-maintains fsynced exclusive `consumed-<run-id>.json` records that are never
-deleted and exclusive per-PARTUUID active ownership records that are removed
-only after durable COMPLETE. The signed run is burned immediately after the
-partition lock is acquired and before recovery-state preparation or artifact
-snapshotting, so a crash or fsync failure cannot silently make that approval
-reusable. The active per-PARTUUID recovery claim is created only after the
-backup/state/artifact preparation succeeds and immediately before any
-`swapoff`/block-zero transition; a pre-destructive failure therefore leaves
-the review consumed without falsely claiming that media recovery is required.
-Once the active claim is attempted, uncertainty is recovery state and blocks
-another physical run. A different base cannot silently reset either ledger.
-Rootless mocks must inject a preparation failure after the burn and prove the
-consumed record survives, no active claim or destructive command is created,
-and replay of that signed run is rejected. Direct review consumption must
-also reject replay after durable COMPLETE releases the active claim; only the
-current run's explicitly preburned transition may create that claim.
-Rootless tests must inject both a preparation failure and an artifact-snapshot
-failure after approval burn. Neither may execute destructive commands or leave
-an active partition claim; replay must fail before preparation runs a second
-time. A snapshot failure records PRE_DESTRUCTIVE_FAILED.
+#### Bounded positive physical correctness suite
 
-After dmsetup create, and immediately before oracle invocation, verify
-the exact helper-generated DM name/UUID, mapper block major:minor, kernel
-sysfs name/UUID and 32768-sector (16 MiB) size, complete target table, and
-the single sysfs lower slave's major:minor. Pass `--expect-dm-uuid` to the
-oracle. The separately owned oracle must verify its own open FD and DM UUID
-before any write. The helper writes `MODULE_PENDING` durably before insmod
-and `MODULE_OWNED` only after success and physical opt-in verification.
-Recovery must never unload an already-present module with pending, unknown
-or foreign ownership. Durable `MODULE_OWNED` records establish that the helper
-successfully loaded the module at that point, but a later standalone recovery
-cannot prove that the currently loaded module is the same uninterrupted kernel
-object; it therefore requires manual recovery instead of automatically running
-`rmmod`. Only same-process cleanup that still owns the physical run lock may
-automatically unload its durably recorded `MODULE_OWNED` instance. A
-pending-present module is likewise manual-recovery-only. Rootless recovery
-must prove a standalone present `MODULE_OWNED` module is not passed to
-`rmmod`, while same-process cleanup retains the bounded owned unload path.
-Rootless tests must prove both contexts with command mocks, with zero external
-commands in standalone recovery. No force removal is permitted.
+The first oracle invocation remains exactly
+device-roundtrip <mapper> --expect-dm-uuid <exact-generated-uuid>. It performs
+the ordinary 128-page byte-exact write/read/overwrite/flush verification and
+independently verifies its opened DM UUID before writing.
 
-Recovery accepts only the saved original, an expected zero header at a
-recognized stage, or a digest-matched valid SWZ header with a durably
-recorded formatter digest. Every /proc/swaps partition entry must have a
-verified block identity during preflight and recovery. An unrelated swapfile
-may coexist, but its path must resolve to a regular file; unreadable,
-substituted or unknown entry types fail closed. The preflight and recovery
-use one shared swap-inventory rule rather than treating a valid swapfile as
-a block-device identity failure.
-Behavioral rootless tests must reject an unverifiable active partition and
-accept a verifiably regular unrelated swapfile without calling block_identity
-on the swapfile path. Recovery verifies exact original bytes
-through a new identity-checked descriptor before swapon. After reactivation, verify
-the saved block identity through /proc/swaps together with the exact
-original size and priority before recording COMPLETE and retiring the active
-ownership marker. Wrong or ambiguous identity, unknown header, missing
-durability, mapper mismatch or failed swap restoration remains
-RECOVERY_REQUIRED/manual review; it is never physical-test approval.
-The dedicated rootless negative contracts must cover each boundary; only
-owner-approved independent reviews and final exact-source qualification
-can unblock physical execution.
+Only if that passes, run these existing positive correctness modes in order on
+the same helper-owned mapper. Immediately before and after every invocation,
+reverify the exact mapper UUID, table, 16 MiB size and lower backing. Record
+dmsetup status and the selected partition block-stat snapshot before and
+after each phase where available.
 
-Capacity-exhaustion evidence must preserve committed reads: a write may return
-`-ENOSPC`, but `ctx->failed` must stay clear unless a separate integrity or
-lower-I/O error occurs.
+1. Delta64: --delta64-write-series 128 1, then
+   --delta64-verify-series 128 1.
+2. Segmented/multi-bvec: --segmented-write-series 128 5, then
+   --segmented-verify-series 128 5, then --verify-series 128 5.
+3. Cross-representation: --write-series 128 6, then
+   --segmented-verify-series 128 6.
+4. THP/compound-folio: --thp-write-series 128 7, then
+   --thp-verify-series 128 7, then --verify-series 128 7.
 
+This first physical round excludes performance and endurance measurement,
+failure injection, fault ordinals, DISCARD/TRIM, repeated 4096-page rewriting,
+GC or resource pressure, null_blk-only overrides and timing-dependent
+suspend/drain work. A failed phase stops all later phases and immediately
+enters the normal recovery path. Do not retry a failed phase under the same
+approval or create a replacement approval automatically.
+
+#### Durable results and restoration
+
+Before destructive work, persist a bounded results.json in the recovery
+directory. It records start/end timestamps, Git/helper/source and artifact
+hashes, run/device identity, original header digest, original swap size and
+priority, mapper name/UUID, per-phase command/return code/bounded stdout and
+stderr, before/after dmsetup status, block-stat snapshots where available,
+final block-zero digest, final /proc/swaps row, recovery state, and mapper,
+module and unrelated-mapper cleanup observations. Never store raw page
+contents. Update and fsync the record throughout execution so failure evidence
+survives recovery.
+
+Only the helper's run path performs the destructive sequence. It exclusively
+locks the partition, consumes the one-use approval, saves and fsyncs recovery
+state, revalidates source/artifacts/device, disables only the selected zero-use
+swap partition, formats through the reviewed descriptor-bound formatter,
+loads only the snapshotted module with physical backing explicitly enabled,
+creates and verifies one helper-owned 16 MiB mapper, and runs the positive
+suite. On success or failure, remove only that exact mapper, unload only a
+positively same-process-owned module, accept only a recognized recovery
+header, restore and reread the exact original 4096 bytes, reactivate only the
+original partition with its original priority, verify its major:minor/size/
+priority, durably mark recovery COMPLETE and release the active marker. Keep
+the consumed-approval record and all recovery artifacts.
+
+Before declaring the smoke complete, prove every selected phase passed; the
+helper mapper is absent; unrelated mapper inventory is unchanged; the
+helper-owned module is unloaded when safe; block zero matches the original
+digest; the original swap entry is active with the same major:minor, size and
+priority; recovery state is COMPLETE; no active marker remains; and the
+approval remains consumed. Post-reactivation swap usage is an observation.
+
+#### Physical-swap rootless regression gate
+
+Keep tests/runtime/native/physical-swap-probe-test.py in the existing
+rootless safety regression path; do not wire the private helper or a real
+device into routine make test. Rootless tests use temporary files,
+controlled command mocks and operation-order assertions only. Cover the
+latest-source PASS plus matching-artifact history policy, allowed post-source
+paths and merge rejection, live artifact hashes, exact verbal-review fields,
+duplicate-key rejection and replay, selected-partition exclusion from
+persistent recovery storage, durable backup/results boundaries, every mapper
+identity check, phase ordering/status capture, stop-on-first-failure behavior,
+module ownership and exact restoration. Keep current sysfs/FD limitations of
+mocks explicit: rootless evidence does not establish physical-media behavior or
+replace the real read-only device plan.
 
 ### Alpha.29 work-conserving dispatcher qualification
 

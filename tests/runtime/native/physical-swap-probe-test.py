@@ -24,6 +24,8 @@ SPEC.loader.exec_module(probe)
 
 REAL_RECOVERY_BASE = probe._recovery_base
 REAL_PARTITION_LOCK = probe._partition_lock
+REAL_PATH_READ_TEXT = Path.read_text
+REAL_PATH_IS_FILE = Path.is_file
 
 
 class PhysicalSwapProbeTests(unittest.TestCase):
@@ -34,7 +36,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.recovery_base = Path(temporary.name)
         for name, replacement in (
-            ("_recovery_base", lambda: self.recovery_base),
+            ("_recovery_base", lambda target=None: self.recovery_base),
             ("_recovery_run_directory", lambda path, run_id=None: Path(path)),
             ("_partition_lock", lambda partuuid: os.open(os.devnull, os.O_RDONLY)),
         ):
@@ -117,6 +119,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                             in enumerate(probe.PHYSICAL_ARTIFACTS, start=1)}
         evidence = {
             "source_sha": "a" * 40,
+            "head": "b" * 40,
+            "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
             "artifact_digests": artifact_digests,
         }
         header = bytearray(probe.PAGE_BYTES)
@@ -128,28 +132,28 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         review = {
             **artifact_digests,
             "approved": True,
-            "reviewer": "independent-reviewer",
+            "approval_mode": "verbal",
+            "approval_text": probe.VERBAL_APPROVAL_TEXT,
+            "reviewer": probe.VERBAL_REVIEWER,
             "scope": probe.EXPECTED_SCOPE,
             "source_sha": evidence["source_sha"],
+            "helper_git_sha": evidence["head"],
             "device_major_minor": "8:4",
             "device_partuuid": "deadbeef-04",
             "device_size_bytes": target["size_bytes"],
             "original_header_sha256": hashlib.sha256(target["header"]).hexdigest(),
             "device_uuid_path": target["device_arg"],
             "run_id": "0123456789abcdef0123456789abcdef",
-            "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
+            "helper_sha256": evidence["helper_sha256"],
         }
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "review.json"
             path.write_text(json.dumps(review))
-            with mock.patch.dict(os.environ, {"SUDO_USER": "keivan", "USER": "root"}), \
-                    mock.patch.object(probe, "_verify_signed_review") as signed:
+            with mock.patch.dict(os.environ, {"SUDO_USER": "keivan", "USER": "root"}):
                 self.assertEqual(
                     probe.validate_review(path, evidence, target),
-                    {"reviewer": "independent-reviewer",
-                     "run_id": review["run_id"]})
-                signed.assert_called_once_with(
-                    path, "independent-reviewer", path.read_bytes())
+                    {"reviewer": probe.VERBAL_REVIEWER,
+                     "run_id": review["run_id"], "approval_mode": "verbal"})
                 review["device_major_minor"] = "8:3"
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
@@ -165,14 +169,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 with self.assertRaisesRegex(probe.ProbeError, "binary artifacts"):
                     probe.validate_review(path, evidence, target)
                 review["module_sha256"] = artifact_digests["module_sha256"]
+                for field, bad_value in (
+                        ("approval_mode", "ssh-signature"),
+                        ("approval_text", "approval wording changed"),
+                        ("reviewer", "different-reviewer"),
+                        ("helper_git_sha", "c" * 40)):
+                    changed = dict(review, **{field: bad_value})
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaises(probe.ProbeError):
+                        probe.validate_review(path, evidence, target)
                 duplicate = json.dumps(review)[:-1] + \
-                    ',"reviewer":"second-reviewer"}'
+                    ',"reviewer":"duplicate-reviewer"}'
                 path.write_text(duplicate)
                 with self.assertRaisesRegex(
                         probe.ProbeError, "duplicate JSON key"):
                     probe.validate_review(path, evidence, target)
 
-    def test_physical_artifact_snapshot_binds_signed_bytes(self):
+    def test_physical_artifact_snapshot_binds_reviewed_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             sources = {}
@@ -198,7 +211,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 sources["module_sha256"].write_bytes(b"replaced module bytes")
                 second_state = root / "state-two"
                 second_state.mkdir(mode=0o700)
-                with self.assertRaisesRegex(probe.ProbeError, "signed review"):
+                with self.assertRaisesRegex(probe.ProbeError, "review"):
                     probe._snapshot_reviewed_artifacts(second_state, expected)
                 self.assertFalse((second_state / "dm-swapz.ko").exists())
 
@@ -208,79 +221,30 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 with self.assertRaisesRegex(probe.ProbeError, "cannot verify"):
                     probe._artifact_digests()
 
-    def test_signed_review_verifies_the_exact_json_bytes(self):
-        keygen = shutil.which("ssh-keygen")
-        if not keygen:
-            self.skipTest("ssh-keygen unavailable")
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            private_key = root / "review-key"
-            review_path = root / "review.json"
-            allowed = root / "allowed-signers"
-            record = b'{"approved":true,"reviewer":"independent-reviewer"}'
-            subprocess.run(
-                [keygen, "-q", "-t", "ed25519", "-N", "",
-                 "-f", str(private_key)],
-                check=True, capture_output=True)
-            public_key = Path(str(private_key) + ".pub").read_text().strip()
-            allowed.write_text(f"independent-reviewer {public_key}\n")
-            review_path.write_bytes(record)
-            subprocess.run(
-                [keygen, "-Y", "sign", "-f", str(private_key),
-                 "-n", probe.REVIEW_NAMESPACE, str(review_path)],
-                check=True, capture_output=True)
-            with mock.patch.object(
-                    probe, "_trusted_review_signers", return_value=allowed), \
-                    mock.patch.object(
-                        probe.shutil, "which", return_value=keygen):
-                probe._verify_signed_review(
-                    review_path, "independent-reviewer", record)
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "not authenticated"):
-                    probe._verify_signed_review(
-                        review_path, "independent-reviewer",
-                        record + b" ")
-
-    def test_signed_review_rejects_missing_trust_and_invalid_signature(self):
-        with tempfile.TemporaryDirectory() as directory:
-            review_path = Path(directory) / "review.json"
-            signature = Path(str(review_path) + ".sig")
-            record = b'{"approved":true}'
-            signature.write_bytes(b"test-signature")
-            with mock.patch.object(probe, "REVIEW_SIGNERS",
-                                   Path(directory) / "absent-signers"):
-                with self.assertRaisesRegex(probe.ProbeError, "trusted reviewer"):
-                    probe._verify_signed_review(
-                        review_path, "independent-reviewer", record)
-            with mock.patch.object(probe, "_trusted_review_signers",
-                                   return_value=Path(directory) / "signers"), \
-                    mock.patch.object(probe.shutil, "which",
-                                      return_value="/usr/bin/ssh-keygen"), \
-                    mock.patch.object(probe.subprocess, "run",
-                                      return_value=subprocess.CompletedProcess(
-                                          [], 255)) as verify:
-                with self.assertRaisesRegex(probe.ProbeError, "not authenticated"):
-                    probe._verify_signed_review(
-                        review_path, "independent-reviewer", record)
-                self.assertEqual(verify.call_args.kwargs["input"], record)
-                self.assertEqual(verify.call_args.args[0][8],
-                                 probe.REVIEW_NAMESPACE)
-            signature.unlink()
-            with self.assertRaisesRegex(probe.ProbeError, "signature is missing"):
-                probe._verify_signed_review(
-                    review_path, "independent-reviewer", record)
-
     def test_review_rejects_the_operator_as_reviewer(self):
-        evidence = {"source_sha": "b" * 40}
+        evidence = {"source_sha": "b" * 40, "head": "c" * 40,
+                    "helper_sha256": hashlib.sha256(
+                        SCRIPT.read_bytes()).hexdigest(),
+                    "artifact_digests": {
+                        key: str(index) * 64 for index, (key, _, _) in
+                        enumerate(probe.PHYSICAL_ARTIFACTS, start=1)}}
         target = {"major": 8, "minor": 4, "partuuid": "deadbeef-04"}
         review = {
             "approved": True,
             "reviewer": "keivan",
+            "approval_mode": "verbal",
+            "approval_text": probe.VERBAL_APPROVAL_TEXT,
             "scope": probe.EXPECTED_SCOPE,
             "source_sha": evidence["source_sha"],
+            "helper_git_sha": evidence["head"],
             "device_major_minor": "8:4",
             "device_partuuid": "deadbeef-04",
-            "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
+            "device_size_bytes": 1024,
+            "original_header_sha256": "a" * 64,
+            "device_uuid_path": "/dev/disk/by-uuid/test",
+            "run_id": "0123456789abcdef0123456789abcdef",
+            "helper_sha256": evidence["helper_sha256"],
+            **evidence["artifact_digests"],
         }
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "review.json"
@@ -551,120 +515,204 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(args[5:], ["status", "--porcelain"])
         self.assertEqual(run.call_args.kwargs["cwd"], probe.ROOT)
 
-    def test_live_host_gate_and_distinct_reports(self):
+    def test_physical_host_gate_rejects_vm_container_and_unknown(self):
+        with mock.patch.object(probe.shutil, "which",
+                               return_value="/usr/bin/systemd-detect-virt"), \
+                mock.patch.object(probe, "_run", side_effect=[
+                    subprocess.CompletedProcess([], 1, stdout="none\n", stderr=""),
+                    subprocess.CompletedProcess([], 1, stdout="none\n", stderr=""),
+                ]) as run:
+            probe._require_physical_host()
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ["--vm", "--container"])
+
+        for output, code in (("kvm\n", 0), ("podman\n", 0), ("", 2)):
+            with self.subTest(output=output, code=code), \
+                    mock.patch.object(probe.shutil, "which",
+                                      return_value="/usr/bin/systemd-detect-virt"), \
+                    mock.patch.object(probe, "_run", return_value=
+                                      subprocess.CompletedProcess(
+                                          [], code, stdout=output,
+                                          stderr="detection error")):
+                with self.assertRaisesRegex(probe.ProbeError,
+                                            "not allowed|cannot establish"):
+                    probe._require_physical_host()
+
+        with mock.patch.object(probe.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(probe.ProbeError,
+                                        "systemd-detect-virt is required"):
+                probe._require_physical_host()
+
+    def test_verbal_approval_is_bound_to_exact_reviewer_wording(self):
+        self.assertEqual(
+            probe.VERBAL_APPROVAL_TEXT,
+            "Approved for one bounded physical swap-partition correctness round-trip only, "
+            "provided the exact qualified artifacts remain unchanged, the current "
+            "helper-policy commit passes its non-privileged CI, the selected partition "
+            "passes every read-only identity/safety check, recovery state is durably "
+            "stored on persistent media, and the helper restores and verifies the "
+            "original swap partition before completion. Any mismatch, unexpected state, "
+            "or recovery uncertainty voids this approval and requires the run to stop.")
+
+    def test_kernel_evidence_keeps_only_bounded_swapz_messages(self):
+        output = "unrelated kernel detail\n" + "\n".join(
+            f"kernel: dm-swapz warning {index}" for index in range(40))
+        with mock.patch.object(probe.shutil, "which",
+                               return_value="/usr/bin/journalctl"), \
+                mock.patch.object(probe, "_run", return_value=
+                                  subprocess.CompletedProcess(
+                                      [], 0, stdout=output, stderr="")) as run:
+            record = probe._kernel_swapz_messages("2026-11-02T12:00:00Z")
+        self.assertTrue(record["available"])
+        self.assertEqual(record["matching_line_count"], 40)
+        self.assertNotIn("unrelated kernel detail", record["messages"])
+        self.assertLessEqual(len(record["messages"]),
+                             probe.MAX_RECORDED_OUTPUT_CHARS)
+        self.assertIn("--since=2026-11-02T12:00:00Z",
+                      run.call_args.args[0])
+
+    def test_live_host_gate_and_identical_artifact_history(self):
         source = "a" * 40
+        earlier_source = "0" * 40
         head = "b" * 40
-        local_host = {
-            "schema": "swapz-host-v1",
-            "architecture": "x86_64",
-            "id_sha256": "1" * 64,
-        }
+        local_host = {"schema": "swapz-host-v1", "architecture": "x86_64",
+                      "id_sha256": "1" * 64}
         artifact_digests = {
-            key: str(index) * 64
-            for index, (key, _, _) in enumerate(
-                probe.PHYSICAL_ARTIFACTS, start=1)
+            key: str(index) * 64 for index, (key, _, _) in
+            enumerate(probe.PHYSICAL_ARTIFACTS, start=1)}
+        changed_artifacts = {
+            key: str(index + 3) * 64 for index, (key, _, _) in
+            enumerate(probe.PHYSICAL_ARTIFACTS, start=1)}
+
+        def report(report_source, *, duration=1, host=None, artifacts=None,
+                   blocked=False):
+            stages = [{"name": name, "status": "PASS", "exit_code": 0}
+                      for name in probe.QUALIFICATION_STAGE_NAMES]
+            if blocked:
+                stages[-1]["status"] = "BLOCKED"
+            return {
+                "overall": "PASS" if not blocked else "BLOCKED",
+                "tested_commit_sha": report_source,
+                "source_sha": report_source,
+                "host_identity": dict(host if host is not None else local_host),
+                "qualified_artifacts": {
+                    "status": "AVAILABLE",
+                    **(artifacts if artifacts is not None else artifact_digests),
+                },
+                "stages": stages,
+                "duration": duration,
+            }
+
+        current = report(source, duration=3)
+        histories = {
+            "latest": current,
+            "earlier": report(earlier_source, duration=1),
+            "duplicate": report(earlier_source, duration=1),
+            "different-artifacts": report(
+                earlier_source, duration=2, artifacts=changed_artifacts),
+            "foreign-host": report(
+                earlier_source, duration=4,
+                host=dict(local_host, id_sha256="2" * 64)),
+            "blocked": report(earlier_source, duration=5, blocked=True),
         }
-        foreign_artifact_digests = {
-            key: str(index + 3) * 64
-            for index, (key, _, _) in enumerate(
-                probe.PHYSICAL_ARTIFACTS, start=1)
+        commits = ["policy-one", "policy-two"]
+        changed_paths = {
+            "policy-one": "tests/tools/physical-swap-probe.py",
+            "policy-two": "docs/testing_standards.md",
         }
-        current = {
-            "overall": "PASS", "tested_commit_sha": source,
-            "source_sha": source, "host_identity": dict(local_host),
-            "qualified_artifacts": {
-                "status": "AVAILABLE", **artifact_digests,
-            },
-            "stages": [{"name": name, "status": "PASS", "exit_code": 0}
-                       for name in probe.QUALIFICATION_STAGE_NAMES],
-        }
-        history = {
-            "first": dict(current, duration=1),
-            "second": dict(current, duration=1),
-        }
+        publications = ["latest", "earlier", "duplicate",
+                        "different-artifacts", "foreign-host", "blocked"]
 
         def git(*args, **kwargs):
             del kwargs
-            operation = args[0]
-            if operation == "symbolic-ref":
+            if args[0] == "symbolic-ref":
                 return "main"
-            if operation == "status":
+            if args[0] == "status":
                 return ""
-            if operation == "rev-parse":
+            if args[0] == "rev-parse":
                 return head
-            if operation == "rev-list":
-                return "first\nsecond"
-            if operation == "diff-tree":
-                return "test_results.json"
-            if operation == "log":
+            if args[0] == "rev-list" and args[1:3] == (
+                    "--reverse", "--first-parent"):
+                return "\n".join(commits)
+            if args[0] == "rev-list" and args[1:4] == (
+                    "--parents", "-n", "1"):
+                commit = args[4]
+                parent = source if commit == "policy-one" else "policy-one"
+                return f"{commit} {parent}"
+            if args[0] == "diff-tree":
+                return changed_paths[args[-1]]
+            if args[0] == "log":
                 self.assertIn("--first-parent", args)
-                self.assertIn(f"{source}..origin/main", args)
-                self.assertNotIn("--all", args)
-                return "first\nsecond"
+                self.assertEqual(args[3], head)
+                return "\n".join(publications)
             raise AssertionError(args)
 
         def git_result(*args, **kwargs):
             del kwargs
             if args[0] == "merge-base":
-                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+                child = args[2]
+                parent = args[3]
+                status = 0 if child in (source, earlier_source) and \
+                    parent in (source, head) else 1
+                return subprocess.CompletedProcess(args, status, stdout="", stderr="")
             if args[0] == "show":
+                name = args[1].split(":")[0]
                 return subprocess.CompletedProcess(
-                    args, 0, stdout=json.dumps(
-                        history[args[1].split(":")[0]]), stderr="")
+                    args, 0, stdout=json.dumps(histories[name]), stderr="")
             raise AssertionError(args)
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "test_results.json").write_text(json.dumps(current))
-            with mock.patch.object(probe, "ROOT", root), \
-                    mock.patch.object(probe.platform, "machine",
-                                      return_value="x86_64"), \
-                    mock.patch.object(probe, "_git", side_effect=git), \
-                    mock.patch.object(probe, "_git_result",
-                                      side_effect=git_result), \
-                    mock.patch.object(probe, "_remote_main_sha", return_value=head), \
-                    mock.patch.object(probe, "live_host_identity",
-                                      return_value=local_host):
-                self.assertEqual(probe.current_source_evidence()["pass_reports"], 1)
-                history["second"] = dict(current, duration=2)
-                self.assertEqual(probe.current_source_evidence()["pass_reports"], 2)
-                history["second"] = dict(current, duration=2, stages=[
-                    *current["stages"][:-1],
-                    dict(current["stages"][-1], status="BLOCKED")])
-                self.assertEqual(probe.current_source_evidence()["pass_reports"], 1)
-                history["second"] = dict(
-                    current, duration=2,
-                    qualified_artifacts={"status": "UNAVAILABLE"})
-                self.assertEqual(
-                    probe.current_source_evidence()["pass_reports"], 1)
-                history["second"] = dict(current, duration=2)
-                current["stages"] = current["stages"][:-1]
-                (root / "test_results.json").write_text(json.dumps(current))
+            patches = (
+                mock.patch.object(probe, "ROOT", root),
+                mock.patch.object(probe.platform, "machine", return_value="x86_64"),
+                mock.patch.object(probe, "_git", side_effect=git),
+                mock.patch.object(probe, "_git_result", side_effect=git_result),
+                mock.patch.object(probe, "_remote_main_sha", return_value=head),
+                mock.patch.object(probe, "_require_physical_host"),
+                mock.patch.object(probe, "live_host_identity", return_value=local_host),
+            )
+            with ExitStack() as stack:
+                for patch in patches:
+                    stack.enter_context(patch)
+                evidence = probe.current_source_evidence()
+                self.assertEqual(evidence["latest_source_reports"], 1)
+                self.assertEqual(evidence["prior_matching_reports"], 1)
+                self.assertEqual(evidence["pass_reports"], 2)
+                self.assertEqual(evidence["artifact_digests"], artifact_digests)
+
+                changed_paths["policy-two"] = "src/kernel/dm-target.c"
+                with self.assertRaisesRegex(probe.ProbeError,
+                                            "can affect qualified artifacts"):
+                    probe.current_source_evidence()
+                changed_paths["policy-two"] = "docs/testing_standards.md"
+                histories["latest"] = report(source, blocked=True)
+                (root / "test_results.json").write_text(
+                    json.dumps(histories["latest"]))
                 with self.assertRaisesRegex(probe.ProbeError, "five-stage"):
                     probe.current_source_evidence()
-                current["stages"] = history["second"]["stages"]
-                current["qualified_artifacts"] = {"status": "UNAVAILABLE"}
-                (root / "test_results.json").write_text(json.dumps(current))
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "qualified artifact digests"):
+                histories["latest"] = report(source, duration=3)
+                (root / "test_results.json").write_text(json.dumps(
+                    report(source, duration=3,
+                           host=dict(local_host, id_sha256="2" * 64))))
+                with self.assertRaisesRegex(probe.ProbeError, "this x86_64 host"):
                     probe.current_source_evidence()
-                current["qualified_artifacts"] = {
-                    "status": "AVAILABLE", **foreign_artifact_digests,
-                }
-                current["host_identity"] = dict(
-                    local_host, id_sha256="2" * 64)
-                (root / "test_results.json").write_text(json.dumps(current))
-                evidence = probe.current_source_evidence()
-                self.assertEqual(evidence["pass_reports"], 2)
-                self.assertEqual(evidence["artifact_digests"],
-                                 artifact_digests)
 
-                history["first"]["host_identity"] = current["host_identity"]
-                history["second"]["host_identity"] = current["host_identity"]
-                with self.assertRaisesRegex(
-                        probe.ProbeError,
-                        "no exact-source five-stage PASS report from this host"):
-                    probe.current_source_evidence()
+    def test_merge_after_qualified_source_blocks_physical_admission(self):
+        def git(*args, **kwargs):
+            del kwargs
+            if args[1] == "--reverse":
+                return "merge-commit"
+            if args[1] == "--parents":
+                return "merge-commit first-parent second-parent"
+            raise AssertionError(args)
+
+        with mock.patch.object(probe, "_git_result",
+                               return_value=subprocess.CompletedProcess([], 0)), \
+                mock.patch.object(probe, "_git", side_effect=git):
+            with self.assertRaisesRegex(probe.ProbeError, "merge commits"):
+                probe._check_post_qualification_paths("a" * 40, "b" * 40)
 
     def test_probe_is_not_wired_into_make_test_and_never_swapons_mapper(self):
         runner = (ROOT / "tools/run-tests.py").read_text()
@@ -675,6 +723,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn('["swapon", target["device"]]', script)
         self.assertNotIn('["swapon", mapper]', script)
         self.assertNotIn('"--force"', script)
+        self.assertNotIn("ssh-keygen", script)
+        self.assertNotIn("allowed_signers", script)
+        self.assertNotIn("REVIEW_NAMESPACE", script)
+        self.assertIn("PROCEDURAL_NOT_CRYPTOGRAPHIC", script)
 
 
 
@@ -702,7 +754,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         return stack
 
     def reviewed_device_fixture(self):
-        """Build an immutable synthetic state to mutate signed review fields."""
+        """Build an immutable synthetic state to mutate verbal review fields."""
         header = bytearray(probe.PAGE_BYTES)
         header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
         target = {
@@ -711,40 +763,49 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "device_arg": "/dev/disk/by-uuid/test-swap",
             "header": bytes(header),
         }
-        evidence = {"source_sha": "a" * 40, "artifact_digests": {
-            key: str(index) * 64 for index, (key, _, _) in
-            enumerate(probe.PHYSICAL_ARTIFACTS, start=1)
-        }}
+        evidence = {
+            "source_sha": "a" * 40,
+            "head": "b" * 40,
+            "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
+            "artifact_digests": {
+                key: str(index) * 64 for index, (key, _, _) in
+                enumerate(probe.PHYSICAL_ARTIFACTS, start=1)},
+        }
         review = {
             **evidence["artifact_digests"],
-            "approved": True, "reviewer": "independent-reviewer",
+            "approved": True,
+            "approval_mode": "verbal",
+            "approval_text": probe.VERBAL_APPROVAL_TEXT,
+            "reviewer": probe.VERBAL_REVIEWER,
             "scope": probe.EXPECTED_SCOPE,
             "source_sha": evidence["source_sha"],
+            "helper_git_sha": evidence["head"],
             "device_major_minor": "8:4",
             "device_partuuid": target["partuuid"],
             "device_size_bytes": target["size_bytes"],
             "original_header_sha256": hashlib.sha256(target["header"]).hexdigest(),
             "device_uuid_path": target["device_arg"],
             "run_id": "0123456789abcdef0123456789abcdef",
-            "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
+            "helper_sha256": evidence["helper_sha256"],
         }
         return target, evidence, review
 
-    def test_signed_review_rejects_changed_device_state_or_run_id(self):
+    def test_verbal_review_rejects_changed_device_state_or_run_id(self):
         target, evidence, review = self.reviewed_device_fixture()
         with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.dict(os.environ, {"SUDO_USER": "operator"}), \
-                mock.patch.object(probe, "_verify_signed_review") as verify:
+                mock.patch.dict(os.environ, {"SUDO_USER": "operator"}):
             review_path = Path(directory) / "review.json"
             review_path.write_text(json.dumps(review))
             self.assertEqual(probe.validate_review(review_path, evidence, target),
                              {"reviewer": review["reviewer"],
-                              "run_id": review["run_id"]})
-            verify.assert_called_once()
+                              "run_id": review["run_id"],
+                              "approval_mode": "verbal"})
             for field, replacement in (
                 ("device_size_bytes", target["size_bytes"] + 4096),
                 ("original_header_sha256", "f" * 64),
                 ("device_uuid_path", "/dev/disk/by-uuid/substituted"),
+                ("approval_text", "approval text was modified"),
+                ("helper_git_sha", "c" * 40),
                 ("run_id", "f" * 31),
                 ("run_id", "A" * 32),
                 ("run_id", "g" * 32),
@@ -756,7 +817,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     with self.assertRaises(probe.ProbeError):
                         probe.validate_review(review_path, evidence, target)
             for missing in ("device_size_bytes", "original_header_sha256",
-                            "device_uuid_path", "run_id"):
+                            "device_uuid_path", "run_id", "approval_text",
+                            "approval_mode", "helper_git_sha"):
                 with self.subTest(missing=missing):
                     changed = dict(review)
                     del changed[missing]
@@ -773,6 +835,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "swap_used_kib": 0,
         })
         evidence["pass_reports"] = 2
+        evidence["latest_source_reports"] = 1
+        evidence["prior_matching_reports"] = 1
         return target, evidence
 
     def test_refuses_volatile_recovery_state_before_backup(self):
@@ -913,7 +977,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                               "size_bytes": probe.PAGE_BYTES})
 
     def simulate_physical_run(self, wrong_mapper=False, mapper_fault=None,
-                              identity_failure_at=None):
+                              identity_failure_at=None,
+                              oracle_failure_at=None):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         token = "1234567890abcdef"
@@ -923,8 +988,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
             "stage": "BACKED_UP", "module_ownership": "NOT_STARTED",
         }
-        review = {"reviewer": "independent-reviewer",
+        review = {"reviewer": probe.VERBAL_REVIEWER,
+                  "approval_mode": "verbal",
                   "run_id": "0123456789abcdef0123456789abcdef"}
+        state.update({
+            "run_id": review["run_id"], "partuuid": target["partuuid"],
+            "major": target["major"], "minor": target["minor"],
+            "device_arg": target["device_arg"],
+            "device": target["device"], "size_bytes": target["size_bytes"],
+            "swap_size_kib": target["swap_size_kib"],
+            "swap_priority": target["swap_priority"],
+        })
         formatted = bytearray(probe.PAGE_BYTES)
         formatted[:8] = probe.SWAPZ_HEADER_MAGIC
         struct.pack_into("<IIQ", formatted, 8,
@@ -934,6 +1008,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         mapper = f"/dev/mapper/{state['dm_name']}"
         events = []
         identity_verifications = 0
+        oracle_invocations = 0
 
         def verify_target(_target):
             nonlocal identity_verifications
@@ -944,10 +1019,20 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     f"injected identity change at boundary {identity_verifications}")
 
         def run(command, **kwargs):
+            nonlocal oracle_invocations
             del kwargs
             arguments = tuple(str(value) for value in command)
             events.append(("command", arguments))
+            if command[0] == "/reviewed/device-roundtrip":
+                oracle_invocations += 1
+                if oracle_invocations == oracle_failure_at:
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout="FAIL injected physical phase\n",
+                        stderr="injected phase failure\n")
             if command[:2] == ["dmsetup", "info"]:
+                if "name,uuid,major,minor" not in command:
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="", stderr="")
                 wrong_uuid = fault == "uuid" or (fault == "substitution" and
                          sum(event[0] == "command" and
                              event[1][:2] == ("dmsetup", "info")
@@ -966,7 +1051,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                                stdout=output, stderr="")
 
         def read_text(path, *args, **kwargs):
-            del args, kwargs
             value = str(path)
             if value.endswith("/parameters/allow_physical_backing"):
                 return "Y\n"
@@ -978,7 +1062,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 return str(probe.LOGICAL_SECTORS - (8 if fault == "size" else 0)) + "\n"
             if value.endswith("/slaves/synthetic/dev"):
                 return f"{target['major']}:{target['minor'] + (1 if fault == 'lower' else 0)}\n"
-            raise AssertionError(f"unexpected sysfs read: {value}")
+            if value.endswith("/stat"):
+                return "0 0 0 0 0 0 0 0 0 0 0\n"
+            return REAL_PATH_READ_TEXT(path, *args, **kwargs)
 
         def is_file(path):
             return str(path).endswith("/parameters/allow_physical_backing")
@@ -987,6 +1073,36 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             if str(path) == "/sys/dev/block/253:0/slaves":
                 return iter([Path("/sys/dev/block/253:0/slaves/synthetic")])
             raise AssertionError(f"unexpected sysfs listing: {path}")
+
+        def remove_test_objects(saved_state, saved_state_dir):
+            saved_state["stage"] = "COMPLETE"
+            probe._release_partition_ownership(saved_state)
+            result_path = Path(saved_state_dir) / probe.RESULTS_NAME
+            saved_results = json.loads(result_path.read_text())
+            saved_results.update({
+                "final_block0_sha256": saved_results[
+                    "original_header_sha256"],
+                "original_header_matches_final": True,
+                "final_swap_row": {
+                    "kind": "partition",
+                    "size_kib": target["swap_size_kib"],
+                    "priority": target["swap_priority"],
+                },
+                "restored_swap_verified": True,
+                "final_mapper_present": False,
+                "final_module_present": False,
+                "mapper_removal_succeeded": True,
+                "module_cleanup_succeeded": True,
+                "active_partition_marker_present": False,
+                "approval_consumed": True,
+                "final_recovery_state": "COMPLETE",
+                "dm_inventory_after": saved_results["dm_inventory_before"],
+                "unrelated_mapper_inventory_unchanged": True,
+                "end_timestamp": probe._utc_timestamp(),
+            })
+            saved_state["_test_results"] = saved_results
+            probe._save_results(saved_state_dir, saved_results)
+            return saved_state
 
         # Isolate each synthetic attempt from one-use approvals claimed earlier.
         # Otherwise, an approval-replay failure can mask a mapper-identity bug.
@@ -998,6 +1114,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe.os, "geteuid", return_value=0),
                 mock.patch.object(probe, "current_source_evidence",
                                   return_value=evidence),
+                mock.patch.object(probe, "_git", side_effect=lambda *args:
+                                  (evidence["head"] if args[0] == "rev-parse"
+                                   else "")),
+                mock.patch.object(probe, "_remote_main_sha",
+                                  return_value=evidence["head"]),
                 mock.patch.object(probe, "inspect_target", return_value=target),
                 mock.patch.object(probe, "_artifact_digests",
                                   return_value=evidence["artifact_digests"]),
@@ -1036,16 +1157,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   side_effect=lambda *_:
                                   events.append(("save", state["stage"]))),
                 mock.patch.object(probe, "_remove_test_objects",
-                                  side_effect=lambda *_: events.append(("recover",))),
+                                  side_effect=lambda saved_state, saved_dir: (
+                                      events.append(("recover",)) or
+                                      remove_test_objects(saved_state, saved_dir))),
                 mock.patch.object(probe, "_run", side_effect=run),
             )
             with ExitStack() as active_patches:
                 for patch in patches:
                     active_patches.enter_context(patch)
-                if fault or identity_failure_at is not None:
+                if fault or identity_failure_at is not None or \
+                        oracle_failure_at is not None:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
-                            "mapper|UUID|identity|table|backing|injected"):
+                            "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed"):
                         probe.run_probe(target["device_arg"], target["device_arg"],
                                         directory, "/reviewed/review.json")
                 else:
@@ -1062,6 +1186,30 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn(("/reviewed/device-roundtrip",
                        f"/dev/mapper/{state['dm_name']}",
                        "--expect-dm-uuid", state["dm_uuid"]), commands)
+        oracle = "/reviewed/device-roundtrip"
+        mapper = f"/dev/mapper/{state['dm_name']}"
+        oracle_commands = [command for command in commands
+                           if command[0] == oracle]
+        self.assertEqual(oracle_commands, [
+            (oracle, mapper, "--expect-dm-uuid", state["dm_uuid"]),
+            (oracle, mapper, "--delta64-write-series", "128", "1"),
+            (oracle, mapper, "--delta64-verify-series", "128", "1"),
+            (oracle, mapper, "--segmented-write-series", "128", "5"),
+            (oracle, mapper, "--segmented-verify-series", "128", "5"),
+            (oracle, mapper, "--verify-series", "128", "5"),
+            (oracle, mapper, "--write-series", "128", "6"),
+            (oracle, mapper, "--segmented-verify-series", "128", "6"),
+            (oracle, mapper, "--thp-write-series", "128", "7"),
+            (oracle, mapper, "--thp-verify-series", "128", "7"),
+            (oracle, mapper, "--verify-series", "128", "7"),
+        ])
+        phases = state["_test_results"]["physical_oracle_phases"]
+        self.assertEqual([entry["status"] for entry in phases], ["PASS"] * 11)
+        for entry in phases:
+            self.assertIn("dmsetup_status_before", entry)
+            self.assertIn("dmsetup_status_after", entry)
+            self.assertIn("block_stats_before", entry)
+            self.assertIn("block_stats_after", entry)
         self.assertFalse(any(command[0] == "swapon" and
                              "swapz-demo" in " ".join(command)
                              for command in commands))
@@ -1073,6 +1221,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         owned = events.index(("save", "MODULE_OWNED"))
         self.assertLess(pending, inserted)
         self.assertLess(inserted, owned)
+
+    def test_failed_oracle_phase_stops_later_phases_and_recovers(self):
+        events, state, _ = self.simulate_physical_run(oracle_failure_at=2)
+        commands = [event[1] for event in events if event[0] == "command"]
+        oracle_commands = [command for command in commands
+                           if command[0] == "/reviewed/device-roundtrip"]
+        self.assertEqual(len(oracle_commands), 2)
+        phases = state["_test_results"]["physical_oracle_phases"]
+        self.assertEqual([entry["status"] for entry in phases], ["PASS", "FAIL"])
+        self.assertEqual(state["_test_results"]["final_recovery_state"],
+                         "COMPLETE")
 
     def test_partition_identity_is_rechecked_after_clear_before_formatter(self):
         events, _, _ = self.simulate_physical_run()
@@ -1231,7 +1390,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe.Path, "exists",
                                       return_value=False), \
                     mock.patch.object(probe, "_mapper_exists",
-                                      return_value=True), \
+                                      side_effect=[True, False]), \
                     mock.patch.object(probe, "_verify_owned_mapper",
                                       return_value=f"/dev/mapper/{state['dm_name']}"), \
                     mock.patch.object(probe, "_run", side_effect=run), \
@@ -1271,8 +1430,20 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with self.subTest(phase=phase):
                 state_dir = self.recovery_base / f"attempt-{phase}"
                 state_dir.mkdir(mode=0o700)
-                review = {"reviewer": "independent-reviewer", "run_id": run_id}
-                state = {"stage": "BACKED_UP"}
+                review = {"reviewer": probe.VERBAL_REVIEWER,
+                          "run_id": run_id, "approval_mode": "verbal"}
+                state = {"stage": "BACKED_UP",
+                         "dm_name": "swapz-demo-physical-1234567890abcdef",
+                         "dm_uuid": "SWAPZ-TEST-PHYSICAL-1234567890abcdef",
+                         "run_id": run_id,
+                         "partuuid": target["partuuid"],
+                         "major": target["major"],
+                         "minor": target["minor"],
+                         "device": target["device"],
+                         "device_arg": target["device_arg"],
+                         "size_bytes": target["size_bytes"],
+                         "swap_size_kib": target["swap_size_kib"],
+                         "swap_priority": target["swap_priority"]}
                 prepare = mock.Mock(
                     return_value=(state, state_dir),
                     side_effect=(probe.ProbeError("injected prepare failure")
@@ -1292,6 +1463,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                           return_value=evidence["artifact_digests"]),
                         mock.patch.object(probe, "validate_review",
                                           return_value=review),
+                        mock.patch.object(probe, "_dm_inventory_snapshot",
+                                          return_value={
+                                              "other_mapper_count": 0,
+                                              "other_mapper_sha256": "a" * 64}),
+                        mock.patch.object(probe, "_read_block0",
+                                          return_value=target["header"]),
+                        mock.patch.object(probe, "_active_swap_for",
+                                          return_value={
+                                              "kind": "partition",
+                                              "size_kib": target["swap_size_kib"],
+                                              "priority": target["swap_priority"]}),
+                        mock.patch.object(probe, "_mapper_exists",
+                                          return_value=False),
+                        mock.patch.object(probe, "_kernel_swapz_messages",
+                                          return_value={
+                                              "available": False,
+                                              "error": "mocked unavailable"}),
                         mock.patch.object(probe.shutil, "which",
                                           return_value="/usr/bin/mock"),
                         mock.patch.object(probe, "_prepare_state", prepare),
@@ -1366,7 +1554,24 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             def run(command, **kwargs):
                 del kwargs
                 executed.append(tuple(command))
+                if command == ["rmmod", "dm_swapz"]:
+                    module_loaded[0] = False
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            module_loaded = [True]
+            real_exists = Path.exists
+            real_is_file = Path.is_file
+
+            def module_exists(path):
+                if str(path) == "/sys/module/dm_swapz":
+                    return module_loaded[0]
+                return real_exists(path)
+
+            def module_is_file(path):
+                if str(path).endswith(
+                        "/parameters/allow_physical_backing"):
+                    return True
+                return real_is_file(path)
 
             with ExitStack() as stack:
                 patches = (
@@ -1374,8 +1579,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(
                         probe, "inspect_target_identity_for_recovery",
                         return_value=target),
-                    mock.patch.object(probe.Path, "exists", return_value=True),
-                    mock.patch.object(probe.Path, "is_file", return_value=True),
+                    mock.patch.object(probe.Path, "exists", autospec=True,
+                                      side_effect=module_exists),
+                    mock.patch.object(probe.Path, "is_file", autospec=True,
+                                      side_effect=module_is_file),
                     mock.patch.object(probe.Path, "read_text", return_value="Y"),
                     mock.patch.object(probe, "_mapper_exists", return_value=False),
                     mock.patch.object(probe, "_holder_names", return_value=[]),
@@ -1443,7 +1650,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                             "priority|capacity|size"):
                     probe.recover(state_dir, state["device_arg"],
                                   state["device_arg"])
-            save.assert_not_called()
+            # Cleanup state is durably recorded before original swap geometry
+            # is checked, so this path must save once before failing closed.
+            save.assert_called_once()
             self.assertFalse(any(command[0] == "swapon" and
                                  "swapz-demo" in " ".join(command)
                                  for command in commands))
