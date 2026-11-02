@@ -4,6 +4,7 @@ OUT := $(ROOT)/build/tests/native
 NATIVE := $(ROOT)/tests/runtime/native
 BENCHMARK := $(ROOT)/tests/runtime/benchmark
 KERNEL := $(ROOT)/src/kernel
+USERSPACE := $(ROOT)/src/userspace
 CODEC := $(KERNEL)/codec.c
 AUTH := $(KERNEL)/authority.c
 ENGINE := $(KERNEL)/engine.c
@@ -15,8 +16,8 @@ CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 endif
 CPPFLAGS += -I$(KERNEL)
 
-.PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor test-anon-page-analyzer test-replay-helper clean
-PROGRAMS := io-replay-native codec-roundtrip extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots lane-gap superblock
+.PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor test-anon-page-analyzer test-userspace test-replay-helper clean
+PROGRAMS := io-replay-native codec-roundtrip extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots lane-gap superblock swapzctl-status
 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
@@ -60,6 +61,8 @@ lane-gap_SRC := $(NATIVE)/io/lane-gap.c
 lane-gap_HDR := $(KERNEL)/lane-gap.h $(KERNEL)/codec.h
 superblock_SRC := $(NATIVE)/codec/superblock.c
 superblock_HDR := $(KERNEL)/superblock.h
+swapzctl-status_SRC := $(NATIVE)/userspace/swapzctl-status.c
+swapzctl-status_HDR := $(USERSPACE)/swapzctl.c $(KERNEL)/superblock.h
 anon-page-analyzer_SRC := $(NATIVE)/codec/anon-page-analyzer.c $(ENGINE) $(AUTH) $(CODEC) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS)
 anon-page-analyzer_HDR := $(KERNEL)/engine.h $(KERNEL)/predictor-route.h $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/codec.h
 anon-page-analyzer_LDLIBS := -llz4
@@ -128,10 +131,13 @@ test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-scan-sca
 test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots $(OUT)/lane-gap
 	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"; "$(OUT)/preparation-slots"; "$(OUT)/lane-gap"
 
+test-userspace: $(OUT)/swapzctl-status
+	@"$(OUT)/swapzctl-status"
+
 test-replay-helper: $(OUT)/io-replay-native
 	@test -x "$(OUT)/io-replay-native"
 
-test-all: test-codec test-predictor test-mapping test-gc test-lower-io test-replay-helper
+test-all: test-codec test-predictor test-mapping test-gc test-lower-io test-userspace test-replay-helper
 
 clean:
 	@rm -f $(addprefix $(OUT)/,$(PROGRAMS)) $(OUT)/predictor-qualification \

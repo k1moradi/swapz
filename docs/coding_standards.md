@@ -14,6 +14,36 @@ Active product C/C++ and headers live under `src/`; test-only code lives under `
 
 Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ may appear only when discussing the current unversioned disk format.
 
+### swapzctl status compression accounting
+
+`swapzctl status` is a read-only Device Mapper observer. It may enumerate
+active mappings and request the target's information status, but it must never
+create, suspend, resume, remove or otherwise mutate a mapper, backing device or
+swap state. Compression accounting is cumulative for successful foreground
+writes since target creation; it is not current live-map occupancy, physical
+NAND wear or a replacement for the qualification report.
+
+The compressed-SWZ ratio uses `compressed * 4096` logical bytes divided by
+successful foreground lower-WRITE bytes attributable to compressed SWZ extents.
+Foreground bytes are `physical_write - gc_write`; subtract exactly one 4KiB
+block for each committed RAW page. This denominator intentionally includes SWZ
+headers, extent rounding and packing cost. If a nonzero lower-bulk padding mode
+makes compressed bytes inseparable from padding using committed counters,
+report the compressed-only ratio as unavailable rather than estimating it.
+
+The overall ratio uses `logical_write / (physical_write - gc_write)`. RAW
+pages therefore contribute 4KiB logical and 4KiB lower bytes, while zero-elided
+writes contribute 4KiB logical and no lower data bytes. Report GC lower-WRITE
+bytes separately and exclude them from both representation ratios. Never derive
+a committed ratio from `lz4_accepted_bytes`, size bins, predictor results or
+other attempt-side diagnostics.
+
+Status parsing must use exact `key=value` tokens, checked arithmetic and
+bounded Device Mapper buffers. Before printing ratios, require two consecutive
+snapshots with identical relevant monotonic counters and validate
+`logical_write == (compressed + raw + zero_elided) * 4096`. A malformed,
+overflowing, unstable or failed target must not produce a numeric ratio.
+
 ### Representative-memory tooling
 
 Representative-memory analysis must be explicitly owner supplied and offline.

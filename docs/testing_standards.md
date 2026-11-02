@@ -324,6 +324,23 @@ the final one-BIO budget skips batch probes, and 64 ordinary completions must
 exhaust the quantum exactly. The regression must fail on the old zero-charge
 path; merely finding a decrement in source is insufficient.
 
+### Userspace compression-ratio status
+
+Rootless native qualification compiles the production `swapzctl.c` directly and
+executes its compression-accounting parser. Cover mixed compressed/RAW/zero
+traffic, exact GC subtraction, RAW-only and zero-only cases, nonzero
+lower-bulk-padding ambiguity, failed targets, arithmetic overflow, missing
+fields, and a cross-counter snapshot that must retry. Include a similarly named
+field such as `physical_write_reqs` before `physical_write` so the test proves
+exact token matching rather than prefix matching.
+
+The status implementation must require two consecutive identical relevant
+snapshots before printing a ratio. The compressed-only result is available only
+when committed counters can partition compressed SWZ extent bytes exactly; an
+ambiguous padding configuration reports unavailable. These rootless checks
+validate userspace parsing/accounting and build compatibility, not live Device
+Mapper semantics; the official acceptance command remains `make test`.
+
 ## Retained-window scheduler qualification
 
 Native tests must keep authoritative sampled tails ahead of dry four-record
