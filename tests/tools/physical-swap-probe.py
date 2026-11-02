@@ -300,10 +300,12 @@ def inspect_target(device_arg, confirm_arg):
     matching = []
     for swap in swaps:
         try:
-            if block_identity(swap["path"]) == (major, minor):
-                matching.append(swap)
-        except ProbeError:
-            continue
+            identity = block_identity(swap["path"])
+        except ProbeError as exc:
+            raise ProbeError(
+                "cannot verify every active swap entry during target preflight") from exc
+        if identity == (major, minor):
+            matching.append(swap)
     if len(matching) != 1:
         raise ProbeError("selected partition must be exactly one active system swap")
     active = matching[0]
@@ -769,6 +771,11 @@ def _durable_exclusive_record(path, record):
     _fsync_directory(path.parent)
 
 
+def _review_consumption_record(target, run_id):
+    return {"run_id": run_id, "partuuid": target["partuuid"],
+            "major": target["major"], "minor": target["minor"]}
+
+
 def _check_review_unconsumed(target, run_id):
     base = _recovery_base()
     if (base / f"consumed-{run_id}.json").exists() or (
@@ -776,20 +783,44 @@ def _check_review_unconsumed(target, run_id):
         raise ProbeError("review consumed or partition recovery outstanding")
 
 
-def _consume_review(target, run_id):
-    """Commit one-use approval and partition ownership before swapoff."""
+def _burn_review(target, run_id):
+    """Permanently consume one signed run before any preparation can fail."""
     base = _recovery_base()
-    record = {"run_id": run_id, "partuuid": target["partuuid"],
-              "major": target["major"], "minor": target["minor"]}
+    record = _review_consumption_record(target, run_id)
+    if (base / f"partition-{target['partuuid']}.active").exists():
+        raise ProbeError("partition recovery is already outstanding")
+    try:
+        _durable_exclusive_record(base / f"consumed-{run_id}.json", record)
+    except FileExistsError as exc:
+        raise ProbeError("signed physical review was already consumed") from exc
+
+
+def _consume_review(target, run_id):
+    """Claim partition recovery after the signed run has been durably burned."""
+    base = _recovery_base()
+    record = _review_consumption_record(target, run_id)
     active_path = base / f"partition-{target['partuuid']}.active"
     used_path = base / f"consumed-{run_id}.json"
-    _check_review_unconsumed(target, run_id)
+    if active_path.exists():
+        raise ProbeError("physical partition recovery is already outstanding")
     try:
-        _durable_exclusive_record(used_path, record)
+        used = _load_unique_json(used_path.read_bytes())
+    except FileNotFoundError:
+        # Direct callers retain the fail-closed one-shot behavior; run_probe()
+        # burns the review earlier, before recovery preparation begins.
+        try:
+            _durable_exclusive_record(used_path, record)
+        except FileExistsError as exc:
+            raise ProbeError("signed physical review was already consumed") from exc
+    except (OSError, ValueError) as exc:
+        raise ProbeError("consumed review record is unreadable") from exc
+    else:
+        if used != record:
+            raise ProbeError("consumed review record belongs to another device")
+    try:
         _durable_exclusive_record(active_path, record)
     except FileExistsError as exc:
-        raise ProbeError("review reused or physical partition already owned") from exc
-    # A failed second record leaves the consumed approval permanently burned.
+        raise ProbeError("physical partition recovery is already outstanding") from exc
 
 
 def _release_partition_ownership(state):
@@ -916,10 +947,12 @@ def _active_swap_for(major, minor):
     matching = []
     for row in parse_swap_rows(Path("/proc/swaps").read_text()):
         try:
-            if block_identity(row["path"]) == (major, minor):
-                matching.append(row)
-        except ProbeError:
-            continue
+            identity = block_identity(row["path"])
+        except ProbeError as exc:
+            raise ProbeError(
+                "cannot verify every active swap entry during recovery") from exc
+        if identity == (major, minor):
+            matching.append(row)
     if len(matching) > 1:
         raise ProbeError("ambiguous duplicate active swap entries")
     return matching[0] if matching else None
@@ -1026,7 +1059,8 @@ def _validate_recovery_header(current_header, backup, state, size_bytes):
         "partition header is not an expected recovery state; manual review required")
 
 
-def recover(state_dir, device_arg, confirm_arg, lock_held=False):
+def recover(state_dir, device_arg, confirm_arg, lock_held=False,
+            module_owned_by_process=False):
     state_dir = Path(state_dir)
     _validate_state_dir(state_dir)
     try:
@@ -1063,6 +1097,10 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False):
         if module_present and state["module_ownership"] != "MODULE_OWNED":
             raise ProbeError(
                 "module load interrupted or foreign; manual recovery required")
+        if module_present and not module_owned_by_process:
+            raise ProbeError(
+                "persisted module ownership cannot prove load continuity; "
+                "manual recovery required")
         if _mapper_exists(state):
             _verify_owned_mapper(state, target)
             _run(["dmsetup", "remove", state["dm_name"]], timeout=60)
@@ -1201,7 +1239,8 @@ def _prepare_state(target, state_dir, evidence, review):
 
 
 def _remove_test_objects(state, state_dir):
-    recover(state_dir, state["device_arg"], state["device_arg"], lock_held=True)
+    recover(state_dir, state["device_arg"], state["device_arg"], lock_held=True,
+            module_owned_by_process=True)
 
 
 def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
@@ -1229,9 +1268,13 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
 
     lock_fd = _partition_lock(target["partuuid"])
     try:
+        # Burn the signed one-run approval before state preparation. A crash,
+        # fsync failure or artifact-snapshot failure can never make it reusable.
+        _burn_review(target, review["run_id"])
         state, state_dir = _prepare_state(
             target, state_dir_arg, evidence, review)
         failure = None
+        partition_claim_attempted = False
         try:
             artifacts = _snapshot_reviewed_artifacts(
                 state_dir, evidence["artifact_digests"])
@@ -1247,8 +1290,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                 raise ProbeError("selected swap state changed after preflight")
             if _read_block0(target["device"], target) != target["header"]:
                 raise ProbeError("original block zero changed after backup")
+            partition_claim_attempted = True
             _consume_review(target, review["run_id"])
-            # Both the review-consumption ledger and the backup are durable.
+            # The consumed review, active partition claim and backup are durable.
             _verify_target_identity(target)
             _run(["swapoff", "--", target["device"]], timeout=120)
             if _active_swap_for(target["major"], target["minor"]) is not None:
@@ -1318,17 +1362,22 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             print("PHYSICAL_SMOKE=BYTE_EXACT_CORRECTNESS_ONLY")
         except BaseException as exc:
             failure = exc
-        try:
-            _remove_test_objects(state, state_dir)
-        except BaseException as cleanup_exc:
-            state["stage_before_recovery"] = state["stage"]
-            state["stage"] = "RECOVERY_REQUIRED"
-            state["recovery_error"] = str(cleanup_exc)
+        if partition_claim_attempted:
+            try:
+                _remove_test_objects(state, state_dir)
+            except BaseException as cleanup_exc:
+                state["stage_before_recovery"] = state["stage"]
+                state["stage"] = "RECOVERY_REQUIRED"
+                state["recovery_error"] = str(cleanup_exc)
+                _save_state(state_dir, state)
+                print(f"RECOVERY_REQUIRED: state preserved at {state_dir}",
+                      file=sys.stderr)
+                if failure is None:
+                    failure = cleanup_exc
+        elif failure is not None:
+            state["stage"] = "PRE_DESTRUCTIVE_FAILED"
+            state["recovery_error"] = str(failure)
             _save_state(state_dir, state)
-            print(f"RECOVERY_REQUIRED: state preserved at {state_dir}",
-                  file=sys.stderr)
-            if failure is None:
-                failure = cleanup_exc
         if failure is not None:
             raise ProbeError(str(failure)) from failure
         print(f"PHYSICAL_SMOKE_RESTORED=swap-enabled state={state_dir}")

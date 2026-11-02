@@ -2788,9 +2788,18 @@ scope, artifact and signature checks. One permanent root-owned partition
 lock inode is flocked nonblocking for a run or recovery. The fixed base
 maintains fsynced exclusive `consumed-<run-id>.json` records that are never
 deleted and exclusive per-PARTUUID active ownership records that are removed
-only after durable COMPLETE. Uncertainty or interruption leaves an approval
-consumed and a partition blocked for explicit recovery; a different base
-cannot silently reset these records.
+only after durable COMPLETE. The signed run is burned immediately after the
+partition lock is acquired and before recovery-state preparation or artifact
+snapshotting, so a crash or fsync failure cannot silently make that approval
+reusable. The active per-PARTUUID recovery claim is created only after the
+backup/state/artifact preparation succeeds and immediately before any
+`swapoff`/block-zero transition; a pre-destructive failure therefore leaves
+the review consumed without falsely claiming that media recovery is required.
+Once the active claim is attempted, uncertainty is recovery state and blocks
+another physical run. A different base cannot silently reset either ledger.
+Rootless mocks must inject a preparation failure after the burn and prove the
+consumed record survives, no active claim or destructive command is created,
+and replay of that signed run is rejected.
 
 After dmsetup create, and immediately before oracle invocation, verify
 the exact helper-generated DM name/UUID, mapper block major:minor, kernel
@@ -2800,13 +2809,23 @@ oracle. The separately owned oracle must verify its own open FD and DM UUID
 before any write. The helper writes `MODULE_PENDING` durably before insmod
 and `MODULE_OWNED` only after success and physical opt-in verification.
 Recovery must never unload an already-present module with pending, unknown
-or foreign ownership; a pending-present module is manual-recovery-only.
-No force removal is permitted.
+or foreign ownership. Durable `MODULE_OWNED` records establish that the helper
+successfully loaded the module at that point, but a later standalone recovery
+cannot prove that the currently loaded module is the same uninterrupted kernel
+object; it therefore requires manual recovery instead of automatically running
+`rmmod`. Only same-process cleanup that still owns the physical run lock may
+automatically unload its durably recorded `MODULE_OWNED` instance. A
+pending-present module is likewise manual-recovery-only. Rootless recovery
+must prove a standalone present `MODULE_OWNED` module is not passed to
+`rmmod`, while same-process cleanup retains the bounded owned unload path. No
+force removal is permitted.
 
 Recovery accepts only the saved original, an expected zero header at a
 recognized stage, or a digest-matched valid SWZ header with a durably
-recorded formatter digest. It must verify exact original bytes through a
-new identity-checked descriptor before swapon. After reactivation, verify
+recorded formatter digest. Every /proc/swaps row must have a resolvable block
+identity during preflight and recovery; an unreadable row is uncertainty and
+must fail closed rather than being ignored as unrelated. It must verify exact
+original bytes through a new identity-checked descriptor before swapon. After reactivation, verify
 the saved block identity through /proc/swaps together with the exact
 original size and priority before recording COMPLETE and retiring the active
 ownership marker. Wrong or ambiguous identity, unknown header, missing
