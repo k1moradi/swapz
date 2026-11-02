@@ -501,6 +501,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             root = Path(temp)
             (root / "test_results.json").write_text(json.dumps(current))
             with mock.patch.object(probe, "ROOT", root), \
+                    mock.patch.object(probe.platform, "machine",
+                                      return_value="x86_64"), \
                     mock.patch.object(probe, "_git", side_effect=git), \
                     mock.patch.object(probe, "_run", side_effect=run), \
                     mock.patch.object(probe, "_remote_main_sha", return_value=head), \

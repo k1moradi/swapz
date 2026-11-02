@@ -2675,7 +2675,10 @@ mapper. The physical correctness smoke must not activate the swapz mapper as
 system swap, and its results remain separate from the RAM-backed report and
 performance history. Rootless tests must reject a disappeared-UUID dependency,
 changed PARTUUID, unrecognized header state, duplicate PASS content and
-historical reports that do not match the live host.
+historical reports that do not match the live host. Tests of the x86-only
+physical-admission state machine must mock the admitted x86_64 architecture so
+the rootless contract remains architecture-neutral and can run unchanged on
+ARM64 qualification hosts.
 
 The review record is JSON with approved=true, a reviewer other than the
 operator, scope=physical swap backing correctness smoke only, the qualified
