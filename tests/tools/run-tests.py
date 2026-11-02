@@ -1256,6 +1256,10 @@ def safe_lines(log):
 def parse_loaded_correctness(output):
     """Parse fixed, non-identifying owned-RAM correctness evidence."""
     patterns = {
+        "maximum_capacity": re.compile(
+            r"PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:(\d+) "
+            r"logical_bytes:(\d+) lower_bytes:(\d+) physical_blocks:(\d+) "
+            r"segments:(\d+) lower_io_delta:(\d+)$"),
         "raw_read": re.compile(
             r"PASS_LOADED_RAW_READ_FANOUT=profiles:(\d+) verified_pages:(\d+) "
             r"async_batches:(\d+) lower_read_reqs:(\d+)$"),
@@ -1322,6 +1326,17 @@ def parse_loaded_correctness(output):
     if missing:
         return {"overall": "INCOMPLETE",
                 "reason": "missing loaded correctness markers: " + ",".join(missing)}
+
+    (capacity_pages, capacity_logical_bytes, capacity_lower_bytes,
+     capacity_physical_blocks, capacity_segments,
+     capacity_lower_io_delta) = found["maximum_capacity"]
+    if (capacity_pages != 3355136 or
+            capacity_logical_bytes != 13742637056 or
+            capacity_lower_bytes != 17178820608 or
+            capacity_physical_blocks != 4194048 or
+            capacity_segments != 16383 or capacity_lower_io_delta != 0):
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded maximum-capacity constructor evidence is incomplete"}
 
     raw_read_profiles, raw_read_pages, raw_read_batches, raw_read_reqs = found["raw_read"]
     if (raw_read_profiles != 2 or raw_read_pages != 2048 or
@@ -1432,6 +1447,12 @@ def parse_loaded_correctness(output):
                 "reason": "ID36 low-RAM/heavy-CPU evidence is incomplete"}
     return {
         "overall": "PASS",
+        "maximum_logical_pages": capacity_pages,
+        "maximum_mapper_bytes": capacity_logical_bytes,
+        "maximum_lower_bytes": capacity_lower_bytes,
+        "maximum_physical_blocks": capacity_physical_blocks,
+        "maximum_segments": capacity_segments,
+        "maximum_lower_io_delta": capacity_lower_io_delta,
         "raw_read_profiles": raw_read_profiles,
         "raw_read_verified_pages": raw_read_pages,
         "raw_read_async_batches": raw_read_batches,
@@ -1609,7 +1630,9 @@ def failure_context(output, *, loaded=True, default_phase=None):
     regime = None
     if loaded:
         for line in output.splitlines():
-            if line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
+            if line.startswith("START_LOADED_MAXIMUM_CAPACITY"):
+                phase = "owned RAM maximum-capacity constructor"
+            elif line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "owned RAM kernel smoke"
             elif line.startswith("START_LOADED_COMPOUND_BIO"):
                 phase = "owned RAM compound/segmented BIO observation"
@@ -7032,6 +7055,11 @@ def print_bench(result, *, detailed=False):
             "Loaded correctness, lifecycle, GC, and reclaim checks",
             ("check", "result"),
             [
+                ("max capacity",
+                 f"{loaded['maximum_logical_pages']:,} pages / "
+                 f"{loaded['maximum_mapper_bytes'] / (1024 ** 3):.2f} GiB; "
+                 f"lower {loaded['maximum_lower_bytes'] / (1024 ** 3):.2f} GiB; "
+                 f"I/O delta {loaded['maximum_lower_io_delta']}"),
                 ("RAW/zero pages",
                  f"{loaded['raw_pages']}/{loaded['zero_pages']}"),
                 ("flushes", loaded["flush_calls"]),

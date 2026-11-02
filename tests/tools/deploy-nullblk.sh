@@ -4,11 +4,18 @@
 set -Eeuo pipefail
 umask 077
 VALIDATED_SOURCE=""
-if [[ $# == 2 && $1 == --validated-source &&
-      $2 =~ ^[0-9a-f]{40}$ ]]; then
+CAPACITY_ONLY=0
+if [[ ( $# == 2 || ( $# == 3 && ${3:-} == --capacity-only ) ) &&
+      ${1:-} == --validated-source &&
+      ${2:-} =~ ^[0-9a-f]{40}$ &&
+      ( $# == 2 || ${3:-} == --capacity-only ) ]]; then
     VALIDATED_SOURCE="$2"
+    if (( $# == 3 )); then
+        CAPACITY_ONLY=1
+    fi
 else
-    printf '%s\n' 'BLOCKED: validated source revision required' >&2
+    printf '%s\n' \
+        'BLOCKED: validated source revision and optional capacity-only mode required' >&2
     exit 2
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -36,6 +43,12 @@ QUARANTINE=0
 SUSPENDED=0
 fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
+status_u64() {
+    local line="$1" key="$2"
+    [[ $line =~ (^|[[:space:]])${key}=([0-9]+)($|[[:space:]]) ]] ||
+        return 1
+    printf '%s\n' "${BASH_REMATCH[2]}"
+}
 
 # A repeated dmsetup remove/create can reassign the DM minor while udev is
 # still updating /dev/mapper. Before ANY owned I/O, prove that the actual
@@ -182,7 +195,11 @@ cleanup() {
 		exit 1
 	fi
 	if (( rc == 0 )); then
-		note "PASS: loaded isolated swapz byte-exact I/O, clean teardown"
+		if (( CAPACITY_ONLY )); then
+			note "PASS: loaded maximum-capacity constructor, no I/O, clean teardown"
+		else
+			note "PASS: loaded isolated swapz byte-exact I/O, clean teardown"
+		fi
 	else
 		note "FAIL: test exit $rc; safe teardown attempted"
 	fi
@@ -217,7 +234,13 @@ for attr in size memory_backed blocksize power index queue_mode submit_queues hw
 	[[ -e "$CONFIG/$attr" ]] || fail "missing configfs attribute $attr"
 done
 # Linux null_blk configfs size unit is MiB. Never use the module default!
-echo 64 > "$CONFIG/size"
+# The capacity-only probe advertises the exact full-partition data geometry
+# (16383 MiB after the SWZ header/segment boundary) but performs no I/O.
+NULLBLK_SIZE_MIB=64
+if (( CAPACITY_ONLY )); then
+	NULLBLK_SIZE_MIB=16383
+fi
+echo "$NULLBLK_SIZE_MIB" > "$CONFIG/size"
 echo 4096 > "$CONFIG/blocksize"
 echo 1 > "$CONFIG/memory_backed"
 echo 1 > "$CONFIG/discard"
@@ -266,7 +289,9 @@ NODEHEX="$(stat -Lc '%t:%T' "$LOWER")" || fail "cannot stat owned node"
 IFS=: read -r HMAJ HMIN <<< "$NODEHEX"
 printf -v NODEDEV '%d:%d' "0x$HMAJ" "0x$HMIN"
 [[ "$NODEDEV" == "$DEVNO" ]] || fail "block node does not match sysfs"
-[[ "$(blockdev --getsize64 "$LOWER")" == 67108864 ]] || fail "RAM lower must be 64MiB"
+EXPECTED_LOWER_BYTES=$((NULLBLK_SIZE_MIB * 1024 * 1024))
+[[ "$(blockdev --getsize64 "$LOWER")" == "$EXPECTED_LOWER_BYTES" ]] ||
+	fail "owned RAM lower size mismatch"
 [[ -d "/sys/block/$DISK/holders" && -z "$(ls -A "/sys/block/$DISK/holders")" ]] ||
     fail "unexpected lower holders"
 [[ -z "$(findmnt -rn -S "$LOWER")" ]] || fail "owned RAM lower is mounted"
@@ -284,6 +309,67 @@ insmod "$MODULE" || fail "swapz kernel module rejected"
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
 	fail "swapz target registration missing"
+if (( CAPACITY_ONLY )); then
+	MAX_LOGICAL_PAGES=3355136
+	MAX_LOGICAL_SECTORS=26841088
+	MAX_LOGICAL_BYTES=13742637056
+	EXPECTED_PHYSICAL_BLOCKS=4194048
+	EXPECTED_SEGMENTS=16383
+	[[ "$EXPECTED_LOWER_BYTES" == 17178820608 ]] ||
+		fail "capacity-only null_blk lower geometry mismatch"
+	note "START_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES"
+	lower_stats_before="$(cat "/sys/block/$DISK/stat")" ||
+		fail "cannot read capacity-probe lower statistics before create"
+	dmsetup create "$DMNAME" --uuid "$UUID" \
+		--table "0 $MAX_LOGICAL_SECTORS swapz $LOWER 0 64 1 2 0 1 0" ||
+		fail "maximum-capacity DM mapping creation failed"
+	OWN_DM=1
+	[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+	      tr -d '[:space:]')" == "$UUID" ]] ||
+		fail "maximum-capacity DM UUID mismatch"
+	swapz_verify_owned_dm_node
+	capacity_table="$(dmsetup table "$DMNAME")" ||
+		fail "cannot inspect maximum-capacity DM table"
+	read -r table_start table_sectors table_target table_lower \
+		table_budget table_window table_verify table_gc table_flush \
+		table_bulk table_write_fail table_retain table_extra <<< "$capacity_table"
+	[[ "$table_start" == 0 && "$table_sectors" == "$MAX_LOGICAL_SECTORS" &&
+	   "$table_target" == swapz &&
+	   ( "$table_lower" == "$LOWER" || "$table_lower" == "$DEVNO" ||
+	     "$table_lower" == "$DISK" ) &&
+	   "$table_budget" == 0 && "$table_window" == 64 &&
+	   "$table_verify" == 1 && "$table_gc" == 2 &&
+	   "$table_flush" == 0 && "$table_bulk" == 1 &&
+	   "$table_write_fail" == 0 && "$table_retain" == 0 &&
+	   -z "${table_extra:-}" ]] ||
+		fail "maximum-capacity DM table mismatch"
+	[[ "$(blockdev --getsize64 "/dev/mapper/$DMNAME")" == \
+	   "$MAX_LOGICAL_BYTES" ]] ||
+		fail "maximum-capacity mapper geometry mismatch"
+	dmsetup deps -o devname "$DMNAME" | grep -Fq "$DISK" ||
+		fail "maximum-capacity mapper dependency mismatch"
+	capacity_status="$(dmsetup status "$DMNAME")" ||
+		fail "cannot read maximum-capacity target status"
+	for key in logical_write logical_read physical_write physical_write_reqs \
+		   physical_read physical_read_reqs; do
+		[[ "$(status_u64 "$capacity_status" "$key")" == 0 ]] ||
+			fail "maximum-capacity constructor probe issued I/O: $key"
+	done
+	lower_stats_after="$(cat "/sys/block/$DISK/stat")" ||
+		fail "cannot read capacity-probe lower statistics after create"
+	[[ "$lower_stats_after" == "$lower_stats_before" ]] ||
+		fail "maximum-capacity constructor probe changed lower I/O counters"
+	[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+	      tr -d '[:space:]')" == "$UUID" ]] ||
+		fail "maximum-capacity mapper identity changed before removal"
+	timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
+		fail "cannot remove maximum-capacity DM mapping"
+	OWN_DM=0
+	[[ -z "$(ls -A "/sys/block/$DISK/holders" 2>/dev/null)" ]] ||
+		fail "maximum-capacity mapper left an unexpected lower holder"
+	note "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES logical_bytes:$MAX_LOGICAL_BYTES lower_bytes:$EXPECTED_LOWER_BYTES physical_blocks:$EXPECTED_PHYSICAL_BLOCKS segments:$EXPECTED_SEGMENTS lower_io_delta:0"
+	exit 0
+fi
 # 16 MiB upper table; current constructor arguments, no injected errors.
 dmsetup create "$DMNAME" --uuid "$UUID" \
 	--table "0 32768 swapz $LOWER 0 64 1 2 0 1 0" ||
@@ -339,12 +425,6 @@ note "LOWER_STATS=${lower_after[*]}"
 # a future C regression that merely increments a status counter.
 # The fixed C oracle submits 128 initial + 64 overwrite pages; of
 # those, initial page 0 and eight second-pass pages are ALL zero.
-status_u64() {
-    local line="$1" key="$2"
-    [[ $line =~ (^|[[:space:]])${key}=([0-9]+)($|[[:space:]]) ]] ||
-        return 1
-    printf '%s\n' "${BASH_REMATCH[2]}"
-}
 status_delta() {
     local key="$1" before_value after_value
     before_value="$(status_u64 "$status_before" "$key")" ||

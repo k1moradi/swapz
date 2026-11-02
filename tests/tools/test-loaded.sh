@@ -93,6 +93,9 @@ run_privileged_bounded() {
 
 run_privileged_bounded 60 tests/tools/loaded-preflight.sh
 printf 'LOADED_QUALIFICATION_SOURCE=%s\n' "$tested_source"
+printf '%s\n' 'START_LOADED_MAXIMUM_CAPACITY'
+run_privileged_bounded 300 tests/tools/deploy-nullblk.sh \
+	--validated-source "$tested_source" --capacity-only
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
 run_privileged_bounded 600 tests/tools/deploy-nullblk.sh --validated-source "$tested_source"
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'

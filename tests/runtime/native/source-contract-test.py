@@ -4817,6 +4817,33 @@ int main(void)
         self.assertIn("settle_udev", pair)
         self.assertNotIn('dmsetup remove --force', pair)
 
+    def test_loaded_maximum_capacity_probe_is_owned_and_io_free(self):
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        self.assertIn('--validated-source "$tested_source" --capacity-only', loaded)
+        self.assertLess(
+            loaded.index("--capacity-only"),
+            loaded.index("START_LOADED_OWNED_NULLBLK_SMOKE"))
+        capacity = deploy.split(
+            "if (( CAPACITY_ONLY )); then", 1)[1].split(
+                "\nfi\n# 16 MiB upper table", 1)[0]
+        for evidence in (
+                "NULLBLK_SIZE_MIB=16383",
+                "MAX_LOGICAL_PAGES=3355136",
+                "MAX_LOGICAL_SECTORS=26841088",
+                "MAX_LOGICAL_BYTES=13742637056",
+                "EXPECTED_PHYSICAL_BLOCKS=4194048",
+                "EXPECTED_SEGMENTS=16383",
+                "blockdev --getsize64 \"/dev/mapper/$DMNAME\"",
+                "logical_write logical_read physical_write physical_write_reqs",
+                "physical_read physical_read_reqs",
+                "[[ \"$lower_stats_after\" == \"$lower_stats_before\" ]]",
+                "dmsetup remove --retry \"$DMNAME\"",
+                "PASS_LOADED_MAXIMUM_CAPACITY="):
+            self.assertIn(evidence, capacity)
+        for forbidden in ("$ORACLE", "mkswap", "swapon", "swapoff", "dd "):
+            self.assertNotIn(forbidden, capacity)
+
     def test_dkms_sandbox_does_not_depend_on_host_module_state(self):
         package = (ROOT / "packaging/package-dkms.sh").read_text()
         self.assertIn(

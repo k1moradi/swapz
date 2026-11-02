@@ -327,8 +327,15 @@ bytes (114.89 MiB) of capacity-index arrays. The last figure excludes the
 target structure, fixed scratch/cache/workspace allocations, and allocator
 overhead; it is not a total module-RAM measurement. Native authority success
 does not prove that the loaded Device Mapper target can allocate or operate at
-that size. Until a loaded maximum-size target and worst-case RAW/GC tests pass,
-report the value only as the source-derived authority admission limit.
+that size. The loaded qualification must first create the maximum logical
+target over a separately owned 16,383 MiB RAM-backed `null_blk` lower, then
+verify the exact DM UUID, table, mapper size, lower identity, zero target I/O
+counters and unchanged lower statistics before ordinary non-force teardown.
+This constructor probe must issue no I/O and does not qualify maximum-size
+writes, reads, allocation churn or GC. Until both the loaded maximum-size
+constructor and worst-case RAW/GC tests pass, report the value as the
+source-derived authority admission limit and keep maximum-capacity operation
+unqualified.
 
 Source contracts validate behavior that requires the Linux Device Mapper target itself, including BIO ownership, queue/drain ordering, null_blk-only admission, lower-I/O accounting and current report/build contracts. Source-string assertions are secondary to executable production-C coverage.
 
