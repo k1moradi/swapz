@@ -630,6 +630,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertNotIn('"--force"', script)
 
 
+
+    def simulate_root_owned_directories(self, *directories):
+        """Model uid 0 in rootless CI without weakening production checks."""
+        original_stat = probe.Path.stat
+        owned = {str(directory) for directory in directories}
+
+        def simulated_stat(path, *args, **kwargs):
+            info = original_stat(path, *args, **kwargs)
+            if str(path) not in owned:
+                return info
+            fields = list(info)
+            fields[4] = 0  # st_uid in os.stat_result, not a real chown.
+            return os.stat_result(fields)
+
+        return mock.patch.object(probe.Path, "stat", simulated_stat)
+
     def reviewed_device_fixture(self):
         """Build an immutable synthetic state to mutate signed review fields."""
         header = bytearray(probe.PAGE_BYTES)
@@ -713,10 +729,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                                 "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
             base = Path(directory)
             base.chmod(0o700)
-            with self.assertRaisesRegex(probe.ProbeError,
-                                        "volatile|persistent|durable|filesystem"):
-                probe._prepare_state(target, base / "attempt", evidence,
-                                     "independent-reviewer")
+            with self.simulate_root_owned_directories(base, base / "attempt"):
+                with self.assertRaisesRegex(probe.ProbeError,
+                                            "volatile|persistent|durable|filesystem"):
+                    probe._prepare_state(target, base / "attempt", evidence,
+                                         "independent-reviewer")
 
     def test_refuses_untrusted_parent_before_creating_state(self):
         target, evidence = self.physical_preparation_fixture()
@@ -727,10 +744,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             base = Path(directory) / "untrusted"
             base.mkdir(mode=0o700)
             base.chmod(0o777)
-            with self.assertRaisesRegex(probe.ProbeError,
-                                        "parent|trusted|root-owned|writable"):
-                probe._prepare_state(target, base / "attempt", evidence,
-                                     "independent-reviewer")
+            with self.simulate_root_owned_directories(base, base / "attempt"):
+                with self.assertRaisesRegex(probe.ProbeError,
+                                            "parent|trusted|writable"):
+                    probe._prepare_state(target, base / "attempt", evidence,
+                                         "independent-reviewer")
 
     def test_parent_entry_fsync_failure_prevents_state_admission(self):
         target, evidence = self.physical_preparation_fixture()
@@ -752,7 +770,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     raise OSError("injected parent-entry fsync failure")
                 return original_fsync(descriptor)
 
-            with mock.patch.object(probe.os, "fsync", side_effect=fail_parent_fsync):
+            with self.simulate_root_owned_directories(base, base / "attempt"), \
+                    mock.patch.object(probe.os, "fsync",
+                                      side_effect=fail_parent_fsync):
                 with self.assertRaisesRegex(Exception,
                                             "parent-entry fsync failure"):
                     probe._prepare_state(target, base / "attempt", evidence,
@@ -902,7 +922,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                       return_value=False), \
                     mock.patch.object(probe, "_read_block0", return_value=backup), \
                     mock.patch.object(probe, "_active_swap_for",
-                                      side_effect=[None, active]), \
+                                      side_effect=[None, active, active]), \
                     mock.patch.object(probe, "_save_state") as save:
                 with self.assertRaisesRegex(probe.ProbeError,
                                             "priority|capacity|size"):
@@ -964,9 +984,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 except probe.ProbeError as exc:
                     return exc
 
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = [executor.submit(claim, index) for index in range(2)]
-                outcomes = [future.result() for future in futures]
+            with self.simulate_root_owned_directories(
+                    base, base / "attempt-0", base / "attempt-1"):
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    futures = [executor.submit(claim, index) for index in range(2)]
+                    outcomes = [future.result() for future in futures]
             self.assertEqual(sum(isinstance(value, Path) for value in outcomes), 1,
                              "two concurrent attempts acquired the same physical device")
             self.assertEqual(sum(isinstance(value, probe.ProbeError)
@@ -981,8 +1003,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                                 "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
             base = Path(directory)
             base.chmod(0o700)
-            with mock.patch.object(probe.os, "fsync",
-                                   side_effect=OSError("injected backup fsync failure")):
+            with self.simulate_root_owned_directories(base, base / "attempt"), \
+                    mock.patch.object(probe.os, "fsync",
+                                      side_effect=OSError("injected backup fsync failure")):
                 with self.assertRaisesRegex(Exception, "backup fsync failure"):
                     probe._prepare_state(target, base / "attempt", evidence,
                                          "independent-reviewer")
