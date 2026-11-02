@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 import os
@@ -37,6 +38,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "header_sha256": hashlib.sha256(header).hexdigest(),
             "swap_was_active": True,
             "swap_priority": -1,
+            "swap_size_kib": (16 * 1024 * 1024 * 1024) // 1024 - 4,
+            "run_id": "0123456789abcdef0123456789abcdef",
             "module_loaded_by_us": False,
             "dm_name": f"swapz-demo-physical-{token}",
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
@@ -88,7 +91,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "source_sha": "a" * 40,
             "artifact_digests": artifact_digests,
         }
-        target = {"major": 8, "minor": 4, "partuuid": "deadbeef-04"}
+        header = bytearray(probe.PAGE_BYTES)
+        header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
+        target = {"major": 8, "minor": 4, "partuuid": "deadbeef-04",
+                  "size_bytes": 16 * 1024 * 1024 * 1024,
+                  "device_arg": "/dev/disk/by-uuid/test-swap",
+                  "header": bytes(header)}
         review = {
             **artifact_digests,
             "approved": True,
@@ -97,6 +105,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "source_sha": evidence["source_sha"],
             "device_major_minor": "8:4",
             "device_partuuid": "deadbeef-04",
+            "device_size_bytes": target["size_bytes"],
+            "original_header_sha256": hashlib.sha256(target["header"]).hexdigest(),
+            "device_uuid_path": target["device_arg"],
+            "run_id": "0123456789abcdef0123456789abcdef",
             "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
         }
         with tempfile.TemporaryDirectory() as temp:
@@ -276,7 +288,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             state_dir = Path(temp) / "state"
             state, backup = self.make_recovery_state(state_dir)
-            active = {"path": state["device"], "priority": -1}
+            active = {"path": state["device"], "priority": -1,
+                      "size_kib": state["swap_size_kib"], "used_kib": 0}
 
             def run(args, **kwargs):
                 del kwargs
@@ -615,6 +628,343 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn('["swapon", state["device"]]', script)
         self.assertNotIn('["swapon", mapper]', script)
         self.assertNotIn('"--force"', script)
+
+
+    def reviewed_device_fixture(self):
+        """Build an immutable synthetic state to mutate signed review fields."""
+        header = bytearray(probe.PAGE_BYTES)
+        header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
+        target = {
+            "major": 8, "minor": 4, "partuuid": "deadbeef-04",
+            "size_bytes": 16 * 1024 * 1024 * 1024,
+            "device_arg": "/dev/disk/by-uuid/test-swap",
+            "header": bytes(header),
+        }
+        evidence = {"source_sha": "a" * 40, "artifact_digests": {
+            key: str(index) * 64 for index, (key, _, _) in
+            enumerate(probe.PHYSICAL_ARTIFACTS, start=1)
+        }}
+        review = {
+            **evidence["artifact_digests"],
+            "approved": True, "reviewer": "independent-reviewer",
+            "scope": probe.EXPECTED_SCOPE,
+            "source_sha": evidence["source_sha"],
+            "device_major_minor": "8:4",
+            "device_partuuid": target["partuuid"],
+            "device_size_bytes": target["size_bytes"],
+            "original_header_sha256": hashlib.sha256(target["header"]).hexdigest(),
+            "device_uuid_path": target["device_arg"],
+            "run_id": "0123456789abcdef0123456789abcdef",
+            "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
+        }
+        return target, evidence, review
+
+    def test_signed_review_rejects_changed_device_state_or_run_id(self):
+        target, evidence, review = self.reviewed_device_fixture()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.dict(os.environ, {"SUDO_USER": "operator"}), \
+                mock.patch.object(probe, "_verify_signed_review") as verify:
+            review_path = Path(directory) / "review.json"
+            review_path.write_text(json.dumps(review))
+            self.assertEqual(probe.validate_review(review_path, evidence, target),
+                             review["reviewer"])
+            verify.assert_called_once()
+            for field, replacement in (
+                ("device_size_bytes", target["size_bytes"] + 4096),
+                ("original_header_sha256", "f" * 64),
+                ("device_uuid_path", "/dev/disk/by-uuid/substituted"),
+                ("run_id", "f" * 31),
+                ("run_id", "A" * 32),
+                ("run_id", "g" * 32),
+                ("run_id", ""),
+            ):
+                with self.subTest(field=field, replacement=replacement):
+                    changed = dict(review, **{field: replacement})
+                    review_path.write_text(json.dumps(changed))
+                    with self.assertRaises(probe.ProbeError):
+                        probe.validate_review(review_path, evidence, target)
+            for missing in ("device_size_bytes", "original_header_sha256",
+                            "device_uuid_path", "run_id"):
+                with self.subTest(missing=missing):
+                    changed = dict(review)
+                    del changed[missing]
+                    review_path.write_text(json.dumps(changed))
+                    with self.assertRaises(probe.ProbeError):
+                        probe.validate_review(review_path, evidence, target)
+
+    def physical_preparation_fixture(self):
+        target, evidence, _ = self.reviewed_device_fixture()
+        target.update({
+            "device": "/dev/synthetic-physical-partition",
+            "swap_path": target["device_arg"], "swap_priority": -1,
+            "swap_size_kib": target["size_bytes"] // 1024,
+            "swap_used_kib": 0,
+        })
+        evidence["pass_reports"] = 2
+        return target, evidence
+
+    def test_refuses_volatile_recovery_state_before_backup(self):
+        if not Path("/dev/shm").is_dir():
+            self.skipTest("no known tmpfs location available")
+        target, evidence = self.physical_preparation_fixture()
+        with tempfile.TemporaryDirectory(dir="/dev/shm") as directory, \
+                mock.patch.object(probe, "_allocate_dm_identity",
+                                  return_value=("swapz-demo-physical-1234567890abcdef",
+                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+            base = Path(directory)
+            base.chmod(0o700)
+            with self.assertRaisesRegex(probe.ProbeError,
+                                        "volatile|persistent|durable|filesystem"):
+                probe._prepare_state(target, base / "attempt", evidence,
+                                     "independent-reviewer")
+
+    def test_refuses_untrusted_parent_before_creating_state(self):
+        target, evidence = self.physical_preparation_fixture()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(probe, "_allocate_dm_identity",
+                                  return_value=("swapz-demo-physical-1234567890abcdef",
+                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+            base = Path(directory) / "untrusted"
+            base.mkdir(mode=0o700)
+            base.chmod(0o777)
+            with self.assertRaisesRegex(probe.ProbeError,
+                                        "parent|trusted|root-owned|writable"):
+                probe._prepare_state(target, base / "attempt", evidence,
+                                     "independent-reviewer")
+
+    def test_parent_entry_fsync_failure_prevents_state_admission(self):
+        target, evidence = self.physical_preparation_fixture()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(probe, "_allocate_dm_identity",
+                                  return_value=("swapz-demo-physical-1234567890abcdef",
+                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+            base = Path(directory)
+            base.chmod(0o700)
+            original_fsync = os.fsync
+            parent_stat = base.stat()
+            seen_parent = []
+
+            def fail_parent_fsync(descriptor):
+                info = os.fstat(descriptor)
+                if (info.st_dev, info.st_ino) == (parent_stat.st_dev,
+                                                  parent_stat.st_ino):
+                    seen_parent.append(True)
+                    raise OSError("injected parent-entry fsync failure")
+                return original_fsync(descriptor)
+
+            with mock.patch.object(probe.os, "fsync", side_effect=fail_parent_fsync):
+                with self.assertRaisesRegex(Exception,
+                                            "parent-entry fsync failure"):
+                    probe._prepare_state(target, base / "attempt", evidence,
+                                         "independent-reviewer")
+            self.assertTrue(seen_parent,
+                            "state directory parent was never durably synced")
+
+    def test_original_header_read_refuses_unverified_regular_descriptor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "lookalike-partition"
+            path.write_bytes(b"\0" * probe.PAGE_BYTES)
+            with self.assertRaisesRegex(probe.ProbeError,
+                                        "block|descriptor|identity"):
+                probe._read_block0(str(path))
+
+    def simulate_physical_run(self, wrong_mapper=False):
+        """Mock every external operation; never access a real device."""
+        target, evidence = self.physical_preparation_fixture()
+        token = "1234567890abcdef"
+        state = {
+            "dm_name": f"swapz-demo-physical-{token}",
+            "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
+            "stage": "BACKED_UP", "module_loaded_by_us": False,
+        }
+        formatted = bytearray(probe.PAGE_BYTES)
+        formatted[:8] = probe.SWAPZ_HEADER_MAGIC
+        struct.pack_into("<IIQ", formatted, 8,
+                         probe.SWAPZ_HEADER_VERSION, probe.PAGE_BYTES,
+                         target["size_bytes"])
+        formatted[24:40] = bytes(range(1, 17))
+        events = []
+
+        def run(command, **kwargs):
+            del kwargs
+            events.append(("command", tuple(str(value) for value in command)))
+            if wrong_mapper and command[:2] == ["dmsetup", "info"]:
+                return subprocess.CompletedProcess(command, 0,
+                    stdout="SWAPZ-TEST-PHYSICAL-ffffffffffffffff\n", stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        def parameter_exists(path):
+            return str(path).endswith("/parameters/allow_physical_backing")
+
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(probe.os, "geteuid", return_value=0), \
+                mock.patch.object(probe, "current_source_evidence",
+                                  return_value=evidence), \
+                mock.patch.object(probe, "inspect_target", return_value=target), \
+                mock.patch.object(probe, "_artifact_digests",
+                                  return_value=evidence["artifact_digests"]), \
+                mock.patch.object(probe, "validate_review",
+                                  return_value="independent-reviewer"), \
+                mock.patch.object(probe.shutil, "which", return_value="/usr/bin/mock"), \
+                mock.patch.object(probe.Path, "exists", parameter_exists), \
+                mock.patch.object(probe.Path, "read_text", return_value="Y"), \
+                mock.patch.object(probe, "_prepare_state",
+                                  return_value=(state, Path(directory))), \
+                mock.patch.object(probe, "_snapshot_reviewed_artifacts",
+                                  return_value={
+                                      "formatter_sha256": "/reviewed/swapzctl",
+                                      "module_sha256": "/reviewed/dm-swapz.ko",
+                                      "oracle_sha256": "/reviewed/device-roundtrip",
+                                  }), \
+                mock.patch.object(probe, "_verify_target_identity",
+                                  side_effect=lambda _: events.append(("verify",))), \
+                mock.patch.object(probe, "_active_swap_for",
+                                  side_effect=[{"used_kib": 0}, None]), \
+                mock.patch.object(probe, "_write_block0",
+                                  side_effect=lambda *_: events.append(("write0",))), \
+                mock.patch.object(probe, "_read_block0",
+                                  return_value=bytes(formatted)), \
+                mock.patch.object(probe, "_save_state",
+                                  side_effect=lambda *_: events.append(("save", state["stage"]))), \
+                mock.patch.object(probe, "_remove_test_objects",
+                                  side_effect=lambda *_: events.append(("recover",))), \
+                mock.patch.object(probe, "_run", side_effect=run):
+            probe.run_probe(target["device_arg"], target["device_arg"],
+                            directory, "/reviewed/review.json")
+        return events, state, target
+
+    def test_formatter_and_oracle_use_exact_reviewed_identity_arguments(self):
+        events, state, target = self.simulate_physical_run()
+        commands = [event[1] for event in events if event[0] == "command"]
+        self.assertIn(("/reviewed/swapzctl", "format", target["device"],
+                       "--expect-major-minor", "8:4", "--expect-bytes",
+                       str(target["size_bytes"])), commands)
+        self.assertIn(("/reviewed/device-roundtrip",
+                       f"/dev/mapper/{state['dm_name']}",
+                       "--expect-dm-uuid", state["dm_uuid"]), commands)
+        self.assertFalse(any(command[0] == "swapon" and
+                             "swapz-demo" in " ".join(command)
+                             for command in commands))
+        self.assertFalse(any("--force" in command for command in commands))
+
+    def test_partition_identity_is_rechecked_after_clear_before_formatter(self):
+        events, _, _ = self.simulate_physical_run()
+        cleared = events.index(("write0",))
+        formatted = next(index for index, event in enumerate(events) if
+                         event[0] == "command" and
+                         event[1][:2] == ("/reviewed/swapzctl", "format"))
+        self.assertTrue(any(event[0] == "verify" for event in
+                            events[cleared + 1:formatted]),
+                        "partition was not rechecked immediately before formatter")
+
+    def test_wrong_created_mapper_identity_never_reaches_oracle(self):
+        events, _, _ = self.simulate_physical_run(wrong_mapper=True)
+        commands = [event[1] for event in events if event[0] == "command"]
+        self.assertTrue(any(command[:2] == ("dmsetup", "info")
+                            for command in commands),
+                        "no post-create mapper identity query was attempted")
+        self.assertFalse(any(command[0] == "/reviewed/device-roundtrip"
+                             for command in commands),
+                         "oracle ran after wrong mapper identity")
+
+    def test_recovery_rejects_wrong_restored_swap_capacity_and_priority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, backup = self.make_recovery_state(state_dir)
+            state["swap_size_kib"] = state["size_bytes"] // 1024 - 4
+            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            active = {"path": state["device"], "used_kib": 0,
+                      "size_kib": state["swap_size_kib"] - 8,
+                      "priority": state["swap_priority"] + 1}
+            commands = []
+
+            def run(command, **kwargs):
+                del kwargs
+                commands.append(tuple(command))
+                return subprocess.CompletedProcess(command, 0,
+                    stdout=state["dm_uuid"] + "\n" if command[:2] ==
+                    ["dmsetup", "info"] else "", stderr="")
+
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(probe, "inspect_target_identity_for_recovery",
+                                      return_value={"device": state["device"],
+                                        "major": 8, "minor": 4,
+                                        "size_bytes": state["size_bytes"]}), \
+                    mock.patch.object(probe, "_run", side_effect=run), \
+                    mock.patch.object(probe, "_holder_names", return_value=[]), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_read_block0", return_value=backup), \
+                    mock.patch.object(probe, "_active_swap_for",
+                                      side_effect=[None, active]), \
+                    mock.patch.object(probe, "_save_state") as save:
+                with self.assertRaisesRegex(probe.ProbeError,
+                                            "priority|capacity|size"):
+                    probe.recover(state_dir, state["device_arg"],
+                                  state["device_arg"])
+            save.assert_not_called()
+            self.assertFalse(any(command[0] == "swapon" and
+                                 "swapz-demo" in " ".join(command)
+                                 for command in commands))
+
+    def test_recovery_refuses_ambiguous_module_owner_before_header_restore(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, backup = self.make_recovery_state(state_dir)
+            state["module_loaded_by_us"] = False
+            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(probe, "inspect_target_identity_for_recovery",
+                                      return_value={"device": state["device"],
+                                        "major": 8, "minor": 4,
+                                        "size_bytes": state["size_bytes"]}), \
+                    mock.patch.object(probe, "_run", return_value=
+                                      subprocess.CompletedProcess([], 1,
+                                          stdout="", stderr="")), \
+                    mock.patch.object(probe.Path, "exists",
+                                      side_effect=lambda path:
+                                          str(path) == "/sys/module/dm_swapz"), \
+                    mock.patch.object(probe, "_holder_names", return_value=[]), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_read_block0",
+                                      return_value=bytes(probe.PAGE_BYTES)), \
+                    mock.patch.object(probe, "_active_swap_for",
+                                      return_value=None), \
+                    mock.patch.object(probe, "_write_block0") as write:
+                with self.assertRaisesRegex(probe.ProbeError,
+                                            "module|owner|manual"):
+                    probe.recover(state_dir, state["device_arg"],
+                                  state["device_arg"])
+            write.assert_not_called()
+
+
+    def test_concurrent_attempts_cannot_claim_one_partition(self):
+        """Separate state directories do not imply independent device ownership."""
+        target, evidence = self.physical_preparation_fixture()
+        target["run_id"] = "0123456789abcdef0123456789abcdef"
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(probe, "_allocate_dm_identity",
+                                  return_value=("swapz-demo-physical-1234567890abcdef",
+                                                "SWAPZ-TEST-PHYSICAL-1234567890abcdef")):
+            base = Path(directory)
+            base.chmod(0o700)
+
+            def claim(index):
+                try:
+                    return probe._prepare_state(
+                        target, base / f"attempt-{index}", evidence,
+                        "independent-reviewer")[1]
+                except probe.ProbeError as exc:
+                    return exc
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(claim, index) for index in range(2)]
+                outcomes = [future.result() for future in futures]
+            self.assertEqual(sum(isinstance(value, Path) for value in outcomes), 1,
+                             "two concurrent attempts acquired the same physical device")
+            self.assertEqual(sum(isinstance(value, probe.ProbeError)
+                                 for value in outcomes), 1)
 
 
 if __name__ == "__main__":

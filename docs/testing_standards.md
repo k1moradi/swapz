@@ -2675,6 +2675,67 @@ the trust path. An unsigned reviewer name cannot authorize physical writes.
 The private read-only plan output prints the PARTUUID, source and helper hashes
 for review binding. A missing or mismatched field blocks the write path.
 
+
+### Physical-swap rootless safety regression gate
+
+Rootless Stage 2 retains the private physical-admission regression suite
+tests/runtime/native/physical-swap-probe-test.py and compiles the real
+freestanding src/kernel/superblock.h from a native C test in the existing
+test-codec dependency of tests/suites/Makefile. This adds no public test
+command, and does not enroll the private physical helper or a real device in
+ordinary make test. New contract tests are deliberately fail-first until
+all physical-safety implementation owners have integrated their changes;
+they must not be interpreted as official PASS or as physical-media evidence.
+
+Safety tests use temporary regular files, a known tmpfs mount when available,
+controlled command mocks and operation-order assertions. Prove root-owned,
+nonvolatile, pre-existing trusted recovery-state parent admission; a durable
+parent-entry fsync and fsynced backup/state before swapoff or any block-0
+write; fail-closed behavior for failed persistence and for header-read
+descriptors whose block identity and BLKGETSIZE64 geometry are not verified.
+The original selected block-device major:minor, PARTUUID, geometry and
+byte-exact original header must be checked again at every destructive
+boundary. No pathname-only preflight can license a later substituted FD.
+
+The exact independent signed review binds source, helper, reviewer, qualified
+artifacts, device major:minor/PARTUUID, decimal device_size_bytes, original
+4096-byte header SHA-256, repeated device_uuid_path and a unique run_id of
+exactly 32 lowercase hexadecimal characters. Reject missing, invalid or
+mismatched fields, replay of consumed approval and concurrent claims to either
+the same run or physical partition. Preserve duplicate-key JSON rejection,
+exact-byte detached signature verification, root-controlled trust and separate
+reviewer identity. Approval consumption and per-device exclusion must be
+durable across interruption, not merely in-memory flags.
+
+The helper's formatter invocation must include exactly
+"format <device> --expect-major-minor <major>:<minor> --expect-bytes
+<decimal-bytes>" and be preceded by fresh verified identity checks.
+Verify after mapper creation and again before oracle I/O that the actual DM
+UUID, table, mapped 16MiB geometry, and underlying block identity match
+the helper-owned reviewed device; no failed check may reach the oracle.
+The oracle invocation must bind "--expect-dm-uuid
+<SWAPZ-TEST-PHYSICAL-token>", and the oracle must independently verify the
+opened mapper FD and its /sys/dev/block major:minor UUID before writing.
+Test wrong-UUID/table/size/lower and mapper-substitution cases as controlled
+failures. Where mocked sysfs behavior cannot reproduce actual kernel device
+nodes, explicitly report that limitation; do not label the mock as a real
+device qualification.
+
+Recovery tests cover interruption around module installation and ownership
+persistence, ambiguous module owners, unexpected active swap, torn or
+unknown block-zero states, wrong restored swap capacity/priority and failure
+to verify exact restored header. Recovery may only remove the proven helper-
+owned mapper, may never force-remove or activate the mapper as swap, and
+must fail closed for uncertain ownership or media. The shared SWZ validator
+must accept exactly the 4096-byte version-1 magic/geometry/nonzero-UUID
+header and reject every nonzero byte in offsets 40..4095, in addition to
+wrong magic, version, UUID or geometry. Rootless source checks and mock
+observations support review, not physical qualification: a separately
+authorized owner/device safety gate, fresh exact-source make test results,
+a final device-specific signed review and real FD/sysfs checks remain
+mandatory before any physical attempt.
+
+
 Capacity-exhaustion evidence must preserve committed reads: a write may return
 `-ENOSPC`, but `ctx->failed` must stay clear unless a separate integrity or
 lower-I/O error occurs.
