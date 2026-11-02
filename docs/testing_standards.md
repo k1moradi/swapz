@@ -2784,6 +2784,9 @@ before and after the bounded run. A command failure, blank response,
 extra diagnostics, or malformed mapper rows must continue to block.
 Rootless regression must cover the empty-inventory response, malformed
 variants, nonzero exit, and unrelated-mapper identity/hash preservation.
+The complete synthetic run must call the inventory snapshot again after
+simulated owned-mapper cleanup and compare that result with the initial
+snapshot; it must not copy the initial fingerprint into the final record.
 
 Keep tests/runtime/native/physical-swap-probe-test.py in the existing
 rootless safety regression path; do not wire the private helper or a real

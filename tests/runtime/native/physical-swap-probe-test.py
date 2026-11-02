@@ -1142,6 +1142,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             probe._release_partition_ownership(saved_state)
             result_path = Path(saved_state_dir) / probe.RESULTS_NAME
             saved_results = json.loads(result_path.read_text())
+            inventory_after = probe._dm_inventory_snapshot(
+                saved_state["dm_name"], saved_state["dm_uuid"])
+            inventory_before = saved_results["dm_inventory_before"]
             saved_results.update({
                 "final_block0_sha256": saved_results[
                     "original_header_sha256"],
@@ -1159,8 +1162,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "active_partition_marker_present": False,
                 "approval_consumed": True,
                 "final_recovery_state": "COMPLETE",
-                "dm_inventory_after": saved_results["dm_inventory_before"],
-                "unrelated_mapper_inventory_unchanged": True,
+                "dm_inventory_after": inventory_after,
+                "unrelated_mapper_inventory_unchanged": (
+                    inventory_before["other_mapper_count"] ==
+                    inventory_after["other_mapper_count"] and
+                    inventory_before["other_mapper_sha256"] ==
+                    inventory_after["other_mapper_sha256"]),
                 "end_timestamp": probe._utc_timestamp(),
             })
             saved_state["_test_results"] = saved_results
@@ -1268,6 +1275,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         ])
         phases = state["_test_results"]["physical_oracle_phases"]
         self.assertEqual([entry["status"] for entry in phases], ["PASS"] * 11)
+        empty_inventory = {
+            "other_mapper_count": 0,
+            "other_mapper_sha256": hashlib.sha256(b"[]").hexdigest(),
+        }
+        self.assertEqual(state["_test_results"]["dm_inventory_before"],
+                         empty_inventory)
+        self.assertEqual(state["_test_results"]["dm_inventory_after"],
+                         empty_inventory)
+        self.assertTrue(state["_test_results"][
+            "unrelated_mapper_inventory_unchanged"])
+        inventory_command = (
+            "dmsetup", "info", "-c", "--noheadings", "-o", "name,uuid")
+        self.assertEqual(commands.count(inventory_command), 2)
         for entry in phases:
             self.assertIn("dmsetup_status_before", entry)
             self.assertIn("dmsetup_status_after", entry)
