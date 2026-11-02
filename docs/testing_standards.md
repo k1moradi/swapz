@@ -2802,6 +2802,10 @@ consumed record survives, no active claim or destructive command is created,
 and replay of that signed run is rejected. Direct review consumption must
 also reject replay after durable COMPLETE releases the active claim; only the
 current run's explicitly preburned transition may create that claim.
+Rootless tests must inject both a preparation failure and an artifact-snapshot
+failure after approval burn. Neither may execute destructive commands or leave
+an active partition claim; replay must fail before preparation runs a second
+time. A snapshot failure records PRE_DESTRUCTIVE_FAILED.
 
 After dmsetup create, and immediately before oracle invocation, verify
 the exact helper-generated DM name/UUID, mapper block major:minor, kernel
@@ -2819,8 +2823,9 @@ object; it therefore requires manual recovery instead of automatically running
 automatically unload its durably recorded `MODULE_OWNED` instance. A
 pending-present module is likewise manual-recovery-only. Rootless recovery
 must prove a standalone present `MODULE_OWNED` module is not passed to
-`rmmod`, while same-process cleanup retains the bounded owned unload path. No
-force removal is permitted.
+`rmmod`, while same-process cleanup retains the bounded owned unload path.
+Rootless tests must prove both contexts with command mocks, with zero external
+commands in standalone recovery. No force removal is permitted.
 
 Recovery accepts only the saved original, an expected zero header at a
 recognized stage, or a digest-matched valid SWZ header with a durably
@@ -2829,7 +2834,10 @@ verified block identity during preflight and recovery. An unrelated swapfile
 may coexist, but its path must resolve to a regular file; unreadable,
 substituted or unknown entry types fail closed. The preflight and recovery
 use one shared swap-inventory rule rather than treating a valid swapfile as
-a block-device identity failure. Recovery verifies exact original bytes
+a block-device identity failure.
+Behavioral rootless tests must reject an unverifiable active partition and
+accept a verifiably regular unrelated swapfile without calling block_identity
+on the swapfile path. Recovery verifies exact original bytes
 through a new identity-checked descriptor before swapon. After reactivation, verify
 the saved block identity through /proc/swaps together with the exact
 original size and priority before recording COMPLETE and retiring the active

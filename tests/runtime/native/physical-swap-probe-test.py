@@ -1118,6 +1118,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             f"partition-{target['partuuid']}.active").exists())
         with self.assertRaisesRegex(probe.ProbeError, "consumed"):
             probe._check_review_unconsumed(target, review["run_id"])
+        with self.assertRaisesRegex(probe.ProbeError, "consumed"):
+            probe._consume_review(target, review["run_id"])
+        self.assertFalse((self.recovery_base /
+            f"partition-{target['partuuid']}.active").exists())
 
     def test_wrong_mapper_table_size_lower_node_and_late_substitution(self):
         for mismatch in ("table", "size", "lower", "node", "substitution"):
@@ -1237,6 +1241,157 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             mapper = f"/dev/mapper/{state['dm_name']}"
             self.assertFalse(any(command[0] == "swapon" and mapper in command
                                  for command in commands))
+
+
+    def test_pre_destructive_failures_burn_run_and_prevent_replay(self):
+        target, evidence = self.physical_preparation_fixture()
+        original_exists = probe.Path.exists
+
+        def is_present(path):
+            if str(path) == "/sys/module/dm_swapz":
+                return False
+            return original_exists(path)
+
+        for phase, run_id in (("prepare", "0" * 32), ("snapshot", "1" * 32)):
+            with self.subTest(phase=phase):
+                state_dir = self.recovery_base / f"attempt-{phase}"
+                state_dir.mkdir(mode=0o700)
+                review = {"reviewer": "independent-reviewer", "run_id": run_id}
+                state = {"stage": "BACKED_UP"}
+                prepare = mock.Mock(
+                    return_value=(state, state_dir),
+                    side_effect=(probe.ProbeError("injected prepare failure")
+                                 if phase == "prepare" else None))
+                snapshot = mock.Mock(
+                    side_effect=probe.ProbeError("injected snapshot failure"))
+                with ExitStack() as stack:
+                    patches = (
+                        mock.patch.object(probe.os, "geteuid", return_value=0),
+                        mock.patch.object(probe.Path, "exists", autospec=True,
+                                          side_effect=is_present),
+                        mock.patch.object(probe, "current_source_evidence",
+                                          return_value=evidence),
+                        mock.patch.object(probe, "inspect_target",
+                                          return_value=target),
+                        mock.patch.object(probe, "_artifact_digests",
+                                          return_value=evidence["artifact_digests"]),
+                        mock.patch.object(probe, "validate_review",
+                                          return_value=review),
+                        mock.patch.object(probe.shutil, "which",
+                                          return_value="/usr/bin/mock"),
+                        mock.patch.object(probe, "_prepare_state", prepare),
+                        mock.patch.object(probe, "_snapshot_reviewed_artifacts",
+                                          snapshot),
+                        mock.patch.object(probe, "_run"),
+                    )
+                    for patch in patches:
+                        stack.enter_context(patch)
+                    external_commands = probe._run
+                    for attempt in range(2):
+                        with self.assertRaisesRegex(
+                                probe.ProbeError,
+                                "injected" if attempt == 0 else "consumed"):
+                            probe.run_probe(target["device_arg"],
+                                            target["device_arg"], str(state_dir),
+                                            "/reviewed/signed-review.json")
+                    external_commands.assert_not_called()
+                    prepare.assert_called_once()
+                    if phase == "prepare":
+                        snapshot.assert_not_called()
+                    else:
+                        snapshot.assert_called_once()
+                    consumed = self.recovery_base / f"consumed-{run_id}.json"
+                    active = self.recovery_base / (
+                        f"partition-{target['partuuid']}.active")
+                    self.assertEqual(json.loads(consumed.read_text()),
+                                     probe._review_consumption_record(target, run_id))
+                    self.assertFalse(active.exists())
+                    state_path = state_dir / probe.STATE_NAME
+                    if phase == "snapshot":
+                        self.assertEqual(json.loads(state_path.read_text())["stage"],
+                                         "PRE_DESTRUCTIVE_FAILED")
+                    else:
+                        self.assertFalse(state_path.exists())
+
+    def test_unverifiable_swap_entry_blocks_recovery(self):
+        swaps = ("Filename Type Size Used Priority\n"
+                 "/dev/unverifiable partition 4096 0 -1\n")
+        with mock.patch.object(probe.Path, "read_text", return_value=swaps), \
+                mock.patch.object(probe, "block_identity",
+                                  side_effect=probe.ProbeError("unresolvable")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "cannot verify active swap block identity"):
+                probe._active_swap_for(8, 4)
+
+    def test_unrelated_verified_swapfile_is_allowed(self):
+        with tempfile.NamedTemporaryFile() as swapfile:
+            inventory = ("Filename Type Size Used Priority\n"
+                         f"{swapfile.name} file 4096 0 -1\n")
+            with mock.patch.object(probe.Path, "read_text",
+                                   return_value=inventory), \
+                    mock.patch.object(probe, "block_identity") as block_lookup:
+                self.assertIsNone(probe._active_swap_for(8, 4))
+                block_lookup.assert_not_called()
+
+    def test_module_continuity_prevents_standalone_unload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, backup = self.make_recovery_state(state_dir)
+            state["stage"] = "MODULE_OWNED"
+            state["module_ownership"] = "MODULE_OWNED"
+            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            target = {"device": state["device"], "major": 8, "minor": 4,
+                      "size_bytes": state["size_bytes"],
+                      "partuuid": state["partuuid"]}
+            active = {"path": state["device"], "used_kib": 0,
+                      "size_kib": state["swap_size_kib"],
+                      "priority": state["swap_priority"]}
+            executed = []
+
+            def run(command, **kwargs):
+                del kwargs
+                executed.append(tuple(command))
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            with ExitStack() as stack:
+                patches = (
+                    mock.patch.object(probe, "_validate_state_dir"),
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery",
+                        return_value=target),
+                    mock.patch.object(probe.Path, "exists", return_value=True),
+                    mock.patch.object(probe.Path, "is_file", return_value=True),
+                    mock.patch.object(probe.Path, "read_text", return_value="Y"),
+                    mock.patch.object(probe, "_mapper_exists", return_value=False),
+                    mock.patch.object(probe, "_holder_names", return_value=[]),
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False),
+                    mock.patch.object(probe, "_read_block0", return_value=backup),
+                    mock.patch.object(probe, "_verify_target_identity"),
+                    mock.patch.object(probe, "_active_swap_for",
+                                      side_effect=[None, None, active]),
+                    mock.patch.object(probe, "_save_state"),
+                    mock.patch.object(probe, "_release_partition_ownership"),
+                    mock.patch.object(probe, "_run", side_effect=run),
+                    mock.patch.object(probe, "_write_block0"),
+                )
+                for patch in patches:
+                    stack.enter_context(patch)
+                header_write = probe._write_block0
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "load continuity|manual recovery"):
+                    probe.recover(state_dir, state["device_arg"],
+                                  state["device_arg"])
+                self.assertEqual(executed, [])
+                header_write.assert_not_called()
+                restored = probe.recover(
+                    state_dir, state["device_arg"], state["device_arg"],
+                    lock_held=True, module_owned_by_process=True)
+                self.assertEqual(restored["stage"], "COMPLETE")
+                self.assertEqual(
+                    [command for command in executed if command[0] == "rmmod"],
+                    [("rmmod", "dm_swapz")])
+                self.assertFalse(any("--force" in command for command in executed))
 
     def test_recovery_rejects_wrong_restored_swap_capacity_and_priority(self):
         with tempfile.TemporaryDirectory() as directory:
