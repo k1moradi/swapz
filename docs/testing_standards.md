@@ -2785,6 +2785,8 @@ lower-backing identity in mapper verification. A wrong UUID under the
 expected name or the owned UUID under another name must fail closed.
 A failed Device Mapper enumeration must never be treated as absence;
 the first mismatching row must stop recovery without a second probe.
+New mapper-name allocation must use the same checked decoder to detect
+existing name/UUID collisions, including colon-delimited report rows.
 The standalone recovery path must continue to refuse module unloading
 without same-process ownership; a recovered parser is not permission to
 bypass that limitation.

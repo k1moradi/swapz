@@ -1138,11 +1138,9 @@ def _allocate_dm_identity():
     result = _run([
         "dmsetup", "info", "-c", "--noheadings", "-o", "name,uuid",
     ])
-    existing = set()
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) == 2:
-            existing.add((fields[0], fields[1]))
+    if result.returncode:
+        raise ProbeError("cannot enumerate Device Mapper identities")
+    existing = set(_dm_info_rows(result.stdout, 2))
     existing_names = {name for name, _ in existing}
     existing_uuids = {uuid for _, uuid in existing}
     for _ in range(16):

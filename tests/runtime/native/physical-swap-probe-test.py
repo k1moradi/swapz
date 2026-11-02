@@ -194,6 +194,25 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(probe.ProbeError, "UUID"):
                 probe._dm_inventory_snapshot(name, uuid)
 
+    def test_mapper_name_allocation_sees_colon_delimited_existing_identity(self):
+        token = "88a2b96d81d81254"
+        old_name = f"swapz-demo-physical-{token}"
+        old_uuid = f"SWAPZ-TEST-PHYSICAL-{token}"
+        output = f"{old_name}:{old_uuid}\n"
+        with mock.patch.object(
+                probe, "_run", return_value=subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=output, stderr="")), \
+                mock.patch.object(probe.secrets, "token_hex",
+                                  side_effect=[token, "abcdef0123456789"]):
+            self.assertEqual(probe._allocate_dm_identity(), (
+                "swapz-demo-physical-abcdef0123456789",
+                "SWAPZ-TEST-PHYSICAL-abcdef0123456789"))
+        with mock.patch.object(
+                probe, "_run", return_value=subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout=output, stderr="error")):
+            with self.assertRaises(probe.ProbeError):
+                probe._allocate_dm_identity()
+
     def test_only_supported_4k_linux_swap_header_is_accepted(self):
         header = bytearray(probe.PAGE_BYTES)
         header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
