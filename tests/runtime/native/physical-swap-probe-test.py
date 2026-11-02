@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import struct
 import stat
+from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest import mock
@@ -850,14 +851,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             path = Path(directory) / "lookalike-partition"
             path.write_bytes(b"\0" * probe.PAGE_BYTES)
             with self.assertRaisesRegex(probe.ProbeError,
-                                        "block|descriptor|identity"):
+                                        "block|descriptor|identity|major:minor"):
                 probe._read_block0(str(path), {"major": 8, "minor": 4,
                                               "size_bytes": probe.PAGE_BYTES})
 
-    def simulate_physical_run(self, wrong_mapper=False):
+    def simulate_physical_run(self, wrong_mapper=False, mapper_fault=None):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         token = "1234567890abcdef"
+        fault = mapper_fault or ("uuid" if wrong_mapper else None)
         state = {
             "dm_name": f"swapz-demo-physical-{token}",
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
@@ -879,11 +881,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             arguments = tuple(str(value) for value in command)
             events.append(("command", arguments))
             if command[:2] == ["dmsetup", "info"]:
+                wrong_uuid = fault == "uuid" or (fault == "substitution" and
+                         sum(event[0] == "command" and
+                             event[1][:2] == ("dmsetup", "info")
+                             for event in events) >= 2)
                 uuid = ("SWAPZ-TEST-PHYSICAL-ffffffffffffffff"
-                        if wrong_mapper else state["dm_uuid"])
+                        if wrong_uuid else state["dm_uuid"])
                 output = f"{state['dm_name']} {uuid} 253 0\n"
             elif command[:2] == ["dmsetup", "table"]:
-                output = probe._expected_dm_table(target) + "\n"
+                table = probe._expected_dm_table(target)
+                if fault == "table":
+                    table = table[:-1] + ("1" if table[-1] != "1" else "0")
+                output = table + "\n"
             else:
                 output = ""
             return subprocess.CompletedProcess(command, 0,
@@ -899,9 +908,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             if value.endswith("/dm/uuid"):
                 return state["dm_uuid"] + "\n"
             if value.endswith("/size"):
-                return str(probe.LOGICAL_SECTORS) + "\n"
+                return str(probe.LOGICAL_SECTORS - (8 if fault == "size" else 0)) + "\n"
             if value.endswith("/slaves/synthetic/dev"):
-                return f"{target['major']}:{target['minor']}\n"
+                return f"{target['major']}:{target['minor'] + (1 if fault == 'lower' else 0)}\n"
             raise AssertionError(f"unexpected sysfs read: {value}")
 
         def is_file(path):
@@ -927,7 +936,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe.Path, "is_file", is_file),
                 mock.patch.object(probe.Path, "read_text", read_text),
                 mock.patch.object(probe.Path, "iterdir", iter_directory),
-                mock.patch.object(probe, "block_identity", return_value=(253, 0)),
+                mock.patch.object(probe, "block_identity",
+                                  return_value=(253, 1 if fault == "node" else 0)),
                 mock.patch.object(probe, "_prepare_state",
                                   return_value=(state, Path(directory))),
                 mock.patch.object(probe, "_snapshot_reviewed_artifacts",
@@ -961,7 +971,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with ExitStack() as active_patches:
                 for patch in patches:
                     active_patches.enter_context(patch)
-                if wrong_mapper:
+                if fault:
                     with self.assertRaisesRegex(
                             probe.ProbeError, "mapper|UUID|identity|table|backing"):
                         probe.run_probe(target["device_arg"], target["device_arg"],
@@ -1022,6 +1032,42 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with self.assertRaisesRegex(probe.ProbeError, "consumed"):
             probe._check_review_unconsumed(target, review["run_id"])
 
+    def test_wrong_mapper_table_size_lower_node_and_late_substitution(self):
+        for mismatch in ("table", "size", "lower", "node", "substitution"):
+            with self.subTest(mismatch=mismatch):
+                events, _, _ = self.simulate_physical_run(mapper_fault=mismatch)
+                commands = [event[1] for event in events
+                            if event[0] == "command"]
+                self.assertFalse(any(command[0] ==
+                    "/reviewed/device-roundtrip" for command in commands),
+                    "oracle reached after mapper substitution or geometry mismatch")
+
+    def test_opened_header_fd_identity_and_geometry_checks(self):
+        target = {"major": 8, "minor": 4,
+                  "size_bytes": 16 * 1024 * 1024 * 1024}
+        device_size = struct.pack("=Q", target["size_bytes"])
+
+        def device_info(major, minor):
+            return SimpleNamespace(st_mode=stat.S_IFBLK | 0o600,
+                                   st_rdev=os.makedev(major, minor))
+
+        with mock.patch.object(probe.os, "fstat",
+                               return_value=device_info(8, 4)), \
+                mock.patch.object(probe.fcntl, "ioctl",
+                                  return_value=device_size):
+            probe._verify_open_block_device(123, target)
+        for major, minor, size in (
+                (8, 5, target["size_bytes"]),
+                (8, 4, target["size_bytes"] - probe.PAGE_BYTES)):
+            with self.subTest(major=major, minor=minor, bytes=size), \
+                    mock.patch.object(probe.os, "fstat",
+                                      return_value=device_info(major, minor)), \
+                    mock.patch.object(probe.fcntl, "ioctl",
+                                      return_value=struct.pack("=Q", size)):
+                with self.assertRaisesRegex(probe.ProbeError,
+                                            "major:minor|geometry"):
+                    probe._verify_open_block_device(123, target)
+
     def test_recovery_rejects_wrong_restored_swap_capacity_and_priority(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory) / "state"
@@ -1077,8 +1123,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                       subprocess.CompletedProcess([], 1,
                                           stdout="", stderr="")), \
                     mock.patch.object(probe.Path, "exists",
-                                      side_effect=lambda path:
-                                          str(path) == "/sys/module/dm_swapz"), \
+                                      return_value=True), \
                     mock.patch.object(probe, "_holder_names", return_value=[]), \
                     mock.patch.object(probe, "_mountinfo_has_device",
                                       return_value=False), \
