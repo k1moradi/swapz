@@ -17,9 +17,10 @@ endurance, stress, hibernation or production qualification.
 Before a future run, the read-only plan must positively bind the exact source,
 canonical `main` HEAD, current CI results, qualified production artifact
 hashes, helper hash, target identity and original header, persistent recovery
-storage, one-use external review, owner authorization, and a separately active
-fallback. The plan must see exactly the intended original swap plus the bound
-fallback, with the original partition active at 0 KiB used and priority -1.
+storage, a fresh one-use owner authorization record, and a separately active
+fallback. Do not invent or claim an external review. The plan must see exactly
+the intended original swap plus the bound fallback, with the original
+partition active at 0 KiB used and priority -1.
 
 The fallback must be a root-owned, mode-0600, allocated regular swapfile on a
 persistent filesystem with at least 512 MiB of free swap capacity. It must
@@ -44,11 +45,12 @@ modes, converts inline data, disables file compression, maps extents, may
 migrate blocks for section alignment, and pins the file. Exact behavior of the
 installed Ubuntu kernel build and a candidate file has **not** been tested.
 Therefore an allocated F2FS swapfile appears feasible in principle but is not
-yet a verified fallback. Do not create or activate one without separate owner
-authorization and a dedicated read-only identity/space review. Even if
-verified, it shares the target's USB device and cannot protect against loss of
-that entire device. It also cannot recover pages whose swapz mapping authority
-or backing data has been lost.
+yet a verified fallback. The current production objective also prohibits
+changing the root filesystem layout to obtain fallback space, so `/dev/sda3`
+is not an eligible fallback under this objective. Even if that boundary were
+changed later, a swapfile there would share the target's USB device and could
+not protect against loss of that entire device. It also cannot recover pages
+whose swapz mapping authority or backing data has been lost.
 
 References: [upstream F2FS swap activation code](https://code.googlesource.com/linux/torvalds/linux/+/7acf90feab8b009fde7def08ff2c622d0f10e99f/fs/f2fs/data.c),
 [F2FS documentation](https://docs.kernel.org/filesystems/f2fs.html), and the
@@ -107,16 +109,19 @@ current header as an explicitly recognized state, restores the exact saved
 4096-byte header, rereads it, then verifies ordinary swap size and priority.
 If the header is torn, the backup is missing, the partition identity changed,
 or recovery state is uncertain, stop for manual review. Never fabricate a
-`COMPLETE` state. The `recover` CLI remains disabled and is not a usable
-cold-boot recovery procedure. The cold-boot path has not yet been tested in a
-disposable VM with substitute block devices; that remains a gate before either
-privileged command can be enabled.
+`COMPLETE` state. The `recover` CLI remains disabled and is not a qualified
+cold-boot recovery procedure. This mission excludes virtual machines and
+intentional host crash/reboot testing. Exercise durable interruption
+boundaries with modeled rootless regressions, and keep actual cold-boot
+recovery explicitly unverified unless a safe, positively identified native
+method becomes available. Do not claim a mock test proves recovery after power
+loss.
 
 A rootless recovery regression also verifies that a saved
 `RECOVERY_REQUIRED` state is not hidden when the standalone cleanup records
 `TRIAL_STOPPING`: the recognized original stage remains authoritative for
 checking the existing SWZ header. Missing or cyclic stage provenance still
-fails closed. This is not a substitute for the disposable-VM cold-boot test.
+fails closed. This verifies modeled stage handling only, not cold-boot recovery.
 
 ## Validation completed for Phase A
 
@@ -124,6 +129,7 @@ The supervisor's mock-only rootless tests cover successful completion,
 interrupted activation, original-swapoff failure without retry, active mapper
 pages under low memory, mapper-swapoff failure, substituted target, ambiguous
 header rejection, exact swap inventory and positive-I/O evidence. They do not
-exercise the kernel, an actual F2FS swapfile, a VM block-device recovery, or a
-physical live trial. Those remain review gates. The command interface remains
-disabled until that review and a separate owner decision are complete.
+exercise the kernel, an actual fallback swap area, a true cold boot, or a
+physical live trial. Those remain qualification gaps. The command interface
+remains disabled until the fallback, lifecycle and native-host safety gates
+are satisfied.

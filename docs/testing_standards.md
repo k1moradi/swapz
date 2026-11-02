@@ -315,6 +315,21 @@ signature to an unchanged module.
 
 Native tests compile the real `src/kernel/{codec,authority,engine}.c` where applicable. They cover codec integrity, authority publication, torn/short failure, overwrite generations, discard, zero-write representation, online packing, randomized authority, lower-run aggregation, flush/FUA accounting, retention/window policy and GC rotation/cost invariants.
 
+The native authority suite must also exercise the exact maximum logical-page
+boundary for the designated 16 GiB backing geometry: one SWZ header block,
+1 MiB segment rounding, and the authority's `ceil(logical_pages / 4)` reserve
+with its two-segment minimum. It must reject the first page beyond the maximum,
+initialize the maximum, attach every capacity-dependent production authority
+array, and calculate those array bytes from the compiled C types. For the
+current geometry this is 4,194,048 usable physical blocks, 3,355,136 logical
+pages (13,742,637,056 mapper bytes), 838,784 reserve blocks, and 120,470,752
+bytes (114.89 MiB) of capacity-index arrays. The last figure excludes the
+target structure, fixed scratch/cache/workspace allocations, and allocator
+overhead; it is not a total module-RAM measurement. Native authority success
+does not prove that the loaded Device Mapper target can allocate or operate at
+that size. Until a loaded maximum-size target and worst-case RAW/GC tests pass,
+report the value only as the source-derived authority admission limit.
+
 Source contracts validate behavior that requires the Linux Device Mapper target itself, including BIO ownership, queue/drain ordering, null_blk-only admission, lower-I/O accounting and current report/build contracts. Source-string assertions are secondary to executable production-C coverage.
 
 Execute the worker's actual batch-selection C block with rejected-probe
@@ -3271,12 +3286,19 @@ after an earlier failed recovery. When cleanup writes `TRIAL_STOPPING` over
 `RECOVERY_REQUIRED`, header verification must resolve both saved wrappers
 back to the original durable stage without guessing an unrecorded format.
 Missing, cyclic, torn or contradictory stage provenance must fail closed
-before any backing-header write. Rootless proof of the recognized-header
-path does not replace the required disposable-VM cold-boot exercise.
+before any backing-header write. Virtual machines and intentional host
+crashes/reboots are excluded for the physical-PC mission. Report modeled
+interruption coverage separately from any true cold-boot behavior, which stays
+unverified unless a safe positively identified native method becomes
+available.
 
-The plan, lifecycle mocks and CI do not establish live-swap correctness. Before
-enabling privileged commands, run the cold-boot recovery path in a disposable
-VM using substitute block devices and review every interrupted durable stage.
-Document that loss of the volatile swapz mapping authority loses access to
-pages already stored through that mapping. Never describe a fallback swapfile
-on another partition of the same physical disk as independent-media redundancy.
+The plan, lifecycle mocks and CI do not establish live-swap correctness. This
+project's physical-PC qualification excludes virtual machines and intentional
+crash/reboot tests. Model each durable interruption boundary with rootless
+tests and use disposable host resources only when they are positively
+identified and cannot alias active system storage. Report true cold-boot
+recovery as unverified when it cannot be exercised safely; do not claim a mock
+proves it. Document that loss of the volatile swapz mapping authority loses
+access to pages already stored through that mapping. Never describe a fallback
+swapfile on another partition of the same physical disk as independent-media
+redundancy.

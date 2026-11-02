@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "authority.h"
 
@@ -57,6 +58,125 @@ static int test_initial_rejects_unsafe_capacity(void)
 	CHECK(swapz_authority_init(&a, maps, live, classes, 64, 768) == 0);
 	CHECK(a.reserve_blocks == 512);
 	CHECK(a.next_block == 0);
+	return 0;
+}
+
+static int test_designated_partition_maximum_capacity(void)
+{
+	const swapz_u64 partition_bytes = 17179869184ULL;
+	const swapz_u32 expected_physical_blocks = 4194048U;
+	const swapz_u32 expected_logical_pages = 3355136U;
+	const swapz_u32 expected_reserve_blocks = 838784U;
+	const swapz_u32 expected_segments = 16383U;
+	const swapz_u64 expected_index_bytes = 120470752ULL;
+	const swapz_u32 total_blocks =
+		(swapz_u32)(partition_bytes / SWAPZ_BLOCK_BYTES);
+	const swapz_u32 physical_blocks =
+		((total_blocks - 1U) / SWAPZ_SEGMENT_BLOCKS) *
+		SWAPZ_SEGMENT_BLOCKS;
+	const swapz_u32 segment_count =
+		physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+	struct swapz_authority a;
+	struct swapz_map *large_maps;
+	swapz_u16 *live_records;
+	swapz_u8 *extent_classes, *segment_roles, *segment_trimmed;
+	swapz_u32 *gc_scores, *gc_io_scores, *gc_segment_evictions;
+	swapz_u32 *segment_mapped_pages, *segment_program_counts;
+	swapz_u32 *segment_first_page, *segment_last_page;
+	swapz_u32 *page_prev_in_segment, *page_next_in_segment;
+	swapz_u16 *gc_min_live_blocks;
+	swapz_u64 index_bytes;
+
+	CHECK(physical_blocks == expected_physical_blocks);
+	CHECK(segment_count == expected_segments);
+	CHECK((swapz_u64)expected_logical_pages * SWAPZ_BLOCK_BYTES ==
+	      13742637056ULL);
+	CHECK((swapz_u64)expected_logical_pages *
+	      (sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)) +
+	      (swapz_u64)physical_blocks *
+	      (sizeof(swapz_u16) + sizeof(swapz_u8)) +
+	      (swapz_u64)segment_count *
+	      (7U * sizeof(swapz_u32) + sizeof(swapz_u16) +
+	       2U * sizeof(swapz_u8)) == expected_index_bytes);
+
+	/* Allocate every capacity-dependent authority/index array used by ctr. */
+	large_maps = calloc((size_t)expected_logical_pages + 1U,
+			    sizeof(*large_maps));
+	live_records = calloc(physical_blocks, sizeof(*live_records));
+	extent_classes = calloc(physical_blocks, sizeof(*extent_classes));
+	gc_scores = calloc(segment_count, sizeof(*gc_scores));
+	gc_io_scores = calloc(segment_count, sizeof(*gc_io_scores));
+	gc_min_live_blocks = calloc(segment_count, sizeof(*gc_min_live_blocks));
+	gc_segment_evictions = calloc(segment_count,
+				      sizeof(*gc_segment_evictions));
+	segment_mapped_pages = calloc(segment_count,
+				      sizeof(*segment_mapped_pages));
+	segment_program_counts = calloc(segment_count,
+					 sizeof(*segment_program_counts));
+	segment_first_page = calloc(segment_count, sizeof(*segment_first_page));
+	segment_last_page = calloc(segment_count, sizeof(*segment_last_page));
+	page_prev_in_segment = calloc(expected_logical_pages,
+				      sizeof(*page_prev_in_segment));
+	page_next_in_segment = calloc(expected_logical_pages,
+				      sizeof(*page_next_in_segment));
+	segment_trimmed = calloc(segment_count, sizeof(*segment_trimmed));
+	segment_roles = calloc(segment_count, sizeof(*segment_roles));
+	CHECK(large_maps && live_records && extent_classes && gc_scores &&
+	      gc_io_scores && gc_min_live_blocks && gc_segment_evictions &&
+	      segment_mapped_pages && segment_program_counts &&
+	      segment_first_page && segment_last_page && page_prev_in_segment &&
+	      page_next_in_segment && segment_trimmed && segment_roles);
+
+	/* The first page beyond the computed maximum must fail before admission. */
+	CHECK(swapz_authority_init(&a, large_maps, live_records, extent_classes,
+				   expected_logical_pages + 1U,
+				   physical_blocks) == -ENOSPC);
+	CHECK(swapz_authority_init(&a, large_maps, live_records, extent_classes,
+				   expected_logical_pages,
+				   physical_blocks) == 0);
+	CHECK(a.reserve_blocks == expected_reserve_blocks);
+	CHECK(a.logical_pages == expected_logical_pages);
+	CHECK(swapz_enable_segment_rotation(&a, segment_roles,
+					    segment_count) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(&a, segment_mapped_pages,
+						 segment_count) == 0);
+	CHECK(swapz_enable_segment_program_counts(&a, segment_program_counts,
+						segment_count) == 0);
+	CHECK(swapz_enable_segment_page_lists(&a, segment_first_page,
+						segment_last_page,
+						page_prev_in_segment,
+						page_next_in_segment,
+						segment_count,
+						expected_logical_pages) == 0);
+	CHECK(swapz_enable_segment_gc_accounting(&a, gc_scores, gc_io_scores,
+						 gc_min_live_blocks,
+						 segment_count) == 0);
+	CHECK(a.segment_count == expected_segments);
+
+	index_bytes = (swapz_u64)expected_logical_pages *
+		(sizeof(*large_maps) + 2U * sizeof(swapz_u32)) +
+		(swapz_u64)physical_blocks *
+		(sizeof(*live_records) + sizeof(*extent_classes)) +
+		(swapz_u64)segment_count *
+		(7U * sizeof(swapz_u32) + sizeof(swapz_u16) +
+		 2U * sizeof(swapz_u8));
+	CHECK(index_bytes == expected_index_bytes);
+
+	free(segment_roles);
+	free(segment_trimmed);
+	free(page_next_in_segment);
+	free(page_prev_in_segment);
+	free(segment_last_page);
+	free(segment_first_page);
+	free(segment_program_counts);
+	free(segment_mapped_pages);
+	free(gc_segment_evictions);
+	free(gc_min_live_blocks);
+	free(gc_io_scores);
+	free(gc_scores);
+	free(extent_classes);
+	free(live_records);
+	free(large_maps);
 	return 0;
 }
 
@@ -505,6 +625,7 @@ int main(void)
 	int passed = 0;
 
 	CHECK(test_initial_rejects_unsafe_capacity() == 0); passed++;
+	CHECK(test_designated_partition_maximum_capacity() == 0); passed++;
 	CHECK(test_full_publish_and_authoritative_reads() == 0); passed++;
 	CHECK(test_peeked_authoritative_read_rechecks_payload_and_sequence() == 0); passed++;
 	CHECK(test_torn_write_no_old_mapping_invalidation() == 0); passed++;

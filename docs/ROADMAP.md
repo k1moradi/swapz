@@ -946,8 +946,9 @@ builds chained BIOs and its synchronous wrapper waits for their completion.
 The implementation review must check split-range completion and memory-pressure
 behavior against the running kernel headers before selecting the async adapter.
 This step changes neither SWZ nor physical-device admission. Heavy-CPU/low-RAM,
-real swap semantics, representative churn and disposable-VM qualification remain
-separate release gates.
+real swap semantics, representative churn and modeled interruption
+qualification remain separate release gates. True cold-boot behavior remains
+unverified because VMs and intentional host crashes/reboots are excluded.
 
 ## NUMA / deployment topology
 
@@ -1289,29 +1290,42 @@ malformed or unexpected state into explicit `BLOCKED:` results instead of an
 opaque shell-runtime status. The numeric internal-error trap remains as a
 last-resort diagnostic. A subsequent owner run exposed one stale native interface assertion that still required the removed regex literals; that contract is aligned with the exact-token ownership checks and now explicitly rejects reintroduction of `BASH_REMATCH`. The following loaded owner rerun still returned shell status 2 before a safety verdict, so the remaining runtime `=~` expressions and C-style arithmetic commands are removed from privileged preflight as well. Canonical decimal validation, exact shell patterns and fixed bounded retry iteration now cover the path end-to-end without weakening positive ownership checks. The following native rerun exposed three stale harness assertions that still required the removed arithmetic spellings (source contract, Make interface contract, and rootless literal grep); all three are aligned to the non-arithmetic preflight forms in one change. The following loaded qualification run exposed that the multi-line `case` pattern in `loaded-preflight.sh` omitted trailing backslashes on continuation lines, triggering a Bash syntax error (unexpected newline) and exit status 2 before execution. The continuation lines are escaped with `\`, and `test-rootless.sh` is updated to invoke `bash -n` individually across every shell harness script so future syntax regressions fail in Stage 2 rather than during privileged loaded execution.
 
-### Experimental Linux live-swap supervisor — Phase A only
+### Physical-PC full-capacity and live-swap qualification
 
-Issue #76's Phase-A implementation is present directly on `main` as a separate
-experimental supervisor. It has a read-only admission plan, a
-reviewable inert operation trace, durable one-use state/backup/result records,
-exact fallback and mapper identity gates, conservative staged cleanup, and
-mock-only lifecycle regressions. The privileged `run` and `recover` commands
-remain disabled. This code is outside the old physical-helper qualification
-exemption; it does not change the qualified production module or the completed
-11/11 physical correctness-smoke evidence.
+The current mission is to qualify the maximum safe logical capacity backed by
+the complete `/dev/sda4` partition, then prove actual Linux swap-out/swap-in,
+GC/churn, shutdown, recovery, and rollback on this physical PC. The earlier
+11/11 physical-backed byte-correctness smoke remains a separate bounded pass;
+it did not activate its mapper as system swap and did not qualify live swap.
 
-Read-only host observations identify F2FS on `/dev/sda3` as a possible location
-for a dedicated fallback swapfile. That candidate is neither allocated nor
-activated and has not been tested with `swapon`. It shares disk 8:0 with
-`/dev/sda4`, so it is additional capacity, not independent-media protection.
-The coordinator requires a pre-existing allocated fallback with at least
-512 MiB free and explicit priority 0 through 32766, and it leaves that fallback
-active after restoration. The exact F2FS behavior and fallback lifecycle need
-separate review.
+The source geometry gives an authority admission limit, not yet a verified
+production capacity. `/dev/sda4` is 17,179,869,184 bytes. After the one-block SWZ
+header and rounding down to 256-block (1 MiB) segments, 4,194,048 physical data
+blocks remain. With the current `ceil(logical_pages / 4)` reserve rule, the
+largest admitted logical target is 3,355,136 pages: 13,742,637,056 mapper bytes
+and 13,420,540 KiB of Linux-usable swap after its first header page. The
+authority reserves 838,784 blocks (3,435,659,264 bytes) for GC. Capacity-index
+arrays are 120,470,752 bytes (114.89 MiB), excluding fixed caches, scratch,
+worker state and allocator overhead. The native boundary regression now passes
+through production authority C, including rejection of the next page and
+initialization of all capacity-dependent authority arrays. This does not
+establish that the loaded target can allocate, reclaim or sustain GC at maximum
+size. Only a loaded maximum-size test on owned RAM backing can do that without
+touching the user's live swap partition.
 
-Remaining gates before any live trial: external source/recovery review, current
-main CI, a disposable-VM substitute-device cold-boot/recovery test, a verified
-fallback provisioned under separate authorization, a fresh read-only plan, and
-a new explicit owner decision. Do not perform swapoff, swapon, mkswap, module
-insertion, mapper creation/removal, formatting or a physical trial while these
-gates are pending.
+Issue #76's separate experimental supervisor currently enforces a 256 MiB,
+30-minute trial and keeps privileged `run`/`recover` disabled. Its modeled
+rootless lifecycle tests do not qualify Linux swap behavior. This goal excludes
+virtual machines and intentional host crash/reboot tests; use modeled durable
+interruption tests and report true cold-boot recovery as unverified where it
+cannot be exercised safely. Loss of the volatile swapz mapping authority still
+means pages already stored through that mapping cannot be reconstructed.
+
+No verified fallback is active. A swapfile on root F2FS (`/dev/sda3`) would
+share the same USB device with `/dev/sda4`; it can add capacity but cannot
+protect against whole-device failure, and changing the root filesystem layout
+is outside the current host-operation scope. The other enumerated disk is not a
+verified Linux swap resource. Investigate zram or other genuinely available
+resources without treating compressed RAM as independent storage. Do not
+activate a live swapz mapper until fallback behavior, target capacity, mapper
+ownership, cleanup, and actual swap I/O are qualified.
