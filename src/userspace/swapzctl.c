@@ -4,12 +4,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/random.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
 #include "../kernel/superblock.h"
@@ -23,10 +25,67 @@
 static void usage(FILE *out)
 {
 	fputs("Usage: swapzctl version | status | format <blockdev> | help\n", out);
+	fputs("       swapzctl format <blockdev> --expect-major-minor <major>:<minor> "
+	      "--expect-bytes <decimal-bytes>\n", out);
 	fputs("format is conservative: block 0 must be all-zero or already SWAPZ.\n",
 	      out);
 	fputs("No mapper target is created and swap is never enabled by swapzctl.\n",
 	      out);
+}
+
+struct format_expectation {
+	unsigned int device_major;
+	unsigned int device_minor;
+	unsigned long long device_bytes;
+};
+
+/* Parse unsigned decimal without accepting signs, whitespace or overflow. */
+static int parse_unsigned_decimal(const char *text, unsigned long long limit,
+				  const char **end, unsigned long long *value)
+{
+	const char *cursor = text;
+	unsigned long long parsed = 0;
+
+	if (*cursor < '0' || *cursor > '9')
+		return -1;
+	while (*cursor >= '0' && *cursor <= '9') {
+		unsigned int digit = (unsigned int)(*cursor - '0');
+
+		if (parsed > (limit - digit) / 10ULL)
+			return -1;
+		parsed = parsed * 10ULL + digit;
+		++cursor;
+	}
+	*end = cursor;
+	*value = parsed;
+	return 0;
+}
+
+static int parse_format_expectation(const char *identity, const char *bytes,
+				    struct format_expectation *expected)
+{
+	const char *end;
+	unsigned long long device_major;
+	unsigned long long device_minor;
+	dev_t expected_device;
+
+	if (parse_unsigned_decimal(identity, UINT_MAX, &end, &device_major) < 0 ||
+	    *end != ':' ||
+	    parse_unsigned_decimal(end + 1, UINT_MAX, &end, &device_minor) < 0 ||
+	    *end != '\0' ||
+	    parse_unsigned_decimal(bytes, ULLONG_MAX, &end,
+				   &expected->device_bytes) < 0 ||
+	    *end != '\0')
+		return -1;
+
+	expected->device_major = (unsigned int)device_major;
+	expected->device_minor = (unsigned int)device_minor;
+	/* Reject numbers not round-trippable through the platform's dev_t. */
+	expected_device = makedev(expected->device_major, expected->device_minor);
+	if (major(expected_device) != expected->device_major ||
+	    minor(expected_device) != expected->device_minor)
+		return -1;
+	return 0;
 }
 
 static int block_is_zero(const unsigned char *block)
@@ -95,18 +154,22 @@ static void print_uuid(const unsigned char *uuid)
 	}
 }
 
-static int format_device(const char *path)
+static int format_device(const char *path,
+			 const struct format_expectation *expected)
 {
 	unsigned char block[SWAPZ_SUPERBLOCK_BYTES];
 	unsigned long long device_bytes = 0;
-	struct stat info;
+	struct stat inspected_info;
+	struct stat opened_info;
+	int already_formatted = 0;
+	int result = 1;
 	int fd;
 
-	if (stat(path, &info) < 0) {
+	if (stat(path, &inspected_info) < 0) {
 		perror("swapzctl format: stat");
 		return 1;
 	}
-	if (!S_ISBLK(info.st_mode)) {
+	if (!S_ISBLK(inspected_info.st_mode)) {
 		fprintf(stderr, "swapzctl format: %s is not a block device\n", path);
 		return 2;
 	}
@@ -115,33 +178,54 @@ static int format_device(const char *path)
 		perror("swapzctl format: exclusive open");
 		return 1;
 	}
+	/* The opened descriptor, not the path, is the authority for block-zero I/O. */
+	if (fstat(fd, &opened_info) < 0) {
+		perror("swapzctl format: fstat");
+		goto close_error;
+	}
+	if (!S_ISBLK(opened_info.st_mode) ||
+	    opened_info.st_rdev != inspected_info.st_rdev) {
+		fputs("swapzctl format: REFUSED: opened device identity changed\n",
+		      stderr);
+		result = 2;
+		goto close_error;
+	}
+	if (expected &&
+	    (major(opened_info.st_rdev) != expected->device_major ||
+	     minor(opened_info.st_rdev) != expected->device_minor)) {
+		fputs("swapzctl format: REFUSED: device major:minor mismatch\n",
+		      stderr);
+		result = 2;
+		goto close_error;
+	}
 	if (ioctl(fd, BLKGETSIZE64, &device_bytes) < 0) {
 		perror("swapzctl format: BLKGETSIZE64");
-		close(fd);
-		return 1;
+		goto close_error;
+	}
+	if (expected && device_bytes != expected->device_bytes) {
+		fputs("swapzctl format: REFUSED: device size mismatch\n", stderr);
+		result = 2;
+		goto close_error;
 	}
 	if (device_bytes < SWAPZ_SUPERBLOCK_BYTES + SWAPZ_MIN_DATA_BYTES) {
 		fprintf(stderr, "swapzctl format: device is too small\n");
-		close(fd);
-		return 2;
+		result = 2;
+		goto close_error;
 	}
+	/* No block-zero read or write occurs until all FD checks have passed. */
 	if (exact_io(fd, block, sizeof(block), 0) < 0) {
 		perror("swapzctl format: read block 0");
-		close(fd);
-		return 1;
+		goto close_error;
 	}
 	if (swapz_sb_valid(block, device_bytes)) {
-		printf("swapzctl: already formatted SWAPZ device uuid=");
-		print_uuid(block + SWAPZ_SUPERBLOCK_UUID_OFFSET);
-		printf(" size=%llu\n", device_bytes);
-		close(fd);
-		return 0;
+		already_formatted = 1;
+		goto close_success;
 	}
 	if (!block_is_zero(block)) {
 		fputs("swapzctl format: REFUSED: block 0 contains nonzero data; "
 		      "use a dedicated zeroed device/partition\n", stderr);
-		close(fd);
-		return 2;
+		result = 2;
+		goto close_error;
 	}
 
 	memset(block, 0, sizeof(block));
@@ -156,8 +240,7 @@ static int format_device(const char *path)
 	if (fill_random(block + SWAPZ_SUPERBLOCK_UUID_OFFSET,
 			SWAPZ_SUPERBLOCK_UUID_BYTES) < 0) {
 		perror("swapzctl format: getrandom");
-		close(fd);
-		return 1;
+		goto close_error;
 	}
 	block[SWAPZ_SUPERBLOCK_UUID_OFFSET + 6U] =
 		(unsigned char)((block[SWAPZ_SUPERBLOCK_UUID_OFFSET + 6U] & 0x0fU) |
@@ -166,19 +249,35 @@ static int format_device(const char *path)
 		(unsigned char)((block[SWAPZ_SUPERBLOCK_UUID_OFFSET + 8U] & 0x3fU) |
 				0x80U);
 
-	if (exact_io(fd, block, sizeof(block), 1) < 0 || fsync(fd) < 0) {
+	if (exact_io(fd, block, sizeof(block), 1) < 0) {
 		perror("swapzctl format: write header");
-		close(fd);
-		return 1;
+		goto close_error;
 	}
+	if (fsync(fd) < 0) {
+		perror("swapzctl format: fsync header");
+		goto close_error;
+	}
+
+close_success:
 	if (close(fd) < 0) {
 		perror("swapzctl format: close");
 		return 1;
 	}
-	printf("swapzctl: formatted SWAPZ authorization header uuid=");
-	print_uuid(block + SWAPZ_SUPERBLOCK_UUID_OFFSET);
-	printf(" size=%llu data_start=4096\n", device_bytes);
+	if (already_formatted) {
+		printf("swapzctl: already formatted SWAPZ device uuid=");
+		print_uuid(block + SWAPZ_SUPERBLOCK_UUID_OFFSET);
+		printf(" size=%llu\n", device_bytes);
+	} else {
+		printf("swapzctl: formatted SWAPZ authorization header uuid=");
+		print_uuid(block + SWAPZ_SUPERBLOCK_UUID_OFFSET);
+		printf(" size=%llu data_start=4096\n", device_bytes);
+	}
 	return 0;
+
+close_error:
+	if (close(fd) < 0)
+		perror("swapzctl format: close");
+	return result;
 }
 
 int main(int argc, char **argv)
@@ -204,7 +303,19 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	if (argc == 3 && !strcmp(argv[1], "format"))
-		return format_device(argv[2]);
+		return format_device(argv[2], NULL);
+	if (argc == 7 && !strcmp(argv[1], "format") &&
+	    !strcmp(argv[3], "--expect-major-minor") &&
+	    !strcmp(argv[5], "--expect-bytes")) {
+		struct format_expectation expected;
+
+		if (parse_format_expectation(argv[4], argv[6], &expected) < 0) {
+			fputs("swapzctl format: BLOCKED: invalid expected identity or size\n",
+			      stderr);
+			return 2;
+		}
+		return format_device(argv[2], &expected);
+	}
 
 	usage(stderr);
 	fputs("BLOCKED: unsupported command; no mapper or swap activation performed.\n",

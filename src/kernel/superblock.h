@@ -16,6 +16,8 @@
 #define SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET 16U
 #define SWAPZ_SUPERBLOCK_UUID_OFFSET 24U
 #define SWAPZ_SUPERBLOCK_UUID_BYTES 16U
+#define SWAPZ_SUPERBLOCK_RESERVED_OFFSET \
+	(SWAPZ_SUPERBLOCK_UUID_OFFSET + SWAPZ_SUPERBLOCK_UUID_BYTES)
 
 static const unsigned char swapz_superblock_magic[SWAPZ_SUPERBLOCK_MAGIC_BYTES] = {
 	'S', 'W', 'A', 'P', 'Z', '0', '0', '1'
@@ -76,6 +78,18 @@ static inline int swapz_sb_uuid_nonzero(const unsigned char *block)
 	return any != 0;
 }
 
+/* Every byte after the UUID is reserved and must remain zero. */
+static inline int swapz_sb_reserved_zero(const unsigned char *block)
+{
+	unsigned int i;
+
+	for (i = SWAPZ_SUPERBLOCK_RESERVED_OFFSET;
+	     i < SWAPZ_SUPERBLOCK_BYTES; ++i)
+		if (block[i] != 0)
+			return 0;
+	return 1;
+}
+
 static inline int swapz_sb_valid(const unsigned char *block,
 				 unsigned long long device_bytes)
 {
@@ -86,7 +100,8 @@ static inline int swapz_sb_valid(const unsigned char *block,
 		       SWAPZ_SUPERBLOCK_BYTES &&
 	       swapz_sb_get_u64(block + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET) ==
 		       device_bytes &&
-	       swapz_sb_uuid_nonzero(block);
+	       swapz_sb_uuid_nonzero(block) &&
+	       swapz_sb_reserved_zero(block);
 }
 
 #endif

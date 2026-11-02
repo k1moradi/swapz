@@ -157,6 +157,38 @@ history or retune only one arm to make a desired model rate appear achievable.
 Never reboot, `swapon`, `swapoff`, mount test storage, force-remove mappings or touch physical/unowned devices. Loaded development uses only positively owned RAM-backed `null_blk` with exact identity checks and ordinary teardown/quarantine.
 
 
+### Physical formatter descriptor and SWZ header contract
+
+`swapzctl format <blockdev>` retains its conservative standalone behavior:
+reject non-block devices, undersized geometry and nonzero block zero unless it
+is an exact existing SWZ authorization header; never create a mapper or
+activate swap. The private physical helper may instead invoke the fixed,
+identity-bound form `swapzctl format <blockdev> --expect-major-minor <major>:<minor> --expect-bytes <decimal-bytes>`.
+Require both options in that order, unsigned decimal integers only, no signs,
+whitespace, overflow, missing values, trailing characters or extra arguments.
+The given device number must be representable as a platform `dev_t`.
+
+After the pre-open block-device check, open exclusively with
+`O_RDWR | O_EXCL | O_CLOEXEC`, then require `fstat()` on that **same FD**
+to report a block device with `st_rdev` identical to the pre-open
+inspection. Identity-bound formatting additionally requires the exact opened
+major:minor. Query `BLKGETSIZE64` on that FD; when bound, its size
+must exactly equal the expected byte count. All FD/geometry checks and the
+minimum size check precede every block-zero read or write. A pathname recheck
+cannot replace FD validation. Close the opened descriptor on every exit path;
+a failed read, write, fsync or close is not a successful format. Incomplete
+media writes require explicit recovery, never an implicit retry that would
+accept an unknown partially written header.
+
+The shared freestanding SWZ authorization validator and private Python helper
+must agree: exact eight-byte magic, format version, header length, opened-device
+size and nonzero 16-byte UUID, with **every reserved byte at offsets 40..4095
+zero**. A formatted header is idempotently recognized only when *all* those
+conditions hold; nonzero unrecognized block zero is refused without writing.
+Do not add kernel-only headers or libc dependencies to `superblock.h`.
+These protections do not authorize physical test execution or bypass the
+separate physical-review gates.
+
 ## MM, folio and zswap semantic boundary
 
 Read [context.md](context.md) for the kernel reclaim/BIO/zswap semantics and
