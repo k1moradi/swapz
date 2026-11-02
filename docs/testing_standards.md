@@ -2680,8 +2680,10 @@ historical reports that do not match the live host.
 The review record is JSON with approved=true, a reviewer other than the
 operator, scope=physical swap backing correctness smoke only, the qualified
 source SHA, the selected partition's major:minor identity and persistent PARTUUID, and the helper's
-SHA-256. The exact JSON bytes additionally require a detached SSH signature
-at `<review-record>.sig` under namespace `swapz-physical-review`, verified
+SHA-256. Duplicate JSON object keys are rejected so the signed attestation has
+one unambiguous interpretation. The exact JSON bytes additionally require a
+detached SSH signature at `<review-record>.sig` under namespace
+`swapz-physical-review`, verified
 for the named reviewer against independently provisioned
 `/etc/swapz/physical-review.allowed_signers`. The trust file and its parent
 must be root-owned and not group/world writable; the operator cannot override

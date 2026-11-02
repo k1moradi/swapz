@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import struct
 import tempfile
@@ -111,6 +112,45 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
                     probe.validate_review(path, evidence, target)
+                duplicate = json.dumps(review)[:-1] + \
+                    ',"reviewer":"second-reviewer"}'
+                path.write_text(duplicate)
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "duplicate JSON key"):
+                    probe.validate_review(path, evidence, target)
+
+    def test_signed_review_verifies_the_exact_json_bytes(self):
+        keygen = shutil.which("ssh-keygen")
+        if not keygen:
+            self.skipTest("ssh-keygen unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            private_key = root / "review-key"
+            review_path = root / "review.json"
+            allowed = root / "allowed-signers"
+            record = b'{"approved":true,"reviewer":"independent-reviewer"}'
+            subprocess.run(
+                [keygen, "-q", "-t", "ed25519", "-N", "",
+                 "-f", str(private_key)],
+                check=True, capture_output=True)
+            public_key = Path(str(private_key) + ".pub").read_text().strip()
+            allowed.write_text(f"independent-reviewer {public_key}\n")
+            review_path.write_bytes(record)
+            subprocess.run(
+                [keygen, "-Y", "sign", "-f", str(private_key),
+                 "-n", probe.REVIEW_NAMESPACE, str(review_path)],
+                check=True, capture_output=True)
+            with mock.patch.object(
+                    probe, "_trusted_review_signers", return_value=allowed), \
+                    mock.patch.object(
+                        probe.shutil, "which", return_value=keygen):
+                probe._verify_signed_review(
+                    review_path, "independent-reviewer", record)
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "not authenticated"):
+                    probe._verify_signed_review(
+                        review_path, "independent-reviewer",
+                        record + b" ")
 
     def test_signed_review_rejects_missing_trust_and_invalid_signature(self):
         with tempfile.TemporaryDirectory() as directory:

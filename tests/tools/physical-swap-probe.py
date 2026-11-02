@@ -464,10 +464,23 @@ def _verify_signed_review(review_path, reviewer, record_bytes):
         raise ProbeError("independent review signature is not authenticated")
 
 
+def _load_unique_json(record_bytes):
+    """Signed safety records must have one unambiguous value per JSON key."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    return json.loads(record_bytes, object_pairs_hook=unique_object)
+
+
 def validate_review(review_path, evidence, target):
     try:
         record_bytes = Path(review_path).read_bytes()
-        review = json.loads(record_bytes)
+        review = _load_unique_json(record_bytes)
     except (OSError, ValueError) as exc:
         raise ProbeError(f"cannot read independent safety review: {exc}") from exc
     if not isinstance(review, dict):
