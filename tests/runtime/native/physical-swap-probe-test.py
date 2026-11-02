@@ -924,6 +924,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         # ExitStack avoids Python's limit on statically nested with-blocks.
         with tempfile.TemporaryDirectory() as directory:
             patches = (
+                mock.patch.object(probe, "_recovery_base",
+                                  return_value=Path(directory)),
                 mock.patch.object(probe.os, "geteuid", return_value=0),
                 mock.patch.object(probe, "current_source_evidence",
                                   return_value=evidence),
