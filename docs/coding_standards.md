@@ -28,6 +28,8 @@ disable core dumps/dumpability and lock current and future mappings; fail closed
 if RLIMIT_MEMLOCK or OS support is insufficient. Privileged replay must recheck
 the private fixture metadata because sudo may discard environment; the native
 replay independently locks its mapped fixture and all future allocations.
+Do not keep a global representative-content marker in the parent test runner:
+each replay scopes its protection to the fixture and its own process.
 A local ignored benchmark artifact may keep its existing fixture
 digest only to prove the raw/target arms shared identical inputs; never publish
 that artifact or the sample. This tooling does not qualify kernel swap
