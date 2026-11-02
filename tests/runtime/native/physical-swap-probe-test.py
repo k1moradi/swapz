@@ -1085,6 +1085,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         command, 1, stdout="FAIL injected physical phase\n",
                         stderr="injected phase failure\n")
             if command[:2] == ["dmsetup", "info"]:
+                if command == ["dmsetup", "info", "-c", "--noheadings",
+                               "-o", "name,uuid"]:
+                    # The simulated host has no unrelated mapper devices.
+                    # Match dmsetup's exact successful empty-inventory output;
+                    # blank stdout is intentionally rejected by the helper.
+                    output = "No devices found\n"
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=output, stderr="")
                 if "name,uuid,major,minor" not in command:
                     return subprocess.CompletedProcess(
                         command, 0, stdout="", stderr="")
