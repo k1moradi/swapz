@@ -818,7 +818,8 @@ def plan(device_arg, confirm_arg, review_path=None):
         except ProbeError as exc:
             review_message = f"independent review: BLOCKED ({exc})"
     print(f"DEVICE_PREFLIGHT=PASS major_minor={target['major']}:{target['minor']} "
-          f"bytes={target['size_bytes']} used_kib={target['swap_used_kib']}")
+          f"partuuid={target['partuuid']} bytes={target['size_bytes']} "
+          f"used_kib={target['swap_used_kib']}")
     print(f"SOURCE_GATE={evidence_message}")
     if evidence is not None:
         helper_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
