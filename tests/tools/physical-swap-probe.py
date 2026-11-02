@@ -7,6 +7,7 @@ unused active swap partition, two current-source PASS reports from this host,
 and an independent review record bound to the source, helper and device.
 """
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -46,6 +47,11 @@ QUALIFICATION_STAGE_NAMES = (
 )
 SWAPZ_HEADER_MAGIC = b"SWAPZ001"
 SWAPZ_HEADER_VERSION = 1
+BLKGETSIZE64 = 0x80081272  # Linux x86_64 _IOR(0x12, 114, size_t).
+RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
+PERSISTENT_RECOVERY_FILESYSTEMS = frozenset({
+    "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs",
+})
 
 
 class ProbeError(RuntimeError):
@@ -147,13 +153,32 @@ def _require_root_not_on_target(major, minor):
         raise ProbeError("selected partition contains or backs the root filesystem")
 
 
-def _read_block0(device):
+def _verify_open_block_device(fd, target):
+    """Bind block I/O to the opened FD, never just a prior pathname."""
     try:
-        fd = os.open(device, os.O_RDONLY | os.O_CLOEXEC)
+        info = os.fstat(fd)
+        if not stat.S_ISBLK(info.st_mode) or (
+                os.major(info.st_rdev), os.minor(info.st_rdev)) != (
+                target["major"], target["minor"]):
+            raise ProbeError("opened partition has a different major:minor")
+        size = struct.unpack("=Q", fcntl.ioctl(
+            fd, BLKGETSIZE64, bytes(8)))[0]
+    except OSError as exc:
+        raise ProbeError("cannot verify opened partition geometry") from exc
+    if size != target["size_bytes"]:
+        raise ProbeError("opened partition geometry differs from reviewed size")
+
+
+def _read_block0(device, target):
+    try:
+        fd = os.open(device, os.O_RDONLY | os.O_CLOEXEC | os.O_NOCTTY)
     except OSError as exc:
         raise ProbeError(f"cannot open selected block device for reading: {exc}") from exc
     try:
+        _verify_open_block_device(fd, target)
         data = os.pread(fd, PAGE_BYTES, 0)
+    except OSError as exc:
+        raise ProbeError("failed to read selected partition header") from exc
     finally:
         os.close(fd)
     if len(data) != PAGE_BYTES:
@@ -284,7 +309,9 @@ def inspect_target(device_arg, confirm_arg):
     active = matching[0]
     if active["used_kib"] != 0:
         raise ProbeError("selected swap partition is in use; require zero used KiB")
-    header = _read_block0(device)
+    header = _read_block0(device, {
+        "major": major, "minor": minor, "size_bytes": size_bytes,
+    })
     if not swap_signature_valid(header, os.sysconf("SC_PAGE_SIZE")):
         raise ProbeError("selected partition does not have a supported SWAPSPACE2 header")
     return {
@@ -620,11 +647,19 @@ def validate_review(review_path, evidence, target):
             (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@+-]{0,127}", reviewer) or
              reviewer.lower() in {"root", operator.lower()}):
         raise ProbeError("review record must name a separate approving reviewer")
+    run_id = review.get("run_id")
     if review.get("scope") != EXPECTED_SCOPE or \
             review.get("source_sha") != evidence["source_sha"] or \
             review.get("device_major_minor") != \
             f"{target['major']}:{target['minor']}" or \
             review.get("device_partuuid") != target["partuuid"] or \
+            type(review.get("device_size_bytes")) is not int or \
+            review["device_size_bytes"] != target["size_bytes"] or \
+            review.get("original_header_sha256") != hashlib.sha256(
+                target["header"]).hexdigest() or \
+            review.get("device_uuid_path") != target["device_arg"] or \
+            not isinstance(run_id, str) or \
+            not re.fullmatch(r"[0-9a-f]{32}", run_id) or \
             review.get("helper_sha256") != hashlib.sha256(
                 Path(__file__).read_bytes()).hexdigest():
         raise ProbeError("review record does not match this source, helper and device")
@@ -636,11 +671,153 @@ def validate_review(review_path, evidence, target):
            for key, _, _ in PHYSICAL_ARTIFACTS):
         raise ProbeError("review record does not match the tested binary artifacts")
     _verify_signed_review(review_path, reviewer, record_bytes)
-    return reviewer
+    return {"reviewer": reviewer, "run_id": run_id}
+
+
+def _fsync_directory(directory):
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY |
+                 os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _recovery_base():
+    """Require an operator-provisioned, non-symlink, root-controlled location."""
+    base = RECOVERY_BASE
+    for directory in (base, *base.parents):
+        try:
+            info = directory.lstat()
+        except OSError as exc:
+            raise ProbeError("recovery base or a parent is missing") from exc
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or (
+                info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+            raise ProbeError("recovery path must have root-controlled directory parents")
+    if stat.S_IMODE(base.stat().st_mode) != 0o700:
+        raise ProbeError("operator must pre-provision recovery base as root-only 0700")
+    filesystem = _run([
+        "findmnt", "--first-only", "--noheadings", "--output", "FSTYPE",
+        "--target", str(base),
+    ]).stdout.strip()
+    if filesystem not in PERSISTENT_RECOVERY_FILESYSTEMS:
+        raise ProbeError("recovery base has unverified or nonpersistent filesystem")
+    source = _run([
+        "findmnt", "--first-only", "--noheadings", "--output", "SOURCE",
+        "--target", str(base),
+    ]).stdout.strip()
+    source_device = source.split("[", 1)[0]
+    if not source_device.startswith("/dev/") or re.match(
+            r"^/dev/(?:loop|ram|zram|nullb)", source_device):
+        raise ProbeError("recovery filesystem has no verified persistent block source")
+    ancestry = _run([
+        "lsblk", "--inverse", "--raw", "--noheadings",
+        "--output", "TYPE,NAME", source_device,
+    ]).stdout.splitlines()
+    devices = [line.split() for line in ancestry if line.strip()]
+    if not devices or any(len(row) != 2 or row[0] in {
+            "loop", "ram", "zram"} or re.match(
+            r"^(?:loop|ram|zram|nullb)", row[1]) for row in devices) or (
+            not any(row[0] == "disk" for row in devices)):
+        raise ProbeError("recovery backing chain is volatile or unverifiable")
+    return base
+
+
+def _recovery_run_directory(state_dir, run_id=None):
+    base = _recovery_base()
+    directory = Path(state_dir)
+    if not directory.is_absolute() or directory.parent != base:
+        raise ProbeError("recovery run directory must be a direct child of the fixed base")
+    if run_id is not None:
+        if directory.name != f"swapz-physical-{run_id}":
+            raise ProbeError("run directory must match the one-use signed run_id")
+    elif not re.fullmatch(r"swapz-physical-[0-9a-f]{32}", directory.name):
+        raise ProbeError("invalid recovery run directory name")
+    return directory
+
+
+def _partition_lock(partuuid):
+    """Permanent lock inode; never unlink it, including after a crash."""
+    base = _recovery_base()
+    name = f"partition-{partuuid}.lock"
+    fd = os.open(base / name, os.O_RDWR | os.O_CREAT |
+                 os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or (
+                stat.S_IMODE(info.st_mode) != 0o600):
+            raise ProbeError("partition lock is not root-controlled")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ProbeError("another physical attempt owns this partition") from exc
+        _fsync_directory(base)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _durable_exclusive_record(path, record):
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                 os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        _write_all(fd, (json.dumps(record, sort_keys=True) + "\n").encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    _fsync_directory(path.parent)
+
+
+def _check_review_unconsumed(target, run_id):
+    base = _recovery_base()
+    if (base / f"consumed-{run_id}.json").exists() or (
+            base / f"partition-{target['partuuid']}.active").exists():
+        raise ProbeError("review consumed or partition recovery outstanding")
+
+
+def _consume_review(target, run_id):
+    """Commit one-use approval and partition ownership before swapoff."""
+    base = _recovery_base()
+    record = {"run_id": run_id, "partuuid": target["partuuid"],
+              "major": target["major"], "minor": target["minor"]}
+    active_path = base / f"partition-{target['partuuid']}.active"
+    used_path = base / f"consumed-{run_id}.json"
+    _check_review_unconsumed(target, run_id)
+    try:
+        _durable_exclusive_record(used_path, record)
+        _durable_exclusive_record(active_path, record)
+    except FileExistsError as exc:
+        raise ProbeError("review reused or physical partition already owned") from exc
+    # A failed second record leaves the consumed approval permanently burned.
+
+
+def _release_partition_ownership(state):
+    """Release an active marker only after durable COMPLETE, never the consumption."""
+    if state.get("stage") != "COMPLETE":
+        raise ProbeError("cannot release ownership before full restoration")
+    base = _recovery_base()
+    active_path = base / f"partition-{state['partuuid']}.active"
+    try:
+        marker = _load_unique_json(active_path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise ProbeError("partition ownership marker missing or damaged") from exc
+    if marker != {"run_id": state["run_id"], "partuuid": state["partuuid"],
+                  "major": state["major"], "minor": state["minor"]}:
+        raise ProbeError("another physical run owns the recovery marker")
+    used_path = base / f"consumed-{state['run_id']}.json"
+    try:
+        used = _load_unique_json(used_path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise ProbeError("one-use signed approval consumption is missing") from exc
+    if used != marker:
+        raise ProbeError("consumed review identity does not match partition owner")
+    active_path.unlink()
+    _fsync_directory(base)
 
 
 def _validate_state_dir(state_dir):
-    state_dir = Path(state_dir)
+    state_dir = _recovery_run_directory(state_dir)
     try:
         info = state_dir.lstat()
     except OSError as exc:
@@ -712,7 +889,7 @@ def _allocate_dm_identity():
     raise ProbeError("cannot allocate a unique owned Device Mapper identity")
 
 
-def _write_block0(device, data, target):
+def _write_block0(device, data, target, expected_current=None):
     if len(data) != PAGE_BYTES:
         raise ProbeError("recovery header has the wrong length")
     try:
@@ -720,11 +897,10 @@ def _write_block0(device, data, target):
     except OSError as exc:
         raise ProbeError(f"cannot exclusively open selected partition: {exc}") from exc
     try:
-        info = os.fstat(fd)
-        if not stat.S_ISBLK(info.st_mode) or (
-                os.major(info.st_rdev), os.minor(info.st_rdev)) != (
-                target["major"], target["minor"]):
-            raise ProbeError("partition identity changed before header write")
+        _verify_open_block_device(fd, target)
+        if expected_current is not None and os.pread(
+                fd, PAGE_BYTES, 0) != expected_current:
+            raise ProbeError("partition header changed before exclusive update")
         written = os.pwrite(fd, data, 0)
         if written != PAGE_BYTES:
             raise ProbeError("short write while updating partition header")
@@ -737,13 +913,16 @@ def _write_block0(device, data, target):
 
 
 def _active_swap_for(major, minor):
+    matching = []
     for row in parse_swap_rows(Path("/proc/swaps").read_text()):
         try:
             if block_identity(row["path"]) == (major, minor):
-                return row
+                matching.append(row)
         except ProbeError:
             continue
-    return None
+    if len(matching) > 1:
+        raise ProbeError("ambiguous duplicate active swap entries")
+    return matching[0] if matching else None
 
 
 def _holder_names(major, minor):
@@ -765,6 +944,70 @@ def _validate_owned_mapper_identity(state):
         raise ProbeError("saved mapper name and UUID tokens do not match")
 
 
+def _expected_dm_table(target):
+    return (f"0 {LOGICAL_SECTORS} swapz {target['device']} "
+            "0 64 0 2 0 1 0 0")
+
+
+def _verify_owned_mapper(state, target):
+    """Prove mapper identity, exact table, size and one genuine lower slave."""
+    _validate_owned_mapper_identity(state)
+    name, expected_uuid = state["dm_name"], state["dm_uuid"]
+    fields = _run([
+        "dmsetup", "info", "-c", "--noheadings",
+        "-o", "name,uuid,major,minor", name,
+    ]).stdout.split()
+    if len(fields) != 4 or fields[:2] != [name, expected_uuid]:
+        raise ProbeError("mapper name or UUID was substituted")
+    try:
+        dm_major, dm_minor = int(fields[2]), int(fields[3])
+    except ValueError as exc:
+        raise ProbeError("mapper major:minor is invalid") from exc
+    mapper = f"/dev/mapper/{name}"
+    if block_identity(mapper) != (dm_major, dm_minor):
+        raise ProbeError("mapper node does not match DM's kernel identity")
+    sysfs = Path(f"/sys/dev/block/{dm_major}:{dm_minor}")
+    try:
+        if (sysfs / "dm/name").read_text().strip() != name or (
+                sysfs / "dm/uuid").read_text().strip() != expected_uuid or (
+                sysfs / "size").read_text().strip() != str(LOGICAL_SECTORS):
+            raise ProbeError("mapper sysfs identity or 16 MiB size differs")
+        slaves = list((sysfs / "slaves").iterdir())
+        if len(slaves) != 1 or (
+                slaves[0] / "dev").read_text().strip() != (
+                f"{target['major']}:{target['minor']}"):
+            raise ProbeError("mapper has wrong or ambiguous lower block device")
+    except OSError as exc:
+        raise ProbeError("cannot prove mapper size and lower dependency") from exc
+    actual_table = _run(["dmsetup", "table", "--showkeys", name]).stdout.split()
+    expected_table = _expected_dm_table(target).split()
+    if len(actual_table) != len(expected_table) or (
+            actual_table[:3] != expected_table[:3] or
+            actual_table[4:] != expected_table[4:]) or (
+            actual_table[3] not in {
+                expected_table[3], f"{target['major']}:{target['minor']}"}):
+        raise ProbeError("mapper table differs from the one approved for the smoke")
+    return mapper
+
+
+def _mapper_exists(state):
+    """Distinguish proven absence from a failed individual info query."""
+    result = _run([
+        "dmsetup", "info", "-c", "--noheadings", "-o", "name,uuid",
+    ])
+    names = []
+    uuids = []
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) not in (1, 2):
+            raise ProbeError("cannot enumerate mapper ownership unambiguously")
+        names.append(fields[0])
+        uuids.append(fields[1] if len(fields) == 2 else "")
+    if state["dm_uuid"] in uuids and state["dm_name"] not in names:
+        raise ProbeError("owned DM UUID appeared under a different name")
+    return state["dm_name"] in names
+
+
 def _validate_recovery_header(current_header, backup, state, size_bytes):
     if current_header == backup:
         return
@@ -773,7 +1016,8 @@ def _validate_recovery_header(current_header, backup, state, size_bytes):
             "SWAP_OFF", "HEADER_CLEARED"}:
         return
     digest = state.get("formatted_header_sha256")
-    if stage in {"SWZ_FORMATTED", "MAPPED", "ORACLE_PASS"} and (
+    if stage in {"SWZ_FORMATTED", "MODULE_PENDING", "MODULE_OWNED",
+                 "MAPPED", "ORACLE_PASS"} and (
             isinstance(digest, str) and
             hashlib.sha256(current_header).hexdigest() == digest and
             swapz_header_valid(current_header, size_bytes)):
@@ -782,63 +1026,93 @@ def _validate_recovery_header(current_header, backup, state, size_bytes):
         "partition header is not an expected recovery state; manual review required")
 
 
-def recover(state_dir, device_arg, confirm_arg):
+def recover(state_dir, device_arg, confirm_arg, lock_held=False):
     state_dir = Path(state_dir)
     _validate_state_dir(state_dir)
     try:
-        state = json.loads((state_dir / STATE_NAME).read_text())
+        state = _load_unique_json((state_dir / STATE_NAME).read_bytes())
         backup = (state_dir / BACKUP_NAME).read_bytes()
     except (OSError, ValueError) as exc:
-        raise ProbeError(f"cannot load the saved physical-test recovery state: {exc}") from exc
-    if len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() != \
-            state.get("header_sha256"):
-        raise ProbeError("saved swap header is missing or does not match its digest")
+        raise ProbeError("cannot load unambiguous saved physical recovery state") from exc
+    if not isinstance(state, dict) or not re.fullmatch(
+            r"[0-9a-f]{32}", str(state.get("run_id", ""))):
+        raise ProbeError("saved recovery state lacks signed one-use run identity")
+    _recovery_run_directory(state_dir, state["run_id"])
+    if len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() != (
+            state.get("header_sha256")):
+        raise ProbeError("saved original header is missing or digest-mismatched")
+    if state.get("module_ownership") not in {
+            "NOT_STARTED", "MODULE_PENDING", "MODULE_OWNED"}:
+        raise ProbeError("saved module ownership is unknown; manual review required")
     _validate_owned_mapper_identity(state)
-    target = inspect_target_identity_for_recovery(
-        state, device_arg, confirm_arg)
-
-    dm_name = state.get("dm_name")
-    dm_uuid = state.get("dm_uuid")
-    if dm_name and dm_uuid:
-        current = _run([
-            "dmsetup", "info", "-c", "--noheadings", "-o", "uuid", dm_name,
-        ], check=False)
-        if current.returncode == 0:
-            if current.stdout.strip() != dm_uuid:
-                raise ProbeError("recovery refused a mapper with a different UUID")
-            _run(["dmsetup", "remove", dm_name], timeout=60)
-    if state.get("module_loaded_by_us") and Path("/sys/module/dm_swapz").exists():
-        _run(["rmmod", "dm_swapz"], timeout=30)
-    if _holder_names(target["major"], target["minor"]):
-        raise ProbeError("recovery refused while the partition still has holders")
-    if _mountinfo_has_device(target["major"], target["minor"]):
-        raise ProbeError("recovery refused while the partition is mounted")
-
+    lock_fd = None if lock_held else _partition_lock(state["partuuid"])
     try:
-        current_header = _read_block0(target["device"])
-    except ProbeError:
-        current_header = b""
-    active = _active_swap_for(target["major"], target["minor"])
-    if active is not None and current_header != backup:
-        raise ProbeError("recovery refused to rewrite a header while swap is active")
-    _validate_recovery_header(current_header, backup, state, target["size_bytes"])
-    if current_header != backup:
-        _verify_target_identity(target)
-        _write_block0(target["device"], backup, target)
+        base = _recovery_base()
+        try:
+            marker = _load_unique_json(
+                (base / f"partition-{state['partuuid']}.active").read_bytes())
+        except (OSError, ValueError) as exc:
+            raise ProbeError("cannot prove this run owns partition recovery") from exc
+        if marker != {"run_id": state["run_id"],
+                      "partuuid": state["partuuid"],
+                      "major": state["major"], "minor": state["minor"]}:
+            raise ProbeError("saved recovery state does not own partition marker")
+        target = inspect_target_identity_for_recovery(
+            state, device_arg, confirm_arg)
+        module_present = Path("/sys/module/dm_swapz").exists()
+        if module_present and state["module_ownership"] != "MODULE_OWNED":
+            raise ProbeError(
+                "module load interrupted or foreign; manual recovery required")
+        if _mapper_exists(state):
+            _verify_owned_mapper(state, target)
+            _run(["dmsetup", "remove", state["dm_name"]], timeout=60)
+        if state["module_ownership"] == "MODULE_OWNED" and module_present:
+            parameter = Path(
+                "/sys/module/dm_swapz/parameters/allow_physical_backing")
+            if not parameter.is_file() or (
+                    parameter.read_text().strip().lower() not in {"y", "1"}):
+                raise ProbeError("module identity/physical opt-in cannot be proven")
+            _run(["rmmod", "dm_swapz"], timeout=30)
+        if _holder_names(target["major"], target["minor"]):
+            raise ProbeError("recovery refused while partition has holders")
+        if _mountinfo_has_device(target["major"], target["minor"]):
+            raise ProbeError("recovery refused while partition is mounted")
 
-    if state.get("swap_was_active"):
-        if _active_swap_for(target["major"], target["minor"]) is None:
-            if state.get("swap_priority", -1) >= 0:
-                _run(["swapon", "--priority", str(state["swap_priority"]),
-                      state["device"]], timeout=60)
-            else:
-                _run(["swapon", state["device"]], timeout=60)
+        current_header = _read_block0(target["device"], target)
         active = _active_swap_for(target["major"], target["minor"])
-        if active is None:
-            raise ProbeError("original swap partition did not become active again")
-    state["stage"] = "COMPLETE"
-    _save_state(state_dir, state)
-    return state
+        if active is not None and current_header != backup:
+            raise ProbeError("recovery refused to rewrite active swap")
+        _validate_recovery_header(
+            current_header, backup, state, target["size_bytes"])
+        if current_header != backup:
+            if active is not None:
+                raise ProbeError("cannot restore header while swap is active")
+            _verify_target_identity(target)
+            _write_block0(target["device"], backup, target,
+                          expected_current=current_header)
+        if _read_block0(target["device"], target) != backup:
+            raise ProbeError("original 4 KiB header not restored exactly")
+
+        if state.get("swap_was_active"):
+            if _active_swap_for(target["major"], target["minor"]) is None:
+                _verify_target_identity(target)
+                if state.get("swap_priority", -1) >= 0:
+                    _run(["swapon", "--priority", str(state["swap_priority"]),
+                          target["device"]], timeout=60)
+                else:
+                    _run(["swapon", target["device"]], timeout=60)
+            active = _active_swap_for(target["major"], target["minor"])
+            if active is None or active["size_kib"] != state["swap_size_kib"] or (
+                    active["priority"] != state["swap_priority"]):
+                raise ProbeError(
+                    "original swap major, size or priority was not restored")
+        state["stage"] = "COMPLETE"
+        _save_state(state_dir, state)
+        _release_partition_ownership(state)
+        return state
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
 
 
 def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
@@ -873,71 +1147,61 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
     }
 
 
-def _prepare_state(target, state_dir, evidence, reviewer):
+def _prepare_state(target, state_dir, evidence, review):
+    """Create and sync the full recovery record before any destructive action."""
     dm_name, dm_uuid = _allocate_dm_identity()
-    state_dir = Path(state_dir).expanduser()
-    if not state_dir.is_absolute():
-        raise ProbeError("--state-dir must be an absolute durable path")
-    state_dir = state_dir.resolve()
-    if ROOT == state_dir or ROOT in state_dir.parents:
-        raise ProbeError("--state-dir must be outside the repository")
-    if state_dir.exists():
-        raise ProbeError("--state-dir already exists; use recover for saved state")
-    state_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+    state_dir = _recovery_run_directory(state_dir, review["run_id"])
+    if state_dir.exists() or state_dir.is_symlink():
+        raise ProbeError("one-use recovery run directory already exists")
+    _verify_target_identity(target)
+    if _read_block0(target["device"], target) != target["header"]:
+        raise ProbeError("original header changed since signed device review")
+    state_dir.mkdir(mode=0o700)  # Deliberately no recursive parent creation.
+    _fsync_directory(state_dir.parent)
+    info = state_dir.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or (
+            stat.S_IMODE(info.st_mode) != 0o700):
+        raise ProbeError("recovery run directory is not root-owned mode 0700")
+    # Failure at any point leaves the directory for explicit inspection rather
+    # than deleting a potentially durable backup or claim.
+    backup_fd = os.open(
+        state_dir / BACKUP_NAME,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+        0o600)
     try:
-        os.chmod(state_dir, 0o700)
-        if state_dir.stat().st_uid != 0 or \
-                stat.S_IMODE(state_dir.stat().st_mode) != 0o700:
-            raise ProbeError("--state-dir must be root-owned with mode 0700")
-        if state_dir.stat().st_dev == os.makedev(target["major"], target["minor"]):
-            raise ProbeError("--state-dir is on the selected swap partition")
-        backup_fd = os.open(
-            state_dir / BACKUP_NAME,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
-            0o600)
-        try:
-            _write_all(backup_fd, target["header"])
-            os.fsync(backup_fd)
-        finally:
-            os.close(backup_fd)
-
-        state = {
-            "device_arg": target["device_arg"],
-            "device": target["device"],
-            "major": target["major"],
-            "minor": target["minor"],
-            "size_bytes": target["size_bytes"],
-            "partuuid": target["partuuid"],
-            "header_sha256": hashlib.sha256(target["header"]).hexdigest(),
-            "swap_was_active": True,
-            "swap_path": target["swap_path"],
-            "swap_priority": target["swap_priority"],
-            "swap_size_kib": target["swap_size_kib"],
-            "swap_used_kib": target["swap_used_kib"],
-            "source_sha": evidence["source_sha"],
-            "host_report_count": evidence["pass_reports"],
-            "reviewer": reviewer,
-            "module_loaded_by_us": False,
-            "dm_name": dm_name,
-            "dm_uuid": dm_uuid,
-            "stage": "BACKED_UP",
-        }
-        _save_state(state_dir, state)
-        return state, state_dir
-    except BaseException:
-        try:
-            (state_dir / BACKUP_NAME).unlink()
-        except FileNotFoundError:
-            pass
-        try:
-            state_dir.rmdir()
-        except OSError:
-            pass
-        raise
+        _write_all(backup_fd, target["header"])
+        os.fsync(backup_fd)
+    finally:
+        os.close(backup_fd)
+    _fsync_directory(state_dir)
+    state = {
+        "device_arg": target["device_arg"],
+        "device": target["device"],
+        "major": target["major"],
+        "minor": target["minor"],
+        "size_bytes": target["size_bytes"],
+        "partuuid": target["partuuid"],
+        "header_sha256": hashlib.sha256(target["header"]).hexdigest(),
+        "swap_was_active": True,
+        "swap_path": target["swap_path"],
+        "swap_priority": target["swap_priority"],
+        "swap_size_kib": target["swap_size_kib"],
+        "swap_used_kib": target["swap_used_kib"],
+        "source_sha": evidence["source_sha"],
+        "host_report_count": evidence["pass_reports"],
+        "reviewer": review["reviewer"],
+        "run_id": review["run_id"],
+        "module_ownership": "NOT_STARTED",
+        "dm_name": dm_name,
+        "dm_uuid": dm_uuid,
+        "stage": "BACKED_UP",
+    }
+    _save_state(state_dir, state)
+    return state, state_dir
 
 
 def _remove_test_objects(state, state_dir):
-    recover(state_dir, state["device_arg"], state["device_arg"])
+    recover(state_dir, state["device_arg"], state["device_arg"], lock_held=True)
 
 
 def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
@@ -950,92 +1214,131 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             f"found {evidence['pass_reports']}")
     target = inspect_target(device_arg, confirm_arg)
     target["device_arg"] = device_arg
-    artifact_digests = _artifact_digests()
-    if artifact_digests != evidence["artifact_digests"]:
+    if _artifact_digests() != evidence["artifact_digests"]:
         raise ProbeError(
             "current build artifacts differ from the qualified make-test report")
-    reviewer = validate_review(review_path, evidence, target)
+    review = validate_review(review_path, evidence, target)
+    state_dir_arg = _recovery_run_directory(state_dir_arg, review["run_id"])
+    _check_review_unconsumed(target, review["run_id"])
     if Path("/sys/module/dm_swapz").exists():
-        raise ProbeError("dm_swapz is already loaded; refusing an ambiguous module owner")
+        raise ProbeError("dm_swapz already loaded; ambiguous module ownership")
     for command in ("blockdev", "dmsetup", "insmod", "modprobe", "rmmod",
-                    "swapoff", "swapon"):
+                    "swapoff", "swapon", "findmnt", "udevadm"):
         if not shutil.which(command):
             raise ProbeError(f"required command is missing: {command}")
-    state, state_dir = _prepare_state(
-        target, state_dir_arg, evidence, reviewer)
-    failure = None
+
+    lock_fd = _partition_lock(target["partuuid"])
     try:
-        artifacts = _snapshot_reviewed_artifacts(
-            state_dir, evidence["artifact_digests"])
-        formatter = artifacts["formatter_sha256"]
-        module = artifacts["module_sha256"]
-        oracle = artifacts["oracle_sha256"]
-        _verify_target_identity(target)
-        current_swap = _active_swap_for(target["major"], target["minor"])
-        if current_swap is None or current_swap["used_kib"] != 0:
-            raise ProbeError("selected swap state changed after preflight")
-        _run(["swapoff", "--", target["device"]], timeout=120)
-        if _active_swap_for(target["major"], target["minor"]) is not None:
-            raise ProbeError("swapoff returned but selected partition is still active")
-        state["stage"] = "SWAP_OFF"
-        _save_state(state_dir, state)
+        state, state_dir = _prepare_state(
+            target, state_dir_arg, evidence, review)
+        failure = None
+        try:
+            artifacts = _snapshot_reviewed_artifacts(
+                state_dir, evidence["artifact_digests"])
+            _fsync_directory(state_dir)  # All snapshot directory entries durable.
+            formatter = artifacts["formatter_sha256"]
+            module = artifacts["module_sha256"]
+            oracle = artifacts["oracle_sha256"]
+            _verify_target_identity(target)
+            current_swap = _active_swap_for(target["major"], target["minor"])
+            if current_swap is None or current_swap["used_kib"] != 0 or (
+                    current_swap["size_kib"] != target["swap_size_kib"]) or (
+                    current_swap["priority"] != target["swap_priority"]):
+                raise ProbeError("selected swap state changed after preflight")
+            if _read_block0(target["device"], target) != target["header"]:
+                raise ProbeError("original block zero changed after backup")
+            _consume_review(target, review["run_id"])
+            # Both the review-consumption ledger and the backup are durable.
+            _verify_target_identity(target)
+            _run(["swapoff", "--", target["device"]], timeout=120)
+            if _active_swap_for(target["major"], target["minor"]) is not None:
+                raise ProbeError("swapoff returned but partition is still active")
+            state["stage"] = "SWAP_OFF"
+            _save_state(state_dir, state)
 
-        _verify_target_identity(target)
-        _write_block0(target["device"], bytes(PAGE_BYTES), target)
-        state["stage"] = "HEADER_CLEARED"
-        _save_state(state_dir, state)
-        _run([formatter, "format", target["device"]], timeout=30)
-        formatted_header = _read_block0(target["device"])
-        if not swapz_header_valid(formatted_header, target["size_bytes"]):
-            raise ProbeError("formatter did not produce the expected SWZ header")
-        state["formatted_header_sha256"] = hashlib.sha256(
-            formatted_header).hexdigest()
-        state["stage"] = "SWZ_FORMATTED"
-        _save_state(state_dir, state)
+            _verify_target_identity(target)
+            _write_block0(target["device"], bytes(PAGE_BYTES), target,
+                          expected_current=target["header"])
+            state["stage"] = "HEADER_CLEARED"
+            _save_state(state_dir, state)
+            _verify_target_identity(target)
+            if _read_block0(target["device"], target) != bytes(PAGE_BYTES):
+                raise ProbeError("partition block zero changed before formatter")
+            _run([
+                formatter, "format", target["device"], "--expect-major-minor",
+                f"{target['major']}:{target['minor']}", "--expect-bytes",
+                str(target["size_bytes"]),
+            ], timeout=30)
+            formatted_header = _read_block0(target["device"], target)
+            if not swapz_header_valid(formatted_header, target["size_bytes"]):
+                raise ProbeError("formatter did not produce the expected SWZ header")
+            state["formatted_header_sha256"] = hashlib.sha256(
+                formatted_header).hexdigest()
+            state["stage"] = "SWZ_FORMATTED"
+            _save_state(state_dir, state)
 
-        _run(["modprobe", "dm_mod"], timeout=30)
-        _run(["modprobe", "lz4_compress"], timeout=30)
-        _run(["insmod", module, "allow_physical_backing=1", "async_prepare=1"],
-             timeout=30)
-        state["module_loaded_by_us"] = True
-        _save_state(state_dir, state)
-        parameter = Path("/sys/module/dm_swapz/parameters/allow_physical_backing")
-        if not parameter.exists() or parameter.read_text().strip().lower() not in {
-                "y", "1"}:
-            raise ProbeError("loaded module did not retain physical-backing opt-in")
+            _run(["modprobe", "dm_mod"], timeout=30)
+            _run(["modprobe", "lz4_compress"], timeout=30)
+            if Path("/sys/module/dm_swapz").exists():
+                raise ProbeError("module appeared before helper-owned insertion")
+            # Persist uncertainty before insmod can succeed. Pending is NEVER
+            # treated as permission to unload a module during recovery.
+            state["module_ownership"] = "MODULE_PENDING"
+            state["stage"] = "MODULE_PENDING"
+            _save_state(state_dir, state)
+            _run(["insmod", module, "allow_physical_backing=1",
+                  "async_prepare=1"], timeout=30)
+            parameter = Path(
+                "/sys/module/dm_swapz/parameters/allow_physical_backing")
+            if not parameter.is_file() or (
+                    parameter.read_text().strip().lower() not in {"y", "1"}):
+                raise ProbeError("loaded module did not retain physical opt-in")
+            state["module_ownership"] = "MODULE_OWNED"
+            state["stage"] = "MODULE_OWNED"
+            _save_state(state_dir, state)
 
-        table = (f"0 {LOGICAL_SECTORS} swapz {target['device']} "
-                 "0 64 0 2 0 1 0 0")
-        _verify_target_identity(target)
-        _save_state(state_dir, state)
-        _run(["dmsetup", "create", state["dm_name"], "--uuid", state["dm_uuid"],
-              "--table", table], timeout=30)
-        state["stage"] = "MAPPED"
-        _save_state(state_dir, state)
-        mapper = f"/dev/mapper/{state['dm_name']}"
-        _run([oracle, mapper], timeout=180)
-        state["stage"] = "ORACLE_PASS"
-        _save_state(state_dir, state)
-        print("PHYSICAL_SMOKE=BYTE_EXACT_CORRECTNESS_ONLY")
-    except BaseException as exc:
-        failure = exc
-    try:
-        _remove_test_objects(state, state_dir)
-    except BaseException as cleanup_exc:
-        state["stage_before_recovery"] = state["stage"]
-        state["stage"] = "RECOVERY_REQUIRED"
-        state["recovery_error"] = str(cleanup_exc)
-        _save_state(state_dir, state)
-        print(f"RECOVERY_REQUIRED: state preserved at {state_dir}", file=sys.stderr)
-        if failure is None:
-            failure = cleanup_exc
-    if failure is not None:
-        raise ProbeError(str(failure)) from failure
-    print(f"PHYSICAL_SMOKE_RESTORED=swap-enabled state={state_dir}")
+            _verify_target_identity(target)
+            table = _expected_dm_table(target)
+            _run([
+                "dmsetup", "create", state["dm_name"], "--uuid",
+                state["dm_uuid"], "--table", table,
+            ], timeout=30)
+            _run(["udevadm", "settle", "--timeout=10"], timeout=15)
+            _verify_owned_mapper(state, target)
+            state["stage"] = "MAPPED"
+            _save_state(state_dir, state)
+
+            _verify_target_identity(target)
+            mapper = _verify_owned_mapper(state, target)
+            _run([
+                oracle, mapper, "--expect-dm-uuid", state["dm_uuid"],
+            ], timeout=180)
+            state["stage"] = "ORACLE_PASS"
+            _save_state(state_dir, state)
+            print("PHYSICAL_SMOKE=BYTE_EXACT_CORRECTNESS_ONLY")
+        except BaseException as exc:
+            failure = exc
+        try:
+            _remove_test_objects(state, state_dir)
+        except BaseException as cleanup_exc:
+            state["stage_before_recovery"] = state["stage"]
+            state["stage"] = "RECOVERY_REQUIRED"
+            state["recovery_error"] = str(cleanup_exc)
+            _save_state(state_dir, state)
+            print(f"RECOVERY_REQUIRED: state preserved at {state_dir}",
+                  file=sys.stderr)
+            if failure is None:
+                failure = cleanup_exc
+        if failure is not None:
+            raise ProbeError(str(failure)) from failure
+        print(f"PHYSICAL_SMOKE_RESTORED=swap-enabled state={state_dir}")
+    finally:
+        os.close(lock_fd)
 
 
 def plan(device_arg, confirm_arg, review_path=None):
     target = inspect_target(device_arg, confirm_arg)
+    target["device_arg"] = device_arg
     evidence = None
     try:
         evidence = current_source_evidence()
@@ -1062,8 +1365,11 @@ def plan(device_arg, confirm_arg, review_path=None):
         try:
             if evidence is None or artifact_digests is None:
                 raise ProbeError("source qualification or binary artifacts are not current")
-            reviewer = validate_review(review_path, evidence, target)
-            review_message = f"independent review: present ({reviewer})"
+            review = validate_review(review_path, evidence, target)
+            _check_review_unconsumed(target, review["run_id"])
+            review_message = (
+                f"independent review: present ({review['reviewer']}, "
+                f"one-use run {review['run_id']})")
         except ProbeError as exc:
             review_message = f"independent review: BLOCKED ({exc})"
     print(f"DEVICE_PREFLIGHT=PASS major_minor={target['major']}:{target['minor']} "

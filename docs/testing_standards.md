@@ -2736,6 +2736,73 @@ a final device-specific signed review and real FD/sysfs checks remain
 mandatory before any physical attempt.
 
 
+
+### Physical swap helper: exact-device, one-use recovery contract
+
+The private physical helper exclusively owns this subsection; it is not an
+additional qualification interface or authority to test a real device. The
+operator must pre-provision `/var/lib/swapz/physical-recovery` as an existing
+root-owned 0700 directory, beneath root-controlled non-symlink parents, on
+a known persistent block-backed filesystem. No caller may create its parents
+implicitly. Volatile, loop/RAM-backed, network, overlay and unverified file
+systems are rejected. A run's `--state-dir` is a *nonexistent direct child*
+`swapz-physical-<signed-run-id>` of that fixed base. The helper must fsync
+the parent after creating the root-only run directory, then fsync the
+descriptor-verified original 4096-byte header backup, root-owned state file,
+all reviewed artifact snapshots and their directory entries before swapoff.
+A failed durability step must not reach any destructive action; uncertain
+saved records are retained for manual inspection rather than silently deleted.
+
+Every original-header read, post-format verification and recovery-header
+read must open the canonical partition, verify the opened descriptor with
+fstat major:minor and BLKGETSIZE64 reviewed geometry, then perform one
+exact-length 4096-byte read. The exclusive block-zero writer must perform
+those same FD-level checks, compare expected current bytes when supplied,
+fsync the write and verify its exact readback. Selection, PARTUUID, size,
+holders, mount/root dependency and post-swapoff non-activation continue to
+gate the destructive path. Just before formatting, the helper must recheck
+the partition identity and exact cleared block zero and call the reviewed
+formatter interface with `--expect-major-minor` and `--expect-bytes`.
+The formatter itself independently verifies its exclusive opened descriptor
+and retains refusal of unexpected nonzero block zero.
+
+A signed approval binds exact `device_size_bytes` (JSON integer),
+`original_header_sha256` (lowercase digest of the verified full 4096-byte
+header), `device_uuid_path` (the repeated literal /dev/disk/by-uuid
+selection) and `run_id` (exactly 32 lowercase hex characters), in addition
+to the prior independent identity, source, helper, major:minor, PARTUUID,
+scope, artifact and signature checks. One permanent root-owned partition
+lock inode is flocked nonblocking for a run or recovery. The fixed base
+maintains fsynced exclusive `consumed-<run-id>.json` records that are never
+deleted and exclusive per-PARTUUID active ownership records that are removed
+only after durable COMPLETE. Uncertainty or interruption leaves an approval
+consumed and a partition blocked for explicit recovery; a different base
+cannot silently reset these records.
+
+After dmsetup create, and immediately before oracle invocation, verify
+the exact helper-generated DM name/UUID, mapper block major:minor, kernel
+sysfs name/UUID and 32768-sector (16 MiB) size, complete target table, and
+the single sysfs lower slave's major:minor. Pass `--expect-dm-uuid` to the
+oracle. The separately owned oracle must verify its own open FD and DM UUID
+before any write. The helper writes `MODULE_PENDING` durably before insmod
+and `MODULE_OWNED` only after success and physical opt-in verification.
+Recovery must never unload an already-present module with pending, unknown
+or foreign ownership; a pending-present module is manual-recovery-only.
+No force removal is permitted.
+
+Recovery accepts only the saved original, an expected zero header at a
+recognized stage, or a digest-matched valid SWZ header with a durably
+recorded formatter digest. It must verify exact original bytes through a
+new identity-checked descriptor before swapon. After reactivation, verify
+the saved block identity through /proc/swaps together with the exact
+original size and priority before recording COMPLETE and retiring the active
+ownership marker. Wrong or ambiguous identity, unknown header, missing
+durability, mapper mismatch or failed swap restoration remains
+RECOVERY_REQUIRED/manual review; it is never physical-test approval.
+The dedicated rootless negative contracts must cover each boundary; only
+owner-approved independent reviews and final exact-source qualification
+can unblock physical execution.
+
 Capacity-exhaustion evidence must preserve committed reads: a write may return
 `-ENOSPC`, but `ctx->failed` must stay clear unless a separate integrity or
 lower-I/O error occurs.
