@@ -410,10 +410,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             def run(args, **kwargs):
                 del kwargs
                 calls.append(tuple(args))
+                columns = " 253 0" if "major,minor" in args else ""
                 return subprocess.CompletedProcess(
                     args, 0, stdout=state["dm_name"] +
-                    " SWAPZ-TEST-PHYSICAL-ffffffffffffffff 253 0\n",
-                    stderr="")
+                    " SWAPZ-TEST-PHYSICAL-ffffffffffffffff" + columns +
+                    "\n", stderr="")
 
             with mock.patch.object(probe, "_validate_state_dir"), \
                     mock.patch.object(
@@ -911,56 +912,63 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 return iter([Path("/sys/dev/block/253:0/slaves/synthetic")])
             raise AssertionError(f"unexpected sysfs listing: {path}")
 
-        with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(probe.os, "geteuid", return_value=0), \
+        # ExitStack avoids Python's limit on statically nested with-blocks.
+        with tempfile.TemporaryDirectory() as directory:
+            patches = (
+                mock.patch.object(probe.os, "geteuid", return_value=0),
                 mock.patch.object(probe, "current_source_evidence",
-                                  return_value=evidence), \
-                mock.patch.object(probe, "inspect_target", return_value=target), \
+                                  return_value=evidence),
+                mock.patch.object(probe, "inspect_target", return_value=target),
                 mock.patch.object(probe, "_artifact_digests",
-                                  return_value=evidence["artifact_digests"]), \
-                mock.patch.object(probe, "validate_review", return_value=review), \
-                mock.patch.object(probe.shutil, "which", return_value="/usr/bin/mock"), \
-                mock.patch.object(probe.Path, "exists", return_value=False), \
-                mock.patch.object(probe.Path, "is_file", is_file), \
-                mock.patch.object(probe.Path, "read_text", read_text), \
-                mock.patch.object(probe.Path, "iterdir", iter_directory), \
-                mock.patch.object(probe, "block_identity",
-                                  return_value=(253, 0)), \
+                                  return_value=evidence["artifact_digests"]),
+                mock.patch.object(probe, "validate_review", return_value=review),
+                mock.patch.object(probe.shutil, "which", return_value="/usr/bin/mock"),
+                mock.patch.object(probe.Path, "exists", return_value=False),
+                mock.patch.object(probe.Path, "is_file", is_file),
+                mock.patch.object(probe.Path, "read_text", read_text),
+                mock.patch.object(probe.Path, "iterdir", iter_directory),
+                mock.patch.object(probe, "block_identity", return_value=(253, 0)),
                 mock.patch.object(probe, "_prepare_state",
-                                  return_value=(state, Path(directory))), \
+                                  return_value=(state, Path(directory))),
                 mock.patch.object(probe, "_snapshot_reviewed_artifacts",
                                   return_value={
                                       "formatter_sha256": "/reviewed/swapzctl",
                                       "module_sha256": "/reviewed/dm-swapz.ko",
                                       "oracle_sha256": "/reviewed/device-roundtrip",
-                                  }), \
+                                  }),
                 mock.patch.object(probe, "_verify_target_identity",
-                                  side_effect=lambda _: events.append(("verify",))), \
+                                  side_effect=lambda _: events.append(("verify",))),
                 mock.patch.object(probe, "_active_swap_for",
                                   side_effect=[{
                                       "used_kib": 0,
                                       "size_kib": target["swap_size_kib"],
                                       "priority": target["swap_priority"],
-                                  }, None]), \
+                                  }, None]),
                 mock.patch.object(probe, "_write_block0",
-                                  side_effect=lambda *_, **__: events.append(("write0",))), \
+                                  side_effect=lambda *_, **__:
+                                  events.append(("write0",))),
                 mock.patch.object(probe, "_read_block0",
                                   side_effect=[target["header"],
                                                bytes(probe.PAGE_BYTES),
-                                               bytes(formatted)]), \
+                                               bytes(formatted)]),
                 mock.patch.object(probe, "_save_state",
-                                  side_effect=lambda *_: events.append(("save", state["stage"]))), \
+                                  side_effect=lambda *_:
+                                  events.append(("save", state["stage"]))),
                 mock.patch.object(probe, "_remove_test_objects",
-                                  side_effect=lambda *_: events.append(("recover",))), \
-                mock.patch.object(probe, "_run", side_effect=run):
-            if wrong_mapper:
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "mapper|UUID|identity|table|backing"):
+                                  side_effect=lambda *_: events.append(("recover",))),
+                mock.patch.object(probe, "_run", side_effect=run),
+            )
+            with ExitStack() as active_patches:
+                for patch in patches:
+                    active_patches.enter_context(patch)
+                if wrong_mapper:
+                    with self.assertRaisesRegex(
+                            probe.ProbeError, "mapper|UUID|identity|table|backing"):
+                        probe.run_probe(target["device_arg"], target["device_arg"],
+                                        directory, "/reviewed/review.json")
+                else:
                     probe.run_probe(target["device_arg"], target["device_arg"],
                                     directory, "/reviewed/review.json")
-            else:
-                probe.run_probe(target["device_arg"], target["device_arg"],
-                                directory, "/reviewed/review.json")
         return events, state, target
 
     def test_formatter_and_oracle_use_exact_reviewed_identity_arguments(self):
