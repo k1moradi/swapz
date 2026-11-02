@@ -295,12 +295,23 @@ def inspect_target(device_arg, confirm_arg):
     }
 
 
-def _git(*args, check=True):
+def _git_result(*args, check=True, timeout=20):
+    """Run local Git as the sudo operator so ownership/config stay consistent."""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=8")
-    result = _run(["git", *args], timeout=20, check=check, cwd=ROOT, env=env)
-    return result.stdout.strip()
+    git_args = ["git", *args]
+    sudo_user = os.environ.get("SUDO_USER")
+    if os.geteuid() == 0 and sudo_user and sudo_user != "root":
+        runuser = shutil.which("runuser")
+        if not runuser:
+            raise ProbeError("runuser is required to verify Git state as the operator")
+        git_args = [runuser, "--user", sudo_user, "--", *git_args]
+    return _run(git_args, timeout=timeout, check=check, cwd=ROOT, env=env)
+
+
+def _git(*args, check=True):
+    return _git_result(*args, check=check).stdout.strip()
 
 
 def _remote_main_sha():
@@ -366,8 +377,8 @@ def current_source_evidence():
             not re.fullmatch(r"[0-9a-f]{40}", source) or \
             not _has_five_passing_stages(report):
         raise ProbeError("current test_results.json is not an exact-source five-stage PASS")
-    ancestor = _run(["git", "merge-base", "--is-ancestor", source, head],
-                    check=False, cwd=ROOT)
+    ancestor = _git_result(
+        "merge-base", "--is-ancestor", source, head, check=False)
     if ancestor.returncode:
         raise ProbeError("qualified source is not an ancestor of main")
     for commit in _git("rev-list", f"{source}..{head}").splitlines():
@@ -385,8 +396,8 @@ def current_source_evidence():
     for commit in _git("log", "--first-parent", "--format=%H",
                        f"{source}..origin/main", "--",
                        "test_results.json").splitlines():
-        result = _run(["git", "show", f"{commit}:test_results.json"],
-                      timeout=10, check=False)
+        result = _git_result(
+            "show", f"{commit}:test_results.json", timeout=10, check=False)
         if result.returncode:
             continue
         try:

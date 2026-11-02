@@ -392,6 +392,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         state["stage_before_recovery"] = "MAPPED"
         probe._validate_recovery_header(formatted, original, state, size)
 
+    def test_git_evidence_runs_as_the_sudo_operator(self):
+        completed = subprocess.CompletedProcess([], 0, stdout="ok\n", stderr="")
+        with mock.patch.object(probe.os, "geteuid", return_value=0), \
+                mock.patch.dict(os.environ, {"SUDO_USER": "keivan"}), \
+                mock.patch.object(probe.shutil, "which",
+                                  return_value="/usr/sbin/runuser"), \
+                mock.patch.object(probe, "_run",
+                                  return_value=completed) as run:
+            self.assertEqual(probe._git("status", "--porcelain"), "ok")
+        args = run.call_args.args[0]
+        self.assertEqual(
+            args[:5],
+            ["/usr/sbin/runuser", "--user", "keivan", "--", "git"])
+        self.assertEqual(args[5:], ["status", "--porcelain"])
+        self.assertEqual(run.call_args.kwargs["cwd"], probe.ROOT)
+
     def test_live_host_gate_and_distinct_reports(self):
         source = "a" * 40
         head = "b" * 40
@@ -432,7 +448,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             raise AssertionError(args)
 
         def run(args, **kwargs):
-            del kwargs
+            self.assertEqual(kwargs.get("cwd"), root)
             if args[:2] == ["git", "merge-base"]:
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
             if args[:2] == ["git", "show"]:

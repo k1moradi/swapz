@@ -2641,7 +2641,10 @@ the committed report identity and both historical identities must equal a fresh
 canonical digest of the running host's /etc/machine-id and architecture.
 Only first-parent report publications on authenticated origin/main after the
 tested source count, and each current/historical report must individually pass
-all five build, native/rootless, W=1, W=2 and loaded-RAM stages.
+all five build, native/rootless, W=1, W=2 and loaded-RAM stages. When the
+physical helper is entered through sudo, every local Git qualification command
+and the remote-main query execute as SUDO_USER rather than root, preserving
+checkout ownership, Git configuration and remote authentication identity.
 Duplicate publications of identical JSON cannot satisfy both counts.
 This is a conservative distinct-report gate, not cryptographic proof of two
 independently executed runs. It additionally requires a separately signed
