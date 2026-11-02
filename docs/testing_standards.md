@@ -3266,6 +3266,14 @@ mapping, module, fallback and recovery evidence in place for supervised review.
 Do not reboot, force-remove, overwrite an unrecognized header or retry a failed
 phase automatically.
 
+Recovery-state tests must cover a second, standalone cleanup attempt
+after an earlier failed recovery. When cleanup writes `TRIAL_STOPPING` over
+`RECOVERY_REQUIRED`, header verification must resolve both saved wrappers
+back to the original durable stage without guessing an unrecorded format.
+Missing, cyclic, torn or contradictory stage provenance must fail closed
+before any backing-header write. Rootless proof of the recognized-header
+path does not replace the required disposable-VM cold-boot exercise.
+
 The plan, lifecycle mocks and CI do not establish live-swap correctness. Before
 enabling privileged commands, run the cold-boot recovery path in a disposable
 VM using substitute block devices and review every interrupted durable stage.
