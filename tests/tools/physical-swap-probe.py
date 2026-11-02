@@ -32,6 +32,13 @@ STATE_NAME = "state.json"
 BACKUP_NAME = "block0.bin"
 REVIEW_SIGNERS = Path("/etc/swapz/physical-review.allowed_signers")
 REVIEW_NAMESPACE = "swapz-physical-review"
+CANONICAL_MAIN_REMOTE = "https://github.com/k1moradi/swapz.git"
+# The independent reviewer attests the exact binaries used, not merely their names.
+PHYSICAL_ARTIFACTS = (
+    ("formatter_sha256", "build/userspace/swapzctl", True),
+    ("module_sha256", "build/kernel/experimental/dm-swapz.ko", False),
+    ("oracle_sha256", "build/tests/device-roundtrip", True),
+)
 QUALIFICATION_STAGE_NAMES = (
     "Build module and helpers", "Native and rootless contracts",
     "Kernel warnings W=1", "Kernel warnings W=2",
@@ -315,27 +322,33 @@ def _git(*args, check=True):
 
 
 def _remote_main_sha():
-    env = os.environ.copy()
+    """Query the canonical public GitHub repository without checkout Git config."""
+    # cwd=/ prevents local .git/config and worktree URL rewrites from affecting
+    # this query; disable system/global/injected Git configuration as well.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_CONFIG_") and key not in {
+               "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
+               "GIT_CEILING_DIRECTORIES", "GIT_INDEX_FILE",
+           }}
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_TERMINAL_PROMPT"] = "0"
-    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=8")
-    git_args = ["git", "-C", str(ROOT), "ls-remote", "origin",
-                "refs/heads/main"]
+    git_args = ["git", "ls-remote", CANONICAL_MAIN_REMOTE, "refs/heads/main"]
     sudo_user = os.environ.get("SUDO_USER")
     if os.geteuid() == 0 and sudo_user and sudo_user != "root":
         runuser = shutil.which("runuser")
         if not runuser:
-            raise ProbeError("runuser is required to verify origin as the operator")
-        git_args = [
-            runuser, "--user", sudo_user, "--", *git_args,
-        ]
-    result = _run(git_args, timeout=20, check=False, env=env)
+            raise ProbeError("runuser is required to verify canonical main as operator")
+        git_args = [runuser, "--user", sudo_user, "--", *git_args]
+    result = _run(git_args, timeout=20, check=False, cwd="/", env=env)
     if result.returncode:
         detail = result.stderr.strip() or result.stdout.strip()
-        raise ProbeError(f"cannot verify origin/main: {detail}")
+        raise ProbeError(f"cannot verify canonical main: {detail}")
     rows = [line.split() for line in result.stdout.splitlines()]
     if len(rows) != 1 or len(rows[0]) != 2 or \
-            rows[0][1] != "refs/heads/main":
-        raise ProbeError("origin did not return exactly one main ref")
+            rows[0][1] != "refs/heads/main" or \
+            not re.fullmatch(r"[0-9a-f]{40}", rows[0][0]):
+        raise ProbeError("canonical repository did not return exactly one main ref")
     return rows[0][0]
 
 
@@ -425,6 +438,103 @@ def current_source_evidence():
     }
 
 
+def _artifact_paths():
+    return {key: (ROOT / relative_path, executable)
+            for key, relative_path, executable in PHYSICAL_ARTIFACTS}
+
+
+def _artifact_digests():
+    """Digest the tested build artifacts with stable no-follow descriptors."""
+    digests = {}
+    for key, (path, executable) in _artifact_paths().items():
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or (
+                    executable and not before.st_mode & 0o111):
+                raise ProbeError(f"physical artifact is not a usable regular file: {path.name}")
+            digest = hashlib.sha256()
+            while chunk := os.read(descriptor, 1024 * 1024):
+                digest.update(chunk)
+            after = os.fstat(descriptor)
+            if (before.st_dev, before.st_ino, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns):
+                raise ProbeError(f"physical artifact changed while hashing: {path.name}")
+            digests[key] = digest.hexdigest()
+        except OSError as exc:
+            raise ProbeError(f"cannot verify physical artifact {path.name}: {exc}") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    return digests
+
+
+def _snapshot_reviewed_artifacts(state_dir, expected_digests):
+    """Pin reviewed binary bytes under the root-owned recovery directory.
+
+    Source files are not trusted after review. Every executable/insmod input
+    comes from this private snapshot, which is verified before swapoff.
+    """
+    snapshots = {}
+    for key, (source_path, executable) in _artifact_paths().items():
+        source_fd = destination_fd = -1
+        destination_created = False
+        succeeded = False
+        destination = Path(state_dir) / source_path.name
+        try:
+            source_fd = os.open(
+                source_path, os.O_RDONLY | os.O_NOFOLLOW |
+                os.O_NONBLOCK | os.O_CLOEXEC)
+            before = os.fstat(source_fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or (
+                    executable and not before.st_mode & 0o111):
+                raise ProbeError(f"invalid physical artifact source: {source_path.name}")
+            destination_fd = os.open(
+                destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                os.O_NOFOLLOW | os.O_CLOEXEC, 0o400)
+            destination_created = True
+            digest = hashlib.sha256()
+            remaining = before.st_size
+            while remaining:
+                chunk = os.read(source_fd, min(1024 * 1024, remaining))
+                if not chunk:
+                    raise ProbeError(f"physical artifact truncated: {source_path.name}")
+                digest.update(chunk)
+                _write_all(destination_fd, chunk)
+                remaining -= len(chunk)
+            if os.read(source_fd, 1):
+                raise ProbeError(f"physical artifact grew during snapshot: {source_path.name}")
+            after = os.fstat(source_fd)
+            if (before.st_dev, before.st_ino, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns):
+                raise ProbeError(f"physical artifact changed during snapshot: {source_path.name}")
+            if digest.hexdigest() != expected_digests[key]:
+                raise ProbeError(f"physical artifact differs from signed review: {source_path.name}")
+            os.fchmod(destination_fd, 0o500 if executable else 0o400)
+            os.fsync(destination_fd)
+            succeeded = True
+            snapshots[key] = destination
+        except OSError as exc:
+            raise ProbeError(f"cannot snapshot physical artifact {source_path.name}: {exc}") from exc
+        finally:
+            if destination_fd >= 0:
+                os.close(destination_fd)
+            if source_fd >= 0:
+                os.close(source_fd)
+            if destination_created and not succeeded:
+                try:
+                    destination.unlink()
+                except FileNotFoundError:
+                    pass
+    return snapshots
+
+
 def _trusted_review_signers():
     """Only independently provisioned root-controlled reviewer keys are trusted."""
     try:
@@ -477,7 +587,7 @@ def _load_unique_json(record_bytes):
     return json.loads(record_bytes, object_pairs_hook=unique_object)
 
 
-def validate_review(review_path, evidence, target):
+def validate_review(review_path, evidence, target, artifact_digests=None):
     try:
         record_bytes = Path(review_path).read_bytes()
         review = _load_unique_json(record_bytes)
@@ -499,6 +609,13 @@ def validate_review(review_path, evidence, target):
             review.get("helper_sha256") != hashlib.sha256(
                 Path(__file__).read_bytes()).hexdigest():
         raise ProbeError("review record does not match this source, helper and device")
+    if artifact_digests is None:
+        artifact_digests = _artifact_digests()
+    if any(not isinstance(review.get(key), str) or
+           not re.fullmatch(r"[0-9a-f]{64}", review[key]) or
+           review[key] != artifact_digests[key]
+           for key, _, _ in PHYSICAL_ARTIFACTS):
+        raise ProbeError("review record does not match the tested binary artifacts")
     _verify_signed_review(review_path, reviewer, record_bytes)
     return reviewer
 
@@ -814,23 +931,22 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             f"found {evidence['pass_reports']}")
     target = inspect_target(device_arg, confirm_arg)
     target["device_arg"] = device_arg
-    reviewer = validate_review(review_path, evidence, target)
+    artifact_digests = _artifact_digests()
+    reviewer = validate_review(review_path, evidence, target, artifact_digests)
     if Path("/sys/module/dm_swapz").exists():
         raise ProbeError("dm_swapz is already loaded; refusing an ambiguous module owner")
     for command in ("blockdev", "dmsetup", "insmod", "modprobe", "rmmod",
                     "swapoff", "swapon"):
         if not shutil.which(command):
             raise ProbeError(f"required command is missing: {command}")
-    formatter = ROOT / "build/userspace/swapzctl"
-    module = ROOT / "build/kernel/experimental/dm-swapz.ko"
-    oracle = ROOT / "build/tests/device-roundtrip"
-    for path in (formatter, module, oracle):
-        if not path.is_file() or (path == oracle and not os.access(path, os.X_OK)):
-            raise ProbeError(f"required tested build artifact is missing: {path.name}")
     state, state_dir = _prepare_state(
         target, state_dir_arg, evidence, reviewer)
     failure = None
     try:
+        artifacts = _snapshot_reviewed_artifacts(state_dir, artifact_digests)
+        formatter = artifacts["formatter_sha256"]
+        module = artifacts["module_sha256"]
+        oracle = artifacts["oracle_sha256"]
         _verify_target_identity(target)
         current_swap = _active_swap_for(target["major"], target["minor"])
         if current_swap is None or current_swap["used_kib"] != 0:
@@ -905,11 +1021,18 @@ def plan(device_arg, confirm_arg, review_path=None):
     except ProbeError as exc:
         evidence_message = f"source qualification: BLOCKED ({exc})"
     review_message = "independent review: missing"
+    artifact_digests = None
+    artifact_message = "reviewed binaries: unavailable"
+    try:
+        artifact_digests = _artifact_digests()
+        artifact_message = "reviewed binaries: digests ready for independent review"
+    except ProbeError as exc:
+        artifact_message = f"reviewed binaries: BLOCKED ({exc})"
     if review_path:
         try:
-            if evidence is None:
-                raise ProbeError("source qualification is not current")
-            reviewer = validate_review(review_path, evidence, target)
+            if evidence is None or artifact_digests is None:
+                raise ProbeError("source qualification or binary artifacts are not current")
+            reviewer = validate_review(review_path, evidence, target, artifact_digests)
             review_message = f"independent review: present ({reviewer})"
         except ProbeError as exc:
             review_message = f"independent review: BLOCKED ({exc})"
@@ -921,6 +1044,10 @@ def plan(device_arg, confirm_arg, review_path=None):
         helper_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         print(f"QUALIFIED_SOURCE_SHA={evidence['source_sha']}")
         print(f"HELPER_SHA256={helper_sha}")
+    print(f"ARTIFACT_GATE={artifact_message}")
+    if artifact_digests is not None:
+        for key, _, _ in PHYSICAL_ARTIFACTS:
+            print(f"{key.upper()}={artifact_digests[key]}")
     print(f"REVIEW_GATE={review_message}")
     print("MAKE_TEST_PHYSICAL=NO")
     print("PHYSICAL_WRITE=NOT_PERFORMED")

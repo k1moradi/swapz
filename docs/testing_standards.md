@@ -2642,12 +2642,14 @@ physical-media behavior. Before it can write, it requires the same x86 host to
 have two committed, distinct-content PASS reports for the exact current source:
 the committed report identity and both historical identities must equal a fresh
 canonical digest of the running host's /etc/machine-id and architecture.
-Only first-parent report publications on authenticated origin/main after the
+Only first-parent report publications on main after the
 tested source count, and each current/historical report must individually pass
 all five build, native/rootless, W=1, W=2 and loaded-RAM stages. When the
 physical helper is entered through sudo, every local Git qualification command
-and the remote-main query execute as SUDO_USER rather than root, preserving
-checkout ownership, Git configuration and remote authentication identity.
+execute as SUDO_USER rather than root. The remote-main query instead uses
+the canonical HTTPS GitHub repository from outside the checkout, with
+system/global/injected Git configuration disabled; rewrites of origin cannot
+satisfy the source gate. Missing canonical remote evidence blocks physical smoke.
 Duplicate publications of identical JSON cannot satisfy both counts.
 This is a conservative distinct-report gate, not cryptographic proof of two
 independently executed runs. It additionally requires a separately signed
@@ -2686,8 +2688,13 @@ also stub _git_result directly instead of depending on process sudo identity.
 
 The review record is JSON with approved=true, a reviewer other than the
 operator, scope=physical swap backing correctness smoke only, the qualified
-source SHA, the selected partition's major:minor identity and persistent PARTUUID, and the helper's
-SHA-256. Duplicate JSON object keys are rejected so the signed attestation has
+source SHA, the selected partition's major:minor identity and persistent PARTUUID, the helper's
+SHA-256 and the formatter_sha256, module_sha256 and oracle_sha256 of the
+three reviewed build artifacts. The read-only plan prints these digest values.
+The helper requires exact digest equality before swapoff, then snapshots the
+reviewed bytes under the root-owned state directory and executes/loads only
+those snapshots. This binds reviewed artifact bytes to the approved source but
+is not, by itself, a proof of reproducible compilation. Duplicate JSON object keys are rejected so the signed attestation has
 one unambiguous interpretation. The exact JSON bytes additionally require a
 detached SSH signature at `<review-record>.sig` under namespace
 `swapz-physical-review`, verified

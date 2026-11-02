@@ -84,7 +84,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_review_record_is_bound_to_helper_source_and_device(self):
         evidence = {"source_sha": "a" * 40}
         target = {"major": 8, "minor": 4, "partuuid": "deadbeef-04"}
+        artifact_digests = {key: str(index) * 64 for index, (key, _, _)
+                            in enumerate(probe.PHYSICAL_ARTIFACTS, start=1)}
         review = {
+            **artifact_digests,
             "approved": True,
             "reviewer": "independent-reviewer",
             "scope": probe.EXPECTED_SCOPE,
@@ -99,25 +102,67 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"SUDO_USER": "keivan", "USER": "root"}), \
                     mock.patch.object(probe, "_verify_signed_review") as signed:
                 self.assertEqual(
-                    probe.validate_review(path, evidence, target),
+                    probe.validate_review(path, evidence, target, artifact_digests),
                     "independent-reviewer")
                 signed.assert_called_once_with(
                     path, "independent-reviewer", path.read_bytes())
                 review["device_major_minor"] = "8:3"
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
-                    probe.validate_review(path, evidence, target)
+                    probe.validate_review(path, evidence, target, artifact_digests)
                 review["device_major_minor"] = "8:4"
                 review["device_partuuid"] = "cafebabe-04"
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
-                    probe.validate_review(path, evidence, target)
+                    probe.validate_review(path, evidence, target, artifact_digests)
+                review["device_partuuid"] = "deadbeef-04"
+                review["module_sha256"] = "f" * 64
+                path.write_text(json.dumps(review))
+                with self.assertRaisesRegex(probe.ProbeError, "binary artifacts"):
+                    probe.validate_review(path, evidence, target, artifact_digests)
+                review["module_sha256"] = artifact_digests["module_sha256"]
                 duplicate = json.dumps(review)[:-1] + \
                     ',"reviewer":"second-reviewer"}'
                 path.write_text(duplicate)
                 with self.assertRaisesRegex(
                         probe.ProbeError, "duplicate JSON key"):
-                    probe.validate_review(path, evidence, target)
+                    probe.validate_review(path, evidence, target, artifact_digests)
+
+    def test_physical_artifact_snapshot_binds_signed_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = {}
+            with mock.patch.object(probe, "ROOT", root):
+                for key, relative, executable in probe.PHYSICAL_ARTIFACTS:
+                    source = root / relative
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_bytes((key + "-reviewed").encode())
+                    source.chmod(0o700 if executable else 0o600)
+                    sources[key] = source
+                expected = probe._artifact_digests()
+                first_state = root / "state-one"
+                first_state.mkdir(mode=0o700)
+                snapshots = probe._snapshot_reviewed_artifacts(
+                    first_state, expected)
+                for key, source in sources.items():
+                    self.assertEqual(snapshots[key].read_bytes(),
+                                     source.read_bytes())
+                    self.assertEqual(snapshots[key].stat().st_mode & 0o777,
+                                     0o400 if key == "module_sha256" else 0o500)
+
+                # Mutating a build artifact after review cannot enter the trial.
+                sources["module_sha256"].write_bytes(b"replaced module bytes")
+                second_state = root / "state-two"
+                second_state.mkdir(mode=0o700)
+                with self.assertRaisesRegex(probe.ProbeError, "signed review"):
+                    probe._snapshot_reviewed_artifacts(second_state, expected)
+                self.assertFalse((second_state / "dm-swapz.ko").exists())
+
+                # No-follow source validation also excludes symlink substitution.
+                sources["module_sha256"].unlink()
+                sources["module_sha256"].symlink_to(sources["formatter_sha256"])
+                with self.assertRaisesRegex(probe.ProbeError, "cannot verify"):
+                    probe._artifact_digests()
 
     def test_signed_review_verifies_the_exact_json_bytes(self):
         keygen = shutil.which("ssh-keygen")
@@ -343,7 +388,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         sha = "c" * 40
         result = subprocess.CompletedProcess(
             [], 0, stdout=f"{sha}\trefs/heads/main\n", stderr="")
-        with mock.patch.dict(os.environ, {"SUDO_USER": "keivan"}), \
+        with mock.patch.dict(os.environ, {
+                    "SUDO_USER": "keivan", "GIT_DIR": "/malicious",
+                    "GIT_CONFIG_PARAMETERS": "url.bad.insteadOf=github.com"
+                }), \
                 mock.patch.object(probe.os, "geteuid", return_value=0), \
                 mock.patch.object(probe.shutil, "which",
                                    return_value="/usr/sbin/runuser"), \
@@ -352,7 +400,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         args = run.call_args.args[0]
         self.assertEqual(args[:4], [
             "/usr/sbin/runuser", "--user", "keivan", "--"])
-        self.assertIn("ls-remote", args)
+        self.assertEqual(args[4:], [
+            "git", "ls-remote", probe.CANONICAL_MAIN_REMOTE, "refs/heads/main"])
+        self.assertEqual(run.call_args.kwargs["cwd"], "/")
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(environment["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(environment["GIT_CONFIG_GLOBAL"], os.devnull)
+        self.assertNotIn("GIT_DIR", environment)
+        self.assertNotIn("GIT_CONFIG_PARAMETERS", environment)
 
     def test_recovery_survives_removed_original_swap_uuid_symlink(self):
         """Formatting invalidates /dev/disk/by-uuid, not the saved PARTUUID."""
