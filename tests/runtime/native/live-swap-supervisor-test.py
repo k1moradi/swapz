@@ -785,6 +785,90 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             with self.assertRaisesRegex(supervisor.LiveSwapError, "ambiguous"):
                 supervisor._recognized_current_header(b"?" * 4096, state)
 
+    def test_standalone_recovery_unwraps_prior_failed_cleanup(self):
+        """Retrying supervised cleanup must not hide the original SWZ stage."""
+        ops = FakeOps()
+        original = ops.original
+        ops.header = ops.formatted
+        ops.original_active = False
+        state = {
+            "schema": "swapz-live-swap-state-v1",
+            "run_id": RUN_ID,
+            "stage": "RECOVERY_REQUIRED",
+            "recovery_previous_stage": "SWZ_FORMATTED",
+            "device": supervisor.DEVICE_PATH,
+            "major": supervisor.DEVICE_MAJOR,
+            "minor": supervisor.DEVICE_MINOR,
+            "partuuid": supervisor.DEVICE_PARTUUID,
+            "size_bytes": supervisor.DEVICE_SIZE_BYTES,
+            "original_header_sha256": hashlib.sha256(original).hexdigest(),
+            "formatted_header_sha256": hashlib.sha256(ops.formatted).hexdigest(),
+            "swap_path": supervisor.DEVICE_PATH,
+            "swap_size_kib": supervisor.DEVICE_SIZE_BYTES // 1024 - 4,
+            "swap_priority": -1,
+            "dm_name": None,
+            "dm_uuid": None,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / f"swapz-live-{RUN_ID}"
+            state_dir.mkdir()
+            (state_dir / supervisor.STATE_NAME).write_text(json.dumps(state))
+            (state_dir / supervisor.BACKUP_NAME).write_bytes(original)
+            (state_dir / supervisor.RESULTS_NAME).write_text(json.dumps({
+                "schema": "swapz-live-swap-results-v1",
+                "run_id": RUN_ID, "commands": [], "phases": [],
+                "observations": [],
+            }))
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    supervisor, "ORIGINAL_HEADER_SHA256",
+                    hashlib.sha256(original).hexdigest()))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_read_recovery_file",
+                    side_effect=lambda path, **_kw: Path(path).read_bytes()))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_validate_state"))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_assert_recovery_ownership", return_value=True))
+                released = stack.enter_context(mock.patch.object(
+                    supervisor, "_release_marker"))
+                stack.enter_context(mock.patch.object(
+                    supervisor.PHYSICAL, "swapz_header_valid",
+                    side_effect=lambda header, _size: header == ops.formatted))
+                result = supervisor.recover_state(state_dir, ops=ops)
+            self.assertEqual(result["status"], "COMPLETE")
+            self.assertTrue(ops.original_active)
+            self.assertFalse(ops.module)
+            self.assertEqual(ops.header, original)
+            self.assertEqual(result["state"]["stage"], "COMPLETE")
+            self.assertEqual(
+                json.loads((state_dir / supervisor.STATE_NAME).read_text())[
+                    "stage"], "COMPLETE")
+            self.assertEqual(
+                [call for call in ops.mutations if call[0] == "swapon"],
+                [["swapon", "--", supervisor.DEVICE_PATH]])
+            released.assert_called_once()
+
+    def test_header_recovery_rejects_cyclic_or_missing_stage_provenance(self):
+        header = b"S" * supervisor.PAGE_BYTES
+        state = {
+            "original_header_sha256": hashlib.sha256(b"O" * 4096).hexdigest(),
+            "formatted_header_sha256": hashlib.sha256(header).hexdigest(),
+            "size_bytes": supervisor.DEVICE_SIZE_BYTES,
+            "stage": "TRIAL_STOPPING",
+            "stage_before_trial_stopping": "RECOVERY_REQUIRED",
+            "recovery_previous_stage": "TRIAL_STOPPING",
+        }
+        with mock.patch.object(supervisor.PHYSICAL, "swapz_header_valid",
+                               return_value=True):
+            with self.assertRaisesRegex(supervisor.LiveSwapError,
+                                        "provenance is ambiguous"):
+                supervisor._recognized_current_header(header, state)
+            del state["recovery_previous_stage"]
+            with self.assertRaisesRegex(supervisor.LiveSwapError,
+                                        "provenance is ambiguous"):
+                supervisor._recognized_current_header(header, state)
+
     def test_complete_recovery_observation_is_idempotent(self):
         original = b"O" * supervisor.PAGE_BYTES
         original_digest = hashlib.sha256(original).hexdigest()

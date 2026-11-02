@@ -112,6 +112,12 @@ cold-boot recovery procedure. The cold-boot path has not yet been tested in a
 disposable VM with substitute block devices; that remains a gate before either
 privileged command can be enabled.
 
+A rootless recovery regression also verifies that a saved
+`RECOVERY_REQUIRED` state is not hidden when the standalone cleanup records
+`TRIAL_STOPPING`: the recognized original stage remains authoritative for
+checking the existing SWZ header. Missing or cyclic stage provenance still
+fails closed. This is not a substitute for the disposable-VM cold-boot test.
+
 ## Validation completed for Phase A
 
 The supervisor's mock-only rootless tests cover successful completion,

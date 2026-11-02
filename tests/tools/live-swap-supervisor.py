@@ -1733,10 +1733,21 @@ def _recognized_current_header(header, state):
     if digest == state["original_header_sha256"]:
         return "ORIGINAL"
     stage = state.get("stage")
-    if stage == "RECOVERY_REQUIRED":
-        stage = state.get("recovery_previous_stage")
-    elif stage == "TRIAL_STOPPING":
-        stage = state.get("stage_before_trial_stopping")
+    # Standalone recovery can re-enter cleanup after RECOVERY_REQUIRED.
+    # The cleanup entry records TRIAL_STOPPING over that wrapper. Resolve both
+    # durable wrappers without allowing missing or cyclic provenance to
+    # authorize any physical block-zero write.
+    visited_stages = set()
+    while stage in {"RECOVERY_REQUIRED", "TRIAL_STOPPING"}:
+        if stage in visited_stages:
+            raise LiveSwapError("saved recovery stage provenance is ambiguous")
+        visited_stages.add(stage)
+        previous_stage_key = (
+            "recovery_previous_stage" if stage == "RECOVERY_REQUIRED"
+            else "stage_before_trial_stopping")
+        stage = state.get(previous_stage_key)
+    if not isinstance(stage, str):
+        raise LiveSwapError("saved recovery stage provenance is ambiguous")
     if stage in {"HEADER_CLEAR_PENDING", "HEADER_CLEARED", "FORMAT_PENDING"} and \
             header == bytes(PAGE_BYTES):
         return "ZEROED"
