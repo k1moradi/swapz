@@ -708,6 +708,125 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn("--since=2026-11-02T12:00:00Z",
                       run.call_args.args[0])
 
+    def test_recovery_observations_use_durable_original_swap_parameters(self):
+        header = b"S" * probe.PAGE_BYTES
+        state = {
+            "partuuid": "deadbeef-04",
+            "run_id": "0123456789abcdef0123456789abcdef",
+            "dm_name": "swapz-demo-physical-1234567890abcdef",
+            "dm_uuid": "SWAPZ-TEST-PHYSICAL-1234567890abcdef",
+            "stage": "COMPLETE",
+            "swap_was_active": True,
+            "swap_size_kib": 16777212,
+            "swap_priority": -1,
+        }
+        # Standalone recovery supplies only identity fields, not swap capacity
+        # or priority. Post-swapon usage may become nonzero immediately.
+        target = {"device": "/dev/sda4", "major": 8, "minor": 4,
+                  "size_bytes": 17179869184, "partuuid": "deadbeef-04"}
+        expected_inventory = {"other_mapper_count": 0,
+                              "other_mapper_sha256": hashlib.sha256(b"[]").hexdigest()}
+        cases = (
+            ({"kind": "partition", "size_kib": 16777212,
+              "priority": -1, "used_kib": 720900}, True),
+            ({"kind": "partition", "size_kib": 16777211,
+              "priority": -1, "used_kib": 0}, False),
+            ({"kind": "partition", "size_kib": 16777212,
+              "priority": 1, "used_kib": 0}, False),
+            (None, False),
+        )
+        with mock.patch.object(probe, "_read_block0", return_value=header), \
+                mock.patch.object(probe, "_block_stat_snapshot",
+                                  return_value={"available": False}), \
+                mock.patch.object(probe, "_kernel_swapz_messages",
+                                  return_value={"available": False}), \
+                mock.patch.object(probe, "_mapper_exists",
+                                  return_value=False), \
+                mock.patch.object(probe, "_dm_inventory_snapshot",
+                                  return_value=expected_inventory), \
+                mock.patch.object(probe, "_save_results") as saved:
+            for active_row, expected in cases:
+                with self.subTest(row=active_row), mock.patch.object(
+                        probe, "_active_swap_for", return_value=active_row):
+                    results = {
+                        "original_header_sha256": hashlib.sha256(
+                            header).hexdigest(),
+                        "start_timestamp": "2026-11-02T16:00:00Z",
+                        "dm_inventory_before": expected_inventory,
+                    }
+                    probe._final_observations(
+                        results, self.recovery_base, state, target)
+                    self.assertEqual(results["restored_swap_verified"], expected)
+                    self.assertEqual(results["final_swap_row"], active_row)
+            self.assertEqual(saved.call_count, len(cases))
+        missing_state = {**state, "swap_priority": None}
+        with mock.patch.object(probe, "_read_block0", return_value=header), \
+                mock.patch.object(probe, "_block_stat_snapshot",
+                                  return_value={"available": False}), \
+                mock.patch.object(probe, "_kernel_swapz_messages",
+                                  return_value={"available": False}), \
+                mock.patch.object(probe, "_mapper_exists",
+                                  return_value=False), \
+                mock.patch.object(probe, "_dm_inventory_snapshot",
+                                  return_value=expected_inventory), \
+                mock.patch.object(probe, "_active_swap_for",
+                                  return_value=cases[0][0]), \
+                mock.patch.object(probe, "_save_results"):
+            results = {"original_header_sha256": hashlib.sha256(header).hexdigest(),
+                       "dm_inventory_before": expected_inventory}
+            probe._final_observations(
+                results, self.recovery_base, missing_state, target)
+            self.assertFalse(results["restored_swap_verified"])
+
+    def test_kernel_log_falls_back_without_attributing_old_dmesg_to_run(self):
+        def tool_path(command):
+            return {"journalctl": "/usr/bin/journalctl",
+                    "dmesg": "/usr/bin/dmesg"}.get(command)
+
+        commands = []
+        def run(command, **kwargs):
+            del kwargs
+            commands.append(tuple(command))
+            if command[0] == "/usr/bin/journalctl":
+                return subprocess.CompletedProcess(
+                    command, 1, stdout="",
+                    stderr="journalctl: unrecognized option --kernel")
+            return subprocess.CompletedProcess(
+                command, 0, stdout=(
+                    "unrelated previous boot message\n"
+                    "kernel: dm-swapz lower or mapping error -5 [old]\n"
+                    "kernel: dm-swapz loaded\n"), stderr="")
+
+        with mock.patch.object(probe.shutil, "which",
+                               side_effect=tool_path), \
+                mock.patch.object(probe, "_run", side_effect=run):
+            record = probe._kernel_swapz_messages("2026-11-02T16:00:00Z")
+        self.assertTrue(record["available"])
+        self.assertEqual(record["source"], "dmesg")
+        self.assertFalse(record["time_filter_applied"])
+        self.assertEqual(record["matching_line_count"], 2)
+        self.assertIn("unrecognized option", record["journalctl_error"])
+        self.assertIn("lower or mapping error -5", record["messages"])
+        self.assertEqual(len(commands), 2)
+        self.assertIn("--since=2026-11-02T16:00:00Z", commands[0])
+        self.assertIn("--time-format=iso", commands[1])
+
+    def test_failed_kernel_log_fallback_is_not_reported_as_available(self):
+        def tool_path(command):
+            return {"journalctl": "/usr/bin/journalctl",
+                    "dmesg": "/usr/bin/dmesg"}.get(command)
+        with mock.patch.object(probe.shutil, "which",
+                               side_effect=tool_path), \
+                mock.patch.object(probe, "_run", return_value=
+                    subprocess.CompletedProcess(
+                        [], 1, stdout="", stderr="unsupported option")):
+            record = probe._kernel_swapz_messages("2026-11-02T16:00:00Z")
+        self.assertFalse(record["available"])
+        self.assertEqual(record["source"], "dmesg")
+        self.assertEqual(record["return_code"], 1)
+        self.assertFalse(record["time_filter_applied"])
+        self.assertIn("unsupported option", record["journalctl_error"])
+
     def test_live_host_gate_and_identical_artifact_history(self):
         source = "a" * 40
         earlier_source = "0" * 40

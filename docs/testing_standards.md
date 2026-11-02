@@ -2776,6 +2776,24 @@ approval remains consumed. Post-reactivation swap usage is an observation.
 
 #### Physical-swap rootless regression gate
 
+For final `results.json` observations, compare the active original swap
+entry against `swap_size_kib` and `swap_priority` in the durable saved
+recovery state, not the identity-only recovery target (which contains
+neither field). Require the row to identify the original active partition,
+and do not require zero usage after normal swap is re-enabled. Missing or
+inconsistent saved values must not produce a verified-restoration result.
+Preserve historical incident evidence even if an old results file contains
+a false negative.
+
+When `journalctl --kernel` is unsupported or fails, attempt a read-only
+`dmesg --time-format=iso` fallback and bound the recorded swapz lines.
+Explicitly record that the dmesg fallback is **not time-filtered**;
+messages found there may predate the physical attempt and cannot be
+attributed to it without independently checking timestamps. Retain
+the journal failure reason, and report unavailable if both sources fail.
+Do not hash the full active swap partition during post-recovery checks;
+read only the identity-checked original 4096-byte header.
+
 All `dmsetup info -c` consumers must interpret colon-delimited and
 whitespace-delimited rows with exact expected column counts. An existing
 owned mapper must never be interpreted as absent because a separator

@@ -1004,34 +1004,51 @@ def _block_stat_snapshot(target):
 
 
 def _kernel_swapz_messages(start_timestamp):
-    """Retain only bounded swapz-related kernel lines for this attempt."""
+    """Retain bounded kernel evidence, identifying when time filtering is absent."""
     journalctl = shutil.which("journalctl")
+    journalctl_error = None
     if journalctl:
-        source = "journalctl"
-        args = [journalctl, "--boot", "--kernel", "--no-pager",
-                "--output=short-iso", f"--since={start_timestamp}"]
-    else:
-        dmesg = shutil.which("dmesg")
-        if not dmesg:
-            return {"available": False,
-                    "error": "journalctl and dmesg are unavailable"}
-        source = "dmesg"
-        args = [dmesg, "--color=never", "--time-format=iso"]
+        command = [journalctl, "--boot", "--kernel", "--no-pager",
+                   "--output=short-iso", f"--since={start_timestamp}"]
+        try:
+            result = _run(command, timeout=20, check=False)
+            if result.returncode == 0:
+                matching = [line for line in result.stdout.splitlines()
+                            if re.search(r"swapz", line, re.IGNORECASE)]
+                return {"available": True, "source": "journalctl",
+                        "time_filter_applied": True,
+                        "matching_line_count": len(matching),
+                        "messages": _bounded_text("\n".join(matching[-32:]))}
+            journalctl_error = _bounded_text(result.stderr or result.stdout)
+        except ProbeError as exc:
+            journalctl_error = _bounded_text(exc)
+
+    dmesg = shutil.which("dmesg")
+    if not dmesg:
+        return {"available": False, "source": "journalctl" if journalctl else None,
+                "time_filter_applied": False,
+                "error": journalctl_error or "journalctl and dmesg are unavailable"}
+    command = [dmesg, "--color=never", "--time-format=iso"]
     try:
-        result = _run(args, timeout=20, check=False)
+        result = _run(command, timeout=20, check=False)
     except ProbeError as exc:
-        return {"available": False, "source": source,
+        return {"available": False, "source": "dmesg",
+                "time_filter_applied": False,
+                "journalctl_error": journalctl_error,
                 "error": _bounded_text(exc)}
     if result.returncode:
-        return {"available": False, "source": source,
+        return {"available": False, "source": "dmesg",
+                "time_filter_applied": False,
+                "journalctl_error": journalctl_error,
                 "return_code": result.returncode,
                 "error": _bounded_text(result.stderr or result.stdout)}
     matching = [line for line in result.stdout.splitlines()
                 if re.search(r"swapz", line, re.IGNORECASE)]
-    text = "\n".join(matching[-32:])
-    return {"available": True, "source": source,
+    return {"available": True, "source": "dmesg",
+            "time_filter_applied": False,
+            "journalctl_error": journalctl_error,
             "matching_line_count": len(matching),
-            "messages": _bounded_text(text)}
+            "messages": _bounded_text("\n".join(matching[-32:]))}
 
 
 def _dm_info_rows(stdout, field_count):
@@ -1098,10 +1115,16 @@ def _final_observations(results, state_dir, state, target):
     results["kernel_swapz_messages"] = _kernel_swapz_messages(
         results.get("start_timestamp", "now"))
     row = results.get("final_swap_row")
+    # The identity-only recovery target omits original swap parameters.
+    # Compare with the durable saved state, including after standalone recovery.
     results["restored_swap_verified"] = (
-        isinstance(row, dict)
-        and row.get("size_kib") == target.get("swap_size_kib")
-        and row.get("priority") == target.get("swap_priority"))
+        state.get("swap_was_active") is True
+        and isinstance(row, dict)
+        and row.get("kind") == "partition"
+        and type(state.get("swap_size_kib")) is int
+        and type(state.get("swap_priority")) is int
+        and row.get("size_kib") == state["swap_size_kib"]
+        and row.get("priority") == state["swap_priority"])
     try:
         results["final_mapper_present"] = _mapper_exists(state)
     except ProbeError as exc:

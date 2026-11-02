@@ -1066,6 +1066,32 @@ A release or physical-media trial remains blocked until the same pinned source h
 
 ### Owner-requested physical swap-partition smoke — bounded correctness only
 
+**2026-11-02 FOLLOW-UP: NORMAL SWAP RESTORED (OWNER-REPORTED).**
+The authorized supervised recovery for run
+`5c4f825bc3bab808e128b2fc66a58f74` removed only the owned mapper,
+unloaded dm_swapz without force, restored the original 4096-byte header
+(SHA-256 `ace016a7a3ecd22b0aca05946a305aef2113bc50439452756ae68909010f0afe`),
+and reactivated ordinary swap on 8:4 at 16777212 KiB and priority -1.
+The recovery state is COMPLETE, the active marker is absent and the
+consumption record remains. Post-reactivation usage reached 720900 KiB,
+which does not invalidate normal-swap restoration. The original physical
+smoke remains FAIL because no oracle phase ran.
+
+The preserved results.json incorrectly records
+`restored_swap_verified=false`: the observation path compared against
+capacity and priority omitted from the identity-only recovery target.
+The durable saved state contains those expected values, and the
+independent restoration checks passed as reported. Do not rewrite the
+historical results or imply the physical smoke passed. The host did not
+support journalctl's --kernel option; unfiltered dmesg included older
+error messages predating the 08:15 physical module load. Their cause
+remains undetermined, not established as a swapz physical-test failure.
+The recovery-coordinator's initial logging-call error occurred before
+device operations; a separate read-only verification preceded the
+corrected invocation. A post-recovery whole-partition hash was stopped;
+the original 4 KiB header was reverified. No further physical smoke is
+approved, and zero-used swap would again be required before one.
+
 **2026-11-02 RECOVERY INCIDENT — PHYSICAL TESTS HALTED.** An approved
 one-use run cleared and SWZ-formatted the selected partition, loaded
 dm_swapz, and created the expected 16 MiB mapper. A colon-delimited
