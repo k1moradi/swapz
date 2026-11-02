@@ -3273,17 +3273,25 @@ to read-only operation; until the exact change has passed independent source
 and recovery review plus a separate owner decision, its privileged `run` and
 `recover` commands must fail closed.
 
-The eventual trial is limited to one 256 MiB mapper and 30 minutes. Admission
-requires the exact bare-metal x86_64 target, unchanged qualified production
-artifact hashes, clean synchronized `main`, current non-privileged CI, zero-used
-original swap at priority -1, no conflicting mapper/module/recovery owner,
-durable recovery storage, conservative memory/PSI gates, a one-use review, and
-an already active, fully allocated fallback with at least 512 MiB free. The
-fallback must use an explicit priority from 0 through 32766 so reactivation of
-the sole default-priority original swap returns at -1. Same-USB fallback is
-additional capacity only; disclose that it does not protect against whole-device
-failure or loss of swapz's volatile mapping authority. Do not create or enable
-fallback swap as part of the coordinator.
+The live-swap trial is the owner-waived, no-fallback trial described in
+[live-swap-trial-recovery.md](live-swap-trial-recovery.md). It is limited to one
+mapper at the maximum logical capacity admitted for the complete `/dev/sda4`
+partition (3,355,136 pages, 13,742,637,056 bytes) and to 30 minutes, with one
+bounded cgroup swap-pressure check inside the window. Admission requires the
+exact bare-metal x86_64 target, unchanged qualified production artifact hashes,
+clean synchronized `main`, current non-privileged CI for HEAD, the original swap
+as the only active swap area at priority -1, no conflicting mapper, module or
+recovery owner, durable recovery storage, RAM use below 50 percent with enough
+MemAvailable to drain the current swap, conservative memory and PSI gates, and
+one unconsumed approval record. No fallback swap is required or created. A
+`verbal` approval needs an external reviewer record. The `owner_waiver` mode
+replaces that record for this one trial and states that no reviewer approval
+exists.
+
+Rootless tests for this procedure are software-model evidence only. They do not
+qualify Linux `swapon`, physical performance, cold-boot recovery or power-loss
+behavior. The owner objective for this PC excludes VMs. Keep these limits
+explicit in every review and result.
 
 The supervisor's qualified-source and artifact pins must follow the latest
 owner x86_64 five-stage PASS report, including the tested oracle binary hash.

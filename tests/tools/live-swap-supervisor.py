@@ -7,6 +7,7 @@ one-use review record. The tool is not a production deployment interface.
 """
 import argparse
 from datetime import datetime, timezone
+import ctypes
 import fcntl
 import hashlib
 import importlib.util
@@ -43,11 +44,47 @@ EXPECTED_ARTIFACTS = {
         "f47c6f9c9ca97d4d580e0a2d88efcb41cca8d34f4a35e0456a4a4d9a6e85ffe8"),
 }
 PAGE_BYTES = 4096
-LOGICAL_BYTES = 256 * 1024 * 1024
+SWAPZ_SEGMENT_BLOCKS = 256
+SWAPZ_MIN_RESERVE_BLOCKS = 2 * SWAPZ_SEGMENT_BLOCKS
+
+
+def _maximum_logical_pages(physical_blocks):
+    """Mirror authority_init()'s reserve and segment-alignment admission."""
+    if type(physical_blocks) is not int or physical_blocks <= 0:
+        raise ValueError("physical block count must be a positive integer")
+    low, high = 0, physical_blocks
+    while low < high:
+        candidate = (low + high + 1) // 2
+        reserve = max((candidate + 3) // 4, SWAPZ_MIN_RESERVE_BLOCKS)
+        admitted = reserve < physical_blocks and candidate <= (
+            (physical_blocks - reserve) // SWAPZ_SEGMENT_BLOCKS
+        ) * SWAPZ_SEGMENT_BLOCKS
+        if admitted:
+            low = candidate
+        else:
+            high = candidate - 1
+    return low
+
+
+MAX_PHYSICAL_BLOCKS = (
+    ((DEVICE_SIZE_BYTES // PAGE_BYTES - 1) // SWAPZ_SEGMENT_BLOCKS) *
+    SWAPZ_SEGMENT_BLOCKS)
+MAX_LOGICAL_PAGES = _maximum_logical_pages(MAX_PHYSICAL_BLOCKS)
+LOGICAL_BYTES = MAX_LOGICAL_PAGES * PAGE_BYTES
 LOGICAL_SECTORS = LOGICAL_BYTES // 512
 TRIAL_SECONDS = 30 * 60
 SAMPLE_SECONDS = 5
-MIN_FALLBACK_BYTES = 512 * 1024 * 1024
+PRESSURE_SETTLE_SECONDS = 60
+SWAPOFF_TIMEOUT_SECONDS = 30 * 60
+PRESSURE_PAGES = 80000
+MAPPER_OPEN_ATTEMPTS = 6
+PRESSURE_MEMORY_MAX_BYTES = 128 * 1024 * 1024
+PRESSURE_TIMEOUT_SECONDS = 15 * 60
+RAM_DRAIN_MARGIN_BYTES = 512 * 1024 * 1024
+MIN_DRAIN_HEADROOM_BYTES = RAM_DRAIN_MARGIN_BYTES
+# The trial starts, samples and stops at this headroom above the 2 GiB
+# reserve. Cleanup then still has the 512 MiB drain margin to spend.
+TRIAL_HEADROOM_BYTES = 1024 * 1024 * 1024
 MIN_AVAILABLE_BYTES = 2 * 1024 * 1024 * 1024
 MIN_CGROUP_HEADROOM_BYTES = 512 * 1024 * 1024
 MAX_MEMORY_SOME_AVG10 = 5.0
@@ -60,9 +97,11 @@ APPROVAL_NAME = "approval.json"
 LIVE_NAME_PREFIX = "swapz-live-"
 LIVE_UUID_PREFIX = "SWAPZ-LIVE-"
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
-# This Phase-A implementation is intentionally read-only at the CLI boundary.
-# Enable only in a separately reviewed commit after the external safety review.
-LIVE_SWAP_EXECUTION_ENABLED = False
+PRESSURE_CGROUP_ROOT = Path("/sys/fs/cgroup")
+# Execution is enabled for the owner-waived one-trial policy recorded in
+# docs/live-swap-trial-recovery.md. Every run still needs a one-use approval
+# bound to this commit, both current CI workflows and the live artifacts.
+LIVE_SWAP_EXECUTION_ENABLED = True
 POST_QUALIFICATION_PATHS = {
     "docs/ROADMAP.md",
     "docs/testing_standards.md",
@@ -78,16 +117,21 @@ REQUIRED_CI_WORKFLOWS = (
     "Native kernel-C project-goal regressions",
     "Experimental swapz production C qualification",
 )
+GH_RUN_LIST_ARGS = (
+    "gh", "run", "list", "--repo", "k1moradi/swapz", "--branch", "main",
+    "--limit", "40", "--json", "headSha,name,conclusion,status",
+)
 PLANNED_MUTATION_TRACE = (
     "persist and fsync one-use recovery state and artifact snapshots",
     "swapoff only the exact original /dev/sda4 swap entry",
     "clear and format only the identity-checked original partition",
     "load only the snapshotted qualified dm_swapz module",
-    "create one exact 256 MiB helper-owned mapper over /dev/sda4",
+    "create one exact maximum-capacity helper-owned mapper over /dev/sda4",
     "initialize Linux swap on the verified mapper only",
-    "activate only the mapper above the already-active fallback; discard disabled",
+    "activate only the maximum-capacity mapper as the sole swap area; discard disabled",
+    "run one cgroup-limited, byte-verified swap-pressure child inside the trial",
     "observe for at most 30 minutes with memory and I/O stop gates",
-    "swapoff only the helper mapper after memory and fallback checks",
+    "swapoff only the helper mapper after RAM drain-capacity checks",
     "remove only the exact mapper without force",
     "unload only a same-process-owned module with zero references",
     "restore and reread the exact original 4096-byte header",
@@ -95,18 +139,26 @@ PLANNED_MUTATION_TRACE = (
     "durably complete recovery and release the active marker",
 )
 LIVE_APPROVAL_TEXT = (
-    "Approved for one supervised experimental Linux swap trial only, with "
-    "swapz capacity limited to 256 MiB and duration limited to 30 minutes. "
-    "Use the reviewed coordinator, verified fallback, exact artifact and "
-    "device bindings, and its checked restoration path. Stop on any mismatch "
-    "or uncertainty; never force-remove, reboot, or overwrite an ambiguous "
-    "header. This does not authorize performance, endurance, stress, or "
+    "Approved by the owner for one supervised experimental Linux swap trial "
+    "only, with swapz capacity set to the maximum admitted for the complete "
+    "selected partition as the sole swap area, without fallback swap, for at "
+    "most 30 minutes including one bounded cgroup swap-pressure check. Require "
+    "RAM use below 50 percent before original swapoff, and enough measured "
+    "MemAvailable to start with a 1 GiB trial headroom above the 2 GiB reserve, "
+    "which leaves the 512 MiB drain margin for cleanup. Use the exact artifact "
+    "and device bindings. Stop on any mismatch or uncertainty; preserve an active "
+    "mapper if swapoff cannot safely drain it. Never force-remove, reboot, or "
+    "overwrite an ambiguous header. This does not authorize endurance or "
     "production qualification."
 )
 OWNER_APPROVAL_TEXT = (
-    "I explicitly authorize this one live-swap trial after the separate "
-    "external review, with the exact device, fallback, artifacts, helper, "
-    "capacity, duration, and recovery record bound below."
+    "I explicitly authorize this one no-fallback live-swap trial using only "
+    "/dev/sda4 after the exact device, artifacts, helper, maximum capacity, "
+    "RAM drain gates, duration, and recovery record are bound below."
+)
+OWNER_WAIVER_TEXT = (
+    "I waive the separate external-review requirement for this one no-fallback "
+    "live-swap trial only. This is an owner decision, not a reviewer approval."
 )
 RECOVERY_RECOGNIZED_STAGES = {
     "ORIGINAL_SWAPOFF_PENDING", "ORIGINAL_SWAP_OFF",
@@ -126,6 +178,14 @@ class LiveSwapError(RuntimeError):
     pass
 
 
+class SafeStop(LiveSwapError):
+    """A conservative stop before or during the trial; restoration still runs."""
+
+    def __init__(self, reason, message):
+        super().__init__(message)
+        self.reason = reason
+
+
 _STOP_REQUESTED = False
 
 
@@ -141,6 +201,8 @@ def _load_physical_helper():
 
 
 PHYSICAL = _load_physical_helper()
+PHYSICAL_HELPER_PATH = ROOT / "tests/tools/physical-swap-probe.py"
+PHYSICAL_HELPER_SHA256 = hashlib.sha256(PHYSICAL_HELPER_PATH.read_bytes()).hexdigest()
 
 
 def _utc_now():
@@ -155,7 +217,7 @@ def _request_stop(_signum, _frame):
 
 def _check_stop(ops):
     if ops.stop_requested():
-        raise LiveSwapError("operator requested a supervised stop")
+        raise SafeStop("operator_stop", "operator requested a supervised stop")
 
 
 def _bounded(value, limit=RESULT_LIMIT):
@@ -167,6 +229,21 @@ def _bounded(value, limit=RESULT_LIMIT):
         return value
     suffix = "\n...[truncated]"
     return value[:limit - len(suffix)] + suffix
+
+
+def _run_isolated(argv, timeout):
+    """Run one mutating tool in its own session, so terminal signals reach only the supervisor.
+
+    The supervisor records a stop request and finishes the current step; a
+    terminal Ctrl-C must not kill a swapoff, format or module load halfway.
+    """
+    try:
+        return subprocess.run(
+            [str(arg) for arg in argv], check=False, capture_output=True,
+            text=True, timeout=timeout, start_new_session=True)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PHYSICAL.ProbeError(
+            f"command failed to run: {argv[0]}: {exc}") from exc
 
 
 def _durable_write(path, data, mode=0o600, exclusive=True):
@@ -287,19 +364,28 @@ def _approval_digest(record):
         .encode()).hexdigest()
 
 
-def validate_approval(record, *, head, helper_sha256, artifacts, target,
-                      fallback):
-    """Validate the future, separately reviewed, one-use live-trial binding."""
+def validate_approval(record, *, head, helper_sha256, artifacts, target):
+    """Validate the one-use live-trial binding: verbal review or owner waiver."""
     if not isinstance(record, dict):
         raise LiveSwapError("live-trial approval must be a JSON object")
     if record.get("approved") is not True or \
-            record.get("approval_mode") != "verbal" or \
-            record.get("reviewer") != "openai-chatgpt-external-reviewer" or \
             record.get("approval_text") != LIVE_APPROVAL_TEXT or \
             record.get("owner_authorized") is not True or \
-            record.get("owner_approval_text") != OWNER_APPROVAL_TEXT or \
-            record.get("source_policy_reviewed") is not True:
-        raise LiveSwapError("external review and owner authorization are required")
+            record.get("owner_approval_text") != OWNER_APPROVAL_TEXT:
+        raise LiveSwapError("owner authorization and exact approval text are required")
+    mode = record.get("approval_mode")
+    if mode == "verbal":
+        if record.get("reviewer") != "openai-chatgpt-external-reviewer" or \
+                record.get("source_policy_reviewed") is not True:
+            raise LiveSwapError("verbal approval requires the named external reviewer")
+    elif mode == "owner_waiver":
+        if record.get("reviewer") is not None or \
+                record.get("external_review") != "waived_by_owner" or \
+                record.get("external_review_waiver") != OWNER_WAIVER_TEXT:
+            raise LiveSwapError(
+                "owner waiver must state the exact external-review waiver")
+    else:
+        raise LiveSwapError("approval_mode must be verbal or owner_waiver")
     review_reference = record.get("review_reference")
     if record.get("issue_number") != 76 or \
             record.get("reviewed_commit_sha") != head or \
@@ -311,6 +397,9 @@ def validate_approval(record, *, head, helper_sha256, artifacts, target,
                 r"https://github\.com/k1moradi/swapz/(?:issues/76(?:#issuecomment-[1-9][0-9]*)?|commit/[0-9a-f]{40})",
                 review_reference):
         raise LiveSwapError("approval is not bound to the reviewed issue-76 change")
+    if review_reference.startswith("https://github.com/k1moradi/swapz/commit/") and \
+            review_reference.rsplit("/", 1)[1] != head:
+        raise LiveSwapError("review commit reference must name the reviewed HEAD")
     run_id = record.get("run_id")
     if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id):
         raise LiveSwapError("approval requires a unique lowercase 32-hex run_id")
@@ -318,6 +407,7 @@ def validate_approval(record, *, head, helper_sha256, artifacts, target,
         "source_sha": QUALIFIED_SOURCE,
         "helper_git_sha": head,
         "helper_sha256": helper_sha256,
+        "physical_helper_sha256": PHYSICAL_HELPER_SHA256,
         "device_uuid_path": DEVICE_UUID_PATH,
         "device": DEVICE_PATH,
         "device_major_minor": f"{DEVICE_MAJOR}:{DEVICE_MINOR}",
@@ -326,6 +416,8 @@ def validate_approval(record, *, head, helper_sha256, artifacts, target,
         "original_header_sha256": ORIGINAL_HEADER_SHA256,
         "logical_capacity_bytes": LOGICAL_BYTES,
         "duration_seconds": TRIAL_SECONDS,
+        "pressure_pages": PRESSURE_PAGES,
+        "pressure_memory_max_bytes": PRESSURE_MEMORY_MAX_BYTES,
         "scope": "experimental live Linux swap trial only",
     }
     if any(record.get(key) != value for key, value in expected.items()):
@@ -338,19 +430,11 @@ def validate_approval(record, *, head, helper_sha256, artifacts, target,
             "size_bytes": DEVICE_SIZE_BYTES,
     }.items()):
         raise LiveSwapError("live target evidence differs from approval binding")
-    if fallback is None or not isinstance(fallback, dict):
-        raise LiveSwapError("fallback swap is not available")
-    fallback_binding = _fallback_binding(fallback)
-    if record.get("fallback") != fallback_binding:
-        raise LiveSwapError("approval fallback binding differs from live state")
-    if fallback["same_physical_device"] and \
-            record.get("accept_same_media_fallback") is not True:
-        raise LiveSwapError("same-USB fallback risk was not explicitly accepted")
-    if fallback["same_partition"] or fallback["size_bytes"] < MIN_FALLBACK_BYTES or \
-            type(fallback["priority"]) is not int or \
-            not 0 <= fallback["priority"] < 32767:
+    if record.get("fallback") is not None or \
+            record.get("fallback_mode") != "none" or \
+            record.get("accept_no_fallback_risk") is not True:
         raise LiveSwapError(
-            "fallback identity, capacity or explicit priority is unsuitable")
+            "approval must explicitly bind the single-swap no-fallback mode")
     return run_id
 
 
@@ -395,6 +479,13 @@ class LinuxOps:
                 "-p", "-s", "TYPE", "-o", "value"] and bool(
                     re.fullmatch(
                         r"/dev/mapper/swapz-live-[0-9a-f]{16}", argv[6]))
+        if name == "gh":
+            return list(argv) == list(GH_RUN_LIST_ARGS)
+        if name == "runuser":
+            return len(argv) == 4 + len(GH_RUN_LIST_ARGS) and \
+                argv[1] == "--user" and argv[2] != "root" and \
+                bool(re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", argv[2])) and \
+                argv[3] == "--" and argv[4:] == list(GH_RUN_LIST_ARGS)
         return name in {"lsblk", "findmnt"}
 
     def mutate(self, argv, *, timeout=120):
@@ -404,7 +495,7 @@ class LinuxOps:
             raise LiveSwapError("privileged action requires root; no escalation")
         if not self._mutation_allowed(argv):
             raise LiveSwapError("supervisor refused an unreviewed mutation")
-        return PHYSICAL._run(argv, timeout=timeout, check=False)
+        return _run_isolated(argv, timeout=timeout)
 
     @staticmethod
     def _mutation_allowed(argv):
@@ -469,7 +560,8 @@ class LinuxOps:
                                expected_current=expected_current)
 
     def inspect_target(self):
-        target = PHYSICAL.inspect_target(DEVICE_UUID_PATH, DEVICE_UUID_PATH)
+        target = PHYSICAL.inspect_target(
+            DEVICE_UUID_PATH, DEVICE_UUID_PATH, allow_used_swap=True)
         if (target["device"], target["major"], target["minor"],
                 target["partuuid"], target["size_bytes"]) != (
                 DEVICE_PATH, DEVICE_MAJOR, DEVICE_MINOR, DEVICE_PARTUUID,
@@ -689,8 +781,12 @@ class LinuxOps:
             fields = rest.split()
             if fields and key in {"MemAvailable", "MemTotal"}:
                 values[key] = int(fields[0]) * 1024
-        if "MemAvailable" not in values:
-            raise LiveSwapError("MemAvailable is unavailable")
+        if not {"MemAvailable", "MemTotal"}.issubset(values) or \
+                values["MemTotal"] <= 0 or values["MemAvailable"] > values["MemTotal"]:
+            raise LiveSwapError("MemAvailable or MemTotal is unavailable or invalid")
+        values["ram_used_percent"] = (
+            100.0 * (values["MemTotal"] - values["MemAvailable"]) /
+            values["MemTotal"])
         values["psi_some_avg10"], values["psi_full_avg10"] = (
             self._psi_avg10(self.text("/proc/pressure/memory")))
         values["cgroup_headroom"] = self._cgroup_headroom()
@@ -796,79 +892,124 @@ class LinuxOps:
         except (OSError, StopIteration, ValueError):
             return None
 
-    def fallback_facts(self, path):
-        if not path:
-            return None
-        path = str(Path(path))
-        info = os.stat(path, follow_symlinks=False)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or \
-                stat.S_IMODE(info.st_mode) != 0o600 or \
-                info.st_blocks * 512 < info.st_size:
-            raise LiveSwapError(
-                "fallback must be a root-owned 0600 allocated regular file")
-        mount_source = self.command([
-            "findmnt", "--first-only", "--raw", "--noheadings",
-            "--output", "SOURCE,FSTYPE", "--target", path,
-        ])
-        if mount_source.returncode:
-            raise LiveSwapError("cannot identify fallback filesystem")
-        fields = mount_source.stdout.split()
-        if len(fields) != 2 or fields[1] not in PHYSICAL.PERSISTENT_RECOVERY_FILESYSTEMS:
-            raise LiveSwapError("fallback filesystem is not persistent and supported")
-        source = fields[0].split("[", 1)[0]
-        source_major_minor = self.command([
-            "lsblk", "--noheadings", "--raw", "--output", "MAJ:MIN", source,
-        ])
-        if source_major_minor.returncode:
-            raise LiveSwapError("cannot identify fallback backing device")
-        backing = source_major_minor.stdout.strip().splitlines()
-        if len(backing) != 1 or not re.fullmatch(r"[0-9]+:[0-9]+", backing[0]):
-            raise LiveSwapError("fallback backing identity is ambiguous")
-        disk_rows = self.command([
-            "lsblk", "--inverse", "--raw", "--noheadings",
-            "--output", "MAJ:MIN,TYPE", source,
-        ])
-        if disk_rows.returncode:
-            raise LiveSwapError("cannot identify fallback physical device")
-        rows = [line.split() for line in disk_rows.stdout.splitlines()
-                if line.strip()]
-        disks = {row[0] for row in rows if len(row) == 2 and row[1] == "disk"}
-        target_disks = self.command([
-            "lsblk", "--inverse", "--raw", "--noheadings",
-            "--output", "MAJ:MIN,TYPE", DEVICE_PATH,
-        ])
-        if target_disks.returncode:
-            raise LiveSwapError("cannot identify selected device parent")
-        target_rows = [line.split() for line in target_disks.stdout.splitlines()
-                       if line.strip()]
-        target_parent_disks = {
-            row[0] for row in target_rows if len(row) == 2 and row[1] == "disk"
-        }
-        swap_rows = PHYSICAL.parse_swap_rows(self.text("/proc/swaps"))
-        active = [row for row in swap_rows
-                  if row["kind"] == "file" and os.path.realpath(row["path"]) ==
-                  os.path.realpath(path)]
-        if len(active) != 1:
-            raise LiveSwapError("fallback file must already be active exactly once")
-        row = active[0]
-        backing_mm = backing[0]
-        return {
-            "path": path,
-            "device": info.st_dev,
-            "inode": info.st_ino,
-            "mode": stat.S_IMODE(info.st_mode),
-            "uid": info.st_uid,
-            "major_minor": backing_mm,
-            "filesystem": fields[1],
-            "size_bytes": info.st_size,
-            "allocated_bytes": info.st_blocks * 512,
-            "used_kib": row["used_kib"],
-            "size_kib": row["size_kib"],
-            "priority": row["priority"],
-            "same_partition": backing_mm == f"{DEVICE_MAJOR}:{DEVICE_MINOR}",
-            "same_physical_device": bool(disks & target_parent_disks),
-            "disk_major_minors": sorted(disks),
-        }
+
+    def pressure_workload(self, state, *, cgroup_name, guard, stop_requested, timeout):
+        """Run one forked, guarded child in its own cgroup, then remove the cgroup."""
+        run_id = state["run_id"]
+        if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id):
+            raise LiveSwapError("pressure seed must be the bound run id")
+        if not re.fullmatch(r"swapz-live-[0-9a-f]{16}", str(cgroup_name)):
+            raise LiveSwapError("pressure cgroup name is malformed")
+        cgroup = PRESSURE_CGROUP_ROOT / cgroup_name
+        if cgroup.exists():
+            raise LiveSwapError("pressure cgroup name is already in use")
+        os.mkdir(cgroup, 0o755)
+        outcome = {"cgroup": str(cgroup), "timed_out": False, "stopped": False}
+        pid = None
+        read_fd = None
+        status = None
+        try:
+            _write_control(cgroup / "memory.max", str(PRESSURE_MEMORY_MAX_BYTES))
+            _require_control(cgroup / "memory.max", str(PRESSURE_MEMORY_MAX_BYTES))
+            if (cgroup / "memory.swap.max").exists():
+                _write_control(cgroup / "memory.swap.max", "max")
+            if not (cgroup / "memory.zswap.max").exists():
+                raise LiveSwapError(
+                    "pressure cgroup cannot disable zswap; pressure would not reach the device")
+            _write_control(cgroup / "memory.zswap.max", "0")
+            _require_control(cgroup / "memory.zswap.max", "0")
+            pid, read_fd = _spawn_pressure_child(
+                cgroup, run_id, PRESSURE_PAGES, PRESSURE_TIMEOUT_SECONDS + 60)
+            started = time.monotonic()
+            last_guard = started
+            while True:
+                waited, code = os.waitpid(pid, os.WNOHANG)
+                if waited == pid:
+                    status = code
+                    break
+                if stop_requested():
+                    outcome["stopped"] = True
+                    break
+                if time.monotonic() - started >= timeout:
+                    outcome["timed_out"] = True
+                    break
+                if time.monotonic() - last_guard >= SAMPLE_SECONDS:
+                    guard()
+                    last_guard = time.monotonic()
+                time.sleep(1)
+        finally:
+            if pid is not None and status is None:
+                status = _terminate_pressure_child(cgroup, pid)
+            if pid is not None:
+                outcome["exit_code"] = os.waitstatus_to_exitcode(status)
+                outcome["stdout"] = _read_all_fd(read_fd)
+                os.close(read_fd)
+            outcome["memory_events"] = _read_memory_events(cgroup)
+            outcome["swap_peak_bytes"] = _read_int_control(cgroup / "memory.swap.peak")
+            outcome["zswap_peak_bytes"] = _read_int_control(cgroup / "memory.zswap.peak")
+            _remove_empty_cgroup(cgroup)
+        return outcome
+
+    def ci_status(self, head):
+        """Ask GitHub, as the operator who holds gh credentials, which workflows passed."""
+        argv = list(GH_RUN_LIST_ARGS)
+        operator = os.environ.get("SUDO_USER")
+        if os.geteuid() == 0 and operator and operator != "root":
+            runuser = shutil.which("runuser")
+            if not runuser:
+                raise LiveSwapError("runuser is required to query CI as the operator")
+            argv = [runuser, "--user", operator, "--", *argv]
+        result = self.command(argv, timeout=60, check=False)
+        if result.returncode:
+            raise LiveSwapError("cannot query GitHub workflow results")
+        try:
+            runs = json.loads(result.stdout)
+        except ValueError as exc:
+            raise LiveSwapError("GitHub workflow results are malformed") from exc
+        if not isinstance(runs, list):
+            raise LiveSwapError("GitHub workflow results are malformed")
+        passed = {run.get("name") for run in runs
+                  if isinstance(run, dict) and run.get("headSha") == head and
+                  run.get("status") == "completed" and
+                  run.get("conclusion") == "success"}
+        ok = set(REQUIRED_CI_WORKFLOWS).issubset(passed)
+        return {"status": "PASS" if ok else "BLOCKED", "commit_sha": head,
+                "workflows": list(REQUIRED_CI_WORKFLOWS) if ok else []}
+
+    def release_pressure_cgroup(self, state):
+        """Remove a pressure cgroup saved by an interrupted run; never force it."""
+        name = state.get("pressure_cgroup")
+        if not name:
+            return False
+        if not re.fullmatch(r"swapz-live-[0-9a-f]{16}", str(name)):
+            raise LiveSwapError("saved pressure cgroup name is malformed")
+        cgroup = PRESSURE_CGROUP_ROOT / name
+        if not cgroup.exists():
+            return False
+        _kill_cgroup(cgroup)
+        procs = cgroup / "cgroup.procs"
+        deadline = time.monotonic() + 60
+        while procs.exists() and procs.read_text().strip():
+            if time.monotonic() >= deadline:
+                raise LiveSwapError("pressure cgroup still has processes; manual review")
+            time.sleep(0.5)
+        _remove_empty_cgroup(cgroup)
+        return True
+
+    def swapoff_processes(self):
+        """Pids whose command is swapoff, so recovery never races a live swapoff."""
+        found = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                argv = (entry / "cmdline").read_bytes().split(b"\0")
+            except OSError:
+                continue
+            if argv and argv[0] and \
+                    Path(argv[0].decode("utf-8", "replace")).name == "swapoff":
+                found.append(int(entry.name))
+        return found
 
     def read_swap_rows(self):
         return PHYSICAL.parse_swap_rows(self.text("/proc/swaps"))
@@ -884,19 +1025,27 @@ def _validate_target_facts(target):
         "partuuid": DEVICE_PARTUUID,
         "size_bytes": DEVICE_SIZE_BYTES,
         "swap_size_kib": DEVICE_SIZE_BYTES // 1024 - PAGE_BYTES // 1024,
-        "swap_used_kib": 0,
         "swap_priority": -1,
     }
     if any(target.get(key) != value for key, value in expected.items()):
         raise LiveSwapError("selected partition facts do not match the fixed target")
+    if type(target.get("swap_used_kib")) is not int or \
+            not 0 <= target["swap_used_kib"] <= target["swap_size_kib"]:
+        raise LiveSwapError("selected swap usage is missing or outside its capacity")
     if hashlib.sha256(target.get("header", b"")).hexdigest() != \
             ORIGINAL_HEADER_SHA256:
         raise LiveSwapError("selected partition header does not match original")
 
 
-def _exact_active_swap_inventory(ops, fallback_path):
-    allowed = {f"block:{DEVICE_MAJOR}:{DEVICE_MINOR}",
-               "file:" + os.path.realpath(fallback_path)}
+def _exact_active_swap_inventory(ops):
+    """The original partition must be the sole active swap area."""
+    if _observed_swap_identities(ops) != {f"block:{DEVICE_MAJOR}:{DEVICE_MINOR}"}:
+        raise LiveSwapError(
+            "active swap inventory differs from the sole original swap area")
+    return True
+
+
+def _observed_swap_identities(ops):
     observed = set()
     for row in ops.read_swap_rows():
         if row["kind"] == "file":
@@ -910,8 +1059,44 @@ def _exact_active_swap_inventory(ops, fallback_path):
         if identity in observed:
             raise LiveSwapError("duplicate active swap inventory entry")
         observed.add(identity)
-    if observed != allowed:
-        raise LiveSwapError("active swap inventory differs from target plus fallback")
+    return observed
+
+
+def _reconcile_trial_state(state_dir, state, ops):
+    """Make persisted flags agree with the kernel before the cleanup inventory check.
+
+    The mapper flag is set only after a successful post-swapon check, so a
+    failed check or a crash can leave it false while the mapper is live, or
+    true after the mapper vanished. The kernel's tables decide.
+    """
+    rows = _mapper_rows_for_state(ops, state)
+    if not rows:
+        state["active_mapper_swap"] = False
+    else:
+        dm_major, dm_minor, _ = _mapper_info(ops, state)
+        state["dm_major"], state["dm_minor"] = dm_major, dm_minor
+        state["active_mapper_swap"] = \
+            ops.active_swap_for(dm_major, dm_minor) is not None
+    if state.get("stage") == "ORIGINAL_SWAPOFF_PENDING" and \
+            not state.get("original_swapoff_complete") and \
+            ops.active_swap_for(state["major"], state["minor"]) is None:
+        if ops.swapoff_processes():
+            raise LiveSwapError(
+                "an orphaned swapoff is still running; manual review")
+        state["original_swapoff_complete"] = True
+    _save_state(state_dir, state)
+
+
+def _verify_trial_swap_inventory(ops, state):
+    if state.get("active_mapper_swap"):
+        expected = {f"block:{state['dm_major']}:{state['dm_minor']}"}
+    elif state.get("original_swap_restored") or \
+            not state.get("original_swapoff_complete"):
+        expected = {f"block:{DEVICE_MAJOR}:{DEVICE_MINOR}"}
+    else:
+        expected = set()
+    if _observed_swap_identities(ops) != expected:
+        raise LiveSwapError("live swap inventory differs from the sole owned swap area")
     return True
 
 
@@ -944,15 +1129,19 @@ def evaluate_plan(facts):
     target_ok = all(target.get(key) == value for key, value in {
         "device": DEVICE_PATH, "major": DEVICE_MAJOR, "minor": DEVICE_MINOR,
         "partuuid": DEVICE_PARTUUID, "size_bytes": DEVICE_SIZE_BYTES,
-        "swap_used_kib": 0, "swap_priority": -1,
+        "swap_priority": -1,
         "header_sha256": ORIGINAL_HEADER_SHA256,
         "mounted": False, "holders": [],
         "root_chain_contains_target": False,
     }.items())
+    target_used_kib = target.get("swap_used_kib")
+    target_size_kib = target.get("swap_size_kib")
+    target_ok = target_ok and type(target_used_kib) is int and \
+        type(target_size_kib) is int and 0 <= target_used_kib <= target_size_kib
     gate("target", target_ok,
-         "exact partition, original header, zero-used active swap and no conflicts")
+         "exact original active swap partition, saved header and no conflicts")
     gate("swap_inventory", facts.get("swap_inventory_exact") is True,
-         "only the selected partition and exact verified fallback may be active")
+         "only the selected original swap partition may be active")
     gate("artifacts", facts.get("artifacts") == EXPECTED_ARTIFACTS,
          "all three qualified artifact digests must match")
     gate("owner_qualification", facts.get("qualification_matches") is True,
@@ -971,42 +1160,48 @@ def evaluate_plan(facts):
     gate("module_and_mapper", facts.get("module_loaded") is False and
          facts.get("owned_mapper_present") is False,
          "no pre-existing swapz module or live-trial mapper")
-    fallback = facts.get("fallback")
-    fallback_ok = isinstance(fallback, dict) and \
-        fallback.get("active") is True and \
-        fallback.get("regular_root_owned_0600") is True and \
-        fallback.get("allocated_bytes", 0) >= fallback.get("size_bytes", 1) and \
-        fallback.get("free_bytes", 0) >= MIN_FALLBACK_BYTES and \
-        fallback.get("same_partition") is False and \
-        fallback.get("major_minor") != f"{DEVICE_MAJOR}:{DEVICE_MINOR}" and \
-        type(fallback.get("priority")) is int and \
-        0 <= fallback["priority"] < 32767
-    gate("fallback", fallback_ok,
-         "verified active allocated fallback with at least 512 MiB free")
-    if fallback_ok and fallback.get("same_physical_device"):
-        gate("fallback_media_risk", facts.get("approval", {}).get(
-            "accept_same_media_fallback") is True,
-            "same-USB fallback requires explicit residual-risk acceptance")
-    else:
-        gate("fallback_media_risk", fallback_ok,
-             "fallback media is independent or unavailable")
-    memory = facts.get("memory", {})
-    cgroup_ok = memory.get("cgroup_headroom_bytes") is None or \
-        memory.get("cgroup_headroom_bytes", -1) >= MIN_CGROUP_HEADROOM_BYTES
-    memory_ok = memory.get("mem_available_bytes", 0) >= MIN_AVAILABLE_BYTES and \
-        cgroup_ok and memory.get("psi_some_avg10", float("inf")) < \
-        MAX_MEMORY_SOME_AVG10 and memory.get("psi_full_avg10", float("inf")) < \
-        MAX_MEMORY_FULL_AVG10
-    gate("memory", memory_ok,
-         "MemAvailable >= 2 GiB, cgroup headroom >= 512 MiB when limited, "
-         "PSI some < 5% and full < 1%")
     approval = facts.get("approval")
+    fallback = facts.get("fallback")
+    no_fallback_ok = facts.get("fallback") is None and \
+        isinstance(approval, dict) and approval.get("fallback_mode") == "none" and \
+        approval.get("accept_no_fallback_risk") is True
+    gate("fallback", no_fallback_ok,
+         "owner and reviewer explicitly bind /dev/sda4 as the sole swap area")
+    gate("fallback_media_risk", no_fallback_ok,
+         "no fallback swap area is active or created")
+    memory = facts.get("memory", {})
+    numeric_keys = ("mem_available_bytes", "mem_total_bytes", "ram_used_percent",
+                    "psi_some_avg10", "psi_full_avg10")
+    numeric = all(isinstance(memory.get(key), (int, float)) and
+                  not isinstance(memory.get(key), bool) for key in numeric_keys)
+    cgroup_value = memory.get("cgroup_headroom_bytes")
+    cgroup_ok = cgroup_value is None or (
+        isinstance(cgroup_value, int) and cgroup_value >= MIN_CGROUP_HEADROOM_BYTES)
+    original_swap_bytes = target_used_kib * 1024 if type(target_used_kib) is int else None
+    original_drain_headroom = (
+        memory.get("mem_available_bytes") - original_swap_bytes - MIN_AVAILABLE_BYTES
+        if numeric and original_swap_bytes is not None else -1)
+    memory_ok = numeric and \
+        memory.get("mem_available_bytes") >= MIN_AVAILABLE_BYTES and \
+        memory.get("mem_total_bytes") > 0 and \
+        memory.get("ram_used_percent") < 50.0 and \
+        original_drain_headroom >= TRIAL_HEADROOM_BYTES and \
+        cgroup_ok and \
+        memory.get("psi_some_avg10") < MAX_MEMORY_SOME_AVG10 and \
+        memory.get("psi_full_avg10") < MAX_MEMORY_FULL_AVG10
+    gate("memory", memory_ok,
+         "RAM use < 50%, MemAvailable covers current swap plus the 2 GiB reserve "
+         "and 1 GiB trial headroom, cgroup headroom >= 512 MiB when limited, "
+         "PSI some < 5% and full < 1%")
+
+
     approval_ok = isinstance(approval, dict) and \
         approval.get("validated") is True and \
         approval.get("run_id_unconsumed") is True and \
         approval.get("state_directory_unused") is True
     gate("one_use_review", approval_ok,
-         "requires fresh external review and explicit owner authorization")
+         "requires a one-use approval bound to this commit with owner "
+         "authorization and either verbal external review or the exact waiver")
     return {
         "schema": "swapz-live-swap-plan-v1",
         "read_only": True,
@@ -1016,6 +1211,7 @@ def evaluate_plan(facts):
         "head": repo.get("head"),
         "device": target.get("device"),
         "fallback": fallback,
+        "original_swap_drain_headroom_bytes": original_drain_headroom,
     }
 
 
@@ -1091,6 +1287,8 @@ def collect_plan_facts(approval_path, ops=None):
         raw = ops.memory_facts()
         facts["memory"] = {
             "mem_available_bytes": raw["MemAvailable"],
+            "mem_total_bytes": raw["MemTotal"],
+            "ram_used_percent": raw["ram_used_percent"],
             "cgroup_headroom_bytes": raw.get("cgroup_headroom"),
             "psi_some_avg10": raw["psi_some_avg10"],
             "psi_full_avg10": raw["psi_full_avg10"],
@@ -1098,23 +1296,16 @@ def collect_plan_facts(approval_path, ops=None):
     except Exception as exc:
         errors.append(_bounded(exc))
     try:
+        facts["ci"] = ops.ci_status((facts.get("repo") or {}).get("head"))
+    except Exception as exc:
+        facts["ci"] = {"status": None, "commit_sha": None, "workflows": None}
+        errors.append(_bounded(exc))
+    try:
         approval = _load_unique_json(approval_path)
-        facts["ci"] = {
-            "status": approval.get("ci_status"),
-            "commit_sha": approval.get("ci_commit_sha"),
-            "workflows": approval.get("ci_workflows"),
-        }
-        fallback = ops.fallback_facts(approval.get("fallback", {}).get("path"))
-        if fallback is not None:
-            fallback["free_bytes"] = max(
-                0, (fallback["size_kib"] - fallback["used_kib"]) * 1024)
-            fallback["active"] = True
-            fallback["regular_root_owned_0600"] = True
-            facts["swap_inventory_exact"] = _exact_active_swap_inventory(
-                ops, fallback["path"])
-        else:
-            facts["swap_inventory_exact"] = False
-        facts["fallback"] = fallback
+        facts["approval_sha256"] = _approval_digest(approval)
+        fallback = None
+        facts["swap_inventory_exact"] = _exact_active_swap_inventory(ops)
+        facts["fallback"] = None
         artifacts = facts.get("artifacts", {})
         repo = facts.get("repo", {})
         target = facts.get("target", {})
@@ -1124,7 +1315,6 @@ def collect_plan_facts(approval_path, ops=None):
             helper_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             artifacts=artifacts,
             target=target,
-            fallback=fallback,
         )
         base = ops.recovery_base(target)
         run_id = approval["run_id"]
@@ -1150,8 +1340,9 @@ def read_only_plan(approval_path, ops=None):
     facts = collect_plan_facts(approval_path, ops=ops)
     plan = evaluate_plan(facts)
     plan["errors"] = facts.get("errors", [])
+    plan["approval_sha256"] = facts.get("approval_sha256")
     # Inert description of the future sequence; no mutation is run here and
-    # a PASS still requires separate review and owner authorization.
+    # a PASS still requires the one-use approval bound to this commit.
     plan["operation_trace"] = list(PLANNED_MUTATION_TRACE)
     return plan
 
@@ -1167,6 +1358,7 @@ def _target_state(target):
         "original_header_sha256": ORIGINAL_HEADER_SHA256,
         "swap_path": target["swap_path"],
         "swap_size_kib": target["swap_size_kib"],
+        "swap_used_kib": target["swap_used_kib"],
         "swap_priority": target["swap_priority"],
     }
 
@@ -1257,28 +1449,6 @@ def _active_swap_row(ops, major, minor):
     return rows[0] if rows else None
 
 
-def _fallback_binding(fallback):
-    return {key: fallback[key] for key in (
-        "path", "device", "inode", "major_minor", "filesystem", "mode",
-        "uid", "size_bytes", "priority", "same_partition",
-        "same_physical_device")}
-
-
-def _verify_fallback(ops, state, *, require_capacity=True):
-    expected = state["fallback"]
-    actual = ops.fallback_facts(expected["path"])
-    if _fallback_binding(actual) != _fallback_binding(expected):
-        raise LiveSwapError("verified fallback identity or configuration changed")
-    free_bytes = max(0, (actual["size_kib"] - actual["used_kib"]) * 1024)
-    if actual["used_kib"] < 0 or actual["size_kib"] * 1024 > actual["size_bytes"]:
-        raise LiveSwapError("fallback swap accounting is inconsistent")
-    if type(actual["priority"]) is not int or not 0 <= actual["priority"] < 32767:
-        raise LiveSwapError("fallback priority cannot preserve original default swap priority")
-    if require_capacity and free_bytes < MIN_FALLBACK_BYTES:
-        raise LiveSwapError("fallback has less than 512 MiB available capacity")
-    return {**actual, "free_bytes": free_bytes, "active": True}
-
-
 def _mapper_info(ops, state):
     result = ops.command([
         "dmsetup", "info", "-c", "--noheadings",
@@ -1297,7 +1467,7 @@ def _mapper_info(ops, state):
     return dm_major, dm_minor, opened
 
 
-def _verify_mapper(ops, state, *, allow_open=False):
+def _verify_mapper_once(ops, state, *, allow_open=False):
     dm_major, dm_minor, opened = _mapper_info(ops, state)
     node = f"/dev/mapper/{state['dm_name']}"
     if PHYSICAL.block_identity(node) != (dm_major, dm_minor):
@@ -1320,6 +1490,18 @@ def _verify_mapper(ops, state, *, allow_open=False):
         state, sysfs_identity=(actual_name, actual_uuid, size, lower),
         table_output=table.stdout, open_count=opened, allow_open=allow_open)
     return node
+
+
+def _verify_mapper(ops, state, *, allow_open=False):
+    """Zero-open checks retry briefly: udev probes can hold a fresh mapper open."""
+    for attempt in range(MAPPER_OPEN_ATTEMPTS):
+        try:
+            return _verify_mapper_once(ops, state, allow_open=allow_open)
+        except LiveSwapError as exc:
+            if allow_open or "open references" not in str(exc) or \
+                    attempt == MAPPER_OPEN_ATTEMPTS - 1:
+                raise
+        time.sleep(0.5)
 
 
 def _validate_mapper_observation(state, *, sysfs_identity, table_output,
@@ -1370,20 +1552,315 @@ def _memory_sample(ops):
     facts = ops.memory_facts()
     return {
         "mem_available_bytes": facts["MemAvailable"],
+        "mem_total_bytes": facts["MemTotal"],
+        "ram_used_percent": facts["ram_used_percent"],
         "cgroup_headroom_bytes": facts.get("cgroup_headroom"),
         "psi_some_avg10": facts["psi_some_avg10"],
         "psi_full_avg10": facts["psi_full_avg10"],
     }
 
 
-def _check_memory_sample(sample):
+def _check_memory_sample(sample, *, require_low_ram=False):
     headroom = sample.get("cgroup_headroom_bytes")
     if sample["mem_available_bytes"] < MIN_AVAILABLE_BYTES or \
             (headroom is not None and
              headroom < MIN_CGROUP_HEADROOM_BYTES) or \
             sample["psi_some_avg10"] >= MAX_MEMORY_SOME_AVG10 or \
             sample["psi_full_avg10"] >= MAX_MEMORY_FULL_AVG10:
-        raise LiveSwapError("memory pressure reached the conservative stop threshold")
+        raise SafeStop(
+            "memory_pressure",
+            "memory pressure reached the conservative stop threshold")
+    if require_low_ram and sample.get("ram_used_percent", 100.0) >= 50.0:
+        raise SafeStop(
+            "ram_not_low",
+            "RAM use must be below 50 percent before original swapoff")
+
+
+def _drain_headroom_bytes(mapper_used_kib, memory):
+    """RAM capacity remaining after swap pages and the 2 GiB reserve."""
+    if type(mapper_used_kib) is not int or mapper_used_kib < 0 or \
+            not isinstance(memory, dict) or \
+            type(memory.get("mem_available_bytes")) is not int:
+        raise LiveSwapError("mapper drain-capacity evidence is malformed")
+    return memory["mem_available_bytes"] - MIN_AVAILABLE_BYTES - mapper_used_kib * 1024
+
+
+def _check_drain_headroom(mapper_used_kib, memory):
+    headroom = _drain_headroom_bytes(mapper_used_kib, memory)
+    if headroom < MIN_DRAIN_HEADROOM_BYTES:
+        raise SafeStop(
+            "drain_headroom",
+            "available RAM cannot safely evacuate active swap pages")
+    return headroom
+
+
+def _pressure_page(seed, index):
+    """Deterministic, incompressible 4 KiB page for one working-set index."""
+    return hashlib.shake_256(seed + index.to_bytes(8, "little")).digest(PAGE_BYTES)
+
+
+def _pressure_verify(working_set, seed, pages):
+    """Count pages whose bytes differ from the deterministic expectation."""
+    mismatches = 0
+    for index in range(pages):
+        offset = index * PAGE_BYTES
+        if working_set[offset:offset + PAGE_BYTES] != _pressure_page(seed, index):
+            mismatches += 1
+    return mismatches
+
+
+def _check_start_headroom(original_used_kib, memory):
+    headroom = _drain_headroom_bytes(original_used_kib, memory)
+    if headroom < TRIAL_HEADROOM_BYTES:
+        raise SafeStop(
+            "drain_headroom",
+            "available RAM cannot start the trial with the required headroom")
+    return headroom
+
+
+def _pressure_run(run_id, pages):
+    """Fill, verify and count one deterministic working set in memory."""
+    seed = run_id.encode("ascii")
+    started = time.monotonic()
+    working_set = bytearray(pages * PAGE_BYTES)
+    for index in range(pages):
+        offset = index * PAGE_BYTES
+        working_set[offset:offset + PAGE_BYTES] = _pressure_page(seed, index)
+    mismatches = _pressure_verify(working_set, seed, pages)
+    return {
+        "verified_pages": pages - mismatches,
+        "mismatches": mismatches,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+    }
+
+
+def _set_parent_death_signal():
+    """Kill the child if the supervisor dies, so no pressure process outlives it."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+        raise OSError(ctypes.get_errno(), "cannot set parent-death signal")
+
+
+def _pressure_child(cgroup, run_id, pages, deadline_seconds, report_fd):
+    """Forked child: join the cgroup, exceed its limit, verify, report, exit.
+
+    The child runs code the supervisor already loaded and verified, so nothing
+    is re-read from disk. It always ends through os._exit.
+    """
+    code = 2
+    try:
+        _set_parent_death_signal()
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.alarm(int(deadline_seconds))
+        with open(Path(cgroup) / "cgroup.procs", "w") as procs:
+            procs.write(f"{os.getpid()}\n")
+        result = _pressure_run(run_id, pages)
+        data = memoryview((json.dumps(result, sort_keys=True) + "\n").encode())
+        while data:
+            data = data[os.write(report_fd, data):]
+        code = 0 if result["mismatches"] == 0 else 1
+    except BaseException:
+        code = 2
+    finally:
+        os._exit(code)
+
+
+def _spawn_pressure_child(cgroup, run_id, pages, deadline_seconds):
+    read_fd, write_fd = os.pipe()
+    try:
+        pid = os.fork()
+    except BaseException:
+        os.close(read_fd)
+        os.close(write_fd)
+        raise
+    if pid == 0:
+        os.close(read_fd)
+        _pressure_child(cgroup, run_id, pages, deadline_seconds, write_fd)
+    os.close(write_fd)
+    return pid, read_fd
+
+
+def _read_all_fd(fd):
+    """Read the child's report to EOF, bounded; the child has already exited."""
+    chunks = []
+    total = 0
+    while True:
+        chunk = os.read(fd, 4096)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > RESULT_LIMIT:
+            raise LiveSwapError("pressure child report exceeds its bound")
+        chunks.append(chunk)
+    return b"".join(chunks).decode("utf-8", errors="replace")
+
+
+def _terminate_pressure_child(cgroup, pid):
+    """Kill the pressure child and its cgroup, then reap it and return its status."""
+    try:
+        _kill_cgroup(cgroup)
+    except OSError:
+        pass
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + 60
+    while True:
+        waited, status = os.waitpid(pid, os.WNOHANG)
+        if waited == pid:
+            return status
+        if time.monotonic() >= deadline:
+            raise LiveSwapError(
+                "pressure child did not exit after SIGKILL; manual review")
+        time.sleep(0.2)
+
+
+def _require_control(path, expected):
+    if Path(path).read_text().strip() != expected:
+        raise LiveSwapError(f"pressure cgroup control was not applied: {Path(path).name}")
+
+
+def _pressure_guard(ops, state, progress):
+    """While the child runs: keep RAM above the floor and record swapz use.
+
+    PSI is deliberately not checked here. The check causes reclaim on purpose,
+    so its stalls are expected.
+    """
+    memory = _memory_sample(ops)
+    if memory["mem_available_bytes"] < MIN_AVAILABLE_BYTES:
+        raise SafeStop(
+            "memory_floor",
+            "MemAvailable fell below the 2 GiB floor during swap pressure")
+    row = ops.active_swap_for(state["dm_major"], state["dm_minor"])
+    used_kib = row["used_kib"] if row is not None else 0
+    progress["peak_mapper_used_kib"] = max(progress["peak_mapper_used_kib"], used_kib)
+    if _drain_headroom_bytes(used_kib, memory) < TRIAL_HEADROOM_BYTES:
+        raise SafeStop(
+            "mapper_drain_headroom_low",
+            "mapper drain headroom fell below the trial stop threshold during swap pressure")
+    return used_kib
+
+
+def _parse_pressure_child_output(text):
+    lines = [line for line in str(text).splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        value = json.loads(lines[-1])
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _write_control(path, value):
+    with open(path, "w") as handle:
+        handle.write(f"{value}\n")
+
+
+def _kill_cgroup(cgroup):
+    kill_file = Path(cgroup) / "cgroup.kill"
+    if kill_file.exists():
+        _write_control(kill_file, "1")
+
+
+def _read_int_control(path):
+    try:
+        text = Path(path).read_text().strip()
+    except FileNotFoundError:
+        return None
+    if not re.fullmatch(r"[0-9]+", text):
+        raise LiveSwapError("cgroup counter is malformed")
+    return int(text)
+
+
+def _read_memory_events(cgroup):
+    events = {}
+    try:
+        text = (Path(cgroup) / "memory.events").read_text()
+    except FileNotFoundError:
+        return events
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1].isdigit():
+            events[fields[0]] = int(fields[1])
+    return events
+
+
+def _remove_empty_cgroup(cgroup):
+    try:
+        os.rmdir(cgroup)
+    except OSError as exc:
+        raise LiveSwapError(
+            "pressure cgroup could not be removed; manual review") from exc
+
+
+def _run_pressure_phase(state_dir, state, results, ops):
+    """Run one forked, guarded, byte-verified swap-pressure child, then validate it."""
+    cgroup_name = f"swapz-live-{secrets.token_hex(8)}"
+    state["pressure_cgroup"] = cgroup_name
+    _save_state(state_dir, state)
+    progress = {"peak_mapper_used_kib": 0}
+    phase = {
+        "status": "FAIL",
+        "cgroup": cgroup_name,
+        "memory_max_bytes": PRESSURE_MEMORY_MAX_BYTES,
+        "zswap_max_bytes": 0,
+        "requested_pages": PRESSURE_PAGES,
+        "peak_mapper_used_kib": 0,
+    }
+    results["pressure_phase"] = phase
+    try:
+        outcome = ops.pressure_workload(
+            state, cgroup_name=cgroup_name,
+            guard=lambda: _pressure_guard(ops, state, progress),
+            stop_requested=ops.stop_requested,
+            timeout=PRESSURE_TIMEOUT_SECONDS)
+    except SafeStop as exc:
+        phase.update(status="SAFE_STOP", error=_bounded(exc),
+                     peak_mapper_used_kib=progress["peak_mapper_used_kib"])
+        _save_results(state_dir, results)
+        raise
+    except LiveSwapError as exc:
+        phase.update(status="FAIL", error=_bounded(exc),
+                     peak_mapper_used_kib=progress["peak_mapper_used_kib"])
+        _save_results(state_dir, results)
+        raise
+    child = _parse_pressure_child_output(outcome.get("stdout", ""))
+    memory_events = outcome.get("memory_events") or {}
+    phase.update(
+        exit_code=outcome.get("exit_code"),
+        timed_out=outcome.get("timed_out") is True,
+        stopped=outcome.get("stopped") is True,
+        memory_events=memory_events,
+        child=child,
+        swap_peak_bytes=outcome.get("swap_peak_bytes"),
+        zswap_peak_bytes=outcome.get("zswap_peak_bytes"),
+        peak_mapper_used_kib=progress["peak_mapper_used_kib"],
+        stderr=_bounded(outcome.get("stderr", "")),
+    )
+    _save_results(state_dir, results)
+    if phase["stopped"]:
+        raise SafeStop("operator_stop",
+                       "operator requested a supervised stop during swap pressure")
+    if phase["timed_out"]:
+        raise LiveSwapError("swap-pressure child exceeded its bounded timeout")
+    swap_peak = phase["swap_peak_bytes"]
+    zswap_peak = phase["zswap_peak_bytes"]
+    if phase["exit_code"] != 0 or child is None or \
+            child.get("mismatches") != 0 or \
+            child.get("verified_pages") != PRESSURE_PAGES or \
+            memory_events.get("oom_kill", 1) != 0:
+        raise LiveSwapError("swap-pressure verification failed")
+    if type(swap_peak) is not int or swap_peak <= 0 or \
+            (zswap_peak is not None and zswap_peak != 0):
+        raise LiveSwapError("swap-pressure did not reach the swap device")
+    if progress["peak_mapper_used_kib"] <= 0:
+        raise LiveSwapError("swapz mapper showed no swap use during the pressure check")
+    phase["status"] = "PASS"
+    _save_results(state_dir, results)
+    return phase
 
 
 def _save_observation(state_dir, state, results, ops, *, first=False):
@@ -1392,10 +1869,11 @@ def _save_observation(state_dir, state, results, ops, *, first=False):
     vmstat = _read_vmstat(ops)
     memory = _memory_sample(ops)
     _check_memory_sample(memory)
-    fallback = _verify_fallback(ops, state)
+    _verify_trial_swap_inventory(ops, state)
     row = _active_swap_row(ops, state["dm_major"], state["dm_minor"])
     if row is None:
         raise LiveSwapError("experimental mapper is not active as swap")
+    drain_headroom = _drain_headroom_bytes(row["used_kib"], memory)
     entry = {
         "timestamp": _utc_now(),
         "swap_used_kib": row["used_kib"],
@@ -1403,8 +1881,7 @@ def _save_observation(state_dir, state, results, ops, *, first=False):
         "swap_priority": row["priority"],
         "vmstat": vmstat,
         "memory": memory,
-        "fallback_used_kib": fallback["used_kib"],
-        "fallback_free_bytes": fallback["free_bytes"],
+        "drain_headroom_bytes": drain_headroom,
         "dmsetup_status": status,
         "block_stats": PHYSICAL._block_stat_snapshot({
             "major": state["major"], "minor": state["minor"],
@@ -1420,31 +1897,35 @@ def _save_observation(state_dir, state, results, ops, *, first=False):
 
 
 def _actual_swap_io(results):
+    """Require kernel swap-out and swap-in, mapper traffic and lower-device writes."""
     baseline = results.get("trial_baseline")
     observations = results.get("observations", [])
-    if not isinstance(baseline, dict) or not observations:
+    pressure = results.get("pressure_phase")
+    if not isinstance(baseline, dict) or not observations or \
+            not isinstance(pressure, dict) or pressure.get("status") != "PASS":
+        return False
+    peak_kib = pressure.get("peak_mapper_used_kib")
+    if type(peak_kib) is not int or peak_kib <= 0:
+        return False
+    final = observations[-1]
+    before_block = baseline.get("block_stats", {})
+    after_block = final.get("block_stats", {})
+    if not before_block.get("available") or not after_block.get("available"):
+        return False
+    before = before_block.get("values", [])
+    after = after_block.get("values", [])
+    if len(before) < 8 or len(after) < 8:
         return False
     initial_vm = baseline["vmstat"]
+    final_vm = final["vmstat"]
     initial_dm = baseline["dmsetup_status"]["counters"]
-    physical_baseline = baseline.get("block_stats", {})
-    if not physical_baseline.get("available"):
-        return False
-    for sample in observations:
-        physical = sample.get("block_stats", {})
-        if not physical.get("available"):
-            continue
-        before = physical_baseline.get("values", [])
-        after = physical.get("values", [])
-        if len(before) < 8 or len(after) < 8:
-            continue
-        vm_write = sample["vmstat"]["pswpout"] > initial_vm["pswpout"]
-        dm_write = sample["dmsetup_status"]["counters"].get(
-            "logical_write", 0) > initial_dm.get("logical_write", 0)
-        swap_used = sample.get("swap_used_kib", 0) > 0
-        lower_write = after[4] > before[4] or after[6] > before[6]
-        if vm_write and dm_write and swap_used and lower_write:
-            return True
-    return False
+    final_dm = final["dmsetup_status"]["counters"]
+    return bool(
+        final_vm["pswpout"] > initial_vm["pswpout"] and
+        final_vm["pswpin"] > initial_vm["pswpin"] and
+        final_dm.get("logical_write", 0) > initial_dm.get("logical_write", 0) and
+        final_dm.get("logical_read", 0) > initial_dm.get("logical_read", 0) and
+        (after[4] > before[4] or after[6] > before[6]))
 
 
 def _release_marker(state):
@@ -1496,7 +1977,9 @@ def _create_durable_state(approval, target, plan, state_dir, ops):
         "dm_uuid": None,
         "module_loaded_by_process": False,
         "active_mapper_swap": False,
-        "fallback": dict(plan["fallback"]),
+        "fallback_mode": "none",
+        "fallback": None,
+        "initial_swap_used_kib": target["swap_used_kib"],
         "authorization_sha256": _approval_digest(approval),
     }
     _save_state(state_dir, state)
@@ -1542,14 +2025,14 @@ def _validate_state(state, backup, state_dir):
         raise LiveSwapError("saved live-trial device identity differs")
 
 
-def _record_phase(state_dir, state, results, ops, phase, argv):
+def _record_phase(state_dir, state, results, ops, phase, argv, *, timeout=120):
     entry = {"phase": phase, "argv": list(map(str, argv)),
              "started_at": _utc_now(), "return_code": None,
              "stdout": "", "stderr": "", "status": "STARTED"}
     results.setdefault("phases", []).append(entry)
     _save_results(state_dir, results)
     try:
-        result = ops.mutate(argv, timeout=120)
+        result = ops.mutate(argv, timeout=timeout)
         entry["return_code"] = result.returncode
         entry["stdout"] = _bounded(result.stdout)
         entry["stderr"] = _bounded(result.stderr)
@@ -1572,27 +2055,39 @@ def _record_phase(state_dir, state, results, ops, phase, argv):
 
 def _activate_trial(state_dir, state, results, target, snapshots, ops,
                     monotonic=time.monotonic, sleep=time.sleep):
-    """Run the activation and bounded observation stages; never masks failure."""
+    """Run activation, one swap-pressure check and bounded observation."""
     _check_stop(ops)
     _transition(state_dir, state, "ORIGINAL_SWAPOFF_PENDING", results)
     _verify_artifacts(ops, state["artifact_digests"])
     _verify_snapshots(snapshots, state["artifact_digests"])
-    _verify_fallback(ops, state)
+    _verify_trial_swap_inventory(ops, state)
     repo = ops.repo_snapshot()
     if repo.get("branch") != "main" or repo.get("clean") is not True or \
             repo.get("head") != state["head"] or \
             repo.get("origin_main") != state["head"] or \
             repo.get("canonical_main") != state["head"]:
         raise LiveSwapError("main or canonical GitHub HEAD changed after admission")
-    _check_memory_sample(_memory_sample(ops))
+    memory = _memory_sample(ops)
+    _check_memory_sample(memory, require_low_ram=True)
     ops.recheck_target(state, expected_header=ORIGINAL_HEADER_SHA256,
-                       require_active=True, require_zero=True)
+                       require_active=True, require_zero=False)
+    original_swap = ops.active_swap_for(state["major"], state["minor"])
+    if original_swap is None or \
+            original_swap["priority"] != state["swap_priority"] or \
+            original_swap["size_kib"] != state["swap_size_kib"]:
+        raise LiveSwapError("original swap size, priority or active identity changed")
+    results["original_swap_used_before_swapoff_kib"] = original_swap["used_kib"]
+    results["original_swap_drain_headroom_bytes"] = _check_start_headroom(
+        original_swap["used_kib"], memory)
+    _save_results(state_dir, results)
     _record_phase(state_dir, state, results, ops, "original_swapoff",
-                  ["swapoff", "--", state["swap_path"]])
+                  ["swapoff", "--", state["swap_path"]],
+                  timeout=SWAPOFF_TIMEOUT_SECONDS)
     if ops.active_swap_for(state["major"], state["minor"]) is not None:
         raise LiveSwapError("original partition remains active after swapoff")
     state["original_swapoff_complete"] = True
     _transition(state_dir, state, "ORIGINAL_SWAP_OFF", results)
+    _verify_trial_swap_inventory(ops, state)
     _check_stop(ops)
 
     _transition(state_dir, state, "HEADER_CLEAR_PENDING", results)
@@ -1679,9 +2174,6 @@ def _activate_trial(state_dir, state, results, target, snapshots, ops,
     _transition(state_dir, state, "MAPPED_SWAP_READY", results)
     _check_stop(ops)
 
-    fallback_priority = state["fallback"]["priority"]
-    if type(fallback_priority) is not int or not 0 <= fallback_priority < 32767:
-        raise LiveSwapError("fallback priority cannot be safely outranked")
     state["mapper_priority"] = 32767
     _verify_mapper(ops, state)
     _transition(state_dir, state, "SWAPON_PENDING", results)
@@ -1695,6 +2187,7 @@ def _activate_trial(state_dir, state, results, target, snapshots, ops,
         raise LiveSwapError("mapped swap entry has wrong identity, size or priority")
     state["active_mapper_swap"] = True
     _transition(state_dir, state, "LIVE_SWAP_ACTIVE", results)
+    _verify_trial_swap_inventory(ops, state)
     _check_stop(ops)
     results["trial_start_timestamp"] = _utc_now()
     results["trial_baseline"] = None
@@ -1703,22 +2196,32 @@ def _activate_trial(state_dir, state, results, target, snapshots, ops,
 
     start = monotonic()
     deadline = start + TRIAL_SECONDS
-    first = True
     stop_reason = None
-    while monotonic() < deadline:
-        if ops.stop_requested():
-            stop_reason = "operator_stop"
-            break
-        sample = _save_observation(
-            state_dir, state, results, ops, first=first)
-        first = False
-        remaining = deadline - monotonic()
-        if remaining <= 0:
-            break
-        sleep(min(SAMPLE_SECONDS, remaining))
-        if ops.stop_requested():
-            stop_reason = "operator_stop"
-            break
+    try:
+        baseline = _save_observation(state_dir, state, results, ops, first=True)
+        if baseline["drain_headroom_bytes"] < TRIAL_HEADROOM_BYTES:
+            raise SafeStop(
+                "baseline_headroom_low",
+                "mapper baseline headroom is below the trial stop threshold")
+        _run_pressure_phase(state_dir, state, results, ops)
+        for _ in range(PRESSURE_SETTLE_SECONDS // SAMPLE_SECONDS):
+            _check_stop(ops)
+            sleep(SAMPLE_SECONDS)
+        while monotonic() < deadline:
+            _check_stop(ops)
+            sample = _save_observation(
+                state_dir, state, results, ops, first=False)
+            if sample["drain_headroom_bytes"] < TRIAL_HEADROOM_BYTES:
+                raise SafeStop(
+                    "mapper_drain_headroom_low",
+                    "mapper drain headroom fell below the safe stop threshold")
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                break
+            sleep(min(SAMPLE_SECONDS, remaining))
+    except SafeStop as exc:
+        stop_reason = exc.reason
+        results["safe_stop_detail"] = _bounded(exc)
     results["trial_end_timestamp"] = _utc_now()
     results["trial_duration_seconds"] = min(
         TRIAL_SECONDS, max(0, int(monotonic() - start)))
@@ -1800,7 +2303,10 @@ def _cleanup_and_restore(state_dir, state, results, ops, *,
     """Conditional normal/failure cleanup, preserving an active mapper on error."""
     state_dir = Path(state_dir)
     _transition(state_dir, state, "TRIAL_STOPPING", results)
+    ops.release_pressure_cgroup(state)
+    _reconcile_trial_state(state_dir, state, ops)
     target = ops.target_descriptor(state)
+    _verify_trial_swap_inventory(ops, state)
     live_rows = _mapper_rows_for_state(ops, state)
     if live_rows:
         _verify_mapper(ops, state, allow_open=True)
@@ -1808,19 +2314,33 @@ def _cleanup_and_restore(state_dir, state, results, ops, *,
         state["dm_major"], state["dm_minor"] = dm_major, dm_minor
         active = ops.active_swap_for(dm_major, dm_minor)
         if active is not None:
-            _verify_fallback(ops, state)
             sample = _memory_sample(ops)
-            _check_memory_sample(sample)
+            drain_headroom = _check_drain_headroom(active["used_kib"], sample)
+            results["mapper_swapoff_drain_headroom_bytes"] = drain_headroom
+            _save_results(state_dir, results)
             _transition(state_dir, state, "MAPPER_SWAPOFF_PENDING", results)
             _record_phase(state_dir, state, results, ops, "swapoff_mapper",
-                          ["swapoff", "--", f"/dev/mapper/{state['dm_name']}"])
+                          ["swapoff", "--", f"/dev/mapper/{state['dm_name']}"],
+                          timeout=SWAPOFF_TIMEOUT_SECONDS)
             if ops.active_swap_for(dm_major, dm_minor) is not None:
                 raise LiveSwapError(
                     "mapper swap remains active after successful swapoff")
+            state["active_mapper_swap"] = False
+            _save_state(state_dir, state)
+            _verify_trial_swap_inventory(ops, state)
         _verify_mapper(ops, state, allow_open=False)
         _transition(state_dir, state, "MAPPER_REMOVE_PENDING", results)
-        _record_phase(state_dir, state, results, ops, "remove_mapper",
-                      ["dmsetup", "remove", "--", state["dm_name"]])
+        for attempt in range(1, MAPPER_OPEN_ATTEMPTS + 1):
+            try:
+                _record_phase(state_dir, state, results, ops,
+                              f"remove_mapper_attempt_{attempt}",
+                              ["dmsetup", "remove", "--", state["dm_name"]])
+                break
+            except LiveSwapError:
+                if attempt == MAPPER_OPEN_ATTEMPTS or \
+                        not _mapper_rows_for_state(ops, state):
+                    raise
+                time.sleep(0.5)
         if _mapper_rows_for_state(ops, state):
             raise LiveSwapError("owned mapper remains after normal removal")
         state["mapper_removal_succeeded"] = True
@@ -1872,8 +2392,7 @@ def _cleanup_and_restore(state_dir, state, results, ops, *,
             state["swap_size_kib"], state["swap_priority"]):
         raise LiveSwapError("original swap size or priority failed restoration")
     state["original_swap_restored"] = True
-
-    state["fallback_cleanup"] = "left_active_for_operator"
+    _verify_trial_swap_inventory(ops, state)
 
     state["recovery_state"] = "COMPLETE"
     _transition(state_dir, state, "COMPLETE", results)
@@ -1884,11 +2403,33 @@ def _cleanup_and_restore(state_dir, state, results, ops, *,
     results["mapper_removal_succeeded"] = not bool(
         _mapper_rows_for_state(ops, state))
     results["module_cleanup"] = state["module_cleanup"]
-    results["fallback_cleanup"] = state["fallback_cleanup"]
     results["end_timestamp"] = _utc_now()
     _release_marker(state)
     _save_results(state_dir, results)
     return {"status": "COMPLETE", "state": state}
+
+
+def _existing_results(state_dir, state):
+    try:
+        return PHYSICAL._load_unique_json(
+            _read_recovery_file(Path(state_dir) / RESULTS_NAME))
+    except (LiveSwapError, OSError, ValueError):
+        return {
+            "schema": "swapz-live-swap-results-v1",
+            "run_id": state["run_id"],
+            "commands": [],
+            "phases": [],
+            "observations": [],
+            "state_dir": str(state_dir),
+        }
+
+
+def _recovery_refusal(state_dir, state, message):
+    """Record REQUIRES_REVIEW for a refusal, so stranded swap is never silent."""
+    error = LiveSwapError(message)
+    _record_recovery_required(
+        state_dir, state, _existing_results(state_dir, state), error)
+    return error
 
 
 def recover_state(state_dir, *, ops=None, module_owned_by_process=False,
@@ -1906,54 +2447,60 @@ def recover_state(state_dir, *, ops=None, module_owned_by_process=False,
     target = ops.target_descriptor(state)
     kind = _recognized_current_header(target["header"], state)
     if _mapper_rows_for_state(ops, state):
-        raise LiveSwapError(
+        raise _recovery_refusal(
+            state_dir, state,
             "mapper still exists; standalone recovery will not remove a live mapping")
     active = ops.active_swap_for(state["major"], state["minor"])
     if active is not None and (kind != "ORIGINAL" or (
             active["size_kib"], active["priority"]) != (
             state["swap_size_kib"], state["swap_priority"])):
-        raise LiveSwapError("active swap conflicts with saved recovery state")
+        raise _recovery_refusal(
+            state_dir, state, "active swap conflicts with saved recovery state")
     if ops.target_holders(state["major"], state["minor"]):
-        raise LiveSwapError("backing partition has holders; recovery stopped")
+        raise _recovery_refusal(
+            state_dir, state, "backing partition has holders; recovery stopped")
     if state.get("stage") != "COMPLETE":
-        results_path = state_dir / RESULTS_NAME
+        results = _existing_results(state_dir, state)
         try:
-            results = PHYSICAL._load_unique_json(
-                _read_recovery_file(results_path))
-        except (LiveSwapError, OSError, ValueError):
-            results = {
-                "schema": "swapz-live-swap-results-v1",
-                "run_id": state["run_id"],
-                "commands": [],
-                "phases": [],
-                "observations": [],
-                "state_dir": str(state_dir),
-            }
-        result = _cleanup_and_restore(
-            state_dir, state, results, ops,
-            module_owned_by_process=module_owned_by_process)
-        return result
+            return _cleanup_and_restore(
+                state_dir, state, results, ops,
+                module_owned_by_process=module_owned_by_process)
+        except BaseException as exc:
+            _record_recovery_required(state_dir, state, results, exc)
+            raise
     final = ops.active_swap_for(state["major"], state["minor"])
     if final is None or (final["size_kib"], final["priority"]) != (
             state["swap_size_kib"], state["swap_priority"]):
-        raise LiveSwapError("COMPLETE state does not match current normal swap")
+        raise _recovery_refusal(
+            state_dir, state, "COMPLETE state does not match current normal swap")
     if hashlib.sha256(ops.read_header(target)).hexdigest() != \
             ORIGINAL_HEADER_SHA256 or ops.module_loaded() or \
             _mapper_rows_for_state(ops, state) or \
             ops.target_holders(state["major"], state["minor"]):
-        raise LiveSwapError("COMPLETE recovery state does not match current host state")
+        raise _recovery_refusal(
+            state_dir, state,
+            "COMPLETE recovery state does not match current host state")
     if marker_present:
         _release_marker(state)
     return {"status": "COMPLETE", "state": state}
 
 
+def _trial_outcome(activation_error, results):
+    if activation_error is not None and not isinstance(activation_error, SafeStop):
+        return "FAIL"
+    if activation_error is not None or \
+            results.get("stop_reason") != "duration_complete":
+        return "SAFE_STOP"
+    return "PASS" if results.get("actual_swap_io_observed") else "ACTIVATION_ONLY"
+
+
 def run_trial(approval_path, state_dir, *, confirm, ops=None,
               monotonic=time.monotonic, sleep=time.sleep):
-    """Execute one reviewed trial, with one cleanup attempt and no retry."""
+    """Execute one owner-authorized trial, with one cleanup attempt and no retry."""
     global _STOP_REQUESTED
     if not LIVE_SWAP_EXECUTION_ENABLED:
         raise LiveSwapError(
-            "live-swap mutations are disabled pending independent safety review")
+            "live-swap mutations are disabled pending owner authorization")
     ops = ops or LinuxOps()
     if os.geteuid() != 0:
         raise LiveSwapError("run requires root; no automatic privilege escalation")
@@ -1961,28 +2508,24 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
         raise LiveSwapError("run requires the exact LIVE-SWAP-TRIAL confirmation")
     lock_fd = PHYSICAL._partition_lock(DEVICE_PARTUUID)
     state_dir = Path(state_dir)
-    state = None
-    results = None
     _STOP_REQUESTED = False
     try:
         plan = read_only_plan(approval_path, ops=ops)
         if plan["status"] != "PASS":
             raise LiveSwapError("read-only plan is not fully positive")
         approval = _load_unique_json(approval_path)
+        if _approval_digest(approval) != plan.get("approval_sha256"):
+            raise LiveSwapError("approval record changed after the read-only plan")
         target = ops.inspect_target()
         _validate_target_facts(target)
-        fallback = ops.fallback_facts(approval["fallback"]["path"])
-        if _fallback_binding(fallback) != _fallback_binding(plan["fallback"]):
-            raise LiveSwapError("fallback changed after the locked read-only plan")
         run_id = validate_approval(
             approval,
             head=plan["head"],
             helper_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-            artifacts=ops.artifact_digests(), target=target,
-            fallback=fallback)
+            artifacts=ops.artifact_digests(), target=target)
         if run_id != approval.get("run_id"):
             raise LiveSwapError("approval run identity changed after the read-only plan")
-        _exact_active_swap_inventory(ops, fallback["path"])
+        _exact_active_swap_inventory(ops)
         state, backup, snapshots = _create_durable_state(
             approval, target, plan, state_dir, ops)
         results = {
@@ -1997,7 +2540,8 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
             "partuuid": DEVICE_PARTUUID,
             "size_bytes": DEVICE_SIZE_BYTES,
             "original_header_sha256": ORIGINAL_HEADER_SHA256,
-            "fallback": dict(state["fallback"]),
+            "fallback_mode": "none",
+            "logical_capacity_bytes": LOGICAL_BYTES,
             "start_timestamp": _utc_now(),
             "commands": [],
             "phases": [],
@@ -2017,6 +2561,8 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
         except BaseException as exc:
             activation_error = exc
             results["failure"] = _bounded(exc)
+            if isinstance(exc, SafeStop):
+                results.setdefault("stop_reason", exc.reason)
             _save_results(state_dir, results)
         try:
             recovery = _cleanup_and_restore(
@@ -2056,14 +2602,12 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
         results["final_recovery_state"] = recovery["state"]["stage"]
         results["recovery_disposition"] = "COMPLETE"
         results["actual_swap_io_observed"] = _actual_swap_io(results)
-        results["live_swap_trial"] = (
-            "PASS" if activation_error is None and
-            results["actual_swap_io_observed"] else
-            "ACTIVATION_ONLY" if activation_error is None else "FAIL")
+        results["live_swap_trial"] = _trial_outcome(activation_error, results)
         results["normal_swap_restored"] = True
         results["end_timestamp"] = _utc_now()
         _save_results(state_dir, results)
-        if activation_error is not None:
+        if activation_error is not None and \
+                not isinstance(activation_error, SafeStop):
             raise LiveSwapError(
                 f"live trial failed; normal swap restored; evidence retained at "
                 f"{state_dir}: {_bounded(activation_error)}") from activation_error
@@ -2098,7 +2642,7 @@ def main(argv=None):
     subparsers = parser.add_subparsers(dest="command", required=True)
     plan = subparsers.add_parser("plan", help="read-only host and approval gates")
     plan.add_argument("--approval", required=True)
-    run = subparsers.add_parser("run", help="run one reviewed 30-minute trial")
+    run = subparsers.add_parser("run", help="run one owner-authorized bounded trial")
     run.add_argument("--approval", required=True)
     run.add_argument("--state-dir", required=True)
     run.add_argument("--confirm", required=True)
@@ -2115,7 +2659,7 @@ def main(argv=None):
             result = run_trial(args.approval, args.state_dir,
                                confirm=args.confirm)
             print(json.dumps(result, sort_keys=True, indent=2))
-            return 0
+            return 0 if result["live_swap_trial"] in {"PASS", "SAFE_STOP"} else 2
         result = recover_cli(args.state_dir, confirm=args.confirm)
         print(json.dumps(result, sort_keys=True, indent=2))
         return 0

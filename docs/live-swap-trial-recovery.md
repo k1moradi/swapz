@@ -1,147 +1,188 @@
 # Experimental live-swap trial and recovery
 
-**Status: implementation prepared for review; live mutations remain disabled.**
+**Status: owner-waived, one bounded trial authorized; not a production deployment.**
+`LIVE_SWAP_EXECUTION_ENABLED` is true in the commit that carries this text. Each
+`run` still needs a one-use approval record bound to that exact commit, to both
+current CI workflows, to the qualified artifact hashes and to the live target.
+
+The owner waived the separate external-review requirement for this one trial on
+2026-11-02. That waiver is an owner decision. No external reviewer approval
+exists in this repository or on issue #76. The adversarial review performed
+before this change was run by internal agents; it is not an external review.
+
 This procedure is separate from the completed physical-backed byte-correctness
-smoke. It does not authorize a live trial or production use. The CLI accepts a
-read-only `plan`; `run` and `recover` fail closed while
-`LIVE_SWAP_EXECUTION_ENABLED` is false. Enabling them requires an independent
-review of the exact commit and a separate owner authorization record.
+smoke. It does not authorize repeated trials, boot integration, production use,
+endurance measurement or performance claims.
 
 ## Trial boundary
 
-The proposed experiment uses only `/dev/sda4` (8:4, PARTUUID
-`7fb9401d-04`) and limits the swapz mapper to 256 MiB for at most 30 minutes.
-It does not reuse the physical-smoke mapper or helper. It is not a performance,
-endurance, stress, hibernation or production qualification.
+- Only `/dev/sda4` (8:4, PARTUUID `7fb9401d-04`, UUID
+  `728b4c06-44b0-46ee-91ec-560ab1bad358`) is touched. It is the PC's only swap
+  area. No other disk, partition or swap entry is written.
+- No fallback swap. The owner accepted that no independent swap exists while the
+  trial runs. Before any mutation the plan requires the original partition to be
+  the only active swap area.
+- Logical capacity is the maximum admitted for the full partition: 3,355,136
+  pages, 13,742,637,056 bytes (26,841,088 sectors). Linux sees 13,420,540 KiB
+  usable. The SWZ header, 1 MiB segment alignment and the
+  `ceil(logical_pages / 4)` GC reserve (838,784 physical blocks) account for the
+  rest. The whole 16 GiB partition cannot be exposed as logical swap because
+  about a quarter must remain reserved for GC.
+- The trial lasts at most 30 minutes after the mapper becomes swap.
+- RAM use (`MemTotal - MemAvailable`, over `MemTotal`) must be below 50 percent
+  before the original swapoff. The swapoff itself requires `MemAvailable` to
+  cover the bytes currently swapped on `/dev/sda4`, plus the 2 GiB reserve and
+  a 1 GiB trial headroom. Admission, the baseline and every in-trial sample use
+  that same 1 GiB headroom, so the plan cannot pass a host the trial would stop
+  on. Cleanup keeps the approved 512 MiB drain margin.
+- Conservative stops end the trial as `SAFE_STOP` with normal swap restored:
+  memory pressure outside the bounded swap-pressure check (MemAvailable below
+  2 GiB, PSI some at or above 5 percent or full at or above 1 percent, cgroup
+  headroom below 512 MiB), drain headroom below 1 GiB, an operator stop, or RAM
+  not low at admission.
+- A failed swap-pressure check is `FAIL`. Normal swap is still restored.
 
-The latest exact-source owner qualification is source
-`6ff945e8c5e6671f9ffd6d1920343190ae1e5e28`, published by report-only commit
-`d6c1edca3ea21836e01ad0a8c087bfda4aeaf470`. Its five stages passed. The
-qualified formatter, module and oracle SHA-256 values are respectively
-`7f38c6f4226142ceb0c655009f0917d7370ccd0aac7a5db110148b1a861e00e0`,
-`e9001e487e3a86f2404c716f69bb01aa4cc4676f4a5f869201468d1a91850d67`, and
-`f47c6f9c9ca97d4d580e0a2d88efcb41cca8d34f4a35e0456a4a4d9a6e85ffe8`.
-The qualification used RAM-backed `null_blk`; it did not activate swapz as
-Linux swap and is not live-swap performance evidence. Its maximum-capacity
-probe checked byte-exact access to only the first and final 4 KiB pages of the
-13,742,637,056-byte mapper.
+## Swap-pressure check
 
-Before a future run, the read-only plan must positively bind the exact source,
-canonical `main` HEAD, current CI results, qualified production artifact
-hashes, helper hash, target identity and original header, persistent recovery
-storage, a fresh one-use owner authorization record, and a separately active
-fallback. Do not invent or claim an external review. The plan must see exactly
-the intended original swap plus the bound fallback, with the original
-partition active at 0 KiB used and priority -1.
+After the baseline observation, the coordinator starts one child process inside
+a new cgroup v2 directory with `memory.max` set to 128 MiB. The child fills a
+320 MiB working set of 80,000 pages. Each page is 4 KiB, derived from the run ID
+with SHAKE-256, and incompressible. It then reads every page back and compares
+it byte for byte. The cgroup limit forces the kernel to swap pages out to the
+swapz mapper and to swap them back in.
 
-The fallback must be a root-owned, mode-0600, allocated regular swapfile on a
-persistent filesystem with at least 512 MiB of free swap capacity. It must
-already be active at an explicit priority from 0 through 32766. This permits
-the default-priority `/dev/sda4` entry to return at -1 after the coordinator
-reactivates it. The coordinator does not create or activate the fallback. It
-leaves the fallback active after restoring ordinary swap, so the host's swap
-inventory remains augmented until an operator verifies that the fallback has
-no used pages and removes it.
+This host runs zswap with lz4 (`zswap.enabled=1`, 20 percent pool). Without a
+bypass, the pressure could stay in the compressed RAM pool and never reach
+`/dev/sda4`. The coordinator therefore sets the cgroup's `memory.zswap.max` to
+0 and refuses to run if that control is missing. The pass also requires
+`memory.swap.peak` above zero, and `memory.zswap.peak` zero when present.
 
-## F2FS fallback finding
+The check passes only with zero mismatches, all 80,000 pages verified, exit
+status 0, no OOM kill in `memory.events` and no timeout (15 minutes). An
+operator stop kills the cgroup and ends the trial as `SAFE_STOP`. The PSI
+thresholds do not stop the trial during this check, because the check causes
+reclaim on purpose. MemAvailable (floor 2 GiB) and the 1 GiB drain headroom are
+sampled every five seconds while the child runs; a breach kills the child and
+ends the trial as `SAFE_STOP`. The child is forked from the supervisor that was
+verified at admission, so it never re-reads files from disk. It joins its
+cgroup, ignores terminal signals, arms a parent-death signal and its own
+deadline, and reports through a pipe. The mapper's swap use is sampled during
+the check, because the pages are released when the child exits.
+The coordinator waits 60 seconds after the check before its next PSI-gated
+sample.
 
-Read-only host observations on 2026-11-02 found `/` on `/dev/sda3` (8:3),
-F2FS, running kernel `7.0.0-42-generic`, with `CONFIG_SWAP=y`,
-`CONFIG_F2FS_FS=m`, and the matching F2FS module installed. The root mount is
-in adaptive mode and has F2FS compression enabled by default for all file
-extensions. `/dev/sda3` and `/dev/sda4` both descend from disk 8:0, the same
-USB device.
+A trial reports `PASS` only if, measured as deltas from the baseline, all of
+these hold: kernel `pswpout` and `pswpin` both increased; dmsetup
+`logical_write` and `logical_read` increased; the lower `/dev/sda4` write
+counters increased; and mapper swap usage was above zero in at least one
+sample. A trial with no swap traffic reports `ACTIVATION_ONLY`, which is not a
+pass.
 
-Upstream F2FS implements swapfile activation. It rejects holes and some mount
-modes, converts inline data, disables file compression, maps extents, may
-migrate blocks for section alignment, and pins the file. Exact behavior of the
-installed Ubuntu kernel build and a candidate file has **not** been tested.
-Therefore an allocated F2FS swapfile appears feasible in principle but is not
-yet a verified fallback. The current production objective also prohibits
-changing the root filesystem layout to obtain fallback space, so `/dev/sda3`
-is not an eligible fallback under this objective. Even if that boundary were
-changed later, a swapfile there would share the target's USB device and could
-not protect against loss of that entire device. It also cannot recover pages
-whose swapz mapping authority or backing data has been lost.
+## Approval records
 
-References: [upstream F2FS swap activation code](https://code.googlesource.com/linux/torvalds/linux/+/7acf90feab8b009fde7def08ff2c622d0f10e99f/fs/f2fs/data.c),
-[F2FS documentation](https://docs.kernel.org/filesystems/f2fs.html), and the
-[swapon manual](https://man7.org/linux/man-pages/man8/swapon.8.html).
+`run` accepts one JSON record. It must bind the run ID (32 lowercase hex),
+the reviewed commit and CI commit equal to HEAD, both required workflows
+`PASS`. The plan asks GitHub for those workflow results as the operator
+(`gh run list`), so a record cannot claim a CI result that GitHub does not show.
+The plan also pins the record's SHA-256 and the run refuses a changed record, the SHA-256 of the supervisor file and of the physical helper it
+imports, the three artifact digests, the
+device identity, the original header digest, capacity, duration, the pressure
+parameters and `fallback_mode` `none`. It must use one of two modes:
 
-## Durable state and normal shutdown
+- `verbal`: names the external reviewer `openai-chatgpt-external-reviewer` and
+  carries the exact approval text. This needs an independent review record.
+  None exists in this repository.
+- `owner_waiver`: `reviewer` is null, `external_review` is `waived_by_owner`,
+  and `external_review_waiver` is the exact waiver text in the code.
 
-All state belongs under
-`/var/lib/swapz/physical-recovery/swapz-live-<run_id>/` on the validated
-persistent recovery filesystem. The coordinator writes and fsyncs the original
-4096-byte header backup, state, bounded result record and exact executable
-snapshots before swapoff. It permanently consumes the run ID and holds the
-partition lock plus active-recovery marker until restoration is verified.
-Evidence contains no page contents.
+Both modes require the owner's authorization text. The waiver covers only the
+external-review step for this one trial. It does not authorize later trials,
+boot integration or production use.
 
-Normal shutdown checks memory pressure and fallback capacity before calling
-swapoff on the exact mapper. It never retries a failed mapper swapoff. If
-swapoff fails or pages remain active, it preserves the mapper, module, SWZ
-header, fallback and recovery marker for supervised review. It does not force
-remove a mapping, unload a module with users, overwrite an ambiguous header,
-or remove the fallback.
+## Durable state
 
-On successful cleanup, the coordinator removes only its exact mapper without
-force, unloads only a same-process-owned module with zero users, verifies no
-backing holders remain, restores and rereads the exact original header, and
-reactivates only `/dev/sda4`. Completion requires the original major:minor,
-size `16777212 KiB`, priority `-1`, absent helper mapper/module, durable
-`COMPLETE` state, permanent consumed-run record and released active marker.
-Post-restoration swap usage is observation only. The planned `swapon` does not
-pass a discard option, and the mutation allowlist rejects explicit discard
-requests. `mkswap` is permitted only on the verified mapper and never uses
-`--force`.
+All state lives under `/var/lib/swapz/physical-recovery/swapz-live-<run_id>/`
+on the persistent recovery filesystem. Before swapoff the coordinator writes and
+fsyncs the original 4096-byte header backup, the state, a bounded results
+record and exact executable snapshots. It consumes the run ID permanently and
+holds the partition lock and the active-recovery marker until restoration is
+verified. The evidence contains no page contents.
+
+## Normal shutdown
+
+The coordinator stops observation, then checks drain headroom before the
+swapoff of the exact mapper. Mutating tools run in their own session, so a
+terminal Ctrl-C reaches only the supervisor. A stop request is honored at the
+next step boundary, and a step in progress finishes. Zero-open checks on the
+mapper, and the non-force remove, retry briefly, because udev probes can open a
+fresh mapper. It never retries a failed mapper swapoff. If
+swapoff fails, or pages remain active, it keeps the mapper, module, SWZ header
+and recovery marker for supervised review. It does not force-remove a mapping,
+unload a module that still has users, or overwrite an ambiguous header.
+
+On successful cleanup the coordinator removes only its exact mapper without
+force, unloads only a module it loaded itself with zero references, checks that
+no backing holder remains, restores and rereads the exact original header, and
+reactivates only `/dev/sda4` with its original size and priority `-1`.
+Completion requires the absent helper mapper and module, a durable `COMPLETE`
+state, the consumed-run record and a released marker. Post-restoration swap
+usage is recorded for observation only. The mutation allowlist permits `swapon`
+without a discard option and rejects discard requests. `mkswap` is permitted
+only on the verified mapper and never with `--force`.
 
 ## Crash and cold-boot recovery
 
-The mapping authority is volatile. If the system crashes or reboots while swapz
-is active, previously swapped pages cannot be reconstructed from the saved
-header backup. The fallback is only additional capacity while the system is
-running; it is neither whole-device redundancy nor a way to restore lost pages.
-Do not claim data recovery after loss of that volatile mapping state.
+The mapping authority is volatile. If the machine crashes or reboots while swapz
+is active, pages already swapped to it cannot be reconstructed from the saved
+header backup. Those pages were held only by the mapper, so a crash can lose
+them. This is the no-fallback risk the owner accepted. Nothing here claims data
+recovery after loss of that mapping state.
 
-After an unexpected stop, preserve the recovery directory and do not reboot
-intentionally, force-remove a mapper, reactivate `/dev/sda4`, or write block
-zero merely because a backup exists. First read the saved state, results and
-backup; independently identify the live partition, mapper, UUID, exact table,
-lower device, open references, module and active swap rows. If the mapper is
-still active or any identity/header is unexpected, leave it unchanged and
-escalate for review. A live mapper may contain the only readable copy of
-swapped pages.
+After an unexpected stop, preserve the recovery directory. Do not reboot on
+purpose, force-remove a mapper, reactivate `/dev/sda4`, or write block zero just
+because a backup exists. First read the saved state, results and backup. Then
+independently identify the live partition, mapper, UUID, exact table, lower
+device, open references, module and active swap rows. If the mapper is still
+active, or any identity or header is unexpected, leave it unchanged and escalate.
+A live mapper may hold the only readable copy of swapped pages.
 
-After a cold boot, the former mapper and module may be absent, but the original
-swap partition may still contain a zeroed, SWZ-formatted or torn header. Normal
-boot does not restore the former swap contents. Preserve the saved evidence;
-use only a reviewed, identity-checked recovery operation that accepts the
-current header as an explicitly recognized state, restores the exact saved
-4096-byte header, rereads it, then verifies ordinary swap size and priority.
-If the header is torn, the backup is missing, the partition identity changed,
-or recovery state is uncertain, stop for manual review. Never fabricate a
-`COMPLETE` state. The `recover` CLI remains disabled and is not a qualified
-cold-boot recovery procedure. A disposable VM may exercise this software
-recovery path using only substitute disk images that cannot alias host block
-devices. That does not restore actual host swap pages or qualify recovery from
-physical-device failure. Keep physical-host cold-boot recovery explicitly
-unverified unless a safe, positively identified method exercises it. Do not
-claim a mock test proves recovery after power loss.
+Before any cleanup step, the coordinator reconciles its persisted flags with the
+kernel's tables. A mapper that is gone is recorded as gone. A live mapper whose
+flag was never set is treated as live, so it is drained. The original swap is
+treated as already off only when it is inactive, its stage was
+`ORIGINAL_SWAPOFF_PENDING`, and no `swapoff` process is still running. Any
+refusal is recorded as `REQUIRES_REVIEW` in the state and the results.
 
-A rootless recovery regression also verifies that a saved
-`RECOVERY_REQUIRED` state is not hidden when the standalone cleanup records
-`TRIAL_STOPPING`: the recognized original stage remains authoritative for
-checking the existing SWZ header. Missing or cyclic stage provenance still
-fails closed. This verifies modeled stage handling only, not cold-boot recovery.
+After a cold boot the former mapper and module are gone. `/dev/sda4` may still
+hold a zeroed, SWZ-formatted or torn header. The fstab swap entry for that
+partition is expected not to activate a header without a swap signature. That
+expectation has not been tested on this machine. Normal boot does not restore the former swap
+contents. The `recover` command accepts only a header it recognizes from the
+saved state. It restores the exact saved 4096-byte header, rereads it and checks
+ordinary swap size and priority. A torn header, a missing backup, a changed
+partition identity or uncertain state stops for manual review. Rootless tests
+model these decisions only. They do not prove recovery after power loss.
+Physical cold-boot behavior remains unverified on this machine.
 
-## Validation completed for Phase A
+A rootless regression verifies that a saved `RECOVERY_REQUIRED` state is not
+hidden when standalone cleanup records `TRIAL_STOPPING`. The recognized original
+stage stays authoritative for checking the SWZ header. Missing or cyclic stage
+provenance fails closed.
 
-The supervisor's mock-only rootless tests cover successful completion,
-interrupted activation, original-swapoff failure without retry, active mapper
-pages under low memory, mapper-swapoff failure, substituted target, ambiguous
-header rejection, exact swap inventory and positive-I/O evidence. They do not
-exercise the kernel, an actual fallback swap area, a true cold boot, or a
-physical live trial. Those remain qualification gaps. The command interface
-remains disabled until the fallback, lifecycle and native-host safety gates
-are satisfied.
+## Validation completed
+
+Rootless tests (`tests/runtime/native/live-swap-supervisor-test.py`, 59 tests)
+cover the capacity arithmetic against the kernel formula; drain and memory
+gates; the approval modes and exact bindings; the plan gates, including the
+no-fallback requirement; the exact mutation allowlist; mapper observation and
+UUID substitution; swap-I/O evidence; the pressure child's byte pattern and
+verification; pressure-workload orchestration with a mocked child and cgroup
+root; full mock trials for PASS, SAFE_STOP, FAIL and REQUIRES_REVIEW paths;
+interrupted activation; failed mkswap, swapon, swapoff and mapper removal;
+ambiguous and torn headers; standalone recovery; reconciliation of persisted
+flags with the kernel's swap and mapper tables (a vanished mapper, a live mapper
+whose flag was never set, an orphaned swapoff); recorded REQUIRES_REVIEW for
+recovery refusals; the CI query and its exact allowlist; the approval digest
+pin; and the isolated-session mutation runner. These tests use mocks and
+a temporary cgroup root. They do not exercise the kernel, real `swapon`, real
+cgroup reclaim, a true cold boot or a physical trial.

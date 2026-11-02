@@ -295,7 +295,8 @@ def _verify_target_identity(target):
         raise ProbeError("selected partition persistent identity changed")
 
 
-def inspect_target(device_arg, confirm_arg):
+def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
+    """Identify the selected partition; the live trial may allow drainable use."""
     if not device_arg or device_arg != confirm_arg:
         raise ProbeError("--device and --confirm-device must match exactly")
     if not device_arg.startswith("/dev/disk/by-uuid/"):
@@ -336,7 +337,9 @@ def inspect_target(device_arg, confirm_arg):
     active = _active_swap_for(major, minor)
     if active is None:
         raise ProbeError("selected partition must be exactly one active system swap")
-    if active["used_kib"] != 0:
+    if not 0 <= active["used_kib"] <= active["size_kib"]:
+        raise ProbeError("selected swap usage is outside its capacity")
+    if active["used_kib"] != 0 and not allow_used_swap:
         raise ProbeError("selected swap partition is in use; require zero used KiB")
     header = _read_block0(device, {
         "major": major, "minor": minor, "size_bytes": size_bytes,

@@ -1342,19 +1342,21 @@ snapshot `MemAvailable` was 8,733,600 kB and memory PSI `full avg10` was 0.97%.
 The zero-used live-swap admission gate remains blocked; the pages must remain
 under normal Linux swap.
 
-Issue #76's separate experimental supervisor currently enforces a 256 MiB,
-30-minute trial and keeps privileged `run`/`recover` disabled. Its qualified
-source and oracle pins must match the latest owner report; rootless lifecycle
-tests and a disposable VM with substitute disk images may exercise software
-recovery, but do not qualify physical swap performance or recovery after
-physical power loss. Loss of the volatile swapz mapping authority still means
-pages already stored through that mapping cannot be reconstructed.
+Issue #76's live-swap supervisor now carries the owner's 2026-11-02 decision for
+one bounded no-fallback trial: swapz as the sole swap area on `/dev/sda4` at the
+maximum admitted capacity (3,355,136 pages, 13,742,637,056 bytes), at most 30
+minutes, with RAM below 50 percent before the original swapoff and one bounded
+cgroup swap-pressure check inside the window. The owner waived the separate
+external-review requirement for this one trial. No reviewer approval exists in
+the repository, and the waiver is recorded as an owner decision. Execution is
+enabled only for an approval bound to a CI-passing HEAD. Whether the trial
+produced real swap-in and swap-out is recorded in its results, not assumed here.
+This is not production readiness: persistent boot integration, sustained GC and
+churn, and physical power-loss recovery remain unqualified. Loss of the volatile
+swapz mapping authority still means pages already stored through that mapping
+cannot be reconstructed.
 
-No verified fallback is active. A swapfile on root F2FS (`/dev/sda3`) would
-share the same USB device with `/dev/sda4`; it can add capacity but cannot
-protect against whole-device failure, and changing the root filesystem layout
-is outside the current host-operation scope. The other enumerated disk is not a
-verified Linux swap resource. Investigate zram or other genuinely available
-resources without treating compressed RAM as independent storage. Do not
-activate a live swapz mapper until fallback behavior, target capacity, mapper
-ownership, cleanup, and actual swap I/O are qualified.
+No fallback swap is required by owner decision. A swapfile on root F2FS
+(`/dev/sda3`) would share the same USB physical device as `/dev/sda4`, so it
+could not protect against loss of that device. Reopen fallback only if the owner
+asks for it.
