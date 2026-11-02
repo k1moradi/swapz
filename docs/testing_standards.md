@@ -3285,6 +3285,13 @@ additional capacity only; disclose that it does not protect against whole-device
 failure or loss of swapz's volatile mapping authority. Do not create or enable
 fallback swap as part of the coordinator.
 
+The supervisor's qualified-source and artifact pins must follow the latest
+owner x86_64 five-stage PASS report, including the tested oracle binary hash.
+A changed test helper or oracle requires a report for that exact source and the
+corresponding live hashes; do not carry an older oracle digest forward by
+assuming only the production module changed. This artifact binding does not
+qualify Linux `swapon` behavior or performance.
+
 The read-only plan may print a mutation trace, but it must never invoke the
 mutation channel. `mkswap` may target only the exact verified mapper, without
 force. `swapon` must not request discard. Never remove an active swap mapper or
@@ -3299,19 +3306,18 @@ after an earlier failed recovery. When cleanup writes `TRIAL_STOPPING` over
 `RECOVERY_REQUIRED`, header verification must resolve both saved wrappers
 back to the original durable stage without guessing an unrecorded format.
 Missing, cyclic, torn or contradictory stage provenance must fail closed
-before any backing-header write. Virtual machines and intentional host
-crashes/reboots are excluded for the physical-PC mission. Report modeled
-interruption coverage separately from any true cold-boot behavior, which stays
-unverified unless a safe positively identified native method becomes
-available.
+before any backing-header write. A disposable VM may exercise the recovery
+state machine with substitute disk images that cannot alias host block devices.
+Such a VM does not qualify physical admission, host live-swap performance, or
+power-loss recovery of the physical device. The physical helper must continue
+to reject VM execution. Report modeled interruption and VM recovery separately
+from any physical-host cold-boot behavior.
 
-The plan, lifecycle mocks and CI do not establish live-swap correctness. This
-project's physical-PC qualification excludes virtual machines and intentional
-crash/reboot tests. Model each durable interruption boundary with rootless
-tests and use disposable host resources only when they are positively
-identified and cannot alias active system storage. Report true cold-boot
-recovery as unverified when it cannot be exercised safely; do not claim a mock
-proves it. Document that loss of the volatile swapz mapping authority loses
-access to pages already stored through that mapping. Never describe a fallback
-swapfile on another partition of the same physical disk as independent-media
+The plan, lifecycle mocks, VM fixtures and CI do not establish live-swap
+correctness. Model each durable interruption boundary with rootless tests and
+use disposable resources only when they are positively identified and cannot
+alias active system storage. Do not claim a mock proves power-loss behavior.
+Document that loss of the volatile swapz mapping authority loses access to
+pages already stored through that mapping. Never describe a fallback swapfile
+on another partition of the same physical disk as independent-media
 redundancy.

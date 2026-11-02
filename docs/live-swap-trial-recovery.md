@@ -14,6 +14,18 @@ The proposed experiment uses only `/dev/sda4` (8:4, PARTUUID
 It does not reuse the physical-smoke mapper or helper. It is not a performance,
 endurance, stress, hibernation or production qualification.
 
+The latest exact-source owner qualification is source
+`6ff945e8c5e6671f9ffd6d1920343190ae1e5e28`, published by report-only commit
+`d6c1edca3ea21836e01ad0a8c087bfda4aeaf470`. Its five stages passed. The
+qualified formatter, module and oracle SHA-256 values are respectively
+`7f38c6f4226142ceb0c655009f0917d7370ccd0aac7a5db110148b1a861e00e0`,
+`e9001e487e3a86f2404c716f69bb01aa4cc4676f4a5f869201468d1a91850d67`, and
+`f47c6f9c9ca97d4d580e0a2d88efcb41cca8d34f4a35e0456a4a4d9a6e85ffe8`.
+The qualification used RAM-backed `null_blk`; it did not activate swapz as
+Linux swap and is not live-swap performance evidence. Its maximum-capacity
+probe checked byte-exact access to only the first and final 4 KiB pages of the
+13,742,637,056-byte mapper.
+
 Before a future run, the read-only plan must positively bind the exact source,
 canonical `main` HEAD, current CI results, qualified production artifact
 hashes, helper hash, target identity and original header, persistent recovery
@@ -110,12 +122,12 @@ current header as an explicitly recognized state, restores the exact saved
 If the header is torn, the backup is missing, the partition identity changed,
 or recovery state is uncertain, stop for manual review. Never fabricate a
 `COMPLETE` state. The `recover` CLI remains disabled and is not a qualified
-cold-boot recovery procedure. This mission excludes virtual machines and
-intentional host crash/reboot testing. Exercise durable interruption
-boundaries with modeled rootless regressions, and keep actual cold-boot
-recovery explicitly unverified unless a safe, positively identified native
-method becomes available. Do not claim a mock test proves recovery after power
-loss.
+cold-boot recovery procedure. A disposable VM may exercise this software
+recovery path using only substitute disk images that cannot alias host block
+devices. That does not restore actual host swap pages or qualify recovery from
+physical-device failure. Keep physical-host cold-boot recovery explicitly
+unverified unless a safe, positively identified method exercises it. Do not
+claim a mock test proves recovery after power loss.
 
 A rootless recovery regression also verifies that a saved
 `RECOVERY_REQUIRED` state is not hidden when the standalone cleanup records

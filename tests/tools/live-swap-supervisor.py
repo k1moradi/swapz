@@ -25,7 +25,7 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
-QUALIFIED_SOURCE = "651c35bb5023a69e8a8b42f1113b8a9beaf3c7f6"
+QUALIFIED_SOURCE = "6ff945e8c5e6671f9ffd6d1920343190ae1e5e28"
 DEVICE_UUID_PATH = "/dev/disk/by-uuid/728b4c06-44b0-46ee-91ec-560ab1bad358"
 DEVICE_PATH = "/dev/sda4"
 DEVICE_MAJOR = 8
@@ -40,7 +40,7 @@ EXPECTED_ARTIFACTS = {
     "module_sha256": (
         "e9001e487e3a86f2404c716f69bb01aa4cc4676f4a5f869201468d1a91850d67"),
     "oracle_sha256": (
-        "2bd79246f5524c00ed06752c66b770a6a15532451e981b9a8cb93f9446ec2b8f"),
+        "f47c6f9c9ca97d4d580e0a2d88efcb41cca8d34f4a35e0456a4a4d9a6e85ffe8"),
 }
 PAGE_BYTES = 4096
 LOGICAL_BYTES = 256 * 1024 * 1024

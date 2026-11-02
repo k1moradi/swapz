@@ -1314,21 +1314,41 @@ size. The loaded maximum-target constructor has passed on the owner host using
 an owned RAM-backed lower sized to the exact usable geometry. Device discovery
 recorded 667,648 mapper logical READ bytes before the probe's own data phase;
 their userspace source was not identified. Constructor lower statistics and
-physical READ/WRITE counters remained unchanged. The next probe version also
-checks byte-exact writes and reads at logical page 0 and the final admitted page
-with only two 4 KiB pages of data, after verifying the opened mapper UUID and
-full table again. This bounded edge check still does not fill the volume or
-qualify sustained maximum-size writes, worst-case RAW occupancy or GC. The
-probe uses only owned RAM-backed null_blk and does not touch the user's live
-swap partition.
+physical READ/WRITE counters remained unchanged. The next probe version passed
+on exact source `6ff945e8c5e6671f9ffd6d1920343190ae1e5e28`: it verified byte-exact
+writes and reads at logical page 0 and the final admitted page, using only two
+4 KiB pages of data and revalidating the opened mapper UUID and full table. The
+reported lower deltas were 24,576 READ bytes and 8,192 WRITE bytes, with zero
+target failures. This confirms bounded boundary addressing; it does not fill
+the volume or qualify sustained maximum-size writes, worst-case RAW occupancy,
+GC or Linux `swapon` behavior. The five-stage owner `make test` passed and
+published by report-only commit `d6c1edca3ea21836e01ad0a8c087bfda4aeaf470`.
+Qualified artifact hashes are formatter
+`7f38c6f4226142ceb0c655009f0917d7370ccd0aac7a5db110148b1a861e00e0`, module
+`e9001e487e3a86f2404c716f69bb01aa4cc4676f4a5f869201468d1a91850d67`, and
+oracle `f47c6f9c9ca97d4d580e0a2d88efcb41cca8d34f4a35e0456a4a4d9a6e85ffe8`.
+The probe uses only owned RAM-backed `null_blk` and does not write to the
+user's live swap partition.
+
+During this `make test`, a read-only `lsblk` inventory was run during the late
+SD read-coalescing matrix. Because `lsblk` may probe a newly created mapper,
+late performance samples may include observer I/O; do not use them for a
+performance conclusion. The maximum-capacity boundary phase had already passed
+before that inventory. At the post-run check, `/dev/sda4` remained ordinary
+swap on 8:4 with priority -1 and the original header hash, with no swapz mapper
+or module. Usage was 4,316,828 KiB at the immediate post-run check and
+3,942,280 KiB in a later read-only snapshot; both were nonzero. At that later
+snapshot `MemAvailable` was 8,733,600 kB and memory PSI `full avg10` was 0.97%.
+The zero-used live-swap admission gate remains blocked; the pages must remain
+under normal Linux swap.
 
 Issue #76's separate experimental supervisor currently enforces a 256 MiB,
-30-minute trial and keeps privileged `run`/`recover` disabled. Its modeled
-rootless lifecycle tests do not qualify Linux swap behavior. This goal excludes
-virtual machines and intentional host crash/reboot tests; use modeled durable
-interruption tests and report true cold-boot recovery as unverified where it
-cannot be exercised safely. Loss of the volatile swapz mapping authority still
-means pages already stored through that mapping cannot be reconstructed.
+30-minute trial and keeps privileged `run`/`recover` disabled. Its qualified
+source and oracle pins must match the latest owner report; rootless lifecycle
+tests and a disposable VM with substitute disk images may exercise software
+recovery, but do not qualify physical swap performance or recovery after
+physical power loss. Loss of the volatile swapz mapping authority still means
+pages already stored through that mapping cannot be reconstructed.
 
 No verified fallback is active. A swapfile on root F2FS (`/dev/sda3`) would
 share the same USB device with `/dev/sda4`; it can add capacity but cannot
