@@ -1632,6 +1632,14 @@ static swapz_u16 swapz_probe_set(
                       "\t\t\t\tswapz_deliver_upper_completions(ctx);", worker)
         self.assertIn("bio_list_init(&ctx->deferred_upper_completions);", DM)
         handoff = body("swapz_try_completion_handoff")
+        # The retired early-publication exception must not bypass this gate.
+        pending_guard = "swapz_inflight_lower_pending(ctx)"
+        self.assertEqual(handoff.count(pending_guard), 2)
+        self.assertLess(handoff.index(pending_guard),
+                        handoff.index("spin_lock_irqsave"))
+        self.assertLess(handoff.index("spin_lock_irqsave"),
+                        handoff.rindex(pending_guard))
+        self.assertNotIn("allow_without_lower_pending", handoff)
         self.assertLess(handoff.index("spin_lock_irqsave"),
                         handoff.index("ctx->accepting && !ctx->failed"))
         self.assertLess(handoff.index("queue_work("),

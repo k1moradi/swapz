@@ -257,6 +257,13 @@ diagnostic only: its timestamp error is bounded by the ACK delivery-loop span
 and it must never move `bio_endio()`, publication, failure checks or ownership.
 No unprotected shared accumulator or new queue is permitted.
 
+After retiring ID181, the existing bounded completion handoff remains
+eligible only when a lower WRITE is pending. Recheck that condition under
+`queue_lock` before publishing completion work; preserve the 4..64-BIO limit,
+fail-closed drain and ID175 submitter-only post-owner-release ACK ordering.
+The removed publication-time exception must not be reintroduced without new
+owner evidence and an explicit correctness review.
+
 ### Lower-lane gap attribution (ID178)
 
 ID178 is observational only. No policy, ACK-delivery time, retained window,
