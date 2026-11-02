@@ -30,9 +30,11 @@ the private fixture metadata because sudo may discard environment; the native
 replay independently locks its mapped fixture and all future allocations.
 Do not keep a global representative-content marker in the parent test runner:
 each replay scopes its protection to the fixture and its own process. Privileged
-shell helpers must reuse the validated shared representative fixture path in
-place; they may copy nonsensitive metadata/traces, but no generic cp/dd/cat
-process may stage representative page bytes outside the protected readers.
+shell helpers must preserve the immutable snapshot boundary with the dedicated
+private-memory copier: it protects before reading representative bytes, rejects
+symlink/changing sources, writes mode 0600, and fsyncs the snapshot. Generic
+cp/dd/cat processes may copy nonsensitive metadata/traces but must never stage
+representative page bytes outside the protected readers.
 A local ignored benchmark artifact may keep its existing fixture
 digest only to prove the raw/target arms shared identical inputs; never publish
 that artifact or the sample. This tooling does not qualify kernel swap

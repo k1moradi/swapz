@@ -799,10 +799,13 @@ if [[ -n $SHARED_PLAN ]]; then
        -f $plan_dir/manifest.json ]] ||
         fail 'shared immutable replay plan missing or outside owned build root'
     mkdir -p "$SESSION/plan"
-    # Reuse the validated fixture in place. An external cp process is not part
-    # of the representative-memory lock/core-dump protection boundary.
-    FIXTURE_PATH="$SHARED_PLAN/fixture.bin"
     cp -- "$SHARED_PLAN/fixture.json" "$SESSION/fixture.json"
+    # Preserve the original immutable snapshot semantics without letting a
+    # generic copy process read representative bytes outside the privacy gate.
+    python3 -B tests/runtime/benchmark/private_memory.py copy-fixture \
+        --source "$SHARED_PLAN/fixture.bin" \
+        --destination "$SESSION/fixture.bin"
+    FIXTURE_PATH="$SESSION/fixture.bin"
     cp -- "$plan_dir/trace.jsonl" "$SESSION/plan/trace.jsonl"
     cp -- "$plan_dir/manifest.json" "$SESSION/plan/manifest.json"
     note 'IMMUTABLE_PLAN_REUSED=1'

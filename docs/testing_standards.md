@@ -109,12 +109,16 @@ RLIMIT_MEMLOCK only after observing the expected fail-closed protection error;
 this is not an operator bypass or a passing representative replay. These protections
 do not erase immutable Python copies before process exit; do not use highly
 sensitive page corpora without separately reviewing that retention boundary.
-Privileged ordinary and striped pair helpers reuse the validated shared
-representative fixture in place rather than copying its bytes through an
-unprotected utility process. The striped helper also requires a nonsymlink
-`fixture.json` beside that fixture so each replay can reestablish the privacy
-classification before reading any page bytes. Privacy metadata itself must be a
-regular file; symlinked metadata is rejected.
+Privileged ordinary and striped pair helpers snapshot the validated shared
+fixture with `private_memory.py copy-fixture`, never generic cp/dd/cat. For
+representative content that helper disables dumps and locks memory before
+opening the source, rejects symlink/nonregular or changing sources, creates a
+mode-0600 destination with exclusive creation, fsyncs it, and removes partial
+snapshots on failure. This retains the root helper's immutable-input boundary
+without exposing bytes to an unprotected copy process. The striped helper also
+requires and copies the nonsensitive, nonsymlink `fixture.json` beside the
+snapshot so each replay can reestablish privacy before reading page bytes.
+Privacy metadata itself must be a regular file; symlinked metadata is rejected.
 The paired `make fast_test` plan uses the same page file and immutable trace for
 raw and swapz arms; its local ignored `latest.json` keeps the fixture digest for
 pair identity and the aggregate analysis, but never the sample bytes or path.

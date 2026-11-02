@@ -1084,7 +1084,11 @@ static swapz_u16 swapz_probe_set(
         for helper in (owned_pair, striped_pair):
             self.assertNotIn(
                 'cp -- "$SHARED_PLAN/fixture.bin" "$SESSION/fixture.bin"', helper)
-            self.assertIn('FIXTURE_PATH="$SHARED_PLAN/fixture.bin"', helper)
+            self.assertIn(
+                "tests/runtime/benchmark/private_memory.py copy-fixture", helper)
+            self.assertIn('--source "$SHARED_PLAN/fixture.bin"', helper)
+            self.assertIn('--destination "$SESSION/fixture.bin"', helper)
+            self.assertIn('FIXTURE_PATH="$SESSION/fixture.bin"', helper)
             self.assertIn('--fixture "$FIXTURE_PATH"', helper)
         self.assertIn(
             '-f $SHARED_PLAN/fixture.json && ! -L $SHARED_PLAN/fixture.json',

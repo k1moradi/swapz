@@ -52,6 +52,32 @@ class PairReplayContract(unittest.TestCase):
             libc.prctl.assert_called_once_with(4, 0, 0, 0, 0)
             libc.mlockall.assert_called_once_with(3)
 
+    def test_private_fixture_snapshot_protects_representative_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fixture.bin"
+            destination = root / "snapshot.bin"
+            payload = (b"private-page" * 4096)[:8192]
+            source.write_bytes(payload)
+            (root / "fixture.json").write_text(
+                json.dumps({"content_profile": "representative"}))
+            with mock.patch.object(
+                    private_memory, "protect_private_memory") as protect:
+                self.assertTrue(
+                    private_memory.copy_fixture(source, destination))
+                protect.assert_called_once_with()
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+
+            destination.unlink()
+            source.unlink()
+            target = root / "fixture-target.bin"
+            target.write_bytes(payload)
+            source.symlink_to(target)
+            with self.assertRaises(OSError):
+                private_memory.copy_fixture(source, destination)
+            self.assertFalse(destination.exists())
+
     def test_representative_memory_protection_success_path(self):
         libc = mock.Mock()
         libc.prctl.return_value = 0

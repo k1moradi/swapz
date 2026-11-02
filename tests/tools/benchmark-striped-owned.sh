@@ -338,8 +338,13 @@ for (( index=0; index<2*STRIPES; ++index )); do
 done
 
 mkdir -m 700 "$SESSION/plans"
-# Reuse the validated shared fixture so no unprotected copy process reads
-# representative page bytes. Each replay classifies the adjacent fixture.json.
+cp -- "$SHARED_PLAN/fixture.json" "$SESSION/fixture.json"
+# Preserve a root-owned immutable fixture snapshot. The helper locks/disables
+# dumps before reading representative bytes and rejects a changing source.
+python3 -B tests/runtime/benchmark/private_memory.py copy-fixture \
+    --source "$SHARED_PLAN/fixture.bin" \
+    --destination "$SESSION/fixture.bin"
+FIXTURE_PATH="$SESSION/fixture.bin"
 for (( stripe=0; stripe<STRIPES; ++stripe )); do
     mkdir -m 700 "$SESSION/plans/$stripe"
     cp -- "$SHARED_PLAN/$STRIPE_PLAN_PREFIX-$STRIPES/stripe-$stripe/trace.jsonl" \
