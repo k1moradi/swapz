@@ -1068,23 +1068,168 @@ A release or physical-media trial remains blocked until the same pinned source h
 
 The owner authorized a separate physical correctness smoke using the active
 swap partition, with swapoff limited to that explicitly selected partition.
-This does not add physical devices to routine qualification. On this x86 host,
-the synced source `5523e66f4af0` passed all five make test stages; report
-`3dff79d01d16` records the run. That baseline predates the physical helper,
-so it cannot qualify a later helper commit. The helper requires two PASS
-reports for the exact current source from this computer. No independent safety
-review has been recorded, and no physical partition write or swapoff has been
-performed.
+This does not add physical devices to routine qualification. The physical
+helper remains private and outside `make test`; no result from the RAM-backed
+qualification matrix authorizes a physical write, performance claim, endurance
+claim, NAND-lifetime claim or general real-media qualification.
 
-The private `tests/tools/physical-swap-probe.py` helper prepares a bounded
-byte-exact correctness smoke around the existing physical-backing opt-in and
-device-roundtrip oracle. It remains outside make test, requires two committed
-same-host PASS reports for the exact current source and a separate review
-record bound to the selected partition and helper hash, and uses durable
-header backup/recovery. It must restore and verify the original swap header
-and re-enable only the original partition. It never enables the swapz mapper
-as system swap and cannot make a performance claim. The actual physical trial
-remains blocked until both evidence gates are met.
+**Current disposition (2026-11-02): BLOCKED / REJECT for physical execution.**
+The handoff review pins production source
+`fb1f6f12bf24a08ebcf1f1f2cfd88ca83bf508b9`, while current `main` is
+`6469d4486d44aeb28fe526318c6596e73ddb8ad4`. Two same-host five-stage PASS
+reports were published for the pinned source, but commit
+`4e983a3b63e8c32c4311111d4669ec4a4462eb0c` later added the external-review
+prompt. Because `current_source_evidence()` permits only `test_results.json`
+publication commits after the qualified source, current `main` must fail the
+physical admission gate. That fail-closed behavior is intentional and must not
+be relaxed. The external reviews were code-only; the device-specific
+`build/physical-swap-review/README.md`, unsigned review record, final detached
+signature and live selected-device state were not independently reviewed. No
+physical partition write or swapoff has been performed.
+
+#### Physical swap-partition smoke unblock checklist
+
+Complete the following in order. The code/test items come first so that the
+eventual two owner qualifications, device packet and independent signature bind
+one final exact source rather than an intermediate repair.
+
+1. **Make recovery-state storage genuinely durable before `swapoff`.**
+   Require an existing operator-reviewed root-owned state base on persistent
+   storage; reject volatile filesystems such as tmpfs/ramfs and other unsuitable
+   recovery locations. Create the unique per-run directory below that base and
+   fsync the parent directory containing the new entry before any destructive
+   transition. Keep fsync of the backup file, state file and state directory.
+   Rootless coverage must prove volatile-storage rejection and prove this
+   durability boundary precedes `swapoff` and every block-zero write.
+
+2. **Bind the original-header backup read to the selected device descriptor.**
+   Open the selected partition, `fstat()` that exact descriptor, verify the
+   expected block-device major:minor and geometry with `BLKGETSIZE64`, and
+   read the original 4 KiB header from that same descriptor. Do not allow a
+   prior pathname check alone to authorize the recovery backup.
+
+3. **Close the formatter check/open identity gap without weakening its current
+   zero-block refusal.** After `swapzctl format` opens the device exclusively,
+   `fstat()` that exact FD and compare its `st_rdev` plus
+   `BLKGETSIZE64` geometry with the helper-reviewed identity before reading or
+   writing block zero. The helper must revalidate target identity immediately
+   before formatter invocation and validate the resulting exact SWZ header
+   before continuing. Preserve the existing refusal of nonzero unrecognized
+   block zero.
+
+4. **Bind the created mapper and the oracle to the exact helper-owned DM
+   identity.** Immediately after `dmsetup create`, verify the generated DM UUID,
+   exact table, 16 MiB mapped size and actual lower backing major:minor. Recheck
+   those properties immediately before oracle I/O. Pass the expected DM UUID to
+   the oracle; after opening the mapper, the oracle must `fstat()` its actual
+   FD and verify the corresponding
+   `/sys/dev/block/<major>:<minor>/dm/uuid` before its first `pwrite()`.
+   A same-size wrong-UUID/wrong-backing mapper must fail closed.
+
+5. **Strengthen the signed review record into one exact device-state/run
+   approval.** In addition to source, helper, major:minor, PARTUUID and artifact
+   digests, bind the selected device size, original 4 KiB header SHA-256,
+   repeated `/dev/disk/by-uuid/...` selection and a unique run/review identifier.
+   Prevent silent reuse for later smokes, and serialize physical-test ownership
+   of the selected partition so concurrent attempts cannot share one approval.
+
+6. **Close the module-load ownership persistence window.** A successful
+   `insmod` must not occur in a state where durable recovery still says the
+   module was not loaded by the helper. Persist a conservative pending/owned
+   transition before or atomically around the load so recovery can safely
+   remove only a helper-owned `dm_swapz` after interruption. Preserve the
+   requirement that an already-loaded module blocks the run.
+
+7. **Make the shared C physical-header validator as strict as the helper.**
+   Keep magic, version, header-size, device-size and nonzero-UUID checks, and
+   additionally reject nonzero reserved bytes after the defined header fields.
+   Add a regression proving Python, formatter and kernel agree on the exact
+   accepted authorization header.
+
+8. **Tighten swap restoration verification.** After restoring and verifying the
+   original block-zero bytes and invoking `swapon`, require the active entry to
+   match the saved major:minor, original size and original priority before
+   marking recovery `COMPLETE`. Preserve manual-recovery-only behavior for
+   torn, modified or otherwise unrecognized headers.
+
+9. **Expand the rootless physical-safety regression suite before any real-media
+   attempt.** At minimum cover volatile state storage and parent durability;
+   header-read substitution; formatter path replacement between checks and
+   open; changed major:minor/PARTUUID/size at destructive boundaries; mapper
+   substitution after creation; wrong DM UUID, table, size or lower backing;
+   oracle FD/UUID mismatch; changed original-header digest/geometry; signed
+   approval replay; concurrent physical-run attempts; interruption around
+   module load; nonzero reserved superblock bytes; interrupted header
+   restoration; unexpected active-swap recovery state; and exact post-`swapon`
+   priority/size restoration. These are executable regressions, not manual
+   reasoning substitutes.
+
+10. **Co-change the canonical standards with implementation/test changes.**
+    Helper, formatter, oracle or physical-admission contract changes must update
+    the corresponding canonical coding/testing safety rules in the same commit.
+    Keep the physical helper outside ordinary `make test`; only its rootless
+    safety contracts belong in routine qualification.
+
+11. **Create one final exact source containing all physical-safety fixes.**
+    Do not work around the present source gate. Once the code and tests are
+    complete, pin that exact `main` source as the physical-review source.
+    After it is qualified, only report-publication commits changing exactly
+    `test_results.json` may follow before the physical smoke; any other commit
+    makes the evidence stale and requires requalification.
+
+12. **Run two complete owner `make test` qualifications on the final exact
+    source on the intended x86_64 host.** Both reports must be distinct-content,
+    same-host, exact-source, five-stage PASS reports and must publish available
+    `qualified_artifacts` SHA-256 values for `swapzctl`, `dm-swapz.ko` and
+    `device-roundtrip`. CI and `make fast_test` do not substitute for this
+    gate.
+
+13. **Refresh the physical review packet from that final state.** Regenerate
+    `build/physical-swap-review/README.md` and the unsigned review record using
+    the final source, final helper digest, final qualified artifact hashes and
+    current selected-partition identity. The packet must include major:minor,
+    PARTUUID, exact size, original-header digest, repeated UUID path and the
+    one-run identifier.
+
+14. **Perform a fresh read-only device preflight before approval.** Confirm that
+    the repeated `/dev/disk/by-uuid/...` path still resolves to the intended
+    partition; PARTUUID, major:minor, size and original header match the packet;
+    it is exactly one active Linux swap entry with zero used KiB; it has no
+    holders or mounts; and it does not contain or back the root filesystem.
+    This step performs no destructive operation.
+
+15. **Obtain a genuinely independent signed review of the final source and
+    device packet.** The reviewer must inspect the final exact code and packet,
+    approve the exact unambiguous JSON and sign it under namespace
+    `swapz-physical-review` with an independently authenticated SSH identity
+    already provisioned in root-controlled
+    `/etc/swapz/physical-review.allowed_signers`. The operator must not sign
+    their own approval or treat a locally invented reviewer identity as
+    independence.
+
+16. **Run the helper's read-only `plan` gate one final time.** It must report
+    exact current-source qualification, two qualifying same-host reports,
+    current artifact bytes matching the qualified digests, a valid signed review
+    matching source/helper/device/artifacts/run identity and unchanged live
+    partition identity. Any mismatch blocks the smoke and requires refresh,
+    requalification or re-review; never bypass the failed condition.
+
+17. **Only after every preceding item passes is one bounded physical correctness
+    smoke eligible to run.** The scope remains one explicitly selected zero-used
+    swap partition, one helper-owned 16 MiB SWZ mapper, byte-exact oracle
+    write/read verification, removal of only the exact helper-owned mapper,
+    exact original block-zero restoration and verification, and re-enabling only
+    the original swap partition with its original parameters. The swapz mapper
+    must never be activated as system swap.
+
+The shortest critical path is therefore:
+
+`durable recovery storage -> descriptor-bound header/formatter identity -> exact DM/oracle identity -> signed one-run binding + recovery hardening -> complete negative tests -> final exact source -> two owner make test PASS reports -> refreshed device packet -> independent signed review -> final read-only plan -> one bounded smoke`.
+
+This checklist authorizes preparation only. A successful bounded smoke would
+establish correctness for that one reviewed device/run only; it would not
+establish performance, endurance, NAND lifetime, wear behavior or general
+physical-media qualification.
 
 
 ### Alpha.29 loaded qualification observability repair
