@@ -121,6 +121,10 @@ without exposing bytes to an unprotected copy process. The striped helper also
 requires and copies the nonsensitive, nonsymlink `fixture.json` beside the
 snapshot so each replay can reestablish privacy before reading page bytes.
 Privacy metadata itself must be a regular file; symlinked metadata is rejected.
+Rootless tests must prove that a pre-existing snapshot path survives O_EXCL
+failure, that explicit private classification forces the protection hook even
+when metadata says a synthetic profile, and that both privileged helpers carry
+that classification across sudo into protected snapshot/replay processes.
 The paired `make fast_test` plan uses the same page file and immutable trace for
 raw and swapz arms; its local ignored `latest.json` keeps the fixture digest for
 pair identity and the aggregate analysis, but never the sample bytes or path.

@@ -1081,9 +1081,14 @@ static swapz_u16 swapz_probe_set(
     def test_representative_fixture_never_crosses_unprotected_copy_process(self):
         owned_pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         striped_pair = (ROOT / "tests/tools/benchmark-striped-owned.sh").read_text()
+        fast_test = (ROOT / "tests/tools/fast-test.py").read_text()
+        self.assertGreaterEqual(
+            fast_test.count('args.content == "representative"'), 3)
         for helper in (owned_pair, striped_pair):
             self.assertNotIn(
                 'cp -- "$SHARED_PLAN/fixture.bin" "$SESSION/fixture.bin"', helper)
+            self.assertIn("--private-fixture", helper)
+            self.assertIn("SWAPZ_PRIVATE_FIXTURE=1", helper)
             self.assertIn(
                 "tests/runtime/benchmark/private_memory.py copy-fixture", helper)
             self.assertIn('--source "$SHARED_PLAN/fixture.bin"', helper)

@@ -76,6 +76,22 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(destination.read_bytes(), b"pre-existing")
 
             destination.unlink()
+            (root / "fixture.json").write_text(
+                json.dumps({"content_profile": "medium"}))
+            with mock.patch.object(
+                    private_memory, "protect_private_memory") as protect:
+                self.assertFalse(
+                    private_memory.copy_fixture(source, destination))
+                protect.assert_not_called()
+            destination.unlink()
+            with mock.patch.object(
+                    private_memory, "protect_private_memory") as protect:
+                self.assertTrue(
+                    private_memory.copy_fixture(
+                        source, destination, force_private=True))
+                protect.assert_called_once_with()
+
+            destination.unlink()
             source.unlink()
             target = root / "fixture-target.bin"
             target.write_bytes(payload)
