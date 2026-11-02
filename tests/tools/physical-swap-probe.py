@@ -422,8 +422,7 @@ def current_source_evidence():
             not re.fullmatch(r"[0-9a-f]{40}", source) or \
             not _has_five_passing_stages(report):
         raise ProbeError("current test_results.json is not an exact-source five-stage PASS")
-    artifact_digests = _report_artifact_digests(report)
-    if artifact_digests is None:
+    if _report_artifact_digests(report) is None:
         raise ProbeError(
             "current test_results.json lacks qualified artifact digests")
     ancestor = _git_result(
@@ -437,11 +436,12 @@ def current_source_evidence():
             raise ProbeError("main has changes after the qualified source")
 
     host_identity = live_host_identity()
-    if report.get("host_identity") != host_identity:
-        raise ProbeError("current PASS report was not produced on this host")
     host_json = json.dumps(host_identity, sort_keys=True, separators=(",", ":"))
     distinct_reports = set()
-    # Authenticate the first-parent main publication chain after tested source.
+    artifact_digests = None
+    # Authenticate the first-parent publication chain. test_results.json is a
+    # shared overwriteable artifact, so a later PASS from another host must not
+    # hide this host's exact-source evidence or substitute its build artifacts.
     for commit in _git("log", "--first-parent", "--format=%H",
                        f"{source}..origin/main", "--",
                        "test_results.json").splitlines():
@@ -453,20 +453,29 @@ def current_source_evidence():
             historical = json.loads(result.stdout)
         except ValueError:
             continue
+        historical_digests = (
+            _report_artifact_digests(historical)
+            if isinstance(historical, dict) else None)
         if not isinstance(historical, dict) or \
                 historical.get("overall") != "PASS" or \
                 historical.get("source_sha") != source or \
                 historical.get("tested_commit_sha") != source or \
                 not _has_five_passing_stages(historical) or \
-                _report_artifact_digests(historical) is None:
+                historical_digests is None:
             continue
         old_host = historical.get("host_identity")
         if isinstance(old_host, dict) and json.dumps(
                 old_host, sort_keys=True, separators=(",", ":")) == host_json:
-            # A replayed/copy-published report is not a second run.
+            # git log is newest-first: bind artifacts to this host's latest
+            # qualifying run while counting distinct report content.
+            if artifact_digests is None:
+                artifact_digests = historical_digests
             distinct_reports.add(hashlib.sha256(
                 json.dumps(historical, sort_keys=True,
                            separators=(",", ":")).encode()).hexdigest())
+    if artifact_digests is None:
+        raise ProbeError(
+            "no exact-source five-stage PASS report from this host")
     return {
         "source_sha": source,
         "host_identity": host_identity,

@@ -564,6 +564,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             for index, (key, _, _) in enumerate(
                 probe.PHYSICAL_ARTIFACTS, start=1)
         }
+        foreign_artifact_digests = {
+            key: str(index + 3) * 64
+            for index, (key, _, _) in enumerate(
+                probe.PHYSICAL_ARTIFACTS, start=1)
+        }
         current = {
             "overall": "PASS", "tested_commit_sha": source,
             "source_sha": source, "host_identity": dict(local_host),
@@ -644,11 +649,21 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         probe.ProbeError, "qualified artifact digests"):
                     probe.current_source_evidence()
                 current["qualified_artifacts"] = {
-                    "status": "AVAILABLE", **artifact_digests,
+                    "status": "AVAILABLE", **foreign_artifact_digests,
                 }
-                current["host_identity"] = dict(local_host, id_sha256="2" * 64)
+                current["host_identity"] = dict(
+                    local_host, id_sha256="2" * 64)
                 (root / "test_results.json").write_text(json.dumps(current))
-                with self.assertRaisesRegex(probe.ProbeError, "not produced on this host"):
+                evidence = probe.current_source_evidence()
+                self.assertEqual(evidence["pass_reports"], 2)
+                self.assertEqual(evidence["artifact_digests"],
+                                 artifact_digests)
+
+                history["first"]["host_identity"] = current["host_identity"]
+                history["second"]["host_identity"] = current["host_identity"]
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "no exact-source five-stage PASS report from this host"):
                     probe.current_source_evidence()
 
     def test_probe_is_not_wired_into_make_test_and_never_swapons_mapper(self):

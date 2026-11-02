@@ -2645,8 +2645,15 @@ mapper. The physical correctness smoke must not activate the swapz mapper as
 system swap, and its results remain separate from the RAM-backed report and
 performance history. Rootless tests must reject a disappeared-UUID dependency,
 changed PARTUUID, unrecognized header state, duplicate PASS content and
-historical reports that do not match the live host. Tests of the x86-only
-physical-admission state machine must mock the admitted x86_64 architecture so
+historical reports that do not match the live host. Because test_results.json
+is a shared overwriteable artifact, a later exact-source PASS from another host
+must not hide valid live-host evidence. Physical admission validates the current
+report and report-only ancestry, then scans the authenticated first-parent
+publication chain, counts only distinct-content exact-source five-stage PASS
+reports matching the live host, and binds reviewed artifacts to the newest such
+live-host report. Never substitute artifact digests from whichever host
+published last. Tests of the x86-only physical-admission state machine must
+mock the admitted x86_64 architecture so
 the rootless contract remains architecture-neutral and can run unchanged on
 ARM64 qualification hosts. The mocked historical Git evidence runner must
 also stub _git_result directly instead of depending on process sudo identity.
