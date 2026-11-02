@@ -73,6 +73,7 @@ def copy_fixture(source_path, destination_path):
                          getattr(os, "O_CLOEXEC", 0) |
                          getattr(os, "O_NOFOLLOW", 0))
     source_fd = destination_fd = -1
+    destination_created = False
     try:
         source_fd = os.open(os.fspath(source_path), source_flags)
         before = os.fstat(source_fd)
@@ -80,6 +81,7 @@ def copy_fixture(source_path, destination_path):
             raise ValueError("fixture snapshot source must be a nonempty regular file")
         destination_fd = os.open(
             os.fspath(destination_path), destination_flags, 0o600)
+        destination_created = True
         os.fchmod(destination_fd, 0o600)
 
         remaining = before.st_size
@@ -107,10 +109,11 @@ def copy_fixture(source_path, destination_path):
         os.fsync(destination_fd)
         return representative
     except BaseException:
-        try:
-            destination_path.unlink()
-        except FileNotFoundError:
-            pass
+        if destination_created:
+            try:
+                destination_path.unlink()
+            except FileNotFoundError:
+                pass
         raise
     finally:
         if destination_fd >= 0:

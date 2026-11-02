@@ -70,6 +70,12 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
 
             destination.unlink()
+            destination.write_bytes(b"pre-existing")
+            with self.assertRaises(FileExistsError):
+                private_memory.copy_fixture(source, destination)
+            self.assertEqual(destination.read_bytes(), b"pre-existing")
+
+            destination.unlink()
             source.unlink()
             target = root / "fixture-target.bin"
             target.write_bytes(payload)

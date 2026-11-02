@@ -113,8 +113,8 @@ Privileged ordinary and striped pair helpers snapshot the validated shared
 fixture with `private_memory.py copy-fixture`, never generic cp/dd/cat. For
 representative content that helper disables dumps and locks memory before
 opening the source, rejects symlink/nonregular or changing sources, creates a
-mode-0600 destination with exclusive creation, fsyncs it, and removes partial
-snapshots on failure. This retains the root helper's immutable-input boundary
+mode-0600 destination with exclusive creation, fsyncs it, removes only partial
+snapshots it actually created on failure, and preserves any pre-existing path. This retains the root helper's immutable-input boundary
 without exposing bytes to an unprotected copy process. The striped helper also
 requires and copies the nonsensitive, nonsymlink `fixture.json` beside the
 snapshot so each replay can reestablish privacy before reading page bytes.

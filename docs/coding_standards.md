@@ -32,7 +32,8 @@ Do not keep a global representative-content marker in the parent test runner:
 each replay scopes its protection to the fixture and its own process. Privileged
 shell helpers must preserve the immutable snapshot boundary with the dedicated
 private-memory copier: it protects before reading representative bytes, rejects
-symlink/changing sources, writes mode 0600, and fsyncs the snapshot. Generic
+symlink/changing sources, never removes a destination it did not create, writes
+mode 0600, and fsyncs the snapshot. Generic
 cp/dd/cat processes may copy nonsensitive metadata/traces but must never stage
 representative page bytes outside the protected readers.
 A local ignored benchmark artifact may keep its existing fixture
