@@ -1075,13 +1075,15 @@ claim, NAND-lifetime claim or general real-media qualification.
 
 **Current disposition (2026-11-02): BLOCKED / REJECT for physical execution.**
 The handoff review pins production source
-`fb1f6f12bf24a08ebcf1f1f2cfd88ca83bf508b9`, while current `main` is
+`fb1f6f12bf24a08ebcf1f1f2cfd88ca83bf508b9`. The code-only review observed
+pre-roadmap-update `main` at
 `6469d4486d44aeb28fe526318c6596e73ddb8ad4`. Two same-host five-stage PASS
 reports were published for the pinned source, but commit
 `4e983a3b63e8c32c4311111d4669ec4a4462eb0c` later added the external-review
-prompt. Because `current_source_evidence()` permits only `test_results.json`
-publication commits after the qualified source, current `main` must fail the
-physical admission gate. That fail-closed behavior is intentional and must not
+prompt, and this roadmap update is itself another non-report commit. Because
+`current_source_evidence()` permits only `test_results.json` publication
+commits after the qualified source, present `main` must fail the physical
+admission gate. That fail-closed behavior is intentional and must not
 be relaxed. The external reviews were code-only; the device-specific
 `build/physical-swap-review/README.md`, unsigned review record, final detached
 signature and live selected-device state were not independently reviewed. No
