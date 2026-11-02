@@ -3288,7 +3288,9 @@ one unconsumed approval record. No fallback swap is required or created. A
 replaces that record for this one trial and states that no reviewer approval
 exists.
 
-Rootless tests for this procedure are software-model evidence only. They do not
+Rootless tests for this procedure pin device identity with synthetic
+major:minor values, so they never depend on a block device on the host (CI
+runners have no `/dev/sda4`). Rootless tests for this procedure are software-model evidence only. They do not
 qualify Linux `swapon`, physical performance, cold-boot recovery or power-loss
 behavior. The owner objective for this PC excludes VMs. Keep these limits
 explicit in every review and result.

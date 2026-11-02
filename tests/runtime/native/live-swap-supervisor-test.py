@@ -288,6 +288,22 @@ class FakeOps:
 
 
 class LiveSwapSupervisorTests(unittest.TestCase):
+    def setUp(self):
+        """Pin device identity: rootless tests must not depend on host block devices."""
+        patcher = mock.patch.object(supervisor.PHYSICAL, "block_identity",
+                                    side_effect=self._synthetic_block_identity)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def _synthetic_block_identity(path):
+        text_path = str(path)
+        if text_path == supervisor.DEVICE_PATH:
+            return (supervisor.DEVICE_MAJOR, supervisor.DEVICE_MINOR)
+        if text_path.startswith("/dev/mapper/") or "swapz-live" in text_path:
+            return (252, 0)
+        raise supervisor.PHYSICAL.ProbeError(f"synthetic test has no device {text_path}")
+
     def test_supervisor_capacity_matches_kernel_maximum_for_full_partition(self):
         self.assertEqual(supervisor.MAX_PHYSICAL_BLOCKS, 4194048)
         self.assertEqual(supervisor.MAX_LOGICAL_PAGES, 3355136)
