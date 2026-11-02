@@ -2609,10 +2609,14 @@ physical-media behavior. Before it can write, it requires the same x86 host to
 have two committed, distinct-content PASS reports for the exact current source:
 the committed report identity and both historical identities must equal a fresh
 canonical digest of the running host's /etc/machine-id and architecture.
-Duplicate publications of an identical JSON report cannot satisfy both counts.
+Only first-parent report publications on authenticated origin/main after the
+tested source count, and each current/historical report must individually pass
+all five build, native/rootless, W=1, W=2 and loaded-RAM stages.
+Duplicate publications of identical JSON cannot satisfy both counts.
 This is a conservative distinct-report gate, not cryptographic proof of two
-independently executed runs. It additionally requires a separate safety-review
-record bound to the source, helper hash and selected partition, an explicitly
+independently executed runs. It additionally requires a separately signed
+safety-review record bound to the source, helper hash and selected partition,
+an explicitly
 repeated /dev/disk/by-uuid/ path, and an active swap partition with zero used
 KiB, no mount and no block holders. Before a destructive operation the helper
 must prove a nonempty partition-table PARTUUID and matching
@@ -2624,7 +2628,7 @@ selected swap partition, uses the existing physical-backing opt-in and byte-exac
 device-roundtrip oracle, then removes only its UUID-owned mapper, restores and
 verifies the original header, and re-enables the original swap partition.
 Recovery must read the current block-0 header and accept only the saved
-original, a zero header at the documented pre-format stages, or an exact
+original, a zero header at SWAP_OFF or HEADER_CLEARED (never BACKED_UP), or an exact
 digest-matched valid SWZ v1 header after the formatter digest is saved.
 Unknown, modified or unrelated headers must stop before any overwrite and
 require manual review. A crash after the formatter writes SWZ but before its
@@ -2643,7 +2647,13 @@ historical reports that do not match the live host.
 The review record is JSON with approved=true, a reviewer other than the
 operator, scope=physical swap backing correctness smoke only, the qualified
 source SHA, the selected partition's major:minor identity and persistent PARTUUID, and the helper's
-SHA-256. The private read-only plan output prints the PARTUUID, source and helper hashes
+SHA-256. The exact JSON bytes additionally require a detached SSH signature
+at `<review-record>.sig` under namespace `swapz-physical-review`, verified
+for the named reviewer against independently provisioned
+`/etc/swapz/physical-review.allowed_signers`. The trust file and its parent
+must be root-owned and not group/world writable; the operator cannot override
+the trust path. An unsigned reviewer name cannot authorize physical writes.
+The private read-only plan output prints the PARTUUID, source and helper hashes
 for review binding. A missing or mismatched field blocks the write path.
 
 Capacity-exhaustion evidence must preserve committed reads: a write may return

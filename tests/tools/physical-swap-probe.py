@@ -30,6 +30,13 @@ LOGICAL_SECTORS = 32768
 EXPECTED_SCOPE = "physical swap backing correctness smoke only"
 STATE_NAME = "state.json"
 BACKUP_NAME = "block0.bin"
+REVIEW_SIGNERS = Path("/etc/swapz/physical-review.allowed_signers")
+REVIEW_NAMESPACE = "swapz-physical-review"
+QUALIFICATION_STAGE_NAMES = (
+    "Build module and helpers", "Native and rootless contracts",
+    "Kernel warnings W=1", "Kernel warnings W=2",
+    "Owned RAM smoke + mixed/QD pilot",
+)
 SWAPZ_HEADER_MAGIC = b"SWAPZ001"
 SWAPZ_HEADER_VERSION = 1
 
@@ -321,6 +328,18 @@ def _remote_main_sha():
     return rows[0][0]
 
 
+def _has_five_passing_stages(report):
+    """Require five executed owner stages, never just an overall PASS."""
+    stages = report.get("stages")
+    return (isinstance(stages, list) and
+            len(stages) == len(QUALIFICATION_STAGE_NAMES) and
+            all(isinstance(stage, dict) and stage.get("name") == name and
+                stage.get("status") == "PASS" and
+                type(stage.get("exit_code")) is int and
+                stage["exit_code"] == 0
+                for stage, name in zip(stages, QUALIFICATION_STAGE_NAMES)))
+
+
 def current_source_evidence():
     if platform.machine() != "x86_64":
         raise ProbeError("physical swap smoke is currently limited to x86_64")
@@ -338,11 +357,15 @@ def current_source_evidence():
         report = json.loads((ROOT / "test_results.json").read_text())
     except (OSError, ValueError) as exc:
         raise ProbeError(f"cannot read the current test report: {exc}") from exc
+    if not isinstance(report, dict):
+        raise ProbeError("current test_results.json must be an object")
     source = report.get("source_sha")
     if report.get("overall") != "PASS" or \
             report.get("tested_commit_sha") != source or \
-            not isinstance(source, str) or len(source) != 40:
-        raise ProbeError("current test_results.json is not an exact-source PASS")
+            not isinstance(source, str) or \
+            not re.fullmatch(r"[0-9a-f]{40}", source) or \
+            not _has_five_passing_stages(report):
+        raise ProbeError("current test_results.json is not an exact-source five-stage PASS")
     ancestor = _run(["git", "merge-base", "--is-ancestor", source, head],
                     check=False, cwd=ROOT)
     if ancestor.returncode:
@@ -358,7 +381,10 @@ def current_source_evidence():
         raise ProbeError("current PASS report was not produced on this host")
     host_json = json.dumps(host_identity, sort_keys=True, separators=(",", ":"))
     distinct_reports = set()
-    for commit in _git("log", "--all", "--format=%H", "--", "test_results.json").splitlines():
+    # Authenticate the first-parent main publication chain after tested source.
+    for commit in _git("log", "--first-parent", "--format=%H",
+                       f"{source}..origin/main", "--",
+                       "test_results.json").splitlines():
         result = _run(["git", "show", f"{commit}:test_results.json"],
                       timeout=10, check=False)
         if result.returncode:
@@ -367,9 +393,11 @@ def current_source_evidence():
             historical = json.loads(result.stdout)
         except ValueError:
             continue
-        if historical.get("overall") != "PASS" or \
+        if not isinstance(historical, dict) or \
+                historical.get("overall") != "PASS" or \
                 historical.get("source_sha") != source or \
-                historical.get("tested_commit_sha") != source:
+                historical.get("tested_commit_sha") != source or \
+                not _has_five_passing_stages(historical):
             continue
         old_host = historical.get("host_identity")
         if isinstance(old_host, dict) and json.dumps(
@@ -386,15 +414,58 @@ def current_source_evidence():
     }
 
 
+def _trusted_review_signers():
+    """Only independently provisioned root-controlled reviewer keys are trusted."""
+    try:
+        directory = REVIEW_SIGNERS.parent.lstat()
+        signers = REVIEW_SIGNERS.lstat()
+    except OSError as exc:
+        raise ProbeError("trusted reviewer signers are not provisioned") from exc
+    for entry, kind in ((directory, stat.S_ISDIR), (signers, stat.S_ISREG)):
+        if not kind(entry.st_mode) or entry.st_uid != 0 or \
+                entry.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise ProbeError("reviewer trust store must be root-owned and not writable by others")
+    return REVIEW_SIGNERS
+
+
+def _verify_signed_review(review_path, reviewer, record_bytes):
+    """Authenticate the exact JSON bytes with an external reviewer signature."""
+    signature = Path(str(review_path) + ".sig")
+    try:
+        signature_info = signature.lstat()
+    except OSError as exc:
+        raise ProbeError("independent review signature is missing") from exc
+    if not stat.S_ISREG(signature_info.st_mode):
+        raise ProbeError("independent review signature must be a regular file")
+    signers = _trusted_review_signers()
+    keygen = shutil.which("ssh-keygen")
+    if not keygen:
+        raise ProbeError("ssh-keygen is required for independent review verification")
+    try:
+        verified = subprocess.run(
+            [keygen, "-Y", "verify", "-f", str(signers), "-I", reviewer,
+             "-n", REVIEW_NAMESPACE, "-s", str(signature)],
+            input=record_bytes, stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProbeError("independent review signature verification failed") from exc
+    if verified.returncode:
+        raise ProbeError("independent review signature is not authenticated")
+
+
 def validate_review(review_path, evidence, target):
     try:
-        review = json.loads(Path(review_path).read_text())
+        record_bytes = Path(review_path).read_bytes()
+        review = json.loads(record_bytes)
     except (OSError, ValueError) as exc:
         raise ProbeError(f"cannot read independent safety review: {exc}") from exc
+    if not isinstance(review, dict):
+        raise ProbeError("independent safety review must be an object")
     reviewer = review.get("reviewer")
     operator = os.environ.get("SUDO_USER") or os.environ.get("USER") or "root"
     if review.get("approved") is not True or not isinstance(reviewer, str) or \
-            reviewer.strip().lower() in {"", "root", operator.lower()}:
+            (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@+-]{0,127}", reviewer) or
+             reviewer.lower() in {"root", operator.lower()}):
         raise ProbeError("review record must name a separate approving reviewer")
     if review.get("scope") != EXPECTED_SCOPE or \
             review.get("source_sha") != evidence["source_sha"] or \
@@ -404,6 +475,7 @@ def validate_review(review_path, evidence, target):
             review.get("helper_sha256") != hashlib.sha256(
                 Path(__file__).read_bytes()).hexdigest():
         raise ProbeError("review record does not match this source, helper and device")
+    _verify_signed_review(review_path, reviewer, record_bytes)
     return reviewer
 
 
@@ -538,7 +610,7 @@ def _validate_recovery_header(current_header, backup, state, size_bytes):
         return
     stage = state.get("stage_before_recovery", state.get("stage"))
     if current_header == bytes(PAGE_BYTES) and stage in {
-            "BACKED_UP", "SWAP_OFF", "HEADER_CLEARED"}:
+            "SWAP_OFF", "HEADER_CLEARED"}:
         return
     digest = state.get("formatted_header_sha256")
     if stage in {"SWZ_FORMATTED", "MAPPED", "ORACLE_PASS"} and (

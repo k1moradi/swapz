@@ -95,10 +95,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "review.json"
             path.write_text(json.dumps(review))
-            with mock.patch.dict(os.environ, {"SUDO_USER": "keivan", "USER": "root"}):
+            with mock.patch.dict(os.environ, {"SUDO_USER": "keivan", "USER": "root"}), \
+                    mock.patch.object(probe, "_verify_signed_review") as signed:
                 self.assertEqual(
                     probe.validate_review(path, evidence, target),
                     "independent-reviewer")
+                signed.assert_called_once_with(
+                    path, "independent-reviewer", path.read_bytes())
                 review["device_major_minor"] = "8:3"
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
@@ -108,6 +111,35 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
                     probe.validate_review(path, evidence, target)
+
+    def test_signed_review_rejects_missing_trust_and_invalid_signature(self):
+        with tempfile.TemporaryDirectory() as directory:
+            review_path = Path(directory) / "review.json"
+            signature = Path(str(review_path) + ".sig")
+            record = b'{"approved":true}'
+            signature.write_bytes(b"test-signature")
+            with mock.patch.object(probe, "REVIEW_SIGNERS",
+                                   Path(directory) / "absent-signers"):
+                with self.assertRaisesRegex(probe.ProbeError, "trusted reviewer"):
+                    probe._verify_signed_review(
+                        review_path, "independent-reviewer", record)
+            with mock.patch.object(probe, "_trusted_review_signers",
+                                   return_value=Path(directory) / "signers"), \
+                    mock.patch.object(probe.shutil, "which",
+                                      return_value="/usr/bin/ssh-keygen"), \
+                    mock.patch.object(probe.subprocess, "run",
+                                      return_value=subprocess.CompletedProcess(
+                                          [], 255)) as verify:
+                with self.assertRaisesRegex(probe.ProbeError, "not authenticated"):
+                    probe._verify_signed_review(
+                        review_path, "independent-reviewer", record)
+                self.assertEqual(verify.call_args.kwargs["input"], record)
+                self.assertEqual(verify.call_args.args[0][8],
+                                 probe.REVIEW_NAMESPACE)
+            signature.unlink()
+            with self.assertRaisesRegex(probe.ProbeError, "signature is missing"):
+                probe._verify_signed_review(
+                    review_path, "independent-reviewer", record)
 
     def test_review_rejects_the_operator_as_reviewer(self):
         evidence = {"source_sha": "b" * 40}
@@ -338,6 +370,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         state = {"stage": "HEADER_CLEARED"}
         probe._validate_recovery_header(original, original, state, size)
         probe._validate_recovery_header(zero, original, state, size)
+        state["stage"] = "SWAP_OFF"
+        probe._validate_recovery_header(zero, original, state, size)
+        state["stage"] = "BACKED_UP"
+        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
+            probe._validate_recovery_header(zero, original, state, size)
         with self.assertRaisesRegex(probe.ProbeError, "manual review"):
             probe._validate_recovery_header(formatted, original, state, size)
         state = {"stage": "MAPPED", "formatted_header_sha256": digest}
@@ -366,6 +403,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         current = {
             "overall": "PASS", "tested_commit_sha": source,
             "source_sha": source, "host_identity": dict(local_host),
+            "stages": [{"name": name, "status": "PASS", "exit_code": 0}
+                       for name in probe.QUALIFICATION_STAGE_NAMES],
         }
         history = {
             "first": dict(current, duration=1),
@@ -386,6 +425,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             if operation == "diff-tree":
                 return "test_results.json"
             if operation == "log":
+                self.assertIn("--first-parent", args)
+                self.assertIn(f"{source}..origin/main", args)
+                self.assertNotIn("--all", args)
                 return "first\nsecond"
             raise AssertionError(args)
 
@@ -411,6 +453,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 self.assertEqual(probe.current_source_evidence()["pass_reports"], 1)
                 history["second"] = dict(current, duration=2)
                 self.assertEqual(probe.current_source_evidence()["pass_reports"], 2)
+                history["second"] = dict(current, duration=2, stages=[
+                    *current["stages"][:-1],
+                    dict(current["stages"][-1], status="BLOCKED")])
+                self.assertEqual(probe.current_source_evidence()["pass_reports"], 1)
+                history["second"] = dict(current, duration=2)
+                current["stages"] = current["stages"][:-1]
+                (root / "test_results.json").write_text(json.dumps(current))
+                with self.assertRaisesRegex(probe.ProbeError, "five-stage"):
+                    probe.current_source_evidence()
+                current["stages"] = history["second"]["stages"]
                 current["host_identity"] = dict(local_host, id_sha256="2" * 64)
                 (root / "test_results.json").write_text(json.dumps(current))
                 with self.assertRaisesRegex(probe.ProbeError, "not produced on this host"):
