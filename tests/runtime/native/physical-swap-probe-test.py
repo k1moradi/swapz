@@ -508,7 +508,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe.recover(
                         state_dir, state["device_arg"], state["device_arg"])
 
-        self.assertGreaterEqual(len(calls), 2)
+        # The exact name/UUID mismatch now fails on the first inventory
+        # query, before any destructive recovery command is considered.
+        self.assertGreaterEqual(len(calls), 1)
         self.assertEqual(calls[0][:2], ("dmsetup", "info"))
         write_header.assert_not_called()
 

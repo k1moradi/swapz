@@ -2783,6 +2783,8 @@ changed. Require exact owned name and UUID in both the inventory and
 existence checks, and exact name/UUID/major/minor plus sysfs/table/size/
 lower-backing identity in mapper verification. A wrong UUID under the
 expected name or the owned UUID under another name must fail closed.
+A failed Device Mapper enumeration must never be treated as absence;
+the first mismatching row must stop recovery without a second probe.
 The standalone recovery path must continue to refuse module unloading
 without same-process ownership; a recovered parser is not permission to
 bypass that limitation.

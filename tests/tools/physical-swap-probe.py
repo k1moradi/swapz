@@ -1347,6 +1347,8 @@ def _mapper_exists(state):
     result = _run([
         "dmsetup", "info", "-c", "--noheadings", "-o", "name,uuid",
     ])
+    if result.returncode:
+        raise ProbeError("cannot enumerate Device Mapper inventory")
     matches = [
         (name, uuid) for name, uuid in _dm_info_rows(result.stdout, 2)
         if name == state["dm_name"] or uuid == state["dm_uuid"]
