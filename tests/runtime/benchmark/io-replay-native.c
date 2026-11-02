@@ -327,6 +327,7 @@ int main(int argc, char **argv)
 	char go[16];
 	int error = 0;
 	int fixture_fd, plan_fd;
+	const char *private_fixture = getenv("SWAPZ_PRIVATE_FIXTURE");
 
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	if (argc != 9) {
@@ -371,6 +372,17 @@ int main(int argc, char **argv)
 	}
 	if (getppid() == 1)
 		return 2;
+	if (private_fixture && strcmp(private_fixture, "1") == 0) {
+		const struct rlimit zero_core = { .rlim_cur = 0, .rlim_max = 0 };
+
+		/* Each exec must protect its own fixture mapping and read buffers. */
+		if (setrlimit(RLIMIT_CORE, &zero_core) != 0 ||
+		    prctl(PR_SET_DUMPABLE, 0, 0L, 0L, 0L) != 0 ||
+		    mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+			perror("io-replay-native: private memory protection");
+			return 2;
+		}
+	}
 	if (fstat(fixture_fd, &fixture_stat) != 0 || fixture_stat.st_size <= 0 ||
 	    fixture_stat.st_size % SWAPZ_REPLAY_PAGE_BYTES) {
 		fprintf(stderr, "io-replay-native: invalid fixture fd\n");

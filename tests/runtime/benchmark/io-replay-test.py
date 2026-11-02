@@ -12,12 +12,50 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import private_memory
 
 PAGE = 4096
 SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_representative_fixture_requires_fail_closed_memory_protection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fixture.bin"
+            self.assertFalse(private_memory.fixture_is_representative(path))
+            (path.parent / "fixture.json").write_text(
+                json.dumps({"content_profile": "representative"}))
+            self.assertTrue(private_memory.fixture_is_representative(path))
+            (path.parent / "fixture.json").write_text("not json")
+            with self.assertRaisesRegex(ValueError, "privacy metadata"):
+                private_memory.fixture_is_representative(path)
+
+        libc = mock.Mock()
+        libc.prctl.return_value = 0
+        libc.mlockall.return_value = -1
+        with mock.patch.object(private_memory.resource, "setrlimit") as no_core, \
+                mock.patch.object(private_memory.ctypes, "CDLL",
+                                  return_value=libc):
+            with self.assertRaisesRegex(ValueError, "protection unavailable"):
+                private_memory.protect_private_memory()
+            no_core.assert_called_once_with(
+                private_memory.resource.RLIMIT_CORE, (0, 0))
+            libc.prctl.assert_called_once_with(4, 0, 0, 0, 0)
+            libc.mlockall.assert_called_once_with(3)
+
+    def test_representative_memory_protection_success_path(self):
+        libc = mock.Mock()
+        libc.prctl.return_value = 0
+        libc.mlockall.return_value = 0
+        with mock.patch.object(private_memory.resource, "setrlimit"), \
+                mock.patch.object(private_memory.ctypes, "CDLL",
+                                  return_value=libc):
+            private_memory.protect_private_memory()
+            libc.prctl.assert_called_once_with(4, 0, 0, 0, 0)
+            libc.mlockall.assert_called_once_with(3)
+
     def test_id178_replay_conservation_and_fail_closed_fields(self):
         import runpy
         replay = runpy.run_path(str(SCRIPT))

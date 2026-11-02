@@ -96,7 +96,16 @@ totals, selected predictor backends, LZ4 version and planner geometry. It
 reports payload bytes saved and added so direct-adoption trade-offs remain
 visible. It emits no page bytes, per-page records, page hashes or sample path.
 Its working buffers are locked against swapping, dumpability is disabled, core
-dumps are disabled, and sample buffers are explicitly cleared.
+dumps are disabled, and sample buffers are explicitly cleared. The surrounding
+Python plan/stripe process and every replay Python process must disable core
+dumps and dumpability and use mlockall(MCL_CURRENT|MCL_FUTURE) before opening
+representative pages. The fixture.json content profile reestablishes this
+requirement across sudo; native replay must independently enforce it before
+mmap and allocating workers. If memory locking is unavailable or RLIMIT_MEMLOCK
+is insufficient, report BLOCKED rather than replay sensitive pages. Rootless
+tests cover privacy-metadata detection and rejected lock setup. These protections
+do not erase immutable Python copies before process exit; do not use highly
+sensitive page corpora without separately reviewing that retention boundary.
 The paired `make fast_test` plan uses the same page file and immutable trace for
 raw and swapz arms; its local ignored `latest.json` keeps the fixture digest for
 pair identity and the aggregate analysis, but never the sample bytes or path.

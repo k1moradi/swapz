@@ -28,6 +28,10 @@ import time
 import traceback
 from pathlib import Path
 
+# runpy consumers and standalone replay share the same fail-closed protection.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import private_memory  # noqa: E402
+
 PAGE = 4096
 SCHEMA = 1
 CANDIDATES = ("off", "swapz")
@@ -2489,6 +2493,13 @@ def main():
     cmp.add_argument("--linear-calibration", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
     try:
+        if args.command in ("prepare", "run") and (
+                private_memory.fixture_is_representative(args.fixture) or
+                os.environ.get("SWAPZ_PRIVATE_FIXTURE") == "1"):
+            # sudo may discard environment. The fixture's content metadata
+            # carries protection across each privileged replay process.
+            private_memory.protect_private_memory()
+            os.environ["SWAPZ_PRIVATE_FIXTURE"] = "1"
         if args.command == "prepare":
             prepare(args)
         elif args.command == "run":
