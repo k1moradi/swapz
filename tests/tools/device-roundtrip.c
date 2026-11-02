@@ -248,14 +248,17 @@ static int parse_uint(const char *text, unsigned int maximum,
 	return 0;
 }
 
-static int validate_owned_device(int fd)
+static int validate_owned_device(int fd, dev_t *opened_device)
 {
 	struct stat st;
 	uint64_t size = 0;
 
-	return fd >= 0 && !fstat(fd, &st) && S_ISBLK(st.st_mode) &&
-		!ioctl(fd, BLKGETSIZE64, &size) &&
-		size == UINT64_C(16) * 1024 * 1024 ? 0 : -1;
+	if (fd < 0 || fstat(fd, &st) || !S_ISBLK(st.st_mode) ||
+	    ioctl(fd, BLKGETSIZE64, &size) ||
+	    size != UINT64_C(16) * 1024 * 1024)
+		return -1;
+	*opened_device = st.st_rdev;
+	return 0;
 }
 
 /*
@@ -265,9 +268,10 @@ static int validate_owned_device(int fd)
 static int valid_physical_dm_uuid(const char *uuid)
 {
 	const size_t prefix_length = sizeof(PHYSICAL_DM_UUID_PREFIX) - 1U;
+	const size_t uuid_length = prefix_length + PHYSICAL_DM_UUID_TOKEN_LENGTH;
 	size_t index;
 
-	if (strlen(uuid) != prefix_length + PHYSICAL_DM_UUID_TOKEN_LENGTH ||
+	if (strnlen(uuid, uuid_length + 1U) != uuid_length ||
 	    memcmp(uuid, PHYSICAL_DM_UUID_PREFIX, prefix_length))
 		return 0;
 	for (index = prefix_length;
@@ -281,7 +285,11 @@ static int valid_physical_dm_uuid(const char *uuid)
 
 static int verify_physical_dm_uuid(dev_t opened_device, const char *expected_uuid)
 {
+	const size_t expected_uuid_length =
+		sizeof(PHYSICAL_DM_UUID_PREFIX) - 1U +
+		PHYSICAL_DM_UUID_TOKEN_LENGTH;
 	char sysfs_path[128];
+	/* One extra byte beyond "<expected UUID>\n" proves exact EOF. */
 	char reported_uuid[sizeof(PHYSICAL_DM_UUID_PREFIX) +
 			   PHYSICAL_DM_UUID_TOKEN_LENGTH + 1U];
 	size_t total_bytes = 0;
@@ -309,9 +317,9 @@ static int verify_physical_dm_uuid(dev_t opened_device, const char *expected_uui
 			break;
 		total_bytes += (size_t)read_bytes;
 	}
-	if (total_bytes == strlen(expected_uuid) + 1U &&
+	if (total_bytes == expected_uuid_length + 1U &&
 	    reported_uuid[total_bytes - 1U] == '\n' &&
-	    !memcmp(reported_uuid, expected_uuid, total_bytes - 1U))
+	    !memcmp(reported_uuid, expected_uuid, expected_uuid_length))
 		result = 0;
 out:
 	if (close(sysfs_fd))
@@ -746,7 +754,7 @@ int main(int argc, char **argv)
 {
 	const char *prefix = "/dev/mapper/swapz-demo-";
 	const char *expected_dm_uuid = NULL;
-	struct stat opened_mapper_stat;
+	dev_t opened_mapper_device = 0;
 	unsigned char *buf = NULL, *expected = NULL;
 	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
 	int raw_series = 0, discard_pages = 0, gc_mode = 0, churn_mode = 0;
@@ -850,14 +858,12 @@ int main(int argc, char **argv)
 	fd = open(argv[1], open_flags);
 	if (fd < 0 && errno == ELOOP)
 		fd = open(argv[1], open_flags & ~O_NOFOLLOW);
-	if (validate_owned_device(fd)) {
+	if (validate_owned_device(fd, &opened_mapper_device)) {
 		fprintf(stderr, "FAIL expected owned 16MiB DM block target\n");
 		goto out;
 	}
 	if (expected_dm_uuid &&
-	    (fstat(fd, &opened_mapper_stat) ||
-	     !S_ISBLK(opened_mapper_stat.st_mode) ||
-	     verify_physical_dm_uuid(opened_mapper_stat.st_rdev, expected_dm_uuid))) {
+	    verify_physical_dm_uuid(opened_mapper_device, expected_dm_uuid)) {
 		fprintf(stderr, "FAIL opened DM UUID missing or not the expected physical identity\n");
 		goto out;
 	}

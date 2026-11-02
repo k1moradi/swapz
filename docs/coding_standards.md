@@ -1896,14 +1896,18 @@ their I/O semantics remain unchanged.
 The oracle preserves its existing owned-mapper pathname restriction, but
 must not treat the pathname or symlink resolution as proof of identity.
 After opening the mapper with its existing aligned `O_DIRECT` flags,
-require `fstat()` on the actual descriptor to identify a block device
-and `BLKGETSIZE64` to confirm exactly 16 MiB. In the physical
-invocation, read `/sys/dev/block/<opened-major>:<opened-minor>/dm/uuid`
-using that descriptor's `st_rdev` identity. Require the kernel
-metadata to contain exactly the expected UUID and its terminating newline,
-followed by EOF. Missing, unreadable, oversized, malformed and mismatched
-metadata are all failures. Use bounded stack storage, no allocation or
-per-page checks, and close every opened FD on failure.
+require one `fstat()` on the actual descriptor to identify a block device,
+retain that same result's `st_rdev` as the authoritative opened identity,
+and use `BLKGETSIZE64` to confirm exactly 16 MiB. Do not take a second
+pathname-derived identity snapshot. In the physical invocation, read
+`/sys/dev/block/<opened-major>:<opened-minor>/dm/uuid` using that retained
+`st_rdev`. Require the kernel metadata to contain exactly the expected UUID
+and its terminating newline, followed by EOF. Missing, unreadable, oversized,
+malformed and mismatched metadata are all failures. Bound both CLI UUID-length
+inspection and the sysfs read to the fixed expected identity size; leave one
+extra byte of sysfs buffer capacity beyond `<UUID>\n` so an oversized value
+cannot be mistaken for an exact match. Use bounded stack storage, no allocation
+or per-page checks, and close every opened FD on failure.
 
 This gate completes before any write, discard, flush or other potentially
 destructive oracle operation; a same-sized but wrong-UUID mapper must never
