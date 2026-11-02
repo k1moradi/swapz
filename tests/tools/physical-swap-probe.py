@@ -1034,29 +1034,40 @@ def _kernel_swapz_messages(start_timestamp):
             "messages": _bounded_text(text)}
 
 
+def _dm_info_rows(stdout, field_count):
+    """Parse dmsetup columns without treating an existing mapper as absent."""
+    output = stdout.strip()
+    if output == "No devices found":
+        return []
+    if not output:
+        raise ProbeError("empty Device Mapper inventory is ambiguous")
+    rows = []
+    for line in stdout.splitlines():
+        if line.strip() == "No devices found":
+            raise ProbeError("mixed Device Mapper inventory diagnostic and rows")
+        # dmsetup -c defaults to colon-separated columns on some hosts, while
+        # other versions and existing fixtures emit whitespace columns.
+        fields = line.strip().split(":") if ":" in line else line.split()
+        if field_count == 2 and len(fields) == 1:
+            fields.append("")  # An unrelated mapper may have no DM UUID.
+        fields = tuple(field.strip() for field in fields)
+        if len(fields) != field_count or not fields[0]:
+            raise ProbeError("cannot parse Device Mapper inventory")
+        rows.append(fields)
+    return rows
+
+
 def _dm_inventory_snapshot(owned_name=None, owned_uuid=None):
     result = _run([
         "dmsetup", "info", "-c", "--noheadings", "-o", "name,uuid",
     ], check=False)
     if result.returncode:
         raise ProbeError("cannot snapshot Device Mapper inventory")
-    # With no maps, dmsetup may return success and this exact diagnostic
-    # rather than an empty table. Normalize it for both pre/post snapshots.
-    output = result.stdout.strip()
-    if output == "No devices found":
-        lines = ()
-    elif not output:
-        raise ProbeError("empty Device Mapper inventory is ambiguous")
-    else:
-        lines = result.stdout.splitlines()
     rows = []
-    for line in lines:
-        fields = line.split()
-        if len(fields) not in (1, 2):
-            raise ProbeError("cannot parse Device Mapper inventory")
-        name = fields[0]
-        uuid = fields[1] if len(fields) == 2 else ""
+    for name, uuid in _dm_info_rows(result.stdout, 2):
         if name == owned_name or uuid == owned_uuid:
+            if (name, uuid) != (owned_name, owned_uuid):
+                raise ProbeError("owned mapper name or UUID changed in inventory")
             continue
         rows.append([name, uuid])
     rows.sort()
@@ -1219,14 +1230,15 @@ def _verify_owned_mapper(state, target):
     """Prove mapper identity, exact table, size and one genuine lower slave."""
     _validate_owned_mapper_identity(state)
     name, expected_uuid = state["dm_name"], state["dm_uuid"]
-    fields = _run([
+    info = _run([
         "dmsetup", "info", "-c", "--noheadings",
         "-o", "name,uuid,major,minor", name,
-    ]).stdout.split()
-    if len(fields) != 4 or fields[:2] != [name, expected_uuid]:
+    ])
+    rows = _dm_info_rows(info.stdout, 4)
+    if len(rows) != 1 or rows[0][:2] != (name, expected_uuid):
         raise ProbeError("mapper name or UUID was substituted")
     try:
-        dm_major, dm_minor = int(fields[2]), int(fields[3])
+        dm_major, dm_minor = int(rows[0][2]), int(rows[0][3])
     except ValueError as exc:
         raise ProbeError("mapper major:minor is invalid") from exc
     mapper = f"/dev/mapper/{name}"
@@ -1330,21 +1342,21 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
 
 
 def _mapper_exists(state):
-    """Distinguish proven absence from a failed individual info query."""
+    """Prove absence or exact identity; never suppress a substituted mapper."""
+    _validate_owned_mapper_identity(state)
     result = _run([
         "dmsetup", "info", "-c", "--noheadings", "-o", "name,uuid",
     ])
-    names = []
-    uuids = []
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) not in (1, 2):
-            raise ProbeError("cannot enumerate mapper ownership unambiguously")
-        names.append(fields[0])
-        uuids.append(fields[1] if len(fields) == 2 else "")
-    if state["dm_uuid"] in uuids and state["dm_name"] not in names:
-        raise ProbeError("owned DM UUID appeared under a different name")
-    return state["dm_name"] in names
+    matches = [
+        (name, uuid) for name, uuid in _dm_info_rows(result.stdout, 2)
+        if name == state["dm_name"] or uuid == state["dm_uuid"]
+    ]
+    if not matches:
+        return False
+    if len(matches) != 1 or matches[0] != (
+            state["dm_name"], state["dm_uuid"]):
+        raise ProbeError("owned mapper name or UUID was substituted")
+    return True
 
 
 def _validate_recovery_header(current_header, backup, state, size_bytes):

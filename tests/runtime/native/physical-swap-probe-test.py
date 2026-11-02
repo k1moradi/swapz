@@ -133,6 +133,67 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 expected_rows, separators=(",", ":")).encode()).hexdigest(),
         })
 
+    def test_colon_delimited_dm_info_identity_cannot_be_mistaken_for_absence(self):
+        token = "88a2b96d81d81254"
+        name = f"swapz-demo-physical-{token}"
+        uuid = f"SWAPZ-TEST-PHYSICAL-{token}"
+        state = {"dm_name": name, "dm_uuid": uuid}
+        for output, present in (
+            (f"{name}:{uuid}\n", True),
+            (f"{name} {uuid}\n", True),
+            ("No devices found\n", False),
+        ):
+            with self.subTest(output=output), mock.patch.object(
+                    probe, "_run", return_value=subprocess.CompletedProcess(
+                        args=[], returncode=0, stdout=output, stderr="")):
+                self.assertEqual(probe._mapper_exists(state), present)
+
+    def test_dm_parser_fail_closed_on_bad_fields_or_substituted_uuid(self):
+        token = "88a2b96d81d81254"
+        name = f"swapz-demo-physical-{token}"
+        uuid = f"SWAPZ-TEST-PHYSICAL-{token}"
+        state = {"dm_name": name, "dm_uuid": uuid}
+        for output in (
+            f"{name}:SWAPZ-TEST-PHYSICAL-ffffffffffffffff\n",
+            f"unrelated:{uuid}\n",
+            f"{name}:{uuid}:another-field\n",
+            "No devices found\nother-map:other-uuid\n",
+            "name:uuid:major:minor\n",
+        ):
+            with self.subTest(output=output), mock.patch.object(
+                    probe, "_run", return_value=subprocess.CompletedProcess(
+                        args=[], returncode=0, stdout=output, stderr="")):
+                with self.assertRaises(probe.ProbeError):
+                    probe._mapper_exists(state)
+        with mock.patch.object(
+                probe, "_run", return_value=subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout=f"{name}:{uuid}\n",
+                    stderr="device-mapper failed")):
+            with self.assertRaises(probe.ProbeError):
+                probe._mapper_exists(state)
+
+    def test_colon_delimited_unrelated_mapper_inventory_preserves_identity(self):
+        token = "88a2b96d81d81254"
+        name = f"swapz-demo-physical-{token}"
+        uuid = f"SWAPZ-TEST-PHYSICAL-{token}"
+        output = f"{name}:{uuid}\nunrelated:other-uuid\n"
+        with mock.patch.object(
+                probe, "_run", return_value=subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=output, stderr="")):
+            result = probe._dm_inventory_snapshot(name, uuid)
+        expected_rows = [["unrelated", "other-uuid"]]
+        self.assertEqual(result, {
+            "other_mapper_count": 1,
+            "other_mapper_sha256": hashlib.sha256(json.dumps(
+                expected_rows, separators=(",", ":")).encode()).hexdigest(),
+        })
+        with mock.patch.object(
+                probe, "_run", return_value=subprocess.CompletedProcess(
+                    args=[], returncode=0,
+                    stdout=f"{name}:wrong-uuid\n", stderr="")):
+            with self.assertRaisesRegex(probe.ProbeError, "UUID"):
+                probe._dm_inventory_snapshot(name, uuid)
+
     def test_only_supported_4k_linux_swap_header_is_accepted(self):
         header = bytearray(probe.PAGE_BYTES)
         header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
@@ -1102,7 +1163,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                              for event in events) >= 2)
                 uuid = ("SWAPZ-TEST-PHYSICAL-ffffffffffffffff"
                         if wrong_uuid else state["dm_uuid"])
-                output = f"{state['dm_name']} {uuid} 253 0\n"
+                output = f"{state['dm_name']}:{uuid}:253:0\n"
             elif command[:2] == ["dmsetup", "table"]:
                 table = probe._expected_dm_table(target)
                 if fault == "table":

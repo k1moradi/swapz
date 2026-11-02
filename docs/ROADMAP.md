@@ -1066,6 +1066,22 @@ A release or physical-media trial remains blocked until the same pinned source h
 
 ### Owner-requested physical swap-partition smoke — bounded correctness only
 
+**2026-11-02 RECOVERY INCIDENT — PHYSICAL TESTS HALTED.** An approved
+one-use run cleared and SWZ-formatted the selected partition, loaded
+dm_swapz, and created the expected 16 MiB mapper. A colon-delimited
+dmsetup information row triggered a false identity failure and later a
+false mapper-absence result; rmmod failed while the mapper was in use.
+The physical mapper and module remain loaded, original swap is inactive,
+the saved formatted-header digest is still present on block zero, and
+the intact 4096-byte original header backup is retained. No oracle
+phase ran. The consumed approval and active recovery marker must remain.
+Before ANY further physical test, separately supervise a live recovery
+review proving exact device/mapper/UUID/table/lower identity, module
+provenance and a matching original backup. No force removal, reboot,
+manual header overwrite or standalone recover bypass is approved.
+A helper-only parser fix and green CI cannot certify that live recovery
+was completed.
+
 The owner authorized one bounded physical correctness round-trip on the active,
 zero-used swap partition, with swapoff limited to that exact selected partition.
 This remains outside ordinary make test and establishes no performance,

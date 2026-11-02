@@ -2776,6 +2776,17 @@ approval remains consumed. Post-reactivation swap usage is an observation.
 
 #### Physical-swap rootless regression gate
 
+All `dmsetup info -c` consumers must interpret colon-delimited and
+whitespace-delimited rows with exact expected column counts. An existing
+owned mapper must never be interpreted as absent because a separator
+changed. Require exact owned name and UUID in both the inventory and
+existence checks, and exact name/UUID/major/minor plus sysfs/table/size/
+lower-backing identity in mapper verification. A wrong UUID under the
+expected name or the owned UUID under another name must fail closed.
+The standalone recovery path must continue to refuse module unloading
+without same-process ownership; a recovered parser is not permission to
+bypass that limitation.
+
 The helper's read-only Device Mapper inventory must treat a successful
 `dmsetup info -c --noheadings -o name,uuid` response containing only the
 exact `No devices found` diagnostic (surrounding whitespace allowed) as an
