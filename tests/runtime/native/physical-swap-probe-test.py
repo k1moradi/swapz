@@ -817,6 +817,53 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                             "root-controlled"):
                     probe._recovery_base()
 
+    def test_missing_or_unverifiable_recovery_base_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing = root / "missing"
+            with mock.patch.object(probe, "_recovery_base", REAL_RECOVERY_BASE), \
+                    mock.patch.object(probe, "RECOVERY_BASE", missing):
+                with self.assertRaisesRegex(probe.ProbeError, "missing"):
+                    probe._recovery_base()
+
+            base = root / "base"
+            base.mkdir(mode=0o700)
+            real_lstat = probe.Path.lstat
+
+            def root_owned_lstat(path):
+                info = real_lstat(path)
+                fields = list(info)
+                fields[4] = 0
+                if path != base:
+                    fields[0] = stat.S_IFDIR | 0o755
+                return os.stat_result(fields)
+
+            def run(command, **kwargs):
+                del kwargs
+                if command[:5] == [
+                        "findmnt", "--first-only", "--noheadings",
+                        "--output", "FSTYPE"]:
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="ext4\n", stderr="")
+                if command[:5] == [
+                        "findmnt", "--first-only", "--noheadings",
+                        "--output", "SOURCE"]:
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="overlay\n", stderr="")
+                raise AssertionError(command)
+
+            with mock.patch.object(probe, "_recovery_base", REAL_RECOVERY_BASE), \
+                    mock.patch.object(probe, "RECOVERY_BASE", base), \
+                    mock.patch.object(probe.Path, "lstat",
+                                      root_owned_lstat), \
+                    mock.patch.object(probe.Path, "stat",
+                                      side_effect=lambda path:
+                                      root_owned_lstat(path)), \
+                    mock.patch.object(probe, "_run", side_effect=run):
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "verified persistent block source"):
+                    probe._recovery_base()
+
     def test_parent_entry_fsync_failure_prevents_state_admission(self):
         target, evidence = self.physical_preparation_fixture()
         _, _, review = self.reviewed_device_fixture()
@@ -855,7 +902,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe._read_block0(str(path), {"major": 8, "minor": 4,
                                               "size_bytes": probe.PAGE_BYTES})
 
-    def simulate_physical_run(self, wrong_mapper=False, mapper_fault=None):
+    def simulate_physical_run(self, wrong_mapper=False, mapper_fault=None,
+                              identity_failure_at=None):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         token = "1234567890abcdef"
@@ -875,6 +923,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         formatted[24:40] = bytes(range(1, 17))
         mapper = f"/dev/mapper/{state['dm_name']}"
         events = []
+        identity_verifications = 0
+
+        def verify_target(_target):
+            nonlocal identity_verifications
+            identity_verifications += 1
+            events.append(("verify", identity_verifications))
+            if identity_failure_at == identity_verifications:
+                raise probe.ProbeError(
+                    f"injected identity change at boundary {identity_verifications}")
 
         def run(command, **kwargs):
             del kwargs
@@ -951,7 +1008,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                       "oracle_sha256": "/reviewed/device-roundtrip",
                                   }),
                 mock.patch.object(probe, "_verify_target_identity",
-                                  side_effect=lambda _: events.append(("verify",))),
+                                  side_effect=verify_target),
                 mock.patch.object(probe, "_active_swap_for",
                                   side_effect=[{
                                       "used_kib": 0,
@@ -975,9 +1032,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with ExitStack() as active_patches:
                 for patch in patches:
                     active_patches.enter_context(patch)
-                if fault:
+                if fault or identity_failure_at is not None:
                     with self.assertRaisesRegex(
-                            probe.ProbeError, "mapper|UUID|identity|table|backing"):
+                            probe.ProbeError,
+                            "mapper|UUID|identity|table|backing|injected"):
                         probe.run_probe(target["device_arg"], target["device_arg"],
                                         directory, "/reviewed/review.json")
                 else:
@@ -1015,6 +1073,29 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertTrue(any(event[0] == "verify" for event in
                             events[cleared + 1:formatted]),
                         "partition was not rechecked immediately before formatter")
+
+    def test_identity_changes_at_late_boundaries_stop_before_next_action(self):
+        cases = (
+            (2, "swapoff"),
+            (4, "/reviewed/swapzctl"),
+            (5, "dmsetup-create"),
+            (6, "/reviewed/device-roundtrip"),
+        )
+        for boundary, forbidden in cases:
+            with self.subTest(boundary=boundary):
+                events, _, _ = self.simulate_physical_run(
+                    identity_failure_at=boundary)
+                commands = [event[1] for event in events
+                            if event[0] == "command"]
+                if forbidden == "dmsetup-create":
+                    reached = any(command[:2] == ("dmsetup", "create")
+                                  for command in commands)
+                else:
+                    reached = any(command[0] == forbidden
+                                  for command in commands)
+                self.assertFalse(
+                    reached,
+                    f"identity failure at boundary {boundary} reached {forbidden}")
 
     def test_wrong_created_mapper_identity_never_reaches_oracle(self):
         events, _, _ = self.simulate_physical_run(wrong_mapper=True)
@@ -1107,6 +1188,60 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe.recover(state_dir, state["device_arg"],
                                   state["device_arg"])
                 write.assert_not_called()
+
+    def test_recovery_removes_owned_mapper_without_force_and_swapons_partition(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, backup = self.make_recovery_state(state_dir)
+            active = {
+                "path": state["device"], "used_kib": 0,
+                "size_kib": state["swap_size_kib"],
+                "priority": state["swap_priority"],
+            }
+            commands = []
+
+            def run(command, **kwargs):
+                del kwargs
+                commands.append(tuple(command))
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="", stderr="")
+
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery",
+                        return_value={
+                            "device": state["device"], "major": 8, "minor": 4,
+                            "size_bytes": state["size_bytes"],
+                            "partuuid": state["partuuid"],
+                        }), \
+                    mock.patch.object(probe.Path, "exists",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_mapper_exists",
+                                      return_value=True), \
+                    mock.patch.object(probe, "_verify_owned_mapper",
+                                      return_value=f"/dev/mapper/{state['dm_name']}"), \
+                    mock.patch.object(probe, "_run", side_effect=run), \
+                    mock.patch.object(probe, "_holder_names", return_value=[]), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_read_block0",
+                                      return_value=backup), \
+                    mock.patch.object(probe, "_verify_target_identity"), \
+                    mock.patch.object(
+                        probe, "_active_swap_for",
+                        side_effect=[None, None, active]), \
+                    mock.patch.object(probe, "_save_state"), \
+                    mock.patch.object(probe, "_release_partition_ownership"):
+                recovered = probe.recover(
+                    state_dir, state["device_arg"], state["device_arg"])
+
+            self.assertEqual(recovered["stage"], "COMPLETE")
+            self.assertIn(("dmsetup", "remove", state["dm_name"]), commands)
+            self.assertFalse(any("--force" in command for command in commands))
+            self.assertIn(("swapon", state["device"]), commands)
+            mapper = f"/dev/mapper/{state['dm_name']}"
+            self.assertFalse(any(command[0] == "swapon" and mapper in command
+                                 for command in commands))
 
     def test_recovery_rejects_wrong_restored_swap_capacity_and_priority(self):
         with tempfile.TemporaryDirectory() as directory:
