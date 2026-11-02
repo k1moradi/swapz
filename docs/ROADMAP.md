@@ -1066,7 +1066,47 @@ A release or physical-media trial remains blocked until the same pinned source h
 
 ### Owner-requested physical swap-partition smoke — bounded correctness only
 
-**2026-11-02 FOLLOW-UP: NORMAL SWAP RESTORED (OWNER-REPORTED).**
+**2026-11-02 PHYSICAL CORRECTNESS SMOKE: PASS (HOST-REPORTED;
+BOUNDED CORRECTNESS ONLY).** Run
+`94e5cd3f2c15d6ff52587d568e8d11f5` executed on bare-metal x86_64
+from 09:27:34 to 09:27:52 PST, with qualified production source
+`651c35bb5023a69e8a8b42f1113b8a9beaf3c7f6` and helper-policy
+commit `841c2bb8c4c4e6b064fe857eaabb976d4c596cdf`. The exact bound
+artifact/helper hashes were verified by the operator, and the final
+read-only plan admitted active swap with 0 KiB used. All 11 physical
+device-roundtrip invocations returned PASS, covering the 128-page
+byte-exact baseline, delta64 write/verify, segmented and cross-
+representation verification, and THP write/verify plus ordinary verify.
+Post-phase mapper identities and status observations passed.
+
+Original Linux swap was restored on /dev/sda4 (8:4, PARTUUID
+`7fb9401d-04`): 16777212 KiB, priority -1, and 0 KiB used at the
+09:28:27 PST observation. The restored 4096-byte header matched the
+original SHA-256
+`ace016a7a3ecd22b0aca05946a305aef2113bc50439452756ae68909010f0afe`.
+Recovery state was durably COMPLETE; the owned mapper and dm_swapz
+module were absent, before/after unrelated DM inventory was identically
+empty, the partition marker was absent and the one-use approval remained
+consumed. Root-owned evidence remains under
+`/var/lib/swapz/physical-recovery/swapz-physical-94e5cd3f2c15d6ff52587d568e8d11f5/`;
+`results.json` SHA-256
+`da71b3642824b63ecaa7db43e6fb65baf19cfaefa8cc4fbf2b13d075eb893865`.
+These device outcomes are operator-reported, not independently read
+from that root-owned evidence directory by this GitHub-side review.
+
+The host's journalctl rejected --kernel, so retained dmesg fallback
+records were unfiltered. The operator separately examined the exact
+run interval and observed only two informational initialization lines,
+with no swapz warning/error attributed to this run. Older messages in
+the fallback must not be treated as run failures. The earlier physical
+attempt `5c4f825bc3bab808e128b2fc66a58f74` remains FAIL with zero
+oracle phases, its recovery COMPLETE and its approval consumed; its
+evidence has not been rewritten. This PASS does **not** qualify
+performance, endurance, broader physical media, or production use.
+No additional physical attempt is approved or necessary to establish
+this bounded correctness milestone.
+
+**HISTORICAL 2026-11-02 FOLLOW-UP: NORMAL SWAP RESTORED (OWNER-REPORTED).**
 The authorized supervised recovery for run
 `5c4f825bc3bab808e128b2fc66a58f74` removed only the owned mapper,
 unloaded dm_swapz without force, restored the original 4096-byte header
@@ -1092,7 +1132,7 @@ corrected invocation. A post-recovery whole-partition hash was stopped;
 the original 4 KiB header was reverified. No further physical smoke is
 approved, and zero-used swap would again be required before one.
 
-**2026-11-02 RECOVERY INCIDENT — PHYSICAL TESTS HALTED.** An approved
+**HISTORICAL 2026-11-02 RECOVERY INCIDENT — PHYSICAL TESTS HALTED.** An approved
 one-use run cleared and SWZ-formatted the selected partition, loaded
 dm_swapz, and created the expected 16 MiB mapper. A colon-delimited
 dmsetup information row triggered a false identity failure and later a
@@ -1113,7 +1153,7 @@ zero-used swap partition, with swapoff limited to that exact selected partition.
 This remains outside ordinary make test and establishes no performance,
 endurance, NAND-lifetime or general physical-media qualification.
 
-**Current disposition (2026-11-02): OWNER QUALIFICATION PASS ON 651c35bb;
+**Historical pre-run disposition (2026-11-02): OWNER QUALIFICATION PASS ON 651c35bb;
 PHYSICAL RUN STILL BLOCKED BEFORE DESTRUCTIVE WORK.** The latest x86_64
 five-stage owner PASS is published by report-only commit e88c3038.
 At last inspection the selected normal swap was active with 0 KiB used,
