@@ -17,6 +17,7 @@ import secrets
 import shutil
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,8 @@ LOGICAL_SECTORS = 32768
 EXPECTED_SCOPE = "physical swap backing correctness smoke only"
 STATE_NAME = "state.json"
 BACKUP_NAME = "block0.bin"
+SWAPZ_HEADER_MAGIC = b"SWAPZ001"
+SWAPZ_HEADER_VERSION = 1
 
 
 class ProbeError(RuntimeError):
@@ -144,6 +147,62 @@ def _read_block0(device):
     return data
 
 
+def swapz_header_valid(header, size_bytes):
+    """Recognize only the exact v1 SWZ formatter header geometry."""
+    return (
+        len(header) == PAGE_BYTES
+        and header[:8] == SWAPZ_HEADER_MAGIC
+        and struct.unpack_from("<IIQ", header, 8) ==
+        (SWAPZ_HEADER_VERSION, PAGE_BYTES, size_bytes)
+        and any(header[24:40])
+        and not any(header[40:])
+    )
+
+
+def _partition_identity(device):
+    try:
+        result = json.loads(_run([
+            "lsblk", "--json", "--bytes", "--nodeps",
+            "--output", "TYPE,PARTUUID,SIZE", device,
+        ]).stdout)
+        rows = result.get("blockdevices", [])
+        if len(rows) != 1 or rows[0].get("type") != "part":
+            raise ProbeError("cannot identify exactly one partition")
+        row = rows[0]
+        partuuid = row.get("partuuid")
+        if not isinstance(partuuid, str) or not re.fullmatch(
+                r"[0-9A-Fa-f-]{8,64}", partuuid):
+            raise ProbeError("partition lacks a stable PARTUUID")
+        size = row.get("size")
+        if type(size) is not int or size <= 0:
+            raise ProbeError("partition lacks a valid size")
+        # Filesystem UUID links disappear when the original swap header is
+        # replaced. The partition-table UUID must survive that transition.
+        by_partuuid = Path("/dev/disk/by-partuuid") / partuuid.lower()
+        if block_identity(by_partuuid) != block_identity(device):
+            raise ProbeError("PARTUUID link does not identify the selected partition")
+        return partuuid.lower(), size
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise ProbeError("cannot verify stable partition identity") from exc
+
+
+def live_host_identity():
+    """Mirror the canonical make-test machine-id digest, not report metadata."""
+    try:
+        machine_id = Path("/etc/machine-id").read_text().strip()
+        if not re.fullmatch(r"[0-9a-fA-F]{32}", machine_id) or (
+                int(machine_id, 16) == 0):
+            raise ValueError("invalid machine-id")
+        return {
+            "schema": "swapz-host-v1",
+            "architecture": platform.machine(),
+            "id_sha256": hashlib.sha256(
+                b"swapz-host\0" + machine_id.lower().encode()).hexdigest(),
+        }
+    except (OSError, ValueError) as exc:
+        raise ProbeError("cannot identify the current host for physical smoke") from exc
+
+
 def _verify_target_identity(target):
     if block_identity(target["device"]) != (target["major"], target["minor"]):
         raise ProbeError("selected block identity changed during the operation")
@@ -155,6 +214,9 @@ def _verify_target_identity(target):
         raise ProbeError("cannot verify selected partition size") from exc
     if size != target["size_bytes"]:
         raise ProbeError("selected partition size changed during the operation")
+    partuuid, part_size = _partition_identity(target["device"])
+    if (partuuid != target["partuuid"] or part_size != target["size_bytes"]):
+        raise ProbeError("selected partition persistent identity changed")
 
 
 def inspect_target(device_arg, confirm_arg):
@@ -189,6 +251,9 @@ def inspect_target(device_arg, confirm_arg):
         raise ProbeError("selected partition is not identified as Linux swap")
     if not row.get("uuid") or not isinstance(size_bytes, int):
         raise ProbeError("selected swap partition lacks stable identity or size")
+    partuuid, partition_size = _partition_identity(device)
+    if partition_size != size_bytes:
+        raise ProbeError("selected partition inventory has inconsistent size")
     if size_bytes < 3 * 1024 * 1024 + PAGE_BYTES:
         raise ProbeError("selected swap partition is too small for swapz")
 
@@ -214,6 +279,7 @@ def inspect_target(device_arg, confirm_arg):
         "minor": minor,
         "size_bytes": size_bytes,
         "uuid": row["uuid"],
+        "partuuid": partuuid,
         "header": header,
         "swap_path": active["path"],
         "swap_priority": active["priority"],
@@ -287,11 +353,11 @@ def current_source_evidence():
         if names != ["test_results.json"]:
             raise ProbeError("main has changes after the qualified source")
 
-    host_identity = report.get("host_identity")
-    if not isinstance(host_identity, dict):
-        raise ProbeError("test report lacks this computer's identity")
+    host_identity = live_host_identity()
+    if report.get("host_identity") != host_identity:
+        raise ProbeError("current PASS report was not produced on this host")
     host_json = json.dumps(host_identity, sort_keys=True, separators=(",", ":"))
-    matching_reports = 0
+    distinct_reports = set()
     for commit in _git("log", "--all", "--format=%H", "--", "test_results.json").splitlines():
         result = _run(["git", "show", f"{commit}:test_results.json"],
                       timeout=10, check=False)
@@ -308,11 +374,14 @@ def current_source_evidence():
         old_host = historical.get("host_identity")
         if isinstance(old_host, dict) and json.dumps(
                 old_host, sort_keys=True, separators=(",", ":")) == host_json:
-            matching_reports += 1
+            # A replayed/copy-published report is not a second run.
+            distinct_reports.add(hashlib.sha256(
+                json.dumps(historical, sort_keys=True,
+                           separators=(",", ":")).encode()).hexdigest())
     return {
         "source_sha": source,
         "host_identity": host_identity,
-        "pass_reports": matching_reports,
+        "pass_reports": len(distinct_reports),
         "head": head,
     }
 
@@ -410,7 +479,7 @@ def _allocate_dm_identity():
     raise ProbeError("cannot allocate a unique owned Device Mapper identity")
 
 
-def _write_block0(device, data):
+def _write_block0(device, data, target):
     if len(data) != PAGE_BYTES:
         raise ProbeError("recovery header has the wrong length")
     try:
@@ -418,6 +487,11 @@ def _write_block0(device, data):
     except OSError as exc:
         raise ProbeError(f"cannot exclusively open selected partition: {exc}") from exc
     try:
+        info = os.fstat(fd)
+        if not stat.S_ISBLK(info.st_mode) or (
+                os.major(info.st_rdev), os.minor(info.st_rdev)) != (
+                target["major"], target["minor"]):
+            raise ProbeError("partition identity changed before header write")
         written = os.pwrite(fd, data, 0)
         if written != PAGE_BYTES:
             raise ProbeError("short write while updating partition header")
@@ -456,6 +530,23 @@ def _validate_owned_mapper_identity(state):
     if not re.fullmatch(r"[0-9a-f]{16}", name_token) or \
             name_token != uuid_token:
         raise ProbeError("saved mapper name and UUID tokens do not match")
+
+
+def _validate_recovery_header(current_header, backup, state, size_bytes):
+    if current_header == backup:
+        return
+    stage = state.get("stage_before_recovery", state.get("stage"))
+    if current_header == bytes(PAGE_BYTES) and stage in {
+            "BACKED_UP", "SWAP_OFF", "HEADER_CLEARED"}:
+        return
+    digest = state.get("formatted_header_sha256")
+    if stage in {"SWZ_FORMATTED", "MAPPED", "ORACLE_PASS"} and (
+            isinstance(digest, str) and
+            hashlib.sha256(current_header).hexdigest() == digest and
+            swapz_header_valid(current_header, size_bytes)):
+        return
+    raise ProbeError(
+        "partition header is not an expected recovery state; manual review required")
 
 
 def recover(state_dir, device_arg, confirm_arg):
@@ -497,9 +588,10 @@ def recover(state_dir, device_arg, confirm_arg):
     active = _active_swap_for(target["major"], target["minor"])
     if active is not None and current_header != backup:
         raise ProbeError("recovery refused to rewrite a header while swap is active")
+    _validate_recovery_header(current_header, backup, state, target["size_bytes"])
     if current_header != backup:
         _verify_target_identity(target)
-        _write_block0(target["device"], backup)
+        _write_block0(target["device"], backup, target)
 
     if state.get("swap_was_active"):
         if _active_swap_for(target["major"], target["minor"]) is None:
@@ -519,7 +611,11 @@ def recover(state_dir, device_arg, confirm_arg):
 def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
     if device_arg != confirm_arg or device_arg != state.get("device_arg"):
         raise ProbeError("recovery requires the exact originally confirmed device path")
-    device = str(Path(device_arg).resolve(strict=True))
+    # The confirmed swap-filesystem UUID link may have vanished after
+    # formatting. Resolve only the previously saved canonical block path.
+    device = state.get("device")
+    if not isinstance(device, str) or not device.startswith("/dev/"):
+        raise ProbeError("recovery state lacks a canonical block device")
     major, minor = block_identity(device)
     if (major, minor) != (state.get("major"), state.get("minor")):
         raise ProbeError("recovery device identity does not match the saved state")
@@ -529,11 +625,18 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
         raise ProbeError("cannot verify selected partition size during recovery") from exc
     if size != state.get("size_bytes"):
         raise ProbeError("recovery partition size does not match saved state")
+    expected_partuuid = state.get("partuuid")
+    if not isinstance(expected_partuuid, str) or not expected_partuuid:
+        raise ProbeError("recovery state lacks a persistent PARTUUID")
+    partuuid, partition_size = _partition_identity(device)
+    if (partuuid != expected_partuuid or partition_size != size):
+        raise ProbeError("recovery partition PARTUUID or geometry changed")
     return {
         "device": device,
         "major": major,
         "minor": minor,
         "size_bytes": size,
+        "partuuid": partuuid,
     }
 
 
@@ -571,6 +674,7 @@ def _prepare_state(target, state_dir, evidence, reviewer):
             "major": target["major"],
             "minor": target["minor"],
             "size_bytes": target["size_bytes"],
+            "partuuid": target["partuuid"],
             "header_sha256": hashlib.sha256(target["header"]).hexdigest(),
             "swap_was_active": True,
             "swap_path": target["swap_path"],
@@ -641,10 +745,15 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
         _save_state(state_dir, state)
 
         _verify_target_identity(target)
-        _write_block0(target["device"], bytes(PAGE_BYTES))
+        _write_block0(target["device"], bytes(PAGE_BYTES), target)
         state["stage"] = "HEADER_CLEARED"
         _save_state(state_dir, state)
         _run([formatter, "format", target["device"]], timeout=30)
+        formatted_header = _read_block0(target["device"])
+        if not swapz_header_valid(formatted_header, target["size_bytes"]):
+            raise ProbeError("formatter did not produce the expected SWZ header")
+        state["formatted_header_sha256"] = hashlib.sha256(
+            formatted_header).hexdigest()
         state["stage"] = "SWZ_FORMATTED"
         _save_state(state_dir, state)
 
@@ -677,6 +786,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
     try:
         _remove_test_objects(state, state_dir)
     except BaseException as cleanup_exc:
+        state["stage_before_recovery"] = state["stage"]
         state["stage"] = "RECOVERY_REQUIRED"
         state["recovery_error"] = str(cleanup_exc)
         _save_state(state_dir, state)

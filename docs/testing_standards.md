@@ -2606,18 +2606,39 @@ A separately owner-authorized physical swap-partition correctness smoke is
 implemented only as the private tests/tools/physical-swap-probe.py helper; it
 is never called by `make test` and does not qualify performance or
 physical-media behavior. Before it can write, it requires the same x86 host to
-have two committed PASS reports for the exact current source, a separate
-safety-review record bound to the source, helper hash and selected partition,
-an explicitly repeated /dev/disk/by-uuid/ path, and an active swap partition
-with zero used KiB, no mount and no block holders. It saves the original 4KiB
-swap header in a root-only state directory, disables only that selected swap
-partition, uses the existing physical-backing opt-in and byte-exact
+have two committed, distinct-content PASS reports for the exact current source:
+the committed report identity and both historical identities must equal a fresh
+canonical digest of the running host's /etc/machine-id and architecture.
+Duplicate publications of an identical JSON report cannot satisfy both counts.
+This is a conservative distinct-report gate, not cryptographic proof of two
+independently executed runs. It additionally requires a separate safety-review
+record bound to the source, helper hash and selected partition, an explicitly
+repeated /dev/disk/by-uuid/ path, and an active swap partition with zero used
+KiB, no mount and no block holders. Before a destructive operation the helper
+must prove a nonempty partition-table PARTUUID and matching
+/dev/disk/by-partuuid/ symlink; recover checks the persisted canonical block
+path, major:minor, size and PARTUUID without resolving the original swap UUID
+symlink, which can disappear when the header is overwritten. It saves the
+original 4KiB swap header in a root-only state directory, disables only that
+selected swap partition, uses the existing physical-backing opt-in and byte-exact
 device-roundtrip oracle, then removes only its UUID-owned mapper, restores and
-verifies the original header, and re-enables the original swap partition. Its
-recovery action uses the saved device identity and never force-removes a
+verifies the original header, and re-enables the original swap partition.
+Recovery must read the current block-0 header and accept only the saved
+original, a zero header at the documented pre-format stages, or an exact
+digest-matched valid SWZ v1 header after the formatter digest is saved.
+Unknown, modified or unrelated headers must stop before any overwrite and
+require manual review. A crash after the formatter writes SWZ but before its
+header digest is durably recorded is deliberately manual-recovery-only, not
+permission to overwrite an unverified partition. Before any header write the
+opened block-device descriptor must match the expected major:minor identity.
+The zero-used-KiB preflight is advisory; the authoritative swapoff and
+post-swapoff inactivity check must both succeed before destructive writes.
+The recovery action uses the saved device identity and never force-removes a
 mapper. The physical correctness smoke must not activate the swapz mapper as
 system swap, and its results remain separate from the RAM-backed report and
-performance history.
+performance history. Rootless tests must reject a disappeared-UUID dependency,
+changed PARTUUID, unrecognized header state, duplicate PASS content and
+historical reports that do not match the live host.
 
 The review record is JSON with approved=true, a reviewer other than the
 operator, scope=physical swap backing correctness smoke only, the qualified

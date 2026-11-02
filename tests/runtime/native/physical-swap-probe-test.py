@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import tempfile
 import unittest
 from unittest import mock
@@ -30,6 +31,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "major": 8,
             "minor": 4,
             "size_bytes": 16 * 1024 * 1024 * 1024,
+            "partuuid": "deadbeef-04",
+            "stage": "HEADER_CLEARED",
             "header_sha256": hashlib.sha256(header).hexdigest(),
             "swap_was_active": True,
             "swap_priority": -1,
@@ -156,7 +159,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         args, 0, stdout=state["dm_uuid"] + "\n", stderr="")
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
-            def write_header(device, header):
+            def write_header(device, header, target):
+                self.assertEqual(target["major"], 8)
                 events.append(("write", device, header))
 
             with mock.patch.object(probe, "_validate_state_dir"), \
@@ -270,6 +274,140 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(args[:4], [
             "/usr/sbin/runuser", "--user", "keivan", "--"])
         self.assertIn("ls-remote", args)
+
+    def test_recovery_survives_removed_original_swap_uuid_symlink(self):
+        """Formatting invalidates /dev/disk/by-uuid, not the saved PARTUUID."""
+        state = {
+            "device_arg": "/dev/disk/by-uuid/original-swap",
+            "device": "/dev/nvme0n1p3",
+            "major": 259, "minor": 3,
+            "size_bytes": 1024 * 1024 * 1024,
+            "partuuid": "deadbeef-03",
+        }
+        completed = subprocess.CompletedProcess(
+            [], 0, stdout=str(state["size_bytes"]) + "\n", stderr="")
+        with mock.patch.object(probe, "block_identity", return_value=(259, 3)), \
+                mock.patch.object(
+                    probe, "_partition_identity",
+                    return_value=("deadbeef-03", state["size_bytes"])), \
+                mock.patch.object(probe, "_run", return_value=completed), \
+                mock.patch.object(
+                    probe.Path, "resolve",
+                    side_effect=AssertionError("old swap UUID link was removed")):
+            target = probe.inspect_target_identity_for_recovery(
+                state, state["device_arg"], state["device_arg"])
+        self.assertEqual(target["device"], state["device"])
+        self.assertEqual(target["partuuid"], state["partuuid"])
+
+    def test_recovery_refuses_repurposed_partition(self):
+        state = {
+            "device_arg": "/dev/disk/by-uuid/old",
+            "device": "/dev/sdb2",
+            "major": 8, "minor": 18,
+            "size_bytes": 1024 * 1024 * 1024,
+            "partuuid": "deadbeef-02",
+        }
+        completed = subprocess.CompletedProcess(
+            [], 0, stdout=str(state["size_bytes"]) + "\n", stderr="")
+        with mock.patch.object(probe, "block_identity", return_value=(8, 18)), \
+                mock.patch.object(
+                    probe, "_partition_identity",
+                    return_value=("cafebabe-02", state["size_bytes"])), \
+                mock.patch.object(probe, "_run", return_value=completed):
+            with self.assertRaisesRegex(probe.ProbeError, "PARTUUID"):
+                probe.inspect_target_identity_for_recovery(
+                    state, state["device_arg"], state["device_arg"])
+
+    def test_recovery_accepts_only_its_recorded_header_transitions(self):
+        size = 1024 * 1024 * 1024
+        original = b"O" * probe.PAGE_BYTES
+        zero = bytes(probe.PAGE_BYTES)
+        header = bytearray(probe.PAGE_BYTES)
+        header[:8] = probe.SWAPZ_HEADER_MAGIC
+        struct.pack_into("<IIQ", header, 8, 1, probe.PAGE_BYTES, size)
+        header[24:40] = bytes(range(1, 17))
+        formatted = bytes(header)
+        digest = hashlib.sha256(formatted).hexdigest()
+        state = {"stage": "HEADER_CLEARED"}
+        probe._validate_recovery_header(original, original, state, size)
+        probe._validate_recovery_header(zero, original, state, size)
+        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
+            probe._validate_recovery_header(formatted, original, state, size)
+        state = {"stage": "MAPPED", "formatted_header_sha256": digest}
+        probe._validate_recovery_header(formatted, original, state, size)
+        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
+            probe._validate_recovery_header(zero, original, state, size)
+        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
+            probe._validate_recovery_header(b"F" * probe.PAGE_BYTES, original,
+                                            state, size)
+        altered = bytearray(formatted)
+        altered[24] ^= 1
+        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
+            probe._validate_recovery_header(bytes(altered), original, state, size)
+        state["stage"] = "RECOVERY_REQUIRED"
+        state["stage_before_recovery"] = "MAPPED"
+        probe._validate_recovery_header(formatted, original, state, size)
+
+    def test_live_host_gate_and_distinct_reports(self):
+        source = "a" * 40
+        head = "b" * 40
+        local_host = {
+            "schema": "swapz-host-v1",
+            "architecture": "x86_64",
+            "id_sha256": "1" * 64,
+        }
+        current = {
+            "overall": "PASS", "tested_commit_sha": source,
+            "source_sha": source, "host_identity": dict(local_host),
+        }
+        history = {
+            "first": dict(current, duration=1),
+            "second": dict(current, duration=1),
+        }
+
+        def git(*args, **kwargs):
+            del kwargs
+            operation = args[0]
+            if operation == "symbolic-ref":
+                return "main"
+            if operation == "status":
+                return ""
+            if operation == "rev-parse":
+                return head
+            if operation == "rev-list":
+                return "first\nsecond"
+            if operation == "diff-tree":
+                return "test_results.json"
+            if operation == "log":
+                return "first\nsecond"
+            raise AssertionError(args)
+
+        def run(args, **kwargs):
+            del kwargs
+            if args[:2] == ["git", "merge-base"]:
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if args[:2] == ["git", "show"]:
+                return subprocess.CompletedProcess(
+                    args, 0, stdout=json.dumps(
+                        history[args[2].split(":")[0]]), stderr="")
+            raise AssertionError(args)
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "test_results.json").write_text(json.dumps(current))
+            with mock.patch.object(probe, "ROOT", root), \
+                    mock.patch.object(probe, "_git", side_effect=git), \
+                    mock.patch.object(probe, "_run", side_effect=run), \
+                    mock.patch.object(probe, "_remote_main_sha", return_value=head), \
+                    mock.patch.object(probe, "live_host_identity",
+                                      return_value=local_host):
+                self.assertEqual(probe.current_source_evidence()["pass_reports"], 1)
+                history["second"] = dict(current, duration=2)
+                self.assertEqual(probe.current_source_evidence()["pass_reports"], 2)
+                current["host_identity"] = dict(local_host, id_sha256="2" * 64)
+                (root / "test_results.json").write_text(json.dumps(current))
+                with self.assertRaisesRegex(probe.ProbeError, "not produced on this host"):
+                    probe.current_source_evidence()
 
     def test_probe_is_not_wired_into_make_test_and_never_swapons_mapper(self):
         runner = (ROOT / "tools/run-tests.py").read_text()
