@@ -82,13 +82,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def test_review_record_is_bound_to_helper_source_and_device(self):
         evidence = {"source_sha": "a" * 40}
-        target = {"major": 8, "minor": 4}
+        target = {"major": 8, "minor": 4, "partuuid": "deadbeef-04"}
         review = {
             "approved": True,
             "reviewer": "independent-reviewer",
             "scope": probe.EXPECTED_SCOPE,
             "source_sha": evidence["source_sha"],
             "device_major_minor": "8:4",
+            "device_partuuid": "deadbeef-04",
             "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
         }
         with tempfile.TemporaryDirectory() as temp:
@@ -102,16 +103,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 path.write_text(json.dumps(review))
                 with self.assertRaisesRegex(probe.ProbeError, "does not match"):
                     probe.validate_review(path, evidence, target)
+                review["device_major_minor"] = "8:4"
+                review["device_partuuid"] = "cafebabe-04"
+                path.write_text(json.dumps(review))
+                with self.assertRaisesRegex(probe.ProbeError, "does not match"):
+                    probe.validate_review(path, evidence, target)
 
     def test_review_rejects_the_operator_as_reviewer(self):
         evidence = {"source_sha": "b" * 40}
-        target = {"major": 8, "minor": 4}
+        target = {"major": 8, "minor": 4, "partuuid": "deadbeef-04"}
         review = {
             "approved": True,
             "reviewer": "keivan",
             "scope": probe.EXPECTED_SCOPE,
             "source_sha": evidence["source_sha"],
             "device_major_minor": "8:4",
+            "device_partuuid": "deadbeef-04",
             "helper_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
         }
         with tempfile.TemporaryDirectory() as temp:

@@ -2642,7 +2642,7 @@ historical reports that do not match the live host.
 
 The review record is JSON with approved=true, a reviewer other than the
 operator, scope=physical swap backing correctness smoke only, the qualified
-source SHA, the selected partition's major:minor identity, and the helper's
+source SHA, the selected partition's major:minor identity and persistent PARTUUID, and the helper's
 SHA-256. The private read-only plan output prints the source and helper hashes
 for review binding. A missing or mismatched field blocks the write path.
 

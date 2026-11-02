@@ -400,6 +400,7 @@ def validate_review(review_path, evidence, target):
             review.get("source_sha") != evidence["source_sha"] or \
             review.get("device_major_minor") != \
             f"{target['major']}:{target['minor']}" or \
+            review.get("device_partuuid") != target["partuuid"] or \
             review.get("helper_sha256") != hashlib.sha256(
                 Path(__file__).read_bytes()).hexdigest():
         raise ProbeError("review record does not match this source, helper and device")
