@@ -4817,7 +4817,7 @@ int main(void)
         self.assertIn("settle_udev", pair)
         self.assertNotIn('dmsetup remove --force', pair)
 
-    def test_loaded_maximum_capacity_probe_is_owned_and_io_free(self):
+    def test_loaded_maximum_capacity_probe_is_owned_and_lower_io_free(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         self.assertIn('--validated-source "$tested_source" --capacity-only', loaded)
@@ -4835,12 +4835,14 @@ int main(void)
                 "EXPECTED_PHYSICAL_BLOCKS=4194048",
                 "EXPECTED_SEGMENTS=16383",
                 "blockdev --getsize64 \"/dev/mapper/$DMNAME\"",
-                "logical_write logical_read physical_write physical_write_reqs",
+                "logical_write physical_write physical_write_reqs",
                 "physical_read physical_read_reqs",
+                "capacity_logical_read_bytes=\"$(status_u64 \"$capacity_status\" logical_read)\"",
                 "[[ \"$lower_stats_after\" == \"$lower_stats_before\" ]]",
                 "dmsetup remove --retry \"$DMNAME\"",
                 "PASS_LOADED_MAXIMUM_CAPACITY="):
             self.assertIn(evidence, capacity)
+        self.assertNotIn("logical_read; do", capacity)
         for forbidden in ("$ORACLE", "mkswap", "swapon", "swapoff", "dd "):
             self.assertNotIn(forbidden, capacity)
 

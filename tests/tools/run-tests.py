@@ -1259,7 +1259,7 @@ def parse_loaded_correctness(output):
         "maximum_capacity": re.compile(
             r"PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:(\d+) "
             r"logical_bytes:(\d+) lower_bytes:(\d+) physical_blocks:(\d+) "
-            r"segments:(\d+) lower_io_delta:(\d+)$"),
+            r"segments:(\d+) mapper_read_bytes:(\d+) lower_io_delta:(\d+)$"),
         "raw_read": re.compile(
             r"PASS_LOADED_RAW_READ_FANOUT=profiles:(\d+) verified_pages:(\d+) "
             r"async_batches:(\d+) lower_read_reqs:(\d+)$"),
@@ -1328,7 +1328,7 @@ def parse_loaded_correctness(output):
                 "reason": "missing loaded correctness markers: " + ",".join(missing)}
 
     (capacity_pages, capacity_logical_bytes, capacity_lower_bytes,
-     capacity_physical_blocks, capacity_segments,
+     capacity_physical_blocks, capacity_segments, capacity_mapper_read_bytes,
      capacity_lower_io_delta) = found["maximum_capacity"]
     if (capacity_pages != 3355136 or
             capacity_logical_bytes != 13742637056 or
@@ -1452,6 +1452,7 @@ def parse_loaded_correctness(output):
         "maximum_lower_bytes": capacity_lower_bytes,
         "maximum_physical_blocks": capacity_physical_blocks,
         "maximum_segments": capacity_segments,
+        "maximum_mapper_read_bytes": capacity_mapper_read_bytes,
         "maximum_lower_io_delta": capacity_lower_io_delta,
         "raw_read_profiles": raw_read_profiles,
         "raw_read_verified_pages": raw_read_pages,
@@ -7056,10 +7057,11 @@ def print_bench(result, *, detailed=False):
             ("check", "result"),
             [
                 ("max capacity",
-                 f"{loaded['maximum_logical_pages']:,} pages / "
+                 f"{loaded['maximum_logical_pages']:,} pages/"
                  f"{loaded['maximum_mapper_bytes'] / (1024 ** 3):.2f} GiB; "
-                 f"lower {loaded['maximum_lower_bytes'] / (1024 ** 3):.2f} GiB; "
-                 f"I/O delta {loaded['maximum_lower_io_delta']}"),
+                 f"lower {loaded['maximum_lower_bytes'] / (1024 ** 3):.0f} GiB; "
+                 f"READ {loaded['maximum_mapper_read_bytes']} B; "
+                 f"I/O {loaded['maximum_lower_io_delta']}"),
                 ("RAW/zero pages",
                  f"{loaded['raw_pages']}/{loaded['zero_pages']}"),
                 ("flushes", loaded["flush_calls"]),

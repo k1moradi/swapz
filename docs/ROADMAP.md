@@ -1310,13 +1310,16 @@ worker state and allocator overhead. The native boundary regression now passes
 through production authority C, including rejection of the next page and
 initialization of all capacity-dependent authority arrays. This does not
 establish that the loaded target can allocate, reclaim or sustain GC at maximum
-size. A no-I/O maximum-target constructor probe is now part of the official
-loaded qualification: it uses an owned RAM-backed lower sized to the exact
-usable geometry, verifies the exact mapping/table/size and zero I/O, and then
-removes the mapping without force. That probe has not yet run on this host and
-will establish constructor allocation only; maximum-size data I/O, RAW-heavy
-behavior and GC remain separate required gates. It does not touch the user's
-live swap partition.
+size. A maximum-target constructor probe is now part of the official loaded
+qualification: it uses an owned RAM-backed lower sized to the exact usable
+geometry, verifies the exact mapping/table/size, checks for zero writes and
+lower-device I/O, and removes the mapping without force. Its first host run
+blocked because a logical READ counter was nonzero during initial mapper
+discovery. The reader was not identified; revised evidence will record that
+counter and continue to require zero lower I/O. This constructor-only probe has
+not passed on the host. Maximum-size data I/O, RAW-heavy behavior and GC remain
+separate required gates. The probe does not touch the user's live swap
+partition.
 
 Issue #76's separate experimental supervisor currently enforces a 256 MiB,
 30-minute trial and keeps privileged `run`/`recover` disabled. Its modeled

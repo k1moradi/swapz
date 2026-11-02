@@ -329,10 +329,13 @@ overhead; it is not a total module-RAM measurement. Native authority success
 does not prove that the loaded Device Mapper target can allocate or operate at
 that size. The loaded qualification must first create the maximum logical
 target over a separately owned 16,383 MiB RAM-backed `null_blk` lower, then
-verify the exact DM UUID, table, mapper size, lower identity, zero target I/O
-counters and unchanged lower statistics before ordinary non-force teardown.
-This constructor probe must issue no I/O and does not qualify maximum-size
-writes, reads, allocation churn or GC. Until both the loaded maximum-size
+verify the exact DM UUID, table, mapper size and lower identity. Device discovery
+may issue logical reads after the mapper is published, so record the observed
+mapper READ bytes without attributing them to a particular process. Require zero
+logical writes, zero lower physical read/write counters, unchanged lower
+statistics and ordinary non-force teardown. The probe itself submits no
+intentional data I/O and does not qualify maximum-size writes, reads, allocation
+churn or GC. Until both the loaded maximum-size
 constructor and worst-case RAW/GC tests pass, report the value as the
 source-derived authority admission limit and keep maximum-capacity operation
 unqualified.

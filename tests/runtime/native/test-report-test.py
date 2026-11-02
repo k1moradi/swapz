@@ -843,7 +843,7 @@ def lz4_acceleration_log():
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
-           "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3355136 logical_bytes:13742637056 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 lower_io_delta:0",
+           "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3355136 logical_bytes:13742637056 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 mapper_read_bytes:4096 lower_io_delta:0",
            "PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 async_batches:64 lower_read_reqs:512",
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:128 adopted:128",
@@ -1045,13 +1045,15 @@ class ReportContract(unittest.TestCase):
     def test_loaded_maximum_capacity_constructor_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3355136 "
                   "logical_bytes:13742637056 lower_bytes:17178820608 "
-                  "physical_blocks:4194048 segments:16383 lower_io_delta:0")
+                  "physical_blocks:4194048 segments:16383 "
+                  "mapper_read_bytes:4096 lower_io_delta:0")
         output = synthetic_log()
         result = runner.parse_loaded_correctness(output)
         self.assertEqual(result["overall"], "PASS")
         self.assertEqual(result["maximum_logical_pages"], 3355136)
         self.assertEqual(result["maximum_mapper_bytes"], 13742637056)
         self.assertEqual(result["maximum_lower_bytes"], 17178820608)
+        self.assertEqual(result["maximum_mapper_read_bytes"], 4096)
         self.assertEqual(result["maximum_lower_io_delta"], 0)
         self.assertEqual(runner.parse_loaded_correctness(
             output.replace(marker, ""))["overall"], "INCOMPLETE")
@@ -1061,6 +1063,7 @@ class ReportContract(unittest.TestCase):
                 ("lower_bytes:17178820608", "lower_bytes:67108864"),
                 ("physical_blocks:4194048", "physical_blocks:4194047"),
                 ("segments:16383", "segments:16382"),
+                ("mapper_read_bytes:4096", "mapper_read_bytes:invalid"),
                 ("lower_io_delta:0", "lower_io_delta:1")):
             bad = output.replace(marker, marker.replace(before, after))
             self.assertEqual(runner.parse_loaded_correctness(bad)["overall"],
@@ -2630,7 +2633,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
         self.assertIn("max capacity", rendered)
-        self.assertIn("I/O delta 0", rendered)
+        self.assertIn("READ 4096 B", rendered)
+        self.assertIn("I/O 0", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
         self.assertIn("WRITE-ONLY SUSTAINED-QD EVIDENCE", rendered)
         self.assertIn("Persistent lane workers", rendered)

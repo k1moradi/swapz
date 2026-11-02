@@ -196,7 +196,7 @@ cleanup() {
 	fi
 	if (( rc == 0 )); then
 		if (( CAPACITY_ONLY )); then
-			note "PASS: loaded maximum-capacity constructor, no I/O, clean teardown"
+			note "PASS: loaded maximum-capacity constructor, no lower I/O, clean teardown"
 		else
 			note "PASS: loaded isolated swapz byte-exact I/O, clean teardown"
 		fi
@@ -235,7 +235,8 @@ for attr in size memory_backed blocksize power index queue_mode submit_queues hw
 done
 # Linux null_blk configfs size unit is MiB. Never use the module default!
 # The capacity-only probe advertises the exact full-partition data geometry
-# (16383 MiB after the SWZ header/segment boundary) but performs no I/O.
+# (16383 MiB after the SWZ header/segment boundary). It submits no intentional
+# data I/O; userspace device discovery may issue logical reads after creation.
 NULLBLK_SIZE_MIB=64
 if (( CAPACITY_ONLY )); then
 	NULLBLK_SIZE_MIB=16383
@@ -350,10 +351,12 @@ if (( CAPACITY_ONLY )); then
 		fail "maximum-capacity mapper dependency mismatch"
 	capacity_status="$(dmsetup status "$DMNAME")" ||
 		fail "cannot read maximum-capacity target status"
-	for key in logical_write logical_read physical_write physical_write_reqs \
+	capacity_logical_read_bytes="$(status_u64 "$capacity_status" logical_read)" ||
+		fail "maximum-capacity logical READ counter is malformed"
+	for key in logical_write physical_write physical_write_reqs \
 		   physical_read physical_read_reqs; do
 		[[ "$(status_u64 "$capacity_status" "$key")" == 0 ]] ||
-			fail "maximum-capacity constructor probe issued I/O: $key"
+			fail "maximum-capacity constructor probe issued writes or lower I/O: $key"
 	done
 	lower_stats_after="$(cat "/sys/block/$DISK/stat")" ||
 		fail "cannot read capacity-probe lower statistics after create"
@@ -367,7 +370,7 @@ if (( CAPACITY_ONLY )); then
 	OWN_DM=0
 	[[ -z "$(ls -A "/sys/block/$DISK/holders" 2>/dev/null)" ]] ||
 		fail "maximum-capacity mapper left an unexpected lower holder"
-	note "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES logical_bytes:$MAX_LOGICAL_BYTES lower_bytes:$EXPECTED_LOWER_BYTES physical_blocks:$EXPECTED_PHYSICAL_BLOCKS segments:$EXPECTED_SEGMENTS lower_io_delta:0"
+	note "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES logical_bytes:$MAX_LOGICAL_BYTES lower_bytes:$EXPECTED_LOWER_BYTES physical_blocks:$EXPECTED_PHYSICAL_BLOCKS segments:$EXPECTED_SEGMENTS mapper_read_bytes:$capacity_logical_read_bytes lower_io_delta:0"
 	exit 0
 fi
 # 16 MiB upper table; current constructor arguments, no injected errors.
