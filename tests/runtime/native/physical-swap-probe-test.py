@@ -996,6 +996,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                              "swapz-demo" in " ".join(command)
                              for command in commands))
         self.assertFalse(any("--force" in command for command in commands))
+        # An interrupted insmod must find the conservative pending state on disk.
+        inserted = next(index for index, event in enumerate(events)
+                        if event[0] == "command" and event[1][0] == "insmod")
+        pending = events.index(("save", "MODULE_PENDING"))
+        owned = events.index(("save", "MODULE_OWNED"))
+        self.assertLess(pending, inserted)
+        self.assertLess(inserted, owned)
 
     def test_partition_identity_is_rechecked_after_clear_before_formatter(self):
         events, _, _ = self.simulate_physical_run()
@@ -1069,6 +1076,35 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 with self.assertRaisesRegex(probe.ProbeError,
                                             "major:minor|geometry"):
                     probe._verify_open_block_device(123, target)
+
+    def test_failed_state_file_fsync_never_publishes_recovery_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            with mock.patch.object(probe.os, "fsync",
+                    side_effect=OSError("injected state fsync failure")):
+                with self.assertRaisesRegex(OSError, "state fsync failure"):
+                    probe._save_state(state_dir, {"stage": "BACKED_UP"})
+            self.assertFalse((state_dir / probe.STATE_NAME).exists())
+
+    def test_interrupted_module_load_requires_manual_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, _ = self.make_recovery_state(state_dir)
+            state["module_ownership"] = "MODULE_PENDING"
+            state["stage"] = "MODULE_PENDING"
+            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery",
+                        return_value={"device": state["device"], "major": 8,
+                                      "minor": 4, "size_bytes": state["size_bytes"]}), \
+                    mock.patch.object(probe.Path, "exists", return_value=True), \
+                    mock.patch.object(probe, "_write_block0") as write:
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "module load interrupted|manual recovery"):
+                    probe.recover(state_dir, state["device_arg"],
+                                  state["device_arg"])
+                write.assert_not_called()
 
     def test_recovery_rejects_wrong_restored_swap_capacity_and_priority(self):
         with tempfile.TemporaryDirectory() as directory:
