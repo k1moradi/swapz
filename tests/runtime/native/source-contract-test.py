@@ -154,6 +154,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         primary = PRIMARY
         start = source_body("swapz_primary_start_prepared", primary)
         stop = source_body("swapz_primary_stop_active", primary)
+        recover = source_body("swapz_primary_recover", primary)
         self.assertIn("#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST", primary)
         self.assertIn(
             'getenv("SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER")', primary)
@@ -168,18 +169,27 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         for phase in ("stop-stopping", "stop-swapoff"):
             self.assertIn(
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', stop)
+        for phase in (
+                "recover-recovering", "recover-swapoff",
+                "recover-mapper-removed", "recover-module-unloaded",
+                "recover-restored"):
+            self.assertIn(
+                f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', recover)
         rehearsal = (
             ROOT / "tests/tools/qualify-primary-lifecycle-nullblk.sh").read_text()
         for phase in (
                 "start-starting", "start-module-loaded",
                 "start-mapper-resumed", "start-swapon",
-                "stop-stopping", "stop-swapoff"):
+                "stop-stopping", "stop-swapoff",
+                "recover-recovering", "recover-swapoff",
+                "recover-mapper-removed", "recover-module-unloaded",
+                "recover-restored"):
             self.assertIn(phase, rehearsal)
         self.assertIn(
             'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER="$phase"', rehearsal)
         self.assertIn('"$CONTROL" primary recover', rehearsal)
         self.assertIn(
-            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6",
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11",
             rehearsal)
         self.assertIn(
             'TEST_BASE="/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"',
