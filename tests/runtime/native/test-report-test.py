@@ -3929,6 +3929,9 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             "module_sha256": "c" * 64,
             "oracle_sha256": "d" * 64,
         }
+        acceptance_manifest_sha256 = (
+            runner.production_acceptance_manifest_sha256())
+        self.assertIsNotNone(acceptance_manifest_sha256)
         evidence = {
             "production_source": dict(common),
             "clean_build_state": {**common, "clean": True},
@@ -3946,19 +3949,23 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             "exact_source_owner_make_test": {
                 **common, "overall": "PASS",
                 "tested_source_sha": self.SOURCE_SHA,
-                "report_sha256": self.DIGEST},
+                "report_sha256": self.DIGEST,
+                "qualified_artifacts": dict(hashes)},
             "owned_nullblk_qualification": {
                 **common, "overall": "PASS",
                 "evidence_sha256": self.DIGEST},
             "real_linux_swap": {
                 **common, "overall": "PASS", "swap_out_in": "PASS",
+                "acceptance_manifest_sha256": acceptance_manifest_sha256,
                 "evidence_sha256": self.DIGEST},
             "maximum_capacity_and_ram": {
                 **common, "overall": "PASS", "incompressible": "PASS",
                 "logical_capacity_bytes": 4096, "peak_ram_bytes": 8192,
+                "acceptance_manifest_sha256": acceptance_manifest_sha256,
                 "evidence_sha256": self.DIGEST},
             "sustained_physical_performance": {
                 **common, "overall": "PASS", "sustained": "PASS",
+                "acceptance_manifest_sha256": acceptance_manifest_sha256,
                 "evidence_sha256": self.DIGEST},
             "lifecycle_deployment_state": {
                 **common, "overall": "PASS", "lifecycle": "PASS",
@@ -4034,6 +4041,39 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         verdict = runner.evaluate_production_readiness(
             stale_ci, self.SOURCE_SHA)
         self.assertEqual(verdict["evidence_statuses"]["required_ci"], "BLOCKED")
+
+    def test_release_hashes_are_cross_bound(self):
+        owner_mismatch = self.passing_snapshot()
+        owner_mismatch["release_evidence"]["exact_source_owner_make_test"][
+            "qualified_artifacts"]["module_sha256"] = "e" * 64
+        verdict = runner.evaluate_production_readiness(
+            owner_mismatch, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["exact_source_owner_make_test"],
+            "BLOCKED")
+
+        installed_mismatch = self.passing_snapshot()
+        installed_mismatch["release_evidence"]["installed_artifact_identity"][
+            "hashes"]["oracle_sha256"] = "e" * 64
+        verdict = runner.evaluate_production_readiness(
+            installed_mismatch, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["installed_artifact_identity"],
+            "BLOCKED")
+
+    def test_physical_passes_bind_frozen_acceptance_manifest(self):
+        for evidence_name in (
+                "real_linux_swap", "maximum_capacity_and_ram",
+                "sustained_physical_performance"):
+            with self.subTest(evidence=evidence_name):
+                snapshot = self.passing_snapshot()
+                snapshot["release_evidence"][evidence_name][
+                    "acceptance_manifest_sha256"] = "e" * 64
+                verdict = runner.evaluate_production_readiness(
+                    snapshot, self.SOURCE_SHA)
+                self.assertEqual(
+                    verdict["evidence_statuses"][evidence_name], "BLOCKED")
+                self.assertNotEqual(verdict["release_verdict"], "PASS")
 
     def test_ready_for_owner_reboot_does_not_forge_reboot_observation(self):
         snapshot = self.passing_snapshot()
