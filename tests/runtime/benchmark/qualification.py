@@ -167,8 +167,15 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
                                 ("content", spec["content"])):
             if arm.get(field) != expected:
                 reasons.append(f"{label} {field} differs from prospective workload")
-        if not isinstance(arm.get("swap_device_identity"), dict):
+        identity = arm.get("swap_device_identity")
+        if not isinstance(identity, dict) or not identity.get("device"):
             reasons.append(f"{label} admitted swap-device identity is missing")
+        elif label == "raw" and identity.get("dm_uuid") is not None:
+            reasons.append("raw anonymous arm unexpectedly carries a DM UUID")
+        elif label == "swapz" and (
+                not identity.get("dm_uuid") or identity.get("dm_target") != "swapz" or
+                not identity.get("lower_device")):
+            reasons.append("swapz anonymous arm lacks exact mapper identity")
         cgroup = arm.get("cgroup_before") or {}
         if cgroup.get("memory_max") != spec["memory_max_bytes"]:
             reasons.append(f"{label} cgroup memory.max differs from prospective workload")
@@ -374,7 +381,11 @@ def anonymous_decision(pairs: list[dict]) -> dict:
             rounds = arm.get("rounds") or []
             pair_ok &= len(rounds) == CONTRACT["workloads"]["anonymous-swap"]["rounds"]
             pair_ok &= all(
-                int((row.get("lower_io") or {}).get("lower_read_bytes", 0)) > 0
+                int((row.get("lower_io") or {}).get("lower_read_bytes", 0)) > 0 and
+                int((row.get("target_io") or {}).get("target_read_bytes", 0)) > 0 and
+                int((row.get("vmstat") or {}).get("pswpin_pages", 0)) > 0 and
+                int((((row.get("cgroup_delta") or {}).get("memory_stat") or {})
+                     .get("pgmajfault", 0))) > 0
                 for row in rounds)
         rows.append({"pair_id": pair["pair_id"], "status": "PASS" if pair_ok else "FAIL", "ratios": ratios})
         ok &= pair_ok
