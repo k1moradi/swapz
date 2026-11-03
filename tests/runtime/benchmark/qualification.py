@@ -28,7 +28,19 @@ AMENDMENT_SCHEMA = "swapz-performance-qualification-amendment-v2"
 # A change to this blob requires a new prospectively versioned protocol.
 AMENDMENT_GIT_BLOB_SHA = "eac574fd204932e630e8bb45dca66b67c135a779"
 MAJOR_MINOR_RE = re.compile(r"[0-9]+:[0-9]+")
-PARTUUID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{7,127}")
+PARTUUID_RE = re.compile(r"[0-9a-f]+(?:-[0-9a-f]+)*")
+
+
+def normalize_partuuid(value):
+    if not isinstance(value, str):
+        return None
+    normalized = value.lower()
+    if (
+            not 8 <= len(normalized) <= 64 or
+            not PARTUUID_RE.fullmatch(normalized) or
+            sum(ch != "-" for ch in normalized) < 8):
+        return None
+    return normalized
 
 
 def _unique_object(pairs):
@@ -280,8 +292,7 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
     partuuid = identity.get("physical_partuuid")
     device_bytes = identity.get("physical_device_bytes")
     lower_major_minor = identity.get("lower_major_minor")
-    if (not isinstance(partuuid, str) or
-            not PARTUUID_RE.fullmatch(partuuid) or
+    if (normalize_partuuid(partuuid) != partuuid or
             type(device_bytes) is not int or device_bytes <= 0 or
             not isinstance(lower_major_minor, str) or
             not MAJOR_MINOR_RE.fullmatch(lower_major_minor)):
@@ -461,14 +472,13 @@ def pair_target_identity(pair: dict):
     partuuid = raw_identity.get("physical_partuuid")
     device_bytes = raw_identity.get("physical_device_bytes")
     lower_major_minor = raw_identity.get("lower_major_minor")
-    if (not isinstance(partuuid, str) or
-            not PARTUUID_RE.fullmatch(partuuid) or
+    if (normalize_partuuid(partuuid) != partuuid or
             type(device_bytes) is not int or device_bytes <= 0 or
             not isinstance(lower_major_minor, str) or
             not MAJOR_MINOR_RE.fullmatch(lower_major_minor)):
         return None
     return {
-        "physical_partuuid": partuuid.lower(),
+        "physical_partuuid": partuuid,
         "physical_device_bytes": device_bytes,
         "lower_major_minor": lower_major_minor,
     }
