@@ -154,9 +154,9 @@ secure_runtime_directory()
 {
 	if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" != 1 ]; then
 		[ "$(id -u)" -eq 0 ] || fail "root privileges are required"
-		[ -e "$runtime_base" ] || mkdir -m 0700 -- "$runtime_base" ||
-			fail "cannot create primary runtime directory"
 	fi
+	[ -e "$runtime_base" ] || mkdir -m 0700 -- "$runtime_base" ||
+		fail "cannot create primary runtime directory"
 	[ -d "$runtime_base" ] && [ ! -L "$runtime_base" ] ||
 		fail "primary runtime directory is unavailable or symlinked"
 	owner=$(stat -c '%u' -- "$runtime_base") ||
