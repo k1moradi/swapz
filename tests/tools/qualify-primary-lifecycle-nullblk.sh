@@ -49,7 +49,10 @@ grep -Fxq "#define SWAPZ_BUILD_SOURCE_SHA \"$SOURCE_HEAD\"" \
 grep -Fxq '#define SWAPZ_BUILD_SOURCE_CLEAN 1' build/source-build-info.h ||
 	blocked "generated build provenance is not clean"
 
-TEST_BASE=/var/lib/swapz-primary-owned-nullblk-test
+TOKEN="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+[[ "$TOKEN" =~ ^[a-f0-9]{16}$ ]] ||
+	fail "cannot generate lifecycle ownership token"
+TEST_BASE="/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"
 CONFIG_BASE="$TEST_BASE/config"
 RECOVERY_BASE="$TEST_BASE/recovery"
 PREFIX="$TEST_BASE/prefix"
@@ -72,7 +75,7 @@ PART_DEVNO=
 RUN_ID=
 
 [[ ! -e "$TEST_BASE" && ! -L "$TEST_BASE" ]] ||
-	blocked "prior owned-nullblk lifecycle evidence exists at $TEST_BASE"
+	blocked "fresh owned-nullblk lifecycle evidence path already exists"
 [[ ! -d /sys/module/dm_swapz ]] ||
 	blocked "dm_swapz is already loaded before lifecycle rehearsal"
 if dmsetup info "$DMNAME" >/dev/null 2>&1; then
@@ -362,7 +365,8 @@ cleanup() {
 	fi
 
 	if (( TEST_BASE_CREATED )) && (( ! QUARANTINE )); then
-		if [[ "$TEST_BASE" != /var/lib/swapz-primary-owned-nullblk-test ||
+		if [[ ! "$TOKEN" =~ ^[a-f0-9]{16}$ ||
+		      "$TEST_BASE" != "/var/lib/swapz-primary-owned-nullblk-test-$TOKEN" ||
 		      ! -d "$TEST_BASE" || -L "$TEST_BASE" ||
 		      "$(stat -Lc '%u:%a' "$TEST_BASE" 2>/dev/null)" != 0:700 ]]; then
 			QUARANTINE=1
@@ -473,8 +477,6 @@ fi
 [[ -d "$CONFIGFS" && ! -L "$CONFIGFS" ]] ||
 	blocked "null_blk configfs root unavailable"
 
-TOKEN="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-[[ "$TOKEN" =~ ^[a-f0-9]{16}$ ]] || fail "cannot generate null_blk ownership token"
 CONFIGNAME="nullb-swapz-$TOKEN"
 CONFIG="$CONFIGFS/$CONFIGNAME"
 mkdir -- "$CONFIG" || blocked "cannot allocate owned null_blk config"

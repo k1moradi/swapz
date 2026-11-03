@@ -703,7 +703,13 @@ When the coordinator itself emits the fixed
 `BLOCKED: primary-swap <operation> failed: <strerror>` line before the helper's
 generic lifecycle marker, the reporter must attach only the strictly allowlisted
 operation and strerror-shaped tail. Path-, ID-, or arbitrary-text-shaped tails
-remain excluded from published diagnostics.
+remain excluded from published diagnostics. Each owned-null_blk lifecycle
+rehearsal must allocate a fresh root-owned evidence directory bound to the same
+random ownership token used for its null_blk config. Clean teardown may remove
+only that exact token-bound directory after the holder/mount/swap identity
+checks pass. Quarantined evidence from an earlier run is retained for
+investigation but must not block a later independent rehearsal merely because a
+fixed historical evidence path still exists.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 

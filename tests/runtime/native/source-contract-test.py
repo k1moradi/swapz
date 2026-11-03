@@ -138,6 +138,18 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn(
             "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6",
             rehearsal)
+        self.assertIn(
+            'TEST_BASE="/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"',
+            rehearsal)
+        self.assertIn(
+            '"$TEST_BASE" != '
+            '"/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"',
+            rehearsal)
+        self.assertEqual(
+            rehearsal.count("TOKEN=\"$(od -An -N8 -tx1 /dev/urandom"), 1)
+        self.assertNotIn(
+            "TEST_BASE=/var/lib/swapz-primary-owned-nullblk-test\n",
+            rehearsal)
 
     def test_primary_manager_target_is_runtime_selected(self):
         # Historical trial paths and device numbers may appear in fixtures or
