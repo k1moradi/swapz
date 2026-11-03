@@ -5398,6 +5398,60 @@ int main(void)
         self.assertIn("maximum_capacity_boundary_roundtrip", roundtrip)
         self.assertIn("verify_dm_uuid_exact", roundtrip)
 
+    def test_loaded_constructor_failure_matrix_is_nullblk_only_and_mandatory(self):
+        ctor = body("swapz_ctr")
+        cleanup = body("swapz_free")
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+
+        self.assertIn("module_param_named(test_fail_constructor_stage", DM)
+        self.assertIn("swapz_test_fail_constructor_stage, uint, 0444", DM)
+        self.assertIn(
+            "Constructor fault injection is restricted to null_blk", ctor)
+        self.assertIn("swapz_test_fail_constructor_stage >", ctor)
+        self.assertIn(
+            "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE", ctor)
+        for stage in (
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_BACKING",
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_IO_CLIENT",
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_AUTHORITY",
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_CORE_SCRATCH",
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_READ_SLOTS",
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_WORKQUEUE",
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_SCRATCH",
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE"):
+            self.assertIn(stage, ctor)
+        self.assertIn("swapz_free(ctx)", ctor)
+        for release in (
+                "destroy_workqueue(ctx->preparation_workqueue)",
+                "destroy_workqueue(ctx->workqueue)",
+                "dm_io_client_destroy(ctx->io_client)",
+                "dm_put_device(ctx->target, ctx->backing)",
+                "kvfree(ctx->maps)",
+                "kfree(ctx)"):
+            self.assertIn(release, cleanup)
+
+        self.assertIn("START_LOADED_CONSTRUCTOR_FAILURE_CLEANUP", deploy)
+        self.assertIn("for constructor_stage in {1..8}; do", deploy)
+        self.assertIn(
+            'insmod "$MODULE" test_fail_constructor_stage="$constructor_stage"',
+            deploy)
+        self.assertIn(
+            '[[ -z "$(ls -A "/sys/block/$DISK/holders" 2>/dev/null)" ]]',
+            deploy)
+        self.assertIn(
+            '[[ "$constructor_lower_after" == "$constructor_lower_before" ]]',
+            deploy)
+        self.assertIn("rmmod dm_swapz ||", deploy)
+        self.assertIn(
+            "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0",
+            deploy)
+        self.assertIn('"constructor_cleanup": re.compile(', runner)
+        self.assertIn(
+            "constructor_cleanup_stages != 8 or "
+            "constructor_cleanup_lower_io_delta != 0",
+            runner)
+
     def test_dkms_sandbox_does_not_depend_on_host_module_state(self):
         package = (ROOT / "packaging/package-dkms.sh").read_text()
         self.assertIn(
