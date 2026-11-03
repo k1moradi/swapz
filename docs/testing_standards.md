@@ -4591,3 +4591,4 @@ binding, while direct `gc_allocation`, forbidden-segment and role-reset
 assertions are made against the authority begin/commit helpers that exclusively
 own those fields. Tests must not require obsolete direct field writes in a
 caller after ownership has moved behind those helpers.
+Mandatory Python qualification suites must remain syntactically valid; a path that exists but cannot execute does not satisfy discovery coverage.

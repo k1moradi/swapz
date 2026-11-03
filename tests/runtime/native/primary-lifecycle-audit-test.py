@@ -769,7 +769,7 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertIn('strstr(device_realpath, "/virtual/") != NULL', source)
         self.assertLess(
             topology.index("swapz_primary_owned_nullblk_parent("),
-            topology.index("strstr(device_realpath")))
+            topology.index("strstr(device_realpath"))
         self.assertIn(
             'sscanf(line, " %u %63s %c", &major_number, name, &extra) != 2',
             source)
