@@ -223,7 +223,12 @@ class PersistentEvidence:
 
 
 def _run(argv: list[str], *, check: bool = True, timeout: float = 30,
-         input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+         input_text: str | None = None,
+         extra_environment: dict[str, str] | None = None
+         ) -> subprocess.CompletedProcess[str]:
+    environment = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+    if extra_environment:
+        environment.update(extra_environment)
     try:
         result = subprocess.run(
             argv,
@@ -232,7 +237,7 @@ def _run(argv: list[str], *, check: bool = True, timeout: float = 30,
             capture_output=True,
             timeout=timeout,
             check=False,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+            env=environment,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Blocked(f"cannot execute required command {argv[0]}: {exc}") from exc
@@ -271,6 +276,74 @@ def installed_artifact_paths(swapzctl: Path) -> dict[str, Path]:
         "module_sha256": prefix / "libexec/swapz/dm-swapz.ko",
         "oracle_sha256": prefix / "libexec/swapz/device-roundtrip",
     }
+
+
+def _physical_control_environment() -> dict[str, str]:
+    """Environment accepted only by the private physical-qualification seam."""
+    return {"SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION": "1"}
+
+
+def _c_string_literal(value: str, label: str) -> str:
+    if not value or any(ord(character) < 0x20 or ord(character) > 0x7e
+                        for character in value):
+        raise Blocked(f"{label} is not a printable ASCII C-string value")
+    return json.dumps(value)
+
+
+def build_physical_execution_control(validated_source: str,
+                                     qualified_swapzctl: Path,
+                                     private_directory: Path
+                                     ) -> tuple[Path, str]:
+    """Build a noninstalled exact-source coordinator bound to qualified bytes."""
+    if not re.fullmatch(r"[0-9a-f]{40}", validated_source):
+        raise Blocked("validated source SHA is malformed")
+    try:
+        qualified_control = qualified_swapzctl.resolve(strict=True)
+    except OSError as exc:
+        raise Blocked(f"cannot resolve qualified installed swapzctl: {exc}") from exc
+    if not qualified_control.is_file():
+        raise Blocked("qualified installed swapzctl is not a regular file")
+    if qualified_control.name != "swapzctl" or qualified_control.parent.name != "sbin":
+        raise Blocked("qualified control must use installed <prefix>/sbin/swapzctl layout")
+
+    try:
+        version = (ROOT / "src/kernel/VERSION").read_text(
+            encoding="ascii").strip()
+    except OSError as exc:
+        raise Blocked(f"cannot read exact-source version: {exc}") from exc
+    version_literal = _c_string_literal(version, "swapz version")
+    control_literal = _c_string_literal(
+        str(qualified_control), "qualified control path")
+    source_literal = _c_string_literal(validated_source, "validated source SHA")
+
+    private_directory.mkdir(mode=0o700, parents=False, exist_ok=False)
+    os.chmod(private_directory, 0o700)
+    output = private_directory / "swapzctl"
+    command = [
+        "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
+        f"-DSWAPZ_BUILD_SOURCE_SHA={source_literal}",
+        "-DSWAPZ_BUILD_SOURCE_CLEAN=1",
+        f"-DSWAPZ_VERSION={version_literal}",
+        "-DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1",
+        f"-DSWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL={control_literal}",
+        str(ROOT / "src/userspace/swapzctl.c"),
+        str(ROOT / "src/userspace/swapz-primary.c"),
+        "-o", str(output),
+    ]
+    result = _run(command, check=False, timeout=120)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().replace("\n", "; ")
+        raise Blocked(
+            "cannot build exact-source private physical coordinator: " + detail)
+    try:
+        os.chmod(output, 0o700)
+        identity = output.stat()
+    except OSError as exc:
+        raise Blocked(f"cannot secure private physical coordinator: {exc}") from exc
+    if not stat.S_ISREG(identity.st_mode) or identity.st_uid != os.geteuid() or \
+            stat.S_IMODE(identity.st_mode) != 0o700:
+        raise Blocked("private physical coordinator identity is unsafe")
+    return output, _sha256_file(output)
 
 
 def qualification_artifact_hashes(report_path: Path, validated_source: str) -> dict[str, str]:
@@ -931,7 +1004,9 @@ def _reject_relevant_kernel_errors(lines: list[str]) -> None:
 
 
 def _read_plan(swapzctl: Path) -> dict:
-    result = _run([str(swapzctl), "primary", "plan"], check=False, timeout=30)
+    result = _run(
+        [str(swapzctl), "primary", "plan"], check=False, timeout=30,
+        extra_environment=_physical_control_environment())
     if not result.stdout.strip():
         raise Blocked("primary plan produced no JSON")
     plan = _load_unique_json(result.stdout.strip(), "primary plan")
@@ -1069,11 +1144,15 @@ def _read_primary_output(result: subprocess.CompletedProcess[str], prefix: str) 
 
 
 def _primary(swapzctl: Path, action: str, timeout: float, *, admitted: bool = False) -> subprocess.CompletedProcess[str]:
+    environment = {
+        **os.environ, "LC_ALL": "C", "LANG": "C",
+        **_physical_control_environment(),
+    }
     try:
         return subprocess.run(
             [str(swapzctl), "primary", action],
             text=True, capture_output=True, timeout=timeout, check=False,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+            env=environment,
         )
     except subprocess.TimeoutExpired as exc:
         if admitted:
@@ -2039,8 +2118,10 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
 
 
 def _import_qualification(swapzctl: Path, report_path: Path) -> None:
-    result = _run([str(swapzctl), "primary", "qualification-import", str(report_path)],
-                  check=False, timeout=30)
+    result = _run(
+        [str(swapzctl), "primary", "qualification-import", str(report_path)],
+        check=False, timeout=30,
+        extra_environment=_physical_control_environment())
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().replace("\n", "; ")
         raise Blocked(f"cannot import exact qualification report: {detail}")
@@ -2051,19 +2132,34 @@ def execute(arguments: argparse.Namespace) -> dict:
         raise Blocked("physical real-swap qualification must not run in GitHub-hosted CI")
     if os.geteuid() != 0:
         raise Blocked("physical real-swap qualification requires noninteractive root privilege")
-    _ensure_commands(("git", "dmsetup", "lsblk", "dmesg"))
+    _ensure_commands(("git", "cc", "dmsetup", "lsblk", "dmesg"))
     if os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
         raise Blocked("primary real-swap qualification requires a 4096-byte host page")
-    swapzctl = Path(arguments.swapzctl).resolve()
+    qualified_swapzctl = Path(arguments.swapzctl).resolve()
     report_path = Path(arguments.qualification_report).resolve()
     oracle_path = Path(arguments.oracle).resolve()
-    for path, label in ((swapzctl, "swapzctl"), (report_path, "qualification report"),
-                        (oracle_path, "real-swap oracle")):
+    for path, label in (
+            (qualified_swapzctl, "qualified installed swapzctl"),
+            (report_path, "qualification report"),
+            (oracle_path, "real-swap oracle")):
         if not path.is_file():
             raise Blocked(f"{label} is unavailable: {path}")
-    if not os.access(swapzctl, os.X_OK) or not os.access(oracle_path, os.X_OK):
-        raise Blocked("swapzctl/oracle executable permission is missing")
+    if not os.access(qualified_swapzctl, os.X_OK) or not os.access(oracle_path, os.X_OK):
+        raise Blocked("qualified swapzctl/oracle executable permission is missing")
     _check_git_source(arguments.validated_source)
+
+    private_workspace = tempfile.TemporaryDirectory(
+        prefix="swapz-primary-physical-")
+    private_parent = Path(private_workspace.name)
+    os.chmod(private_parent, 0o700)
+    private_directory = private_parent / "control"
+    try:
+        swapzctl, execution_control_sha256 = build_physical_execution_control(
+            arguments.validated_source, qualified_swapzctl, private_directory)
+    except Exception:
+        private_workspace.cleanup()
+        raise
+
     preflight_workload_environment(
         arguments.workload_mib, arguments.resident_mib, arguments.swap_limit_mib)
     verify_acceptance_manifest(
@@ -2077,7 +2173,7 @@ def execute(arguments: argparse.Namespace) -> dict:
     _import_qualification(swapzctl, report_path)
     plan = _read_plan(swapzctl)
     artifact_hashes = verify_provenance(
-        plan, arguments.validated_source, report_path, swapzctl)
+        plan, arguments.validated_source, report_path, qualified_swapzctl)
     selector_partuuid = _read_selector()
     _target_path, target_device, target_parent_device = verify_authorized_target(
         plan, selector_partuuid)
@@ -2097,6 +2193,7 @@ def execute(arguments: argparse.Namespace) -> dict:
             "helper_sha256": _sha256_file(Path(__file__)),
             "oracle_sha256": _sha256_file(oracle_path),
             "qualified_installed_artifacts": artifact_hashes,
+            "physical_execution_control_sha256": execution_control_sha256,
             "partuuid": selector_partuuid,
             "target_device": f"{target_device[0]}:{target_device[1]}",
             "cycles_requested": arguments.cycles,
@@ -2158,6 +2255,7 @@ def execute(arguments: argparse.Namespace) -> dict:
             "oracle_sha256": _sha256_file(oracle_path),
             "qualification_report_sha256": _sha256_file(report_path),
             "qualified_installed_artifacts": artifact_hashes,
+            "physical_execution_control_sha256": execution_control_sha256,
             "partuuid": selector_partuuid,
             "target_device": f"{target_device[0]}:{target_device[1]}",
             "cycles_requested": arguments.cycles,
@@ -2187,13 +2285,17 @@ def execute(arguments: argparse.Namespace) -> dict:
         setattr(failure, "evidence_path", str(evidence.path))
         evidence.finish("FAIL", str(failure), cycles=cycles)
         raise failure from exc
+    finally:
+        private_workspace.cleanup()
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--validated-source", required=True)
     parser.add_argument("--qualification-report", required=True)
-    parser.add_argument("--swapzctl", default="/usr/local/sbin/swapzctl",
-                        help="installed <prefix>/sbin/swapzctl (default: /usr/local/sbin/swapzctl)")
+    parser.add_argument(
+        "--swapzctl", default="/usr/local/sbin/swapzctl",
+        help="qualified installed <prefix>/sbin/swapzctl whose artifact identity "
+             "is bound by the owner report (default: /usr/local/sbin/swapzctl)")
     parser.add_argument("--oracle", default=str(ROOT / "tests/tools/primary-real-swap-oracle.py"))
     parser.add_argument("--cycles", type=int, default=DEFAULT_CYCLES)
     parser.add_argument("--workload-mib", type=int, default=DEFAULT_WORKLOAD_MIB)
