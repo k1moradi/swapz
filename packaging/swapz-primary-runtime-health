@@ -415,6 +415,11 @@ active_swapz_swap()
 			exit 10
 		fi
 		source_major_minor=$(path_major_minor "$source" 2>/dev/null || true)
+		# A block swap whose identity cannot be resolved could be a swapz
+		# alias. Do not confuse a valid inventory row with verified absence.
+		if [ "$type" = partition ] && [ -z "$source_major_minor" ]; then
+			exit 11
+		fi
 		if [ -n "$mapper_major_minor" ] && [ "$source_major_minor" = "$mapper_major_minor" ]; then
 			exit 10
 		fi

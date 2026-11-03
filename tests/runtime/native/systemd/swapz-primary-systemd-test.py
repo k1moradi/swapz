@@ -1445,6 +1445,22 @@ class RuntimeHealthTests(unittest.TestCase):
         allowed = self.run_helper("hibernate-guard")
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
+    def test_unconfigured_ambiguous_live_block_swap_refuses_hibernate(self) -> None:
+        # A valid inventory row is insufficient if its block identity cannot
+        # be resolved. In particular, do not mistake a vanished DM alias for
+        # proof that there are no live swapz pages.
+        (self.etc / "swapz" / "primary-target").unlink()
+        (self.dev / "mapper" / "swapz-primary").unlink()
+        write_executable(self.sbin / "swapzctl", "#!/bin/sh\nexit 2\n")
+        (self.proc / "swaps").write_text(
+            "Filename\tType\tSize\tUsed\tPriority\n"
+            "/dev/dm-unresolvable\tpartition\t10000\t2000\t-1\n",
+            encoding="ascii",
+        )
+        blocked = self.run_helper("hibernate-guard")
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("cannot prove swapz-primary inactive", blocked.stderr)
+
     def test_unresolved_resume_alias_blocks_when_selected_media_is_absent(self) -> None:
         (self.dev / "disk" / "by-partuuid" / PARTUUID).unlink()
 

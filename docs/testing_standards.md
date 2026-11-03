@@ -5083,7 +5083,10 @@ resume evidence is safe. A configured primary target must block hibernation for
 the whole configured interval, and mapper activation must independently refuse
 to begin while a hibernation-capable systemd unit is active or activating.
 Exercise missing removable media plus unresolved `/dev` and tagged resume
-aliases; admit only a provably distinct stable identity. Missing
+aliases; admit only a provably distinct stable identity. Also exercise an
+unconfigured primary selector plus a syntactically valid, active block-swap
+entry with an unresolvable device identity; the hibernation guard must refuse
+rather than infer that the unknown swap device is unrelated. Missing
 `/proc/cmdline` and a live mapper whose target authority cannot be
 resolved both require fail-closed results. Assert bounded journal observation,
 finite deadlines for external observer commands, a fixed production PATH, and

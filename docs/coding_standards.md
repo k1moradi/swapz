@@ -2565,7 +2565,10 @@ of paths: require the exact five-column header and valid rows, normalize
 space/tab field boundaries, and distinguish an actually empty inventory
 from unreadable, truncated, or malformed data. Inability to prove swapz
 inactive must deny pre-hibernation admission without executing any
-swap/mapper operations. Unreadable current kernel command-line evidence
+swap/mapper operations. A syntactically valid active block-swap row with an
+unresolvable device identity is not proof that it is unrelated to swapz and
+must also deny hibernation, including when the primary target selector is
+absent. Verified unrelated swapfiles remain permitted. Unreadable current kernel command-line evidence
 must likewise deny resume admission. A live mapper without provable selected
 backing/run authority is a failure, not a degraded optional metric.
 Keep repeated kernel-journal queries capped to a small recent-error window,
