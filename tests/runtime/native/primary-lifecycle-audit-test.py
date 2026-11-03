@@ -14,6 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 PRIMARY_SOURCE = ROOT / "src/userspace/swapz-primary.c"
+PACKAGE_DKMS = ROOT / "packaging/package-dkms.sh"
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
 ROOT_MAKEFILE = ROOT / "Makefile"
 
@@ -793,6 +794,40 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             'sscanf(line, " %u %63s %c", &major_number, name, &extra) != 2',
             source)
         self.assertIn('strcmp(name, "nullb")', source)
+
+    def test_package_and_primary_share_global_mutation_lock_identity(self):
+        package = PACKAGE_DKMS.read_text(encoding="utf-8")
+        macros = active_preprocessor_macros()
+        ordinary = preprocessed_primary_source()
+        lifecycle = c_function_body(
+            ordinary, "swapz_primary_run_mutating_action")
+
+        self.assertEqual(
+            macros.get("SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY"),
+            '"/run/lock/swapz"')
+        self.assertEqual(
+            macros.get("SWAPZ_PRIMARY_MUTATION_LOCK_NAME"),
+            '"package.lock"')
+        self.assertIn(
+            'package_lock="/run/lock/swapz/package.lock"', package)
+        self.assertLess(
+            package.index("flock -n 9"),
+            package.index('primary_recovery_base="/var/lib/swapz/physical-recovery"'))
+        self.assertLess(
+            package.index("flock -n 9"),
+            package.index("assert_no_primary_recovery_authority upgrade"))
+        self.assertLess(
+            lifecycle.index("swapz_primary_mutation_lock()"),
+            lifecycle.index("swapz_primary_prepare_metadata()"))
+        self.assertLess(
+            lifecycle.index("swapz_primary_mutation_lock()"),
+            lifecycle.index("swapz_primary_start_prepared()"))
+        self.assertLess(
+            lifecycle.index("swapz_primary_mutation_lock()"),
+            lifecycle.index("swapz_primary_stop_active()"))
+        self.assertLess(
+            lifecycle.index("swapz_primary_mutation_lock()"),
+            lifecycle.index("swapz_primary_recover()"))
 
     def test_qualification_import_serializes_before_partition_state(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
