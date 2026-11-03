@@ -1301,10 +1301,10 @@ it did not activate its mapper as system swap and did not qualify live swap.
 The source geometry gives an authority admission limit, not yet a verified
 production capacity. `/dev/sda4` is 17,179,869,184 bytes. After the one-block SWZ
 header and rounding down to 256-block (1 MiB) segments, 4,194,048 physical data
-blocks remain. With the current `ceil(logical_pages / 4)` reserve rule, the
-largest admitted logical target is 3,355,136 pages: 13,742,637,056 mapper bytes
-and 13,420,540 KiB of Linux-usable swap after its first header page. The
-authority reserves 838,784 blocks (3,435,659,264 bytes) for GC. Capacity-index
+blocks remain. With the current `ceil(logical_pages / 8)` reserve rule, the
+largest admitted logical target is 3,727,872 pages: 15,269,363,712 mapper bytes
+and 14,911,484 KiB of Linux-usable swap after its first header page. The
+authority reserves 465,984 blocks (1,908,678,144 bytes) for GC. Capacity-index
 arrays are 120,470,752 bytes (114.89 MiB), excluding fixed caches, scratch,
 worker state and allocator overhead. The native boundary regression now passes
 through production authority C, including rejection of the next page and
@@ -1344,7 +1344,7 @@ under normal Linux swap.
 
 Issue #76's live-swap supervisor now carries the owner's 2026-11-02 decision for
 one bounded no-fallback trial: swapz as the sole swap area on `/dev/sda4` at the
-maximum admitted capacity (3,355,136 pages, 13,742,637,056 bytes), at most 30
+maximum admitted capacity (3,727,872 pages, 15,269,363,712 bytes), at most 30
 minutes, with RAM below 50 percent before the original swapoff and one bounded
 cgroup swap-pressure check inside the window. The owner waived the separate
 external-review requirement for this one trial. No reviewer approval exists in

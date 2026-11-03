@@ -843,7 +843,7 @@ def lz4_acceleration_log():
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
-           "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3355136 logical_bytes:13742637056 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 initial_mapper_read_bytes:4096 constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:8192 boundary_lower_write_bytes:8192",
+           "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727872 logical_bytes:15269363712 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 initial_mapper_read_bytes:4096 constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:8192 boundary_lower_write_bytes:8192",
            "PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 async_batches:64 lower_read_reqs:512",
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:128 adopted:128",
@@ -1043,8 +1043,8 @@ def synthetic_log():
 
 class ReportContract(unittest.TestCase):
     def test_loaded_maximum_capacity_constructor_evidence_is_mandatory(self):
-        marker = ("PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3355136 "
-                  "logical_bytes:13742637056 lower_bytes:17178820608 "
+        marker = ("PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727872 "
+                  "logical_bytes:15269363712 lower_bytes:17178820608 "
                   "physical_blocks:4194048 segments:16383 "
                   "initial_mapper_read_bytes:4096 "
                   "constructor_lower_io_delta:0 boundary_pages:2 "
@@ -1053,8 +1053,8 @@ class ReportContract(unittest.TestCase):
         output = synthetic_log()
         result = runner.parse_loaded_correctness(output)
         self.assertEqual(result["overall"], "PASS")
-        self.assertEqual(result["maximum_logical_pages"], 3355136)
-        self.assertEqual(result["maximum_mapper_bytes"], 13742637056)
+        self.assertEqual(result["maximum_logical_pages"], 3727872)
+        self.assertEqual(result["maximum_mapper_bytes"], 15269363712)
         self.assertEqual(result["maximum_lower_bytes"], 17178820608)
         self.assertEqual(result["maximum_mapper_read_bytes"], 4096)
         self.assertEqual(result["maximum_lower_io_delta"], 0)
@@ -1065,8 +1065,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.parse_loaded_correctness(
             output.replace(marker, ""))["overall"], "INCOMPLETE")
         for before, after in (
-                ("logical_pages:3355136", "logical_pages:3355135"),
-                ("logical_bytes:13742637056", "logical_bytes:13742637055"),
+                ("logical_pages:3727872", "logical_pages:3355135"),
+                ("logical_bytes:15269363712", "logical_bytes:13742637055"),
                 ("lower_bytes:17178820608", "lower_bytes:67108864"),
                 ("physical_blocks:4194048", "physical_blocks:4194047"),
                 ("segments:16383", "segments:16382"),

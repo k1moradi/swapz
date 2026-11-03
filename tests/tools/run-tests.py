@@ -1335,8 +1335,8 @@ def parse_loaded_correctness(output):
      capacity_lower_io_delta, capacity_boundary_pages,
      capacity_boundary_page_bytes, capacity_boundary_read_bytes,
      capacity_boundary_write_bytes) = found["maximum_capacity"]
-    if (capacity_pages != 3355136 or
-            capacity_logical_bytes != 13742637056 or
+    if (capacity_pages != 3727872 or
+            capacity_logical_bytes != 15269363712 or
             capacity_lower_bytes != 17178820608 or
             capacity_physical_blocks != 4194048 or
             capacity_segments != 16383 or capacity_lower_io_delta != 0 or

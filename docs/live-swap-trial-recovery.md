@@ -22,12 +22,12 @@ endurance measurement or performance claims.
 - No fallback swap. The owner accepted that no independent swap exists while the
   trial runs. Before any mutation the plan requires the original partition to be
   the only active swap area.
-- Logical capacity is the maximum admitted for the full partition: 3,355,136
-  pages, 13,742,637,056 bytes (26,841,088 sectors). Linux sees 13,420,540 KiB
+- Logical capacity is the maximum admitted for the full partition: 3,727,872
+  pages, 15,269,363,712 bytes (29,822,976 sectors). Linux sees 14,911,484 KiB
   usable. The SWZ header, 1 MiB segment alignment and the
-  `ceil(logical_pages / 4)` GC reserve (838,784 physical blocks) account for the
+  `ceil(logical_pages / 8)` GC reserve (465,984 physical blocks) account for the
   rest. The whole 16 GiB partition cannot be exposed as logical swap because
-  about a quarter must remain reserved for GC.
+  about one eighth must remain reserved for GC.
 - The trial lasts at most 30 minutes after the mapper becomes swap.
 - RAM use (`MemTotal - MemAvailable`, over `MemTotal`) must be below 50 percent
   before the original swapoff. The swapoff itself requires `MemAvailable` to

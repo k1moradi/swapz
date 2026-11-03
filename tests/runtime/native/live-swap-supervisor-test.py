@@ -306,11 +306,11 @@ class LiveSwapSupervisorTests(unittest.TestCase):
 
     def test_supervisor_capacity_matches_kernel_maximum_for_full_partition(self):
         self.assertEqual(supervisor.MAX_PHYSICAL_BLOCKS, 4194048)
-        self.assertEqual(supervisor.MAX_LOGICAL_PAGES, 3355136)
-        self.assertEqual(supervisor.LOGICAL_BYTES, 13742637056)
-        self.assertEqual(supervisor.LOGICAL_SECTORS, 26841088)
+        self.assertEqual(supervisor.MAX_LOGICAL_PAGES, 3727872)
+        self.assertEqual(supervisor.LOGICAL_BYTES, 15269363712)
+        self.assertEqual(supervisor.LOGICAL_SECTORS, 29822976)
         reserve = max(
-            (supervisor.MAX_LOGICAL_PAGES + 3) // 4,
+            (supervisor.MAX_LOGICAL_PAGES + 7) // 8,
             supervisor.SWAPZ_MIN_RESERVE_BLOCKS)
         admitted_blocks = (
             (supervisor.MAX_PHYSICAL_BLOCKS - reserve) //
@@ -318,7 +318,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         ) * supervisor.SWAPZ_SEGMENT_BLOCKS
         self.assertLessEqual(supervisor.MAX_LOGICAL_PAGES, admitted_blocks)
         next_reserve = max(
-            (supervisor.MAX_LOGICAL_PAGES + 1 + 3) // 4,
+            (supervisor.MAX_LOGICAL_PAGES + 1 + 7) // 8,
             supervisor.SWAPZ_MIN_RESERVE_BLOCKS)
         next_admitted = (
             (supervisor.MAX_PHYSICAL_BLOCKS - next_reserve) //

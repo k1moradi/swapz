@@ -55,7 +55,7 @@ def _maximum_logical_pages(physical_blocks):
     low, high = 0, physical_blocks
     while low < high:
         candidate = (low + high + 1) // 2
-        reserve = max((candidate + 3) // 4, SWAPZ_MIN_RESERVE_BLOCKS)
+        reserve = max((candidate + 7) // 8, SWAPZ_MIN_RESERVE_BLOCKS)
         admitted = reserve < physical_blocks and candidate <= (
             (physical_blocks - reserve) // SWAPZ_SEGMENT_BLOCKS
         ) * SWAPZ_SEGMENT_BLOCKS

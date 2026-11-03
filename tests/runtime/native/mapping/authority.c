@@ -65,8 +65,8 @@ static int test_designated_partition_maximum_capacity(void)
 {
 	const swapz_u64 partition_bytes = 17179869184ULL;
 	const swapz_u32 expected_physical_blocks = 4194048U;
-	const swapz_u32 expected_logical_pages = 3355136U;
-	const swapz_u32 expected_reserve_blocks = 838784U;
+	const swapz_u32 expected_logical_pages = 3727872U;
+	const swapz_u32 expected_reserve_blocks = 465984U;
 	const swapz_u32 expected_segments = 16383U;
 	const swapz_u64 expected_index_bytes = 120470752ULL;
 	const swapz_u32 total_blocks =
@@ -90,7 +90,7 @@ static int test_designated_partition_maximum_capacity(void)
 	CHECK(physical_blocks == expected_physical_blocks);
 	CHECK(segment_count == expected_segments);
 	CHECK((swapz_u64)expected_logical_pages * SWAPZ_BLOCK_BYTES ==
-	      13742637056ULL);
+	      15269363712ULL);
 	CHECK((swapz_u64)expected_logical_pages *
 	      (sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)) +
 	      (swapz_u64)physical_blocks *

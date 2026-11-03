@@ -472,7 +472,7 @@ static swapz_u16 swapz_probe_set(
         self.assertEqual(source_body("swapz_probe_set", source).strip(),
                          "return (swapz_u16)(block & 127U);")
 
-    def test_swz_format_identity_remains_unversioned(self):
+    def test_swz_capacity_policy_keeps_authorization_header_version(self):
         legacy_format_name = "SWZ" + "3"
         text_suffixes = {".c", ".h", ".md", ".py", ".sh", ".yml", ".yaml"}
         paths = [ROOT / "Makefile", ROOT / "dkms.conf"]
@@ -492,6 +492,10 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("#define SWAPZ_MAGIC 0x005a5753U", codec_header)
         self.assertIn("swapz_u16 flags_le;", codec_header)
         self.assertNotIn("SWAPZ_VERSION", codec_header)
+
+        superblock = (ROOT / "src/kernel/superblock.h").read_text()
+        self.assertIn("#define SWAPZ_SUPERBLOCK_VERSION 1U", superblock)
+        self.assertIn("#define SWAPZ_SUPERBLOCK_BYTES 4096U", superblock)
 
     def test_publish_crc_probe_times_only_final_payload_crc(self):
         descriptor = source_body("swapz_lookup_validated_descriptor", CODEC)
@@ -4829,9 +4833,9 @@ int main(void)
                 "\nfi\n# 16 MiB upper table", 1)[0]
         for evidence in (
                 "NULLBLK_SIZE_MIB=16383",
-                "MAX_LOGICAL_PAGES=3355136",
-                "MAX_LOGICAL_SECTORS=26841088",
-                "MAX_LOGICAL_BYTES=13742637056",
+                "MAX_LOGICAL_PAGES=3727872",
+                "MAX_LOGICAL_SECTORS=29822976",
+                "MAX_LOGICAL_BYTES=15269363712",
                 "EXPECTED_PHYSICAL_BLOCKS=4194048",
                 "EXPECTED_SEGMENTS=16383",
                 "blockdev --getsize64 \"/dev/mapper/$DMNAME\"",
@@ -4854,7 +4858,7 @@ int main(void)
             self.assertNotIn(forbidden, capacity)
         roundtrip = (ROOT / "tests/tools/device-roundtrip.c").read_text()
         self.assertIn('"--maximum-capacity-boundary"', roundtrip)
-        self.assertIn("MAX_CAPACITY_LOGICAL_PAGES = 3355136U", roundtrip)
+        self.assertIn("MAX_CAPACITY_LOGICAL_PAGES = 3727872U", roundtrip)
         self.assertIn("maximum_capacity_boundary_roundtrip", roundtrip)
         self.assertIn("verify_dm_uuid_exact", roundtrip)
 

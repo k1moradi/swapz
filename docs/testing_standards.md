@@ -317,12 +317,12 @@ Native tests compile the real `src/kernel/{codec,authority,engine}.c` where appl
 
 The native authority suite must also exercise the exact maximum logical-page
 boundary for the designated 16 GiB backing geometry: one SWZ header block,
-1 MiB segment rounding, and the authority's `ceil(logical_pages / 4)` reserve
+1 MiB segment rounding, and the authority's `ceil(logical_pages / 8)` reserve
 with its two-segment minimum. It must reject the first page beyond the maximum,
 initialize the maximum, attach every capacity-dependent production authority
 array, and calculate those array bytes from the compiled C types. For the
-current geometry this is 4,194,048 usable physical blocks, 3,355,136 logical
-pages (13,742,637,056 mapper bytes), 838,784 reserve blocks, and 120,470,752
+current geometry this is 4,194,048 usable physical blocks, 3,727,872 logical
+pages (15,269,363,712 mapper bytes), 465,984 reserve blocks, and 120,470,752
 bytes (114.89 MiB) of capacity-index arrays. The last figure excludes the
 target structure, fixed scratch/cache/workspace allocations, and allocator
 overhead; it is not a total module-RAM measurement. Native authority success
@@ -342,6 +342,12 @@ churn or GC. Require the target's failed-I/O counter to remain zero. Until loade
 worst-case RAW/GC tests pass, report the value as a
 source-derived authority admission limit and keep maximum-capacity operation
 unqualified.
+
+The `/8` reserve change updates the admitted-capacity policy, not the serialized
+SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
+1; no on-media capacity capability or format-version field is added. A maximum
+capacity claim must therefore identify the source that implements the reserve
+policy. Do not bump the superblock version for this policy-only change.
 
 Source contracts validate behavior that requires the Linux Device Mapper target itself, including BIO ownership, queue/drain ordering, null_blk-only admission, lower-I/O accounting and current report/build contracts. Source-string assertions are secondary to executable production-C coverage.
 
@@ -3276,7 +3282,7 @@ and recovery review plus a separate owner decision, its privileged `run` and
 The live-swap trial is the owner-waived, no-fallback trial described in
 [live-swap-trial-recovery.md](live-swap-trial-recovery.md). It is limited to one
 mapper at the maximum logical capacity admitted for the complete `/dev/sda4`
-partition (3,355,136 pages, 13,742,637,056 bytes) and to 30 minutes, with one
+partition (3,727,872 pages, 15,269,363,712 bytes) and to 30 minutes, with one
 bounded cgroup swap-pressure check inside the window. Admission requires the
 exact bare-metal x86_64 target, unchanged qualified production artifact hashes,
 clean synchronized `main`, current non-privileged CI for HEAD, the original swap

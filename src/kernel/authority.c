@@ -323,7 +323,7 @@ int swapz_authority_init(struct swapz_authority *a,
 	    !logical_pages || physical_blocks < 3U * SWAPZ_SEGMENT_BLOCKS ||
 	    physical_blocks % SWAPZ_SEGMENT_BLOCKS)
 		return -EINVAL;
-	reserve = (logical_pages / 4U) + (logical_pages % 4U != 0);
+	reserve = (logical_pages / 8U) + (logical_pages % 8U != 0);
 	if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)
 		reserve = 2U * SWAPZ_SEGMENT_BLOCKS;
 	if (reserve >= physical_blocks ||

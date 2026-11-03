@@ -34,7 +34,7 @@ enum {
 	CHURN_COLD_PAGES = 2294,
 	CHURN_HOT_PAGES = 573,
 	CHURN_HOT_WRITES = 40960,
-	MAX_CAPACITY_LOGICAL_PAGES = 3355136U,
+	MAX_CAPACITY_LOGICAL_PAGES = 3727872U,
 	CHURN_FSYNC_INTERVAL = 256
 };
 
@@ -893,7 +893,7 @@ int main(int argc, char **argv)
 			}
 			maximum_capacity_mode = 1;
 			expected_dm_uuid = argv[3];
-			expected_device_bytes = UINT64_C(13742637056);
+			expected_device_bytes = UINT64_C(15269363712);
 		} else {
 			if (strcmp(argv[2], "--gc-stress") ||
 			    parse_uint(argv[3], 8U, &gc_rounds) ||
