@@ -186,7 +186,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             rootless)
         self.assertNotIn(
             "SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST",
-            ROOT_MAKEFILE.read_text())
+            (ROOT / "Makefile").read_text())
 
     def test_primary_manager_target_is_runtime_selected(self):
         # Historical trial paths and device numbers may appear in fixtures or
