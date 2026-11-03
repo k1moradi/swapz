@@ -38,6 +38,7 @@ PRODUCTION_READINESS_REQUIRED_EVIDENCE = (
     "required_ci",
     "exact_source_owner_make_test",
     "owned_nullblk_qualification",
+    "authorized_target_identity",
     "real_linux_swap",
     "maximum_capacity_and_ram",
     "sustained_physical_performance",
@@ -49,14 +50,16 @@ PRODUCTION_READINESS_REQUIRED_EVIDENCE = (
 PRODUCTION_READINESS_CODE_EVIDENCE = (
     "production_source", "clean_build_state", "qualified_artifact_hashes",
     "required_ci", "exact_source_owner_make_test",
-    "owned_nullblk_qualification", "real_linux_swap",
+    "owned_nullblk_qualification", "authorized_target_identity",
+    "real_linux_swap",
     "maximum_capacity_and_ram", "sustained_physical_performance",
     "lifecycle_deployment_state",
 )
 PRODUCTION_READINESS_DEPLOYMENT_EVIDENCE = (
     "production_source", "clean_build_state", "qualified_artifact_hashes",
     "required_ci", "exact_source_owner_make_test",
-    "lifecycle_deployment_state", "installed_artifact_identity",
+    "authorized_target_identity", "lifecycle_deployment_state",
+    "installed_artifact_identity",
     "cold_boot_harness",
 )
 PRODUCTION_READINESS_REQUIRED_CI = (
@@ -141,6 +144,25 @@ def _readiness_artifact_hashes_valid(hashes):
         for name in ("formatter_sha256", "module_sha256", "oracle_sha256"))
 
 
+def _readiness_target_key(target):
+    """Return stable target identity fields, excluding ephemeral device numbers."""
+    if not isinstance(target, dict):
+        return None
+    partuuid = target.get("partuuid")
+    device_bytes = target.get("device_bytes")
+    if (not isinstance(partuuid, str) or partuuid != partuuid.lower() or
+            not re.fullmatch(
+                r"[0-9a-f](?:[0-9a-f]|-(?=[0-9a-f])){6,62}[0-9a-f]",
+                partuuid) or
+            "--" in partuuid or
+            len(partuuid.replace("-", "")) < 8 or
+            type(device_bytes) is not int or
+            device_bytes <= LOGICAL_BLOCK_BYTES or
+            device_bytes % LOGICAL_BLOCK_BYTES):
+        return None
+    return partuuid, device_bytes
+
+
 def production_acceptance_manifest_sha256():
     """Return the exact frozen acceptance-policy digest, or None if unusable."""
     path = ROOT / "docs/production-acceptance.json"
@@ -191,6 +213,9 @@ def _readiness_pass_payload_valid(
     if name == "owned_nullblk_qualification":
         return (entry.get("overall") == "PASS" and
                 _valid_sha256(entry.get("evidence_sha256")))
+    if name == "authorized_target_identity":
+        return (entry.get("authorized") is True and
+                _readiness_target_key(entry.get("target")) is not None)
     if name == "real_linux_swap":
         return (entry.get("overall") == "PASS" and
                 entry.get("swap_out_in") == "PASS" and
@@ -303,6 +328,22 @@ def evaluate_production_readiness(snapshot, current_source_sha):
             continue
         statuses[name] = status
         reasons[name] = entry.get("reason", "")
+
+    if statuses.get("authorized_target_identity") == "PASS":
+        authorized_target = _readiness_target_key(
+            evidence["authorized_target_identity"].get("target"))
+        for name in (
+                "real_linux_swap", "maximum_capacity_and_ram",
+                "sustained_physical_performance",
+                "lifecycle_deployment_state", "cold_boot_harness",
+                "owner_observed_reboot"):
+            entry = evidence.get(name, {})
+            if (statuses.get(name) == "PASS" and
+                    _readiness_target_key(entry.get("target")) !=
+                    authorized_target):
+                statuses[name] = "BLOCKED"
+                reasons[name] = (
+                    "release evidence targets a different authorized device")
 
     if statuses.get("qualified_artifact_hashes") == "PASS":
         qualified_hashes = evidence["qualified_artifact_hashes"]["hashes"]
