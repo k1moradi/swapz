@@ -325,6 +325,20 @@ def parse_selector(text: str) -> str:
     return partuuid.lower()
 
 
+def release_target_identity(plan: dict, selector_partuuid: str) -> dict:
+    if parse_selector("PARTUUID=" + selector_partuuid + "\n") != selector_partuuid:
+        raise Blocked("release target PARTUUID is not canonical")
+    if str(plan.get("target_partuuid", "")).lower() != selector_partuuid:
+        raise Blocked("release target differs from protected selector")
+    try:
+        device_bytes = int(plan["target_device_bytes"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise Blocked("release target geometry is unavailable") from exc
+    if device_bytes <= PAGE_BYTES or device_bytes % PAGE_BYTES:
+        raise Blocked("release target geometry is invalid")
+    return {"partuuid": selector_partuuid, "device_bytes": device_bytes}
+
+
 def _read_selector() -> str:
     try:
         info = SELECTOR.lstat()
@@ -2081,6 +2095,7 @@ def execute(arguments: argparse.Namespace) -> dict:
     selector_partuuid = _read_selector()
     _target_path, target_device, target_parent_device = verify_authorized_target(
         plan, selector_partuuid)
+    target_identity = release_target_identity(plan, selector_partuuid)
     baseline = read_swap_rows()
     _validate_precycle_state(
         selector_partuuid, target_device, target_parent_device, baseline)
@@ -2098,6 +2113,7 @@ def execute(arguments: argparse.Namespace) -> dict:
             "oracle_sha256": _sha256_file(oracle_path),
             "qualified_installed_artifacts": artifact_hashes,
             "partuuid": selector_partuuid,
+            "target": dict(target_identity),
             "target_device": f"{target_device[0]}:{target_device[1]}",
             "cycles_requested": arguments.cycles,
             "workload_mib": arguments.workload_mib,
@@ -2159,6 +2175,7 @@ def execute(arguments: argparse.Namespace) -> dict:
             "qualification_report_sha256": _sha256_file(report_path),
             "qualified_installed_artifacts": artifact_hashes,
             "partuuid": selector_partuuid,
+            "target": dict(target_identity),
             "target_device": f"{target_device[0]}:{target_device[1]}",
             "cycles_requested": arguments.cycles,
             "cycles_passed": len(cycles),
