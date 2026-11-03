@@ -1648,8 +1648,14 @@ RESTORED/COMPLETE and owner release; failures return durably to
 RECOVERY_REQUIRED with the first interrupted stage preserved. Definite
 swapon/swapoff syscall failures are never treated as success; only EINTR may be
 reconciled by exact post-operation inventory. The global execution gate remains
-zero. Interruption and owned-null_blk qualification, bounded physical live swap,
-cold-boot recovery, boot integration, workload performance and production
+zero. The rootless direct-C suite now injects fake syscall and swap-inventory
+adapters into the same transition helper used by the native wrappers, covering
+success, definite failure, EINTR reconciliation, unreadable post-operation
+inventory and raw-backing refusal. Its independent Python lifecycle model is
+supplemental. This covers the bounded syscall/inventory decision logic only; it
+does not execute the complete Device Mapper coordinator or simulate process
+death. Interruption and owned-null_blk qualification, bounded physical live
+swap, cold-boot recovery, boot integration, workload performance and production
 qualification remain open.
 
 Mapper lifecycle admission now also reads the per-run original-header backup,

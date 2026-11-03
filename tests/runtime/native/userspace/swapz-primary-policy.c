@@ -88,6 +88,277 @@ static void test_recovery_required_state_builder(void)
 		       sizeof(recovery_required)));
 }
 
+struct primary_swap_transition_fixture {
+	dev_t mapper_device;
+	dev_t backing_device;
+	int mapper_active;
+	int backing_active;
+	int swapon_result;
+	int swapon_errno;
+	int swapon_applies;
+	int swapon_activates_backing;
+	int swapoff_result;
+	int swapoff_errno;
+	int swapoff_applies;
+	int active_calls;
+	int fail_active_call;
+	int swapon_calls;
+	int swapoff_calls;
+	char path[64];
+};
+
+static int primary_swap_transition_active(void *context,
+						 dev_t expected_device)
+{
+	struct primary_swap_transition_fixture *fixture = context;
+	++fixture->active_calls;
+	if (fixture->active_calls == fixture->fail_active_call) {
+		errno = EIO;
+		return -1;
+	}
+	if (expected_device == fixture->mapper_device)
+		return fixture->mapper_active;
+	if (expected_device == fixture->backing_device)
+		return fixture->backing_active;
+	errno = ENODEV;
+	return -1;
+}
+
+static long primary_swap_transition_swapon(void *context,
+						   const char *mapper_path)
+{
+	struct primary_swap_transition_fixture *fixture = context;
+	++fixture->swapon_calls;
+	assert(strlen(mapper_path) < sizeof(fixture->path));
+	strcpy(fixture->path, mapper_path);
+	if (fixture->swapon_applies) {
+		fixture->mapper_active = 1;
+		if (fixture->swapon_activates_backing)
+			fixture->backing_active = 1;
+	}
+	if (fixture->swapon_result < 0)
+		errno = fixture->swapon_errno;
+	return fixture->swapon_result;
+}
+
+static long primary_swap_transition_swapoff(void *context,
+						    const char *mapper_path)
+{
+	struct primary_swap_transition_fixture *fixture = context;
+	++fixture->swapoff_calls;
+	assert(strlen(mapper_path) < sizeof(fixture->path));
+	strcpy(fixture->path, mapper_path);
+	if (fixture->swapoff_applies)
+		fixture->mapper_active = 0;
+	if (fixture->swapoff_result < 0)
+		errno = fixture->swapoff_errno;
+	return fixture->swapoff_result;
+}
+
+static void primary_swap_transition_fixture_init(
+	struct primary_swap_transition_fixture *fixture)
+{
+	memset(fixture, 0, sizeof(*fixture));
+	fixture->mapper_device = makedev(253, 91);
+	fixture->backing_device = makedev(8, 4);
+	fixture->swapon_applies = 1;
+	fixture->swapoff_applies = 1;
+}
+
+static struct swapz_primary_swap_transition_ops
+primary_swap_transition_ops(struct primary_swap_transition_fixture *fixture)
+{
+	struct swapz_primary_swap_transition_ops ops = {
+		.device_active = primary_swap_transition_active,
+		.swapon = primary_swap_transition_swapon,
+		.swapoff = primary_swap_transition_swapoff,
+		.context = fixture,
+	};
+
+	return ops;
+}
+
+static void test_primary_swap_transition_adapter(void)
+{
+	const char *path = "/proc/self/fd/55";
+	struct primary_swap_transition_fixture fixture;
+	struct swapz_primary_swap_transition_ops ops;
+	int verified;
+
+	primary_swap_transition_fixture_init(&fixture);
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 9;
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) == 0);
+	assert(verified == 1 && fixture.swapon_calls == 1);
+	assert(fixture.mapper_active && !fixture.backing_active);
+	assert(!strcmp(fixture.path, path));
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.swapon_result = -1;
+	fixture.swapon_errno = EPERM;
+	fixture.swapon_applies = 0;
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	errno = 0;
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EPERM && verified == 0 && fixture.swapon_calls == 1);
+	assert(!fixture.mapper_active);
+
+	/* A definite syscall error stays a failure even if inventory shows active. */
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.swapon_result = -1;
+	fixture.swapon_errno = EPERM;
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	errno = 0;
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EPERM && verified == 0 && fixture.swapon_calls == 1);
+	assert(fixture.mapper_active);
+
+	/* A zero syscall result is insufficient when inventory cannot be read. */
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.fail_active_call = 3;
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	errno = 0;
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EIO && verified == 0 && fixture.swapon_calls == 1);
+	assert(fixture.mapper_active);
+
+	/* EINTR is reconciled only if exact post-operation inventory is active. */
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.swapon_result = -1;
+	fixture.swapon_errno = EINTR;
+	ops = primary_swap_transition_ops(&fixture);
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) == 0);
+	assert(verified == 1 && fixture.mapper_active);
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.swapon_result = -1;
+	fixture.swapon_errno = EINTR;
+	fixture.swapon_applies = 0;
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	errno = 0;
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EINTR && verified == 0 && !fixture.mapper_active);
+
+	/* Existing active state and raw-backing activation both refuse swapon. */
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.mapper_active = 1;
+	ops = primary_swap_transition_ops(&fixture);
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EBUSY && verified == 0 && !fixture.swapon_calls);
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.backing_active = 1;
+	ops = primary_swap_transition_ops(&fixture);
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EBUSY && verified == 0 && !fixture.swapon_calls);
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.swapon_activates_backing = 1;
+	ops = primary_swap_transition_ops(&fixture);
+	assert(swapz_primary_swap_transition_apply(
+		1, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EBUSY && verified == 0 && fixture.mapper_active &&
+	       fixture.backing_active);
+
+	/* Failed swapoff or unreadable/active post-state never authorizes removal. */
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.mapper_active = 1;
+	ops = primary_swap_transition_ops(&fixture);
+	assert(swapz_primary_swap_transition_apply(
+		0, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) == 0);
+	assert(verified == 1 && fixture.swapoff_calls == 1 &&
+	       !fixture.mapper_active);
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.mapper_active = 1;
+	fixture.swapoff_applies = 0;
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	errno = 0;
+	assert(swapz_primary_swap_transition_apply(
+		0, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EBUSY && verified == 0 && fixture.mapper_active);
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.mapper_active = 1;
+	fixture.swapoff_result = -1;
+	fixture.swapoff_errno = EBUSY;
+	fixture.swapoff_applies = 0;
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	errno = 0;
+	assert(swapz_primary_swap_transition_apply(
+		0, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EBUSY && verified == 0 && fixture.mapper_active &&
+	       fixture.swapoff_calls == 1);
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.mapper_active = 1;
+	fixture.swapoff_result = -1;
+	fixture.swapoff_errno = EINTR;
+	ops = primary_swap_transition_ops(&fixture);
+	assert(swapz_primary_swap_transition_apply(
+		0, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) == 0);
+	assert(verified == 1 && !fixture.mapper_active);
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.mapper_active = 1;
+	fixture.swapoff_result = -1;
+	fixture.swapoff_errno = EINTR;
+	fixture.swapoff_applies = 0;
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	errno = 0;
+	assert(swapz_primary_swap_transition_apply(
+		0, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EINTR && verified == 0 && fixture.mapper_active);
+
+	primary_swap_transition_fixture_init(&fixture);
+	fixture.mapper_active = 1;
+	fixture.fail_active_call = 3;
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	errno = 0;
+	assert(swapz_primary_swap_transition_apply(
+		0, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) < 0);
+	assert(errno == EIO && verified == 0 && !fixture.mapper_active);
+
+	primary_swap_transition_fixture_init(&fixture);
+	ops = primary_swap_transition_ops(&fixture);
+	verified = 7;
+	assert(swapz_primary_swap_transition_apply(
+		0, fixture.mapper_device, fixture.backing_device, path,
+		&ops, &verified) == 0);
+	assert(verified == 0 && fixture.swapoff_calls == 0);
+}
+
 static void test_swap_inventory_parser(void)
 {
 	struct swapz_primary_swap_entry rows[4];
@@ -2112,6 +2383,7 @@ int main(void)
 	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						  pages + 1ULL));
 	test_recovery_required_state_builder();
+	test_primary_swap_transition_adapter();
 	test_swap_inventory_parser();
 	test_selected_target_swap_quiescence();
 	test_target_identity_and_header_policy();
@@ -2258,6 +2530,15 @@ int main(void)
 		recovery_fd, first_lock, other_run_id, geteuid()) == 0);
 	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
 						    &lifecycle, geteuid()) == 0);
+	assert_primary_state_equals(recovery_fd, &lifecycle);
+	/* A completed A-side retry must not mutate B after the same lock is reused. */
+	errno = 0;
+	assert(swapz_primary_state_require_recovery_at(
+		recovery_fd, first_lock, run_id, geteuid()) < 0);
+	assert(errno == EPERM);
+	assert(swapz_primary_release_partition_owner_at(
+		recovery_fd, first_lock, run_id, geteuid()) < 0);
+	assert(errno == EPERM);
 	assert_primary_state_equals(recovery_fd, &lifecycle);
 	assert(swapz_primary_write_record_at(recovery_fd, "state-target",
 					     "target\n", geteuid()) == 0);

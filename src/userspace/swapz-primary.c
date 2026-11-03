@@ -6043,6 +6043,114 @@ static int swapz_primary_module_load_mark_loaded_at(
 		recovery_fd, manifest, "LOADED", expected_owner);
 }
 
+/*
+ * Keep the kernel transition's syscall and inventory decisions in one small
+ * production helper. Rootless tests inject only these three boundaries; the
+ * privileged callers still perform the manifest, owner-lock, Device Mapper,
+ * descriptor and target-identity checks before they reach this helper.
+ */
+struct swapz_primary_swap_transition_ops {
+	int (*device_active)(void *context, dev_t expected_device);
+	long (*swapon)(void *context, const char *mapper_path);
+	long (*swapoff)(void *context, const char *mapper_path);
+	void *context;
+};
+
+static int swapz_primary_swap_transition_apply(
+	int activate, dev_t mapper_device, dev_t backing_device,
+	const char *mapper_path,
+	const struct swapz_primary_swap_transition_ops *ops,
+	int *operation_verified_by_call)
+{
+	int mapper_active;
+	int backing_active;
+	int syscall_errno = 0;
+	long syscall_result;
+	int result = -1;
+	int saved_errno = EIO;
+
+	if ((activate != 0 && activate != 1) || mapper_device == 0 ||
+	    backing_device == 0 || !mapper_path || !*mapper_path || !ops ||
+	    !ops->device_active || !ops->swapon || !ops->swapoff ||
+	    !operation_verified_by_call) {
+		errno = EINVAL;
+		return -1;
+	}
+	*operation_verified_by_call = 0;
+	backing_active = ops->device_active(ops->context, backing_device);
+	if (backing_active < 0)
+		goto out;
+	if (backing_active != 0) {
+		errno = EBUSY;
+		goto out;
+	}
+	mapper_active = ops->device_active(ops->context, mapper_device);
+	if (mapper_active < 0)
+		goto out;
+	if (mapper_active > 1) {
+		errno = EPROTO;
+		goto out;
+	}
+	if (activate && mapper_active) {
+		/* STARTING must not adopt an unexplained pre-existing swap area. */
+		errno = EBUSY;
+		goto out;
+	}
+	if (!activate && !mapper_active) {
+		/* Exact inventory absence is already a safe idempotent stop result. */
+		result = 0;
+		goto out;
+	}
+
+	/*
+	 * Linux accepts a pathname here. Production supplies /proc/self/fd/N for
+	 * the already-open, identity-checked mapper; the inventory callback then
+	 * proves that the kernel activated/deactivated that exact block dev_t.
+	 * EINTR is ambiguous, so only the post-syscall inventory can reconcile it.
+	 */
+	errno = 0;
+	syscall_result = activate ?
+		ops->swapon(ops->context, mapper_path) :
+		ops->swapoff(ops->context, mapper_path);
+	if (syscall_result < 0)
+		syscall_errno = errno ? errno : EIO;
+	if (!activate && syscall_result < 0 && syscall_errno != EINTR) {
+		errno = syscall_errno;
+		goto out;
+	}
+
+	mapper_active = ops->device_active(ops->context, mapper_device);
+	if (mapper_active < 0)
+		goto out;
+	if (mapper_active > 1) {
+		errno = EPROTO;
+		goto out;
+	}
+	backing_active = ops->device_active(ops->context, backing_device);
+	if (backing_active < 0)
+		goto out;
+	if (backing_active > 1) {
+		errno = EPROTO;
+		goto out;
+	}
+	if (activate && syscall_result < 0 && syscall_errno != EINTR) {
+		errno = syscall_errno;
+		goto out;
+	}
+	if ((activate && mapper_active != 1) ||
+	    (!activate && mapper_active != 0) || backing_active != 0) {
+		errno = syscall_errno ? syscall_errno : EBUSY;
+		goto out;
+	}
+	*operation_verified_by_call = 1;
+	result = 0;
+out:
+	saved_errno = result == 0 ? 0 : (errno ? errno : EIO);
+	if (result < 0)
+		errno = saved_errno;
+	return result;
+}
+
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_swap_device_active(dev_t expected_device)
 {
@@ -6575,6 +6683,35 @@ static int swapz_primary_run_mkswap(int mkswap_fd, int mapper_fd)
 #endif
 
 
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
+static int swapz_primary_native_swap_active(
+	void *context, dev_t expected_device)
+{
+	(void)context;
+	return swapz_primary_swap_device_active(expected_device);
+}
+
+static long swapz_primary_native_swapon(void *context, const char *mapper_path)
+{
+	(void)context;
+	return syscall(SYS_swapon, mapper_path, 0);
+}
+
+static long swapz_primary_native_swapoff(void *context, const char *mapper_path)
+{
+	(void)context;
+	return syscall(SYS_swapoff, mapper_path);
+}
+
+static const struct swapz_primary_swap_transition_ops
+	swapz_primary_native_swap_transition_ops = {
+	.device_active = swapz_primary_native_swap_active,
+	.swapon = swapz_primary_native_swapon,
+	.swapoff = swapz_primary_native_swapoff,
+	.context = NULL,
+};
+#endif
+
 static int swapz_primary_activate_mapper_swap(
 	int recovery_fd, int lock_fd,
 	const struct swapz_primary_manifest *manifest,
@@ -6605,12 +6742,8 @@ static int swapz_primary_activate_mapper_swap(
 	dev_t observed_mapper_device = 0;
 	int control_fd = -1;
 	int mapper_fd = -1;
-	int mapper_active;
-	int backing_active;
 	int result = -1;
 	int saved_errno = EIO;
-	int syscall_errno = 0;
-	long syscall_result;
 
 	if (!manifest || expected_mapper_device == 0 || !activated_by_call) {
 		errno = EINVAL;
@@ -6646,21 +6779,6 @@ static int swapz_primary_activate_mapper_swap(
 			errno = ESTALE;
 		goto out;
 	}
-	backing_active =
-		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
-	if (backing_active != 0) {
-		if (backing_active > 0)
-			errno = EBUSY;
-		goto out;
-	}
-	mapper_active =
-		swapz_primary_swap_device_active(expected_mapper_device);
-	if (mapper_active != 0) {
-		if (mapper_active > 0)
-			errno = EBUSY;
-		goto out;
-	}
-
 	mapper_fd = swapz_primary_mapper_device_open(
 		mapper_name, expected_mapper_device, logical_bytes);
 	if (mapper_fd < 0 ||
@@ -6676,27 +6794,16 @@ static int swapz_primary_activate_mapper_swap(
 		goto out;
 	}
 
-	errno = 0;
-	syscall_result = syscall(SYS_swapon, mapper_path, 0);
-	if (syscall_result < 0)
-		syscall_errno = errno ? errno : EIO;
-
-	mapper_active =
-		swapz_primary_swap_device_active(expected_mapper_device);
-	if (mapper_active < 0)
+	/*
+	 * The durable ACTIVE state is written by start_prepared only after this
+	 * exact-dev_t inventory proof. A successful swapon return alone is not
+	 * activation evidence, and EINTR is resolved only by the same proof.
+	 */
+	if (swapz_primary_swap_transition_apply(
+		    1, expected_mapper_device, SWAPZ_PRIMARY_TARGET_DEVICE,
+		    mapper_path, &swapz_primary_native_swap_transition_ops,
+		    activated_by_call) < 0 || !*activated_by_call)
 		goto out;
-	backing_active =
-		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
-	if (backing_active < 0)
-		goto out;
-	if (syscall_result < 0 && syscall_errno != EINTR) {
-		errno = syscall_errno;
-		goto out;
-	}
-	if (mapper_active != 1 || backing_active != 0) {
-		errno = syscall_errno ? syscall_errno : EIO;
-		goto out;
-	}
 	if (swapz_primary_dm_mapper_verify_fd(
 		    control_fd, manifest, 1, 0,
 		    &observed_mapper_device) < 0 ||
@@ -6762,8 +6869,6 @@ static int swapz_primary_deactivate_mapper_swap(
 	int backing_active;
 	int result = -1;
 	int saved_errno = EIO;
-	int syscall_errno = 0;
-	long syscall_result;
 
 	if (!manifest || !deactivated_by_call) {
 		errno = EINVAL;
@@ -6851,26 +6956,17 @@ static int swapz_primary_deactivate_mapper_swap(
 		goto out;
 	}
 
-	errno = 0;
-	syscall_result = syscall(SYS_swapoff, mapper_path);
-	if (syscall_result < 0)
-		syscall_errno = errno ? errno : EIO;
-	if (syscall_result < 0 && syscall_errno != EINTR) {
-		errno = syscall_errno;
+	/*
+	 * Mapper removal is not a substitute for normal swapoff. This shared
+	 * transition succeeds only after exact /proc/swaps absence is proved; an
+	 * uncertain result stays recoverable and prevents the caller reaching DM
+	 * removal.
+	 */
+	if (swapz_primary_swap_transition_apply(
+		    0, mapper_device, SWAPZ_PRIMARY_TARGET_DEVICE,
+		    mapper_path, &swapz_primary_native_swap_transition_ops,
+		    deactivated_by_call) < 0)
 		goto out;
-	}
-
-	mapper_active = swapz_primary_swap_device_active(mapper_device);
-	if (mapper_active < 0)
-		goto out;
-	backing_active =
-		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
-	if (backing_active < 0)
-		goto out;
-	if (mapper_active != 0 || backing_active != 0) {
-		errno = syscall_errno ? syscall_errno : EBUSY;
-		goto out;
-	}
 	if (swapz_primary_dm_mapper_verify_fd(
 		    control_fd, manifest, 1, 0,
 		    &verified_mapper_device) < 0 ||
@@ -6881,7 +6977,6 @@ static int swapz_primary_deactivate_mapper_swap(
 		goto out;
 	}
 
-	*deactivated_by_call = 1;
 	result = 0;
 out:
 	saved_errno = result == 0 ? 0 : (errno ? errno : EIO);

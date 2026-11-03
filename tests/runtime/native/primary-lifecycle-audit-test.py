@@ -95,6 +95,7 @@ class FakeKernelAdapter:
     swapoff_calls: int = 0
     remove_calls: int = 0
     inventory_calls: int = 0
+    remove_failure_once: bool = False
     operation_trace: list[str] = field(default_factory=list)
 
     def swapon(self) -> OperationResult:
@@ -131,6 +132,9 @@ class FakeKernelAdapter:
         self.remove_calls += 1
         if self.facts.mapper_active:
             return False
+        if self.remove_failure_once:
+            self.remove_failure_once = False
+            return False
         self.facts.mapper_present = False
         return True
 
@@ -161,8 +165,10 @@ class LifecycleModel:
 
         before = kernel.inventory()
         if before is InventoryResult.EXACT_ACTIVE:
-            self.stage = DurableStage.ACTIVE
-            return True
+            # STARTING is never promoted from a pre-existing active mapper.
+            # Recovery owns reconciliation of an interrupted swapon attempt.
+            self.stage = DurableStage.RECOVERY_REQUIRED
+            return False
         if before is not InventoryResult.EXACT_INACTIVE:
             self.stage = DurableStage.RECOVERY_REQUIRED
             return False
@@ -249,6 +255,12 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
         self.assertEqual(kernel.operation_trace,
                          ["inventory", "swapon", "inventory"])
 
+    def test_duplicate_start_is_rejected(self):
+        model = self.new_model()
+        self.assertTrue(model.begin_start(model.run_id))
+        self.assertFalse(model.begin_start(model.run_id))
+        self.assertIs(model.stage, DurableStage.STARTING)
+
     def test_swapon_success_without_inventory_proof_requires_recovery(self):
         model = self.new_model()
         self.assertTrue(model.begin_start(model.run_id))
@@ -271,15 +283,37 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
         self.assertTrue(model.activate(model.run_id, kernel))
         self.assertIs(model.stage, DurableStage.ACTIVE)
 
-    def test_existing_exact_active_mapper_is_adopted_without_duplicate_swapon(self):
+    def test_preexisting_exact_active_mapper_requires_recovery(self):
         model = self.new_model()
         self.assertTrue(model.begin_start(model.run_id))
         kernel = FakeKernelAdapter(
             KernelFacts(mapper_active=True),
             inventory_results=(InventoryResult.EXACT_ACTIVE,))
-        self.assertTrue(model.activate(model.run_id, kernel))
+        self.assertFalse(model.activate(model.run_id, kernel))
         self.assertEqual(kernel.swapon_calls, 0)
-        self.assertIs(model.stage, DurableStage.ACTIVE)
+        self.assertIs(model.stage, DurableStage.RECOVERY_REQUIRED)
+
+    def test_recovery_reconciles_exact_active_mapper_without_reissuing_swapon(self):
+        model = self.new_model()
+        model.stage = DurableStage.STARTING
+        kernel = FakeKernelAdapter(KernelFacts(mapper_active=True))
+        self.assertTrue(model.begin_recovery(model.run_id))
+        self.assertTrue(model.deactivate_and_remove(model.run_id, kernel))
+        self.assertEqual(kernel.swapon_calls, 0)
+        self.assertEqual(kernel.swapoff_calls, 1)
+        self.assertEqual(kernel.remove_calls, 1)
+        self.assertIs(model.stage, DurableStage.COMPLETE)
+
+    def test_recovery_refuses_active_mapper_with_unexpected_identity(self):
+        model = self.new_model()
+        model.stage = DurableStage.STARTING
+        kernel = FakeKernelAdapter(
+            KernelFacts(mapper_active=True, mapper_identity_matches=False))
+        self.assertTrue(model.begin_recovery(model.run_id))
+        self.assertFalse(model.deactivate_and_remove(model.run_id, kernel))
+        self.assertEqual(kernel.swapoff_calls, 0)
+        self.assertEqual(kernel.remove_calls, 0)
+        self.assertIs(model.stage, DurableStage.RECOVERY_REQUIRED)
 
     def test_wrong_active_device_never_satisfies_activation(self):
         model = self.new_model()
@@ -375,6 +409,24 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
         self.assertTrue(model.deactivate_and_remove(model.run_id, kernel))
         self.assertEqual(kernel.swapoff_calls, 0)
         self.assertEqual(kernel.remove_calls, 1)
+        self.assertIs(model.stage, DurableStage.COMPLETE)
+
+    def test_recovery_repeats_after_swapoff_before_mapper_removal(self):
+        model = self.new_model()
+        model.stage = DurableStage.ACTIVE
+        self.assertTrue(model.begin_stop(model.run_id))
+        kernel = FakeKernelAdapter(
+            KernelFacts(mapper_active=True), remove_failure_once=True)
+        self.assertFalse(model.deactivate_and_remove(model.run_id, kernel))
+        self.assertIs(model.stage, DurableStage.RECOVERY_REQUIRED)
+        self.assertTrue(kernel.facts.mapper_present)
+        self.assertFalse(kernel.facts.mapper_active)
+
+        self.assertTrue(model.begin_recovery(model.run_id))
+        self.assertTrue(model.deactivate_and_remove(model.run_id, kernel))
+        self.assertEqual(kernel.swapoff_calls, 1)
+        self.assertEqual(kernel.remove_calls, 2)
+        self.assertFalse(kernel.facts.mapper_present)
         self.assertIs(model.stage, DurableStage.COMPLETE)
 
     def test_recovery_accepts_proven_inactive_already_absent_mapper(self):
@@ -523,20 +575,31 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         stop = c_function_body(source, "swapz_primary_stop_active")
         recover = c_function_body(source, "swapz_primary_recover")
 
-        self.assertIn("syscall(SYS_swapon, mapper_path, 0)", activate)
-        self.assertGreaterEqual(
-            activate.count(
-                "swapz_primary_swap_device_active(expected_mapper_device)"), 2)
+        self.assertIn("swapz_primary_swap_transition_apply(", activate)
+        self.assertLess(
+            activate.index("swapz_primary_transaction_manifest_matches_at("),
+            activate.index("swapz_primary_swap_transition_apply("))
         self.assertIn("swapz_primary_dm_mapper_verify_fd(", activate)
+        self.assertIn(
+            "return syscall(SYS_swapon, mapper_path, 0);", source)
         self.assertLess(
             start.index("swapz_primary_activate_mapper_swap("),
             start.index("active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE"))
 
-        self.assertIn("syscall(SYS_swapoff, mapper_path)", deactivate)
-        self.assertGreaterEqual(
-            deactivate.count("swapz_primary_swap_device_active(mapper_device)"),
-            2)
+        self.assertIn("swapz_primary_swap_transition_apply(", deactivate)
+        self.assertLess(
+            deactivate.index("swapz_primary_transaction_manifest_matches_at("),
+            deactivate.index("swapz_primary_swap_transition_apply("))
+        self.assertIn("return syscall(SYS_swapoff, mapper_path);", source)
         self.assertIn("swapz_primary_dm_mapper_verify_fd(", deactivate)
+        transition = c_function_body(
+            source, "swapz_primary_swap_transition_apply")
+        self.assertLess(
+            transition.index("ops->swapon(ops->context, mapper_path)"),
+            transition.index(
+                "ops->device_active(ops->context, mapper_device)",
+                transition.index("ops->swapon(ops->context, mapper_path)")))
+        self.assertIn("syscall_errno != EINTR", transition)
         self.assertLess(
             stop.index("swapz_primary_deactivate_mapper_swap("),
             stop.index("swapz_primary_dm_remove_mapper("))

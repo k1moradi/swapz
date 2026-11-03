@@ -3908,9 +3908,15 @@ target; no such test may open or write a host block device. The rootless build
 must keep the command unavailable and prove no host path or lifecycle side
 effect is reached. Rootless direct-C coverage must also prove the native
 activation/deactivation helpers return `ENODEV` with their side-effect outputs
-cleared. The adversarial lifecycle audit must verify native `swapon` is ordered
-before durable `ACTIVE`, and native `swapoff` is ordered before mapper
-removal in both stop and recovery. The privileged execution gate remains
+cleared. The shared production syscall/inventory transition helper must also
+be exercised from direct-C rootless tests with fake inventory and syscall
+adapters. Cover successful and failed `swapon`/`swapoff`, `EINTR` reconciliation,
+post-operation inventory failure, already-active/inactive state, and raw-backing
+swap refusal. The independent lifecycle model remains supplemental; it must not
+be the only behavioral evidence for production logic. The adversarial lifecycle
+audit must verify native `swapon` is ordered before durable `ACTIVE`, and native
+`swapoff` is ordered before mapper removal in both stop and recovery. The
+privileged execution gate remains
 explicitly zero until owned-RAM interruption coverage and bounded physical
 lifecycle evidence are added; source presence of the syscalls alone is not
 authorization. A metadata-preparation PASS is not start, live-swap,
@@ -3925,15 +3931,18 @@ manifest-bound PARTUUID target exclusively, and compare all 4096 current
 block-zero bytes with the digest-verified saved header. Only after `STARTING`
 is durable may it write the run-bound SWZ header, load the exact qualified
 module, create/resume the exact run-bound mapper, initialize Linux swap metadata
-on that mapper, and persist `ACTIVE`. Every failure after durable `STARTING`
-must mark `RECOVERY_REQUIRED` while the owner lock is still held. The primary
-manager is the sole owner of swap activation: start must complete native
-`swapon` before durable `ACTIVE`, and stop/recovery must complete native
-`swapoff` before mapper teardown. The packaged `.swap` unit is a passive
-status view and must not be independently enabled or used as a second lifecycle
-owner. Normal stop persists `STOPPING` before deactivation and cleanup, then
-removes only
-the exact manifest-bound mapper with zero swap/open references, and unload only
+on that mapper, call native `swapon` through `/proc/self/fd/N` for the already
+verified mapper descriptor, and prove that `/proc/swaps` contains the exact
+mapper device while the raw backing device is absent before persisting
+`ACTIVE`. A successful syscall return alone is not activation proof. The primary
+manager is the sole owner of swap activation; the packaged
+`.swap` unit is a passive status view and must not be independently enabled or
+used as a second lifecycle owner. Every failure after durable `STARTING` must
+mark `RECOVERY_REQUIRED` while the owner lock is still held. Normal stop
+persists `STOPPING` before deactivation and cleanup, calls native `swapoff` for
+the exact verified mapper when active, and proves it absent from `/proc/swaps`
+before mapper removal. It must remove only the exact manifest-bound mapper with
+zero swap/open references, and unload only
 a module backed by the same run's exact `LOADED` ownership record, matching
 loaded source provenance and physical-backing parameter, using non-forced
 `delete_module`. After cleanup it must verify the backing partition still has
