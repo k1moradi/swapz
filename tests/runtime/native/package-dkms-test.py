@@ -96,13 +96,11 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertTrue(swap_unit.is_file())
         service_text = mapper_service.read_text()
         swap_text = swap_unit.read_text()
-        original_swap_unit = (
-            r"dev-disk-by\x2duuid-728b4c06\x2d44b0\x2d46ee"
-            r"\x2d91ec\x2d560ab1bad358.swap")
         self.assertIn("RefuseManualStart=yes", service_text)
         self.assertIn("RefuseManualStop=yes", service_text)
-        self.assertIn("Before=" + original_swap_unit, service_text)
-        self.assertIn("Conflicts=" + original_swap_unit, service_text)
+        self.assertNotIn("dev-disk-by", service_text)
+        self.assertNotIn("sda4", service_text)
+        self.assertNotIn("7fb9401d-04", service_text)
         self.assertIn(
             "ConditionPathExists=/var/lib/swapz/physical-recovery/primary-state.json",
             service_text)
@@ -174,7 +172,7 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertNotEqual(r.returncode, 0)
         self.assertTrue(primary_state.is_symlink())
         primary_state.unlink()
-        primary_active = recovery / "partition-7fb9401d-04.active"
+        primary_active = recovery / "partition-1234abcd-01.active"
         primary_active.write_text("active\n")
         r = self.invoke("uninstall")
         self.assertNotEqual(r.returncode, 0)

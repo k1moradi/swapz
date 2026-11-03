@@ -32,6 +32,23 @@ canonical in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). Historical `/dev/sda4`
 trial narratives below remain evidence for the older computer, not current
 authorization policy.
 
+The primary manager reads one protected PARTUUID selector from
+`/etc/swapz/primary-target`; source code must not pin a path, device number or
+partition capacity. It records the discovered partition identity and geometry
+in each transaction manifest and rechecks the PARTUUID, descriptor, parent,
+root-device and recovery-device relationships before preparation. Selecting a
+different goal drive is a configuration and authorization update, not a source
+constant edit. Package cleanup protects every active PARTUUID ownership marker,
+and packaged units no longer name a historical device or UUID. Their
+target-aware swap ordering is still unimplemented, so the units and privileged
+lifecycle remain disabled. The historical live-swap supervisor remains tied to
+its old host and is not a deployment path for the current card.
+
+Older primary-manager implementation notes later in this file document the
+former fixed-device design. Any `/dev/sda4`, `8:4`, 16 GiB, or original-header
+digest values in those notes are historical test context, not current source
+requirements; use the selector and manifest-bound geometry described above.
+
 ## Current owner requirement: fixed production compression stack
 
 Every emulated device must run the production delta64 + `DELTA64_SHUF8`
@@ -1317,10 +1334,10 @@ malformed or unexpected state into explicit `BLOCKED:` results instead of an
 opaque shell-runtime status. The numeric internal-error trap remains as a
 last-resort diagnostic. A subsequent owner run exposed one stale native interface assertion that still required the removed regex literals; that contract is aligned with the exact-token ownership checks and now explicitly rejects reintroduction of `BASH_REMATCH`. The following loaded owner rerun still returned shell status 2 before a safety verdict, so the remaining runtime `=~` expressions and C-style arithmetic commands are removed from privileged preflight as well. Canonical decimal validation, exact shell patterns and fixed bounded retry iteration now cover the path end-to-end without weakening positive ownership checks. The following native rerun exposed three stale harness assertions that still required the removed arithmetic spellings (source contract, Make interface contract, and rootless literal grep); all three are aligned to the non-arithmetic preflight forms in one change. The following loaded qualification run exposed that the multi-line `case` pattern in `loaded-preflight.sh` omitted trailing backslashes on continuation lines, triggering a Bash syntax error (unexpected newline) and exit status 2 before execution. The continuation lines are escaped with `\`, and `test-rootless.sh` is updated to invoke `bash -n` individually across every shell harness script so future syntax regressions fail in Stage 2 rather than during privileged loaded execution.
 
-### Physical-PC full-capacity and live-swap qualification
+### Historical old-host full-capacity and live-swap qualification
 
-The current mission is to qualify the maximum safe logical capacity backed by
-the complete `/dev/sda4` partition, then prove actual Linux swap-out/swap-in,
+At the time of these records, the mission was to qualify the maximum safe
+logical capacity backed by the complete `/dev/sda4` partition, then prove actual Linux swap-out/swap-in,
 GC/churn, shutdown, recovery, and rollback on this physical PC. The earlier
 11/11 physical-backed byte-correctness smoke remains a separate bounded pass;
 it did not activate its mapper as system swap and did not qualify live swap.

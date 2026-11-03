@@ -431,19 +431,27 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             ops.command(["blkid", "--update", "all"])
 
     def test_execution_requires_root_and_exact_confirmation(self):
-        self.assertTrue(supervisor.LIVE_SWAP_EXECUTION_ENABLED)
+        self.assertFalse(supervisor.LIVE_SWAP_EXECUTION_ENABLED)
         ops = FakeOps()
-        with mock.patch.object(supervisor.os, "geteuid", return_value=1000):
-            with self.assertRaisesRegex(supervisor.LiveSwapError, "requires root"):
+        with mock.patch.object(supervisor.os, "geteuid", return_value=0):
+            with self.assertRaisesRegex(supervisor.LiveSwapError, "disabled"):
                 supervisor.run_trial("/unused", "/unused",
                                      confirm="LIVE-SWAP-TRIAL", ops=ops)
-            with self.assertRaisesRegex(supervisor.LiveSwapError, "requires root"):
+            with self.assertRaisesRegex(supervisor.LiveSwapError, "disabled"):
                 supervisor.recover_cli("/unused",
                                        confirm="RESTORE-ORIGINAL-SWAP", ops=ops)
-        with mock.patch.object(supervisor.os, "geteuid", return_value=0):
-            with self.assertRaisesRegex(supervisor.LiveSwapError, "confirmation"):
-                supervisor.run_trial("/unused", "/unused",
-                                     confirm="yes", ops=ops)
+        with mock.patch.object(supervisor, "LIVE_SWAP_EXECUTION_ENABLED", True):
+            with mock.patch.object(supervisor.os, "geteuid", return_value=1000):
+                with self.assertRaisesRegex(supervisor.LiveSwapError, "requires root"):
+                    supervisor.run_trial("/unused", "/unused",
+                                         confirm="LIVE-SWAP-TRIAL", ops=ops)
+                with self.assertRaisesRegex(supervisor.LiveSwapError, "requires root"):
+                    supervisor.recover_cli("/unused",
+                                           confirm="RESTORE-ORIGINAL-SWAP", ops=ops)
+            with mock.patch.object(supervisor.os, "geteuid", return_value=0):
+                with self.assertRaisesRegex(supervisor.LiveSwapError, "confirmation"):
+                    supervisor.run_trial("/unused", "/unused",
+                                         confirm="yes", ops=ops)
 
     def test_read_only_plan_never_calls_mutation_channel_and_exposes_trace(self):
         ops = FakeOps()
@@ -725,6 +733,8 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         ops = FakeOps()
         approval = {"run_id": RUN_ID}
         with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                supervisor, "LIVE_SWAP_EXECUTION_ENABLED", True))
             stack.enter_context(mock.patch.object(supervisor.os, "geteuid", return_value=0))
             stack.enter_context(mock.patch.object(
                 supervisor.PHYSICAL, "_partition_lock",

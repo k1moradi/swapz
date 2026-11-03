@@ -259,7 +259,10 @@ memory from a freshly generated lowercase 32-hex transaction ID using the
 system random source. Convert those 16 bytes directly into the 16-byte header
 UUID; do not use timestamps, process IDs or caller-selected identifiers.
 Populate the shared unversioned header layout and bind the **currently verified
-configured target geometry**, never a historical hard-coded `/dev/sda4` size.
+configured target geometry**, never a fixed or historical target size. The
+configured target is resolved from the protected PARTUUID selector, and its
+opened descriptor, discovered device number, byte size and parent relationship
+are checked at runtime.
 Leave every reserved byte zero and validate the complete 4096-byte candidate
 with `swapz_sb_valid()` before exposing it to the caller. Reject malformed or
 all-zero IDs without changing the caller's output buffer. Header construction
@@ -318,7 +321,10 @@ refuse an existing active marker and must never silently retire a pending
 Before claiming a run, require a clean synchronized main, accepted exact-source
 owner qualification and live artifact hashes, persistent lifecycle storage, no
 conflicting swapz module/mapper/transaction, and an identity-checked configured
-target whose opened partition and parent match the dedicated SD-card binding.
+target selected by the protected PARTUUID configuration. Resolve its current
+partition and parent identity at runtime; do not compile a device pathname,
+major:minor or capacity into the manager. The opened partition and parent must
+match the owner-authorized target recorded in AGENT_CONTEXT.
 Do not require preservation of historical card contents or an old Linux-swap
 header on this disposable target. If an active swapz/ordinary-swap entry exists,
 its identity and usage must be understood and safely drained before a destructive
@@ -344,7 +350,8 @@ Build mapper tables and issue Device Mapper ioctls in process; do not invoke
 `dmsetup` as a privileged subprocess. Align every ioctl buffer and validate
 its returned interface version, bounded lengths, target count, generated name
 and UUID before interpreting payloads. The primary table is one `swapz`
-target over exactly `8:4` at the manifest-derived maximum safe size. Verify
+target over the manifest's discovered major:minor at its maximum safe size.
+Verify
 its returned table parameters, one lower-device dependency, sysfs name/UUID,
 logical sector count and backing major:minor before admitting use. The mapper
 name is the stable `swapz-primary` path consumed by the packaged systemd swap
@@ -365,12 +372,12 @@ references, identity drift or a failed query stop cleanup and preserve the
 durable recovery state. These primitives remain disabled until the complete
 provisioning, activation, teardown, recovery and boot lifecycle is qualified.
 
-The shared transaction admission check must also read the run's immutable
-4096-byte original-header backup, verify its recorded SHA-256, and confirm the
-original Linux swap signature before mapper creation or removal. Missing,
-altered, malformed or non-swap rollback evidence blocks either mapper
-operation; never create a mapping when the exact original swap state cannot be
-restored.
+The shared transaction admission check must read the run's immutable 4096-byte
+block-zero backup when the transaction records one and verify its recorded
+SHA-256 before mapper creation or removal. The selected target may contain a
+filesystem, an old swap header or arbitrary disposable contents; do not require
+a pre-existing Linux swap signature. Missing or altered rollback bytes block
+an operation whenever that transaction's recovery plan requires the backup.
 
 ## MM, folio and zswap semantic boundary
 

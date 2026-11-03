@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Private experimental live-swap coordinator.
+"""Historical old-host live-swap coordinator, retained for recovery review.
 
 This tool is separate from physical-swap-probe.py. Its plan action is
-read-only; its run and recover actions are deliberately gated by a fresh,
-one-use review record. The tool is not a production deployment interface.
+read-only. Its run and recover actions are permanently disabled because its
+approval and target bindings are specific to the retired /dev/sda4 host. It is
+not a production deployment interface or a selector for the current target.
 """
 import argparse
 from datetime import datetime, timezone
@@ -98,10 +99,9 @@ LIVE_NAME_PREFIX = "swapz-live-"
 LIVE_UUID_PREFIX = "SWAPZ-LIVE-"
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 PRESSURE_CGROUP_ROOT = Path("/sys/fs/cgroup")
-# Execution is enabled for the owner-waived one-trial policy recorded in
-# docs/live-swap-trial-recovery.md. Every run still needs a one-use approval
-# bound to this commit, both current CI workflows and the live artifacts.
-LIVE_SWAP_EXECUTION_ENABLED = True
+# Retained only for read-only plan output and synthetic policy tests. Do not
+# re-enable this helper: its device and approval model are historical.
+LIVE_SWAP_EXECUTION_ENABLED = False
 POST_QUALIFICATION_PATHS = {
     "docs/ROADMAP.md",
     "docs/testing_standards.md",

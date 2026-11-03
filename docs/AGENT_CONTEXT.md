@@ -22,6 +22,20 @@ The current owner-observed target is:
 - PARTUUID: `f13428f6-01`
 - parent: removable USB Multi-Card reader, approximately 116.2 GiB
 
+The primary manager selects its target from the root-owned
+`/etc/swapz/primary-target` file, which contains one `PARTUUID=<value>` line.
+Keep device paths, major:minor values and capacities out of production source
+constants. The manager resolves and checks the selected partition at runtime,
+then binds its PARTUUID, discovered major:minor and byte size into the
+transaction manifest. To move the goal to another drive, update the protected
+selector and this owner-observed target record after confirming the new
+partition and parent; do not patch C constants. The current authorization
+still applies only to the target identified above, and lifecycle execution
+must remain disabled until the manager's parent checks and physical acceptance
+cover the selected target. Packaged systemd units also must remain disabled
+until their ordering/conflict behavior is resolved from the selected target
+rather than a historical host UUID.
+
 The partition path and content UUID are observations, not sufficient identity.
 Before destructive work, prove that the opened partition and parent are the
 same authorized removable card by geometry, partition/parent topology,
@@ -225,8 +239,9 @@ production-readiness mission because Codex is explicitly forbidden to reboot.
 
 Unless evidence changes the order, work on:
 
-1. exact target/configuration abstraction for the dedicated SD card instead of
-   historical hard-coded `/dev/sda4` assumptions;
+1. finish the target/configuration abstraction across the manager, package and
+   boot integration; the manager now resolves a protected PARTUUID selector,
+   while target-aware systemd ordering remains a gate before activation;
 2. native production lifecycle and standing-authorization policy cleanup;
 3. actual Linux swap correctness on the authorized card;
 4. maximum safe full-card capacity and bounded metadata RAM;

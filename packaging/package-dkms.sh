@@ -54,11 +54,11 @@ else
     echo "BLOCKED: DKMS unavailable" >&2; exit 1;
   }
 fi
-primary_state="/var/lib/swapz/physical-recovery/primary-state.json"
-primary_active="/var/lib/swapz/physical-recovery/partition-7fb9401d-04.active"
+primary_recovery_base="/var/lib/swapz/physical-recovery"
+primary_state="$primary_recovery_base/primary-state.json"
 if [[ -n "$test_root" ]]; then
-  primary_state="$sandbox/var/lib/swapz/physical-recovery/primary-state.json"
-  primary_active="$sandbox/var/lib/swapz/physical-recovery/partition-7fb9401d-04.active"
+  primary_recovery_base="$sandbox/var/lib/swapz/physical-recovery"
+  primary_state="$primary_recovery_base/primary-state.json"
 fi
 [[ -x "$dkms_bin" ]] || { echo "BLOCKED: no DKMS executable" >&2; exit 1; }
 src="$srcbase/swapz-$version"
@@ -87,10 +87,10 @@ if [[ "$action" == uninstall ]]; then
     echo "BLOCKED: primary recovery state exists; preserve it during package removal" >&2
     exit 1
   }
-  [[ ! -e "$primary_active" && ! -L "$primary_active" ]] || {
-    echo "BLOCKED: primary partition ownership marker exists; preserve the recovery path during package removal" >&2
+  if compgen -G "$primary_recovery_base/partition-*.active" >/dev/null; then
+    echo "BLOCKED: a primary partition ownership marker exists; preserve the recovery path during package removal" >&2
     exit 1
-  }
+  fi
 fi
 if [[ -z "$test_root" && "$action" == uninstall ]]; then
   for unit in swapz-primary-mapper.service \

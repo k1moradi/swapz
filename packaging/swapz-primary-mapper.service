@@ -4,8 +4,8 @@ DefaultDependencies=no
 Requires=-.mount
 After=-.mount systemd-modules-load.service
 Before=dev-mapper-swapz\x2dprimary.swap shutdown.target
-Before=dev-disk-by\x2duuid-728b4c06\x2d44b0\x2d46ee\x2d91ec\x2d560ab1bad358.swap
-Conflicts=dev-disk-by\x2duuid-728b4c06\x2d44b0\x2d46ee\x2d91ec\x2d560ab1bad358.swap
+# No physical partition identity is compiled into this unit. Target-aware
+# swap-unit ordering remains a required gate before this disabled unit can run.
 Conflicts=shutdown.target
 PartOf=dev-mapper-swapz\x2dprimary.swap
 RefuseManualStart=yes

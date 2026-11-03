@@ -22,6 +22,16 @@ enum swapz_primary_stage {
 #define SWAPZ_PRIMARY_RUN_ID_LENGTH 32U
 #define SWAPZ_PRIMARY_SOURCE_SHA_LENGTH 40U
 #define SWAPZ_PRIMARY_SHA256_LENGTH 64U
+#define SWAPZ_PRIMARY_PARTUUID_LENGTH 64U
+
+/* Stable target selection is PARTUUID-based; major:minor and size are bound
+ * after opening the selected partition and are rechecked before each use. */
+struct swapz_primary_target {
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	uint32_t device_major;
+	uint32_t device_minor;
+	uint64_t device_bytes;
+};
 
 struct swapz_primary_state {
 	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
@@ -37,6 +47,7 @@ struct swapz_primary_manifest {
 	char module_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
 	char qualification_report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
 	char original_header_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
+	struct swapz_primary_target target;
 };
 
 struct swapz_primary_qualification {
@@ -63,9 +74,19 @@ int swapz_primary_state_transition_allowed(
 /* Mint a cryptographically random lowercase 32-hex-character transaction ID. */
 int swapz_primary_run_id_generate(
 	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U]);
-/* Build the exact fixed-geometry SWZ authorization header for a run ID. */
+/* Stable target configuration contains only a canonical PARTUUID. */
+int swapz_primary_partuuid_valid(const char *partuuid);
+int swapz_primary_target_config_parse(
+	const char *record, size_t length,
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U]);
+int swapz_primary_target_config_read(
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U]);
+int swapz_primary_target_inspect(const char *partuuid,
+				 struct swapz_primary_target *target);
+/* Build an SWZ authorization header for the opened target geometry. */
 int swapz_primary_header_build(
 	const char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U],
+	uint64_t device_bytes,
 	unsigned char header[4096]);
 /* Validate an mkswap v1 header for the exact 4KiB logical page capacity. */
 int swapz_primary_linux_swap_header_valid(
@@ -84,14 +105,16 @@ int swapz_primary_manifest_write_at(
 	int recovery_fd, int lock_fd,
 	const struct swapz_primary_manifest *manifest, uid_t expected_owner);
 int swapz_primary_manifest_read_at(
-	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner,
+	int recovery_fd, int lock_fd, const char *run_id,
+	const char *partuuid, uid_t expected_owner,
 	struct swapz_primary_manifest *manifest);
-/* Open only the fixed 8:4 target through PARTUUID after SWZ formatting;
- * a present content-UUID alias must still resolve to the opened partition. */
-int swapz_primary_target_open_exclusive(void);
+/* Open the manifest-bound target through its stable PARTUUID after formatting. */
+int swapz_primary_target_open_exclusive(
+	const struct swapz_primary_manifest *manifest);
 /* Production callers must open the target O_RDWR|O_EXCL before calling. */
 int swapz_primary_write_header_checked_fd(
-	int fd, const unsigned char expected_current[4096],
+	int fd, const struct swapz_primary_target *target,
+	const unsigned char expected_current[4096],
 	const unsigned char replacement[4096]);
 /* Hash a stable, private regular-file descriptor with bounded allocation. */
 int swapz_primary_sha256_regular_fd(int fd, uid_t expected_owner,
@@ -123,7 +146,7 @@ int swapz_primary_dm_remove_mapper(
 	const struct swapz_primary_manifest *manifest,
 	int *removed_by_call);
 
-int swapz_primary_partition_lock_acquire(void);
+int swapz_primary_partition_lock_acquire(const char *partuuid);
 /* Internal lifecycle primitive; caller must hold the matching partition lock. */
 int swapz_primary_claim_partition_owner_at(int recovery_fd, int lock_fd,
 						  const char *run_id,

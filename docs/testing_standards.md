@@ -3335,17 +3335,22 @@ qualify Linux `swapon`, physical performance, cold-boot recovery or power-loss
 behavior. The owner objective for this PC excludes VMs. Keep these limits
 explicit in every review and result.
 
-The primary manager's direct production-C tests must exercise the exact maximum
-geometry, Device Mapper output variants, active-swap parsing, header recognition,
-and fail-closed ownership decisions without opening or modifying a block device.
+The primary manager's direct production-C tests must exercise multiple synthetic
+target identities and geometries, Device Mapper output variants, active-swap
+parsing, header recognition, and fail-closed ownership decisions without
+opening or modifying a block device. Include different major:minor values,
+minor zero, different PARTUUIDs, and capacity/alignment boundaries so tests do
+not encode the active owner's current partition as a production assumption.
 The direct-C fixture must compile the plan in a mode that refuses all host
 block-device and `/proc/swaps` reads; test the identity and signature parsers
 with synthetic major:minor values and bytes. Host admission must hash the exact
-4096-byte original swap header and compare it with the recorded device-bound
-digest before any destructive transition.
+4096-byte block-zero image and compare it with the transaction's manifest-bound
+digest before any destructive transition; the selected partition need not have
+contained a Linux swap signature before provisioning.
 The plan must also check the fixed recovery base's root-owned 0700 path, an
 allowlisted persistent filesystem, direct filesystem-device separation from
-8:4, and absence of the active recovery marker. Separate recovery-source and
+the runtime-selected target, and absence of that target's PARTUUID marker.
+Separate recovery-source and
 target-source gates must resolve each device through `/sys/dev/block`, match
 the recorded major:minor, prove a direct physical partition with a physical
 parent device, and reject holders, stacked slaves, virtual devices and the
@@ -3367,21 +3372,24 @@ malformed names, matching name and UUID prefixes, and unrelated mapper
 identities without loading modules or querying the host inventory.
 The `/proc/swaps` parser must reject malformed or extra fields, duplicate paths,
 numeric overflow and invalid signed priorities. The read-only plan may report
-the active-entry count and whether `/dev/sda4` is the sole 16,777,212 KiB
-partition entry at priority -1 with zero KiB used; this partial observation
-must never be reported as complete device admission.
+the active-entry count and whether the configured PARTUUID's discovered device
+is the sole partition entry at the size derived from its physical byte capacity,
+at the selected priority and with zero KiB used; this partial observation must
+never be reported as complete device admission.
 The package regression must prove that units are installed disabled and that
 package install/uninstall does not start or stop system swap. The primary
-mapper service must order before and conflict with the systemd swap unit
-generated for the exact `/dev/disk/by-uuid/728b4c06-44b0-46ee-91ec-560ab1bad358`
-entry, so the original partition and swapz mapper cannot be active together.
-The package test must pin the fully systemd-escaped generated unit name.
-The manager must use the same permanent `/dev/sda4` partition lock as the
-physical-swap helpers; tests must reject an unsafe lock directory, lock file or
-concurrent owner before any mutation. A persistent active-ownership marker is
-also required before the provisioning path can be enabled.
+mapper service and package templates must not contain a device pathname,
+major:minor, UUID or PARTUUID. Target-aware systemd ordering/conflict behavior
+must be generated from the protected selector and qualified before units can
+be enabled; current units remain disabled and
+`RefuseManualStart`/`Stop` stays in force until then. The package regression
+must verify target-independent unit content. The manager must use the same
+permanent selected-PARTUUID lock for all of its operations; tests must reject
+an unsafe lock directory, lock file or concurrent owner before any mutation.
+A persistent active-ownership marker is also required before the provisioning
+path can be enabled.
 The native lock primitive must open the same permanent
-`partition-7fb9401d-04.lock` inode under
+`partition-<selected-partuuid>.lock` inode under
 `/var/lib/swapz/physical-recovery`, reject symlinks and unsafe ownership or
 modes, acquire a nonblocking exclusive `flock`, and fsync the recovery-base
 directory. It must never unlink or replace that inode. Until lifecycle commands
@@ -3424,15 +3432,15 @@ force. The primary C manager must pin a root-owned `mkswap` executable that is
 not group/world-writable, pass it only a descriptor path for the independently
 verified mapper, and verify the resulting Linux swap v1 header, including its
 exact ten-byte `SWAPSPACE2` magic, against the mapper capacity. It must also
-prove that the original `/dev/sda4` SWZ header is
+prove that the selected target's manifest-bound original block-zero image is
 unchanged before and after initialization. The formatter operation is valid
 only in the durable `STARTING` state. Rootless direct-C tests must validate the
 header fields and prove the privileged formatter stub is unavailable without
 target mutation. `swapon` must not request discard. Never remove an active swap
 mapper or unload a module while it may contain pages. A failed mapper `swapoff`,
 uncertain mapper/module ownership, ambiguous header, or recovery uncertainty
-leaves the mapping, module, fallback and recovery evidence in place for
-supervised review. Do not reboot, force-remove, overwrite an unrecognized
+leaves the mapping, module and recovery evidence in place for supervised
+review. Do not create or depend on fallback swap. Do not reboot, force-remove, overwrite an unrecognized
 header or retry a failed phase automatically.
 
 Recovery-state tests must cover a second, standalone cleanup attempt
@@ -3537,9 +3545,9 @@ claiming. After claim, focused rootless or isolated-VM lifecycle tests must
 verify durable consumed/`READY`/active ordering, exact original-header backup
 and manifest readback, and recovery from interruption after each metadata
 publication, including the atomic `READY` close and owner-marker release. No
-such test may write to the host's `/dev/sda4`; the rootless
-build must keep the command unavailable and prove no host path or lifecycle
-side effect is reached. A metadata-preparation PASS is not start, live-swap,
+such test may open or write a host block device; the rootless build must keep
+the command unavailable and prove no host path or lifecycle side effect is
+reached. A metadata-preparation PASS is not start, live-swap,
 crash-recovery, boot, performance, or production qualification.
 
 The primary manager's original-header backup is immutable per run ID. Its
@@ -3552,47 +3560,40 @@ short or extended contents, and digest mismatch; it copies bytes to the caller
 only after full validation. Rootless tests must verify exact 4096-byte
 round-trip, no-overwrite behavior, invalid digest refusal, and output-buffer
 preservation on read failure. The lifecycle caller must bind the expected hash
-to the freshly identity-checked `/dev/sda4` header before the first mutation.
+to block zero read through the freshly revalidated descriptor for the configured
+PARTUUID before the first mutation.
 
 Any primary-swap block-zero write must use the checked descriptor primitive in
-`src/userspace/swapz-primary.c`. Before replacing the original Linux swap
-signature, production callers must open the fixed target with `O_RDWR|O_EXCL`,
-verify the canonical UUID and PARTUUID paths name that same block device, and
-verify its major:minor and `BLKGETSIZE64` geometry. Once the SWZ header replaces
-the swap signature, the content-based by-UUID link may disappear. Post-format
-mapper and recovery operations must therefore open through the stable
-by-PARTUUID path and fixed `/dev/sda4` path, still checking exact 8:4 identity
-and 16 GiB geometry. If the by-UUID link exists, it must resolve to the opened
-device; a dangling, substituted or changing link fails closed. Its absence is
-accepted only when block zero on the opened device contains a valid SWZ header.
-The lifecycle caller must additionally validate that header's run ID against
-the durable manifest. Rootless path tests must cover a valid alias, absent
-by-UUID link with both original and valid SWZ headers, dangling link and
-mismatched link without opening host block devices.
-Use `swapz_primary_target_open_exclusive()` for the post-format fixed-path
-open; it opens the by-PARTUUID path read/write and exclusively, then checks the
-opened descriptor and rechecks `/dev/sda4`, the PARTUUID path and any present
-UUID alias to close path-substitution races. The helper rejects anything
-outside major:minor 8:4 and the exact 16 GiB geometry.
-The primitive independently requires an open read/write descriptor for the
-fixed 8:4 device and exact 16 GiB geometry, compares all 4096 current bytes to
-the caller-bound expected header before writing, handles short writes, calls
-`fsync`, then rereads and compares all 4096 replacement bytes. A stale header
-must fail with no write. Rootless direct-C coverage uses only a temporary
-regular-file fixture to verify exact replacement and stale-header refusal; it
-does not qualify kernel block-device exclusive-open behavior or physical
-recovery. The alias-path fixture verifies matching identity and rejects a
-substituted target, but cannot model races in `/dev` or real block geometry.
-Keep both primitives disconnected from privileged lifecycle commands until
-the full manifest binding and recovery use are implemented and tested.
+`src/userspace/swapz-primary.c`. Before writing, production callers must open
+the configured target by its stable PARTUUID with `O_RDWR|O_EXCL`, then verify
+the opened descriptor's major:minor, `BLKGETSIZE64` geometry and sysfs PARTUUID
+against the immutable transaction manifest. Recheck the by-PARTUUID alias
+before and after opening to close path-substitution races. Do not require a
+content-based by-UUID link: formatting can remove it and the selected target
+may not have had a swap signature. After formatting, use the same stable
+PARTUUID path and manifest-bound identity. The lifecycle caller must validate
+the written SWZ header and run ID against the durable manifest. Rootless path
+tests must use synthetic identities and prove that no host block device is
+opened.
+
+The checked primitive independently requires an open read/write descriptor
+whose device number and capacity match the selected runtime target, compares
+all 4096 current bytes with the caller-bound expected header before writing,
+handles short writes, calls `fsync`, then rereads and compares all 4096
+replacement bytes. A stale header must fail with no write. Rootless direct-C
+coverage uses only temporary regular-file fixtures to verify exact replacement
+and stale-header refusal; it does not qualify kernel block-device
+exclusive-open behavior or physical recovery. Keep the primitive disconnected
+from privileged lifecycle commands until the full manifest binding and
+recovery use are implemented and tested.
 
 The native primary manager's immutable run manifest is separate from the
 mutable lifecycle stage. Its canonical newline-delimited schema has fixed field
 order and rejects duplicate or unknown fields, alternate numeric spellings,
 and trailing data. It binds the run ID, 40-character lowercase qualified
 source commit, `swapzctl` and module SHA-256 values, qualification-report
-SHA-256, exact `/dev/sda4` UUID and PARTUUID paths, 8:4 identity, 16 GiB size,
-original header digest, maximum `/8` logical capacity, generated per-run mapper
+SHA-256, configured PARTUUID, discovered major:minor and byte size, original
+block-zero digest, maximum `/8` logical capacity, generated per-run mapper
 name/UUID, and exact Device Mapper table. The writer requires the held PARTUUID
 lock and matching active/consumed claim, installs a root-owned 0600 file with
 fsync and no-replace atomic rename, fsyncs the directory, and verifies exact
@@ -3722,13 +3723,12 @@ the host.
 
 The shared transaction-to-manifest admission check must require the matching
 owner claim, allowed durable stage, exact stored manifest, and the immutable
-4096-byte original-header backup. Rootless direct-C coverage must accept a
-valid saved Linux swap header and refuse a missing backup, digest-tampered
+4096-byte original block-zero backup. Rootless direct-C coverage must accept
+arbitrary saved block-zero bytes and refuse a missing backup, digest-tampered
 backup, or disallowed stage before mapper lifecycle operations are admitted.
-The header-signature predicate must reject an SWZ header as an original swap
-header. A synthetic original-header digest may be injected
-only in the rootless test translation unit; production retains the fixed
-host-qualified digest. These tests do not perform or authorize block I/O.
+The header-signature predicate may identify a Linux swap header but must not
+require one or treat an SWZ header as one. The production digest is bound per
+transaction in the manifest. These tests do not perform or authorize block I/O.
 
 Before any future lifecycle enablement, isolated VM coverage must exercise
 interruption after device creation, after inactive-table load, after resume,
@@ -3743,8 +3743,9 @@ The primary manager's transaction-ID generator must use the operating system's
 cryptographic random source, handle interrupted and partial reads, return only
 lowercase 32-hex IDs, and leave its output unchanged on failure. Rootless
 direct-C coverage must validate generated IDs and exercise deterministic
-header construction from a known ID. The 4096-byte candidate must pass the
-shared SWZ validator for the exact `/dev/sda4` geometry, contain the exact
+header construction from a known ID for multiple synthetic target geometries.
+The 4096-byte candidate must pass the shared SWZ validator for the supplied
+device capacity, contain the exact
 16-byte ID, and have zero reserved bytes. Malformed and all-zero IDs must be
 rejected without altering the caller's header buffer. These tests establish
 format construction only; they do not authorize writes or close lifecycle,
