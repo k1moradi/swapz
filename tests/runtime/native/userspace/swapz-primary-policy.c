@@ -52,6 +52,52 @@ static void assert_primary_state_equals(
 	assert_record_equals(directory_fd, "primary-state.json", record);
 }
 
+static void test_execution_record_is_boot_source_and_target_bound(void)
+{
+	static const char boot_id[] = "11111111-2222-3333-4444-555555555555";
+	static const char source_sha[] =
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+	static const char partuuid[] = "f13428f6-01";
+	static const char valid_record[] =
+		"schema=swapz-primary-execution-v1\n"
+		"boot_id=11111111-2222-3333-4444-555555555555\n"
+		"source_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+		"partuuid=f13428f6-01\n"
+		"target_size_bytes=17179869184\n";
+	char changed_record[sizeof(valid_record)];
+
+	assert(swapz_primary_execution_record_matches(
+		valid_record, sizeof(valid_record) - 1U, boot_id, source_sha,
+		partuuid, 17179869184ULL));
+	assert(!swapz_primary_execution_record_matches(
+		valid_record, sizeof(valid_record) - 1U,
+		"11111111-2222-3333-4444-555555555556", source_sha,
+		partuuid, 17179869184ULL));
+	assert(!swapz_primary_execution_record_matches(
+		valid_record, sizeof(valid_record) - 1U, boot_id,
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		partuuid, 17179869184ULL));
+	assert(!swapz_primary_execution_record_matches(
+		valid_record, sizeof(valid_record) - 1U, boot_id, source_sha,
+		"f13428f6-02", 17179869184ULL));
+	assert(!swapz_primary_execution_record_matches(
+		valid_record, sizeof(valid_record) - 1U, boot_id, source_sha,
+		partuuid, 17179869185ULL));
+	assert(!swapz_primary_execution_record_matches(
+		valid_record, sizeof(valid_record) - 2U, boot_id, source_sha,
+		partuuid, 17179869184ULL));
+
+	memcpy(changed_record, valid_record, sizeof(valid_record));
+	changed_record[0] = 'S';
+	assert(!swapz_primary_execution_record_matches(
+		changed_record, sizeof(changed_record) - 1U, boot_id, source_sha,
+		partuuid, 17179869184ULL));
+	assert(!swapz_primary_boot_id_valid(
+		"11111111-2222-3333-4444-55555555555g"));
+	assert(!swapz_primary_boot_id_valid(
+		"111111112222-3333-4444-555555555555"));
+}
+
 static void test_partuuid_validation_and_normalization(void)
 {
 	static const char *const invalid_partuuids[] = {
@@ -2540,6 +2586,7 @@ int main(void)
 	assert(swapz_primary_physical_blocks(
 		       ((uint64_t)UINT32_MAX + 2ULL) *
 		       SWAPZ_PRIMARY_BLOCK_BYTES) == 0ULL);
+	test_execution_record_is_boot_source_and_target_bound();
 	test_partuuid_validation_and_normalization();
 	test_recovery_required_state_builder();
 	test_primary_swap_transition_adapter();
