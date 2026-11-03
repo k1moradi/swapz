@@ -1366,3 +1366,14 @@ No fallback swap is required by owner decision. A swapfile on root F2FS
 (`/dev/sda3`) would share the same USB physical device as `/dev/sda4`, so it
 could not protect against loss of that device. Reopen fallback only if the owner
 asks for it.
+
+The primary systemd manager is now being developed as a separate boot-lifecycle
+component. Its package units remain disabled. The current draft verifies the
+maximum mapper geometry and refuses teardown unless the durable state records
+service module ownership and the exact mapper major:minor. Rootless tests
+cover its parsers, ownership policy and disabled privileged entry points. It is
+not yet usable: durable initial
+provisioning, checked restoration, and startup-failure rollback are still
+missing, and no live swap or boot integration has been qualified through this
+manager. Do not enable its units or call its privileged start/stop commands
+until those gaps and the exact-host qualification gates are closed.

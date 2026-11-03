@@ -7,7 +7,7 @@ umask 022
 }
 action="$1"; prefix="$2"
 [[ "$prefix" == /* && "$prefix" != / && "$prefix" != */ &&
-   "$prefix" != *..* && "$prefix" != *//* ]] || {
+   "$prefix" != *..* && "$prefix" != *//* && "$prefix" != *'|'* ]] || {
   echo "BLOCKED: invalid install prefix" >&2; exit 2;
 }
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)"
@@ -43,20 +43,49 @@ fi
 src="$srcbase/swapz-$version"
 cli_dir="$prefix/sbin"; cli="$cli_dir/swapzctl"
 helper_dir="$prefix/libexec/swapz"; helper="$helper_dir/device-roundtrip"
+primary="$helper_dir/swapz-primary"
+unit_dir="$prefix/lib/systemd/system"
+mapper_service="$unit_dir/swapz-primary-mapper.service"
+swap_unit_name="$(systemd-escape --path --suffix=swap /dev/mapper/swapz-primary)"
+[[ "$swap_unit_name" == 'dev-mapper-swapz\x2dprimary.swap' ]] || {
+  echo "BLOCKED: unexpected systemd-escaped primary swap unit name" >&2; exit 1;
+}
+primary_swap="$unit_dir/$swap_unit_name"
 marker=".swapz-owned"
 [[ ! -L "$srcbase" && ! -L "$prefix" &&
-   ! -L "$cli_dir" && ! -L "$helper_dir" ]] || {
+   ! -L "$cli_dir" && ! -L "$helper_dir" &&
+   ! -L "$prefix/lib" && ! -L "$prefix/lib/systemd" &&
+   ! -L "$unit_dir" ]] || {
   echo "BLOCKED: symlinked package prefix" >&2; exit 1;
 }
 if [[ -z "$test_root" && "$action" == uninstall ]] &&
    [[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]; then
   echo "BLOCKED: loaded module; refusing DKMS removal" >&2; exit 1;
 fi
+if [[ -z "$test_root" && "$action" == uninstall ]]; then
+  for unit in swapz-primary-mapper.service \
+      "$swap_unit_name"; do
+    systemctl is-active --quiet "$unit" && {
+      echo "BLOCKED: $unit is active; refusing package removal" >&2; exit 1;
+    }
+    systemctl is-enabled --quiet "$unit" && {
+      echo "BLOCKED: $unit is enabled; disable swapz through its recovery procedure first" >&2
+      exit 1
+    }
+  done
+  [[ ! -e /var/lib/swapz/primary/state.json ]] || {
+    echo "BLOCKED: primary recovery state exists; preserve it during package removal" >&2
+    exit 1
+  }
+fi
 verify_owned() {
   [[ -d "$src" && ! -L "$src" && -f "$src/$marker" &&
      -f "$src/.swapz-sources.sha256" &&
      -f "$src/.swapz-binaries.sha256" &&
-     -f "$cli" && ! -L "$cli" && -f "$helper" && ! -L "$helper" ]] || return 1
+     -f "$cli" && ! -L "$cli" && -f "$helper" && ! -L "$helper" &&
+     -f "$primary" && ! -L "$primary" &&
+     -f "$mapper_service" && ! -L "$mapper_service" &&
+     -f "$primary_swap" && ! -L "$primary_swap" ]] || return 1
   grep -Fxq "swapz:$version" "$src/$marker" || return 1
   (cd "$src" && sha256sum --quiet -c .swapz-sources.sha256) || return 1
   sha256sum --quiet -c "$src/.swapz-binaries.sha256" || return 1
@@ -67,7 +96,7 @@ cleanup_owned() {
        -z "$(find "$src/build" -type l -print -quit)" ]] || return 1
     rm -r -- "$src/build"
   fi
-  rm -f -- "$cli" "$helper"
+  rm -f -- "$cli" "$helper" "$primary" "$mapper_service" "$primary_swap"
   rmdir -- "$helper_dir"
   for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
     rm -f -- "$src/src/kernel/$(basename "$file")"
@@ -84,6 +113,12 @@ if [[ "$action" == uninstall ]]; then
   cleanup_owned || {
     echo "BLOCKED: package cleanup incomplete; inspect ownership" >&2; exit 1;
   }
+  if [[ -z "$test_root" ]]; then
+    systemctl daemon-reload || {
+      echo "BLOCKED: package removed but systemd did not reload; inspect unit cache" >&2
+      exit 1
+    }
+  fi
   echo "Uninstalled owned swapz package without touching swap"
   exit 0
 fi
@@ -97,10 +132,12 @@ if [[ -z "$test_root" ]]; then
 fi
 [[ ! -e "$src" && ! -L "$src" &&
    ! -e "$cli" && ! -L "$cli" &&
-   ! -e "$helper_dir" && ! -L "$helper_dir" ]] || {
+   ! -e "$helper_dir" && ! -L "$helper_dir" &&
+   ! -e "$mapper_service" && ! -L "$mapper_service" &&
+   ! -e "$primary_swap" && ! -L "$primary_swap" ]] || {
   echo "BLOCKED: existing DKMS source/program; refusing overwrite" >&2; exit 1;
 }
-install -d -m0755 "$src/src/kernel" "$cli_dir" "$helper_dir"
+install -d -m0755 "$src/src/kernel" "$cli_dir" "$helper_dir" "$unit_dir"
 install -m0644 dkms.conf "$src/dkms.conf"
 install -m0644 src/kernel/VERSION "$src/src/kernel/VERSION"
 for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
@@ -108,10 +145,15 @@ for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
 done
 install -m0755 build/userspace/swapzctl "$cli"
 install -m0755 build/tests/device-roundtrip "$helper"
+install -m0755 src/userspace/swapz-primary.py "$primary"
+sed "s|@SWAPZ_LIBEXECDIR@|$helper_dir|g" \
+  packaging/swapz-primary-mapper.service > "$mapper_service"
+install -m0644 packaging/swapz-primary.swap "$primary_swap"
 printf 'swapz:%s\n' "$version" > "$src/$marker"
 (cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
   src/kernel/*.c src/kernel/*.h) > "$src/.swapz-sources.sha256"
-sha256sum "$cli" "$helper" > "$src/.swapz-binaries.sha256"
+sha256sum "$cli" "$helper" "$primary" "$mapper_service" "$primary_swap" \
+  > "$src/.swapz-binaries.sha256"
 rollback() {
   rc=$?
   trap - ERR
@@ -133,5 +175,8 @@ trap rollback ERR
 "$dkms_bin" install -m swapz -v "$version" -k "$(uname -r)"
 status="$("$dkms_bin" status -m swapz -v "$version" -k "$(uname -r)")"
 [[ "$status" == *installed* ]]
+if [[ -z "$test_root" ]]; then
+  systemctl daemon-reload
+fi
 trap - ERR
-echo "Installed swapz DKMS, read-only swapzctl and helper; module NOT loaded"
+echo "Installed swapz DKMS and disabled primary-swap units; no mapper or swap activated"

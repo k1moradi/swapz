@@ -67,6 +67,25 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertEqual(version_from_dkms.stdout, VERSION)
         self.assertEqual(subprocess.run([binary, "start", "/dev/sda"],
                          capture_output=True).returncode, 2)
+        primary = self.prefix / "libexec/swapz/swapz-primary"
+        self.assertTrue(primary.is_file())
+        self.assertEqual(subprocess.run([primary, "--help"], capture_output=True,
+                                        text=True).returncode, 0)
+        unit_dir = self.prefix / "lib/systemd/system"
+        mapper_service = unit_dir / "swapz-primary-mapper.service"
+        swap_unit = unit_dir / "dev-mapper-swapz\\x2dprimary.swap"
+        self.assertTrue(mapper_service.is_file())
+        self.assertTrue(swap_unit.is_file())
+        service_text = mapper_service.read_text()
+        swap_text = swap_unit.read_text()
+        self.assertIn("RefuseManualStart=yes", service_text)
+        self.assertIn("RefuseManualStop=yes", service_text)
+        self.assertIn("ExecStart=" + str(primary) + " start", service_text)
+        self.assertIn("What=/dev/mapper/swapz-primary", swap_text)
+        self.assertIn("Priority=-1", swap_text)
+        self.assertNotIn("discard", swap_text.lower())
+        self.assertFalse((self.prefix / "etc/systemd/system/swap.target.wants" /
+                          swap_unit.name).exists())
         # Rootless safety: the format command rejects a regular file and
         # leaves its bytes untouched. No block-device formatting occurs here.
         regular = self.home / "not-a-block-device"
@@ -80,6 +99,9 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         r = self.invoke("uninstall")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(binary.exists())
+        self.assertFalse(primary.exists())
+        self.assertFalse(mapper_service.exists())
+        self.assertFalse(swap_unit.exists())
         self.assertFalse((self.home / "usr/src" / ("swapz-" + VERSION)).exists())
         self.assertEqual(self.log.read_text().splitlines(),
                          ["add", "build", "install", "status", "remove"])

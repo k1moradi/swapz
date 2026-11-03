@@ -1,0 +1,11 @@
+[Unit]
+Description=Primary Linux swap on swapz
+BindsTo=swapz-primary-mapper.service
+After=swapz-primary-mapper.service
+
+[Swap]
+What=/dev/mapper/swapz-primary
+Priority=-1
+
+[Install]
+WantedBy=swap.target

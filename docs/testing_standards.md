@@ -3279,6 +3279,18 @@ to read-only operation; until the exact change has passed independent source
 and recovery review plus a separate owner decision, its privileged `run` and
 `recover` commands must fail closed.
 
+The primary boot-manager package currently installs its systemd units disabled;
+package installation must never start the mapper, activate swap, or enable a
+unit. Its privileged `start` and `stop` entry points must also remain blocked
+by the explicit execution gate until their lifecycle is qualified. The manager
+is not eligible for use as the machine's primary swap until
+it has a complete durable provisioning and restoration path, interruption-safe
+startup rollback, mapper/module ownership checks, rootless lifecycle coverage,
+and exact-source qualification. Installing the manager or passing its parser
+and geometry tests does not establish readiness. Keep the boot units disabled
+until live swap, orderly shutdown, recovery and boot lifecycle gates have been
+verified on the exact host and device.
+
 The live-swap trial is the owner-waived, no-fallback trial described in
 [live-swap-trial-recovery.md](live-swap-trial-recovery.md). It is limited to one
 mapper at the maximum logical capacity admitted for the complete `/dev/sda4`
@@ -3300,6 +3312,12 @@ runners have no `/dev/sda4`). Rootless tests for this procedure are software-mod
 qualify Linux `swapon`, physical performance, cold-boot recovery or power-loss
 behavior. The owner objective for this PC excludes VMs. Keep these limits
 explicit in every review and result.
+
+The primary manager's rootless tests must exercise the exact maximum geometry,
+Device Mapper output variants, active-swap parsing, header recognition, and
+fail-closed ownership decisions without opening or modifying a block device.
+The package regression must prove that units are installed disabled and that
+package install/uninstall does not start or stop system swap.
 
 Recovery must refuse while any `swapoff` process runs in a swapoff stage, even
 when the kernel still lists the device, and an unreadable `/proc` entry fails

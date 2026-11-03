@@ -1,0 +1,20 @@
+[Unit]
+Description=Prepare the swapz primary swap mapper
+DefaultDependencies=no
+Requires=-.mount
+After=-.mount systemd-modules-load.service
+Before=dev-mapper-swapz\x2dprimary.swap shutdown.target
+Conflicts=shutdown.target
+PartOf=dev-mapper-swapz\x2dprimary.swap
+RefuseManualStart=yes
+RefuseManualStop=yes
+ConditionPathExists=/var/lib/swapz/primary/state.json
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=@SWAPZ_LIBEXECDIR@/swapz-primary start
+ExecStop=@SWAPZ_LIBEXECDIR@/swapz-primary stop
+TimeoutStartSec=120s
+TimeoutStopSec=infinity
+UMask=0077
