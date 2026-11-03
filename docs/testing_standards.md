@@ -784,7 +784,16 @@ also runs the dedicated ThreadSanitizer publication/slot-reuse probes with
 halt-on-error. A sanitizer finding is therefore a hard CI failure, not a warning
 followed by continued qualification. These user-space production-C sanitizer
 probes do not claim kernel KASAN/KCSAN/lockdep coverage; any such debug-kernel
-evidence must be reported separately and never inferred from this CI.
+evidence must be reported separately and never inferred from this CI. The loaded
+owned-`null_blk` phase records the exact running-kernel KASAN, KCSAN and
+`CONFIG_PROVE_LOCKING` state when kernel configuration is readable. If any
+facility is enabled it snapshots the privileged kernel log before loaded work
+and compares only a prefix-stable appended suffix afterwards. Ring-buffer loss,
+unreadable diagnostics, ambiguous configuration, or unrelated new debug reports
+produce explicit incomplete evidence rather than PASS. Any new KASAN/KCSAN/
+lockdep report whose bounded context names swapz is a hard loaded-test failure.
+Production kernels with all three facilities disabled remain `NOT_ENABLED`,
+not falsely qualified as debug-kernel clean.
 
 Native window tests must distinguish a successful READ serviced after a staged
 two/three-record post-PACK tail from successful READ continuity in the same

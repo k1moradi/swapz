@@ -1562,6 +1562,55 @@ def safe_lines(log):
     return list(dict.fromkeys(found))[-20:]
 
 
+def parse_kernel_debug_evidence(output):
+    """Parse loaded-kernel sanitizer/lockdep evidence independently of native sanitizers."""
+    features_re = re.compile(
+        r"KERNEL_DEBUG_FEATURES=kasan:(0|1|unknown) kcsan:(0|1|unknown) "
+        r"lockdep:(0|1|unknown) config:(proc|boot|build|unavailable)$")
+    observation_re = re.compile(
+        r"KERNEL_DEBUG_OBSERVATION=checked:([01]) baseline_stable:([01]) "
+        r"reports:(\d+) swapz_reports:(\d+)$")
+    features = []
+    observations = []
+    for line in output.splitlines():
+        text = line.strip()
+        if match := features_re.fullmatch(text):
+            features.append(match.groups())
+        if match := observation_re.fullmatch(text):
+            observations.append(tuple(int(value) for value in match.groups()))
+    if len(features) != 1 or len(observations) != 1:
+        return {"overall": "INCOMPLETE",
+                "reason": "kernel debug evidence marker missing or duplicated"}
+
+    kasan, kcsan, lockdep, config_source = features[0]
+    checked, baseline_stable, reports, swapz_reports = observations[0]
+    evidence = {
+        "kasan": kasan, "kcsan": kcsan, "lockdep": lockdep,
+        "config_source": config_source, "checked": checked,
+        "baseline_stable": baseline_stable, "reports": reports,
+        "swapz_reports": swapz_reports,
+    }
+    if config_source == "unavailable":
+        return {**evidence, "overall": "UNAVAILABLE",
+                "reason": "running kernel configuration is unavailable"}
+    if "unknown" in (kasan, kcsan, lockdep):
+        return {**evidence, "overall": "INCOMPLETE",
+                "reason": "running kernel debug configuration is ambiguous"}
+    if (kasan, kcsan, lockdep) == ("0", "0", "0"):
+        return {**evidence, "overall": "NOT_ENABLED",
+                "reason": "KASAN, KCSAN and PROVE_LOCKING are disabled"}
+    if not checked or not baseline_stable:
+        return {**evidence, "overall": "INCOMPLETE",
+                "reason": "kernel log could not be compared with a stable pre-test baseline"}
+    if swapz_reports:
+        return {**evidence, "overall": "FAIL",
+                "reason": "new loaded-kernel debug diagnostics implicated swapz"}
+    if reports:
+        return {**evidence, "overall": "INCOMPLETE",
+                "reason": "new non-swapz kernel debug diagnostics make the run ambiguous"}
+    return {**evidence, "overall": "PASS"}
+
+
 def parse_loaded_correctness(output):
     """Parse fixed, non-identifying owned-RAM correctness evidence."""
     patterns = {
@@ -2371,6 +2420,8 @@ def run_stage(title, command, result, *, parse_bench=False):
     if predictor_failure or gc_scale_failure or extent_geometry_failure:
         rc = 1
     loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
+    kernel_debug_evidence = (
+        parse_kernel_debug_evidence(output) if parse_bench else None)
     parallel_read_sessions = parse_parallel_read_ab(output) if parse_bench else []
     parallel_read_diagnostic = (
         parallel_read_ab_verdict(parallel_read_sessions)
@@ -2501,6 +2552,7 @@ def run_stage(title, command, result, *, parse_bench=False):
         result.setdefault("evidence", {})["extent_geometry"] = extent_geometry_evidence
     if parse_bench:
         result["benchmarks"]["loaded_correctness"] = loaded_correctness
+        result.setdefault("evidence", {})["kernel_debug"] = kernel_debug_evidence
         result["benchmarks"]["sessions"] = parse_sessions(output)
         result["benchmarks"]["verdicts"] = benchmark_verdicts(
             result["benchmarks"]["sessions"])

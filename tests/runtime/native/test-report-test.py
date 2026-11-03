@@ -843,6 +843,8 @@ def lz4_acceleration_log():
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
+           "KERNEL_DEBUG_FEATURES=kasan:1 kcsan:0 lockdep:1 config:boot",
+           "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 reports:0 swapz_reports:0",
            "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0",
            "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727616 logical_bytes:15268315136 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 initial_mapper_read_bytes:4096 constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:8192 boundary_lower_write_bytes:8192",
            "PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 async_batches:64 lower_read_reqs:512",
@@ -1075,6 +1077,43 @@ class ReportContract(unittest.TestCase):
                 result = runner.parse_loaded_correctness(
                     output.replace(marker, replacement))
                 self.assertEqual(result["overall"], "INCOMPLETE")
+
+    def test_loaded_kernel_debug_evidence_is_explicit_and_fail_closed(self):
+        output = synthetic_log()
+        evidence = runner.parse_kernel_debug_evidence(output)
+        self.assertEqual(evidence["overall"], "PASS", evidence)
+        self.assertEqual(evidence["kasan"], "1")
+        self.assertEqual(evidence["lockdep"], "1")
+
+        disabled = output.replace(
+            "KERNEL_DEBUG_FEATURES=kasan:1 kcsan:0 lockdep:1 config:boot",
+            "KERNEL_DEBUG_FEATURES=kasan:0 kcsan:0 lockdep:0 config:boot")
+        self.assertEqual(runner.parse_kernel_debug_evidence(disabled)["overall"],
+                         "NOT_ENABLED")
+
+        unavailable = output.replace(
+            "KERNEL_DEBUG_FEATURES=kasan:1 kcsan:0 lockdep:1 config:boot",
+            "KERNEL_DEBUG_FEATURES=kasan:unknown kcsan:unknown lockdep:unknown config:unavailable")
+        self.assertEqual(runner.parse_kernel_debug_evidence(unavailable)["overall"],
+                         "UNAVAILABLE")
+
+        unstable = output.replace(
+            "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 reports:0 swapz_reports:0",
+            "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:0 reports:0 swapz_reports:0")
+        self.assertEqual(runner.parse_kernel_debug_evidence(unstable)["overall"],
+                         "INCOMPLETE")
+
+        unrelated = output.replace(
+            "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 reports:0 swapz_reports:0",
+            "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 reports:1 swapz_reports:0")
+        self.assertEqual(runner.parse_kernel_debug_evidence(unrelated)["overall"],
+                         "INCOMPLETE")
+
+        implicated = output.replace(
+            "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 reports:0 swapz_reports:0",
+            "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 reports:1 swapz_reports:1")
+        self.assertEqual(runner.parse_kernel_debug_evidence(implicated)["overall"],
+                         "FAIL")
 
     def test_loaded_maximum_capacity_constructor_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727616 "

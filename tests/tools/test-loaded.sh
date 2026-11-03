@@ -142,11 +142,45 @@ kernel_debug_value() {
     fi
     printf '%s' unknown
 }
+kernel_debug_kasan="$(kernel_debug_value CONFIG_KASAN)"
+kernel_debug_kcsan="$(kernel_debug_value CONFIG_KCSAN)"
+kernel_debug_lockdep="$(kernel_debug_value CONFIG_PROVE_LOCKING)"
 printf 'KERNEL_DEBUG_FEATURES=kasan:%s kcsan:%s lockdep:%s config:%s\n' \
-    "$(kernel_debug_value CONFIG_KASAN)" \
-    "$(kernel_debug_value CONFIG_KCSAN)" \
-    "$(kernel_debug_value CONFIG_PROVE_LOCKING)" \
+    "$kernel_debug_kasan" "$kernel_debug_kcsan" "$kernel_debug_lockdep" \
     "$kernel_debug_config_source"
+
+kernel_debug_dir=""
+kernel_debug_baseline_ready=0
+cleanup_kernel_debug() {
+    if [[ -n "$kernel_debug_dir" &&
+          "$kernel_debug_dir" == "$ROOT/build/tests/kernel-debug."* &&
+          -d "$kernel_debug_dir" && ! -L "$kernel_debug_dir" ]]; then
+        rm -f -- "$kernel_debug_dir/baseline.log" \
+            "$kernel_debug_dir/final.log" "$kernel_debug_dir/delta.log"
+        rmdir -- "$kernel_debug_dir" 2>/dev/null || true
+    fi
+}
+capture_kernel_debug_log() {
+    local output="$1"
+    local rc
+    if "${privileged[@]}" -c 'exec "$@"' swapz-kernel-debug \
+            dmesg --color=never --notime >"$output" 2>/dev/null; then
+        rc=0
+    else
+        rc=$?
+    fi
+    assert_git_metadata_unchanged || return 1
+    return "$rc"
+}
+if [[ $kernel_debug_kasan == 1 || $kernel_debug_kcsan == 1 ||
+      $kernel_debug_lockdep == 1 ]]; then
+    mkdir -p "$ROOT/build/tests"
+    kernel_debug_dir="$(mktemp -d "$ROOT/build/tests/kernel-debug.XXXXXXXX")"
+    trap cleanup_kernel_debug EXIT
+    if capture_kernel_debug_log "$kernel_debug_dir/baseline.log"; then
+        kernel_debug_baseline_ready=1
+    fi
+fi
 
 printf '%s\n' 'START_LOADED_MAXIMUM_CAPACITY'
 run_privileged_bounded 300 tests/tools/deploy-nullblk.sh \
@@ -200,7 +234,7 @@ cleanup_shared_plan() {
     done
     rmdir -- "$shared_plan/plan" "$shared_plan" 2>/dev/null || true
 }
-trap cleanup_shared_plan EXIT
+trap 'cleanup_shared_plan; cleanup_kernel_debug' EXIT
 printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=fixture'
 python3 -B tests/runtime/benchmark/anon-page-fixture.py \
     --output-prefix "$shared_plan/fixture" --pages 128 \
@@ -464,6 +498,43 @@ done
 # and CPU PSI without any OOM event.
 run_privileged_bounded 960 tests/tools/qualify-resource-pressure.sh \
     --validated-source "$tested_source" --shared-plan "$shared_plan"
+
+kernel_debug_checked=0
+kernel_debug_baseline_stable=0
+kernel_debug_reports=0
+kernel_debug_swapz_reports=0
+if [[ $kernel_debug_kasan == 1 || $kernel_debug_kcsan == 1 ||
+      $kernel_debug_lockdep == 1 ]]; then
+    if (( kernel_debug_baseline_ready )) &&
+       capture_kernel_debug_log "$kernel_debug_dir/final.log"; then
+        kernel_debug_checked=1
+        kernel_debug_baseline_bytes="$(stat -Lc '%s' "$kernel_debug_dir/baseline.log")"
+        kernel_debug_final_bytes="$(stat -Lc '%s' "$kernel_debug_dir/final.log")"
+        if (( kernel_debug_final_bytes >= kernel_debug_baseline_bytes )) &&
+           head -c "$kernel_debug_baseline_bytes" "$kernel_debug_dir/final.log" |
+                cmp -s - "$kernel_debug_dir/baseline.log"; then
+            kernel_debug_baseline_stable=1
+            tail -c "+$((kernel_debug_baseline_bytes + 1))" \
+                "$kernel_debug_dir/final.log" >"$kernel_debug_dir/delta.log"
+            kernel_debug_pattern='BUG: KASAN:|KASAN:.*(use-after-free|out-of-bounds)|BUG: KCSAN:|KCSAN: data-race|possible circular locking dependency detected|possible recursive locking detected|inconsistent lock state|held lock freed|trying to register non-static key|sleeping function called from invalid context'
+            kernel_debug_reports="$(grep -Eic "$kernel_debug_pattern" \
+                "$kernel_debug_dir/delta.log" || true)"
+            if (( kernel_debug_reports > 0 )); then
+                kernel_debug_swapz_reports="$(grep -Ei -B8 -A120 \
+                    "$kernel_debug_pattern" "$kernel_debug_dir/delta.log" |
+                    grep -Eic '(^|[^[:alnum:]_])(dm[-_]swapz|swapz)([^[:alnum:]_]|$)' ||
+                    true)"
+            fi
+        fi
+    fi
+fi
+printf 'KERNEL_DEBUG_OBSERVATION=checked:%d baseline_stable:%d reports:%d swapz_reports:%d\n' \
+    "$kernel_debug_checked" "$kernel_debug_baseline_stable" \
+    "$kernel_debug_reports" "$kernel_debug_swapz_reports"
+if (( kernel_debug_swapz_reports > 0 )); then
+    printf '%s\n' 'FAIL: loaded kernel debug diagnostics implicated swapz' >&2
+    exit 1
+fi
 
 # ID38 depth=2 remains a diagnostic module/benchmark control. Two idle-host
 # five-pair cycles found no useful-throughput or latency benefit. Production
