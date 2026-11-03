@@ -568,7 +568,7 @@ if (( GC_RECOVERY_FAULT_PROBE )); then
 			count++; line=$0
 		} END { if (count == 1) print line }')" ||
 		fail "cannot parse GC recovery oracle evidence"
-	[[ "$gc_recovery_oracle_line" ==
+	[[ "$gc_recovery_oracle_line" == \
 	   "GC_ROLL_FORWARD_FAULT_ORACLE=foreground_writes:768 fault_write:769 retry_attempts:2 verified_pages:512" ]] ||
 		fail "GC recovery oracle did not prove exact bounded retry sequence"
 	gc_recovery_after="$(dmsetup status "$DMNAME")" ||
