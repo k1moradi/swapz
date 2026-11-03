@@ -1408,3 +1408,9 @@ rootless symlink/update tests. No primary lifecycle command uses the lock,
 owner claim or state replacement yet. No live swap or boot integration has
 been qualified through this manager. Do not enable its units until those paths
 and the exact-host qualification gates are closed.
+
+The native manager now has an explicit lifecycle-stage name parser and
+transition predicate, with rootless coverage of every stage pair and invalid
+values. This is policy scaffolding only: durable state parsing, run-ID-aware
+transitions, privileged lifecycle commands, startup rollback and recovery still
+need to use and validate it before the manager can be enabled.

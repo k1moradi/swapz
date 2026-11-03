@@ -59,6 +59,79 @@ struct swapz_primary_swap_entry {
 	int priority;
 };
 
+static const char *const swapz_primary_stage_names[] = {
+	[SWAPZ_PRIMARY_STAGE_READY] = "READY",
+	[SWAPZ_PRIMARY_STAGE_STARTING] = "STARTING",
+	[SWAPZ_PRIMARY_STAGE_ACTIVE] = "ACTIVE",
+	[SWAPZ_PRIMARY_STAGE_STOPPING] = "STOPPING",
+	[SWAPZ_PRIMARY_STAGE_RECOVERING] = "RECOVERING",
+	[SWAPZ_PRIMARY_STAGE_RESTORED] = "RESTORED",
+	[SWAPZ_PRIMARY_STAGE_DISABLING] = "DISABLING",
+	[SWAPZ_PRIMARY_STAGE_COMPLETE] = "COMPLETE",
+	[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = "RECOVERY_REQUIRED",
+};
+
+const char *swapz_primary_stage_name(enum swapz_primary_stage stage)
+{
+	if ((unsigned int)stage >= (unsigned int)SWAPZ_PRIMARY_STAGE_COUNT)
+		return NULL;
+	return swapz_primary_stage_names[stage];
+}
+
+int swapz_primary_stage_parse(const char *name,
+			      enum swapz_primary_stage *stage)
+{
+	enum swapz_primary_stage candidate;
+
+	if (!name || !stage)
+		return -1;
+	for (candidate = SWAPZ_PRIMARY_STAGE_READY;
+	     (unsigned int)candidate < (unsigned int)SWAPZ_PRIMARY_STAGE_COUNT;
+	     ++candidate) {
+		if (!strcmp(name, swapz_primary_stage_names[candidate])) {
+			*stage = candidate;
+			return 0;
+		}
+	}
+	return -1;
+}
+
+int swapz_primary_stage_transition_allowed(enum swapz_primary_stage from,
+						   enum swapz_primary_stage to)
+{
+	if ((unsigned int)from >= (unsigned int)SWAPZ_PRIMARY_STAGE_COUNT ||
+	    (unsigned int)to >= (unsigned int)SWAPZ_PRIMARY_STAGE_COUNT)
+		return 0;
+	if (from == to)
+		return from != SWAPZ_PRIMARY_STAGE_COMPLETE;
+	if (to == SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED)
+		return from != SWAPZ_PRIMARY_STAGE_COMPLETE;
+	switch (from) {
+	case SWAPZ_PRIMARY_STAGE_READY:
+		return to == SWAPZ_PRIMARY_STAGE_STARTING ||
+		       to == SWAPZ_PRIMARY_STAGE_DISABLING;
+	case SWAPZ_PRIMARY_STAGE_STARTING:
+		return to == SWAPZ_PRIMARY_STAGE_ACTIVE;
+	case SWAPZ_PRIMARY_STAGE_ACTIVE:
+		return to == SWAPZ_PRIMARY_STAGE_STOPPING;
+	case SWAPZ_PRIMARY_STAGE_STOPPING:
+		return to == SWAPZ_PRIMARY_STAGE_RESTORED;
+	case SWAPZ_PRIMARY_STAGE_RECOVERING:
+		return to == SWAPZ_PRIMARY_STAGE_RESTORED;
+	case SWAPZ_PRIMARY_STAGE_RESTORED:
+		return to == SWAPZ_PRIMARY_STAGE_READY ||
+		       to == SWAPZ_PRIMARY_STAGE_COMPLETE;
+	case SWAPZ_PRIMARY_STAGE_DISABLING:
+		return to == SWAPZ_PRIMARY_STAGE_COMPLETE;
+	case SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED:
+		return to == SWAPZ_PRIMARY_STAGE_RECOVERING;
+	case SWAPZ_PRIMARY_STAGE_COMPLETE:
+	case SWAPZ_PRIMARY_STAGE_COUNT:
+		return 0;
+	}
+	return 0;
+}
+
 static int swapz_primary_device_number_matches(dev_t device)
 {
 	return major(device) == 8U && minor(device) == 4U;

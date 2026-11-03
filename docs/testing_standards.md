@@ -3425,3 +3425,30 @@ Document that loss of the volatile swapz mapping authority loses access to
 pages already stored through that mapping. Never describe a fallback swapfile
 on another partition of the same physical disk as independent-media
 redundancy.
+
+The native primary manager's lifecycle-stage vocabulary is defined in
+`src/userspace/swapz-primary.h`. Its parser accepts only exact stage names, and
+its transition predicate rejects every edge outside the table below. Rootless
+direct-C tests cover the stage-name round trip, every ordered pair of known
+stages, invalid enum values, and invalid names. Repeated persistence of an
+in-progress stage is permitted; `COMPLETE` is terminal for that run. A new run
+requires a fresh one-use owner claim and a separately validated state
+transition. The stage predicate alone does not authorize a new run or a
+block-device operation.
+
+| Current stage | Permitted next stages |
+| --- | --- |
+| `READY` | `READY`, `STARTING`, `DISABLING`, `RECOVERY_REQUIRED` |
+| `STARTING` | `STARTING`, `ACTIVE`, `RECOVERY_REQUIRED` |
+| `ACTIVE` | `ACTIVE`, `STOPPING`, `RECOVERY_REQUIRED` |
+| `STOPPING` | `STOPPING`, `RESTORED`, `RECOVERY_REQUIRED` |
+| `RECOVERING` | `RECOVERING`, `RESTORED`, `RECOVERY_REQUIRED` |
+| `RESTORED` | `RESTORED`, `READY`, `COMPLETE`, `RECOVERY_REQUIRED` |
+| `DISABLING` | `DISABLING`, `COMPLETE`, `RECOVERY_REQUIRED` |
+| `COMPLETE` | none |
+| `RECOVERY_REQUIRED` | `RECOVERY_REQUIRED`, `RECOVERING` |
+
+Persisted recovery records must retain and validate the original interrupted
+stage independently of this transition predicate. This table is policy
+scaffolding, not a complete lifecycle implementation; it does not permit
+enabling privileged commands or boot units by itself.

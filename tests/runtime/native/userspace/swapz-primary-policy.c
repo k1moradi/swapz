@@ -112,6 +112,85 @@ static void test_target_identity_and_header_policy(void)
 	assert(!swapz_primary_original_swap_signature(block));
 }
 
+static void test_primary_stage_policy(void)
+{
+	static const unsigned char allowed[SWAPZ_PRIMARY_STAGE_COUNT]
+					       [SWAPZ_PRIMARY_STAGE_COUNT] = {
+		[SWAPZ_PRIMARY_STAGE_READY] = {
+			[SWAPZ_PRIMARY_STAGE_READY] = 1,
+			[SWAPZ_PRIMARY_STAGE_STARTING] = 1,
+			[SWAPZ_PRIMARY_STAGE_DISABLING] = 1,
+			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
+		},
+		[SWAPZ_PRIMARY_STAGE_STARTING] = {
+			[SWAPZ_PRIMARY_STAGE_STARTING] = 1,
+			[SWAPZ_PRIMARY_STAGE_ACTIVE] = 1,
+			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
+		},
+		[SWAPZ_PRIMARY_STAGE_ACTIVE] = {
+			[SWAPZ_PRIMARY_STAGE_ACTIVE] = 1,
+			[SWAPZ_PRIMARY_STAGE_STOPPING] = 1,
+			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
+		},
+		[SWAPZ_PRIMARY_STAGE_STOPPING] = {
+			[SWAPZ_PRIMARY_STAGE_STOPPING] = 1,
+			[SWAPZ_PRIMARY_STAGE_RESTORED] = 1,
+			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
+		},
+		[SWAPZ_PRIMARY_STAGE_RECOVERING] = {
+			[SWAPZ_PRIMARY_STAGE_RECOVERING] = 1,
+			[SWAPZ_PRIMARY_STAGE_RESTORED] = 1,
+			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
+		},
+		[SWAPZ_PRIMARY_STAGE_RESTORED] = {
+			[SWAPZ_PRIMARY_STAGE_RESTORED] = 1,
+			[SWAPZ_PRIMARY_STAGE_READY] = 1,
+			[SWAPZ_PRIMARY_STAGE_COMPLETE] = 1,
+			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
+		},
+		[SWAPZ_PRIMARY_STAGE_DISABLING] = {
+			[SWAPZ_PRIMARY_STAGE_DISABLING] = 1,
+			[SWAPZ_PRIMARY_STAGE_COMPLETE] = 1,
+			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
+		},
+		[SWAPZ_PRIMARY_STAGE_COMPLETE] = {0},
+		[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = {
+			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
+			[SWAPZ_PRIMARY_STAGE_RECOVERING] = 1,
+		},
+	};
+	enum swapz_primary_stage from;
+	enum swapz_primary_stage to;
+	enum swapz_primary_stage parsed = SWAPZ_PRIMARY_STAGE_READY;
+	unsigned int i;
+	unsigned int j;
+
+	for (i = 0; i < (unsigned int)SWAPZ_PRIMARY_STAGE_COUNT; ++i) {
+		from = (enum swapz_primary_stage)i;
+		assert(swapz_primary_stage_name(from));
+		assert(swapz_primary_stage_parse(swapz_primary_stage_name(from),
+						 &parsed) == 0);
+		assert(parsed == from);
+		for (j = 0; j < (unsigned int)SWAPZ_PRIMARY_STAGE_COUNT; ++j) {
+			to = (enum swapz_primary_stage)j;
+			assert(swapz_primary_stage_transition_allowed(from, to) ==
+			       (int)allowed[i][j]);
+		}
+	}
+	assert(!swapz_primary_stage_name((enum swapz_primary_stage)-1));
+	assert(!swapz_primary_stage_name(SWAPZ_PRIMARY_STAGE_COUNT));
+	assert(swapz_primary_stage_transition_allowed(
+		(enum swapz_primary_stage)-1, SWAPZ_PRIMARY_STAGE_READY) == 0);
+	assert(swapz_primary_stage_transition_allowed(
+		SWAPZ_PRIMARY_STAGE_READY,
+		(enum swapz_primary_stage)-1) == 0);
+	parsed = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	assert(swapz_primary_stage_parse("unknown", &parsed) < 0);
+	assert(parsed == SWAPZ_PRIMARY_STAGE_COMPLETE);
+	assert(swapz_primary_stage_parse(NULL, &parsed) < 0);
+	assert(swapz_primary_stage_parse("READY", NULL) < 0);
+}
+
 static void test_exact_block_read_helper(void)
 {
 	const char *home = getenv("HOME");
@@ -392,6 +471,7 @@ int main(void)
 						  pages + 1ULL));
 	test_swap_inventory_parser();
 	test_target_identity_and_header_policy();
+	test_primary_stage_policy();
 	test_exact_block_read_helper();
 	test_sha256_helper();
 	test_recovery_filesystem_policy();
