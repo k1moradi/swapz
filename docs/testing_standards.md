@@ -506,7 +506,10 @@ authenticated roll-forward may make the full destination the next victim and
 reuse that independently verified-dead original victim as the next reserve
 destination. The worker token must remain active and be rebound to that exact
 role handoff before foreground mutation can resume. If the old victim is not
-fully dead, the operation must remain fail-closed. The exact-production DM GC
+fully dead, the operation must remain fail-closed. The exceptional worker
+roll-forward path must independently verify every logical mapping and physical
+liveness counter, not rely only on segment-mapping counts, before allowing a
+recycle hook to touch the prior victim; contradictory metadata must be terminal. The exact-production DM GC
 error boundary must still reject an integrity/authority failure (-EBADMSG or
 -EUCLEAN) as terminal even with a live recovery token, while preserving
 retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC.

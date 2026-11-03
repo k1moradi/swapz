@@ -3859,12 +3859,39 @@ static int swapz_gc_recovery_roll_forward(struct swapz_dm *ctx)
 {
 	struct swapz_authority *a = &ctx->authority;
 	struct swapz_gc_recovery *recovery = &ctx->gc_recovery;
-	swapz_u32 exhausted_destination;
+	swapz_u32 exhausted_destination, source_start, logical, offset;
 	int error;
 
 	error = swapz_gc_recovery_validate(ctx);
 	if (error)
 		return error;
+
+	/*
+	 * The exceptional roll-forward may recycle the previous GC victim.
+	 * Do not rely solely on segment_mapped_pages or physical refcounts:
+	 * independently check every authoritative map before the recycle hook
+	 * can discard or reuse a possibly referenced segment. This full scan
+	 * is deliberately outside the normal survivor-scaled GC hot path.
+	 */
+	if (a->segment_mapped_pages &&
+	    a->segment_mapped_pages[recovery->victim])
+		return -EUCLEAN;
+	for (logical = 0; logical < ctx->logical_pages; ++logical) {
+		const struct swapz_map *mapping = &ctx->maps[logical];
+
+		if (mapping->valid &&
+		    (mapping->start_block >= ctx->physical_blocks ||
+		     mapping->start_block / SWAPZ_SEGMENT_BLOCKS ==
+			     recovery->victim))
+			return -EUCLEAN;
+		if (!(logical & 4095U))
+			cond_resched();
+	}
+	source_start = recovery->victim * SWAPZ_SEGMENT_BLOCKS;
+	for (offset = 0; offset < SWAPZ_SEGMENT_BLOCKS; ++offset)
+		if (a->live_records[source_start + offset])
+			return -EUCLEAN;
+
 	exhausted_destination = recovery->destination;
 	error = swapz_gc_roll_forward_rotation(a, exhausted_destination);
 	if (error)
