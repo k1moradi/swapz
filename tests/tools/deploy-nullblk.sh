@@ -306,6 +306,51 @@ done < /proc/swaps
 note "OWNED_RAM_LOWER=$LOWER CONFIG=$CONFIG DISK=$DISK DEVICE=$DEVNO UUID=$UUID"
 modprobe dm_mod || fail "device mapper core unavailable"
 modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
+
+# Exercise constructor cleanup after every major ownership/allocation milestone.
+# The module parameter is null_blk-only and every create must fail before target
+# admission. No failed constructor may retain a mapper, lower holder, lower I/O
+# accounting, workqueue/module reference, or other resource that blocks unload.
+if (( ! MAX_BOUNDARY_PROBE )); then
+	note "START_LOADED_CONSTRUCTOR_FAILURE_CLEANUP"
+	constructor_lower_before="$(cat "/sys/block/$DISK/stat")" ||
+		fail "cannot read lower statistics before constructor failure matrix"
+	for constructor_stage in {1..8}; do
+		UUID="SWAPZ-TEST-$TOKEN-ctor-$constructor_stage"
+		insmod "$MODULE" test_fail_constructor_stage="$constructor_stage" ||
+			fail "cannot load constructor failure stage $constructor_stage"
+		OWN_MODULE=1
+		dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
+			fail "swapz target missing during constructor failure stage $constructor_stage"
+		if dmsetup create "$DMNAME" --uuid "$UUID" 		    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0" 		    >/dev/null 2>&1; then
+			OWN_DM=1
+			fail "constructor failure stage $constructor_stage unexpectedly created a mapper"
+		fi
+		if dmsetup info "$DMNAME" >/dev/null 2>&1; then
+			constructor_uuid="$(dmsetup info -c --noheadings -o uuid 				"$DMNAME" 2>/dev/null | tr -d '[:space:]')"
+			if [[ "$constructor_uuid" == "$UUID" ]]; then
+				OWN_DM=1
+			else
+				QUARANTINE=1
+			fi
+			fail "constructor failure stage $constructor_stage left a mapper"
+		fi
+		[[ -z "$(ls -A "/sys/block/$DISK/holders" 2>/dev/null)" ]] ||
+			fail "constructor failure stage $constructor_stage left a lower holder"
+		constructor_lower_after="$(cat "/sys/block/$DISK/stat")" ||
+			fail "cannot read lower statistics after constructor failure stage $constructor_stage"
+		[[ "$constructor_lower_after" == "$constructor_lower_before" ]] ||
+			fail "constructor failure stage $constructor_stage issued lower I/O"
+		rmmod dm_swapz ||
+			fail "constructor failure stage $constructor_stage leaked a module reference"
+		OWN_MODULE=0
+		[[ ! -d /sys/module/dm_swapz ]] ||
+			fail "constructor failure stage $constructor_stage left the module loaded"
+	done
+	UUID="SWAPZ-TEST-$TOKEN"
+	note "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0"
+fi
+
 insmod "$MODULE" || fail "swapz kernel module rejected"
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
