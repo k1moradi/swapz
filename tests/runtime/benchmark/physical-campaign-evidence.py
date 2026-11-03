@@ -322,7 +322,7 @@ def physical_virtualization() -> str:
 
 def host_snapshot(source_sha: str, device: Path) -> dict:
     require_clean_source(source_sha)
-    return {
+    snapshot = {
         "schema": HOST_SCHEMA,
         "captured_at_utc": datetime.datetime.now(
             datetime.timezone.utc).isoformat(),
@@ -345,6 +345,8 @@ def host_snapshot(source_sha: str, device: Path) -> dict:
         "thermal": thermal_snapshot(),
         "dm_swapz_module": module_parameters(),
     }
+    validate_host_snapshot(snapshot, source_sha)
+    return snapshot
 
 
 def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
@@ -388,12 +390,29 @@ def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
             type(queue.get("physical_block_size")) is not int or \
             queue["logical_block_size"] <= 0 or queue["physical_block_size"] <= 0:
         raise ValueError("campaign physical-device queue geometry is incomplete")
+    pressure = snapshot.get("pressure")
+    module = snapshot.get("dm_swapz_module")
     if not isinstance(snapshot.get("swap_inventory"), list) or \
             not isinstance(snapshot.get("mount_inventory"), str) or \
-            not isinstance(snapshot.get("pressure"), dict) or \
+            not isinstance(pressure, dict) or \
+            not all(isinstance(pressure.get(name), str)
+                    for name in ("cpu", "io", "memory")) or \
             not isinstance(snapshot.get("thermal"), list) or \
-            not isinstance(snapshot.get("dm_swapz_module"), dict):
+            not isinstance(module, dict) or \
+            module.get("status") not in ("LOADED", "NOT_LOADED") or \
+            not isinstance(module.get("values"), dict):
         raise ValueError("campaign host context is incomplete")
+
+
+def swap_identity(rows: list[dict]) -> list[tuple]:
+    identity = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return []
+        identity.append((
+            row.get("path"), row.get("type"), row.get("size_kib"),
+            row.get("priority")))
+    return sorted(identity)
 
 
 def pair_key(record: dict):
@@ -413,6 +432,9 @@ def host_stability(before: dict, after: dict) -> dict:
         "kernel_machine":
             (before.get("kernel") or {}).get("machine") ==
             (after.get("kernel") or {}).get("machine"),
+        "kernel_node":
+            (before.get("kernel") or {}).get("node") ==
+            (after.get("kernel") or {}).get("node"),
         "device_major_minor":
             (before.get("device") or {}).get("major_minor") ==
             (after.get("device") or {}).get("major_minor"),
@@ -437,6 +459,12 @@ def host_stability(before: dict, after: dict) -> dict:
         "device_transport":
             (before.get("device") or {}).get("transport") ==
             (after.get("device") or {}).get("transport"),
+        "device_scheduler":
+            (before.get("device") or {}).get("selected_scheduler") ==
+            (after.get("device") or {}).get("selected_scheduler"),
+        "device_queue":
+            (before.get("device") or {}).get("queue") ==
+            (after.get("device") or {}).get("queue"),
         "configured_cpus":
             (before.get("cpu") or {}).get("configured_cpus") ==
             (after.get("cpu") or {}).get("configured_cpus"),
@@ -446,6 +474,23 @@ def host_stability(before: dict, after: dict) -> dict:
         "affinity_cpus":
             (before.get("cpu") or {}).get("affinity_cpus") ==
             (after.get("cpu") or {}).get("affinity_cpus"),
+        "cpu_governors":
+            (before.get("cpu") or {}).get("governors") ==
+            (after.get("cpu") or {}).get("governors"),
+        "cpu_frequency_drivers":
+            (before.get("cpu") or {}).get("frequency_drivers") ==
+            (after.get("cpu") or {}).get("frequency_drivers"),
+        "cpu_scaling_min":
+            (before.get("cpu") or {}).get("scaling_min_khz") ==
+            (after.get("cpu") or {}).get("scaling_min_khz"),
+        "cpu_scaling_max":
+            (before.get("cpu") or {}).get("scaling_max_khz") ==
+            (after.get("cpu") or {}).get("scaling_max_khz"),
+        "swap_inventory":
+            swap_identity(before.get("swap_inventory") or []) ==
+            swap_identity(after.get("swap_inventory") or []),
+        "module_state":
+            before.get("dm_swapz_module") == after.get("dm_swapz_module"),
     }
     failed = sorted(name for name, passed in checks.items() if not passed)
     return {
@@ -486,10 +531,36 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
     sealer_data = read_regular_bytes(EVIDENCE_PATH)
     if summary.get("acceptance_manifest_sha256") != sha256_bytes(acceptance_data):
         raise ValueError("qualification summary references a different acceptance manifest")
-    amendment = summary.get("prospective_amendment")
-    if not isinstance(amendment, dict) or amendment.get("schema") != \
-            "swapz-performance-qualification-amendment-v2":
-        raise ValueError("qualification summary lacks the prospective amendment")
+    acceptance = json.loads(
+        acceptance_data.decode("utf-8"), object_pairs_hook=unique_object)
+    local_amendment = json.loads(
+        amendment_data.decode("utf-8"), object_pairs_hook=unique_object)
+    if summary.get("contract") != acceptance.get("physical_qualification"):
+        raise ValueError("qualification summary contract differs from frozen policy")
+    if summary.get("prospective_amendment") != local_amendment:
+        raise ValueError("qualification summary amendment differs from frozen policy")
+
+    v1_workloads = set(
+        (acceptance.get("physical_qualification") or {}).get("workloads") or {})
+    v2_workloads = set(local_amendment.get("workloads") or {})
+    protocol = summary.get("evaluation_protocol")
+    if protocol == "v2" and summary.get("amendment_active") is True:
+        expected_workloads = v1_workloads | v2_workloads
+        protocol_v2 = True
+    elif protocol == "v1" and summary.get("amendment_active") is False:
+        expected_workloads = v1_workloads
+        protocol_v2 = False
+    else:
+        raise ValueError("qualification summary protocol state is inconsistent")
+    decisions = summary.get("decisions")
+    if not isinstance(decisions, dict) or set(decisions) != expected_workloads:
+        raise ValueError("qualification summary workload decision set is incomplete")
+    decision_pass = all(
+        isinstance(decision, dict) and decision.get("status") == "PASS"
+        for decision in decisions.values())
+    expected_summary_status = "PASS" if decision_pass else "FAIL_OR_INCOMPLETE"
+    if summary.get("status") != expected_summary_status:
+        raise ValueError("qualification summary status is inconsistent with decisions")
 
     records = summary.get("records")
     if not isinstance(records, list):
@@ -539,12 +610,14 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
 
     stability = host_stability(before, after)
     summary_status = summary.get("status")
-    if summary_status == "PASS" and stability["status"] == "STABLE":
-        campaign_status = "PASS"
-    elif summary_status == "PASS":
+    if summary_status != "PASS":
+        campaign_status = "FAIL_OR_INCOMPLETE"
+    elif not protocol_v2:
+        campaign_status = "BLOCKED_PROTOCOL_NOT_V2"
+    elif stability["status"] != "STABLE":
         campaign_status = "BLOCKED_HOST_IDENTITY_CHANGED"
     else:
-        campaign_status = "FAIL_OR_INCOMPLETE"
+        campaign_status = "PASS"
 
     return {
         "schema": CAMPAIGN_SCHEMA,

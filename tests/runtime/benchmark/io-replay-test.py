@@ -2318,6 +2318,10 @@ class PairReplayContract(unittest.TestCase):
             self.assertGreater(report["overwrite"]["measured_hot_pages_rewritten"], 0)
             self.assertGreater(report["overwrite"]["measured_repeat_write_operations"], 0)
             self.assertEqual(report["sustained_intervals"], [])
+            self.assertEqual(
+                report["sustained_observer_overhead"]["samples"], 0)
+            self.assertEqual(
+                report["sustained_observer_overhead"]["child_cpu_seconds"], 0.0)
             self.assertIn("not live physical-segment utilization",
                           report["occupancy_scope"])
             self.assertGreaterEqual(report["max_no_progress_seconds"], 0)
@@ -2623,7 +2627,10 @@ class PairReplayContract(unittest.TestCase):
             "analysis_exclusion_reasons": ["synthetic exclusion"],
         }
         acceptance_bytes = evidence.ACCEPTANCE_MANIFEST.read_bytes()
+        acceptance = json.loads(acceptance_bytes)
+        contract = acceptance["physical_qualification"]
         amendment = json.loads(evidence.AMENDMENT_MANIFEST.read_text())
+        workload_names = set(contract["workloads"]) | set(amendment["workloads"])
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2640,9 +2647,14 @@ class PairReplayContract(unittest.TestCase):
                 "campaign_source_sha": source_sha,
                 "acceptance_manifest_sha256":
                     hashlib.sha256(acceptance_bytes).hexdigest(),
+                "contract": contract,
                 "prospective_amendment": amendment,
+                "amendment_active": True,
                 "evaluation_protocol": "v2",
                 "status": "FAIL_OR_INCOMPLETE",
+                "decisions": {
+                    name: {"status": "INCOMPLETE"}
+                    for name in workload_names},
                 "records": [summary_record],
             }
             summary_path.write_text(json.dumps(summary))
@@ -2672,6 +2684,8 @@ class PairReplayContract(unittest.TestCase):
                 **host, "device": {**host["device"], "major_minor": "8:2"}}
             after_path.write_text(json.dumps(changed_host))
             summary["status"] = "PASS"
+            summary["decisions"] = {
+                name: {"status": "PASS"} for name in workload_names}
             summary_path.write_text(json.dumps(summary))
             with mock.patch.object(
                     evidence, "require_clean_source", return_value=None), \
@@ -2685,6 +2699,29 @@ class PairReplayContract(unittest.TestCase):
                 changed["campaign_status"],
                 "BLOCKED_HOST_IDENTITY_CHANGED")
 
+            # A numerically passing legacy/v1 summary is not sufficient for
+            # the current production campaign that prospectively added v2.
+            after_path.write_text(json.dumps(host))
+            summary["evaluation_protocol"] = "v1"
+            summary["amendment_active"] = False
+            summary["decisions"] = {
+                name: {"status": "PASS"} for name in contract["workloads"]}
+            summary_path.write_text(json.dumps(summary))
+            with mock.patch.object(
+                    evidence, "require_clean_source", return_value=None), \
+                    mock.patch.object(
+                        evidence, "source_tree_sha",
+                        return_value=source_tree_sha):
+                legacy = evidence.seal_campaign(
+                    source_sha, before_path, after_path,
+                    summary_path, [pair_path])
+            self.assertEqual(
+                legacy["campaign_status"], "BLOCKED_PROTOCOL_NOT_V2")
+
+            summary["evaluation_protocol"] = "v2"
+            summary["amendment_active"] = True
+            summary["decisions"] = {
+                name: {"status": "PASS"} for name in workload_names}
             summary["records"][0]["status"] = "PASS"
             summary_path.write_text(json.dumps(summary))
             with mock.patch.object(
