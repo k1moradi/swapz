@@ -67,12 +67,41 @@ def status_format_sequence(source: str = "") -> str:
     source = source.split("case STATUSTYPE_INFO:", 1)[1]
     source = source.split("case STATUSTYPE_TABLE:", 1)[0]
     emitted = []
-    for call in re.findall(r"DMEMIT\((.*?)(?=\n\s*\);)", source, re.S):
+    cursor = 0
+    while True:
+        start = source.find("DMEMIT(", cursor)
+        if start < 0:
+            break
+        pos = start + len("DMEMIT(")
+        arg_start = pos
+        depth = 1
+        in_string = False
+        escaped = False
+        while pos < len(source) and depth:
+            char = source[pos]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+            elif char == '"':
+                in_string = True
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            pos += 1
+        if depth:
+            raise AssertionError("Unclosed DMEMIT in swapz_status")
+        call = source[arg_start:pos - 1]
         literals = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', call)
         if literals:
             text = "".join(literals)
             if not text.startswith("status_snapshot_error="):
                 emitted.append(text)
+        cursor = pos
     return "".join(emitted)
 
 
