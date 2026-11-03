@@ -590,7 +590,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         evidence["release_evidence"]["installed_artifact_identity"][
             "installed"] = False
         evidence["release_evidence"]["owner_observed_reboot"].update(
-            status="FAIL", observed=False)
+            status="FAIL", observed=True, overall="FAIL")
         result = evaluate(report, evidence, policy)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
