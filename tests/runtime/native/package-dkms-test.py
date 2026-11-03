@@ -54,6 +54,7 @@ class PackageLifecycle(unittest.TestCase):
             f'#define SWAPZ_BUILD_SOURCE_SHA "{SOURCE_SHA}"\n'
             "#define SWAPZ_BUILD_SOURCE_CLEAN 1\n"
             '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n')
+        self.build_info.chmod(0o600)
         self.cli = self.build / "swapzctl"
         self.cli.write_text(
             "#!/bin/sh\n"
@@ -71,6 +72,7 @@ class PackageLifecycle(unittest.TestCase):
         self.oracle.chmod(0o755)
         self.module = self.build / "dm-swapz.ko"
         self.module.write_bytes(b"synthetic-qualified-dm-swapz-module\n")
+        self.module.chmod(0o600)
         self.report = self.home / "qualification.json"
         self.write_report()
 
@@ -123,6 +125,9 @@ class PackageLifecycle(unittest.TestCase):
                 "oracle_sha256": sha256(self.oracle),
             },
         }, sort_keys=True) + "\n")
+        # These are synthetic trusted package inputs. Keep their mode safe
+        # even when the test runner inherits a group-writable umask.
+        self.report.chmod(0o600)
 
     def tool(self, name, content):
         path = self.bin / name

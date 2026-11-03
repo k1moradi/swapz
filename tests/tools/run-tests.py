@@ -1591,6 +1591,9 @@ def write_report(result):
     try:
         with temporary.open("wb") as out:
             out.write(payload)
+        # The package admission path rejects group/world-writable inputs.
+        # Make the report's mode deterministic across caller umasks.
+        os.chmod(temporary, 0o644)
         os.replace(temporary, REPORT)
     finally:
         temporary.unlink(missing_ok=True)

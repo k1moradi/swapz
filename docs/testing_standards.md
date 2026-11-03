@@ -4170,6 +4170,11 @@ build-provenance header into its sandbox, compile `swapzctl` with that header,
 and prove DKMS receives byte-identical provenance in its owned source tree.
 The test override is valid only under the hermetic package sandbox and must
 not change the production package path.
+Synthetic qualification inputs in that regression must have no group/world
+write bits regardless of the test process umask. The root `make` target must
+normalize the exact qualified artifact modes and the official report writer
+must create a non-group/world-writable report, so `make install` can admit the
+same bytes without relaxing the package's safe-input checks.
 
 Production `make install` is admission-only and must not depend on the root
 `all` build target. It may consume only the already-qualified `swapzctl`,

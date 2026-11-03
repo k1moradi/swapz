@@ -24,6 +24,12 @@ Normal artifacts live only under `build/`:
   during `make test` and `make fast_test`; it accepts owner-supplied page data
   only through the ID177 representative-content workflow.
 
+The root `make` target normalizes qualified build-artifact permissions after
+building: non-executable inputs are mode 0644 and the userspace/oracle binaries
+are mode 0755. The official test report is also written mode 0644. This keeps
+the exact-artifact admission checks independent of the caller's umask without
+weakening their refusal of group/world-writable files.
+
 The one generated qualification artifact outside `build/` is the root
 `test_results.json`. This is UTF-8 JSON with newlines, without compression or indentation. It is
 intentionally overwriteable and versioned so

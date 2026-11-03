@@ -44,6 +44,8 @@ build/source-build-info.h: build/source-build-info-force
 # The module recipe always checks running-kernel Kbuild; Kbuild's own
 # incremental dependency logic avoids unchanged .o recompilation.
 all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/userspace/swapzctl
+	@chmod 0644 build/source-build-info.h build/kernel/experimental/dm-swapz.ko
+	@chmod 0755 build/tests/device-roundtrip build/userspace/swapzctl
 
 build/kernel/experimental/dm-swapz.ko: build/source-build-info.h
 	$(MAKE) -C src/kernel KDIR="$(KDIR)" SWAPZ_BUILD_INFO="$(abspath build/source-build-info.h)" all
