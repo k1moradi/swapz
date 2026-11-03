@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Explicit swapz administrative tool. It never activates a mapper or swapon. */
+/*
+ * Explicit swapz administrative tool. Generic status/format never activate
+ * swap; primary lifecycle subcommands delegate mapper and swapon/swapoff
+ * ownership to swapz-primary, which remains fail-closed behind its gate.
+ */
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <errno.h>
