@@ -640,7 +640,16 @@ pairs is incomplete evidence. The evaluator counts **all recorded attempts**:
 additional failed/excluded attempts cannot be hidden behind a complete set of
 passing replacements. Pair IDs must be distinct within each workload, every
 attempt must match the same exact source SHA (including its raw/swapz arms),
-and mixed-source campaigns are incomplete rather than pooled.
+and mixed-source campaigns are incomplete rather than pooled. Pair artifacts
+are not trusted as editable summaries: the evaluator re-derives their deltas,
+intrinsic exclusions and PASS consistency from the embedded raw/swapz arms.
+Every accepted pair must also resolve to one exact physical lower identity
+(PARTUUID, byte size and major:minor where the block replay records them; exact
+lower major:minor for anonymous swap), and all accepted pairs must agree. The
+campaign sealer independently binds that evaluator identity to the admitted
+partition in the boundary host snapshot. A mismatch blocks a PASS but failed or
+excluded artifacts remain sealable evidence. These are evidence-integrity
+checks and do not change any frozen performance threshold.
 
 For each five-pair service cohort, PASS requires the paired 95% interval lower
 bound for useful WRITE to be at least +5%; interval upper bounds for normalized

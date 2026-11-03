@@ -504,6 +504,34 @@ def physical_target_identity(snapshot: dict) -> dict:
     }
 
 
+def qualification_target_identity(snapshot: dict) -> dict:
+    """Translate the host snapshot into the evaluator's physical-target schema."""
+    physical = physical_target_identity(snapshot)
+    major_minor = (snapshot.get("device") or {}).get("major_minor")
+    if not isinstance(major_minor, str) or not re.fullmatch(
+            r"[0-9]+:[0-9]+", major_minor):
+        raise ValueError("campaign target major:minor is incomplete")
+    return {
+        "physical_partuuid": physical["partuuid"],
+        "physical_device_bytes": physical["device_bytes"],
+        "lower_major_minor": major_minor,
+    }
+
+
+def qualification_target_binding(summary: dict, snapshot: dict) -> dict:
+    expected = qualification_target_identity(snapshot)
+    observed = summary.get("campaign_target_identity")
+    consistent = (
+        summary.get("campaign_target_consistent") is True and
+        observed == expected)
+    return {
+        "status": "MATCH" if consistent else "MISMATCH",
+        "consistent": consistent,
+        "expected": expected,
+        "observed": observed,
+    }
+
+
 def admitted_device_boundary(snapshot: dict) -> dict:
     device = snapshot.get("device") or {}
     major_minor = device.get("major_minor")
@@ -638,13 +666,16 @@ def artifact(path: Path, data: bytes) -> dict:
 
 
 def campaign_status(summary_status: str, source_consistent: bool,
-                    protocol_v2: bool, stability_status: str) -> str:
+                    protocol_v2: bool, stability_status: str,
+                    target_consistent: bool = True) -> str:
     if summary_status != "PASS":
         return "FAIL_OR_INCOMPLETE"
     if not source_consistent:
         return "BLOCKED_SOURCE_IDENTITY_CHANGED"
     if not protocol_v2:
         return "BLOCKED_PROTOCOL_NOT_V2"
+    if not target_consistent:
+        return "BLOCKED_TARGET_IDENTITY_CHANGED"
     if stability_status != "STABLE":
         return "BLOCKED_HOST_IDENTITY_CHANGED"
     return "PASS"
@@ -770,9 +801,11 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         summary_source_sha == source_sha and pair_source_shas == [source_sha])
 
     stability = host_stability(before, after)
+    target_binding = qualification_target_binding(summary, before)
     summary_status = summary.get("status")
     sealed_status = campaign_status(
-        summary_status, source_consistent, protocol_v2, stability["status"])
+        summary_status, source_consistent, protocol_v2, stability["status"],
+        target_binding["consistent"])
 
     return {
         "schema": CAMPAIGN_SCHEMA,
@@ -787,6 +820,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         "qualification_status": summary_status,
         "evaluation_protocol": summary.get("evaluation_protocol"),
         "target": physical_target_identity(before),
+        "qualification_target_binding": target_binding,
         "host_stability": stability,
         "admitted_device_boundary": {
             "before": admitted_device_boundary(before),

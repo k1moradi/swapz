@@ -27,6 +27,8 @@ AMENDMENT_MANIFEST = ROOT / "tests/runtime/benchmark/physical-qualification-amen
 AMENDMENT_SCHEMA = "swapz-performance-qualification-amendment-v2"
 # A change to this blob requires a new prospectively versioned protocol.
 AMENDMENT_GIT_BLOB_SHA = "eac574fd204932e630e8bb45dca66b67c135a779"
+MAJOR_MINOR_RE = re.compile(r"[0-9]+:[0-9]+")
+PARTUUID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{7,127}")
 
 
 def _unique_object(pairs):
@@ -233,14 +235,28 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
             if arm.get(field) != expected:
                 reasons.append(f"{label} {field} differs from prospective workload")
         identity = arm.get("swap_device_identity")
-        if not isinstance(identity, dict) or not identity.get("device"):
+        if not isinstance(identity, dict):
             reasons.append(f"{label} admitted swap-device identity is missing")
-        elif label == "raw" and identity.get("dm_uuid") is not None:
-            reasons.append("raw anonymous arm unexpectedly carries a DM UUID")
-        elif label == "swapz" and (
-                not identity.get("dm_uuid") or identity.get("dm_target") != "swapz" or
-                not identity.get("lower_device")):
-            reasons.append("swapz anonymous arm lacks exact mapper identity")
+        else:
+            device = identity.get("device")
+            if not isinstance(device, str) or not MAJOR_MINOR_RE.fullmatch(device):
+                reasons.append(
+                    f"{label} admitted swap-device major:minor is malformed")
+            if label == "raw":
+                if identity.get("dm_uuid") is not None:
+                    reasons.append(
+                        "raw anonymous arm unexpectedly carries a DM UUID")
+                if identity.get("lower_device") != device:
+                    reasons.append(
+                        "raw anonymous arm lower identity differs from device")
+            else:
+                lower_device = identity.get("lower_device")
+                if (not identity.get("dm_uuid") or
+                        identity.get("dm_target") != "swapz" or
+                        not isinstance(lower_device, str) or
+                        not MAJOR_MINOR_RE.fullmatch(lower_device)):
+                    reasons.append(
+                        "swapz anonymous arm lacks exact mapper/lower identity")
         cgroup = arm.get("cgroup_before") or {}
         if cgroup.get("memory_max") != spec["memory_max_bytes"]:
             reasons.append(f"{label} cgroup memory.max differs from prospective workload")
@@ -261,8 +277,15 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
         if arm.get(field) != expected_value:
             reasons.append(f"{label} {field} differs from prospective workload")
     identity = arm.get("device_identity") or {}
-    if not identity.get("physical_partuuid") or not identity.get("physical_device_bytes"):
-        reasons.append(f"{label} physical identity is missing")
+    partuuid = identity.get("physical_partuuid")
+    device_bytes = identity.get("physical_device_bytes")
+    lower_major_minor = identity.get("lower_major_minor")
+    if (not isinstance(partuuid, str) or
+            not PARTUUID_RE.fullmatch(partuuid) or
+            type(device_bytes) is not int or device_bytes <= 0 or
+            not isinstance(lower_major_minor, str) or
+            not MAJOR_MINOR_RE.fullmatch(lower_major_minor)):
+        reasons.append(f"{label} physical identity is missing or malformed")
     if label == "raw" and identity.get("dm_uuid") is not None:
         reasons.append("raw arm unexpectedly carries a DM UUID")
     if label == "swapz" and not identity.get("dm_uuid"):
@@ -358,6 +381,124 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
         "status": "PASS" if not reasons else "EXCLUDED", "excluded": bool(reasons),
         "exclusion_reasons": reasons, "deltas": deltas, "raw": raw, "swapz": swapz,
     }
+
+
+def pair_integrity_reasons(pair: dict) -> list[str]:
+    """Re-derive pair evidence so stored verdicts/deltas cannot be edited open."""
+    raw = pair.get("raw")
+    swapz = pair.get("swapz")
+    if not isinstance(raw, dict) or not isinstance(swapz, dict):
+        return ["pair raw/swapz arm evidence is missing"]
+    try:
+        derived = compare_pair(
+            raw, swapz, pair.get("workload"), pair.get("pair_id"),
+            pair.get("pair_index"), pair.get("order"))
+    except (KeyError, TypeError, ValueError) as exc:
+        return ["pair cannot be re-derived from arm evidence: " + str(exc)]
+
+    reasons = []
+    if pair.get("deltas") != derived["deltas"]:
+        reasons.append("stored pair deltas differ from recomputed arm evidence")
+    for field in ("source_sha", "qualification_protocol"):
+        if pair.get(field) != derived[field]:
+            reasons.append(
+                f"stored pair {field} differs from recomputed arm evidence")
+
+    recorded_reasons = pair.get("exclusion_reasons")
+    if (not isinstance(recorded_reasons, list) or
+            any(not isinstance(reason, str) for reason in recorded_reasons)):
+        reasons.append("stored pair exclusion reasons are malformed")
+        recorded_reasons = []
+    intrinsic_reasons = set(derived["exclusion_reasons"])
+    if not intrinsic_reasons.issubset(set(recorded_reasons)):
+        reasons.append(
+            "stored pair exclusions omit failures derived from arm evidence")
+
+    status = pair.get("status")
+    excluded = pair.get("excluded")
+    if status == "PASS":
+        if excluded is not False or recorded_reasons or derived["status"] != "PASS":
+            reasons.append("stored pair PASS contradicts embedded arm evidence")
+    elif status == "EXCLUDED":
+        if excluded is not True or not recorded_reasons:
+            reasons.append("stored pair EXCLUDED state is malformed")
+    else:
+        reasons.append("stored pair status is invalid")
+    return sorted(set(reasons))
+
+
+def pair_target_identity(pair: dict):
+    """Return the physical lower identity proven by one internally matched pair."""
+    raw = pair.get("raw")
+    swapz = pair.get("swapz")
+    if not isinstance(raw, dict) or not isinstance(swapz, dict):
+        return None
+    if pair.get("workload") == "anonymous-swap":
+        raw_identity = raw.get("swap_device_identity") or {}
+        swapz_identity = swapz.get("swap_device_identity") or {}
+        raw_device = raw_identity.get("device")
+        swapz_lower = swapz_identity.get("lower_device")
+        if (isinstance(raw_device, str) and
+                MAJOR_MINOR_RE.fullmatch(raw_device) and
+                raw_device == swapz_lower):
+            return {"lower_major_minor": raw_device}
+        return None
+
+    raw_identity = raw.get("device_identity") or {}
+    swapz_identity = swapz.get("device_identity") or {}
+    fields = (
+        "physical_partuuid", "physical_device_bytes", "lower_major_minor")
+    if any(raw_identity.get(field) != swapz_identity.get(field)
+           for field in fields):
+        return None
+    partuuid = raw_identity.get("physical_partuuid")
+    device_bytes = raw_identity.get("physical_device_bytes")
+    lower_major_minor = raw_identity.get("lower_major_minor")
+    if (not isinstance(partuuid, str) or
+            not PARTUUID_RE.fullmatch(partuuid) or
+            type(device_bytes) is not int or device_bytes <= 0 or
+            not isinstance(lower_major_minor, str) or
+            not MAJOR_MINOR_RE.fullmatch(lower_major_minor)):
+        return None
+    return {
+        "physical_partuuid": partuuid.lower(),
+        "physical_device_bytes": device_bytes,
+        "lower_major_minor": lower_major_minor,
+    }
+
+
+def common_campaign_target(rows: list[dict]):
+    """Require every currently usable pair to resolve to one physical lower."""
+    identities = []
+    for row in rows:
+        if not row.get("analysis_usable"):
+            continue
+        identity = pair_target_identity(row)
+        if identity is None:
+            return None, False
+        identities.append(identity)
+    if not identities:
+        return None, False
+
+    major_minors = {row["lower_major_minor"] for row in identities}
+    if len(major_minors) != 1:
+        return None, False
+    complete = [
+        row for row in identities if "physical_partuuid" in row]
+    if not complete:
+        return {"lower_major_minor": identities[0]["lower_major_minor"]}, True
+    complete_keys = {
+        (row["physical_partuuid"], row["physical_device_bytes"],
+         row["lower_major_minor"])
+        for row in complete
+    }
+    if len(complete_keys) != 1:
+        return None, False
+    canonical = dict(complete[0])
+    if any(row["lower_major_minor"] != canonical["lower_major_minor"]
+           for row in identities):
+        return None, False
+    return canonical, True
 
 
 def quartile_ratio(rows: list[dict], field: str) -> float:
@@ -482,11 +623,21 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
         raise ValueError("unsupported physical qualification protocol")
     preserved = []
     for pair in records:
-        if pair.get("schema") != PAIR_SCHEMA or pair.get("workload") not in WORKLOADS:
+        if not isinstance(pair, dict) or \
+                pair.get("schema") != PAIR_SCHEMA or \
+                pair.get("workload") not in WORKLOADS:
             raise ValueError("invalid qualification pair")
         saved = dict(pair)
-        saved["analysis_usable"] = pair.get("status") == "PASS" and not pair.get("excluded")
-        saved["analysis_exclusion_reasons"] = list(pair.get("exclusion_reasons") or [])
+        saved["analysis_usable"] = (
+            pair.get("status") == "PASS" and pair.get("excluded") is False)
+        recorded_reasons = pair.get("exclusion_reasons")
+        saved["analysis_exclusion_reasons"] = (
+            list(recorded_reasons) if isinstance(recorded_reasons, list)
+            else [])
+        integrity_reasons = pair_integrity_reasons(pair)
+        if integrity_reasons:
+            saved["analysis_usable"] = False
+            saved["analysis_exclusion_reasons"].extend(integrity_reasons)
         workload = pair["workload"]
         expected_protocol = (
             AMENDMENT_SCHEMA if workload in AMENDMENT["workloads"] else SCHEMA)
@@ -516,6 +667,16 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
             row["analysis_usable"] = False
             row["analysis_exclusion_reasons"].append(
                 "campaign requires one exact source SHA across every attempted arm")
+
+    campaign_target_identity, campaign_target_consistent = (
+        common_campaign_target(preserved))
+    if any(row.get("analysis_usable") for row in preserved) and \
+            not campaign_target_consistent:
+        for row in preserved:
+            if row.get("analysis_usable"):
+                row["analysis_usable"] = False
+                row["analysis_exclusion_reasons"].append(
+                    "campaign requires one exact physical target across accepted pairs")
 
     has_amendment_records = any(
         row["workload"] in AMENDMENT["workloads"] for row in preserved)
@@ -579,6 +740,8 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
             "amendment_active": include_amendment,
             "evaluation_protocol": "v2" if include_amendment else "v1",
             "campaign_source_sha": campaign_source_sha,
+            "campaign_target_identity": campaign_target_identity,
+            "campaign_target_consistent": campaign_target_consistent,
             "status": "PASS" if overall else "FAIL_OR_INCOMPLETE",
             "decisions": decisions, "raw_repeat_spread": raw_spread, "records": preserved}
 

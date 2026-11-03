@@ -2486,6 +2486,60 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(stable["campaign_source_sha"], "a" * 40)
         self.assertEqual(stable["decisions"]["sd-service-balanced"]["status"], "PASS")
 
+        self.assertTrue(stable["campaign_target_consistent"])
+        self.assertEqual(
+            stable["campaign_target_identity"],
+            {
+                "physical_partuuid": "f13428f6-01",
+                "physical_device_bytes": 124787884032,
+                "lower_major_minor": "8:1",
+            })
+
+        # Stored pair deltas are derived evidence, not an editable acceptance
+        # surface. A changed delta with unchanged arms must be excluded.
+        tampered_pairs = json.loads(json.dumps(stable_pairs))
+        tampered_pairs[0]["deltas"]["useful_write"] = 9.0
+        tampered = qualification.evaluate(tampered_pairs)
+        self.assertEqual(
+            tampered["decisions"]["sd-service-balanced"]["status"],
+            "INCOMPLETE")
+        self.assertTrue(any(
+            "stored pair deltas differ" in reason
+            for reason in tampered["records"][0]["analysis_exclusion_reasons"]))
+
+        # Internally matched pairs from a different physical lower cannot be
+        # pooled into one campaign even when their source SHA is identical.
+        other_raw = arm("raw")
+        other_swapz = arm("swapz")
+        for other_arm in (other_raw, other_swapz):
+            other_arm["device_identity"] = {
+                **other_arm["device_identity"],
+                "physical_partuuid": "deadbeef-01",
+                "lower_major_minor": "8:17",
+            }
+        mixed_target_pairs = list(stable_pairs)
+        mixed_target_pairs[1] = qualification.compare_pair(
+            other_raw, other_swapz, "sd-service-balanced",
+            "other-target", 2, orders[1])
+        mixed_target = qualification.evaluate(mixed_target_pairs)
+        self.assertFalse(mixed_target["campaign_target_consistent"])
+        self.assertIsNone(mixed_target["campaign_target_identity"])
+        self.assertEqual(
+            mixed_target["decisions"]["sd-service-balanced"]["status"],
+            "INCOMPLETE")
+
+        missing_lower_raw = arm("raw")
+        missing_lower_swapz = arm("swapz")
+        missing_lower_raw["device_identity"].pop("lower_major_minor")
+        missing_lower_swapz["device_identity"].pop("lower_major_minor")
+        missing_lower = qualification.compare_pair(
+            missing_lower_raw, missing_lower_swapz, "sd-service-balanced",
+            "missing-lower", 1, "raw-first")
+        self.assertTrue(missing_lower["excluded"])
+        self.assertIn(
+            "physical identity is missing or malformed",
+            " ".join(missing_lower["exclusion_reasons"]))
+
         # An excluded original cannot be hidden by a full set of later PASS
         # attempts. Preserve the original attempt and block promotion.
         masked = qualification.evaluate([*stable_pairs, excluded])
@@ -2807,6 +2861,10 @@ class PairReplayContract(unittest.TestCase):
             evidence.campaign_status("PASS", True, True, "CHANGED"),
             "BLOCKED_HOST_IDENTITY_CHANGED")
         self.assertEqual(
+            evidence.campaign_status(
+                "PASS", True, True, "STABLE", target_consistent=False),
+            "BLOCKED_TARGET_IDENTITY_CHANGED")
+        self.assertEqual(
             evidence.campaign_status("PASS", True, True, "STABLE"),
             "PASS")
 
@@ -2938,6 +2996,26 @@ class PairReplayContract(unittest.TestCase):
                 {"partuuid": "11111111-01", "device_bytes": 123456})
             self.assertEqual(
                 evidence.physical_target_identity(host), sealed["target"])
+            self.assertFalse(
+                sealed["qualification_target_binding"]["consistent"])
+            expected_binding = evidence.qualification_target_binding({
+                "campaign_target_consistent": True,
+                "campaign_target_identity": {
+                    "physical_partuuid": "11111111-01",
+                    "physical_device_bytes": 123456,
+                    "lower_major_minor": "8:1",
+                },
+            }, host)
+            self.assertTrue(expected_binding["consistent"])
+            wrong_binding = evidence.qualification_target_binding({
+                "campaign_target_consistent": True,
+                "campaign_target_identity": {
+                    "physical_partuuid": "22222222-01",
+                    "physical_device_bytes": 123456,
+                    "lower_major_minor": "8:1",
+                },
+            }, host)
+            self.assertFalse(wrong_binding["consistent"])
             self.assertTrue(
                 sealed["admitted_device_boundary"]["before"]["quiescent"])
             self.assertTrue(
