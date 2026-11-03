@@ -512,8 +512,12 @@ operation and acquires its partition recovery lock only afterward. Native and
 rootless tests must prove a second lock attempt returns
 `EWOULDBLOCK`/`EAGAIN`, release permits a later holder, a held package lock
 blocks package mutation without installing bytes, and source contracts bind the
-C and shell lock paths. The owned-null_blk lifecycle rehearsal uses a private
-token-bound lock directory and must not contend on the host production lock.
+C and shell lock paths. Native production-C policy coverage must additionally
+start with an absent mutation-lock directory, prove the lifecycle helper creates
+that exact directory, acquires/releases its lock, and can remove the private
+fixture afterward; this models `/run` being cleared across reboot. The
+owned-null_blk lifecycle rehearsal uses a private token-bound lock directory and
+must not contend on the host production lock.
 
 On Secure Boot-enabled hosts, stage 1 uses the same root-build signing hook as
 `make` and must leave the experimental `dm-swapz.ko` signed before any
