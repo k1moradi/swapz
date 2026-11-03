@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import statistics
 from pathlib import Path
 
@@ -439,6 +440,25 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
                 "qualification protocol differs from workload contract")
         preserved.append(saved)
 
+    # Check all attempts, including failed and excluded records. No pair can
+    # be promoted by pooling results from different source revisions.
+    sources = [row.get("source_sha") for row in preserved]
+    campaign_source_sha = (
+        sources[0] if sources and type(sources[0]) is str and
+        re.fullmatch(r"[0-9a-f]{40}", sources[0]) and
+        all(source == sources[0] for source in sources) else None)
+    for row in preserved:
+        raw = row.get("raw")
+        swapz = row.get("swapz")
+        if (campaign_source_sha is None or
+                not isinstance(raw, dict) or
+                not isinstance(swapz, dict) or
+                raw.get("source_sha") != campaign_source_sha or
+                swapz.get("source_sha") != campaign_source_sha):
+            row["analysis_usable"] = False
+            row["analysis_exclusion_reasons"].append(
+                "campaign requires one exact source SHA across every attempted arm")
+
     has_amendment_records = any(
         row["workload"] in AMENDMENT["workloads"] for row in preserved)
     if protocol == "v1" and has_amendment_records:
@@ -464,13 +484,27 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
 
     decisions, overall = {}, True
     for name, spec in evaluation_workloads.items():
-        rows = [row for row in preserved if row["workload"] == name and row["analysis_usable"]]
+        attempts = [row for row in preserved if row["workload"] == name]
+        rows = [row for row in attempts if row["analysis_usable"]]
         required = spec["pairs"]
-        order_ok = (sorted(row.get("pair_index") for row in rows) == list(range(1, required + 1)) and
-                    all(row.get("order") == spec["counterbalanced_order"][row["pair_index"] - 1] for row in rows))
-        if len(rows) != required or not order_ok:
+        pair_indices = [row.get("pair_index") for row in attempts]
+        order_ok = (
+            len(attempts) == required and
+            all(type(index) is int for index in pair_indices) and
+            sorted(pair_indices) == list(range(1, required + 1)) and
+            all(row.get("order") == spec["counterbalanced_order"][row["pair_index"] - 1]
+                for row in attempts))
+        pair_ids = [row.get("pair_id") for row in attempts]
+        pair_ids_unique = (
+            all(type(pair_id) is str and pair_id for pair_id in pair_ids) and
+            len(set(pair_ids)) == len(pair_ids))
+        # A failed/excluded attempt followed by a passing replacement must
+        # never qualify: count all recorded attempts, not only usable rows.
+        if len(rows) != required or not order_ok or not pair_ids_unique:
             decision = {"status": "INCOMPLETE", "accepted_pairs": len(rows),
-                        "required_pairs": required, "prospective_order_complete": order_ok,
+                        "attempted_pairs": len(attempts), "required_pairs": required,
+                        "prospective_order_complete": order_ok,
+                        "pair_ids_unique": pair_ids_unique,
                         "raw_repeat_spread": raw_spread.get(name)}
         elif spec["evidence"] == "statistical_paired":
             decision = service_decision(rows, name)
@@ -486,6 +520,7 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
             "prospective_amendment": amendment(),
             "amendment_active": include_amendment,
             "evaluation_protocol": "v2" if include_amendment else "v1",
+            "campaign_source_sha": campaign_source_sha,
             "status": "PASS" if overall else "FAIL_OR_INCOMPLETE",
             "decisions": decisions, "raw_repeat_spread": raw_spread, "records": preserved}
 

@@ -614,7 +614,11 @@ fraction <=25%, CPU PSI \`some\` <=5% and steal <=1%; timed-arm steal must also 
 <=1%. Across each five-pair service cohort, raw useful-WRITE max/min spread must be
 <=10%. A noisy, missing-counter, failed or excluded sample is retained with its
 reason and is never automatically retried. Fewer than all prospectively fixed
-pairs is incomplete evidence.
+pairs is incomplete evidence. The evaluator counts **all recorded attempts**:
+additional failed/excluded attempts cannot be hidden behind a complete set of
+passing replacements. Pair IDs must be distinct within each workload, every
+attempt must match the same exact source SHA (including its raw/swapz arms),
+and mixed-source campaigns are incomplete rather than pooled.
 
 For each five-pair service cohort, PASS requires the paired 95% interval lower
 bound for useful WRITE to be at least +5%; interval upper bounds for normalized

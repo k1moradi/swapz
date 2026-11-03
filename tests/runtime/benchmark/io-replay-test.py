@@ -2435,6 +2435,47 @@ class PairReplayContract(unittest.TestCase):
             not row["analysis_usable"] for row in summary["records"]
             if row["workload"] == "sd-service-balanced"))
 
+        stable_pairs = [
+            qualification.compare_pair(
+                arm("raw"), arm("swapz"), "sd-service-balanced",
+                f"stable-{index}", index, orders[index - 1])
+            for index in range(1, 6)]
+        stable = qualification.evaluate(stable_pairs)
+        self.assertEqual(stable["campaign_source_sha"], "a" * 40)
+        self.assertEqual(stable["decisions"]["sd-service-balanced"]["status"], "PASS")
+
+        # An excluded original cannot be hidden by a full set of later PASS
+        # attempts. Preserve the original attempt and block promotion.
+        masked = qualification.evaluate([*stable_pairs, excluded])
+        self.assertEqual(
+            masked["decisions"]["sd-service-balanced"]["status"], "INCOMPLETE")
+        self.assertEqual(
+            masked["decisions"]["sd-service-balanced"]["attempted_pairs"], 6)
+        self.assertEqual(len(masked["records"]), 6)
+
+        # All source revisions must match across the entire campaign.
+        mixed_pairs = list(stable_pairs)
+        mixed_pairs[1] = qualification.compare_pair(
+            {**arm("raw"), "source_sha": "b" * 40},
+            {**arm("swapz"), "source_sha": "b" * 40},
+            "sd-service-balanced", "mixed-revision", 2, orders[1])
+        mixed = qualification.evaluate(mixed_pairs)
+        self.assertIsNone(mixed["campaign_source_sha"])
+        self.assertEqual(
+            mixed["decisions"]["sd-service-balanced"]["status"], "INCOMPLETE")
+        self.assertTrue(all(
+            not pair["analysis_usable"] for pair in mixed["records"]))
+
+        # Pair IDs must identify distinct attempted repeats.
+        duplicate_ids = list(stable_pairs)
+        duplicate_ids[1] = {
+            **stable_pairs[1], "pair_id": stable_pairs[0]["pair_id"]}
+        duplicate = qualification.evaluate(duplicate_ids)
+        self.assertEqual(
+            duplicate["decisions"]["sd-service-balanced"]["status"], "INCOMPLETE")
+        self.assertFalse(
+            duplicate["decisions"]["sd-service-balanced"]["pair_ids_unique"])
+
     def test_sustained_interval_sampler_gc_and_trailing_gap(self):
         import importlib.util
         import time
