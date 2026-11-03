@@ -1308,22 +1308,28 @@ authority reserves 465,984 blocks (1,908,678,144 bytes) for GC. Capacity-index
 arrays are 132,398,304 bytes (126.26 MiB), excluding fixed caches, scratch,
 worker state and allocator overhead. The native boundary regression now passes
 through production authority C, including rejection of the next page and
-initialization of all capacity-dependent authority arrays. This does not
-establish that the loaded target can allocate, reclaim or sustain GC at maximum
-size. The loaded maximum-target constructor has passed on the owner host using
-an owned RAM-backed lower sized to the exact usable geometry. Device discovery
-recorded 667,648 mapper logical READ bytes before the probe's own data phase;
-their userspace source was not identified. Constructor lower statistics and
-physical READ/WRITE counters remained unchanged. The next probe version passed
-on exact source `6ff945e8c5e6671f9ffd6d1920343190ae1e5e28`: it verified byte-exact
-writes and reads at logical page 0 and the final admitted page, using only two
-4 KiB pages of data and revalidating the opened mapper UUID and full table. The
-reported lower deltas were 24,576 READ bytes and 8,192 WRITE bytes, with zero
-target failures. This confirms bounded boundary addressing; it does not fill
-the volume or qualify sustained maximum-size writes, worst-case RAW occupancy,
-GC or Linux `swapon` behavior. The five-stage owner `make test` passed and
-published by report-only commit `d6c1edca3ea21836e01ad0a8c087bfda4aeaf470`.
-Qualified artifact hashes are formatter
+initialization of all capacity-dependent authority arrays. It does not
+establish that the loaded target can allocate, reclaim or sustain GC at this
+new maximum. The previous loaded maximum-target constructor and boundary probe
+ran on exact source `6ff945e8c5e6671f9ffd6d1920343190ae1e5e28`, whose authority
+used the older `ceil(logical_pages / 4)` policy and admitted 3,355,136 pages
+(13,742,637,056 bytes). That owner `make test` and its report-only publication
+`d6c1edca3ea21836e01ad0a8c087bfda4aeaf470` remain valid historical evidence for
+that older limit; they do not qualify the new `/8` maximum. No owner `make test`
+has yet qualified this capacity-policy change.
+
+On that older source, the loaded maximum-target constructor used an owned
+RAM-backed lower sized to the then-usable geometry. Device discovery recorded
+667,648 mapper logical READ bytes before the probe's own data phase; their
+userspace source was not identified. Constructor lower statistics and physical
+READ/WRITE counters remained unchanged. The boundary probe verified byte-exact
+writes and reads at logical page 0 and the old final admitted page, using only
+two 4 KiB pages of data and revalidating the opened mapper UUID and full table.
+Its reported lower deltas were 24,576 READ bytes and 8,192 WRITE bytes, with
+zero target failures. This confirms bounded old-limit boundary addressing; it
+does not fill the volume or qualify sustained maximum-size writes, worst-case
+RAW occupancy, GC or Linux `swapon` behavior. The historical qualified artifact
+hashes are formatter
 `7f38c6f4226142ceb0c655009f0917d7370ccd0aac7a5db110148b1a861e00e0`, module
 `e9001e487e3a86f2404c716f69bb01aa4cc4676f4a5f869201468d1a91850d67`, and
 oracle `f47c6f9c9ca97d4d580e0a2d88efcb41cca8d34f4a35e0456a4a4d9a6e85ffe8`.
