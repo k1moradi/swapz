@@ -5022,6 +5022,15 @@ retained old host snapshot must be labeled HISTORICAL and cannot become a
 current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
+Owner `test_results.json` ingestion is strict: the stage list must contain
+exactly the five canonical stages in order, each with `status: PASS` and an
+integer `exit_code: 0`; duplicate, reordered, missing, extra, or internally
+contradictory stage rows are BLOCKED. The qualified-artifact object accepts
+only its status plus formatter/module/oracle SHA-256 fields. The
+`unresolved_critical_issues` release record must carry a real JSON integer
+count exactly equal to zero; booleans, strings, negative values, null, and
+nonzero counts are BLOCKED.
+
 The executable evaluator's process success is stricter than the pre-reboot
 readiness fields: it returns 0 only when the full `release_verdict` is PASS,
 which requires code PASS, deployment PASS and a current owner-observed cold-boot

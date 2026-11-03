@@ -554,16 +554,28 @@ def evaluate_release(
     if not isinstance(stages, list):
         block_code("owner qualification stages are missing")
     else:
-        by_name = {
-            row.get("name"): row.get("status")
-            for row in stages if isinstance(row, dict)
-        }
-        if any(by_name.get(name) != "PASS" for name in REQUIRED_STAGES):
-            block_code("one or more mandatory owner qualification stages are not PASS")
+        stage_rows = [row for row in stages if isinstance(row, dict)]
+        stage_names = [row.get("name") for row in stage_rows]
+        if (
+                len(stage_rows) != len(REQUIRED_STAGES) or
+                stage_names != list(REQUIRED_STAGES)):
+            block_code(
+                "owner qualification stage set/order is not exactly canonical")
+        elif any(
+                row.get("status") != "PASS" or
+                type(row.get("exit_code")) is not int or
+                row.get("exit_code") != 0
+                for row in stage_rows):
+            block_code(
+                "one or more mandatory owner qualification stages are not "
+                "PASS with exit code 0")
     if not isinstance(report_hashes, dict) or             report_hashes.get("status") != "AVAILABLE":
         block_code("qualified artifact hashes are unavailable")
         report_artifacts = None
     else:
+        expected_artifact_fields = {"status", *ARTIFACT_KEYS}
+        if set(report_hashes) != expected_artifact_fields:
+            block_code("qualified artifact hash record is non-canonical")
         report_artifacts = {
             key: report_hashes.get(key) for key in ARTIFACT_KEYS}
         if not _valid_hash_mapping(report_artifacts):
@@ -688,8 +700,11 @@ def evaluate_release(
                 "owned_nullblk_qualification: module/oracle artifact binding mismatch")
 
     critical = pass_record("unresolved_critical_issues")
-    if critical is not None and critical.get("count") != 0:
-        block_code("unresolved critical correctness issues remain")
+    if critical is not None and (
+            type(critical.get("count")) is not int or
+            critical.get("count") != 0):
+        block_code(
+            "unresolved critical correctness issue count is not integer zero")
 
     def require_target(name: str, record: dict[str, Any] | None,
                        *, deployment: bool = False) -> None:

@@ -74,7 +74,7 @@ def owner_report():
             **dict(ARTIFACTS),
         },
         "stages": [
-            {"name": name, "status": "PASS"}
+            {"name": name, "status": "PASS", "exit_code": 0}
             for name in EVALUATOR.REQUIRED_STAGES
         ],
     }
@@ -619,12 +619,52 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
     def test_unresolved_critical_issue_blocks_code_readiness(self):
         report = owner_report()
         policy = acceptance_policy()
-        evidence = current_evidence(encoded(report), encoded(policy))
-        evidence["release_evidence"]["unresolved_critical_issues"]["count"] = 1
-        result = evaluate(report, evidence, policy)
+        for bad_count in (1, -1, False, "0", None):
+            with self.subTest(count=bad_count):
+                evidence = current_evidence(encoded(report), encoded(policy))
+                evidence["release_evidence"]["unresolved_critical_issues"][
+                    "count"] = bad_count
+                result = evaluate(report, evidence, policy)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    "critical correctness issue count is not integer zero"
+                    in blocker for blocker in result["code_blockers"]))
+
+    def test_owner_report_stage_set_order_status_and_exit_are_exact(self):
+        policy = acceptance_policy()
+
+        report = owner_report()
+        report["stages"][-1]["name"] = report["stages"][0]["name"]
+        result = evaluate(report, policy=policy)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertTrue(any(
-            "critical correctness" in blocker
+            "stage set/order is not exactly canonical" in blocker
+            for blocker in result["code_blockers"]))
+
+        report = owner_report()
+        report["stages"][2]["exit_code"] = 1
+        result = evaluate(report, policy=policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "PASS with exit code 0" in blocker
+            for blocker in result["code_blockers"]))
+
+        report = owner_report()
+        report["stages"].append(
+            {"name": "Unexpected stage", "status": "PASS", "exit_code": 0})
+        result = evaluate(report, policy=policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "stage set/order is not exactly canonical" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_owner_artifact_hash_record_rejects_unknown_fields(self):
+        report = owner_report()
+        report["qualified_artifacts"]["unexpected"] = "field"
+        result = evaluate(report)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "artifact hash record is non-canonical" in blocker
             for blocker in result["code_blockers"]))
 
     def test_deployment_evidence_does_not_backfill_code_readiness(self):
