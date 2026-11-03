@@ -1669,6 +1669,10 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = "owned RAM packed placement verification"
             elif line.startswith("START_LOADED_COMPLETION_HANDOFF"):
                 phase = "owned RAM published completion handoff/drain/failure"
+            elif (match := re.fullmatch(
+                    r"START_LOADED_PRIMARY_NULLBLK_LIFECYCLE="
+                    r"(setup|prepare|start|stop)", line)):
+                phase = "owned RAM primary lifecycle " + match.group(1)
             elif line.startswith("START_LOADED_PRIMARY_NULLBLK_LIFECYCLE"):
                 phase = "owned RAM primary lifecycle rehearsal"
             elif (match := re.fullmatch(

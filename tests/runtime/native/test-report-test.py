@@ -3134,6 +3134,15 @@ class ReportContract(unittest.TestCase):
                 "FAIL_PRIMARY_NULLBLK_LIFECYCLE: private detail"),
             "FAIL_PRIMARY_NULLBLK_LIFECYCLE")
 
+        start_subphase = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=start\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: coordinator start failed\n"
+        )
+        phase, reason = runner.failure_context(start_subphase)
+        self.assertEqual(phase, "owned RAM primary lifecycle start")
+        self.assertIn("coordinator start failed", reason)
+
         interrupted = (
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
             "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:redacted\n"

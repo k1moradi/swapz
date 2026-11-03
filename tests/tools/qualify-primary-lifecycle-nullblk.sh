@@ -381,6 +381,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
+note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=setup"
 install -d -m 0700 "$TEST_BASE" "$CONFIG_BASE" "$RECOVERY_BASE" \
 	"$PREFIX" "$PREFIX/sbin" "$PREFIX/libexec" "$PREFIX/libexec/swapz"
 TEST_BASE_CREATED=1
@@ -573,6 +574,7 @@ blockdev --flushbufs "$PARTITION" ||
 printf 'PARTUUID=%s\n' "$PARTUUID" > "$CONFIG_BASE/primary-target"
 chmod 0600 "$CONFIG_BASE/primary-target"
 
+note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare"
 if ! prepare_output="$("$CONTROL" primary prepare 2>&1)"; then
 	printf '%s\n' "$prepare_output" >&2
 	fail "production coordinator prepare failed on owned null_blk"
@@ -586,6 +588,7 @@ RUN_ID="$(printf '%s\n' "$prepare_output" |
    -f "$RECOVERY_BASE/primary-manifest-$RUN_ID.txt" ]] ||
 	fail "prepare did not persist consumed provenance and immutable manifest"
 
+note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=start"
 if ! start_output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary start 2>&1)"; then
 	printf '%s\n' "$start_output" >&2
 	fail "production coordinator start failed on owned null_blk"
@@ -628,6 +631,7 @@ done < /proc/swaps
 [[ "$active_mapper_entries" == 1 ]] ||
 	fail "manager-created mapper is not the unique active swap identity"
 
+note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=stop"
 if ! stop_output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary stop 2>&1)"; then
 	printf '%s\n' "$stop_output" >&2
 	fail "production coordinator stop failed on owned null_blk"

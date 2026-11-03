@@ -692,9 +692,11 @@ lifecycle helper's fixed `FAIL_PRIMARY_NULLBLK_LIFECYCLE:` and
 diagnostics: the reporter must retain the marker plus a bounded sanitized reason,
 while stripping paths, long IDs and arbitrary host-specific text. Live progress
 may print only the fixed marker label, never its private detail. Failure-phase
-attribution must recognize the primary lifecycle rehearsal and its named
+attribution must recognize the primary lifecycle rehearsal, its fixed
+`setup`/`prepare`/`start`/`stop` subphase markers, and its named
 interruption phase before any later benchmark-fixture default can overwrite the
-operator-visible failure location.
+operator-visible failure location. The subphase markers carry no device identity,
+run ID or path.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 
