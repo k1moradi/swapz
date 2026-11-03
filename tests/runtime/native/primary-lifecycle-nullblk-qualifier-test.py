@@ -104,6 +104,8 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
     def test_cleanup_quarantines_unfinished_durable_state(self):
         self.assertIn("unfinished_or_ambiguous_durable_state", self.script)
         self.assertIn("unresolved_owner_record", self.script)
+        self.assertIn("actual_bytes == canonical_bytes", self.script)
+        self.assertIn("payload != canonical_bytes", self.script)
 
     def test_fault_shim_is_warning_clean(self):
         subprocess.run(

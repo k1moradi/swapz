@@ -254,10 +254,12 @@ def canonical_owned_record(path):
             stat.S_IMODE(identity.st_mode) != 0o600 or identity.st_nlink != 1):
         raise ValueError("unsafe transaction record identity")
     payload = path.read_bytes()
-    record = json.loads(payload)
-    if record != {"major": major, "minor": minor,
-                  "partuuid": partuuid, "run_id": run_id}:
-        raise ValueError("wrong transaction owner")
+    canonical_bytes = (
+        '{"major":' + str(major) + ',"minor":' + str(minor) +
+        ',"partuuid":"' + partuuid + '","run_id":"' + run_id + '"}\n'
+    ).encode("ascii")
+    if payload != canonical_bytes:
+        raise ValueError("noncanonical or wrong transaction owner")
     return payload
 
 consumed_bytes = canonical_owned_record(consumed)
@@ -883,10 +885,20 @@ import sys
 try:
     with open(sys.argv[1], "r", encoding="utf-8") as state_file:
         state = json.load(state_file)
+    previous = state.get("recovery_previous_stage")
+    if previous not in (None, "STARTING", "STOPPING"):
+        raise ValueError("invalid recovery provenance")
+    previous_token = "null" if previous is None else '"' + previous + '"'
+    canonical_bytes = (
+        '{"schema":"swapz-primary-state-v1","run_id":"' +
+        sys.argv[2] + '","stage":"COMPLETE",'
+        '"recovery_previous_stage":' + previous_token + '}\n'
+    ).encode("ascii")
+    with open(sys.argv[1], "rb") as state_file:
+        actual_bytes = state_file.read()
     valid = (state.get("run_id") == sys.argv[2] and
              state.get("stage") == "COMPLETE" and
-             state.get("recovery_previous_stage") in
-             (None, "STARTING", "STOPPING"))
+             actual_bytes == canonical_bytes)
 except (OSError, ValueError, TypeError, AttributeError):
     valid = False
 raise SystemExit(0 if valid else 1)

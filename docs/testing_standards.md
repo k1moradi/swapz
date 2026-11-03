@@ -4158,8 +4158,9 @@ stale-run-ID fixture must mutate only the run-ID field of the original canonical
 state record, preserving every other byte so a rejection proves transaction
 ownership rather than JSON-parser strictness. For denied recovery, unchanged
 kernel inventory must be accompanied by byte-identical durable owner claims
-and state. Teardown must quarantine an unfinished READY transaction, an
-unparseable or non-COMPLETE durable record, or an orphan owner marker even when
+and state. Teardown must quarantine an unfinished READY transaction, a durable record
+that fails byte-exact canonical COMPLETE serialization (even if a permissive
+JSON decoder accepts it), a noncanonical owner claim, or an orphan owner marker even when
 the module and mapper are already absent; no test cleanup may discard the last
 recovery provenance. The validated source SHA must name the current checkout.
 
