@@ -16,6 +16,7 @@ AUTH = (ROOT / "src/kernel/authority.c").read_text()
 CODEC = (ROOT / "src/kernel/codec.c").read_text()
 MK = (ROOT / "src/kernel/Makefile").read_text()
 README = (ROOT / "docs/README.md").read_text()
+PRIMARY = (ROOT / "src/userspace/swapz-primary.c").read_text()
 
 
 def body(symbol: str) -> str:
@@ -53,6 +54,20 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_primary_manager_target_is_runtime_selected(self):
+        # Historical trial paths and device numbers may appear in fixtures or
+        # recovery documentation, but must never become production manager
+        # constants. The configured PARTUUID is resolved and its observed
+        # identity/geometry is carried through the transaction manifest.
+        for fixed_target in (
+                "/dev/sda4", "8:4", "17179869184"):
+            self.assertNotIn(fixed_target, PRIMARY)
+        self.assertIn("swapz_primary_selected_target.device_bytes", PRIMARY)
+        self.assertIn("swapz_primary_selected_target.device_major", PRIMARY)
+        self.assertIn("swapz_primary_selected_target.device_minor", PRIMARY)
+        self.assertIn("swapz_primary_configured_target(&target)", PRIMARY)
+        self.assertIn("manifest.target = target", PRIMARY)
+
     def test_lane_gap_observation_only_and_single_owner(self):
         header = (ROOT / "src/kernel/lane-gap.h").read_text()
         engine_header = (ROOT / "src/kernel/engine.h").read_text()
