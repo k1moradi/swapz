@@ -312,17 +312,16 @@ static int swapz_gc_account_transition_commit(struct swapz_authority *a,
 	return 0;
 }
 
-int swapz_authority_init(struct swapz_authority *a,
-			 struct swapz_map *maps, swapz_u16 *live_records,
-			 swapz_u8 *extent_classes, swapz_u32 logical_pages,
-			 swapz_u32 physical_blocks)
+int swapz_authority_validate_geometry(swapz_u32 logical_pages,
+				      swapz_u32 physical_blocks,
+				      swapz_u32 *reserve_blocks)
 {
 	swapz_u32 reserve;
 
-	if (!a || !maps || !live_records || !extent_classes ||
-	    !logical_pages || physical_blocks < 3U * SWAPZ_SEGMENT_BLOCKS ||
+	if (!logical_pages || physical_blocks < 3U * SWAPZ_SEGMENT_BLOCKS ||
 	    physical_blocks % SWAPZ_SEGMENT_BLOCKS)
 		return -EINVAL;
+	/* Division before addition keeps ceil(logical_pages / 8) in u32. */
 	reserve = (logical_pages / 8U) + (logical_pages % 8U != 0);
 	if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)
 		reserve = 2U * SWAPZ_SEGMENT_BLOCKS;
@@ -330,6 +329,25 @@ int swapz_authority_init(struct swapz_authority *a,
 	    logical_pages > ((physical_blocks - reserve) /
 			     SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS)
 		return -ENOSPC;
+	if (reserve_blocks)
+		*reserve_blocks = reserve;
+	return 0;
+}
+
+int swapz_authority_init(struct swapz_authority *a,
+			 struct swapz_map *maps, swapz_u16 *live_records,
+			 swapz_u8 *extent_classes, swapz_u32 logical_pages,
+			 swapz_u32 physical_blocks)
+{
+	swapz_u32 reserve;
+	int error;
+
+	if (!a || !maps || !live_records || !extent_classes)
+		return -EINVAL;
+	error = swapz_authority_validate_geometry(logical_pages, physical_blocks,
+						 &reserve);
+	if (error)
+		return error;
 
 	memset(a, 0, sizeof(*a));
 	memset(maps, 0, (size_t)logical_pages * sizeof(*maps));

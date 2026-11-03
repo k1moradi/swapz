@@ -254,6 +254,14 @@ int swapz_gc_begin_rotation(struct swapz_authority *authority, swapz_u32 victim)
  * Leaves foreground cursor inside new (formerly reserve) destination. */
 int swapz_gc_commit_rotation(struct swapz_authority *authority, swapz_u32 victim);
 
+/*
+ * Allocation-free geometry gate for callers that provision capacity-dependent
+ * arrays. swapz_authority_init() rechecks this exact policy before touching
+ * caller memory. reserve_blocks may be NULL when only admission is needed.
+ */
+int swapz_authority_validate_geometry(swapz_u32 logical_pages,
+				      swapz_u32 physical_blocks,
+				      swapz_u32 *reserve_blocks);
 /* Returns -ENOSPC unless capacity supports logical pages plus GC reserve. */
 int swapz_authority_init(struct swapz_authority *authority,
 		       struct swapz_map *maps, swapz_u16 *live_records,

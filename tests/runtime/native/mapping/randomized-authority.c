@@ -41,11 +41,13 @@ static swapz_u8 data_store[SWAPZ_MAX_RECORDS][SWAPZ_MAX_COMPRESSED];
 static swapz_u8 output[SWAPZ_MAX_COMPRESSED];
 static swapz_u8 reference[LOGICAL_PAGES][SWAPZ_MAX_COMPRESSED];
 static swapz_u16 reference_length[LOGICAL_PAGES];
+static swapz_u32 reference_generation[LOGICAL_PAGES];
 static int reference_valid[LOGICAL_PAGES];
 static struct swapz_compressed_page pages[SWAPZ_MAX_RECORDS];
 static struct swapz_engine engine;
 static struct memory_disk disk;
 static uint32_t random_state = 0x0d3a5eedU;
+static uint32_t transition_random_state = 0xa17e4c39U;
 
 static uint32_t next_random(void)
 {
@@ -53,6 +55,14 @@ static uint32_t next_random(void)
 	random_state ^= random_state >> 17;
 	random_state ^= random_state << 5;
 	return random_state;
+}
+
+static uint32_t next_transition_random(void)
+{
+	transition_random_state ^= transition_random_state << 13;
+	transition_random_state ^= transition_random_state >> 17;
+	transition_random_state ^= transition_random_state << 5;
+	return transition_random_state;
 }
 
 static int lower_write(void *opaque, swapz_u32 start, swapz_u8 blocks,
@@ -92,6 +102,7 @@ static int lower_read(void *opaque, swapz_u32 start, swapz_u8 blocks,
 static int initialize_engine(unsigned read_cap)
 {
 	memset(reference_length, 0, sizeof(reference_length));
+	memset(reference_generation, 0, sizeof(reference_generation));
 	memset(reference_valid, 0, sizeof(reference_valid));
 	disk.write_calls = 0;
 	disk.write_blocks = 0;
@@ -114,15 +125,31 @@ static int initialize_engine(unsigned read_cap)
 	return 0;
 }
 
+static int validate_page_authority(unsigned logical_page)
+{
+	const struct swapz_map *map = &maps[logical_page];
+
+	if (map->generation != reference_generation[logical_page] ||
+	    !!map->valid != !!reference_valid[logical_page])
+		return -1;
+	if (!map->valid)
+		return 0;
+	if (map->raw || !map->extent_blocks ||
+	    map->start_block >= PHYSICAL_BLOCKS ||
+	    classes[map->start_block] != map->extent_blocks ||
+	    !live[map->start_block])
+		return -1;
+	return 0;
+}
+
 static int verify_page(unsigned logical_page)
 {
 	swapz_u16 output_length = 0;
-	int result;
+	int result = swapz_engine_read_page(&engine, logical_page, output,
+					    sizeof(output), &output_length);
 
 	if (!reference_valid[logical_page])
-		return 0;
-	result = swapz_engine_read_page(&engine, logical_page, output,
-				      sizeof(output), &output_length);
+		return result == -ESTALE ? 0 : -1;
 	if (result || output_length != reference_length[logical_page] ||
 	    memcmp(output, reference[logical_page], output_length)) {
 		fprintf(stderr,
@@ -136,6 +163,7 @@ static int verify_page(unsigned logical_page)
 
 static void update_reference(const struct swapz_compressed_page *page)
 {
+	reference_generation[page->logical_page]++;
 	reference_valid[page->logical_page] = 1;
 	reference_length[page->logical_page] = page->length;
 	memcpy(reference[page->logical_page], page->payload, page->length);
@@ -197,10 +225,31 @@ int main(void)
 			CHECK(!authority.in_flight);
 			for (unsigned i = 0; i < count; i++) {
 				update_reference(&pages[i]);
+				CHECK(validate_page_authority(
+					      pages[i].logical_page) == 0);
 				CHECK(verify_page(pages[i].logical_page) == 0);
 			}
-			for (unsigned sample = 0; sample < 4; sample++)
-				CHECK(verify_page(next_random() % LOGICAL_PAGES) == 0);
+			for (unsigned sample = 0; sample < 4; sample++) {
+				unsigned logical_page =
+					next_random() % LOGICAL_PAGES;
+
+				CHECK(validate_page_authority(logical_page) == 0);
+				CHECK(verify_page(logical_page) == 0);
+			}
+			/* Randomized WRITE/overwrite/DISCARD/read state machine.
+			 * DISCARD advances generation even for an already-empty slot. */
+			if ((next_transition_random() & 3U) == 0U) {
+				unsigned logical_page =
+					next_transition_random() % LOGICAL_PAGES;
+
+				CHECK(swapz_discard_page(&authority,
+						       logical_page) == 0);
+				reference_generation[logical_page]++;
+				reference_valid[logical_page] = 0;
+				reference_length[logical_page] = 0;
+				CHECK(validate_page_authority(logical_page) == 0);
+				CHECK(verify_page(logical_page) == 0);
+			}
 		}
 
 		/* Duplicate logical IDs must occupy separate planned extents. */
@@ -228,7 +277,9 @@ int main(void)
 			CHECK(swapz_engine_write_window_batched(&engine, pages, 2,
 						      &committed) == 0);
 			CHECK(committed == 2);
+			update_reference(&pages[0]);
 			update_reference(&pages[1]);
+			CHECK(validate_page_authority(7) == 0);
 			CHECK(verify_page(7) == 0);
 		}
 
@@ -263,6 +314,8 @@ int main(void)
 			for (unsigned i = 0; i < 16; i++) {
 				if (i < prefix)
 					update_reference(&pages[i]);
+				CHECK(validate_page_authority(
+					      pages[i].logical_page) == 0);
 				CHECK(verify_page(pages[i].logical_page) == 0);
 			}
 			CHECK(authority.abandoned_blocks > 0);

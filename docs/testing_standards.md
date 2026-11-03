@@ -353,6 +353,24 @@ worst-case RAW/GC tests pass, report the value as a
 source-derived authority admission limit and keep maximum-capacity operation
 unqualified.
 
+The direct authority suite must also run an allocation-free preflight for the
+currently selected-card geometry recorded in AGENT_CONTEXT.md; this is a
+source-level sizing oracle, not a host allocation attempt. For the current
+124,787,884,032-byte partition, reserving physical block zero and rounding the
+remainder down to 1MiB segments yields 30,465,536 physical data blocks and
+119,006 segments. The maximum admitted logical capacity is 27,080,448 pages
+(110,921,515,008 mapper bytes), with maximum logical index 27,080,447 and
+3,385,056 reserve blocks. The first page beyond that limit must fail
+allocation-free with `-ENOSPC`. Capacity-index payload is 776,077,112 bytes
+(740.1248 MiB); on a 4KiB-page host, independently rounding each current array
+to an allocation-page boundary is 776,118,272 bytes, 41,160 bytes of page
+rounding. The largest one is the 433,287,168-byte mapping array. vmalloc
+metadata, page tables, fixed target scratch/caches/workspaces and allocator
+implementation overhead remain outside those figures and require loaded-host
+measurement. The same preflight must exercise an aligned near-`u32` physical
+geometry without allocating it, proving reserve arithmetic and one-past-limit
+rejection do not truncate or wrap.
+
 The `/8` reserve change updates the admitted-capacity policy, not the serialized
 SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
 1; no on-media capacity capability or format-version field is added. A maximum

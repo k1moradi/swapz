@@ -264,9 +264,12 @@ Unless evidence changes the order, work on:
 4. maximum safe full-card capacity and bounded metadata RAM. The current
    `/dev/sda1` geometry admits 27,080,448 logical pages; a 16-byte map plus
    compact per-extent sequence index reduces the source-derived capacity-index
-   lower bound from the 20-byte-map estimate of 813.92 MiB to 740.12 MiB
-   (73.80 MiB saved net of the sequence index). This estimate excludes fixed
-   target scratch, caches, workspaces and allocator overhead. It is not proof
+   lower bound from the 20-byte-map estimate of 813.92 MiB to 776,077,112 bytes
+   (740.1248 MiB, 73.80 MiB saved net of the sequence index). Independently
+   rounding each current array to 4KiB allocation pages yields 776,118,272
+   bytes; the largest single array is the 433,287,168-byte mapping table. These
+   figures exclude fixed target scratch, caches, workspaces, vmalloc metadata,
+   page tables and allocator implementation overhead. They are not proof
    that a full-capacity live target fits available RAM; measure actual
    allocation and peak memory before advertising or activating that capacity.
    Recalculate from the runtime-selected geometry if the protected PARTUUID

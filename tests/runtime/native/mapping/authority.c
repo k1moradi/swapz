@@ -56,6 +56,34 @@ static int encode(const struct swapz_tx *tx)
 	return swapz_seal(&b) != 0;
 }
 
+static swapz_u32 maximum_admitted_logical_pages(swapz_u32 physical_blocks)
+{
+	swapz_u32 low = 1U, high = physical_blocks, maximum = 0;
+
+	while (low <= high) {
+		swapz_u32 middle = low + (high - low) / 2U;
+		int error = swapz_authority_validate_geometry(middle,
+							      physical_blocks,
+							      NULL);
+
+		if (!error) {
+			maximum = middle;
+			low = middle + 1U;
+		} else {
+			if (error != -ENOSPC)
+				return 0;
+			high = middle - 1U;
+		}
+	}
+	return maximum;
+}
+
+static swapz_u64 round_up_4k(swapz_u64 bytes)
+{
+	return (bytes + (SWAPZ_BLOCK_BYTES - 1U)) &
+	       ~((swapz_u64)SWAPZ_BLOCK_BYTES - 1U);
+}
+
 static int test_initial_rejects_unsafe_capacity(void)
 {
 	struct swapz_authority a;
@@ -66,6 +94,94 @@ static int test_initial_rejects_unsafe_capacity(void)
 	CHECK(swapz_authority_init(&a, maps, live, classes, 64, 768) == 0);
 	CHECK(a.reserve_blocks == 512);
 	CHECK(a.next_block == 0);
+	return 0;
+}
+
+static int test_selected_card_geometry_and_memory_scaling(void)
+{
+	const swapz_u64 partition_bytes = 124787884032ULL;
+	const swapz_u32 expected_physical_blocks = 30465536U;
+	const swapz_u32 expected_logical_pages = 27080448U;
+	const swapz_u32 expected_reserve_blocks = 3385056U;
+	const swapz_u32 expected_segments = 119006U;
+	const swapz_u64 expected_mapper_bytes = 110921515008ULL;
+	const swapz_u64 expected_index_bytes = 776077112ULL;
+	const swapz_u64 expected_page_rounded_bytes = 776118272ULL;
+	const swapz_u64 expected_largest_allocation = 433287168ULL;
+	const swapz_u32 near_u32_physical = 0xffffff00U;
+	const swapz_u32 near_u32_logical = 3817748480U;
+	const swapz_u32 near_u32_reserve = 477218560U;
+	const swapz_u32 total_blocks =
+		(swapz_u32)(partition_bytes / SWAPZ_BLOCK_BYTES);
+	const swapz_u32 physical_blocks =
+		((total_blocks - 1U) / SWAPZ_SEGMENT_BLOCKS) *
+		SWAPZ_SEGMENT_BLOCKS;
+	const swapz_u32 segment_count =
+		physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+	swapz_u64 index_bytes, rounded_bytes;
+	swapz_u32 reserve = 0;
+
+	CHECK(partition_bytes % SWAPZ_BLOCK_BYTES == 0);
+	CHECK(physical_blocks == expected_physical_blocks);
+	CHECK(segment_count == expected_segments);
+	CHECK(maximum_admitted_logical_pages(physical_blocks) ==
+	      expected_logical_pages);
+	CHECK(swapz_authority_validate_geometry(expected_logical_pages,
+						 physical_blocks,
+						 &reserve) == 0);
+	CHECK(reserve == expected_reserve_blocks);
+	reserve = 0xa5a5a5a5U;
+	CHECK(swapz_authority_validate_geometry(expected_logical_pages + 1U,
+						 physical_blocks,
+						 &reserve) == -ENOSPC);
+	CHECK(reserve == 0xa5a5a5a5U);
+	CHECK(expected_logical_pages - 1U == 27080447U);
+	CHECK((swapz_u64)expected_logical_pages * SWAPZ_BLOCK_BYTES ==
+	      expected_mapper_bytes);
+
+	index_bytes = (swapz_u64)expected_logical_pages *
+		(sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)) +
+		(swapz_u64)physical_blocks *
+		(sizeof(swapz_u16) + 2U * sizeof(swapz_u8)) +
+		(swapz_u64)segment_count *
+		(8U * sizeof(swapz_u32) + sizeof(swapz_u16) +
+		 2U * sizeof(swapz_u8));
+	CHECK(index_bytes == expected_index_bytes);
+	CHECK((swapz_u64)expected_logical_pages * sizeof(struct swapz_map) ==
+	      expected_largest_allocation);
+
+	/* Current x86 host uses 4KiB allocation pages. This is page-rounding
+	 * payload overhead only; vmalloc metadata/page tables remain external. */
+	rounded_bytes =
+		round_up_4k((swapz_u64)expected_logical_pages *
+			    sizeof(struct swapz_map)) +
+		2U * round_up_4k((swapz_u64)expected_logical_pages *
+				 sizeof(swapz_u32)) +
+		round_up_4k((swapz_u64)physical_blocks * sizeof(swapz_u16)) +
+		2U * round_up_4k((swapz_u64)physical_blocks *
+				 sizeof(swapz_u8)) +
+		8U * round_up_4k((swapz_u64)segment_count *
+				 sizeof(swapz_u32)) +
+		round_up_4k((swapz_u64)segment_count * sizeof(swapz_u16)) +
+		2U * round_up_4k((swapz_u64)segment_count *
+				 sizeof(swapz_u8));
+	CHECK(rounded_bytes == expected_page_rounded_bytes);
+	CHECK(rounded_bytes - index_bytes == 41160ULL);
+
+	/* Exercise the top aligned u32 physical geometry without allocating it. */
+	CHECK(maximum_admitted_logical_pages(near_u32_physical) ==
+	      near_u32_logical);
+	CHECK(swapz_authority_validate_geometry(near_u32_logical,
+						 near_u32_physical,
+						 &reserve) == 0);
+	CHECK(reserve == near_u32_reserve);
+	reserve = 0x5a5a5a5aU;
+	CHECK(swapz_authority_validate_geometry(near_u32_logical + 1U,
+						 near_u32_physical,
+						 &reserve) == -ENOSPC);
+	CHECK(reserve == 0x5a5a5a5aU);
+	CHECK(swapz_authority_validate_geometry(1U, 0xffffffffU,
+						 NULL) == -EINVAL);
 	return 0;
 }
 
@@ -289,6 +405,68 @@ static int test_peeked_authoritative_read_rechecks_payload_and_sequence(void)
 					    extent, 8192,
 					    &peeked, &payload) == -EUCLEAN);
 	extent[8] ^= 0x40;
+	return 0;
+}
+
+static int test_inflight_interleavings_preserve_authority(void)
+{
+	const swapz_u32 page[] = {11};
+	const swapz_u32 other_page[] = {12};
+	struct swapz_tx first, pending, forged, blocked, failed;
+	struct swapz_map old, committed;
+	struct swapz_decoded decoded;
+	const swapz_u8 *payload = NULL;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&authority, page, 1, 1, &first) == 0);
+	CHECK(encode(&first) == 0);
+	CHECK(swapz_finish(&authority, &first, extent, SWAPZ_BLOCK_BYTES,
+			   1, 0) == 0);
+	memcpy(previous_extent, extent, SWAPZ_BLOCK_BYTES);
+	old = maps[page[0]];
+
+	CHECK(swapz_stage(&authority, page, 1, 1, &pending) == 0);
+	CHECK(pending.records[0].generation == old.generation + 1U);
+	CHECK(encode(&pending) == 0);
+	CHECK(swapz_discard_page(&authority, page[0]) == -EBUSY);
+	CHECK(swapz_stage(&authority, other_page, 1, 1, &blocked) == -EBUSY);
+	CHECK(maps[page[0]].start_block == old.start_block &&
+	      maps[page[0]].generation == old.generation);
+	CHECK(swapz_peek(previous_extent, SWAPZ_BLOCK_BYTES,
+			 old.record_index, &decoded) == 0);
+	CHECK(swapz_read_authoritative_peeked(&authority, page[0], &old,
+					     previous_extent,
+					     SWAPZ_BLOCK_BYTES,
+					     &decoded, &payload) == 0);
+
+	forged = pending;
+	forged.records[0].generation++;
+	CHECK(swapz_finish(&authority, &forged, extent, SWAPZ_BLOCK_BYTES,
+			   1, 0) == -ESTALE);
+	CHECK(authority.in_flight);
+	CHECK(maps[page[0]].generation == old.generation);
+
+	CHECK(swapz_finish(&authority, &pending, extent, SWAPZ_BLOCK_BYTES,
+			   1, 0) == 0);
+	committed = maps[page[0]];
+	CHECK(committed.valid && committed.generation == old.generation + 1U);
+	CHECK(swapz_read_authoritative_peeked(&authority, page[0], &old,
+					     previous_extent,
+					     SWAPZ_BLOCK_BYTES,
+					     &decoded, &payload) == -ESTALE);
+	CHECK(swapz_finish(&authority, &pending, extent, SWAPZ_BLOCK_BYTES,
+			   1, 0) == -ESTALE);
+
+	CHECK(swapz_discard_page(&authority, page[0]) == 0);
+	CHECK(!maps[page[0]].valid &&
+	      maps[page[0]].generation == committed.generation + 1U);
+	CHECK(swapz_stage(&authority, page, 1, 1, &failed) == 0);
+	CHECK(failed.records[0].generation == committed.generation + 2U);
+	CHECK(encode(&failed) == 0);
+	CHECK(swapz_finish(&authority, &failed, extent, SWAPZ_BLOCK_BYTES,
+			   0, -EIO) == -EIO);
+	CHECK(!maps[page[0]].valid &&
+	      maps[page[0]].generation == committed.generation + 1U);
 	return 0;
 }
 
@@ -709,9 +887,11 @@ int main(void)
 	int passed = 0;
 
 	CHECK(test_initial_rejects_unsafe_capacity() == 0); passed++;
+	CHECK(test_selected_card_geometry_and_memory_scaling() == 0); passed++;
 	CHECK(test_16gib_fixture_maximum_capacity() == 0); passed++;
 	CHECK(test_full_publish_and_authoritative_reads() == 0); passed++;
 	CHECK(test_peeked_authoritative_read_rechecks_payload_and_sequence() == 0); passed++;
+	CHECK(test_inflight_interleavings_preserve_authority() == 0); passed++;
 	CHECK(test_torn_write_no_old_mapping_invalidation() == 0); passed++;
 	CHECK(test_overwrite_generation_and_liveness() == 0); passed++;
 	CHECK(test_last_corrupt_sibling_prevents_all_publication() == 0); passed++;
