@@ -2518,6 +2518,69 @@ class PairReplayContract(unittest.TestCase):
         self.assertFalse(
             duplicate["decisions"]["sd-service-balanced"]["pair_ids_unique"])
 
+
+    def test_physical_sustained_gc_headroom_requires_actual_counter(self):
+        import importlib.util
+
+        path = SCRIPT.with_name("qualification.py")
+        spec = importlib.util.spec_from_file_location(
+            "swapz_sustained_headroom_contract", path)
+        qualification = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(qualification)
+
+        raw = {
+            "throughput": {"logical_write_mbps": 100.0},
+            "lower_io": {
+                "lower_write_bytes_per_logical_write_byte": 1.0,
+                "lower_write_requests_per_1000_logical_writes": 100,
+            },
+            "latency": {"read_p99_ns": 1000, "write_p99_ns": 1000},
+            "cold_read": {"p99_ns": 1000, "pages": 16},
+            "overwrite": {"measured_hot_pages_rewritten": 1},
+        }
+        swapz = {
+            "throughput": {"logical_write_mbps": 110.0},
+            "lower_io": {
+                "lower_write_bytes_per_logical_write_byte": 0.8,
+                "lower_write_requests_per_1000_logical_writes": 80,
+            },
+            "latency": {"read_p99_ns": 1050, "write_p99_ns": 1050},
+            "cold_read": {"p99_ns": 1050, "pages": 16},
+            "minute_buckets": [
+                {"logical_write_mbps": 110.0, "p99_ns": 1000}
+                for _ in range(4)],
+            "gc": {
+                "wall_fraction": 0.05, "gc_no_headroom_skips": 0,
+                "gc_victims": 2, "gc_pages": 10,
+                "segment_program_sum": 3, "failed": 0, "error": 0,
+            },
+            "resources": {
+                "replay_peak_rss_bytes": 32 * 1024 * 1024,
+                "metadata_and_target_peak_ram_bytes": 512 * 1024 * 1024,
+            },
+            "overwrite": {"measured_hot_pages_rewritten": 2},
+            "oracle": {"mismatches": 0},
+            "occupancy_percent": 90,
+            "max_no_progress_seconds": 1.0,
+        }
+        passing = qualification.sustained_decision(
+            {"raw": raw, "swapz": swapz})
+        self.assertEqual(passing["status"], "PASS")
+        self.assertTrue(passing["checks"]["gc_headroom"])
+
+        # A missing/negative/positive counter cannot be interpreted as zero.
+        for observed in (None, -1, 1, True, "0"):
+            with self.subTest(observed=observed):
+                gc = dict(swapz["gc"])
+                if observed is None:
+                    gc.pop("gc_no_headroom_skips")
+                else:
+                    gc["gc_no_headroom_skips"] = observed
+                failed = qualification.sustained_decision(
+                    {"raw": raw, "swapz": {**swapz, "gc": gc}})
+                self.assertEqual(failed["status"], "FAIL")
+                self.assertFalse(failed["checks"]["gc_headroom"])
+
     def test_sustained_interval_sampler_gc_and_trailing_gap(self):
         import importlib.util
         import time

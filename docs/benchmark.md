@@ -527,7 +527,11 @@ hot region with balanced pages at QD16/20% READ for 60 seconds of warmup plus
 then verifies every occupied page. The measured phase reports deterministic
 hot-page touch/rewrite coverage, and both raw and swapz must reach at least one
 second-cycle hot-page overwrite; positive GC counters alone do not prove a
-repeated logical overwrite. Each arm has a 14,400-second scheduler
+repeated logical overwrite.
+The sustained evaluator must read the exact `gc_no_headroom_skips` status
+counter, require its presence as a nonnegative integer, and enforce the frozen
+`gc_no_headroom_skips_max` bound. Missing/negative counters cannot be treated
+as zero skips; this is fail-closed evidence validation, not a new threshold. Each arm has a 14,400-second scheduler
 safety timeout to include the large initial fill and final oracle. One pair is
 directional evidence, never a significance claim.
 

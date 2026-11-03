@@ -415,7 +415,10 @@ def sustained_decision(pair: dict) -> dict:
         "throughput_drift": ratios["throughput_drift"] >= limit["throughput_drift_ratio_min"],
         "p99_drift": ratios["p99_drift"] <= limit["p99_drift_ratio_max"],
         "gc_wall": number(gc.get("wall_fraction"), "gc.wall_fraction") <= limit["gc_wall_fraction_max"],
-        "gc_headroom": int(gc.get("no_headroom_skips", -1)) <= 0,
+        "gc_headroom": (
+            type(gc.get("gc_no_headroom_skips")) is int and
+            0 <= gc["gc_no_headroom_skips"] <=
+            limit["gc_no_headroom_skips_max"]),
         "gc_relocation": int(gc.get("gc_victims", 0)) > 0 and int(gc.get("gc_pages", 0)) > 0,
         "segment_programming": int(gc.get("segment_program_sum", 0)) > 0,
         "target_not_failed": int(gc.get("failed", -1)) == 0 and int(gc.get("error", 0)) == 0,
