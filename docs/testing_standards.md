@@ -3875,14 +3875,23 @@ guards must prove RECOVERY_REQUIRED is durable before RECOVERING, cleanup
 precedes RESTORED/COMPLETE, owner release follows COMPLETE, and a failed
 in-progress recovery durably returns to RECOVERY_REQUIRED. This deterministic
 model evidence does not replace owned-null_blk/native-process interruption
-qualification. The production translation unit may expose one compile-time
-owned-null_blk rehearsal seam only when a dedicated test macro is present.
-The ordinary source must retain literal execution gate 0 and production
-`/etc/swapz`, recovery and qualification paths; the public Makefile must never
-define the test macro. A test build must fail compilation unless private
-config, recovery and qualification-report paths are supplied, and only that
-build may compile the lifecycle gate as 1. The production topology proof still
-rejects every virtual backing chain. Under the owned-null_blk macro only, the
+qualification. The production translation unit may expose two mutually
+exclusive noninstalled qualification seams. The owned-null_blk rehearsal seam
+requires its dedicated test macro plus private config, recovery and
+qualification-report paths; only that build may use the virtual-null_blk
+topology exception described below. The physical real-swap seam retains the
+production `/etc/swapz`, recovery and qualification paths, requires a
+compile-time path to the installed qualified `<prefix>/sbin/swapzctl`, and
+must resolve/hash formatter/module/oracle artifacts from that installed control
+tree rather than from the temporary executor. Physical lifecycle commands must
+also require exact runtime marker
+`SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION=1`; without it the private executor
+remains blocked. The ordinary source must retain literal execution gate 0 and
+must not read that marker. The public Makefile and package must never define,
+install or expose either test seam. Rootless CI must warning-compile both seams,
+prove the physical seam fails compilation without its qualified-control path,
+and prove both seam macros cannot be combined. The production topology proof
+still rejects every virtual backing chain. Under the owned-null_blk macro only, the
 selected target may use a virtual parent when it is exactly one
 `/sys/devices/virtual/block/<disk>` parent, its source is exactly one partition
 child, and that parent major equals the unique `nullb` block major parsed from

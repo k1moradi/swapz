@@ -39,14 +39,12 @@ static void swapz_primary_selected_target_clear(void)
 }
 
 #define SWAPZ_PRIMARY_BLOCK_BYTES 4096ULL
-#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
-#define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
-#define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
-#define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
-	"/var/lib/swapz/physical-recovery/primary-qualification.json"
-/* Privileged lifecycle stays disabled until provisioning and recovery qualify. */
-#define SWAPZ_PRIMARY_EXECUTION_ENABLED 0
-#else
+#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
+	defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
+#error "primary lifecycle test modes are mutually exclusive"
+#endif
+
+#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST)
 #ifndef SWAPZ_PRIMARY_TEST_CONFIG_BASE
 #error "owned-null_blk lifecycle test requires private config base"
 #endif
@@ -61,7 +59,34 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
+#elif defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
+#ifndef SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL
+#error "physical lifecycle qualification requires installed qualified control path"
 #endif
+#define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
+#define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
+#define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
+	"/var/lib/swapz/physical-recovery/primary-qualification.json"
+#define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
+#else
+#define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
+#define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
+#define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
+	"/var/lib/swapz/physical-recovery/primary-qualification.json"
+/* Privileged lifecycle stays disabled until provisioning and recovery qualify. */
+#define SWAPZ_PRIMARY_EXECUTION_ENABLED 0
+#endif
+
+static int swapz_primary_lifecycle_runtime_enabled(void)
+{
+#ifdef SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST
+	const char *enabled = getenv("SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION");
+
+	return enabled && !strcmp(enabled, "1");
+#else
+	return 1;
+#endif
+}
 
 #ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
 static void swapz_primary_test_interrupt_after(const char *phase)
@@ -5682,6 +5707,18 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 		errno = EINVAL;
 		return -1;
 	}
+#ifdef SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST
+	control_length = snprintf(control_path, sizeof(control_path), "%s",
+				  SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL);
+	if (control_length < 0 || (size_t)control_length >= sizeof(control_path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (control_path[0] != '/') {
+		errno = EPERM;
+		return -1;
+	}
+#else
 	control_length = readlink("/proc/self/exe", control_path,
 				  sizeof(control_path) - 1U);
 	if (control_length < 0)
@@ -5691,6 +5728,7 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 		return -1;
 	}
 	control_path[control_length] = '\0';
+#endif
 	if ((size_t)control_length < sizeof(control_suffix) - 1U ||
 	    strcmp(control_path + control_length -
 		   (ssize_t)(sizeof(control_suffix) - 1U), control_suffix)) {
@@ -5710,10 +5748,17 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 		errno = ENAMETOOLONG;
 		return -1;
 	}
+#ifdef SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST
+	if (swapz_primary_hash_regular_path(control_path, 1,
+					    swapzctl_sha256) < 0 ||
+	    swapz_primary_hash_regular_path(oracle_path, 0, oracle_sha256) < 0)
+		return -1;
+#else
 	if (swapz_primary_hash_regular_path("/proc/self/exe", 1,
 					    swapzctl_sha256) < 0 ||
 	    swapz_primary_hash_regular_path(oracle_path, 0, oracle_sha256) < 0)
 		return -1;
+#endif
 	module_fd = swapz_primary_open_qualified_module_fd(
 		control_path, expected_module_sha256);
 	if (module_fd < 0)
@@ -9330,7 +9375,8 @@ int swapz_primary_command(int argc, char **argv)
 		fputs("BLOCKED: unsupported primary-swap action\n", stderr);
 		return 2;
 	}
-	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
+	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED ||
+	    !swapz_primary_lifecycle_runtime_enabled()) {
 		fputs("BLOCKED: primary-swap provisioning, activation, teardown and "
 		      "recovery remain disabled pending qualification\n", stderr);
 		return 2;

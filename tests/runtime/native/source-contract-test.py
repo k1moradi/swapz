@@ -151,6 +151,43 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "TEST_BASE=/var/lib/swapz-primary-owned-nullblk-test\n",
             rehearsal)
 
+    def test_physical_lifecycle_qualification_seam_is_noninstalled_and_guarded(self):
+        primary = PRIMARY
+        command = source_body("swapz_primary_command", primary)
+        live_hashes = source_body("swapz_primary_live_artifact_hashes", primary)
+        runtime_gate = source_body(
+            "swapz_primary_lifecycle_runtime_enabled", primary)
+        rootless = (ROOT / "tests/tools/test-rootless.sh").read_text()
+
+        self.assertIn("#define SWAPZ_PRIMARY_EXECUTION_ENABLED 0", primary)
+        self.assertIn(
+            "#elif defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)",
+            primary)
+        self.assertIn(
+            "#error \"physical lifecycle qualification requires installed "
+            "qualified control path\"",
+            primary)
+        self.assertIn(
+            "#error \"primary lifecycle test modes are mutually exclusive\"",
+            primary)
+        self.assertIn(
+            'getenv("SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION")', runtime_gate)
+        self.assertIn('!strcmp(enabled, "1")', runtime_gate)
+        self.assertIn(
+            "!swapz_primary_lifecycle_runtime_enabled()", command)
+        self.assertIn(
+            "SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL", live_hashes)
+        self.assertIn(
+            "swapz_primary_hash_regular_path(control_path, 1", live_hashes)
+        self.assertIn(
+            "-DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1", rootless)
+        self.assertIn(
+            'SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL="/usr/local/sbin/swapzctl"',
+            rootless)
+        self.assertNotIn(
+            "SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST",
+            ROOT_MAKEFILE.read_text())
+
     def test_primary_manager_target_is_runtime_selected(self):
         # Historical trial paths and device numbers may appear in fixtures or
         # recovery documentation, but must never become production manager

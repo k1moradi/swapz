@@ -30,6 +30,27 @@ cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
   '-DSWAPZ_PRIMARY_TEST_RECOVERY_BASE="/var/tmp/swapz-primary-owned-nullblk/recovery"' \
   '-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"' \
   src/userspace/swapz-primary.c
+cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
+  -DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1 \
+  '-DSWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL="/usr/local/sbin/swapzctl"' \
+  src/userspace/swapz-primary.c
+if cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
+     -DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1 \
+     src/userspace/swapz-primary.c >/dev/null 2>&1; then
+  printf '%s\n' 'FAIL: physical qualification seam compiled without qualified control path' >&2
+  exit 1
+fi
+if cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
+     -DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1 \
+     -DSWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1 \
+     '-DSWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL="/usr/local/sbin/swapzctl"' \
+     '-DSWAPZ_PRIMARY_TEST_CONFIG_BASE="/var/tmp/swapz-primary-owned-nullblk/config"' \
+     '-DSWAPZ_PRIMARY_TEST_RECOVERY_BASE="/var/tmp/swapz-primary-owned-nullblk/recovery"' \
+     '-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"' \
+     src/userspace/swapz-primary.c >/dev/null 2>&1; then
+  printf '%s\n' 'FAIL: physical and null_blk lifecycle seams compiled together' >&2
+  exit 1
+fi
 python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
 [[ -x tests/tools/loaded-preflight.sh ]] || {
   printf '%s\n' 'FAIL: loaded-preflight.sh must remain executable' >&2
