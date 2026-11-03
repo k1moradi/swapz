@@ -558,6 +558,38 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertNotIn("GIT_DIR", environment)
         self.assertNotIn("GIT_CONFIG_PARAMETERS", environment)
 
+    def test_partition_identity_uses_primary_partuuid_grammar(self):
+        size_bytes = 1024 * 1024 * 1024
+        for partuuid in (
+                "--------", "-deadbeef", "deadbeef-",
+                "deadbeef--01", "1234-567", "deadbeef.01"):
+            with self.subTest(partuuid=partuuid), \
+                    mock.patch.object(
+                        probe, "_run",
+                        return_value=subprocess.CompletedProcess(
+                            args=[], returncode=0,
+                            stdout=json.dumps({"blockdevices": [{
+                                "type": "part", "partuuid": partuuid,
+                                "size": size_bytes}]}),
+                            stderr="")):
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "stable PARTUUID"):
+                    probe._partition_identity("/dev/test-partition")
+
+        with mock.patch.object(
+                probe, "_run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=0,
+                    stdout=json.dumps({"blockdevices": [{
+                        "type": "part", "partuuid": "DEADBEEF-01",
+                        "size": size_bytes}]}),
+                    stderr="")), \
+                mock.patch.object(
+                    probe, "block_identity", return_value=(8, 1)):
+            self.assertEqual(
+                probe._partition_identity("/dev/test-partition"),
+                ("deadbeef-01", size_bytes))
+
     def test_recovery_survives_removed_original_swap_uuid_symlink(self):
         """Formatting invalidates /dev/disk/by-uuid, not the saved PARTUUID."""
         state = {
