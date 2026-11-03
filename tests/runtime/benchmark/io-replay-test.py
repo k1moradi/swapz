@@ -2947,6 +2947,26 @@ class PairReplayContract(unittest.TestCase):
                 evidence.host_stability(host, changed_host)["status"],
                 "CHANGED")
 
+            context_changed = {
+                **after_host,
+                "kernel": {
+                    **after_host["kernel"], "version": "#2 SMP"},
+                "cpu": {
+                    **after_host["cpu"],
+                    "model_names": ["Different CPU"]},
+                "memory": {
+                    "total_bytes": host["memory"]["total_bytes"] * 2},
+                "mount_inventory":
+                    host["mount_inventory"] + "\n/mnt /dev/sdb1 ext4 8:17",
+            }
+            context_stability = evidence.host_stability(
+                host, context_changed)
+            self.assertEqual(context_stability["status"], "CHANGED")
+            self.assertTrue({
+                "kernel_version", "cpu_model_names",
+                "memory_total_bytes", "mount_inventory",
+            }.issubset(context_stability["failed_checks"]))
+
             after_path.write_text(json.dumps(after_host))
             summary_path.write_text(json.dumps(summary))
             with mock.patch.object(
