@@ -1021,6 +1021,27 @@ static void test_primary_dm_operations_disabled(void)
 	assert(errno == ENODEV);
 }
 
+static void test_recovery_header_recognition(void)
+{
+	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	unsigned char swapz_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+
+	original[0] = 0x11U;
+	swapz_header[0] = 0x22U;
+	memcpy(observed, original, sizeof(observed));
+	assert(swapz_primary_recovery_header_known(
+		observed, original, swapz_header));
+	memcpy(observed, swapz_header, sizeof(observed));
+	assert(swapz_primary_recovery_header_known(
+		observed, original, swapz_header));
+	observed[128] ^= 0x01U;
+	assert(!swapz_primary_recovery_header_known(
+		observed, original, swapz_header));
+	assert(!swapz_primary_recovery_header_known(
+		NULL, original, swapz_header));
+}
+
 static void test_checked_header_write(void)
 {
 	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
@@ -2058,6 +2079,7 @@ int main(void)
 	test_primary_run_id_and_header_builder();
 	test_primary_stage_policy();
 	test_primary_state_records();
+	test_recovery_header_recognition();
 	test_checked_header_write();
 	test_primary_dm_table();
 	test_primary_dm_operations_disabled();

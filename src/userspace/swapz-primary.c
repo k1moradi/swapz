@@ -7763,13 +7763,6 @@ static int swapz_primary_unload_owned_module(
 		    recovery_fd, lock_fd, manifest, unload_stages,
 		    sizeof(unload_stages) / sizeof(unload_stages[0]), 0) < 0)
 		return -1;
-	if (swapz_primary_module_load_record_matches_at(
-		    recovery_fd, manifest, "LOADED", 0) < 0) {
-		if (!allow_intent ||
-		    swapz_primary_module_load_record_matches_at(
-			    recovery_fd, manifest, "INTENT", 0) < 0)
-			return -1;
-	}
 	if (swapz_primary_read_module_mapper_inventory(
 		    &module_loaded, &mapper_present) < 0)
 		return -1;
@@ -7777,8 +7770,20 @@ static int swapz_primary_unload_owned_module(
 		errno = EBUSY;
 		return -1;
 	}
+	/*
+	 * A STARTING failure can precede the durable module-load INTENT. If no
+	 * module exists there is nothing to adopt or unload. A live module always
+	 * requires exact per-run WAL before recovery may touch it.
+	 */
 	if (!module_loaded)
 		return 0;
+	if (swapz_primary_module_load_record_matches_at(
+		    recovery_fd, manifest, "LOADED", 0) < 0) {
+		if (!allow_intent ||
+		    swapz_primary_module_load_record_matches_at(
+			    recovery_fd, manifest, "INTENT", 0) < 0)
+			return -1;
+	}
 	if (swapz_primary_read_module_build_provenance(
 		    module_loaded, module_source_sha, &module_clean) < 0 ||
 	    !swapz_primary_build_sources_match(
@@ -8035,6 +8040,16 @@ out:
 }
 
 
+static int swapz_primary_recovery_header_known(
+	const unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES],
+	const unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES],
+	const unsigned char swapz_header[SWAPZ_PRIMARY_BLOCK_BYTES])
+{
+	return observed && original && swapz_header &&
+	       (!memcmp(observed, original, SWAPZ_PRIMARY_BLOCK_BYTES) ||
+		!memcmp(observed, swapz_header, SWAPZ_PRIMARY_BLOCK_BYTES));
+}
+
 static int swapz_primary_stop_active(void)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -8172,6 +8187,186 @@ out:
 	memset(observed_header, 0, sizeof(observed_header));
 	if (result == 0)
 		printf("PRIMARY_STOP=COMPLETE run_id=%s mapper_removed=%s "
+		       "module_unloaded=%s\n",
+		       state.run_id, mapper_removed_by_call ? "true" : "false",
+		       module_unloaded_by_call ? "true" : "false");
+	if (result < 0)
+		errno = saved_errno;
+	return result;
+#endif
+}
+
+
+static int swapz_primary_recover(void)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	errno = ENODEV;
+	return -1;
+#else
+	static const enum swapz_primary_stage recovery_required_stage[] = {
+		SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED,
+	};
+	struct swapz_primary_target target = {0};
+	struct swapz_primary_manifest manifest = {0};
+	struct swapz_primary_state state = {0};
+	struct swapz_primary_state recovering_state = {0};
+	struct swapz_primary_state restored_state = {0};
+	struct swapz_primary_state complete_state = {0};
+	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	unsigned char swapz_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	unsigned char observed_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	char state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	size_t state_length = 0;
+	int recovery_fd = -1;
+	int lock_fd = -1;
+	int target_fd = -1;
+	int mapper_removed_by_call = 0;
+	int module_unloaded_by_call = 0;
+	int recovering_persisted = 0;
+	int complete_persisted = 0;
+	int result = -1;
+	int saved_errno = EIO;
+
+	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	if (geteuid() != 0) {
+		errno = EPERM;
+		return -1;
+	}
+	if (swapz_primary_configured_target(&target) < 0)
+		goto out;
+	recovery_fd = swapz_primary_recovery_base_open(
+		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	if (recovery_fd < 0)
+		goto out;
+	lock_fd = swapz_primary_partition_lock_at(
+		recovery_fd, target.partuuid, 0);
+	if (lock_fd < 0)
+		goto out;
+	if (swapz_primary_record_read_at(
+		    recovery_fd, "primary-state.json", 0, state_record,
+		    sizeof(state_record), &state_length, NULL) < 0 ||
+	    swapz_primary_state_parse(state_record, state_length, &state) < 0 ||
+	    state.stage != SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED ||
+	    !state.has_recovery_previous_stage ||
+	    swapz_primary_manifest_read_at(
+		    recovery_fd, lock_fd, state.run_id, target.partuuid, 0,
+		    &manifest) < 0 ||
+	    memcmp(&manifest.target, &target, sizeof(target)) ||
+	    swapz_primary_transaction_manifest_matches_at(
+		    recovery_fd, lock_fd, &manifest, recovery_required_stage,
+		    sizeof(recovery_required_stage) /
+			    sizeof(recovery_required_stage[0]), 0) < 0) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_header_backup_read_at(
+		    recovery_fd, lock_fd, manifest.run_id,
+		    manifest.original_header_sha256, 0, original_header) < 0 ||
+	    swapz_primary_header_build(
+		    manifest.run_id, manifest.target.device_bytes, swapz_header) < 0)
+		goto out;
+
+	/*
+	 * The mapper may still own the backing partition, so pre-cleanup header
+	 * inspection is read-only. The PARTUUID helper still revalidates the exact
+	 * manifest-bound selected target before opening it.
+	 */
+	swapz_primary_selected_target = manifest.target;
+	target_fd = swapz_primary_target_open_readonly();
+	if (target_fd < 0 ||
+	    swapz_primary_exact_read(
+		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
+	    !swapz_primary_recovery_header_known(
+		    observed_header, original_header, swapz_header)) {
+		if (!errno)
+			errno = ESTALE;
+		goto out;
+	}
+	if (close(target_fd) < 0) {
+		target_fd = -1;
+		goto out;
+	}
+	target_fd = -1;
+
+	recovering_state = state;
+	recovering_state.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;
+	if (swapz_primary_state_write_at(
+		    recovery_fd, lock_fd, &recovering_state, 0) < 0)
+		goto out;
+	recovering_persisted = 1;
+
+	if (swapz_primary_dm_remove_mapper(
+		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0 ||
+	    swapz_primary_unload_owned_module(
+		    recovery_fd, lock_fd, &manifest, 1,
+		    &module_unloaded_by_call) < 0)
+		goto out;
+
+	/* After all holders are gone, prove the same known header through an
+	 * exclusive manifest-bound descriptor before closing the transaction. */
+	target_fd = swapz_primary_target_open_exclusive(&manifest);
+	if (target_fd < 0 ||
+	    swapz_primary_exact_read(
+		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
+	    !swapz_primary_recovery_header_known(
+		    observed_header, original_header, swapz_header)) {
+		if (!errno)
+			errno = ESTALE;
+		goto out;
+	}
+	if (close(target_fd) < 0) {
+		target_fd = -1;
+		goto out;
+	}
+	target_fd = -1;
+
+	restored_state = recovering_state;
+	restored_state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
+	if (swapz_primary_state_write_at(
+		    recovery_fd, lock_fd, &restored_state, 0) < 0)
+		goto out;
+	complete_state = restored_state;
+	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	if (swapz_primary_state_write_at(
+		    recovery_fd, lock_fd, &complete_state, 0) < 0)
+		goto out;
+	complete_persisted = 1;
+	if (swapz_primary_release_partition_owner_at(
+		    recovery_fd, lock_fd, manifest.run_id, 0) < 0)
+		goto out;
+	result = 0;
+out:
+	saved_errno = errno ? errno : EIO;
+	if (result < 0 && recovering_persisted && !complete_persisted &&
+	    recovery_fd >= 0 && lock_fd >= 0) {
+		int failure_errno = saved_errno;
+
+		if (swapz_primary_state_require_recovery_at(
+			    recovery_fd, lock_fd, state.run_id, 0) < 0) {
+			saved_errno = errno ? errno : EIO;
+			fprintf(stderr,
+				"PRIMARY_RECOVER=RECOVERY_STATE_FAILED run_id=%s "
+				"original_error=%s recovery_error=%s\n",
+				state.run_id, strerror(failure_errno),
+				strerror(saved_errno));
+		} else {
+			saved_errno = failure_errno;
+		}
+	}
+	if (target_fd >= 0)
+		(void)close(target_fd);
+	if (lock_fd >= 0)
+		(void)close(lock_fd);
+	if (recovery_fd >= 0)
+		(void)close(recovery_fd);
+	memset(original_header, 0, sizeof(original_header));
+	memset(swapz_header, 0, sizeof(swapz_header));
+	memset(observed_header, 0, sizeof(observed_header));
+	if (result == 0)
+		printf("PRIMARY_RECOVER=COMPLETE run_id=%s mapper_removed=%s "
 		       "module_unloaded=%s\n",
 		       state.run_id, mapper_removed_by_call ? "true" : "false",
 		       module_unloaded_by_call ? "true" : "false");
@@ -8527,6 +8722,14 @@ int swapz_primary_command(int argc, char **argv)
 		}
 		return 0;
 	}
-	fputs("BLOCKED: primary-swap recover action is not implemented\n", stderr);
+	if (!strcmp(argv[0], "recover")) {
+		if (swapz_primary_recover() < 0) {
+			fprintf(stderr, "BLOCKED: primary-swap recovery failed: %s\n",
+				strerror(errno));
+			return 2;
+		}
+		return 0;
+	}
+	fputs("BLOCKED: unsupported primary-swap lifecycle action\n", stderr);
 	return 2;
 }

@@ -3603,8 +3603,27 @@ and release the active owner marker. The disposable-card mission intentionally
 does not restore a historical raw swap/filesystem header during normal stop;
 leaving the SWZ authorization header prevents accidental raw-swap reuse. Any
 failure after `STOPPING` but before `COMPLETE` must mark
-`RECOVERY_REQUIRED`. Keep execution disabled until recover and the required
-interruption/null_blk/physical evidence are complete.
+`RECOVERY_REQUIRED`.
+
+Standalone recovery consumes only an exact owned `RECOVERY_REQUIRED` record
+and retains its original interrupted-stage provenance through `RECOVERING`,
+`RESTORED`, and `COMPLETE`. Before cleanup it must read block zero through
+the revalidated PARTUUID path and accept only one of two byte-exact values: the
+digest-verified saved original header or the run-bound SWZ authorization
+header. Unknown or torn bytes stop recovery before cleanup. It then persists
+`RECOVERING`, removes or proves absent only the manifest-bound inactive mapper,
+and unloads a module only when live provenance matches the manifest and the
+per-run module-load WAL is `LOADED` or, for the crash window around
+`finit_module`, `INTENT`. A failure before INTENT may have no module-load
+record; recovery may proceed only when the module is actually absent. After
+cleanup it exclusively reopens the same manifest-bound target and rechecks that
+block zero is still one of the same two known values before persisting
+`RESTORED`/terminal `COMPLETE` and releasing the owner marker. Recovery never
+restores historical raw bytes on the disposable card, never force-removes a
+mapper/module, and never adopts a live module without matching WAL. Any failure
+after entering `RECOVERING` must return to `RECOVERY_REQUIRED` while
+preserving the original interrupted stage. Keep execution disabled until the
+required interruption/null_blk/physical evidence are complete.
 
 When the primary manager records an optional original-header backup, it is
 immutable per run ID. Its writer must require the exclusive lock and matching
