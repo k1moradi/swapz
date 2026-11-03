@@ -37,7 +37,7 @@ GitHub; no second report copy is generated.
 Exactly five commands are public:
 
 - `make`: build product artifacts without loading them.
-- `make install`: install the owned package/binary without activating swap.
+- `make install`: admit and install the exact artifacts already qualified by `make test`; it does not rebuild, re-sign, load the module, create a mapper, or activate swap.
 - `make uninstall`: remove only the matching owned installation.
 - `make test`: execute the complete supported qualification.
 - `make fast_test`: development-only decision loop: build the working tree,
@@ -94,7 +94,38 @@ hook.
 
 ## Packaging
 
-DKMS uses `AUTOINSTALL="no"`. Installation does not load the module, create a mapper or activate swap. Uninstall verifies ownership/version and refuses unsafe removal. Packaging tests run in a rootless sandbox; they are not system-install qualification.
+DKMS uses `AUTOINSTALL="no"`. `make install` is an admission operation rather
+than a build operation: it requires an exact five-stage PASS qualification
+report, clean embedded source provenance, matching userspace/oracle/module
+SHA-256 values, current-kernel headers and matching module vermagic. On Secure
+Boot hosts it verifies the already-qualified module signature and never signs
+or otherwise changes those bytes during packaging.
+
+DKMS still performs a current-kernel compatibility build, but that rebuild is
+not promoted as the qualified image. After DKMS succeeds, packaging replaces
+the DKMS-installed image with the byte-exact qualified `dm-swapz.ko`, hashes it
+before and after `depmod`, and requires `modinfo -n dm_swapz` to resolve to
+that owned path. The qualified module digest, the retained package copy, and
+the module selected for a later checked load therefore identify the same bytes.
+
+Install/upgrade is serialized and transactional. An identical verified install
+is a no-op. A non-identical upgrade refuses a loaded swapz module or existing
+swapz mapper, stages replacement files first, and restores the previous
+verified package if DKMS, hashing, depmod, systemd reload, a signal, or another
+commit step fails. Uninstall likewise refuses active/enabled deployment state,
+active mapper/module use, recovery ownership, or any ownership/digest mismatch;
+it never unloads a module, removes a mapper, or calls swapon/swapoff. Production
+uses the fixed `/usr/local` prefix, trusted system executables, root-owned
+package files, restrictive transaction storage, and symlink/path substitution
+checks.
+
+A kernel upgrade is deliberately not automatic deployment: because
+`AUTOINSTALL="no"` is retained, the new kernel needs matching headers, a
+qualified module for that kernel, and an explicit admission/install cycle.
+Rootless packaging tests exercise clean/repeated install, missing headers or
+signature verification, path substitution, partial failure, active
+upgrade/uninstall refusal, rollback, interruption cleanup and installed digest
+mismatch; they are not system-install qualification.
 
 ## Removed build paths
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sign the normal swapz qualification module when EFI Secure Boot is enabled.
+# Sign qualification modules at build time; packaging uses --verify only.
 set -Eeuo pipefail
 
 blocked() {
@@ -7,8 +7,39 @@ blocked() {
     exit 2
 }
 
-[[ $# == 1 ]] || blocked "internal helper requires exactly one module path"
-module="$1"
+mode=sign
+if [[ $# == 2 && $1 == --verify ]]; then
+    mode=verify
+    module="$2"
+elif [[ $# == 1 ]]; then
+    module="$1"
+else
+    blocked "internal helper requires MODULE or --verify MODULE"
+fi
+
+helper_path="${BASH_SOURCE[0]}"
+case "$helper_path" in
+    */*) helper_dir="${helper_path%/*}" ;;
+    *) helper_dir=. ;;
+esac
+project_root="$(CDPATH= cd -- "$helper_dir/.." && pwd -P)"
+
+sign_test_root="${SWAPZ_SIGN_TEST_ROOT:-}"
+if [[ -n "$sign_test_root" ]]; then
+    [[ $(id -u) != 0 ]] || blocked "root test mode forbidden"
+    sign_test_root="$(realpath -m -- "$sign_test_root")"
+    case "$sign_test_root" in "$project_root/build/tests/"*) ;; *)
+        blocked "test signing sandbox is outside build/tests" ;;
+    esac
+    module_real="$(realpath -m -- "$module")"
+    case "$module_real" in "$sign_test_root"/*) ;; *)
+        blocked "test module is outside the signing sandbox" ;;
+    esac
+else
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    export PATH
+fi
+
 [[ -f "$module" && ! -L "$module" ]] ||
     blocked "built dm-swapz.ko is missing or not a regular file"
 
@@ -53,12 +84,11 @@ state="$(secure_boot_state)"
 key="${SWAPZ_MOK_PRIVATE_KEY:-/var/lib/shim-signed/mok/MOK.priv}"
 cert="${SWAPZ_MOK_CERT:-/var/lib/shim-signed/mok/MOK.der}"
 
-command -v modinfo >/dev/null 2>&1 ||
-    blocked "modinfo is required"
-command -v openssl >/dev/null 2>&1 ||
-    blocked "openssl is required"
-command -v kmodsign >/dev/null 2>&1 ||
-    blocked "kmodsign is required"
+command -v modinfo >/dev/null 2>&1 || blocked "modinfo is required"
+command -v openssl >/dev/null 2>&1 || blocked "openssl is required"
+if [[ "$mode" == sign ]]; then
+    command -v kmodsign >/dev/null 2>&1 || blocked "kmodsign is required"
+fi
 
 sudo_command=()
 need_sudo() {
@@ -82,21 +112,31 @@ if [[ -r "$cert" ]]; then
     cert_serial="$(openssl x509 -inform DER -in "$cert" -noout -serial 2>/dev/null |
                    sed -n 's/^serial=//p' | normalize_hex)"
 else
+    if [[ "$mode" == verify ]]; then
+        blocked "MOK certificate is unavailable for signature verification"
+    fi
     need_sudo
     "${sudo_command[@]}" test -f "$cert" &&
         "${sudo_command[@]}" test ! -L "$cert" ||
         blocked "MOK certificate is missing, unsafe, or sudo authorization is unavailable"
-    cert_serial="$("${sudo_command[@]}" openssl x509 -inform DER -in "$cert"                     -noout -serial 2>/dev/null |
+    cert_serial="$("${sudo_command[@]}" openssl x509 -inform DER -in "$cert" \
+                     -noout -serial 2>/dev/null |
                    sed -n 's/^serial=//p' | normalize_hex)"
 fi
-[[ -n "$cert_serial" ]] ||
-    blocked "cannot read MOK certificate serial"
+[[ -n "$cert_serial" ]] || blocked "cannot read MOK certificate serial"
 
 module_sig_key="$(modinfo -F sig_key "$module" 2>/dev/null | normalize_hex)"
 if [[ -n "$module_sig_key" && "$module_sig_key" == "$cert_serial" ]]; then
-    printf '%s\n' "Secure Boot: dm-swapz.ko already signed with configured MOK"
+    if [[ "$mode" == verify ]]; then
+        printf '%s\n' "Secure Boot: qualified dm-swapz.ko signature verified"
+    else
+        printf '%s\n' "Secure Boot: dm-swapz.ko already signed with configured MOK"
+    fi
     exit 0
 fi
+
+[[ "$mode" == sign ]] ||
+    blocked "qualified module is unsigned or signed by a different key"
 
 sign=(kmodsign sha512 "$key" "$cert" "$module")
 if [[ -r "$key" ]]; then

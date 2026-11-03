@@ -4162,6 +4162,46 @@ build-provenance header into its sandbox, compile `swapzctl` with that header,
 and prove DKMS receives byte-identical provenance in its owned source tree.
 The test override is valid only under the hermetic package sandbox and must
 not change the production package path.
+
+Production `make install` is admission-only and must not depend on the root
+`all` build target. It may consume only the already-qualified `swapzctl`,
+round-trip oracle and normal module bytes. Admission requires the exact
+five-stage PASS report, clean embedded source provenance, report artifact
+digests, a report-only descendant checkout with no relevant dirty inputs,
+current-kernel headers, and matching module vermagic. Secure Boot admission is
+verification-only: packaging must never append or replace a signature after
+qualification, and an enabled host with unavailable certificate/signature
+verification must fail closed.
+
+DKMS remains the compatibility/header integration mechanism, not the artifact
+authority. After a successful current-kernel DKMS build/install, packaging must
+replace the DKMS-produced module with the exact qualified module, verify its
+SHA-256 before and after `depmod`, and require `modinfo -n dm_swapz` to
+resolve to that exact owned path. `AUTOINSTALL="no"` remains mandatory so a
+kernel upgrade cannot silently carry qualification forward; a new running
+kernel requires matching headers/vermagic, exact artifact qualification and an
+explicit install.
+
+Package install/upgrade must be serialized and transactional. Exact repeated
+install is a verified no-op. Any non-identical upgrade must refuse while
+`dm_swapz` is loaded or any swapz mapper exists, stage replacement files
+before publishing them, and restore the previous verified source, userspace
+files and exact installed module if DKMS, hashing, depmod, systemd reload or a
+caught HUP/INT/TERM fails. Uninstall must refuse loaded-module, active-mapper,
+active/enabled-unit, recovery-owner and digest/ownership mismatches; packaging
+must never call swapon/swapoff, unload a module, or remove a mapper. Production
+uses the fixed `/usr/local` prefix, trusted executable paths, root-owned
+installed files with fixed modes, non-symlink package directories and
+single-link non-writable artifact/report inputs.
+
+The hermetic regression must cover clean and repeated install, missing kernel
+headers, unavailable Secure Boot verification, vermagic mismatch, unexpected
+paths/symlinks, partial DKMS failure, active-module and active-mapper upgrade
+refusal, active uninstall refusal, rollback of a failed upgrade, reinstall
+after safe cleanup, installed-module digest mismatch, post-depmod tamper and
+signal interruption cleanup without reading or modifying host swap state.
+Sandbox artifacts must stay private to the package sandbox and must not replace
+the repository's qualification build outputs.
 Incremental-build Makefile fixtures that compile or stage the primary manager
 must include the committed fallback `src/kernel/swapz-build-info.h`; otherwise
 they do not model the source inputs of the real checkout.

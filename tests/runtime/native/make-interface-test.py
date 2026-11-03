@@ -76,7 +76,8 @@ class PublicMakeContract(unittest.TestCase):
         content = helper.read_text()
         for required in ("mokutil --sb-state", "kmodsign sha512",
                          "SWAPZ_MOK_PRIVATE_KEY", "SWAPZ_MOK_CERT",
-                         "SWAPZ_SIGN_NONINTERACTIVE", "sudo_command+=(-n)"):
+                         "SWAPZ_SIGN_NONINTERACTIVE", "sudo_command+=(-n)",
+                         "--verify", "SWAPZ_SIGN_TEST_ROOT"):
             self.assertIn(required, content)
         self.assertIn('bash packaging/sign-module.sh "$@"', MAKE)
 
@@ -124,6 +125,7 @@ class PublicMakeContract(unittest.TestCase):
             env["SWAPZ_MOK_PRIVATE_KEY"] = str(key)
             env["SWAPZ_MOK_CERT"] = str(cert)
             env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
+            env["SWAPZ_SIGN_TEST_ROOT"] = str(fixture)
             for _ in range(2):
                 proc = subprocess.run(
                     ["bash", str(helper), str(module)], env=env,
@@ -132,6 +134,18 @@ class PublicMakeContract(unittest.TestCase):
                                  proc.stdout + "\n" + proc.stderr)
             self.assertEqual((fixture / "dm-swapz.ko.calls").read_text(),
                              "call\n")
+            verified = subprocess.run(
+                ["bash", str(helper), "--verify", str(module)], env=env,
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(verified.returncode, 0,
+                             verified.stdout + "\n" + verified.stderr)
+            (fixture / "dm-swapz.ko.signed").unlink()
+            unsigned = subprocess.run(
+                ["bash", str(helper), "--verify", str(module)], env=env,
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(unsigned.returncode, 2)
+            self.assertIn("unsigned or signed by a different key",
+                          unsigned.stderr)
 
     def test_make_test_is_only_official_documented_test_command(self):
         canonical = ("docs/README.md", "docs/VISION.md",
@@ -1076,6 +1090,8 @@ class PublicMakeContract(unittest.TestCase):
     def test_packaging_and_loaded_tests_are_bounded(self):
         self.assertIn("packaging/package-dkms.sh install", MAKE)
         self.assertIn("packaging/package-dkms.sh uninstall", MAKE)
+        self.assertIn("\ninstall:\n", MAKE)
+        self.assertNotIn("\ninstall: all\n", MAKE)
         self.assertIn("tests/tools/test-rootless.sh", (ROOT / "tests/tools/run-tests.py").read_text())
         rootless_test_recipe = MAKE.split("\ntest:\n", 1)[1]
         self.assertIn("tests/tools/run-tests.py", rootless_test_recipe)
