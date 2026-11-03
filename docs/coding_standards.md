@@ -257,13 +257,47 @@ not authorize lifecycle execution through the CLI.
 The initial one-use owner claim must durably publish the consumed run ID and
 canonical `READY` stage before publishing the active partition marker. Every
 device-changing operation requires both the matching active claim and a
-durable `STARTING` stage, so a `READY` state with no active marker identifies
-only an interrupted metadata-only claim. Under the permanent PARTUUID lock,
-reconcile that orphan only when its consumed record exactly matches its run
-ID; persist `READY -> DISABLING -> COMPLETE`, retain the consumed record, then
-allow a new run. Missing or malformed provenance, any non-`READY` orphan
-stage, or an active marker remains a fail-closed condition. This reconciliation
-must never perform block, swap, module, or mapper operations.
+durable `STARTING` stage. Under the permanent PARTUUID lock, reconcile only
+these interruption states: exact `READY` with either a matching active marker
+or no active marker, and exact `COMPLETE` with a matching active marker. Verify
+the consumed record and, when present, the active record against the run ID;
+atomically replace untouched `READY` with `COMPLETE` before releasing an
+active marker, retain the consumed record, then allow a new run. This
+metadata-only close is specific to reconciliation; it does not add a
+`READY -> COMPLETE` edge to the normal lifecycle transition graph. Using an
+intermediate `DISABLING` stage is forbidden because a crash there would be
+ambiguous with an actual teardown. Missing or malformed provenance, an active
+marker without state, or any other orphan stage remains a fail-closed
+condition. Reconciliation must never perform block, swap, module, or mapper
+operations. A caller starting a fresh transaction must invoke reconciliation
+explicitly while holding the same lock; the owner-claim primitive itself must
+refuse an existing active marker and must never silently retire a pending
+`READY` transaction as a side effect of a duplicate claim attempt.
+
+### Metadata-only primary preparation
+
+`swapzctl primary prepare` may establish durable transaction metadata only.
+Before claiming a run, require a clean source build, the accepted exact-source
+owner qualification and live artifact hashes, the persistent recovery base,
+an unchanged identity-checked `/dev/sda4` geometry and original header, exactly
+one active `/dev/sda4` swap entry with the expected size, priority `-1` and
+zero use, no mount or root-filesystem dependency, and no loaded `dm_swapz` or
+swapz mapper. Recheck the swap inventory and reread the opened target header
+immediately before the one-use claim. Revalidate the UUID, PARTUUID and fixed
+device aliases against the opened descriptor after reading the header.
+
+After those checks, generate a fresh OS-random run ID, build the candidate SWZ
+header only in memory, durably publish the consumed record, `READY` state and
+active marker, then save the exact original 4096-byte header and immutable
+manifest and read both back byte-for-byte. Preparation must not write the
+target, change swap state, load a module, or create a mapper. Any failure after
+claim retains the consumed record and active ownership for reconciliation; it
+must report an incomplete preparation rather than releasing ownership or
+claiming readiness. The later `start` path must revalidate the same device,
+qualification and saved records, persist `STARTING`, and only then perform its
+first device or swap mutation. Keep all privileged lifecycle actions disabled
+until preparation and every later transition have rootless and isolated-VM
+coverage, and exact-source qualification is current.
 
 ### Primary manager Device Mapper lifecycle primitives
 

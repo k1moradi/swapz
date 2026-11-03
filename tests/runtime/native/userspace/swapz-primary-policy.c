@@ -127,6 +127,7 @@ static void test_primary_run_id_and_header_builder(void)
 	const char *run_id = "0123456789abcdef0123456789abcdef";
 	const char *all_zero = "00000000000000000000000000000000";
 	const char *uppercase = "0123456789ABCDEF0123456789ABCDEF";
+	char short_run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U] = "short";
 	unsigned char header[SWAPZ_SUPERBLOCK_BYTES];
 	unsigned char original[SWAPZ_SUPERBLOCK_BYTES];
 	char unterminated[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
@@ -154,7 +155,7 @@ static void test_primary_run_id_and_header_builder(void)
 	assert(errno == EINVAL);
 	assert(!memcmp(header, original, sizeof(header)));
 	errno = 0;
-	assert(swapz_primary_header_build("short", header) < 0);
+	assert(swapz_primary_header_build(short_run_id, header) < 0);
 	assert(errno == EINVAL);
 	assert(!memcmp(header, original, sizeof(header)));
 	memset(unterminated, 'a', sizeof(unterminated));
@@ -1404,6 +1405,7 @@ static void test_orphan_ready_claim_reconciliation(void)
 	char recovered_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	char unchanged_state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	struct swapz_primary_state state = {0};
+	struct stat active_info;
 	size_t recovered_length;
 	size_t unchanged_state_length;
 	int formatted_length;
@@ -1452,7 +1454,7 @@ static void test_orphan_ready_claim_reconciliation(void)
 	assert(unlinkat(directory_fd, first_consumed_name, 0) == 0);
 	assert(fsync(directory_fd) == 0);
 	errno = 0;
-	assert(swapz_primary_reconcile_orphan_ready_state_at(
+	assert(swapz_primary_reconcile_metadata_claim_at(
 		directory_fd, lock_fd, geteuid()) < 0);
 	assert(errno == ENOENT);
 	assert(swapz_primary_record_read_at(
@@ -1463,7 +1465,7 @@ static void test_orphan_ready_claim_reconciliation(void)
 		       unchanged_state_length));
 	assert(swapz_primary_write_record_at(
 		directory_fd, first_consumed_name, first_record, geteuid()) == 0);
-	assert(swapz_primary_reconcile_orphan_ready_state_at(
+	assert(swapz_primary_reconcile_metadata_claim_at(
 		directory_fd, lock_fd, geteuid()) == 0);
 	assert(swapz_primary_record_read_at(
 		directory_fd, "primary-state.json", geteuid(), recovered_record,
@@ -1480,7 +1482,7 @@ static void test_orphan_ready_claim_reconciliation(void)
 	assert(swapz_primary_replace_record_at(
 		directory_fd, "primary-state.json", first_run_id,
 		recovered_record, geteuid()) == 0);
-	assert(swapz_primary_reconcile_orphan_ready_state_at(
+	assert(swapz_primary_reconcile_metadata_claim_at(
 		directory_fd, lock_fd, geteuid()) < 0);
 	assert(errno == EBUSY);
 	assert(swapz_primary_record_read_at(
@@ -1507,14 +1509,32 @@ static void test_orphan_ready_claim_reconciliation(void)
 					&state) == 0);
 	assert(state.stage == SWAPZ_PRIMARY_STAGE_READY &&
 	       !strcmp(state.run_id, next_run_id));
-	state.stage = SWAPZ_PRIMARY_STAGE_DISABLING;
-	assert(swapz_primary_state_write_at(
-		directory_fd, lock_fd, &state, geteuid()) == 0);
-	state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
-	assert(swapz_primary_state_write_at(
-		directory_fd, lock_fd, &state, geteuid()) == 0);
-	assert(swapz_primary_release_partition_owner_at(
-		directory_fd, lock_fd, next_run_id, geteuid()) == 0);
+	assert(swapz_primary_reconcile_metadata_claim_at(
+		directory_fd, lock_fd, geteuid()) == 0);
+	assert(fstatat(directory_fd, active_name, &active_info,
+		       AT_SYMLINK_NOFOLLOW) < 0 && errno == ENOENT);
+	assert(swapz_primary_record_read_at(
+		directory_fd, "primary-state.json", geteuid(), recovered_record,
+		sizeof(recovered_record), &recovered_length, NULL) == 0);
+	assert(swapz_primary_state_parse(recovered_record, recovered_length,
+					&state) == 0);
+	assert(state.stage == SWAPZ_PRIMARY_STAGE_COMPLETE &&
+	       !strcmp(state.run_id, next_run_id));
+	assert_record_equals(directory_fd, next_consumed_name, next_record);
+	/* Also recover the crash window after COMPLETE but before marker release. */
+	assert(swapz_primary_write_record_at(
+		directory_fd, active_name, next_record, geteuid()) == 0);
+	assert(swapz_primary_reconcile_metadata_claim_at(
+		directory_fd, lock_fd, geteuid()) == 0);
+	assert(fstatat(directory_fd, active_name, &active_info,
+		       AT_SYMLINK_NOFOLLOW) < 0 && errno == ENOENT);
+	assert(swapz_primary_record_read_at(
+		directory_fd, "primary-state.json", geteuid(), recovered_record,
+		sizeof(recovered_record), &recovered_length, NULL) == 0);
+	assert(swapz_primary_state_parse(recovered_record, recovered_length,
+					&state) == 0);
+	assert(state.stage == SWAPZ_PRIMARY_STAGE_COMPLETE &&
+	       !strcmp(state.run_id, next_run_id));
 	assert(unlinkat(directory_fd, first_consumed_name, 0) == 0);
 	assert(unlinkat(directory_fd, next_consumed_name, 0) == 0);
 	assert(unlinkat(directory_fd, "primary-state.json", 0) == 0);

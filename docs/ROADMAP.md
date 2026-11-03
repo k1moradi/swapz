@@ -1545,10 +1545,24 @@ live swap-I/O evidence remain open.
 
 The one-use owner-claim primitive now persists its consumed run record and
 initial `READY` state before publishing the active marker. A later claim can
-reconcile the narrow crash gap—matching consumed record, `READY` state, and no
-active marker—through `DISABLING` to `COMPLETE`, without deleting the consumed
-record or touching the device. Missing provenance and other orphan stages fail
-closed. Rootless tests model the gap and missing-provenance case. This closes
-only metadata-claim crash accounting; it does not implement
-prepare/start/stop/recover, qualify state against live device facts, or enable
-the manager.
+reconcile interrupted metadata-only `READY` claims with either an exact active
+marker or no active marker. It also releases an exact `COMPLETE` transaction
+whose active marker survived interruption. Every path verifies permanent
+consumed provenance and atomically closes untouched `READY` state to
+`COMPLETE` before releasing ownership. It never deletes the consumed record or
+touches the device. Missing provenance and other orphan stages fail closed.
+Rootless tests model both `READY` interruption windows, the
+`COMPLETE`-before-marker-release window and missing provenance. This closes
+only metadata-claim crash accounting.
+
+A production-only metadata preparation path now verifies the qualified source
+and live artifacts, persistent recovery storage, exact original `/dev/sda4`
+identity/header, its sole active zero-use swap entry, root/mount separation,
+and absence of a loaded module or existing mapper. It constructs the future
+SWZ header in memory, then durably claims a fresh run and stores/read-verifies
+the original header backup and immutable manifest. It performs no target,
+swap, module or mapper mutation. The global privileged lifecycle gate remains
+disabled, and the path has not yet received its isolated-VM interruption
+coverage or a new exact-source owner qualification. Start/stop/recover,
+live-swap, cold-boot recovery, boot integration, workload performance and
+production qualification remain open.

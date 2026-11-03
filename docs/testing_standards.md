@@ -3480,16 +3480,39 @@ actions disabled until provisioning, mapper ownership, rollback and recovery
 actually use them.
 
 The owner-claim writer must fsync the consumed record, then atomically persist
-the initial `READY` state, then fsync and publish the active marker. On a later
-claim under the same lock, an absent active marker plus a matching consumed
-record and `READY` state may be reconciled as a metadata-only abort through
-`DISABLING` to `COMPLETE`; the consumed record remains permanent. Reject
-missing or mismatched consumed provenance, malformed state, and every orphan
-stage except `READY`. Rootless direct-C regressions must model the crash gap,
-prove that missing provenance leaves the `READY` bytes unchanged, prove that
-restored exact provenance permits reconciliation, and verify a subsequent
-fresh run is admitted only after the old state is durably `COMPLETE`. This
-reconciler must not touch device, swap, module, or mapper state.
+the initial `READY` state, then fsync and publish the active marker. Under the
+same lock, reconciliation may close exact `READY` with either its matching
+active marker or no marker, and may release an exact `COMPLETE` state with its
+matching active marker. It must validate the consumed record and any active
+record before atomically replacing untouched `READY` with `COMPLETE` or
+releasing ownership. This metadata-only close is a reconciler-specific
+operation, not a normal stage-graph edge. Do not write an intermediate
+`DISABLING` stage: after a crash that stage cannot distinguish an untouched
+claim from a teardown in progress. Missing or mismatched provenance, malformed
+state, an active marker without state, and every other orphan stage must fail
+closed. Rootless direct-C regressions must model both `READY` interruption
+windows and the `COMPLETE`-before-marker-release window, prove that missing
+provenance leaves the `READY` bytes unchanged, and verify fresh-run admission
+only after the old state is durably `COMPLETE`. This reconciler must not touch
+device, swap, module, or mapper state. A duplicate or competing owner-claim
+attempt must fail while the active marker exists without changing the state,
+consumed record or marker; only a caller's explicit reconciliation step may
+close a metadata-only `READY` transaction.
+
+The metadata-only `primary prepare` command remains behind the global disabled
+lifecycle gate until the complete coordinator is qualified. Its production
+path must reject any non-root, dirty-source, stale qualification, artifact
+mismatch, recovery-filesystem failure, target identity/header drift, nonzero
+swap use, extra swap entry, mount/root dependency, loaded module or existing
+mapper. It must repeat the exact swap and block-zero checks immediately before
+claiming. After claim, focused rootless or isolated-VM lifecycle tests must
+verify durable consumed/`READY`/active ordering, exact original-header backup
+and manifest readback, and recovery from interruption after each metadata
+publication, including the atomic `READY` close and owner-marker release. No
+such test may write to the host's `/dev/sda4`; the rootless
+build must keep the command unavailable and prove no host path or lifecycle
+side effect is reached. A metadata-preparation PASS is not start, live-swap,
+crash-recovery, boot, performance, or production qualification.
 
 The primary manager's original-header backup is immutable per run ID. Its
 writer must require the exclusive lock and matching consumed/active owner claim,

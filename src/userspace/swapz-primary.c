@@ -87,7 +87,7 @@ static const char *const swapz_primary_stage_names[] = {
 static int swapz_primary_valid_run_id(const char *run_id);
 static int swapz_primary_valid_sha256(const char *digest);
 static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks);
-static int swapz_primary_reconcile_orphan_ready_state_at(
+static int swapz_primary_reconcile_metadata_claim_at(
 	int recovery_fd, int lock_fd, uid_t expected_owner);
 static int swapz_primary_record_read_at(
 	int recovery_fd, const char *name, uid_t expected_owner,
@@ -1580,12 +1580,14 @@ failed:
 
 static int swapz_primary_target_preflight(uint64_t *device_bytes,
 						 int *original_swap_header,
-						 int *original_header_hash_matches)
+						 int *original_header_hash_matches,
+						 unsigned char *original_header)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
 	(void)device_bytes;
 	(void)original_swap_header;
 	(void)original_header_hash_matches;
+	(void)original_header;
 	errno = ENODEV;
 	return -1;
 #else
@@ -1593,8 +1595,12 @@ static int swapz_primary_target_preflight(uint64_t *device_bytes,
 	struct stat partuuid_info;
 	struct stat device_info;
 	struct stat opened_info;
+	struct stat uuid_after;
+	struct stat partuuid_after;
+	struct stat device_after;
 	unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES];
 	char digest[65];
+	uint64_t device_bytes_after;
 	int fd;
 
 	if (!device_bytes || !original_swap_header ||
@@ -1652,13 +1658,40 @@ static int swapz_primary_target_preflight(uint64_t *device_bytes,
 		errno = saved_errno;
 		return -1;
 	}
+	if (fstat(fd, &opened_info) < 0 ||
+	    ioctl(fd, BLKGETSIZE64, &device_bytes_after) < 0 ||
+	    stat(SWAPZ_PRIMARY_UUID_PATH, &uuid_after) < 0 ||
+	    stat(SWAPZ_PRIMARY_PARTUUID_PATH, &partuuid_after) < 0 ||
+	    stat(SWAPZ_PRIMARY_DEVICE_PATH, &device_after) < 0) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (!S_ISBLK(opened_info.st_mode) ||
+	    !S_ISBLK(uuid_after.st_mode) || !S_ISBLK(partuuid_after.st_mode) ||
+	    !S_ISBLK(device_after.st_mode) ||
+	    opened_info.st_rdev != uuid_info.st_rdev ||
+	    uuid_after.st_rdev != uuid_info.st_rdev ||
+	    partuuid_after.st_rdev != uuid_info.st_rdev ||
+	    device_after.st_rdev != uuid_info.st_rdev ||
+	    device_bytes_after != *device_bytes ||
+	    !swapz_primary_device_number_matches(opened_info.st_rdev)) {
+		close(fd);
+		errno = ESTALE;
+		return -1;
+	}
 	if (close(fd) < 0)
 		return -1;
 	*original_swap_header = swapz_primary_original_swap_signature(block);
 	if (*original_swap_header &&
-	    swapz_primary_sha256(block, sizeof(block), digest) == 0)
+	    swapz_primary_sha256(block, sizeof(block), digest) == 0) {
 		*original_header_hash_matches =
 			!strcmp(digest, SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256);
+		if (original_header)
+			memcpy(original_header, block, sizeof(block));
+	}
 	return 0;
 #endif
 }
@@ -1873,6 +1906,32 @@ static int swapz_primary_read_swap_inventory(
 	return swapz_primary_parse_swaps(buffer, entries, capacity, entry_count);
 #endif
 }
+
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
+static int swapz_primary_original_swap_is_quiescent(void)
+{
+	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
+	struct stat info;
+	size_t count = 0;
+
+	if (swapz_primary_read_swap_inventory(
+		    entries, SWAPZ_PRIMARY_SWAP_ROWS_MAX, &count) < 0)
+		return -1;
+	if (count != 1U || strcmp(entries[0].type, "partition") ||
+	    entries[0].size_kib != SWAPZ_PRIMARY_SWAP_SIZE_KIB ||
+	    entries[0].used_kib != 0U || entries[0].priority != -1) {
+		errno = EBUSY;
+		return -1;
+	}
+	if (stat(entries[0].path, &info) < 0)
+		return -1;
+	if (!S_ISBLK(info.st_mode) || info.st_rdev != makedev(8U, 4U)) {
+		errno = ENODEV;
+		return -1;
+	}
+	return 0;
+}
+#endif
 
 static int swapz_primary_valid_partuuid(const char *partuuid)
 {
@@ -2887,9 +2946,6 @@ int swapz_primary_claim_partition_owner_at(int recovery_fd, int lock_fd,
 	}
 	if (flock(lock_fd, LOCK_EX | LOCK_NB) < 0)
 		return -1;
-	if (swapz_primary_reconcile_orphan_ready_state_at(
-		    recovery_fd, lock_fd, expected_owner) < 0)
-		return -1;
 	if (fstatat(recovery_fd, active_name, &marker_info,
 		    AT_SYMLINK_NOFOLLOW) == 0) {
 		errno = EBUSY;
@@ -3138,13 +3194,13 @@ static int swapz_primary_owner_claim_matches_at(int recovery_fd,
 }
 
 /*
- * A READY state without an active marker can only be left by a crash while
- * publishing a new metadata-only claim. Lifecycle operations require both
- * the READY state and the active marker, and STARTING must be durable before
- * any device mutation. Preserve the consumed run and close this untouched
- * transaction through the ordinary READY -> DISABLING -> COMPLETE edges.
+ * READY with an exact active marker or with no active marker can only be left
+ * by interruption during metadata-only preparation. STARTING must be durable
+ * before any device mutation. COMPLETE with an exact active marker can only
+ * be left by interruption before marker release. Preserve consumed runs and
+ * close only these states through durable lifecycle edges.
  */
-static int swapz_primary_reconcile_orphan_ready_state_at(
+static int swapz_primary_reconcile_metadata_claim_at(
 	int recovery_fd, int lock_fd, uid_t expected_owner)
 {
 	struct swapz_primary_state current;
@@ -3159,6 +3215,7 @@ static int swapz_primary_reconcile_orphan_ready_state_at(
 	size_t consumed_length;
 	int expected_length;
 	int formatted_length;
+	int active_present = 0;
 
 	if (recovery_fd < 0 || lock_fd < 0 ||
 	    !swapz_primary_state_lock_valid(recovery_fd, lock_fd,
@@ -3171,25 +3228,25 @@ static int swapz_primary_reconcile_orphan_ready_state_at(
 	}
 	if (fstatat(recovery_fd, active_name, &active_info,
 		    AT_SYMLINK_NOFOLLOW) == 0)
-		return 0;
-	if (errno != ENOENT)
+		active_present = 1;
+	else if (errno != ENOENT)
 		return -1;
 	if (swapz_primary_record_read_at(recovery_fd, "primary-state.json",
 					 expected_owner, state_record,
 					 sizeof(state_record), &state_length,
 					 NULL) < 0) {
-		if (errno == ENOENT)
+		if (errno == ENOENT && !active_present)
 			return 0;
+		if (errno == ENOENT)
+			errno = EBADMSG;
 		return -1;
 	}
 	if (swapz_primary_state_parse(state_record, state_length, &current) < 0) {
 		errno = EBADMSG;
 		return -1;
 	}
-	if (current.stage == SWAPZ_PRIMARY_STAGE_COMPLETE)
-		return 0;
-	if (current.stage != SWAPZ_PRIMARY_STAGE_READY ||
-	    current.has_recovery_previous_stage) {
+	if (current.stage != SWAPZ_PRIMARY_STAGE_READY &&
+	    current.stage != SWAPZ_PRIMARY_STAGE_COMPLETE) {
 		errno = EBUSY;
 		return -1;
 	}
@@ -3218,31 +3275,52 @@ static int swapz_primary_reconcile_orphan_ready_state_at(
 		errno = EPERM;
 		return -1;
 	}
+	if (active_present) {
+		char active_record[256];
+		size_t active_length;
+		struct stat active_identity;
+
+		if (swapz_primary_record_read_at(
+			    recovery_fd, active_name, expected_owner,
+			    active_record, sizeof(active_record), &active_length,
+			    &active_identity) < 0 ||
+		    active_identity.st_dev != active_info.st_dev ||
+		    active_identity.st_ino != active_info.st_ino ||
+		    active_length != (size_t)expected_length ||
+		    memcmp(active_record, expected_record, active_length)) {
+			errno = EPERM;
+			return -1;
+		}
+	}
+	if (current.stage == SWAPZ_PRIMARY_STAGE_COMPLETE) {
+		if (active_present &&
+		    swapz_primary_release_partition_owner_at(
+			    recovery_fd, lock_fd, current.run_id,
+			    expected_owner) < 0)
+			return -1;
+		return 0;
+	}
+	if (current.has_recovery_previous_stage) {
+		errno = EBUSY;
+		return -1;
+	}
 	next = current;
-	next.stage = SWAPZ_PRIMARY_STAGE_DISABLING;
-	if (!swapz_primary_state_transition_allowed(&current, &next)) {
-		errno = EPERM;
-		return -1;
-	}
-	formatted_length = swapz_primary_state_format(
-		&next, state_record, sizeof(state_record));
-	if (formatted_length < 0 ||
-	    swapz_primary_replace_record_at(
-		    recovery_fd, "primary-state.json", current.run_id,
-		    state_record, expected_owner) < 0)
-		return -1;
-	current = next;
 	next.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
-	if (!swapz_primary_state_transition_allowed(&current, &next)) {
-		errno = EPERM;
-		return -1;
-	}
+	/*
+	 * READY guarantees no device mutation has started. Close this metadata-
+	 * only abort with one atomic state replacement: an intermediate DISABLING
+	 * record would be ambiguous with a real teardown after a crash.
+	 */
 	formatted_length = swapz_primary_state_format(
 		&next, state_record, sizeof(state_record));
 	if (formatted_length < 0 ||
 	    swapz_primary_replace_record_at(
 		    recovery_fd, "primary-state.json", current.run_id,
 		    state_record, expected_owner) < 0)
+		return -1;
+	if (active_present &&
+	    swapz_primary_release_partition_owner_at(
+		    recovery_fd, lock_fd, current.run_id, expected_owner) < 0)
 		return -1;
 	return 0;
 }
@@ -6127,6 +6205,212 @@ out:
 #endif
 }
 
+static int swapz_primary_prepare_metadata(void)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	errno = ENODEV;
+	return -1;
+#else
+	struct swapz_primary_qualification qualification = {0};
+	struct swapz_primary_mount_facts mount_facts = {0};
+	struct swapz_primary_manifest manifest = {0};
+	struct swapz_primary_manifest verified_manifest = {0};
+	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	unsigned char verified_current_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	unsigned char verified_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	unsigned char proposed_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	char live_swapzctl_sha256[65];
+	char live_module_sha256[65];
+	char live_oracle_sha256[65];
+	char original_header_sha256[65];
+	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U] = {0};
+	uint64_t device_bytes = 0;
+	dev_t target_parent = 0;
+	dev_t root_parent = 0;
+	int directory_safe = 0;
+	int persistent_filesystem = 0;
+	unsigned int recovery_filesystem_major = 0;
+	unsigned int recovery_filesystem_minor = 0;
+	int recovery_directly_not_target = 0;
+	int recovery_source_chain_checked = 0;
+	unsigned int recovery_parent_major = 0;
+	unsigned int recovery_parent_minor = 0;
+	int active_marker_clear = 0;
+	int original_swap_header = 0;
+	int original_header_hash_matches = 0;
+	int module_loaded = 0;
+	int mapper_present = 0;
+	int recovery_fd = -1;
+	int lock_fd = -1;
+	int claimed = 0;
+	int result = -1;
+	int saved_errno;
+
+	if (geteuid() != 0 || SWAPZ_BUILD_SOURCE_CLEAN != 1 ||
+	    !swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA)) {
+		errno = EPERM;
+		goto out;
+	}
+	recovery_fd = swapz_primary_recovery_base_open(
+		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	if (recovery_fd < 0)
+		goto out;
+	lock_fd = swapz_primary_partition_lock_at(
+		recovery_fd, SWAPZ_PRIMARY_PARTUUID, 0);
+	if (lock_fd < 0 ||
+	    swapz_primary_reconcile_metadata_claim_at(
+		    recovery_fd, lock_fd, 0) < 0)
+		goto out;
+	if (swapz_primary_recovery_preflight(
+		    &directory_safe, &persistent_filesystem,
+		    &recovery_filesystem_major, &recovery_filesystem_minor,
+		    &recovery_directly_not_target, &recovery_source_chain_checked,
+		    &recovery_parent_major, &recovery_parent_minor,
+		    &active_marker_clear) < 0 ||
+	    !directory_safe || !persistent_filesystem ||
+	    !recovery_directly_not_target || !recovery_source_chain_checked ||
+	    !active_marker_clear) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_read_qualification_report(&qualification) < 0 ||
+	    strcmp(qualification.source_sha, SWAPZ_BUILD_SOURCE_SHA) ||
+	    swapz_primary_live_artifact_hashes(
+		    live_swapzctl_sha256, live_module_sha256,
+		    live_oracle_sha256, qualification.module_sha256, NULL) < 0 ||
+	    !swapz_primary_qualification_artifacts_match(
+		    &qualification, live_swapzctl_sha256, live_module_sha256,
+		    live_oracle_sha256)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_target_preflight(
+		    &device_bytes, &original_swap_header,
+		    &original_header_hash_matches, original_header) < 0 ||
+	    device_bytes != SWAPZ_PRIMARY_DEVICE_BYTES ||
+	    !original_swap_header || !original_header_hash_matches ||
+	    swapz_primary_sha256(original_header, sizeof(original_header),
+			     original_header_sha256) < 0 ||
+	    strcmp(original_header_sha256,
+		   SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_original_swap_is_quiescent() < 0)
+		goto out;
+	if (swapz_primary_read_mount_facts(&mount_facts) < 0 ||
+	    mount_facts.target_mounted ||
+	    !swapz_primary_recovery_source_chain(
+		    "/sys", makedev(8U, 4U), 0, &target_parent) ||
+	    !swapz_primary_recovery_source_chain(
+		    "/sys", mount_facts.root_device, makedev(8U, 4U),
+		    &root_parent)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_read_module_mapper_inventory(
+		    &module_loaded, &mapper_present) < 0 || module_loaded ||
+	    mapper_present) {
+		errno = EBUSY;
+		goto out;
+	}
+	if (swapz_primary_original_swap_is_quiescent() < 0)
+		goto out;
+	{
+		uint64_t verified_device_bytes = 0;
+		int verified_swap_header = 0;
+		int verified_header_hash = 0;
+
+		if (swapz_primary_target_preflight(
+			    &verified_device_bytes, &verified_swap_header,
+			    &verified_header_hash, verified_current_header) < 0 ||
+		    verified_device_bytes != device_bytes || !verified_swap_header ||
+		    !verified_header_hash ||
+		    memcmp(original_header, verified_current_header,
+			   sizeof(original_header))) {
+			errno = ESTALE;
+			goto out;
+		}
+	}
+	if (swapz_primary_run_id_generate(run_id) < 0 ||
+	    swapz_primary_header_build(run_id, proposed_header) < 0)
+		goto out;
+	memcpy(manifest.run_id, run_id, sizeof(manifest.run_id));
+	memcpy(manifest.source_sha, qualification.source_sha,
+	       sizeof(manifest.source_sha));
+	memcpy(manifest.swapzctl_sha256, qualification.formatter_sha256,
+	       sizeof(manifest.swapzctl_sha256));
+	memcpy(manifest.module_sha256, qualification.module_sha256,
+	       sizeof(manifest.module_sha256));
+	memcpy(manifest.qualification_report_sha256,
+	       qualification.report_sha256,
+	       sizeof(manifest.qualification_report_sha256));
+	memcpy(manifest.original_header_sha256, original_header_sha256,
+	       sizeof(manifest.original_header_sha256));
+	if (swapz_primary_claim_partition_owner_at(
+		    recovery_fd, lock_fd, run_id, 0) < 0)
+		goto out;
+	claimed = 1;
+	if (swapz_primary_header_backup_write_at(
+		    recovery_fd, lock_fd, run_id, original_header,
+		    original_header_sha256, 0) < 0)
+		goto out;
+	if (swapz_primary_manifest_write_at(
+		    recovery_fd, lock_fd, &manifest, 0) < 0)
+		goto out;
+	if (swapz_primary_header_backup_read_at(
+		    recovery_fd, lock_fd, run_id, original_header_sha256, 0,
+		    verified_header) < 0)
+		goto out;
+	if (memcmp(original_header, verified_header, sizeof(original_header))) {
+		errno = EBADMSG;
+		goto out;
+	}
+	if (swapz_primary_manifest_read_at(
+		    recovery_fd, lock_fd, run_id, 0, &verified_manifest) < 0)
+		goto out;
+	if (!swapz_primary_manifest_equal(&manifest, &verified_manifest)) {
+		errno = EBADMSG;
+		goto out;
+	}
+	result = 0;
+	out:
+	saved_errno = errno ? errno : EIO;
+	if (lock_fd >= 0 && close(lock_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (recovery_fd >= 0 && close(recovery_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	memset(original_header, 0, sizeof(original_header));
+	memset(verified_current_header, 0, sizeof(verified_current_header));
+	memset(verified_header, 0, sizeof(verified_header));
+	memset(proposed_header, 0, sizeof(proposed_header));
+	if (result == 0)
+		printf("PRIMARY_PREPARE=READY run_id=%s source=%s logical_pages=%llu "
+		       "logical_bytes=%llu swap_kib=%llu\n",
+		       run_id, manifest.source_sha,
+		       (unsigned long long)swapz_primary_maximum_logical_pages(
+			       SWAPZ_PRIMARY_PHYSICAL_BLOCKS),
+		       (unsigned long long)(swapz_primary_maximum_logical_pages(
+				       SWAPZ_PRIMARY_PHYSICAL_BLOCKS) *
+			       SWAPZ_PRIMARY_BLOCK_BYTES),
+		       (unsigned long long)(swapz_primary_maximum_logical_pages(
+			       SWAPZ_PRIMARY_PHYSICAL_BLOCKS) *
+		       SWAPZ_PRIMARY_BLOCK_BYTES / 1024ULL - 4ULL));
+	if (result < 0 && claimed)
+		fprintf(stderr,
+			"PRIMARY_PREPARE=INCOMPLETE run_id=%s claim=retained "
+			"target_unchanged=true error=%s\n",
+			run_id, strerror(saved_errno));
+	if (result < 0)
+		errno = saved_errno;
+	return result;
+#endif
+}
+
 static int swapz_primary_read_only_plan(void)
 {
 	struct swapz_primary_swap_entry swaps[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
@@ -6149,7 +6433,7 @@ static int swapz_primary_read_only_plan(void)
 	int original_header_hash_matches = 0;
 	int target_device_preflight = swapz_primary_target_preflight(
 		&target_device_bytes, &original_swap_header,
-		&original_header_hash_matches) == 0;
+		&original_header_hash_matches, NULL) == 0;
 	int recovery_directory_safe = 0;
 	int recovery_persistent_filesystem = 0;
 	unsigned int recovery_filesystem_major = 0;
@@ -6392,6 +6676,14 @@ int swapz_primary_command(int argc, char **argv)
 		fputs("BLOCKED: primary-swap provisioning, activation, teardown and "
 		      "recovery remain disabled pending qualification\n", stderr);
 		return 2;
+	}
+	if (!strcmp(argv[0], "prepare")) {
+		if (swapz_primary_prepare_metadata() < 0) {
+			fprintf(stderr, "BLOCKED: primary-swap preparation failed: %s\n",
+				strerror(errno));
+			return 2;
+		}
+		return 0;
 	}
 	fputs("BLOCKED: primary-swap lifecycle action is not implemented\n", stderr);
 	return 2;
