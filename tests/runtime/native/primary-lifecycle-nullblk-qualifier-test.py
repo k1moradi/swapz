@@ -115,8 +115,13 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
                       self.script)
         self.assertNotIn('json.dumps(state, sort_keys=True', self.script)
 
-    def test_source_head_must_match_validated_source(self):
-        self.assertIn('git rev-parse --verify HEAD', self.script)
+    def test_source_head_uses_parent_validation_and_build_provenance(self):
+        self.assertIn('--validated-source <40-hex-sha>', self.script)
+        self.assertIn('SWAPZ_BUILD_SOURCE_SHA', self.script)
+        self.assertIn('SWAPZ_BUILD_SOURCE_CLEAN 1', self.script)
+        self.assertNotIn('git rev-parse', self.script)
+        self.assertNotRegex(self.script, r"(?m)^\s*git\s")
+        self.assertNotIn("$(git ", self.script)
 
     def test_cleanup_quarantines_unfinished_durable_state(self):
         self.assertIn("unfinished_or_ambiguous_durable_state", self.script)
@@ -135,9 +140,12 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
     def test_missing_swap_path_cannot_be_counted_as_absent(self):
         self.assertIn('[[ -e "$swap_path" ]] || return 1', self.script)
 
-    def test_dirty_checkout_cannot_be_used_for_loaded_proof(self):
-        self.assertIn("git diff --quiet --exit-code", self.script)
-        self.assertIn("git diff --cached --quiet --exit-code", self.script)
+    def test_privileged_qualifier_does_not_touch_git_metadata(self):
+        self.assertNotIn("git diff --quiet --exit-code", self.script)
+        self.assertNotIn("git diff --cached --quiet --exit-code", self.script)
+        self.assertIn(
+            "Branch/source/cleanliness are proved by the unprivileged "
+            "loaded-test parent", self.script)
 
     def test_fault_shim_is_warning_clean(self):
         subprocess.run(
