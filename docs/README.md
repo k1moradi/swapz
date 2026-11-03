@@ -79,6 +79,8 @@ for the current dedicated SD card.
 
 ## Documentation
 
+- [AGENTS.md](../AGENTS.md): mandatory Codex/agent instructions; ONLY
+  `main`, no new branches, no PRs, and fast-forward-only direct publishing.
 - [AGENT_CONTEXT.md](AGENT_CONTEXT.md): **always-loaded current operating
   context** — target identity, standing owner scope, autonomy rules, main-sync
   contract, documentation budget and production-ready completion criteria.
