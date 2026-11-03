@@ -779,11 +779,13 @@ class SustainedIntervalSampler:
         self.start_ns = None
         self.observer_samples = 0
         self.observer_wall_ns = 0
+        self.observer_thread_cpu_ns = 0
         self.observer_child_user_seconds = 0.0
         self.observer_child_system_seconds = 0.0
 
     def _snapshot(self) -> dict:
         observer_start = time.monotonic_ns()
+        observer_thread_start = time.thread_time_ns()
         child_before = resource.getrusage(resource.RUSAGE_CHILDREN)
         snapshot = {
             "time_ns": observer_start,
@@ -797,16 +799,20 @@ class SustainedIntervalSampler:
         }
         child_after = resource.getrusage(resource.RUSAGE_CHILDREN)
         observer_wall_ns = time.monotonic_ns() - observer_start
+        observer_thread_cpu_ns = max(
+            0, time.thread_time_ns() - observer_thread_start)
         child_user_seconds = max(
             0.0, child_after.ru_utime - child_before.ru_utime)
         child_system_seconds = max(
             0.0, child_after.ru_stime - child_before.ru_stime)
         self.observer_samples += 1
         self.observer_wall_ns += observer_wall_ns
+        self.observer_thread_cpu_ns += observer_thread_cpu_ns
         self.observer_child_user_seconds += child_user_seconds
         self.observer_child_system_seconds += child_system_seconds
         snapshot["observer_overhead"] = {
             "wall_seconds": observer_wall_ns / 1e9,
+            "thread_cpu_seconds": observer_thread_cpu_ns / 1e9,
             "child_user_seconds": child_user_seconds,
             "child_system_seconds": child_system_seconds,
         }
@@ -816,15 +822,17 @@ class SustainedIntervalSampler:
         return {
             "samples": self.observer_samples,
             "wall_seconds": self.observer_wall_ns / 1e9,
+            "thread_cpu_seconds": self.observer_thread_cpu_ns / 1e9,
             "child_user_seconds": self.observer_child_user_seconds,
             "child_system_seconds": self.observer_child_system_seconds,
             "child_cpu_seconds": (
                 self.observer_child_user_seconds +
                 self.observer_child_system_seconds),
             "scope": (
-                "low-rate telemetry observer only; includes read-only status "
-                "sampling and its child-process CPU where applicable; excluded "
-                "from the frozen measured CPU acceptance metric"),
+                "low-rate telemetry observer only; thread CPU is part of "
+                "RUSAGE_SELF and therefore remains included in the frozen "
+                "replay-process CPU metric; child-process CPU is reported "
+                "separately and is not charged to that metric"),
         }
 
     def _append(self, current: dict, minimum_ns: int = 0) -> None:
@@ -891,6 +899,7 @@ def stop_interval_sampler(interval_sampler, partial: dict,
     if interval_sampler is None:
         partial["sustained_observer_overhead"] = {
             "samples": 0, "wall_seconds": 0.0,
+            "thread_cpu_seconds": 0.0,
             "child_user_seconds": 0.0, "child_system_seconds": 0.0,
             "child_cpu_seconds": 0.0,
             "scope": "no sustained interval sampler for this fixed-work arm",

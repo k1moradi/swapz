@@ -2543,6 +2543,7 @@ class PairReplayContract(unittest.TestCase):
             def observer_summary(self):
                 return {
                     "samples": 1, "wall_seconds": .01,
+                    "thread_cpu_seconds": .0005,
                     "child_user_seconds": .001,
                     "child_system_seconds": .002,
                     "child_cpu_seconds": .003,
@@ -2571,6 +2572,7 @@ class PairReplayContract(unittest.TestCase):
         observer_cost = observer.observer_summary()
         self.assertEqual(observer_cost["samples"], 1)
         self.assertGreaterEqual(observer_cost["wall_seconds"], 0)
+        self.assertGreaterEqual(observer_cost["thread_cpu_seconds"], 0)
         self.assertGreaterEqual(observer_cost["child_cpu_seconds"], 0)
 
     def test_physical_campaign_evidence_seals_all_attempts_and_policy(self):

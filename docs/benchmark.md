@@ -611,10 +611,13 @@ swapz-only cost. Process-only CPU must never be described as whole-swapz CPU.
 The anonymous worker additionally reports process-only CPU for deterministic
 fill and each reread/verification round; these are diagnostic phase splits and
 do not replace the frozen whole-arm CPU acceptance metric. Sustained one-minute
-telemetry reports its own sampling wall time and child-process CPU (including
-read-only `dmsetup status` where applicable). That observer overhead is excluded
-from the frozen replay+exported-worker CPU metric and must be considered when
-correlating minute-level GC events with service drift.
+telemetry reports its own sampling wall time, sampler-thread CPU and child-
+process CPU (including read-only `dmsetup status` where applicable). Sampler
+thread CPU remains inside `RUSAGE_SELF` and therefore remains charged to the
+frozen replay-process CPU metric; child-process CPU is reported separately and
+is not charged. No observer cost is subtracted post hoc from acceptance. These
+diagnostics must be considered when correlating minute-level GC events with
+service drift.
 
 A 200 ms quiet window immediately before and after each arm must have busy
 fraction <=25%, CPU PSI \`some\` <=5% and steal <=1%; timed-arm steal must also be
