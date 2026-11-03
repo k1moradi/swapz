@@ -29,6 +29,8 @@ static swapz_u8 disk[NPHYS * SWAPZ_BLOCK_BYTES];
 static swapz_u8 payloads[3][2072];
 static struct swapz_compressed_page pages[3];
 static swapz_u32 writes, reads;
+static swapz_u32 last_lower_write_block;
+static swapz_u8 last_lower_write_blocks;
 static int corrupt_after_write, fail_read, lie_about_completion;
 static int partial_write_error, short_success;
 
@@ -45,6 +47,8 @@ static int write_lower(void *unused, swapz_u32 block, swapz_u8 blocks,
 	if (block >= NPHYS || blocks > NPHYS - block)
 		return -ERANGE;
 	writes++;
+	last_lower_write_block = block;
+	last_lower_write_blocks = blocks;
 	if (lie_about_completion) {
 		*completed = blocks + 1U;
 		return 0;
@@ -89,6 +93,8 @@ static int setup(void)
 	memset(&engine, 0, sizeof(engine));
 	memset(disk, 0, sizeof(disk));
 	writes = reads = 0;
+	last_lower_write_block = 0;
+	last_lower_write_blocks = 0;
 	corrupt_after_write = fail_read = lie_about_completion = 0;
 	partial_write_error = short_success = 0;
 	if (swapz_authority_init(&auth, map, live, klass, 64, NPHYS) ||
@@ -217,6 +223,8 @@ static int test_partial_or_short_write_never_publishes(void)
 
 	for (mode = 0; mode < 2U; ++mode) {
 		swapz_u8 committed = 99;
+		size_t lower_write_offset;
+		size_t byte_index;
 
 		CHECK(setup() == 0);
 		engine.verify_after_write = 1;
@@ -227,6 +235,17 @@ static int test_partial_or_short_write_never_publishes(void)
 		CHECK(committed == 0 && writes == 1 && reads == 0);
 		CHECK(engine.submitted_blocks == 2 &&
 		      engine.completed_blocks == 1);
+		CHECK(last_lower_write_blocks == 2U);
+		lower_write_offset =
+			(size_t)last_lower_write_block * SWAPZ_BLOCK_BYTES;
+		/* The lower callback must really write the acknowledged prefix. */
+		CHECK(!memcmp(disk + lower_write_offset, scratch_w,
+			      SWAPZ_BLOCK_BYTES));
+		/* Its unacknowledged block must remain physically untouched. */
+		for (byte_index = 0; byte_index < SWAPZ_BLOCK_BYTES;
+		     ++byte_index)
+			CHECK(disk[lower_write_offset + SWAPZ_BLOCK_BYTES +
+				   byte_index] == 0);
 		CHECK(engine.write_verify_read_blocks == 0);
 		CHECK(auth.abandoned_blocks == 2 && !auth.in_flight);
 		CHECK(!map[0].valid && !map[1].valid && !map[2].valid);
