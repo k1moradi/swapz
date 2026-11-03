@@ -352,6 +352,20 @@ signature to an unchanged module.
 
 Native tests compile the real `src/kernel/{codec,authority,engine}.c` where applicable. They cover codec integrity, authority publication, torn/short failure, overwrite generations, discard, zero-write representation, online packing, randomized authority, lower-run aggregation, flush/FUA accounting, retention/window policy and GC rotation/cost invariants. GC engine coverage must also force a fully completed batched lower write whose authority replay fails after at least one earlier extent has published; the wrapper must return the exact committed prefix while leaving the unpublished tail unreachable, so callers never retry already-authoritative pages as though the prefix were zero. A delayed GC lower completion must keep both overwrite staging and DISCARD fenced until replay, and failed GC lower I/O must leave the uncertain physical reservation unavailable for immediate reuse.
 
+The GC native suite must additionally sustain at least 64 all-RAW exhaustion-and-
+rotation cycles over a fully populated logical mapper, verifying all surviving
+pages byte-for-byte and preserving both rotating reserve roles after every
+cycle; a successful mapper construction or two rotations are insufficient.
+It must also reproduce repeated *partial* GC failures: a published relocation
+pins a reserved destination even if a later read/write fails. The current
+worker restores the foreground cursor but has no authority-level protocol to
+resume or safely undo that relocation, so two failures can leave both reserves
+pinned and subsequent GC returning `-ENOSPC` without any data corruption.
+This is a known forward-progress blocker, not a passed recovery qualification:
+fixing it requires coordinated authority and serialized-worker changes plus a
+recovery-success regression. Never reclassify a reserved segment with live
+references as dead to make this test pass.
+
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
 regression fixture: one SWZ header block,
 1 MiB segment rounding, and the authority's `ceil(logical_pages / 8)` reserve

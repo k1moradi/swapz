@@ -360,6 +360,80 @@ static int test_late_replay_failure_reports_committed_prefix(void)
 	return 0;
 }
 
+/*
+ * Audit of the current failure contract, NOT a forward-progress success.
+ * If a GC read/write fails after a prior relocation has published, the
+ * reserved destination contains authoritative mappings. The DM worker
+ * restores foreground cursors, but it cannot reuse that reserve as dead.
+ * Two such failures can pin both reserves; role checks must still refuse
+ * to overwrite referenced extents. Authority/worker recovery is required.
+ */
+static void restore_failed_gc_cursor(swapz_u32 next_block,
+				     swapz_u32 open_segment,
+				     swapz_u32 next_probe)
+{
+	a.gc_allocation = 0;
+	a.gc_forbidden_open = ~(swapz_u32)0;
+	a.gc_forbidden_victim = ~(swapz_u32)0;
+	a.gc_destination = ~(swapz_u32)0;
+	a.next_block = next_block;
+	a.open_segment = open_segment;
+	a.next_segment_probe = next_probe;
+}
+
+static int test_partial_gc_failures_pin_both_reserves_safely(void)
+{
+	const swapz_u32 victim = 0U;
+	swapz_u32 saved_next, saved_open, saved_probe;
+	unsigned int index;
+
+	CHECK(setup() == 0);
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS - 2U; ++index)
+		CHECK(write_one(0) == 0);
+	CHECK(write_one(1) == 0);
+	CHECK(write_one(2) == 0);
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(write_one(3) == 0);
+	CHECK(write_one(4) == -ENOSPC);
+	saved_next = a.next_block;
+	saved_open = a.open_segment;
+	saved_probe = a.next_segment_probe;
+
+	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
+	CHECK(a.gc_destination == 2U);
+	CHECK(write_one(0) == 0);
+	fail_write = 1;
+	CHECK(write_one(1) == -EIO);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
+	restore_failed_gc_cursor(saved_next, saved_open, saved_probe);
+	CHECK(roles[2] == 0 && maps[0].start_block == 512U);
+	CHECK(verify_page(0) == 0 && verify_page(1) == 0);
+
+	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
+	CHECK(a.gc_destination == 3U);
+	CHECK(write_one(1) == 0);
+	fail_write = 1;
+	CHECK(write_one(2) == -EIO);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
+	restore_failed_gc_cursor(saved_next, saved_open, saved_probe);
+
+	/* The reserve roles remain reserved and each contains a live extent.
+	 * This is safe (no reference is reused), but GC cannot make progress
+	 * without an authority-owned resume/recovery protocol. */
+	CHECK(a.segment_foreground[2] == 0 && a.segment_foreground[3] == 0);
+	CHECK(maps[0].start_block / SWAPZ_SEGMENT_BLOCKS == 2);
+	CHECK(maps[1].start_block / SWAPZ_SEGMENT_BLOCKS == 3);
+	CHECK(maps[2].start_block / SWAPZ_SEGMENT_BLOCKS == victim);
+	CHECK(live[maps[0].start_block] && live[maps[1].start_block] &&
+	      live[maps[2].start_block]);
+	CHECK(swapz_gc_begin_rotation(&a, victim) == -ENOSPC);
+	CHECK(write_one(4) == -ENOSPC);
+	for (index = 0; index < 4; ++index)
+		CHECK(verify_page(index) == 0);
+	return 0;
+}
+
+
 int main(void)
 {
 	int passed = 0;
@@ -369,6 +443,7 @@ int main(void)
 	CHECK(test_failed_gc_read_preserves_live_mapping() == 0); passed++;
 	CHECK(test_delayed_gc_completion_fences_mutation() == 0); passed++;
 	CHECK(test_late_replay_failure_reports_committed_prefix() == 0); passed++;
+	CHECK(test_partial_gc_failures_pin_both_reserves_safely() == 0); passed++;
 	printf("SWAPZ_GC_ENGINE_ROTATION_TESTS_PASS=%d\n", passed);
 	return 0;
 }

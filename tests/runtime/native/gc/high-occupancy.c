@@ -269,11 +269,107 @@ static int test_fragmented_raw_gc_restores_progress(void)
 	return 0;
 }
 
+/*
+ * Keep every other foreground segment partially LIVE while consuming the
+ * active segment. That prevents opportunistic whole-dead reuse and forces
+ * repeated GC reserve exchanges at exactly worst-case RAW occupancy.
+ */
+static int overwrite_outside_open(swapz_u32 *next_logical)
+{
+	swapz_u32 scan;
+
+	for (scan = 0; scan < LOGICAL_PAGES; ++scan) {
+		swapz_u32 logical = (*next_logical + scan) % LOGICAL_PAGES;
+		swapz_u32 segment;
+
+		if (!maps[logical].valid ||
+		    maps[logical].start_block >= PHYSICAL_BLOCKS)
+			return -EUCLEAN;
+		segment = maps[logical].start_block / SWAPZ_SEGMENT_BLOCKS;
+		if (!roles[segment] || segment == a.open_segment ||
+		    segment_maps[segment] < 2U)
+			continue;
+		{
+			int error = write_page(logical, versions[logical] + 1U);
+
+			if (!error)
+				*next_logical = (logical + 1U) % LOGICAL_PAGES;
+			return error;
+		}
+	}
+	return -EUCLEAN;
+}
+
+static int choose_partial_victim(swapz_u32 *victim)
+{
+	swapz_u32 segment, best = ~(swapz_u32)0;
+	swapz_u32 fewest_live = SWAPZ_SEGMENT_BLOCKS;
+
+	for (segment = 0; segment < PHYSICAL_SEGMENTS; ++segment) {
+		if (!roles[segment] || segment == a.open_segment ||
+		    !segment_maps[segment] ||
+		    segment_maps[segment] >= fewest_live)
+			continue;
+		fewest_live = segment_maps[segment];
+		best = segment;
+	}
+	if (best == ~(swapz_u32)0)
+		return -ENOSPC;
+	*victim = best;
+	return 0;
+}
+
+static int test_sustained_all_raw_gc_rotations(void)
+{
+	const unsigned int rotations = 64U;
+	swapz_u32 next_logical = 0;
+	unsigned int rotation;
+
+	CHECK(setup() == 0);
+	CHECK(fill_all_pages(1) == 0);
+	for (rotation = 0; rotation < rotations; ++rotation) {
+		swapz_u32 victim, block;
+		unsigned int attempts;
+		int error = -EUCLEAN;
+
+		/* A bounded sweep must exhaust all ordinary foreground allocation
+		 * even though the target remains 100% logically populated. */
+		for (attempts = 0;
+		     attempts < FOREGROUND_SEGMENTS * SWAPZ_SEGMENT_BLOCKS;
+		     ++attempts) {
+			error = overwrite_outside_open(&next_logical);
+			if (error)
+				break;
+		}
+		CHECK(error == -ENOSPC);
+		CHECK(!a.in_flight && !a.batch_pending);
+		CHECK(choose_partial_victim(&victim) == 0);
+		CHECK(segment_maps[victim] < SWAPZ_SEGMENT_BLOCKS);
+		CHECK(relocate_segment(victim) == 0);
+		CHECK(!roles[victim] && !segment_maps[victim]);
+		for (block = victim * SWAPZ_SEGMENT_BLOCKS;
+		     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
+			CHECK(!live[block]);
+		CHECK(reserve_segments() == PHYSICAL_SEGMENTS - FOREGROUND_SEGMENTS);
+		CHECK(verify_all_pages() == 0);
+	}
+	CHECK(gc_reads == gc_writes);
+	CHECK(gc_bytes_relocated == gc_writes * (unsigned long long)SWAPZ_BLOCK_BYTES);
+	printf("SWAPZ_GC_SUSTAINED_EVIDENCE=rotations:%u "
+	       "foreground_writes:%llu gc_reads:%llu gc_writes:%llu "
+	       "gc_bytes_relocated:%llu\n",
+	       rotations, foreground_writes, gc_reads, gc_writes,
+	       gc_bytes_relocated);
+	return 0;
+}
+
+
 int main(void)
 {
 	int passed = 0;
 
 	CHECK(test_repeated_raw_reclaim_and_reuse() == 0); passed++;
+	CHECK(test_sustained_all_raw_gc_rotations() == 0); passed++;
 	CHECK(test_fragmented_raw_gc_restores_progress() == 0); passed++;
 	printf("SWAPZ_GC_HIGH_OCCUPANCY_PASS=%d "
 	       "foreground_writes=%llu gc_reads=%llu gc_writes=%llu "
