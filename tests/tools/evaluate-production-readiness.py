@@ -27,7 +27,7 @@ PHYSICAL_CAMPAIGN_AMENDMENT = (
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-PARTUUID_RE = re.compile(r"^[0-9a-f][0-9a-f-]*$")
+PARTUUID_RE = re.compile(r"^[0-9a-f]+(?:-[0-9a-f]+)*$")
 MAJOR_MINOR_RE = re.compile(r"^[0-9]+:[0-9]+$")
 KERNEL_RELEASE_RE = re.compile(r"^[A-Za-z0-9._+-]{1,127}$")
 
@@ -107,7 +107,10 @@ def _normalize_target(value: Any) -> tuple[str, int] | None:
     size_bytes = value.get("size_bytes")
     if not isinstance(partuuid, str) or partuuid != partuuid.lower():
         return None
-    if not PARTUUID_RE.fullmatch(partuuid):
+    if (
+            not 8 <= len(partuuid) <= 64 or
+            not PARTUUID_RE.fullmatch(partuuid) or
+            sum(ch != "-" for ch in partuuid) < 8):
         return None
     if not isinstance(size_bytes, int) or isinstance(size_bytes, bool):
         return None
