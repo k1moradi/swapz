@@ -602,8 +602,7 @@ def validate_cold_boot_arm_evidence(
         source_sha: str,
         target: tuple[str, int] | None,
         report_artifacts: dict[str, Any] | None,
-        owner_kernel_release: Any,
-        cold_boot_arm: dict[str, str] | None = None) -> list[str]:
+        owner_kernel_release: Any) -> list[str]:
     """Validate the durable pre-reboot arm record."""
     issues: list[str] = []
 
@@ -652,7 +651,8 @@ def validate_cold_boot_evidence(
         source_sha: str,
         target: tuple[str, int] | None,
         report_artifacts: dict[str, Any] | None,
-        owner_kernel_release: Any) -> list[str]:
+        owner_kernel_release: Any,
+        cold_boot_arm: dict[str, str] | None = None) -> list[str]:
     """Validate the persisted boot verifier report behind a claimed reboot PASS."""
     issues: list[str] = []
 
