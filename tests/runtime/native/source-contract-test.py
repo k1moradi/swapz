@@ -986,7 +986,7 @@ static swapz_u16 swapz_probe_set(
                       ctor)
         self.assertIn("prepared->length = swapz_compress_prepared_page(", producer)
         self.assertIn("prepared->raw_bytes", producer)
-        self.assertIn("swapz_preparation_publish_result(", producer)
+        self.assertIn("swapz_preparation_publish_codec_result(", producer)
         self.assertIn("length = swapz_compress_page(", ordered)
         self.assertIn("if (ctx->delta64_rescue_enabled)", compressor)
         self.assertIn("swapz_predict_delta64_sample_score(input)", compressor)
@@ -5669,7 +5669,7 @@ int main(void)
             preparing = body(name)
             self.assertIn("prepared->length = swapz_compress_prepared_page(", preparing)
             self.assertLess(preparing.index("swapz_compress_prepared_page("),
-                            preparing.index("swapz_preparation_publish_result("))
+                            preparing.index("swapz_preparation_publish_codec_result("))
         accept = body("swapz_accept_write")
         self.assertIn("swapz_observe_prepared_lz4_cost(ctx, prepared, prepared_state)",
                       accept)
@@ -5881,7 +5881,7 @@ int main(void) {
         self.assertIn("complete_all(&entry->preparation_snapshot_ready)",
                       payload)
         self.assertIn("prepared->length = swapz_compress_prepared_page(", payload)
-        self.assertIn("swapz_preparation_publish_result(", payload)
+        self.assertIn("swapz_preparation_publish_codec_result(", payload)
         self.assertNotIn("preparation_submitter_active", payload)
         self.assertNotIn("_delayed_work(", payload)
         self.assertNotIn("swapz_preparation_release_slot(", payload)
