@@ -248,10 +248,13 @@ Unless evidence changes the order, work on:
 1. **Target/configuration abstraction — implemented.** The manager, package
    and systemd generator use a protected PARTUUID selector; target path,
    major:minor and capacity are discovered at runtime. Alternate synthetic
-   identities and geometries are covered in direct-C tests, and both required
-   GitHub workflows pass on `1f390fa47f788c927d2eb8987bf2cd6f60ae7ede`
-   (runs `41638449351` and `41638449872`). The latest owner report remains
-   BLOCKED on older source `9feb6b9df7710634bffbf394504257b2a4d2d8d3`.
+   identities and geometries are covered in direct-C tests. Production-C CI
+   passes on source `1f390fa47f788c927d2eb8987bf2cd6f60ae7ede` (run
+   `41638449351`); native project-goal CI passes on current documentation-only
+   HEAD `ed76ae2a7d1ef067732ec6c63151c054dac4a9c2` (run `41639975131`). The
+   latest owner report remains BLOCKED on older source
+   `9feb6b9df7710634bffbf394504257b2a4d2d8d3`. See the compact snapshot at
+   [docs/handoff/production-readiness.json](handoff/production-readiness.json).
    Keep the privileged lifecycle disabled until separately qualified. The
    historical fixed-device live-swap supervisor is not the active selector or
    deployment path.

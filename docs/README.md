@@ -64,14 +64,19 @@ The most recent owner attempt published report-only commit
 `9feb6b9df7710634bffbf394504257b2a4d2d8d3`. Stages 1–4 passed; stage 5 was
 BLOCKED because the ID36 low-RAM gate required at least 1 GiB of
 `MemAvailable`. The report is not an overall qualification, and it does not
-qualify later `main` changes. Current `main` at
-`1f390fa47f788c927d2eb8987bf2cd6f60ae7ede` has passing GitHub runs for both
-required workflows: [production-C qualification](https://github.com/k1moradi/swapz/actions/runs/41638449351)
-and [native project-goal regressions](https://github.com/k1moradi/swapz/actions/runs/41638449872).
-These validate the source and CI contracts, but do not replace an exact-source
-owner `make test`; loaded owner qualification for this `main` head is still
-outstanding. The current root `test_results.json` remains `BLOCKED` on source
+qualify later `main` changes. Current `main` is
+`ed76ae2a7d1ef067732ec6c63151c054dac4a9c2`; its native project-goal workflow
+passed on that exact commit (run `41639975131`). The latest production-C
+qualification passed on `1f390fa47f788c927d2eb8987bf2cd6f60ae7ede`
+(run `41638449351`); production source is unchanged through current `main`.
+These CI results do not replace exact-source owner `make test`. The current
+root `test_results.json` remains `BLOCKED` on source
 `9feb6b9df7710634bffbf394504257b2a4d2d8d3`.
+
+The current host, target, build, CI, plan, and readiness-gate snapshot is
+tracked in [handoff/production-readiness.json](handoff/production-readiness.json).
+Its geometry-derived logical capacity is a candidate only; memory feasibility,
+full-card correctness, and actual swap behavior remain unqualified.
 
 The primary manager and installed systemd generator are drive-neutral. The
 manager reads a root-protected PARTUUID selector and discovers the selected

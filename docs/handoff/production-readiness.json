@@ -1,0 +1,150 @@
+{
+  "schema": "swapz-production-readiness-v1",
+  "updated_at_utc": "2026-11-03T13:01:36Z",
+  "repository": {
+    "branch": "main",
+    "local_sha": "ed76ae2a7d1ef067732ec6c63151c054dac4a9c2",
+    "origin_main_sha": "ed76ae2a7d1ef067732ec6c63151c054dac4a9c2",
+    "synchronized": true,
+    "production_source_sha": "1f390fa47f788c927d2eb8987bf2cd6f60ae7ede"
+  },
+  "host": {
+    "architecture": "x86_64",
+    "kernel_release": "7.0.0-42-generic",
+    "page_size_bytes": 4096,
+    "mem_total_kib": 3863624,
+    "mem_available_kib": 940264,
+    "mem_available_observed_at_utc": "2026-11-03T13:01:36Z",
+    "secure_boot": "unverified"
+  },
+  "authorized_target": {
+    "selector_path": "/etc/swapz/primary-target",
+    "partuuid": "f13428f6-01",
+    "observed_path": "/dev/sda1",
+    "major_minor": "8:1",
+    "size_bytes": 124787884032,
+    "uuid": "8c6a02a2-20e9-4e31-869a-48ef7f6c990b",
+    "parent_major_minor": "8:0",
+    "parent_model": "Multi-Card",
+    "transport": "usb",
+    "mounted": false,
+    "active_swap": false,
+    "current_observation_scope": "read-only lsblk and primary-plan checks; no destructive preflight or mutation in this update"
+  },
+  "swap_and_mapper_state": {
+    "active_swap": [
+      {
+        "path": "/swapfile",
+        "scope": "unrelated host swap; untouched"
+      }
+    ],
+    "swapz_module_loaded": false,
+    "swapz_mapper_present": false,
+    "dmsetup_tree": "No devices found",
+    "null_blk_module_loaded": true,
+    "null_blk_test_ownership": "not established; left untouched"
+  },
+  "current_build": {
+    "source_sha": "ed76ae2a7d1ef067732ec6c63151c054dac4a9c2",
+    "source_clean": true,
+    "build_result": "PASS",
+    "build_scope": "normal make -j4; not W=1/W=2 or owner qualification",
+    "swapzctl_sha256": "fb5366c39bd39247fb5262dc286b39803afdf78812c807e0f06f7b915c897b4e",
+    "module_sha256": "53f6a8e1ad124383e205633f4433fbb5b3d308c56d2564cc1629cef2b3fd312f",
+    "installed": false,
+    "loaded": false,
+    "warnings": [
+      "compiler executable name differs from kernel build compiler name, though both report GCC 15.2.0",
+      "swapz_status frame size 2112 bytes exceeds 1024 bytes",
+      "pahole reports version 0; kernel was built with pahole version 131",
+      "BTF skipped because vmlinux is unavailable"
+    ]
+  },
+  "deployment_artifacts": {
+    "swapzctl_installed": false,
+    "dm_swapz_module_installed": false,
+    "primary_systemd_unit": "not-found",
+    "primary_systemd_unit_enabled": false
+  },
+  "primary_plan": {
+    "status": "BLOCKED",
+    "privileged_execution_enabled": false,
+    "target_device_preflight": true,
+    "target_not_mounted": true,
+    "target_swap_entries": 0,
+    "recovery_directory_safe": true,
+    "recovery_filesystem_supported": true,
+    "recovery_on_separate_physical_disk": true,
+    "qualification_report_valid": false,
+    "live_artifacts_match_qualification": false,
+    "swapz_module_loaded": false,
+    "swapz_mapper_absent": true,
+    "logical_pages_candidate": 27080448,
+    "logical_bytes_candidate": 110921515008,
+    "linux_swap_kib_candidate": 121863164,
+    "gc_reserve_blocks": 3385056,
+    "candidate_capacity_is_production_verified": false,
+    "reason": "device_identity_recovery_and_lifecycle_gates_not_qualified"
+  },
+  "qualification": {
+    "latest_report_path": "test_results.json",
+    "latest_report_sha256": "45f11b4e6ad37cf60d26a6a39692388854aa0a0ce20286eef6d283e3ec7949af",
+    "tested_source_sha": "9feb6b9df7710634bffbf394504257b2a4d2d8d3",
+    "overall": "BLOCKED",
+    "qualification_scope": "RAM_BACKED_NULL_BLK_ONLY",
+    "stages": {
+      "Build module and helpers": "PASS",
+      "Native and rootless contracts": "PASS",
+      "Kernel warnings W=1": "PASS",
+      "Kernel warnings W=2": "PASS",
+      "Owned RAM smoke + mixed/QD pilot": "BLOCKED"
+    },
+    "stage5_block_reason": "ID36 requires at least 1048576 KiB MemAvailable; the latest report did not pass that gate",
+    "current_main_exact_source_qualified": false
+  },
+  "ci": [
+    {
+      "workflow": "Native kernel-C project-goal regressions",
+      "head_sha": "ed76ae2a7d1ef067732ec6c63151c054dac4a9c2",
+      "run_id": "41639975131",
+      "result": "PASS",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/41639975131"
+    },
+    {
+      "workflow": "Experimental swapz production C qualification",
+      "head_sha": "1f390fa47f788c927d2eb8987bf2cd6f60ae7ede",
+      "run_id": "41638449351",
+      "result": "PASS",
+      "scope_note": "same production source tree; later main commit is documentation-only",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/41638449351"
+    }
+  ],
+  "acceptance_manifest": {
+    "status": "NOT_FROZEN",
+    "required_before": "decisive owner physical, full-capacity, sustained-churn, or performance qualification"
+  },
+  "readiness": {
+    "CODE_PRODUCTION_READY": "IN_PROGRESS",
+    "DEPLOYMENT_PRODUCTION_READY": "IN_PROGRESS",
+    "PRODUCTION_READY_FOR_OWNER_REBOOT": "NO",
+    "COLD_BOOT_HARNESS": "NOT_ARMED",
+    "COLD_BOOT_OBSERVED": "NO",
+    "ACTUAL_LINUX_SWAP": "NOT_RUN",
+    "FULL_CARD_BACKING": "NOT_RUN",
+    "MAX_SAFE_LOGICAL_CAPACITY_BYTES": null,
+    "GC_AND_CHURN": "NOT_RUN",
+    "HOST_STABILITY": "IN_PROGRESS",
+    "MAIN_SYNC": "PASS"
+  },
+  "open_gates": [
+    "complete and test the primary start/stop/recovery coordinator; it is currently unimplemented and the execution gate remains disabled",
+    "freeze the quantitative production acceptance manifest before decisive qualification",
+    "obtain exact-current-source official owner qualification; the latest report is blocked on older source",
+    "measure complete full-capacity target memory, including steady-state and initialization peak",
+    "qualify maximum logical capacity with incompressible block-oracle coverage without equivalent RAM allocation",
+    "verify actual Linux swap-out and swap-in with byte-exact expected data and safe teardown",
+    "qualify high-occupancy physical GC/churn and removable-media failure behavior",
+    "install and verify production artifacts, lifecycle units, monitoring, and cold-boot acceptance harness"
+  ],
+  "next_action": "implement the primary lifecycle coordinator behind the existing disabled gate, with deterministic interruption/recovery coverage; do not enable the gate until required RAM-backed and authorized-card qualification passes"
+}
