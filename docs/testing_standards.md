@@ -58,6 +58,61 @@ remaining disabled is a safety block, not lifecycle qualification. Synthetic
 model PASS does not establish current-host or production-C lifecycle correctness;
 bounded real anonymous-page swap-out/swap-in evidence remains required.
 
+### Primary real-swap native-host qualification
+
+`tests/tools/qualify-primary-real-swap.py` is private Agent-8 test
+infrastructure, not a second public command; Agent 10 owns any eventual
+`make test` integration. It must BLOCK in GitHub-hosted CI and must never call
+`swapon`, `swapoff`, Device Mapper removal, forced module removal, or create
+fallback swap itself. Activation, deactivation, and recovery are requested only
+through the production primary coordinator.
+
+Before physical activation it must prove: exact clean source and current
+qualification provenance; matching qualified userspace/module hashes; a frozen
+production acceptance manifest; the protected PARTUUID selector; exact
+partition size, device number, removable USB parent/topology, and separation
+from root/recovery storage; no unresolved primary transaction, mapper, module,
+or raw-target swap alias; at least 1 GiB `MemAvailable`; readable kernel
+diagnostics; and working cgroup-v2 memory, swap, PSI, OOM, and zswap controls.
+A disposable cgroup preflight must complete before primary `prepare/start`.
+Default bounds are 384 MiB deterministic anonymous memory,
+`memory.max=128 MiB`, `memory.swap.max=384 MiB`, cgroup zswap disabled,
+128 MiB minimum real-swap evidence, two cycles, and 240-second finite waits.
+
+A `PRIMARY_START=ACTIVE` message is insufficient. The helper independently
+proves the run-bound mapper name/DM UUID/device number, exact one-line `swapz`
+table and backing dependency, sysfs identity, valid Linux swap header with a
+fresh nonzero UUID, raw backing absent from `/proc/swaps`, exact mapper
+present with zero initial use, unchanged unrelated swap identity, and unique
+highest swap priority for attributable cgroup traffic. Ambiguous attribution
+is BLOCKED.
+
+PASS requires actual reclaim and swap-in: at least 128 MiB cgroup swap
+occupancy, increasing exact-mapper use, positive swapz logical/physical WRITE
+and READ counters, backing-partition WRITE and READ sector deltas, positive
+`pswpout` and `pswpin`, zero OOM events, healthy target status, and
+byte-exact verification of every deterministic 4 KiB page. PSI and relevant
+kernel errors are recorded. Current-host evidence is mandatory; historical
+reports or successful `swapon` without traffic cannot qualify.
+
+Normal teardown is requested only through `swapzctl primary stop`. An
+independent sampler must witness active mapper swap, then mapper-present but
+swap-inactive, then mapper absence; disappearance while still in the known
+swap inventory is FAIL. A definite stop/`swapoff` failure is FAIL and cannot
+be masked by sampling uncertainty. If correct teardown is too fast to prove
+the inactive-before-remove interval independently, the result is BLOCKED, not
+PASS. No force cleanup is allowed, including error paths.
+
+At least two passing cycles require new run IDs and Linux swap UUIDs, zero
+initial mapper usage, no stale mapper/module/ownership state, durable
+`COMPLETE`, and restored baseline swap inventory after each cycle. This
+proves the non-reboot fresh-volatile-mapping property; cold-boot observation is
+separate. `tests/runtime/native/primary-real-swap-test.py` provides rootless
+parser, identity/provenance, traffic, byte-oracle, stop-order, disposition, and
+cleanup mutants. `tests/tools/primary-real-swap-oracle.py` only allocates and
+verifies memory; it configures no swap or mapper state. These private files stay
+out of shared runner/CI wiring until Agent 10 reviews them.
+
 ### Development decision loop
 
 The project-goal CI policy validates all five root Make targets
