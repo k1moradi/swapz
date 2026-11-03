@@ -274,28 +274,41 @@ static int test_fragmented_raw_gc_restores_progress(void)
  * active segment. That prevents opportunistic whole-dead reuse and forces
  * repeated GC reserve exchanges at exactly worst-case RAW occupancy.
  */
-static int overwrite_outside_open(swapz_u32 *next_logical)
+static int overwrite_outside_open(swapz_u32 *next_source_segment)
 {
-	swapz_u32 scan;
+	swapz_u32 offset;
 
-	for (scan = 0; scan < LOGICAL_PAGES; ++scan) {
-		swapz_u32 logical = (*next_logical + scan) % LOGICAL_PAGES;
-		swapz_u32 segment;
+	/*
+	 * Walk PHYSICAL source segments, not adjacent logical page indices.
+	 * Logical indices are initially clustered by source; a sequential
+	 * logical sweep would empty one victim before touching the others and
+	 * exercise only one survivor per rotation instead of high-live GC.
+	 */
+	for (offset = 0; offset < PHYSICAL_SEGMENTS; ++offset) {
+		swapz_u32 segment =
+			(*next_source_segment + offset) % PHYSICAL_SEGMENTS;
+		swapz_u32 logical;
 
-		if (!maps[logical].valid ||
-		    maps[logical].start_block >= PHYSICAL_BLOCKS)
-			return -EUCLEAN;
-		segment = maps[logical].start_block / SWAPZ_SEGMENT_BLOCKS;
 		if (!roles[segment] || segment == a.open_segment ||
 		    segment_maps[segment] < 2U)
 			continue;
-		{
-			int error = write_page(logical, versions[logical] + 1U);
+		for (logical = 0; logical < LOGICAL_PAGES; ++logical) {
+			swapz_u32 source;
 
-			if (!error)
-				*next_logical = (logical + 1U) % LOGICAL_PAGES;
-			return error;
+			if (!maps[logical].valid ||
+			    maps[logical].start_block >= PHYSICAL_BLOCKS)
+				return -EUCLEAN;
+			source = maps[logical].start_block / SWAPZ_SEGMENT_BLOCKS;
+			if (source == segment) {
+				int error = write_page(logical, versions[logical] + 1U);
+
+				if (!error)
+					*next_source_segment =
+						(segment + 1U) % PHYSICAL_SEGMENTS;
+				return error;
+			}
 		}
+		return -EUCLEAN;
 	}
 	return -EUCLEAN;
 }
@@ -353,6 +366,10 @@ static int test_sustained_all_raw_gc_rotations(void)
 		CHECK(reserve_segments() == PHYSICAL_SEGMENTS - FOREGROUND_SEGMENTS);
 		CHECK(verify_all_pages() == 0);
 	}
+	/* A tiny one-live-page victim would make the same rotation counter
+	 * pass without exercising nearly full destination relocation. */
+	CHECK(gc_writes >= (unsigned long long)rotations *
+		      (SWAPZ_SEGMENT_BLOCKS / 2U));
 	CHECK(gc_reads == gc_writes);
 	CHECK(gc_bytes_relocated == gc_writes * (unsigned long long)SWAPZ_BLOCK_BYTES);
 	printf("SWAPZ_GC_SUSTAINED_EVIDENCE=rotations:%u "

@@ -356,6 +356,9 @@ The GC native suite must additionally sustain at least 64 all-RAW exhaustion-and
 rotation cycles over a fully populated logical mapper, verifying all surviving
 pages byte-for-byte and preserving both rotating reserve roles after every
 cycle; a successful mapper construction or two rotations are insufficient.
+The test must distribute foreground rewrites across distinct physical source
+segments and relocate at least 128 4KiB RAW survivors per successful rotation
+on average; a sequence that leaves one survivor per victim is not sufficient.
 It must also reproduce repeated *partial* GC failures: a published relocation
 pins a reserved destination even if a later read/write fails. The current
 worker restores the foreground cursor but has no authority-level protocol to
