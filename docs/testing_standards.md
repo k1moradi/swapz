@@ -541,7 +541,12 @@ foreground write plus byte/CRC readback. Abandoned tail blocks must never
 become authoritative mappings. The worker may perform at most one destination
 role handoff per invocation; if no replacement reserve exists while foreground
 mutation is fenced, the owned recovery is terminal rather than indefinitely
-retryable foreground -ENOSPC.
+retryable foreground -ENOSPC. Status/rootless runtime-health coverage must
+report serialized initial/current reserve-role counts and the successful
+destination-advance counter, warn after the first role is consumed, fail at
+zero or an impossible count, and degrade rather than assume health when those
+fields are unavailable. Normal one-for-one GC/roll-forward must not decrement
+the count.
 
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
 regression fixture: one SWZ header block,
