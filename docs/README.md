@@ -51,102 +51,31 @@ establish an idle host or make an idle historical run directly comparable.
 
 ## Current evidence
 
-The latest complete owner `make test` passed all five stages for source
-`acdeba452aa142c702bed40010c083276a692711`. It published report-only commit
-`17ed3c639ce99708ee2bfbed7d979b35592c7a5a`; report SHA-256 is
-`e82b4054fbc51daf7bc99f2b60cc1c41581530ac0c59283229b891cb6cb40651`.
-Stage times were 22.474 s (build), 189.993 s (native/rootless), 18.180 s
-(W=1), 14.141 s (W=2), and 1403.514 s (owned RAM, mixed/QD). Its scope is
-`RAM_BACKED_NULL_BLK_ONLY`: it does not qualify physical SD, real Linux swap,
-or full-card capacity. This report predates the current lifecycle coordinator
-and kernel status change.
+Use the generated evidence artifacts directly instead of copying volatile
+commit IDs, stage timings, host counters, or readiness flags into this compact
+navigation document.
 
-The run began below the ID36 1 GiB `MemAvailable` gate (926,752 KiB). The owner
-reports closing programs to free memory and swap during the run. Later
-read-only snapshots showed about 2.1 GiB available and more than 260 MiB of
-swap free; the full run, including ID36, passed. This records host headroom
-for that run and does not change the gate.
+- [`test_results.json`](../test_results.json) is the canonical latest published
+  owner `make test` report. Read its `overall`, `tested_commit_sha`,
+  qualification scope, stage results, and qualified-artifact hashes together.
+  A PASS for an older source does not qualify a newer `main`, and a report-only
+  commit is evidence publication rather than a new production source revision.
+- [`handoff/production-readiness.json`](handoff/production-readiness.json) is a
+  host/readiness snapshot with its own `updated_at_utc` and repository SHAs.
+  It is observational and may lag both `main` and the latest generated test
+  report; never let an older readiness field override newer canonical source,
+  policy, or test evidence.
+- [`production-acceptance.json`](production-acceptance.json) is the canonical
+  quantitative physical-acceptance policy consumed by the physical evaluators.
+  Candidate geometry or capacity in a snapshot is not a production PASS until
+  the required full-capacity, incompressible-data, lifecycle, churn, and
+  physical evidence actually passes.
 
-Current `main` is `a31661f887f1fa7a88efdfff5186a84672217950`, synchronized with
-`origin/main`. The latest production source is the same commit; it includes the
-primary lifecycle coordinator behind the disabled gate, bounded status
-emission, portable little-endian delta64 semantics, deliberately unaligned
-codec coverage, authority geometry/generation checks, drain-wakeup closure,
-GC failure-recovery/high-occupancy coverage, and hardened standalone physical
-formatter identity. Current head passed production-C CI run `41655643592` and
-native project-goal CI run `41655643668`. The latest owner report still tests older source
-`acdeba452aa142c702bed40010c083276a692711`, so a fresh exact-head `make test`
-is pending.
-
-The normal build is not installed or loaded. Its current artifacts were built
-before the source commit with `SWAPZ_BUILD_SOURCE_CLEAN=0`, so they are not
-eligible for the primary plan. The latest read-only primary plan reports
-`BLOCKED`; privileged execution remains disabled because exact artifact
-provenance, owner qualification and lifecycle evidence are not satisfied.
-
-At the read-only snapshot on 2026-11-03 14:40:24 UTC, the selected target was
-the removable USB card partition `/dev/sda1` (8:1,
-124,787,884,032 bytes, PARTUUID `f13428f6-01`, UUID
-`8c6a02a2-20e9-4e31-869a-48ef7f6c990b`). At the latest read-only check it was
-unmounted and inactive; the only active swap was the unrelated `/swapfile`
-(227.1 MiB used), which was not touched. No swapz mapper was present, and no
-physical-card write has been made. Host `MemAvailable` was 2,097,148 KiB and
-swap free was 291,696 KiB.
-
-The production manager and systemd generator select a drive through the
-protected PARTUUID file and discover its current path, device number and
-geometry at runtime. The current source allows unrelated host swap entries
-while rejecting an active or ambiguous alias of the selected target. Prepared
-start, normal stop, and standalone recovery are wired to durable run state and
-module ownership. The execution gate remains disabled. Deterministic
-interruption/owned-null_blk qualification, actual Linux swap, full-card memory
-and capacity, physical churn, installation, and boot acceptance remain open.
-
-The systemd integration now bounds the selected udev device wait at 30s,
-mapper start and stop at 120s each, and the overall mapper job at 300s.
-The manager alone owns the `swapon`/`swapoff` lifecycle; the mapper service
-is the only installable swap.target entry, while the `.swap` unit is an
-uninstallable passive status view (never enable both). A reboot-free verifier
-checks the protected selector, parent reader identity, raw-swap aliases,
-persisted owner transaction and exact run-bound mapper UUID/table/geometry,
-service state, errors and counters. It writes persistent root-only PASS, FAIL
-or INCOMPLETE observations and cannot claim PASS in the arming boot.
-Agent 7 has integrated the verifier executable/unit into the disabled-by-default
-package and Agent 10 has integrated the isolated systemd fixture into the
-rootless test stage. Owner-side installation, qualification and arming remain
-open. No reboot, real swap activation, or physical-card write was performed
-by this systemd work.
-
-The current host, target, build, CI, plan, and readiness-gate snapshot is
-tracked in [handoff/production-readiness.json](handoff/production-readiness.json).
-The geometry-derived logical capacity there is a candidate only; memory
-feasibility, full-card correctness, and actual swap behavior remain
-unqualified.
-
-The qualified positive-fixture delta64 rescue A/B exercised 4096 direct
-predictor-first adoptions that skipped ordinary LZ4. Lower WRITE bytes fell
-27.04% and useful WRITE throughput rose 5.15%; lower-request and p99 intervals
-overlapped zero. This is controlled positive-content evidence, not
-representative swap evidence. By owner decision the production delta64 +
-`DELTA64_SHUF8` + LZ4 stack is now a fixed main requirement for emulated
-devices. Historical rescue-off evidence remains in Git history only; routine
-qualification, development benchmarks and history plots no longer spend runs
-on delta64 off/on comparison.
-
-Adjacent-range READ coalescing remains default-on. Fast sequential confirmation
-reduced lower READ requests 17.53% and p99 5.43%, while the useful-throughput
-interval overlapped zero. Serial-depth confirmation reduced requests 20.75%,
-reduced p99 12.24%, and increased useful throughput 16.61%, with all three
-intervals excluding zero. Production coalescing is fixed at an eight-block
-maximum span.
-
-Current source fixes ordinary LZ4 at acceleration one, delta64 preparation at
-one producer lane, and lower-WRITE submission at one immutable run; the retired
-runtime tuning selectors are absent, and the old depth-two write allocation/
-append path has been removed. Loaded correctness still covers GC relocation,
-whole-segment discard, packed placement and byte-exact readback. Low-RAM/
-heavy-CPU behavior, realistic long-run churn, actual kernel swap, physical-media
-behavior and endurance remain open qualification gates.
+Current target identity, standing authorization, lifecycle execution policy,
+and production-readiness definitions live in
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md). Historical `/dev/sda4` physical and
+live-swap evidence is preserved separately and must not be read as instructions
+for the current dedicated SD card.
 
 ## Documentation
 
@@ -162,6 +91,7 @@ behavior and endurance remain open qualification gates.
   not a history of retired A/B protocols.
 - [context.md](context.md): reusable Linux MM, folio, swap/zswap, BIO and SWZ
   technical context; implementation proposals and priorities stay in ROADMAP.
+- [handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md): detailed historical `/dev/sda4` physical-smoke, capacity and live-swap evidence; not current policy.
 - [compile.md](compile.md): build/install/test interface and artifacts.
 - [benchmark.md](benchmark.md): current benchmark methodology, interpretation and
   only the minimum settled evidence needed to avoid repeating a test.
