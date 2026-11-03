@@ -13,6 +13,7 @@ if [[ -n ${SWAPZ_TEST_JOBS:-} ]]; then
 fi
 "${make_args[@]}" -C tests test
 python3 -B tests/runtime/native/source-contract-test.py -v
+python3 -B tests/runtime/native/primary-lifecycle-audit-test.py -v
 python3 -B tests/runtime/benchmark/io-replay-test.py -v
 python3 -B tests/runtime/native/make-interface-test.py -v
 python3 -B tests/runtime/native/test-report-test.py -v

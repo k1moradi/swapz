@@ -21,6 +21,24 @@ strictly sequential.
 
 It must execute the supported qualification in order and fail closed. Rootless/CI-only success is partial evidence and cannot substitute for the loaded owned-RAM phase. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
+### Primary lifecycle transaction-state contract
+
+Primary lifecycle qualification must keep durable transaction state consistent
+with independently observed kernel state. Durable `ACTIVE` requires proof that
+the exact transaction-owned mapper is active in the Linux swap inventory.
+Normal stop and recovery must use ordinary `swapoff`, prove the exact mapper
+inactive, and only then permit mapper removal. Ambiguous activation or
+deactivation outcomes remain recoverable until exact kernel state is proven; a
+stale run ID must never activate, deactivate, remove, or complete a newer
+transaction.
+
+`tests/runtime/native/primary-lifecycle-audit-test.py` is a rootless
+adversarial model for those invariants and performs no privileged or physical
+device operations. It also prevents the privileged primary execution gate from
+being enabled before native `swapon` and `swapoff` support exists. This
+synthetic coverage is not current-host swap qualification and does not replace
+the required bounded real anonymous-page swap-out/swap-in evidence.
+
 ### Development decision loop
 
 The project-goal CI policy validates all five root Make targets
