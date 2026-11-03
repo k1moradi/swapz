@@ -312,7 +312,13 @@ whole-device parent, and that parent must be the exact expected device, report
 removable media, match the expected printable model, and resolve through a USB
 transport path. The selected partition must be the parent's sole partition.
 Both the partition and its parent must have empty holders and slaves, and
-neither may appear mounted or as active swap. Mount inventory parsing
+neither may appear mounted or as active swap. Active swap block nodes conflict
+by their `st_rdev`, and regular swapfiles conflict by their filesystem
+`st_dev` when it matches the partition or parent. Other swap-entry file types
+and unreadable entries refuse formatting. This catches directly backed swapfiles
+visible through `/proc/swaps` even if their mount is outside the formatter's
+mount namespace; it does not prove ancestry through arbitrary stacked filesystems.
+Mount inventory parsing
 must accept Linux pseudo-filesystem major-zero device identifiers (for example
 `0:20`) without mistaking them for the selected nonzero-major block device.
 Malformed mountinfo rows and unverified target identities still fail closed.

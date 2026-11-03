@@ -1347,6 +1347,26 @@ static int format_inventory_device_conflicts(dev_t observed_device,
 	return observed_device == device || observed_device == parent_device;
 }
 
+/*
+ * Swapfiles name regular files, not block nodes. Their filesystem st_dev
+ * still identifies a directly mounted target/parent backing device even if
+ * that mount is absent from this process's mount namespace.
+ */
+static int format_swap_entry_conflicts(const struct stat *info, dev_t device,
+				       dev_t parent_device)
+{
+	if (!info)
+		return 1;
+	if (S_ISBLK(info->st_mode))
+		return format_inventory_device_conflicts(info->st_rdev, device,
+						  parent_device);
+	if (S_ISREG(info->st_mode))
+		return format_inventory_device_conflicts(info->st_dev, device,
+						  parent_device);
+	/* /proc/swaps cannot legitimately name another file type. */
+	return 1;
+}
+
 static int format_mount_inventory_clear(dev_t device, dev_t parent_device)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
@@ -1434,9 +1454,7 @@ static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
 			errno = saved_errno;
 			return -1;
 		}
-		if (S_ISBLK(info.st_mode) &&
-		    format_inventory_device_conflicts(info.st_rdev, device,
-						     parent_device)) {
+		if (format_swap_entry_conflicts(&info, device, parent_device)) {
 			fclose(stream);
 			errno = EBUSY;
 			return -1;

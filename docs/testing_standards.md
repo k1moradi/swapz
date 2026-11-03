@@ -3366,7 +3366,10 @@ non-removable/held topology, missing sole-partition status,
 parent-model/USB-transport mismatch, an opened descriptor that becomes
 read-only, invalid SWZ UUID/reserved bytes, stale identity immediately before
 the write, truncated reads, unexpected permissions, USB/transport-style I/O
-failure, and device disappearance before and after the write. The mountinfo parser must accept normal major-zero pseudo-filesystem
+failure, and device disappearance before and after the write. The swap-inventory gate must reject active regular swapfiles with filesystem
+`st_dev` matching the selected partition or parent, while leaving unrelated
+regular-file and block-device entries nonconflicting; unknown entry types must
+fail closed. The mountinfo parser must accept normal major-zero pseudo-filesystem
 entries (including `0:0`) while still rejecting malformed/overflowed rows;
 major zero must remain forbidden for a configured physical partition or parent.
 For every ownership/identity uncertainty before publication, the test

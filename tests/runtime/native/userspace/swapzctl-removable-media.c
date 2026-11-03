@@ -135,6 +135,29 @@ static void test_transport_path_must_still_be_usb(void)
 		"/sys/devices/pci0000:00/ata1/host0/target0:0:0/0:0:0:0"));
 }
 
+static void test_swapfile_backing_identity_conflicts(void)
+{
+	const dev_t device = makedev(8U, 1U);
+	const dev_t parent = makedev(8U, 0U);
+	struct stat swap_entry = { .st_mode = S_IFREG, .st_dev = device };
+
+	assert(format_swap_entry_conflicts(&swap_entry, device, parent));
+	swap_entry.st_dev = parent;
+	assert(format_swap_entry_conflicts(&swap_entry, device, parent));
+	swap_entry.st_dev = makedev(259U, 1U);
+	assert(!format_swap_entry_conflicts(&swap_entry, device, parent));
+
+	swap_entry.st_mode = S_IFBLK;
+	swap_entry.st_rdev = device;
+	assert(format_swap_entry_conflicts(&swap_entry, device, parent));
+	swap_entry.st_rdev = makedev(8U, 2U);
+	assert(!format_swap_entry_conflicts(&swap_entry, device, parent));
+
+	swap_entry.st_mode = S_IFDIR;
+	assert(format_swap_entry_conflicts(&swap_entry, device, parent));
+	assert(format_swap_entry_conflicts(NULL, device, parent));
+}
+
 int main(void)
 {
 	test_partuuid_canonicalization_rejects_weak_structures();
@@ -142,6 +165,7 @@ int main(void)
 	test_replaced_alias_and_parent_are_rejected();
 	test_reconnection_requires_fresh_exact_device_identity();
 	test_geometry_holders_and_active_inventory_fail_closed();
+	test_swapfile_backing_identity_conflicts();
 	test_transport_path_must_still_be_usb();
 	puts("PASS: removable-media identity rejects substitution and topology drift");
 	return 0;
