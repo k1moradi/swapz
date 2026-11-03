@@ -232,7 +232,7 @@ def _readiness_pass_payload_valid(
                 entry.get("tested_source_sha") == current_source_sha and
                 _valid_sha256(entry.get("report_sha256")) and
                 _readiness_artifact_hashes_valid(
-                    entry.get("qualified_artifacts")))
+                    entry.get("hashes")))
     if name == "owned_nullblk_qualification":
         return (entry.get("overall") == "PASS" and
                 _valid_sha256(entry.get("evidence_sha256")) and
@@ -382,7 +382,7 @@ def evaluate_production_readiness(snapshot, current_source_sha):
         qualified_hashes = evidence["qualified_artifact_hashes"]["hashes"]
         owner_test = evidence.get("exact_source_owner_make_test", {})
         if (statuses.get("exact_source_owner_make_test") == "PASS" and
-                owner_test.get("qualified_artifacts") != qualified_hashes):
+                owner_test.get("hashes") != qualified_hashes):
             statuses["exact_source_owner_make_test"] = "BLOCKED"
             reasons["exact_source_owner_make_test"] = (
                 "owner qualification artifact hashes differ from release hashes")

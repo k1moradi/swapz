@@ -4218,7 +4218,7 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 **common, "overall": "PASS",
                 "tested_source_sha": self.SOURCE_SHA,
                 "report_sha256": self.DIGEST,
-                "qualified_artifacts": dict(hashes)},
+                "hashes": dict(hashes)},
             "owned_nullblk_qualification": {
                 **common, "overall": "PASS",
                 "evidence_sha256": self.DIGEST,
@@ -4347,7 +4347,7 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
     def test_release_hashes_are_cross_bound(self):
         owner_mismatch = self.passing_snapshot()
         owner_mismatch["release_evidence"]["exact_source_owner_make_test"][
-            "qualified_artifacts"]["module_sha256"] = "e" * 64
+            "hashes"]["module_sha256"] = "e" * 64
         verdict = runner.evaluate_production_readiness(
             owner_mismatch, self.SOURCE_SHA)
         self.assertEqual(
