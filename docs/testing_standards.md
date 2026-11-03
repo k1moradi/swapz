@@ -2839,10 +2839,16 @@ positive, zero, and artificial negative results. When an error wins prepared
 publication, it must retain its exact errno, must not increment RAW-fallback
 accounting, and must not publish or stage RAW as a no-fit result. When
 RAW_SELECTED linearizes first, a late negative result must leave that selected
-state unchanged but terminally fail the target before any upper success can be
-reported. Prepared and ordered owners are separate required cases; the ordered
-mapped-input case must prove unmapping precedes the error return. Positive and
-zero controls must continue to select compressed and RAW storage respectively.
+state unchanged, must not be counted as codec no-fit, and must fail the target
+closed as soon as the producer observes it. The ordered owner can complete a
+correct, independently selected RAW write before speculative compression
+finishes: a later target failure cannot revoke an already-acknowledged BIO.
+Qualification must distinguish those orderings; requiring the same BIO to fail
+in both cases needs explicit producer/completion synchronization, not only a
+post-result failed-target check. Prepared and ordered owners are separate
+required cases; the ordered mapped-input case must prove unmapping precedes the
+error return. Positive and zero controls must continue to select compressed and
+RAW storage respectively.
 
 Direct codec qualification must include deterministic nonzero randomized
 payload bytes, boundary lengths around 8-byte/CRC lanes and production packing
