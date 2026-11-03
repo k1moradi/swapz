@@ -42,6 +42,8 @@
 #define SWAPZ_PRIMARY_DM_MAPPERS_MAX 512U
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
+#define SWAPZ_PRIMARY_STATE_JSON_PREFIX \
+	"{\"schema\":\"swapz-primary-state-v1\",\"run_id\":"
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_PARTUUID "7fb9401d-04"
 #define SWAPZ_PRIMARY_PHYSICAL_BLOCKS \
@@ -70,6 +72,8 @@ static const char *const swapz_primary_stage_names[] = {
 	[SWAPZ_PRIMARY_STAGE_COMPLETE] = "COMPLETE",
 	[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = "RECOVERY_REQUIRED",
 };
+
+static int swapz_primary_valid_run_id(const char *run_id);
 
 const char *swapz_primary_stage_name(enum swapz_primary_stage stage)
 {
@@ -119,8 +123,7 @@ int swapz_primary_stage_transition_allowed(enum swapz_primary_stage from,
 	case SWAPZ_PRIMARY_STAGE_RECOVERING:
 		return to == SWAPZ_PRIMARY_STAGE_RESTORED;
 	case SWAPZ_PRIMARY_STAGE_RESTORED:
-		return to == SWAPZ_PRIMARY_STAGE_READY ||
-		       to == SWAPZ_PRIMARY_STAGE_COMPLETE;
+		return to == SWAPZ_PRIMARY_STAGE_COMPLETE;
 	case SWAPZ_PRIMARY_STAGE_DISABLING:
 		return to == SWAPZ_PRIMARY_STAGE_COMPLETE;
 	case SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED:
@@ -130,6 +133,194 @@ int swapz_primary_stage_transition_allowed(enum swapz_primary_stage from,
 		return 0;
 	}
 	return 0;
+}
+
+static int swapz_primary_state_string(const char **cursor,
+				      const char *end, char *value,
+				      size_t capacity)
+{
+	size_t length = 0;
+
+	if (!cursor || !*cursor || !value || !capacity || *cursor >= end ||
+	    **cursor != '"')
+		return -1;
+	++*cursor;
+	while (*cursor < end && **cursor != '"') {
+		unsigned char byte = (unsigned char)**cursor;
+
+		if (byte < 0x20U || byte > 0x7eU || byte == '\\' ||
+		    length + 1U >= capacity)
+			return -1;
+		value[length++] = (char)byte;
+		++*cursor;
+	}
+	if (*cursor >= end || **cursor != '"')
+		return -1;
+	++*cursor;
+	value[length] = '\0';
+	return 0;
+}
+
+static int swapz_primary_state_run_id_valid(const char *run_id)
+{
+	unsigned int i;
+
+	if (!run_id || run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH] != '\0')
+		return 0;
+	for (i = 0; i < SWAPZ_PRIMARY_RUN_ID_LENGTH; ++i)
+		if (!((run_id[i] >= '0' && run_id[i] <= '9') ||
+		      (run_id[i] >= 'a' && run_id[i] <= 'f')))
+			return 0;
+	return 1;
+}
+
+static int swapz_primary_state_valid(const struct swapz_primary_state *state)
+{
+	if (!state || !swapz_primary_state_run_id_valid(state->run_id) ||
+	    (state->has_recovery_previous_stage != 0 &&
+	     state->has_recovery_previous_stage != 1) ||
+	    (unsigned int)state->stage >=
+			(unsigned int)SWAPZ_PRIMARY_STAGE_COUNT)
+		return 0;
+	if (!state->has_recovery_previous_stage)
+		return state->stage != SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED &&
+		       state->stage != SWAPZ_PRIMARY_STAGE_RECOVERING;
+	if ((unsigned int)state->recovery_previous_stage >=
+	    (unsigned int)SWAPZ_PRIMARY_STAGE_COUNT ||
+	    state->recovery_previous_stage == SWAPZ_PRIMARY_STAGE_COMPLETE ||
+	    state->recovery_previous_stage ==
+			SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED ||
+	    state->recovery_previous_stage == SWAPZ_PRIMARY_STAGE_RECOVERING)
+		return 0;
+	return state->stage == SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED ||
+	       state->stage == SWAPZ_PRIMARY_STAGE_RECOVERING ||
+	       state->stage == SWAPZ_PRIMARY_STAGE_RESTORED ||
+	       state->stage == SWAPZ_PRIMARY_STAGE_COMPLETE;
+}
+
+int swapz_primary_state_parse(const char *record, size_t length,
+			      struct swapz_primary_state *state)
+{
+	struct swapz_primary_state parsed = {0};
+	char token[64];
+	const char *cursor;
+	const char *end;
+
+	if (!record || !state || !length ||
+	    length > SWAPZ_PRIMARY_STATE_RECORD_MAX ||
+	    memchr(record, '\0', length))
+		return -1;
+	cursor = record;
+	end = record + length;
+	if ((size_t)(end - cursor) < sizeof(SWAPZ_PRIMARY_STATE_JSON_PREFIX) - 1U ||
+	    memcmp(cursor, SWAPZ_PRIMARY_STATE_JSON_PREFIX,
+		   sizeof(SWAPZ_PRIMARY_STATE_JSON_PREFIX) - 1U))
+		return -1;
+	cursor += sizeof(SWAPZ_PRIMARY_STATE_JSON_PREFIX) - 1U;
+	if (swapz_primary_state_string(&cursor, end, parsed.run_id,
+				       sizeof(parsed.run_id)) < 0 ||
+	    !swapz_primary_valid_run_id(parsed.run_id) ||
+	    (size_t)(end - cursor) < sizeof(",\"stage\":") - 1U ||
+	    memcmp(cursor, ",\"stage\":", sizeof(",\"stage\":") - 1U))
+		return -1;
+	cursor += sizeof(",\"stage\":") - 1U;
+	if (swapz_primary_state_string(&cursor, end, token, sizeof(token)) < 0 ||
+	    swapz_primary_stage_parse(token, &parsed.stage) < 0 ||
+	    (size_t)(end - cursor) <
+		    sizeof(",\"recovery_previous_stage\":") - 1U ||
+	    memcmp(cursor, ",\"recovery_previous_stage\":",
+		   sizeof(",\"recovery_previous_stage\":") - 1U))
+		return -1;
+	cursor += sizeof(",\"recovery_previous_stage\":") - 1U;
+	if ((size_t)(end - cursor) >= sizeof("null}\n") - 1U &&
+	    !memcmp(cursor, "null}\n", sizeof("null}\n") - 1U)) {
+		cursor += sizeof("null}\n") - 1U;
+	} else {
+		if (swapz_primary_state_string(&cursor, end, token,
+					       sizeof(token)) < 0 ||
+		    swapz_primary_stage_parse(token,
+					     &parsed.recovery_previous_stage) < 0 ||
+		    (size_t)(end - cursor) < sizeof("}\n") - 1U ||
+		    memcmp(cursor, "}\n", sizeof("}\n") - 1U))
+			return -1;
+		cursor += sizeof("}\n") - 1U;
+		parsed.has_recovery_previous_stage = 1;
+	}
+	if (cursor != end || !swapz_primary_state_valid(&parsed))
+		return -1;
+	*state = parsed;
+	return 0;
+}
+
+int swapz_primary_state_format(const struct swapz_primary_state *state,
+			       char *record, size_t capacity)
+{
+	const char *previous = "null";
+	int length;
+
+	if (!swapz_primary_state_valid(state) || !record || !capacity) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (state->has_recovery_previous_stage)
+		previous = swapz_primary_stage_name(
+			state->recovery_previous_stage);
+	length = snprintf(record, capacity,
+			  SWAPZ_PRIMARY_STATE_JSON_PREFIX
+			  "\"%s\",\"stage\":\"%s\","
+			  "\"recovery_previous_stage\":%s%s%s}\n",
+			  state->run_id, swapz_primary_stage_name(state->stage),
+			  state->has_recovery_previous_stage ? "\"" : "",
+			  previous,
+			  state->has_recovery_previous_stage ? "\"" : "");
+	if (length < 0 || (size_t)length >= capacity ||
+	    (size_t)length > SWAPZ_PRIMARY_STATE_RECORD_MAX) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	return length;
+}
+
+int swapz_primary_state_transition_allowed(
+	const struct swapz_primary_state *current,
+	const struct swapz_primary_state *next)
+{
+	enum swapz_primary_stage recovery_origin;
+
+	if (!swapz_primary_state_valid(current) ||
+	    !swapz_primary_state_valid(next))
+		return 0;
+	if (strcmp(current->run_id, next->run_id))
+		return current->stage == SWAPZ_PRIMARY_STAGE_COMPLETE &&
+		       next->stage == SWAPZ_PRIMARY_STAGE_READY &&
+		       !next->has_recovery_previous_stage;
+	if (current->stage == SWAPZ_PRIMARY_STAGE_COMPLETE)
+		return 0;
+	if (next->stage == SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED) {
+		recovery_origin = current->has_recovery_previous_stage ?
+			current->recovery_previous_stage : current->stage;
+		return next->has_recovery_previous_stage &&
+		       next->recovery_previous_stage == recovery_origin;
+	}
+	if (current->stage == SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED ||
+	    current->stage == SWAPZ_PRIMARY_STAGE_RECOVERING) {
+		if (!current->has_recovery_previous_stage ||
+		    !next->has_recovery_previous_stage ||
+		    current->recovery_previous_stage !=
+			    next->recovery_previous_stage)
+			return 0;
+	} else if (current->stage == SWAPZ_PRIMARY_STAGE_RESTORED &&
+		   current->has_recovery_previous_stage) {
+		if (!next->has_recovery_previous_stage ||
+		    current->recovery_previous_stage !=
+			    next->recovery_previous_stage)
+			return 0;
+	} else if (current->has_recovery_previous_stage ||
+		   next->has_recovery_previous_stage) {
+		return 0;
+	}
+	return swapz_primary_stage_transition_allowed(current->stage,
+						      next->stage);
 }
 
 static int swapz_primary_device_number_matches(dev_t device)
@@ -1568,6 +1759,306 @@ int swapz_primary_claim_partition_owner_at(int recovery_fd, int lock_fd,
 		return -1;
 	return swapz_primary_write_record_at(recovery_fd, active_name,
 					     record, expected_owner);
+}
+
+static int swapz_primary_state_lock_valid(int recovery_fd, int lock_fd,
+					  uid_t expected_owner)
+{
+	struct stat directory_info;
+	struct stat held_lock_info;
+	struct stat named_lock_info;
+	char lock_name[64];
+
+	if (recovery_fd < 0 || lock_fd < 0 ||
+	    fstat(recovery_fd, &directory_info) < 0 ||
+	    fstat(lock_fd, &held_lock_info) < 0)
+		return 0;
+	if (!S_ISDIR(directory_info.st_mode) ||
+	    directory_info.st_uid != expected_owner ||
+	    (directory_info.st_mode & 0777U) != 0700U ||
+	    !S_ISREG(held_lock_info.st_mode) ||
+	    held_lock_info.st_uid != expected_owner ||
+	    (held_lock_info.st_mode & 0777U) != 0600U ||
+	    held_lock_info.st_nlink != 1) {
+		errno = EPERM;
+		return 0;
+	}
+	if (snprintf(lock_name, sizeof(lock_name), "partition-%s.lock",
+		     SWAPZ_PRIMARY_PARTUUID) < 0 ||
+	    fstatat(recovery_fd, lock_name, &named_lock_info,
+		    AT_SYMLINK_NOFOLLOW) < 0)
+		return 0;
+	if (!S_ISREG(named_lock_info.st_mode) ||
+	    named_lock_info.st_uid != expected_owner ||
+	    (named_lock_info.st_mode & 0777U) != 0600U ||
+	    named_lock_info.st_nlink != 1 ||
+	    named_lock_info.st_dev != held_lock_info.st_dev ||
+	    named_lock_info.st_ino != held_lock_info.st_ino) {
+		errno = EPERM;
+		return 0;
+	}
+	return flock(lock_fd, LOCK_EX | LOCK_NB) == 0;
+}
+
+static int swapz_primary_record_read_at(int recovery_fd, const char *name,
+					uid_t expected_owner, char *record,
+					size_t capacity, size_t *length,
+					struct stat *identity)
+{
+	struct stat opened_info;
+	struct stat named_info;
+	struct stat after_info;
+	unsigned char extra;
+	size_t completed = 0;
+	int fd;
+
+	if (recovery_fd < 0 || !name || !record || capacity < 2U || !length) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (fstatat(recovery_fd, name, &named_info, AT_SYMLINK_NOFOLLOW) < 0)
+		return -1;
+	fd = openat(recovery_fd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &opened_info) < 0)
+		goto failed;
+	if (!S_ISREG(opened_info.st_mode) ||
+	    opened_info.st_uid != expected_owner ||
+	    (opened_info.st_mode & 0777U) != 0600U ||
+	    opened_info.st_nlink != 1 || opened_info.st_size <= 0 ||
+	    (uint64_t)opened_info.st_size >= (uint64_t)capacity ||
+	    (uint64_t)opened_info.st_size > SWAPZ_PRIMARY_STATE_RECORD_MAX ||
+	    opened_info.st_dev != named_info.st_dev ||
+	    opened_info.st_ino != named_info.st_ino) {
+		errno = EPERM;
+		goto failed;
+	}
+	while (completed < (size_t)opened_info.st_size) {
+		ssize_t count = pread(fd, record + completed,
+				      (size_t)opened_info.st_size - completed,
+				      (off_t)completed);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			goto failed;
+		}
+		completed += (size_t)count;
+	}
+	for (;;) {
+		ssize_t count = pread(fd, &extra, sizeof(extra),
+				      opened_info.st_size);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count != 0) {
+			if (count > 0)
+				errno = EOVERFLOW;
+			goto failed;
+		}
+		break;
+	}
+	if (fstat(fd, &after_info) < 0 ||
+	    fstatat(recovery_fd, name, &named_info, AT_SYMLINK_NOFOLLOW) < 0)
+		goto failed;
+	if (after_info.st_dev != opened_info.st_dev ||
+	    after_info.st_ino != opened_info.st_ino ||
+	    after_info.st_size != opened_info.st_size ||
+	    after_info.st_mtim.tv_sec != opened_info.st_mtim.tv_sec ||
+	    after_info.st_mtim.tv_nsec != opened_info.st_mtim.tv_nsec ||
+	    after_info.st_ctim.tv_sec != opened_info.st_ctim.tv_sec ||
+	    after_info.st_ctim.tv_nsec != opened_info.st_ctim.tv_nsec ||
+	    after_info.st_uid != expected_owner ||
+	    (after_info.st_mode & 0777U) != 0600U ||
+	    !S_ISREG(after_info.st_mode) || after_info.st_nlink != 1 ||
+	    named_info.st_dev != opened_info.st_dev ||
+	    named_info.st_ino != opened_info.st_ino ||
+	    named_info.st_uid != expected_owner ||
+	    (named_info.st_mode & 0777U) != 0600U ||
+	    !S_ISREG(named_info.st_mode) || named_info.st_nlink != 1) {
+		errno = EPERM;
+		goto failed;
+	}
+	if (close(fd) < 0)
+		return -1;
+	*length = completed;
+	record[completed] = '\0';
+	if (identity)
+		*identity = opened_info;
+	return 0;
+
+failed:
+	{
+		int saved_errno = errno;
+
+		(void)close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+}
+
+static int swapz_primary_owner_claim_matches_at(int recovery_fd,
+						const char *run_id,
+						uid_t expected_owner)
+{
+	char active_name[64];
+	char consumed_name[64];
+	char expected[192];
+	char active_record[256];
+	char consumed_record[256];
+	size_t active_length;
+	size_t consumed_length;
+	int expected_length;
+
+	if (!swapz_primary_valid_run_id(run_id)) {
+		errno = EINVAL;
+		return 0;
+	}
+	if (snprintf(active_name, sizeof(active_name), "partition-%s.active",
+		     SWAPZ_PRIMARY_PARTUUID) < 0 ||
+	    snprintf(consumed_name, sizeof(consumed_name), "consumed-%s.json",
+		     run_id) < 0)
+		return 0;
+	expected_length = snprintf(expected, sizeof(expected),
+				   "{\"major\":8,\"minor\":4,"
+				   "\"partuuid\":\"%s\",\"run_id\":\"%s\"}\n",
+				   SWAPZ_PRIMARY_PARTUUID, run_id);
+	if (expected_length < 0 || (size_t)expected_length >= sizeof(expected)) {
+		errno = EOVERFLOW;
+		return 0;
+	}
+	if (swapz_primary_record_read_at(recovery_fd, active_name,
+					 expected_owner, active_record,
+					 sizeof(active_record), &active_length,
+					 NULL) < 0 ||
+	    swapz_primary_record_read_at(recovery_fd, consumed_name,
+					 expected_owner, consumed_record,
+					 sizeof(consumed_record), &consumed_length,
+					 NULL) < 0)
+		return 0;
+	if (active_length != (size_t)expected_length ||
+	    consumed_length != (size_t)expected_length ||
+	    memcmp(active_record, expected, active_length) ||
+	    memcmp(consumed_record, expected, consumed_length)) {
+		errno = EPERM;
+		return 0;
+	}
+	return 1;
+}
+
+int swapz_primary_state_write_at(int recovery_fd, int lock_fd,
+				 const struct swapz_primary_state *next,
+				 uid_t expected_owner)
+{
+	struct swapz_primary_state current;
+	char current_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char next_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	size_t current_length;
+	int length;
+
+	if (!swapz_primary_state_valid(next)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner))
+		return -1;
+	if (!swapz_primary_owner_claim_matches_at(recovery_fd, next->run_id,
+						 expected_owner))
+		return -1;
+	if (swapz_primary_record_read_at(recovery_fd, "primary-state.json",
+					 expected_owner, current_record,
+					 sizeof(current_record), &current_length,
+					 NULL) == 0) {
+		if (swapz_primary_state_parse(current_record, current_length,
+					      &current) < 0 ||
+		    !swapz_primary_state_transition_allowed(&current, next)) {
+			errno = EPERM;
+			return -1;
+		}
+	} else if (errno != ENOENT ||
+		   next->stage != SWAPZ_PRIMARY_STAGE_READY ||
+		   next->has_recovery_previous_stage) {
+		return -1;
+	}
+	length = swapz_primary_state_format(next, next_record,
+					   sizeof(next_record));
+	if (length < 0)
+		return -1;
+	if (swapz_primary_replace_record_at(recovery_fd, "primary-state.json",
+					   next->run_id, next_record,
+					   expected_owner) < 0)
+		return -1;
+	return 0;
+}
+
+int swapz_primary_release_partition_owner_at(int recovery_fd, int lock_fd,
+						     const char *run_id,
+						     uid_t expected_owner)
+{
+	struct swapz_primary_state state;
+	struct stat active_info;
+	struct stat named_info;
+	char state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char active_name[64];
+	size_t state_length;
+	int marker_result;
+
+	if (recovery_fd < 0 || lock_fd < 0 ||
+	    !swapz_primary_valid_run_id(run_id)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner))
+		return -1;
+	if (!swapz_primary_owner_claim_matches_at(recovery_fd, run_id,
+						 expected_owner))
+		return -1;
+	if (swapz_primary_record_read_at(recovery_fd, "primary-state.json",
+					 expected_owner, state_record,
+					 sizeof(state_record), &state_length,
+					 NULL) < 0)
+		return -1;
+	if (swapz_primary_state_parse(state_record, state_length, &state) < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (state.stage != SWAPZ_PRIMARY_STAGE_COMPLETE ||
+	    strcmp(state.run_id, run_id)) {
+		errno = EPERM;
+		return -1;
+	}
+	if (snprintf(active_name, sizeof(active_name), "partition-%s.active",
+		     SWAPZ_PRIMARY_PARTUUID) < 0)
+		return -1;
+	if (swapz_primary_record_read_at(recovery_fd, active_name,
+					 expected_owner, state_record,
+					 sizeof(state_record), &state_length,
+					 &active_info) < 0)
+		return -1;
+	if (fstatat(recovery_fd, active_name, &named_info,
+		    AT_SYMLINK_NOFOLLOW) < 0 ||
+	    named_info.st_dev != active_info.st_dev ||
+	    named_info.st_ino != active_info.st_ino ||
+	    !S_ISREG(named_info.st_mode) || named_info.st_nlink != 1) {
+		errno = EPERM;
+		return -1;
+	}
+	marker_result = unlinkat(recovery_fd, active_name, 0);
+	if (marker_result < 0)
+		return -1;
+	if (fsync(recovery_fd) < 0)
+		return -1;
+	if (fstatat(recovery_fd, active_name, &named_info,
+		    AT_SYMLINK_NOFOLLOW) == 0 || errno != ENOENT) {
+		errno = EIO;
+		return -1;
+	}
+	return 0;
 }
 
 int swapz_primary_partition_lock_acquire(void)

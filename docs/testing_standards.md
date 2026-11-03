@@ -3432,9 +3432,21 @@ its transition predicate rejects every edge outside the table below. Rootless
 direct-C tests cover the stage-name round trip, every ordered pair of known
 stages, invalid enum values, and invalid names. Repeated persistence of an
 in-progress stage is permitted; `COMPLETE` is terminal for that run. A new run
-requires a fresh one-use owner claim and a separately validated state
-transition. The stage predicate alone does not authorize a new run or a
-block-device operation.
+requires a fresh lowercase 32-hex run ID, a one-use owner claim and a
+separately validated state transition. The canonical state record has exactly
+the fields `schema`, `run_id`, `stage`, and `recovery_previous_stage`, in that
+order. It has no escaped strings, duplicate or unknown keys, or trailing data;
+recovery provenance is `null` for a normal lifecycle and retains the exact
+original interrupted stage through `RECOVERY_REQUIRED`, `RECOVERING`, and
+restored completion. Parsing and formatting must be round-tripped in rootless
+direct-C tests. A same-run transition to `COMPLETE` is terminal. A later run may
+begin at `READY` only from a valid `COMPLETE` record and with a different run
+ID. The state-transition predicate alone does not prove the corresponding
+one-use claim exists, authorize a device operation, or establish that a saved
+stage matches the live device. The mutable stage envelope is not a complete
+recovery manifest; durable run evidence must separately bind the exact
+partition identity, original-header backup and digest, qualified source and
+artifact hashes, and expected mapper identity and geometry.
 
 | Current stage | Permitted next stages |
 | --- | --- |
@@ -3443,7 +3455,7 @@ block-device operation.
 | `ACTIVE` | `ACTIVE`, `STOPPING`, `RECOVERY_REQUIRED` |
 | `STOPPING` | `STOPPING`, `RESTORED`, `RECOVERY_REQUIRED` |
 | `RECOVERING` | `RECOVERING`, `RESTORED`, `RECOVERY_REQUIRED` |
-| `RESTORED` | `RESTORED`, `READY`, `COMPLETE`, `RECOVERY_REQUIRED` |
+| `RESTORED` | `RESTORED`, `COMPLETE`, `RECOVERY_REQUIRED` |
 | `DISABLING` | `DISABLING`, `COMPLETE`, `RECOVERY_REQUIRED` |
 | `COMPLETE` | none |
 | `RECOVERY_REQUIRED` | `RECOVERY_REQUIRED`, `RECOVERING` |
@@ -3452,3 +3464,17 @@ Persisted recovery records must retain and validate the original interrupted
 stage independently of this transition predicate. This table is policy
 scaffolding, not a complete lifecycle implementation; it does not permit
 enabling privileged commands or boot units by itself.
+
+The native durable-state writer must hold the exact permanent PARTUUID lock,
+verify the active and consumed owner records against the state run ID, parse
+the existing canonical state, and reject an illegal transition without
+replacing the prior file. An absent state permits only the initial `READY`
+record after the one-use claim exists. A new run may replace `COMPLETE` with
+`READY` only under a different claimed run ID. Releasing the active owner
+marker requires a matching `COMPLETE` record and must leave the consumed record
+in place. Rootless tests must cover a competing lock, representative accepted
+state updates, rejected edges with byte-identical state preservation, recovery
+provenance retention, fresh-run admission, and marker release only after
+completion. These primitives are not lifecycle commands; keep privileged
+actions disabled until provisioning, mapper ownership, rollback and recovery
+actually use them.

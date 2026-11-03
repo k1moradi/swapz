@@ -2,6 +2,7 @@
 #ifndef SWAPZ_PRIMARY_H
 #define SWAPZ_PRIMARY_H
 
+#include <stddef.h>
 #include <sys/types.h>
 
 enum swapz_primary_stage {
@@ -17,11 +18,27 @@ enum swapz_primary_stage {
 	SWAPZ_PRIMARY_STAGE_COUNT
 };
 
+#define SWAPZ_PRIMARY_RUN_ID_LENGTH 32U
+
+struct swapz_primary_state {
+	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
+	enum swapz_primary_stage stage;
+	int has_recovery_previous_stage;
+	enum swapz_primary_stage recovery_previous_stage;
+};
+
 const char *swapz_primary_stage_name(enum swapz_primary_stage stage);
 int swapz_primary_stage_parse(const char *name,
 			      enum swapz_primary_stage *stage);
 int swapz_primary_stage_transition_allowed(enum swapz_primary_stage from,
 						   enum swapz_primary_stage to);
+int swapz_primary_state_parse(const char *record, size_t length,
+			      struct swapz_primary_state *state);
+int swapz_primary_state_format(const struct swapz_primary_state *state,
+			       char *record, size_t capacity);
+int swapz_primary_state_transition_allowed(
+	const struct swapz_primary_state *current,
+	const struct swapz_primary_state *next);
 
 int swapz_primary_partition_lock_acquire(void);
 /* Internal lifecycle primitive; caller must hold the matching partition lock. */
@@ -32,6 +49,14 @@ int swapz_primary_claim_partition_owner_at(int recovery_fd, int lock_fd,
 int swapz_primary_replace_record_at(int recovery_fd, const char *name,
 				    const char *run_id, const char *record,
 				    uid_t expected_owner);
+/* State changes require the exclusive partition lock and current run claim. */
+int swapz_primary_state_write_at(int recovery_fd, int lock_fd,
+				 const struct swapz_primary_state *next,
+				 uid_t expected_owner);
+/* Only a COMPLETE state may release the active marker; consumed claim remains. */
+int swapz_primary_release_partition_owner_at(int recovery_fd, int lock_fd,
+						     const char *run_id,
+						     uid_t expected_owner);
 int swapz_primary_command(int argc, char **argv);
 
 #endif /* SWAPZ_PRIMARY_H */

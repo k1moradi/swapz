@@ -38,6 +38,16 @@ static void assert_record_equals(int directory_fd, const char *name,
 	assert(close(fd) == 0);
 }
 
+static void assert_primary_state_equals(
+	int directory_fd, const struct swapz_primary_state *state)
+{
+	char record[256];
+	int length = swapz_primary_state_format(state, record, sizeof(record));
+
+	assert(length > 0);
+	assert_record_equals(directory_fd, "primary-state.json", record);
+}
+
 static void test_swap_inventory_parser(void)
 {
 	struct swapz_primary_swap_entry rows[4];
@@ -144,7 +154,6 @@ static void test_primary_stage_policy(void)
 		},
 		[SWAPZ_PRIMARY_STAGE_RESTORED] = {
 			[SWAPZ_PRIMARY_STAGE_RESTORED] = 1,
-			[SWAPZ_PRIMARY_STAGE_READY] = 1,
 			[SWAPZ_PRIMARY_STAGE_COMPLETE] = 1,
 			[SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED] = 1,
 		},
@@ -189,6 +198,123 @@ static void test_primary_stage_policy(void)
 	assert(parsed == SWAPZ_PRIMARY_STAGE_COMPLETE);
 	assert(swapz_primary_stage_parse(NULL, &parsed) < 0);
 	assert(swapz_primary_stage_parse("READY", NULL) < 0);
+}
+
+static void test_primary_state_records(void)
+{
+	const char *run_id = "0123456789abcdef0123456789abcdef";
+	const char *next_run_id = "fedcba9876543210fedcba9876543210";
+	const char *duplicate_key_record =
+		"{\"schema\":\"swapz-primary-state-v1\","
+		"\"run_id\":\"0123456789abcdef0123456789abcdef\","
+		"\"run_id\":\"0123456789abcdef0123456789abcdef\","
+		"\"stage\":\"READY\",\"recovery_previous_stage\":null}\n";
+	const char *unknown_key_record =
+		"{\"schema\":\"swapz-primary-state-v1\","
+		"\"run_id\":\"0123456789abcdef0123456789abcdef\","
+		"\"unknown\":0,\"stage\":\"READY\","
+		"\"recovery_previous_stage\":null}\n";
+	const char *escaped_stage_record =
+		"{\"schema\":\"swapz-primary-state-v1\","
+		"\"run_id\":\"0123456789abcdef0123456789abcdef\","
+		"\"stage\":\"RE\\u0041DY\","
+		"\"recovery_previous_stage\":null}\n";
+	struct swapz_primary_state current = {0};
+	struct swapz_primary_state next = {0};
+	struct swapz_primary_state parsed = {0};
+	struct swapz_primary_state invalid = {0};
+	char record[256];
+	int length;
+
+	memcpy(current.run_id, run_id, sizeof(current.run_id));
+	current.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+	next = current;
+	next.stage = SWAPZ_PRIMARY_STAGE_STOPPING;
+	assert(swapz_primary_state_transition_allowed(&current, &next));
+	length = swapz_primary_state_format(&current, record, sizeof(record));
+	assert(length > 0);
+	assert(swapz_primary_state_parse(record, (size_t)length, &parsed) == 0);
+	assert(!strcmp(current.run_id, parsed.run_id));
+	assert(current.stage == parsed.stage);
+	assert(current.has_recovery_previous_stage ==
+	       parsed.has_recovery_previous_stage);
+	assert(swapz_primary_state_parse(duplicate_key_record,
+					 strlen(duplicate_key_record), &parsed) < 0);
+	assert(swapz_primary_state_parse(unknown_key_record,
+					 strlen(unknown_key_record), &parsed) < 0);
+	assert(swapz_primary_state_parse(escaped_stage_record,
+					 strlen(escaped_stage_record), &parsed) < 0);
+	invalid = current;
+	memset(invalid.run_id, 'a', sizeof(invalid.run_id));
+	assert(!swapz_primary_state_transition_allowed(&current, &invalid));
+	invalid = current;
+	invalid.has_recovery_previous_stage = 2;
+	assert(swapz_primary_state_format(&invalid, record, sizeof(record)) < 0);
+	assert(swapz_primary_state_parse(record, (size_t)length - 1U,
+					 &parsed) < 0);
+	assert(swapz_primary_state_parse(record, (size_t)length + 1U,
+					 &parsed) < 0);
+	record[length] = 'x';
+	assert(swapz_primary_state_parse(record, (size_t)length + 1U,
+					 &parsed) < 0);
+	assert(swapz_primary_state_format(&current, record, 1U) < 0);
+
+	next = current;
+	next.stage = SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED;
+	next.has_recovery_previous_stage = 1;
+	next.recovery_previous_stage = current.stage;
+	assert(swapz_primary_state_transition_allowed(&current, &next));
+	length = swapz_primary_state_format(&next, record, sizeof(record));
+	assert(length > 0);
+	assert(swapz_primary_state_parse(record, (size_t)length, &parsed) == 0);
+	assert(!strcmp(next.run_id, parsed.run_id));
+	assert(next.stage == parsed.stage);
+	assert(next.has_recovery_previous_stage ==
+	       parsed.has_recovery_previous_stage);
+	assert(next.recovery_previous_stage == parsed.recovery_previous_stage);
+	current = next;
+	next.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;
+	assert(swapz_primary_state_transition_allowed(&current, &next));
+	current = next;
+	next.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
+	assert(swapz_primary_state_transition_allowed(&current, &next));
+	current = next;
+	next.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	assert(swapz_primary_state_transition_allowed(&current, &next));
+	current = next;
+	memcpy(next.run_id, next_run_id, sizeof(next.run_id));
+	next.stage = SWAPZ_PRIMARY_STAGE_READY;
+	next.has_recovery_previous_stage = 0;
+	assert(swapz_primary_state_transition_allowed(&current, &next));
+
+	current = parsed;
+	memcpy(current.run_id, run_id, sizeof(current.run_id));
+	current.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+	current.has_recovery_previous_stage = 0;
+	next = current;
+	next.stage = SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED;
+	next.has_recovery_previous_stage = 1;
+	next.recovery_previous_stage = SWAPZ_PRIMARY_STAGE_READY;
+	assert(!swapz_primary_state_transition_allowed(&current, &next));
+	next.recovery_previous_stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+	assert(swapz_primary_state_transition_allowed(&current, &next));
+	next.recovery_previous_stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	assert(!swapz_primary_state_transition_allowed(&current, &next));
+	next = current;
+	next.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
+	assert(!swapz_primary_state_transition_allowed(&current, &next));
+	current.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	next = current;
+	next.stage = SWAPZ_PRIMARY_STAGE_READY;
+	assert(!swapz_primary_state_transition_allowed(&current, &next));
+	memcpy(next.run_id, next_run_id, sizeof(next.run_id));
+	assert(swapz_primary_state_transition_allowed(&current, &next));
+	next.stage = SWAPZ_PRIMARY_STAGE_STARTING;
+	assert(!swapz_primary_state_transition_allowed(&current, &next));
+	next.stage = SWAPZ_PRIMARY_STAGE_READY;
+	next.has_recovery_previous_stage = 1;
+	next.recovery_previous_stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+	assert(!swapz_primary_state_transition_allowed(&current, &next));
 }
 
 static void test_exact_block_read_helper(void)
@@ -448,6 +574,8 @@ int main(void)
 	char target_path[PATH_MAX];
 	char active_name[64];
 	char consumed_name[64];
+	char next_consumed_name[64];
+	struct swapz_primary_state lifecycle = {0};
 	struct stat state_link_info;
 	const char *run_id = "0123456789abcdef0123456789abcdef";
 	const char *other_run_id = "fedcba9876543210fedcba9876543210";
@@ -472,6 +600,7 @@ int main(void)
 	test_swap_inventory_parser();
 	test_target_identity_and_header_policy();
 	test_primary_stage_policy();
+	test_primary_state_records();
 	test_exact_block_read_helper();
 	test_sha256_helper();
 	test_recovery_filesystem_policy();
@@ -490,6 +619,8 @@ int main(void)
 			 "partition-7fb9401d-04.active") > 0);
 	assert(snprintf(consumed_name, sizeof(consumed_name),
 			 "consumed-%s.json", run_id) > 0);
+	assert(snprintf(next_consumed_name, sizeof(next_consumed_name),
+			 "consumed-%s.json", other_run_id) > 0);
 	recovery_fd = swapz_primary_recovery_base_open(
 		base_template, geteuid());
 	assert(recovery_fd >= 0);
@@ -520,18 +651,70 @@ int main(void)
 	assert(errno == EBUSY);
 	assert_record_equals(recovery_fd, active_name, expected_record);
 	assert_record_equals(recovery_fd, consumed_name, expected_record);
-	assert(swapz_primary_replace_record_at(
-		recovery_fd, "primary-state.json", run_id,
-		"{\"schema\":\"swapz-primary-state-v1\",\"stage\":\"PREPARED\"}\n",
-		geteuid()) == 0);
-	assert_record_equals(recovery_fd, "primary-state.json",
-		"{\"schema\":\"swapz-primary-state-v1\",\"stage\":\"PREPARED\"}\n");
-	assert(swapz_primary_replace_record_at(
-		recovery_fd, "primary-state.json", other_run_id,
-		"{\"schema\":\"swapz-primary-state-v1\",\"stage\":\"ACTIVE\"}\n",
-		geteuid()) == 0);
-	assert_record_equals(recovery_fd, "primary-state.json",
-		"{\"schema\":\"swapz-primary-state-v1\",\"stage\":\"ACTIVE\"}\n");
+	memcpy(lifecycle.run_id, run_id, sizeof(lifecycle.run_id));
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_READY;
+	unlocked_lock = openat(recovery_fd, "partition-7fb9401d-04.lock",
+			      O_RDWR | O_NOFOLLOW);
+	assert(unlocked_lock >= 0);
+	assert(swapz_primary_state_write_at(recovery_fd, unlocked_lock,
+						    &lifecycle, geteuid()) < 0);
+	assert(errno == EWOULDBLOCK || errno == EAGAIN);
+	assert(close(unlocked_lock) == 0);
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) == 0);
+	assert_primary_state_equals(recovery_fd, &lifecycle);
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_STARTING;
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) == 0);
+	assert_primary_state_equals(recovery_fd, &lifecycle);
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_STOPPING;
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) < 0);
+	assert(errno == EPERM);
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_STARTING;
+	assert_primary_state_equals(recovery_fd, &lifecycle);
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) == 0);
+	lifecycle.recovery_previous_stage = lifecycle.stage;
+	lifecycle.has_recovery_previous_stage = 1;
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED;
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) == 0);
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) == 0);
+	lifecycle.recovery_previous_stage = SWAPZ_PRIMARY_STAGE_READY;
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) < 0);
+	assert(errno == EPERM);
+	lifecycle.recovery_previous_stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+	assert_primary_state_equals(recovery_fd, &lifecycle);
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) == 0);
+	assert(swapz_primary_release_partition_owner_at(
+		recovery_fd, first_lock, run_id, geteuid()) < 0);
+	assert(errno == EPERM);
+	assert_record_equals(recovery_fd, active_name, expected_record);
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) == 0);
+	assert(swapz_primary_release_partition_owner_at(
+		recovery_fd, first_lock, run_id, geteuid()) == 0);
+	assert(fstatat(recovery_fd, active_name, &state_link_info,
+		       AT_SYMLINK_NOFOLLOW) < 0 && errno == ENOENT);
+	assert_record_equals(recovery_fd, consumed_name, expected_record);
+	assert(swapz_primary_release_partition_owner_at(
+		recovery_fd, first_lock, run_id, geteuid()) < 0);
+	memcpy(lifecycle.run_id, other_run_id, sizeof(lifecycle.run_id));
+	lifecycle.stage = SWAPZ_PRIMARY_STAGE_READY;
+	lifecycle.has_recovery_previous_stage = 0;
+	assert(swapz_primary_claim_partition_owner_at(
+		recovery_fd, first_lock, other_run_id, geteuid()) == 0);
+	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
+						    &lifecycle, geteuid()) == 0);
+	assert_primary_state_equals(recovery_fd, &lifecycle);
 	assert(swapz_primary_write_record_at(recovery_fd, "state-target",
 					     "target\n", geteuid()) == 0);
 	assert(symlinkat("state-target", recovery_fd, "state-link") == 0);
@@ -570,6 +753,7 @@ int main(void)
 		recovery_fd, "../sda4", geteuid()) < 0);
 	assert(unlinkat(recovery_fd, active_name, 0) == 0);
 	assert(unlinkat(recovery_fd, consumed_name, 0) == 0);
+	assert(unlinkat(recovery_fd, next_consumed_name, 0) == 0);
 	assert(unlinkat(recovery_fd, "primary-state.json", 0) == 0);
 	assert(unlinkat(recovery_fd, "state-link", 0) == 0);
 	assert(unlinkat(recovery_fd, "state-target", 0) == 0);
@@ -585,6 +769,6 @@ int main(void)
 	assert(swapz_primary_command(1, start) == 2);
 	assert(swapz_primary_command(1, stop) == 2);
 	assert(swapz_primary_command(1, recover) == 2);
-	puts("PASS: primary swap inventory, capacity, durable owner claim, shared lock and disabled lifecycle gate");
+	puts("PASS: primary swap inventory, capacity, durable stage transitions, owner claims and disabled lifecycle gate");
 	return 0;
 }

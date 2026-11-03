@@ -1409,8 +1409,14 @@ owner claim or state replacement yet. No live swap or boot integration has
 been qualified through this manager. Do not enable its units until those paths
 and the exact-host qualification gates are closed.
 
-The native manager now has an explicit lifecycle-stage name parser and
-transition predicate, with rootless coverage of every stage pair and invalid
-values. This is policy scaffolding only: durable state parsing, run-ID-aware
-transitions, privileged lifecycle commands, startup rollback and recovery still
-need to use and validate it before the manager can be enabled.
+The native manager now has strict canonical parsing and formatting for its
+small durable lifecycle-stage record, plus a run-ID-aware transition predicate
+that preserves original recovery provenance. Its state writer checks the
+permanent lock and exact owner claim, rejects illegal transitions, and uses
+the durable replace primitive. Owner release requires a matching `COMPLETE`
+state, removes only the active marker, and preserves the consumed record.
+Rootless coverage exercises these paths, including rejection of a competing
+lock and a new run after completion. The record is only a stage envelope, not
+the immutable device/artifact/backup recovery manifest. No privileged lifecycle
+command uses these primitives yet; provisioning, mapper ownership, startup
+rollback and recovery remain unimplemented and unqualified.
