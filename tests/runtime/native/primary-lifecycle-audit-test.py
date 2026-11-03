@@ -682,12 +682,12 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             "case SWAPZ_PRIMARY_STAGE_RESTORED:",
             c_function_body(source, "swapz_primary_state_recoverable"))
 
-    def test_execution_gate_remains_disabled_pending_live_lifecycle_evidence(self):
+    def test_execution_gate_is_boot_scoped_pending_live_lifecycle_evidence(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         ordinary = active_preprocessor_macros()
         self.assertEqual(
-            ordinary.get("SWAPZ_PRIMARY_EXECUTION_ENABLED"), "0",
-            "ordinary production lifecycle needs physical evidence")
+            ordinary.get("SWAPZ_PRIMARY_EXECUTION_ENABLED"), "1",
+            "ordinary production must compile the exact lifecycle artifact")
         self.assertEqual(
             ordinary.get("SWAPZ_PRIMARY_CONFIG_BASE"), '"/etc/swapz"')
         self.assertEqual(
@@ -740,12 +740,26 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
 
         gate = c_function_body(
             source, "swapz_primary_privileged_execution_enabled")
+        runtime_gate = c_function_body(
+            source, "swapz_primary_lifecycle_runtime_enabled")
+        production_authorization = c_function_body(
+            source, "swapz_primary_production_execution_authorized")
         plan = c_function_body(source, "swapz_primary_read_only_plan")
         plan_raw = c_function_body(
             source, "swapz_primary_read_only_plan", code_only=False)
         command = c_function_body(source, "swapz_primary_command")
         self.assertIn("SWAPZ_PRIMARY_EXECUTION_ENABLED", gate)
         self.assertIn("swapz_primary_lifecycle_runtime_enabled()", gate)
+        self.assertIn(
+            "swapz_primary_production_execution_authorized()", runtime_gate)
+        for required in (
+                "SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY",
+                "SWAPZ_PRIMARY_EXECUTION_RECORD_NAME",
+                "swapz_primary_read_current_boot_id(boot_id)",
+                "swapz_primary_configured_target(&target)",
+                "swapz_primary_execution_record_matches(",
+                "SWAPZ_BUILD_SOURCE_SHA"):
+            self.assertIn(required, production_authorization)
         self.assertIn("swapz_primary_privileged_execution_enabled()", plan)
         self.assertIn(
             '"\\\"privileged_execution_enabled\\\":%s,"', plan_raw)
@@ -759,6 +773,12 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertNotIn(
             "SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION", ordinary_source,
             "ordinary production build must not read the physical marker")
+        self.assertIn(
+            '"/run/swapz"', ordinary_source,
+            "ordinary production must retain the boot-scoped runtime lock")
+        self.assertIn(
+            '"primary-execution.env"', ordinary_source,
+            "ordinary production must require the canonical runtime token")
         self.assertRegex(
             physical_source,
             r'\bgetenv\s*\(\s*"SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION"\s*\)')
