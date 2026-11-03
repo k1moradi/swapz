@@ -101,6 +101,56 @@ static void test_swap_inventory_parser(void)
 		rows, 0U, &count) < 0);
 }
 
+static void test_selected_target_swap_quiescence(void)
+{
+	struct swapz_primary_swap_entry rows[3] = {0};
+	dev_t devices[3] = {0};
+	unsigned char is_block[3] = {0};
+
+	strcpy(rows[0].path, "/swapfile");
+	strcpy(rows[0].type, "file");
+	rows[0].size_kib = 524284U;
+	rows[0].used_kib = 123U;
+	assert(swapz_primary_swap_inventory_target_is_quiescent(
+		rows, devices, is_block, 1U, makedev(8, 4),
+		SWAPZ_PRIMARY_SWAP_SIZE_KIB) == 0);
+
+	strcpy(rows[1].path, "/dev/target-alias");
+	strcpy(rows[1].type, "partition");
+	rows[1].size_kib = SWAPZ_PRIMARY_SWAP_SIZE_KIB;
+	rows[1].used_kib = 0U;
+	devices[1] = makedev(8, 4);
+	is_block[1] = 1U;
+	assert(swapz_primary_swap_inventory_target_is_quiescent(
+		rows, devices, is_block, 2U, makedev(8, 4),
+		SWAPZ_PRIMARY_SWAP_SIZE_KIB) == 0);
+
+	rows[1].used_kib = 1U;
+	errno = 0;
+	assert(swapz_primary_swap_inventory_target_is_quiescent(
+		rows, devices, is_block, 2U, makedev(8, 4),
+		SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+	assert(errno == EBUSY);
+	rows[1].used_kib = 0U;
+	--rows[1].size_kib;
+	errno = 0;
+	assert(swapz_primary_swap_inventory_target_is_quiescent(
+		rows, devices, is_block, 2U, makedev(8, 4),
+		SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+	assert(errno == EBUSY);
+	++rows[1].size_kib;
+
+	rows[2] = rows[1];
+	strcpy(rows[2].path, "/dev/target-second-alias");
+	devices[2] = devices[1];
+	is_block[2] = 1U;
+	errno = 0;
+	assert(swapz_primary_swap_inventory_target_is_quiescent(
+		rows, devices, is_block, 3U, makedev(8, 4),
+		SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+	assert(errno == EBUSY);
+}
+
 static void test_target_identity_and_header_policy(void)
 {
 	unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
@@ -1898,6 +1948,7 @@ int main(void)
 	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						  pages + 1ULL));
 	test_swap_inventory_parser();
+	test_selected_target_swap_quiescence();
 	test_target_identity_and_header_policy();
 	test_target_config_and_dynamic_geometry();
 	test_primary_linux_swap_header();

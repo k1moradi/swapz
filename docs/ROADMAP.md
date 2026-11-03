@@ -1608,9 +1608,10 @@ only metadata-claim crash accounting.
 
 A production-only metadata preparation path now verifies the qualified source
 and live artifacts, persistent recovery storage, exact original `/dev/sda4`
-identity/header, its sole active zero-use swap entry, root/mount separation,
-and absence of a loaded module or existing mapper. It constructs the future
-SWZ header in memory, then durably claims a fresh run and stores/read-verifies
+identity/header, any active selected-target alias as zero-use and unambiguous,
+root/mount separation, and absence of a loaded module or existing mapper.
+Unrelated swap entries are permitted and remain untouched. It constructs the
+future SWZ header in memory, then durably claims a fresh run and stores/read-verifies
 the original header backup and immutable manifest. It performs no target,
 swap, module or mapper mutation. The global privileged lifecycle gate remains
 disabled, and the path has not yet received its isolated-VM interruption

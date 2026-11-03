@@ -2572,12 +2572,44 @@ static int swapz_primary_read_swap_inventory(
 #endif
 }
 
+static int swapz_primary_swap_inventory_target_is_quiescent(
+	const struct swapz_primary_swap_entry *entries,
+	const dev_t *resolved_devices, const unsigned char *resolved_is_block,
+	size_t count, dev_t target_device, uint64_t target_size_kib)
+{
+	size_t index;
+	unsigned int target_entries = 0;
+
+	if (!entries || !resolved_devices || !resolved_is_block ||
+	    !target_size_kib) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (index = 0; index < count; ++index) {
+		if (!resolved_is_block[index] ||
+		    resolved_devices[index] != target_device)
+			continue;
+		++target_entries;
+		if (target_entries > 1U ||
+		    strcmp(entries[index].type, "partition") ||
+		    entries[index].size_kib != target_size_kib ||
+		    entries[index].used_kib != 0U) {
+			errno = EBUSY;
+			return -1;
+		}
+	}
+	return 0;
+}
+
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_original_swap_is_quiescent(void)
 {
 	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
+	dev_t resolved_devices[SWAPZ_PRIMARY_SWAP_ROWS_MAX] = {0};
+	unsigned char resolved_is_block[SWAPZ_PRIMARY_SWAP_ROWS_MAX] = {0};
 	struct stat info;
 	size_t count = 0;
+	size_t index;
 
 	if (!swapz_primary_target_valid(&swapz_primary_selected_target)) {
 		errno = ENODEV;
@@ -2586,24 +2618,20 @@ static int swapz_primary_original_swap_is_quiescent(void)
 	if (swapz_primary_read_swap_inventory(
 		    entries, SWAPZ_PRIMARY_SWAP_ROWS_MAX, &count) < 0)
 		return -1;
-	/* A prepared target may currently be inactive. If active, it must be the
-	 * sole swap entry and completely unused; other swap areas are never changed. */
-	if (!count)
-		return 0;
-	if (count != 1U || strcmp(entries[0].type, "partition") ||
-	    entries[0].size_kib != SWAPZ_PRIMARY_SWAP_SIZE_KIB ||
-	    entries[0].used_kib != 0U) {
-		errno = EBUSY;
-		return -1;
+	/*
+	 * Metadata preparation never changes swap state. Resolve every entry so
+	 * aliases of the selected partition cannot hide behind another pathname,
+	 * but leave unrelated swap areas untouched.
+	 */
+	for (index = 0; index < count; ++index) {
+		if (stat(entries[index].path, &info) < 0)
+			return -1;
+		resolved_devices[index] = info.st_rdev;
+		resolved_is_block[index] = S_ISBLK(info.st_mode) ? 1U : 0U;
 	}
-	if (stat(entries[0].path, &info) < 0)
-		return -1;
-	if (!S_ISBLK(info.st_mode) ||
-	    info.st_rdev != SWAPZ_PRIMARY_TARGET_DEVICE) {
-		errno = ENODEV;
-		return -1;
-	}
-	return 0;
+	return swapz_primary_swap_inventory_target_is_quiescent(
+		entries, resolved_devices, resolved_is_block, count,
+		SWAPZ_PRIMARY_TARGET_DEVICE, SWAPZ_PRIMARY_SWAP_SIZE_KIB);
 }
 #endif
 

@@ -3561,9 +3561,10 @@ The metadata-only `primary prepare` command remains behind the global disabled
 lifecycle gate until the complete coordinator is qualified. Its production
 path must reject any non-root, dirty-source, stale qualification, artifact
 mismatch, recovery-filesystem failure, target identity/header drift, nonzero
-swap use, extra swap entry, mount/root dependency, loaded module or existing
-mapper. It must repeat the exact swap and block-zero checks immediately before
-claiming. After claim, focused rootless lifecycle tests must verify durable
+selected-target swap use, duplicate or ambiguous selected-target swap aliases,
+mount/root dependency, loaded module or existing mapper. Unrelated swap entries
+may remain active and must never be modified by metadata preparation. It must
+repeat the exact swap and block-zero checks immediately before claiming. After claim, focused rootless lifecycle tests must verify durable
 consumed/`READY`/active ordering, manifest readback, optional-backup behavior,
 and recovery from interruption after each metadata publication, including the
 atomic `READY` close and owner-marker release. Where platform behavior is
