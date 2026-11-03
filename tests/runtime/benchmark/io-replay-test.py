@@ -2243,8 +2243,23 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(report["cold_read"]["pages"], 8)
             self.assertIn(report["performance_screening"]["status"],
                           ("SCREENED", "EXCLUDED"))
-            self.assertLessEqual(report["resources"]["replay_peak_rss_bytes"],
+            resources = report["resources"]
+            self.assertLessEqual(resources["replay_peak_rss_bytes"],
                                  128 * 1024 * 1024)
+            self.assertEqual(resources["replay_process_maxrss_bytes"],
+                             resources["replay_peak_rss_bytes"])
+            self.assertLessEqual(resources["replay_measurement_start_maxrss_bytes"],
+                                 resources["replay_peak_rss_bytes"])
+            self.assertEqual(
+                resources["replay_measurement_peak_rss_growth_bytes"],
+                resources["replay_peak_rss_bytes"] -
+                resources["replay_measurement_start_maxrss_bytes"])
+            sustained_source = sustained.read_text()
+            self.assertEqual(
+                sustained_source.count("ThreadPoolExecutor(max_workers=args.qd)"),
+                1)
+            self.assertNotIn(
+                "ThreadPoolExecutor(max_workers=qd)", sustained_source)
 
             failed = root / "failed.json"
             bad = command.copy()

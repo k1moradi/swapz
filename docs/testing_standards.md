@@ -664,8 +664,11 @@ The sustained replay's write permutation has a closed-form inverse, so latest
 page generations are reconstructed from per-lane completed-write counters. It
 must never allocate a logical-page map proportional to the advertised swap
 capacity. In-flight buffers, latency histograms and minute buckets remain
-bounded by queue depth/run duration; the final oracle streams every occupied
-page and compares the independently regenerated expected bytes. The untouched
+bounded by queue depth/run duration. Fill, warmup and measured work reuse one
+bounded QD worker pool so cached pthread stacks cannot make memory scale with
+phase count and worker creation stays outside the timed measured phase. The
+final oracle streams every occupied page and compares the independently
+regenerated expected bytes. The untouched
 filled tail is read before that full sweep and is the cold-read phase. A
 physical maximum-capacity run therefore proves high logical occupancy without
 allocating the logical capacity in host RAM.
@@ -689,10 +692,10 @@ lower WRITE bytes/requests <=0.90, READ/WRITE/cold p99 <=1.25, last/first
 quartile throughput >=0.75, last/first quartile p99 <=1.25, GC wall <=20%, zero
 GC no-headroom skips, positive victim relocation and segment programming, zero
 target failure, zero byte mismatches, <=10 seconds maximum no-progress, <=128
-MiB incremental replay peak RSS from the pre-measurement process boundary and
-<=1.25 GiB observed metadata+target peak RAM. The absolute process max RSS is
-retained as context and is not charged to the workload when it predates the
-measurement boundary.
+MiB absolute replay-process peak RSS through measured completion and <=1.25 GiB
+observed metadata+target peak RAM. The measurement-boundary max-RSS value and
+growth are retained as diagnostics only; setup-time allocations cannot be
+excluded from the replay memory gate.
 
 Anonymous-swap evidence is also directional: all three pairs must observe at
 least 128 MiB of workload-specific process/cgroup swap and at least that usage

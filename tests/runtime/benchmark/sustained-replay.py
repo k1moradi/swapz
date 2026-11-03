@@ -444,7 +444,8 @@ def read_fixture(path: Path):
     return stream, mapping, view, chunks
 
 
-def fill_device(fd, data_offset: int, occupied: int, qd: int, chunks, seed: int):
+def fill_device(fd, data_offset: int, occupied: int, qd: int, chunks, seed: int,
+                pool):
     start = time.monotonic_ns()
 
     def lane(lane_index):
@@ -452,8 +453,7 @@ def fill_device(fd, data_offset: int, occupied: int, qd: int, chunks, seed: int)
             full_write(fd, data_offset + page * PAGE,
                        chunks[payload_index(page, 0, len(chunks), seed)])
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=qd) as pool:
-        list(pool.map(lane, range(qd)))
+    list(pool.map(lane, range(qd)))
     os.fsync(fd)
     seconds = (time.monotonic_ns() - start) / 1e9
     return {"pages": occupied, "seconds": seconds,
@@ -461,7 +461,7 @@ def fill_device(fd, data_offset: int, occupied: int, qd: int, chunks, seed: int)
 
 
 def phase_workers(fd, data_offset: int, args, hot_pages: int, fill_chunks, churn_chunks,
-                  warmup: bool, initial_writes=None, progress=None):
+                  warmup: bool, pool, initial_writes=None, progress=None):
     qd = args.qd
     initial_writes = initial_writes or [0] * qd
     progress = progress or ProgressTracker()
@@ -527,8 +527,7 @@ def phase_workers(fd, data_offset: int, args, hot_pages: int, fill_chunks, churn
         return {"lane": lane, "writes": write_count, "read": read_hist,
                 "write": write_hist, "minutes": minutes, "ops": operation}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=qd) as pool:
-        results = list(pool.map(worker, range(qd)))
+    results = list(pool.map(worker, range(qd)))
     os.fsync(fd)
     return results, progress, (time.monotonic_ns() - phase_start)
 
@@ -690,29 +689,35 @@ def run(args):
     try:
         fd = os.open(target, flags)
         try:
-            fill = fill_device(
-                fd, data_offset, occupied, args.qd, fill_chunks, args.seed)
-            partial["fill"] = fill
-            warm_results, progress, _ = phase_workers(
-                fd, data_offset, args, hot, fill_chunks, churn_chunks, True)
-            initial_writes = [row["writes"] for row in warm_results]
+            # Reuse one bounded QD worker set across fill, warmup and measure.
+            # Recreating pthread pools can retain multiple default-size stacks
+            # in libc and make peak RSS scale with phase count instead of QD.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=args.qd) as pool:
+                fill = fill_device(
+                    fd, data_offset, occupied, args.qd, fill_chunks, args.seed,
+                    pool)
+                partial["fill"] = fill
+                warm_results, progress, _ = phase_workers(
+                    fd, data_offset, args, hot, fill_chunks, churn_chunks, True,
+                    pool)
+                initial_writes = [row["writes"] for row in warm_results]
 
-            pre_quiet = quiet_window()
-            if identity.get("dm_uuid"):
-                REPLAY["kernel_write_profile_epoch"](target, identity)
-            lower_before = REPLAY["lower_stat"](identity.get("owned_disk"))
-            write_before = REPLAY["kernel_write_snapshot"](target, identity)
-            read_before = REPLAY["kernel_read_snapshot"](target, identity)
-            status_before = status_snapshot(target, identity)
-            host_before = REPLAY["host_cpu_snapshot"]()
-            cpu_before = process_cpu()
-            start = time.monotonic_ns()
-            measured, progress, wall_ns = phase_workers(
-                fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
-                initial_writes, progress)
-            end = time.monotonic_ns()
-            cpu_after = process_cpu()
-            host_after = REPLAY["host_cpu_snapshot"]()
+                pre_quiet = quiet_window()
+                if identity.get("dm_uuid"):
+                    REPLAY["kernel_write_profile_epoch"](target, identity)
+                lower_before = REPLAY["lower_stat"](identity.get("owned_disk"))
+                write_before = REPLAY["kernel_write_snapshot"](target, identity)
+                read_before = REPLAY["kernel_read_snapshot"](target, identity)
+                status_before = status_snapshot(target, identity)
+                host_before = REPLAY["host_cpu_snapshot"]()
+                cpu_before = process_cpu()
+                start = time.monotonic_ns()
+                measured, progress, wall_ns = phase_workers(
+                    fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
+                    pool, initial_writes, progress)
+                end = time.monotonic_ns()
+                cpu_after = process_cpu()
+                host_after = REPLAY["host_cpu_snapshot"]()
             status_after = status_snapshot(target, identity)
             read_after = REPLAY["kernel_read_snapshot"](target, identity)
             write_after = REPLAY["kernel_write_snapshot"](target, identity)
@@ -813,8 +818,11 @@ def run(args):
                         "replay process plus exported swapz worker CPU; "
                         "other kernel CPU excluded")},
                 "resources": {
-                    "replay_peak_rss_bytes": max(0, cpu_after[2] - cpu_before[2]),
+                    "replay_peak_rss_bytes": cpu_after[2],
                     "replay_process_maxrss_bytes": cpu_after[2],
+                    "replay_measurement_start_maxrss_bytes": cpu_before[2],
+                    "replay_measurement_peak_rss_growth_bytes":
+                        max(0, cpu_after[2] - cpu_before[2]),
                     "metadata_and_target_peak_ram_bytes":
                         args.metadata_and_target_peak_ram_bytes or 0,
                     "metadata_ram_scope": (
