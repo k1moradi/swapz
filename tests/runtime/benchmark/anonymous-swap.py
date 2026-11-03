@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 PAGE = 4096
+SYSFS_SECTOR_BYTES = 512
 MIB = 1024 * 1024
 SCHEMA = "swapz-anonymous-swap-v1"
 CONTENT_DEFINITION = "50% deterministic compressible + 50% deterministic entropy anonymous pages"
@@ -191,6 +192,43 @@ def _device_sysfs(expected_device: str) -> tuple[Path, os.stat_result]:
     return sysdev, info
 
 
+def _physical_partition_identity(sysdev: Path) -> dict:
+    """Return the canonical lower-partition identity used by release evidence."""
+    try:
+        partition = int((sysdev / "partition").read_text(encoding="ascii").strip())
+        sectors = int((sysdev / "size").read_text(encoding="ascii").strip())
+        lines = (sysdev / "uevent").read_text(encoding="ascii").splitlines()
+    except (OSError, ValueError) as exc:
+        raise ValueError("physical swap partition identity is unavailable") from exc
+    if partition <= 0 or sectors <= 0:
+        raise ValueError("physical swap lower is not a valid partition")
+
+    fields = {}
+    for line in lines:
+        if "=" not in line:
+            raise ValueError("physical swap partition uevent is malformed")
+        key, value = line.split("=", 1)
+        if not key or key in fields:
+            raise ValueError("physical swap partition uevent is ambiguous")
+        fields[key] = value
+    partuuid = fields.get("PARTUUID")
+    if (not isinstance(partuuid, str) or
+            not re.fullmatch(
+                r"[0-9A-Fa-f](?:[0-9A-Fa-f]|-(?=[0-9A-Fa-f])){6,62}[0-9A-Fa-f]",
+                partuuid) or
+            len(partuuid.replace("-", "")) < 8):
+        raise ValueError("physical swap partition PARTUUID is unavailable or malformed")
+
+    device_bytes = sectors * SYSFS_SECTOR_BYTES
+    if (device_bytes <= PAGE or device_bytes > (1 << 64) - 1 or
+            device_bytes % PAGE):
+        raise ValueError("physical swap partition geometry is invalid")
+    return {
+        "physical_partuuid": partuuid.lower(),
+        "physical_device_bytes": device_bytes,
+    }
+
+
 def device_stat(expected_device: str | None):
     if not expected_device:
         return None
@@ -214,6 +252,7 @@ def target_io_delta(before, after):
 def swap_device_identity(expected_device: str, candidate: str,
                          expected_dm_uuid: str | None) -> dict:
     sysdev, info = _device_sysfs(expected_device)
+    lower_sysdev = sysdev
     identity = {
         "requested_path": expected_device,
         "resolved_path": str(Path(expected_device).resolve(strict=True)),
@@ -235,6 +274,7 @@ def swap_device_identity(expected_device: str, candidate: str,
         if len(slaves) != 1:
             raise ValueError("anonymous swap mapper must have exactly one lower")
         lower = slaves[0].resolve(strict=True)
+        lower_sysdev = lower
         table = subprocess.run(
             ["dmsetup", "table", dm_name], text=True, capture_output=True,
             check=False, timeout=10)
@@ -255,6 +295,7 @@ def swap_device_identity(expected_device: str, candidate: str,
         if expected_dm_uuid:
             raise ValueError("raw anonymous arm must not name a DM UUID")
         identity["lower_device"] = identity["device"]
+    identity.update(_physical_partition_identity(lower_sysdev))
     return identity
 
 
