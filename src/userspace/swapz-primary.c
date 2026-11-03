@@ -39,6 +39,30 @@ static void swapz_primary_selected_target_clear(void)
 }
 
 #define SWAPZ_PRIMARY_BLOCK_BYTES 4096ULL
+#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+#define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
+#define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
+#define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
+	"/var/lib/swapz/physical-recovery/primary-qualification.json"
+/* Privileged lifecycle stays disabled until provisioning and recovery qualify. */
+#define SWAPZ_PRIMARY_EXECUTION_ENABLED 0
+#else
+#ifndef SWAPZ_PRIMARY_TEST_CONFIG_BASE
+#error "owned-null_blk lifecycle test requires private config base"
+#endif
+#ifndef SWAPZ_PRIMARY_TEST_RECOVERY_BASE
+#error "owned-null_blk lifecycle test requires private recovery base"
+#endif
+#ifndef SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
+#error "owned-null_blk lifecycle test requires private qualification report"
+#endif
+#define SWAPZ_PRIMARY_CONFIG_BASE SWAPZ_PRIMARY_TEST_CONFIG_BASE
+#define SWAPZ_PRIMARY_RECOVERY_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
+#define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
+	SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
+#define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
+#endif
+
 #define SWAPZ_PRIMARY_SWAP_VERSION_OFFSET 1024U
 #define SWAPZ_PRIMARY_SWAP_LAST_PAGE_OFFSET 1028U
 #define SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET 1032U
@@ -78,11 +102,6 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_MODULE_RELATIVE_PATH "libexec/swapz/dm-swapz.ko"
 #define SWAPZ_PRIMARY_STATE_JSON_PREFIX \
 	"{\"schema\":\"swapz-primary-state-v1\",\"run_id\":"
-#define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
-#define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
-	"/var/lib/swapz/physical-recovery/primary-qualification.json"
-/* Privileged lifecycle stays disabled until provisioning and recovery qualify. */
-#define SWAPZ_PRIMARY_EXECUTION_ENABLED 0
 
 struct swapz_primary_swap_entry {
 	char path[PATH_MAX];
@@ -615,7 +634,7 @@ int swapz_primary_target_config_read(
 	partuuid[0] = '\0';
 	{
 		struct stat directory_info;
-		int directory_fd = open("/etc/swapz",
+		int directory_fd = open(SWAPZ_PRIMARY_CONFIG_BASE,
 					 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 
 		if (directory_fd < 0)

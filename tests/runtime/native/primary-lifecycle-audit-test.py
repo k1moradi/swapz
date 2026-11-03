@@ -14,6 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 PRIMARY_SOURCE = ROOT / "src/userspace/swapz-primary.c"
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
+ROOT_MAKEFILE = ROOT / "Makefile"
 
 
 # C comments and quoted diagnostics must never satisfy native operation guards.
@@ -583,6 +584,18 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertEqual(
             gate.group(1), "0",
             "privileged lifecycle needs owned-null_blk and physical evidence")
+        self.assertIn("#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST", source)
+        self.assertIn(
+            "#define SWAPZ_PRIMARY_CONFIG_BASE \"/etc/swapz\"", source)
+        self.assertIn(
+            "#define SWAPZ_PRIMARY_RECOVERY_BASE "
+            "\"/var/lib/swapz/physical-recovery\"", source)
+        self.assertIn(
+            "#define SWAPZ_PRIMARY_EXECUTION_ENABLED 1", source)
+        self.assertNotIn(
+            "SWAPZ_PRIMARY_OWNED_NULLBLK_TEST",
+            ROOT_MAKEFILE.read_text(encoding="utf-8"),
+            "public build must never enable the owned-null_blk lifecycle seam")
 
     def test_execution_gate_cannot_enable_without_native_swap_operations(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")

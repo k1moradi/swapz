@@ -302,7 +302,11 @@ Unless evidence changes the order, work on:
    RECOVERY_REQUIRED and RESTORED, requires exact-owned convergence, and proves
    wrong mapper identity cannot trigger swapoff/remove. Remaining lifecycle
    evidence is owned-`null_blk` execution and native-process interruption
-   behavior; the latest source also permits unrelated swap entries such as
+   behavior. A noninstalled test-only build seam now exists for that work: the
+   production gate remains literal zero, while the owned-null_blk macro requires
+   private selector/recovery/qualification paths before it can compile with the
+   gate enabled. The public Makefile never selects that seam. The latest source
+   also permits unrelated swap entries such as
    `/swapfile` while rejecting an active or ambiguous alias of the selected
    target. Do not enable the gate before exact-source and card-specific
    acceptance gates pass.

@@ -3603,8 +3603,15 @@ guards must prove RECOVERY_REQUIRED is durable before RECOVERING, cleanup
 precedes RESTORED/COMPLETE, owner release follows COMPLETE, and a failed
 in-progress recovery durably returns to RECOVERY_REQUIRED. This deterministic
 model evidence does not replace owned-null_blk/native-process interruption
-qualification. Do not intentionally crash or reboot the host to manufacture
-power-loss evidence.
+qualification. The production translation unit may expose one compile-time
+owned-null_blk rehearsal seam only when a dedicated test macro is present.
+The ordinary source must retain literal execution gate 0 and production
+`/etc/swapz`, recovery and qualification paths; the public Makefile must never
+define the test macro. A test build must fail compilation unless private
+config, recovery and qualification-report paths are supplied, and only that
+build may compile the lifecycle gate as 1. This seam is not deployment
+authorization and must never be installed. Do not intentionally crash or reboot
+the host to manufacture power-loss evidence.
 
 The plan, lifecycle mocks and CI do not by themselves establish live-swap
 correctness. Model each durable interruption boundary and add physical-host
