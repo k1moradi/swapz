@@ -4983,3 +4983,5 @@ Boot-verifier rootless fixtures must provide an explicit benign synthetic
 Resume-tag tests must normalize the complete tag key as well as hexadecimal
 payload characters so uppercase `PARTUUID=` syntax cannot bypass stable-identity
 comparison.
+
+Loaded lifecycle summary counts must be emitted from the validated parsed evidence rather than duplicated numeric constants; when the negative-recovery matrix grows, the parser must validate the new count and report that parsed count so report regressions cannot silently lag the qualification contract.

@@ -1646,7 +1646,7 @@ def parse_loaded_correctness(output):
             r"repeat_recovery:safe$"),
         "primary_negative_recovery": re.compile(
             r"PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="
-            r"cases:13 ambiguous_syscall:true inventory_failure:true "
+            r"cases:(\d+) ambiguous_syscall:true inventory_failure:true "
             r"definite_io_error:true wrong_mapper:true failed_swapoff:true "
             r"stale_run:true fsync_failure:true lost_provenance:true "
             r"repeat_recovery:safe host_swap_identity:preserved$"),
@@ -1689,6 +1689,12 @@ def parse_loaded_correctness(output):
             "overall": "INCOMPLETE",
             "reason": (
                 "primary lifecycle interruption recovery evidence is incomplete"),
+        }
+    negative_recovery_cases, = found["primary_negative_recovery"]
+    if negative_recovery_cases != 13:
+        return {
+            "overall": "INCOMPLETE",
+            "reason": "primary lifecycle negative recovery evidence is incomplete",
         }
 
     constructor_cleanup_stages, constructor_cleanup_lower_io_delta = (
@@ -1851,7 +1857,7 @@ def parse_loaded_correctness(output):
         "raw_read_lower_requests": raw_read_reqs,
         "primary_lifecycle": "PASS",
         "primary_lifecycle_interruptions": len(expected_interruption_phases),
-        "primary_lifecycle_negative_cases": 11,
+        "primary_lifecycle_negative_cases": negative_recovery_cases,
         "raw_pages": raw_pages,
         "zero_pages": zero_pages,
         "flush_calls": flush_calls,
