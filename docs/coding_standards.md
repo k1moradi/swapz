@@ -116,9 +116,15 @@ may claim one different independently verified-dead reserve, then and only then
 promote the blocked destination to foreground and rebind the exact worker token
 to the new destination while retaining the original victim and forbidden OPEN.
 This exceptional destination advance consumes one reserve role and is bounded
-to one role handoff per worker call. If no replacement reserve exists, convert
-the owned no-progress condition to terminal fail-closed state; ordinary
-foreground -ENOSPC outside an owned recovery remains nonterminal.
+to one role handoff per worker call. Track initial/current reserve-role counts
+in serialized target state rather than rescanning a concurrently changing role
+array from status; decrement only after a validated destination advance and keep
+ordinary one-for-one rotations unchanged. Target status also exposes a
+saturating successful-advance counter. Runtime health warns on any reserve-role
+erosion, fails on zero or an impossible current count above the initial count,
+and treats missing telemetry as degraded evidence. If no replacement reserve
+exists, convert the owned no-progress condition to terminal fail-closed state;
+ordinary foreground -ENOSPC outside an owned recovery remains nonterminal.
 
 ## Performance work
 
