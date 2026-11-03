@@ -38,6 +38,33 @@ static int near_full_recycle(void *opaque, swapz_u32 segment)
 	return near_full_recycle_error;
 }
 
+static void near_full_fill_raw(swapz_u32 logical, swapz_u32 version)
+{
+	swapz_u32 offset;
+
+	for (offset = 0; offset < SWAPZ_BLOCK_BYTES; ++offset)
+		raw[offset] = (swapz_u8)(offset * 29U + logical * 37U +
+					 version * 101U);
+	raw[0] = (swapz_u8)logical;
+	raw[1] = (swapz_u8)(logical >> 8);
+	raw[2] = (swapz_u8)version;
+	raw[3] = (swapz_u8)(version >> 8);
+}
+
+static int near_full_finish_raw(struct swapz_authority *authority,
+				struct swapz_tx *tx,
+				swapz_u32 logical, swapz_u32 version)
+{
+	near_full_fill_raw(logical, version);
+	return swapz_finish_raw(authority, tx, raw, 1, 0);
+}
+
+static swapz_u32 near_full_raw_crc(swapz_u32 logical, swapz_u32 version)
+{
+	near_full_fill_raw(logical, version);
+	return swapz_crc32c_bytes(raw, SWAPZ_BLOCK_BYTES);
+}
+
 static int setup(void)
 {
 	int error = swapz_authority_init(&a, maps, live, classes, 16, NPHYS);
@@ -364,12 +391,12 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 	static swapz_u8 near_full_classes[5U * SWAPZ_SEGMENT_BLOCKS];
 	static swapz_u8 near_full_roles[5];
 	static swapz_u32 near_full_mapped_pages[5];
+	static swapz_u32 near_full_versions[SWAPZ_SEGMENT_BLOCKS];
 	const swapz_u32 survivors = SWAPZ_SEGMENT_BLOCKS - 1U;
 	struct swapz_tx tx;
-	swapz_u32 page, block, expected_raw_crc;
+	swapz_u32 page, block;
 
-	memset(raw, 0xa5, sizeof(raw));
-	expected_raw_crc = swapz_crc32c_bytes(raw, SWAPZ_BLOCK_BYTES);
+	memset(near_full_versions, 0, sizeof(near_full_versions));
 	CHECK(swapz_authority_init(&near_full_authority, near_full_maps,
 				  near_full_liveness, near_full_classes,
 				  SWAPZ_SEGMENT_BLOCKS + 1U,
@@ -390,21 +417,28 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 
 	for (page = 0; page < survivors; ++page) {
 		CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
-		CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+		near_full_versions[page] = 1U;
+		CHECK(near_full_finish_raw(&near_full_authority, &tx, page,
+					   near_full_versions[page]) == 0);
 	}
 	page = 0;
 	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
-	CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+	near_full_versions[page]++;
+	CHECK(near_full_finish_raw(&near_full_authority, &tx, page,
+				   near_full_versions[page]) == 0);
 	page = survivors;
 	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
-	CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+	near_full_versions[page] = 1U;
+	CHECK(near_full_finish_raw(&near_full_authority, &tx, page,
+				   near_full_versions[page]) == 0);
 	CHECK(near_full_authority.open_segment == 1U);
 	CHECK(swapz_gc_begin_rotation(&near_full_authority, 0) == 0);
 	CHECK(near_full_authority.gc_destination == 3U);
 
 	page = 0;
 	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
-	CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+	CHECK(near_full_finish_raw(&near_full_authority, &tx, page,
+				   near_full_versions[page]) == 0);
 	page = 1;
 	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
 	CHECK(tx.start_block == 3U * SWAPZ_SEGMENT_BLOCKS + 1U);
@@ -412,7 +446,8 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 
 	for (page = 1; page < survivors; ++page) {
 		CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
-		CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+		CHECK(near_full_finish_raw(&near_full_authority, &tx, page,
+					   near_full_versions[page]) == 0);
 	}
 	CHECK(near_full_authority.next_block == 4U * SWAPZ_SEGMENT_BLOCKS);
 	CHECK(swapz_gc_commit_rotation(&near_full_authority, 0) == -ENOSPC);
@@ -496,9 +531,12 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 
 	for (page = 0; page < survivors; ++page) {
 		CHECK(near_full_maps[page].valid &&
-		      near_full_maps[page].start_block / SWAPZ_SEGMENT_BLOCKS == 3U);
+		      near_full_maps[page].start_block / SWAPZ_SEGMENT_BLOCKS == 3U &&
+		      near_full_maps[page].raw_crc32c ==
+			      near_full_raw_crc(page, near_full_versions[page]));
 		CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
-		CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+		CHECK(near_full_finish_raw(&near_full_authority, &tx, page,
+					   near_full_versions[page]) == 0);
 	}
 	CHECK(near_full_authority.next_block == SWAPZ_SEGMENT_BLOCKS - 1U);
 	CHECK(swapz_gc_commit_rotation(&near_full_authority, 3U) == 0);
@@ -510,19 +548,24 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 	page = survivors;
 	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
 	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS - 1U);
-	CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+	near_full_versions[page]++;
+	CHECK(near_full_finish_raw(&near_full_authority, &tx, page,
+				   near_full_versions[page]) == 0);
 
 	for (page = 0; page < survivors; ++page) {
 		CHECK(near_full_maps[page].valid && near_full_maps[page].raw &&
 		      near_full_maps[page].start_block < SWAPZ_SEGMENT_BLOCKS &&
-		      near_full_maps[page].raw_crc32c == expected_raw_crc &&
+		      near_full_maps[page].raw_crc32c ==
+			      near_full_raw_crc(page, near_full_versions[page]) &&
 		      near_full_maps[page].generation == (page == 0 ? 4U : 3U));
 	}
 	CHECK(near_full_maps[survivors].valid &&
 	      near_full_maps[survivors].start_block ==
 		      SWAPZ_SEGMENT_BLOCKS - 1U &&
 	      near_full_maps[survivors].generation == 2U &&
-	      near_full_maps[survivors].raw_crc32c == expected_raw_crc);
+	      near_full_maps[survivors].raw_crc32c ==
+		      near_full_raw_crc(survivors,
+					near_full_versions[survivors]));
 	for (block = 3U * SWAPZ_SEGMENT_BLOCKS;
 	     block < 5U * SWAPZ_SEGMENT_BLOCKS; ++block)
 		CHECK(!near_full_liveness[block]);
