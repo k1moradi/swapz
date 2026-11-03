@@ -843,6 +843,40 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
  * next GC victim and the verified-dead original victim the next destination.
  * No mapping, generation or live refcount changes here.
  */
+static int swapz_verify_recovery_victim_dead(
+	const struct swapz_authority *a, swapz_u32 segment)
+{
+	swapz_u32 logical, start_block, block;
+
+	if (!a || !a->maps || !a->live_records || segment >= a->segment_count)
+		return -EINVAL;
+
+	/*
+	 * Roll-forward is an exceptional recovery path, so prefer independent
+	 * authority proof over the ordinary O(1) segment sidecar fast path.
+	 * A stale/corrupt cached count must never permit reclaim, and a zero count
+	 * must not hide a surviving authoritative mapping.
+	 */
+	for (logical = 0; logical < a->logical_pages; ++logical) {
+		const struct swapz_map *map = &a->maps[logical];
+
+		if (!map->valid)
+			continue;
+		if (map->start_block >= a->physical_blocks)
+			return -EUCLEAN;
+		if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment)
+			return -EUCLEAN;
+	}
+	if (a->segment_mapped_pages && a->segment_mapped_pages[segment])
+		return -EUCLEAN;
+
+	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
+	for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
+		if (a->live_records[start_block + block])
+			return -EUCLEAN;
+	return 0;
+}
+
 int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 				   swapz_u32 exhausted_destination)
 {
@@ -868,11 +902,15 @@ int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 		return -EUCLEAN;
 
 	/*
-	 * This is the only fallible step. It proves the old victim has no map or
-	 * physical liveness, applies the optional recycle hook, clears stale
-	 * extent metadata and binds OPEN/next_block to its segment start.
-	 * Roles are deliberately unchanged until that complete proof succeeds.
+	 * Independently prove the old victim is absent from the authoritative map
+	 * array, cached mapped-page sidecar and physical liveness before any recycle
+	 * hook can touch it. swapz_claim_dead_segment() then revalidates the normal
+	 * dead-segment metadata and performs the only externally fallible hook.
+	 * Roles remain unchanged until every check and the hook have succeeded.
 	 */
+	error = swapz_verify_recovery_victim_dead(a, evacuated_victim);
+	if (error)
+		return error;
 	probe_start = swapz_authority_now_ns();
 	error = swapz_claim_dead_segment(a, evacuated_victim, probe_start);
 	if (error)

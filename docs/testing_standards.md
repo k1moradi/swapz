@@ -517,7 +517,13 @@ retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC.
 The exact-authority regression must construct 255 distinct surviving RAW pages
 in one victim, publish one relocation, abort one uncertain one-block lower
 WRITE and relocate all remaining pages. The first destination must become full
-and fail ordinary commit; roll-forward must then evacuate that full intermediate
+and fail ordinary commit. Before a successful roll-forward, deliberately make
+each independent deadness view disagree in turn: a valid map pointing into the
+old victim, a nonzero cached mapped-page count with no such map, and a nonzero
+physical liveness record. Every contradiction must return -EUCLEAN before the
+recycle hook and leave roles, cursors and recovery ownership unchanged. A
+recycle-hook failure must return its error with the same state atomicity.
+After restoring consistency, roll-forward must evacuate that full intermediate
 segment into the verified-dead original victim, preserve every byte/CRC and the
 expected generation increments, leave the other reserve untouched, and permit
 a subsequent foreground write. Native authority/engine tests remain supporting

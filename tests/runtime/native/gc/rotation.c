@@ -26,6 +26,18 @@ static swapz_u8 classes[NPHYS];
 static swapz_u8 roles[4];
 static swapz_u8 raw[SWAPZ_BLOCK_BYTES];
 
+static int near_full_recycle_error;
+static unsigned int near_full_recycle_calls;
+static swapz_u32 near_full_recycle_segment;
+
+static int near_full_recycle(void *opaque, swapz_u32 segment)
+{
+	(void)opaque;
+	near_full_recycle_calls++;
+	near_full_recycle_segment = segment;
+	return near_full_recycle_error;
+}
+
 static int setup(void)
 {
 	int error = swapz_authority_init(&a, maps, live, classes, 16, NPHYS);
@@ -351,6 +363,7 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 	static swapz_u16 near_full_liveness[5U * SWAPZ_SEGMENT_BLOCKS];
 	static swapz_u8 near_full_classes[5U * SWAPZ_SEGMENT_BLOCKS];
 	static swapz_u8 near_full_roles[5];
+	static swapz_u32 near_full_mapped_pages[5];
 	const swapz_u32 survivors = SWAPZ_SEGMENT_BLOCKS - 1U;
 	struct swapz_tx tx;
 	swapz_u32 page, block, expected_raw_crc;
@@ -364,6 +377,13 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 	near_full_authority.reuse_dead_segments = 1;
 	CHECK(swapz_enable_segment_rotation(&near_full_authority,
 					    near_full_roles, 5) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(
+		      &near_full_authority, near_full_mapped_pages, 5) == 0);
+	near_full_recycle_error = 0;
+	near_full_recycle_calls = 0;
+	near_full_recycle_segment = ~(swapz_u32)0;
+	near_full_authority.dead_segment_recycle = near_full_recycle;
+	near_full_authority.dead_segment_recycle_opaque = NULL;
 	CHECK(swapz_gc_candidate_can_free_block(
 		      survivors * SWAPZ_BLOCK_BYTES,
 		      (swapz_u16)survivors));
@@ -401,9 +421,70 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 	      near_full_authority.gc_destination == 3U);
 	for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
 		CHECK(!near_full_liveness[block]);
+	CHECK(near_full_mapped_pages[0] == 0U);
 
+	/*
+	 * Roll-forward is allowed to reuse the evacuated victim only after three
+	 * independent views agree it is dead. A contradictory map, cached mapped
+	 * count, or physical liveness record must fail before the recycle hook and
+	 * without changing the authenticated recovery state.
+	 */
+	{
+		struct swapz_map saved_map = near_full_maps[survivors];
+
+		near_full_maps[survivors].start_block = 0U;
+		CHECK(swapz_gc_roll_forward_rotation(
+			      &near_full_authority, 3U) == -EUCLEAN);
+		CHECK(near_full_recycle_calls == 0U);
+		CHECK(near_full_authority.gc_forbidden_victim == 0U &&
+		      near_full_authority.gc_destination == 3U &&
+		      near_full_authority.open_segment == 3U &&
+		      near_full_authority.next_block ==
+			      4U * SWAPZ_SEGMENT_BLOCKS);
+		CHECK(near_full_roles[0] == 1U && near_full_roles[3] == 0U);
+		near_full_maps[survivors] = saved_map;
+	}
+	near_full_mapped_pages[0] = 1U;
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &near_full_authority, 3U) == -EUCLEAN);
+	CHECK(near_full_recycle_calls == 0U);
+	CHECK(near_full_authority.gc_forbidden_victim == 0U &&
+	      near_full_authority.gc_destination == 3U &&
+	      near_full_authority.open_segment == 3U &&
+	      near_full_authority.next_block == 4U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(near_full_roles[0] == 1U && near_full_roles[3] == 0U);
+	near_full_mapped_pages[0] = 0U;
+
+	near_full_liveness[0] = 1U;
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &near_full_authority, 3U) == -EUCLEAN);
+	CHECK(near_full_recycle_calls == 0U);
+	CHECK(near_full_authority.gc_forbidden_victim == 0U &&
+	      near_full_authority.gc_destination == 3U &&
+	      near_full_authority.open_segment == 3U &&
+	      near_full_authority.next_block == 4U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(near_full_roles[0] == 1U && near_full_roles[3] == 0U);
+	near_full_liveness[0] = 0U;
+
+	/* A recycle failure is externally fallible but must be state-atomic. */
+	near_full_recycle_error = -EIO;
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &near_full_authority, 3U) == -EIO);
+	CHECK(near_full_recycle_calls == 1U &&
+	      near_full_recycle_segment == 0U);
+	CHECK(near_full_authority.recycled_dead_segments == 0U);
+	CHECK(near_full_authority.gc_forbidden_victim == 0U &&
+	      near_full_authority.gc_destination == 3U &&
+	      near_full_authority.open_segment == 3U &&
+	      near_full_authority.next_block == 4U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(near_full_roles[0] == 1U && near_full_roles[3] == 0U);
+
+	near_full_recycle_error = 0;
 	CHECK(swapz_gc_roll_forward_rotation(
 		      &near_full_authority, 3U) == 0);
+	CHECK(near_full_recycle_calls == 2U &&
+	      near_full_recycle_segment == 0U);
+	CHECK(near_full_authority.recycled_dead_segments == 1U);
 	CHECK(near_full_authority.gc_allocation &&
 	      near_full_authority.gc_forbidden_victim == 3U &&
 	      near_full_authority.gc_destination == 0U &&
