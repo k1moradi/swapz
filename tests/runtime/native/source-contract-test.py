@@ -263,6 +263,25 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "TEST_BASE=/var/lib/swapz-primary-owned-nullblk-test\n",
             rehearsal)
 
+    def test_physical_real_swap_source_admission_is_unprivileged(self):
+        child = (
+            ROOT / "tests/tools/qualify-primary-real-swap.py").read_text()
+        parent = (
+            ROOT / "tests/tools/qualify-primary-real-swap-parent.py").read_text()
+
+        self.assertNotIn("_check_git_source", child)
+        self.assertNotIn('["git",', child)
+        self.assertIn("class SourceAdmissionClient:", child)
+        self.assertIn("socket.SO_PEERCRED", child)
+        self.assertIn('admission.require(f"cycle-{index}")', child)
+        self.assertIn('admission.require("final")', child)
+        self.assertIn("def _check_git_source(", parent)
+        self.assertIn('["git", "ls-remote"', parent)
+        self.assertIn("source_admission_parent_must_be_unprivileged", parent)
+        self.assertIn("socket.SO_PEERCRED", parent)
+        for forbidden in ('["swapon"', '["swapoff"', '["dmsetup", "remove"'):
+            self.assertNotIn(forbidden, parent)
+
     def test_physical_lifecycle_qualification_seam_is_noninstalled_and_guarded(self):
         primary = PRIMARY
         command = source_body("swapz_primary_command", primary)

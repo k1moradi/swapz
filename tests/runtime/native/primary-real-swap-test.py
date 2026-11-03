@@ -16,12 +16,18 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 HELPER = ROOT / "tests/tools/qualify-primary-real-swap.py"
+PARENT = ROOT / "tests/tools/qualify-primary-real-swap-parent.py"
 ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
 
 SPEC = importlib.util.spec_from_file_location("qualify_primary_real_swap", HELPER)
 qualify = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = qualify
 SPEC.loader.exec_module(qualify)
+PARENT_SPEC = importlib.util.spec_from_file_location(
+    "qualify_primary_real_swap_parent", PARENT)
+parent = importlib.util.module_from_spec(PARENT_SPEC)
+sys.modules[PARENT_SPEC.name] = parent
+PARENT_SPEC.loader.exec_module(parent)
 ORACLE_SPEC = importlib.util.spec_from_file_location("primary_real_swap_oracle", ORACLE)
 oracle = importlib.util.module_from_spec(ORACLE_SPEC)
 sys.modules[ORACLE_SPEC.name] = oracle
@@ -369,11 +375,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             private_control.write_bytes(b"private")
             private_control.chmod(0o700)
 
+            admission = mock.Mock()
             with mock.patch.dict(os.environ, {}, clear=True), \
                     mock.patch.object(os, "geteuid", return_value=0), \
                     mock.patch.object(os, "sysconf", return_value=qualify.PAGE_BYTES), \
                     mock.patch.object(qualify, "_ensure_commands"), \
-                    mock.patch.object(qualify, "_check_git_source"), \
                     mock.patch.object(
                         qualify.tempfile, "TemporaryDirectory",
                         return_value=FakeWorkspace()), \
@@ -387,8 +393,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                         qualify, "preflight_workload_environment",
                         side_effect=qualify.Blocked("synthetic preflight")):
                 with self.assertRaisesRegex(qualify.Blocked, "synthetic preflight"):
-                    qualify.execute(args)
+                    qualify.execute(args, admission=admission)
 
+            admission.require.assert_called_once_with("initial")
             self.assertEqual(cleanup_called, [True])
 
     def test_real_swap_oracle_is_canonical_and_pinned_before_use(self):
@@ -432,36 +439,36 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                       stdout=source_sha + "\trefs/heads/main\n", stderr=""),
             completed(args=[], returncode=0, stdout="", stderr=""),
         ]
-        with mock.patch.object(qualify, "_run", side_effect=good):
-            qualify._check_git_source(source_sha)
+        with mock.patch.object(parent, "_run", side_effect=good):
+            parent._check_git_source(source_sha)
 
         wrong_origin = list(good)
         wrong_origin[2] = completed(
             args=[], returncode=0, stdout="b" * 40 + "\n", stderr="")
-        with mock.patch.object(qualify, "_run", side_effect=wrong_origin), \
-                self.assertRaisesRegex(qualify.Blocked, "main == origin/main"):
-            qualify._check_git_source(source_sha)
+        with mock.patch.object(parent, "_run", side_effect=wrong_origin), \
+                self.assertRaisesRegex(parent.Blocked, "main == origin/main"):
+            parent._check_git_source(source_sha)
 
         detached = list(good)
         detached[1] = completed(
             args=[], returncode=0, stdout="HEAD\n", stderr="")
-        with mock.patch.object(qualify, "_run", side_effect=detached), \
-                self.assertRaisesRegex(qualify.Blocked, "main == origin/main"):
-            qualify._check_git_source(source_sha)
+        with mock.patch.object(parent, "_run", side_effect=detached), \
+                self.assertRaisesRegex(parent.Blocked, "main == origin/main"):
+            parent._check_git_source(source_sha)
 
         stale_remote = list(good)
         stale_remote[3] = completed(
             args=[], returncode=0, stdout="b" * 40 + "\trefs/heads/main\n", stderr="")
-        with mock.patch.object(qualify, "_run", side_effect=stale_remote), \
-                self.assertRaisesRegex(qualify.Blocked, "current remote main differs"):
-            qualify._check_git_source(source_sha)
+        with mock.patch.object(parent, "_run", side_effect=stale_remote), \
+                self.assertRaisesRegex(parent.Blocked, "current remote main differs"):
+            parent._check_git_source(source_sha)
 
         unreachable_remote = list(good)
         unreachable_remote[3] = completed(
             args=[], returncode=128, stdout="", stderr="remote unavailable")
-        with mock.patch.object(qualify, "_run", side_effect=unreachable_remote), \
-                self.assertRaisesRegex(qualify.Blocked, "cannot verify the current remote"):
-            qualify._check_git_source(source_sha)
+        with mock.patch.object(parent, "_run", side_effect=unreachable_remote), \
+                self.assertRaisesRegex(parent.Blocked, "cannot verify the current remote"):
+            parent._check_git_source(source_sha)
 
     def canonical_manifest(self):
         run_id = "1" * 32
@@ -806,32 +813,29 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 Path("/synthetic/swapzctl"), manifest, active, set(),
                 "f13428f6-01", 60)
 
-    def test_run_cycle_rechecks_current_main_before_prepare(self):
-        source_sha = "2" * 40
-        source_guard = mock.Mock(
-            side_effect=qualify.Blocked(
-                "current remote main differs from validated source"))
+    def test_run_cycle_requires_parent_revalidation_before_prepare(self):
+        admission = mock.Mock()
+        admission.require.side_effect = qualify.Blocked(
+            "unprivileged source admission refused at cycle-1")
         primary = mock.Mock()
         with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
                 mock.patch.object(
                     qualify, "_validate_precycle_state", return_value=None), \
                 mock.patch.object(
                     qualify, "_kernel_log_snapshot", return_value=[]), \
-                mock.patch.object(
-                    qualify, "_check_git_source", source_guard), \
                 mock.patch.object(qualify, "_primary", primary), \
                 self.assertRaisesRegex(
-                    qualify.Blocked, "current remote main differs"):
+                    qualify.Blocked, "source admission refused"):
             qualify.run_cycle(
                 1, swapzctl=Path("/synthetic/swapzctl"),
                 oracle_path=Path("/synthetic/oracle"),
-                validated_source=source_sha,
+                validated_source="2" * 40,
                 plan={}, selector_partuuid="f13428f6-01",
                 target_device=(8, 1), target_parent_device=(8, 0),
                 workload_mib=384, resident_mib=128, swap_limit_mib=384,
                 timeout_seconds=60, prior_run_ids=set(),
-                prior_swap_uuids=set())
-        source_guard.assert_called_once_with(source_sha)
+                prior_swap_uuids=set(), admission=admission)
+        admission.require.assert_called_once_with("cycle-1")
         primary.assert_not_called()
 
     def test_independent_active_verification_failure_still_requests_normal_stop(self):
@@ -842,10 +846,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         start = __import__("subprocess").CompletedProcess(
             args=[], returncode=0, stdout=f"PRIMARY_START=ACTIVE run_id={run_id} mapper=/dev/mapper/swapz-primary swapon=true\n", stderr="")
         normal_stop = mock.Mock(return_value=None)
+        admission = mock.Mock()
         with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
                 mock.patch.object(qualify, "_validate_precycle_state", return_value=None), \
                 mock.patch.object(qualify, "_kernel_log_snapshot", return_value=[]), \
-                mock.patch.object(qualify, "_check_git_source", return_value=None), \
                 mock.patch.object(qualify, "_reject_relevant_kernel_errors", return_value=None), \
                 mock.patch.object(qualify, "_primary", side_effect=[prepare, start]), \
                 mock.patch.object(qualify, "read_state", side_effect=[
@@ -867,7 +871,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 plan={}, selector_partuuid="f13428f6-01", target_device=(8, 1),
                 target_parent_device=(8, 0),
                 workload_mib=384, resident_mib=128, swap_limit_mib=384,
-                timeout_seconds=60, prior_run_ids=set(), prior_swap_uuids=set())
+                timeout_seconds=60, prior_run_ids=set(), prior_swap_uuids=set(),
+                admission=admission)
+        admission.require.assert_called_once_with("cycle-1")
         normal_stop.assert_called_once()
         self.assertIsNone(normal_stop.call_args.args[2])
 
@@ -959,6 +965,19 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=False), \
                 self.assertRaisesRegex(qualify.Blocked, "GitHub-hosted CI"):
             qualify.execute(args)
+
+    def test_privileged_helper_has_no_git_source_admission_path(self):
+        source = HELPER.read_text(encoding="utf-8")
+        admission_parent = PARENT.read_text(encoding="utf-8")
+        self.assertNotIn("_check_git_source", source)
+        self.assertNotIn('["git",', source)
+        self.assertIn("SO_PEERCRED", source)
+        self.assertIn('admission.require(f"cycle-{index}")', source)
+        self.assertIn('admission.require("final")', source)
+        self.assertIn("def _check_git_source(", admission_parent)
+        self.assertIn('["git", "ls-remote"', admission_parent)
+        self.assertIn("os.geteuid() == 0", admission_parent)
+        self.assertIn("SO_PEERCRED", admission_parent)
 
     def test_helper_has_no_direct_swapoff_swapon_or_mapper_remove_command(self):
         source = HELPER.read_text(encoding="utf-8")

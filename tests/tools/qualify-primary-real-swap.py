@@ -24,6 +24,7 @@ import re
 import select
 import signal
 import shutil
+import socket
 import stat
 import struct
 import subprocess
@@ -67,6 +68,9 @@ MAX_CYCLES = 4
 CONCURRENT_ORACLE_PROCESSES = 2
 REUSE_ROUNDS = 2
 RESULT_PREFIX = "PRIMARY_REAL_SWAP_RESULT="
+SOURCE_ADMISSION_SCHEMA = "swapz-primary-real-swap-admission-v1"
+SOURCE_ADMISSION_MAX_LINE_BYTES = 4096
+SOURCE_ADMISSION_TIMEOUT_SECONDS = 45
 
 
 class Blocked(RuntimeError):
@@ -75,6 +79,105 @@ class Blocked(RuntimeError):
 
 class QualificationFailure(RuntimeError):
     pass
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key {key}")
+        result[key] = value
+    return result
+
+
+class SourceAdmissionClient:
+    """Authenticated channel to the unprivileged source-verification parent."""
+
+    def __init__(self, socket_path: str, parent_uid: int, validated_source: str):
+        if not re.fullmatch(r"[0-9a-f]{40}", validated_source):
+            raise Blocked("validated source must be one full lowercase SHA")
+        if parent_uid <= 0:
+            raise Blocked("source admission parent must be unprivileged")
+        path = Path(socket_path)
+        if not path.is_absolute():
+            raise Blocked("source admission socket path must be absolute")
+        try:
+            before = path.lstat()
+        except OSError as exc:
+            raise Blocked("source admission socket is unavailable") from exc
+        if (not stat.S_ISSOCK(before.st_mode) or before.st_uid != parent_uid or
+                stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1):
+            raise Blocked("source admission socket ownership is unsafe")
+
+        channel = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        channel.settimeout(SOURCE_ADMISSION_TIMEOUT_SECONDS)
+        try:
+            channel.connect(os.fspath(path))
+            credentials = channel.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            _peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
+            after = path.lstat()
+            before_identity = (
+                before.st_dev, before.st_ino, before.st_uid,
+                stat.S_IMODE(before.st_mode), before.st_nlink)
+            after_identity = (
+                after.st_dev, after.st_ino, after.st_uid,
+                stat.S_IMODE(after.st_mode), after.st_nlink)
+            if peer_uid != parent_uid or before_identity != after_identity:
+                raise Blocked("source admission parent identity changed")
+        except Exception:
+            channel.close()
+            raise
+        self._channel = channel
+        self._validated_source = validated_source
+
+    def close(self) -> None:
+        channel = getattr(self, "_channel", None)
+        if channel is not None:
+            self._channel = None
+            channel.close()
+
+    def _read_line(self) -> bytes:
+        data = bytearray()
+        while len(data) <= SOURCE_ADMISSION_MAX_LINE_BYTES:
+            chunk = self._channel.recv(1)
+            if not chunk:
+                raise Blocked("source admission parent disconnected")
+            if chunk == b"\n":
+                return bytes(data)
+            data.extend(chunk)
+        raise Blocked("source admission response is oversized")
+
+    def require(self, phase: str) -> None:
+        if not re.fullmatch(r"(?:initial|final|cycle-[1-4])", phase):
+            raise Blocked("source admission phase is invalid")
+        nonce = os.urandom(16).hex()
+        request = {
+            "schema": SOURCE_ADMISSION_SCHEMA,
+            "phase": phase,
+            "source_sha": self._validated_source,
+            "nonce": nonce,
+        }
+        self._channel.sendall(
+            json.dumps(
+                request, sort_keys=True, separators=(",", ":")).encode("ascii") +
+            b"\n")
+        try:
+            response = json.loads(
+                self._read_line().decode("ascii"),
+                object_pairs_hook=_unique_json_object)
+        except (UnicodeError, ValueError, TypeError) as exc:
+            raise Blocked("source admission response is malformed") from exc
+        required = {"schema", "status", "phase", "source_sha", "nonce"}
+        if (not isinstance(response, dict) or set(response) != required or
+                response.get("schema") != SOURCE_ADMISSION_SCHEMA or
+                response.get("phase") != phase or
+                response.get("source_sha") != self._validated_source or
+                response.get("nonce") != nonce):
+            raise Blocked("source admission response identity mismatch")
+        if response.get("status") != "PASS":
+            raise Blocked(
+                f"unprivileged source admission refused at {phase}")
 
 
 @dataclass(frozen=True)
@@ -1230,32 +1333,6 @@ def verify_loaded_module_provenance(validated_source: str) -> dict[str, str]:
     }
 
 
-def _check_git_source(validated_source: str) -> None:
-    if not re.fullmatch(r"[0-9a-f]{40}", validated_source):
-        raise Blocked("validated source must be one full lowercase SHA")
-    head = _run(["git", "rev-parse", "HEAD"], timeout=10).stdout.strip()
-    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=10).stdout.strip()
-    origin_main = _run(
-        ["git", "rev-parse", "--verify", "refs/remotes/origin/main"],
-        timeout=10).stdout.strip()
-    if head != validated_source:
-        raise Blocked(f"checkout HEAD {head} differs from validated source {validated_source}")
-    if branch != "main" or origin_main != validated_source:
-        raise Blocked("physical qualification requires main == origin/main == validated source")
-    # A local tracking ref may be stale even when the checkout is clean.
-    # Query the real remote head without mutating local branches or refs.
-    remote_main = _run(
-        ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
-        check=False, timeout=30)
-    if remote_main.returncode != 0:
-        raise Blocked("cannot verify the current remote main for physical qualification")
-    if remote_main.stdout.strip() != f"{validated_source}\trefs/heads/main":
-        raise Blocked("current remote main differs from the validated source")
-    dirty = _run(["git", "status", "--porcelain"], timeout=10).stdout
-    if dirty:
-        raise Blocked("production source tree is not clean")
-
-
 def _ensure_commands(names: tuple[str, ...]) -> None:
     for name in names:
         if shutil.which(name) is None:
@@ -2184,17 +2261,17 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
               plan: dict, selector_partuuid: str, target_device: tuple[int, int],
               target_parent_device: tuple[int, int],
               workload_mib: int, resident_mib: int, swap_limit_mib: int,
-              timeout_seconds: int, prior_run_ids: set[str], prior_swap_uuids: set[str]) -> dict:
+              timeout_seconds: int, prior_run_ids: set[str], prior_swap_uuids: set[str],
+              admission: SourceAdmissionClient) -> dict:
     baseline_rows = read_swap_rows()
     baseline_identity = _swap_identity(baseline_rows)
     _validate_precycle_state(
         selector_partuuid, target_device, target_parent_device, baseline_rows)
     kernel_before = _kernel_log_snapshot()
 
-    # Re-query canonical main at the mutation boundary. Admission above may
-    # outlive a concurrent push; a superseded source must block before the
-    # selected card enters a new durable transaction.
-    _check_git_source(validated_source)
+    # The unprivileged parent owns Git/network source admission. Revalidate
+    # immediately before this cycle's first durable/card mutation.
+    admission.require(f"cycle-{index}")
 
     prepared = _primary(swapzctl, "prepare", timeout_seconds, admitted=True)
     if prepared.returncode != 0:
@@ -2293,12 +2370,10 @@ def _import_qualification(swapzctl: Path, report_path: Path) -> None:
         raise Blocked(f"cannot import exact qualification report: {detail}")
 
 
-def execute(arguments: argparse.Namespace) -> dict:
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        raise Blocked("physical real-swap qualification must not run in GitHub-hosted CI")
-    if os.geteuid() != 0:
-        raise Blocked("physical real-swap qualification requires noninteractive root privilege")
-    _ensure_commands(("git", "cc", "dmsetup", "lsblk", "dmesg"))
+def _execute_admitted(arguments: argparse.Namespace,
+                      admission: SourceAdmissionClient) -> dict:
+    admission.require("initial")
+    _ensure_commands(("cc", "dmsetup", "lsblk", "dmesg"))
     if os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
         raise Blocked("primary real-swap qualification requires a 4096-byte host page")
     qualified_swapzctl = Path(arguments.swapzctl).resolve()
@@ -2313,8 +2388,6 @@ def execute(arguments: argparse.Namespace) -> dict:
     if not os.access(qualified_swapzctl, os.X_OK) or \
             not os.access(requested_oracle_path, os.X_OK):
         raise Blocked("qualified swapzctl/oracle executable permission is missing")
-    _check_git_source(arguments.validated_source)
-
     private_workspace = tempfile.TemporaryDirectory(
         prefix="swapz-primary-physical-")
     private_parent = Path(private_workspace.name)
@@ -2410,6 +2483,7 @@ def execute(arguments: argparse.Namespace) -> dict:
                 timeout_seconds=arguments.timeout_seconds,
                 prior_run_ids=run_ids,
                 prior_swap_uuids=swap_uuids,
+                admission=admission,
             )
             run_ids.add(result["run_id"])
             swap_uuids.add(result["linux_swap_uuid"])
@@ -2421,7 +2495,8 @@ def execute(arguments: argparse.Namespace) -> dict:
                 run_id=result["run_id"],
             )
         # A long physical run must not qualify a source superseded on main.
-        _check_git_source(arguments.validated_source)
+        # The final source proof is again performed by the unprivileged parent.
+        admission.require("final")
         kernel_after = _kernel_log_snapshot()
         _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
         result = {
@@ -2467,6 +2542,28 @@ def execute(arguments: argparse.Namespace) -> dict:
     finally:
         private_workspace.cleanup()
 
+def execute(arguments: argparse.Namespace,
+            admission: SourceAdmissionClient | None = None) -> dict:
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        raise Blocked("physical real-swap qualification must not run in GitHub-hosted CI")
+    if os.geteuid() != 0:
+        raise Blocked("physical real-swap qualification requires noninteractive root privilege")
+
+    owns_admission = admission is None
+    if admission is None:
+        socket_path = getattr(arguments, "source_admission_socket", None)
+        parent_uid = getattr(arguments, "source_admission_parent_uid", None)
+        if not socket_path or parent_uid is None:
+            raise Blocked("unprivileged source admission channel is required")
+        admission = SourceAdmissionClient(
+            socket_path, parent_uid, arguments.validated_source)
+    try:
+        return _execute_admitted(arguments, admission)
+    finally:
+        if owns_admission:
+            admission.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--validated-source", required=True)
@@ -2481,6 +2578,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resident-mib", type=int, default=DEFAULT_RESIDENT_MIB)
     parser.add_argument("--swap-limit-mib", type=int, default=DEFAULT_SWAP_LIMIT_MIB)
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument(
+        "--source-admission-socket", default=None, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--source-admission-parent-uid", type=int, default=None,
+        help=argparse.SUPPRESS)
     return parser
 
 
