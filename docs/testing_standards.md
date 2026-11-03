@@ -692,10 +692,14 @@ lower WRITE bytes/requests <=0.90, READ/WRITE/cold p99 <=1.25, last/first
 quartile throughput >=0.75, last/first quartile p99 <=1.25, GC wall <=20%, zero
 GC no-headroom skips, positive victim relocation and segment programming, zero
 target failure, zero byte mismatches, <=10 seconds maximum no-progress, <=128
-MiB absolute replay-process peak RSS through measured completion and <=1.25 GiB
-observed metadata+target peak RAM. The measurement-boundary max-RSS value and
-growth are retained as diagnostics only; setup-time allocations cannot be
-excluded from the replay memory gate.
+MiB absolute post-exec replay-process peak RSS through measured completion and
+<=1.25 GiB observed metadata+target peak RAM. On Linux this must come from the
+bounded, strictly parsed `VmHWM` field in `/proc/self/status`, not
+`getrusage().ru_maxrss`: resource high-water counters survive `execve()` and
+can therefore charge the replay for memory previously used by its launcher.
+The measurement-boundary VmHWM value and growth remain diagnostics only;
+setup-time allocations within the replay process cannot be excluded from the
+memory gate.
 
 Anonymous-swap evidence is also directional: all three pairs must observe at
 least 128 MiB of workload-specific process/cgroup swap and at least that usage

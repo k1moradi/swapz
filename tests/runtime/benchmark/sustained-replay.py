@@ -421,9 +421,32 @@ def quiet_window():
     return {"observed": observed, "reasons": reasons}
 
 
+def parse_process_hwm_bytes(status_text: str) -> int:
+    matches = re.findall(
+        r"^VmHWM:[ \t]+([0-9]+)[ \t]+kB[ \t]*$",
+        status_text, re.MULTILINE)
+    if len(matches) != 1:
+        raise RuntimeError("cannot read unique process VmHWM")
+    kib = int(matches[0])
+    if kib <= 0 or kib > (1 << 53) // 1024:
+        raise RuntimeError("process VmHWM is outside supported bounds")
+    return kib * 1024
+
+
+def process_hwm_bytes() -> int:
+    with open("/proc/self/status", "r", encoding="ascii") as stream:
+        status_text = stream.read(65537)
+    if len(status_text) > 65536:
+        raise RuntimeError("/proc/self/status exceeds bounded parser input")
+    return parse_process_hwm_bytes(status_text)
+
+
 def process_cpu():
     usage = resource.getrusage(resource.RUSAGE_SELF)
-    return usage.ru_utime, usage.ru_stime, usage.ru_maxrss * 1024
+    # ru_maxrss is intentionally not used: Linux preserves resource usage
+    # high-water counters across execve(), so a replay launched by a large
+    # harness can inherit a peak it never allocated. VmHWM is post-exec.
+    return usage.ru_utime, usage.ru_stime, process_hwm_bytes()
 
 
 def full_write(fd: int, offset: int, payload) -> None:

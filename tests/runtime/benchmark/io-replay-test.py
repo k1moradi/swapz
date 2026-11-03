@@ -2203,6 +2203,25 @@ class PairReplayContract(unittest.TestCase):
         self.assertGreaterEqual(histogram.percentile(.99), 990)
         self.assertLessEqual(histogram.percentile(.99), 1024)
 
+    def test_sustained_replay_vmhwm_parser_is_strict(self):
+        sustained_path = SCRIPT.with_name("sustained-replay.py")
+        sustained_spec = importlib.util.spec_from_file_location(
+            "swapz_sustained_hwm", sustained_path)
+        sustained = importlib.util.module_from_spec(sustained_spec)
+        sustained_spec.loader.exec_module(sustained)
+        self.assertEqual(
+            sustained.parse_process_hwm_bytes(
+                "Name:\tpython\nVmHWM:\t   12345 kB\nVmRSS:\t   10000 kB\n"),
+            12345 * 1024)
+        for invalid in (
+                "Name:\tpython\n",
+                "VmHWM:\t0 kB\n",
+                "VmHWM:\t12 MB\n",
+                "VmHWM:\t12 kB\nVmHWM:\t13 kB\n"):
+            with self.assertRaises(RuntimeError):
+                sustained.parse_process_hwm_bytes(invalid)
+        self.assertGreater(sustained.process_hwm_bytes(), 0)
+
     def test_sustained_replay_rootless_fixed_work_and_failure_record(self):
         sustained = SCRIPT.with_name("sustained-replay.py")
         with tempfile.TemporaryDirectory(prefix="swapz-sustain-test-") as directory:

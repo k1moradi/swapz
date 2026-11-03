@@ -25,10 +25,10 @@ CONTRACT = {
         "they are not direct NAND-wear or endurance measurements"
     ),
     "resource_measurement": {
-        "replay_peak_rss_bytes": "absolute process ru_maxrss through measured completion",
-        "replay_process_maxrss_bytes": "same absolute peak retained for schema clarity",
-        "replay_measurement_start_maxrss_bytes": "absolute ru_maxrss at the measured boundary",
-        "replay_measurement_peak_rss_growth_bytes": "diagnostic measured-boundary growth only",
+        "replay_peak_rss_bytes": "absolute post-exec process VmHWM through measured completion",
+        "replay_process_maxrss_bytes": "same VmHWM peak retained for schema clarity",
+        "replay_measurement_start_maxrss_bytes": "post-exec VmHWM at the measured boundary",
+        "replay_measurement_peak_rss_growth_bytes": "diagnostic measured-boundary VmHWM growth only",
     },
     "screening": {
         "pre_post_busy_fraction_max": .25,

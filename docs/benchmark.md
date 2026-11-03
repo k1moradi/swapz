@@ -533,9 +533,12 @@ conservative observed metadata+target peak. The same host sampler surrounds the
 raw control so unrelated host drift is visible. This is a whole-host upper-bound
 observation, not exact per-allocation attribution; compiled array-size evidence
 remains complementary and cannot substitute for it. The fixed ceilings are 128
-MiB absolute replay-process peak RSS through measured completion and 1.25 GiB
-for metadata plus target peak RAM. Measurement-boundary RSS growth is retained
-as a diagnostic, but setup-time allocations remain charged to the replay gate.
+MiB absolute post-exec replay-process peak RSS through measured completion and
+1.25 GiB for metadata plus target peak RAM. Replay RSS uses the kernel's
+`/proc/self/status` `VmHWM` rather than inherited `ru_maxrss`; bounded strict
+parsing fails closed if that Linux metric is unavailable. Measurement-boundary
+VmHWM growth is retained as a diagnostic, but setup-time allocations within the
+replay remain charged to the gate.
 
 A 200 ms quiet window immediately before and after each arm must have busy
 fraction <=25%, CPU PSI \`some\` <=5% and steal <=1%; timed-arm steal must also be
