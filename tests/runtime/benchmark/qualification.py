@@ -18,6 +18,7 @@ SCHEMA = "swapz-performance-qualification-v1"
 PAIR_SCHEMA = "swapz-performance-pair-v1"
 SUMMARY_SCHEMA = "swapz-performance-summary-v1"
 T95_DF4 = 2.7764451051977987
+LOGICAL_BLOCK_BYTES = 4096
 
 ROOT = Path(__file__).resolve().parents[3]
 ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
@@ -167,6 +168,34 @@ def paired_ci95(values: list[float]) -> dict:
     return {"n": 5, "mean": mean, "lower": mean - half, "upper": mean + half}
 
 
+def physical_target_key(arm: dict, workload: str):
+    identity = (
+        arm.get("swap_device_identity")
+        if workload == "anonymous-swap"
+        else arm.get("device_identity"))
+    if not isinstance(identity, dict):
+        return None
+    partuuid = identity.get("physical_partuuid")
+    device_bytes = identity.get("physical_device_bytes")
+    if (not isinstance(partuuid, str) or
+            not re.fullmatch(
+                r"[0-9A-Fa-f](?:[0-9A-Fa-f]|-(?=[0-9A-Fa-f])){6,62}[0-9A-Fa-f]",
+                partuuid) or
+            len(partuuid.replace("-", "")) < 8 or
+            type(device_bytes) is not int or
+            device_bytes <= LOGICAL_BLOCK_BYTES or
+            device_bytes % LOGICAL_BLOCK_BYTES):
+        return None
+    return partuuid.lower(), device_bytes
+
+
+def pair_physical_target(pair: dict):
+    workload = pair.get("workload")
+    raw = physical_target_key(pair.get("raw") or {}, workload)
+    swapz = physical_target_key(pair.get("swapz") or {}, workload)
+    return raw if raw is not None and raw == swapz else None
+
+
 def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
     spec = workload_spec(workload)
     reasons = []
@@ -186,6 +215,8 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
                 not identity.get("dm_uuid") or identity.get("dm_target") != "swapz" or
                 not identity.get("lower_device")):
             reasons.append("swapz anonymous arm lacks exact mapper identity")
+        if physical_target_key(arm, workload) is None:
+            reasons.append(f"{label} physical target identity is missing or malformed")
         cgroup = arm.get("cgroup_before") or {}
         if cgroup.get("memory_max") != spec["memory_max_bytes"]:
             reasons.append(f"{label} cgroup memory.max differs from prospective workload")
@@ -206,8 +237,8 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
         if arm.get(field) != expected_value:
             reasons.append(f"{label} {field} differs from prospective workload")
     identity = arm.get("device_identity") or {}
-    if not identity.get("physical_partuuid") or not identity.get("physical_device_bytes"):
-        reasons.append(f"{label} physical identity is missing")
+    if physical_target_key(arm, workload) is None:
+        reasons.append(f"{label} physical identity is missing or malformed")
     if label == "raw" and identity.get("dm_uuid") is not None:
         reasons.append("raw arm unexpectedly carries a DM UUID")
     if label == "swapz" and not identity.get("dm_uuid"):
@@ -259,6 +290,9 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
         swapz_identity = swapz.get("swap_device_identity") or {}
         if raw_identity.get("device") != swapz_identity.get("lower_device"):
             reasons.append("anonymous pair physical lower identity mismatch")
+        for field in ("physical_partuuid", "physical_device_bytes"):
+            if raw_identity.get(field) != swapz_identity.get(field):
+                reasons.append("anonymous pair physical identity mismatch: " + field)
     for label, arm in (("raw", raw), ("swapz", swapz)):
         if arm.get("verdict") != "PASS":
             reasons.append(f"{label} arm verdict is not PASS")
@@ -459,6 +493,20 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
             row["analysis_exclusion_reasons"].append(
                 "campaign requires one exact source SHA across every attempted arm")
 
+    target_keys = [pair_physical_target(row) for row in preserved]
+    campaign_target_key = (
+        target_keys[0] if target_keys and target_keys[0] is not None and
+        all(key == target_keys[0] for key in target_keys) else None)
+    campaign_target = (
+        {"partuuid": campaign_target_key[0],
+         "device_bytes": campaign_target_key[1]}
+        if campaign_target_key is not None else None)
+    if preserved and campaign_target is None:
+        for row in preserved:
+            row["analysis_usable"] = False
+            row["analysis_exclusion_reasons"].append(
+                "campaign requires one exact physical target across every attempted pair")
+
     has_amendment_records = any(
         row["workload"] in AMENDMENT["workloads"] for row in preserved)
     if protocol == "v1" and has_amendment_records:
@@ -521,6 +569,7 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
             "amendment_active": include_amendment,
             "evaluation_protocol": "v2" if include_amendment else "v1",
             "campaign_source_sha": campaign_source_sha,
+            "target": campaign_target,
             "status": "PASS" if overall else "FAIL_OR_INCOMPLETE",
             "decisions": decisions, "raw_repeat_spread": raw_spread, "records": preserved}
 
