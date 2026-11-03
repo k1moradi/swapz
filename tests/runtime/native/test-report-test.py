@@ -2054,7 +2054,7 @@ class ReportContract(unittest.TestCase):
     def test_loaded_read_fault_evidence_is_mandatory_and_pre_submission(self):
         marker = (
             "PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 "
-            "lower_read_delta:0 submitted_delta:0")
+            "syscall_errno:EIO lower_read_delta:0 submitted_delta:0")
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         make_interface = (
             ROOT / "tests/runtime/native/make-interface-test.py").read_text()

@@ -5232,3 +5232,5 @@ utilities used by the root helper. The hermetic package suite must retain a
 source-contract assertion for that runtime dependency set.
 
 Incremental `make test` fixtures that exercise the real `tests/suites/Makefile` must stage every native probe source that Makefile consumes, including both direct-write and direct-read probes, and must track those outputs when asserting that unrelated CLI or authority-header edits do not spuriously rebuild native probes.
+
+Synthetic retained READ-fault evidence must include the exact `syscall_errno:EIO`, zero lower-read delta, and zero submitted-I/O delta in both isolated fixtures and report-parser regressions. Mutation tests must alter fields that are actually present in the canonical marker so a no-op string replacement cannot masquerade as negative coverage.
