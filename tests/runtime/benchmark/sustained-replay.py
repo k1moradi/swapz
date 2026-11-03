@@ -917,13 +917,13 @@ def run(args):
                     measured, measured_progress, wall_ns = phase_workers(
                         fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
                         pool, initial_writes, measured_progress)
+                    end = time.monotonic_ns()
+                    cpu_after = process_cpu()
+                    host_after = REPLAY["host_cpu_snapshot"]()
                 finally:
                     interval_rows = (
                         interval_sampler.stop()
                         if interval_sampler is not None else [])
-                end = time.monotonic_ns()
-                cpu_after = process_cpu()
-                host_after = REPLAY["host_cpu_snapshot"]()
             status_after = status_snapshot(target, identity)
             read_after = REPLAY["kernel_read_snapshot"](target, identity)
             write_after = REPLAY["kernel_write_snapshot"](target, identity)
