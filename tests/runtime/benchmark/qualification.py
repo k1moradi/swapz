@@ -7,6 +7,7 @@ project's single supported test interface.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import statistics
@@ -19,6 +20,8 @@ T95_DF4 = 2.7764451051977987
 
 ROOT = Path(__file__).resolve().parents[3]
 ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
+AMENDMENT_MANIFEST = ROOT / "tests/runtime/benchmark/physical-qualification-amendment-v2.json"
+AMENDMENT_SCHEMA = "swapz-performance-qualification-amendment-v2"
 
 
 def _unique_object(pairs):
@@ -54,8 +57,69 @@ def _load_frozen_physical_contract() -> dict:
 CONTRACT = _load_frozen_physical_contract()
 
 
+def _git_blob_sha(path: Path) -> str:
+    data = path.read_bytes()
+    digest = hashlib.sha1()
+    digest.update(f"blob {len(data)}\0".encode("ascii"))
+    digest.update(data)
+    return digest.hexdigest()
+
+
+def _load_frozen_amendment() -> dict:
+    try:
+        document = json.loads(
+            AMENDMENT_MANIFEST.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_object)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"cannot load prospective physical amendment: {exc}") from exc
+    required = {
+        "schema", "status", "issued_on", "parent_schema", "parent_manifest",
+        "parent_manifest_git_blob_sha", "result_pooling", "workloads",
+        "acceptance",
+    }
+    if set(document) != required or document.get("schema") != AMENDMENT_SCHEMA or \
+            document.get("status") != "FROZEN_PROSPECTIVE" or \
+            document.get("parent_schema") != SCHEMA or \
+            document.get("parent_manifest") != "docs/production-acceptance.json":
+        raise ValueError("prospective physical amendment is not canonical and frozen")
+    if document.get("parent_manifest_git_blob_sha") != _git_blob_sha(ACCEPTANCE_MANIFEST):
+        raise ValueError("prospective physical amendment parent manifest changed")
+    workloads = document.get("workloads")
+    if not isinstance(workloads, dict) or not workloads or \
+            set(workloads) & set(CONTRACT["workloads"]):
+        raise ValueError("prospective physical amendment workloads are malformed")
+    return document
+
+
+AMENDMENT = _load_frozen_amendment()
+WORKLOADS = {**CONTRACT["workloads"], **AMENDMENT["workloads"]}
+
+
 def contract() -> dict:
     return json.loads(json.dumps(CONTRACT))
+
+
+def amendment() -> dict:
+    return json.loads(json.dumps(AMENDMENT))
+
+
+def workload_spec(workload: str) -> dict:
+    try:
+        return WORKLOADS[workload]
+    except KeyError as exc:
+        raise ValueError("unknown qualification workload") from exc
+
+
+def service_limits(workload: str) -> dict:
+    spec = workload_spec(workload)
+    profile = spec.get("acceptance_profile")
+    if profile in (None, "service-v1"):
+        return CONTRACT["acceptance"]["service"]
+    try:
+        return AMENDMENT["acceptance"][profile]
+    except KeyError as exc:
+        raise ValueError("unknown prospective acceptance profile") from exc
 
 
 def number(value, name: str) -> float:
@@ -94,7 +158,7 @@ def paired_ci95(values: list[float]) -> dict:
 
 
 def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
-    spec = CONTRACT["workloads"][workload]
+    spec = workload_spec(workload)
     reasons = []
     if workload == "anonymous-swap":
         for field, expected in (("bytes", spec["bytes"]),
@@ -148,11 +212,11 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
 
 def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
                  pair_index: int, order: str, extra_reasons=None) -> dict:
-    if workload not in CONTRACT["workloads"]:
+    if workload not in WORKLOADS:
         raise ValueError("unknown qualification workload")
     if raw.get("candidate") != "raw" or swapz.get("candidate") != "swapz":
         raise ValueError("pair requires one raw and one swapz arm")
-    spec = CONTRACT["workloads"][workload]
+    spec = workload_spec(workload)
     reasons = list(extra_reasons or [])
     if not 1 <= pair_index <= spec["pairs"]:
         reasons.append("pair index is outside prospective repetition plan")
@@ -212,6 +276,8 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
     return {
         "schema": PAIR_SCHEMA, "workload": workload, "pair_id": pair_id,
         "pair_index": pair_index, "order": order, "source_sha": raw.get("source_sha"),
+        "qualification_protocol": (
+            AMENDMENT_SCHEMA if workload in AMENDMENT["workloads"] else SCHEMA),
         "status": "PASS" if not reasons else "EXCLUDED", "excluded": bool(reasons),
         "exclusion_reasons": reasons, "deltas": deltas, "raw": raw, "swapz": swapz,
     }
@@ -225,11 +291,11 @@ def quartile_ratio(rows: list[dict], field: str) -> float:
     return statistics.fmean(values[-count:]) / statistics.fmean(values[:count])
 
 
-def service_decision(pairs: list[dict]) -> dict:
+def service_decision(pairs: list[dict], workload: str) -> dict:
     names = ("useful_write", "lower_write_bytes", "lower_write_requests",
              "read_p95", "read_p99", "write_p95", "write_p99", "cpu")
     cis = {name: paired_ci95([pair["deltas"][name] for pair in pairs]) for name in names}
-    limit = CONTRACT["acceptance"]["service"]
+    limit = service_limits(workload)
     checks = {
         "useful_write": cis["useful_write"]["lower"] >= limit["useful_write_ci_lower_min"],
         "lower_write_bytes": cis["lower_write_bytes"]["upper"] <= limit["lower_write_bytes_ci_upper_max"],
@@ -318,7 +384,7 @@ def anonymous_decision(pairs: list[dict]) -> dict:
 def evaluate(records: list[dict]) -> dict:
     preserved = []
     for pair in records:
-        if pair.get("schema") != PAIR_SCHEMA or pair.get("workload") not in CONTRACT["workloads"]:
+        if pair.get("schema") != PAIR_SCHEMA or pair.get("workload") not in WORKLOADS:
             raise ValueError("invalid qualification pair")
         saved = dict(pair)
         saved["analysis_usable"] = pair.get("status") == "PASS" and not pair.get("excluded")
@@ -326,7 +392,7 @@ def evaluate(records: list[dict]) -> dict:
         preserved.append(saved)
 
     raw_spread = {}
-    for name, spec in CONTRACT["workloads"].items():
+    for name, spec in WORKLOADS.items():
         if spec["evidence"] != "statistical_paired":
             continue
         rows = [row for row in preserved if row["workload"] == name and row["analysis_usable"]]
@@ -341,7 +407,7 @@ def evaluate(records: list[dict]) -> dict:
                     row["analysis_exclusion_reasons"].append(reason)
 
     decisions, overall = {}, True
-    for name, spec in CONTRACT["workloads"].items():
+    for name, spec in WORKLOADS.items():
         rows = [row for row in preserved if row["workload"] == name and row["analysis_usable"]]
         required = spec["pairs"]
         order_ok = (sorted(row.get("pair_index") for row in rows) == list(range(1, required + 1)) and
@@ -351,7 +417,7 @@ def evaluate(records: list[dict]) -> dict:
                         "required_pairs": required, "prospective_order_complete": order_ok,
                         "raw_repeat_spread": raw_spread.get(name)}
         elif spec["evidence"] == "statistical_paired":
-            decision = service_decision(rows)
+            decision = service_decision(rows, name)
         elif name == "sd-high-occupancy-churn":
             decision = sustained_decision(rows[0])
         else:
@@ -359,6 +425,7 @@ def evaluate(records: list[dict]) -> dict:
         decisions[name] = decision
         overall &= decision["status"] == "PASS"
     return {"schema": SUMMARY_SCHEMA, "contract": contract(),
+            "prospective_amendment": amendment(),
             "status": "PASS" if overall else "FAIL_OR_INCOMPLETE",
             "decisions": decisions, "raw_repeat_spread": raw_spread, "records": preserved}
 
@@ -375,6 +442,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("contract")
+    sub.add_parser("amendment")
     pair = sub.add_parser("pair")
     pair.add_argument("--raw", required=True); pair.add_argument("--swapz", required=True)
     pair.add_argument("--workload", required=True); pair.add_argument("--pair-id", required=True)
@@ -386,6 +454,8 @@ def main() -> None:
     try:
         if args.command == "contract":
             print(json.dumps(contract(), sort_keys=True))
+        elif args.command == "amendment":
+            print(json.dumps(amendment(), sort_keys=True))
         elif args.command == "pair":
             raw = json.loads(Path(args.raw).read_text()); swapz = json.loads(Path(args.swapz).read_text())
             record = compare_pair(raw, swapz, args.workload, args.pair_id,
