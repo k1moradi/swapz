@@ -1457,3 +1457,20 @@ The bounded artifact-FD hasher rejects writable, unsafe-mode, hard-linked,
 oversized, or changing regular files and preserves its output on refusal. Its
 rootless tests pass, but no primary lifecycle or qualification checker uses it
 yet.
+
+The root build now embeds the committed Git source SHA and a production-input
+clean/dirty bit in `swapzctl` and `dm-swapz.ko`; `swapzctl primary plan`
+reports both values and whether the loaded module agrees with the control
+binary. The kernel publishes its values through read-only parameters and
+module metadata. DKMS packaging carries the generated header into its owned
+source tree so a later DKMS compile uses the same provenance. Rootless
+regressions require exact, clean source equality and reject dirty, mismatched,
+invalid, and unknown identities. These values are evidence inputs, not
+qualification: the manager still needs an accepted owner-report reader, live
+module/userspace artifact hash comparison, and lifecycle integration. This
+build-input change alters both qualified artifacts, so a fresh exact-source
+owner qualification is required before any primary live-swap execution.
+The DKMS lifecycle regression now supplies deterministic private provenance
+within its sandbox and verifies that the installed source manifest contains
+the exact header used to compile the packaged control binary; production
+package metadata remains fixed to the generated in-tree header.

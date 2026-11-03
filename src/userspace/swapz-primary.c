@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _GNU_SOURCE
 #include "swapz-primary.h"
+#include "../kernel/swapz-build-info.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -189,6 +190,17 @@ static int swapz_primary_valid_source_sha(const char *source_sha)
 		      (source_sha[i] >= 'a' && source_sha[i] <= 'f')))
 			return 0;
 	return 1;
+}
+
+static int swapz_primary_build_sources_match(const char *control_sha,
+					     int control_clean,
+					     const char *module_sha,
+					     int module_clean)
+{
+	return control_clean == 1 && module_clean == 1 &&
+	       swapz_primary_valid_source_sha(control_sha) &&
+	       swapz_primary_valid_source_sha(module_sha) &&
+	       !strcmp(control_sha, module_sha);
 }
 
 static int swapz_primary_state_valid(const struct swapz_primary_state *state)
@@ -1735,6 +1747,59 @@ static int swapz_primary_read_module_mapper_inventory(
 #endif
 }
 
+static int swapz_primary_read_module_build_provenance(
+	int module_loaded, char source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 8U],
+	int *source_clean)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)module_loaded;
+	(void)source_sha;
+	(void)source_clean;
+	errno = ENODEV;
+	return -1;
+#else
+	char sha_path[PATH_MAX];
+	char clean_path[PATH_MAX];
+	char sha_text[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 8U];
+	char clean_text[16];
+	int clean;
+
+	if (!source_sha || !source_clean) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!module_loaded) {
+		errno = ENODEV;
+		return -1;
+	}
+	if (swapz_primary_path_format(sha_path, sizeof(sha_path),
+				      "/sys/module/dm_swapz/parameters/build_source_sha") < 0 ||
+	    swapz_primary_path_format(clean_path, sizeof(clean_path),
+				      "/sys/module/dm_swapz/parameters/build_source_clean") < 0 ||
+	    swapz_primary_read_sysfs_text(sha_path, sha_text,
+					      sizeof(sha_text)) < 0 ||
+	    swapz_primary_read_sysfs_text(clean_path, clean_text,
+					      sizeof(clean_text)) < 0)
+		return -1;
+	if (strcmp(sha_text, "unknown") &&
+	    !swapz_primary_valid_source_sha(sha_text)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!strcmp(clean_text, "0"))
+		clean = 0;
+	else if (!strcmp(clean_text, "1"))
+		clean = 1;
+	else {
+		errno = EINVAL;
+		return -1;
+	}
+	memcpy(source_sha, sha_text, strlen(sha_text) + 1U);
+	*source_clean = clean;
+	return 0;
+#endif
+}
+
 static int swapz_primary_sysfs_directory_empty(const char *path,
 					      int missing_is_empty)
 {
@@ -3127,9 +3192,20 @@ static int swapz_primary_read_only_plan(void)
 		root_physical_parent == target_physical_parent;
 	int dm_swapz_module_loaded = 0;
 	int swapz_mapper_present = 0;
+	char module_build_source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 8U] =
+		"unavailable";
+	int module_build_source_clean = 0;
 	int module_mapper_inventory_read =
 		swapz_primary_read_module_mapper_inventory(
 			&dm_swapz_module_loaded, &swapz_mapper_present) == 0;
+	int module_build_provenance_read = module_mapper_inventory_read &&
+		swapz_primary_read_module_build_provenance(
+			dm_swapz_module_loaded, module_build_source_sha,
+			&module_build_source_clean) == 0;
+	int control_module_source_matches = module_build_provenance_read &&
+		swapz_primary_build_sources_match(
+			SWAPZ_BUILD_SOURCE_SHA, SWAPZ_BUILD_SOURCE_CLEAN,
+			module_build_source_sha, module_build_source_clean);
 
 	if (swaps_valid) {
 		for (i = 0; i < swap_count; ++i) {
@@ -3154,6 +3230,12 @@ static int swapz_primary_read_only_plan(void)
 	printf("{\"schema\":\"swapz-primary-plan-v1\","
 	       "\"status\":\"BLOCKED\","
 	       "\"privileged_execution_enabled\":false,"
+	       "\"control_build_source_sha\":\"%s\","
+	       "\"control_build_source_clean\":%s,"
+	       "\"module_build_provenance_read\":%s,"
+	       "\"module_build_source_sha\":\"%s\","
+	       "\"module_build_source_clean\":%s,"
+	       "\"control_module_source_matches\":%s,"
 	       "\"live_device_gates_checked\":false,"
 	       "\"target_device_preflight\":%s,"
 	       "\"target_device_bytes\":%llu,"
@@ -3192,6 +3274,13 @@ static int swapz_primary_read_only_plan(void)
 	       "\"logical_pages\":%llu,\"logical_bytes\":%llu,"
 	       "\"linux_swap_kib\":%llu,\"gc_reserve_blocks\":%llu,"
 	       "\"reason\":\"device_identity_recovery_and_lifecycle_gates_not_qualified\"}\n",
+	       SWAPZ_BUILD_SOURCE_SHA,
+	       SWAPZ_BUILD_SOURCE_CLEAN ? "true" : "false",
+	       module_build_provenance_read ? "true" : "false",
+	       module_build_source_sha,
+	       module_build_provenance_read && module_build_source_clean ?
+		       "true" : "false",
+	       control_module_source_matches ? "true" : "false",
 	       target_device_preflight ? "true" : "false",
 	       (unsigned long long)target_device_bytes,
 	       original_swap_header ? "true" : "false",

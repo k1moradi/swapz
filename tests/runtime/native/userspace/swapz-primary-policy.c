@@ -825,6 +825,23 @@ static void test_module_mapper_identity_policy(void)
 	assert(swapz_primary_mapper_identity_is_swapz("map", "bad\001uuid") < 0);
 }
 
+static void test_build_source_provenance_policy(void)
+{
+	const char *same_sha =
+		"0123456789abcdef0123456789abcdef01234567";
+	const char *other_sha =
+		"fedcba9876543210fedcba9876543210fedcba98";
+
+	assert(swapz_primary_build_sources_match(same_sha, 1, same_sha, 1));
+	assert(!swapz_primary_build_sources_match(same_sha, 0, same_sha, 1));
+	assert(!swapz_primary_build_sources_match(same_sha, 1, same_sha, 0));
+	assert(!swapz_primary_build_sources_match(same_sha, 2, same_sha, 1));
+	assert(!swapz_primary_build_sources_match(same_sha, 1, same_sha, -1));
+	assert(!swapz_primary_build_sources_match(same_sha, 1, other_sha, 1));
+	assert(!swapz_primary_build_sources_match("unknown", 1, "unknown", 1));
+	assert(!swapz_primary_build_sources_match("invalid", 1, same_sha, 1));
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -871,6 +888,7 @@ int main(void)
 	test_recovery_source_chain();
 	test_mountinfo_parser();
 	test_module_mapper_identity_policy();
+	test_build_source_provenance_policy();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);

@@ -16,6 +16,23 @@ KDIR ?= /lib/modules/$(shell uname -r)/build
 PREFIX ?= /usr/local
 CC ?= cc
 
+SWAPZ_BUILD_SOURCE_SHA := $(shell git rev-parse --verify HEAD 2>/dev/null | grep -E '^[0-9a-f]{40}$$' | head -n 1)
+ifeq ($(strip $(SWAPZ_BUILD_SOURCE_SHA)),)
+SWAPZ_BUILD_SOURCE_SHA := unknown
+SWAPZ_BUILD_SOURCE_CLEAN := 0
+else
+SWAPZ_BUILD_SOURCE_CLEAN := $(shell \
+	if test -z "$$(git status --porcelain --untracked-files=all -- \
+		src/kernel src/userspace Makefile packaging 2>/dev/null)"; \
+	then echo 1; else echo 0; fi)
+endif
+
+.PHONY: build/source-build-info-force
+build/source-build-info.h: build/source-build-info-force
+	@mkdir -p build
+	@printf '%s\n' '#define SWAPZ_BUILD_SOURCE_SHA "$(SWAPZ_BUILD_SOURCE_SHA)"' \
+		'#define SWAPZ_BUILD_SOURCE_CLEAN $(SWAPZ_BUILD_SOURCE_CLEAN)' > "$@"
+
 .PHONY: all install uninstall test fast_test
 .PHONY: build/kernel/experimental/dm-swapz.ko
 # Make can compile independent outputs concurrently. The private test reporter
@@ -25,8 +42,8 @@ CC ?= cc
 # incremental dependency logic avoids unchanged .o recompilation.
 all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/userspace/swapzctl
 
-build/kernel/experimental/dm-swapz.ko:
-	$(MAKE) -C src/kernel KDIR="$(KDIR)" all
+build/kernel/experimental/dm-swapz.ko: build/source-build-info.h
+	$(MAKE) -C src/kernel KDIR="$(KDIR)" SWAPZ_BUILD_INFO="$(abspath build/source-build-info.h)" all
 	@bash packaging/sign-module.sh "$@"
 
 build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile build/tests/direct-write-probe
@@ -37,9 +54,9 @@ build/tests/direct-write-probe: tests/tools/direct-write-probe.c Makefile
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-build/userspace/swapzctl: src/userspace/swapzctl.c src/userspace/swapz-primary.c src/userspace/swapz-primary.h src/kernel/VERSION src/kernel/superblock.h Makefile
+build/userspace/swapzctl: src/userspace/swapzctl.c src/userspace/swapz-primary.c src/userspace/swapz-primary.h src/kernel/VERSION src/kernel/superblock.h src/kernel/swapz-build-info.h build/source-build-info.h Makefile
 	@mkdir -p build/userspace
-	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' src/userspace/swapzctl.c src/userspace/swapz-primary.c -o $@
+	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror -include build/source-build-info.h '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' src/userspace/swapzctl.c src/userspace/swapz-primary.c -o $@
 
 install: all
 	@sudo bash packaging/package-dkms.sh install "$(PREFIX)"

@@ -3548,3 +3548,23 @@ cover digest correctness, writable-FD refusal, oversized files, unsafe mode,
 hard-link refusal, and output preservation. This does not establish that a
 path names an accepted artifact; callers must bind the opened descriptor to
 the exact expected path and qualification record.
+
+Root builds embed the committed Git source SHA and a clean/dirty bit for the
+production and packaging inputs into both `swapzctl` and `dm-swapz.ko`. The
+kernel exposes the same values as read-only module parameters and ELF module
+metadata. The read-only primary plan reports both identities and whether they
+match; a mismatch, dirty input, missing value, or `unknown` source must remain
+ineligible. DKMS packaging must copy the generated provenance header into its
+owned source tree before calculating the source manifest. Build metadata is
+diagnostic and must never be accepted as qualification by itself. The primary
+lifecycle admission must compare these embedded values with an accepted
+qualification record and independently hash the live binary artifacts before
+it can be enabled. Changes to this build metadata alter the qualified module
+and userspace artifacts and therefore require exact-source owner
+qualification before live activation.
+
+The rootless package lifecycle regression must install a deterministic private
+build-provenance header into its sandbox, compile `swapzctl` with that header,
+and prove DKMS receives byte-identical provenance in its owned source tree.
+The test override is valid only under the hermetic package sandbox and must
+not change the production package path.

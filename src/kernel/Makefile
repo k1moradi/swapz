@@ -30,6 +30,7 @@ endif
 else
 KDIR ?= /lib/modules/$(shell uname -r)/build
 SWAPZ_ROOT := $(abspath $(CURDIR)/../..)
+SWAPZ_BUILD_INFO ?= $(SWAPZ_ROOT)/build/source-build-info.h
 ifeq ($(W),1)
 SWAPZ_STAGE := $(SWAPZ_ROOT)/build/kernel/w1
 else ifeq ($(W),2)
@@ -44,6 +45,10 @@ all:
 		dst="$(SWAPZ_STAGE)/$${src##*/}"; \
 		if ! cmp -s "$$src" "$$dst"; then cp -f "$$src" "$$dst"; fi; \
 	done
+	@if test -f "$(SWAPZ_BUILD_INFO)" && \
+	   ! cmp -s "$(SWAPZ_BUILD_INFO)" "$(SWAPZ_STAGE)/swapz-build-info.h"; then \
+		cp -f "$(SWAPZ_BUILD_INFO)" "$(SWAPZ_STAGE)/swapz-build-info.h"; \
+	fi
 	@set -e; version="$$(cat "$(CURDIR)/VERSION")"; \
 	  printf '%s\n' "$$version" | grep -Eq '^3[.]0[.]0-alpha[.][0-9]+$$' || \
 	    { echo "BLOCKED: invalid canonical VERSION" >&2; exit 1; }; \

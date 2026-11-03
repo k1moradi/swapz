@@ -19,6 +19,12 @@ class PackageLifecycle(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(dir=BASE)
         self.addCleanup(self.temp.cleanup)
         self.home = pathlib.Path(self.temp.name).resolve()
+        (self.home / "build").mkdir()
+        self.build_info = self.home / "build/source-build-info.h"
+        self.build_info.write_text(
+            '#define SWAPZ_BUILD_SOURCE_SHA "'
+            '0123456789abcdef0123456789abcdef01234567"\n'
+            "#define SWAPZ_BUILD_SOURCE_CLEAN 1\n")
         (self.home / "bin").mkdir()
         dkms = self.home / "bin/dkms"
         dkms.write_text("""#!/usr/bin/env bash
@@ -30,12 +36,14 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         dkms.chmod(0o755)
         self.log = self.home / "dkms.log"
         self.env = dict(os.environ, SWAPZ_PACKAGE_TEST_ROOT=str(self.home),
-                        SWAPZ_DKMS_LOG=str(self.log), SWAPZ_FAKE_FAIL_AT="never")
+                        SWAPZ_DKMS_LOG=str(self.log), SWAPZ_FAKE_FAIL_AT="never",
+                        SWAPZ_TEST_BUILD_INFO=str(self.build_info))
         self.env["PATH"] = str(self.home / "bin") + os.pathsep + self.env["PATH"]
         self.prefix = self.home / "usr/local"
         (ROOT / "build/userspace").mkdir(parents=True, exist_ok=True)
         (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                        "-include", str(self.build_info),
                         '-DSWAPZ_VERSION="' + VERSION + '"',
                         str(ROOT / "src/userspace/swapzctl.c"),
                         str(ROOT / "src/userspace/swapz-primary.c"), "-o",
@@ -61,6 +69,9 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertEqual(subprocess.run([binary, "status"], capture_output=True).returncode, 0)
         installed_source = self.home / "usr/src" / ("swapz-" + VERSION)
         self.assertEqual((installed_source / "src/kernel/VERSION").read_text().strip(), VERSION)
+        self.assertEqual(
+            (installed_source / "src/kernel/swapz-build-info.h").read_bytes(),
+            self.build_info.read_bytes())
         version_from_dkms = subprocess.run(
             ["bash", "-c", 'source "$1"; printf "%s" "$PACKAGE_VERSION"',
              "_", str(installed_source / "dkms.conf")],

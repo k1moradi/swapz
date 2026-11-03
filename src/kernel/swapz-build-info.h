@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef SWAPZ_BUILD_SOURCE_SHA
+#define SWAPZ_BUILD_SOURCE_SHA "unknown"
+#endif
+#ifndef SWAPZ_BUILD_SOURCE_CLEAN
+#define SWAPZ_BUILD_SOURCE_CLEAN 0
+#endif
+
+#if SWAPZ_BUILD_SOURCE_CLEAN
+#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"
+#else
+#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "0"
+#endif

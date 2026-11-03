@@ -32,9 +32,15 @@ if [[ -n "$test_root" ]]; then
     echo "BLOCKED: test prefix mismatch" >&2; exit 1;
   }
   srcbase="$sandbox/usr/src"; dkms_bin="$sandbox/bin/dkms"
+  build_info="${SWAPZ_TEST_BUILD_INFO:-$root/build/source-build-info.h}"
+  build_info="$(realpath -m -- "$build_info")"
+  case "$build_info" in "$sandbox"/*) ;; *)
+    echo "BLOCKED: test build metadata outside package sandbox" >&2; exit 1 ;;
+  esac
 else
   [[ $(id -u) == 0 ]] || { echo "BLOCKED: root required" >&2; exit 1; }
   srcbase="/usr/src"
+  build_info="$root/build/source-build-info.h"
   dkms_bin="$(command -v dkms)" || {
     echo "BLOCKED: DKMS unavailable" >&2; exit 1;
   }
@@ -135,6 +141,9 @@ fi
 [[ -x build/userspace/swapzctl && -x build/tests/device-roundtrip ]] || {
   echo "BLOCKED: run make before packaging" >&2; exit 1;
 }
+[[ -f "$build_info" && ! -L "$build_info" ]] || {
+  echo "BLOCKED: committed-source build provenance missing" >&2; exit 1;
+}
 if [[ -z "$test_root" ]]; then
   [[ -f build/kernel/experimental/dm-swapz.ko ]] || {
     echo "BLOCKED: swapz kernel module missing" >&2; exit 1;
@@ -153,6 +162,9 @@ install -m0644 src/kernel/VERSION "$src/src/kernel/VERSION"
 for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
   install -m0644 "$file" "$src/src/kernel/$(basename "$file")"
 done
+# DKMS recompiles the module after installation; carry the exact provenance
+# header used by the userspace binary and the development module build.
+install -m0644 "$build_info" "$src/src/kernel/swapz-build-info.h"
 install -m0755 build/userspace/swapzctl "$cli"
 install -m0755 build/tests/device-roundtrip "$helper"
 sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" \

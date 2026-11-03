@@ -44,6 +44,7 @@
 #include "predictor.h"
 #include "predictor-route.h"
 #include "superblock.h"
+#include "swapz-build-info.h"
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz requires 4KiB PAGE_SIZE"
@@ -51,6 +52,18 @@
 #define SWAPZ_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SWAPZ_BATCH_BYTES (SWAPZ_MAX_RECORDS * SWAPZ_BLOCK_BYTES)
 #include "swapz-version.h" /* generated from src/kernel/VERSION */
+
+static char swapz_build_source_sha[] = SWAPZ_BUILD_SOURCE_SHA;
+module_param_string(build_source_sha, swapz_build_source_sha,
+		    sizeof(swapz_build_source_sha), 0444);
+MODULE_PARM_DESC(build_source_sha,
+		 "Committed source SHA embedded when this module was built");
+static int swapz_build_source_clean = SWAPZ_BUILD_SOURCE_CLEAN;
+module_param_named(build_source_clean, swapz_build_source_clean, int, 0444);
+MODULE_PARM_DESC(build_source_clean,
+		 "Whether tracked and untracked source inputs were clean at build time");
+MODULE_INFO(swapz_build_source_sha, SWAPZ_BUILD_SOURCE_SHA);
+MODULE_INFO(swapz_build_source_clean, SWAPZ_BUILD_SOURCE_CLEAN_STRING);
 #define SWAPZ_WORK_QUANTUM_BIOS 64U
 #define SWAPZ_WORK_CONSERVING_HAND_RECORDS 8U
 /* Published ACK cohorts have an independent four-BIO handoff floor. */
