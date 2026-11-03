@@ -297,7 +297,12 @@ def selector_matches(partuuid: str) -> None:
     info = path.stat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
         raise ValueError("protected primary selector ownership is invalid")
-    if path.read_text() != f"PARTUUID={partuuid}\n":
+    lines = path.read_text(encoding="ascii").splitlines()
+    if len(lines) != 1 or not lines[0].startswith("PARTUUID="):
+        raise ValueError("protected primary selector is malformed")
+    observed = QUALIFICATION["normalize_partuuid"](
+        lines[0][len("PARTUUID="):])
+    if observed is None or observed != partuuid:
         raise ValueError("protected selector no longer names admitted card")
 
 
@@ -347,13 +352,15 @@ def check_physical(args, logical_pages: int):
                 args.expected_parent_dev, args.expected_parent_model, args.expected_parent_transport)
     if any(value in (None, "") for value in required):
         raise ValueError("physical identity bundle is incomplete")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{7,127}", args.physical_partuuid):
+    physical_partuuid = QUALIFICATION["normalize_partuuid"](
+        args.physical_partuuid)
+    if physical_partuuid is None:
         raise ValueError("invalid physical PARTUUID")
     require_clean_source(args.source_sha)
-    selector_matches(args.physical_partuuid)
+    selector_matches(physical_partuuid)
     args._physical_lock_fd = acquire_physical_lock()
 
-    alias = (Path("/dev/disk/by-partuuid") / args.physical_partuuid).resolve(strict=True)
+    alias = (Path("/dev/disk/by-partuuid") / physical_partuuid).resolve(strict=True)
     lower_info = alias.stat()
     if not stat.S_ISBLK(lower_info.st_mode) or dev_text(lower_info.st_rdev) != args.expected_lower_dev:
         raise ValueError("PARTUUID alias major:minor mismatch")
@@ -424,7 +431,7 @@ def check_physical(args, logical_pages: int):
     check_in_use({target_info.st_rdev, lower_dev})
     return target, os.O_RDWR | os.O_DIRECT | os.O_CLOEXEC, data_offset, {
         "device": dev_text(target_info.st_rdev), "owned_disk": parent.name,
-        "lower_major_minor": args.expected_lower_dev, "physical_partuuid": args.physical_partuuid,
+        "lower_major_minor": args.expected_lower_dev, "physical_partuuid": physical_partuuid,
         "physical_device_bytes": args.expected_device_bytes, "parent_major_minor": args.expected_parent_dev,
         "parent_model": model, "parent_transport": transport, "dm_uuid": dm_uuid,
         "swapz_config": config if args.candidate == "swapz" else None,

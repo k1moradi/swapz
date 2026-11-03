@@ -2149,6 +2149,35 @@ class PairReplayContract(unittest.TestCase):
                 mod.LowerInflightSampler._read_fd = orig_read_fd
                 sampler.close()
 
+    def test_physical_partuuid_grammar_matches_production_selector(self):
+        import importlib.util
+
+        qualification_path = SCRIPT.with_name("qualification.py")
+        qualification_spec = importlib.util.spec_from_file_location(
+            "swapz_partuuid_contract", qualification_path)
+        qualification = importlib.util.module_from_spec(qualification_spec)
+        qualification_spec.loader.exec_module(qualification)
+
+        self.assertEqual(
+            qualification.normalize_partuuid("F13428F6-01"),
+            "f13428f6-01")
+        for malformed in (
+                "--------", "f13428f6--01", "f13428f6.",
+                ".f13428f6", "1234-567", "nothex001",
+                "a" * 65):
+            with self.subTest(partuuid=malformed):
+                self.assertIsNone(
+                    qualification.normalize_partuuid(malformed))
+
+        sustained_source = SCRIPT.with_name("sustained-replay.py").read_text()
+        self.assertIn(
+            'QUALIFICATION["normalize_partuuid"](\n'
+            '        args.physical_partuuid)',
+            sustained_source)
+        self.assertNotIn(
+            'r"[A-Za-z0-9][A-Za-z0-9.-]{7,127}"',
+            sustained_source)
+
     def test_physical_qualification_contract_and_o1_oracle(self):
         import importlib.util
 

@@ -646,6 +646,10 @@ intrinsic exclusions and PASS consistency from the embedded raw/swapz arms.
 Every accepted pair must also resolve to one exact physical lower identity
 (PARTUUID, byte size and major:minor where the block replay records them; exact
 lower major:minor for anonymous swap), and all accepted pairs must agree. The
+physical replay, evaluator and campaign snapshot use the same production
+PARTUUID grammar: 8..64 characters, hexadecimal groups separated only by
+single internal hyphens, at least eight hexadecimal digits, normalized to
+lowercase before the admitted identity is recorded. The
 campaign sealer independently binds that evaluator identity to the admitted
 partition in the boundary host snapshot. A mismatch blocks a PASS but failed or
 excluded artifacts remain sealable evidence. These are evidence-integrity
