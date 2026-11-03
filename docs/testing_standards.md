@@ -3318,6 +3318,10 @@ Device Mapper output variants, active-swap parsing, header recognition, and
 fail-closed ownership decisions without opening or modifying a block device.
 The package regression must prove that units are installed disabled and that
 package install/uninstall does not start or stop system swap.
+The manager must use the same permanent `/dev/sda4` partition lock as the
+physical-swap helpers; tests must reject an unsafe lock directory, lock file or
+concurrent owner before any mutation. A persistent active-ownership marker is
+also required before the provisioning path can be enabled.
 
 Recovery must refuse while any `swapoff` process runs in a swapoff stage, even
 when the kernel still lists the device, and an unreadable `/proc` entry fails

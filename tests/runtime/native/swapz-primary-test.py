@@ -2,6 +2,7 @@
 """Rootless policy tests for the disabled primary-swap boot manager."""
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -94,6 +95,9 @@ class PrimaryPolicy(unittest.TestCase):
 
     def test_privileged_lifecycle_remains_disabled_until_full_qualification(self):
         self.assertFalse(primary.PRIMARY_EXECUTION_ENABLED)
+        self.assertEqual(primary.LOCK_PATH,
+                         Path("/var/lib/swapz/physical-recovery/"
+                              "partition-7fb9401d-04.lock"))
         manager = primary.PrimaryManager(ops=object())
         with self.assertRaisesRegex(primary.ManagerError, "remains disabled"):
             manager.start()
@@ -110,6 +114,29 @@ class PrimaryPolicy(unittest.TestCase):
             with self.subTest(state=state, loaded=loaded, rows=rows), \
                     self.assertRaises(primary.ManagerError):
                 primary.require_stopped_state_is_unambiguous(state, loaded, rows)
+
+    def test_active_partition_marker_is_bound_to_unique_run_and_device(self):
+        state = {"run_id": "d" * 32}
+        good = {"run_id": "d" * 32, "partuuid": "7fb9401d-04",
+                "major": 8, "minor": 4}
+        primary.validate_active_marker(good, state)
+        for bad in (
+                {**good, "run_id": "e" * 32},
+                {**good, "major": 8, "minor": 3},
+                {**good, "partuuid": "7fb9401d-05"},
+                {**good, "extra": True},
+        ):
+            with self.subTest(marker=bad), self.assertRaises(primary.ManagerError):
+                primary.validate_active_marker(bad, state)
+
+    def test_privileged_directory_validation_rejects_symlink(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-primary-path-") as temp:
+            target = Path(temp) / "target"
+            target.mkdir(mode=0o700)
+            link = Path(temp) / "link"
+            link.symlink_to(target, target_is_directory=True)
+            with self.assertRaises(primary.ManagerError):
+                primary.validate_root_directory(link, 0o700)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,8 @@ MIN_RESERVE_BLOCKS = 2 * SEGMENT_BLOCKS
 STATE_DIR = Path('/var/lib/swapz/primary')
 STATE_PATH = STATE_DIR / 'state.json'
 BACKUP_PATH = STATE_DIR / 'block0.bin'
-LOCK_PATH = Path('/run/lock/swapz-primary.lock')
+RECOVERY_BASE = Path('/var/lib/swapz/physical-recovery')
+LOCK_PATH = RECOVERY_BASE / 'partition-7fb9401d-04.lock'
 MAPPER_NAME = 'swapz-primary'
 MAPPER_UUID = 'SWAPZ-PRIMARY'
 SWAP_PRIORITY = -1
@@ -130,6 +131,30 @@ def block_identity(path):
     if not stat.S_ISBLK(info.st_mode):
         raise ManagerError(f'{path} is not a block device')
     return (os.major(info.st_rdev), os.minor(info.st_rdev))
+
+
+def validate_root_directory(path, final_mode=None):
+    """Reject symlinks and non-root-owned parents for privileged state paths."""
+    path = Path(path)
+    if not path.is_absolute():
+        raise ManagerError('privileged state directory must be absolute')
+    chain = list(reversed(path.parents)) + [path]
+    for component in chain:
+        try:
+            info = component.lstat()
+        except OSError as exc:
+            raise ManagerError(f'privileged directory is unavailable: {component}') from exc
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0:
+            raise ManagerError(f'privileged directory is not a root-owned directory: {component}')
+    if final_mode is not None and stat.S_IMODE(chain[-1].lstat().st_mode) != final_mode:
+        raise ManagerError(f'privileged directory mode is not {final_mode:04o}: {path}')
+
+
+def validate_active_marker(marker, state):
+    expected = {'run_id': state.get('run_id'), 'partuuid': '7fb9401d-04',
+                'major': 8, 'minor': 4}
+    if not re.fullmatch(r'[0-9a-f]{32}', str(expected['run_id'])) or marker != expected:
+        raise ManagerError('persistent /dev/sda4 ownership marker differs from state')
 
 
 def read_block_zero(path=DEVICE):
@@ -413,6 +438,7 @@ class PrimaryManager:
 
     def load_state(self):
         self.validate_state_directory()
+        validate_root_directory(RECOVERY_BASE, 0o700)
         state = load_unique_json(STATE_PATH)
         if not isinstance(state, dict) or state.get('schema') != 'swapz-primary-v1':
             raise ManagerError('primary state schema is invalid')
@@ -422,6 +448,9 @@ class PrimaryManager:
                     'dm_uuid': MAPPER_UUID}
         if any(state.get(k) != v for k, v in expected.items()):
             raise ManagerError('primary state is not bound to exact /dev/sda4 maximum')
+        marker = load_unique_json(
+            RECOVERY_BASE / 'partition-7fb9401d-04.active')
+        validate_active_marker(marker, state)
         backup_fd = os.open(BACKUP_PATH, os.O_RDONLY | os.O_CLOEXEC |
                             getattr(os, 'O_NOFOLLOW', 0))
         try:
@@ -451,13 +480,7 @@ class PrimaryManager:
 
     @staticmethod
     def validate_state_directory():
-        try:
-            info = STATE_DIR.lstat()
-        except OSError as exc:
-            raise ManagerError('primary state directory is missing') from exc
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or \
-                stat.S_IMODE(info.st_mode) != 0o700:
-            raise ManagerError('primary state directory is not root-owned mode 0700')
+        validate_root_directory(STATE_DIR, 0o700)
 
     def plan(self):
         gates = {}
@@ -706,11 +729,28 @@ class PrimaryManager:
 
     @staticmethod
     def lock():
-        LOCK_PATH.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        validate_root_directory(RECOVERY_BASE, 0o700)
         fd = os.open(LOCK_PATH, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC |
                      getattr(os, 'O_NOFOLLOW', 0), 0o600)
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fd
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or \
+                    info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600:
+                raise ManagerError('shared partition lock is not root-controlled')
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise ManagerError('another swapz operation owns /dev/sda4') from exc
+            dirfd = os.open(RECOVERY_BASE, os.O_RDONLY | os.O_DIRECTORY |
+                            os.O_CLOEXEC | getattr(os, 'O_NOFOLLOW', 0))
+            try:
+                os.fsync(dirfd)
+            finally:
+                os.close(dirfd)
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
 
 
 def main(argv=None):

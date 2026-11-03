@@ -1374,6 +1374,8 @@ service module ownership and the exact mapper major:minor. Rootless tests
 cover its parsers, ownership policy and disabled privileged entry points. It is
 not yet usable: durable initial
 provisioning, checked restoration, and startup-failure rollback are still
-missing, and no live swap or boot integration has been qualified through this
-manager. Do not enable its units or call its privileged start/stop commands
-until those gaps and the exact-host qualification gates are closed.
+missing; it now shares the permanent partition lock with the physical-swap
+helpers, but still needs a persistent active-ownership marker. No live swap or
+boot integration has been qualified through this manager. Do not enable its
+units or call its privileged start/stop commands until those gaps and the
+exact-host qualification gates are closed.
