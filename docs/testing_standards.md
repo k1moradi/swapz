@@ -4967,6 +4967,14 @@ retained old host snapshot must be labeled HISTORICAL and cannot become a
 current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
+The executable evaluator's process success is stricter than the pre-reboot
+readiness fields: it returns 0 only when the full `release_verdict` is PASS,
+which requires code PASS, deployment PASS and a current owner-observed cold-boot
+PASS on the same authorized target. A current owner-observed reboot FAIL makes
+the release verdict FAIL and returns 1; missing or unobserved reboot evidence
+keeps the release verdict BLOCKED and returns 2. Therefore automation can use
+the command exit status as a final-release gate without confusing “safe to
+perform the owner reboot” with “release qualification complete.”
 
 The private `tests/tools/evaluate-production-readiness.py` evaluator is the
 executable form of this release-evidence contract; it is not a new operator

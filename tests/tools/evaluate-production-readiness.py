@@ -762,8 +762,18 @@ def evaluate_release(
         elif reboot.get("status") == "FAIL":
             cold_boot_observed = "FAIL"
 
+    if not code_ready or not deployment_ready:
+        release_verdict = "BLOCKED"
+    elif cold_boot_observed == "PASS":
+        release_verdict = "PASS"
+    elif cold_boot_observed == "FAIL":
+        release_verdict = "FAIL"
+    else:
+        release_verdict = "BLOCKED"
+
     return {
         "schema": "swapz-production-readiness-evaluation-v1",
+        "release_verdict": release_verdict,
         "source_sha": source_sha,
         "production_acceptance_sha256": policy_sha256,
         "CODE_PRODUCTION_READY": "PASS" if code_ready else "BLOCKED",
@@ -821,6 +831,7 @@ def main() -> int:
         result = {
             "schema": "swapz-production-readiness-evaluation-v1",
             "source_sha": args.source_sha,
+            "release_verdict": "BLOCKED",
             "CODE_PRODUCTION_READY": "BLOCKED",
             "DEPLOYMENT_PRODUCTION_READY": "BLOCKED",
             "PRODUCTION_READY_FOR_OWNER_REBOOT": "NO",
@@ -832,7 +843,11 @@ def main() -> int:
         }
 
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
-    return 0 if result["CODE_PRODUCTION_READY"] == "PASS" and         result["DEPLOYMENT_PRODUCTION_READY"] == "PASS" else 2
+    if result["release_verdict"] == "PASS":
+        return 0
+    if result["release_verdict"] == "FAIL":
+        return 1
+    return 2
 
 
 if __name__ == "__main__":

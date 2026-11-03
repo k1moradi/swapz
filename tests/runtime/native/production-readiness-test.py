@@ -351,6 +351,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["PRODUCTION_READY_FOR_OWNER_REBOOT"], "PASS")
         self.assertEqual(result["COLD_BOOT_HARNESS"], "ARMED")
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+        self.assertEqual(result["release_verdict"], "BLOCKED")
         self.assertEqual(result["code_blockers"], [])
         self.assertEqual(result["deployment_blockers"], [])
 
@@ -383,12 +384,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "PASS")
+        self.assertEqual(result["release_verdict"], "PASS")
 
         reboot.update(status="FAIL", observed=False)
         result = evaluate(report, evidence, policy)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "FAIL")
+        self.assertEqual(result["release_verdict"], "FAIL")
 
     def test_historical_or_unsynchronized_source_cannot_pass(self):
         report = owner_report()
@@ -754,6 +757,61 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         with self.assertRaises(EVALUATOR.EvidenceError):
             EVALUATOR.validate_acceptance_policy(policy, encoded(policy))
 
+
+    def test_cli_exit_code_tracks_full_release_verdict(self):
+        with mock.patch.object(
+                EVALUATOR, "evaluate_release",
+                return_value={
+                    "schema": "swapz-production-readiness-evaluation-v1",
+                    "source_sha": SOURCE,
+                    "release_verdict": "PASS",
+                    "CODE_PRODUCTION_READY": "PASS",
+                    "DEPLOYMENT_PRODUCTION_READY": "PASS",
+                    "PRODUCTION_READY_FOR_OWNER_REBOOT": "PASS",
+                    "COLD_BOOT_HARNESS": "ARMED",
+                    "COLD_BOOT_OBSERVED": "PASS",
+                    "code_blockers": [],
+                    "deployment_blockers": [],
+                }), \
+                mock.patch.object(EVALUATOR, "load_json_strict",
+                                  return_value=({}, b"{}")), \
+                mock.patch.object(sys, "argv", [
+                    str(EVALUATOR_PATH), "--source-sha", SOURCE,
+                    "--test-results", "/tmp/test-results.json",
+                    "--evidence", "/tmp/evidence.json",
+                    "--acceptance", "/tmp/acceptance.json",
+                ]):
+            with mock.patch("builtins.print"):
+                self.assertEqual(EVALUATOR.main(), 0)
+
+        for verdict, expected in (("BLOCKED", 2), ("FAIL", 1)):
+            with self.subTest(verdict=verdict), \
+                    mock.patch.object(
+                        EVALUATOR, "evaluate_release",
+                        return_value={
+                            "schema": "swapz-production-readiness-evaluation-v1",
+                            "source_sha": SOURCE,
+                            "release_verdict": verdict,
+                            "CODE_PRODUCTION_READY": "PASS",
+                            "DEPLOYMENT_PRODUCTION_READY": "PASS",
+                            "PRODUCTION_READY_FOR_OWNER_REBOOT": "PASS",
+                            "COLD_BOOT_HARNESS": "ARMED",
+                            "COLD_BOOT_OBSERVED": (
+                                "FAIL" if verdict == "FAIL" else "NO"),
+                            "code_blockers": [],
+                            "deployment_blockers": [],
+                        }), \
+                    mock.patch.object(EVALUATOR, "load_json_strict",
+                                      return_value=({}, b"{}")), \
+                    mock.patch.object(sys, "argv", [
+                        str(EVALUATOR_PATH), "--source-sha", SOURCE,
+                        "--test-results", "/tmp/test-results.json",
+                        "--evidence", "/tmp/evidence.json",
+                        "--acceptance", "/tmp/acceptance.json",
+                    ]):
+                with mock.patch("builtins.print"):
+                    self.assertEqual(EVALUATOR.main(), expected)
+
     def test_cli_returns_blocked_for_historical_snapshot(self):
         report = owner_report()
         policy = acceptance_policy()
@@ -785,6 +843,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(payload["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(payload["release_verdict"], "BLOCKED")
 
 
 if __name__ == "__main__":
