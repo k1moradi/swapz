@@ -1321,13 +1321,12 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 		if (field == 2U) {
 			char token[64];
 			size_t length = (size_t)(token_end - cursor);
+			unsigned int mounted_major;
+			unsigned int mounted_minor;
 
 			if (!length || length >= sizeof(token) ||
 			    token_end >= separator)
 				return -1;
-			unsigned int mounted_major;
-			unsigned int mounted_minor;
-
 			memcpy(token, cursor, length);
 			token[length] = '\0';
 			if (parse_device_identity_fields(token, &mounted_major,
