@@ -265,6 +265,42 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 digest, hashlib.sha256(b"private-physical-control").hexdigest())
             self.assertEqual(stat.S_IMODE(control.stat().st_mode), 0o700)
 
+    def test_private_physical_control_compiles_and_reports_runtime_gate(self):
+        source_sha = "a" * 40
+        subprocess = __import__("subprocess")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            qualified = root / "prefix/sbin/swapzctl"
+            qualified.parent.mkdir(parents=True)
+            qualified.write_bytes(b"qualified-installed-control")
+            qualified.chmod(0o700)
+            control, digest = qualify.build_physical_execution_control(
+                source_sha, qualified, root / "private")
+            self.assertEqual(digest, hashlib.sha256(control.read_bytes()).hexdigest())
+
+            unmarked_environment = dict(os.environ)
+            unmarked_environment.pop(
+                "SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION", None)
+            unmarked = subprocess.run(
+                [str(control), "primary", "plan"],
+                text=True, capture_output=True, check=False,
+                env=unmarked_environment)
+            self.assertEqual(unmarked.returncode, 2)
+            unmarked_plan = json.loads(unmarked.stdout)
+            self.assertIs(unmarked_plan["privileged_execution_enabled"], False)
+            self.assertEqual(
+                unmarked_plan["control_build_source_sha"], source_sha)
+
+            marked = subprocess.run(
+                [str(control), "primary", "plan"],
+                text=True, capture_output=True, check=False,
+                env={**unmarked_environment,
+                     **qualify._physical_control_environment()})
+            self.assertEqual(marked.returncode, 2)
+            marked_plan = json.loads(marked.stdout)
+            self.assertIs(marked_plan["privileged_execution_enabled"], True)
+            self.assertEqual(marked_plan["control_build_source_sha"], source_sha)
+
     def test_private_control_invocations_receive_runtime_marker_only_as_child_env(self):
         completed = __import__("subprocess").CompletedProcess
         plan_result = completed(
