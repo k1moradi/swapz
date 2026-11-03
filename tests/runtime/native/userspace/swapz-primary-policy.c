@@ -317,6 +317,45 @@ static void test_primary_state_records(void)
 	assert(!swapz_primary_state_transition_allowed(&current, &next));
 }
 
+static void test_primary_header_backup(int recovery_fd, int lock_fd,
+				       const char *run_id)
+{
+	static const unsigned char swap_magic[] = "SWAPSPACE2";
+	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
+	unsigned char restored[SWAPZ_PRIMARY_BLOCK_BYTES];
+	char backup_name[64];
+	char digest[65];
+	char wrong_digest[65];
+	size_t i;
+
+	for (i = 0; i < sizeof(original); ++i)
+		original[i] = (unsigned char)((i * 37U + 11U) & 0xffU);
+	memcpy(original + sizeof(original) - sizeof(swap_magic) + 1U,
+	       swap_magic, sizeof(swap_magic) - 1U);
+	assert(swapz_primary_original_swap_signature(original));
+	assert(swapz_primary_sha256(original, sizeof(original), digest) == 0);
+	assert(swapz_primary_header_backup_write_at(
+		recovery_fd, lock_fd, run_id, original, digest, geteuid()) == 0);
+	memset(restored, 0xa5, sizeof(restored));
+	assert(swapz_primary_header_backup_read_at(
+		recovery_fd, lock_fd, run_id, digest, geteuid(), restored) == 0);
+	assert(!memcmp(original, restored, sizeof(original)));
+	assert(swapz_primary_header_backup_write_at(
+		recovery_fd, lock_fd, run_id, original, digest, geteuid()) < 0);
+	assert(errno == EEXIST);
+	memcpy(wrong_digest, digest, sizeof(wrong_digest));
+	wrong_digest[0] = wrong_digest[0] == '0' ? '1' : '0';
+	memset(restored, 0xa5, sizeof(restored));
+	assert(swapz_primary_header_backup_read_at(
+		recovery_fd, lock_fd, run_id, wrong_digest, geteuid(), restored) < 0);
+	assert(errno == EBADMSG);
+	assert(restored[0] == 0xa5);
+	assert(snprintf(backup_name, sizeof(backup_name), "block0-%s.bin",
+			 run_id) > 0);
+	assert(unlinkat(recovery_fd, backup_name, 0) == 0);
+	assert(fsync(recovery_fd) == 0);
+}
+
 static void test_exact_block_read_helper(void)
 {
 	const char *home = getenv("HOME");
@@ -651,6 +690,7 @@ int main(void)
 	assert(errno == EBUSY);
 	assert_record_equals(recovery_fd, active_name, expected_record);
 	assert_record_equals(recovery_fd, consumed_name, expected_record);
+	test_primary_header_backup(recovery_fd, first_lock, run_id);
 	memcpy(lifecycle.run_id, run_id, sizeof(lifecycle.run_id));
 	lifecycle.stage = SWAPZ_PRIMARY_STAGE_READY;
 	unlocked_lock = openat(recovery_fd, "partition-7fb9401d-04.lock",

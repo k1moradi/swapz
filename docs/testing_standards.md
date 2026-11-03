@@ -3478,3 +3478,15 @@ provenance retention, fresh-run admission, and marker release only after
 completion. These primitives are not lifecycle commands; keep privileged
 actions disabled until provisioning, mapper ownership, rollback and recovery
 actually use them.
+
+The primary manager's original-header backup is immutable per run ID. Its
+writer must require the exclusive lock and matching consumed/active owner claim,
+validate the caller-bound SHA-256 before writing, create a root-owned 0600
+temporary file, fsync it, atomically install the final name without replacing
+an existing backup, and fsync the recovery directory. Its reader must reject
+symlinks, non-regular or multiply linked files, wrong ownership/mode/size,
+short or extended contents, and digest mismatch; it copies bytes to the caller
+only after full validation. Rootless tests must verify exact 4096-byte
+round-trip, no-overwrite behavior, invalid digest refusal, and output-buffer
+preservation on read failure. The lifecycle caller must bind the expected hash
+to the freshly identity-checked `/dev/sda4` header before the first mutation.

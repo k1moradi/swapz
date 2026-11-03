@@ -1110,7 +1110,7 @@ static int swapz_primary_read_module_mapper_inventory(
 	struct stat module_info;
 	DIR *block_directory;
 	unsigned int mapper_count = 0;
-	int saved_errno;
+	int saved_errno = 0;
 
 	if (!module_loaded || !swapz_mapper_present) {
 		errno = EINVAL;
@@ -1947,6 +1947,208 @@ static int swapz_primary_owner_claim_matches_at(int recovery_fd,
 		return 0;
 	}
 	return 1;
+}
+
+static int swapz_primary_valid_sha256(const char *digest)
+{
+	unsigned int i;
+
+	if (!digest || strnlen(digest, 65U) != 64U)
+		return 0;
+	for (i = 0; i < 64U; ++i)
+		if (!((digest[i] >= '0' && digest[i] <= '9') ||
+		      (digest[i] >= 'a' && digest[i] <= 'f')))
+			return 0;
+	return 1;
+}
+
+static int swapz_primary_header_backup_name(const char *run_id,
+						    char *name, size_t capacity)
+{
+	int length;
+
+	if (!swapz_primary_valid_run_id(run_id) || !name || !capacity) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(name, capacity, "block0-%s.bin", run_id);
+	if (length < 0 || (size_t)length >= capacity) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	return 0;
+}
+
+int swapz_primary_header_backup_read_at(
+	int recovery_fd, int lock_fd, const char *run_id,
+	const char *expected_sha256, uid_t expected_owner,
+	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES])
+{
+	unsigned char saved[SWAPZ_PRIMARY_BLOCK_BYTES + 1U];
+	char name[64];
+	char digest[65];
+	size_t length;
+
+	if (recovery_fd < 0 || lock_fd < 0 || !header ||
+	    !swapz_primary_valid_sha256(expected_sha256) ||
+	    swapz_primary_header_backup_name(run_id, name, sizeof(name)) < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner) ||
+	    !swapz_primary_owner_claim_matches_at(recovery_fd, run_id,
+						 expected_owner))
+		return -1;
+	if (swapz_primary_record_read_at(recovery_fd, name, expected_owner,
+					 (char *)saved, sizeof(saved), &length,
+					 NULL) < 0)
+		return -1;
+	if (length != SWAPZ_PRIMARY_BLOCK_BYTES ||
+	    swapz_primary_sha256(saved, length, digest) < 0)
+		return -1;
+	if (strcmp(digest, expected_sha256)) {
+		errno = EBADMSG;
+		return -1;
+	}
+	memcpy(header, saved, SWAPZ_PRIMARY_BLOCK_BYTES);
+	return 0;
+}
+
+int swapz_primary_header_backup_write_at(
+	int recovery_fd, int lock_fd, const char *run_id,
+	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
+	const char *expected_sha256, uid_t expected_owner)
+{
+	struct stat directory_info;
+	struct stat temporary_info;
+	struct stat named_info;
+	unsigned char verified[SWAPZ_PRIMARY_BLOCK_BYTES];
+	char name[64];
+	char temporary[96];
+	char digest[65];
+	int fd = -1;
+	int temporary_identity_valid = 0;
+	int saved_errno = 0;
+	int length;
+	size_t written = 0;
+
+	if (recovery_fd < 0 || lock_fd < 0 || !header ||
+	    !swapz_primary_valid_sha256(expected_sha256) ||
+	    swapz_primary_header_backup_name(run_id, name, sizeof(name)) < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner) ||
+	    !swapz_primary_owner_claim_matches_at(recovery_fd, run_id,
+						 expected_owner))
+		return -1;
+	if (swapz_primary_sha256(header, SWAPZ_PRIMARY_BLOCK_BYTES, digest) < 0)
+		return -1;
+	if (strcmp(digest, expected_sha256)) {
+		errno = EBADMSG;
+		return -1;
+	}
+	if (fstat(recovery_fd, &directory_info) < 0)
+		return -1;
+	if (!S_ISDIR(directory_info.st_mode) ||
+	    directory_info.st_uid != expected_owner ||
+	    (directory_info.st_mode & 0777U) != 0700U) {
+		errno = EPERM;
+		return -1;
+	}
+	length = snprintf(temporary, sizeof(temporary), ".%s.%s.tmp", name,
+			  run_id);
+	if (length < 0 || (size_t)length >= sizeof(temporary)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (fstatat(recovery_fd, name, &named_info, AT_SYMLINK_NOFOLLOW) == 0) {
+		errno = EEXIST;
+		return -1;
+	}
+	if (errno != ENOENT)
+		return -1;
+	fd = openat(recovery_fd, temporary,
+		    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &temporary_info) < 0)
+		goto failed;
+	if (!S_ISREG(temporary_info.st_mode) ||
+	    temporary_info.st_uid != expected_owner ||
+	    (temporary_info.st_mode & 0777U) != 0600U ||
+	    temporary_info.st_nlink != 1) {
+		errno = EPERM;
+		goto failed;
+	}
+	temporary_identity_valid = 1;
+	while (written < SWAPZ_PRIMARY_BLOCK_BYTES) {
+		ssize_t count = write(fd, header + written,
+				     SWAPZ_PRIMARY_BLOCK_BYTES - written);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			goto failed;
+		}
+		written += (size_t)count;
+	}
+	if (fsync(fd) < 0 ||
+	    fstatat(recovery_fd, temporary, &named_info,
+		    AT_SYMLINK_NOFOLLOW) < 0)
+		goto failed;
+	if (named_info.st_dev != temporary_info.st_dev ||
+	    named_info.st_ino != temporary_info.st_ino ||
+	    !S_ISREG(named_info.st_mode) ||
+	    named_info.st_uid != expected_owner ||
+	    (named_info.st_mode & 0777U) != 0600U ||
+	    named_info.st_nlink != 1 ||
+	    named_info.st_size != (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) {
+		errno = EPERM;
+		goto failed;
+	}
+	if (close(fd) < 0) {
+		saved_errno = errno;
+		fd = -1;
+		errno = saved_errno;
+		goto failed;
+	}
+	fd = -1;
+	if (renameat2(recovery_fd, temporary, recovery_fd, name,
+		       RENAME_NOREPLACE) < 0) {
+		saved_errno = errno;
+		goto failed;
+	}
+	if (fsync(recovery_fd) < 0 ||
+	    swapz_primary_header_backup_read_at(recovery_fd, lock_fd, run_id,
+						expected_sha256, expected_owner,
+						verified) < 0)
+		return -1;
+	if (memcmp(header, verified, sizeof(verified))) {
+		errno = EIO;
+		return -1;
+	}
+	return 0;
+
+failed:
+	if (!saved_errno)
+		saved_errno = errno;
+	if (temporary_identity_valid &&
+	    fstatat(recovery_fd, temporary, &named_info,
+		    AT_SYMLINK_NOFOLLOW) == 0 &&
+	    named_info.st_dev == temporary_info.st_dev &&
+	    named_info.st_ino == temporary_info.st_ino) {
+		(void)unlinkat(recovery_fd, temporary, 0);
+		(void)fsync(recovery_fd);
+	}
+	if (fd >= 0)
+		(void)close(fd);
+	errno = saved_errno;
+	return -1;
 }
 
 int swapz_primary_state_write_at(int recovery_fd, int lock_fd,

@@ -1417,6 +1417,10 @@ the durable replace primitive. Owner release requires a matching `COMPLETE`
 state, removes only the active marker, and preserves the consumed record.
 Rootless coverage exercises these paths, including rejection of a competing
 lock and a new run after completion. The record is only a stage envelope, not
-the immutable device/artifact/backup recovery manifest. No privileged lifecycle
-command uses these primitives yet; provisioning, mapper ownership, startup
-rollback and recovery remain unimplemented and unqualified.
+the immutable device/artifact/backup recovery manifest. A per-run original
+4096-byte header backup now has an exclusive-lock/claim-bound writer, atomic
+no-replace installation, fsyncs, SHA-256 verification and a strict reader with
+rootless round-trip and tamper-refusal coverage. The manifest that binds this
+backup to device identity and qualified artifact hashes is still missing. No
+privileged lifecycle command uses these primitives yet; provisioning, mapper
+ownership, startup rollback and recovery remain unimplemented and unqualified.
