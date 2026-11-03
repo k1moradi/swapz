@@ -22,7 +22,7 @@ Public identities are immutable: `swapz`, `dm-swapz.ko`, `dm_swapz`, target `swa
 - `tests/runtime/benchmark/`: deterministic benchmark fixture and replay logic.
 - `tests/tools/`: private qualification orchestration and owned-RAM helpers.
 - `tests/suites/`: native test build rules.
-- `docs/`: current documentation only.
+- `docs/`: maintained documentation, including clearly labeled historical records under `docs/handoff/`.
 - `packaging/`: install/uninstall packaging logic.
 - `.github/workflows/product-codec.yml`: production-C and Kbuild qualification.
 - `.github/workflows/project-goals.yml`: project-goal, rootless and governance qualification.
@@ -60,11 +60,11 @@ navigation document.
   qualification scope, stage results, and qualified-artifact hashes together.
   A PASS for an older source does not qualify a newer `main`, and a report-only
   commit is evidence publication rather than a new production source revision.
-- [`handoff/production-readiness.json`](handoff/production-readiness.json) is a
-  host/readiness snapshot with its own `updated_at_utc` and repository SHAs.
-  It is observational and may lag both `main` and the latest generated test
-  report; never let an older readiness field override newer canonical source,
-  policy, or test evidence.
+- [`handoff/production-readiness.json`](handoff/production-readiness.json) is
+  explicitly marked `snapshot_kind: HISTORICAL` and `SNAPSHOT_CURRENT: NO`.
+  Its `updated_at_utc` and repository SHAs document a past host observation,
+  **not** current synchronization or production readiness. Never let its
+  historical fields override current source, policy, or test evidence.
 - [`production-acceptance.json`](production-acceptance.json) is the canonical
   quantitative physical-acceptance policy consumed by the physical evaluators.
   Candidate geometry or capacity in a snapshot is not a production PASS until
@@ -91,7 +91,7 @@ for the current dedicated SD card.
   not a history of retired A/B protocols.
 - [context.md](context.md): reusable Linux MM, folio, swap/zswap, BIO and SWZ
   technical context; implementation proposals and priorities stay in ROADMAP.
-- [handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md): detailed historical `/dev/sda4` physical-smoke, capacity and live-swap evidence; not current policy.
+- [handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md): historical `/dev/sda4` physical/capacity/live-swap evidence and transitional primary-manager implementation notes; not current policy.
 - [compile.md](compile.md): build/install/test interface and artifacts.
 - [benchmark.md](benchmark.md): current benchmark methodology, interpretation and
   only the minimum settled evidence needed to avoid repeating a test.
@@ -99,8 +99,8 @@ for the current dedicated SD card.
 A settled idea should have one compact record in the ROADMAP evidence table:
 **decision, evidence anchor when useful, and the condition that would justify
 reopening it**. Do not duplicate the full experiment story across documents.
-Detailed trial narratives and superseded procedures belong in immutable Git
-history and report commits.
+Detailed trial narratives and superseded procedures remain in clearly labeled
+historical handoff records, Git history, and report commits—not active policy.
 
 Agents must keep documentation at or below 25% of the 256K context window
 (64K tokens). Keep AGENT_CONTEXT, VISION and README resident; retrieve only
