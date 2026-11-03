@@ -1158,12 +1158,12 @@ def evaluate_release(
         elif reboot.get("status") == "FAIL":
             cold_boot_observed = "FAIL"
 
-    if not code_ready or not deployment_ready:
+    if cold_boot_observed == "FAIL":
+        release_verdict = "FAIL"
+    elif not code_ready or not deployment_ready:
         release_verdict = "BLOCKED"
     elif cold_boot_observed == "PASS":
         release_verdict = "PASS"
-    elif cold_boot_observed == "FAIL":
-        release_verdict = "FAIL"
     else:
         release_verdict = "BLOCKED"
 

@@ -554,6 +554,20 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "FAIL")
         self.assertEqual(result["release_verdict"], "FAIL")
 
+    def test_current_owner_reboot_failure_dominates_stale_readiness(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        evidence["release_evidence"]["installed_artifact_identity"][
+            "installed"] = False
+        evidence["release_evidence"]["owner_observed_reboot"].update(
+            status="FAIL", observed=False)
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")
+        self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["COLD_BOOT_OBSERVED"], "FAIL")
+        self.assertEqual(result["release_verdict"], "FAIL")
+
     def test_owner_reboot_pass_requires_persistent_cold_boot_evidence(self):
         report = owner_report()
         policy = acceptance_policy()
