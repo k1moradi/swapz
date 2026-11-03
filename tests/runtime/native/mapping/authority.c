@@ -78,6 +78,60 @@ static int test_initial_rejects_unsafe_capacity(void)
 	return 0;
 }
 
+
+/*
+ * Exercise every segment transition across the GC minimum -> proportional
+ * reserve crossover without copying the capacity formula into the test.
+ * The production capacity helper and admission gate must agree at both edges.
+ */
+static int test_capacity_preflight_segment_sweep(void)
+{
+	swapz_u32 segment_count;
+
+	for (segment_count = 3U; segment_count <= 2048U; ++segment_count) {
+		const swapz_u32 physical_blocks =
+			segment_count * SWAPZ_SEGMENT_BLOCKS;
+		struct swapz_authority_geometry geometry;
+		swapz_u32 reserve = 0x5a5a5a5aU;
+		int error;
+
+		memset(&geometry, 0x5a, sizeof(geometry));
+		error = swapz_authority_capacity(physical_blocks, &geometry);
+		if (segment_count == 3U) {
+			CHECK(error == -ENOSPC);
+			CHECK(geometry.maximum_logical_pages == 0x5a5a5a5aU);
+			continue;
+		}
+		CHECK(error == 0);
+		CHECK(geometry.usable_physical_blocks == physical_blocks);
+		CHECK(geometry.gc_reserve_blocks >= 2U * SWAPZ_SEGMENT_BLOCKS);
+		CHECK(geometry.required_foreground_headroom_blocks ==
+		      SWAPZ_FOREGROUND_HEADROOM_BLOCKS);
+		CHECK(geometry.maximum_logical_pages > 0U);
+		CHECK(geometry.logical_mapper_bytes ==
+		      (swapz_u64)geometry.maximum_logical_pages *
+		      SWAPZ_BLOCK_BYTES);
+		CHECK(geometry.linux_usable_swap_bytes ==
+		      (swapz_u64)(geometry.maximum_logical_pages -
+				  SWAPZ_LINUX_SWAP_HEADER_BLOCKS) *
+		      SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_authority_validate_geometry(
+			      geometry.maximum_logical_pages,
+			      physical_blocks, &reserve) == 0);
+		CHECK(reserve == geometry.gc_reserve_blocks);
+		CHECK(((physical_blocks - reserve) / SWAPZ_SEGMENT_BLOCKS) *
+			      SWAPZ_SEGMENT_BLOCKS -
+			      geometry.maximum_logical_pages >=
+		      SWAPZ_FOREGROUND_HEADROOM_BLOCKS);
+		reserve = 0x5a5a5a5aU;
+		CHECK(swapz_authority_validate_geometry(
+			      geometry.maximum_logical_pages + 1U,
+			      physical_blocks, &reserve) == -ENOSPC);
+		CHECK(reserve == 0x5a5a5a5aU);
+	}
+	return 0;
+}
+
 static int test_selected_card_geometry_and_memory_scaling(void)
 {
 	const swapz_u64 partition_bytes = 124787884032ULL;
@@ -1187,6 +1241,65 @@ static int capacity_progress_choose_partial_victim(swapz_u32 *victim)
 	return 0;
 }
 
+
+/*
+ * Exactly one stale RAW block in a 256-block victim requires relocation of
+ * 255 live records. The GC destination must retain its final single block;
+ * an overwrite within that last block must not corrupt the earlier records.
+ * A second rotation of the opposite (one-survivor) victim proves forward
+ * progress without consuming either reserve role.
+ */
+static int test_maximum_capacity_single_block_gc_reclaim(void)
+{
+	swapz_u32 overwrite_index;
+	swapz_u32 logical = 2U;
+	struct swapz_tx tx;
+
+	CHECK(capacity_progress_setup() == 0);
+	CHECK(capacity_progress_fill_all_pages(1U) == 0);
+	for (overwrite_index = 0U; overwrite_index < SWAPZ_SEGMENT_BLOCKS;
+	     ++overwrite_index)
+		CHECK(capacity_progress_write_page(0U, overwrite_index + 2U) == 0);
+	CHECK(capacity_progress_authority.open_segment == 5U);
+	CHECK(capacity_progress_authority.next_block ==
+	      6U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(capacity_progress_segment_maps[0] ==
+	      SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(capacity_progress_segment_maps[5] == 1U);
+	CHECK(swapz_stage(&capacity_progress_authority, &logical, 1, 1,
+			  &tx) == -ENOSPC);
+	CHECK(!capacity_progress_authority.in_flight);
+	CHECK(capacity_progress_verify_all_pages() == 0);
+
+	CHECK(capacity_progress_relocate_segment(0U) == 0);
+	CHECK(capacity_progress_gc_writes == SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(capacity_progress_segment_maps[6] ==
+	      SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(capacity_progress_authority.open_segment == 6U);
+	CHECK(capacity_progress_authority.next_block ==
+	      7U * SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(capacity_progress_reserve_segments() == 2U);
+	CHECK(capacity_progress_verify_all_pages() == 0);
+
+	/* Consuming the last free destination block must preserve prior data. */
+	CHECK(capacity_progress_write_page(1U, 2U) == 0);
+	CHECK(capacity_progress_authority.next_block ==
+	      7U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(swapz_stage(&capacity_progress_authority, &logical, 1, 1,
+			  &tx) == -ENOSPC);
+	CHECK(!capacity_progress_authority.in_flight);
+	CHECK(capacity_progress_verify_all_pages() == 0);
+
+	CHECK(capacity_progress_relocate_segment(5U) == 0);
+	CHECK(capacity_progress_gc_writes == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(capacity_progress_segment_maps[7] == 1U);
+	CHECK(capacity_progress_authority.open_segment == 7U);
+	CHECK(capacity_progress_reserve_segments() == 2U);
+	CHECK(capacity_progress_write_page(logical, 2U) == 0);
+	CHECK(capacity_progress_verify_all_pages() == 0);
+	return 0;
+}
+
 static int test_maximum_capacity_raw_cow_and_gc_progress(void)
 {
 	const unsigned int rotations = 8U;
@@ -1244,8 +1357,10 @@ int main(void)
 	int passed = 0;
 
 	CHECK(test_initial_rejects_unsafe_capacity() == 0); passed++;
+	CHECK(test_capacity_preflight_segment_sweep() == 0); passed++;
 	CHECK(test_selected_card_geometry_and_memory_scaling() == 0); passed++;
 	CHECK(test_16gib_fixture_maximum_capacity() == 0); passed++;
+	CHECK(test_maximum_capacity_single_block_gc_reclaim() == 0); passed++;
 	CHECK(test_maximum_capacity_raw_cow_and_gc_progress() == 0); passed++;
 	CHECK(test_full_publish_and_authoritative_reads() == 0); passed++;
 	CHECK(test_peeked_authoritative_read_rechecks_payload_and_sequence() == 0); passed++;

@@ -583,7 +583,15 @@ overwrite from the mandatory foreground headroom, then force repeated
 high-live GC reserve rotations while checking every surviving byte, generation
 and RAW CRC. The GC high-occupancy suite remains the longer 64-rotation stress
 proof; together these establish that capacity acceptance corresponds to actual
-allocator forward progress rather than mapper construction alone. Allocator
+allocator forward progress rather than mapper construction alone. The native
+authority suite must also sweep segment-rounded physical geometries across the
+minimum and proportional-reserve crossover, verifying exact maximum and
+one-page-over admission without a second test-side capacity formula. At full
+RAW occupancy, it must exercise the single-stale-block extreme: a 255-survivor
+GC relocation leaving exactly one destination block, an overwrite consuming
+that final block, and a subsequent one-survivor reserve rotation. Every
+surviving byte, RAW CRC, generation, and reserve-role count is checked. This
+is an allocator invariant test, not a loaded-host proof. Allocator
 edge fixtures that are not themselves capacity tests must still use an
 admissible geometry: under this policy three physical segments have no positive
 logical capacity because the two GC-reserve segments plus one foreground COW
