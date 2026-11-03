@@ -2017,7 +2017,15 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("a->segment_gc_min_live_blocks[segment] +=", AUTH)
         self.assertIn("swapz_gc_candidate_can_free_block", choose)
         self.assertIn("ctx->gc_no_headroom_skips++", choose)
-        self.assertIn("gc_no_headroom_skips=%llu", body("swapz_status"))
+        status = body("swapz_status")
+        advance = body("swapz_gc_recovery_advance_destination")
+        self.assertIn("gc_no_headroom_skips=%llu", status)
+        self.assertIn("gc_reserve_segments_initial=%u", status)
+        self.assertIn("gc_reserve_segments_current=%u", status)
+        self.assertIn("gc_destination_advances=%llu", status)
+        self.assertIn("ctx->gc_reserve_segments_current--", advance)
+        self.assertIn("ctx->gc_destination_advances++", advance)
+        self.assertIn("ctx->gc_reserve_segments_current =", ctr)
         self.assertIn("ctx->gc_min_live_blocks = kvcalloc", ctr)
 
     def test_gc_io_aware_default_retains_old_control_policies(self):
