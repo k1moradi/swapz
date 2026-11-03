@@ -1590,4 +1590,6 @@ This `swapzctl` production-source change requires fresh exact-source owner
 qualification before use. The full primary start/stop/recover coordinator,
 interruption recovery, boot integration, sustained-GC behavior, and production
 readiness remain open; packaged units and the global privileged execution gate
-remain disabled.
+remain disabled. The focused direct-C regression first caught a strict-compiler
+warning from the ten-byte magic declaration; the validator now compares the
+ten magic bytes while excluding the C string terminator.

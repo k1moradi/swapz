@@ -3400,8 +3400,9 @@ The read-only plan may print a mutation trace, but it must never invoke the
 mutation channel. `mkswap` may target only the exact verified mapper, without
 force. The primary C manager must pin a root-owned `mkswap` executable that is
 not group/world-writable, pass it only a descriptor path for the independently
-verified mapper, and verify the resulting Linux swap v1 header against the exact
-mapper capacity. It must also prove that the original `/dev/sda4` SWZ header is
+verified mapper, and verify the resulting Linux swap v1 header, including its
+exact ten-byte `SWAPSPACE2` magic, against the mapper capacity. It must also
+prove that the original `/dev/sda4` SWZ header is
 unchanged before and after initialization. The formatter operation is valid
 only in the durable `STARTING` state. Rootless direct-C tests must validate the
 header fields and prove the privileged formatter stub is unavailable without

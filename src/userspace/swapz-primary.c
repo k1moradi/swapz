@@ -1059,8 +1059,7 @@ int swapz_primary_linux_swap_header_valid(
 	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
 	uint64_t logical_pages)
 {
-	static const unsigned char magic[SWAPZ_PRIMARY_SWAP_MAGIC_BYTES] =
-		"SWAPSPACE2";
+	static const unsigned char magic[] = "SWAPSPACE2";
 	unsigned char uuid_nonzero = 0;
 	unsigned int i;
 
@@ -1074,7 +1073,7 @@ int swapz_primary_linux_swap_header_valid(
 		header + SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET) != 0U ||
 	    memcmp(header + SWAPZ_PRIMARY_BLOCK_BYTES -
 		   SWAPZ_PRIMARY_SWAP_MAGIC_BYTES,
-		   magic, sizeof(magic)))
+		   magic, sizeof(magic) - 1U))
 		return 0;
 	for (i = 0; i < SWAPZ_PRIMARY_SWAP_UUID_BYTES; ++i)
 		uuid_nonzero |= header[SWAPZ_PRIMARY_SWAP_UUID_OFFSET + i];
