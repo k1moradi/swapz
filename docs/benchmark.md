@@ -649,7 +649,9 @@ lower major:minor for anonymous swap), and all accepted pairs must agree. The
 campaign sealer independently binds that evaluator identity to the admitted
 partition in the boundary host snapshot. A mismatch blocks a PASS but failed or
 excluded artifacts remain sealable evidence. These are evidence-integrity
-checks and do not change any frozen performance threshold.
+checks and do not change any frozen performance threshold. Acceptance counters
+and byte/page quantities are type-strict integers; JSON strings and booleans are
+malformed evidence and cannot satisfy a numeric gate.
 
 For each five-pair service cohort, PASS requires the paired 95% interval lower
 bound for useful WRITE to be at least +5%; interval upper bounds for normalized

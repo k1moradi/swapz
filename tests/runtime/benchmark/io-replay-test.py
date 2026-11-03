@@ -2644,6 +2644,20 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(failed["status"], "FAIL")
                 self.assertFalse(failed["checks"]["gc_headroom"])
 
+        # JSON numeric evidence is not coerced from strings or booleans.
+        malformed_gc = {
+            **swapz, "gc": {**swapz["gc"], "gc_victims": "2"}}
+        self.assertEqual(
+            qualification.sustained_decision(
+                {"raw": raw, "swapz": malformed_gc})["status"],
+            "FAIL")
+        malformed_cold_read = {
+            **swapz, "cold_read": {**swapz["cold_read"], "pages": "16"}}
+        self.assertEqual(
+            qualification.sustained_decision(
+                {"raw": raw, "swapz": malformed_cold_read})["status"],
+            "FAIL")
+
     def test_sustained_interval_sampler_gc_and_trailing_gap(self):
         import importlib.util
         import time
@@ -3306,6 +3320,9 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(verdict(), "FAIL")
         arm["anonymous_swap_attribution"]["vmstat"]["pswpout_pages"] = 128
         arm["target_io"]["target_write_bytes"] = 0
+        self.assertEqual(verdict(), "FAIL")
+        arm["target_io"]["target_write_bytes"] = 1048576
+        arm["observed_swap_bytes"] = "134217728"
         self.assertEqual(verdict(), "FAIL")
 
         anonymous_path = SCRIPT.with_name("anonymous-swap.py")

@@ -534,6 +534,14 @@ def service_decision(pairs: list[dict], workload: str) -> dict:
             "evidence": "paired_t_95pct", "confidence_intervals": cis, "checks": checks}
 
 
+def integer_at_least(value, minimum: int) -> bool:
+    return type(value) is int and value >= minimum
+
+
+def positive_counter(value) -> bool:
+    return integer_at_least(value, 1)
+
+
 def sustained_decision(pair: dict) -> dict:
     raw, swapz = pair["raw"], pair["swapz"]
     limit = CONTRACT["acceptance"]["sustained"]
@@ -566,24 +574,36 @@ def sustained_decision(pair: dict) -> dict:
             type(gc.get("gc_no_headroom_skips")) is int and
             0 <= gc["gc_no_headroom_skips"] <=
             limit["gc_no_headroom_skips_max"]),
-        "gc_relocation": int(gc.get("gc_victims", 0)) > 0 and int(gc.get("gc_pages", 0)) > 0,
-        "segment_programming": int(gc.get("segment_program_sum", 0)) > 0,
-        "target_not_failed": int(gc.get("failed", -1)) == 0 and int(gc.get("error", 0)) == 0,
+        "gc_relocation": (
+            positive_counter(gc.get("gc_victims")) and
+            positive_counter(gc.get("gc_pages"))),
+        "segment_programming": positive_counter(gc.get("segment_program_sum")),
+        "target_not_failed": (
+            gc.get("failed") == 0 and type(gc.get("failed")) is int and
+            gc.get("error") == 0 and type(gc.get("error")) is int),
         "forward_progress": number(swapz.get("max_no_progress_seconds"), "max_no_progress_seconds") <= limit["max_no_progress_seconds"],
-        "raw_repeated_overwrite": int(raw_overwrite.get("measured_hot_pages_rewritten", 0)) >= limit["minimum_rewritten_hot_pages"],
-        "swapz_repeated_overwrite": int(swapz_overwrite.get("measured_hot_pages_rewritten", 0)) >= limit["minimum_rewritten_hot_pages"],
-        "replay_rss": int(resources.get("replay_peak_rss_bytes", -1)) <= limit["replay_peak_rss_bytes_max"],
-        "target_ram": int(resources.get("metadata_and_target_peak_ram_bytes", -1)) <= limit["metadata_and_target_peak_ram_bytes_max"],
+        "raw_repeated_overwrite": integer_at_least(
+            raw_overwrite.get("measured_hot_pages_rewritten"),
+            limit["minimum_rewritten_hot_pages"]),
+        "swapz_repeated_overwrite": integer_at_least(
+            swapz_overwrite.get("measured_hot_pages_rewritten"),
+            limit["minimum_rewritten_hot_pages"]),
+        "replay_rss": (
+            integer_at_least(resources.get("replay_peak_rss_bytes"), 0) and
+            resources["replay_peak_rss_bytes"] <=
+            limit["replay_peak_rss_bytes_max"]),
+        "target_ram": (
+            integer_at_least(
+                resources.get("metadata_and_target_peak_ram_bytes"), 0) and
+            resources["metadata_and_target_peak_ram_bytes"] <=
+            limit["metadata_and_target_peak_ram_bytes_max"]),
         "oracle": (swapz.get("oracle") or {}).get("mismatches") == 0,
-        "cold_read": int((swapz.get("cold_read") or {}).get("pages", 0)) > 0,
-        "high_occupancy": int(swapz.get("occupancy_percent", 0)) >= 90,
+        "cold_read": positive_counter((swapz.get("cold_read") or {}).get("pages")),
+        "high_occupancy": integer_at_least(
+            swapz.get("occupancy_percent"), 90),
     }
     return {"status": "PASS" if all(checks.values()) else "FAIL",
             "evidence": "directional_single_pair", "ratios": ratios, "checks": checks}
-
-
-def positive_counter(value) -> bool:
-    return type(value) is int and value > 0
 
 
 def anonymous_decision(pairs: list[dict]) -> dict:
@@ -600,7 +620,9 @@ def anonymous_decision(pairs: list[dict]) -> dict:
             ratios["lower_write_requests"] <= limit["lower_write_requests_ratio_max"] and
             ratios["cpu"] <= limit["cpu_ratio_max"])
         for arm in (pair["raw"], pair["swapz"]):
-            pair_ok &= int(arm.get("observed_swap_bytes", 0)) >= limit["minimum_observed_swap_bytes"]
+            pair_ok &= integer_at_least(
+                arm.get("observed_swap_bytes"),
+                limit["minimum_observed_swap_bytes"])
             pair_ok &= (arm.get("oracle") or {}).get("mismatches") == 0
             attribution = arm.get("anonymous_swap_attribution") or {}
             pair_ok &= positive_counter(
