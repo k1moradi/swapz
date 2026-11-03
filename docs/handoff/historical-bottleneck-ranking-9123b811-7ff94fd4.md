@@ -64,3 +64,27 @@ telemetry and qualification semantics remain in
 3. **QD8 bimodality and the 8KiB READ-amplification cap.** Unchanged from the
    ID101–ID104 analysis: merged eight-record windows win, and accepted-burst
    extents are capped at 8KiB, holding QD8 lower bytes near 0.75.
+
+---
+
+## What the pinned queue experiment establishes
+
+The QD32 replay remains intentionally unpaced and closed-loop, but the lower
+device geometry is no longer ambiguous. The slow model is blk-mq with one
+submit queue and `hw_queue_depth=1`, and observed lower peaks stay at one.
+The faster model uses `hw_queue_depth=64`; raw traffic reaches sampled depth
+greater than one, proving that the model can expose parallel lower service.
+
+This resolves the earlier SD-model uncertainty. On the serial-depth synthetic
+model, swapz's compression and aggregation are strongly beneficial even though
+K=1 async preparation is not. The correct conclusion is therefore not "more
+WRITE concurrency is needed for SD-like media"; it is "data/request reduction
+already wins on the serial model, while async WRITE concurrency currently adds
+nothing measurable."
+
+The fast model exposes a different problem. swapz lower READ and WRITE peaks
+remain near one despite deeper raw service capability. For WRITEs, the K=1 run
+slot is occupied only ~9% of mixed wall and preparation backlog is shallow, so
+K>1 would add slots before proving ready-run pressure. For READs, raw reaches
+sampled depth ~4 while swapz remains serialized at one; this is the cleaner
+bounded concurrency opportunity.
