@@ -669,6 +669,9 @@ struct swapz_dm {
 	u64 gc_relocation_map_entries;
 	u64 gc_victims;
 	u64 gc_role_rotations;
+	u64 gc_destination_advances; /* successful recovery-only reserve degradation */
+	swapz_u32 gc_reserve_segments_initial;
+	swapz_u32 gc_reserve_segments_current;
 	swapz_u32 last_gc_victim;
 	swapz_u32 last_gc_destination;
 	u64 gc_pages;
@@ -3945,6 +3948,10 @@ static int swapz_gc_recovery_advance_destination(struct swapz_dm *ctx)
 	error = swapz_gc_recovery_validate(ctx);
 	if (error)
 		return error;
+	if (!ctx->gc_reserve_segments_current)
+		return -EUCLEAN;
+	if (ctx->gc_reserve_segments_current == 1U)
+		return -ENOSPC;
 	blocked_destination = recovery->destination;
 	victim = recovery->victim;
 	error = swapz_gc_advance_rotation_destination(
@@ -3960,7 +3967,13 @@ static int swapz_gc_recovery_advance_destination(struct swapz_dm *ctx)
 	recovery->destination = a->gc_destination;
 	recovery->next_segment_probe = a->next_segment_probe;
 	recovery->minimum_next_block = a->next_block;
-	return swapz_gc_recovery_validate(ctx);
+	error = swapz_gc_recovery_validate(ctx);
+	if (error)
+		return error;
+	ctx->gc_reserve_segments_current--;
+	if (ctx->gc_destination_advances != U64_MAX)
+		ctx->gc_destination_advances++;
+	return 0;
 }
 
 static int swapz_gc_recovery_roll_forward(struct swapz_dm *ctx)
@@ -8702,6 +8715,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Cannot initialize rotating GC reserve roles";
 		goto fail;
 	}
+	ctx->gc_reserve_segments_initial =
+		ctx->segment_count -
+		(ctx->physical_blocks - ctx->authority.reserve_blocks) /
+			SWAPZ_SEGMENT_BLOCKS;
+	ctx->gc_reserve_segments_current = ctx->gc_reserve_segments_initial;
 	error = swapz_enable_segment_mapping_counts(&ctx->authority,
 						ctx->segment_mapped_pages,
 						ctx->segment_count);
@@ -9052,7 +9070,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->reordered_records,
 		       ctx->authority.next_block);
 		DMEMIT(
-			   " reserve=%u gc_victims=%llu gc_role_rotations=%llu "
+			   " reserve=%u gc_reserve_segments_initial=%u "
+			   "gc_reserve_segments_current=%u gc_destination_advances=%llu "
+			   "gc_victims=%llu gc_role_rotations=%llu "
 			   "gc_distinct_victims=%u gc_victim_min_evictions=%u "
 			   "gc_victim_max_evictions=%u last_gc_victim=%u last_gc_destination=%u "
 			   "gc_pages=%llu gc_read=%llu gc_write=%llu gc_policy=%u "
@@ -9062,6 +9082,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			   "gc_choose_segment_entries=%llu gc_relocation_map_entries=%llu "
 			   "gc_read_reqs=%llu gc_write_reqs=%llu dead_segment_reuses=%u",
 		       ctx->authority.reserve_blocks,
+		       READ_ONCE(ctx->gc_reserve_segments_initial),
+		       READ_ONCE(ctx->gc_reserve_segments_current),
+		       READ_ONCE(ctx->gc_destination_advances),
 		       ctx->gc_victims,
 		       ctx->gc_role_rotations,
 		       gc_distinct_victims,
