@@ -838,7 +838,9 @@ must emit a concise `FAIL:` marker rather than disappearing behind filtered
 stage-5 output. Rootless verification must run `bash -n` across every harness shell script individually to ensure syntax regressions fail rootless Stage 2 rather than reaching loaded execution. The rootless harness must also prove that
 `source-contract-test.py` contains exactly one terminal test runner; duplicated
 tails or duplicate `__main__` blocks are harness corruption and fail before
-loaded qualification. Unexpected preflight command failures must be trapped
+loaded qualification. Shared benchmark-plan construction must emit fixed allocation/fixture/trace/write-plans/verify progress markers before each fallible setup class. If that setup returns nonzero without a separately allowlisted diagnostic, the reporter must publish only the fixed step name and a bounded fixed reason; it must never copy the failing command, path, fixture bytes, or arbitrary stderr.
+
+Unexpected preflight command failures must be trapped
 before any ownership mutation and reported only as numeric status and source
 line. The diagnostic must not include `BASH_COMMAND`, paths, UUIDs, mapper
 names, or other host-specific values; normal ownership/safety rejections still

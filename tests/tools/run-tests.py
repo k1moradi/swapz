@@ -2038,6 +2038,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
     phase = default_phase or "preflight / administrator authorization"
     pair_number = 0
     regime = None
+    shared_plan_step = None
     if loaded:
         for line in output.splitlines():
             if line.startswith("START_LOADED_MAXIMUM_CAPACITY"):
@@ -2088,6 +2089,14 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = "owned RAM target construction"
             elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "shared fixture allocation and workload generation"
+            elif (match := re.fullmatch(
+                    r"START_LOADED_SHARED_BENCHMARK_PLAN="
+                    r"(allocation|fixture|trace|write-plans|verify)", line)):
+                shared_plan_step = match.group(1)
+                phase = "shared fixture preparation " + shared_plan_step
+            elif line.startswith("PASS_LOADED_SHARED_BENCHMARK_PLAN"):
+                shared_plan_step = None
+                phase = "shared fixture preparation complete"
             elif line.startswith("START_OWNED_RAM_REGIME="):
                 label = line.partition("=")[2]
                 if label in MODEL_ORDER:
@@ -2271,6 +2280,10 @@ def failure_context(output, *, loaded=True, default_phase=None):
             if "TimeoutExpired" in candidate or "timed out" in candidate:
                 reason = "Operation exceeded its bounded timeout"
                 break
+        if reason is None and shared_plan_step is not None:
+            reason = (
+                "Shared benchmark plan " + shared_plan_step +
+                " step returned nonzero")
         if reason is None:
             reason = (("Child returned nonzero without a sanitized loaded diagnostic marker")
                       if loaded else

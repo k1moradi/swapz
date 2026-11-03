@@ -3231,6 +3231,18 @@ class ReportContract(unittest.TestCase):
         self.assertIn("not writable", reason)
         self.assertNotIn("/home/secret", reason)
 
+        for step in ("allocation", "fixture", "trace", "write-plans", "verify"):
+            with self.subTest(shared_plan_step=step):
+                phase, reason = runner.failure_context(
+                    "PASS_LOADED_OWNED_NULLBLK_SMOKE\n"
+                    f"START_LOADED_SHARED_BENCHMARK_PLAN={step}\n"
+                    "/home/private/path must not leak\n")
+                self.assertIn(step, phase)
+                self.assertEqual(
+                    reason,
+                    f"Shared benchmark plan {step} step returned nonzero")
+                self.assertNotIn("/home/private", reason)
+
         blocked = ("START_LOADED_OWNED_NULLBLK_SMOKE\n"
                    "BLOCKED: backing mismatch: "
                    "/home/private/dev/nullb-swapz-abcdef0123456789\n")
@@ -3391,6 +3403,10 @@ class ReportContract(unittest.TestCase):
         private = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         self.assertIn('mkdir -p "$ROOT/build/tests"', loaded)
         self.assertIn('mktemp -d "$ROOT/build/tests/benchmark-plan.XXXXXXXX"', loaded)
+        self.assertIn(
+            "START_LOADED_SHARED_BENCHMARK_PLAN=allocation", loaded)
+        self.assertIn(
+            "PASS_LOADED_SHARED_BENCHMARK_PLAN", loaded)
         self.assertIn('"$ROOT/build/tests/benchmark-plan."*', loaded)
         self.assertIn('"$ROOT/build/tests/benchmark-plan."*', private)
         self.assertNotIn('mktemp -d "$ROOT/build/benchmark/', loaded)

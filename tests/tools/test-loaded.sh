@@ -168,6 +168,7 @@ umask 077
 # would fail with EACCES after the loaded smoke already passed.
 # The rootless/native build owns build/tests; keep the immutable fixture
 # there, and let each privileged child COPY it to its own private session.
+printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=allocation'
 mkdir -p "$ROOT/build/tests"
 shared_plan="$(mktemp -d "$ROOT/build/tests/benchmark-plan.XXXXXXXX")"
 cleanup_shared_plan() {
@@ -195,9 +196,11 @@ cleanup_shared_plan() {
     rmdir -- "$shared_plan/plan" "$shared_plan" 2>/dev/null || true
 }
 trap cleanup_shared_plan EXIT
+printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=fixture'
 python3 -B tests/runtime/benchmark/anon-page-fixture.py \
     --output-prefix "$shared_plan/fixture" --pages 128 \
     --seed 0x51a0a9 --weights medium=100
+printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=trace'
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --fixture "$shared_plan/fixture.bin" --output-dir "$shared_plan/plan" \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
@@ -215,6 +218,7 @@ python3 -B tests/runtime/benchmark/io-replay.py prepare \
 # Four immutable unpaced write-only plans reuse the identical fixture and
 # logical volume. Persistent lane-owned workers sustain offered QD without
 # per-I/O Future dispatch or an artificial barrier between completed writes.
+printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=write-plans'
 for qd in 1 4 8 32; do
     python3 -B tests/runtime/benchmark/io-replay.py prepare \
         --fixture "$shared_plan/fixture.bin" \
@@ -225,6 +229,7 @@ for qd in 1 4 8 32; do
 done
 
 # Assert the representative fixture remains in the measured ~2KiB class.
+printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=verify'
 python3 -B - "$shared_plan/fixture.json" <<'PY'
 import json
 import sys
@@ -236,6 +241,7 @@ assert fixture["lz4_size_buckets"] == {"2049_3072": 128}
 assert fixture["raw_pages"] == 0
 assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
 PY
+printf '%s\n' 'PASS_LOADED_SHARED_BENCHMARK_PLAN'
 
 # Delta64 + DELTA64_SHUF8 + LZ4 remains fixed on for every emulated-device
 # workload; the former positive-fixture off/on benchmark is retired.
