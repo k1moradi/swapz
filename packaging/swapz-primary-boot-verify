@@ -39,10 +39,13 @@ if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
 fi
 
 recovery_base=/var/lib/swapz/physical-recovery
+runtime_base=/run/swapz
 if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
 	recovery_base=${SWAPZ_PRIMARY_TEST_RECOVERY_BASE:?missing test recovery base}
+	runtime_base=$report_base/runtime
 fi
 arm_file=$report_base/armed.env
+runtime_enable_file=$runtime_base/primary-execution.env
 mapper_swap_unit='dev-mapper-swapz\x2dprimary.swap'
 mapper_service=swapz-primary-mapper.service
 mapper_path=$dev_root/mapper/swapz-primary
@@ -144,6 +147,52 @@ commit_file()
 	sync -f "$temporary"
 	mv -f -- "$temporary" "$destination"
 	sync -f "$report_base"
+}
+
+
+secure_runtime_directory()
+{
+	if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" != 1 ]; then
+		[ "$(id -u)" -eq 0 ] || fail "root privileges are required"
+		[ -e "$runtime_base" ] || mkdir -m 0700 -- "$runtime_base" ||
+			fail "cannot create primary runtime directory"
+	fi
+	[ -d "$runtime_base" ] && [ ! -L "$runtime_base" ] ||
+		fail "primary runtime directory is unavailable or symlinked"
+	owner=$(stat -c '%u' -- "$runtime_base") ||
+		fail "cannot inspect primary runtime directory owner"
+	permissions=$(stat -c '%a' -- "$runtime_base") ||
+		fail "cannot inspect primary runtime directory permissions"
+	[ "$owner" -eq "$expected_uid" ] && [ "$permissions" = 700 ] ||
+		fail "primary runtime directory must be owned mode 0700"
+}
+
+clear_runtime_authorization()
+{
+	secure_runtime_directory
+	rm -f -- "$runtime_enable_file"
+	sync -f "$runtime_base"
+}
+
+commit_runtime_authorization()
+{
+	boot_id=$1
+	source_sha=$2
+	partuuid=$3
+	target_size=$4
+	temporary=$(mktemp "$runtime_base/.primary-execution.XXXXXX") ||
+		fail "cannot create runtime authorization temporary"
+	cat > "$temporary" <<AUTH
+schema=swapz-primary-execution-v1
+boot_id=$boot_id
+source_sha=$source_sha
+partuuid=$partuuid
+target_size_bytes=$target_size
+AUTH
+	chmod 0600 "$temporary"
+	sync -f "$temporary"
+	mv -f -- "$temporary" "$runtime_enable_file"
+	sync -f "$runtime_base"
 }
 
 validate_arm_file()
@@ -521,6 +570,9 @@ ARM
 preflight_boot()
 {
 	secure_report_directory
+	# Any failed or repeated preflight must remove an earlier authorization
+	# before evaluating current boot/source/target facts.
+	clear_runtime_authorization
 	for command_name in grep sed awk stat sync lsblk blockdev sha256sum modinfo findmnt systemctl uname; do
 		require_command "$command_name"
 	done
@@ -566,6 +618,8 @@ preflight_boot()
 	[ "$module_sha256" = "$expected_module_sha" ] || fail "installed module bytes changed after arming"
 	[ "$module_source_sha" = "$expected_source_sha" ] || fail "installed module source changed after arming"
 	[ "$module_source_clean" = "$expected_source_clean" ] || fail "installed module clean marker changed after arming"
+	commit_runtime_authorization \
+		"$boot_id" "$expected_source_sha" "$selected_partuuid" "$target_size_bytes"
 	printf 'PRIMARY_BOOT_PREFLIGHT=PASS boot_id=%s armed_boot_id=%s partuuid=%s\n' \
 		"$boot_id" "$armed_boot_id" "$selected_partuuid"
 }
