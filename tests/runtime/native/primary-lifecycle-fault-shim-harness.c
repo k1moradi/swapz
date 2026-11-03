@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 /*
  * Rootless fake kernel for the private linker-wrap fixture. No real swapon,
@@ -77,7 +78,7 @@ int open(const char *path, int flags, ...)
 
 int fsync(int fd)
 {
-	if (fd != 25)
+	if (fd < 0)
 		abort();
 	++normal_fsync_calls;
 	return 0;
@@ -102,13 +103,24 @@ int main(int argc, char **argv)
 		require_condition(
 			setenv("SWAPZ_PRIMARY_TEST_FAULT", case_name, 1) == 0);
 	if (!strcmp(case_name, "state-dir-fsync")) {
+		int directory_fd = openat(
+			AT_FDCWD, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+		int regular_fd = openat(
+			AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC);
+
+		require_condition(directory_fd >= 0 && regular_fd >= 0);
 		require_condition(setenv(
-			"SWAPZ_PRIMARY_TEST_FSYNC_FAIL_CALL", "3", 1) == 0);
-		require_condition(__wrap_fsync(25) == 0);
-		require_condition(__wrap_fsync(25) == 0);
+			"SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL", "2", 1) == 0);
+		/* First directory durability sync forwards. An intervening regular
+		 * file sync must not advance the selected directory boundary. */
+		require_condition(__wrap_fsync(directory_fd) == 0);
+		require_condition(__wrap_fsync(regular_fd) == 0);
 		errno = 0;
-		require_condition(__wrap_fsync(25) == -1 && errno == EIO);
+		require_condition(
+			__wrap_fsync(directory_fd) == -1 && errno == EIO);
 		require_condition(normal_fsync_calls == 2);
+		require_condition(close(regular_fd) == 0);
+		require_condition(close(directory_fd) == 0);
 		return 0;
 	}
 	if (!strcmp(case_name, "passthrough")) {
