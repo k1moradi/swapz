@@ -48,8 +48,19 @@ static int recycle_hook(void *opaque, swapz_u32 segment)
 
 static int setup(void)
 {
-	int rc = swapz_authority_init(&a, maps, live, classes, 32, 768);
+	int rc = swapz_authority_init(
+		&a, maps, live, classes, 32, 4U * SWAPZ_SEGMENT_BLOCKS);
 
+	if (rc)
+		return rc;
+	/*
+	 * Geometry admission keeps one foreground COW headroom segment
+	 * independently of the two-segment minimum GC reserve. This focused
+	 * dead-recycle fixture intentionally needs one ordinary foreground
+	 * segment, so conservatively reserve one additional segment only after
+	 * validating an admissible four-segment authority.
+	 */
+	a.reserve_blocks = 3U * SWAPZ_SEGMENT_BLOCKS;
 	recycle_hook_calls = 0;
 	recycle_hook_last_segment = ~(swapz_u32)0;
 	recycle_hook_error = 0;
@@ -216,7 +227,7 @@ static int test_segment_page_lists_track_authority(void)
 {
 	const swapz_u32 none = ~(swapz_u32)0;
 
-	CHECK(setup_indexed(768) == 0);
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
 	CHECK(first_page[0] == none && last_page[0] == none);
 	CHECK(write_page(0) == 0);
 	CHECK(write_page(1) == 0);

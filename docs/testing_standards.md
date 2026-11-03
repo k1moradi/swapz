@@ -574,7 +574,13 @@ allocator forward progress rather than mapper construction alone. Allocator
 edge fixtures that are not themselves capacity tests must still use an
 admissible geometry: under this policy three physical segments have no positive
 logical capacity because the two GC-reserve segments plus one foreground COW
-segment consume the entire device, so the smallest such fixture uses four.
+segment consume the entire device, so the smallest such fixture uses four. The focused legacy dead-segment recycler may conservatively
+reserve one additional segment after successful four-segment initialization
+when it intentionally needs exactly one foreground segment to exercise
+immediate recycle, hook-failure, and live-map refusal semantics; this test-only
+restriction must not bypass or weaken the production geometry validator.
+Indexed dead-segment metadata fixtures use the same admissible four-segment
+minimum.
 
 The `/8` reserve change updates the admitted-capacity policy, not the serialized
 SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
