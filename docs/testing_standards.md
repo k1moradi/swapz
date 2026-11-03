@@ -3295,6 +3295,13 @@ qualify Linux `swapon`, physical performance, cold-boot recovery or power-loss
 behavior. The owner objective for this PC excludes VMs. Keep these limits
 explicit in every review and result.
 
+Recovery must refuse while any `swapoff` process runs in a swapoff stage, even
+when the kernel still lists the device, and an unreadable `/proc` entry fails
+closed. Rootless suites for this procedure run with privileged commands refused
+(for example through a `sudo` stub that exits nonzero). The physical-swap-probe
+suite simulates its physical run with mocks, so it must pass under that stub
+and must never be run unguarded on the PC.
+
 The supervisor's qualified-source and artifact pins must follow the latest
 owner x86_64 five-stage PASS report, including the tested oracle binary hash.
 A changed test helper or oracle requires a report for that exact source and the
