@@ -3281,9 +3281,9 @@ and recovery review plus a separate owner decision, its privileged `run` and
 
 The primary boot-manager package currently installs its systemd units disabled;
 package installation must never start the mapper, activate swap, or enable a
-unit. Its privileged `start` and `stop` entry points must also remain blocked
-by the explicit execution gate until their lifecycle is qualified. The manager
-is not eligible for use as the machine's primary swap until
+unit. The native `swapzctl primary` privileged actions must remain blocked by
+the explicit execution gate until their lifecycle is qualified. The manager is
+not eligible for use as the machine's primary swap until
 it has a complete durable provisioning and restoration path, interruption-safe
 startup rollback, mapper/module ownership checks, rootless lifecycle coverage,
 and exact-source qualification. Installing the manager or passing its parser
@@ -3313,9 +3313,9 @@ qualify Linux `swapon`, physical performance, cold-boot recovery or power-loss
 behavior. The owner objective for this PC excludes VMs. Keep these limits
 explicit in every review and result.
 
-The primary manager's rootless tests must exercise the exact maximum geometry,
-Device Mapper output variants, active-swap parsing, header recognition, and
-fail-closed ownership decisions without opening or modifying a block device.
+The primary manager's direct production-C tests must exercise the exact maximum
+geometry, Device Mapper output variants, active-swap parsing, header recognition,
+and fail-closed ownership decisions without opening or modifying a block device.
 The package regression must prove that units are installed disabled and that
 package install/uninstall does not start or stop system swap.
 The manager must use the same permanent `/dev/sda4` partition lock as the

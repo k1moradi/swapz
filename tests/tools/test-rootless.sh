@@ -19,7 +19,6 @@ python3 -B tests/runtime/native/test-report-test.py -v
 python3 -B tests/runtime/native/package-dkms-test.py -v
 python3 -B tests/runtime/native/physical-swap-probe-test.py -v
 python3 -B tests/runtime/native/live-swap-supervisor-test.py -v
-python3 -B tests/runtime/native/swapz-primary-test.py -v
 python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
 [[ -x tests/tools/loaded-preflight.sh ]] || {
   printf '%s\n' 'FAIL: loaded-preflight.sh must remain executable' >&2

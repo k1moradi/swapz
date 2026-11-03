@@ -1367,15 +1367,14 @@ No fallback swap is required by owner decision. A swapfile on root F2FS
 could not protect against loss of that device. Reopen fallback only if the owner
 asks for it.
 
-The primary systemd manager is now being developed as a separate boot-lifecycle
-component. Its package units remain disabled. The current draft verifies the
-maximum mapper geometry and refuses teardown unless the durable state records
-service module ownership and the exact mapper major:minor. Rootless tests
-cover its parsers, ownership policy and disabled privileged entry points. It is
-not yet usable: durable initial
-provisioning, checked restoration, and startup-failure rollback are still
-missing; it now shares the permanent partition lock with the physical-swap
-helpers, but still needs a persistent active-ownership marker. No live swap or
-boot integration has been qualified through this manager. Do not enable its
-units or call its privileged start/stop commands until those gaps and the
-exact-host qualification gates are closed.
+The primary systemd manager is being developed in native userspace C and its
+package units remain disabled. `swapzctl primary plan` reports the maximum
+capacity arithmetic but explicitly marks all live-device gates unchecked and
+the plan BLOCKED. Provision, activation, teardown and recovery are disabled.
+The earlier Python manager draft was removed because production Python is
+outside this repository's coding standards. The remaining implementation must
+add the durable active marker and shared partition lock, initial provisioning,
+checked restoration, startup-failure rollback, exact mapper/module ownership,
+and interruption recovery. No live swap or boot integration has been
+qualified through this manager. Do not enable its units until those paths and
+the exact-host qualification gates are closed.

@@ -43,7 +43,6 @@ fi
 src="$srcbase/swapz-$version"
 cli_dir="$prefix/sbin"; cli="$cli_dir/swapzctl"
 helper_dir="$prefix/libexec/swapz"; helper="$helper_dir/device-roundtrip"
-primary="$helper_dir/swapz-primary"
 unit_dir="$prefix/lib/systemd/system"
 mapper_service="$unit_dir/swapz-primary-mapper.service"
 swap_unit_name="$(systemd-escape --path --suffix=swap /dev/mapper/swapz-primary)"
@@ -83,7 +82,6 @@ verify_owned() {
      -f "$src/.swapz-sources.sha256" &&
      -f "$src/.swapz-binaries.sha256" &&
      -f "$cli" && ! -L "$cli" && -f "$helper" && ! -L "$helper" &&
-     -f "$primary" && ! -L "$primary" &&
      -f "$mapper_service" && ! -L "$mapper_service" &&
      -f "$primary_swap" && ! -L "$primary_swap" ]] || return 1
   grep -Fxq "swapz:$version" "$src/$marker" || return 1
@@ -96,7 +94,7 @@ cleanup_owned() {
        -z "$(find "$src/build" -type l -print -quit)" ]] || return 1
     rm -r -- "$src/build"
   fi
-  rm -f -- "$cli" "$helper" "$primary" "$mapper_service" "$primary_swap"
+  rm -f -- "$cli" "$helper" "$mapper_service" "$primary_swap"
   rmdir -- "$helper_dir"
   for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
     rm -f -- "$src/src/kernel/$(basename "$file")"
@@ -145,14 +143,13 @@ for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
 done
 install -m0755 build/userspace/swapzctl "$cli"
 install -m0755 build/tests/device-roundtrip "$helper"
-install -m0755 src/userspace/swapz-primary.py "$primary"
-sed "s|@SWAPZ_LIBEXECDIR@|$helper_dir|g" \
+sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" \
   packaging/swapz-primary-mapper.service > "$mapper_service"
 install -m0644 packaging/swapz-primary.swap "$primary_swap"
 printf 'swapz:%s\n' "$version" > "$src/$marker"
 (cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
   src/kernel/*.c src/kernel/*.h) > "$src/.swapz-sources.sha256"
-sha256sum "$cli" "$helper" "$primary" "$mapper_service" "$primary_swap" \
+sha256sum "$cli" "$helper" "$mapper_service" "$primary_swap" \
   > "$src/.swapz-binaries.sha256"
 rollback() {
   rc=$?

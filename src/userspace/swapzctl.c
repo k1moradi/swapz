@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "../kernel/superblock.h"
+#include "swapz-primary.h"
 
 #ifndef SWAPZ_VERSION
 #define SWAPZ_VERSION "unknown"
@@ -33,13 +34,16 @@
 static void usage(FILE *out)
 {
 	fputs("Usage: swapzctl version | status | format <blockdev> | help\n", out);
+	fputs("       swapzctl primary plan|prepare|start|stop|recover\n", out);
 	fputs("       swapzctl format <blockdev> --expect-major-minor <major>:<minor> "
 	      "--expect-bytes <decimal-bytes>\n", out);
 	fputs("status reports cumulative committed foreground compression ratios "
 	      "for active swapz targets.\n", out);
 	fputs("format is conservative: block 0 must be all-zero or already SWAPZ.\n",
 	      out);
-	fputs("No mapper target is created and swap is never enabled by swapzctl.\n",
+	fputs("Primary-swap lifecycle commands remain disabled until separately "
+	      "qualified.\n", out);
+	fputs("The format command creates no mapper target and never enables swap.\n",
 	      out);
 }
 
@@ -793,6 +797,9 @@ close_error:
 int main(int argc, char **argv)
 {
 	struct stat info;
+
+	if (argc >= 2 && !strcmp(argv[1], "primary"))
+		return swapz_primary_command(argc - 2, argv + 2);
 
 	if (argc == 2 &&
 	    (!strcmp(argv[1], "help") || !strcmp(argv[1], "--help"))) {

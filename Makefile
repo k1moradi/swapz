@@ -37,9 +37,9 @@ build/tests/direct-write-probe: tests/tools/direct-write-probe.c Makefile
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-build/userspace/swapzctl: src/userspace/swapzctl.c src/kernel/VERSION src/kernel/superblock.h Makefile
+build/userspace/swapzctl: src/userspace/swapzctl.c src/userspace/swapz-primary.c src/userspace/swapz-primary.h src/kernel/VERSION src/kernel/superblock.h Makefile
 	@mkdir -p build/userspace
-	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' $< -o $@
+	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' src/userspace/swapzctl.c src/userspace/swapz-primary.c -o $@
 
 install: all
 	@sudo bash packaging/package-dkms.sh install "$(PREFIX)"

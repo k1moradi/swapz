@@ -53,6 +53,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("build/tests/device-roundtrip: tests/tools/device-roundtrip.c", MAKE)
         self.assertIn("build/tests/direct-write-probe: tests/tools/direct-write-probe.c", MAKE)
         self.assertIn("build/userspace/swapzctl: src/userspace/swapzctl.c "
+                      "src/userspace/swapz-primary.c src/userspace/swapz-primary.h "
                       "src/kernel/VERSION", MAKE)
         staged = (ROOT / "src/kernel/Makefile").read_text()
         self.assertIn('cmp -s "$$src" "$$dst"', staged)

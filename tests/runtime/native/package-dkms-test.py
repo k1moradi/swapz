@@ -37,7 +37,8 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                         '-DSWAPZ_VERSION="' + VERSION + '"',
-                        str(ROOT / "src/userspace/swapzctl.c"), "-o",
+                        str(ROOT / "src/userspace/swapzctl.c"),
+                        str(ROOT / "src/userspace/swapz-primary.c"), "-o",
                         str(ROOT / "build/userspace/swapzctl")], check=True)
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                         str(ROOT / "tests/tools/device-roundtrip.c"), "-o",
@@ -67,10 +68,10 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertEqual(version_from_dkms.stdout, VERSION)
         self.assertEqual(subprocess.run([binary, "start", "/dev/sda"],
                          capture_output=True).returncode, 2)
-        primary = self.prefix / "libexec/swapz/swapz-primary"
-        self.assertTrue(primary.is_file())
-        self.assertEqual(subprocess.run([primary, "--help"], capture_output=True,
-                                        text=True).returncode, 0)
+        primary_status = subprocess.run(
+            [binary, "primary", "start"], capture_output=True, text=True)
+        self.assertEqual(primary_status.returncode, 2)
+        self.assertIn("remain disabled", primary_status.stderr)
         unit_dir = self.prefix / "lib/systemd/system"
         mapper_service = unit_dir / "swapz-primary-mapper.service"
         swap_unit = unit_dir / "dev-mapper-swapz\\x2dprimary.swap"
@@ -80,7 +81,7 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         swap_text = swap_unit.read_text()
         self.assertIn("RefuseManualStart=yes", service_text)
         self.assertIn("RefuseManualStop=yes", service_text)
-        self.assertIn("ExecStart=" + str(primary) + " start", service_text)
+        self.assertIn("ExecStart=" + str(binary) + " primary start", service_text)
         self.assertIn("What=/dev/mapper/swapz-primary", swap_text)
         self.assertIn("Priority=-1", swap_text)
         self.assertNotIn("discard", swap_text.lower())
@@ -99,7 +100,6 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         r = self.invoke("uninstall")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(binary.exists())
-        self.assertFalse(primary.exists())
         self.assertFalse(mapper_service.exists())
         self.assertFalse(swap_unit.exists())
         self.assertFalse((self.home / "usr/src" / ("swapz-" + VERSION)).exists())

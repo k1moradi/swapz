@@ -13,8 +13,8 @@ ConditionPathExists=/var/lib/swapz/primary/state.json
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=@SWAPZ_LIBEXECDIR@/swapz-primary start
-ExecStop=@SWAPZ_LIBEXECDIR@/swapz-primary stop
+ExecStart=@SWAPZ_SBINDIR@/swapzctl primary start
+ExecStop=@SWAPZ_SBINDIR@/swapzctl primary stop
 TimeoutStartSec=120s
 TimeoutStopSec=infinity
 UMask=0077
