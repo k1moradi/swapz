@@ -583,6 +583,11 @@ source-derived authority admission limit and keep maximum-capacity operation
 unqualified. Report-parser and Make-interface fixtures must synthesize this
 same 3,727,616-page / 15,268,315,136-byte boundary; the retired pre-headroom
 3,727,872-page marker is invalid evidence and must not be accepted as current.
+The primary manager must consume the shared authority capacity-window helper,
+and its rootless policy test must prove the helper's exact GC-reserve result for
+both the 16 GiB fixture and current-card geometry. Incremental-build coverage
+must also prove that changing `authority.h` rebuilds `swapzctl`; a stale
+manager compiled against an older capacity policy is not qualifying evidence.
 
 The direct authority suite must also run an allocation-free preflight for the
 currently selected-card geometry recorded in AGENT_CONTEXT.md; this is a

@@ -324,9 +324,7 @@ static int swapz_authority_validate_candidate(swapz_u32 logical_pages,
 					      swapz_u32 physical_blocks,
 					      swapz_u32 *reserve_blocks)
 {
-	swapz_u32 foreground_blocks;
 	swapz_u32 reserve;
-	swapz_u64 required_blocks;
 	int error;
 
 	if (!logical_pages)
@@ -335,23 +333,13 @@ static int swapz_authority_validate_candidate(swapz_u32 logical_pages,
 	if (error)
 		return error;
 
-	/* Division before addition keeps ceil(logical_pages / 8) in u32. */
-	reserve = (logical_pages / 8U) + (logical_pages % 8U != 0);
-	if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)
-		reserve = 2U * SWAPZ_SEGMENT_BLOCKS;
-	if (reserve >= physical_blocks)
-		return -ENOSPC;
-	foreground_blocks = ((physical_blocks - reserve) /
-			     SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
 	/*
-	 * The rotating GC reserve is not foreground allocation authority.
-	 * Retain one complete ordinary segment so a 100%-RAW logical fill can
-	 * publish its first COW overwrite before any victim becomes reclaimable.
-	 * Widen before addition so a near-u32 logical count cannot wrap.
+	 * The shared window owns ceil(logical_pages / 8), the two-segment GC
+	 * minimum and the independent foreground COW headroom requirement.
+	 * Keep userspace mapper planning on this exact same capacity policy.
 	 */
-	required_blocks = (swapz_u64)logical_pages +
-			  SWAPZ_FOREGROUND_HEADROOM_BLOCKS;
-	if (required_blocks > foreground_blocks)
+	if (!swapz_authority_capacity_window(logical_pages, physical_blocks,
+					     &reserve))
 		return -ENOSPC;
 
 	/*
