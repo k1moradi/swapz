@@ -549,7 +549,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         evidence = current_evidence(
             encoded(report), encoded(policy), cold_boot_arm_raw=arm_raw)
         evidence["release_evidence"]["owner_observed_reboot"].update(
-            status="PASS", observed=True,
+            status="PASS", observed=True, overall="PASS",
             evidence_sha256=hashlib.sha256(cold_raw).hexdigest())
         result = evaluate(
             report, evidence, policy, cold_boot_raw=cold_raw,
@@ -645,7 +645,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 raw = cold_boot_evidence_raw(**overrides)
                 evidence = current_evidence(encoded(report), encoded(policy))
                 evidence["release_evidence"]["owner_observed_reboot"].update(
-                    status="PASS", observed=True,
+                    status="PASS", observed=True, overall="PASS",
                     evidence_sha256=hashlib.sha256(raw).hexdigest())
                 result = evaluate(
                     report, evidence, policy, cold_boot_raw=raw)
@@ -678,7 +678,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             with self.subTest(reason=reason):
                 evidence = current_evidence(encoded(report), encoded(policy))
                 evidence["release_evidence"]["owner_observed_reboot"].update(
-                    status="PASS", observed=True,
+                    status="PASS", observed=True, overall="PASS",
                     evidence_sha256=hashlib.sha256(raw).hexdigest())
                 result = evaluate(
                     report, evidence, policy, cold_boot_raw=raw)
