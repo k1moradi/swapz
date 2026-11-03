@@ -834,16 +834,19 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
 static int swapz_verify_recovery_victim_dead(
 	const struct swapz_authority *a, swapz_u32 segment)
 {
-	swapz_u32 logical, start_block, block;
+	swapz_u32 logical, start_block, end_block, block;
 
 	if (!a || !a->maps || !a->live_records || segment >= a->segment_count)
 		return -EINVAL;
+	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
+	end_block = start_block + SWAPZ_SEGMENT_BLOCKS;
 
 	/*
 	 * Roll-forward is an exceptional recovery path, so prefer independent
 	 * authority proof over the ordinary O(1) segment sidecar fast path.
 	 * A stale/corrupt cached count must never permit reclaim, and a zero count
-	 * must not hide a surviving authoritative mapping.
+	 * must not hide a surviving authoritative mapping. Cache the victim range
+	 * once: a full production map can contain tens of millions of entries.
 	 */
 	for (logical = 0; logical < a->logical_pages; ++logical) {
 		const struct swapz_map *map = &a->maps[logical];
@@ -852,13 +855,12 @@ static int swapz_verify_recovery_victim_dead(
 			continue;
 		if (map->start_block >= a->physical_blocks)
 			return -EUCLEAN;
-		if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment)
+		if (map->start_block >= start_block && map->start_block < end_block)
 			return -EUCLEAN;
 	}
 	if (a->segment_mapped_pages && a->segment_mapped_pages[segment])
 		return -EUCLEAN;
 
-	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
 	for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
 		if (a->live_records[start_block + block])
 			return -EUCLEAN;
