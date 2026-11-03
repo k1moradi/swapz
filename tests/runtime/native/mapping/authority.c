@@ -744,20 +744,20 @@ static int test_packed_append_only_segment_edges(void)
 	CHECK(verify_append_only_page(&a, &tx) == 0);
 
 	/* An extent exactly filling the foreground area may end at the reserve. */
-	CHECK(init_append_only_authority(&a, 768) == 0);
-	CHECK(advance_append_only_cursor(&a, 252) == 0);
+	CHECK(init_append_only_authority(&a, 1024) == 0);
+	CHECK(advance_append_only_cursor(&a, 508) == 0);
 	CHECK(swapz_stage(&a, pages, 1, 4, &tx) == 0);
-	CHECK(tx.start_block == 252 && a.next_block == 256);
+	CHECK(tx.start_block == 508 && a.next_block == 512);
 	CHECK(!a.alignment_hole_blocks_foreground &&
 	      !a.segment_tail_waste_blocks_foreground);
 	CHECK(swapz_abort(&a, &tx) == 0);
 
 	/* A skipped extent may not enter the reserved suffix or mutate state. */
-	CHECK(init_append_only_authority(&a, 768) == 0);
-	CHECK(advance_append_only_cursor(&a, 255) == 0);
+	CHECK(init_append_only_authority(&a, 1024) == 0);
+	CHECK(advance_append_only_cursor(&a, 511) == 0);
 	next_sequence = a.next_sequence;
 	CHECK(swapz_stage(&a, pages, 1, 2, &tx) == -ENOSPC);
-	CHECK(a.next_block == 255 && a.next_sequence == next_sequence &&
+	CHECK(a.next_block == 511 && a.next_sequence == next_sequence &&
 	      !a.in_flight &&
 	      !a.alignment_hole_blocks_foreground &&
 	      !a.segment_tail_waste_blocks_foreground &&

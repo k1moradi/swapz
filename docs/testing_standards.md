@@ -563,7 +563,11 @@ overwrite from the mandatory foreground headroom, then force repeated
 high-live GC reserve rotations while checking every surviving byte, generation
 and RAW CRC. The GC high-occupancy suite remains the longer 64-rotation stress
 proof; together these establish that capacity acceptance corresponds to actual
-allocator forward progress rather than mapper construction alone.
+allocator forward progress rather than mapper construction alone. Allocator
+edge fixtures that are not themselves capacity tests must still use an
+admissible geometry: under this policy three physical segments have no positive
+logical capacity because the two GC-reserve segments plus one foreground COW
+segment consume the entire device, so the smallest such fixture uses four.
 
 The `/8` reserve change updates the admitted-capacity policy, not the serialized
 SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
