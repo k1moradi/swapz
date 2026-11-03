@@ -8487,15 +8487,23 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 	swapz_u32 segment_program_min, segment_program_max;
 	u64 segment_program_sum;
 	u64 engine_publish_auth_wall_ns;
-	struct swapz_preparation_totals prep;
-	struct swapz_preparation_totals submitter;
+	struct swapz_preparation_totals *snapshots;
+	struct swapz_preparation_totals *prep, *submitter;
 	unsigned int sz = 0;
 
 	(void)flags;
 	switch (type) {
 	case STATUSTYPE_INFO:
-		swapz_preparation_totals_snapshot(ctx, &prep);
-	swapz_submitter_totals_snapshot(ctx, &submitter);
+		/* Keep the large per-lane counters off the kernel status stack. */
+		snapshots = kcalloc(2, sizeof(*snapshots), GFP_NOIO);
+		if (!snapshots) {
+			DMEMIT("status_snapshot_error=%d", -ENOMEM);
+			break;
+		}
+		prep = &snapshots[0];
+		submitter = &snapshots[1];
+		swapz_preparation_totals_snapshot(ctx, prep);
+		swapz_submitter_totals_snapshot(ctx, submitter);
 		swapz_gc_victim_distribution(ctx, &gc_distinct_victims,
 					     &gc_victim_min_evictions,
 					     &gc_victim_max_evictions);
@@ -8505,237 +8513,87 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		engine_publish_auth_wall_ns =
 			ctx->engine_publish_wall_ns >= ctx->engine_publish_crc_wall_ns ?
 			ctx->engine_publish_wall_ns - ctx->engine_publish_crc_wall_ns : 0;
-		DMEMIT("version=%s mode=alpha-live-gc logical_write=%llu logical_read=%llu "
-		       "physical_write=%llu physical_write_reqs=%llu "
-		       "physical_read=%llu physical_read_reqs=%llu "
-		       "compressed=%llu raw=%llu zero_elided=%llu discarded=%llu "
-		       "lz4_acceleration=%u delta64_lz4_acceleration=%u "
-		       "lz4_attempts=%llu lz4_accepted_bytes=%llu "
-		       "lz4_size_le256=%llu lz4_size_257_1024=%llu "
-		       "lz4_size_1025_2048=%llu lz4_size_2049_3072=%llu "
-		       "lz4_size_3073_3568=%llu lz4_raw_fallback=%llu "
-		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
-		       "gc_victims=%llu gc_role_rotations=%llu "
-		       "gc_distinct_victims=%u gc_victim_min_evictions=%u "
-		       "gc_victim_max_evictions=%u "
-		       "last_gc_victim=%u last_gc_destination=%u "
-		       "gc_pages=%llu gc_read=%llu gc_write=%llu "
-		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
-		       "gc_selected_io_estimate=%llu gc_no_headroom_skips=%llu "
-		       "gc_choose_wall_ns=%llu gc_choose_calls=%llu "
-		       "gc_choose_map_entries=%llu gc_choose_segment_entries=%llu "
-		       "gc_relocation_map_entries=%llu "
-		       "gc_read_reqs=%llu gc_write_reqs=%llu "
-		       "dead_segment_reuses=%u "
-		       "segment_discards_eligible=%llu segment_discards_issued=%llu "
-		       "segment_discards_completed=%llu segment_discards_unsupported=%llu "
-		       "segment_discards_failed=%llu segment_discard_sectors=%llu "
-		       "segment_discard_wall_ns=%llu "
-		       "segment_discards_skipped_already_trimmed=%llu "
-		       "alignment_hole_blocks_foreground=%llu "
-		       "alignment_hole_blocks_gc=%llu "
-		       "segment_tail_waste_blocks_foreground=%llu "
-		       "segment_tail_waste_blocks_gc=%llu run_splits_by_hole=%u "
-		       "alloc_probe_segments=%llu alloc_probe_full_scans=%llu "
-		       "alloc_probe_wall_ns=%llu "
-		       "segment_program_min=%u segment_program_sum=%llu "
-		       "segment_program_max=%u segment_program_segments=%u "
-		       "write_verify_blocks=%u verify=%u "
-		       "write_submitted=%llu write_submitted_reqs=%llu "
-		       "read_submitted=%llu read_submitted_reqs=%llu "
-		       "write_fault_nth=%u write_fault_calls=%llu write_fault_injected=%llu "
-		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
-		       "flush_injected=%llu flush_fault_nth=%u "
-		       "packed_placement=%u logical_open_balance=%u "
-		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
-		       "bulk_mixed_io=%u bulk_raw_only_io=%u bulk_raw_entries=%u "
-		       "worker_requeues=%llu one_page_windows=%llu "
-		       "window_records=%llu "
-		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
-		       "win9_16=%llu win17_64=%llu "
-		       "close_unknown=%llu close_full=%llu close_duplicate=%llu "
-		       "close_zero=%llu close_fua=%llu close_raw=%llu "
-		       "close_read_conflict=%llu close_read_unrelated=%llu "
-		       "close_discard=%llu close_preflush=%llu "
-		       "close_quantum=%llu close_idle=%llu close_shutdown=%llu "
-		       "close_other=%llu "
-		       "win1_unknown=%llu win1_full=%llu win1_duplicate=%llu "
-		       "win1_zero=%llu win1_fua=%llu win1_raw=%llu "
-		       "win1_read_conflict=%llu win1_read_unrelated=%llu "
-		       "win1_discard=%llu win1_preflush=%llu win1_quantum=%llu "
-		       "win1_idle=%llu win1_shutdown=%llu win1_other=%llu "
-		       "win1_deadline=%llu win1_pack_ready=%llu "
-		       "win1_pack_tail_target=%llu win1_pack_read_bypass=%llu "
-		       "win1_pack_wave_interrupted=%llu "
-		       "single_tail_deferrals=%llu single_tail_companions=%llu "
-		       "win1_deadline_deferred_tail=%llu "
-		       "win1_idle_deferred_tail=%llu single_tail_other_clears=%llu "
-		       "single_tail_comp_age_le250us=%llu "
-		       "single_tail_comp_age_251_500us=%llu "
-		       "single_tail_comp_age_501_1000us=%llu "
-		       "single_tail_comp_age_gt1000us=%llu "
-		       "single_tail_comp_age_1001_1250us=%llu "
-		       "single_tail_comp_age_1251_1500us=%llu "
-		       "single_tail_comp_age_1501_1750us=%llu "
-		       "single_tail_comp_age_gt1750us=%llu "
-		       "single_tail_deadline_age_le250us=%llu "
-		       "single_tail_deadline_age_251_500us=%llu "
-		       "single_tail_deadline_age_501_1000us=%llu "
-		       "single_tail_deadline_age_gt1000us=%llu "
-		       "single_tail_comp_after_lower_done=%llu "
-		       "single_tail_comp_after_read_bypass=%llu "
-		       "single_tail_comp_after_both=%llu "
-		       "single_tail_deadline_after_lower_done=%llu "
-		       "single_tail_deadline_after_read_bypass=%llu "
-		       "single_tail_deadline_after_both=%llu "
-		       "window_gc_pressure=%llu "
-		       "age_le100us=%llu age_101_1000us=%llu "
-		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
-		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
-		       "retain_timer_arm_skips=%llu "
-		       "async_prepare=%u delta64_prepare_workers=%u "
-		       "delta64_prepare_active_max=%u delta64_prepare_pages=%llu "
-		       "write_pipeline_depth=%u pipeline_active_max=%u "
-		       "delta64_prepare_parallel_starts=%llu "
-		       "guard_inflight_zero_shrink=%u "
-		       "prep_lower_write_overlap_starts=%llu "
-		       "prep_lower_write_overlap_ns=%llu "
-		       "prep_lower_read_overlap_starts=%llu "
-		       "prep_lower_read_overlap_ns=%llu prep_wave_kicks=%llu "
-		       "prep_lower_write_samples=%llu "
-		       "prep_lower_write_start_queued=%llu "
-		       "prep_lower_write_start_nonempty=%llu "
-		       "prep_lower_write_end_queued=%llu "
-		       "prep_lower_write_end_nonempty=%llu "
-		       "pipeline_async_runs=%llu pipeline_completed_runs=%llu "
-		       "pipeline_collected_pages=%llu pipeline_read_bypass_skips=%llu "
-		       "pipeline_finalize_waits=%llu pipeline_finalize_wait_wall_ns=%llu "
-		       "k1_ready_wait_windows=%llu k1_ready_wait_records=%llu "
-		       "k1_ready_wait_wall_ns=%llu k1_ready_wait_max_records=%llu "
-		       "k1_ready_wait_pack_ready=%llu k1_ready_wait_full=%llu "
-		       "k1_ready_wait_deadline=%llu k1_ready_wait_fence=%llu "
-		       "k1_ready_wait_other=%llu pipeline_active_wall_ns=%llu "
-		       "pipeline_post_lower_wall_ns=%llu "
-		       "prep_producer_head_claims=%llu prep_producer_tail_claims=%llu "
-		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
-		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
-		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
-		       "ordered_lz4_wall_ns=%llu prep_lz4_wall_ns=%llu "
-		       "write_copy_wall_ns=%llu write_copy_bytes=%llu "
-		       "ordered_write_copy_wall_ns=%llu prep_write_copy_wall_ns=%llu "
-		       "direct_lz4_input_pages=%llu "
-		       "mapped_snapshot_input_pages=%llu "
-		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
-		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
-		       "window_commit_nonio_wall_ns=%llu "
-		       "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
-		       "engine_publish_wall_ns=%llu engine_publish_crc_wall_ns=%llu "
-		       "engine_publish_auth_wall_ns=%llu engine_prehashed_records=%u "
-		       "batch_snapshot_crc_wall_ns=%llu "
-		       "batch_pause_crc_wall_ns=%llu batch_resume_crc_wall_ns=%llu "
-		       "prep_crc_wall_ns=%llu ordered_crc_wall_ns=%llu "
-		       "read_engine_nonio_wall_ns=%llu "
-		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
-		       "ordered_worker_wall_ns=%llu prep_worker_wall_ns=%llu "
-		       "ordered_worker_cpu_ns=%llu prep_worker_cpu_ns=%llu "
-		       "read_worker_cpu_ns=%llu "
-		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
-		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
-		       "close_deadline=%llu "
-		       "deadline_before_bio=%llu deadline_after_read=%llu "
-		       "deadline_worker_with_local=%llu deadline_worker_empty=%llu "
-		       "retained_read_bypasses=%llu "
-		       "close_pack_ready=%llu "
-		       "pack_close_tail_target=%llu pack_close_tail_target_le4=%llu "
-		       "pack_close_tail_target_2=%llu pack_close_tail_target_3=%llu "
-		       "pack_close_tail_target_4=%llu "
-		       "pack_close_burst_target=%llu pack_close_service_dry=%llu "
-		       "pack_close_burst_admission=%llu pack_close_burst_worker=%llu "
-		       "pack_close_burst_target_le4=%llu "
-		       "pack_close_burst_target_5_8=%llu "
-		       "pack_close_burst_target_9_16=%llu "
-		       "pack_close_burst_target_17_64=%llu "
-		       "pack_close_burst_count_le4=%llu "
-		       "pack_close_burst_count_5_8=%llu "
-		       "pack_close_burst_count_9_16=%llu "
-		       "pack_close_burst_count_17_64=%llu "
-		       "pack_close_burst_overshoot=%llu "
-		       "pack_tail_samples=%llu "
-		       "pack_tail_zero_inflight=%llu pack_tail_zero_idle=%llu "
-		       "pack_tail_one_inflight=%llu pack_tail_one_idle=%llu "
-		       "pack_tail_many_inflight=%llu pack_tail_many_idle=%llu "
-		       "burst_target_grows=%llu burst_target_shrinks=%llu "
-		       "burst_shrink_inflight_zero_skips=%llu "
-		       "burst_shrink_after_inflight_zero=%llu "
-		       "burst_shrink_after_read_bypass=%llu "
-		       "burst_shrink_other=%llu "
-		       "burst_shrink_target_le8=%llu "
-		       "burst_shrink_target_9_32=%llu "
-		       "burst_shrink_target_gt32=%llu "
-		       "packed_early_commits=%llu "
-		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
-		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
-		       "retained_burst_target=%u "
-		       "read_meta_reqs=%u read_payload_reqs=%u "
-		       "read_payload_blocks=%u read_meta_cache_hits=%u "
-		       "read_meta_lru_hits=%u "
-		       "read_meta_set_lookups=%llu read_meta_set_hits=%llu "
-		       "read_meta_set_probes=%llu read_meta_set_replacements=%llu "
-		       "read_meta_primary_hits=%llu read_meta_secondary_hits=%llu "
-		       "read_meta_copy_bytes=%llu "
-		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
-		       "read_two_block_skips=%u "
-		       "read_grouping_enabled=%u read_coalescing_enabled=%u "
-		       "parallel_reads_enabled=%u "
-		       "parallel_read_pairs=%llu parallel_read_same_extent_pairs=%llu "
-		       "parallel_read_async_batches=%llu parallel_read_async_slots=%llu "
-		       "parallel_read_distinct_extent_pairs=%llu "
-		       "parallel_read_adjacent_extent_pairs=%llu "
-		       "parallel_read_adjacent_extent_blocks=%llu "
-		       "parallel_read_adjacent_chain_3plus=%llu "
-		       "parallel_read_adjacent_chain_extent_max=%llu "
-		       "parallel_read_adjacent_chain_blocks_max=%llu "
-		       "parallel_read_coalesced_pairs=%llu "
-		       "parallel_read_coalesced_reqs_saved=%llu "
-		       "parallel_read_coalesced_blocks=%llu "
-		       "parallel_read_coalesce_extra_blocks=%llu "
-		       "parallel_read_coalesce_skip_cached=%llu "
-		       "parallel_read_coalesce_skip_noncontig_slot=%llu "
-		       "parallel_read_coalesce_skip_gap=%llu "
-		       "parallel_read_coalesce_skip_other=%llu "
-		       "failed=%u error=%d",
-		       SWAPZ_ALPHA_VERSION, ctx->logical_write_bytes,
-		       ctx->logical_read_bytes, ctx->physical_write_bytes,
-		       ctx->physical_write_reqs, ctx->physical_read_bytes,
-		       ctx->physical_read_reqs, ctx->compressed_pages,
-		       ctx->raw_pages, ctx->zero_elided_pages,
+		DMEMIT(
+			   "version=%s mode=alpha-live-gc logical_write=%llu logical_read=%llu "
+			   "physical_write=%llu physical_write_reqs=%llu physical_read=%llu "
+			   "physical_read_reqs=%llu compressed=%llu raw=%llu zero_elided=%llu "
+			   "discarded=%llu lz4_acceleration=%u delta64_lz4_acceleration=%u "
+			   "lz4_attempts=%llu lz4_accepted_bytes=%llu lz4_size_le256=%llu "
+			   "lz4_size_257_1024=%llu lz4_size_1025_2048=%llu lz4_size_2049_3072=%llu "
+			   "lz4_size_3073_3568=%llu lz4_raw_fallback=%llu windows=%llu "
+			   "reordered=%llu cursor=%u",
+		       SWAPZ_ALPHA_VERSION,
+		       ctx->logical_write_bytes,
+		       ctx->logical_read_bytes,
+		       ctx->physical_write_bytes,
+		       ctx->physical_write_reqs,
+		       ctx->physical_read_bytes,
+		       ctx->physical_read_reqs,
+		       ctx->compressed_pages,
+		       ctx->raw_pages,
+		       ctx->zero_elided_pages,
 		       ctx->discard_pages,
 		       SWAPZ_LZ4_ORDINARY_ACCELERATION_DEFAULT,
 		       ctx->delta64_lz4_acceleration,
-		       ctx->lz4_attempts + prep.lz4_attempts + submitter.lz4_attempts,
-		       ctx->lz4_accepted_bytes + prep.lz4_accepted_bytes + submitter.lz4_accepted_bytes,
-		       ctx->lz4_size_bins[0] + prep.lz4_size_bins[0] + submitter.lz4_size_bins[0],
-		       ctx->lz4_size_bins[1] + prep.lz4_size_bins[1] + submitter.lz4_size_bins[1],
-		       ctx->lz4_size_bins[2] + prep.lz4_size_bins[2] + submitter.lz4_size_bins[2],
-		       ctx->lz4_size_bins[3] + prep.lz4_size_bins[3] + submitter.lz4_size_bins[3],
-		       ctx->lz4_size_bins[4] + prep.lz4_size_bins[4] + submitter.lz4_size_bins[4],
-		       ctx->lz4_size_bins[5] + prep.lz4_size_bins[5] + submitter.lz4_size_bins[5],
+		       ctx->lz4_attempts + prep->lz4_attempts + submitter->lz4_attempts,
+		       ctx->lz4_accepted_bytes + prep->lz4_accepted_bytes + submitter->lz4_accepted_bytes,
+		       ctx->lz4_size_bins[0] + prep->lz4_size_bins[0] + submitter->lz4_size_bins[0],
+		       ctx->lz4_size_bins[1] + prep->lz4_size_bins[1] + submitter->lz4_size_bins[1],
+		       ctx->lz4_size_bins[2] + prep->lz4_size_bins[2] + submitter->lz4_size_bins[2],
+		       ctx->lz4_size_bins[3] + prep->lz4_size_bins[3] + submitter->lz4_size_bins[3],
+		       ctx->lz4_size_bins[4] + prep->lz4_size_bins[4] + submitter->lz4_size_bins[4],
+		       ctx->lz4_size_bins[5] + prep->lz4_size_bins[5] + submitter->lz4_size_bins[5],
 		       ctx->windows,
-		       ctx->reordered_records, ctx->authority.next_block,
+		       ctx->reordered_records,
+		       ctx->authority.next_block);
+		DMEMIT(
+			   " reserve=%u gc_victims=%llu gc_role_rotations=%llu "
+			   "gc_distinct_victims=%u gc_victim_min_evictions=%u "
+			   "gc_victim_max_evictions=%u last_gc_victim=%u last_gc_destination=%u "
+			   "gc_pages=%llu gc_read=%llu gc_write=%llu gc_policy=%u "
+			   "gc_selected_bytes=%llu gc_selected_pages=%llu "
+			   "gc_selected_io_estimate=%llu gc_no_headroom_skips=%llu "
+			   "gc_choose_wall_ns=%llu gc_choose_calls=%llu gc_choose_map_entries=%llu "
+			   "gc_choose_segment_entries=%llu gc_relocation_map_entries=%llu "
+			   "gc_read_reqs=%llu gc_write_reqs=%llu dead_segment_reuses=%u",
 		       ctx->authority.reserve_blocks,
-		       ctx->gc_victims, ctx->gc_role_rotations,
-		       gc_distinct_victims, gc_victim_min_evictions,
+		       ctx->gc_victims,
+		       ctx->gc_role_rotations,
+		       gc_distinct_victims,
+		       gc_victim_min_evictions,
 		       gc_victim_max_evictions,
-		       ctx->last_gc_victim, ctx->last_gc_destination,
-		       ctx->gc_pages, ctx->gc_read_bytes, ctx->gc_write_bytes,
-		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
-		       ctx->gc_selected_live_records, ctx->gc_selected_io_cost,
+		       ctx->last_gc_victim,
+		       ctx->last_gc_destination,
+		       ctx->gc_pages,
+		       ctx->gc_read_bytes,
+		       ctx->gc_write_bytes,
+		       ctx->gc_cost_policy,
+		       ctx->gc_selected_live_bytes,
+		       ctx->gc_selected_live_records,
+		       ctx->gc_selected_io_cost,
 		       ctx->gc_no_headroom_skips,
-		       ctx->gc_choose_wall_ns, ctx->gc_choose_calls,
-		       ctx->gc_choose_map_entries, ctx->gc_choose_segment_entries,
+		       ctx->gc_choose_wall_ns,
+		       ctx->gc_choose_calls,
+		       ctx->gc_choose_map_entries,
+		       ctx->gc_choose_segment_entries,
 		       ctx->gc_relocation_map_entries,
-		       ctx->gc_read_reqs, ctx->gc_write_reqs,
-		       ctx->authority.recycled_dead_segments,
+		       ctx->gc_read_reqs,
+		       ctx->gc_write_reqs,
+		       ctx->authority.recycled_dead_segments);
+		DMEMIT(
+			   " segment_discards_eligible=%llu segment_discards_issued=%llu "
+			   "segment_discards_completed=%llu segment_discards_unsupported=%llu "
+			   "segment_discards_failed=%llu segment_discard_sectors=%llu "
+			   "segment_discard_wall_ns=%llu "
+			   "segment_discards_skipped_already_trimmed=%llu "
+			   "alignment_hole_blocks_foreground=%llu alignment_hole_blocks_gc=%llu "
+			   "segment_tail_waste_blocks_foreground=%llu "
+			   "segment_tail_waste_blocks_gc=%llu run_splits_by_hole=%u "
+			   "alloc_probe_segments=%llu alloc_probe_full_scans=%llu "
+			   "alloc_probe_wall_ns=%llu segment_program_min=%u "
+			   "segment_program_sum=%llu segment_program_max=%u "
+			   "segment_program_segments=%u write_verify_blocks=%u verify=%u "
+			   "write_submitted=%llu write_submitted_reqs=%llu",
 		       ctx->segment_discards_eligible,
 		       ctx->segment_discards_issued,
 		       ctx->segment_discards_completed,
@@ -8752,32 +8610,58 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->authority.alloc_probe_segments,
 		       ctx->authority.alloc_probe_full_scans,
 		       ctx->authority.alloc_probe_wall_ns,
-		       segment_program_min, segment_program_sum,
-		       segment_program_max, ctx->segment_count,
+		       segment_program_min,
+		       segment_program_sum,
+		       segment_program_max,
+		       ctx->segment_count,
 		       ctx->engine.write_verify_read_blocks,
 		       ctx->engine.verify_after_write,
 		       ctx->lower_write_submitted_bytes,
-		       ctx->lower_write_submitted_reqs,
+		       ctx->lower_write_submitted_reqs);
+		DMEMIT(
+			   " read_submitted=%llu read_submitted_reqs=%llu write_fault_nth=%u "
+			   "write_fault_calls=%llu write_fault_injected=%llu flush_calls=%llu "
+			   "flush_ok=%llu flush_err=%llu flush_injected=%llu flush_fault_nth=%u "
+			   "packed_placement=%u logical_open_balance=%u bulk_mode=%u bulk_io=%u "
+			   "bulk_extents=%u bulk_padding=%u bulk_mixed_io=%u bulk_raw_only_io=%u "
+			   "bulk_raw_entries=%u worker_requeues=%llu one_page_windows=%llu "
+			   "window_records=%llu win1=%llu win2=%llu",
 		       ctx->lower_read_submitted_bytes,
 		       ctx->lower_read_submitted_reqs,
-		       ctx->write_fault_nth, ctx->write_fault_calls,
+		       ctx->write_fault_nth,
+		       ctx->write_fault_calls,
 		       ctx->write_fault_injected,
-		       ctx->flush_meter.attempts, ctx->flush_meter.successes,
-		       ctx->flush_meter.failures, ctx->flush_meter.injected,
+		       ctx->flush_meter.attempts,
+		       ctx->flush_meter.successes,
+		       ctx->flush_meter.failures,
+		       ctx->flush_meter.injected,
 		       ctx->flush_meter.fail_nth,
 		       1U,
 		       0U,
 		       ctx->engine.bulk_enabled,
-		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
+		       ctx->engine.bulk_writes,
+		       ctx->engine.bulk_extents,
 		       ctx->engine.bulk_padding_blocks,
 		       ctx->engine.bulk_mixed_runs,
 		       ctx->engine.bulk_raw_only_runs,
 		       ctx->engine.bulk_raw_entries,
-		       ctx->worker_requeues, ctx->one_page_windows,
+		       ctx->worker_requeues,
+		       ctx->one_page_windows,
 		       ctx->window_records_total,
-		       ctx->window_bins[0], ctx->window_bins[1],
-		       ctx->window_bins[2], ctx->window_bins[3],
-		       ctx->window_bins[4], ctx->window_bins[5],
+		       ctx->window_bins[0],
+		       ctx->window_bins[1]);
+		DMEMIT(
+			   " win3_4=%llu win5_8=%llu win9_16=%llu win17_64=%llu close_unknown=%llu "
+			   "close_full=%llu close_duplicate=%llu close_zero=%llu close_fua=%llu "
+			   "close_raw=%llu close_read_conflict=%llu close_read_unrelated=%llu "
+			   "close_discard=%llu close_preflush=%llu close_quantum=%llu "
+			   "close_idle=%llu close_shutdown=%llu close_other=%llu win1_unknown=%llu "
+			   "win1_full=%llu win1_duplicate=%llu win1_zero=%llu win1_fua=%llu "
+			   "win1_raw=%llu",
+		       ctx->window_bins[2],
+		       ctx->window_bins[3],
+		       ctx->window_bins[4],
+		       ctx->window_bins[5],
 		       ctx->window_close_reasons[SWAPZ_CLOSE_UNKNOWN],
 		       ctx->window_close_reasons[SWAPZ_CLOSE_FULL],
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DUPLICATE],
@@ -8797,7 +8681,19 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->one_page_close_reasons[SWAPZ_CLOSE_DUPLICATE],
 		       ctx->one_page_close_reasons[SWAPZ_CLOSE_ZERO],
 		       ctx->one_page_close_reasons[SWAPZ_CLOSE_FUA],
-		       ctx->one_page_close_reasons[SWAPZ_CLOSE_RAW],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_RAW]);
+		DMEMIT(
+			   " win1_read_conflict=%llu win1_read_unrelated=%llu win1_discard=%llu "
+			   "win1_preflush=%llu win1_quantum=%llu win1_idle=%llu win1_shutdown=%llu "
+			   "win1_other=%llu win1_deadline=%llu win1_pack_ready=%llu "
+			   "win1_pack_tail_target=%llu win1_pack_read_bypass=%llu "
+			   "win1_pack_wave_interrupted=%llu single_tail_deferrals=%llu "
+			   "single_tail_companions=%llu win1_deadline_deferred_tail=%llu "
+			   "win1_idle_deferred_tail=%llu single_tail_other_clears=%llu "
+			   "single_tail_comp_age_le250us=%llu single_tail_comp_age_251_500us=%llu "
+			   "single_tail_comp_age_501_1000us=%llu single_tail_comp_age_gt1000us=%llu "
+			   "single_tail_comp_age_1001_1250us=%llu "
+			   "single_tail_comp_age_1251_1500us=%llu",
 		       ctx->one_page_close_reasons[SWAPZ_CLOSE_READ_CONFLICT],
 		       ctx->one_page_close_reasons[SWAPZ_CLOSE_READ_UNRELATED],
 		       ctx->one_page_close_reasons[SWAPZ_CLOSE_DISCARD],
@@ -8821,7 +8717,23 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->single_tail_companion_age_501_1000us,
 		       ctx->single_tail_companion_age_gt1000us,
 		       ctx->single_tail_companion_age_1001_1250us,
-		       ctx->single_tail_companion_age_1251_1500us,
+		       ctx->single_tail_companion_age_1251_1500us);
+		DMEMIT(
+			   " single_tail_comp_age_1501_1750us=%llu "
+			   "single_tail_comp_age_gt1750us=%llu "
+			   "single_tail_deadline_age_le250us=%llu "
+			   "single_tail_deadline_age_251_500us=%llu "
+			   "single_tail_deadline_age_501_1000us=%llu "
+			   "single_tail_deadline_age_gt1000us=%llu "
+			   "single_tail_comp_after_lower_done=%llu "
+			   "single_tail_comp_after_read_bypass=%llu "
+			   "single_tail_comp_after_both=%llu "
+			   "single_tail_deadline_after_lower_done=%llu "
+			   "single_tail_deadline_after_read_bypass=%llu "
+			   "single_tail_deadline_after_both=%llu window_gc_pressure=%llu "
+			   "age_le100us=%llu age_101_1000us=%llu age_gt1000us=%llu age_sum_ns=%llu "
+			   "age_max_ns=%llu retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
+			   "retain_timer_arm_skips=%llu async_prepare=%u delta64_prepare_workers=%u",
 		       ctx->single_tail_companion_age_1501_1750us,
 		       ctx->single_tail_companion_age_gt1750us,
 		       ctx->single_tail_deadline_age_le250us,
@@ -8835,32 +8747,66 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->single_tail_deadline_after_read_bypass,
 		       ctx->single_tail_deadline_after_both,
 		       ctx->window_gc_pressure,
-		       ctx->window_age_le_100us, ctx->window_age_101_1000us,
-		       ctx->window_age_gt_1000us, ctx->window_age_sum_ns,
+		       ctx->window_age_le_100us,
+		       ctx->window_age_101_1000us,
+		       ctx->window_age_gt_1000us,
+		       ctx->window_age_sum_ns,
 		       ctx->window_age_max_ns,
-		       ctx->retain_ms, ctx->retain_worker_passes,
-		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
-		       ctx->async_prepare, ctx->preparation_worker_count,
+		       ctx->retain_ms,
+		       ctx->retain_worker_passes,
+		       ctx->retain_timer_arms,
+		       ctx->retain_timer_arm_skips,
+		       ctx->async_prepare,
+		       ctx->preparation_worker_count);
+		DMEMIT(
+			   " delta64_prepare_active_max=%u delta64_prepare_pages=%llu "
+			   "write_pipeline_depth=%u pipeline_active_max=%u "
+			   "delta64_prepare_parallel_starts=%llu guard_inflight_zero_shrink=%u "
+			   "prep_lower_write_overlap_starts=%llu prep_lower_write_overlap_ns=%llu "
+			   "prep_lower_read_overlap_starts=%llu prep_lower_read_overlap_ns=%llu "
+			   "prep_wave_kicks=%llu prep_lower_write_samples=%llu "
+			   "prep_lower_write_start_queued=%llu prep_lower_write_start_nonempty=%llu "
+			   "prep_lower_write_end_queued=%llu prep_lower_write_end_nonempty=%llu "
+			   "pipeline_async_runs=%llu pipeline_completed_runs=%llu "
+			   "pipeline_collected_pages=%llu pipeline_read_bypass_skips=%llu "
+			   "pipeline_finalize_waits=%llu pipeline_finalize_wait_wall_ns=%llu "
+			   "k1_ready_wait_windows=%llu k1_ready_wait_records=%llu",
 		       (unsigned int)atomic_read(&ctx->preparation_workers_active_max),
-		       prep.prepared_pages,
-		       SWAPZ_WRITE_PIPELINE_DEPTH, ctx->pipeline_active_max,
-		       0ULL, 0U,
-		       prep.prepared_during_lower_write,
-		       prep.lower_write_overlap_ns,
-		       0ULL, 0ULL,
+		       prep->prepared_pages,
+		       SWAPZ_WRITE_PIPELINE_DEPTH,
+		       ctx->pipeline_active_max,
+		       0ULL,
+		       0U,
+		       prep->prepared_during_lower_write,
+		       prep->lower_write_overlap_ns,
+		       0ULL,
+		       0ULL,
 		       ctx->preparation_wave_kicks,
 		       ctx->prep_lower_write_samples,
 		       ctx->prep_lower_write_start_queued,
 		       ctx->prep_lower_write_start_nonempty,
 		       ctx->prep_lower_write_end_queued,
 		       ctx->prep_lower_write_end_nonempty,
-		       ctx->pipeline_async_runs, ctx->pipeline_completed_runs,
+		       ctx->pipeline_async_runs,
+		       ctx->pipeline_completed_runs,
 		       ctx->pipeline_collected_pages,
 		       ctx->pipeline_read_bypass_skips,
 		       ctx->pipeline_finalize_waits,
 		       ctx->pipeline_finalize_wait_wall_ns,
 		       ctx->k1_ready_wait_windows,
-		       ctx->k1_ready_wait_records,
+		       ctx->k1_ready_wait_records);
+		DMEMIT(
+			   " k1_ready_wait_wall_ns=%llu k1_ready_wait_max_records=%llu "
+			   "k1_ready_wait_pack_ready=%llu k1_ready_wait_full=%llu "
+			   "k1_ready_wait_deadline=%llu k1_ready_wait_fence=%llu "
+			   "k1_ready_wait_other=%llu pipeline_active_wall_ns=%llu "
+			   "pipeline_post_lower_wall_ns=%llu prep_producer_head_claims=%llu "
+			   "prep_producer_tail_claims=%llu prep_ordered_inline=%llu "
+			   "prep_ordered_handoffs=%llu prep_ordered_waits=%llu "
+			   "prep_wait_wall_ns=%llu lz4_wall_ns=%llu decode_wall_ns=%llu "
+			   "ordered_lz4_wall_ns=%llu prep_lz4_wall_ns=%llu write_copy_wall_ns=%llu "
+			   "write_copy_bytes=%llu ordered_write_copy_wall_ns=%llu "
+			   "prep_write_copy_wall_ns=%llu direct_lz4_input_pages=%llu",
 		       ctx->k1_ready_wait_wall_ns,
 		       ctx->k1_ready_wait_max_records,
 		       ctx->k1_ready_wait_pack_ready,
@@ -8876,39 +8822,76 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->preparation_ordered_handoffs,
 		       ctx->preparation_ordered_waits,
 		       ctx->preparation_ordered_wait_wall_ns,
-		       ctx->lz4_wall_ns + prep.lz4_wall_ns + submitter.lz4_wall_ns,
+		       ctx->lz4_wall_ns + prep->lz4_wall_ns + submitter->lz4_wall_ns,
 		       ctx->decode_wall_ns,
-		       ctx->lz4_wall_ns, prep.lz4_wall_ns,
-		       prep.copy_wall_ns + submitter.copy_wall_ns +
+		       ctx->lz4_wall_ns,
+		       prep->lz4_wall_ns,
+		       prep->copy_wall_ns + submitter->copy_wall_ns +
 			       ctx->ordered_write_copy_wall_ns,
-		       prep.copy_bytes + submitter.copy_bytes +
+		       prep->copy_bytes + submitter->copy_bytes +
 			       ctx->ordered_write_copy_bytes,
 		       ctx->ordered_write_copy_wall_ns,
-		       prep.copy_wall_ns,
-		       ctx->ordered_direct_lz4_pages,
-		       prep.mapped_snapshot_pages + submitter.mapped_snapshot_pages,
-		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
-		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
+		       prep->copy_wall_ns,
+		       ctx->ordered_direct_lz4_pages);
+		DMEMIT(
+			   " mapped_snapshot_input_pages=%llu read_copy_wall_ns=%llu "
+			   "read_copy_bytes=%llu window_sort_wall_ns=%llu "
+			   "window_commit_wall_ns=%llu window_commit_nonio_wall_ns=%llu "
+			   "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
+			   "engine_publish_wall_ns=%llu engine_publish_crc_wall_ns=%llu "
+			   "engine_publish_auth_wall_ns=%llu engine_prehashed_records=%u "
+			   "batch_snapshot_crc_wall_ns=%llu batch_pause_crc_wall_ns=%llu "
+			   "batch_resume_crc_wall_ns=%llu prep_crc_wall_ns=%llu "
+			   "ordered_crc_wall_ns=%llu read_engine_nonio_wall_ns=%llu "
+			   "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
+			   "ordered_worker_wall_ns=%llu prep_worker_wall_ns=%llu "
+			   "ordered_worker_cpu_ns=%llu prep_worker_cpu_ns=%llu",
+		       prep->mapped_snapshot_pages + submitter->mapped_snapshot_pages,
+		       ctx->read_copy_wall_ns,
+		       ctx->read_copy_bytes,
+		       ctx->window_sort_wall_ns,
+		       ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,
-		       ctx->engine_plan_wall_ns, ctx->engine_pack_wall_ns,
-		       ctx->engine_publish_wall_ns, ctx->engine_publish_crc_wall_ns,
-		       engine_publish_auth_wall_ns, ctx->engine.prehashed_records,
+		       ctx->engine_plan_wall_ns,
+		       ctx->engine_pack_wall_ns,
+		       ctx->engine_publish_wall_ns,
+		       ctx->engine_publish_crc_wall_ns,
+		       engine_publish_auth_wall_ns,
+		       ctx->engine.prehashed_records,
 		       ctx->authority.batch_snapshot_crc_wall_ns,
 		       ctx->authority.batch_pause_crc_wall_ns,
 		       ctx->authority.batch_resume_crc_wall_ns,
-		       prep.crc_wall_ns, ctx->ordered_crc_wall_ns,
+		       prep->crc_wall_ns,
+		       ctx->ordered_crc_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
-		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
+		       ctx->lower_read_wall_ns,
+		       ctx->lower_write_wall_ns,
 		       ctx->ordered_worker_wall_ns,
-		       prep.worker_wall_ns,
+		       prep->worker_wall_ns,
 		       ctx->ordered_worker_cpu_ns,
-		       prep.worker_cpu_ns,
+		       prep->worker_cpu_ns);
+		DMEMIT(
+			   " read_worker_cpu_ns=%llu write_wait_le1ms=%llu write_wait_1to4ms=%llu "
+			   "write_wait_gt4ms=%llu gc_wall_ns=%llu close_deadline=%llu "
+			   "deadline_before_bio=%llu deadline_after_read=%llu "
+			   "deadline_worker_with_local=%llu deadline_worker_empty=%llu "
+			   "retained_read_bypasses=%llu close_pack_ready=%llu "
+			   "pack_close_tail_target=%llu pack_close_tail_target_le4=%llu "
+			   "pack_close_tail_target_2=%llu pack_close_tail_target_3=%llu "
+			   "pack_close_tail_target_4=%llu pack_close_burst_target=%llu "
+			   "pack_close_service_dry=%llu pack_close_burst_admission=%llu "
+			   "pack_close_burst_worker=%llu pack_close_burst_target_le4=%llu "
+			   "pack_close_burst_target_5_8=%llu pack_close_burst_target_9_16=%llu",
 		       ctx->read_worker_cpu_ns,
-		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
-		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
+		       ctx->write_wait_le_1ms,
+		       ctx->write_wait_1_to_4ms,
+		       ctx->write_wait_gt_4ms,
+		       ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DEADLINE],
-		       ctx->deadline_before_bio, ctx->deadline_after_read,
-		       ctx->deadline_worker_with_local, ctx->deadline_worker_empty,
+		       ctx->deadline_before_bio,
+		       ctx->deadline_after_read,
+		       ctx->deadline_worker_with_local,
+		       ctx->deadline_worker_empty,
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_PACK_READY],
 		       ctx->pack_close_tail_target,
@@ -8922,7 +8905,21 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->pack_close_burst_worker,
 		       ctx->pack_close_burst_target_le4,
 		       ctx->pack_close_burst_target_5_8,
-		       ctx->pack_close_burst_target_9_16,
+		       ctx->pack_close_burst_target_9_16);
+		DMEMIT(
+			   " pack_close_burst_target_17_64=%llu pack_close_burst_count_le4=%llu "
+			   "pack_close_burst_count_5_8=%llu pack_close_burst_count_9_16=%llu "
+			   "pack_close_burst_count_17_64=%llu pack_close_burst_overshoot=%llu "
+			   "pack_tail_samples=%llu pack_tail_zero_inflight=%llu "
+			   "pack_tail_zero_idle=%llu pack_tail_one_inflight=%llu "
+			   "pack_tail_one_idle=%llu pack_tail_many_inflight=%llu "
+			   "pack_tail_many_idle=%llu burst_target_grows=%llu "
+			   "burst_target_shrinks=%llu burst_shrink_inflight_zero_skips=%llu "
+			   "burst_shrink_after_inflight_zero=%llu "
+			   "burst_shrink_after_read_bypass=%llu burst_shrink_other=%llu "
+			   "burst_shrink_target_le8=%llu burst_shrink_target_9_32=%llu "
+			   "burst_shrink_target_gt32=%llu packed_early_commits=%llu "
+			   "single_pack_deferrals=%llu",
 		       ctx->pack_close_burst_target_17_64,
 		       ctx->pack_close_burst_count_le4,
 		       ctx->pack_close_burst_count_5_8,
@@ -8938,15 +8935,30 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->pack_tail_many_idle,
 		       ctx->burst_target_grows,
 		       ctx->burst_target_shrinks,
-		       0ULL, /* retired ID64 compatibility token */
-		       0ULL, /* completion-aware zero-tail makes this impossible */
+		       0ULL,
+		       /* retired ID64 compatibility token */
+		       0ULL,
+		       /* completion-aware zero-tail makes this impossible */
 		       ctx->burst_shrink_after_read_bypass,
 		       ctx->burst_shrink_other,
 		       ctx->burst_shrink_target_le8,
 		       ctx->burst_shrink_target_9_32,
 		       ctx->burst_shrink_target_gt32,
 		       ctx->packed_early_commits,
-		       ctx->single_pack_deferrals,
+		       ctx->single_pack_deferrals);
+		DMEMIT(
+			   " accepted_burst_extensions=%llu accepted_burst_tail_flushes=%llu "
+			   "accepted_burst_read_caps=%llu retained_burst_target=%u "
+			   "read_meta_reqs=%u read_payload_reqs=%u read_payload_blocks=%u "
+			   "read_meta_cache_hits=%u read_meta_lru_hits=%u "
+			   "read_meta_set_lookups=%llu read_meta_set_hits=%llu "
+			   "read_meta_set_probes=%llu read_meta_set_replacements=%llu "
+			   "read_meta_primary_hits=%llu read_meta_secondary_hits=%llu "
+			   "read_meta_copy_bytes=%llu read_full_extent_reqs=%u "
+			   "read_full_cache_hits=%u read_two_block_skips=%u "
+			   "read_grouping_enabled=%u read_coalescing_enabled=%u "
+			   "parallel_reads_enabled=%u parallel_read_pairs=%llu "
+			   "parallel_read_same_extent_pairs=%llu",
 		       ctx->accepted_burst_extensions,
 		       ctx->accepted_burst_tail_flushes,
 		       ctx->accepted_burst_read_caps,
@@ -8970,7 +8982,23 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->read_coalescing_enabled,
 		       1U,
 		       ctx->parallel_read_pairs,
-		       ctx->parallel_read_same_extent_pairs,
+		       ctx->parallel_read_same_extent_pairs);
+		DMEMIT(
+			   " parallel_read_async_batches=%llu parallel_read_async_slots=%llu "
+			   "parallel_read_distinct_extent_pairs=%llu "
+			   "parallel_read_adjacent_extent_pairs=%llu "
+			   "parallel_read_adjacent_extent_blocks=%llu "
+			   "parallel_read_adjacent_chain_3plus=%llu "
+			   "parallel_read_adjacent_chain_extent_max=%llu "
+			   "parallel_read_adjacent_chain_blocks_max=%llu "
+			   "parallel_read_coalesced_pairs=%llu "
+			   "parallel_read_coalesced_reqs_saved=%llu "
+			   "parallel_read_coalesced_blocks=%llu "
+			   "parallel_read_coalesce_extra_blocks=%llu "
+			   "parallel_read_coalesce_skip_cached=%llu "
+			   "parallel_read_coalesce_skip_noncontig_slot=%llu "
+			   "parallel_read_coalesce_skip_gap=%llu "
+			   "parallel_read_coalesce_skip_other=%llu failed=%u error=%d",
 		       ctx->parallel_read_async_batches,
 		       ctx->parallel_read_async_slots,
 		       ctx->parallel_read_distinct_extent_pairs,
@@ -8987,7 +9015,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->parallel_read_coalesce_skip_noncontig_slot,
 		       ctx->parallel_read_coalesce_skip_gap,
 		       ctx->parallel_read_coalesce_skip_other,
-		       ctx->failed, ctx->last_error);
+		       ctx->failed,
+		       ctx->last_error);
 		/* Retired compatibility token: the read-bypass detach override is gone. */
 		DMEMIT(" k1_allow_after_read_bypass=0 "
 		       "read_coalesce_max_blocks=%u "
@@ -9000,8 +9029,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->bio_segments_gt1, ctx->bio_segments_max,
 		       ctx->bio_nonzero_offset, ctx->bio_compound_folio_pages,
 		       ctx->ordered_copy_fallback_pages +
-			       prep.copy_fallback_pages +
-			       submitter.copy_fallback_pages);
+			       prep->copy_fallback_pages +
+			       submitter->copy_fallback_pages);
 		DMEMIT(" work_conserving_hand_records=%u "
 		       "work_conserving_hand_closes=%llu "
 		       "work_conserving_dry_closes=%llu "
@@ -9030,7 +9059,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->work_conserving_raw_not_ready,
 		       ctx->work_conserving_compressed_ready,
 		       ctx->work_conserving_raw_ready,
-		       prep.late_results_discarded,
+		       prep->late_results_discarded,
 		       atomic_read(&ctx->preparation_ready_current),
 		       atomic_read(&ctx->preparation_ready_max),
 		       atomic_read(&ctx->preparation_slots_in_use),
@@ -9134,13 +9163,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       (unsigned int)atomic_read(&ctx->submitter_preparation_active),
 		       (unsigned int)atomic_read(&ctx->submitter_preparation_active_max),
 		       ctx->submitter_owner_deferrals,
-		       submitter.prepared_pages,
-		       submitter.worker_wall_ns,
-		       submitter.worker_cpu_ns,
-		       submitter.lz4_wall_ns,
-		       submitter.copy_wall_ns,
-		       submitter.copy_bytes,
-		       submitter.crc_wall_ns,
+		       submitter->prepared_pages,
+		       submitter->worker_wall_ns,
+		       submitter->worker_cpu_ns,
+		       submitter->lz4_wall_ns,
+		       submitter->copy_wall_ns,
+		       submitter->copy_bytes,
+		       submitter->crc_wall_ns,
 		       ctx->submitter_dispatches,
 		       ctx->submitter_dispatch_declines);
 		DMEMIT(" write_admit_worker_samples=%llu "
@@ -9171,49 +9200,49 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "delta64_transform_wall_ns=%llu delta64_wall_ns=%llu",
 		       ctx->delta64_rescue_enabled,
 		       READ_ONCE(ctx->ordered_delta64.eligible) +
-			prep.delta64.eligible + submitter.delta64.eligible,
+			prep->delta64.eligible + submitter->delta64.eligible,
 		       READ_ONCE(ctx->ordered_delta64.classifier_pass) +
-			prep.delta64.classifier_pass + submitter.delta64.classifier_pass,
+			prep->delta64.classifier_pass + submitter->delta64.classifier_pass,
 		       READ_ONCE(ctx->ordered_delta64.attempts) +
-			prep.delta64.attempts + submitter.delta64.attempts,
+			prep->delta64.attempts + submitter->delta64.attempts,
 		       READ_ONCE(ctx->ordered_delta64.adopted) +
-			prep.delta64.adopted + submitter.delta64.adopted,
+			prep->delta64.adopted + submitter->delta64.adopted,
 		       READ_ONCE(ctx->ordered_delta64.direct_adopted) +
-			prep.delta64.direct_adopted + submitter.delta64.direct_adopted,
+			prep->delta64.direct_adopted + submitter->delta64.direct_adopted,
 		       READ_ONCE(ctx->ordered_delta64.first_lz4_skipped) +
-			prep.delta64.first_lz4_skipped + submitter.delta64.first_lz4_skipped,
+			prep->delta64.first_lz4_skipped + submitter->delta64.first_lz4_skipped,
 		       READ_ONCE(ctx->ordered_delta64.raw_rescues) +
-			prep.delta64.raw_rescues + submitter.delta64.raw_rescues,
+			prep->delta64.raw_rescues + submitter->delta64.raw_rescues,
 		       READ_ONCE(ctx->ordered_delta64.lz4_rescues) +
-			prep.delta64.lz4_rescues + submitter.delta64.lz4_rescues,
+			prep->delta64.lz4_rescues + submitter->delta64.lz4_rescues,
 		       READ_ONCE(ctx->ordered_delta64.pack_eligible) +
-			prep.delta64.pack_eligible + submitter.delta64.pack_eligible,
+			prep->delta64.pack_eligible + submitter->delta64.pack_eligible,
 		       READ_ONCE(ctx->ordered_delta64.pack_attempts) +
-			prep.delta64.pack_attempts + submitter.delta64.pack_attempts,
+			prep->delta64.pack_attempts + submitter->delta64.pack_attempts,
 		       READ_ONCE(ctx->ordered_delta64.pack_cliff_crossings) +
-			prep.delta64.pack_cliff_crossings + submitter.delta64.pack_cliff_crossings,
+			prep->delta64.pack_cliff_crossings + submitter->delta64.pack_cliff_crossings,
 		       READ_ONCE(ctx->ordered_delta64.pack_adopted) +
-			prep.delta64.pack_adopted + submitter.delta64.pack_adopted,
+			prep->delta64.pack_adopted + submitter->delta64.pack_adopted,
 		       READ_ONCE(ctx->ordered_delta64.score_0_7) +
-			prep.delta64.score_0_7 + submitter.delta64.score_0_7,
+			prep->delta64.score_0_7 + submitter->delta64.score_0_7,
 		       READ_ONCE(ctx->ordered_delta64.score_8_15) +
-			prep.delta64.score_8_15 + submitter.delta64.score_8_15,
+			prep->delta64.score_8_15 + submitter->delta64.score_8_15,
 		       READ_ONCE(ctx->ordered_delta64.score_16_23) +
-			prep.delta64.score_16_23 + submitter.delta64.score_16_23,
+			prep->delta64.score_16_23 + submitter->delta64.score_16_23,
 		       READ_ONCE(ctx->ordered_delta64.score_ge24) +
-			prep.delta64.score_ge24 + submitter.delta64.score_ge24,
+			prep->delta64.score_ge24 + submitter->delta64.score_ge24,
 		       READ_ONCE(ctx->ordered_delta64.payload_bytes_saved) +
-			prep.delta64.payload_bytes_saved + submitter.delta64.payload_bytes_saved,
+			prep->delta64.payload_bytes_saved + submitter->delta64.payload_bytes_saved,
 		       READ_ONCE(ctx->ordered_delta64.raw_payload_bytes_saved) +
-			prep.delta64.raw_payload_bytes_saved + submitter.delta64.raw_payload_bytes_saved,
+			prep->delta64.raw_payload_bytes_saved + submitter->delta64.raw_payload_bytes_saved,
 		       READ_ONCE(ctx->ordered_delta64.lz4_payload_bytes_saved) +
-			prep.delta64.lz4_payload_bytes_saved + submitter.delta64.lz4_payload_bytes_saved,
+			prep->delta64.lz4_payload_bytes_saved + submitter->delta64.lz4_payload_bytes_saved,
 		       READ_ONCE(ctx->ordered_delta64.transform_calls) +
-			prep.delta64.transform_calls + submitter.delta64.transform_calls,
+			prep->delta64.transform_calls + submitter->delta64.transform_calls,
 		       READ_ONCE(ctx->ordered_delta64.transform_wall_ns) +
-			prep.delta64.transform_wall_ns + submitter.delta64.transform_wall_ns,
+			prep->delta64.transform_wall_ns + submitter->delta64.transform_wall_ns,
 		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
-			prep.delta64.wall_ns + submitter.delta64.wall_ns);
+			prep->delta64.wall_ns + submitter->delta64.wall_ns);
 		DMEMIT(" completion_offloaded_batches=%llu completion_active=%d",
 		       READ_ONCE(ctx->completion_offloaded_batches),
 		       atomic_read(&ctx->completion_active));
@@ -9225,6 +9254,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       (u64)atomic64_read(&ctx->endio_write_seen_ok),
 		       (u64)atomic64_read(&ctx->endio_write_seen_err),
 		       (u64)atomic64_read(&ctx->endio_write_forced_err));
+		kfree(snapshots);
 		break;
 	case STATUSTYPE_TABLE:
 		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,
