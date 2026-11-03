@@ -37,10 +37,19 @@ if [[ -n "$test_root" ]]; then
   case "$build_info" in "$sandbox"/*) ;; *)
     echo "BLOCKED: test build metadata outside package sandbox" >&2; exit 1 ;;
   esac
+  module_artifact="${SWAPZ_TEST_MODULE_ARTIFACT:-}"
+  [[ -n "$module_artifact" ]] || {
+    echo "BLOCKED: test module artifact was not supplied" >&2; exit 1;
+  }
+  module_artifact="$(realpath -m -- "$module_artifact")"
+  case "$module_artifact" in "$sandbox"/*) ;; *)
+    echo "BLOCKED: test module artifact outside package sandbox" >&2; exit 1 ;;
+  esac
 else
   [[ $(id -u) == 0 ]] || { echo "BLOCKED: root required" >&2; exit 1; }
   srcbase="/usr/src"
   build_info="$root/build/source-build-info.h"
+  module_artifact="$root/build/kernel/experimental/dm-swapz.ko"
   dkms_bin="$(command -v dkms)" || {
     echo "BLOCKED: DKMS unavailable" >&2; exit 1;
   }
@@ -100,6 +109,7 @@ verify_owned() {
      -f "$src/.swapz-sources.sha256" &&
      -f "$src/.swapz-binaries.sha256" &&
      -f "$cli" && ! -L "$cli" && -f "$helper" && ! -L "$helper" &&
+     -f "$helper_dir/dm-swapz.ko" && ! -L "$helper_dir/dm-swapz.ko" &&
      -f "$mapper_service" && ! -L "$mapper_service" &&
      -f "$primary_swap" && ! -L "$primary_swap" ]] || return 1
   grep -Fxq "swapz:$version" "$src/$marker" || return 1
@@ -112,7 +122,8 @@ cleanup_owned() {
        -z "$(find "$src/build" -type l -print -quit)" ]] || return 1
     rm -r -- "$src/build"
   fi
-  rm -f -- "$cli" "$helper" "$mapper_service" "$primary_swap"
+  rm -f -- "$cli" "$helper" "$helper_dir/dm-swapz.ko" \
+    "$mapper_service" "$primary_swap"
   rmdir -- "$helper_dir"
   for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
     rm -f -- "$src/src/kernel/$(basename "$file")"
@@ -138,17 +149,13 @@ if [[ "$action" == uninstall ]]; then
   echo "Uninstalled owned swapz package without touching swap"
   exit 0
 fi
-[[ -x build/userspace/swapzctl && -x build/tests/device-roundtrip ]] || {
+[[ -x build/userspace/swapzctl && -x build/tests/device-roundtrip &&
+   -f "$module_artifact" && ! -L "$module_artifact" ]] || {
   echo "BLOCKED: run make before packaging" >&2; exit 1;
 }
 [[ -f "$build_info" && ! -L "$build_info" ]] || {
   echo "BLOCKED: committed-source build provenance missing" >&2; exit 1;
 }
-if [[ -z "$test_root" ]]; then
-  [[ -f build/kernel/experimental/dm-swapz.ko ]] || {
-    echo "BLOCKED: swapz kernel module missing" >&2; exit 1;
-  }
-fi
 [[ ! -e "$src" && ! -L "$src" &&
    ! -e "$cli" && ! -L "$cli" &&
    ! -e "$helper_dir" && ! -L "$helper_dir" &&
@@ -167,13 +174,16 @@ done
 install -m0644 "$build_info" "$src/src/kernel/swapz-build-info.h"
 install -m0755 build/userspace/swapzctl "$cli"
 install -m0755 build/tests/device-roundtrip "$helper"
+install -m0644 "$module_artifact" \
+  "$helper_dir/dm-swapz.ko"
 sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" \
   packaging/swapz-primary-mapper.service > "$mapper_service"
 install -m0644 packaging/swapz-primary.swap "$primary_swap"
 printf 'swapz:%s\n' "$version" > "$src/$marker"
 (cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
   src/kernel/*.c src/kernel/*.h) > "$src/.swapz-sources.sha256"
-sha256sum "$cli" "$helper" "$mapper_service" "$primary_swap" \
+sha256sum "$cli" "$helper" "$helper_dir/dm-swapz.ko" \
+  "$mapper_service" "$primary_swap" \
   > "$src/.swapz-binaries.sha256"
 rollback() {
   rc=$?

@@ -1487,10 +1487,12 @@ The primary userspace now parses a bounded root-owned
 `/var/lib/swapz/physical-recovery/primary-qualification.json` report. The
 reader requires the exact five PASS stages, source SHA, x86_64 machine-id
 digest and three qualified artifact hashes. The read-only plan now hashes its
-running `swapzctl`, the package-matched round-trip oracle and the current
-kernel's DKMS module, then exposes each digest and its match against the owner
-report. Rootless fixtures accept a matching report, reject host/source and
-stage mismatches, malformed JSON, trailing bytes, duplicate required keys,
+running `swapzctl`, the package-matched round-trip oracle and a byte-for-byte
+copy of the qualified module retained under `libexec/swapz/dm-swapz.ko`, then
+exposes each digest and its match against the owner report. The package tracks
+that retained module image in ownership/tamper checks; a DKMS rebuild is not
+substituted for it. Rootless fixtures accept a matching report, reject
+host/source and stage mismatches, malformed JSON, trailing bytes, duplicate required keys,
 nonzero stage exits and invalid artifact hashes, and ensure host artifact
 paths are unavailable in the fixture. The report is not installed
 automatically yet, and no lifecycle operation consumes the hashes. Source

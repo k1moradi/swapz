@@ -3589,7 +3589,9 @@ before any primary lifecycle operation is enabled.
 
 The read-only primary plan must independently hash the running `swapzctl`
 through `/proc/self/exe`, the package-matched `libexec/swapz/device-roundtrip`,
-and the current kernel's DKMS-installed `dm-swapz.ko`. It must compare all
+and the package-held exact `libexec/swapz/dm-swapz.ko` module image. The
+package must retain this image byte-for-byte from the qualified build; a
+separate DKMS rebuild is not a substitute. It must compare all
 three live SHA-256 values with the owner report (`formatter_sha256` is the
 historical report key for `swapzctl`) and report each observed digest and
 match result. Missing, unsafe, changed, or ambiguous files remain ineligible.
@@ -3599,3 +3601,9 @@ that was already loaded. Lifecycle admission must either prove a durable
 manager-owned exact-load record for that live module or reject it. Rootless
 fixtures must prove that host artifact paths are never read and that a mismatch
 in any one digest fails the aggregate comparison.
+
+The hermetic DKMS package test supplies a synthetic module artifact only from
+inside its private sandbox through `SWAPZ_TEST_MODULE_ARTIFACT`. That test hook
+must be rejected outside the sandbox and must not change the production module
+source path. Package ownership hashes and uninstall checks must cover the
+retained module image as well as the CLI, oracle and systemd files.

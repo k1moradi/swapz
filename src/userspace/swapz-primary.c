@@ -3962,7 +3962,6 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 	return -1;
 #else
 	static const char control_suffix[] = "/sbin/swapzctl";
-	struct utsname system;
 	char control_path[PATH_MAX];
 	char oracle_path[PATH_MAX];
 	char module_path[PATH_MAX];
@@ -4002,18 +4001,9 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 		errno = ENAMETOOLONG;
 		return -1;
 	}
-	if (uname(&system) < 0)
-		return -1;
-	if (!system.release[0] ||
-	    strspn(system.release,
-		   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-") !=
-		    strlen(system.release) || strstr(system.release, "..")) {
-		errno = EINVAL;
-		return -1;
-	}
 	length = snprintf(module_path, sizeof(module_path),
-			  "/lib/modules/%s/updates/dkms/dm-swapz.ko",
-			  system.release);
+			  "%.*s/libexec/swapz/dm-swapz.ko",
+			  prefix_length, control_path);
 	if (length < 0 || (size_t)length >= sizeof(module_path)) {
 		errno = ENAMETOOLONG;
 		return -1;

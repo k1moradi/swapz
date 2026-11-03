@@ -25,6 +25,8 @@ class PackageLifecycle(unittest.TestCase):
             '#define SWAPZ_BUILD_SOURCE_SHA "'
             '0123456789abcdef0123456789abcdef01234567"\n'
             "#define SWAPZ_BUILD_SOURCE_CLEAN 1\n")
+        self.module_artifact = self.home / "build/dm-swapz.ko"
+        self.module_artifact.write_bytes(b"synthetic-qualified-dm-swapz-module\n")
         (self.home / "bin").mkdir()
         dkms = self.home / "bin/dkms"
         dkms.write_text("""#!/usr/bin/env bash
@@ -37,7 +39,8 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.log = self.home / "dkms.log"
         self.env = dict(os.environ, SWAPZ_PACKAGE_TEST_ROOT=str(self.home),
                         SWAPZ_DKMS_LOG=str(self.log), SWAPZ_FAKE_FAIL_AT="never",
-                        SWAPZ_TEST_BUILD_INFO=str(self.build_info))
+                        SWAPZ_TEST_BUILD_INFO=str(self.build_info),
+                        SWAPZ_TEST_MODULE_ARTIFACT=str(self.module_artifact))
         self.env["PATH"] = str(self.home / "bin") + os.pathsep + self.env["PATH"]
         self.prefix = self.home / "usr/local"
         (ROOT / "build/userspace").mkdir(parents=True, exist_ok=True)
@@ -64,6 +67,9 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertEqual(r.returncode, 0, r.stderr)
         binary = self.prefix / "sbin/swapzctl"
         self.assertTrue(binary.is_file())
+        module_snapshot = self.prefix / "libexec/swapz/dm-swapz.ko"
+        self.assertEqual(module_snapshot.read_bytes(),
+                         self.module_artifact.read_bytes())
         version = subprocess.run([binary, "version"], capture_output=True, text=True)
         self.assertIn(VERSION, version.stdout)
         self.assertEqual(subprocess.run([binary, "status"], capture_output=True).returncode, 0)
@@ -121,6 +127,7 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertFalse(binary.exists())
         self.assertFalse(mapper_service.exists())
         self.assertFalse(swap_unit.exists())
+        self.assertFalse(module_snapshot.exists())
         self.assertFalse((self.home / "usr/src" / ("swapz-" + VERSION)).exists())
         self.assertEqual(self.log.read_text().splitlines(),
                          ["add", "build", "install", "status", "remove"])
@@ -149,6 +156,11 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         binary.write_bytes(b"tampered")
         self.assertNotEqual(self.invoke("uninstall").returncode, 0)
         binary.write_bytes(original)
+        module_snapshot = self.prefix / "libexec/swapz/dm-swapz.ko"
+        original_module = module_snapshot.read_bytes()
+        module_snapshot.write_bytes(b"tampered module")
+        self.assertNotEqual(self.invoke("uninstall").returncode, 0)
+        module_snapshot.write_bytes(original_module)
         recovery = self.home / "var/lib/swapz/physical-recovery"
         recovery.mkdir(parents=True)
         primary_state = recovery / "primary-state.json"
@@ -190,6 +202,10 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
             r = subprocess.run(["bash", str(SCRIPT), "install", prefix],
                                cwd=ROOT, env=self.env, capture_output=True)
             self.assertNotEqual(r.returncode, 0)
+        self.assertNotEqual(
+            self.invoke("install", {
+                "SWAPZ_TEST_MODULE_ARTIFACT": str(self.home / "outside.ko")
+            }).returncode, 0)
         self.assertNotEqual(self.invoke("invalid").returncode, 0)
 
 if __name__ == "__main__":
