@@ -216,6 +216,21 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "exact-source PASS" in blocker for blocker in result["code_blockers"]))
 
+    def test_systemd_package_workflow_is_a_required_release_gate(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        runs = evidence["release_evidence"]["required_ci"]["runs"]
+        runs[:] = [
+            run for run in runs
+            if run["workflow"] != "Systemd and package production-readiness"
+        ]
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "Systemd and package production-readiness" in blocker
+            for blocker in result["code_blockers"]))
+
     def test_artifact_hash_mappings_are_cross_bound_independently(self):
         report = owner_report()
         policy = acceptance_policy()

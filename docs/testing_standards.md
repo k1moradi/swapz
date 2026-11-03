@@ -4883,8 +4883,11 @@ executable form of this release-evidence contract; it is not a new operator
 command and never performs privileged work. It must derive readiness rather
 than trust summary PASS fields. It strictly rejects duplicate JSON keys,
 requires a FROZEN canonical production-acceptance policy, hashes the exact
-policy bytes, binds owner `make test`, both required CI workflows and all
-qualified artifacts to one exact synchronized `main` SHA, and independently
+policy bytes, binds owner `make test`, all three required CI workflows
+(`Native kernel-C project-goal regressions`,
+`Experimental swapz production C qualification`, and
+`Systemd and package production-readiness`) and all qualified artifacts to one
+exact synchronized `main` SHA, and independently
 cross-checks formatter/module/oracle hashes. Current PASS physical records bind
 the normalized lowercase PARTUUID plus exact partition byte size and the frozen
 policy SHA-256. Full-capacity evidence must include measured positive logical

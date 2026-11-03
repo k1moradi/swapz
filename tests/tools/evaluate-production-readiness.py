@@ -29,6 +29,7 @@ REQUIRED_STAGES = (
 REQUIRED_CI_WORKFLOWS = (
     "Native kernel-C project-goal regressions",
     "Experimental swapz production C qualification",
+    "Systemd and package production-readiness",
 )
 ARTIFACT_KEYS = (
     "formatter_sha256",
