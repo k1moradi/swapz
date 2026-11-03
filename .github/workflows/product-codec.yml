@@ -39,6 +39,9 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq liblz4-dev
       - name: Reuse one build directory for native production-C tests
         shell: bash
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           set -euo pipefail
           make -C tests/suites SANITIZE=1 test-all

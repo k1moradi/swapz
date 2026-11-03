@@ -12,7 +12,7 @@ CC ?= cc
 OBJDUMP ?= objdump
 CFLAGS ?= -std=c11 -O1 -g -Wall -Wextra -Werror
 ifeq ($(SANITIZE),1)
-CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
+CFLAGS += -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 endif
 ifeq ($(THREAD_SANITIZE),1)
 CFLAGS += -fsanitize=thread -fno-omit-frame-pointer

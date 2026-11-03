@@ -49,6 +49,7 @@ jobs:
           grep -Fq 'python3 -B tests/runtime/native/primary-lifecycle-audit-test.py -v' tests/tools/test-rootless.sh
           grep -Fq 'python3 -B tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py -v' tests/tools/test-rootless.sh
           grep -Fq 'python3 -B tests/runtime/native/primary-real-swap-test.py -v' tests/tools/test-rootless.sh
+          grep -Fq 'python3 -B tests/runtime/native/production-readiness-test.py -v' tests/tools/test-rootless.sh
           grep -Fq 'python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v' tests/tools/test-rootless.sh
           grep -Fq 'test-predictor: $(OUT)/predictor-qualification test-anon-page-analyzer' tests/suites/Makefile
           grep -Fq 'anon-page-analyzer-test.py' tests/suites/Makefile

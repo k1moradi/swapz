@@ -19,6 +19,7 @@ python3 -B tests/runtime/native/primary-real-swap-test.py -v
 python3 -B tests/runtime/benchmark/io-replay-test.py -v
 python3 -B tests/runtime/native/make-interface-test.py -v
 python3 -B tests/runtime/native/test-report-test.py -v
+python3 -B tests/runtime/native/production-readiness-test.py -v
 python3 -B tests/runtime/native/package-dkms-test.py -v
 python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v
 python3 -B tests/runtime/native/physical-swap-probe-test.py -v

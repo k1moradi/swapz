@@ -738,6 +738,14 @@ Only an exact-source owner `make test` with the loaded RAM-backed null_blk phase
 can qualify useful READ/WRITE, p99, lower bytes/requests, SD/SSD/NVMe, GC and
 fault/lifecycle behavior. Rootless checks alone are supporting evidence.
 
+Native production-C CI runs AddressSanitizer plus UndefinedBehaviorSanitizer
+with sanitizer recovery disabled and runtime halt-on-error controls; x86_64
+also runs the dedicated ThreadSanitizer publication/slot-reuse probes with
+halt-on-error. A sanitizer finding is therefore a hard CI failure, not a warning
+followed by continued qualification. These user-space production-C sanitizer
+probes do not claim kernel KASAN/KCSAN/lockdep coverage; any such debug-kernel
+evidence must be reported separately and never inferred from this CI.
+
 Native window tests must distinguish a successful READ serviced after a staged
 two/three-record post-PACK tail from successful READ continuity in the same
 accepted PACK chain; source contracts must enforce the queued follower gate. The bounded
@@ -4858,6 +4866,27 @@ retained old host snapshot must be labeled HISTORICAL and cannot become a
 current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
+
+The private `tests/tools/evaluate-production-readiness.py` evaluator is the
+executable form of this release-evidence contract; it is not a new operator
+command and never performs privileged work. It must derive readiness rather
+than trust summary PASS fields. It strictly rejects duplicate JSON keys,
+requires a FROZEN canonical production-acceptance policy, hashes the exact
+policy bytes, binds owner `make test`, both required CI workflows and all
+qualified artifacts to one exact synchronized `main` SHA, and independently
+cross-checks formatter/module/oracle hashes. Current PASS physical records bind
+the normalized lowercase PARTUUID plus exact partition byte size and the frozen
+policy SHA-256. Full-capacity evidence must include measured positive logical
+capacity and measured peak target/metadata RAM no greater than the frozen
+`metadata_and_target_peak_ram_bytes_max`. Current code readiness also requires
+zero explicitly recorded unresolved critical correctness/ownership/race issues.
+Deployment readiness additionally requires lifecycle/deployment PASS, exact
+installed artifact hashes and an armed cold-boot harness. Owner reboot
+observation remains a separate PASS/FAIL/NO field and can never be inferred
+from code or deployment readiness. Unit fixtures must prove stale source,
+historical evidence, owner-test failure, CI mismatch, artifact mismatch, target
+mismatch, policy mismatch, over-budget RAM, unresolved critical issues and
+unarmed deployment all fail closed.
 
 Source-contract assertions follow the component that owns a safety transition.
 For FUA, the contract requires the lower flush before any successful upper BIO

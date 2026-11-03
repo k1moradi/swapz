@@ -26,6 +26,7 @@ MANDATORY_ROOTLESS_PYTHON_SUITES = (
     "tests/runtime/benchmark/io-replay-test.py",
     "tests/runtime/native/make-interface-test.py",
     "tests/runtime/native/test-report-test.py",
+    "tests/runtime/native/production-readiness-test.py",
     "tests/runtime/native/package-dkms-test.py",
     "tests/runtime/native/systemd/swapz-primary-systemd-test.py",
     "tests/runtime/native/physical-swap-probe-test.py",
@@ -149,6 +150,23 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "test-predictor: $(OUT)/predictor-qualification "
             "test-anon-page-analyzer", suites)
         self.assertIn("test-all: test-codec test-predictor", suites)
+
+    def test_native_sanitizers_fail_hard_in_ci(self):
+        suites = (ROOT / "tests/suites/Makefile").read_text(encoding="utf-8")
+        workflow = (
+            ROOT / ".github/workflows/product-codec.yml").read_text(
+                encoding="utf-8")
+        self.assertIn(
+            "-fsanitize=address,undefined -fno-sanitize-recover=all "
+            "-fno-omit-frame-pointer",
+            suites)
+        self.assertIn(
+            "ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1",
+            workflow)
+        self.assertIn(
+            "UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1",
+            workflow)
+        self.assertIn("TSAN_OPTIONS: halt_on_error=1", workflow)
 
     def test_owned_nullblk_lifecycle_interruptions_are_test_only(self):
         primary = PRIMARY
