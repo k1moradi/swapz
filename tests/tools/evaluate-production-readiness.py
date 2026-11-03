@@ -34,6 +34,9 @@ BOOT_ID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 ENV_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+UTC_TIMESTAMP_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+    r"[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z$")
 
 REQUIRED_STAGES = (
     "Build module and helpers",
@@ -189,6 +192,18 @@ def _same_hashes(left: Any, right: Any) -> bool:
 
 def _valid_source(value: Any) -> bool:
     return isinstance(value, str) and bool(GIT_SHA_RE.fullmatch(value))
+
+
+def _valid_observed_at_utc(value: Any) -> bool:
+    return isinstance(value, str) and bool(UTC_TIMESTAMP_RE.fullmatch(value))
+
+
+def _valid_run_id(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    return isinstance(value, str) and value.isdigit() and int(value) > 0
 
 
 def _normalize_target(value: Any) -> tuple[str, int] | None:
@@ -936,6 +951,9 @@ def evaluate_release(
         if record.get("source_sha") != source_sha:
             blocker(f"{name}: source binding mismatch")
             return None
+        if not _valid_observed_at_utc(record.get("observed_at_utc")):
+            blocker(f"{name}: observation timestamp is missing or invalid")
+            return None
         return record
 
     pass_record("production_source")
@@ -962,8 +980,14 @@ def evaluate_release(
                     valid_runs.setdefault(workflow, []).append(run)
         for workflow in REQUIRED_CI_WORKFLOWS:
             rows = valid_runs.get(workflow, [])
-            if len(rows) != 1 or rows[0].get("head_sha") != source_sha or                     rows[0].get("result") != "PASS":
-                block_code(f"required_ci: {workflow} is not an exact-source PASS")
+            if (
+                    len(rows) != 1 or
+                    rows[0].get("head_sha") != source_sha or
+                    rows[0].get("result") != "PASS" or
+                    not _valid_run_id(rows[0].get("run_id"))):
+                block_code(
+                    f"required_ci: {workflow} is not an exact-source "
+                    "PASS with a concrete run ID")
         if set(valid_runs) != set(REQUIRED_CI_WORKFLOWS):
             block_code("required_ci: workflow set is incomplete")
 
@@ -999,9 +1023,10 @@ def evaluate_release(
     critical = pass_record("unresolved_critical_issues")
     if critical is not None and (
             type(critical.get("count")) is not int or
-            critical.get("count") != 0):
+            critical.get("count") != 0 or
+            critical.get("issues") != []):
         block_code(
-            "unresolved critical correctness issue count is not integer zero")
+            "unresolved critical correctness issue count/list is inconsistent")
 
     def require_target(name: str, record: dict[str, Any] | None,
                        *, deployment: bool = False) -> None:
@@ -1090,12 +1115,18 @@ def evaluate_release(
 
     lifecycle = pass_record("lifecycle_deployment_state", deployment=True)
     require_target("lifecycle_deployment_state", lifecycle, deployment=True)
-    if lifecycle is not None and (
-            lifecycle.get("overall") != "PASS" or
-            lifecycle.get("lifecycle") != "PASS" or
-            lifecycle.get("deployment") != "PASS"):
-        block_deployment(
-            "lifecycle_deployment_state: lifecycle/deployment result is not PASS")
+    if lifecycle is not None:
+        if (
+                lifecycle.get("overall") != "PASS" or
+                lifecycle.get("lifecycle") != "PASS" or
+                lifecycle.get("deployment") != "PASS"):
+            block_deployment(
+                "lifecycle_deployment_state: lifecycle/deployment result is not PASS")
+        evidence_sha256 = lifecycle.get("evidence_sha256")
+        if not isinstance(evidence_sha256, str) or not SHA256_RE.fullmatch(
+                evidence_sha256):
+            block_deployment(
+                "lifecycle_deployment_state: evidence digest is invalid")
 
     installed = pass_record("installed_artifact_identity", deployment=True)
     require_target("installed_artifact_identity", installed, deployment=True)
@@ -1136,9 +1167,13 @@ def evaluate_release(
     cold_boot_observed = "NO"
     if isinstance(reboot, dict) and reboot.get("current") is True and \
             reboot.get("source_sha") == source_sha and \
+            _valid_observed_at_utc(reboot.get("observed_at_utc")) and \
             (target is not None and
              _normalize_target(reboot.get("target")) == target):
-        if reboot.get("status") == "PASS" and reboot.get("observed") is True:
+        if (
+                reboot.get("status") == "PASS" and
+                reboot.get("observed") is True and
+                reboot.get("overall") == "PASS"):
             if cold_boot_evidence is None or cold_boot_evidence_raw is None:
                 cold_boot_blockers.append(
                     "owner_observed_reboot: persistent cold-boot evidence is missing")
@@ -1155,7 +1190,10 @@ def evaluate_release(
                         "owner_observed_reboot: " + issue)
                 if not cold_boot_blockers:
                     cold_boot_observed = "PASS"
-        elif reboot.get("status") == "FAIL":
+        elif (
+                reboot.get("status") == "FAIL" and
+                reboot.get("observed") is True and
+                reboot.get("overall") == "FAIL"):
             cold_boot_observed = "FAIL"
 
     if cold_boot_observed == "FAIL":

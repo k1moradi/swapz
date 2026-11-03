@@ -167,6 +167,7 @@ def pass_record(**extra):
         "status": "PASS",
         "current": True,
         "source_sha": SOURCE,
+        "observed_at_utc": "2026-11-03T00:00:00Z",
         **extra,
     }
 
@@ -369,8 +370,10 @@ def current_evidence(
                     "workflow": workflow,
                     "head_sha": SOURCE,
                     "result": "PASS",
+                    "run_id": str(index + 1),
                 }
-                for workflow in EVALUATOR.REQUIRED_CI_WORKFLOWS
+                for index, workflow in enumerate(
+                    EVALUATOR.REQUIRED_CI_WORKFLOWS)
             ]),
             "exact_source_owner_make_test": pass_record(
                 overall="PASS",
@@ -380,7 +383,8 @@ def current_evidence(
             "owned_nullblk_qualification": pass_record(
                 overall="PASS", evidence_sha256="5" * 64,
                 hashes=dict(ARTIFACTS)),
-            "unresolved_critical_issues": pass_record(count=0),
+            "unresolved_critical_issues": pass_record(
+                count=0, issues=[]),
             "real_linux_swap": pass_record(
                 policy_sha256=policy_digest,
                 target=dict(TARGET),
@@ -398,7 +402,8 @@ def current_evidence(
                 evidence_sha256=hashlib.sha256(campaign_raw).hexdigest()),
             "lifecycle_deployment_state": pass_record(
                 target=dict(TARGET), overall="PASS",
-                lifecycle="PASS", deployment="PASS"),
+                lifecycle="PASS", deployment="PASS",
+                evidence_sha256="6" * 64),
             "installed_artifact_identity": pass_record(
                 target=dict(TARGET),
                 installed=True,
@@ -412,8 +417,10 @@ def current_evidence(
                 "status": "BLOCKED",
                 "current": True,
                 "source_sha": SOURCE,
+                "observed_at_utc": "2026-11-03T00:00:00Z",
                 "target": dict(TARGET),
                 "observed": False,
+                "overall": "BLOCKED",
             },
         },
     }
@@ -537,7 +544,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         reboot = evidence["release_evidence"]["owner_observed_reboot"]
         cold_boot_raw = cold_boot_evidence_raw()
         reboot.update(
-            status="PASS", observed=True,
+            status="PASS", observed=True, overall="PASS",
             evidence_sha256=hashlib.sha256(cold_boot_raw).hexdigest())
         result = evaluate(
             report, evidence, policy, cold_boot_raw=cold_boot_raw)
@@ -547,7 +554,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["cold_boot_blockers"], [])
         self.assertEqual(result["release_verdict"], "PASS")
 
-        reboot.update(status="FAIL", observed=False)
+        reboot.update(status="FAIL", observed=True, overall="FAIL")
         result = evaluate(report, evidence, policy)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
@@ -575,7 +582,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         reboot = evidence["release_evidence"]["owner_observed_reboot"]
         cold_boot_raw = cold_boot_evidence_raw()
         reboot.update(
-            status="PASS", observed=True,
+            status="PASS", observed=True, overall="PASS",
             evidence_sha256=hashlib.sha256(cold_boot_raw).hexdigest())
 
         missing = evaluate(report, evidence, policy)
@@ -671,6 +678,81 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "frozen on synchronized main" in blocker
             for blocker in result["code_blockers"]))
+
+    def test_current_pass_records_require_auditable_utc_timestamp(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        del evidence["release_evidence"]["clean_build_state"]["observed_at_utc"]
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "observation timestamp" in blocker
+            for blocker in result["code_blockers"]))
+
+        evidence = current_evidence(encoded(report), encoded(policy))
+        evidence["release_evidence"]["clean_build_state"][
+            "observed_at_utc"] = "2026-11-03 00:00:00"
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+
+    def test_required_ci_pass_requires_concrete_run_ids(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        del evidence["release_evidence"]["required_ci"]["runs"][0]["run_id"]
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "concrete run ID" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_zero_critical_count_requires_an_empty_issue_list(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        evidence["release_evidence"]["unresolved_critical_issues"][
+            "issues"] = ["publication race"]
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "count/list is inconsistent" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_deployment_pass_requires_retained_lifecycle_digest(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        del evidence["release_evidence"]["lifecycle_deployment_state"][
+            "evidence_sha256"]
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "lifecycle_deployment_state: evidence digest is invalid" in blocker
+            for blocker in result["deployment_blockers"]))
+
+    def test_owner_reboot_status_requires_timestamp_and_matching_overall(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        reboot = evidence["release_evidence"]["owner_observed_reboot"]
+        cold_boot_raw = cold_boot_evidence_raw()
+        reboot.update(
+            status="PASS", observed=True, overall="PASS",
+            evidence_sha256=hashlib.sha256(cold_boot_raw).hexdigest())
+        del reboot["observed_at_utc"]
+        result = evaluate(
+            report, evidence, policy, cold_boot_raw=cold_boot_raw)
+        self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+
+        evidence = current_evidence(encoded(report), encoded(policy))
+        reboot = evidence["release_evidence"]["owner_observed_reboot"]
+        reboot.update(
+            status="PASS", observed=True, overall="BLOCKED",
+            evidence_sha256=hashlib.sha256(cold_boot_raw).hexdigest())
+        result = evaluate(
+            report, evidence, policy, cold_boot_raw=cold_boot_raw)
+        self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
 
     def test_current_owner_failure_overrides_self_declared_pass_records(self):
         report = owner_report()

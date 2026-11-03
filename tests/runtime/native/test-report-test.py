@@ -4230,7 +4230,8 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 **common, "overall": "PASS",
                 "evidence_sha256": self.DIGEST,
                 "hashes": dict(hashes)},
-            "unresolved_critical_issues": {**common, "count": 0},
+            "unresolved_critical_issues": {
+                **common, "count": 0, "issues": []},
             "authorized_target_identity": {
                 **common, "authorized": True, "target": dict(target)},
             "real_linux_swap": {
@@ -4337,6 +4338,17 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             "BLOCKED")
         self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(verdict["release_verdict"], "BLOCKED")
+
+    def test_zero_critical_count_requires_empty_issue_list(self):
+        snapshot = self.passing_snapshot()
+        critical = snapshot["release_evidence"]["unresolved_critical_issues"]
+        critical["issues"] = ["publication race"]
+        verdict = runner.evaluate_production_readiness(
+            snapshot, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["unresolved_critical_issues"],
+            "BLOCKED")
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED")
 
     def test_pass_requires_qualified_hashes_and_current_ci(self):
         missing_hash = self.passing_snapshot()

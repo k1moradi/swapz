@@ -238,7 +238,9 @@ def _readiness_pass_payload_valid(
                 _valid_sha256(entry.get("evidence_sha256")) and
                 _readiness_artifact_hashes_valid(entry.get("hashes")))
     if name == "unresolved_critical_issues":
-        return type(entry.get("count")) is int and entry["count"] == 0
+        return (
+            type(entry.get("count")) is int and entry["count"] == 0 and
+            entry.get("issues") == [])
     if name == "authorized_target_identity":
         return (entry.get("authorized") is True and
                 _readiness_target_key(entry.get("target")) is not None)

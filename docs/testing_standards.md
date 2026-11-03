@@ -4979,7 +4979,7 @@ the sole qualification interface; `make fast_test` remains development-only.
 `docs/handoff/production-readiness.json` is observational release evidence,
 not a qualification result. Every current PASS must bind to the exact
 production source and carry the evidence appropriate to its gate: clean build
-state, qualified formatter/module/oracle hashes, both required CI runs,
+state, qualified formatter/module/oracle hashes, all three required CI workflows,
 exact-source owner `make test`, owned-null_blk lifecycle qualification, real
 Linux swap-out/in, maximum-capacity plus measured RAM evidence, sustained
 physical performance, lifecycle/deployment state, installed artifact identity,
@@ -5044,16 +5044,22 @@ report-side expected/actual capacity fields are not sufficient.
 Missing, malformed, digest-mismatched,
 source/target-mismatched or non-PASS retained boot evidence keeps
 `COLD_BOOT_OBSERVED=NO` and the final release BLOCKED; it does not erase an
-otherwise valid pre-reboot code/deployment readiness result. A current summary
-FAIL remains conservatively FAIL.
+otherwise valid pre-reboot code/deployment readiness result. A reboot summary
+can drive PASS or FAIL only when it is current, exact-source/target bound,
+marked observed, carries a strict UTC `observed_at_utc` timestamp, and its
+`overall` disposition matches the summary status. A structurally incomplete
+reboot summary remains NO/BLOCKED rather than fabricating an observation.
 Owner `test_results.json` ingestion is strict: the stage list must contain
 exactly the five canonical stages in order, each with `status: PASS` and an
 integer `exit_code: 0`; duplicate, reordered, missing, extra, or internally
 contradictory stage rows are BLOCKED. The qualified-artifact object accepts
-only its status plus formatter/module/oracle SHA-256 fields. The
-`unresolved_critical_issues` release record must carry a real JSON integer
-count exactly equal to zero; booleans, strings, negative values, null, and
-nonzero counts are BLOCKED.
+only its status plus formatter/module/oracle SHA-256 fields. Every current PASS
+release record must carry a strict UTC `observed_at_utc` timestamp, and each
+required CI workflow PASS must carry one concrete positive run ID for the exact
+release source. The `unresolved_critical_issues` release record must carry a
+real JSON integer count exactly equal to zero and an empty `issues` list;
+booleans, strings, negative values, null, nonzero counts, or a zero count paired
+with listed issues are BLOCKED.
 
 The executable evaluator's process success is stricter than the pre-reboot
 readiness fields: it returns 0 only when the full `release_verdict` is PASS,
@@ -5119,8 +5125,10 @@ bind the same campaign bytes and exactly match the sealed logical capacity and
 peak RAM. Peak RAM must remain no greater than the frozen
 `metadata_and_target_peak_ram_bytes_max`. Current code readiness also requires
 zero explicitly recorded unresolved critical correctness/ownership/race issues.
-Deployment readiness additionally requires lifecycle/deployment PASS, exact
-installed artifact hashes and an armed cold-boot harness. Owner reboot
+Deployment readiness additionally requires lifecycle/deployment PASS with a
+valid retained evidence SHA-256 digest, exact installed artifact hashes, and an
+armed cold-boot harness whose release record SHA-256 binds its separately
+validated persistent arm evidence. Owner reboot
 observation remains a separate PASS/FAIL/NO field and can never be inferred
 from code or deployment readiness. Unit fixtures must prove stale source,
 historical evidence, owner-test failure, CI mismatch, artifact mismatch, target
