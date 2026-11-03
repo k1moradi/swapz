@@ -813,7 +813,13 @@ random ownership token used for its null_blk config. Clean teardown may remove
 only that exact token-bound directory after the holder/mount/swap identity
 checks pass. Quarantined evidence from an earlier run is retained for
 investigation but must not block a later independent rehearsal merely because a
-fixed historical evidence path still exists.
+fixed historical evidence path still exists. Loaded correctness qualification
+must require the canonical primary lifecycle PASS record, the exact ordered six
+fresh-process interruption PASS phases, the six-case interruption-recovery
+aggregate, and the eleven-case negative-recovery aggregate. Missing, duplicated,
+substituted or malformed lifecycle markers make Stage 5 evidence incomplete;
+merely executing the helper or recognizing its failure markers is not sufficient
+for a qualification PASS.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 

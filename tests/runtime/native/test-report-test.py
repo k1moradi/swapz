@@ -856,6 +856,15 @@ def synthetic_log():
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 syscall_errno:EIO lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
            "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
+           "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa partuuid:01234567-89abcdef device:251:1 prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-starting",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-loaded",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-mapper-resumed",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-swapon",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-stopping",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-swapoff",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
+           "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:11 ambiguous_syscall:true inventory_failure:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
            "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
@@ -1079,6 +1088,41 @@ class ReportContract(unittest.TestCase):
             bad = output.replace(marker, marker.replace(before, after))
             self.assertEqual(runner.parse_loaded_correctness(bad)["overall"],
                              "INCOMPLETE")
+
+    def test_primary_lifecycle_recovery_evidence_is_mandatory(self):
+        output = synthetic_log()
+        evidence = runner.parse_loaded_correctness(output)
+        self.assertEqual(evidence["overall"], "PASS")
+        self.assertEqual(evidence["primary_lifecycle"], "PASS")
+        self.assertEqual(evidence["primary_lifecycle_interruptions"], 6)
+        self.assertEqual(evidence["primary_lifecycle_negative_cases"], 11)
+
+        required_markers = (
+            "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=",
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=",
+            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=",
+        )
+        for marker in required_markers:
+            with self.subTest(missing=marker):
+                lines = [
+                    line for line in output.splitlines()
+                    if not line.startswith(marker)
+                ]
+                result = runner.parse_loaded_correctness("\n".join(lines) + "\n")
+                self.assertEqual(result["overall"], "INCOMPLETE")
+
+        interruption = (
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-loaded")
+        result = runner.parse_loaded_correctness(
+            output.replace(interruption + "\n", ""))
+        self.assertEqual(result["overall"], "INCOMPLETE")
+        self.assertIn("interruption recovery", result["reason"])
+
+        duplicated = output.replace(
+            interruption + "\n",
+            interruption + "\n" + interruption + "\n")
+        result = runner.parse_loaded_correctness(duplicated)
+        self.assertEqual(result["overall"], "INCOMPLETE")
 
     def test_raw_read_fanout_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 "
