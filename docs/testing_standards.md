@@ -691,7 +691,10 @@ lifecycle helper's fixed `FAIL_PRIMARY_NULLBLK_LIFECYCLE:` and
 `BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:` markers are also actionable loaded-stage
 diagnostics: the reporter must retain the marker plus a bounded sanitized reason,
 while stripping paths, long IDs and arbitrary host-specific text. Live progress
-may print only the fixed marker label, never its private detail.
+may print only the fixed marker label, never its private detail. Failure-phase
+attribution must recognize the primary lifecycle rehearsal and its named
+interruption phase before any later benchmark-fixture default can overwrite the
+operator-visible failure location.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 

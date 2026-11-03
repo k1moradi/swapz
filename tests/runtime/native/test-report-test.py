@@ -3134,6 +3134,16 @@ class ReportContract(unittest.TestCase):
                 "FAIL_PRIMARY_NULLBLK_LIFECYCLE: private detail"),
             "FAIL_PRIMARY_NULLBLK_LIFECYCLE")
 
+        interrupted = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
+            "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:redacted\n"
+            "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-swapon run_id=redacted\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: unexpected kernel facts\n"
+        )
+        phase, reason = runner.failure_context(interrupted)
+        self.assertIn("primary lifecycle interruption start-swapon", phase)
+        self.assertIn("unexpected kernel facts", reason)
+
         blocked_primary = (
             "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: prior evidence at "
             "/var/lib/private/0123456789abcdef0123456789abcdef\n"
