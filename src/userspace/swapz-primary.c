@@ -6346,6 +6346,16 @@ failed:
 	return -1;
 }
 
+static int swapz_primary_proc_fd_path(int fd, char *path, size_t capacity)
+{
+	if (fd < 0 || !path || !capacity) {
+		errno = EINVAL;
+		return -1;
+	}
+	return swapz_primary_path_format(
+		path, capacity, "/proc/self/fd/%d", fd);
+}
+
 static int swapz_primary_mkswap_open(void)
 {
 	struct stat path_info;
@@ -6399,15 +6409,11 @@ static int swapz_primary_run_mkswap(int mkswap_fd, int mapper_fd)
 		(char *)"LC_ALL=C", (char *)"PATH=/usr/sbin:/sbin", NULL,
 	};
 	pid_t child;
-	int length;
 	int status;
 
-	length = snprintf(mapper_path, sizeof(mapper_path),
-			   "/proc/self/fd/%d", mapper_fd);
-	if (length < 0 || (size_t)length >= sizeof(mapper_path)) {
-		errno = EOVERFLOW;
+	if (swapz_primary_proc_fd_path(
+		    mapper_fd, mapper_path, sizeof(mapper_path)) < 0)
 		return -1;
-	}
 	child = fork();
 	if (child < 0)
 		return -1;
@@ -6434,6 +6440,331 @@ static int swapz_primary_run_mkswap(int mkswap_fd, int mapper_fd)
 	return 0;
 }
 #endif
+
+
+static int swapz_primary_activate_mapper_swap(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest,
+	dev_t expected_mapper_device, int *activated_by_call)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)recovery_fd;
+	(void)lock_fd;
+	(void)manifest;
+	(void)expected_mapper_device;
+	if (!activated_by_call) {
+		errno = EINVAL;
+		return -1;
+	}
+	*activated_by_call = 0;
+	errno = ENODEV;
+	return -1;
+#else
+	static const enum swapz_primary_stage starting[] = {
+		SWAPZ_PRIMARY_STAGE_STARTING,
+	};
+	char mapper_name[64];
+	char mapper_uuid[64];
+	char table[128];
+	char mapper_path[64];
+	uint64_t logical_sectors = 0;
+	uint64_t logical_bytes;
+	dev_t observed_mapper_device = 0;
+	int control_fd = -1;
+	int mapper_fd = -1;
+	int mapper_active;
+	int backing_active;
+	int result = -1;
+	int saved_errno = EIO;
+	int syscall_errno = 0;
+	long syscall_result;
+
+	if (!manifest || expected_mapper_device == 0 || !activated_by_call) {
+		errno = EINVAL;
+		return -1;
+	}
+	*activated_by_call = 0;
+	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	if (geteuid() != 0 ||
+	    swapz_primary_transaction_manifest_matches_at(
+		    recovery_fd, lock_fd, manifest, starting,
+		    sizeof(starting) / sizeof(starting[0]), 0) < 0 ||
+	    swapz_primary_mapper_layout(
+		    manifest, mapper_name, mapper_uuid, table,
+		    &logical_sectors) < 0)
+		return -1;
+	if (!logical_sectors || logical_sectors > UINT64_MAX / 512ULL) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	logical_bytes = logical_sectors * 512ULL;
+
+	control_fd = swapz_primary_dm_control_open();
+	if (control_fd < 0 ||
+	    swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 1,
+		    &observed_mapper_device) < 0 ||
+	    observed_mapper_device != expected_mapper_device) {
+		if (observed_mapper_device &&
+		    observed_mapper_device != expected_mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+	backing_active =
+		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
+	if (backing_active != 0) {
+		if (backing_active > 0)
+			errno = EBUSY;
+		goto out;
+	}
+	mapper_active =
+		swapz_primary_swap_device_active(expected_mapper_device);
+	if (mapper_active != 0) {
+		if (mapper_active > 0)
+			errno = EBUSY;
+		goto out;
+	}
+
+	mapper_fd = swapz_primary_mapper_device_open(
+		mapper_name, expected_mapper_device, logical_bytes);
+	if (mapper_fd < 0 ||
+	    swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 0,
+		    &observed_mapper_device) < 0 ||
+	    observed_mapper_device != expected_mapper_device ||
+	    swapz_primary_proc_fd_path(
+		    mapper_fd, mapper_path, sizeof(mapper_path)) < 0) {
+		if (observed_mapper_device &&
+		    observed_mapper_device != expected_mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+
+	errno = 0;
+	syscall_result = syscall(SYS_swapon, mapper_path, 0);
+	if (syscall_result < 0)
+		syscall_errno = errno ? errno : EIO;
+
+	mapper_active =
+		swapz_primary_swap_device_active(expected_mapper_device);
+	if (mapper_active < 0)
+		goto out;
+	backing_active =
+		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
+	if (backing_active < 0)
+		goto out;
+	if (syscall_result < 0 && syscall_errno != EINTR) {
+		errno = syscall_errno;
+		goto out;
+	}
+	if (mapper_active != 1 || backing_active != 0) {
+		errno = syscall_errno ? syscall_errno : EIO;
+		goto out;
+	}
+	if (swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 0,
+		    &observed_mapper_device) < 0 ||
+	    observed_mapper_device != expected_mapper_device) {
+		if (observed_mapper_device &&
+		    observed_mapper_device != expected_mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+
+	*activated_by_call = 1;
+	result = 0;
+out:
+	saved_errno = result == 0 ? 0 : (errno ? errno : EIO);
+	if (mapper_fd >= 0 && close(mapper_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (control_fd >= 0 && close(control_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (result < 0)
+		errno = saved_errno;
+	return result;
+#endif
+}
+
+static int swapz_primary_deactivate_mapper_swap(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest,
+	int *deactivated_by_call)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)recovery_fd;
+	(void)lock_fd;
+	(void)manifest;
+	if (!deactivated_by_call) {
+		errno = EINVAL;
+		return -1;
+	}
+	*deactivated_by_call = 0;
+	errno = ENODEV;
+	return -1;
+#else
+	static const enum swapz_primary_stage deactivation_stages[] = {
+		SWAPZ_PRIMARY_STAGE_STOPPING,
+		SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED,
+		SWAPZ_PRIMARY_STAGE_RECOVERING,
+	};
+	struct dm_ioctl status;
+	char mapper_name[64];
+	char mapper_uuid[64];
+	char table[128];
+	char mapper_path[64];
+	uint64_t logical_sectors = 0;
+	uint64_t logical_bytes;
+	dev_t mapper_device = 0;
+	dev_t verified_mapper_device = 0;
+	int control_fd = -1;
+	int mapper_fd = -1;
+	int mapper_active;
+	int backing_active;
+	int result = -1;
+	int saved_errno = EIO;
+	int syscall_errno = 0;
+	long syscall_result;
+
+	if (!manifest || !deactivated_by_call) {
+		errno = EINVAL;
+		return -1;
+	}
+	*deactivated_by_call = 0;
+	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	if (geteuid() != 0 ||
+	    swapz_primary_transaction_manifest_matches_at(
+		    recovery_fd, lock_fd, manifest, deactivation_stages,
+		    sizeof(deactivation_stages) /
+			    sizeof(deactivation_stages[0]), 0) < 0 ||
+	    swapz_primary_mapper_layout(
+		    manifest, mapper_name, mapper_uuid, table,
+		    &logical_sectors) < 0)
+		return -1;
+	if (!logical_sectors || logical_sectors > UINT64_MAX / 512ULL) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	logical_bytes = logical_sectors * 512ULL;
+
+	backing_active =
+		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
+	if (backing_active != 0) {
+		if (backing_active > 0)
+			errno = EBUSY;
+		return -1;
+	}
+
+	control_fd = swapz_primary_dm_control_open();
+	if (control_fd < 0)
+		return -1;
+	if (swapz_primary_dm_status_fd(
+		    control_fd, mapper_name, mapper_uuid, &status) < 0) {
+		if (errno != ENXIO ||
+		    swapz_primary_dm_prove_mapper_absent(
+			    control_fd, mapper_name, mapper_uuid) < 0)
+			goto out;
+		result = 0;
+		goto out;
+	}
+	if (status.dev == 0U) {
+		errno = EPROTO;
+		goto out;
+	}
+	mapper_device = (dev_t)status.dev;
+	if ((uint64_t)mapper_device != status.dev) {
+		errno = EPROTO;
+		goto out;
+	}
+
+	mapper_active = swapz_primary_swap_device_active(mapper_device);
+	if (mapper_active < 0)
+		goto out;
+	if (!mapper_active) {
+		result = 0;
+		goto out;
+	}
+
+	if (swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 0,
+		    &verified_mapper_device) < 0 ||
+	    verified_mapper_device != mapper_device) {
+		if (verified_mapper_device &&
+		    verified_mapper_device != mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+	mapper_fd = swapz_primary_mapper_device_open(
+		mapper_name, mapper_device, logical_bytes);
+	if (mapper_fd < 0 ||
+	    swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 0,
+		    &verified_mapper_device) < 0 ||
+	    verified_mapper_device != mapper_device ||
+	    swapz_primary_proc_fd_path(
+		    mapper_fd, mapper_path, sizeof(mapper_path)) < 0) {
+		if (verified_mapper_device &&
+		    verified_mapper_device != mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+
+	errno = 0;
+	syscall_result = syscall(SYS_swapoff, mapper_path);
+	if (syscall_result < 0)
+		syscall_errno = errno ? errno : EIO;
+	if (syscall_result < 0 && syscall_errno != EINTR) {
+		errno = syscall_errno;
+		goto out;
+	}
+
+	mapper_active = swapz_primary_swap_device_active(mapper_device);
+	if (mapper_active < 0)
+		goto out;
+	backing_active =
+		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
+	if (backing_active < 0)
+		goto out;
+	if (mapper_active != 0 || backing_active != 0) {
+		errno = syscall_errno ? syscall_errno : EBUSY;
+		goto out;
+	}
+	if (swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 0,
+		    &verified_mapper_device) < 0 ||
+	    verified_mapper_device != mapper_device) {
+		if (verified_mapper_device &&
+		    verified_mapper_device != mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+
+	*deactivated_by_call = 1;
+	result = 0;
+out:
+	saved_errno = result == 0 ? 0 : (errno ? errno : EIO);
+	if (mapper_fd >= 0 && close(mapper_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (control_fd >= 0 && close(control_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (result < 0)
+		errno = saved_errno;
+	return result;
+#endif
+}
 
 int swapz_primary_dm_create_mapper(
 	int recovery_fd, int lock_fd,
@@ -7853,6 +8184,7 @@ static int swapz_primary_start_prepared(void)
 	int module_loaded_by_call = 0;
 	int mapper_created_by_call = 0;
 	int mapper_resumed_by_call = 0;
+	int swap_activated_by_call = 0;
 	int target_swap_active;
 	int recovery_fd = -1;
 	int lock_fd = -1;
@@ -7995,7 +8327,11 @@ static int swapz_primary_start_prepared(void)
 	    !mapper_created_by_call || !mapper_resumed_by_call ||
 	    mapper_device == 0 ||
 	    swapz_primary_format_mapper_swap(
-		    recovery_fd, lock_fd, &manifest, mapper_device) < 0)
+		    recovery_fd, lock_fd, &manifest, mapper_device) < 0 ||
+	    swapz_primary_activate_mapper_swap(
+		    recovery_fd, lock_fd, &manifest, mapper_device,
+		    &swap_activated_by_call) < 0 ||
+	    !swap_activated_by_call)
 		goto out;
 	active_state = starting_state;
 	active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
@@ -8031,8 +8367,8 @@ out:
 	memset(observed_header, 0, sizeof(observed_header));
 	memset(swapz_header, 0, sizeof(swapz_header));
 	if (result == 0)
-		printf("PRIMARY_START=ACTIVE run_id=%s mapper=/dev/mapper/swapz-primary\n",
-		       state.run_id);
+		printf("PRIMARY_START=ACTIVE run_id=%s mapper=/dev/mapper/swapz-primary "
+		       "swapon=true\n", state.run_id);
 	if (result < 0)
 		errno = saved_errno;
 	return result;
@@ -8096,6 +8432,7 @@ static int swapz_primary_stop_active(void)
 	int target_fd = -1;
 	int mapper_removed_by_call = 0;
 	int module_unloaded_by_call = 0;
+	int swap_deactivated_by_call = 0;
 	int stopping_persisted = 0;
 	int complete_persisted = 0;
 	int result = -1;
@@ -8143,7 +8480,10 @@ static int swapz_primary_stop_active(void)
 		    recovery_fd, lock_fd, &stopping_state, 0) < 0)
 		goto out;
 	stopping_persisted = 1;
-	if (swapz_primary_dm_remove_mapper(
+	if (swapz_primary_deactivate_mapper_swap(
+		    recovery_fd, lock_fd, &manifest,
+		    &swap_deactivated_by_call) < 0 ||
+	    swapz_primary_dm_remove_mapper(
 		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0 ||
 	    swapz_primary_unload_owned_module(
 		    recovery_fd, lock_fd, &manifest, 0,
@@ -8208,9 +8548,11 @@ out:
 	memset(expected_header, 0, sizeof(expected_header));
 	memset(observed_header, 0, sizeof(observed_header));
 	if (result == 0)
-		printf("PRIMARY_STOP=COMPLETE run_id=%s mapper_removed=%s "
-		       "module_unloaded=%s\n",
-		       state.run_id, mapper_removed_by_call ? "true" : "false",
+		printf("PRIMARY_STOP=COMPLETE run_id=%s swapoff=%s "
+		       "mapper_removed=%s module_unloaded=%s\n",
+		       state.run_id,
+		       swap_deactivated_by_call ? "true" : "false",
+		       mapper_removed_by_call ? "true" : "false",
 		       module_unloaded_by_call ? "true" : "false");
 	if (result < 0)
 		errno = saved_errno;
@@ -8244,6 +8586,7 @@ static int swapz_primary_recover(void)
 	int target_fd = -1;
 	int mapper_removed_by_call = 0;
 	int module_unloaded_by_call = 0;
+	int swap_deactivated_by_call = 0;
 	int recovering_persisted = 0;
 	int complete_persisted = 0;
 	int result = -1;
@@ -8336,7 +8679,10 @@ static int swapz_primary_recover(void)
 		goto out;
 	recovering_persisted = 1;
 
-	if (swapz_primary_dm_remove_mapper(
+	if (swapz_primary_deactivate_mapper_swap(
+		    recovery_fd, lock_fd, &manifest,
+		    &swap_deactivated_by_call) < 0 ||
+	    swapz_primary_dm_remove_mapper(
 		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0 ||
 	    swapz_primary_unload_owned_module(
 		    recovery_fd, lock_fd, &manifest, 1,
@@ -8404,9 +8750,11 @@ out:
 	memset(swapz_header, 0, sizeof(swapz_header));
 	memset(observed_header, 0, sizeof(observed_header));
 	if (result == 0)
-		printf("PRIMARY_RECOVER=COMPLETE run_id=%s mapper_removed=%s "
-		       "module_unloaded=%s\n",
-		       state.run_id, mapper_removed_by_call ? "true" : "false",
+		printf("PRIMARY_RECOVER=COMPLETE run_id=%s swapoff=%s "
+		       "mapper_removed=%s module_unloaded=%s\n",
+		       state.run_id,
+		       swap_deactivated_by_call ? "true" : "false",
+		       mapper_removed_by_call ? "true" : "false",
 		       module_unloaded_by_call ? "true" : "false");
 	if (result < 0)
 		errno = saved_errno;

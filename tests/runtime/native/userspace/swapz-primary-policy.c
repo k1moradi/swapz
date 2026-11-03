@@ -1002,6 +1002,8 @@ static void test_primary_dm_operations_disabled(void)
 	int resumed = 1;
 	int removed = 1;
 	int unloaded = 1;
+	int activated = 1;
+	int deactivated = 1;
 
 	assert(swapz_primary_dm_create_mapper(
 		-1, -1, &manifest, 1, &created, &resumed,
@@ -1019,6 +1021,14 @@ static void test_primary_dm_operations_disabled(void)
 	assert(swapz_primary_format_mapper_swap(
 		-1, -1, &manifest, (dev_t)-1) < 0);
 	assert(errno == ENODEV);
+	assert(swapz_primary_activate_mapper_swap(
+		-1, -1, &manifest, (dev_t)-1, &activated) < 0);
+	assert(errno == ENODEV);
+	assert(activated == 0);
+	assert(swapz_primary_deactivate_mapper_swap(
+		-1, -1, &manifest, &deactivated) < 0);
+	assert(errno == ENODEV);
+	assert(deactivated == 0);
 }
 
 static void test_recoverable_lifecycle_stages(void)

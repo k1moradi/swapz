@@ -26,11 +26,25 @@ It must execute the supported qualification in order and fail closed. Rootless/C
 Primary lifecycle qualification must keep durable transaction state consistent
 with independently observed kernel state. Durable `ACTIVE` requires proof that
 the exact transaction-owned mapper is active in the Linux swap inventory.
-Normal stop and recovery must use ordinary `swapoff`, prove the exact mapper
-inactive, and only then permit mapper removal. Ambiguous activation or
-deactivation outcomes remain recoverable until exact kernel state is proven; a
-stale run ID must never activate, deactivate, remove, or complete a newer
-transaction.
+After mapper creation and Linux swap-header initialization, the native
+coordinator must pin the manifest-bound mapper block device, revalidate its
+Device Mapper UUID/table/backing identity, prove both the raw backing partition
+and mapper inactive in `/proc/swaps`, invoke ordinary `swapon` through that
+descriptor's `/proc/self/fd/<n>` reference, and independently prove the exact
+mapper active before persisting `ACTIVE`. A definite `swapon` error fails the
+transaction even if later state is surprising; only an interrupted syscall may
+be reconciled by exact active inventory proof.
+
+Normal stop and recovery must use ordinary `swapoff`. If the exact
+manifest-bound mapper is active, the coordinator pins and revalidates it,
+invokes `swapoff` through the descriptor reference, then independently proves
+the mapper and raw backing inactive before Device Mapper removal. A mapper
+already proved inactive or absent requires no duplicate `swapoff`. A definite
+`swapoff` failure must never permit mapper removal; only an interrupted syscall
+may be reconciled by exact inactive inventory proof. Ambiguous inventory,
+wrong-device activation, stale identity, or an active raw backing partition
+remains recoverable and fail-closed. A stale run ID must never activate,
+deactivate, remove, or complete a newer transaction.
 
 `tests/runtime/native/primary-lifecycle-audit-test.py` is a rootless
 adversarial model for those invariants and performs no privileged or physical
@@ -3641,7 +3655,14 @@ atomic `READY` close and owner-marker release. Where platform behavior is
 needed, use deterministic fault injection on an owned RAM-backed `null_blk`
 target; no such test may open or write a host block device. The rootless build
 must keep the command unavailable and prove no host path or lifecycle side
-effect is reached. A metadata-preparation PASS is not start, live-swap,
+effect is reached. Rootless direct-C coverage must also prove the native
+activation/deactivation helpers return `ENODEV` with their side-effect outputs
+cleared. The adversarial lifecycle audit must verify native `swapon` is ordered
+before durable `ACTIVE`, and native `swapoff` is ordered before mapper
+removal in both stop and recovery. The privileged execution gate remains
+explicitly zero until owned-RAM interruption coverage and bounded physical
+lifecycle evidence are added; source presence of the syscalls alone is not
+authorization. A metadata-preparation PASS is not start, live-swap,
 loaded-recovery, boot, performance, or production qualification.
 
 The prepared-start coordinator may consume only an exact owned `READY`

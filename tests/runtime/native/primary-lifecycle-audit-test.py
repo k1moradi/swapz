@@ -16,6 +16,25 @@ PRIMARY_SOURCE = ROOT / "src/userspace/swapz-primary.c"
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
 
 
+def c_function_body(source: str, symbol: str) -> str:
+    """Return one static-int function body without depending on formatting."""
+    match = re.search(
+        r"static\s+int\s+" + re.escape(symbol) + r"\s*\([^;]*?\)\s*\{",
+        source, re.S)
+    if not match:
+        raise AssertionError("missing production function " + symbol)
+    start = match.end()
+    depth = 1
+    for position in range(start, len(source)):
+        if source[position] == "{":
+            depth += 1
+        elif source[position] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:position]
+    raise AssertionError("unclosed production function " + symbol)
+
+
 class DurableStage(Enum):
     READY = auto()
     STARTING = auto()
@@ -360,6 +379,46 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
 
 
 class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
+    def test_native_swap_operations_are_transaction_ordered(self):
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        activate = c_function_body(source, "swapz_primary_activate_mapper_swap")
+        deactivate = c_function_body(
+            source, "swapz_primary_deactivate_mapper_swap")
+        start = c_function_body(source, "swapz_primary_start_prepared")
+        stop = c_function_body(source, "swapz_primary_stop_active")
+        recover = c_function_body(source, "swapz_primary_recover")
+
+        self.assertIn("syscall(SYS_swapon, mapper_path, 0)", activate)
+        self.assertGreaterEqual(
+            activate.count(
+                "swapz_primary_swap_device_active(expected_mapper_device)"), 2)
+        self.assertIn("swapz_primary_dm_mapper_verify_fd(", activate)
+        self.assertLess(
+            start.index("swapz_primary_activate_mapper_swap("),
+            start.index("active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE"))
+
+        self.assertIn("syscall(SYS_swapoff, mapper_path)", deactivate)
+        self.assertGreaterEqual(
+            deactivate.count("swapz_primary_swap_device_active(mapper_device)"),
+            2)
+        self.assertIn("swapz_primary_dm_mapper_verify_fd(", deactivate)
+        self.assertLess(
+            stop.index("swapz_primary_deactivate_mapper_swap("),
+            stop.index("swapz_primary_dm_remove_mapper("))
+        self.assertLess(
+            recover.index("swapz_primary_deactivate_mapper_swap("),
+            recover.index("swapz_primary_dm_remove_mapper("))
+
+    def test_execution_gate_remains_disabled_pending_live_lifecycle_evidence(self):
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        gate = re.search(
+            r"^#define\s+SWAPZ_PRIMARY_EXECUTION_ENABLED\s+([01])\s*$",
+            source, re.MULTILINE)
+        self.assertIsNotNone(gate, "primary execution gate must remain explicit")
+        self.assertEqual(
+            gate.group(1), "0",
+            "privileged lifecycle needs owned-null_blk and physical evidence")
+
     def test_execution_gate_cannot_enable_without_native_swap_operations(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         gate = re.search(
