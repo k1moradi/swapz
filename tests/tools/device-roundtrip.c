@@ -893,7 +893,8 @@ int main(int argc, char **argv)
 			}
 			maximum_capacity_mode = 1;
 			expected_dm_uuid = argv[3];
-			expected_device_bytes = UINT64_C(15269363712);
+			expected_device_bytes =
+				(uint64_t)MAX_CAPACITY_LOGICAL_PAGES * PAGE;
 		} else {
 			if (strcmp(argv[2], "--gc-stress") ||
 			    parse_uint(argv[3], 8U, &gc_rounds) ||

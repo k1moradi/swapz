@@ -5413,6 +5413,9 @@ int main(void)
         roundtrip = (ROOT / "tests/tools/device-roundtrip.c").read_text()
         self.assertIn('"--maximum-capacity-boundary"', roundtrip)
         self.assertIn("MAX_CAPACITY_LOGICAL_PAGES = 3727616U", roundtrip)
+        self.assertIn(
+            "(uint64_t)MAX_CAPACITY_LOGICAL_PAGES * PAGE", roundtrip)
+        self.assertNotIn("UINT64_C(15269363712)", roundtrip)
         self.assertIn("maximum_capacity_boundary_roundtrip", roundtrip)
         self.assertIn("verify_dm_uuid_exact", roundtrip)
 
