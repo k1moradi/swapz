@@ -272,6 +272,8 @@ class PublicMakeContract(unittest.TestCase):
                 "int main(void) { return 0; }\n")
             (fixture / "tests/tools/direct-write-probe.c").write_text(
                 "int main(void) { return 0; }\n")
+            (fixture / "tests/tools/direct-read-probe.c").write_text(
+                "int main(void) { return 0; }\n")
             cli = fixture / "src/userspace/swapzctl.c"
             cli.write_text("int main(void) { return 0; }\n")
             (fixture / "src/userspace/swapz-primary.c").write_text(
@@ -1046,11 +1048,12 @@ class PublicMakeContract(unittest.TestCase):
             w2_staged = fixture / "build/kernel/w2/dm-target.c"
             device = fixture / "build/tests/device-roundtrip"
             direct_probe = fixture / "build/tests/direct-write-probe"
+            direct_read_probe = fixture / "build/tests/direct-read-probe"
             cli_out = fixture / "build/userspace/swapzctl"
             execute("initial")
             tracked = (module, w1_module, w2_module, staged,
                        w1_staged, w2_staged, staged_make, device,
-                       direct_probe, cli_out)
+                       direct_probe, direct_read_probe, cli_out)
             first = {p: p.stat().st_mtime_ns for p in tracked}
             execute("unchanged")
             self.assertEqual(first,
@@ -1064,7 +1067,8 @@ class PublicMakeContract(unittest.TestCase):
             self.assertGreater(cli_out.stat().st_mtime_ns, first[cli_out],
                                "MAKE_INCREMENTAL_PHASE=cli-source")
             for p in (module, w1_module, w2_module, staged,
-                      w1_staged, w2_staged, staged_make, device, direct_probe):
+                      w1_staged, w2_staged, staged_make, device, direct_probe,
+                      direct_read_probe):
                 self.assertEqual(first[p], p.stat().st_mtime_ns, str(p))
 
             second = {p: p.stat().st_mtime_ns for p in tracked}
@@ -1078,7 +1082,8 @@ class PublicMakeContract(unittest.TestCase):
                 cli_out.stat().st_mtime_ns, second[cli_out],
                 "MAKE_INCREMENTAL_PHASE=authority-header")
             for p in (module, w1_module, w2_module, staged,
-                      w1_staged, w2_staged, staged_make, device, direct_probe):
+                      w1_staged, w2_staged, staged_make, device, direct_probe,
+                      direct_read_probe):
                 self.assertEqual(second[p], p.stat().st_mtime_ns, str(p))
 
             second = {p: p.stat().st_mtime_ns for p in tracked}
