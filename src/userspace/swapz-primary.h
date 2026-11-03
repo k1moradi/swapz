@@ -39,6 +39,10 @@ int swapz_primary_state_format(const struct swapz_primary_state *state,
 int swapz_primary_state_transition_allowed(
 	const struct swapz_primary_state *current,
 	const struct swapz_primary_state *next);
+/* Production callers must open the target O_RDWR|O_EXCL before calling. */
+int swapz_primary_write_header_checked_fd(
+	int fd, const unsigned char expected_current[4096],
+	const unsigned char replacement[4096]);
 
 int swapz_primary_partition_lock_acquire(void);
 /* Internal lifecycle primitive; caller must hold the matching partition lock. */

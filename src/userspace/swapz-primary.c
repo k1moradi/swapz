@@ -359,6 +359,89 @@ static int swapz_primary_exact_read(int fd, unsigned char *buffer,
 	return 0;
 }
 
+static int swapz_primary_header_fd_valid(int fd)
+{
+	struct stat info;
+	int flags;
+
+	if (fd < 0 || fstat(fd, &info) < 0)
+		return 0;
+	flags = fcntl(fd, F_GETFL);
+	if (flags < 0)
+		return 0;
+	if ((flags & O_ACCMODE) != O_RDWR) {
+		errno = EBADF;
+		return 0;
+	}
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	if (!S_ISREG(info.st_mode) ||
+	    info.st_size < (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) {
+		errno = ENODEV;
+		return 0;
+	}
+#else
+	{
+		uint64_t bytes = 0;
+
+		if (!S_ISBLK(info.st_mode) ||
+		    !swapz_primary_device_number_matches(info.st_rdev)) {
+			errno = EPERM;
+			return 0;
+		}
+		if (ioctl(fd, BLKGETSIZE64, &bytes) < 0)
+			return 0;
+		if (bytes != SWAPZ_PRIMARY_DEVICE_BYTES) {
+			errno = EINVAL;
+			return 0;
+		}
+	}
+#endif
+	return 1;
+}
+
+int swapz_primary_write_header_checked_fd(
+	int fd, const unsigned char expected_current[SWAPZ_PRIMARY_BLOCK_BYTES],
+	const unsigned char replacement[SWAPZ_PRIMARY_BLOCK_BYTES])
+{
+	unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES];
+	size_t completed = 0;
+
+	if (!expected_current || !replacement) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_header_fd_valid(fd))
+		return -1;
+	if (swapz_primary_exact_read(fd, observed, sizeof(observed)) < 0)
+		return -1;
+	if (memcmp(observed, expected_current, sizeof(observed))) {
+		errno = ESTALE;
+		return -1;
+	}
+	while (completed < sizeof(observed)) {
+		ssize_t count = pwrite(fd, replacement + completed,
+				       sizeof(observed) - completed,
+				       (off_t)completed);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			return -1;
+		}
+		completed += (size_t)count;
+	}
+	if (fsync(fd) < 0 || !swapz_primary_header_fd_valid(fd) ||
+	    swapz_primary_exact_read(fd, observed, sizeof(observed)) < 0)
+		return -1;
+	if (memcmp(observed, replacement, sizeof(observed))) {
+		errno = EIO;
+		return -1;
+	}
+	return 0;
+}
+
 static int swapz_primary_sha256(const unsigned char *bytes, size_t length,
 				char digest[65])
 {

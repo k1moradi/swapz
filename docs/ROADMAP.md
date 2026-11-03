@@ -1424,3 +1424,13 @@ rootless round-trip and tamper-refusal coverage. The manifest that binds this
 backup to device identity and qualified artifact hashes is still missing. No
 privileged lifecycle command uses these primitives yet; provisioning, mapper
 ownership, startup rollback and recovery remain unimplemented and unqualified.
+
+The next checked-restoration primitive now accepts only a read/write descriptor
+for the fixed 8:4 target with exact 16 GiB geometry, compares the complete
+current 4096-byte header with an expected value, writes the replacement with
+short-write handling, fsyncs, and proves exact readback. Its rootless fixture
+uses a temporary regular file and confirms stale-header refusal. The API
+requires production callers to obtain the descriptor with `O_RDWR|O_EXCL`,
+but the primitive cannot introspect that open-time flag; a dedicated
+identity-checked target-open function and immutable device/artifact manifest
+must precede any lifecycle use. Privileged execution remains disabled.

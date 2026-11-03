@@ -356,6 +356,42 @@ static void test_primary_header_backup(int recovery_fd, int lock_fd,
 	assert(fsync(recovery_fd) == 0);
 }
 
+static void test_checked_header_write(void)
+{
+	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
+	unsigned char replacement[SWAPZ_PRIMARY_BLOCK_BYTES];
+	unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES];
+	char path[] = "/tmp/swapz-primary-header-write-XXXXXX";
+	size_t i;
+	int fd;
+
+	fd = mkstemp(path);
+	assert(fd >= 0);
+	assert(ftruncate(fd, (off_t)sizeof(original)) == 0);
+	for (i = 0; i < sizeof(original); ++i) {
+		original[i] = (unsigned char)((i * 13U + 7U) & 0xffU);
+		replacement[i] = (unsigned char)((i * 29U + 3U) & 0xffU);
+	}
+	assert(pwrite(fd, original, sizeof(original), 0) ==
+	       (ssize_t)sizeof(original));
+	assert(fsync(fd) == 0);
+	assert(swapz_primary_write_header_checked_fd(
+		fd, original, replacement) == 0);
+	assert(swapz_primary_exact_read(fd, observed, sizeof(observed)) == 0);
+	assert(!memcmp(observed, replacement, sizeof(observed)));
+	assert(swapz_primary_write_header_checked_fd(
+		fd, original, original) < 0);
+	assert(errno == ESTALE);
+	assert(swapz_primary_exact_read(fd, observed, sizeof(observed)) == 0);
+	assert(!memcmp(observed, replacement, sizeof(observed)));
+	assert(swapz_primary_write_header_checked_fd(
+		fd, replacement, original) == 0);
+	assert(swapz_primary_exact_read(fd, observed, sizeof(observed)) == 0);
+	assert(!memcmp(observed, original, sizeof(observed)));
+	assert(close(fd) == 0);
+	assert(unlink(path) == 0);
+}
+
 static void test_exact_block_read_helper(void)
 {
 	const char *home = getenv("HOME");
@@ -640,6 +676,7 @@ int main(void)
 	test_target_identity_and_header_policy();
 	test_primary_stage_policy();
 	test_primary_state_records();
+	test_checked_header_write();
 	test_exact_block_read_helper();
 	test_sha256_helper();
 	test_recovery_filesystem_policy();

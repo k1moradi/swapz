@@ -3490,3 +3490,17 @@ only after full validation. Rootless tests must verify exact 4096-byte
 round-trip, no-overwrite behavior, invalid digest refusal, and output-buffer
 preservation on read failure. The lifecycle caller must bind the expected hash
 to the freshly identity-checked `/dev/sda4` header before the first mutation.
+
+Any primary-swap block-zero write must use the checked descriptor primitive in
+`src/userspace/swapz-primary.c`. Production callers must first open the fixed
+target with `O_RDWR|O_EXCL`, verify the canonical UUID and PARTUUID paths name
+that same block device, and verify its major:minor and `BLKGETSIZE64` geometry.
+The primitive independently requires an open read/write descriptor for the
+fixed 8:4 device and exact 16 GiB geometry, compares all 4096 current bytes to
+the caller-bound expected header before writing, handles short writes, calls
+`fsync`, then rereads and compares all 4096 replacement bytes. A stale header
+must fail with no write. Rootless direct-C coverage uses only a temporary
+regular-file fixture to verify exact replacement and stale-header refusal; it
+does not qualify block-device locking or physical recovery. Keep this
+primitive disconnected from privileged lifecycle commands until the checked
+target-open path and full manifest binding are implemented and tested.
