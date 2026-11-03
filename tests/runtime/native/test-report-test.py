@@ -4096,6 +4096,14 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             verdict["evidence_statuses"]["authorized_target_identity"],
             "BLOCKED")
 
+        weak = self.passing_snapshot()
+        weak["release_evidence"]["authorized_target_identity"]["target"][
+            "partuuid"] = "a-b-c-d-e"
+        verdict = runner.evaluate_production_readiness(weak, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["authorized_target_identity"],
+            "BLOCKED")
+
         for evidence_name in (
                 "real_linux_swap", "maximum_capacity_and_ram",
                 "sustained_physical_performance",
