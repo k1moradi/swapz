@@ -215,7 +215,7 @@ elif [[ "$1" == -F && "$2" == sig_key ]]; then
   printf '%s\n' "$SWAPZ_FAKE_SIG_KEY"
 elif [[ "$1" == -n && "$2" == dm_swapz ]]; then
   [[ -f "$SWAPZ_TEST_INSTALLED_MODULE" ]] || exit 1
-  printf '%s\n' "$SWAPZ_TEST_INSTALLED_MODULE"
+  printf '%s\n' "${SWAPZ_FAKE_MODULE_LOOKUP:-$SWAPZ_TEST_INSTALLED_MODULE}"
 else
   exit 1
 fi
@@ -724,6 +724,17 @@ esac
         self.assertIn("partial, foreign, or modified", result.stderr)
         self.assertEqual(health.read_bytes(), b"foreign-runtime-health\n")
         self.assertFalse(self.installed_module.exists())
+
+    def test_foreign_module_resolution_refuses_uninstall(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        foreign = self.home / "foreign-module-resolution.ko"
+        foreign.write_bytes(b"foreign module\n")
+        failed = self.invoke(
+            "uninstall", {"SWAPZ_FAKE_MODULE_LOOKUP": str(foreign)})
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("foreign, absent or modified", failed.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
 
     def test_metadata_tamper_cannot_enter_legacy_upgrade_path(self):
         self.assertEqual(self.invoke("install").returncode, 0)

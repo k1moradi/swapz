@@ -4471,7 +4471,9 @@ DKMS remains the compatibility/header integration mechanism, not the artifact
 authority. After a successful current-kernel DKMS build/install, packaging must
 replace the DKMS-produced module with the exact qualified module, verify its
 SHA-256 before and after `depmod`, and require `modinfo -n dm_swapz` to
-resolve to that exact owned path. `AUTOINSTALL="no"` remains mandatory so a
+resolve to that exact owned path, including re-verification of an existing
+installation and both install/uninstall rollback paths before activation files
+can be republished. `AUTOINSTALL="no"` remains mandatory so a
 kernel upgrade cannot silently carry qualification forward; a new running
 kernel requires matching headers/vermagic, exact artifact qualification and an
 explicit install.
@@ -4530,7 +4532,7 @@ destructive uninstall transition, failed depmod, failed systemd daemon-reload,
 reinstall after safe cleanup, installed-module/userspace digest mismatch,
 post-depmod tamper, install/uninstall signal interruption, stale rollback
 temporary-name collisions, legacy rollback, metadata downgrade refusal,
-post-CLI re-verification failure, foreign monitoring payload refusal,
+post-CLI re-verification failure, foreign monitoring payload refusal, foreign module resolution refusal,
 monitor helper/service rollback from a pre-monitor installation, and
 interruption of uninstall rollback. The
 interrupted-rollback fixture must verify the retained

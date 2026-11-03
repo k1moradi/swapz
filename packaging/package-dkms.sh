@@ -339,6 +339,7 @@ verify_owned_legacy() {
   done
   if [[ -e "$installed_module" || -L "$installed_module" ]]; then
     installed_file_metadata "$installed_module" 644 || return 1
+    verify_module_resolution || return 1
   fi
   # Both monitoring artifacts are optional only for older verified packages.
   if [[ -e "$runtime_health" || -L "$runtime_health" ||
@@ -359,6 +360,13 @@ verify_installed_module_set() {
     fi
   done
   [[ "$count" == 1 && "$matched" == "$installed_module" ]]
+}
+
+verify_module_resolution() {
+  local resolved_module
+  resolved_module="$(modinfo -n dm_swapz 2>/dev/null || true)"
+  resolved_module="$(readlink -f -- "$resolved_module" 2>/dev/null || true)"
+  [[ "$resolved_module" == "$installed_module" ]]
 }
 
 verify_owned() {
@@ -866,9 +874,7 @@ fi
 if [[ "$existing_kind" == current ]] &&
    cmp -s "$src/$qualification_marker" <(incoming_identity) &&
    [[ "$current_dkms_status" == *installed* ]]; then
-  resolved_module="$(modinfo -n dm_swapz 2>/dev/null || true)"
-  resolved_module="$(readlink -f -- "$resolved_module" 2>/dev/null || true)"
-  [[ "$resolved_module" == "$installed_module" ]] ||
+  verify_module_resolution ||
     blocked "installed module lookup does not match package ownership"
   echo "Installed swapz package already matches the exact qualified artifacts"
   exit 0
@@ -1075,9 +1081,7 @@ install -m0644 "$module_artifact" "$installed_module"
 "$depmod_bin" "$kernel_release"
 [[ "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
   blocked "installed module changed during depmod"
-resolved_module="$(modinfo -n dm_swapz 2>/dev/null || true)"
-resolved_module="$(readlink -f -- "$resolved_module" 2>/dev/null || true)"
-[[ "$resolved_module" == "$installed_module" ]] ||
+verify_module_resolution ||
   blocked "module lookup does not resolve to the qualified installed image"
 
 # Prepare all userspace/systemd bytes before replacing any live package file.
