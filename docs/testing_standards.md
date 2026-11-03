@@ -377,7 +377,7 @@ SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
 capacity claim must therefore identify the source that implements the reserve
 policy. Do not bump the superblock version for this policy-only change.
 
-Source contracts validate behavior that requires the Linux Device Mapper target itself, including BIO ownership, queue/drain ordering, null_blk-only admission, lower-I/O accounting and current report/build contracts. Source-string assertions are secondary to executable production-C coverage.
+Source contracts validate behavior that requires the Linux Device Mapper target itself, including BIO ownership, queue/drain ordering, null_blk-only admission, lower-I/O accounting and current report/build contracts. Source-string assertions are secondary to executable production-C coverage. Assertions over emitted calls must preserve argument identity and order without requiring punctuation after a final argument; when a status stream is split across bounded emissions, inspect the reconstructed format/argument stream or the specific call that owns the argument.
 
 Execute the worker's actual batch-selection C block with rejected-probe
 outputs of zero and a nonzero poison value: either fallback must charge one
