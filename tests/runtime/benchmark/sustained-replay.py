@@ -150,8 +150,9 @@ class ProgressTracker:
             self.last_ns = now
 
     def snapshot_max_gap_ns(self) -> int:
+        now = time.monotonic_ns()
         with self.lock:
-            return self.max_gap_ns
+            return max(self.max_gap_ns, now - self.last_ns)
 
 
 def digest_file(path: Path) -> str:
