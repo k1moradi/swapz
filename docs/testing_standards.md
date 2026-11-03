@@ -3619,8 +3619,12 @@ templates must not contain a device pathname,
 major:minor, UUID or PARTUUID. The installed systemd generator must derive
 the selected `.device` and by-PARTUUID `.swap` unit names through the manager's
 validated protected-selector interface, then emit `Requires`/`After` for the
-device and `Conflicts`/`Before` for its by-PARTUUID swap unit with a bounded
-device-job timeout. It must not use `BindsTo` on the removable device, because
+device and `Conflicts`/`Before` for its by-PARTUUID swap unit. The exact
+selected `.device` job must have its own 30-second timeout, while the mapper job
+has a separate 300-second bound so the manager's bounded startup and shutdown
+(including native swapoff) are not truncated by device-discovery policy. Rootless
+package coverage must assert both generated drop-ins independently. It must not
+use `BindsTo` on the removable device, because
 media removal must not automatically stop a mapper that may own live swap
 pages. Rootless package tests must use at least two selected PARTUUIDs and
 verify the generated names and dependencies change, and malformed selector
@@ -3849,10 +3853,13 @@ block-zero bytes with the digest-verified saved header. Only after `STARTING`
 is durable may it write the run-bound SWZ header, load the exact qualified
 module, create/resume the exact run-bound mapper, initialize Linux swap metadata
 on that mapper, and persist `ACTIVE`. Every failure after durable `STARTING`
-must mark `RECOVERY_REQUIRED` while the owner lock is still held. The mapper
-service returning ACTIVE does not itself prove `swapon`; the systemd swap unit
-performs that later activation. Normal stop runs only after that swap unit has
-deactivated the mapper. It must persist `STOPPING` before cleanup, remove only
+must mark `RECOVERY_REQUIRED` while the owner lock is still held. The primary
+manager is the sole owner of swap activation: start must complete native
+`swapon` before durable `ACTIVE`, and stop/recovery must complete native
+`swapoff` before mapper teardown. The packaged `.swap` unit is a passive
+status view and must not be independently enabled or used as a second lifecycle
+owner. Normal stop persists `STOPPING` before deactivation and cleanup, then
+removes only
 the exact manifest-bound mapper with zero swap/open references, and unload only
 a module backed by the same run's exact `LOADED` ownership record, matching
 loaded source provenance and physical-backing parameter, using non-forced

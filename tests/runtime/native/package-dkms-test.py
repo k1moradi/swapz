@@ -167,18 +167,26 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
                     [str(primary_generator), str(normal), str(early), str(late)],
                     env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                dropin = (normal / "swapz-primary-mapper.service.d" /
-                          "50-selected-target.conf")
-                self.assertTrue(dropin.is_file())
-                content = dropin.read_text()
+                mapper_dropin = (normal / "swapz-primary-mapper.service.d" /
+                                  "50-selected-target.conf")
                 target_device = env["SWAPZ_TEST_DEVICE_UNIT"]
                 target_swap = env["SWAPZ_TEST_SWAP_UNIT"]
-                self.assertIn("Requires=" + target_device, content)
-                self.assertIn("After=" + target_device, content)
-                self.assertIn("Conflicts=" + target_swap, content)
-                self.assertIn("Before=" + target_swap, content)
-                self.assertIn("JobTimeoutSec=30s", content)
-                generated.append(content)
+                device_dropin = (normal / (target_device + ".d") /
+                                 "50-swapz-timeout.conf")
+                self.assertTrue(mapper_dropin.is_file())
+                self.assertTrue(device_dropin.is_file())
+                mapper_content = mapper_dropin.read_text()
+                device_content = device_dropin.read_text()
+                self.assertIn("Requires=" + target_device, mapper_content)
+                self.assertIn("After=" + target_device, mapper_content)
+                self.assertIn("Conflicts=" + target_swap, mapper_content)
+                self.assertIn("Before=" + target_swap, mapper_content)
+                self.assertIn("JobTimeoutSec=300s", mapper_content)
+                self.assertIn("JobTimeoutAction=none", mapper_content)
+                self.assertEqual(
+                    device_content,
+                    "[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n")
+                generated.append(mapper_content)
             self.assertNotEqual(generated[0], generated[1])
             invalid_cases = (
                 ("prefix", "untrusted.device", env["SWAPZ_TEST_SWAP_UNIT"]),
