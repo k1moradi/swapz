@@ -966,6 +966,15 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertRaisesRegex(qualify.Blocked, "GitHub-hosted CI"):
             qualify.execute(args)
 
+    def test_source_admission_transport_failure_is_blocked(self):
+        client = object.__new__(qualify.SourceAdmissionClient)
+        client._validated_source = "a" * 40
+        client._channel = mock.Mock()
+        client._channel.sendall.side_effect = BrokenPipeError()
+        with self.assertRaisesRegex(
+                qualify.Blocked, "source admission transport failed at cycle-1"):
+            client.require("cycle-1")
+
     def test_privileged_helper_has_no_git_source_admission_path(self):
         source = HELPER.read_text(encoding="utf-8")
         admission_parent = PARENT.read_text(encoding="utf-8")

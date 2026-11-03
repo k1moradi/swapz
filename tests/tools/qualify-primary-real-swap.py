@@ -125,9 +125,13 @@ class SourceAdmissionClient:
                 stat.S_IMODE(after.st_mode), after.st_nlink)
             if peer_uid != parent_uid or before_identity != after_identity:
                 raise Blocked("source admission parent identity changed")
-        except Exception:
+        except Blocked:
             channel.close()
             raise
+        except (OSError, struct.error) as exc:
+            channel.close()
+            raise Blocked(
+                "source admission parent connection failed") from exc
         self._channel = channel
         self._validated_source = validated_source
 
@@ -158,13 +162,18 @@ class SourceAdmissionClient:
             "source_sha": self._validated_source,
             "nonce": nonce,
         }
-        self._channel.sendall(
-            json.dumps(
-                request, sort_keys=True, separators=(",", ":")).encode("ascii") +
-            b"\n")
+        try:
+            self._channel.sendall(
+                json.dumps(
+                    request, sort_keys=True, separators=(",", ":")).encode("ascii") +
+                b"\n")
+            response_bytes = self._read_line()
+        except OSError as exc:
+            raise Blocked(
+                f"source admission transport failed at {phase}") from exc
         try:
             response = json.loads(
-                self._read_line().decode("ascii"),
+                response_bytes.decode("ascii"),
                 object_pairs_hook=_unique_json_object)
         except (UnicodeError, ValueError, TypeError) as exc:
             raise Blocked("source admission response is malformed") from exc
