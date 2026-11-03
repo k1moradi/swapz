@@ -367,7 +367,11 @@ order is global mutation lock first and target partition recovery lock second;
 never acquire those in reverse order. The global lock directory must be owned
 by root and not group/world-writable; the lock file must be a single-link 0600
 regular file owned by root, and the opened descriptor must still match the
-named file after nonblocking `flock(LOCK_EX)`. Contention is BLOCKED rather
+named file after nonblocking `flock(LOCK_EX)`. Because `/run` is volatile,
+the primary may recreate the exact configured lock directory with mode 0755
+when it is absent, but must immediately reopen it with `O_NOFOLLOW` and apply
+the same root-owner/non-writable validation before creating or trusting the lock
+file. It must not create alternate lock paths. Contention is BLOCKED rather
 than retried across mutable installed artifacts. Owned-null_blk qualification
 redirects only this global lock to its token-bound private directory; physical
 and ordinary production use the installed package lock.
