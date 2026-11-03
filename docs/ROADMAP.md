@@ -1399,7 +1399,9 @@ integrate the permanent root-controlled PARTUUID lock primitive with each
 lifecycle operation and add durable state transitions, initial provisioning,
 checked restoration, startup-failure rollback, exact mapper/module ownership,
 and interruption recovery. Lock acquisition and durable one-use owner-claim
-primitives now have direct-C regressions, but no primary lifecycle command
-uses them yet. No live swap or boot integration has been qualified through
-this manager. Do not enable its units until those paths and the exact-host
-qualification gates are closed.
+primitives now have direct-C regressions. A bounded state-record replacement
+primitive now uses file fsync, checked atomic rename and directory fsync, with
+rootless symlink/update tests. No primary lifecycle command uses the lock,
+owner claim or state replacement yet. No live swap or boot integration has
+been qualified through this manager. Do not enable its units until those paths
+and the exact-host qualification gates are closed.

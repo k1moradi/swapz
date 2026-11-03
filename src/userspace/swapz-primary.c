@@ -41,6 +41,7 @@
 #define SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES 65536U
 #define SWAPZ_PRIMARY_DM_MAPPERS_MAX 512U
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
+#define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_PARTUUID "7fb9401d-04"
 #define SWAPZ_PRIMARY_PHYSICAL_BLOCKS \
@@ -1249,6 +1250,167 @@ static int swapz_primary_write_record_at(int recovery_fd, const char *name,
 	if (close(fd) < 0)
 		return -1;
 	return fsync(recovery_fd);
+}
+
+int swapz_primary_replace_record_at(int recovery_fd, const char *name,
+				    const char *run_id, const char *record,
+				    uid_t expected_owner)
+{
+	struct stat directory_info;
+	struct stat old_info;
+	struct stat current_info;
+	struct stat temporary_info;
+	char temporary_name[256];
+	const unsigned char *name_cursor;
+	const char *record_cursor = record;
+	size_t remaining;
+	int old_present = 0;
+	int temporary_identity_valid = 0;
+	int fd = -1;
+	int saved_errno;
+	int length;
+	size_t name_length;
+
+	if (recovery_fd < 0 || !name || !run_id || !record ||
+	    !swapz_primary_valid_run_id(run_id)) {
+		errno = EINVAL;
+		return -1;
+	}
+	remaining = strnlen(record, SWAPZ_PRIMARY_STATE_RECORD_MAX);
+	if (remaining == SWAPZ_PRIMARY_STATE_RECORD_MAX) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	name_length = strnlen(name, 128U);
+	if (!name_length || name_length == 128U || name[0] == '.') {
+		errno = EINVAL;
+		return -1;
+	}
+	for (name_cursor = (const unsigned char *)name; *name_cursor;
+	     ++name_cursor)
+		if (!((*name_cursor >= 'a' && *name_cursor <= 'z') ||
+		      (*name_cursor >= 'A' && *name_cursor <= 'Z') ||
+		      (*name_cursor >= '0' && *name_cursor <= '9') ||
+		      *name_cursor == '.' || *name_cursor == '_' ||
+		      *name_cursor == '-')) {
+			errno = EINVAL;
+			return -1;
+		}
+	if (fstat(recovery_fd, &directory_info) < 0)
+		return -1;
+	if (!S_ISDIR(directory_info.st_mode) ||
+	    directory_info.st_uid != expected_owner ||
+	    (directory_info.st_mode & 0777U) != 0700U) {
+		errno = EPERM;
+		return -1;
+	}
+	length = snprintf(temporary_name, sizeof(temporary_name), ".%s.%s.tmp",
+			  name, run_id);
+	if (length < 0 || (size_t)length >= sizeof(temporary_name)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (fstatat(recovery_fd, name, &old_info, AT_SYMLINK_NOFOLLOW) == 0) {
+		if (!S_ISREG(old_info.st_mode) || old_info.st_uid != expected_owner ||
+		    (old_info.st_mode & 0777U) != 0600U || old_info.st_nlink != 1) {
+			errno = EPERM;
+			return -1;
+		}
+		old_present = 1;
+	} else if (errno != ENOENT) {
+		return -1;
+	}
+	fd = openat(recovery_fd, temporary_name,
+		    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &temporary_info) < 0) {
+		saved_errno = errno;
+		goto failed;
+	}
+	if (!S_ISREG(temporary_info.st_mode) ||
+	    temporary_info.st_uid != expected_owner ||
+	    (temporary_info.st_mode & 0777U) != 0600U ||
+	    temporary_info.st_nlink != 1) {
+		saved_errno = EPERM;
+		goto failed;
+	}
+	temporary_identity_valid = 1;
+	while (remaining) {
+		ssize_t count = write(fd, record_cursor, remaining);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			saved_errno = count < 0 ? errno : EIO;
+			goto failed;
+		}
+		record_cursor += count;
+		remaining -= (size_t)count;
+	}
+	if (fsync(fd) < 0) {
+		saved_errno = errno;
+		goto failed;
+	}
+	if (fstatat(recovery_fd, temporary_name, &current_info,
+		    AT_SYMLINK_NOFOLLOW) < 0) {
+		saved_errno = errno;
+		goto failed;
+	}
+	if (current_info.st_dev != temporary_info.st_dev ||
+	    current_info.st_ino != temporary_info.st_ino ||
+	    !S_ISREG(current_info.st_mode) || current_info.st_nlink != 1) {
+		saved_errno = EPERM;
+		goto failed;
+	}
+	if (old_present) {
+		if (fstatat(recovery_fd, name, &current_info,
+			    AT_SYMLINK_NOFOLLOW) < 0) {
+			saved_errno = errno;
+			goto failed;
+		}
+		if (current_info.st_dev != old_info.st_dev ||
+		    current_info.st_ino != old_info.st_ino ||
+		    !S_ISREG(current_info.st_mode) ||
+		    current_info.st_uid != expected_owner ||
+		    (current_info.st_mode & 0777U) != 0600U ||
+		    current_info.st_nlink != 1) {
+			saved_errno = EPERM;
+			goto failed;
+		}
+	} else {
+		if (fstatat(recovery_fd, name, &current_info,
+			    AT_SYMLINK_NOFOLLOW) == 0) {
+			saved_errno = EEXIST;
+			goto failed;
+		}
+		if (errno != ENOENT) {
+			saved_errno = errno;
+			goto failed;
+		}
+	}
+	if (renameat(recovery_fd, temporary_name, recovery_fd, name) < 0) {
+		saved_errno = errno;
+		goto failed;
+	}
+	if (close(fd) < 0)
+		return -1;
+	return fsync(recovery_fd);
+
+failed:
+	if (fd >= 0) {
+		struct stat named_info;
+
+		if (temporary_identity_valid &&
+		    fstatat(recovery_fd, temporary_name, &named_info,
+			    AT_SYMLINK_NOFOLLOW) == 0 &&
+		    named_info.st_dev == temporary_info.st_dev &&
+		    named_info.st_ino == temporary_info.st_ino)
+			(void)unlinkat(recovery_fd, temporary_name, 0);
+		(void)close(fd);
+	}
+	errno = saved_errno;
+	return -1;
 }
 
 int swapz_primary_claim_partition_owner_at(int recovery_fd, int lock_fd,

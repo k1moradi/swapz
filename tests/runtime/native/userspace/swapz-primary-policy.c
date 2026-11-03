@@ -369,6 +369,7 @@ int main(void)
 	char target_path[PATH_MAX];
 	char active_name[64];
 	char consumed_name[64];
+	struct stat state_link_info;
 	const char *run_id = "0123456789abcdef0123456789abcdef";
 	const char *other_run_id = "fedcba9876543210fedcba9876543210";
 	const char *expected_record =
@@ -439,6 +440,26 @@ int main(void)
 	assert(errno == EBUSY);
 	assert_record_equals(recovery_fd, active_name, expected_record);
 	assert_record_equals(recovery_fd, consumed_name, expected_record);
+	assert(swapz_primary_replace_record_at(
+		recovery_fd, "primary-state.json", run_id,
+		"{\"schema\":\"swapz-primary-state-v1\",\"stage\":\"PREPARED\"}\n",
+		geteuid()) == 0);
+	assert_record_equals(recovery_fd, "primary-state.json",
+		"{\"schema\":\"swapz-primary-state-v1\",\"stage\":\"PREPARED\"}\n");
+	assert(swapz_primary_replace_record_at(
+		recovery_fd, "primary-state.json", other_run_id,
+		"{\"schema\":\"swapz-primary-state-v1\",\"stage\":\"ACTIVE\"}\n",
+		geteuid()) == 0);
+	assert_record_equals(recovery_fd, "primary-state.json",
+		"{\"schema\":\"swapz-primary-state-v1\",\"stage\":\"ACTIVE\"}\n");
+	assert(swapz_primary_write_record_at(recovery_fd, "state-target",
+					     "target\n", geteuid()) == 0);
+	assert(symlinkat("state-target", recovery_fd, "state-link") == 0);
+	assert(swapz_primary_replace_record_at(
+		recovery_fd, "state-link", run_id, "replacement\n", geteuid()) < 0);
+	assert(errno == EPERM);
+	assert(fstatat(recovery_fd, "state-link", &state_link_info,
+		       AT_SYMLINK_NOFOLLOW) == 0 && S_ISLNK(state_link_info.st_mode));
 	assert(close(first_lock) == 0);
 	first_lock = swapz_primary_partition_lock_at(
 		recovery_fd, "7fb9401d-04", geteuid());
@@ -469,6 +490,9 @@ int main(void)
 		recovery_fd, "../sda4", geteuid()) < 0);
 	assert(unlinkat(recovery_fd, active_name, 0) == 0);
 	assert(unlinkat(recovery_fd, consumed_name, 0) == 0);
+	assert(unlinkat(recovery_fd, "primary-state.json", 0) == 0);
+	assert(unlinkat(recovery_fd, "state-link", 0) == 0);
+	assert(unlinkat(recovery_fd, "state-target", 0) == 0);
 	assert(fsync(recovery_fd) == 0);
 	assert(close(recovery_fd) == 0);
 	assert(chmod(base_template, 0755) == 0);
