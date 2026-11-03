@@ -526,7 +526,7 @@ static void test_primary_dm_table(void)
 	       sizeof(manifest.original_header_sha256));
 	assert(swapz_primary_mapper_layout(&manifest, mapper_name, mapper_uuid,
 					 table, &logical_sectors) == 0);
-	assert(!strcmp(mapper_name, "swapz-primary-0123456789abcdef0123456789abcdef"));
+	assert(!strcmp(mapper_name, "swapz-primary"));
 	assert(!strcmp(mapper_uuid,
 		       "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef"));
 	assert(logical_sectors == 29822976ULL);

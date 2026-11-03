@@ -3673,8 +3673,8 @@ result or touching host paths.
 
 The primary manager's Device Mapper layer must keep privileged create/remove
 calls disabled until the whole coordinator is qualified. Rootless production-C
-tests must exercise the manifest-derived maximum table, exact run-bound name
-and UUID, ioctl buffer alignment, one-target bounds, exact `swapz` parameters,
+tests must exercise the manifest-derived maximum table, exact stable
+`swapz-primary` name, run-bound UUID, ioctl buffer alignment, one-target bounds, exact `swapz` parameters,
 and rejection of altered lengths, target counts, versions, UUIDs, padding and
 unaligned payloads. The rootless build must prove that mapper create/remove
 return `ENODEV` without setting any side-effect result. A strict production
@@ -3684,7 +3684,7 @@ the host.
 
 Before any future lifecycle enablement, isolated VM coverage must exercise
 interruption after device creation, after inactive-table load, after resume,
-and during cleanup. Recovery may remove only the exact run-bound mapper, an
+and during cleanup. Recovery may remove only the exact manifest-bound mapper, an
 exact active table or exact suspended inactive table, zero open references,
 and an inactive swap mapping. It must prove both name and UUID absent after
 non-forced removal. Missing, substituted, extra-target, extra-dependency or

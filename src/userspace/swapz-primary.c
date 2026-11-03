@@ -540,7 +540,8 @@ static int swapz_primary_mapper_layout(
 		return -1;
 	}
 	*logical_sectors = logical_pages * SWAPZ_PRIMARY_SECTORS_PER_PAGE;
-	length = snprintf(mapper_name, 64U, "swapz-primary-%s", manifest->run_id);
+	/* Match the packaged systemd swap unit; UUID remains run-bound. */
+	length = snprintf(mapper_name, 64U, "swapz-primary");
 	if (length < 0 || length >= 64) {
 		errno = EOVERFLOW;
 		return -1;
@@ -877,8 +878,7 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 		char mapper_name[64];
 		char mapper_uuid[64];
 
-		if (snprintf(mapper_name, sizeof(mapper_name), "swapz-primary-%s",
-			      parsed.run_id) < 0 ||
+		if (snprintf(mapper_name, sizeof(mapper_name), "swapz-primary") < 0 ||
 		    swapz_primary_manifest_expect_line(&cursor, end, "mapper_name",
 						      mapper_name) < 0 ||
 		    snprintf(mapper_uuid, sizeof(mapper_uuid), "SWAPZ-PRIMARY-%s",

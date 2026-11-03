@@ -307,13 +307,17 @@ its returned interface version, bounded lengths, target count, generated name
 and UUID before interpreting payloads. The primary table is one `swapz`
 target over exactly `8:4` at the manifest-derived maximum safe size. Verify
 its returned table parameters, one lower-device dependency, sysfs name/UUID,
-logical sector count and backing major:minor before admitting use.
+logical sector count and backing major:minor before admitting use. The mapper
+name is the stable `swapz-primary` path consumed by the packaged systemd swap
+unit; the DM UUID includes the fresh run ID and remains the authoritative
+ownership binding. A matching name with a different UUID is foreign and must
+never be adopted or removed.
 
 Persist and verify the matching owner claim, immutable manifest and
 `STARTING` state before mapper creation. Preserve side-effect flags when an
 ioctl sequence fails so recovery knows whether a mapper may exist. Cleanup
 must prove the mapper is inactive as swap, has zero open references and is
-identified by the exact run-bound name and UUID. It may remove only the exact
+identified by the exact manifest name and run-bound UUID. It may remove only the exact
 active table or a suspended partial mapper with no active table and either no
 inactive table or the exact expected inactive table. Clear that inactive
 table only after parsing it exactly; remove without force; then independently

@@ -1519,8 +1519,9 @@ module loaded by another actor; lifecycle admission must reject such modules.
 
 The primary manager now has a manifest-derived Device Mapper table builder and
 an in-process ioctl layer for creating, verifying and removing the maximum
-safe-capacity `/dev/sda4` mapper. Verification checks the run-bound name and
-UUID, active table parameters, exact logical sector count, one lower `8:4`
+safe-capacity `/dev/sda4` mapper. The mapper uses the stable name expected by
+the packaged systemd swap unit and a run-bound UUID. Verification checks both,
+the active table parameters, exact logical sector count, one lower `8:4`
 dependency, sysfs identity and backing relationship. Removal refuses an
 active swap entry, open references, deferred removal and unknown table state;
 it handles a suspended mapper left before table resume only when its inactive
