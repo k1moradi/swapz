@@ -5088,3 +5088,5 @@ direct installer must reject hosts missing the bounded-execution utility,
 device-mapper/util-linux identity tools, journal reader, or basic text/path
 utilities used by the root helper. The hermetic package suite must retain a
 source-contract assertion for that runtime dependency set.
+
+Executable qualification entrypoints that are asserted by the public Make-interface contract must retain executable Git mode; mode regressions are qualification failures even when a Python interpreter could invoke the file explicitly.
