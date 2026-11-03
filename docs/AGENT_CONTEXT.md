@@ -343,11 +343,13 @@ Unless evidence changes the order, work on:
    workspaces, vmalloc metadata, page tables and allocator implementation
    overhead. They are not proof that a full-capacity live target fits available
    RAM; measure actual allocation and peak memory before advertising or
-   activating that capacity. Agent 1 must use the authority preflight before
-   kernel target allocations, and Codex must make the primary userspace
-   selector use this same safe maximum before mapping creation. Recalculate
-   from the runtime-selected geometry if the protected PARTUUID changes; these
-   host-specific figures are not production capacity constants.
+   activating that capacity. The kernel authority preflight and primary
+   userspace mapper sizing now enforce the same one-segment foreground-COW
+   headroom rule; rootless policy regression covers both the 16 GiB fixture and
+   current-card geometry. Recalculate from the runtime-selected geometry if the
+   protected PARTUUID changes; these host-specific figures are not production
+   capacity constants. Full-capacity loaded-host memory and physical RAW/GC
+   qualification remain open.
 5. sustained occupancy/GC/churn and physical service;
 6. persistent startup/shutdown integration and cold-boot acceptance harness:
    bounded fail-closed units, packaged verifier and rootless runner are wired;
