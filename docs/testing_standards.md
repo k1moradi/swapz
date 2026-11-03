@@ -4604,3 +4604,30 @@ assertions are made against the authority begin/commit helpers that exclusively
 own those fields. Tests must not require obsolete direct field writes in a
 caller after ownership has moved behind those helpers.
 Mandatory Python qualification suites must remain syntactically valid; a path that exists but cannot execute does not satisfy discovery coverage.
+
+
+### Runtime systemd health and non-hibernation regression
+
+The isolated systemd fixture must exercise the runtime-health helper and unit
+without reading or changing host swap state. Cover exact mapper/run/backing
+identity, foreign mapper rejection, active swap inventory and capacity,
+monitoring-command failure as degraded evidence, low-noise unchanged polling,
+kernel/systemd telemetry, and sustained GC pressure without progress. Target
+health failures must remain observable rather than causing the monitor service
+to restart the primary lifecycle; only monitor-process failure is eligible for
+`Restart=on-failure`.
+
+Rootless transactions must retain missing-media no-swap behavior, interrupted
+startup, failed native stop, and service-restart contracts. A failed stop must
+execute the native `primary stop` once; any `ExecStopPost` observer is
+read-only, ignored for unit-result ownership, and may not force removal or
+recreate/reformat a mapping that could still contain live pages.
+
+Test hibernation exclusion with literal mapper paths, selected PARTUUID/device
+aliases, tagged UUID aliases, initramfs `RESUME=auto`, sysfs resume identity,
+and active mapper inventory. The generator must emit guards for
+`systemd-hibernate.service`, `systemd-hybrid-sleep.service`, and
+`systemd-suspend-then-hibernate.service` even when selector-derived mapper
+drop-ins cannot be emitted. Cold-boot PASS remains exclusively the
+owner-triggered cross-boot verifier; rootless fixtures and daemon-reload checks
+cannot manufacture observed cold-boot evidence.

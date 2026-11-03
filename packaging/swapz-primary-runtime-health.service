@@ -1,0 +1,28 @@
+[Unit]
+Description=Monitor primary swapz runtime health
+After=swapz-primary-mapper.service dev-mapper-swapz\x2dprimary.swap
+Before=shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/dev/mapper/swapz-primary
+StartLimitIntervalSec=5min
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=@SWAPZ_SBINDIR@/swapz-primary-runtime-health monitor
+Restart=on-failure
+RestartSec=30s
+TimeoutStopSec=10s
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=swap.target

@@ -23,6 +23,10 @@ ExecStartPre=-@SWAPZ_SBINDIR@/swapzctl primary recover
 ExecStartPre=@SWAPZ_SBINDIR@/swapzctl primary prepare
 ExecStart=@SWAPZ_SBINDIR@/swapzctl primary start
 ExecStop=@SWAPZ_SBINDIR@/swapzctl primary stop
+# The post-stop observer is read-only. Its failure is ignored so it can report
+# a retained active swap/mapper after a native stop failure without masking or
+# retrying the native manager's authoritative stop result.
+ExecStopPost=-@SWAPZ_SBINDIR@/swapz-primary-runtime-health stop-observe
 TimeoutStartSec=120s
 TimeoutStopSec=120s
 UMask=0077

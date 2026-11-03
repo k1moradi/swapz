@@ -21,6 +21,41 @@ if [ ! -d "$normal_dir" ] || [ -L "$normal_dir" ]; then
 	exit 2
 fi
 
+# Hibernation cannot preserve swapz's volatile mapping authority. Install a
+# narrow pre-hibernation guard on every systemd sleep path that can write a
+# hibernation image. The helper is observation-only and blocks rather than
+# deactivating or recreating a mapping. Generators rerun on daemon-reload, so
+# these transient drop-ins follow the installed helper path automatically.
+hibernate_temporary=
+cleanup_hibernate()
+{
+	[ -z "$hibernate_temporary" ] || rm -f -- "$hibernate_temporary"
+}
+trap cleanup_hibernate EXIT HUP INT TERM
+for sleep_service in systemd-hibernate.service systemd-hybrid-sleep.service systemd-suspend-then-hibernate.service; do
+	hibernate_dropin_dir=$normal_dir/$sleep_service.d
+	if [ -L "$hibernate_dropin_dir" ]; then
+		echo "swapz-primary-generator: refusing symlinked hibernation drop-in directory" >&2
+		exit 1
+	fi
+	mkdir -p -- "$hibernate_dropin_dir"
+	if [ ! -d "$hibernate_dropin_dir" ] || [ -L "$hibernate_dropin_dir" ]; then
+		echo "swapz-primary-generator: cannot create safe hibernation drop-in directory" >&2
+		exit 1
+	fi
+	hibernate_dropin=$hibernate_dropin_dir/50-swapz-no-hibernate.conf
+	hibernate_temporary=$hibernate_dropin.tmp.$$
+	( set -C; : > "$hibernate_temporary" ) 2>/dev/null || {
+		echo "swapz-primary-generator: cannot create hibernation drop-in" >&2
+		exit 1
+	}
+	printf '[Service]\nExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-runtime-health hibernate-guard\n' > "$hibernate_temporary"
+	chmod 0644 "$hibernate_temporary"
+	mv -fT -- "$hibernate_temporary" "$hibernate_dropin"
+	hibernate_temporary=
+done
+trap - EXIT HUP INT TERM
+
 # swapzctl owns selector parsing, root-ownership checks, PARTUUID normalization,
 # and escaping. The generator must never infer or substitute a target itself.
 units=$("@SWAPZ_SBINDIR@/swapzctl" primary systemd-units) || {

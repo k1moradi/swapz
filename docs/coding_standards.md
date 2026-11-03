@@ -2392,3 +2392,33 @@ upper completion counts, final bytes, and fail-closed writes after a later
 injected lower error. Native tests compile actual target bodies for the close-
 before-publication and release-before-reuse interleavings; fake queue primitives
 do not replace kernel lifecycle/resource qualification.
+
+
+### Runtime primary health and hibernation boundary
+
+The systemd runtime-health path is an observer, not a second lifecycle owner.
+It must not call `swapon`, `swapoff`, mapper removal/creation, formatting,
+`swapzctl primary start` or `primary stop`, or mutate recovery authority.
+The native primary manager remains the only owner of swap activation and
+deactivation. A failed native stop may be followed only by an ignored,
+read-only diagnostic that reports retained mapper/swap state without retrying
+or hiding the native failure.
+
+Production observation is bounded to low-frequency polling (normally 60
+seconds) and logs the first snapshot plus state changes and confirmed failures,
+not repetitive success. Bind the mapper to the ACTIVE run ID and exact selected
+backing identity, then observe active swap inventory, target terminal/error and
+lower/logical I/O counters, GC progress/headroom pressure, occupancy/remaining
+capacity, backing availability, mapper/passive-swap unit state, and attributable
+kernel errors. Missing telemetry is degraded/incomplete evidence; it never
+authorizes destructive recovery. Sustained GC-stall reporting requires repeated
+pressure/headroom evidence without GC victim/page progress.
+
+Hibernation/resume is unsupported because primary swapz mapping authority is
+volatile across a fresh boot. Arming and boot preflight must fail closed when
+kernel, initramfs, boot-loader, sysfs resume, or persistent swap aliases select
+the swapz mapper/backing device or an ambiguous automatic resume target. The
+systemd generator must add read-only pre-hibernation guards to hibernate,
+hybrid-sleep, and suspend-then-hibernate paths; daemon-reload regeneration must
+preserve that boundary. Do not broadly disable unrelated suspend settings or
+rewrite administrator configuration: reject the unsafe path with diagnostics.

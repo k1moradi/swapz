@@ -19,6 +19,7 @@ esac
 self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 prefix_dir=$(dirname -- "$self_dir")
 swapzctl=$self_dir/swapzctl
+runtime_health=$self_dir/swapz-primary-runtime-health
 module_artifact=$prefix_dir/libexec/swapz/dm-swapz.ko
 proc_root=/proc
 sys_root=/sys
@@ -433,6 +434,15 @@ active_transaction_run_id()
 	printf '%s\n' "$run_id"
 }
 
+hibernation_resume_guard()
+{
+	[ -x "$runtime_health" ] || {
+		echo "swapz-primary-boot-verify: runtime health helper is unavailable" >&2
+		return 1
+	}
+	"$runtime_health" hibernation-config-check
+}
+
 verify_persistent_report_storage()
 {
 	# The manager already proves that its recovery filesystem is persistent and
@@ -470,6 +480,7 @@ arm_harness()
 		fail "selected target parent has neither a stable serial nor WWN"
 	verify_persistent_report_storage
 	raw_swap_alias_guard || fail "selected partition has a raw-swap alias conflict or alias inventory is unavailable"
+	hibernation_resume_guard || fail "unsupported hibernation/resume configuration selects swapz"
 	module_artifact_metadata || fail "installed module provenance is unavailable or unqualified"
 
 	temporary=$(mktemp "$report_base/.armed.env.XXXXXX") || fail "cannot create arm record"
@@ -537,6 +548,7 @@ preflight_boot()
 	[ "$target_removable" = "$expected_removable" ] || fail "selected target removable marker changed after arming"
 	verify_persistent_report_storage
 	raw_swap_alias_guard || fail "selected partition has a raw-swap alias conflict or alias inventory is unavailable"
+	hibernation_resume_guard || fail "unsupported hibernation/resume configuration selects swapz"
 	module_artifact_metadata || fail "installed module provenance cannot be verified after reboot"
 	[ "$module_sha256" = "$expected_module_sha" ] || fail "installed module bytes changed after arming"
 	[ "$module_source_sha" = "$expected_source_sha" ] || fail "installed module source changed after arming"
@@ -673,6 +685,20 @@ observe_boot()
 			append_failure selected_target_unavailable
 		else
 			append_incomplete selected_target_unavailable
+		fi
+	fi
+
+	if [ ! -x "$runtime_health" ]; then
+		if [ "$observation_expected" -eq 1 ]; then
+			append_failure runtime_health_helper_unavailable
+		else
+			append_incomplete runtime_health_helper_unavailable
+		fi
+	elif ! "$runtime_health" hibernation-config-check >/dev/null 2>&1; then
+		if [ "$observation_expected" -eq 1 ]; then
+			append_failure hibernation_resume_configuration_conflict
+		else
+			append_incomplete hibernation_resume_configuration_conflict
 		fi
 	fi
 
