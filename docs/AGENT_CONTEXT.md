@@ -245,11 +245,16 @@ production-readiness mission because Codex is explicitly forbidden to reboot.
 
 Unless evidence changes the order, work on:
 
-1. finish the target/configuration abstraction across the manager, package and
-   boot integration; the manager resolves a protected PARTUUID selector and
-   the package now generates selector-derived systemd dependencies, while the
-   actual start/stop/recovery lifecycle remains disabled pending qualification;
-2. native production lifecycle and standing-authorization policy cleanup;
+1. **Target/configuration abstraction — implemented.** The manager, package
+   and systemd generator use a protected PARTUUID selector; target path,
+   major:minor and capacity are discovered at runtime. Alternate synthetic
+   identities and geometries are covered in direct-C tests, and both required
+   GitHub workflows pass on `6ebf6fd3c9a641c4fbf57c021ee0b9aad5b24efb`.
+   Keep the privileged lifecycle disabled until separately qualified. The
+   historical fixed-device live-swap supervisor is not the active selector or
+   deployment path.
+2. **Active:** native production lifecycle and standing-authorization policy
+   cleanup;
 3. actual Linux swap correctness on the authorized card;
 4. maximum safe full-card capacity and bounded metadata RAM;
 5. sustained occupancy/GC/churn and physical service;

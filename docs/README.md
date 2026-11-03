@@ -64,8 +64,22 @@ The most recent owner attempt published report-only commit
 `9feb6b9df7710634bffbf394504257b2a4d2d8d3`. Stages 1–4 passed; stage 5 was
 BLOCKED because the ID36 low-RAM gate required at least 1 GiB of
 `MemAvailable`. The report is not an overall qualification, and it does not
-qualify later `main` changes. The current systemd-generator work also still
-needs exact-source tests and CI before it is qualified.
+qualify later `main` changes. Current `main` at
+`6ebf6fd3c9a641c4fbf57c021ee0b9aad5b24efb` has passing GitHub runs for both
+required workflows: production-C qualification and native project-goal
+regressions. These validate the source and CI contracts, but do not replace an
+exact-source owner `make test`; loaded owner qualification for this `main` head
+is still outstanding.
+
+The primary manager and installed systemd generator are drive-neutral. The
+manager reads a root-protected PARTUUID selector and discovers the selected
+partition's current path, major:minor and size at runtime; direct-C coverage
+uses alternate PARTUUIDs, device numbers and geometries. A fixed `/dev/sda4`
+review finding against the earlier `ac665aee` source was superseded by
+`9feb6b9d` (`Make primary target selection drive-neutral`). The old live-swap
+supervisor still contains `/dev/sda4` trial constants, but its execution is
+hard-disabled and it is historical test code, not the current manager or
+deployment selector.
 
 The qualified positive-fixture delta64 rescue A/B exercised 4096 direct
 predictor-first adoptions that skipped ordinary LZ4. Lower WRITE bytes fell
