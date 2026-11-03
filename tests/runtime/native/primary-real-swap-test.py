@@ -1062,6 +1062,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify.QualificationFailure):
                 qualify.evaluate_reuse_rounds(mutant)
 
+    def test_persistent_real_swap_result_binds_exact_target_byte_size(self):
+        source = HELPER.read_text(encoding="utf-8")
+        self.assertIn(
+            'target_size_bytes = int(plan["target_device_bytes"])', source)
+        self.assertEqual(
+            source.count('"target_size_bytes": target_size_bytes'), 2)
+        self.assertLess(
+            source.index("verify_authorized_target("),
+            source.index('target_size_bytes = int(plan["target_device_bytes"])'))
+
     def test_persistent_evidence_starts_fail_closed_and_finishes_atomically(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

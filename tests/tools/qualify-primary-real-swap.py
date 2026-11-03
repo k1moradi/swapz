@@ -2343,6 +2343,9 @@ def execute(arguments: argparse.Namespace) -> dict:
         selector_partuuid = _read_selector()
         _target_path, target_device, target_parent_device = verify_authorized_target(
             plan, selector_partuuid)
+        # The verifier has already matched this value against live block
+        # geometry, lsblk and the authorized target snapshot.
+        target_size_bytes = int(plan["target_device_bytes"])
         baseline = read_swap_rows()
         _validate_precycle_state(
             selector_partuuid, target_device, target_parent_device, baseline)
@@ -2361,6 +2364,7 @@ def execute(arguments: argparse.Namespace) -> dict:
                 "qualified_installed_artifacts": artifact_hashes,
                 "physical_execution_control_sha256": execution_control_sha256,
                 "partuuid": selector_partuuid,
+                "target_size_bytes": target_size_bytes,
                 "target_device": f"{target_device[0]}:{target_device[1]}",
                 "cycles_requested": arguments.cycles,
                 "workload_mib": arguments.workload_mib,
@@ -2427,6 +2431,7 @@ def execute(arguments: argparse.Namespace) -> dict:
             "qualified_installed_artifacts": artifact_hashes,
             "physical_execution_control_sha256": execution_control_sha256,
             "partuuid": selector_partuuid,
+            "target_size_bytes": target_size_bytes,
             "target_device": f"{target_device[0]}:{target_device[1]}",
             "cycles_requested": arguments.cycles,
             "cycles_passed": len(cycles),

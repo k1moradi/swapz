@@ -202,8 +202,9 @@ def validate_real_swap_result(
         reject("nested result did not use two concurrent byte oracles")
     if result.get("reuse_rounds_per_cycle") != 2:
         reject("nested result did not complete two reuse rounds per cycle")
-    if target is None or result.get("partuuid") != target[0]:
-        reject("nested result authorized target PARTUUID mismatch")
+    if target is None or result.get("partuuid") != target[0] or \
+            result.get("target_size_bytes") != target[1]:
+        reject("nested result authorized target identity mismatch")
 
     cycles = result.get("cycles")
     if not isinstance(cycles, list) or (
@@ -281,7 +282,7 @@ def validate_real_swap_evidence(
             "source_sha", "acceptance_manifest_sha256",
             "qualification_report_sha256", "helper_sha256", "oracle_sha256",
             "qualified_installed_artifacts", "physical_execution_control_sha256",
-            "partuuid", "cycles_requested", "workload_mib",
+            "partuuid", "target_size_bytes", "cycles_requested", "workload_mib",
             "resident_limit_mib", "swap_limit_mib", "timeout_seconds",
             "concurrent_oracles", "reuse_rounds_per_cycle", "cycles"):
         if physical_evidence.get(key) != result.get(key):

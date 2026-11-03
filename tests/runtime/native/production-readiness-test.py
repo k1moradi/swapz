@@ -104,6 +104,7 @@ def real_swap_result(report_raw, policy_raw):
         "qualified_installed_artifacts": dict(ARTIFACTS),
         "physical_execution_control_sha256": "4" * 64,
         "partuuid": TARGET["partuuid"],
+        "target_size_bytes": TARGET["size_bytes"],
         "target_device": "8:1",
         "cycles_requested": primary["cycles"],
         "cycles_passed": primary["cycles"],
@@ -132,7 +133,7 @@ def real_swap_evidence(report_raw, policy_raw):
         "source_sha", "acceptance_manifest_sha256",
         "qualification_report_sha256", "helper_sha256", "oracle_sha256",
         "qualified_installed_artifacts", "physical_execution_control_sha256",
-        "partuuid", "cycles_requested", "workload_mib",
+        "partuuid", "target_size_bytes", "cycles_requested", "workload_mib",
         "resident_limit_mib", "swap_limit_mib", "timeout_seconds",
         "concurrent_oracles", "reuse_rounds_per_cycle", "cycles",
     )
@@ -542,6 +543,25 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertTrue(any(
             "persistent evidence/result mismatch for workload_mib" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_real_swap_persistent_evidence_binds_exact_target_byte_size(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        wrong_size = TARGET["size_bytes"] + 4096
+        physical["target_size_bytes"] = wrong_size
+        physical["result"]["target_size_bytes"] = wrong_size
+        raw = encoded(physical)
+        evidence = current_evidence(report_raw, policy_raw, raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "authorized target identity mismatch" in blocker
             for blocker in result["code_blockers"]))
 
     def test_strict_json_rejects_duplicate_policy_keys(self):
