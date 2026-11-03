@@ -5482,7 +5482,16 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		error = swapz_raw_write(ctx, bio, logical);
 		if (!error && (bio->bi_opf & REQ_FUA))
 			error = swapz_issue_flush(ctx);
-		if (error)
+		/*
+		 * A standalone RAW write can be the request that first discovers
+		 * foreground ENOSPC and starts GC. If that GC then hits a transient
+		 * lower READ/WRITE fault, no authority for this RAW write was
+		 * published and the authenticated GC destination remains resumable.
+		 * Every non-GC RAW/FUA error, and any GC error that already marked the
+		 * target failed, remains terminal.
+		 */
+		if (error &&
+		    (!ctx->gc_recovery.active || smp_load_acquire(&ctx->failed)))
 			swapz_fail(ctx, error);
 		swapz_complete(bio, error);
 		return 0;
