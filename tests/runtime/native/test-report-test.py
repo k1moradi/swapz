@@ -4295,19 +4295,27 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 self.assertNotEqual(verdict["release_verdict"], "PASS")
 
     def test_fail_and_in_progress_remain_distinct(self):
-        failed = self.passing_snapshot()
-        failed["release_evidence"]["real_linux_swap"]["status"] = "FAIL"
-        verdict = runner.evaluate_production_readiness(failed, self.SOURCE_SHA)
-        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "FAIL")
-        self.assertEqual(verdict["release_verdict"], "FAIL")
-
+        # Summary-only PASS is intentionally BLOCKED for persistent physical
+        # evidence. Put every persistent gate in a genuine in-progress state
+        # first so this test isolates status precedence rather than accidentally
+        # depending on unqualified synthetic PASS payloads.
         progressing = self.passing_snapshot()
-        progressing["release_evidence"]["real_linux_swap"]["status"] = (
-            "IN_PROGRESS")
+        for evidence_name in runner.PRODUCTION_READINESS_PERSISTENT_EVIDENCE:
+            progressing["release_evidence"][evidence_name]["status"] = (
+                "IN_PROGRESS")
+
         verdict = runner.evaluate_production_readiness(
             progressing, self.SOURCE_SHA)
         self.assertEqual(verdict["CODE_PRODUCTION_READY"], "IN_PROGRESS")
         self.assertEqual(verdict["release_verdict"], "IN_PROGRESS")
+
+        failed = self.passing_snapshot()
+        for evidence_name in runner.PRODUCTION_READINESS_PERSISTENT_EVIDENCE:
+            failed["release_evidence"][evidence_name]["status"] = "IN_PROGRESS"
+        failed["release_evidence"]["real_linux_swap"]["status"] = "FAIL"
+        verdict = runner.evaluate_production_readiness(failed, self.SOURCE_SHA)
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "FAIL")
+        self.assertEqual(verdict["release_verdict"], "FAIL")
 
     def test_pass_requires_qualified_hashes_and_current_ci(self):
         missing_hash = self.passing_snapshot()

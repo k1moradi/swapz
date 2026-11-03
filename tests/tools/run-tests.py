@@ -1762,8 +1762,14 @@ def parse_loaded_correctness(output):
                 found[name] = tuple(int(value) for value in match.groups())
     missing = [name for name in patterns if name not in found]
     if missing:
+        # Reasons are operator/test diagnostics, not stable machine keys.
+        # Render marker names with hyphens so multiword recovery paths such as
+        # gc-roll-forward remain readable while the internal dictionary keys
+        # stay unchanged.
+        missing_labels = [name.replace("_", "-") for name in missing]
         return {"overall": "INCOMPLETE",
-                "reason": "missing loaded correctness markers: " + ",".join(missing)}
+                "reason": "missing loaded correctness markers: " +
+                          ",".join(missing_labels)}
     if tuple(observed_interruption_phases) != expected_interruption_phases:
         return {
             "overall": "INCOMPLETE",
