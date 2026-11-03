@@ -31,10 +31,10 @@ def _c_code_only(source: str) -> str:
 
 
 def c_function_body(source: str, symbol: str) -> str:
-    """Return one static executable body, ignoring comments and literals."""
+    """Return one executable C body, ignoring comments and literals."""
     source = _c_code_only(source)
     match = re.search(
-        r"static\s+(?:int|long)\s+" + re.escape(symbol) +
+        r"(?:static\s+)?(?:int|long)\s+" + re.escape(symbol) +
         r"\s*\([^;]*?\)\s*\{",
         source, re.S)
     if not match:
