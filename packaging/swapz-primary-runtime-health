@@ -231,7 +231,7 @@ resume_spec_matches_swapz()
 	[ -n "${mapper_major_minor:-}" ] && swapz_identity_known=1
 
 	if [ -n "${selected_partuuid:-}" ]; then
-		normalized=$(printf '%s\n' "$spec" | tr 'A-F' 'a-f')
+		normalized=$(printf '%s\n' "$spec" | tr '[:upper:]' '[:lower:]')
 		case "$normalized" in
 		partuuid="$selected_partuuid"|/dev/disk/by-partuuid/"$selected_partuuid"|"$dev_root"/disk/by-partuuid/"$selected_partuuid") return 0 ;;
 		esac

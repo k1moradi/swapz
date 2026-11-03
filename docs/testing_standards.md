@@ -4963,3 +4963,9 @@ service contracts only; it does not replace loaded-kernel, physical-media, or
 owner-observed cold-boot qualification.
 
 Nested `make test` fixtures must track every mandatory loaded-correctness marker byte-for-byte when the parser contract grows; adding a new fail-closed recovery case requires updating the isolated fixture rather than weakening or making the marker optional.
+
+Boot-verifier rootless fixtures must provide an explicit benign synthetic
+`/proc/cmdline`; absence is reserved for the dedicated fail-closed regression.
+Resume-tag tests must normalize the complete tag key as well as hexadecimal
+payload characters so uppercase `PARTUUID=` syntax cannot bypass stable-identity
+comparison.

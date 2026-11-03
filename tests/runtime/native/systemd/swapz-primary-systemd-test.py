@@ -517,6 +517,7 @@ class BootVerifierTests(unittest.TestCase):
         )
         self.create_mocks()
         self.write_boot_id(BOOT_A)
+        (self.proc / "cmdline").write_text("quiet\n", encoding="ascii")
         self.write_proc_swaps(active=True)
         (self.sys / "module" / "dm_swapz" / "parameters" / "build_source_sha").write_text(SOURCE_SHA + "\n", encoding="ascii")
         (self.sys / "module" / "dm_swapz" / "parameters" / "build_source_clean").write_text("1\n", encoding="ascii")
