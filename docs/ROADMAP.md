@@ -1374,9 +1374,10 @@ the plan BLOCKED. Provision, activation, teardown and recovery are disabled.
 The earlier Python manager draft was removed because production Python is
 outside this repository's coding standards. The remaining implementation must
 integrate the permanent root-controlled PARTUUID lock primitive with each
-lifecycle operation and add the durable active marker, initial provisioning,
+lifecycle operation and add durable state transitions, initial provisioning,
 checked restoration, startup-failure rollback, exact mapper/module ownership,
-and interruption recovery. The shared lock primitive is not yet held by any
-primary lifecycle command. No live swap or boot integration has been qualified
-through this manager. Do not enable its units until those paths and the
-exact-host qualification gates are closed.
+and interruption recovery. Lock acquisition and durable one-use owner-claim
+primitives now have direct-C regressions, but no primary lifecycle command
+uses them yet. No live swap or boot integration has been qualified through
+this manager. Do not enable its units until those paths and the exact-host
+qualification gates are closed.

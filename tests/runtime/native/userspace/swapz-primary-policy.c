@@ -15,6 +15,26 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+static void assert_record_equals(int directory_fd, const char *name,
+				 const char *expected)
+{
+	struct stat info;
+	char buffer[192];
+	ssize_t count;
+	int fd = openat(directory_fd, name, O_RDONLY | O_NOFOLLOW);
+
+	assert(fd >= 0);
+	assert(fstat(fd, &info) == 0);
+	assert(S_ISREG(info.st_mode));
+	assert(info.st_uid == geteuid());
+	assert((info.st_mode & 0777U) == 0600U);
+	count = read(fd, buffer, sizeof(buffer) - 1U);
+	assert(count >= 0);
+	buffer[count] = '\0';
+	assert(strcmp(buffer, expected) == 0);
+	assert(close(fd) == 0);
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -23,9 +43,17 @@ int main(void)
 	char base_template[PATH_MAX];
 	char lock_path[PATH_MAX];
 	char target_path[PATH_MAX];
+	char active_name[64];
+	char consumed_name[64];
+	const char *run_id = "0123456789abcdef0123456789abcdef";
+	const char *other_run_id = "fedcba9876543210fedcba9876543210";
+	const char *expected_record =
+		"{\"major\":8,\"minor\":4,\"partuuid\":\"7fb9401d-04\","
+		"\"run_id\":\"0123456789abcdef0123456789abcdef\"}\n";
 	int recovery_fd;
 	int first_lock;
 	int second_lock;
+	int unlocked_lock;
 	char *plan[] = {"plan"};
 	char *prepare[] = {"prepare"};
 	char *start[] = {"start"};
@@ -45,6 +73,10 @@ int main(void)
 			 "%s/partition-7fb9401d-04.lock", base_template) > 0);
 	assert(snprintf(target_path, sizeof(target_path),
 			 "%s/target", base_template) > 0);
+	assert(snprintf(active_name, sizeof(active_name),
+			 "partition-7fb9401d-04.active") > 0);
+	assert(snprintf(consumed_name, sizeof(consumed_name),
+			 "consumed-%s.json", run_id) > 0);
 	recovery_fd = swapz_primary_recovery_base_open(
 		base_template, geteuid());
 	assert(recovery_fd >= 0);
@@ -55,6 +87,26 @@ int main(void)
 		recovery_fd, "7fb9401d-04", geteuid());
 	assert(second_lock < 0);
 	assert(errno == EWOULDBLOCK || errno == EAGAIN);
+	unlocked_lock = openat(recovery_fd, "partition-7fb9401d-04.lock",
+			      O_RDWR | O_NOFOLLOW);
+	assert(unlocked_lock >= 0);
+	assert(swapz_primary_claim_partition_owner_at(
+		recovery_fd, unlocked_lock, run_id, geteuid()) < 0);
+	assert(errno == EWOULDBLOCK || errno == EAGAIN);
+	assert(close(unlocked_lock) == 0);
+	assert(swapz_primary_claim_partition_owner_at(
+		recovery_fd, first_lock, "invalid-run-id", geteuid()) < 0);
+	assert(errno == EINVAL);
+	assert(swapz_primary_claim_partition_owner_at(
+		recovery_fd, first_lock, run_id, geteuid()) == 0);
+	assert(swapz_primary_claim_partition_owner_at(
+		recovery_fd, first_lock, run_id, geteuid()) < 0);
+	assert(errno == EBUSY);
+	assert(swapz_primary_claim_partition_owner_at(
+		recovery_fd, first_lock, other_run_id, geteuid()) < 0);
+	assert(errno == EBUSY);
+	assert_record_equals(recovery_fd, active_name, expected_record);
+	assert_record_equals(recovery_fd, consumed_name, expected_record);
 	assert(close(first_lock) == 0);
 	first_lock = swapz_primary_partition_lock_at(
 		recovery_fd, "7fb9401d-04", geteuid());
@@ -83,6 +135,9 @@ int main(void)
 	assert(unlink(lock_path) == 0);
 	assert(swapz_primary_partition_lock_at(
 		recovery_fd, "../sda4", geteuid()) < 0);
+	assert(unlinkat(recovery_fd, active_name, 0) == 0);
+	assert(unlinkat(recovery_fd, consumed_name, 0) == 0);
+	assert(fsync(recovery_fd) == 0);
 	assert(close(recovery_fd) == 0);
 	assert(chmod(base_template, 0755) == 0);
 	assert(swapz_primary_recovery_base_open(
@@ -94,6 +149,6 @@ int main(void)
 	assert(swapz_primary_command(1, start) == 2);
 	assert(swapz_primary_command(1, stop) == 2);
 	assert(swapz_primary_command(1, recover) == 2);
-	puts("PASS: primary swap capacity, shared lock and disabled lifecycle gate");
+	puts("PASS: primary swap capacity, durable owner claim, shared lock and disabled lifecycle gate");
 	return 0;
 }

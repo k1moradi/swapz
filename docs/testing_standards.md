@@ -3329,6 +3329,12 @@ modes, acquire a nonblocking exclusive `flock`, and fsync the recovery-base
 directory. It must never unlink or replace that inode. Until lifecycle commands
 actually acquire and hold this lock for their full operation, the primitive's
 presence alone does not satisfy the manager's shared-lock requirement.
+Before the first device mutation, consume a fresh lowercase 32-hex run ID with
+an `O_EXCL` record and create the matching active PARTUUID marker. Each record
+must be root-owned mode 0600, fsynced, and followed by a recovery-directory
+fsync. A partial or uncertain claim stays consumed and blocks future starts.
+Only checked recovery after a durable COMPLETE state may release the active
+marker; consumed records remain permanently present.
 
 Recovery must refuse while any `swapoff` process runs in a swapoff stage, even
 when the kernel still lists the device, and an unreadable `/proc` entry fails

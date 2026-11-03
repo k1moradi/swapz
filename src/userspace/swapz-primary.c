@@ -173,6 +173,155 @@ static int swapz_primary_partition_lock_at(int recovery_fd,
 	return fd;
 }
 
+static int swapz_primary_valid_run_id(const char *run_id)
+{
+	size_t i;
+
+	if (!run_id || strlen(run_id) != 32U)
+		return 0;
+	for (i = 0; i < 32U; ++i) {
+		if (!((run_id[i] >= '0' && run_id[i] <= '9') ||
+		      (run_id[i] >= 'a' && run_id[i] <= 'f')))
+			return 0;
+	}
+	return 1;
+}
+
+static int swapz_primary_write_record_at(int recovery_fd, const char *name,
+						 const char *record,
+						 uid_t expected_owner)
+{
+	struct stat info;
+	const char *cursor = record;
+	size_t remaining = strlen(record);
+	int fd;
+	int saved_errno;
+
+	fd = openat(recovery_fd, name, O_WRONLY | O_CREAT | O_EXCL |
+		    O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &info) < 0) {
+		saved_errno = errno;
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (!S_ISREG(info.st_mode) || info.st_uid != expected_owner ||
+	    (info.st_mode & 0777U) != 0600U || info.st_nlink != 1) {
+		close(fd);
+		errno = EPERM;
+		return -1;
+	}
+	while (remaining) {
+		ssize_t count = write(fd, cursor, remaining);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			saved_errno = count < 0 ? errno : EIO;
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		cursor += count;
+		remaining -= (size_t)count;
+	}
+	if (fsync(fd) < 0) {
+		saved_errno = errno;
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (close(fd) < 0)
+		return -1;
+	return fsync(recovery_fd);
+}
+
+int swapz_primary_claim_partition_owner_at(int recovery_fd, int lock_fd,
+						  const char *run_id,
+						  uid_t expected_owner)
+{
+	struct stat directory_info;
+	struct stat held_lock_info;
+	struct stat named_lock_info;
+	struct stat marker_info;
+	char lock_name[64];
+	char active_name[64];
+	char consumed_name[64];
+	char record[192];
+	int count;
+
+	if (recovery_fd < 0 || lock_fd < 0 ||
+	    !swapz_primary_valid_run_id(run_id)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (fstat(recovery_fd, &directory_info) < 0)
+		return -1;
+	if (!S_ISDIR(directory_info.st_mode) ||
+	    directory_info.st_uid != expected_owner ||
+	    (directory_info.st_mode & 0777U) != 0700U) {
+		errno = EPERM;
+		return -1;
+	}
+	if (snprintf(lock_name, sizeof(lock_name), "partition-%s.lock",
+		     SWAPZ_PRIMARY_PARTUUID) < 0 ||
+	    snprintf(active_name, sizeof(active_name), "partition-%s.active",
+		     SWAPZ_PRIMARY_PARTUUID) < 0 ||
+	    snprintf(consumed_name, sizeof(consumed_name), "consumed-%s.json",
+		     run_id) < 0) {
+		errno = EIO;
+		return -1;
+	}
+	if (fstat(lock_fd, &held_lock_info) < 0 ||
+	    fstatat(recovery_fd, lock_name, &named_lock_info,
+		    AT_SYMLINK_NOFOLLOW) < 0)
+		return -1;
+	if (!S_ISREG(held_lock_info.st_mode) ||
+	    held_lock_info.st_uid != expected_owner ||
+	    (held_lock_info.st_mode & 0777U) != 0600U ||
+	    held_lock_info.st_nlink != 1 ||
+	    held_lock_info.st_dev != named_lock_info.st_dev ||
+	    held_lock_info.st_ino != named_lock_info.st_ino ||
+	    !S_ISREG(named_lock_info.st_mode) ||
+	    named_lock_info.st_uid != expected_owner ||
+	    (named_lock_info.st_mode & 0777U) != 0600U ||
+	    named_lock_info.st_nlink != 1) {
+		errno = EPERM;
+		return -1;
+	}
+	if (flock(lock_fd, LOCK_EX | LOCK_NB) < 0)
+		return -1;
+	if (fstatat(recovery_fd, active_name, &marker_info,
+		    AT_SYMLINK_NOFOLLOW) == 0) {
+		errno = EBUSY;
+		return -1;
+	}
+	if (errno != ENOENT)
+		return -1;
+	if (fstatat(recovery_fd, consumed_name, &marker_info,
+		    AT_SYMLINK_NOFOLLOW) == 0) {
+		errno = EEXIST;
+		return -1;
+	}
+	if (errno != ENOENT)
+		return -1;
+	count = snprintf(record, sizeof(record),
+			 "{\"major\":8,\"minor\":4,\"partuuid\":\"%s\","
+			 "\"run_id\":\"%s\"}\n",
+			 SWAPZ_PRIMARY_PARTUUID, run_id);
+	if (count < 0 || (size_t)count >= sizeof(record)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	if (swapz_primary_write_record_at(recovery_fd, consumed_name,
+					  record, expected_owner) < 0)
+		return -1;
+	return swapz_primary_write_record_at(recovery_fd, active_name,
+					     record, expected_owner);
+}
+
 int swapz_primary_partition_lock_acquire(void)
 {
 	uid_t expected_owner = 0;
