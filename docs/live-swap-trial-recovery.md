@@ -7,9 +7,13 @@ They are superseded for the current dedicated SD-card production mission by the
 standing owner scope in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). Preserve this
 file's evidence; do not use it to require another human approval for current
 `/dev/sda1` work.
-`LIVE_SWAP_EXECUTION_ENABLED` is true in the commit that carries this text. Each
-`run` still needs a one-use approval record bound to that exact commit, to both
-current CI workflows, to the qualified artifact hashes and to the live target.
+The detailed old-host physical and live-swap transcript is preserved in
+[old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md).
+The historical trial commit enabled `LIVE_SWAP_EXECUTION_ENABLED` only for its
+consumed one-use run. Current `main` sets that gate to `false`; the retained
+supervisor's `run` and `recover` actions are permanently disabled because their
+device and approval bindings belong to the retired host. The approval mechanics
+below therefore document the historical evidence and cannot enable a new run.
 
 The owner waived the separate external-review requirement for this one trial on
 2026-11-02. That waiver is an owner decision. No external reviewer approval
