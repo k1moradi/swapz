@@ -4917,10 +4917,13 @@ IN_PROGRESS, never PASS; a current FAIL stays FAIL. The owner `make test`
 evidence must carry the same formatter/module/oracle digests as the qualified
 artifact evidence. Owned-null_blk lifecycle PASS evidence is source-bound but
 uses a private test-seam control binary, so its formatter digest is not compared
-to the production formatter. Instead it must record `overall=PASS` and a
-valid retained `evidence_sha256`; missing, malformed or non-PASS lifecycle
-evidence is BLOCKED. Real-swap PASS evidence must carry the installed qualified
-formatter/module/oracle digests
+to the production formatter. It must record `overall=PASS`, a valid retained
+`evidence_sha256`, and the formatter/module/oracle hashes emitted by the
+rehearsal qualification report. The private formatter hash is required only for
+structural provenance; the lifecycle module and oracle hashes must exactly match
+the qualified release module and oracle. Missing, malformed, non-PASS, or
+module/oracle-mismatched lifecycle evidence is BLOCKED. Real-swap PASS evidence
+must carry the installed qualified formatter/module/oracle digests
 observed by the physical helper, and those digests plus installed artifact
 identity must match the exact qualified release
 artifacts. Real-swap, maximum-capacity/RAM and sustained-physical PASS evidence
@@ -4959,7 +4962,9 @@ policy bytes, binds owner `make test`, all three required CI workflows
 exact synchronized `main` SHA, independently cross-checks
 formatter/module/oracle hashes for owner, real-swap and installed-artifact
 evidence, and requires owned-null_blk lifecycle evidence to carry an exact-source
-PASS result plus a valid retained evidence digest. Current PASS physical records bind
+PASS result, a valid retained evidence digest, and production-matching module and
+oracle hashes while allowing its private test-seam formatter hash to differ.
+Current PASS physical records bind
 the normalized lowercase PARTUUID plus exact partition byte size and the frozen
 policy SHA-256. Full-capacity evidence must include measured positive logical
 capacity and measured peak target/metadata RAM no greater than the frozen

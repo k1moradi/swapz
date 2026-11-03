@@ -108,7 +108,8 @@ def current_evidence(report_raw, policy_raw):
                 report_sha256=report_digest,
                 hashes=dict(ARTIFACTS)),
             "owned_nullblk_qualification": pass_record(
-                overall="PASS", evidence_sha256="5" * 64),
+                overall="PASS", evidence_sha256="5" * 64,
+                hashes=dict(ARTIFACTS)),
             "unresolved_critical_issues": pass_record(count=0),
             "real_linux_swap": pass_record(
                 policy_sha256=policy_digest,
@@ -252,7 +253,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "installed artifact binding mismatch" in blocker
             for blocker in result["code_blockers"]))
 
-    def test_owned_nullblk_pass_requires_lifecycle_result_and_digest(self):
+    def test_owned_nullblk_pass_requires_lifecycle_result_digest_and_production_bytes(self):
         report = owner_report()
         policy = acceptance_policy()
         evidence = current_evidence(encoded(report), encoded(policy))
@@ -266,6 +267,18 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             for blocker in result["code_blockers"]))
 
         nullblk["evidence_sha256"] = "5" * 64
+        nullblk["hashes"]["formatter_sha256"] = "4" * 64
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS", result)
+
+        nullblk["hashes"]["module_sha256"] = "6" * 64
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "owned_nullblk_qualification: module/oracle artifact binding mismatch"
+            in blocker for blocker in result["code_blockers"]))
+
+        nullblk["hashes"] = dict(ARTIFACTS)
         nullblk["overall"] = "FAIL"
         result = evaluate(report, evidence, policy)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")

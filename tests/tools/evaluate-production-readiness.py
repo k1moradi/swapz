@@ -270,6 +270,15 @@ def evaluate_release(
                 evidence_sha256):
             block_code(
                 "owned_nullblk_qualification: evidence digest is invalid")
+        lifecycle_hashes = owned_nullblk.get("hashes")
+        if not _valid_hash_mapping(lifecycle_hashes):
+            block_code(
+                "owned_nullblk_qualification: lifecycle artifact hashes are malformed")
+        elif report_artifacts is None or any(
+                lifecycle_hashes.get(key) != report_artifacts.get(key)
+                for key in ("module_sha256", "oracle_sha256")):
+            block_code(
+                "owned_nullblk_qualification: module/oracle artifact binding mismatch")
 
     critical = pass_record("unresolved_critical_issues")
     if critical is not None and critical.get("count") != 0:

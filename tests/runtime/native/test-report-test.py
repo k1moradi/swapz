@@ -4127,7 +4127,8 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 "qualified_artifacts": dict(hashes)},
             "owned_nullblk_qualification": {
                 **common, "overall": "PASS",
-                "evidence_sha256": self.DIGEST},
+                "evidence_sha256": self.DIGEST,
+                "hashes": dict(hashes)},
             "authorized_target_identity": {
                 **common, "authorized": True, "target": dict(target)},
             "real_linux_swap": {
@@ -4232,6 +4233,26 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             owner_mismatch, self.SOURCE_SHA)
         self.assertEqual(
             verdict["evidence_statuses"]["exact_source_owner_make_test"],
+            "BLOCKED")
+
+        nullblk_private_formatter = self.passing_snapshot()
+        nullblk_private_formatter["release_evidence"][
+            "owned_nullblk_qualification"]["hashes"]["formatter_sha256"] = (
+                "e" * 64)
+        verdict = runner.evaluate_production_readiness(
+            nullblk_private_formatter, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["owned_nullblk_qualification"],
+            "PASS")
+
+        nullblk_module_mismatch = self.passing_snapshot()
+        nullblk_module_mismatch["release_evidence"][
+            "owned_nullblk_qualification"]["hashes"]["module_sha256"] = (
+                "e" * 64)
+        verdict = runner.evaluate_production_readiness(
+            nullblk_module_mismatch, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["owned_nullblk_qualification"],
             "BLOCKED")
 
         real_swap_mismatch = self.passing_snapshot()

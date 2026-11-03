@@ -229,7 +229,8 @@ def _readiness_pass_payload_valid(
                     entry.get("qualified_artifacts")))
     if name == "owned_nullblk_qualification":
         return (entry.get("overall") == "PASS" and
-                _valid_sha256(entry.get("evidence_sha256")))
+                _valid_sha256(entry.get("evidence_sha256")) and
+                _readiness_artifact_hashes_valid(entry.get("hashes")))
     if name == "authorized_target_identity":
         return (entry.get("authorized") is True and
                 _readiness_target_key(entry.get("target")) is not None)
@@ -372,6 +373,15 @@ def evaluate_production_readiness(snapshot, current_source_sha):
             statuses["exact_source_owner_make_test"] = "BLOCKED"
             reasons["exact_source_owner_make_test"] = (
                 "owner qualification artifact hashes differ from release hashes")
+        owned_nullblk = evidence.get("owned_nullblk_qualification", {})
+        if statuses.get("owned_nullblk_qualification") == "PASS":
+            lifecycle_hashes = owned_nullblk.get("hashes", {})
+            if any(
+                    lifecycle_hashes.get(key) != qualified_hashes.get(key)
+                    for key in ("module_sha256", "oracle_sha256")):
+                statuses["owned_nullblk_qualification"] = "BLOCKED"
+                reasons["owned_nullblk_qualification"] = (
+                    "lifecycle module/oracle hashes differ from release hashes")
         real_swap = evidence.get("real_linux_swap", {})
         if (statuses.get("real_linux_swap") == "PASS" and
                 real_swap.get("qualified_installed_artifacts") !=
