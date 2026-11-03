@@ -128,6 +128,23 @@ static int swapz_primary_privileged_execution_enabled(void)
 	       swapz_primary_lifecycle_runtime_enabled();
 }
 
+/*
+ * Activation needs current boot-scoped authorization. Cleanup is different:
+ * ordinary production may stop or recover only an already durable transaction,
+ * whose operation revalidates clean source, exact target and ownership state.
+ * Private qualification seams retain their original runtime authority.
+ */
+static int swapz_primary_cleanup_execution_enabled(void)
+{
+#if !defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
+	!defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST) && \
+	!defined(SWAPZ_PRIMARY_ROOTLESS_TEST)
+	return SWAPZ_PRIMARY_EXECUTION_ENABLED;
+#else
+	return swapz_primary_privileged_execution_enabled();
+#endif
+}
+
 #ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
 static void swapz_primary_test_interrupt_after(const char *phase)
 {
@@ -9136,7 +9153,8 @@ static int swapz_primary_stop_active(void)
 		errno = ENOTSUP;
 		return -1;
 	}
-	if (geteuid() != 0) {
+	if (geteuid() != 0 || SWAPZ_BUILD_SOURCE_CLEAN != 1 ||
+	    !swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA)) {
 		errno = EPERM;
 		return -1;
 	}
@@ -9160,6 +9178,7 @@ static int swapz_primary_stop_active(void)
 		    recovery_fd, lock_fd, state.run_id, target.partuuid, 0,
 		    &manifest) < 0 ||
 	    memcmp(&manifest.target, &target, sizeof(target)) ||
+	    strcmp(manifest.source_sha, SWAPZ_BUILD_SOURCE_SHA) ||
 	    swapz_primary_transaction_manifest_matches_at(
 		    recovery_fd, lock_fd, &manifest, active_stage,
 		    sizeof(active_stage) / sizeof(active_stage[0]), 0) < 0 ||
@@ -9293,7 +9312,8 @@ static int swapz_primary_recover(void)
 		errno = ENOTSUP;
 		return -1;
 	}
-	if (geteuid() != 0) {
+	if (geteuid() != 0 || SWAPZ_BUILD_SOURCE_CLEAN != 1 ||
+	    !swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA)) {
 		errno = EPERM;
 		return -1;
 	}
@@ -9315,7 +9335,8 @@ static int swapz_primary_recover(void)
 	    swapz_primary_manifest_read_at(
 		    recovery_fd, lock_fd, state.run_id, target.partuuid, 0,
 		    &manifest) < 0 ||
-	    memcmp(&manifest.target, &target, sizeof(target))) {
+	    memcmp(&manifest.target, &target, sizeof(target)) ||
+	    strcmp(manifest.source_sha, SWAPZ_BUILD_SOURCE_SHA)) {
 		errno = EPERM;
 		goto out;
 	}
@@ -9878,9 +9899,16 @@ int swapz_primary_command(int argc, char **argv)
 		fputs("BLOCKED: unsupported primary-swap action\n", stderr);
 		return 2;
 	}
-	if (!swapz_primary_privileged_execution_enabled()) {
-		fputs("BLOCKED: primary-swap provisioning, activation, teardown and "
-		      "recovery remain disabled pending qualification\n", stderr);
+	if ((!strcmp(argv[0], "prepare") || !strcmp(argv[0], "start")) &&
+	    !swapz_primary_privileged_execution_enabled()) {
+		fputs("BLOCKED: primary-swap prepare/start remain disabled pending "
+		      "current boot authorization\n", stderr);
+		return 2;
+	}
+	if ((!strcmp(argv[0], "stop") || !strcmp(argv[0], "recover")) &&
+	    !swapz_primary_cleanup_execution_enabled()) {
+		fputs("BLOCKED: primary-swap cleanup authority is unavailable\n",
+		      stderr);
 		return 2;
 	}
 	if (!strcmp(argv[0], "prepare")) {

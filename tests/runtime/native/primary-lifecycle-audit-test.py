@@ -740,6 +740,8 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
 
         gate = c_function_body(
             source, "swapz_primary_privileged_execution_enabled")
+        cleanup_gate = c_function_body(
+            source, "swapz_primary_cleanup_execution_enabled")
         runtime_gate = c_function_body(
             source, "swapz_primary_lifecycle_runtime_enabled")
         production_authorization = c_function_body(
@@ -750,6 +752,9 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         command = c_function_body(source, "swapz_primary_command")
         self.assertIn("SWAPZ_PRIMARY_EXECUTION_ENABLED", gate)
         self.assertIn("swapz_primary_lifecycle_runtime_enabled()", gate)
+        self.assertIn("SWAPZ_PRIMARY_EXECUTION_ENABLED", cleanup_gate)
+        self.assertIn(
+            "swapz_primary_privileged_execution_enabled()", cleanup_gate)
         self.assertIn(
             "swapz_primary_production_execution_authorized()", runtime_gate)
         for required in (
@@ -767,6 +772,19 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             '"\\\"privileged_execution_enabled\\\":false,"', plan_raw)
         self.assertIn(
             "!swapz_primary_privileged_execution_enabled()", command)
+        self.assertIn(
+            "!swapz_primary_cleanup_execution_enabled()", command)
+
+        stop = c_function_body(source, "swapz_primary_stop_active")
+        recover = c_function_body(source, "swapz_primary_recover")
+        for cleanup in (stop, recover):
+            self.assertIn("SWAPZ_BUILD_SOURCE_CLEAN != 1", cleanup)
+            self.assertIn(
+                "!swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA)",
+                cleanup)
+            self.assertIn(
+                "strcmp(manifest.source_sha, SWAPZ_BUILD_SOURCE_SHA)",
+                cleanup)
 
         ordinary_source = preprocessed_primary_source()
         physical_source = preprocessed_primary_source(physical_definitions)

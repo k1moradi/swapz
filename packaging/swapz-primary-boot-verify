@@ -1080,6 +1080,9 @@ REPORT
 	latest_temporary=$(mktemp "$report_base/.latest.XXXXXX") || fail "cannot create latest report"
 	cat -- "$report" > "$latest_temporary"
 	commit_file "$latest_temporary" "$report_base/latest.env"
+	if [ "$status" != PASS ]; then
+		clear_runtime_authorization
+	fi
 	printf 'COLD_BOOT_OBSERVATION=%s boot_id=%s armed_boot_id=%s report=%s\n' \
 		"$status" "$boot_id" "$armed_boot_id" "$report"
 	# systemd must not report this observer as successful when the acceptance

@@ -947,6 +947,24 @@ class BootVerifierTests(unittest.TestCase):
         self.assertFalse(runtime_authorization.exists())
 
 
+    def test_failed_cold_boot_observation_revokes_activation_token(self) -> None:
+        self.arm_then_reboot()
+        preflight = self.run_verifier("preflight")
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        runtime_authorization = (
+            self.report / "runtime" / "primary-execution.env")
+        self.assertTrue(runtime_authorization.is_file())
+
+        env = self.env.copy()
+        env["MOCK_DM_UUID"] = "SWAPZ-PRIMARY-" + "f" * 32
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertFalse(runtime_authorization.exists())
+        report = (self.report / f"report-{BOOT_B}.env").read_text(
+            encoding="utf-8")
+        self.assertIn("status=FAIL", report)
+        self.assertIn("mapper_uuid_not_bound_to_active_run", report)
+
     def test_foreign_mapper_uuid_with_valid_prefix_cannot_pass(self) -> None:
         self.arm_then_reboot()
         env = self.env.copy()

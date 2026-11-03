@@ -4281,7 +4281,10 @@ same qualified artifact is instead runtime-locked by volatile
 cross-boot preflight. That record must be root-owned mode 0600 under a
 root-owned mode-0700 runtime directory and exactly bind current boot ID, build
 source SHA, canonical configured PARTUUID and target byte size. Failed or
-repeated preflight removes any earlier token before checking current facts. The
+repeated preflight removes any earlier token before checking current facts.
+A cold-boot observation that durably records FAIL or INCOMPLETE must likewise
+remove the volatile token so the boot cannot authorize a later prepare/start;
+that revocation must not prevent exact durable stop/recover cleanup. The
 public Makefile and package must never define, install or expose either test
 seam. The source contract must inspect the root
 Makefile directly and reject the physical seam macro there. The lifecycle audit
@@ -4928,13 +4931,20 @@ Lifecycle execution-gate assertions must evaluate the active C preprocessor
 configuration rather than the first textual `#define`. Ordinary production,
 owned-null_blk qualification and physical qualification may compile lifecycle
 capability, but their runtime authorities are distinct and must fail closed.
-The read-only primary plan and mutating command dispatcher must use the same
-derived compile-time-plus-runtime gate. `privileged_execution_enabled` must
-report false for ordinary production until the boot-scoped authorization
-record exactly matches current boot ID, clean build source SHA, configured
-PARTUUID and target size; owned-null_blk qualification remains directly enabled
-inside its private fixture; physical qualification is true only while its
-explicit test-only runtime marker is exactly enabled. Ordinary production must
+The read-only primary plan and activation commands must use the same derived
+compile-time-plus-runtime gate. `privileged_execution_enabled` must report
+false for ordinary production until the boot-scoped authorization record
+exactly matches current boot ID, clean build source SHA, configured PARTUUID
+and target size; owned-null_blk qualification remains directly enabled inside
+its private fixture; physical qualification is true only while its explicit
+test-only runtime marker is exactly enabled. Ordinary production `prepare`
+and `start` require that volatile activation authority. `stop` and
+`recover` are deliberately different: token loss must not strand an existing
+owned swap mapping. They may proceed without the volatile token only through
+the exact durable transaction path, with root privilege, clean/current build
+source, manifest source/target identity and the existing mapper/module/header
+ownership checks. Private seams retain their original runtime gate for cleanup
+as well. Ordinary production must
 not read the physical qualification marker, and a private seam cannot
 substitute for the production boot token. Comments and string literals
 containing fake gate or syscall text never satisfy safety assertions.
