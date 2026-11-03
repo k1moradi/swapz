@@ -843,6 +843,7 @@ def lz4_acceleration_log():
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
+           "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0",
            "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727616 logical_bytes:15268315136 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 initial_mapper_read_bytes:4096 constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:8192 boundary_lower_write_bytes:8192",
            "PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 async_batches:64 lower_read_reqs:512",
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
@@ -1057,6 +1058,24 @@ def synthetic_log():
 
 
 class ReportContract(unittest.TestCase):
+    def test_constructor_failure_cleanup_evidence_is_mandatory(self):
+        marker = "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0"
+        output = synthetic_log()
+        evidence = runner.parse_loaded_correctness(output)
+        self.assertEqual(evidence["overall"], "PASS", evidence)
+        self.assertEqual(evidence["constructor_cleanup_stages"], 8)
+        self.assertEqual(evidence["constructor_cleanup_lower_io_delta"], 0)
+        self.assertEqual(
+            runner.parse_loaded_correctness(output.replace(marker, ""))["overall"],
+            "INCOMPLETE")
+        for replacement in (
+                marker.replace("stages:8", "stages:7"),
+                marker.replace("lower_io_delta:0", "lower_io_delta:1")):
+            with self.subTest(invalid_constructor_cleanup=replacement):
+                result = runner.parse_loaded_correctness(
+                    output.replace(marker, replacement))
+                self.assertEqual(result["overall"], "INCOMPLETE")
+
     def test_loaded_maximum_capacity_constructor_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727616 "
                   "logical_bytes:15268315136 lower_bytes:17178820608 "
