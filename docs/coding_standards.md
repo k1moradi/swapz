@@ -758,7 +758,13 @@ belong in the ROADMAP decision table and Git history.
 - **Planner:** minimize lower bytes first, bounded cold-read cost second and
   extent count third. Only the adjacent lower-run writer may use the physical
   cursor/larger-class tie-break after those objectives are exactly tied.
-  Default mode never adds padding bytes merely to improve alignment.
+  Default mode never adds padding bytes merely to improve alignment. Keep the
+  kernel planner frame below the 1KiB warning threshold without hot-path
+  allocation: the descending DP evaluates each extent class once and retains
+  only its previous take for the duplicate-class shortcut. The adjacent writer
+  may recompute the three bounded fit candidates only when its selected extent
+  would cross a segment edge and exact-objective tie reconstruction is needed;
+  ordinary planning and non-crossing reconstruction must not repeat fits.
 - **Scratch:** do not clear full 4/8/16KiB or 256KiB buffers when authoritative
   bytes will be overwritten. Initialize exact headers/descriptors/payloads and
   only the unused gap that can actually reach lower media. Tests should poison

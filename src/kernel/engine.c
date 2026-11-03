@@ -216,8 +216,6 @@ static int swapz_engine_plan_bounded_policy(
 {
 	swapz_u32 costs[SWAPZ_MAX_RECORDS + 1U];
 	swapz_u32 reads[SWAPZ_MAX_RECORDS + 1U];
-	swapz_u16 cached_reads[SWAPZ_MAX_RECORDS][3];
-	swapz_u8 cached_takes[SWAPZ_MAX_RECORDS][3];
 	swapz_u8 batches[SWAPZ_MAX_RECORDS + 1U];
 	swapz_u8 selected_class[SWAPZ_MAX_RECORDS];
 	swapz_u8 selected_count[SWAPZ_MAX_RECORDS];
@@ -252,6 +250,7 @@ static int swapz_engine_plan_bounded_policy(
 	batches[count] = 0;
 	for (index = (int)count - 1; index >= 0; --index) {
 		swapz_u8 class_index;
+		swapz_u8 previous_take = 0;
 
 		costs[index] = ~(swapz_u32)0;
 		reads[index] = ~(swapz_u32)0;
@@ -267,13 +266,15 @@ static int swapz_engine_plan_bounded_policy(
 			swapz_u32 candidate_bytes, candidate_reads;
 			swapz_u8 candidate_batches;
 
-			cached_takes[index][class_index] = take;
-			cached_reads[index][class_index] = local_read_blocks;
-			if (!take)
+			if (!take) {
+				previous_take = 0;
 				continue;
-			if (class_index > 0 &&
-			    take == cached_takes[index][class_index - 1U])
+			}
+			if (class_index > 0 && take == previous_take) {
+				previous_take = take;
 				continue;
+			}
+			previous_take = take;
 			candidate_bytes = (swapz_u32)blocks * SWAPZ_BLOCK_BYTES +
 				costs[index + take];
 			candidate_reads = local_read_blocks + reads[index + take];
@@ -303,18 +304,8 @@ static int swapz_engine_plan_bounded_policy(
 				selected_count[index] = take;
 			}
 			if (take == (swapz_u8)(count - (swapz_u8)index) ||
-			    (class_index == 0 && max_read_blocks == 1U)) {
-				if (class_index == 0) {
-					cached_takes[index][1] = 0;
-					cached_reads[index][1] = 0;
-					cached_takes[index][2] = 0;
-					cached_reads[index][2] = 0;
-				} else if (class_index == 1) {
-					cached_takes[index][2] = 0;
-					cached_reads[index][2] = 0;
-				}
+			    (class_index == 0 && max_read_blocks == 1U))
 				break;
-			}
 		}
 		if (!selected_count[index])
 			return -E2BIG;
@@ -339,13 +330,19 @@ static int swapz_engine_plan_bounded_policy(
 			chosen_count = 0;
 			for (class_index = 0; class_index < 3; ++class_index) {
 				swapz_u8 blocks = (swapz_u8)(1U << class_index);
-				swapz_u32 local_read_blocks =
-					cached_reads[position][class_index];
-				swapz_u8 take = cached_takes[position][class_index];
+				swapz_u32 local_read_blocks = 0;
+				swapz_u8 take = swapz_fit_count(
+					pages, count, position, blocks, max_read_blocks,
+					logical_pages_unique, &local_read_blocks);
 				swapz_u32 candidate_bytes, candidate_reads;
 				swapz_u8 candidate_batches;
 				swapz_u32 hole;
 
+				/*
+				 * Recompute only when the selected class crosses a segment
+				 * edge. This rare tie reconstruction avoids 576 bytes of
+				 * per-call planner stack cache.
+				 */
 				if (!take)
 					continue;
 				candidate_bytes =
