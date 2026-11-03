@@ -18,6 +18,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 REAL_SWAP_HELPER = ROOT / "tests/tools/qualify-primary-real-swap.py"
 REAL_SWAP_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
+PHYSICAL_CAMPAIGN_SEALER = (
+    ROOT / "tests/runtime/benchmark/physical-campaign-evidence.py")
+PHYSICAL_CAMPAIGN_EVALUATOR = (
+    ROOT / "tests/runtime/benchmark/qualification.py")
+PHYSICAL_CAMPAIGN_AMENDMENT = (
+    ROOT / "tests/runtime/benchmark/physical-qualification-amendment-v2.json")
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -107,6 +113,27 @@ def _normalize_target(value: Any) -> tuple[str, int] | None:
     if size_bytes <= 0:
         return None
     return partuuid, size_bytes
+
+
+def _normalize_campaign_target(value: Any) -> tuple[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    return _normalize_target({
+        "partuuid": value.get("partuuid"),
+        "size_bytes": value.get("device_bytes"),
+    })
+
+
+def _valid_campaign_artifact(value: Any) -> bool:
+    return (
+        isinstance(value, dict) and
+        isinstance(value.get("name"), str) and bool(value["name"]) and
+        isinstance(value.get("size_bytes"), int) and
+        not isinstance(value.get("size_bytes"), bool) and
+        value["size_bytes"] > 0 and
+        isinstance(value.get("sha256"), str) and
+        bool(SHA256_RE.fullmatch(value["sha256"]))
+    )
 
 
 def validate_acceptance_policy(
@@ -290,6 +317,133 @@ def validate_real_swap_evidence(
     return issues
 
 
+def validate_physical_campaign_evidence(
+        campaign: dict[str, Any],
+        raw: bytes,
+        source_sha: str,
+        policy_sha256: str | None,
+        target: tuple[str, int] | None) -> list[str]:
+    issues: list[str] = []
+
+    def reject(message: str) -> None:
+        if message not in issues:
+            issues.append(message)
+
+    if campaign.get("schema") != "swapz-performance-campaign-evidence-v1":
+        reject("sealed campaign schema is invalid")
+    if not raw:
+        reject("sealed campaign evidence bytes are empty")
+    if campaign.get("source_sha") != source_sha:
+        reject("sealed campaign source binding mismatch")
+
+    source_tree_sha = campaign.get("source_tree_sha")
+    if (
+            not isinstance(source_tree_sha, str) or
+            not GIT_SHA_RE.fullmatch(source_tree_sha)):
+        reject("sealed campaign source tree SHA is invalid")
+    if (
+            campaign.get("campaign_source_sha") != source_sha or
+            campaign.get("pair_source_shas") != [source_sha] or
+            campaign.get("source_consistent") is not True):
+        reject("sealed campaign pair sources are not exact and consistent")
+    if (
+            campaign.get("campaign_status") != "PASS" or
+            campaign.get("qualification_status") != "PASS"):
+        reject("sealed campaign qualification is not PASS")
+    if campaign.get("evaluation_protocol") != "v2":
+        reject("sealed campaign did not use the required v2 protocol")
+    if (
+            target is None or
+            _normalize_campaign_target(campaign.get("target")) != target):
+        reject("sealed campaign authorized target binding mismatch")
+
+    stability = campaign.get("host_stability")
+    if not isinstance(stability, dict) or stability.get("status") != "STABLE":
+        reject("sealed campaign host stability is not STABLE")
+    else:
+        checks = stability.get("checks")
+        failed = stability.get("failed_checks")
+        if (
+                not isinstance(checks, dict) or not checks or
+                any(value is not True for value in checks.values())):
+            reject("sealed campaign host stability checks are incomplete")
+        if failed != []:
+            reject("sealed campaign host stability records failed checks")
+
+    boundaries = campaign.get("admitted_device_boundary")
+    if not isinstance(boundaries, dict):
+        reject("sealed campaign admitted-device boundary is missing")
+    else:
+        for phase in ("before", "after"):
+            boundary = boundaries.get(phase)
+            if (
+                    not isinstance(boundary, dict) or
+                    boundary.get("quiescent") is not True):
+                reject(
+                    f"sealed campaign target was not quiescent {phase} campaign")
+
+    policy = campaign.get("policy")
+    if not isinstance(policy, dict):
+        reject("sealed campaign policy provenance is missing")
+    else:
+        acceptance = policy.get("acceptance_manifest")
+        if (
+                policy_sha256 is None or
+                not isinstance(acceptance, dict) or
+                acceptance.get("sha256") != policy_sha256):
+            reject("sealed campaign production policy binding mismatch")
+        expected_files = (
+            ("prospective_amendment", PHYSICAL_CAMPAIGN_AMENDMENT),
+            ("evaluator", PHYSICAL_CAMPAIGN_EVALUATOR),
+            ("evidence_sealer", PHYSICAL_CAMPAIGN_SEALER),
+        )
+        for name, path in expected_files:
+            record = policy.get(name)
+            try:
+                expected_sha256 = sha256_bytes(path.read_bytes())
+            except OSError:
+                expected_sha256 = None
+                reject(f"current physical campaign {name} bytes are unreadable")
+            if (
+                    expected_sha256 is not None and
+                    (not isinstance(record, dict) or
+                     record.get("sha256") != expected_sha256)):
+                reject(
+                    f"sealed campaign {name} digest differs from current source")
+
+    artifacts = campaign.get("artifacts")
+    if not isinstance(artifacts, dict):
+        reject("sealed campaign artifact manifest is missing")
+    else:
+        for name in ("host_before", "host_after", "qualification_summary"):
+            if not _valid_campaign_artifact(artifacts.get(name)):
+                reject(f"sealed campaign {name} artifact is invalid")
+        pairs = artifacts.get("pairs")
+        record_count = campaign.get("record_count")
+        if not isinstance(pairs, list) or not pairs:
+            reject("sealed campaign pair artifact list is empty")
+        elif (
+                not isinstance(record_count, int) or
+                isinstance(record_count, bool) or
+                record_count != len(pairs)):
+            reject("sealed campaign pair artifact count mismatch")
+        else:
+            for pair in pairs:
+                if not _valid_campaign_artifact(pair):
+                    reject("sealed campaign contains an invalid pair artifact")
+                    break
+                status = pair.get("status")
+                excluded = pair.get("excluded")
+                if (
+                        status not in ("PASS", "EXCLUDED") or
+                        not isinstance(excluded, bool) or
+                        excluded != (status == "EXCLUDED")):
+                    reject(
+                        "sealed campaign pair disposition is inconsistent")
+                    break
+    return issues
+
+
 def evaluate_release(
         source_sha: str,
         test_results: dict[str, Any],
@@ -298,7 +452,9 @@ def evaluate_release(
         policy: dict[str, Any],
         policy_raw: bytes,
         real_swap_evidence: dict[str, Any] | None = None,
-        real_swap_evidence_raw: bytes | None = None) -> dict[str, Any]:
+        real_swap_evidence_raw: bytes | None = None,
+        physical_campaign_evidence: dict[str, Any] | None = None,
+        physical_campaign_evidence_raw: bytes | None = None) -> dict[str, Any]:
     code_blockers: list[str] = []
     deployment_blockers: list[str] = []
 
@@ -532,6 +688,22 @@ def evaluate_release(
     physical = pass_record("sustained_physical_performance")
     require_target("sustained_physical_performance", physical)
     require_policy("sustained_physical_performance", physical)
+    if physical is not None:
+        if (
+                physical_campaign_evidence is None or
+                physical_campaign_evidence_raw is None):
+            block_code(
+                "sustained_physical_performance: persistent campaign evidence is missing")
+        else:
+            if physical.get("evidence_sha256") != sha256_bytes(
+                    physical_campaign_evidence_raw):
+                block_code(
+                    "sustained_physical_performance: campaign evidence digest binding mismatch")
+            for issue in validate_physical_campaign_evidence(
+                    physical_campaign_evidence,
+                    physical_campaign_evidence_raw,
+                    source_sha, policy_sha256, target):
+                block_code("sustained_physical_performance: " + issue)
 
     lifecycle = pass_record("lifecycle_deployment_state", deployment=True)
     require_target("lifecycle_deployment_state", lifecycle, deployment=True)
@@ -594,6 +766,9 @@ def main() -> int:
     parser.add_argument(
         "--real-swap-evidence", type=Path,
         help="persistent primary-real-swap evidence emitted by the current qualifier")
+    parser.add_argument(
+        "--physical-campaign-evidence", type=Path,
+        help="sealed physical performance campaign evidence for the release source")
     args = parser.parse_args()
 
     try:
@@ -606,9 +781,16 @@ def main() -> int:
         else:
             real_swap_evidence, real_swap_evidence_raw = load_json_strict(
                 args.real_swap_evidence)
+        if args.physical_campaign_evidence is None:
+            physical_campaign_evidence = None
+            physical_campaign_evidence_raw = None
+        else:
+            physical_campaign_evidence, physical_campaign_evidence_raw = (
+                load_json_strict(args.physical_campaign_evidence))
         result = evaluate_release(
             args.source_sha, test_results, test_raw, evidence, policy, policy_raw,
-            real_swap_evidence, real_swap_evidence_raw)
+            real_swap_evidence, real_swap_evidence_raw,
+            physical_campaign_evidence, physical_campaign_evidence_raw)
     except (OSError, EvidenceError) as exc:
         result = {
             "schema": "swapz-production-readiness-evaluation-v1",

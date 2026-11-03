@@ -150,11 +150,90 @@ def real_swap_evidence(report_raw, policy_raw):
     }
 
 
-def current_evidence(report_raw, policy_raw, physical_raw=None):
+def campaign_artifact(name, byte):
+    return {
+        "name": name,
+        "size_bytes": 1,
+        "sha256": byte * 64,
+    }
+
+
+def physical_campaign_evidence(policy_raw):
+    return {
+        "schema": "swapz-performance-campaign-evidence-v1",
+        "sealed_at_utc": "2026-11-03T00:00:00+00:00",
+        "source_sha": SOURCE,
+        "source_tree_sha": "b" * 40,
+        "campaign_source_sha": SOURCE,
+        "pair_source_shas": [SOURCE],
+        "source_consistent": True,
+        "campaign_status": "PASS",
+        "qualification_status": "PASS",
+        "evaluation_protocol": "v2",
+        "target": {
+            "partuuid": TARGET["partuuid"],
+            "device_bytes": TARGET["size_bytes"],
+        },
+        "host_stability": {
+            "status": "STABLE",
+            "checks": {
+                "source_sha": True,
+                "source_tree_sha": True,
+                "admitted_device_quiescent_before": True,
+                "admitted_device_quiescent_after": True,
+            },
+            "failed_checks": [],
+        },
+        "admitted_device_boundary": {
+            "before": {"quiescent": True},
+            "after": {"quiescent": True},
+        },
+        "policy": {
+            "acceptance_manifest": {
+                "name": "production-acceptance.json",
+                "sha256": hashlib.sha256(policy_raw).hexdigest(),
+            },
+            "prospective_amendment": {
+                "name": EVALUATOR.PHYSICAL_CAMPAIGN_AMENDMENT.name,
+                "sha256": hashlib.sha256(
+                    EVALUATOR.PHYSICAL_CAMPAIGN_AMENDMENT.read_bytes()
+                ).hexdigest(),
+            },
+            "evaluator": {
+                "name": EVALUATOR.PHYSICAL_CAMPAIGN_EVALUATOR.name,
+                "sha256": hashlib.sha256(
+                    EVALUATOR.PHYSICAL_CAMPAIGN_EVALUATOR.read_bytes()
+                ).hexdigest(),
+            },
+            "evidence_sealer": {
+                "name": EVALUATOR.PHYSICAL_CAMPAIGN_SEALER.name,
+                "sha256": hashlib.sha256(
+                    EVALUATOR.PHYSICAL_CAMPAIGN_SEALER.read_bytes()
+                ).hexdigest(),
+            },
+        },
+        "artifacts": {
+            "host_before": campaign_artifact("host-before.json", "4"),
+            "host_after": campaign_artifact("host-after.json", "5"),
+            "qualification_summary": campaign_artifact("summary.json", "6"),
+            "pairs": [{
+                **campaign_artifact("pair-1.json", "7"),
+                "status": "PASS",
+                "excluded": False,
+            }],
+        },
+        "record_count": 1,
+    }
+
+
+def current_evidence(
+        report_raw, policy_raw, physical_raw=None, campaign_raw=None):
     policy_digest = hashlib.sha256(policy_raw).hexdigest()
     report_digest = hashlib.sha256(report_raw).hexdigest()
     if physical_raw is None:
         physical_raw = encoded(real_swap_evidence(report_raw, policy_raw))
+    if campaign_raw is None:
+        campaign_raw = encoded(physical_campaign_evidence(policy_raw))
     return {
         "schema": "swapz-production-readiness-v2",
         "snapshot_kind": "CURRENT",
@@ -205,7 +284,8 @@ def current_evidence(report_raw, policy_raw, physical_raw=None):
                 peak_ram_bytes=900000000),
             "sustained_physical_performance": pass_record(
                 policy_sha256=policy_digest,
-                target=dict(TARGET)),
+                target=dict(TARGET),
+                evidence_sha256=hashlib.sha256(campaign_raw).hexdigest()),
             "lifecycle_deployment_state": pass_record(
                 target=dict(TARGET)),
             "installed_artifact_identity": pass_record(
@@ -226,7 +306,9 @@ def current_evidence(report_raw, policy_raw, physical_raw=None):
     }
 
 
-def evaluate(report=None, evidence=None, policy=None, physical=None):
+def evaluate(
+        report=None, evidence=None, policy=None, physical=None,
+        campaign=None):
     report = owner_report() if report is None else report
     policy = acceptance_policy() if policy is None else policy
     report_raw = encoded(report)
@@ -235,11 +317,16 @@ def evaluate(report=None, evidence=None, policy=None, physical=None):
         real_swap_evidence(report_raw, policy_raw)
         if physical is None else physical)
     physical_raw = encoded(physical)
+    campaign = (
+        physical_campaign_evidence(policy_raw)
+        if campaign is None else campaign)
+    campaign_raw = encoded(campaign)
     if evidence is None:
-        evidence = current_evidence(report_raw, policy_raw, physical_raw)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
     return EVALUATOR.evaluate_release(
         SOURCE, report, report_raw, evidence, policy, policy_raw,
-        physical, physical_raw)
+        physical, physical_raw, campaign, campaign_raw)
 
 
 class ProductionReadinessEvaluatorTest(unittest.TestCase):
@@ -563,6 +650,74 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "authorized target identity mismatch" in blocker
             for blocker in result["code_blockers"]))
+
+    def test_sustained_physical_requires_sealed_campaign_evidence(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+
+        missing = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw)
+        self.assertEqual(missing["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "persistent campaign evidence is missing" in blocker
+            for blocker in missing["code_blockers"]))
+
+        evidence["release_evidence"]["sustained_physical_performance"][
+            "evidence_sha256"] = "8" * 64
+        mismatched = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(mismatched["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "campaign evidence digest binding mismatch" in blocker
+            for blocker in mismatched["code_blockers"]))
+
+    def test_sealed_campaign_binds_source_target_policy_and_tooling(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+
+        mutations = (
+            ("source",
+             lambda value: value.__setitem__("source_sha", "b" * 40),
+             "source binding mismatch"),
+            ("target",
+             lambda value: value["target"].__setitem__(
+                 "device_bytes", TARGET["size_bytes"] + 4096),
+             "authorized target binding mismatch"),
+            ("policy",
+             lambda value: value["policy"]["acceptance_manifest"].__setitem__(
+                 "sha256", "8" * 64),
+             "production policy binding mismatch"),
+            ("stability",
+             lambda value: value["host_stability"].__setitem__(
+                 "status", "CHANGED"),
+             "host stability is not STABLE"),
+            ("sealer",
+             lambda value: value["policy"]["evidence_sealer"].__setitem__(
+                 "sha256", "9" * 64),
+             "evidence_sealer digest differs from current source"),
+        )
+        for name, mutate, expected in mutations:
+            with self.subTest(name=name):
+                campaign = physical_campaign_evidence(policy_raw)
+                mutate(campaign)
+                result = evaluate(
+                    report=report, policy=policy, campaign=campaign)
+                self.assertEqual(
+                    result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    expected in blocker
+                    for blocker in result["code_blockers"]))
 
     def test_strict_json_rejects_duplicate_policy_keys(self):
         with TemporaryDirectory(prefix="swapz-release-json-") as directory:

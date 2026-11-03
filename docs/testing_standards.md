@@ -4994,8 +4994,18 @@ valid private execution-control digest, frozen workload/cycle values, distinct
 transaction run IDs and Linux swap UUIDs, and durable COMPLETE for every
 required cycle. Missing persistent physical evidence is BLOCKED.
 Current PASS physical records bind the normalized lowercase PARTUUID plus exact
-partition byte size and the frozen policy SHA-256. Full-capacity evidence must include measured positive logical
-capacity and measured peak target/metadata RAM no greater than the frozen
+partition byte size and the frozen policy SHA-256. A synthesized
+`sustained_physical_performance: PASS` record is not sufficient: release
+evaluation must also ingest the sealed
+`swapz-performance-campaign-evidence-v1` artifact, SHA-256 bind those exact
+bytes from the release record, require exact source and pair-source consistency,
+v2 PASS qualification, the same authorized target, STABLE host identity with
+quiescent admitted-device boundaries, and the exact current policy,
+prospective-amendment, campaign-evaluator and evidence-sealer digests. Its
+host/summary/pair artifact manifest must be structurally complete and internally
+count-consistent. Missing or stale sealed campaign evidence is BLOCKED.
+Full-capacity evidence must include measured positive logical capacity and
+measured peak target/metadata RAM no greater than the frozen
 `metadata_and_target_peak_ram_bytes_max`. Current code readiness also requires
 zero explicitly recorded unresolved critical correctness/ownership/race issues.
 Deployment readiness additionally requires lifecycle/deployment PASS, exact
