@@ -825,6 +825,93 @@ static void test_module_mapper_identity_policy(void)
 	assert(swapz_primary_mapper_identity_is_swapz("map", "bad\001uuid") < 0);
 }
 
+static void test_qualified_module_fd(void)
+{
+	static const unsigned char module_bytes[] = "exact module image bytes\n";
+	const char *home = getenv("HOME");
+	char root_template[PATH_MAX];
+	char libexec_path[PATH_MAX];
+	char swapz_path[PATH_MAX];
+	char prefix_path[PATH_MAX];
+	char module_path[PATH_MAX];
+	char control_path[PATH_MAX];
+	char renamed_path[PATH_MAX];
+	char renamed_directory[PATH_MAX];
+	char hardlink_path[PATH_MAX];
+	char wrong_path[PATH_MAX];
+	char digest[65];
+	char wrong_digest[65];
+	struct stat info;
+	int module_fd;
+
+	assert(home && home[0] == '/');
+	assert(snprintf(root_template, sizeof(root_template),
+			 "%s/.swapz-primary-module-XXXXXX", home) > 0);
+	assert(mkdtemp(root_template));
+	assert(chmod(root_template, 0700) == 0);
+	test_path_join(libexec_path, sizeof(libexec_path), root_template,
+		       "libexec");
+	assert(mkdir(libexec_path, 0700) == 0);
+	test_path_join(prefix_path, sizeof(prefix_path), root_template, "prefix");
+	assert(mkdir(prefix_path, 0700) == 0);
+	test_path_join(swapz_path, sizeof(swapz_path), libexec_path, "swapz");
+	assert(mkdir(swapz_path, 0700) == 0);
+	test_path_join(module_path, sizeof(module_path), swapz_path,
+		       "dm-swapz.ko");
+	test_path_join(control_path, sizeof(control_path), root_template,
+		       "sbin/swapzctl");
+	test_path_join(renamed_path, sizeof(renamed_path), swapz_path,
+	       "dm-swapz.saved");
+	test_path_join(renamed_directory, sizeof(renamed_directory), libexec_path,
+	       "swapz.saved");
+	test_path_join(hardlink_path, sizeof(hardlink_path), swapz_path,
+	       "dm-swapz.copy");
+	test_path_join(wrong_path, sizeof(wrong_path), root_template,
+	       "prefix/../sbin/swapzctl");
+	test_write_text(module_path, (const char *)module_bytes);
+	assert(chmod(module_path, 0644) == 0);
+	assert(swapz_primary_sha256(module_bytes, sizeof(module_bytes) - 1U,
+				    digest) == 0);
+	memset(wrong_digest, '0', sizeof(wrong_digest) - 1U);
+	wrong_digest[sizeof(wrong_digest) - 1U] = '\0';
+	module_fd = swapz_primary_open_qualified_module_fd(
+		control_path, geteuid(), digest);
+	assert(module_fd >= 0);
+	assert(fstat(module_fd, &info) == 0 && S_ISREG(info.st_mode));
+	assert(info.st_uid == geteuid() && info.st_nlink == 1U);
+	assert((fcntl(module_fd, F_GETFL) & O_ACCMODE) == O_RDONLY);
+	assert(close(module_fd) == 0);
+	assert(swapz_primary_open_qualified_module_fd(
+		control_path, geteuid(), wrong_digest) < 0);
+	assert(errno == EBADMSG);
+	assert(chmod(module_path, 0664) == 0);
+	assert(swapz_primary_open_qualified_module_fd(
+		control_path, geteuid(), digest) < 0);
+	assert(errno == EPERM);
+	assert(chmod(module_path, 0644) == 0);
+	assert(link(module_path, hardlink_path) == 0);
+	assert(swapz_primary_open_qualified_module_fd(
+		control_path, geteuid(), digest) < 0);
+	assert(errno == EPERM);
+	assert(unlink(hardlink_path) == 0);
+	assert(rename(module_path, renamed_path) == 0);
+	assert(symlink(renamed_path, module_path) == 0);
+	assert(swapz_primary_open_qualified_module_fd(
+		control_path, geteuid(), digest) < 0);
+	assert(unlink(module_path) == 0);
+	assert(rename(renamed_path, module_path) == 0);
+	assert(rename(swapz_path, renamed_directory) == 0);
+	assert(symlink(renamed_directory, swapz_path) == 0);
+	assert(swapz_primary_open_qualified_module_fd(
+		control_path, geteuid(), digest) < 0);
+	assert(unlink(swapz_path) == 0);
+	assert(rename(renamed_directory, swapz_path) == 0);
+	assert(swapz_primary_open_qualified_module_fd(
+		wrong_path, geteuid(), digest) < 0);
+	assert(nftw(root_template, test_remove_tree_entry, 16,
+		    FTW_DEPTH | FTW_PHYS) == 0);
+}
+
 static void test_build_source_provenance_policy(void)
 {
 	const char *same_sha =
@@ -1151,6 +1238,7 @@ int main(void)
 	test_recovery_source_chain();
 	test_mountinfo_parser();
 	test_module_mapper_identity_policy();
+	test_qualified_module_fd();
 	test_build_source_provenance_policy();
 	test_primary_qualification_report_parser();
 	test_primary_qualification_report_store();

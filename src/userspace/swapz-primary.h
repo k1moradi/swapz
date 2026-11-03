@@ -85,6 +85,11 @@ int swapz_primary_write_header_checked_fd(
 /* Hash a stable, private regular-file descriptor with bounded allocation. */
 int swapz_primary_sha256_regular_fd(int fd, uid_t expected_owner,
 				    uint64_t maximum_bytes, char digest[65]);
+/* Open the exact packaged module beside this control binary and pin its bytes.
+ * The returned read-only descriptor must be used directly for finit_module. */
+int swapz_primary_open_qualified_module_fd(const char *control_executable,
+					  uid_t expected_owner,
+					  const char expected_sha256[65]);
 
 int swapz_primary_partition_lock_acquire(void);
 /* Internal lifecycle primitive; caller must hold the matching partition lock. */

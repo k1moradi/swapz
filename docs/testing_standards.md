@@ -3618,3 +3618,11 @@ bytes at the fixed path; a replaced report is preserved under a SHA-256 name.
 This command does not prepare the partition, load the module, create a mapper
 or enable swap. Rootless tests must exercise atomic store, repeat store,
 prior-report preservation and refusal while an active marker exists.
+
+Primary module admission opens `libexec/swapz/dm-swapz.ko` relative to the
+installed control executable using descriptor-relative traversal. Focused
+rootless tests must accept the exact stable read-only file and reject a
+digest mismatch, a writable file, a hard link, a symlinked module, a
+symlinked parent directory and an executable path containing traversal
+components. The validated descriptor is the object that the later
+`finit_module()` caller must use; tests must not load a host module.

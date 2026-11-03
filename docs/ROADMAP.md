@@ -1500,7 +1500,13 @@ paths are unavailable in the fixture. An explicit root-only
 artifact hashes, persistent recovery base and inactive manager state before
 atomically storing it. Replaced reports are retained by their digest.
 Rootless store tests cover replacement, preservation, repeat store and
-active-marker refusal. No lifecycle operation consumes the
-hashes yet. Source provenance cannot authenticate a preloaded module's exact
-bytes; the future manager must load a checked module descriptor itself or
-reject the preloaded module. Privileged execution remains disabled.
+active-marker refusal. The manager now has a descriptor-relative package
+module opener that walks the installed path without symlinks, rejects unsafe
+directory/file ownership and permissions, pins a single-link regular file,
+hashes that descriptor against the qualified module digest and returns the
+same read-only FD for a future exact load. Rootless regressions cover digest,
+mode, hard-link, final symlink, parent symlink and traversal failures. The FD
+is not yet passed to `finit_module()` and no lifecycle operation consumes the
+hashes. Source provenance cannot authenticate a preloaded module's exact
+bytes; the future manager must load the checked descriptor itself or reject
+the preloaded module. Privileged execution remains disabled.

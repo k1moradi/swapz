@@ -44,6 +44,8 @@
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
 #define SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES (64ULL * 1024ULL * 1024ULL)
+#define SWAPZ_PRIMARY_MODULE_SUFFIX "/sbin/swapzctl"
+#define SWAPZ_PRIMARY_MODULE_RELATIVE_PATH "libexec/swapz/dm-swapz.ko"
 #define SWAPZ_PRIMARY_STATE_JSON_PREFIX \
 	"{\"schema\":\"swapz-primary-state-v1\",\"run_id\":"
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
@@ -1053,6 +1055,232 @@ int swapz_primary_sha256_regular_fd(int fd, uid_t expected_owner,
 out:
 	free(bytes);
 	return result;
+}
+
+static int swapz_primary_module_directory_owner_allowed(uid_t observed,
+							 uid_t expected);
+
+static int swapz_primary_open_private_directory_at(int parent_fd,
+						   const char *name,
+						   uid_t expected_owner)
+{
+	struct stat before;
+	struct stat after;
+	int fd;
+
+	if (parent_fd < 0 || !name || !name[0] || strchr(name, '/') ||
+	    !strcmp(name, ".") || !strcmp(name, "..")) {
+		errno = EINVAL;
+		return -1;
+	}
+	fd = openat(parent_fd, name,
+		    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &before) < 0 ||
+	    fstatat(parent_fd, name, &after, AT_SYMLINK_NOFOLLOW) < 0) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (!S_ISDIR(before.st_mode) ||
+	    !swapz_primary_module_directory_owner_allowed(before.st_uid,
+							  expected_owner) ||
+	    (before.st_mode & 0022U) || !S_ISDIR(after.st_mode) ||
+	    after.st_dev != before.st_dev || after.st_ino != before.st_ino ||
+	    after.st_uid != before.st_uid ||
+	    !swapz_primary_module_directory_owner_allowed(after.st_uid,
+							  expected_owner) ||
+	    (after.st_mode & 0022U)) {
+		close(fd);
+		errno = EPERM;
+		return -1;
+	}
+	return fd;
+}
+
+static int swapz_primary_module_directory_owner_allowed(uid_t observed,
+							 uid_t expected)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	return observed == 0 || observed == expected;
+#else
+	(void)expected;
+	return observed == 0;
+#endif
+}
+
+int swapz_primary_open_qualified_module_fd(const char *control_executable,
+					  uid_t expected_owner,
+					  const char expected_sha256[65])
+{
+	struct stat opened;
+	struct stat named;
+	char module_path[PATH_MAX];
+	char digest[65];
+	char *cursor;
+	char *component;
+	char *separator;
+	char *end;
+	int directory_fd = -1;
+	int module_fd = -1;
+	int length;
+	size_t prefix_length;
+	size_t remaining;
+
+	if (!control_executable || control_executable[0] != '/' ||
+	    !swapz_primary_valid_sha256(expected_sha256) ||
+	    expected_owner == (uid_t)-1 ||
+	    strlen(control_executable) >= PATH_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(module_path, sizeof(module_path), "%s",
+			  control_executable);
+	if (length < 0 || (size_t)length >= sizeof(module_path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	length = (int)strlen(module_path);
+	if (length <= (int)(sizeof(SWAPZ_PRIMARY_MODULE_SUFFIX) - 1U) ||
+	    strcmp(module_path + length -
+		   (int)(sizeof(SWAPZ_PRIMARY_MODULE_SUFFIX) - 1U),
+		   SWAPZ_PRIMARY_MODULE_SUFFIX)) {
+		errno = EPERM;
+		return -1;
+	}
+	module_path[length -
+		   (int)(sizeof(SWAPZ_PRIMARY_MODULE_SUFFIX) - 1U)] = '\0';
+	prefix_length = strlen(module_path);
+	remaining = sizeof(module_path) - prefix_length;
+	length = snprintf(module_path + prefix_length, remaining, "/%s",
+			  SWAPZ_PRIMARY_MODULE_RELATIVE_PATH);
+	if (length < 0 || (size_t)length >= remaining) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	directory_fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (directory_fd < 0)
+		return -1;
+	{
+		struct stat root_info;
+
+		if (fstat(directory_fd, &root_info) < 0) {
+			goto failed;
+		}
+		if (!S_ISDIR(root_info.st_mode) ||
+		    !swapz_primary_module_directory_owner_allowed(
+			    root_info.st_uid, expected_owner) ||
+		    (root_info.st_mode & 0022U)) {
+			errno = EPERM;
+			goto failed;
+		}
+	}
+	cursor = module_path + 1U;
+	for (;;) {
+		component = cursor;
+		separator = strchr(cursor, '/');
+		if (!separator)
+			break;
+		if (separator == component) {
+			errno = EINVAL;
+			goto failed;
+		}
+		*separator = '\0';
+		end = separator + 1U;
+		{
+			int next_fd;
+			struct stat next_info;
+
+			next_fd = swapz_primary_open_private_directory_at(
+				directory_fd, component, expected_owner);
+
+			if (next_fd < 0)
+				goto failed;
+			if (fstat(next_fd, &next_info) < 0) {
+				int saved_errno = errno;
+
+				close(next_fd);
+				errno = saved_errno;
+				goto failed;
+			}
+			if (!swapz_primary_module_directory_owner_allowed(
+				    next_info.st_uid, expected_owner)) {
+				close(next_fd);
+				errno = EPERM;
+				goto failed;
+			}
+			if (close(directory_fd) < 0) {
+				directory_fd = next_fd;
+				goto failed;
+			}
+			directory_fd = next_fd;
+		}
+		cursor = end;
+	}
+	if (!cursor[0] || strchr(cursor, '/')) {
+		errno = EINVAL;
+		goto failed;
+	}
+	module_fd = openat(directory_fd, cursor,
+			   O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+	if (module_fd < 0)
+		goto failed;
+	if (fstat(module_fd, &opened) < 0 ||
+	    fstatat(directory_fd, cursor, &named, AT_SYMLINK_NOFOLLOW) < 0)
+		goto failed;
+	if (!S_ISREG(opened.st_mode) || opened.st_uid != expected_owner ||
+	    (opened.st_mode & 0022U) || opened.st_nlink != 1U ||
+	    opened.st_size <= 0 ||
+	    (uint64_t)opened.st_size > SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES ||
+	    !S_ISREG(named.st_mode) || named.st_dev != opened.st_dev ||
+	    named.st_ino != opened.st_ino || named.st_uid != opened.st_uid ||
+	    (named.st_mode & 0022U) || named.st_nlink != 1U) {
+		errno = EPERM;
+		goto failed;
+	}
+	if (swapz_primary_sha256_regular_fd(
+		    module_fd, expected_owner,
+		    SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES, digest) < 0)
+		goto failed;
+	if (strcmp(digest, expected_sha256)) {
+		errno = EBADMSG;
+		goto failed;
+	}
+	if (fstat(module_fd, &named) < 0)
+		goto failed;
+	if (named.st_dev != opened.st_dev || named.st_ino != opened.st_ino ||
+	    named.st_mode != opened.st_mode || named.st_uid != opened.st_uid ||
+	    named.st_gid != opened.st_gid || named.st_nlink != opened.st_nlink ||
+	    named.st_size != opened.st_size ||
+	    fstatat(directory_fd, cursor, &named, AT_SYMLINK_NOFOLLOW) < 0)
+		goto failed;
+	if (named.st_dev != opened.st_dev || named.st_ino != opened.st_ino ||
+	    named.st_mode != opened.st_mode || named.st_uid != opened.st_uid ||
+	    named.st_gid != opened.st_gid || named.st_nlink != opened.st_nlink ||
+	    named.st_size != opened.st_size) {
+		errno = ESTALE;
+		goto failed;
+	}
+	if (close(directory_fd) < 0) {
+		directory_fd = -1;
+		goto failed;
+	}
+	return module_fd;
+
+failed:
+	{
+		int saved_errno = errno ? errno : EIO;
+
+		if (module_fd >= 0)
+			close(module_fd);
+		if (directory_fd >= 0)
+			close(directory_fd);
+		errno = saved_errno;
+		return -1;
+	}
 }
 
 static int swapz_primary_target_preflight(uint64_t *device_bytes,

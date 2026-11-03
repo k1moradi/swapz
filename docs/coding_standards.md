@@ -219,6 +219,21 @@ Do not add kernel-only headers or libc dependencies to `superblock.h`.
 These protections do not authorize physical test execution or bypass the
 separate physical-review gates.
 
+### Primary manager module admission
+
+The primary manager must open the retained package image at
+`libexec/swapz/dm-swapz.ko` relative to the installed `swapzctl`, walking each
+absolute directory with descriptor-relative `openat()` and rejecting
+symlinks, non-root-owned or group/world-writable directories, and path
+components such as `.` or `..`. The final image must be a root-owned,
+read-only-opened regular file with one link, bounded size and stable identity.
+Hash that opened descriptor against the host-qualified report, then pass that
+same still-open descriptor to `finit_module()`; never hash a path and reopen
+it for loading. A preloaded module is not authenticated by source parameters
+or package metadata and must be rejected unless a durable manager-owned exact
+load record proves its identity. The current descriptor-opening primitive
+does not itself load a module or authorize lifecycle execution.
+
 ## MM, folio and zswap semantic boundary
 
 Read [context.md](context.md) for the kernel reclaim/BIO/zswap semantics and
