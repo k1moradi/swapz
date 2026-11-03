@@ -619,6 +619,43 @@ esac
             stale_cli_restore.read_text(), "foreign stale rollback temp\n")
         self.assertIn("daemon-reload", self.systemctl_log.read_text())
 
+    def test_upgrade_refuses_primary_recovery_authority(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        old_binary = (self.prefix / "sbin/swapzctl").read_bytes()
+        old_module = self.installed_module.read_bytes()
+
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        recovery = self.home / "var/lib/swapz/physical-recovery"
+        recovery.mkdir(parents=True)
+
+        state = recovery / "primary-state.json"
+        state.write_text('{"schema":"synthetic-recovery"}\n')
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("primary recovery state exists", result.stderr)
+        self.assertEqual((self.prefix / "sbin/swapzctl").read_bytes(), old_binary)
+        self.assertEqual(self.installed_module.read_bytes(), old_module)
+        state.unlink()
+
+        marker = recovery / "partition-f13428f6-01.active"
+        marker.write_text("synthetic ownership marker\n")
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("primary partition ownership marker exists", result.stderr)
+        self.assertEqual((self.prefix / "sbin/swapzctl").read_bytes(), old_binary)
+        self.assertEqual(self.installed_module.read_bytes(), old_module)
+        marker.unlink()
+
+        # An exact repeat install is a byte-for-byte no-op and may return before
+        # the mutation guard because it cannot invalidate recovery ownership.
+        self.module.write_bytes(old_module)
+        self.write_report()
+        state.write_text('{"schema":"synthetic-recovery"}\n')
+        repeated = self.invoke("install")
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertIn("already matches", repeated.stdout)
+
     def test_uninstall_refuses_active_mapping_or_module(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         for flag in ("SWAPZ_TEST_MAPPING_ACTIVE", "SWAPZ_TEST_MODULE_ACTIVE"):

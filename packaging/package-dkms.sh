@@ -287,6 +287,15 @@ swapz_mapper_present() {
   return 1
 }
 
+assert_no_primary_recovery_authority() {
+  local operation="$1"
+  [[ ! -e "$primary_state" && ! -L "$primary_state" ]] ||
+    blocked "primary recovery state exists; preserve it during package $operation"
+  if compgen -G "$primary_recovery_base/partition-*.active" >/dev/null; then
+    blocked "a primary partition ownership marker exists; preserve the recovery path during package $operation"
+  fi
+}
+
 verify_source_manifest() {
   [[ -f "$src/$source_manifest" && ! -L "$src/$source_manifest" ]] || return 1
   (cd "$src" && sha256sum --quiet -c "$source_manifest")
@@ -606,11 +615,7 @@ if [[ "$action" == uninstall ]]; then
     exit 1
   fi
   swapz_mapper_present && blocked "active swapz mapping; refusing package removal"
-  [[ ! -e "$primary_state" && ! -L "$primary_state" ]] ||
-    blocked "primary recovery state exists; preserve it during package removal"
-  if compgen -G "$primary_recovery_base/partition-*.active" >/dev/null; then
-    blocked "a primary partition ownership marker exists; preserve the recovery path during package removal"
-  fi
+  assert_no_primary_recovery_authority removal
   if [[ -z "$test_root" ]]; then
     for unit in swapz-primary-boot-verify.service swapz-primary-mapper.service "$swap_unit_name"; do
       "$systemctl_bin" is-active --quiet "$unit" &&
@@ -827,6 +832,7 @@ fi
 
 swapz_module_loaded && blocked "loaded module; refusing package upgrade"
 swapz_mapper_present && blocked "active swapz mapping; refusing package upgrade"
+assert_no_primary_recovery_authority upgrade
 
 ensure_transaction_parent
 transaction_dir="$(mktemp -d "$transaction_parent/swapz-package.XXXXXXXX")"

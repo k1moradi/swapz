@@ -456,6 +456,14 @@ completions fail closed.
 
 Stages are ordered and fail fast. Privileged device sessions must never overlap. If noninteractive privilege or safe owned-device provisioning is unavailable, the complete run reports BLOCKED rather than silently skipping loaded work.
 
+Package install, upgrade and uninstall must preserve primary recovery authority.
+An exact already-installed identity may return as a no-op, but any package
+mutation is BLOCKED while `primary-state.json` or a partition ownership marker
+exists. This prevents a package transaction from replacing the qualified
+control/module snapshots needed to reconcile an interrupted primary lifecycle.
+The rootless package suite must exercise both durable-state and ownership-marker
+refusals and prove the installed bytes remain unchanged.
+
 On Secure Boot-enabled hosts, stage 1 uses the same root-build signing hook as
 `make` and must leave the experimental `dm-swapz.ko` signed before any
 loaded work can begin. Qualification never prompts for signing privilege:
