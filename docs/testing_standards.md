@@ -988,8 +988,12 @@ allocating the logical capacity in host RAM.
 Every arm preserves a JSON result on success or failure. Pair records embed
 both arms, exclusion state and every exclusion reason. SIGTERM/SIGINT delivered
 to a physical benchmark worker must produce an explicit FAIL result when Python
-receives the signal, and a later attempt must not overwrite that existing
-result path. There is no automatic retry. The evaluator counts every recorded attempt, including failed/excluded
+receives the signal. Benchmark and campaign JSON publication must be atomic,
+0600 and create-only: fsync the complete temporary inode before publishing its
+final name, refuse an existing file or symlink without following it, and remove
+the temporary inode on storage failure so partial JSON is never presented as a
+result. A later attempt must not overwrite that existing result path. There is
+no automatic retry. The evaluator counts every recorded attempt, including failed/excluded
 attempts: a later PASS cannot replace an earlier attempt, pair IDs must be
 unique within a workload, and every pair plus both embedded arms must share one
 exact source SHA across the campaign. Mixed-source evidence is incomplete and
