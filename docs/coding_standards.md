@@ -1290,8 +1290,13 @@ invalidate per-BIO data. Slot return uses a full barrier before relaxed
 overwriting the array element. Returning the bit without this ordering is not
 sufficient. Close admission before draining, and drain the producer again after
 the ordered workqueue has finished: ordered callbacks may queue a late producer
-invocation after the first producer drain. Check the all-free mask only after
-this final drain. Destruction frees the array after both workqueues. Tail
+invocation after the first producer drain. A producer that observes closed
+admission must not queue a fresh ordered-worker wake, so this final producer
+drain is terminal with respect to the already-drained ordered workqueue. A
+producer that observed open admission before closure is joined by the first
+producer drain, and its wake is therefore caught by the later ordered drain.
+Check the all-free mask only after this final drain. Destruction frees the array
+after both workqueues. Tail
 claiming never consumes
 completion/publication ownership: the FIFO worker can continue inline-stealing
 unclaimed heads and releases prepared slots as it reaches completed tail

@@ -184,6 +184,24 @@ static int test_ready_publication_wins_raw_cas(void)
 	return 0;
 }
 
+static int test_closed_admission_suppresses_producer_owner_wake(void)
+{
+	unsigned int ordered_wakes = 0;
+
+	CHECK(swapz_preparation_owner_wake_allowed(1));
+	CHECK(!swapz_preparation_owner_wake_allowed(0));
+	/* Model a producer that finishes only in the final preparation drain,
+	 * after the ordered workqueue has already drained. */
+	if (swapz_preparation_owner_wake_allowed(0))
+		ordered_wakes++;
+	CHECK(ordered_wakes == 0);
+	/* Ordinary operation retains the producer-to-owner progress edge. */
+	if (swapz_preparation_owner_wake_allowed(1))
+		ordered_wakes++;
+	CHECK(ordered_wakes == 1);
+	return 0;
+}
+
 #define TRANSFERS 8192U
 static struct {
 	atomic64_t mask;
@@ -273,8 +291,9 @@ int main(void)
 {
 	CHECK(!test_representation_race());
 	CHECK(!test_ready_publication_wins_raw_cas());
+	CHECK(!test_closed_admission_suppresses_producer_owner_wake());
 	CHECK(!test_capacity_high_bit_and_reuse());
 	CHECK(!test_concurrent_reuse());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=4");
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=5");
 	return 0;
 }

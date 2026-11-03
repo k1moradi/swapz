@@ -61,6 +61,18 @@ static inline int swapz_preparation_publish_result(atomic_t *state,
 }
 
 /*
+ * The final preparation-workqueue drain runs after the ordered workqueue has
+ * drained. Once admission is closed, a producer finishing there must not
+ * publish a fresh ordered-worker wake. A producer that observed open admission
+ * before closure is joined by the first preparation drain, so the later
+ * ordered drain still catches its wake.
+ */
+static inline int swapz_preparation_owner_wake_allowed(int accepting)
+{
+	return accepting != 0;
+}
+
+/*
  * Bounded preparers may clear bits concurrently; cmpxchg keeps each claim
  * unique and consumers return bits only after their slot use is complete.
  * During a claim at most 64 occupied slots can be returned, so 65 attempts

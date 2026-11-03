@@ -3269,8 +3269,11 @@ static void swapz_preparation_worker(struct work_struct *work)
 				WRITE_ONCE(entry->preparation_error, error);
 				complete_all(&entry->preparation_snapshot_ready);
 				swapz_prepared_put(ctx, prepared);
-				swapz_note_accepted_lower_idle_wake(ctx);
-				mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+				if (swapz_preparation_owner_wake_allowed(
+					    READ_ONCE(ctx->accepting))) {
+					swapz_note_accepted_lower_idle_wake(ctx);
+					mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+				}
 				continue;
 			}
 		}
@@ -3353,8 +3356,10 @@ static void swapz_preparation_worker(struct work_struct *work)
 		complete(&prepared->result_ready);
 		lane->prepared_pages++;
 		swapz_prepared_put(ctx, prepared);
-		swapz_note_accepted_lower_idle_wake(ctx);
-		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+		if (swapz_preparation_owner_wake_allowed(READ_ONCE(ctx->accepting))) {
+			swapz_note_accepted_lower_idle_wake(ctx);
+			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+		}
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 		    !atomic_read(&ctx->preparation_tail_credit))
 			goto out;
