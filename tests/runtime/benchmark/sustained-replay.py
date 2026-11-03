@@ -8,6 +8,7 @@ arguments supplied by the host scheduler.
 from __future__ import annotations
 
 import argparse
+import array
 import concurrent.futures
 import fcntl
 import hashlib
@@ -78,10 +79,15 @@ def latest_write_index(local_page: int, completed_writes: int,
     return first + ((completed_writes - 1 - first) // lane_pages) * lane_pages
 
 
+LATENCY_SUB_BUCKETS = 16
+LATENCY_EXPONENTS = 65
+LATENCY_BIN_COUNT = LATENCY_SUB_BUCKETS * LATENCY_EXPONENTS
+
+
 class LatencyHistogram:
-    """Bounded log histogram; percentile values are conservative bucket ceilings."""
+    """Compact log histogram with <=6.25% relative bucket width."""
     def __init__(self):
-        self.bins = [0] * 65
+        self.bins = array.array("Q", [0]) * LATENCY_BIN_COUNT
         self.count = 0
         self.sum_ns = 0
         self.max_ns = 0
@@ -89,7 +95,13 @@ class LatencyHistogram:
     def observe(self, value: int) -> None:
         if value <= 0:
             raise ValueError("latency must be positive")
-        index = min(64, max(0, value.bit_length() - 1))
+        exponent = min(LATENCY_EXPONENTS - 1,
+                       max(0, value.bit_length() - 1))
+        base = 1 << exponent
+        sub_bucket = min(
+            LATENCY_SUB_BUCKETS - 1,
+            ((value - base) * LATENCY_SUB_BUCKETS) // base)
+        index = exponent * LATENCY_SUB_BUCKETS + sub_bucket
         self.bins[index] += 1
         self.count += 1
         self.sum_ns += value
@@ -110,7 +122,13 @@ class LatencyHistogram:
         for index, value in enumerate(self.bins):
             seen += value
             if seen >= target:
-                return 1 if index == 0 else 1 << (index + 1)
+                exponent, sub_bucket = divmod(index, LATENCY_SUB_BUCKETS)
+                base = 1 << exponent
+                # Conservative exclusive upper edge; unlike a single
+                # power-of-two bin, this cannot dominate a 25% tail gate.
+                return base + (
+                    (sub_bucket + 1) * base + LATENCY_SUB_BUCKETS - 1
+                ) // LATENCY_SUB_BUCKETS
         return self.max_ns
 
     def summary(self) -> dict:
@@ -580,6 +598,47 @@ def merge_phase(results, wall_ns: int):
     return read_hist, write_hist, rows
 
 
+def overwrite_coverage(hot_pages: int, qd: int,
+                       measured_writes_per_lane: list[int]) -> dict:
+    """Summarize measured-phase overwrites without a page-sized oracle map."""
+    if hot_pages < qd or len(measured_writes_per_lane) != qd:
+        raise ValueError("invalid overwrite coverage geometry")
+    touched = 0
+    rewritten = 0
+    repeat_operations = 0
+    minimum_writes = None
+    maximum_writes = 0
+    for lane, writes in enumerate(measured_writes_per_lane):
+        if type(writes) is not int or writes < 0:
+            raise ValueError("invalid measured lane write count")
+        lane_pages = (hot_pages - lane + qd - 1) // qd
+        if lane_pages <= 0:
+            raise ValueError("empty measured overwrite lane")
+        full_cycles, remainder = divmod(writes, lane_pages)
+        touched += min(writes, lane_pages)
+        repeat_operations += max(0, writes - lane_pages)
+        if full_cycles == 0:
+            lane_rewritten = 0
+        elif full_cycles == 1:
+            lane_rewritten = remainder
+        else:
+            lane_rewritten = lane_pages
+        rewritten += lane_rewritten
+        minimum_writes = (full_cycles if minimum_writes is None
+                          else min(minimum_writes, full_cycles))
+        maximum_writes = max(
+            maximum_writes, full_cycles + (1 if remainder else 0))
+    return {
+        "hot_pages": hot_pages,
+        "measured_hot_pages_touched": touched,
+        "measured_hot_pages_rewritten": rewritten,
+        "measured_repeat_write_operations": repeat_operations,
+        "measured_rewrite_fraction": rewritten / hot_pages,
+        "measured_min_writes_per_hot_page": minimum_writes or 0,
+        "measured_max_writes_per_hot_page": maximum_writes,
+    }
+
+
 def final_oracle(fd, data_offset, args, occupied, hot,
                  fill_chunks, churn_chunks, writes_per_lane):
     digest_expected, digest_actual = hashlib.sha256(), hashlib.sha256()
@@ -720,7 +779,7 @@ def run(args):
                     fd, data_offset, occupied, args.qd, fill_chunks, args.seed,
                     pool)
                 partial["fill"] = fill
-                warm_results, progress, _ = phase_workers(
+                warm_results, _, _ = phase_workers(
                     fd, data_offset, args, hot, fill_chunks, churn_chunks, True,
                     pool)
                 initial_writes = [row["writes"] for row in warm_results]
@@ -734,10 +793,11 @@ def run(args):
                 status_before = status_snapshot(target, identity)
                 host_before = REPLAY["host_cpu_snapshot"]()
                 cpu_before = process_cpu()
+                measured_progress = ProgressTracker()
                 start = time.monotonic_ns()
-                measured, progress, wall_ns = phase_workers(
+                measured, measured_progress, wall_ns = phase_workers(
                     fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
-                    pool, initial_writes, progress)
+                    pool, initial_writes, measured_progress)
                 end = time.monotonic_ns()
                 cpu_after = process_cpu()
                 host_after = REPLAY["host_cpu_snapshot"]()
@@ -750,6 +810,14 @@ def run(args):
             seconds = (end - start) / 1e9
             read_hist, write_hist, minute_rows = merge_phase(measured, wall_ns)
             read_ops, write_ops = read_hist.count, write_hist.count
+            measured_writes_per_lane = [
+                row["writes"] - initial_writes[index]
+                for index, row in enumerate(measured)
+            ]
+            if sum(measured_writes_per_lane) != write_ops:
+                raise ValueError("measured overwrite accounting mismatch")
+            overwrite = overwrite_coverage(
+                hot, args.qd, measured_writes_per_lane)
             logical_write_bytes, logical_read_bytes = write_ops * PAGE, read_ops * PAGE
             lower = (REPLAY["iostat_delta"](lower_before, lower_after)
                      if lower_before is not None else None)
@@ -858,7 +926,8 @@ def run(args):
                 "lower_io": lower, "kernel_write_path": kernel_write,
                 "kernel_read_path": kernel_read, "gc": gc,
                 "cold_read": cold_read_result, "minute_buckets": minute_rows,
-                "max_no_progress_seconds": progress.max_gap_ns / 1e9,
+                "overwrite": overwrite,
+                "max_no_progress_seconds": measured_progress.max_gap_ns / 1e9,
                 "oracle": oracle,
                 "claim_boundary": (
                     "host-visible lower bytes/requests are physical I/O cost, "

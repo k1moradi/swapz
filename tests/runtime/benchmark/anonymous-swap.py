@@ -25,6 +25,8 @@ MIB = 1024 * 1024
 SCHEMA = "swapz-anonymous-swap-v1"
 CONTENT_DEFINITION = "50% deterministic compressible + 50% deterministic entropy anonymous pages"
 REPLAY = runpy.run_path(str(Path(__file__).with_name("io-replay.py")))
+QUALIFICATION = runpy.run_path(str(Path(__file__).with_name("qualification.py")))
+ANONYMOUS_SPEC = QUALIFICATION["CONTRACT"]["workloads"]["anonymous-swap"]
 
 
 def page_bytes(index: int) -> bytes:
@@ -123,6 +125,19 @@ def run(args):
         raise ValueError("physical anonymous qualification requires exact source SHA")
 
     rows_before = swap_inventory(args.expected_swap_device); cgroup_before = cgroup_values()
+    if args.expected_swap_device:
+        if (args.bytes != ANONYMOUS_SPEC["bytes"] or
+                args.rounds != ANONYMOUS_SPEC["rounds"] or
+                args.require_swap_bytes != ANONYMOUS_SPEC["minimum_observed_swap_bytes"]):
+            raise ValueError("anonymous workload differs from prospective geometry")
+        memory_max = cgroup_before.get("memory_max")
+        swap_max = cgroup_before.get("memory_swap_max")
+        if memory_max != ANONYMOUS_SPEC["memory_max_bytes"]:
+            raise ValueError("anonymous cgroup memory.max differs from prospective geometry")
+        required_swap_headroom = args.bytes - memory_max
+        if swap_max != "max" and (
+                type(swap_max) is not int or swap_max < required_swap_headroom):
+            raise ValueError("anonymous cgroup memory.swap.max cannot cover working-set excess")
     page_count = args.bytes // PAGE
     args._partial_report = {"schema": SCHEMA, "verdict": "IN_PROGRESS", "stage": "preflight",
                             "workload_id": args.workload_id, "candidate": args.candidate,
@@ -149,6 +164,7 @@ def run(args):
             if observed < args.require_swap_bytes: raise ValueError("workload-specific swap below prospective minimum")
             if args.expected_swap_device and target_used < args.require_swap_bytes:
                 raise ValueError("admitted target swap usage below prospective minimum")
+            round_lower_before = REPLAY["lower_stat"](lower_disk)
             samples = array.array("Q"); start = time.monotonic_ns()
             for page in range(page_count):
                 offset = page * PAGE; expected = page_bytes(page); begin = time.monotonic_ns()
@@ -157,9 +173,17 @@ def run(args):
                 if actual != expected:
                     mismatches += 1
                     if mismatches > 16: raise ValueError("anonymous byte oracle exceeded mismatch limit")
+            round_lower_after = REPLAY["lower_stat"](lower_disk)
+            round_lower = (
+                REPLAY["iostat_delta"](round_lower_before, round_lower_after)
+                if round_lower_before is not None else None)
+            if args.expected_swap_device and (
+                    round_lower is None or round_lower["lower_read_bytes"] <= 0):
+                raise ValueError("timed anonymous reread produced no admitted lower-device READ bytes")
             rounds.append({"round": round_index, "seconds": (time.monotonic_ns() - start) / 1e9,
                            "observed_swap_bytes_before_read": observed, "target_swap_used_bytes": target_used,
-                           "vm_swap_bytes": vm_swap, "cgroup": cgroup, "latency": latency_summary(samples)})
+                           "vm_swap_bytes": vm_swap, "cgroup": cgroup,
+                           "lower_io": round_lower, "latency": latency_summary(samples)})
             args._partial_report.update(stage=f"round-{round_index + 1}", rounds=list(rounds),
                                         observed_swap_bytes=max_observed,
                                         oracle={"mismatches": mismatches, "verified_pages": page_count * (round_index + 1)})

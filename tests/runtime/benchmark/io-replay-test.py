@@ -2170,11 +2170,16 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(sustained_contract["logical_occupancy_percent"], 90)
         self.assertEqual(sustained_contract["hot_region_percent"], 80)
         self.assertEqual(sustained_contract["measure_seconds"], 3600)
+        anonymous_contract = contract["workloads"]["anonymous-swap"]
+        self.assertEqual(anonymous_contract["bytes"], 1024 * 1024 * 1024)
+        self.assertEqual(anonymous_contract["memory_max_bytes"], 512 * 1024 * 1024)
         self.assertEqual(
             contract["acceptance"]["service"][
                 "useful_write_ci_lower_min"], .05)
         self.assertEqual(
             contract["acceptance"]["sustained"]["gc_wall_fraction_max"], .20)
+        self.assertEqual(
+            contract["acceptance"]["sustained"]["minimum_rewritten_hot_pages"], 1)
         self.assertIn("not direct NAND-wear", contract["claim_boundary"])
         with self.assertRaisesRegex(ValueError, "exactly five"):
             qualification.paired_ci95([.1] * 4)
@@ -2202,6 +2207,19 @@ class PairReplayContract(unittest.TestCase):
         self.assertLessEqual(histogram.percentile(.95), 1024)
         self.assertGreaterEqual(histogram.percentile(.99), 990)
         self.assertLessEqual(histogram.percentile(.99), 1024)
+        low_tail = sustained.LatencyHistogram()
+        high_tail = sustained.LatencyHistogram()
+        for _ in range(100):
+            low_tail.observe(1_000_000)
+            high_tail.observe(1_100_000)
+        self.assertLess(
+            high_tail.percentile(.99) / low_tail.percentile(.99), 1.20)
+        coverage = sustained.overwrite_coverage(16, 4, [5, 5, 5, 5])
+        self.assertEqual(coverage["measured_hot_pages_touched"], 16)
+        self.assertEqual(coverage["measured_hot_pages_rewritten"], 4)
+        self.assertEqual(coverage["measured_repeat_write_operations"], 4)
+        self.assertEqual(coverage["measured_min_writes_per_hot_page"], 1)
+        self.assertEqual(coverage["measured_max_writes_per_hot_page"], 2)
 
     def test_sustained_replay_vmhwm_parser_is_strict(self):
         import importlib.util
@@ -2262,6 +2280,8 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(report["oracle"]["mismatches"], 0)
             self.assertEqual(report["oracle"]["verified_pages"], 96)
             self.assertEqual(report["cold_read"]["pages"], 8)
+            self.assertGreater(report["overwrite"]["measured_hot_pages_rewritten"], 0)
+            self.assertGreater(report["overwrite"]["measured_repeat_write_operations"], 0)
             self.assertIn(report["performance_screening"]["status"],
                           ("SCREENED", "EXCLUDED"))
             resources = report["resources"]
@@ -2385,6 +2405,25 @@ class PairReplayContract(unittest.TestCase):
         self.assertTrue(medium.startswith(b"swapz-anonymous-page:2\0"))
         self.assertGreater(len(set(entropy)), 200)
 
+        qualification_path = SCRIPT.with_name("qualification.py")
+        qualification_spec = importlib.util.spec_from_file_location(
+            "swapz_anonymous_contract", qualification_path)
+        qualification = importlib.util.module_from_spec(qualification_spec)
+        qualification_spec.loader.exec_module(qualification)
+        spec = qualification.CONTRACT["workloads"]["anonymous-swap"]
+        arm = {
+            "bytes": spec["bytes"], "round_count": spec["rounds"],
+            "required_swap_bytes": spec["minimum_observed_swap_bytes"],
+            "content": spec["content"], "swap_device_identity": {},
+            "cgroup_before": {"memory_max": spec["memory_max_bytes"]},
+        }
+        self.assertEqual(
+            qualification.validate_arm(arm, "anonymous-swap", "raw"), [])
+        arm["cgroup_before"]["memory_max"] += PAGE
+        self.assertTrue(any(
+            "memory.max" in reason
+            for reason in qualification.validate_arm(
+                arm, "anonymous-swap", "raw")))
 
 
 if __name__ == "__main__":

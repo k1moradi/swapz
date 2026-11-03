@@ -633,10 +633,15 @@ fixed measured operations. Their arm order is fixed before sampling as
 raw-first, swapz-first, swapz-first, raw-first, raw-first. Each arm is externally
 bounded to 1,800 seconds. The sustained pair is raw-first, maps the manager's
 maximum logical capacity, fills 90% with proven entropy content, churns an 80%
-hot region at QD16/20% READ for 60 seconds warmup plus 3,600 measured seconds,
-and has a 14,400-second whole-arm timeout. The anonymous cohort order is
-raw-first, swapz-first, raw-first; each arm performs three full verified read
-rounds and is externally bounded to 1,800 seconds.
+hot region at QD16/20% READ for 60 seconds warmup plus 3,600 measured seconds.
+The measured phase must report deterministic hot-page overwrite coverage, and
+both raw and swapz must reach at least one second-cycle overwrite; GC activity
+alone cannot substitute for repeated logical overwrites. The whole-arm timeout
+is 14,400 seconds. The anonymous cohort order is
+raw-first, swapz-first, raw-first; each arm uses an exact 1 GiB anonymous
+working set under a 512 MiB cgroup memory.max, with memory.swap.max unlimited
+or at least 512 MiB, performs three full verified read rounds, and is
+externally bounded to 1,800 seconds.
 
 Physical block replay must fail closed unless it is bare metal, root, clean
 \`HEAD == origin/main == source_sha\`, and holds the private nonblocking host
@@ -686,12 +691,15 @@ Five-pair service claims use paired fractional deltas and a two-sided Student-t
 95% confidence interval (df=4). PASS requires: useful-WRITE CI lower bound
 >=+5%; normalized lower-WRITE-byte and lower-WRITE-request CI upper bounds
 <=-10%; READ and WRITE p95/p99 CI upper bounds <=+25%; and measured
-CPU-per-useful-byte CI upper bound <=+50%. The single sustained pair is
-explicitly directional and requires swapz/raw useful WRITE >=1.05, normalized
+CPU-per-useful-byte CI upper bound <=+50%. Sustained percentile histograms use
+16 sub-buckets per power-of-two range (<=6.25% relative bucket width). The
+single sustained pair is explicitly directional and requires swapz/raw useful
+WRITE >=1.05, normalized
 lower WRITE bytes/requests <=0.90, READ/WRITE/cold p99 <=1.25, last/first
 quartile throughput >=0.75, last/first quartile p99 <=1.25, GC wall <=20%, zero
 GC no-headroom skips, positive victim relocation and segment programming, zero
-target failure, zero byte mismatches, <=10 seconds maximum no-progress, <=128
+target failure, zero byte mismatches, at least one measured hot-page rewrite
+in both arms, <=10 seconds measured-interval maximum no-progress, <=128
 MiB absolute post-exec replay-process peak RSS through measured completion and
 <=1.25 GiB observed metadata+target peak RAM. On Linux this must come from the
 bounded, strictly parsed `VmHWM` field in `/proc/self/status`, not
@@ -705,8 +713,9 @@ self-status reader so malformed accounting cannot silently qualify.
 
 Anonymous-swap evidence is also directional: all three pairs must observe at
 least 128 MiB of workload-specific process/cgroup swap and at least that usage
-on the sole admitted swap device before each timed reread. Every pair requires
-byte-exact recovery, swapz/raw swap-in p95/p99 <=1.25, useful read >=0.80,
+on the sole admitted swap device before each timed reread. Every timed reread
+round must also show positive READ bytes on that admitted device. Every pair
+requires byte-exact recovery, swapz/raw swap-in p95/p99 <=1.25, useful read >=0.80,
 normalized lower WRITE bytes/requests <=0.90, and measured CPU/useful-byte
 <=1.50. This is the only benchmark cohort that establishes actual anonymous
 swap-in-sensitive reads; direct block replays and representative fixture

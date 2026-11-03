@@ -498,16 +498,23 @@ capacity derived by the same reserve/segment rule as the primary manager. It
 fills 90% of logical pages with metadata-proven entropy pages, churns an 80%
 hot region with balanced pages at QD16/20% READ for 60 seconds of warmup plus
 3,600 measured seconds, retains an untouched filled tail for cold reads, and
-then verifies every occupied page. Each arm has a 14,400-second scheduler
+then verifies every occupied page. The measured phase reports deterministic
+hot-page touch/rewrite coverage, and both raw and swapz must reach at least one
+second-cycle hot-page overwrite; positive GC counters alone do not prove a
+repeated logical overwrite. Each arm has a 14,400-second scheduler
 safety timeout to include the large initial fill and final oracle. One pair is
 directional evidence, never a significance claim.
 
 The anonymous-swap cohort uses three counterbalanced pairs and three verified
 read rounds per arm. The worker alternates deterministic compressible and
-incompressible anonymous pages. Each round requires at least 128 MiB of
+incompressible anonymous pages in an exact 1 GiB working set under a 512 MiB
+cgroup memory.max; memory.swap.max must be unlimited or cover the remaining
+512 MiB. Each round requires at least 128 MiB of
 workload-specific \`VmSwap\`/cgroup swap plus at least that much usage on the sole
-admitted swap device before timed rereads can count as swap-in evidence. These
-three pairs are replicated directional evidence, not a t-test.
+admitted swap device before timed rereads can count as swap-in evidence. Each
+timed reread round must also produce positive READ bytes on that admitted
+device; swap occupancy without lower READ service is not swap-in evidence.
+These three pairs are replicated directional evidence, not a t-test.
 
 For physical block service the raw arm uses the same selected partition with a
 4096-byte data offset so the SWZ authorization header is not overwritten. It
@@ -524,7 +531,10 @@ latency, replay CPU plus exported swapz worker CPU, host CPU/PSI context, replay
 RSS, a separately measured mapper metadata/target peak-RAM observation, lower
 READ/WRITE bytes and requests, cold-read lower I/O, GC wall/victims/relocation,
 allocator probe cost, repeated segment programming, minute throughput/p99
-buckets and maximum forward-progress gap. The swapz scheduler samples
+buckets and measured-interval-only maximum forward-progress gap. Sustained
+latency histograms use 16 sub-buckets per power-of-two range, bounding
+percentile bucket width to 6.25% so the 25% p95/p99 gates are not dominated by
+coarse quantization. The swapz scheduler samples
 \`/proc/meminfo\` every 100 ms from a one-second pre-create baseline through mapper
 creation, the measured workload and two seconds of post-workload quiescence. It
 records the minimum \`MemAvailable\` plus \`SUnreclaim\`/\`VmallocUsed\` context and

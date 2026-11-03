@@ -69,6 +69,7 @@ CONTRACT = {
             "evidence": "directional_three_pair", "pairs": 3,
             "counterbalanced_order": ["raw-first", "swapz-first", "raw-first"],
             "content": "50% deterministic compressible + 50% deterministic entropy anonymous pages",
+            "bytes": 1073741824, "memory_max_bytes": 536870912,
             "rounds": 3, "minimum_observed_swap_bytes": 134217728,
             "arm_timeout_seconds": 1800,
         },
@@ -93,6 +94,7 @@ CONTRACT = {
             "replay_peak_rss_bytes_max": 134217728,
             "metadata_and_target_peak_ram_bytes_max": 1342177280,
             "max_no_progress_seconds": 10.0,
+            "minimum_rewritten_hot_pages": 1,
         },
         "anonymous": {
             "minimum_observed_swap_bytes": 134217728,
@@ -154,13 +156,17 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
     spec = CONTRACT["workloads"][workload]
     reasons = []
     if workload == "anonymous-swap":
-        for field, expected in (("round_count", spec["rounds"]),
+        for field, expected in (("bytes", spec["bytes"]),
+                                ("round_count", spec["rounds"]),
                                 ("required_swap_bytes", spec["minimum_observed_swap_bytes"]),
                                 ("content", spec["content"])):
             if arm.get(field) != expected:
                 reasons.append(f"{label} {field} differs from prospective workload")
         if not isinstance(arm.get("swap_device_identity"), dict):
             reasons.append(f"{label} admitted swap-device identity is missing")
+        cgroup = arm.get("cgroup_before") or {}
+        if cgroup.get("memory_max") != spec["memory_max_bytes"]:
+            reasons.append(f"{label} cgroup memory.max differs from prospective workload")
         return reasons
 
     expected = {
@@ -313,6 +319,8 @@ def sustained_decision(pair: dict) -> dict:
     }
     gc = swapz.get("gc") or {}
     resources = swapz.get("resources") or {}
+    raw_overwrite = raw.get("overwrite") or {}
+    swapz_overwrite = swapz.get("overwrite") or {}
     checks = {
         "useful_write": ratios["useful_write"] >= limit["useful_write_ratio_min"],
         "lower_write_bytes": ratios["lower_write_bytes"] <= limit["lower_write_bytes_ratio_max"],
@@ -328,6 +336,8 @@ def sustained_decision(pair: dict) -> dict:
         "segment_programming": int(gc.get("segment_program_sum", 0)) > 0,
         "target_not_failed": int(gc.get("failed", -1)) == 0 and int(gc.get("error", 0)) == 0,
         "forward_progress": number(swapz.get("max_no_progress_seconds"), "max_no_progress_seconds") <= limit["max_no_progress_seconds"],
+        "raw_repeated_overwrite": int(raw_overwrite.get("measured_hot_pages_rewritten", 0)) >= limit["minimum_rewritten_hot_pages"],
+        "swapz_repeated_overwrite": int(swapz_overwrite.get("measured_hot_pages_rewritten", 0)) >= limit["minimum_rewritten_hot_pages"],
         "replay_rss": int(resources.get("replay_peak_rss_bytes", -1)) <= limit["replay_peak_rss_bytes_max"],
         "target_ram": int(resources.get("metadata_and_target_peak_ram_bytes", -1)) <= limit["metadata_and_target_peak_ram_bytes_max"],
         "oracle": (swapz.get("oracle") or {}).get("mismatches") == 0,
@@ -354,6 +364,11 @@ def anonymous_decision(pairs: list[dict]) -> dict:
         for arm in (pair["raw"], pair["swapz"]):
             pair_ok &= int(arm.get("observed_swap_bytes", 0)) >= limit["minimum_observed_swap_bytes"]
             pair_ok &= (arm.get("oracle") or {}).get("mismatches") == 0
+            rounds = arm.get("rounds") or []
+            pair_ok &= len(rounds) == CONTRACT["workloads"]["anonymous-swap"]["rounds"]
+            pair_ok &= all(
+                int((row.get("lower_io") or {}).get("lower_read_bytes", 0)) > 0
+                for row in rounds)
         rows.append({"pair_id": pair["pair_id"], "status": "PASS" if pair_ok else "FAIL", "ratios": ratios})
         ok &= pair_ok
     return {"status": "PASS" if ok else "FAIL", "evidence": "directional_three_pair", "pairs": rows}
