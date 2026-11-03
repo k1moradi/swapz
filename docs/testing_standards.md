@@ -3490,8 +3490,9 @@ ID. The state-transition predicate alone does not prove the corresponding
 one-use claim exists, authorize a device operation, or establish that a saved
 stage matches the live device. The mutable stage envelope is not a complete
 recovery manifest; durable run evidence must separately bind the exact
-partition identity, original-header backup and digest, qualified source and
-artifact hashes, and expected mapper identity and geometry.
+partition identity, qualified source and artifact hashes, and expected mapper
+identity and geometry. If an optional original-header backup is recorded, bind
+its digest to that run's manifest.
 
 | Current stage | Permitted next stages |
 | --- | --- |
@@ -3550,17 +3551,19 @@ path must reject any non-root, dirty-source, stale qualification, artifact
 mismatch, recovery-filesystem failure, target identity/header drift, nonzero
 swap use, extra swap entry, mount/root dependency, loaded module or existing
 mapper. It must repeat the exact swap and block-zero checks immediately before
-claiming. After claim, focused rootless or isolated-VM lifecycle tests must
-verify durable consumed/`READY`/active ordering, exact original-header backup
-and manifest readback, and recovery from interruption after each metadata
-publication, including the atomic `READY` close and owner-marker release. No
-such test may open or write a host block device; the rootless build must keep
-the command unavailable and prove no host path or lifecycle side effect is
-reached. A metadata-preparation PASS is not start, live-swap,
-crash-recovery, boot, performance, or production qualification.
+claiming. After claim, focused rootless lifecycle tests must verify durable
+consumed/`READY`/active ordering, manifest readback, optional-backup behavior,
+and recovery from interruption after each metadata publication, including the
+atomic `READY` close and owner-marker release. Where platform behavior is
+needed, use deterministic fault injection on an owned RAM-backed `null_blk`
+target; no such test may open or write a host block device. The rootless build
+must keep the command unavailable and prove no host path or lifecycle side
+effect is reached. A metadata-preparation PASS is not start, live-swap,
+loaded-recovery, boot, performance, or production qualification.
 
-The primary manager's original-header backup is immutable per run ID. Its
-writer must require the exclusive lock and matching consumed/active owner claim,
+When the primary manager records an optional original-header backup, it is
+immutable per run ID. Its writer must require the exclusive lock and matching
+consumed/active owner claim,
 validate the caller-bound SHA-256 before writing, create a root-owned 0600
 temporary file, fsync it, atomically install the final name without replacing
 an existing backup, and fsync the recovery directory. Its reader must reject
@@ -3568,9 +3571,10 @@ symlinks, non-regular or multiply linked files, wrong ownership/mode/size,
 short or extended contents, and digest mismatch; it copies bytes to the caller
 only after full validation. Rootless tests must verify exact 4096-byte
 round-trip, no-overwrite behavior, invalid digest refusal, and output-buffer
-preservation on read failure. The lifecycle caller must bind the expected hash
-to block zero read through the freshly revalidated descriptor for the configured
-PARTUUID before the first mutation.
+preservation on read failure. If a transaction records this optional backup,
+the lifecycle caller must bind its expected hash to block zero read through the
+freshly revalidated descriptor for the configured PARTUUID before the first
+mutation.
 
 Any primary-swap block-zero write must use the checked descriptor primitive in
 `src/userspace/swapz-primary.c`. Before writing, production callers must open
@@ -3731,22 +3735,30 @@ checks do not emulate kernel Device Mapper behavior or authorize a mapper on
 the host.
 
 The shared transaction-to-manifest admission check must require the matching
-owner claim, allowed durable stage, exact stored manifest, and the immutable
-4096-byte original block-zero backup. Rootless direct-C coverage must accept
-arbitrary saved block-zero bytes and refuse a missing backup, digest-tampered
-backup, or disallowed stage before mapper lifecycle operations are admitted.
-The header-signature predicate may identify a Linux swap header but must not
-require one or treat an SWZ header as one. The production digest is bound per
-transaction in the manifest. These tests do not perform or authorize block I/O.
+owner claim, allowed durable stage and exact stored manifest. If a transaction
+records an original 4096-byte block-zero backup, admission must verify its
+digest before using it; a backup is optional for the disposable development
+card and must not become a lifecycle gate. Rootless direct-C coverage must
+exercise a transaction with no backup, accept arbitrary saved block-zero bytes
+when a backup is present, and refuse a digest-tampered backup or disallowed
+stage before mapper lifecycle operations are admitted. The header-signature
+predicate may identify a Linux swap header but must not require one or treat
+an SWZ header as one. The production digest is bound per transaction in the
+manifest. These tests do not perform or authorize block I/O.
 
-Before any future lifecycle enablement, isolated VM coverage must exercise
-interruption after device creation, after inactive-table load, after resume,
-and during cleanup. Recovery may remove only the exact manifest-bound mapper, an
-exact active table or exact suspended inactive table, zero open references,
-and an inactive swap mapping. It must prove both name and UUID absent after
-non-forced removal. Missing, substituted, extra-target, extra-dependency or
-unqueryable mapper state remains a recovery stop condition; rootless parser
-coverage alone cannot close these VM gates.
+Before future lifecycle enablement, interruption points after device creation,
+inactive-table load, resume and during cleanup must be covered by rootless
+state-machine/direct-C tests and deterministic fault injection against an owned
+RAM-backed `null_blk` target. The lifecycle must then pass safely bounded
+physical-host recovery and swap checks on the positively identified authorized
+card before it is enabled by default. VM coverage is not required. Do not
+intentionally crash or reboot the host to create interruption evidence.
+Recovery may remove only the exact manifest-bound mapper, an exact active
+table or exact suspended inactive table, zero open references and an inactive
+swap mapping. It must prove both name and UUID absent after non-forced removal.
+Missing, substituted, extra-target, extra-dependency or unqueryable mapper
+state remains a recovery stop condition; rootless parser coverage alone cannot
+close the loaded or physical-host gates.
 
 The primary manager's transaction-ID generator must use the operating system's
 cryptographic random source, handle interrupted and partial reads, return only
@@ -3757,5 +3769,5 @@ The 4096-byte candidate must pass the shared SWZ validator for the supplied
 device capacity, contain the exact
 16-byte ID, and have zero reserved bytes. Malformed and all-zero IDs must be
 rejected without altering the caller's header buffer. These tests establish
-format construction only; they do not authorize writes or close lifecycle,
-crash-recovery, VM, or physical-swap qualification gates.
+format construction only; they do not authorize writes or close loaded
+recovery, physical-swap, or production-acceptance gates.

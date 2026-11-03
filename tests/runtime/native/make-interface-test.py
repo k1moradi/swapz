@@ -164,6 +164,20 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("tests/tools/test-rootless.sh", (ROOT / "tests/tools/run-tests.py").read_text())
         self.assertIn("tests/tools/test-loaded.sh", (ROOT / "tests/tools/run-tests.py").read_text())
 
+    def test_primary_lifecycle_standards_match_no_vm_disposable_target_goal(self):
+        testing = " ".join((ROOT / "docs/testing_standards.md").read_text().split())
+        coding = (ROOT / "docs/coding_standards.md").read_text()
+        self.assertIn("VM coverage is not required", testing)
+        self.assertIn("deterministic fault injection on an owned RAM-backed `null_blk`",
+                      testing)
+        self.assertIn("safely bounded physical-host recovery and swap checks",
+                      testing)
+        self.assertIn("An original-header backup is optional", coding)
+        self.assertNotIn("isolated VM coverage must", testing)
+        self.assertNotIn("VM gates", testing)
+        self.assertNotIn("must bind the exact partition identity, original-header backup",
+                         testing)
+
     def test_parallel_build_is_incremental_and_test_stages_stay_ordered(self):
         """Run the REAL root/extent Makefiles using a fake, unprivileged Kbuild.
 
