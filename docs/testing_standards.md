@@ -3321,6 +3321,18 @@ block-device and `/proc/swaps` reads; test the identity and signature parsers
 with synthetic major:minor values and bytes. Host admission must hash the exact
 4096-byte original swap header and compare it with the recorded device-bound
 digest before any destructive transition.
+The plan must also check the fixed recovery base's root-owned 0700 path, an
+allowlisted persistent filesystem, direct filesystem-device separation from
+8:4, and absence of the active recovery marker. The source-chain gate must
+resolve the filesystem device through `/sys/dev/block`, match its recorded
+major:minor, prove it is a physical partition with a physical parent device,
+and reject holders, stacked slaves, virtual devices and the selected swap
+partition. Keep Btrfs excluded until multi-device backing can be enumerated
+and checked. Report whether recovery storage shares the target's physical disk;
+that is a relevant failure-domain limitation even when it is a different
+partition. Rootless tests must use synthetic sysfs trees and cover malformed
+device numbers, target identity, missing physical identity and nonempty holder
+directories without reading host block devices.
 The `/proc/swaps` parser must reject malformed or extra fields, duplicate paths,
 numeric overflow and invalid signed priorities. The read-only plan may report
 the active-entry count and whether `/dev/sda4` is the sole 16,777,212 KiB

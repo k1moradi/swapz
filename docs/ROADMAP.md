@@ -1374,8 +1374,17 @@ entry count and target size, priority and use. It also performs read-only
 by-UUID/by-PARTUUID/device identity, exact-size and original swap-signature
 checks when run on the host. The direct-C fixture disables those live reads.
 It verifies the original 4096-byte header against the recorded SHA-256 digest.
-The plan explicitly marks its remaining live-device gates unchecked and stays
-BLOCKED. Provision, activation, teardown and recovery are disabled.
+It checks recovery-directory ownership/mode, an allowlisted persistent
+filesystem, direct separation from 8:4, and an absent active marker. Its
+read-only sysfs check now resolves the filesystem source and target partition
+to physical parent devices, requires direct physical-partition backing, and
+rejects virtual/stacked sources or nonempty holder lists. It reports that the
+recovery directory is on the same physical USB disk as the target, so this
+state is persistent across process exit but does not protect against failure
+of that whole device. Btrfs remains excluded until multi-device ancestry can
+be verified. Target mount/root-chain checks, module/mapper ownership and the
+lifecycle remain unchecked, so the plan stays BLOCKED. Provision, activation,
+teardown and recovery are disabled.
 The earlier Python manager draft was removed because production Python is
 outside this repository's coding standards. The remaining implementation must
 integrate the permanent root-controlled PARTUUID lock primitive with each

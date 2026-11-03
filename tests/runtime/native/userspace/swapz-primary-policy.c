@@ -5,8 +5,10 @@
 #undef main
 
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -149,6 +151,165 @@ static void test_sha256_helper(void)
 	assert(!strcmp(digest, expected));
 }
 
+static void test_recovery_filesystem_policy(void)
+{
+	assert(swapz_primary_persistent_fs_magic(EXT2_SUPER_MAGIC));
+	assert(swapz_primary_persistent_fs_magic(XFS_SUPER_MAGIC));
+	assert(swapz_primary_persistent_fs_magic(F2FS_SUPER_MAGIC));
+	assert(!swapz_primary_persistent_fs_magic(BTRFS_SUPER_MAGIC));
+	assert(!swapz_primary_persistent_fs_magic(TMPFS_MAGIC));
+	assert(!swapz_primary_persistent_fs_magic(RAMFS_MAGIC));
+	assert(!swapz_primary_persistent_fs_magic(OVERLAYFS_SUPER_MAGIC));
+}
+
+static void test_path_join(char *path, size_t capacity, const char *parent,
+			   const char *child)
+{
+	int length = snprintf(path, capacity, "%s/%s", parent, child);
+
+	assert(length > 0 && (size_t)length < capacity);
+}
+
+static void test_write_text(const char *path, const char *text)
+{
+	size_t length = strlen(text);
+	const char *cursor = text;
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+
+	assert(fd >= 0);
+	while (length) {
+		ssize_t count = write(fd, cursor, length);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		assert(count > 0);
+		cursor += count;
+		length -= (size_t)count;
+	}
+	assert(close(fd) == 0);
+}
+
+static int test_remove_tree_entry(const char *path, const struct stat *info,
+				 int type, struct FTW *walk)
+{
+	(void)info;
+	(void)type;
+	(void)walk;
+	return remove(path);
+}
+
+static void test_recovery_source_chain(void)
+{
+	char root_template[] = "/tmp/swapz-primary-sysfs-XXXXXX";
+	char root[PATH_MAX];
+	char devices[PATH_MAX];
+	char transport[PATH_MAX];
+	char block[PATH_MAX];
+	char disk[PATH_MAX];
+	char physical[PATH_MAX];
+	char node3[PATH_MAX];
+	char node4[PATH_MAX];
+	char virtual_device[PATH_MAX];
+	char dev_directory[PATH_MAX];
+	char block_directory[PATH_MAX];
+	char source_link[PATH_MAX];
+	char target_link[PATH_MAX];
+	char path[PATH_MAX];
+	char path2[PATH_MAX];
+	dev_t physical_device = 0;
+	dev_t target_parent_device = 0;
+
+	assert(mkdtemp(root_template));
+	assert(strlen(root_template) < sizeof(root));
+	strcpy(root, root_template);
+	test_path_join(devices, sizeof(devices), root, "devices");
+	test_path_join(dev_directory, sizeof(dev_directory), root, "dev");
+	test_path_join(block_directory, sizeof(block_directory), dev_directory,
+		       "block");
+	assert(mkdir(devices, 0700) == 0);
+	assert(mkdir(dev_directory, 0700) == 0);
+	assert(mkdir(block_directory, 0700) == 0);
+	test_path_join(transport, sizeof(transport), devices, "transport");
+	test_path_join(block, sizeof(block), transport, "block");
+	test_path_join(disk, sizeof(disk), block, "sda");
+	test_path_join(physical, sizeof(physical), transport, "scsi-device");
+	test_path_join(node3, sizeof(node3), disk, "sda3");
+	test_path_join(node4, sizeof(node4), disk, "sda4");
+	assert(mkdir(transport, 0700) == 0);
+	assert(mkdir(block, 0700) == 0);
+	assert(mkdir(disk, 0700) == 0);
+	assert(mkdir(physical, 0700) == 0);
+	test_path_join(path, sizeof(path), devices, "virtual");
+	assert(mkdir(path, 0700) == 0);
+	test_path_join(virtual_device, sizeof(virtual_device), path, "block-device");
+	assert(mkdir(virtual_device, 0700) == 0);
+	assert(mkdir(node3, 0700) == 0);
+	assert(mkdir(node4, 0700) == 0);
+	test_path_join(path, sizeof(path), disk, "queue");
+	assert(mkdir(path, 0700) == 0);
+	test_path_join(path, sizeof(path), disk, "holders");
+	assert(mkdir(path, 0700) == 0);
+	test_path_join(path, sizeof(path), disk, "slaves");
+	assert(mkdir(path, 0700) == 0);
+	test_path_join(path, sizeof(path), node3, "holders");
+	assert(mkdir(path, 0700) == 0);
+	test_path_join(path, sizeof(path), node4, "holders");
+	assert(mkdir(path, 0700) == 0);
+	test_path_join(path, sizeof(path), disk, "device");
+	assert(symlink(physical, path) == 0);
+	test_path_join(path, sizeof(path), disk, "dev");
+	test_write_text(path, "8:0\n");
+	test_path_join(path, sizeof(path), node3, "dev");
+	test_write_text(path, "8:3\n");
+	test_path_join(path, sizeof(path), node3, "partition");
+	test_write_text(path, "3\n");
+	test_path_join(path, sizeof(path), node4, "dev");
+	test_write_text(path, "8:4\n");
+	test_path_join(path, sizeof(path), node4, "partition");
+	test_write_text(path, "4\n");
+	test_path_join(source_link, sizeof(source_link), block_directory, "8:3");
+	test_path_join(target_link, sizeof(target_link), block_directory, "8:4");
+	assert(symlink(node3, source_link) == 0);
+	assert(symlink(node4, target_link) == 0);
+	assert(swapz_primary_recovery_source_chain(
+		root, makedev(8U, 3U), makedev(8U, 4U), &physical_device));
+	assert(physical_device == makedev(8U, 0U));
+	assert(swapz_primary_recovery_source_chain(
+		root, makedev(8U, 4U), 0, &target_parent_device));
+	assert(target_parent_device == physical_device);
+	assert(!swapz_primary_recovery_source_chain(
+		root, makedev(8U, 4U), makedev(8U, 4U), &target_parent_device));
+	test_path_join(path, sizeof(path), node3, "holders");
+	test_path_join(path2, sizeof(path2), path, "dm-0");
+	test_write_text(path2, "held\n");
+	assert(!swapz_primary_recovery_source_chain(
+		root, makedev(8U, 3U), makedev(8U, 4U), &physical_device));
+	assert(unlink(path2) == 0);
+	test_path_join(path, sizeof(path), node3, "slaves");
+	assert(mkdir(path, 0700) == 0);
+	test_path_join(path2, sizeof(path2), path, "8:5");
+	test_write_text(path2, "stacked\n");
+	assert(!swapz_primary_recovery_source_chain(
+		root, makedev(8U, 3U), makedev(8U, 4U), &physical_device));
+	assert(unlink(path2) == 0);
+	assert(rmdir(path) == 0);
+	test_path_join(path, sizeof(path), node3, "dev");
+	test_write_text(path, "8:30\n");
+	assert(!swapz_primary_recovery_source_chain(
+		root, makedev(8U, 3U), makedev(8U, 4U), &physical_device));
+	test_write_text(path, "8:3\n");
+	test_path_join(path, sizeof(path), disk, "device");
+	assert(unlink(path) == 0);
+	assert(!swapz_primary_recovery_source_chain(
+		root, makedev(8U, 3U), makedev(8U, 4U), &physical_device));
+	assert(symlink(virtual_device, path) == 0);
+	assert(!swapz_primary_recovery_source_chain(
+		root, makedev(8U, 3U), makedev(8U, 4U), &physical_device));
+	assert(unlink(path) == 0);
+	assert(symlink(physical, path) == 0);
+	assert(nftw(root, test_remove_tree_entry, 16, FTW_DEPTH | FTW_PHYS) == 0);
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -183,6 +344,8 @@ int main(void)
 	test_target_identity_and_header_policy();
 	test_exact_block_read_helper();
 	test_sha256_helper();
+	test_recovery_filesystem_policy();
+	test_recovery_source_chain();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);

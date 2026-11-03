@@ -3,12 +3,16 @@
 #include "swapz-primary.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/fs.h>
+#include <linux/magic.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
@@ -16,6 +20,7 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
+#include <sys/vfs.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -565,6 +570,336 @@ static int swapz_primary_recovery_base_open(const char *path,
 	return fd;
 }
 
+static int swapz_primary_persistent_fs_magic(long type)
+{
+	switch ((unsigned long)type) {
+	case EXT2_SUPER_MAGIC:
+	case XFS_SUPER_MAGIC:
+	case F2FS_SUPER_MAGIC:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static int swapz_primary_path_format(char *path, size_t capacity,
+				     const char *format, ...)
+{
+	va_list arguments;
+	int length;
+
+	va_start(arguments, format);
+	length = vsnprintf(path, capacity, format, arguments);
+	va_end(arguments);
+	if (length < 0 || (size_t)length >= capacity) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	return 0;
+}
+
+static int swapz_primary_read_sysfs_text(const char *path, char *buffer,
+					size_t capacity)
+{
+	size_t length = 0;
+	int fd;
+
+	if (!path || !buffer || capacity < 2U) {
+		errno = EINVAL;
+		return -1;
+	}
+	fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	if (fd < 0)
+		return -1;
+	while (length + 1U < capacity) {
+		ssize_t count = read(fd, buffer + length, capacity - length - 1U);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		length += (size_t)count;
+	}
+	if (length + 1U == capacity) {
+		close(fd);
+		errno = EOVERFLOW;
+		return -1;
+	}
+	if (close(fd) < 0)
+		return -1;
+	while (length && (buffer[length - 1U] == '\n' ||
+			  buffer[length - 1U] == '\r'))
+		--length;
+	buffer[length] = '\0';
+	return 0;
+}
+
+static int swapz_primary_sysfs_dev_number(const char *path, dev_t *device)
+{
+	char buffer[64];
+	char *colon;
+	uint64_t major_number;
+	uint64_t minor_number;
+
+	if (!device || swapz_primary_read_sysfs_text(path, buffer,
+						     sizeof(buffer)) < 0)
+		return -1;
+	colon = strchr(buffer, ':');
+	if (!colon || strchr(colon + 1, ':')) {
+		errno = EINVAL;
+		return -1;
+	}
+	*colon = '\0';
+	if (swapz_primary_parse_u64(buffer, &major_number) < 0 ||
+	    swapz_primary_parse_u64(colon + 1, &minor_number) < 0 ||
+	    major_number > UINT_MAX || minor_number > UINT_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+	*device = makedev((unsigned int)major_number,
+			  (unsigned int)minor_number);
+	if (major(*device) != major_number || minor(*device) != minor_number) {
+		errno = ERANGE;
+		return -1;
+	}
+	return 0;
+}
+
+static int swapz_primary_sysfs_directory_empty(const char *path,
+					      int missing_is_empty)
+{
+	struct dirent *entry;
+	DIR *directory = opendir(path);
+	int read_error = 0;
+
+	if (!directory)
+		return missing_is_empty && errno == ENOENT;
+	errno = 0;
+	while ((entry = readdir(directory)) != NULL) {
+		if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+			continue;
+		read_error = ENOTEMPTY;
+		break;
+	}
+	if (!read_error && errno)
+		read_error = errno;
+	if (closedir(directory) < 0 && !read_error)
+		read_error = errno;
+	if (read_error) {
+		errno = read_error;
+		return 0;
+	}
+	return 1;
+}
+
+static int swapz_primary_recovery_source_chain(
+	const char *sysfs_root, dev_t source_device, dev_t target_device,
+	dev_t *physical_parent_device)
+{
+	char devices_root[PATH_MAX];
+	char block_root[PATH_MAX];
+	char link_path[PATH_MAX];
+	char node_path[PATH_MAX];
+	char parent_path[PATH_MAX];
+	char source_realpath[PATH_MAX];
+	char device_path[PATH_MAX];
+	char device_realpath[PATH_MAX];
+	char path[PATH_MAX];
+	char *slash;
+	char *resolved_devices_root;
+	dev_t observed_source;
+	dev_t observed_parent;
+	struct stat link_info;
+	struct stat queue_info;
+	uint64_t partition_number;
+	size_t devices_root_length;
+
+	if (!sysfs_root || !physical_parent_device ||
+	    (major(source_device) == 0U && minor(source_device) == 0U) ||
+	    ((major(target_device) != 0U || minor(target_device) != 0U) &&
+	     source_device == target_device)) {
+		errno = EINVAL;
+		return 0;
+	}
+	if (swapz_primary_path_format(devices_root, sizeof(devices_root),
+				      "%s/devices", sysfs_root) < 0 ||
+	    swapz_primary_path_format(block_root, sizeof(block_root),
+				      "%s/dev/block", sysfs_root) < 0 ||
+	    swapz_primary_path_format(link_path, sizeof(link_path), "%s/%u:%u",
+				      block_root, major(source_device),
+				      minor(source_device)) < 0)
+		return 0;
+	if (!realpath(devices_root, path))
+		return 0;
+	resolved_devices_root = strdup(path);
+	if (!resolved_devices_root)
+		return 0;
+	devices_root_length = strlen(resolved_devices_root);
+	if (!realpath(link_path, source_realpath) ||
+	    strncmp(source_realpath, resolved_devices_root,
+		    devices_root_length) ||
+	    source_realpath[devices_root_length] != '/')
+		goto rejected;
+	if (swapz_primary_path_format(path, sizeof(path), "%s/dev",
+				      source_realpath) < 0 ||
+	    swapz_primary_sysfs_dev_number(path, &observed_source) < 0 ||
+	    observed_source != source_device)
+		goto rejected;
+	if (swapz_primary_path_format(path, sizeof(path), "%s/partition",
+				      source_realpath) < 0 ||
+	    swapz_primary_read_sysfs_text(path, node_path,
+					     sizeof(node_path)) < 0 ||
+	    swapz_primary_parse_u64(node_path, &partition_number) < 0 ||
+	    partition_number == 0U)
+		goto rejected;
+	if (swapz_primary_path_format(parent_path, sizeof(parent_path), "%s",
+				      source_realpath) < 0)
+		goto rejected;
+	slash = strrchr(parent_path, '/');
+	if (!slash || slash == parent_path)
+		goto rejected;
+	*slash = '\0';
+	if (swapz_primary_path_format(path, sizeof(path), "%s/dev",
+				      parent_path) < 0 ||
+	    swapz_primary_sysfs_dev_number(path, &observed_parent) < 0 ||
+	    observed_parent == source_device ||
+	    ((major(target_device) != 0U || minor(target_device) != 0U) &&
+	     observed_parent == target_device))
+		goto rejected;
+	if (swapz_primary_path_format(device_path, sizeof(device_path),
+				       "%s/device", parent_path) < 0 ||
+	    lstat(device_path, &link_info) < 0 || !S_ISLNK(link_info.st_mode) ||
+	    !realpath(device_path, device_realpath))
+		goto rejected;
+	if (strncmp(device_realpath, resolved_devices_root,
+		    devices_root_length) ||
+	    device_realpath[devices_root_length] != '/' ||
+	    strstr(device_realpath, "/virtual/") != NULL)
+		goto rejected;
+	if (swapz_primary_path_format(path, sizeof(path), "%s/queue",
+				      parent_path) < 0 ||
+	    stat(path, &queue_info) < 0 || !S_ISDIR(queue_info.st_mode))
+		goto rejected;
+	if (swapz_primary_path_format(path, sizeof(path), "%s/holders",
+				      source_realpath) < 0 ||
+	    !swapz_primary_sysfs_directory_empty(path, 0) ||
+	    swapz_primary_path_format(path, sizeof(path), "%s/slaves",
+				      source_realpath) < 0 ||
+	    !swapz_primary_sysfs_directory_empty(path, 1) ||
+	    swapz_primary_path_format(path, sizeof(path), "%s/holders",
+				      parent_path) < 0 ||
+	    !swapz_primary_sysfs_directory_empty(path, 0) ||
+	    swapz_primary_path_format(path, sizeof(path), "%s/slaves",
+				      parent_path) < 0 ||
+	    !swapz_primary_sysfs_directory_empty(path, 1))
+		goto rejected;
+	*physical_parent_device = observed_parent;
+	free(resolved_devices_root);
+	return 1;
+
+rejected:
+	free(resolved_devices_root);
+	return 0;
+}
+
+static int swapz_primary_recovery_preflight(
+	int *directory_safe, int *persistent_filesystem,
+	unsigned int *filesystem_major, unsigned int *filesystem_minor,
+	int *directly_not_target, int *source_chain_checked,
+	unsigned int *physical_parent_major, unsigned int *physical_parent_minor,
+	int *same_physical_disk, int *active_marker_clear)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)directory_safe;
+	(void)persistent_filesystem;
+	(void)filesystem_major;
+	(void)filesystem_minor;
+	(void)directly_not_target;
+	(void)source_chain_checked;
+	(void)physical_parent_major;
+	(void)physical_parent_minor;
+	(void)same_physical_disk;
+	(void)active_marker_clear;
+	errno = ENODEV;
+	return -1;
+#else
+	struct stat directory_info;
+	struct statfs filesystem_info;
+	struct stat marker_info;
+	dev_t source_device;
+	dev_t source_parent_device = 0;
+	dev_t target_parent_device = 0;
+	int recovery_fd;
+	int marker_result;
+
+	if (!directory_safe || !persistent_filesystem || !filesystem_major ||
+	    !filesystem_minor || !directly_not_target || !source_chain_checked ||
+	    !physical_parent_major || !physical_parent_minor ||
+	    !same_physical_disk || !active_marker_clear) {
+		errno = EINVAL;
+		return -1;
+	}
+	*directory_safe = 0;
+	*persistent_filesystem = 0;
+	*filesystem_major = 0;
+	*filesystem_minor = 0;
+	*directly_not_target = 0;
+	*source_chain_checked = 0;
+	*physical_parent_major = 0;
+	*physical_parent_minor = 0;
+	*same_physical_disk = 0;
+	*active_marker_clear = 0;
+	recovery_fd = swapz_primary_recovery_base_open(
+		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	if (recovery_fd < 0)
+		return -1;
+	if (fstat(recovery_fd, &directory_info) < 0 ||
+	    fstatfs(recovery_fd, &filesystem_info) < 0) {
+		int saved_errno = errno;
+
+		close(recovery_fd);
+		errno = saved_errno;
+		return -1;
+	}
+	*directory_safe = 1;
+	*persistent_filesystem =
+		swapz_primary_persistent_fs_magic(filesystem_info.f_type);
+	*filesystem_major = major(directory_info.st_dev);
+	*filesystem_minor = minor(directory_info.st_dev);
+	*directly_not_target =
+		(*filesystem_major != 0U || *filesystem_minor != 0U) &&
+		!(*filesystem_major == 8U && *filesystem_minor == 4U);
+	source_device = makedev(*filesystem_major, *filesystem_minor);
+	if (*persistent_filesystem && *directly_not_target &&
+	    swapz_primary_recovery_source_chain(
+		    "/sys", source_device, makedev(8U, 4U),
+		    &source_parent_device) &&
+	    swapz_primary_recovery_source_chain(
+		    "/sys", makedev(8U, 4U), 0,
+		    &target_parent_device)) {
+		*source_chain_checked = 1;
+		*physical_parent_major = major(source_parent_device);
+		*physical_parent_minor = minor(source_parent_device);
+		*same_physical_disk = source_parent_device == target_parent_device;
+	}
+	marker_result = fstatat(recovery_fd,
+				"partition-7fb9401d-04.active", &marker_info,
+				AT_SYMLINK_NOFOLLOW);
+	if (marker_result < 0 && errno == ENOENT)
+		*active_marker_clear = 1;
+	if (close(recovery_fd) < 0)
+		return -1;
+	return 0;
+#endif
+}
+
 static int swapz_primary_partition_lock_at(int recovery_fd,
 						   const char *partuuid,
 						   uid_t expected_owner)
@@ -844,6 +1179,24 @@ static int swapz_primary_read_only_plan(void)
 	int target_device_preflight = swapz_primary_target_preflight(
 		&target_device_bytes, &original_swap_header,
 		&original_header_hash_matches) == 0;
+	int recovery_directory_safe = 0;
+	int recovery_persistent_filesystem = 0;
+	unsigned int recovery_filesystem_major = 0;
+	unsigned int recovery_filesystem_minor = 0;
+	int recovery_directly_not_target = 0;
+	int recovery_source_chain_checked = 0;
+	unsigned int recovery_physical_parent_major = 0;
+	unsigned int recovery_physical_parent_minor = 0;
+	int recovery_same_physical_disk = 0;
+	int recovery_active_marker_clear = 0;
+	int recovery_preflight_read = swapz_primary_recovery_preflight(
+		&recovery_directory_safe, &recovery_persistent_filesystem,
+		&recovery_filesystem_major, &recovery_filesystem_minor,
+		&recovery_directly_not_target, &recovery_source_chain_checked,
+		&recovery_physical_parent_major,
+		&recovery_physical_parent_minor,
+		&recovery_same_physical_disk,
+		&recovery_active_marker_clear) == 0;
 
 	if (swaps_valid) {
 		for (i = 0; i < swap_count; ++i) {
@@ -873,6 +1226,17 @@ static int swapz_primary_read_only_plan(void)
 	       "\"target_device_bytes\":%llu,"
 	       "\"original_swap_signature\":%s,"
 	       "\"original_header_hash_matches\":%s,"
+	       "\"recovery_preflight_read\":%s,"
+	       "\"recovery_directory_safe\":%s,"
+	       "\"recovery_filesystem_supported\":%s,"
+	       "\"recovery_filesystem_major\":%u,"
+	       "\"recovery_filesystem_minor\":%u,"
+	       "\"recovery_directly_not_target\":%s,"
+	       "\"recovery_active_marker_clear\":%s,"
+	       "\"recovery_source_chain_checked\":%s,"
+	       "\"recovery_physical_parent_major\":%u,"
+	       "\"recovery_physical_parent_minor\":%u,"
+	       "\"recovery_same_physical_disk_as_target\":%s,"
 	       "\"swap_inventory_read\":%s,"
 	       "\"active_swap_entries\":%llu,"
 	       "\"target_swap_entries\":%llu,"
@@ -887,6 +1251,17 @@ static int swapz_primary_read_only_plan(void)
 	       (unsigned long long)target_device_bytes,
 	       original_swap_header ? "true" : "false",
 	       original_header_hash_matches ? "true" : "false",
+	       recovery_preflight_read ? "true" : "false",
+	       recovery_directory_safe ? "true" : "false",
+	       recovery_persistent_filesystem ? "true" : "false",
+	       recovery_filesystem_major,
+	       recovery_filesystem_minor,
+	       recovery_directly_not_target ? "true" : "false",
+	       recovery_active_marker_clear ? "true" : "false",
+	       recovery_source_chain_checked ? "true" : "false",
+	       recovery_physical_parent_major,
+	       recovery_physical_parent_minor,
+	       recovery_same_physical_disk ? "true" : "false",
 	       swaps_valid ? "true" : "false",
 	       (unsigned long long)swap_count,
 	       (unsigned long long)target_count,
