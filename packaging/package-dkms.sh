@@ -4,11 +4,14 @@ set -Eeuo pipefail
 umask 022
 
 transaction_active=0
+transaction_dir=""
 
 blocked() {
   printf 'BLOCKED: %s\n' "$*" >&2
   if (( transaction_active == 1 )); then
     rollback 2 failure
+  elif (( transaction_active == 2 )); then
+    staging_abort 2 failure
   fi
   exit 2
 }
@@ -90,14 +93,33 @@ else
   module_artifact="$root/build/kernel/experimental/dm-swapz.ko"
   qualification_report="$root/test_results.json"
   kernel_release="$(uname -r)"
-  package_lock="/run/lock/swapz-package.lock"
-  transaction_parent="/var/tmp"
+  package_lock="/run/lock/swapz/package.lock"
+  transaction_parent="/var/lib/swapz-package-transactions"
   dkms_bin="$(command -v dkms 2>/dev/null || true)"
   depmod_bin="$(command -v depmod 2>/dev/null || true)"
+  modules_root="$(readlink -f -- "$modules_root" 2>/dev/null || true)"
+  srcbase="$(readlink -f -- "$srcbase" 2>/dev/null || true)"
+  [[ -n "$modules_root" && -n "$srcbase" ]] ||
+    blocked "cannot canonicalize system package roots"
 fi
 
-[[ -x "$dkms_bin" && ! -L "$dkms_bin" ]] || blocked "no trusted DKMS executable"
-[[ -x "$depmod_bin" && ! -L "$depmod_bin" ]] || blocked "no trusted depmod executable"
+trusted_system_executable() {
+  local path="$1" resolved uid mode
+  [[ "$path" == /* ]] || return 1
+  resolved="$(readlink -f -- "$path" 2>/dev/null || true)"
+  case "$resolved" in /usr/bin/*|/usr/sbin/*|/bin/*|/sbin/*) ;; *) return 1 ;; esac
+  [[ -f "$resolved" && -x "$resolved" && ! -L "$resolved" ]] || return 1
+  IFS=: read -r uid mode < <(stat -c '%u:%a' -- "$resolved") || return 1
+  [[ "$uid" == 0 ]] && (( (8#$mode & 8#022) == 0 ))
+}
+
+if [[ -n "$test_root" ]]; then
+  [[ -x "$dkms_bin" && ! -L "$dkms_bin" ]] || blocked "no trusted DKMS executable"
+  [[ -x "$depmod_bin" && ! -L "$depmod_bin" ]] || blocked "no trusted depmod executable"
+else
+  trusted_system_executable "$dkms_bin" || blocked "no trusted DKMS executable"
+  trusted_system_executable "$depmod_bin" || blocked "no trusted depmod executable"
+fi
 for required_command in python3 sha256sum stat install cp rm mkdir rmdir sed grep find realpath readlink flock modinfo systemd-escape awk cmp basename mktemp git uname; do
   command -v "$required_command" >/dev/null 2>&1 || blocked "$required_command unavailable"
 done
@@ -106,9 +128,11 @@ if [[ -z "$test_root" ]]; then
 fi
 
 if [[ -z "$test_root" ]]; then
-  install -d -m0755 "$(dirname "$package_lock")"
+  install -d -o 0 -g 0 -m0755 "$(dirname "$package_lock")"
 fi
+[[ ! -L "$package_lock" ]] || blocked "symlinked package lock"
 exec 9>"$package_lock"
+chmod 0600 "$package_lock" || blocked "cannot secure package lock"
 flock -n 9 || blocked "another swapz package operation is active"
 
 primary_recovery_base="/var/lib/swapz/physical-recovery"
@@ -136,6 +160,12 @@ swap_unit_name="$(systemd-escape --path --suffix=swap /dev/mapper/swapz-primary)
 primary_swap="$unit_dir/$swap_unit_name"
 installed_module_dir="$modules_root/$kernel_release/updates/dkms"
 installed_module="$installed_module_dir/dm-swapz.ko"
+module_candidate_paths=(
+  "$installed_module"
+  "$installed_module.xz"
+  "$installed_module.zst"
+  "$installed_module.gz"
+)
 marker=".swapz-owned"
 qualification_marker=".swapz-qualification"
 source_manifest=".swapz-sources.sha256"
@@ -162,6 +192,15 @@ if [[ -z "$test_root" ]]; then
   expected_installed_group=0
 fi
 
+installed_directory_metadata() {
+  local path="$1" expected_mode="$2" uid gid mode
+  [[ -d "$path" && ! -L "$path" ]] || return 1
+  IFS=: read -r uid gid mode < <(stat -c '%u:%g:%a' -- "$path") || return 1
+  [[ "$uid" == "$expected_installed_owner" &&
+     "$gid" == "$expected_installed_group" &&
+     "$mode" == "$expected_mode" ]]
+}
+
 reject_symlinked_destination() {
   local path="$1"
   [[ ! -L "$path" ]] || blocked "symlinked package destination: $path"
@@ -172,6 +211,15 @@ for destination in "$srcbase" "$modules_root" "$modules_root/$kernel_release" "$
     "$unit_dir" "$generator_dir" "$installed_module_dir"; do
   if [[ -e "$destination" || -L "$destination" ]]; then
     reject_symlinked_destination "$destination"
+    [[ -d "$destination" ]] || blocked "non-directory package destination: $destination"
+    IFS=: read -r destination_uid destination_gid destination_mode < <(
+      stat -c '%u:%g:%a' -- "$destination"
+    ) || blocked "cannot inspect package destination: $destination"
+    [[ "$destination_uid" == "$expected_installed_owner" &&
+       "$destination_gid" == "$expected_installed_group" ]] ||
+      blocked "unexpected package destination ownership: $destination"
+    (( (8#$destination_mode & 8#022) == 0 )) ||
+      blocked "writable package destination directory: $destination"
   fi
 done
 
@@ -182,6 +230,21 @@ installed_file_metadata() {
   [[ "$uid" == "$expected_installed_owner" &&
      "$gid" == "$expected_installed_group" &&
      "$mode" == "$expected_mode" && "$links" == 1 ]]
+}
+
+verify_source_metadata() {
+  local path
+  installed_directory_metadata "$src" 755 || return 1
+  installed_directory_metadata "$src/src" 755 || return 1
+  installed_directory_metadata "$src/src/kernel" 755 || return 1
+  for path in "$src/dkms.conf" "$src/src/kernel/VERSION" \
+      "$src/src/kernel/Makefile" "$src/$marker" \
+      "$src/$source_manifest" "$src/$binary_manifest"; do
+    installed_file_metadata "$path" 644 || return 1
+  done
+  for path in "$src"/src/kernel/*.c "$src"/src/kernel/*.h; do
+    installed_file_metadata "$path" 644 || return 1
+  done
 }
 
 swapz_module_loaded() {
@@ -222,6 +285,7 @@ verify_binary_manifest() {
 }
 
 verify_owned_legacy() {
+  verify_source_metadata || return 1
   [[ -d "$src" && ! -L "$src" && -f "$src/$marker" &&
      -f "$src/$source_manifest" && -f "$src/$binary_manifest" &&
      -f "$cli" && ! -L "$cli" && -f "$helper" && ! -L "$helper" &&
@@ -235,10 +299,23 @@ verify_owned_legacy() {
   verify_source_manifest && verify_binary_manifest
 }
 
+verify_installed_module_set() {
+  local candidate count=0 matched=""
+  for candidate in "${module_candidate_paths[@]}"; do
+    if [[ -e "$candidate" || -L "$candidate" ]]; then
+      count=$((count + 1))
+      matched="$candidate"
+    fi
+  done
+  [[ "$count" == 1 && "$matched" == "$installed_module" ]]
+}
+
 verify_owned() {
   verify_owned_legacy || return 1
+  verify_installed_module_set || return 1
   [[ -f "$src/$qualification_marker" && ! -L "$src/$qualification_marker" &&
      -f "$installed_module" && ! -L "$installed_module" ]] || return 1
+  installed_file_metadata "$src/$qualification_marker" 644 || return 1
   installed_file_metadata "$cli" 755 || return 1
   installed_file_metadata "$boot_verifier" 755 || return 1
   installed_file_metadata "$helper" 755 || return 1
@@ -252,13 +329,20 @@ verify_owned() {
 }
 
 package_paths_present() {
-  [[ -e "$src" || -L "$src" || -e "$cli" || -L "$cli" ||
-     -e "$boot_verifier" || -L "$boot_verifier" ||
-     -e "$helper_dir" || -L "$helper_dir" ||
-     -e "$primary_generator" || -L "$primary_generator" ||
-     -e "$mapper_service" || -L "$mapper_service" ||
-     -e "$boot_verifier_service" || -L "$boot_verifier_service" ||
-     -e "$primary_swap" || -L "$primary_swap" ]]
+  local candidate
+  if [[ -e "$src" || -L "$src" || -e "$cli" || -L "$cli" ||
+        -e "$boot_verifier" || -L "$boot_verifier" ||
+        -e "$helper_dir" || -L "$helper_dir" ||
+        -e "$primary_generator" || -L "$primary_generator" ||
+        -e "$mapper_service" || -L "$mapper_service" ||
+        -e "$boot_verifier_service" || -L "$boot_verifier_service" ||
+        -e "$primary_swap" || -L "$primary_swap" ]]; then
+    return 0
+  fi
+  for candidate in "${module_candidate_paths[@]}"; do
+    [[ -e "$candidate" || -L "$candidate" ]] && return 0
+  done
+  return 1
 }
 
 cleanup_package_files() {
@@ -324,6 +408,13 @@ for input in "$cli_artifact" "$oracle_artifact" "$module_artifact" "$build_info"
 done
 [[ -x "$cli_artifact" && -x "$oracle_artifact" ]] ||
   blocked "qualified userspace artifacts are not executable"
+for payload in dkms.conf src/kernel/VERSION \
+    packaging/swapz-primary-boot-verify \
+    packaging/swapz-primary-mapper.service \
+    packaging/swapz-primary-boot-verify.service \
+    packaging/swapz-primary-generator packaging/swapz-primary.swap; do
+  safe_input_file "$payload" || blocked "unsafe package payload: $payload"
+done
 
 qualification_output="$(python3 - "$qualification_report" <<'PY'
 import json
@@ -460,8 +551,31 @@ fi
 swapz_module_loaded && blocked "loaded module; refusing package upgrade"
 swapz_mapper_present && blocked "active swapz mapping; refusing package upgrade"
 
-install -d -m0700 "$transaction_parent"
+staging_abort() {
+  local rc="${1:-1}" reason="${2:-failure}"
+  trap - ERR HUP INT TERM
+  transaction_active=0
+  echo "BLOCKED: package $reason before mutation; removing staging data" >&2
+  [[ -z "$transaction_dir" ]] || rm -rf -- "$transaction_dir"
+  exit "$rc"
+}
+
+if [[ -e "$transaction_parent" || -L "$transaction_parent" ]]; then
+  installed_directory_metadata "$transaction_parent" 700 ||
+    blocked "unsafe package transaction directory"
+else
+  if [[ -z "$test_root" ]]; then
+    install -d -o 0 -g 0 -m0700 "$transaction_parent"
+  else
+    install -d -m0700 "$transaction_parent"
+  fi
+fi
 transaction_dir="$(mktemp -d "$transaction_parent/swapz-package.XXXXXXXX")"
+transaction_active=2
+trap 'staging_abort $? failure' ERR
+trap 'staging_abort 129 interruption' HUP
+trap 'staging_abort 130 interruption' INT
+trap 'staging_abort 143 interruption' TERM
 chmod 0700 "$transaction_dir"
 backup_dir="$transaction_dir/backup"
 stage_dir="$transaction_dir/stage"
@@ -555,11 +669,11 @@ rollback() {
   fi
   exit "$rc"
 }
+transaction_active=1
 trap 'rollback $? failure' ERR
 trap 'rollback 129 interruption' HUP
 trap 'rollback 130 interruption' INT
 trap 'rollback 143 interruption' TERM
-transaction_active=1
 
 if (( had_existing == 1 )); then
   "$dkms_bin" remove -m swapz -v "$version" --all
@@ -572,7 +686,7 @@ new_source_created=1
 install -m0644 dkms.conf "$src/dkms.conf"
 install -m0644 src/kernel/VERSION "$src/src/kernel/VERSION"
 for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
-  [[ -f "$file" && ! -L "$file" ]] || blocked "unsafe kernel package source: $file"
+  safe_input_file "$file" || blocked "unsafe kernel package source: $file"
   install -m0644 "$file" "$src/src/kernel/$(basename "$file")"
 done
 install -m0644 "$build_info" "$src/src/kernel/swapz-build-info.h"
@@ -590,12 +704,8 @@ status="$("$dkms_bin" status -m swapz -v "$version" -k "$kernel_release")"
 [[ "$status" == *installed* && "$status" == *"$kernel_release"* ]] ||
   blocked "DKMS did not report the current kernel installed"
 
-shopt -s nullglob
-module_candidates=("$installed_module_dir"/dm-swapz.ko "$installed_module_dir"/dm-swapz.ko.xz \
-                   "$installed_module_dir"/dm-swapz.ko.zst "$installed_module_dir"/dm-swapz.ko.gz)
-shopt -u nullglob
 existing_module_candidates=()
-for candidate in "${module_candidates[@]}"; do
+for candidate in "${module_candidate_paths[@]}"; do
   [[ -e "$candidate" || -L "$candidate" ]] && existing_module_candidates+=("$candidate")
 done
 [[ ${#existing_module_candidates[@]} == 1 ]] || blocked "unexpected DKMS module paths"

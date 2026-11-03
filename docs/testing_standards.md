@@ -3807,6 +3807,19 @@ while this file or the active ownership marker exists, including dangling
 symlinks at either path; both remain preserved until an explicit completed
 recovery. The rootless package test must cover these refusal cases.
 
+Package admission must treat every current-kernel `dm-swapz.ko` candidate
+(uncompressed or compressed) as package state even when the userspace/source
+tree is absent; an unmatched image is foreign and blocks installation rather
+than being overwritten. Installed source files and package-owned directories
+must remain single-link, non-symlinked, owner/mode-checked objects, and existing
+shared destination directories must not be group/world writable. Production
+may accept distribution symlink wrappers for `dkms` or `depmod` only after
+the canonical executable resolves inside a trusted system executable directory
+and is root-owned and non-writable. Transaction scratch must use a dedicated
+root-owned mode-0700 directory outside shared temporary directories; errors or
+signals during the pre-mutation backup phase remove only that staging data,
+while failures after mutation enter the full version-owned rollback path.
+
 Recovery must refuse while any `swapoff` process runs in a swapoff stage, even
 when the kernel still lists the device, and an unreadable `/proc` entry fails
 closed. Rootless suites for this procedure run with privileged commands refused

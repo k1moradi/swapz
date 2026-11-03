@@ -104,6 +104,7 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_FAKE_BUILD_SLEEP="0",
             SWAPZ_FAKE_TAMPER_INSTALLED="0",
             SWAPZ_FAKE_SECURE_BOOT="disabled",
+            SWAPZ_FAKE_MOK_ENROLLED="1",
             SWAPZ_FAKE_SIG_KEY="ABCD",
             SWAPZ_FAKE_VERMAGIC=self.kernel_release,
             SWAPZ_MOK_CERT=str(self.cert),
@@ -187,10 +188,19 @@ else
 fi
 ''')
         self.tool("mokutil", r'''#!/usr/bin/env bash
-case "$SWAPZ_FAKE_SECURE_BOOT" in
-  enabled) echo 'SecureBoot enabled';;
-  disabled) echo 'SecureBoot disabled';;
-  *) echo 'unknown'; exit 1;;
+set -eu
+case "${1:-}" in
+  --sb-state)
+    case "$SWAPZ_FAKE_SECURE_BOOT" in
+      enabled) echo 'SecureBoot enabled';;
+      disabled) echo 'SecureBoot disabled';;
+      *) echo 'unknown'; exit 1;;
+    esac
+    ;;
+  --test-key)
+    [[ "$SWAPZ_FAKE_MOK_ENROLLED" == 1 ]]
+    ;;
+  *) exit 2 ;;
 esac
 ''')
         self.tool("openssl", "#!/bin/sh\nprintf '%s\\n' 'serial=ABCD'\n")
@@ -272,10 +282,43 @@ esac
         self.cert.write_text("certificate")
 
         result = self.invoke(
+            "install", {
+                "SWAPZ_FAKE_SECURE_BOOT": "enabled",
+                "SWAPZ_FAKE_MOK_ENROLLED": "0",
+            })
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not enrolled", result.stderr)
+        self.assert_absent()
+
+        result = self.invoke(
             "install", {"SWAPZ_FAKE_VERMAGIC": "other-kernel"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not match the running kernel", result.stderr)
         self.assert_absent()
+
+    def test_kernel_upgrade_requires_new_qualified_module(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        old_module = self.installed_module.read_bytes()
+        next_release = self.kernel_release + "-next"
+        next_headers = (
+            self.home / "lib/modules" / next_release / "build")
+        next_headers.mkdir(parents=True)
+        (next_headers / "Makefile").write_text("all:\n\t@:\n")
+        result = self.invoke(
+            "install", {"SWAPZ_TEST_KERNEL_RELEASE": next_release})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not match the running kernel", result.stderr)
+        self.assertEqual(self.installed_module.read_bytes(), old_module)
+        self.assertFalse(
+            (self.home / "lib/modules" / next_release /
+             "updates/dkms/dm-swapz.ko").exists())
+
+    def test_production_transaction_storage_is_private(self):
+        content = SCRIPT.read_text()
+        self.assertIn(
+            'transaction_parent="/var/lib/swapz-package-transactions"',
+            content)
+        self.assertNotIn('transaction_parent="/var/tmp"', content)
 
     def test_unexpected_paths_and_symlinks_refuse(self):
         for prefix in ("/", "/tmp/../wrong", "/usr/local"):
@@ -297,6 +340,35 @@ esac
         result = self.invoke("install")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("symlinked package destination", result.stderr)
+
+    def test_foreign_module_writable_destination_and_tool_symlink_refuse(self):
+        self.installed_module.parent.mkdir(parents=True, exist_ok=True)
+        self.installed_module.write_bytes(b"foreign-module\n")
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertEqual(
+            self.installed_module.read_bytes(), b"foreign-module\n")
+        self.installed_module.unlink()
+
+        self.prefix.mkdir(parents=True, exist_ok=True)
+        self.prefix.chmod(0o777)
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("writable package destination directory", result.stderr)
+        self.prefix.chmod(0o755)
+
+        dkms = self.bin / "dkms"
+        real_dkms = self.bin / "dkms.real"
+        dkms.rename(real_dkms)
+        dkms.symlink_to(real_dkms.name)
+        try:
+            result = self.invoke("install")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no trusted DKMS executable", result.stderr)
+        finally:
+            dkms.unlink()
+            real_dkms.rename(dkms)
 
     def test_partial_failure_and_digest_tamper_roll_back(self):
         result = self.invoke(
@@ -338,6 +410,29 @@ esac
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue((self.prefix / "sbin/swapzctl").exists())
             self.assertTrue(self.installed_module.exists())
+
+    def test_installed_source_symlink_is_not_silently_accepted(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        source_version = (
+            self.home / "usr/src" / ("swapz-" + VERSION) /
+            "src/kernel/VERSION")
+        source_version.unlink()
+        source_version.symlink_to(ROOT / "src/kernel/VERSION")
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertTrue(source_version.is_symlink())
+        self.assertNotEqual(self.invoke("uninstall").returncode, 0)
+
+    def test_installed_userspace_digest_mismatch_is_not_silently_repaired(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        binary = self.prefix / "sbin/swapzctl"
+        binary.write_bytes(b"tampered-userspace\n")
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertEqual(binary.read_bytes(), b"tampered-userspace\n")
+        self.assertNotEqual(self.invoke("uninstall").returncode, 0)
 
     def test_installed_digest_mismatch_is_not_silently_repaired(self):
         self.assertEqual(self.invoke("install").returncode, 0)

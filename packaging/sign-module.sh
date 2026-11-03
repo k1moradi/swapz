@@ -106,6 +106,7 @@ normalize_hex() {
     tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]'
 }
 
+cert_requires_sudo=0
 if [[ -r "$cert" ]]; then
     [[ -f "$cert" && ! -L "$cert" ]] ||
         blocked "MOK certificate is not a regular file"
@@ -119,11 +120,22 @@ else
     "${sudo_command[@]}" test -f "$cert" &&
         "${sudo_command[@]}" test ! -L "$cert" ||
         blocked "MOK certificate is missing, unsafe, or sudo authorization is unavailable"
+    cert_requires_sudo=1
     cert_serial="$("${sudo_command[@]}" openssl x509 -inform DER -in "$cert" \
                      -noout -serial 2>/dev/null |
                    sed -n 's/^serial=//p' | normalize_hex)"
 fi
 [[ -n "$cert_serial" ]] || blocked "cannot read MOK certificate serial"
+
+command -v mokutil >/dev/null 2>&1 ||
+    blocked "mokutil is required to verify MOK enrollment"
+if (( cert_requires_sudo == 1 )); then
+    "${sudo_command[@]}" mokutil --test-key "$cert" >/dev/null 2>&1 ||
+        blocked "configured MOK certificate is not enrolled"
+else
+    mokutil --test-key "$cert" >/dev/null 2>&1 ||
+        blocked "configured MOK certificate is not enrolled"
+fi
 
 module_sig_key="$(modinfo -F sig_key "$module" 2>/dev/null | normalize_hex)"
 if [[ -n "$module_sig_key" && "$module_sig_key" == "$cert_serial" ]]; then

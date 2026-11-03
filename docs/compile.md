@@ -86,7 +86,10 @@ before the build succeeds. The default Ubuntu MOK locations are
 `/var/lib/shim-signed/mok/MOK.priv` and
 `/var/lib/shim-signed/mok/MOK.der`; `SWAPZ_MOK_PRIVATE_KEY` and
 `SWAPZ_MOK_CERT` may select an equivalent enrolled signing key and
-certificate. Secure Boot-disabled and non-EFI hosts do not sign the module.
+certificate. When Secure Boot is enabled, the configured certificate must also
+be reported enrolled by `mokutil --test-key`; a matching signature made by an
+unenrolled certificate is refused. Secure Boot-disabled and non-EFI hosts do
+not sign the module.
 
 The signing hook compares the module's current signature key with the
 certificate serial and does not append a duplicate signature on an unchanged
@@ -122,8 +125,13 @@ commit step fails. Uninstall likewise refuses active/enabled deployment state,
 active mapper/module use, recovery ownership, or any ownership/digest mismatch;
 it never unloads a module, removes a mapper, or calls swapon/swapoff. Production
 uses the fixed `/usr/local` prefix, trusted system executables, root-owned
-package files, restrictive transaction storage, and symlink/path substitution
-checks.
+package files, a dedicated root-owned mode-0700 transaction directory outside
+shared temporary paths, and symlink/path substitution checks. Existing package
+source/destination metadata and every current-kernel module candidate are part
+of admission, so a stray compressed or uncompressed `dm-swapz.ko` cannot be
+silently overwritten. Distribution command symlinks are accepted only when
+their canonical executable is root-owned, non-writable and within trusted
+system executable directories.
 
 A kernel upgrade is deliberately not automatic deployment: because
 `AUTOINSTALL="no"` is retained, the new kernel needs matching headers, a
