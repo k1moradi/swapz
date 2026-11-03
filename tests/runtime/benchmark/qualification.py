@@ -59,7 +59,7 @@ CONTRACT = _load_frozen_physical_contract()
 
 def _git_blob_sha(path: Path) -> str:
     data = path.read_bytes()
-    digest = hashlib.sha1()
+    digest = hashlib.sha1(usedforsecurity=False)
     digest.update(f"blob {len(data)}\0".encode("ascii"))
     digest.update(data)
     return digest.hexdigest()
@@ -244,6 +244,11 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
         for field in ("physical_partuuid", "physical_device_bytes", "lower_major_minor"):
             if (raw.get("device_identity") or {}).get(field) != (swapz.get("device_identity") or {}).get(field):
                 reasons.append("physical pair identity mismatch: " + field)
+    else:
+        raw_identity = raw.get("swap_device_identity") or {}
+        swapz_identity = swapz.get("swap_device_identity") or {}
+        if raw_identity.get("device") != swapz_identity.get("lower_device"):
+            reasons.append("anonymous pair physical lower identity mismatch")
     for label, arm in (("raw", raw), ("swapz", swapz)):
         if arm.get("verdict") != "PASS":
             reasons.append(f"{label} arm verdict is not PASS")
