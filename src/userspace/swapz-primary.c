@@ -41,6 +41,10 @@ static void swapz_primary_selected_target_clear(void)
 
 #define SWAPZ_PRIMARY_BLOCK_BYTES ((uint64_t)SWAPZ_BLOCK_BYTES)
 #define SWAPZ_PRIMARY_MUTATION_LOCK_NAME "package.lock"
+#define SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY "/run/swapz"
+#define SWAPZ_PRIMARY_EXECUTION_RECORD_NAME "primary-execution.env"
+#define SWAPZ_PRIMARY_BOOT_ID_LENGTH 36U
+#define SWAPZ_PRIMARY_EXECUTION_RECORD_BYTES 512U
 #if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
 	defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
 #error "primary lifecycle test modes are mutually exclusive"
@@ -82,8 +86,19 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	"/var/lib/swapz/physical-recovery/primary-qualification.json"
 #define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY "/run/lock/swapz"
-/* Privileged lifecycle stays disabled until provisioning and recovery qualify. */
-#define SWAPZ_PRIMARY_EXECUTION_ENABLED 0
+/*
+ * Ordinary production contains the qualified lifecycle implementation but is
+ * runtime-locked. A successful owner-armed, cross-boot preflight must mint a
+ * volatile source/boot/target-bound authorization before mutation is possible.
+ * Private qualification seams retain their existing admission behavior.
+ */
+#define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
+#endif
+
+#if !defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
+	!defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST) && \
+	!defined(SWAPZ_PRIMARY_ROOTLESS_TEST)
+static int swapz_primary_production_execution_authorized(void);
 #endif
 
 static int swapz_primary_lifecycle_runtime_enabled(void)
@@ -92,16 +107,20 @@ static int swapz_primary_lifecycle_runtime_enabled(void)
 	const char *enabled = getenv("SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION");
 
 	return enabled && !strcmp(enabled, "1");
-#else
+#elif defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST)
 	return 1;
+#elif defined(SWAPZ_PRIMARY_ROOTLESS_TEST)
+	return 0;
+#else
+	return swapz_primary_production_execution_authorized();
 #endif
 }
 
 /*
  * One source of truth for both read-only admission reporting and mutating
- * command dispatch. Ordinary production resolves the compile-time gate to
- * zero; private qualification seams still require their existing runtime
- * admission before this can become true.
+ * command dispatch. Ordinary production is compiled capable but remains
+ * runtime-locked until the current boot's preflight authorization validates;
+ * private qualification seams retain their explicit admission rules.
  */
 static int swapz_primary_privileged_execution_enabled(void)
 {
@@ -628,6 +647,59 @@ int swapz_primary_partuuid_valid(const char *partuuid)
 	return swapz_primary_partuuid_normalize(partuuid, normalized) == 0;
 }
 
+
+static int swapz_primary_boot_id_valid(const char *boot_id)
+{
+	unsigned int index;
+
+	if (!boot_id ||
+	    strnlen(boot_id, SWAPZ_PRIMARY_BOOT_ID_LENGTH + 1U) !=
+		    SWAPZ_PRIMARY_BOOT_ID_LENGTH)
+		return 0;
+	for (index = 0; index < SWAPZ_PRIMARY_BOOT_ID_LENGTH; ++index) {
+		unsigned char byte = (unsigned char)boot_id[index];
+		int hyphen = index == 8U || index == 13U ||
+			     index == 18U || index == 23U;
+
+		if (hyphen) {
+			if (byte != '-')
+				return 0;
+			continue;
+		}
+		if (!((byte >= '0' && byte <= '9') ||
+		      (byte >= 'a' && byte <= 'f')))
+			return 0;
+	}
+	return 1;
+}
+
+static int swapz_primary_execution_record_matches(
+	const char *record, size_t length, const char *boot_id,
+	const char *source_sha, const char *partuuid, uint64_t target_size_bytes)
+{
+	char expected[SWAPZ_PRIMARY_EXECUTION_RECORD_BYTES];
+	int expected_length;
+
+	if (!record || !length || !swapz_primary_boot_id_valid(boot_id) ||
+	    !swapz_primary_valid_source_sha(source_sha) ||
+	    !swapz_primary_partuuid_valid(partuuid) || !target_size_bytes)
+		return 0;
+	expected_length = snprintf(
+		expected, sizeof(expected),
+		"schema=swapz-primary-execution-v1\n"
+		"boot_id=%s\n"
+		"source_sha=%s\n"
+		"partuuid=%s\n"
+		"target_size_bytes=%llu\n",
+		boot_id, source_sha, partuuid,
+		(unsigned long long)target_size_bytes);
+	if (expected_length <= 0 ||
+	    (size_t)expected_length >= sizeof(expected))
+		return 0;
+	return length == (size_t)expected_length &&
+	       !memcmp(record, expected, (size_t)expected_length);
+}
+
 static int swapz_primary_target_valid(
 	const struct swapz_primary_target *target)
 {
@@ -1078,6 +1150,127 @@ static int swapz_primary_configured_target(
 	swapz_primary_selected_target = *target;
 	return 0;
 }
+
+#if !defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
+	!defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
+static int swapz_primary_read_current_boot_id(
+	char boot_id[SWAPZ_PRIMARY_BOOT_ID_LENGTH + 1U])
+{
+	char record[SWAPZ_PRIMARY_BOOT_ID_LENGTH + 2U];
+	size_t used = 0;
+	int fd;
+
+	if (!boot_id) {
+		errno = EINVAL;
+		return -1;
+	}
+	boot_id[0] = '\0';
+	fd = open("/proc/sys/kernel/random/boot_id",
+		  O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	while (used < sizeof(record)) {
+		ssize_t count = read(fd, record + used, sizeof(record) - used);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (close(fd) < 0)
+		return -1;
+	if (used != SWAPZ_PRIMARY_BOOT_ID_LENGTH + 1U ||
+	    record[SWAPZ_PRIMARY_BOOT_ID_LENGTH] != '\n') {
+		errno = EINVAL;
+		return -1;
+	}
+	record[SWAPZ_PRIMARY_BOOT_ID_LENGTH] = '\0';
+	if (!swapz_primary_boot_id_valid(record)) {
+		errno = EINVAL;
+		return -1;
+	}
+	memcpy(boot_id, record, SWAPZ_PRIMARY_BOOT_ID_LENGTH + 1U);
+	return 0;
+}
+
+static int swapz_primary_production_execution_authorized(void)
+{
+	struct swapz_primary_target target = {0};
+	struct stat directory_info;
+	struct stat before;
+	struct stat after;
+	char boot_id[SWAPZ_PRIMARY_BOOT_ID_LENGTH + 1U];
+	char record[SWAPZ_PRIMARY_EXECUTION_RECORD_BYTES];
+	size_t used = 0;
+	int directory_fd = -1;
+	int fd = -1;
+	int authorized = 0;
+
+	if (SWAPZ_BUILD_SOURCE_CLEAN != 1 ||
+	    !swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA) ||
+	    swapz_primary_read_current_boot_id(boot_id) < 0 ||
+	    swapz_primary_configured_target(&target) < 0)
+		return 0;
+
+	directory_fd = open(SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY,
+			    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (directory_fd < 0)
+		goto out;
+	if (fstat(directory_fd, &directory_info) < 0 ||
+	    !S_ISDIR(directory_info.st_mode) || directory_info.st_uid != 0 ||
+	    (directory_info.st_mode & 0777U) != 0700U)
+		goto out;
+	fd = openat(directory_fd, SWAPZ_PRIMARY_EXECUTION_RECORD_NAME,
+		    O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		goto out;
+	if (fstat(fd, &before) < 0 || !S_ISREG(before.st_mode) ||
+	    before.st_uid != 0 || (before.st_mode & 0777U) != 0600U ||
+	    before.st_nlink != 1 || before.st_size <= 0 ||
+	    (uint64_t)before.st_size >= sizeof(record))
+		goto out;
+	while (used < sizeof(record)) {
+		ssize_t count = read(fd, record + used, sizeof(record) - used);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0)
+			goto out;
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (used == sizeof(record) || fstat(fd, &after) < 0 ||
+	    before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
+	    before.st_size != after.st_size ||
+	    before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
+	    before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
+	    before.st_ctim.tv_sec != after.st_ctim.tv_sec ||
+	    before.st_ctim.tv_nsec != after.st_ctim.tv_nsec ||
+	    before.st_uid != after.st_uid || before.st_mode != after.st_mode ||
+	    before.st_nlink != after.st_nlink || used != (size_t)before.st_size)
+		goto out;
+	authorized = swapz_primary_execution_record_matches(
+		record, used, boot_id, SWAPZ_BUILD_SOURCE_SHA, target.partuuid,
+		target.device_bytes);
+out:
+	if (fd >= 0)
+		(void)close(fd);
+	if (directory_fd >= 0)
+		(void)close(directory_fd);
+	memset(record, 0, sizeof(record));
+	memset(&target, 0, sizeof(target));
+	return authorized;
+}
+#endif
 #endif
 
 int swapz_primary_header_build(
