@@ -3889,9 +3889,13 @@ also require exact runtime marker
 remains blocked. The ordinary source must retain literal execution gate 0 and
 must not read that marker. The public Makefile and package must never define,
 install or expose either test seam. The source contract must inspect the root
-Makefile directly and reject the physical seam macro there. Rootless CI must
-warning-compile both seams, prove the physical seam fails compilation without
-its qualified-control path, and prove both seam macros cannot be combined. The production topology proof
+Makefile directly and reject the physical seam macro there. The lifecycle audit
+must identify the ordinary production gate independently of seam-local gate
+definitions, and must prove the native swapon/swapoff syscall implementations
+plus activate/deactivate routing through the shared transition ops. Rootless CI
+must warning-compile both seams, prove the physical seam fails compilation
+without its qualified-control path, and prove both seam macros cannot be
+combined. The production topology proof
 still rejects every virtual backing chain. Under the owned-null_blk macro only, the
 selected target may use a virtual parent when it is exactly one
 `/sys/devices/virtual/block/<disk>` parent, its source is exactly one partition

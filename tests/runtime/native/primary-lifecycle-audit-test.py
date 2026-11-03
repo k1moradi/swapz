@@ -641,13 +641,19 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
     def test_execution_gate_remains_disabled_pending_live_lifecycle_evidence(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         gate = re.search(
-            r"^#define\s+SWAPZ_PRIMARY_EXECUTION_ENABLED\s+([01])\s*$",
-            source, re.MULTILINE)
-        self.assertIsNotNone(gate, "primary execution gate must remain explicit")
+            r"/\* Privileged lifecycle stays disabled until provisioning "
+            r"and recovery qualify\. \*/\s*"
+            r"#define\s+SWAPZ_PRIMARY_EXECUTION_ENABLED\s+([01])",
+            source)
+        self.assertIsNotNone(
+            gate, "production primary execution gate must remain explicit")
         self.assertEqual(
             gate.group(1), "0",
-            "privileged lifecycle needs owned-null_blk and physical evidence")
-        self.assertIn("#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST", source)
+            "privileged production lifecycle needs physical evidence")
+        self.assertIn("#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST)", source)
+        self.assertIn(
+            "#elif defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)",
+            source)
         self.assertIn(
             "#define SWAPZ_PRIMARY_CONFIG_BASE \"/etc/swapz\"", source)
         self.assertIn(
@@ -674,20 +680,20 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
 
     def test_execution_gate_cannot_enable_without_native_swap_operations(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
-        gate = re.search(
-            r"^#define\s+SWAPZ_PRIMARY_EXECUTION_ENABLED\s+([01])\s*$",
-            source, re.MULTILINE)
-        self.assertIsNotNone(gate, "primary execution gate must remain explicit")
-        if gate.group(1) == "0":
-            return
+        native_swapon = c_function_body(source, "swapz_primary_native_swapon")
+        native_swapoff = c_function_body(source, "swapz_primary_native_swapoff")
         activate = c_function_body(source, "swapz_primary_activate_mapper_swap")
         deactivate = c_function_body(source, "swapz_primary_deactivate_mapper_swap")
         self.assertRegex(
-            activate, r"\bsyscall\s*\(\s*SYS_swapon\s*,",
-            "privileged lifecycle enabled without executable native swapon")
+            native_swapon, r"\bsyscall\s*\(\s*SYS_swapon\s*,",
+            "native transition ops lack executable swapon")
         self.assertRegex(
-            deactivate, r"\bsyscall\s*\(\s*SYS_swapoff\s*,",
-            "privileged lifecycle enabled without executable native swapoff")
+            native_swapoff, r"\bsyscall\s*\(\s*SYS_swapoff\s*,",
+            "native transition ops lack executable swapoff")
+        self.assertIn(
+            "&swapz_primary_native_swap_transition_ops", activate)
+        self.assertIn(
+            "&swapz_primary_native_swap_transition_ops", deactivate)
 
     def test_source_guard_ignores_comments_and_string_literals(self):
         sample = """static int swapz_primary_activate_mapper_swap(void) {
