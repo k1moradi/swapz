@@ -310,6 +310,35 @@ static void test_recovery_source_chain(void)
 	assert(nftw(root, test_remove_tree_entry, 16, FTW_DEPTH | FTW_PHYS) == 0);
 }
 
+static void test_mountinfo_parser(void)
+{
+	struct swapz_primary_mount_facts facts;
+
+	assert(swapz_primary_parse_mountinfo(
+		"36 25 8:3 / / rw,relatime - f2fs /dev/sda3 rw\n"
+		"37 36 8:3 /data /data\\040archive rw - f2fs /dev/sda3 rw\n"
+		"38 37 0:5 mnt:[4026531840] /run/ns rw - nsfs nsfs rw\n",
+		makedev(8U, 4U), &facts) == 0);
+	assert(facts.root_mount_seen);
+	assert(facts.root_device == makedev(8U, 3U));
+	assert(!facts.target_mounted);
+	assert(swapz_primary_parse_mountinfo(
+		"36 25 8:3 / / rw - f2fs /dev/sda3 rw\n"
+		"37 36 8:4 / /mnt/swap rw - swap /dev/sda4 rw\n",
+		makedev(8U, 4U), &facts) == 0);
+	assert(facts.target_mounted);
+	assert(swapz_primary_parse_mountinfo(
+		"36 25 8:x / / rw - f2fs /dev/sda3 rw\n",
+		makedev(8U, 4U), &facts) < 0);
+	assert(swapz_primary_parse_mountinfo(
+		"36 25 8:3 / / rw - f2fs /dev/sda3 rw\n"
+		"37 36 8:3 / / rw - f2fs /dev/sda3 rw\n",
+		makedev(8U, 4U), &facts) < 0);
+	assert(swapz_primary_parse_mountinfo(
+		"36 25 8:3 / / rw - f2fs /dev/sda3\n",
+		makedev(8U, 4U), &facts) < 0);
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -346,6 +375,7 @@ int main(void)
 	test_sha256_helper();
 	test_recovery_filesystem_policy();
 	test_recovery_source_chain();
+	test_mountinfo_parser();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);

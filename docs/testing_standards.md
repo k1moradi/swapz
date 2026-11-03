@@ -3332,7 +3332,11 @@ and checked. Report whether recovery storage shares the target's physical disk;
 that is a relevant failure-domain limitation even when it is a different
 partition. Rootless tests must use synthetic sysfs trees and cover malformed
 device numbers, target identity, missing physical identity and nonempty holder
-directories without reading host block devices.
+or slave directories without reading host block devices. Parse mountinfo
+strictly, identify the unique `/` mount, and reject any mount whose
+major:minor is the selected swap partition. Rootless mountinfo tests must
+include escaped mountpoints, special non-path filesystem roots, malformed
+device fields and duplicate root entries.
 The `/proc/swaps` parser must reject malformed or extra fields, duplicate paths,
 numeric overflow and invalid signed priorities. The read-only plan may report
 the active-entry count and whether `/dev/sda4` is the sole 16,777,212 KiB

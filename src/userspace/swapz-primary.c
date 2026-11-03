@@ -38,6 +38,7 @@
 #define SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256 \
 	"ace016a7a3ecd22b0aca05946a305aef2113bc50439452756ae68909010f0afe"
 #define SWAPZ_PRIMARY_PLAN_BUFFER_BYTES 16384U
+#define SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES 65536U
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_PARTUUID "7fb9401d-04"
@@ -345,6 +346,45 @@ static int swapz_primary_parse_priority(const char *text, int *priority)
 	return 0;
 }
 
+static int swapz_primary_parse_dev_number(const char *text, dev_t *device)
+{
+	const char *colon;
+	char major_text[32];
+	uint64_t major_number;
+	uint64_t minor_number;
+	size_t major_length;
+
+	if (!text || !device) {
+		errno = EINVAL;
+		return -1;
+	}
+	colon = strchr(text, ':');
+	if (!colon || strchr(colon + 1, ':')) {
+		errno = EINVAL;
+		return -1;
+	}
+	major_length = (size_t)(colon - text);
+	if (!major_length || major_length >= sizeof(major_text)) {
+		errno = EINVAL;
+		return -1;
+	}
+	memcpy(major_text, text, major_length);
+	major_text[major_length] = '\0';
+	if (swapz_primary_parse_u64(major_text, &major_number) < 0 ||
+	    swapz_primary_parse_u64(colon + 1, &minor_number) < 0 ||
+	    major_number > UINT_MAX || minor_number > UINT_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+	*device = makedev((unsigned int)major_number,
+			  (unsigned int)minor_number);
+	if (major(*device) != major_number || minor(*device) != minor_number) {
+		errno = ERANGE;
+		return -1;
+	}
+	return 0;
+}
+
 static int swapz_primary_split_fields(char *line, char **fields,
 				      size_t field_capacity, size_t *field_count)
 {
@@ -644,32 +684,122 @@ static int swapz_primary_read_sysfs_text(const char *path, char *buffer,
 static int swapz_primary_sysfs_dev_number(const char *path, dev_t *device)
 {
 	char buffer[64];
-	char *colon;
-	uint64_t major_number;
-	uint64_t minor_number;
 
 	if (!device || swapz_primary_read_sysfs_text(path, buffer,
 						     sizeof(buffer)) < 0)
 		return -1;
-	colon = strchr(buffer, ':');
-	if (!colon || strchr(colon + 1, ':')) {
-		errno = EINVAL;
+	return swapz_primary_parse_dev_number(buffer, device);
+}
+
+struct swapz_primary_mount_facts {
+	dev_t root_device;
+	int root_mount_seen;
+	int target_mounted;
+};
+
+static int swapz_primary_parse_mountinfo(const char *text,
+					       dev_t target_device,
+					       struct swapz_primary_mount_facts *facts)
+{
+	const char *line = text;
+	struct swapz_primary_mount_facts parsed = {0};
+
+	if (!text || !facts)
 		return -1;
+	while (*line) {
+		char buffer[8192];
+		char *fields[64];
+		char *separator;
+		size_t length;
+		size_t field_count = 0;
+		size_t i;
+		size_t separator_index = SIZE_MAX;
+		uint64_t mount_id;
+		uint64_t parent_id;
+		dev_t mounted_device;
+		const char *end = strchr(line, '\n');
+
+		length = end ? (size_t)(end - line) : strlen(line);
+		if (!length || length >= sizeof(buffer))
+			return -1;
+		memcpy(buffer, line, length);
+		buffer[length] = '\0';
+		line = end ? end + 1 : line + length;
+		separator = strstr(buffer, " - ");
+		if (!separator || strstr(separator + 3, " - "))
+			return -1;
+		if (swapz_primary_split_fields(buffer, fields,
+					      sizeof(fields) / sizeof(fields[0]),
+					      &field_count) < 0 || field_count < 10U ||
+		    swapz_primary_parse_u64(fields[0], &mount_id) < 0 ||
+		    swapz_primary_parse_u64(fields[1], &parent_id) < 0 ||
+		    !mount_id || !parent_id ||
+		    swapz_primary_parse_dev_number(fields[2], &mounted_device) < 0 ||
+		    !fields[3][0] || fields[4][0] != '/')
+			return -1;
+		for (i = 0; i < field_count; ++i) {
+			if (strcmp(fields[i], "-"))
+				continue;
+			if (separator_index != SIZE_MAX)
+				return -1;
+			separator_index = i;
+		}
+		if (separator_index < 6U || separator_index + 3U >= field_count)
+			return -1;
+		if (mounted_device == target_device)
+			parsed.target_mounted = 1;
+		if (!strcmp(fields[4], "/")) {
+			if (parsed.root_mount_seen)
+				return -1;
+			parsed.root_mount_seen = 1;
+			parsed.root_device = mounted_device;
+		}
 	}
-	*colon = '\0';
-	if (swapz_primary_parse_u64(buffer, &major_number) < 0 ||
-	    swapz_primary_parse_u64(colon + 1, &minor_number) < 0 ||
-	    major_number > UINT_MAX || minor_number > UINT_MAX) {
-		errno = EINVAL;
+	if (!parsed.root_mount_seen)
 		return -1;
-	}
-	*device = makedev((unsigned int)major_number,
-			  (unsigned int)minor_number);
-	if (major(*device) != major_number || minor(*device) != minor_number) {
-		errno = ERANGE;
-		return -1;
-	}
+	*facts = parsed;
 	return 0;
+}
+
+static int swapz_primary_read_mount_facts(
+	struct swapz_primary_mount_facts *facts)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)facts;
+	errno = ENODEV;
+	return -1;
+#else
+	char buffer[SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES];
+	size_t used = 0;
+	int fd = open("/proc/self/mountinfo", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+
+	if (fd < 0)
+		return -1;
+	while (used + 1U < sizeof(buffer)) {
+		ssize_t count = read(fd, buffer + used, sizeof(buffer) - used - 1U);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (close(fd) < 0)
+		return -1;
+	if (used + 1U == sizeof(buffer)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	buffer[used] = '\0';
+	return swapz_primary_parse_mountinfo(buffer, makedev(8U, 4U), facts);
+#endif
 }
 
 static int swapz_primary_sysfs_directory_empty(const char *path,
@@ -1197,6 +1327,21 @@ static int swapz_primary_read_only_plan(void)
 		&recovery_physical_parent_minor,
 		&recovery_same_physical_disk,
 		&recovery_active_marker_clear) == 0;
+	struct swapz_primary_mount_facts mount_facts = {0};
+	int mount_inventory_read = swapz_primary_read_mount_facts(&mount_facts) == 0;
+	int target_not_mounted = mount_inventory_read &&
+		!mount_facts.target_mounted;
+	dev_t root_physical_parent = 0;
+	dev_t target_physical_parent = 0;
+	int root_mount_source_chain_checked = mount_inventory_read &&
+		swapz_primary_recovery_source_chain(
+			"/sys", mount_facts.root_device, makedev(8U, 4U),
+			&root_physical_parent) &&
+		swapz_primary_recovery_source_chain(
+			"/sys", makedev(8U, 4U), 0,
+			&target_physical_parent);
+	int root_same_physical_disk = root_mount_source_chain_checked &&
+		root_physical_parent == target_physical_parent;
 
 	if (swaps_valid) {
 		for (i = 0; i < swap_count; ++i) {
@@ -1237,6 +1382,12 @@ static int swapz_primary_read_only_plan(void)
 	       "\"recovery_physical_parent_major\":%u,"
 	       "\"recovery_physical_parent_minor\":%u,"
 	       "\"recovery_same_physical_disk_as_target\":%s,"
+	       "\"mount_inventory_read\":%s,"
+	       "\"target_not_mounted\":%s,"
+	       "\"root_mount_device_major\":%u,"
+	       "\"root_mount_device_minor\":%u,"
+	       "\"root_mount_source_chain_checked\":%s,"
+	       "\"root_same_physical_disk_as_target\":%s,"
 	       "\"swap_inventory_read\":%s,"
 	       "\"active_swap_entries\":%llu,"
 	       "\"target_swap_entries\":%llu,"
@@ -1262,6 +1413,12 @@ static int swapz_primary_read_only_plan(void)
 	       recovery_physical_parent_major,
 	       recovery_physical_parent_minor,
 	       recovery_same_physical_disk ? "true" : "false",
+	       mount_inventory_read ? "true" : "false",
+	       target_not_mounted ? "true" : "false",
+	       major(mount_facts.root_device),
+	       minor(mount_facts.root_device),
+	       root_mount_source_chain_checked ? "true" : "false",
+	       root_same_physical_disk ? "true" : "false",
 	       swaps_valid ? "true" : "false",
 	       (unsigned long long)swap_count,
 	       (unsigned long long)target_count,
