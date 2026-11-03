@@ -3323,20 +3323,21 @@ with synthetic major:minor values and bytes. Host admission must hash the exact
 digest before any destructive transition.
 The plan must also check the fixed recovery base's root-owned 0700 path, an
 allowlisted persistent filesystem, direct filesystem-device separation from
-8:4, and absence of the active recovery marker. The source-chain gate must
-resolve the filesystem device through `/sys/dev/block`, match its recorded
-major:minor, prove it is a physical partition with a physical parent device,
-and reject holders, stacked slaves, virtual devices and the selected swap
-partition. Keep Btrfs excluded until multi-device backing can be enumerated
-and checked. Report whether recovery storage shares the target's physical disk;
-that is a relevant failure-domain limitation even when it is a different
-partition. Rootless tests must use synthetic sysfs trees and cover malformed
-device numbers, target identity, missing physical identity and nonempty holder
-or slave directories without reading host block devices. Parse mountinfo
-strictly, identify the unique `/` mount, and reject any mount whose
-major:minor is the selected swap partition. Rootless mountinfo tests must
-include escaped mountpoints, special non-path filesystem roots, malformed
-device fields and duplicate root entries.
+8:4, and absence of the active recovery marker. Separate recovery-source and
+target-source gates must resolve each device through `/sys/dev/block`, match
+the recorded major:minor, prove a direct physical partition with a physical
+parent device, and reject holders, stacked slaves, virtual devices and the
+selected swap partition in the recovery chain. Keep Btrfs excluded until
+multi-device backing can be enumerated and checked. Report whether recovery
+storage shares the target's physical disk; that is a relevant failure-domain
+limitation even when it is a different partition. Rootless tests must use
+synthetic sysfs trees and cover malformed device numbers, target identity,
+missing physical identity and nonempty holder or slave directories without
+reading host block devices. Parse mountinfo strictly, identify the unique `/`
+mount, verify its physical source chain excludes the selected swap partition,
+and reject any mount whose major:minor is that partition. Rootless mountinfo
+tests must include escaped mountpoints, special non-path filesystem roots,
+malformed device fields and duplicate root entries.
 The `/proc/swaps` parser must reject malformed or extra fields, duplicate paths,
 numeric overflow and invalid signed priorities. The read-only plan may report
 the active-entry count and whether `/dev/sda4` is the sole 16,777,212 KiB

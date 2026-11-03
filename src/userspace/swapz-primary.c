@@ -944,7 +944,7 @@ static int swapz_primary_recovery_preflight(
 	unsigned int *filesystem_major, unsigned int *filesystem_minor,
 	int *directly_not_target, int *source_chain_checked,
 	unsigned int *physical_parent_major, unsigned int *physical_parent_minor,
-	int *same_physical_disk, int *active_marker_clear)
+	int *active_marker_clear)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
 	(void)directory_safe;
@@ -955,7 +955,6 @@ static int swapz_primary_recovery_preflight(
 	(void)source_chain_checked;
 	(void)physical_parent_major;
 	(void)physical_parent_minor;
-	(void)same_physical_disk;
 	(void)active_marker_clear;
 	errno = ENODEV;
 	return -1;
@@ -965,14 +964,13 @@ static int swapz_primary_recovery_preflight(
 	struct stat marker_info;
 	dev_t source_device;
 	dev_t source_parent_device = 0;
-	dev_t target_parent_device = 0;
 	int recovery_fd;
 	int marker_result;
 
 	if (!directory_safe || !persistent_filesystem || !filesystem_major ||
 	    !filesystem_minor || !directly_not_target || !source_chain_checked ||
 	    !physical_parent_major || !physical_parent_minor ||
-	    !same_physical_disk || !active_marker_clear) {
+	    !active_marker_clear) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -984,7 +982,6 @@ static int swapz_primary_recovery_preflight(
 	*source_chain_checked = 0;
 	*physical_parent_major = 0;
 	*physical_parent_minor = 0;
-	*same_physical_disk = 0;
 	*active_marker_clear = 0;
 	recovery_fd = swapz_primary_recovery_base_open(
 		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
@@ -1010,14 +1007,10 @@ static int swapz_primary_recovery_preflight(
 	if (*persistent_filesystem && *directly_not_target &&
 	    swapz_primary_recovery_source_chain(
 		    "/sys", source_device, makedev(8U, 4U),
-		    &source_parent_device) &&
-	    swapz_primary_recovery_source_chain(
-		    "/sys", makedev(8U, 4U), 0,
-		    &target_parent_device)) {
+		    &source_parent_device)) {
 		*source_chain_checked = 1;
 		*physical_parent_major = major(source_parent_device);
 		*physical_parent_minor = minor(source_parent_device);
-		*same_physical_disk = source_parent_device == target_parent_device;
 	}
 	marker_result = fstatat(recovery_fd,
 				"partition-7fb9401d-04.active", &marker_info,
@@ -1317,7 +1310,6 @@ static int swapz_primary_read_only_plan(void)
 	int recovery_source_chain_checked = 0;
 	unsigned int recovery_physical_parent_major = 0;
 	unsigned int recovery_physical_parent_minor = 0;
-	int recovery_same_physical_disk = 0;
 	int recovery_active_marker_clear = 0;
 	int recovery_preflight_read = swapz_primary_recovery_preflight(
 		&recovery_directory_safe, &recovery_persistent_filesystem,
@@ -1325,7 +1317,6 @@ static int swapz_primary_read_only_plan(void)
 		&recovery_directly_not_target, &recovery_source_chain_checked,
 		&recovery_physical_parent_major,
 		&recovery_physical_parent_minor,
-		&recovery_same_physical_disk,
 		&recovery_active_marker_clear) == 0;
 	struct swapz_primary_mount_facts mount_facts = {0};
 	int mount_inventory_read = swapz_primary_read_mount_facts(&mount_facts) == 0;
@@ -1333,13 +1324,19 @@ static int swapz_primary_read_only_plan(void)
 		!mount_facts.target_mounted;
 	dev_t root_physical_parent = 0;
 	dev_t target_physical_parent = 0;
-	int root_mount_source_chain_checked = mount_inventory_read &&
-		swapz_primary_recovery_source_chain(
-			"/sys", mount_facts.root_device, makedev(8U, 4U),
-			&root_physical_parent) &&
+	int target_device_chain_checked = target_device_preflight &&
 		swapz_primary_recovery_source_chain(
 			"/sys", makedev(8U, 4U), 0,
 			&target_physical_parent);
+	int recovery_same_physical_disk = recovery_source_chain_checked &&
+		target_device_chain_checked &&
+		makedev(recovery_physical_parent_major,
+			recovery_physical_parent_minor) == target_physical_parent;
+	int root_mount_source_chain_checked = mount_inventory_read &&
+		target_device_chain_checked &&
+		swapz_primary_recovery_source_chain(
+			"/sys", mount_facts.root_device, makedev(8U, 4U),
+			&root_physical_parent);
 	int root_same_physical_disk = root_mount_source_chain_checked &&
 		root_physical_parent == target_physical_parent;
 
@@ -1382,6 +1379,9 @@ static int swapz_primary_read_only_plan(void)
 	       "\"recovery_physical_parent_major\":%u,"
 	       "\"recovery_physical_parent_minor\":%u,"
 	       "\"recovery_same_physical_disk_as_target\":%s,"
+	       "\"target_device_chain_checked\":%s,"
+	       "\"target_physical_parent_major\":%u,"
+	       "\"target_physical_parent_minor\":%u,"
 	       "\"mount_inventory_read\":%s,"
 	       "\"target_not_mounted\":%s,"
 	       "\"root_mount_device_major\":%u,"
@@ -1413,6 +1413,9 @@ static int swapz_primary_read_only_plan(void)
 	       recovery_physical_parent_major,
 	       recovery_physical_parent_minor,
 	       recovery_same_physical_disk ? "true" : "false",
+	       target_device_chain_checked ? "true" : "false",
+	       major(target_physical_parent),
+	       minor(target_physical_parent),
 	       mount_inventory_read ? "true" : "false",
 	       target_not_mounted ? "true" : "false",
 	       major(mount_facts.root_device),

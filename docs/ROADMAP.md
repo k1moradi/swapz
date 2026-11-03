@@ -1376,17 +1376,18 @@ checks when run on the host. The direct-C fixture disables those live reads.
 It verifies the original 4096-byte header against the recorded SHA-256 digest.
 It checks recovery-directory ownership/mode, an allowlisted persistent
 filesystem, direct separation from 8:4, and an absent active marker. Its
-read-only sysfs check now resolves the filesystem source and target partition
-to physical parent devices, requires direct physical-partition backing, and
-rejects virtual/stacked sources or nonempty holder lists. It reports that the
+read-only sysfs checks separately resolve the recovery and target partitions
+to physical parent devices, require direct physical-partition backing, and
+reject virtual/stacked sources or nonempty holder lists. It reports that the
 recovery directory is on the same physical USB disk as the target, so this
 state is persistent across process exit but does not protect against failure
 of that whole device. Btrfs remains excluded until multi-device ancestry can
 be verified. It also strictly parses mountinfo, confirms `/dev/sda4` is not
-mounted, and resolves the root mount to a direct physical partition. The root
-and recovery filesystems share the target's physical USB disk. Module/mapper
-ownership and the lifecycle remain unchecked, so the plan stays BLOCKED.
-Provision, activation, teardown and recovery are disabled.
+mounted, and resolves the root mount to a direct physical partition distinct
+from 8:4. It reports separately that the root and recovery filesystems share
+the target's physical USB disk. Module/mapper ownership and the lifecycle
+remain unchecked, so the plan stays BLOCKED. Provision, activation, teardown
+and recovery are disabled.
 The earlier Python manager draft was removed because production Python is
 outside this repository's coding standards. The remaining implementation must
 integrate the permanent root-controlled PARTUUID lock primitive with each
