@@ -4706,6 +4706,12 @@ write bits regardless of the test process umask. The root `make` target must
 normalize the exact qualified artifact modes and the official report writer
 must create a non-group/world-writable report, so `make install` can admit the
 same bytes without relaxing the package's safe-input checks.
+The package suite must run the installer against a private snapshot of its
+package inputs with canonical safe file modes and a module destination tree
+created with exact safe directory modes, independent of the test process
+umask. This keeps the suite hermetic without weakening production admission:
+the installer must continue rejecting group/world-writable inputs and
+destinations.
 
 Production `make install` is admission-only and must not depend on the root
 `all` build target. It may consume only the already-qualified `swapzctl`,

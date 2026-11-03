@@ -30,21 +30,57 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def copy_safe_package_file(source, destination):
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+    shutil.copyfile(source, destination)
+    destination.chmod(0o755 if source.stat().st_mode & 0o111 else 0o644)
+
+
+def copy_safe_package_source(source, destination):
+    """Build a hermetic package input tree with Git's safe file modes."""
+    destination.mkdir(parents=True, exist_ok=True, mode=0o755)
+    destination.chmod(0o755)
+    for path in source.iterdir():
+        if path.is_file() and not path.is_symlink():
+            copy_safe_package_file(path, destination / path.name)
+
+
 class PackageLifecycle(unittest.TestCase):
     def setUp(self):
         if os.geteuid() == 0:
             self.skipTest("package test requires nonroot (root test mode forbidden)")
+        original_umask = os.umask(0o022)
+        self.addCleanup(os.umask, original_umask)
         BASE.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=BASE)
         self.addCleanup(self.temp.cleanup)
-        self.home = Path(self.temp.name).resolve()
+        temp_root = Path(self.temp.name).resolve()
+        self.repo_root = temp_root / "repository"
+        self.repo_root.mkdir(mode=0o700)
+        copy_safe_package_file(ROOT / "dkms.conf", self.repo_root / "dkms.conf")
+        copy_safe_package_source(ROOT / "packaging", self.repo_root / "packaging")
+        source_root = self.repo_root / "src"
+        source_root.mkdir(mode=0o755)
+        source_root.chmod(0o755)
+        copy_safe_package_source(ROOT / "src/kernel", self.repo_root / "src/kernel")
+        self.script = self.repo_root / "packaging/package-dkms.sh"
+        self.home = (self.repo_root / "build/tests/package-sandbox" /
+                     temp_root.name)
+        self.home.mkdir(parents=True, mode=0o700)
         self.build = self.home / "build"
         self.bin = self.home / "bin"
         self.build.mkdir()
         self.bin.mkdir()
         self.kernel_release = "6.12.0-swapz-test"
-        headers = self.home / "lib/modules" / self.kernel_release / "build"
-        headers.mkdir(parents=True)
+        modules_root = self.home / "lib/modules"
+        modules_root.mkdir(parents=True, mode=0o755)
+        modules_root.chmod(0o755)
+        kernel_tree = modules_root / self.kernel_release
+        kernel_tree.mkdir(mode=0o755)
+        kernel_tree.chmod(0o755)
+        headers = kernel_tree / "build"
+        headers.mkdir(mode=0o755)
+        headers.chmod(0o755)
         (headers / "Makefile").write_text("all:\n\t@:\n")
         self.headers_makefile = headers / "Makefile"
         self.installed_module = (
@@ -309,8 +345,9 @@ esac
         if extra:
             env.update(extra)
         return subprocess.run(
-            ["bash", str(SCRIPT), action, str(self.prefix)],
-            cwd=ROOT, env=env, capture_output=True, text=True, timeout=timeout)
+            ["bash", str(self.script), action, str(self.prefix)],
+            cwd=self.repo_root, env=env, capture_output=True, text=True,
+            timeout=timeout)
 
     def assert_absent(self):
         self.assertFalse((self.prefix / "sbin/swapzctl").exists())
@@ -326,10 +363,10 @@ esac
             self.cli.read_bytes())
         self.assertEqual(
             (self.prefix / "sbin/swapz-primary-runtime-health").read_bytes(),
-            (ROOT / "packaging/swapz-primary-runtime-health").read_bytes())
+            (self.repo_root / "packaging/swapz-primary-runtime-health").read_bytes())
         self.assertEqual(
             (self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service").read_text(),
-            (ROOT / "packaging/swapz-primary-runtime-health.service").read_text().replace(
+            (self.repo_root / "packaging/swapz-primary-runtime-health.service").read_text().replace(
                 "@SWAPZ_SBINDIR@", str(self.prefix / "sbin")))
         self.assertEqual(
             (self.prefix / "libexec/swapz/device-roundtrip").read_bytes(),
@@ -594,8 +631,9 @@ esac
     def test_unexpected_paths_and_symlinks_refuse(self):
         for prefix in ("/", "/tmp/../wrong", "/usr/local"):
             result = subprocess.run(
-                ["bash", str(SCRIPT), "install", prefix],
-                cwd=ROOT, env=self.env, capture_output=True, text=True)
+                ["bash", str(self.script), "install", prefix],
+                cwd=self.repo_root, env=self.env, capture_output=True,
+                text=True)
             self.assertNotEqual(result.returncode, 0)
         outside = self.home.parent / "outside-module.ko"
         outside.write_bytes(b"outside")
@@ -940,8 +978,8 @@ esac
         self.assertEqual(self.invoke("install").returncode, 0)
         env = dict(self.env, SWAPZ_FAKE_REMOVE_SLEEP="30")
         process = subprocess.Popen(
-            ["bash", str(SCRIPT), "uninstall", str(self.prefix)],
-            cwd=ROOT, env=env, stdout=subprocess.PIPE,
+            ["bash", str(self.script), "uninstall", str(self.prefix)],
+            cwd=self.repo_root, env=env, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
@@ -967,8 +1005,8 @@ esac
             SWAPZ_FAKE_BUILD_SLEEP="30",
         )
         process = subprocess.Popen(
-            ["bash", str(SCRIPT), "uninstall", str(self.prefix)],
-            cwd=ROOT, env=env, stdout=subprocess.PIPE,
+            ["bash", str(self.script), "uninstall", str(self.prefix)],
+            cwd=self.repo_root, env=env, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
@@ -1044,8 +1082,8 @@ esac
     def test_interrupt_during_dkms_build_rolls_back(self):
         env = dict(self.env, SWAPZ_FAKE_BUILD_SLEEP="30")
         process = subprocess.Popen(
-            ["bash", str(SCRIPT), "install", str(self.prefix)],
-            cwd=ROOT, env=env, stdout=subprocess.PIPE,
+            ["bash", str(self.script), "install", str(self.prefix)],
+            cwd=self.repo_root, env=env, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
