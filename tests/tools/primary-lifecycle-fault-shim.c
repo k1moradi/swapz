@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 
@@ -20,7 +21,7 @@ int __real_open(const char *path, int flags, ...);
 int __real_fsync(int fd);
 
 static long last_swap_syscall;
-static unsigned long fsync_calls;
+static unsigned long directory_fsync_calls;
 
 /* Stable test-only evidence: a generic coordinator error is not an injected
  * fault. Never print arbitrary environment values or test credentials. */
@@ -36,21 +37,30 @@ static int fault_is(const char *name)
 	return fault && name && !strcmp(fault, name);
 }
 
-static int fsync_should_fail(void)
+static int fsync_should_fail(int fd)
 {
-	const char *requested = getenv("SWAPZ_PRIMARY_TEST_FSYNC_FAIL_CALL");
+	const char *requested =
+		getenv("SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL");
+	struct stat info;
 	char *end = NULL;
 	unsigned long call;
 
-	++fsync_calls;
 	if (!requested || !*requested)
 		return 0;
+	/*
+	 * Count only recovery-directory durability boundaries. Regular-file fsyncs
+	 * may be added or removed without silently retargeting this fault.
+	 */
+	if (fstat(fd, &info) < 0 || !S_ISDIR(info.st_mode))
+		return 0;
+	++directory_fsync_calls;
 	errno = 0;
 	call = strtoul(requested, &end, 10);
 	if (errno || end == requested || *end || !call)
 		return 0;
-	if (call == fsync_calls) {
-		fprintf(stderr, "SWAPZ_PRIMARY_TEST_FSYNC_HIT=%lu\n", call);
+	if (call == directory_fsync_calls) {
+		fprintf(stderr,
+			"SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT=%lu\n", call);
 		return 1;
 	}
 	return 0;
@@ -173,7 +183,7 @@ int __wrap_open(const char *path, int flags, ...)
 
 int __wrap_fsync(int fd)
 {
-	if (fsync_should_fail()) {
+	if (fsync_should_fail(fd)) {
 		errno = EIO;
 		return -1;
 	}
