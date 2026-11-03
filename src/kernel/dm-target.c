@@ -3849,6 +3849,35 @@ static int swapz_gc_recovery_record(struct swapz_dm *ctx, swapz_u32 victim)
 	return swapz_gc_recovery_validate(ctx);
 }
 
+/*
+ * Rebind the worker token only after authority has atomically rolled a full
+ * recovery destination forward. The old destination becomes the next victim;
+ * the verified-dead old victim becomes the next destination. Foreground
+ * mutation remains fenced because gc_recovery.active never drops.
+ */
+static int swapz_gc_recovery_roll_forward(struct swapz_dm *ctx)
+{
+	struct swapz_authority *a = &ctx->authority;
+	struct swapz_gc_recovery *recovery = &ctx->gc_recovery;
+	swapz_u32 exhausted_destination;
+	int error;
+
+	error = swapz_gc_recovery_validate(ctx);
+	if (error)
+		return error;
+	exhausted_destination = recovery->destination;
+	error = swapz_gc_roll_forward_rotation(a, exhausted_destination);
+	if (error)
+		return error;
+
+	recovery->victim = exhausted_destination;
+	recovery->destination = a->gc_destination;
+	recovery->forbidden_open = a->gc_forbidden_open;
+	recovery->next_segment_probe = a->next_segment_probe;
+	recovery->minimum_next_block = a->next_block;
+	return swapz_gc_recovery_validate(ctx);
+}
+
 static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 {
 	struct swapz_authority *a = &ctx->authority;
@@ -3879,14 +3908,20 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 		}
 		victim = ctx->gc_recovery.victim;
 		/*
-		 * A fully consumed destination cannot produce a foreground
-		 * allocation: commit_rotation() rejects it. Reject later retries
-		 * without rereading the surviving victim or probing other reserves.
-		 * Roll-forward requires a separately authenticated authority API.
+		 * A full owned destination cannot itself become useful foreground.
+		 * If the original victim is already fully evacuated, roll the
+		 * authenticated recovery forward: the full destination becomes the
+		 * next victim and the verified-dead old victim becomes its reserve.
+		 * One bounded handoff occurs per foreground retry; persistent lower
+		 * errors therefore still fail closed without an internal spin loop.
 		 */
 		if (a->next_block ==
-		    (ctx->gc_recovery.destination + 1U) * SWAPZ_SEGMENT_BLOCKS)
-			return -ENOSPC;
+		    (ctx->gc_recovery.destination + 1U) * SWAPZ_SEGMENT_BLOCKS) {
+			error = swapz_gc_recovery_roll_forward(ctx);
+			if (error)
+				return error;
+			victim = ctx->gc_recovery.victim;
+		}
 	} else {
 		if (a->gc_allocation) {
 			/* An authority-side rotation without the worker token is stale
@@ -4046,9 +4081,9 @@ out:
 		 * Keep the exact active destination and its monotonic cursor. Current
 		 * victim membership is re-read on the next attempt, so already-
 		 * published relocations are skipped while failed/uncertain blocks
-		 * remain quarantined. If the destination itself reaches -ENOSPC,
-		 * the recovery remains fail-closed instead of consuming another
-		 * reserve or rolling authority backward.
+		 * remain quarantined. A completely full destination is rolled
+		 * forward only after its original victim is independently proven
+		 * dead; otherwise the same authenticated state remains fail-closed.
 		 */
 		WARN_ON_ONCE(a->gc_destination != ctx->gc_recovery.destination);
 	}

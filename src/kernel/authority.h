@@ -252,6 +252,14 @@ int swapz_enable_segment_gc_accounting(struct swapz_authority *authority,
 /* Begin GC into ONE entirely dead reserve segment (not a foreground one).
  * Caller preserves the foreground cursor until commit; no nested GC. */
 int swapz_gc_begin_rotation(struct swapz_authority *authority, swapz_u32 victim);
+/*
+ * Recovery-only bounded roll-forward. The current destination must be full and
+ * the original victim must already be wholly dead. Rebind that dead victim as
+ * the next reserve destination and make the full destination the next victim;
+ * GC ownership remains active throughout and no mapping/generation is changed.
+ */
+int swapz_gc_roll_forward_rotation(struct swapz_authority *authority,
+				   swapz_u32 exhausted_destination);
 /* Swap physical roles ONLY after the source victim is wholly dead.
  * Leaves foreground cursor inside new (formerly reserve) destination. */
 int swapz_gc_commit_rotation(struct swapz_authority *authority, swapz_u32 victim);

@@ -499,15 +499,27 @@ after the fault is removed. Repeated recovery must verify byte-exact contents
 and generations, must not consume a second reserve merely because the first
 attempt failed, and must prove the evacuated source becomes reusable only after
 its mapping and physical liveness reach zero. If accumulated uncertain
-reservations exhaust the owned destination, qualification requires fail-closed
-behavior rather than cursor rollback, live-reserve reclassification or
-unbounded retry. The exact-production DM GC error boundary must reject an integrity/authority failure (-EBADMSG or -EUCLEAN) as terminal even with a live recovery token, while preserving retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC. Native authority/engine tests do not by themselves exercise this DM worker classification. The exact-authority regression must additionally construct 255
-distinct surviving RAW pages in one victim, publish one relocation, abort one
-uncertain one-block lower WRITE and relocate all remaining pages. Its expected
-full destination and -ENOSPC outcome is an explicit UNRESOLVED forward-progress
-case even though all mappings, CRCs, generations and role/liveness guards
-remain intact. Do not claim #78 recovered until a bounded authenticated
-roll-forward can pass the same fixture with a successful new foreground write.
+reservations exhaust the owned destination, qualification forbids cursor
+rollback, live-reserve reuse or an unbounded internal retry. When the original
+victim has nevertheless reached zero mapping and physical liveness, one bounded
+authenticated roll-forward may make the full destination the next victim and
+reuse that independently verified-dead original victim as the next reserve
+destination. The worker token must remain active and be rebound to that exact
+role handoff before foreground mutation can resume. If the old victim is not
+fully dead, the operation must remain fail-closed. The exact-production DM GC
+error boundary must still reject an integrity/authority failure (-EBADMSG or
+-EUCLEAN) as terminal even with a live recovery token, while preserving
+retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC.
+
+The exact-authority regression must construct 255 distinct surviving RAW pages
+in one victim, publish one relocation, abort one uncertain one-block lower
+WRITE and relocate all remaining pages. The first destination must become full
+and fail ordinary commit; roll-forward must then evacuate that full intermediate
+segment into the verified-dead original victim, preserve every byte/CRC and the
+expected generation increments, leave the other reserve untouched, and permit
+a subsequent foreground write. Native authority/engine tests remain supporting
+evidence for this state transition; loaded worker qualification is still
+required for production release.
 
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
 regression fixture: one SWZ header block,

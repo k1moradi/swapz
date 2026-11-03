@@ -2683,6 +2683,7 @@ int main(void)
         gc = body("swapz_gc_compact_one_inner")
         begin = source_body("swapz_gc_begin_rotation", authority)
         commit = source_body("swapz_gc_commit_rotation", authority)
+        roll_forward = source_body("swapz_gc_roll_forward_rotation", authority)
         eligible = source_body("swapz_dead_segment_eligible", authority)
         recovery = body("swapz_gc_recovery_validate")
         self.assertIn("a->gc_forbidden_open = a->open_segment", begin)
@@ -2696,7 +2697,21 @@ int main(void)
         self.assertIn(
             "a->gc_forbidden_open != recovery->forbidden_open", recovery)
         self.assertIn("swapz_gc_begin_rotation(a, victim)", gc)
+        self.assertIn("swapz_gc_recovery_roll_forward(ctx)", gc)
         self.assertIn("swapz_gc_commit_rotation(a, victim)", gc)
+        self.assertIn(
+            "swapz_claim_dead_segment(a, evacuated_victim, probe_start)",
+            roll_forward)
+        self.assertIn(
+            "a->segment_foreground[exhausted_destination] = 1",
+            roll_forward)
+        self.assertIn(
+            "a->segment_foreground[evacuated_victim] = 0",
+            roll_forward)
+        self.assertIn(
+            "a->gc_forbidden_victim = exhausted_destination",
+            roll_forward)
+        self.assertIn("a->gc_destination = evacuated_victim", roll_forward)
         self.assertIn("swapz_enable_segment_rotation(&ctx->authority", body("swapz_ctr"))
         self.assertIn("!ctx->segment_roles[segment]", body("swapz_gc_choose_victim"))
         self.assertIn("a->segment_foreground[dest] = 1", commit)

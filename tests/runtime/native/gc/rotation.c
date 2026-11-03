@@ -336,16 +336,15 @@ static int test_gc_cannot_spill_into_second_reserve(void)
 }
 
 /*
- * Unresolved P0 boundary: the candidate heuristic legitimately admits 255
- * authoritative RAW survivors. ONE uncertain lower reservation then consumes
- * their only headroom block. Existing resume-in-place keeps all mappings safe
- * but cannot restore foreground writes even after that lower fault is removed.
- * This is a fail-closed counterexample, NOT a recovery-success qualification.
- *
- * A future authenticated roll-forward must replace this expected -ENOSPC with
- * progress while preserving the same byte/generation/liveness assertions.
+ * Worst-case recoverable RAW boundary: 255 authoritative survivors leave one
+ * destination block of slack. One uncertain lower reservation consumes that
+ * slack, so the first destination becomes full exactly as the original victim
+ * reaches zero liveness. Recovery must not publish the full destination as
+ * foreground progress. It instead rolls that verified-dead victim forward as
+ * the next reserve destination, evacuates the full intermediate segment, and
+ * restores at least one successful foreground overwrite.
  */
-static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
+static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 {
 	static struct swapz_authority near_full_authority;
 	static struct swapz_map near_full_maps[SWAPZ_SEGMENT_BLOCKS + 1U];
@@ -369,10 +368,6 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 		      survivors * SWAPZ_BLOCK_BYTES,
 		      (swapz_u16)survivors));
 
-	/* Five segments satisfy the mandatory complete foreground headroom.
-	 * Three foreground segments [0,1,2] and two reserves [3,4].
-	 * 255 different RAW pages plus one overwrite fill victim 0 with
-	 * 255 live records and one dead physical record. Open segment 1. */
 	for (page = 0; page < survivors; ++page) {
 		CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
 		CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
@@ -387,8 +382,6 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 	CHECK(swapz_gc_begin_rotation(&near_full_authority, 0) == 0);
 	CHECK(near_full_authority.gc_destination == 3U);
 
-	/* First relocation publishes. The next lower write fails
-	 * uncertainly; abort quarantines its entire one-block reservation. */
 	page = 0;
 	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
 	CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
@@ -397,40 +390,61 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 	CHECK(tx.start_block == 3U * SWAPZ_SEGMENT_BLOCKS + 1U);
 	CHECK(swapz_abort(&near_full_authority, &tx) == 0);
 
-	/* All surviving pages can still be relocated, but the victim is
-	 * no longer reclaimable under the one-free-block commit contract. */
 	for (page = 1; page < survivors; ++page) {
 		CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
 		CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
 	}
-	CHECK(near_full_authority.next_block ==
-	      4U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(near_full_authority.next_block == 4U * SWAPZ_SEGMENT_BLOCKS);
 	CHECK(swapz_gc_commit_rotation(&near_full_authority, 0) == -ENOSPC);
 	CHECK(near_full_authority.gc_allocation &&
 	      near_full_authority.gc_forbidden_victim == 0U &&
 	      near_full_authority.gc_destination == 3U);
+	for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
+		CHECK(!near_full_liveness[block]);
+
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &near_full_authority, 3U) == 0);
+	CHECK(near_full_authority.gc_allocation &&
+	      near_full_authority.gc_forbidden_victim == 3U &&
+	      near_full_authority.gc_destination == 0U &&
+	      near_full_authority.open_segment == 0U &&
+	      near_full_authority.next_block == 0U);
+	CHECK(near_full_roles[0] == 0U && near_full_roles[1] == 1U &&
+	      near_full_roles[2] == 1U && near_full_roles[3] == 1U &&
+	      near_full_roles[4] == 0U);
+
+	for (page = 0; page < survivors; ++page) {
+		CHECK(near_full_maps[page].valid &&
+		      near_full_maps[page].start_block / SWAPZ_SEGMENT_BLOCKS == 3U);
+		CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
+		CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+	}
+	CHECK(near_full_authority.next_block == SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(swapz_gc_commit_rotation(&near_full_authority, 3U) == 0);
+	CHECK(!near_full_authority.gc_allocation);
 	CHECK(near_full_roles[0] == 1U && near_full_roles[1] == 1U &&
 	      near_full_roles[2] == 1U && near_full_roles[3] == 0U &&
 	      near_full_roles[4] == 0U);
-	page = SWAPZ_SEGMENT_BLOCKS;
-	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == -ENOSPC);
+
+	page = survivors;
+	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
+
 	for (page = 0; page < survivors; ++page) {
-		CHECK(near_full_maps[page].valid &&
-		      near_full_maps[page].raw &&
-		      near_full_maps[page].start_block / SWAPZ_SEGMENT_BLOCKS == 3U &&
+		CHECK(near_full_maps[page].valid && near_full_maps[page].raw &&
+		      near_full_maps[page].start_block < SWAPZ_SEGMENT_BLOCKS &&
 		      near_full_maps[page].raw_crc32c == expected_raw_crc &&
-		      near_full_maps[page].generation == (page == 0 ? 3U : 2U));
+		      near_full_maps[page].generation == (page == 0 ? 4U : 3U));
 	}
 	CHECK(near_full_maps[survivors].valid &&
-	      near_full_maps[survivors].start_block == SWAPZ_SEGMENT_BLOCKS &&
-	      near_full_maps[survivors].generation == 1U &&
+	      near_full_maps[survivors].start_block ==
+		      SWAPZ_SEGMENT_BLOCKS - 1U &&
+	      near_full_maps[survivors].generation == 2U &&
 	      near_full_maps[survivors].raw_crc32c == expected_raw_crc);
-	for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
-		CHECK(!near_full_liveness[block]);
-	for (block = 4U * SWAPZ_SEGMENT_BLOCKS;
+	for (block = 3U * SWAPZ_SEGMENT_BLOCKS;
 	     block < 5U * SWAPZ_SEGMENT_BLOCKS; ++block)
 		CHECK(!near_full_liveness[block]);
-	CHECK(!near_full_liveness[3U * SWAPZ_SEGMENT_BLOCKS + 1U]);
 	return 0;
 }
 
@@ -444,7 +458,7 @@ int main(void)
 	CHECK(test_empty_gc_destination_cannot_rotate_roles() == 0); passed++;
 	CHECK(test_gc_cannot_spill_into_second_reserve() == 0); passed++;
 	CHECK(test_full_destination_is_not_gc_progress() == 0); passed++;
-	CHECK(test_one_uncertain_block_exhausts_raw_recovery_headroom() == 0); passed++;
+	CHECK(test_one_uncertain_block_rolls_forward_raw_recovery_headroom() == 0); passed++;
 	printf("SWAPZ_ROTATING_GC_TESTS_PASS=%d\n", passed);
 	return 0;
 }

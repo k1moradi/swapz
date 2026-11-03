@@ -831,6 +831,61 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
 }
 
 /*
+ * A recovery destination can become physically full after one uncertain block
+ * plus all still-authoritative survivors have been relocated. At that point
+ * the original victim is dead but commit_rotation() correctly refuses to call
+ * the full destination foreground progress.
+ *
+ * Roll forward without exposing that no-progress role exchange to foreground:
+ * first run the original victim through the same full dead-segment validator
+ * and recycle hook used by ordinary allocation. Only after that succeeds do
+ * the infallible in-memory role changes below make the full destination the
+ * next GC victim and the verified-dead original victim the next destination.
+ * No mapping, generation or live refcount changes here.
+ */
+int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
+				   swapz_u32 exhausted_destination)
+{
+	swapz_u32 evacuated_victim;
+	unsigned long long probe_start;
+	int error;
+
+	if (!a || !a->segment_foreground || !a->gc_allocation ||
+	    a->in_flight || a->batch_pending || a->batch_replaying ||
+	    exhausted_destination >= a->segment_count ||
+	    exhausted_destination != a->gc_destination ||
+	    a->open_segment != exhausted_destination ||
+	    a->next_block !=
+		    (exhausted_destination + 1U) * SWAPZ_SEGMENT_BLOCKS)
+		return -EINVAL;
+
+	evacuated_victim = a->gc_forbidden_victim;
+	if (evacuated_victim >= a->segment_count ||
+	    evacuated_victim == exhausted_destination ||
+	    evacuated_victim == a->gc_forbidden_open ||
+	    !a->segment_foreground[evacuated_victim] ||
+	    a->segment_foreground[exhausted_destination])
+		return -EUCLEAN;
+
+	/*
+	 * This is the only fallible step. It proves the old victim has no map or
+	 * physical liveness, applies the optional recycle hook, clears stale
+	 * extent metadata and binds OPEN/next_block to its segment start.
+	 * Roles are deliberately unchanged until that complete proof succeeds.
+	 */
+	probe_start = swapz_authority_now_ns();
+	error = swapz_claim_dead_segment(a, evacuated_victim, probe_start);
+	if (error)
+		return error;
+
+	a->segment_foreground[exhausted_destination] = 1;
+	a->segment_foreground[evacuated_victim] = 0;
+	a->gc_forbidden_victim = exhausted_destination;
+	a->gc_destination = evacuated_victim;
+	return 0;
+}
+
+/*
  * Commit one evacuated victim -> free reserve, one new GC destination ->
  * foreground. All new physical writes and authority publications have
  * completed before this function is invoked by the sole DM worker.
