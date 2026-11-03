@@ -1706,6 +1706,20 @@ def failure_context(output, *, loaded=True, default_phase=None):
             elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
                 phase = f"after completed owned RAM comparison {pair_number}/8"
 
+    primary_lifecycle_command_failure = None
+    if loaded:
+        # The lifecycle helper prints the coordinator's own fixed BLOCKED line
+        # before its generic lifecycle marker. Preserve only the operation and
+        # strerror-shaped tail; never copy paths, IDs or arbitrary child output.
+        for line in output.splitlines():
+            match = re.fullmatch(
+                r"BLOCKED: primary-swap "
+                r"(preparation|start|stop|recovery) failed: "
+                r"([A-Za-z0-9 .()_-]{1,96})",
+                line.strip())
+            if match:
+                primary_lifecycle_command_failure = match.groups()
+
     unittest_failure = None
     if not loaded:
         for line in output.splitlines():
@@ -1826,7 +1840,14 @@ def failure_context(output, *, loaded=True, default_phase=None):
                     "[id]", msg, flags=re.I)
                 msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?", msg)
                 label = lifecycle_prefix.partition(":")[0]
-                reason = f"{label}: {msg[:155]}"
+                if primary_lifecycle_command_failure is not None:
+                    operation, coordinator_error = (
+                        primary_lifecycle_command_failure)
+                    reason = (
+                        f"{label}: coordinator {operation}: "
+                        f"{coordinator_error}")[:180]
+                else:
+                    reason = f"{label}: {msg[:155]}"
                 break
             if candidate.startswith(("BLOCKED: ", "FAIL: ")):
                 msg = candidate.partition(": ")[2]

@@ -3170,6 +3170,31 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(phase, "owned RAM primary lifecycle start")
         self.assertIn("coordinator start failed", reason)
 
+        start_command_failure = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=start\n"
+            "BLOCKED: primary-swap start failed: Operation not permitted\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: "
+            "production coordinator start failed on owned null_blk\n"
+        )
+        phase, reason = runner.failure_context(start_command_failure)
+        self.assertEqual(phase, "owned RAM primary lifecycle start")
+        self.assertEqual(
+            reason,
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: coordinator start: "
+            "Operation not permitted")
+
+        unsafe_command_failure = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
+            "BLOCKED: primary-swap preparation failed: /private/device/path\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: prepare failed\n"
+        )
+        phase, reason = runner.failure_context(unsafe_command_failure)
+        self.assertEqual(phase, "owned RAM primary lifecycle prepare")
+        self.assertEqual(
+            reason, "FAIL_PRIMARY_NULLBLK_LIFECYCLE: prepare failed")
+        self.assertNotIn("/private", reason)
+
         interrupted = (
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
             "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:redacted\n"

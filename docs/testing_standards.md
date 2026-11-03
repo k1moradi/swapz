@@ -699,6 +699,11 @@ operator-visible failure location. The subphase markers carry no device identity
 run ID or path. A `BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:` marker from the loaded
 helper is a qualification BLOCKED outcome, not a code FAIL; the reporter must
 preserve that distinction while retaining the same sanitized diagnostic rules.
+When the coordinator itself emits the fixed
+`BLOCKED: primary-swap <operation> failed: <strerror>` line before the helper's
+generic lifecycle marker, the reporter must attach only the strictly allowlisted
+operation and strerror-shaped tail. Path-, ID-, or arbitrary-text-shaped tails
+remain excluded from published diagnostics.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 
