@@ -290,24 +290,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 7124,
-"legacy_dead_probe_ns": 725598,
-"legacy_score_scan_ns": 5616581,
+"incremental_select_ns": 7137,
+"legacy_dead_probe_ns": 757257,
+"legacy_score_scan_ns": 6625648,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3833,
-"relocation_list_ns": 1874,
-"relocation_scan_ns": 1814636,
+"mapped_dead_probe_ns": 3783,
+"relocation_list_ns": 2618,
+"relocation_scan_ns": 1775136,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 25284,
-"legacy_dead_probe_ns": 3218619,
-"legacy_score_scan_ns": 22760329,
+"incremental_select_ns": 25117,
+"legacy_dead_probe_ns": 3504005,
+"legacy_score_scan_ns": 22398462,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 12843,
-"relocation_list_ns": 2612,
-"relocation_scan_ns": 7425718,
+"mapped_dead_probe_ns": 13066,
+"relocation_list_ns": 2486,
+"relocation_scan_ns": 6870357,
 "segments": 4096,
 "victim_records": 256
 }
@@ -321,14 +321,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 831,
+"inverse_ns_per_page": 1524,
 "name": "scalar",
-"transform_ns_per_page": 853
+"transform_ns_per_page": 1626
 },
 {
-"inverse_ns_per_page": 592,
+"inverse_ns_per_page": 1177,
 "name": "sse2",
-"transform_ns_per_page": 525
+"transform_ns_per_page": 767
 }
 ],
 "classifier": {
@@ -338,9 +338,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 548,
+"ns_per_page": 494,
 "sample_pairs": 32,
-"scalar_ns_per_page": 548,
+"scalar_ns_per_page": 494,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -355,7 +355,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 8077
+"wall_ns_per_page": 11542
 },
 {
 "acceleration": 2,
@@ -363,7 +363,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 7538
+"wall_ns_per_page": 10605
 },
 {
 "acceleration": 3,
@@ -371,7 +371,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 7258
+"wall_ns_per_page": 8088
 },
 {
 "acceleration": 4,
@@ -379,7 +379,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 7127
+"wall_ns_per_page": 6952
 }
 ],
 "negative_pages": 256,
@@ -396,9 +396,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 5072,
-"modeled_wall_ns_total": 2921984,
-"ns_per_saved_block": 56192,
+"modeled_wall_ns_per_page": 6042,
+"modeled_wall_ns_total": 3480576,
+"ns_per_saved_block": 66934,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -423,29 +423,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 544,
+"baseline_ns_per_page": 962,
 "order": "baseline_first",
-"unrolled_ns_per_page": 528
+"unrolled_ns_per_page": 788
 },
 {
-"baseline_ns_per_page": 569,
+"baseline_ns_per_page": 970,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 502
+"unrolled_ns_per_page": 783
 },
 {
-"baseline_ns_per_page": 542,
+"baseline_ns_per_page": 955,
 "order": "baseline_first",
-"unrolled_ns_per_page": 512
+"unrolled_ns_per_page": 785
 },
 {
-"baseline_ns_per_page": 545,
+"baseline_ns_per_page": 953,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 534
+"unrolled_ns_per_page": 788
 },
 {
-"baseline_ns_per_page": 582,
+"baseline_ns_per_page": 962,
 "order": "baseline_first",
-"unrolled_ns_per_page": 532
+"unrolled_ns_per_page": 785
 }
 ],
 "repeats_per_arm": 64,
@@ -494,14 +494,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 57236,
+"ns_per_saved_block": 68362,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 5664,
-"routed_cpu_ns_total": 3262478,
+"routed_cpu_ns_per_page": 6765,
+"routed_cpu_ns_total": 3896640,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -549,14 +549,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 57629,
+"ns_per_saved_block": 68784,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 5502,
-"routed_cpu_ns_total": 3169616,
+"routed_cpu_ns_per_page": 6568,
+"routed_cpu_ns_total": 3783168,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -604,14 +604,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 56192,
+"ns_per_saved_block": 66934,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 5072,
-"routed_cpu_ns_total": 2921984,
+"routed_cpu_ns_per_page": 6042,
+"routed_cpu_ns_total": 3480576,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -659,14 +659,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 56192,
+"ns_per_saved_block": 66934,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 5072,
-"routed_cpu_ns_total": 2921984,
+"routed_cpu_ns_per_page": 6042,
+"routed_cpu_ns_total": 3480576,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -714,14 +714,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 56192,
+"ns_per_saved_block": 66934,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 5072,
-"routed_cpu_ns_total": 2921984,
+"routed_cpu_ns_per_page": 6042,
+"routed_cpu_ns_total": 3480576,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -738,17 +738,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 592,
+"inverse_ns_per_page": 1177,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 831,
-"scalar_transform_ns_per_page": 853,
-"second_lz4_ns_per_page": 9793,
+"scalar_inverse_ns_per_page": 1524,
+"scalar_transform_ns_per_page": 1626,
+"second_lz4_ns_per_page": 11841,
 "transform_backend": "sse2",
-"transform_ns_per_page": 525
+"transform_ns_per_page": 767
 }
 ]
 }
@@ -762,41 +762,41 @@
 "overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "7ce0515530bac54f8874ec69666419a829f5e45f377b5b4ce6f2832324188ccb",
-"module_sha256": "14964438220937e21b0a46223b427afdedefc3f290c5758984bdfffbdeb0a852",
+"formatter_sha256": "f5fd7699acb2f9dff44dbab8b26fa94a5a4e9e9d0933c140f0887acf6e1c211e",
+"module_sha256": "58589ccb6fbbbe18606d62a7b57d2612a0715d6f6d2a8065a5a6fd7dfd85e84b",
 "oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "5cc839216190cf2052de521a532e0e7fbcad98a8",
+"source_sha": "598dde211b8a16c6b4f36ff7927a2e657c1a407d",
 "stages": [
 {
-"elapsed_s": 12.279,
+"elapsed_s": 12.688,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 427.233,
+"elapsed_s": 424.777,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 12.418,
+"elapsed_s": 12.62,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 12.78,
+"elapsed_s": 12.479,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
 "diagnostic": "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: udev did not publish the owned partition by-PARTUUID node",
-"elapsed_s": 33.248,
+"elapsed_s": 35.721,
 "exit_code": 2,
 "failed_phase": "owned RAM primary lifecycle setup",
 "name": "Owned RAM smoke + mixed/QD pilot",
@@ -825,5 +825,5 @@
 "status": "BLOCKED"
 }
 ],
-"tested_commit_sha": "5cc839216190cf2052de521a532e0e7fbcad98a8"
+"tested_commit_sha": "598dde211b8a16c6b4f36ff7927a2e657c1a407d"
 }
