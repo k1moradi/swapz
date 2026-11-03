@@ -334,19 +334,23 @@ Unless evidence changes the order, work on:
    target. Do not enable the gate before exact-source and card-specific
    acceptance gates pass.
 3. actual Linux swap correctness on the authorized card;
-4. maximum safe full-card capacity and bounded metadata RAM. The current
-   `/dev/sda1` geometry admits 27,080,448 logical pages; a 16-byte map plus
-   compact per-extent sequence index reduces the source-derived capacity-index
-   lower bound from the 20-byte-map estimate of 813.92 MiB to 776,077,112 bytes
-   (740.1248 MiB, 73.80 MiB saved net of the sequence index). Independently
-   rounding each current array to 4KiB allocation pages yields 776,118,272
-   bytes; the largest single array is the 433,287,168-byte mapping table. These
-   figures exclude fixed target scratch, caches, workspaces, vmalloc metadata,
-   page tables and allocator implementation overhead. They are not proof
-   that a full-capacity live target fits available RAM; measure actual
-   allocation and peak memory before advertising or activating that capacity.
-   Recalculate from the runtime-selected geometry if the protected PARTUUID
-   changes; these host-specific figures are not production capacity constants.
+4. maximum safe full-card capacity and bounded metadata RAM. The authority
+   policy for the current `/dev/sda1` geometry admits 27,080,192 logical pages,
+   retains 3,385,024 GC-reserve blocks plus one independent 256-block foreground
+   COW segment, exposes 110,920,466,432 mapper bytes and 110,920,462,336
+   Linux-usable swap bytes. A 16-byte map plus compact per-extent sequence index
+   requires 776,070,968 bytes (740.1189 MiB) of source-derived capacity-index
+   payload; independently rounding each current array to 4KiB allocation pages
+   yields 776,114,176 bytes. The largest single array is the 433,283,072-byte
+   mapping table. These figures exclude fixed target scratch, caches,
+   workspaces, vmalloc metadata, page tables and allocator implementation
+   overhead. They are not proof that a full-capacity live target fits available
+   RAM; measure actual allocation and peak memory before advertising or
+   activating that capacity. Agent 1 must use the authority preflight before
+   kernel target allocations, and Codex must make the primary userspace
+   selector use this same safe maximum before mapping creation. Recalculate
+   from the runtime-selected geometry if the protected PARTUUID changes; these
+   host-specific figures are not production capacity constants.
 5. sustained occupancy/GC/churn and physical service;
 6. persistent startup/shutdown integration and cold-boot acceptance harness:
    bounded fail-closed units, packaged verifier and rootless runner are wired;

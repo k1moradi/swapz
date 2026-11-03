@@ -56,29 +56,6 @@ static int encode(const struct swapz_tx *tx)
 	return swapz_seal(&b) != 0;
 }
 
-static swapz_u32 maximum_admitted_logical_pages(swapz_u32 physical_blocks)
-{
-	swapz_u32 low = 1U, high = physical_blocks, maximum = 0;
-
-	while (low <= high) {
-		swapz_u32 middle = low + (high - low) / 2U;
-		int error = swapz_authority_validate_geometry(middle,
-							      physical_blocks,
-							      NULL);
-
-		if (!error) {
-			maximum = middle;
-			low = middle + 1U;
-		} else {
-			/* An unaddressable array length is also an upper bound. */
-			if (error != -ENOSPC && error != -EOVERFLOW)
-				return 0;
-			high = middle - 1U;
-		}
-	}
-	return maximum;
-}
-
 static swapz_u64 round_up_4k(swapz_u64 bytes)
 {
 	return (bytes + (SWAPZ_BLOCK_BYTES - 1U)) &
@@ -87,12 +64,15 @@ static swapz_u64 round_up_4k(swapz_u64 bytes)
 
 static int test_initial_rejects_unsafe_capacity(void)
 {
+	struct swapz_authority_geometry geometry;
 	struct swapz_authority a;
 
 	CHECK(swapz_authority_init(&a, maps, live, classes, 64, 512) == -EINVAL);
 	CHECK(swapz_authority_init(&a, maps, live, classes, 500, 768) == -ENOSPC);
 	CHECK(swapz_authority_init(&a, maps, live, classes, 64, 769) == -EINVAL);
-	CHECK(swapz_authority_init(&a, maps, live, classes, 64, 768) == 0);
+	CHECK(swapz_authority_capacity(768, &geometry) == -ENOSPC);
+	CHECK(swapz_authority_init(&a, maps, live, classes, 64, 768) == -ENOSPC);
+	CHECK(swapz_authority_init(&a, maps, live, classes, 64, 1024) == 0);
 	CHECK(a.reserve_blocks == 512);
 	CHECK(a.next_block == 0);
 	return 0;
@@ -102,18 +82,17 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 {
 	const swapz_u64 partition_bytes = 124787884032ULL;
 	const swapz_u32 expected_physical_blocks = 30465536U;
-	const swapz_u32 expected_logical_pages = 27080448U;
-	const swapz_u32 expected_reserve_blocks = 3385056U;
+	const swapz_u32 expected_logical_pages = 27080192U;
+	const swapz_u32 expected_reserve_blocks = 3385024U;
 	const swapz_u32 expected_segments = 119006U;
-	const swapz_u64 expected_mapper_bytes = 110921515008ULL;
-	const swapz_u64 expected_index_bytes = 776077112ULL;
-	const swapz_u64 expected_page_rounded_bytes = 776118272ULL;
-	const swapz_u64 expected_largest_allocation = 433287168ULL;
-	const swapz_u32 safe_raw_overwrite_pages = 27080192U;
-	const swapz_u32 safe_raw_overwrite_reserve = 3385024U;
+	const swapz_u64 expected_mapper_bytes = 110920466432ULL;
+	const swapz_u64 expected_linux_swap_bytes = 110920462336ULL;
+	const swapz_u64 expected_index_bytes = 776070968ULL;
+	const swapz_u64 expected_page_rounded_bytes = 776114176ULL;
+	const swapz_u64 expected_largest_allocation = 433283072ULL;
 	const swapz_u32 near_u32_physical = 0xffffff00U;
-	const swapz_u32 near_u32_logical = 3817748480U;
-	const swapz_u32 near_u32_reserve = 477218560U;
+	const swapz_u32 near_u32_logical = 3817748224U;
+	const swapz_u32 near_u32_reserve = 477218528U;
 	const swapz_u32 total_blocks =
 		(swapz_u32)(partition_bytes / SWAPZ_BLOCK_BYTES);
 	const swapz_u32 physical_blocks =
@@ -121,14 +100,22 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 		SWAPZ_SEGMENT_BLOCKS;
 	const swapz_u32 segment_count =
 		physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+	struct swapz_authority_geometry geometry;
+	struct swapz_authority_geometry near_u32_geometry;
 	swapz_u64 index_bytes, rounded_bytes;
 	swapz_u32 reserve = 0;
 
 	CHECK(partition_bytes % SWAPZ_BLOCK_BYTES == 0);
 	CHECK(physical_blocks == expected_physical_blocks);
 	CHECK(segment_count == expected_segments);
-	CHECK(maximum_admitted_logical_pages(physical_blocks) ==
-	      expected_logical_pages);
+	CHECK(swapz_authority_capacity(physical_blocks, &geometry) == 0);
+	CHECK(geometry.usable_physical_blocks == expected_physical_blocks);
+	CHECK(geometry.gc_reserve_blocks == expected_reserve_blocks);
+	CHECK(geometry.required_foreground_headroom_blocks ==
+	      SWAPZ_SEGMENT_BLOCKS);
+	CHECK(geometry.maximum_logical_pages == expected_logical_pages);
+	CHECK(geometry.logical_mapper_bytes == expected_mapper_bytes);
+	CHECK(geometry.linux_usable_swap_bytes == expected_linux_swap_bytes);
 	CHECK(swapz_authority_validate_geometry(expected_logical_pages,
 						 physical_blocks,
 						 &reserve) == 0);
@@ -138,35 +125,12 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 						 physical_blocks,
 						 &reserve) == -ENOSPC);
 	CHECK(reserve == 0xa5a5a5a5U);
-	CHECK(expected_logical_pages - 1U == 27080447U);
+	CHECK(expected_logical_pages - 1U == 27080191U);
 	CHECK((swapz_u64)expected_logical_pages * SWAPZ_BLOCK_BYTES ==
 	      expected_mapper_bytes);
-	/*
-	 * The admission ceiling alone can fill every foreground block with
-	 * RAW pages. A distinct overwrite-bootstrap candidate retains an
-	 * untouched foreground segment in addition to the GC reserve.
-	 */
-	/* Refresh after the previous rejected geometry left a poison
-	 * sentinel in reserve; never derive headroom from failed output. */
-	CHECK(swapz_authority_validate_geometry(expected_logical_pages,
-						 physical_blocks,
-						 &reserve) == 0);
-	CHECK(reserve == expected_reserve_blocks);
-	CHECK(((physical_blocks - reserve) / SWAPZ_SEGMENT_BLOCKS) *
-	      SWAPZ_SEGMENT_BLOCKS == expected_logical_pages);
-	CHECK(swapz_authority_validate_geometry(safe_raw_overwrite_pages,
-						 physical_blocks,
-						 &reserve) == 0);
-	CHECK(reserve == safe_raw_overwrite_reserve);
-	CHECK(((physical_blocks - reserve) / SWAPZ_SEGMENT_BLOCKS) *
-	      SWAPZ_SEGMENT_BLOCKS - safe_raw_overwrite_pages ==
-	      SWAPZ_SEGMENT_BLOCKS);
-	CHECK(swapz_authority_validate_geometry(safe_raw_overwrite_pages + 1U,
-						 physical_blocks,
-						 &reserve) == 0);
-	CHECK(((physical_blocks - reserve) / SWAPZ_SEGMENT_BLOCKS) *
-	      SWAPZ_SEGMENT_BLOCKS - (safe_raw_overwrite_pages + 1U) <
-	      SWAPZ_SEGMENT_BLOCKS);
+	CHECK(((physical_blocks - expected_reserve_blocks) /
+	       SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS -
+	      expected_logical_pages == SWAPZ_SEGMENT_BLOCKS);
 
 	index_bytes = (swapz_u64)expected_logical_pages *
 		(sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)) +
@@ -195,21 +159,28 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 		2U * round_up_4k((swapz_u64)segment_count *
 				 sizeof(swapz_u8));
 	CHECK(rounded_bytes == expected_page_rounded_bytes);
-	CHECK(rounded_bytes - index_bytes == 41160ULL);
+	CHECK(rounded_bytes - index_bytes == 43208ULL);
 
 	/* Exercise the top aligned u32 geometry without allocating it.
-	 * On 32-bit systems its array byte lengths are unaddressable even
-	 * though the reserve arithmetic itself remains valid. */
+	 * On 32-bit systems its physical liveness index is unaddressable even
+	 * though widened reserve/headroom arithmetic itself remains valid. */
 	if (sizeof(size_t) < sizeof(swapz_u64)) {
 		reserve = 0x5a5a5a5aU;
-		CHECK(maximum_admitted_logical_pages(near_u32_physical) == 0);
+		CHECK(swapz_authority_capacity(near_u32_physical,
+					       &near_u32_geometry) == -EOVERFLOW);
 		CHECK(swapz_authority_validate_geometry(near_u32_logical,
 							 near_u32_physical,
 							 &reserve) == -EOVERFLOW);
 		CHECK(reserve == 0x5a5a5a5aU);
 	} else {
-		CHECK(maximum_admitted_logical_pages(near_u32_physical) ==
+		CHECK(swapz_authority_capacity(near_u32_physical,
+					       &near_u32_geometry) == 0);
+		CHECK(near_u32_geometry.maximum_logical_pages ==
 		      near_u32_logical);
+		CHECK(near_u32_geometry.gc_reserve_blocks ==
+		      near_u32_reserve);
+		CHECK(near_u32_geometry.required_foreground_headroom_blocks ==
+		      SWAPZ_SEGMENT_BLOCKS);
 		CHECK(swapz_authority_validate_geometry(near_u32_logical,
 							 near_u32_physical,
 							 &reserve) == 0);
@@ -220,6 +191,7 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 						 near_u32_physical,
 						 &reserve) == -ENOSPC);
 	CHECK(reserve == 0x5a5a5a5aU);
+	CHECK(swapz_authority_capacity(0xffffffffU, &geometry) == -EINVAL);
 	CHECK(swapz_authority_validate_geometry(1U, 0xffffffffU,
 						 NULL) == -EINVAL);
 	return 0;
@@ -229,10 +201,12 @@ static int test_16gib_fixture_maximum_capacity(void)
 {
 	const swapz_u64 partition_bytes = 17179869184ULL;
 	const swapz_u32 expected_physical_blocks = 4194048U;
-	const swapz_u32 expected_logical_pages = 3727872U;
-	const swapz_u32 expected_reserve_blocks = 465984U;
+	const swapz_u32 expected_logical_pages = 3727616U;
+	const swapz_u32 expected_reserve_blocks = 465952U;
 	const swapz_u32 expected_segments = 16383U;
-	const swapz_u64 expected_index_bytes = 106834908ULL;
+	const swapz_u64 expected_mapper_bytes = 15268315136ULL;
+	const swapz_u64 expected_linux_swap_bytes = 15268311040ULL;
+	const swapz_u64 expected_index_bytes = 106828764ULL;
 	const swapz_u32 total_blocks =
 		(swapz_u32)(partition_bytes / SWAPZ_BLOCK_BYTES);
 	const swapz_u32 physical_blocks =
@@ -240,6 +214,7 @@ static int test_16gib_fixture_maximum_capacity(void)
 		SWAPZ_SEGMENT_BLOCKS;
 	const swapz_u32 segment_count =
 		physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+	struct swapz_authority_geometry geometry;
 	struct swapz_authority a;
 	struct swapz_map *large_maps;
 	swapz_u16 *live_records;
@@ -255,8 +230,18 @@ static int test_16gib_fixture_maximum_capacity(void)
 
 	CHECK(physical_blocks == expected_physical_blocks);
 	CHECK(segment_count == expected_segments);
+	CHECK(swapz_authority_capacity(physical_blocks, &geometry) == 0);
+	CHECK(geometry.usable_physical_blocks == expected_physical_blocks);
+	CHECK(geometry.gc_reserve_blocks == expected_reserve_blocks);
+	CHECK(geometry.required_foreground_headroom_blocks ==
+	      SWAPZ_SEGMENT_BLOCKS);
+	CHECK(geometry.maximum_logical_pages == expected_logical_pages);
+	CHECK(geometry.logical_mapper_bytes == expected_mapper_bytes);
+	CHECK(geometry.linux_usable_swap_bytes == expected_linux_swap_bytes);
+	CHECK(swapz_authority_validate_geometry(expected_logical_pages + 1U,
+						 physical_blocks, NULL) == -ENOSPC);
 	CHECK((swapz_u64)expected_logical_pages * SWAPZ_BLOCK_BYTES ==
-	      15269363712ULL);
+	      expected_mapper_bytes);
 	CHECK((swapz_u64)expected_logical_pages *
 	      (sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)) +
 	      (swapz_u64)physical_blocks *
@@ -267,8 +252,7 @@ static int test_16gib_fixture_maximum_capacity(void)
 	      expected_index_bytes);
 
 	/* Allocate every capacity-dependent authority/index array used by ctr. */
-	large_maps = calloc((size_t)expected_logical_pages + 1U,
-			    sizeof(*large_maps));
+	large_maps = calloc(expected_logical_pages, sizeof(*large_maps));
 	live_records = calloc(physical_blocks, sizeof(*live_records));
 	extent_classes = calloc(physical_blocks, sizeof(*extent_classes));
 	extent_sequence_delta = calloc(physical_blocks,
@@ -299,10 +283,7 @@ static int test_16gib_fixture_maximum_capacity(void)
 	      segment_first_page && segment_last_page && page_prev_in_segment &&
 	      page_next_in_segment && segment_trimmed && segment_roles);
 
-	/* The first page beyond the computed maximum must fail before admission. */
-	CHECK(swapz_authority_init(&a, large_maps, live_records, extent_classes,
-				   expected_logical_pages + 1U,
-				   physical_blocks) == -ENOSPC);
+	/* The one-past maximum was rejected above before these large arrays. */
 	CHECK(swapz_authority_init(&a, large_maps, live_records, extent_classes,
 				   expected_logical_pages,
 				   physical_blocks) == 0);
@@ -922,6 +903,342 @@ static int test_old_liveness_corruption_fail_closed(void)
 	return 0;
 }
 
+
+#define CAPACITY_PROGRESS_PHYSICAL_SEGMENTS 8U
+#define CAPACITY_PROGRESS_PHYSICAL_BLOCKS \
+	(CAPACITY_PROGRESS_PHYSICAL_SEGMENTS * SWAPZ_SEGMENT_BLOCKS)
+
+static struct swapz_authority capacity_progress_authority;
+static struct swapz_map capacity_progress_maps[CAPACITY_PROGRESS_PHYSICAL_BLOCKS];
+static swapz_u16 capacity_progress_live[CAPACITY_PROGRESS_PHYSICAL_BLOCKS];
+static swapz_u8 capacity_progress_classes[CAPACITY_PROGRESS_PHYSICAL_BLOCKS];
+static swapz_u8 capacity_progress_roles[CAPACITY_PROGRESS_PHYSICAL_SEGMENTS];
+static swapz_u32 capacity_progress_segment_maps[
+	CAPACITY_PROGRESS_PHYSICAL_SEGMENTS];
+static swapz_u32 capacity_progress_versions[CAPACITY_PROGRESS_PHYSICAL_BLOCKS];
+static swapz_u32 capacity_progress_generations[
+	CAPACITY_PROGRESS_PHYSICAL_BLOCKS];
+static swapz_u8 capacity_progress_media[
+	CAPACITY_PROGRESS_PHYSICAL_BLOCKS * SWAPZ_BLOCK_BYTES];
+static swapz_u8 capacity_progress_page[SWAPZ_BLOCK_BYTES];
+static swapz_u8 capacity_progress_expected[SWAPZ_BLOCK_BYTES];
+static swapz_u32 capacity_progress_logical_pages;
+static unsigned long long capacity_progress_gc_writes;
+
+static void capacity_progress_make_raw_page(swapz_u32 logical,
+					    swapz_u32 version,
+					    swapz_u8 *output)
+{
+	swapz_u32 state = 0x9e3779b9U ^
+		(logical * 0x85ebca6bU) ^ (version * 0xc2b2ae35U);
+	swapz_u32 offset;
+
+	for (offset = 0; offset < SWAPZ_BLOCK_BYTES; offset += 4U) {
+		state ^= state << 13;
+		state ^= state >> 17;
+		state ^= state << 5;
+		output[offset] = (swapz_u8)state;
+		output[offset + 1U] = (swapz_u8)(state >> 8);
+		output[offset + 2U] = (swapz_u8)(state >> 16);
+		output[offset + 3U] = (swapz_u8)(state >> 24);
+	}
+}
+
+static int capacity_progress_setup(void)
+{
+	struct swapz_authority_geometry geometry;
+	int error;
+
+	error = swapz_authority_capacity(CAPACITY_PROGRESS_PHYSICAL_BLOCKS,
+					 &geometry);
+	if (error)
+		return error;
+	if (geometry.maximum_logical_pages !=
+	    5U * SWAPZ_SEGMENT_BLOCKS ||
+	    geometry.gc_reserve_blocks != 2U * SWAPZ_SEGMENT_BLOCKS ||
+	    geometry.required_foreground_headroom_blocks !=
+		    SWAPZ_SEGMENT_BLOCKS)
+		return -EUCLEAN;
+	if (swapz_authority_validate_geometry(
+		    geometry.maximum_logical_pages + 1U,
+		    CAPACITY_PROGRESS_PHYSICAL_BLOCKS, NULL) != -ENOSPC)
+		return -EUCLEAN;
+
+	capacity_progress_logical_pages = geometry.maximum_logical_pages;
+	memset(capacity_progress_maps, 0, sizeof(capacity_progress_maps));
+	memset(capacity_progress_live, 0, sizeof(capacity_progress_live));
+	memset(capacity_progress_classes, 0, sizeof(capacity_progress_classes));
+	memset(capacity_progress_roles, 0, sizeof(capacity_progress_roles));
+	memset(capacity_progress_segment_maps, 0,
+	       sizeof(capacity_progress_segment_maps));
+	memset(capacity_progress_versions, 0, sizeof(capacity_progress_versions));
+	memset(capacity_progress_generations, 0,
+	       sizeof(capacity_progress_generations));
+	memset(capacity_progress_media, 0, sizeof(capacity_progress_media));
+	capacity_progress_gc_writes = 0;
+
+	error = swapz_authority_init(
+		&capacity_progress_authority, capacity_progress_maps,
+		capacity_progress_live, capacity_progress_classes,
+		capacity_progress_logical_pages,
+		CAPACITY_PROGRESS_PHYSICAL_BLOCKS);
+	if (error)
+		return error;
+	capacity_progress_authority.reuse_dead_segments = 1;
+	error = swapz_enable_segment_rotation(
+		&capacity_progress_authority, capacity_progress_roles,
+		CAPACITY_PROGRESS_PHYSICAL_SEGMENTS);
+	if (error)
+		return error;
+	return swapz_enable_segment_mapping_counts(
+		&capacity_progress_authority, capacity_progress_segment_maps,
+		CAPACITY_PROGRESS_PHYSICAL_SEGMENTS);
+}
+
+static int capacity_progress_write_page(swapz_u32 logical, swapz_u32 version)
+{
+	struct swapz_tx tx;
+	int error;
+
+	if (logical >= capacity_progress_logical_pages)
+		return -ERANGE;
+	capacity_progress_make_raw_page(logical, version,
+					capacity_progress_page);
+	error = swapz_stage(&capacity_progress_authority, &logical, 1, 1, &tx);
+	if (error)
+		return error;
+	if (tx.start_block >= CAPACITY_PROGRESS_PHYSICAL_BLOCKS) {
+		(void)swapz_finish_raw(&capacity_progress_authority, &tx,
+				      capacity_progress_page, 0, -ERANGE);
+		return -ERANGE;
+	}
+	memcpy(capacity_progress_media +
+		       (size_t)tx.start_block * SWAPZ_BLOCK_BYTES,
+	       capacity_progress_page, SWAPZ_BLOCK_BYTES);
+	error = swapz_finish_raw(&capacity_progress_authority, &tx,
+				 capacity_progress_page, 1, 0);
+	if (error)
+		return error;
+	capacity_progress_versions[logical] = version;
+	capacity_progress_generations[logical]++;
+	if (capacity_progress_maps[logical].generation !=
+	    capacity_progress_generations[logical])
+		return -EUCLEAN;
+	return 0;
+}
+
+static int capacity_progress_verify_all_pages(void)
+{
+	swapz_u32 logical;
+
+	for (logical = 0; logical < capacity_progress_logical_pages; ++logical) {
+		const struct swapz_map *map = &capacity_progress_maps[logical];
+		const swapz_u8 *stored;
+
+		if (!map->valid || !map->raw || map->extent_blocks != 1 ||
+		    map->start_block >= CAPACITY_PROGRESS_PHYSICAL_BLOCKS ||
+		    map->generation != capacity_progress_generations[logical])
+			return -EUCLEAN;
+		stored = capacity_progress_media +
+			(size_t)map->start_block * SWAPZ_BLOCK_BYTES;
+		capacity_progress_make_raw_page(
+			logical, capacity_progress_versions[logical],
+			capacity_progress_expected);
+		if (memcmp(stored, capacity_progress_expected,
+			   SWAPZ_BLOCK_BYTES) ||
+		    swapz_verify_raw(&capacity_progress_authority, logical,
+				     stored))
+			return -EBADMSG;
+	}
+	return 0;
+}
+
+static int capacity_progress_fill_all_pages(swapz_u32 version)
+{
+	swapz_u32 logical;
+
+	for (logical = 0; logical < capacity_progress_logical_pages; ++logical) {
+		int error = capacity_progress_write_page(logical, version);
+
+		if (error)
+			return error;
+	}
+	return 0;
+}
+
+static unsigned int capacity_progress_reserve_segments(void)
+{
+	unsigned int count = 0;
+	swapz_u32 segment;
+
+	for (segment = 0; segment < CAPACITY_PROGRESS_PHYSICAL_SEGMENTS;
+	     ++segment)
+		if (!capacity_progress_roles[segment])
+			count++;
+	return count;
+}
+
+static int capacity_progress_relocate_segment(swapz_u32 victim)
+{
+	swapz_u32 logical;
+	int error;
+
+	error = swapz_gc_begin_rotation(&capacity_progress_authority, victim);
+	if (error)
+		return error;
+	for (logical = 0; logical < capacity_progress_logical_pages; ++logical) {
+		struct swapz_tx tx;
+		swapz_u32 source;
+
+		if (!capacity_progress_maps[logical].valid ||
+		    capacity_progress_maps[logical].start_block /
+				    SWAPZ_SEGMENT_BLOCKS != victim)
+			continue;
+		source = capacity_progress_maps[logical].start_block;
+		memcpy(capacity_progress_page,
+		       capacity_progress_media +
+			       (size_t)source * SWAPZ_BLOCK_BYTES,
+		       SWAPZ_BLOCK_BYTES);
+		if (swapz_verify_raw(&capacity_progress_authority, logical,
+				     capacity_progress_page))
+			return -EBADMSG;
+		error = swapz_stage(&capacity_progress_authority, &logical, 1, 1,
+				    &tx);
+		if (error)
+			return error;
+		memcpy(capacity_progress_media +
+			       (size_t)tx.start_block * SWAPZ_BLOCK_BYTES,
+		       capacity_progress_page, SWAPZ_BLOCK_BYTES);
+		error = swapz_finish_raw(&capacity_progress_authority, &tx,
+					 capacity_progress_page, 1, 0);
+		if (error)
+			return error;
+		capacity_progress_generations[logical]++;
+		capacity_progress_gc_writes++;
+		if (capacity_progress_maps[logical].generation !=
+		    capacity_progress_generations[logical])
+			return -EUCLEAN;
+	}
+	return swapz_gc_commit_rotation(&capacity_progress_authority, victim);
+}
+
+static int capacity_progress_overwrite_outside_open(
+	swapz_u32 *next_source_segment)
+{
+	swapz_u32 offset;
+
+	for (offset = 0; offset < CAPACITY_PROGRESS_PHYSICAL_SEGMENTS;
+	     ++offset) {
+		swapz_u32 segment =
+			(*next_source_segment + offset) %
+			CAPACITY_PROGRESS_PHYSICAL_SEGMENTS;
+		swapz_u32 logical;
+
+		if (!capacity_progress_roles[segment] ||
+		    segment == capacity_progress_authority.open_segment ||
+		    capacity_progress_segment_maps[segment] < 2U)
+			continue;
+		for (logical = 0; logical < capacity_progress_logical_pages;
+		     ++logical) {
+			swapz_u32 source;
+
+			if (!capacity_progress_maps[logical].valid ||
+			    capacity_progress_maps[logical].start_block >=
+				    CAPACITY_PROGRESS_PHYSICAL_BLOCKS)
+				return -EUCLEAN;
+			source = capacity_progress_maps[logical].start_block /
+				 SWAPZ_SEGMENT_BLOCKS;
+			if (source == segment) {
+				int error = capacity_progress_write_page(
+					logical,
+					capacity_progress_versions[logical] + 1U);
+
+				if (!error)
+					*next_source_segment =
+						(segment + 1U) %
+						CAPACITY_PROGRESS_PHYSICAL_SEGMENTS;
+				return error;
+			}
+		}
+		return -EUCLEAN;
+	}
+	return -EUCLEAN;
+}
+
+static int capacity_progress_choose_partial_victim(swapz_u32 *victim)
+{
+	swapz_u32 segment;
+	swapz_u32 best = ~(swapz_u32)0;
+	swapz_u32 fewest_live = SWAPZ_SEGMENT_BLOCKS;
+
+	for (segment = 0; segment < CAPACITY_PROGRESS_PHYSICAL_SEGMENTS;
+	     ++segment) {
+		if (!capacity_progress_roles[segment] ||
+		    segment == capacity_progress_authority.open_segment ||
+		    !capacity_progress_segment_maps[segment] ||
+		    capacity_progress_segment_maps[segment] >= fewest_live)
+			continue;
+		fewest_live = capacity_progress_segment_maps[segment];
+		best = segment;
+	}
+	if (best == ~(swapz_u32)0)
+		return -ENOSPC;
+	*victim = best;
+	return 0;
+}
+
+static int test_maximum_capacity_raw_cow_and_gc_progress(void)
+{
+	const unsigned int rotations = 8U;
+	swapz_u32 next_source_segment = 0;
+	unsigned int rotation;
+
+	CHECK(capacity_progress_setup() == 0);
+	CHECK(capacity_progress_reserve_segments() == 2U);
+	CHECK(capacity_progress_fill_all_pages(1U) == 0);
+	CHECK(capacity_progress_authority.next_block ==
+	      capacity_progress_logical_pages);
+	CHECK(capacity_progress_verify_all_pages() == 0);
+
+	/* The accepted all-RAW maximum must have one ordinary COW block now. */
+	CHECK(capacity_progress_write_page(0U, 2U) == 0);
+	CHECK(capacity_progress_verify_all_pages() == 0);
+
+	for (rotation = 0; rotation < rotations; ++rotation) {
+		swapz_u32 victim;
+		swapz_u32 victim_live;
+		unsigned int attempts;
+		unsigned long long gc_writes_before;
+		int error = 0;
+
+		for (attempts = 0;
+		     attempts < CAPACITY_PROGRESS_PHYSICAL_SEGMENTS *
+				     SWAPZ_SEGMENT_BLOCKS;
+		     ++attempts) {
+			error = capacity_progress_overwrite_outside_open(
+				&next_source_segment);
+			if (error)
+				break;
+		}
+		CHECK(error == -ENOSPC);
+		CHECK(!capacity_progress_authority.in_flight);
+		CHECK(capacity_progress_choose_partial_victim(&victim) == 0);
+		victim_live = capacity_progress_segment_maps[victim];
+		CHECK(victim_live >= SWAPZ_SEGMENT_BLOCKS / 2U);
+		CHECK(victim_live < SWAPZ_SEGMENT_BLOCKS);
+		gc_writes_before = capacity_progress_gc_writes;
+		CHECK(capacity_progress_relocate_segment(victim) == 0);
+		CHECK(capacity_progress_gc_writes - gc_writes_before ==
+		      victim_live);
+		CHECK(capacity_progress_reserve_segments() == 2U);
+		CHECK(capacity_progress_verify_all_pages() == 0);
+	}
+	CHECK(capacity_progress_gc_writes >=
+	      (unsigned long long)rotations * (SWAPZ_SEGMENT_BLOCKS / 2U));
+	return 0;
+}
+
+
 int main(void)
 {
 	int passed = 0;
@@ -929,6 +1246,7 @@ int main(void)
 	CHECK(test_initial_rejects_unsafe_capacity() == 0); passed++;
 	CHECK(test_selected_card_geometry_and_memory_scaling() == 0); passed++;
 	CHECK(test_16gib_fixture_maximum_capacity() == 0); passed++;
+	CHECK(test_maximum_capacity_raw_cow_and_gc_progress() == 0); passed++;
 	CHECK(test_full_publish_and_authoritative_reads() == 0); passed++;
 	CHECK(test_peeked_authoritative_read_rechecks_payload_and_sequence() == 0); passed++;
 	CHECK(test_inflight_interleavings_preserve_authority() == 0); passed++;

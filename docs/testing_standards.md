@@ -489,11 +489,12 @@ other interpretation. The transaction sequence is retained separately with
 one byte per physical block for a compressed extent's offset from its segment's
 first compressed sequence, plus one 32-bit sequence base per segment. The
 native test must cover the maximum 255 offset and fail closed on overflow. For the current
-16 GiB fixture geometry this is 4,194,048 usable physical blocks, 3,727,872
-logical pages (15,269,363,712 mapper bytes), 465,984 reserve blocks, and
-106,834,908 bytes (101.89 MiB) of capacity-index arrays. Compared with the
-20-byte map and no sequence index, the net compiled-array reduction is
-10,651,908 bytes (10.15 MiB). The array figure excludes the target structure,
+16 GiB fixture geometry this is 4,194,048 usable physical blocks, 3,727,616
+logical pages (15,268,315,136 mapper bytes), 465,952 GC-reserve blocks, one
+separate 256-block foreground COW segment, 15,268,311,040 Linux-usable swap
+bytes, and 106,828,764 bytes (101.88 MiB) of capacity-index arrays. Compared
+with the 20-byte map and no sequence index, the net compiled-array reduction is
+10,650,884 bytes (10.16 MiB). The array figure excludes the target structure,
 fixed scratch/cache/workspace allocations and allocator overhead; it is not a
 total module-RAM measurement. Native
 authority success does not prove that the loaded Device Mapper target can
@@ -519,13 +520,15 @@ currently selected-card geometry recorded in AGENT_CONTEXT.md; this is a
 source-level sizing oracle, not a host allocation attempt. For the current
 124,787,884,032-byte partition, reserving physical block zero and rounding the
 remainder down to 1MiB segments yields 30,465,536 physical data blocks and
-119,006 segments. The maximum admitted logical capacity is 27,080,448 pages
-(110,921,515,008 mapper bytes), with maximum logical index 27,080,447 and
-3,385,056 reserve blocks. The first page beyond that limit must fail
-allocation-free with `-ENOSPC`. Capacity-index payload is 776,077,112 bytes
-(740.1248 MiB); on a 4KiB-page host, independently rounding each current array
-to an allocation-page boundary is 776,118,272 bytes, 41,160 bytes of page
-rounding. The largest one is the 433,287,168-byte mapping array. vmalloc
+119,006 segments. The maximum admitted logical capacity is 27,080,192 pages
+(110,920,466,432 mapper bytes), with maximum logical index 27,080,191,
+3,385,024 GC-reserve blocks, and one separate 256-block foreground COW
+segment. Linux can use 110,920,462,336 bytes after its mapper page-zero swap
+header. The first page beyond that limit must fail allocation-free with
+`-ENOSPC`. Capacity-index payload is 776,070,968 bytes (740.1189 MiB); on a
+4KiB-page host, independently rounding each current array to an allocation-page
+boundary is 776,114,176 bytes, 43,208 bytes of page rounding. The largest one
+is the 433,283,072-byte mapping array. vmalloc
 metadata, page tables, fixed target scratch/caches/workspaces and allocator
 implementation overhead remain outside those figures and require loaded-host
 measurement. The same preflight must exercise an aligned near-`u32` physical
@@ -538,17 +541,29 @@ A rejected geometry leaves the output reserve untouched: the test must refresh
 a successful preflight before using its reserve for foreground-headroom checks,
 not accidentally compute from an earlier poison sentinel.
 
-That selected-card value is an authority-admission limit, not a worst-case RAW
-forward-progress limit. With 30,465,536 data blocks, the current 27,080,448-page
-admission and 3,385,056-block reserve leave exactly 27,080,448 foreground
-blocks: an all-RAW fill therefore leaves no copy-on-write block for the first
-overwrite. Under the current rotating-role allocator, full-capacity
-qualification must preserve at least one unused 256-block foreground segment
-after GC reserves. Solving the existing `ceil(logical_pages / 8)` reserve policy
-with that headroom gives at most 27,080,192 logical pages, a 3,385,024-block GC
-reserve, and a 110,920,466,432-byte mapper. A different allocator may exceed
-that limit only if direct production-C and loaded tests prove equivalent
-overwrite bootstrap without reusing a referenced or uncertain extent.
+The authority policy now enforces worst-case RAW forward progress instead of
+merely documenting it. Its reusable contract takes usable physical blocks
+(after the SWZ header and 1MiB rounding), keeps the GC reserve at
+`max(ceil(logical_pages / 8), 512)` blocks, and independently requires one
+256-block foreground COW segment. A candidate is admissible only when
+`logical_pages + 256 <= floor((physical_blocks - gc_reserve_blocks) / 256) *
+256`. The capacity helper applies that same gate plus the build's `size_t`
+array-addressability checks, then reports the maximum logical pages, mapper
+bytes (`logical_pages * 4096`), and Linux-usable swap bytes
+(`(logical_pages - 1) * 4096`). Misaligned backing is `-EINVAL`; a valid but
+too-small or one-past-capacity geometry is `-ENOSPC`; an otherwise admissible
+map/liveness byte count that cannot fit `size_t` is `-EOVERFLOW`, with all
+failure outputs untouched. The GC reserve is never reduced to recover page
+count.
+
+The native mapping suite must bind acceptance to allocator behavior on exact
+production authority C: derive the maximum for an eight-segment fixture, reject
+the next page, fill every admitted logical page as RAW, perform the first COW
+overwrite from the mandatory foreground headroom, then force repeated
+high-live GC reserve rotations while checking every surviving byte, generation
+and RAW CRC. The GC high-occupancy suite remains the longer 64-rotation stress
+proof; together these establish that capacity acceptance corresponds to actual
+allocator forward progress rather than mapper construction alone.
 
 The `/8` reserve change updates the admitted-capacity policy, not the serialized
 SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
