@@ -10,7 +10,7 @@ More than half of ongoing development engineering time should concern production
 
 ## Source and naming
 
-Active product C/C++ and headers live under `src/`; test-only code lives under `tests/`; maintained Markdown lives under `docs/`; packaging code lives under `packaging/`. Do not recreate parallel `kernel/`, `userspace/`, `tools/`, legacy source trees, alternate research modules or historical models.
+Active product C/C++ and headers live under `src/`; test-only code lives under `tests/`; maintained project documentation lives under `docs/`; packaging code lives under `packaging/`. The sole root-level Markdown exception is `AGENTS.md`, which is repository-control metadata intentionally rooted for coding-agent discovery and is not product documentation. Do not create any other root Markdown or recreate parallel `kernel/`, `userspace/`, `tools/`, legacy source trees, alternate research modules or historical models.
 
 Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ may appear only when discussing the current unversioned disk format.
 

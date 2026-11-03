@@ -86,9 +86,12 @@ jobs:
           for file in "${required[@]}"; do
             test -s "$file" || { echo "FAIL: missing documentation $file"; exit 1; }
           done
-          if git ls-files '*.md' | grep -v '^docs/' | grep -q .; then
-            echo 'FAIL: all maintained Markdown must live under docs/'
-            git ls-files '*.md' | grep -v '^docs/' || true
+          # AGENTS.md is repository-control metadata intentionally rooted where
+          # coding agents discover it; all maintained project documentation
+          # remains under docs/.
+          if git ls-files '*.md' | grep -vE '^(docs/|AGENTS\.md$)' | grep -q .; then
+            echo 'FAIL: maintained project Markdown must live under docs/ (root AGENTS.md is the sole control-file exception)'
+            git ls-files '*.md' | grep -vE '^(docs/|AGENTS\.md$)' || true
             exit 1
           fi
           if git ls-files '*.py' | grep -v '^tests/' | grep -q .; then
