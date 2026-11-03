@@ -683,7 +683,9 @@ exactly. It hashes the frozen acceptance manifest, prospective amendment and
 evaluator. FAIL/INCOMPLETE evidence may still be sealed when pair/source
 provenance is inconsistent so the invalid campaign remains auditable; a PASS is
 blocked unless all pair/summary source identity matches the exact host source.
-Stable host/device state is independently required for PASS. The resulting
+Stable source/tree, full kernel identity, CPU model/policy/affinity, total
+RAM, mount and swap inventories, device identity/queue/scheduler and swapz
+module cleanup state are independently required for PASS. The resulting
 campaign JSON is the machine-readable provenance index; preserving the original
 arm/pair files remains mandatory.
 This methodology change intentionally does not add a second public test
