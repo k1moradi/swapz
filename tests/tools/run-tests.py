@@ -155,6 +155,7 @@ def _readiness_target_key(target):
                 r"[0-9a-f](?:[0-9a-f]|-(?=[0-9a-f])){6,62}[0-9a-f]",
                 partuuid) or
             "--" in partuuid or
+            len(partuuid.replace("-", "")) < 8 or
             type(device_bytes) is not int or
             device_bytes <= LOGICAL_BLOCK_BYTES or
             device_bytes % LOGICAL_BLOCK_BYTES):
