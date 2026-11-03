@@ -2494,6 +2494,15 @@ int main(void)
 	assert(!swapz_primary_page_limit_fits(0ULL, 1ULL));
 	assert(!swapz_primary_page_limit_fits(
 		3ULL * SWAPZ_PRIMARY_SEGMENT_BLOCKS + 1ULL, 1ULL));
+	/* First segment-rounded physical geometry outside the kernel u32
+	 * address domain must fail before mapper planning, not truncate. */
+	assert(!swapz_primary_page_limit_fits(
+		(uint64_t)UINT32_MAX + 1ULL, 1ULL));
+	assert(swapz_primary_maximum_logical_pages(
+		       (uint64_t)UINT32_MAX + 1ULL) == 0ULL);
+	assert(swapz_primary_physical_blocks(
+		       ((uint64_t)UINT32_MAX + 2ULL) *
+		       SWAPZ_PRIMARY_BLOCK_BYTES) == 0ULL);
 	test_partuuid_validation_and_normalization();
 	test_recovery_required_state_builder();
 	test_primary_swap_transition_adapter();

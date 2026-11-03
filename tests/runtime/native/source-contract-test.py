@@ -1399,6 +1399,7 @@ static swapz_u16 swapz_probe_set(
     def test_allocation_has_gc_reserve_and_fail_closed_reuse(self):
         compact = body("swapz_gc_compact_one_inner")
         relocate = body("swapz_gc_relocate_one")
+        ctor = body("swapz_ctr")
         self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_flush_window"))
         self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_raw_write"))
         self.assertIn("swapz_gc_choose_victim(ctx,", compact)
@@ -1411,6 +1412,13 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_gc_prefer(score, count, best, best_count)", DM)
         self.assertIn("swapz_gc_relocate_one(ctx, victim, logical)", compact)
         self.assertIn("swapz_engine_read_page(&ctx->engine", relocate)
+        self.assertIn("swapz_authority_validate_geometry(", ctor)
+        self.assertLess(
+            ctor.index("swapz_authority_validate_geometry("),
+            ctor.index("ctx->gc_scores = kvcalloc"))
+        self.assertLess(
+            ctor.index("swapz_authority_validate_geometry("),
+            ctor.index("ctx->maps = kvcalloc"))
         self.assertIn("swapz_gc_flush(ctx)", compact)
         self.assertIn("swapz_finish_raw(&ctx->authority", body("swapz_gc_move_raw"))
         self.assertIn("if (a->live_records[block])", compact)

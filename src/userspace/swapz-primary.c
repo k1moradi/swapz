@@ -28,6 +28,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include "../kernel/authority.h"
 #include "../kernel/superblock.h"
 
 static struct swapz_primary_target swapz_primary_selected_target;
@@ -1146,13 +1147,18 @@ static int swapz_primary_manifest_valid(
 static uint64_t swapz_primary_physical_blocks(uint64_t device_bytes)
 {
 	uint64_t blocks;
+	uint64_t usable_blocks;
 
 	if (device_bytes < SWAPZ_PRIMARY_BLOCK_BYTES ||
 	    device_bytes % SWAPZ_PRIMARY_BLOCK_BYTES)
 		return 0;
 	blocks = device_bytes / SWAPZ_PRIMARY_BLOCK_BYTES;
-	return ((blocks - 1ULL) / SWAPZ_PRIMARY_SEGMENT_BLOCKS) *
-		SWAPZ_PRIMARY_SEGMENT_BLOCKS;
+	usable_blocks = ((blocks - 1ULL) / SWAPZ_PRIMARY_SEGMENT_BLOCKS) *
+			SWAPZ_PRIMARY_SEGMENT_BLOCKS;
+	if (usable_blocks > UINT32_MAX ||
+	    usable_blocks > (uint64_t)SIZE_MAX / sizeof(swapz_u16))
+		return 0;
+	return usable_blocks;
 }
 
 static int swapz_primary_mapper_layout(
@@ -4839,7 +4845,10 @@ static int swapz_primary_page_limit_fits(uint64_t physical_blocks,
 	uint64_t reserve;
 	uint64_t data_blocks;
 
-	if (!logical_pages ||
+	if (!logical_pages || logical_pages > UINT32_MAX ||
+	    physical_blocks > UINT32_MAX ||
+	    logical_pages > (uint64_t)SIZE_MAX / sizeof(struct swapz_map) ||
+	    physical_blocks > (uint64_t)SIZE_MAX / sizeof(swapz_u16) ||
 	    physical_blocks < 3ULL * SWAPZ_PRIMARY_SEGMENT_BLOCKS ||
 	    physical_blocks % SWAPZ_PRIMARY_SEGMENT_BLOCKS)
 		return 0;

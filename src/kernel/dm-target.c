@@ -8398,6 +8398,19 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		error = -EINVAL;
 		goto fail;
 	}
+	/*
+	 * Reject impossible capacity before any logical/physical-sized arrays.
+	 * swapz_authority_init() rechecks the same policy after allocation, but
+	 * that cannot protect the constructor from a doomed multi-gigabyte
+	 * kvcalloc request.
+	 */
+	error = swapz_authority_validate_geometry(
+		(u32)logical, (u32)physical, NULL);
+	if (error) {
+		ti->error =
+			"Insufficient capacity for uncompressed pages plus swapz reserve";
+		goto fail;
+	}
 	ctx->logical_pages = logical;
 	ctx->physical_blocks = physical;
 	ctx->segment_count = physical / SWAPZ_SEGMENT_BLOCKS;

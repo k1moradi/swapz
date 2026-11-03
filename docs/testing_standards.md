@@ -599,7 +599,13 @@ bytes (`logical_pages * 4096`), and Linux-usable swap bytes
 independently enforce the same boundary: 3,727,616 logical pages for the 16 GiB
 fixture and 27,080,192 for the recorded 30,465,536-block card geometry, with
 the next page and the former zero-headroom 27,080,448-page userspace limit
-rejected. Misaligned backing is `-EINVAL`; a valid but
+rejected. Userspace must also reject the first segment-rounded physical geometry
+above `UINT32_MAX` and the build's `size_t` map/liveness addressability before
+emitting a Device Mapper table; it must never truncate a wider device geometry
+into the kernel's u32 authority indices. The target constructor must call the
+allocation-free authority geometry validator before any capacity-sized
+`kvcalloc`, with `swapz_authority_init()` retaining its post-allocation
+defensive recheck. Misaligned backing is `-EINVAL`; a valid but
 too-small or one-past-capacity geometry is `-ENOSPC`; an otherwise admissible
 map/liveness byte count that cannot fit `size_t` is `-EOVERFLOW`, with all
 failure outputs untouched. The GC reserve is never reduced to recover page
