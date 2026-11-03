@@ -34,16 +34,14 @@ SOURCE_HEAD="$2"
 
 for command in cc dmsetup modprobe mountpoint mount blockdev sfdisk udevadm \
 	blkid mkswap sha256sum python3 timeout stat findmnt awk sed grep install od \
-	tr cut basename readlink rm rmdir ls sleep cat chmod git; do
+	tr cut basename readlink rm rmdir ls sleep cat chmod; do
 	command -v "$command" >/dev/null 2>&1 ||
 		blocked "required command is unavailable: $command"
 done
 
-[[ "$(git rev-parse --verify HEAD 2>/dev/null)" == "$SOURCE_HEAD" ]] ||
-	blocked "validated source does not match current checkout"
-git diff --quiet --exit-code &&
-	git diff --cached --quiet --exit-code ||
-	blocked "owned-nullblk qualifier requires a clean checkout"
+# Branch/source/cleanliness are proved by the unprivileged loaded-test parent
+# before sudo and rechecked there after this child returns. The privileged
+# helper consumes only the explicit validated SHA and generated build provenance.
 [[ -r build/source-build-info.h &&
    -r build/kernel/experimental/dm-swapz.ko &&
    -x build/tests/device-roundtrip ]] ||
