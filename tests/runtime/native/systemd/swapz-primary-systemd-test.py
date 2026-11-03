@@ -894,7 +894,8 @@ class BootVerifierTests(unittest.TestCase):
     def test_wrong_mapper_geometry_records_fail(self) -> None:
         self.arm_then_reboot()
         env = self.env.copy()
-        env["MOCK_DM_TABLE"] = "0 216643576 swapz 8:1 0 64 0 2 0 1 0 0"
+        # Exact retired zero-COW-headroom maximum must never pass boot verification.
+        env["MOCK_DM_TABLE"] = "0 216643584 swapz 8:1 0 64 0 2 0 1 0 0"
         observed = self.run_verifier("observe", env=env)
         self.assertEqual(observed.returncode, 1, observed.stderr)
         self.assertIn("COLD_BOOT_OBSERVATION=FAIL", observed.stdout)

@@ -567,6 +567,8 @@ maximum_logical_sectors()
 	[ "$blocks" -gt 1 ] || return 1
 	physical_blocks=$((((blocks - 1) / 256) * 256))
 	[ "$physical_blocks" -gt 0 ] || return 1
+	# Production authority indexes physical blocks with swapz_u32.
+	[ "$physical_blocks" -le 4294967295 ] || return 1
 	low=0
 	high=$physical_blocks
 	while [ "$low" -lt "$high" ]; do
@@ -577,11 +579,10 @@ maximum_logical_sectors()
 			fits=0
 		else
 			data_blocks=$((((physical_blocks - reserve) / 256) * 256))
-			# Match swapz_authority_capacity_window(): GC reserve is not
-			# foreground COW authority. Keep one complete 256-page segment
-			# beyond the logical mapper so a 100%-RAW fill can publish its
-			# first overwrite before any victim is reclaimable.
-			if [ "$candidate" -le $((data_blocks - 256)) ]; then
+			# GC reserve is not foreground allocation authority. Keep one
+			# independent 256-block segment for the first all-RAW COW write.
+			if [ "$data_blocks" -ge 256 ] &&
+			   [ "$candidate" -le "$((data_blocks - 256))" ]; then
 				fits=1
 			else
 				fits=0

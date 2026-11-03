@@ -2503,7 +2503,13 @@ major:minor can no longer be queried; preserve the parsed identity long enough
 to report that distinction. Missing or uninspectable telemetry for an existing
 device is degraded/incomplete evidence; it never authorizes destructive
 recovery. Sustained GC-stall reporting requires repeated pressure/headroom
-evidence without GC victim/page progress.
+evidence without GC victim/page progress. Cold-boot capacity verification must
+independently reproduce the kernel/manager admission boundary: the GC reserve is
+`max(ceil(logical_pages / 8), 512)` physical blocks and one additional
+256-block foreground COW segment must remain outside the advertised logical
+mapping. A zero-headroom maximum or capacity derived directly from raw backing
+bytes must fail boot verification rather than being accepted as equivalent
+geometry.
 
 Hibernation/resume is unsupported because primary swapz mapping authority is
 volatile across a fresh boot. Arming and boot preflight must fail closed when

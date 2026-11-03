@@ -4949,10 +4949,16 @@ without reading or changing host swap state. Cover exact mapper/run/backing
 identity, foreign mapper rejection, active swap inventory and capacity,
 configured backing-path disappearance as a hard failure, monitoring-command
 failure as degraded evidence, low-noise unchanged polling, kernel/systemd
-telemetry, and sustained GC pressure without progress. Target
-health failures must remain observable rather than causing the monitor service
-to restart the primary lifecycle; only monitor-process failure is eligible for
-`Restart=on-failure`.
+telemetry, and sustained GC pressure without progress. Cold-boot verification
+must independently derive maximum mapper geometry from the selected backing
+bytes using the production reserve rule plus one 256-block foreground COW
+headroom segment. For the current-card geometry it must accept 216,641,536
+logical sectors and reject the exact retired zero-headroom 216,643,584-sector
+geometry with `mapper_logical_capacity_mismatch`. The calculation must also
+reject a physical-block geometry outside the kernel's `swapz_u32` address
+domain. Target health failures must remain observable rather than causing the
+monitor service to restart the primary lifecycle; only monitor-process failure
+is eligible for `Restart=on-failure`.
 
 Rootless transactions must retain missing-media no-swap behavior, interrupted
 startup, failed native stop, and service-restart contracts. A failed stop must
