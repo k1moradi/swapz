@@ -4424,7 +4424,10 @@ must keep the command unavailable and prove no host path or lifecycle side
 effect is reached. After the ordinary loaded owned-null_blk smoke, the official
 loaded stage must also execute one private success-cycle rehearsal with
 `SWAPZ_PRIMARY_OWNED_NULLBLK_TEST`: create a uniquely owned memory-backed
-null_blk disk, create exactly one real partition with a kernel PARTUUID,
+null_blk disk, create exactly one real partition with a kernel PARTUUID using
+`sfdisk --lock`, and rely on sfdisk's normal kernel notification rather than
+issuing a second unlocked `blockdev --rereadpt` that can race with udevd. Settle
+udev before enumerating the partition. Then
 verify its PARTUUID against the partition's sysfs uevent, trigger udev's add
 event only for that exact sysfs partition path, and require udev to publish the
 real by-PARTUUID block-device alias with the same major:minor; never fabricate

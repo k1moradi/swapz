@@ -1213,7 +1213,7 @@ done
 
 DISK_ID="$(printf '%s' "$TOKEN" | cut -c1-8)"
 [[ "$DISK_ID" != 00000000 ]] || DISK_ID=1a2b3c4d
-if ! sfdisk --wipe always "$LOWER" >/dev/null <<EOF
+if ! sfdisk --lock --wipe always "$LOWER" >/dev/null <<EOF
 label: dos
 label-id: 0x$DISK_ID
 unit: sectors
@@ -1223,8 +1223,6 @@ EOF
 then
 	blocked "cannot create partition table on owned RAM null_blk"
 fi
-blockdev --rereadpt "$LOWER" ||
-	blocked "kernel refused owned null_blk partition-table reread"
 udevadm settle --timeout=10 || blocked "udev did not settle owned null_blk partition"
 
 partition_count=0

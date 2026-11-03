@@ -118,6 +118,16 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertLess(alias_wait, alias_identity)
         self.assertNotRegex(self.script, r"(?m)^\s*ln\s+-s\b")
 
+    def test_partition_reread_is_locked_and_not_duplicated_after_sfdisk(self):
+        partition_write = self.script.index(
+            'if ! sfdisk --lock --wipe always "$LOWER"')
+        partition_settle = self.script.index(
+            'udevadm settle --timeout=10 || blocked "udev did not settle owned null_blk partition"',
+            partition_write,
+        )
+        self.assertLess(partition_write, partition_settle)
+        self.assertNotIn('blockdev --rereadpt "$LOWER"', self.script)
+
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)
