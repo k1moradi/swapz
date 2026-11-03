@@ -3479,6 +3479,18 @@ completion. These primitives are not lifecycle commands; keep privileged
 actions disabled until provisioning, mapper ownership, rollback and recovery
 actually use them.
 
+The owner-claim writer must fsync the consumed record, then atomically persist
+the initial `READY` state, then fsync and publish the active marker. On a later
+claim under the same lock, an absent active marker plus a matching consumed
+record and `READY` state may be reconciled as a metadata-only abort through
+`DISABLING` to `COMPLETE`; the consumed record remains permanent. Reject
+missing or mismatched consumed provenance, malformed state, and every orphan
+stage except `READY`. Rootless direct-C regressions must model the crash gap,
+prove that missing provenance leaves the `READY` bytes unchanged, prove that
+restored exact provenance permits reconciliation, and verify a subsequent
+fresh run is admitted only after the old state is durably `COMPLETE`. This
+reconciler must not touch device, swap, module, or mapper state.
+
 The primary manager's original-header backup is immutable per run ID. Its
 writer must require the exclusive lock and matching consumed/active owner claim,
 validate the caller-bound SHA-256 before writing, create a root-owned 0600

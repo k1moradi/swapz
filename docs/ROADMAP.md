@@ -1542,3 +1542,13 @@ invalid input. This is format-construction groundwork only: no partition was
 written, the privileged lifecycle remains disabled, and cold-boot recovery,
 swap activation, stop/recovery integration, exact-source qualification and
 live swap-I/O evidence remain open.
+
+The one-use owner-claim primitive now persists its consumed run record and
+initial `READY` state before publishing the active marker. A later claim can
+reconcile the narrow crash gap—matching consumed record, `READY` state, and no
+active marker—through `DISABLING` to `COMPLETE`, without deleting the consumed
+record or touching the device. Missing provenance and other orphan stages fail
+closed. Rootless tests model the gap and missing-provenance case. This closes
+only metadata-claim crash accounting; it does not implement
+prepare/start/stop/recover, qualify state against live device facts, or enable
+the manager.

@@ -254,6 +254,17 @@ read-only parameter. Its ownership result remains set if post-load checks
 fail, so recovery cannot hide a module that may be live. This primitive does
 not authorize lifecycle execution through the CLI.
 
+The initial one-use owner claim must durably publish the consumed run ID and
+canonical `READY` stage before publishing the active partition marker. Every
+device-changing operation requires both the matching active claim and a
+durable `STARTING` stage, so a `READY` state with no active marker identifies
+only an interrupted metadata-only claim. Under the permanent PARTUUID lock,
+reconcile that orphan only when its consumed record exactly matches its run
+ID; persist `READY -> DISABLING -> COMPLETE`, retain the consumed record, then
+allow a new run. Missing or malformed provenance, any non-`READY` orphan
+stage, or an active marker remains a fail-closed condition. This reconciliation
+must never perform block, swap, module, or mapper operations.
+
 ### Primary manager Device Mapper lifecycle primitives
 
 Build mapper tables and issue Device Mapper ioctls in process; do not invoke

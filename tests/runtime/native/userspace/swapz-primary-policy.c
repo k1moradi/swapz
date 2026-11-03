@@ -1389,6 +1389,142 @@ static void test_primary_qualification_live_reader_disabled_in_rootless(void)
 	assert(errno == ENODEV);
 }
 
+static void test_orphan_ready_claim_reconciliation(void)
+{
+	const char *home = getenv("HOME");
+	const char *first_run_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+	const char *next_run_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+	char base_template[PATH_MAX];
+	char lock_path[PATH_MAX];
+	char active_name[64];
+	char first_consumed_name[64];
+	char next_consumed_name[64];
+	char first_record[192];
+	char next_record[192];
+	char recovered_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char unchanged_state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	struct swapz_primary_state state = {0};
+	size_t recovered_length;
+	size_t unchanged_state_length;
+	int formatted_length;
+	int directory_fd;
+	int lock_fd;
+
+	assert(home && home[0] == '/');
+	assert(snprintf(base_template, sizeof(base_template),
+			 "%s/.swapz-primary-orphan-XXXXXX", home) > 0);
+	assert(mkdtemp(base_template));
+	assert(snprintf(lock_path, sizeof(lock_path),
+			 "%s/partition-7fb9401d-04.lock", base_template) > 0);
+	assert(snprintf(active_name, sizeof(active_name),
+			 "partition-7fb9401d-04.active") > 0);
+	assert(snprintf(first_consumed_name, sizeof(first_consumed_name),
+			 "consumed-%s.json", first_run_id) > 0);
+	assert(snprintf(next_consumed_name, sizeof(next_consumed_name),
+			 "consumed-%s.json", next_run_id) > 0);
+	assert(snprintf(first_record, sizeof(first_record),
+			 "{\"major\":8,\"minor\":4,"
+			 "\"partuuid\":\"7fb9401d-04\","
+			 "\"run_id\":\"%s\"}\n", first_run_id) > 0);
+	assert(snprintf(next_record, sizeof(next_record),
+			 "{\"major\":8,\"minor\":4,"
+			 "\"partuuid\":\"7fb9401d-04\","
+			 "\"run_id\":\"%s\"}\n", next_run_id) > 0);
+	directory_fd = swapz_primary_recovery_base_open(
+		base_template, geteuid());
+	assert(directory_fd >= 0);
+	lock_fd = swapz_primary_partition_lock_at(
+		directory_fd, "7fb9401d-04", geteuid());
+	assert(lock_fd >= 0);
+	assert(swapz_primary_claim_partition_owner_at(
+		directory_fd, lock_fd, first_run_id, geteuid()) == 0);
+	assert(swapz_primary_record_read_at(
+		directory_fd, "primary-state.json", geteuid(), recovered_record,
+		sizeof(recovered_record), &recovered_length, NULL) == 0);
+	assert(swapz_primary_state_parse(
+		recovered_record, recovered_length, &state) == 0);
+	assert(state.stage == SWAPZ_PRIMARY_STAGE_READY &&
+	       !strcmp(state.run_id, first_run_id));
+	unchanged_state_length = recovered_length;
+	memcpy(unchanged_state_record, recovered_record,
+	       recovered_length + 1U);
+	assert(unlinkat(directory_fd, active_name, 0) == 0);
+	assert(unlinkat(directory_fd, first_consumed_name, 0) == 0);
+	assert(fsync(directory_fd) == 0);
+	errno = 0;
+	assert(swapz_primary_reconcile_orphan_ready_state_at(
+		directory_fd, lock_fd, geteuid()) < 0);
+	assert(errno == ENOENT);
+	assert(swapz_primary_record_read_at(
+		directory_fd, "primary-state.json", geteuid(), recovered_record,
+		sizeof(recovered_record), &recovered_length, NULL) == 0);
+	assert(recovered_length == unchanged_state_length &&
+	       !memcmp(recovered_record, unchanged_state_record,
+		       unchanged_state_length));
+	assert(swapz_primary_write_record_at(
+		directory_fd, first_consumed_name, first_record, geteuid()) == 0);
+	assert(swapz_primary_reconcile_orphan_ready_state_at(
+		directory_fd, lock_fd, geteuid()) == 0);
+	assert(swapz_primary_record_read_at(
+		directory_fd, "primary-state.json", geteuid(), recovered_record,
+		sizeof(recovered_record), &recovered_length, NULL) == 0);
+	assert(swapz_primary_state_parse(recovered_record, recovered_length,
+					&state) == 0);
+	assert(state.stage == SWAPZ_PRIMARY_STAGE_COMPLETE &&
+	       !strcmp(state.run_id, first_run_id));
+	assert_record_equals(directory_fd, first_consumed_name, first_record);
+	state.stage = SWAPZ_PRIMARY_STAGE_STARTING;
+	formatted_length = swapz_primary_state_format(
+		&state, recovered_record, sizeof(recovered_record));
+	assert(formatted_length > 0);
+	assert(swapz_primary_replace_record_at(
+		directory_fd, "primary-state.json", first_run_id,
+		recovered_record, geteuid()) == 0);
+	assert(swapz_primary_reconcile_orphan_ready_state_at(
+		directory_fd, lock_fd, geteuid()) < 0);
+	assert(errno == EBUSY);
+	assert(swapz_primary_record_read_at(
+		directory_fd, "primary-state.json", geteuid(), recovered_record,
+		sizeof(recovered_record), &recovered_length, NULL) == 0);
+	assert(swapz_primary_state_parse(recovered_record, recovered_length,
+					&state) == 0);
+	assert(state.stage == SWAPZ_PRIMARY_STAGE_STARTING &&
+	       !strcmp(state.run_id, first_run_id));
+	state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	formatted_length = swapz_primary_state_format(
+		&state, recovered_record, sizeof(recovered_record));
+	assert(formatted_length > 0);
+	assert(swapz_primary_replace_record_at(
+		directory_fd, "primary-state.json", first_run_id,
+		recovered_record, geteuid()) == 0);
+	assert(swapz_primary_claim_partition_owner_at(
+		directory_fd, lock_fd, next_run_id, geteuid()) == 0);
+	assert_record_equals(directory_fd, active_name, next_record);
+	assert(swapz_primary_record_read_at(
+		directory_fd, "primary-state.json", geteuid(), recovered_record,
+		sizeof(recovered_record), &recovered_length, NULL) == 0);
+	assert(swapz_primary_state_parse(recovered_record, recovered_length,
+					&state) == 0);
+	assert(state.stage == SWAPZ_PRIMARY_STAGE_READY &&
+	       !strcmp(state.run_id, next_run_id));
+	state.stage = SWAPZ_PRIMARY_STAGE_DISABLING;
+	assert(swapz_primary_state_write_at(
+		directory_fd, lock_fd, &state, geteuid()) == 0);
+	state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	assert(swapz_primary_state_write_at(
+		directory_fd, lock_fd, &state, geteuid()) == 0);
+	assert(swapz_primary_release_partition_owner_at(
+		directory_fd, lock_fd, next_run_id, geteuid()) == 0);
+	assert(unlinkat(directory_fd, first_consumed_name, 0) == 0);
+	assert(unlinkat(directory_fd, next_consumed_name, 0) == 0);
+	assert(unlinkat(directory_fd, "primary-state.json", 0) == 0);
+	assert(fsync(directory_fd) == 0);
+	assert(close(lock_fd) == 0);
+	assert(close(directory_fd) == 0);
+	assert(unlink(lock_path) == 0);
+	assert(rmdir(base_template) == 0);
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -1444,6 +1580,7 @@ int main(void)
 	test_primary_qualification_report_parser();
 	test_primary_qualification_report_store();
 	test_primary_qualification_live_reader_disabled_in_rootless();
+	test_orphan_ready_claim_reconciliation();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);
