@@ -3349,7 +3349,11 @@ the active-entry count and whether `/dev/sda4` is the sole 16,777,212 KiB
 partition entry at priority -1 with zero KiB used; this partial observation
 must never be reported as complete device admission.
 The package regression must prove that units are installed disabled and that
-package install/uninstall does not start or stop system swap.
+package install/uninstall does not start or stop system swap. The primary
+mapper service must order before and conflict with the systemd swap unit
+generated for the exact `/dev/disk/by-uuid/728b4c06-44b0-46ee-91ec-560ab1bad358`
+entry, so the original partition and swapz mapper cannot be active together.
+The package test must pin the fully systemd-escaped generated unit name.
 The manager must use the same permanent `/dev/sda4` partition lock as the
 physical-swap helpers; tests must reject an unsafe lock directory, lock file or
 concurrent owner before any mutation. A persistent active-ownership marker is

@@ -79,8 +79,13 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertTrue(swap_unit.is_file())
         service_text = mapper_service.read_text()
         swap_text = swap_unit.read_text()
+        original_swap_unit = (
+            r"dev-disk-by\x2duuid-728b4c06\x2d44b0\x2d46ee"
+            r"\x2d91ec\x2d560ab1bad358.swap")
         self.assertIn("RefuseManualStart=yes", service_text)
         self.assertIn("RefuseManualStop=yes", service_text)
+        self.assertIn("Before=" + original_swap_unit, service_text)
+        self.assertIn("Conflicts=" + original_swap_unit, service_text)
         self.assertIn("ExecStart=" + str(binary) + " primary start", service_text)
         self.assertIn("What=/dev/mapper/swapz-primary", swap_text)
         self.assertIn("Priority=-1", swap_text)

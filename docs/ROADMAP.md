@@ -1390,6 +1390,9 @@ the target's physical USB disk. It also inventories `/sys/module/dm_swapz` and
 absent. Exact runtime ownership, swapz target table/capacity, and the lifecycle
 remain unchecked, so the plan stays BLOCKED. Provision, activation, teardown
 and recovery are disabled.
+The installed mapper service now orders before and conflicts with the exact
+UUID-generated systemd swap unit for `/dev/sda4`; package installation still
+leaves both swapz units disabled and does not alter the host's fstab.
 The earlier Python manager draft was removed because production Python is
 outside this repository's coding standards. The remaining implementation must
 integrate the permanent root-controlled PARTUUID lock primitive with each

@@ -1538,7 +1538,8 @@ static int swapz_primary_read_only_plan(void)
 	       minor(target_physical_parent),
 	       module_mapper_inventory_read ? "true" : "false",
 	       dm_swapz_module_loaded ? "true" : "false",
-	       !swapz_mapper_present ? "true" : "false",
+	       module_mapper_inventory_read && !swapz_mapper_present ?
+		       "true" : "false",
 	       mount_inventory_read ? "true" : "false",
 	       target_not_mounted ? "true" : "false",
 	       major(mount_facts.root_device),
