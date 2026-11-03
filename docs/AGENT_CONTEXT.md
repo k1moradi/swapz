@@ -329,8 +329,10 @@ Unless evidence changes the order, work on:
    `test_results.json`. An older PASS never qualifies a newer source.
    [docs/handoff/production-readiness.json](handoff/production-readiness.json)
    is historical unless it explicitly carries a current source-bound release
-   evidence set. The production lifecycle gate stays disabled until the exact
-   current source and card-specific acceptance gates pass. The historical
+   evidence set. The production lifecycle remains runtime-disabled until the exact
+   current source and card-specific acceptance gates pass and the owner arms
+   the cold-boot harness. The same qualified artifact is unlocked only by a
+   volatile source/boot/PARTUUID/size-bound preflight token. The historical
    fixed-device live-swap supervisor is not the active selector or deployment
    path.
 2. **Active:** directly qualify interruption and recovery behavior for the
@@ -342,14 +344,13 @@ Unless evidence changes the order, work on:
    RECOVERY_REQUIRED and RESTORED, requires exact-owned convergence, and proves
    wrong mapper identity cannot trigger swapoff/remove. Remaining lifecycle
    evidence is owned-`null_blk` execution and native-process interruption
-   behavior. A noninstalled test-only build seam now exists for that work: the
-   production gate remains literal zero, while the owned-null_blk macro requires
-   private selector/recovery/qualification paths before it can compile with the
-   gate enabled. The public Makefile never selects that seam. The latest source
+   behavior. A noninstalled test-only build seam now exists for that work: ordinary production is compiled capable but remains runtime-locked without a
+   current-boot authorization, while the owned-null_blk macro retains isolated
+   private selector/recovery/qualification authority. The public Makefile never selects that seam. The latest source
    also permits unrelated swap entries such as
    `/swapfile` while rejecting an active or ambiguous alias of the selected
-   target. Do not enable the gate before exact-source and card-specific
-   acceptance gates pass.
+   target. Do not arm production runtime authorization before exact-source and
+   card-specific acceptance gates pass.
 3. actual Linux swap correctness on the authorized card;
 4. maximum safe full-card capacity and bounded metadata RAM. The authority
    policy for the current `/dev/sda1` geometry admits 27,080,192 logical pages,
