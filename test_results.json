@@ -191,7 +191,7 @@
 "lane_gap_attribution": [],
 "loaded_correctness": {
 "overall": "INCOMPLETE",
-"reason": "missing loaded correctness markers: raw-read,packed-placement,completion-handoff,read-fault,flush-fault,codec-errors,id36,primary-lifecycle,primary-interruption-recovery,primary-negative-recovery"
+"reason": "missing loaded correctness markers: raw-read,id36,primary-lifecycle,primary-interruption-recovery,primary-negative-recovery"
 },
 "lz4_acceleration": {
 "overall": "NOT_RUN",
@@ -290,24 +290,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 7983,
-"legacy_dead_probe_ns": 715316,
-"legacy_score_scan_ns": 5267789,
+"incremental_select_ns": 7124,
+"legacy_dead_probe_ns": 725598,
+"legacy_score_scan_ns": 5616581,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3438,
-"relocation_list_ns": 2389,
-"relocation_scan_ns": 1744929,
+"mapped_dead_probe_ns": 3833,
+"relocation_list_ns": 1874,
+"relocation_scan_ns": 1814636,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 25483,
-"legacy_dead_probe_ns": 3409184,
-"legacy_score_scan_ns": 22979851,
+"incremental_select_ns": 25284,
+"legacy_dead_probe_ns": 3218619,
+"legacy_score_scan_ns": 22760329,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 13632,
-"relocation_list_ns": 2600,
-"relocation_scan_ns": 7435105,
+"mapped_dead_probe_ns": 12843,
+"relocation_list_ns": 2612,
+"relocation_scan_ns": 7425718,
 "segments": 4096,
 "victim_records": 256
 }
@@ -321,14 +321,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1254,
+"inverse_ns_per_page": 831,
 "name": "scalar",
-"transform_ns_per_page": 845
+"transform_ns_per_page": 853
 },
 {
-"inverse_ns_per_page": 577,
+"inverse_ns_per_page": 592,
 "name": "sse2",
-"transform_ns_per_page": 976
+"transform_ns_per_page": 525
 }
 ],
 "classifier": {
@@ -338,9 +338,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 492,
+"ns_per_page": 548,
 "sample_pairs": 32,
-"scalar_ns_per_page": 492,
+"scalar_ns_per_page": 548,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -355,7 +355,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11831
+"wall_ns_per_page": 8077
 },
 {
 "acceleration": 2,
@@ -363,7 +363,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 10975
+"wall_ns_per_page": 7538
 },
 {
 "acceleration": 3,
@@ -371,7 +371,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 8379
+"wall_ns_per_page": 7258
 },
 {
 "acceleration": 4,
@@ -379,7 +379,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 6914
+"wall_ns_per_page": 7127
 }
 ],
 "negative_pages": 256,
@@ -396,9 +396,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6233,
-"modeled_wall_ns_total": 3590656,
-"ns_per_saved_block": 69051,
+"modeled_wall_ns_per_page": 5072,
+"modeled_wall_ns_total": 2921984,
+"ns_per_saved_block": 56192,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -423,29 +423,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 524,
+"baseline_ns_per_page": 544,
 "order": "baseline_first",
-"unrolled_ns_per_page": 682
+"unrolled_ns_per_page": 528
 },
 {
-"baseline_ns_per_page": 971,
+"baseline_ns_per_page": 569,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 796
+"unrolled_ns_per_page": 502
 },
 {
-"baseline_ns_per_page": 951,
+"baseline_ns_per_page": 542,
 "order": "baseline_first",
-"unrolled_ns_per_page": 801
+"unrolled_ns_per_page": 512
 },
 {
-"baseline_ns_per_page": 962,
+"baseline_ns_per_page": 545,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 811
+"unrolled_ns_per_page": 534
 },
 {
-"baseline_ns_per_page": 968,
+"baseline_ns_per_page": 582,
 "order": "baseline_first",
-"unrolled_ns_per_page": 800
+"unrolled_ns_per_page": 532
 }
 ],
 "repeats_per_arm": 64,
@@ -494,14 +494,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 70544,
+"ns_per_saved_block": 57236,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 6980,
-"routed_cpu_ns_total": 4021042,
+"routed_cpu_ns_per_page": 5664,
+"routed_cpu_ns_total": 3262478,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -549,14 +549,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 70975,
+"ns_per_saved_block": 57629,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 6777,
-"routed_cpu_ns_total": 3903664,
+"routed_cpu_ns_per_page": 5502,
+"routed_cpu_ns_total": 3169616,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -604,14 +604,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 69051,
+"ns_per_saved_block": 56192,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6233,
-"routed_cpu_ns_total": 3590656,
+"routed_cpu_ns_per_page": 5072,
+"routed_cpu_ns_total": 2921984,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -659,14 +659,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 69051,
+"ns_per_saved_block": 56192,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6233,
-"routed_cpu_ns_total": 3590656,
+"routed_cpu_ns_per_page": 5072,
+"routed_cpu_ns_total": 2921984,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -714,14 +714,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 69051,
+"ns_per_saved_block": 56192,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6233,
-"routed_cpu_ns_total": 3590656,
+"routed_cpu_ns_per_page": 5072,
+"routed_cpu_ns_total": 2921984,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -738,17 +738,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 577,
+"inverse_ns_per_page": 592,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1254,
-"scalar_transform_ns_per_page": 845,
-"second_lz4_ns_per_page": 12066,
+"scalar_inverse_ns_per_page": 831,
+"scalar_transform_ns_per_page": 853,
+"second_lz4_ns_per_page": 9793,
 "transform_backend": "sse2",
-"transform_ns_per_page": 976
+"transform_ns_per_page": 525
 }
 ]
 }
@@ -762,50 +762,45 @@
 "overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "86017bf0552a35d61bbd9f38fbd1ce9d8783e531c225024f0bc5332deccd9c6a",
-"module_sha256": "7916dea5415341a1f2b21d44996669fe9fffe208beda0f5bb2e5a1cb6387365e",
-"oracle_sha256": "c82b37148db7c7822e34162f78e5bfc4dddcd9f4b6a43dbaaf3531764c65b236",
+"formatter_sha256": "7ce0515530bac54f8874ec69666419a829f5e45f377b5b4ce6f2832324188ccb",
+"module_sha256": "14964438220937e21b0a46223b427afdedefc3f290c5758984bdfffbdeb0a852",
+"oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "2a98e3b8dc4a2379b0dc2b7e30eeed0d69cd4a89",
+"source_sha": "5cc839216190cf2052de521a532e0e7fbcad98a8",
 "stages": [
 {
-"elapsed_s": 14.582,
+"elapsed_s": 12.279,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 428.573,
+"elapsed_s": 427.233,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 12.941,
+"elapsed_s": 12.418,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 12.576,
+"elapsed_s": 12.78,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
-"diagnostic": "BLOCKED: READ-fault fired before the verification READ",
-"elapsed_s": 10.52,
-"exit_code": 1,
-"failed_phase": "owned RAM synthetic lower READ fault",
+"diagnostic": "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: udev did not publish the owned partition by-PARTUUID node",
+"elapsed_s": 33.248,
+"exit_code": 2,
+"failed_phase": "owned RAM primary lifecycle setup",
 "name": "Owned RAM smoke + mixed/QD pilot",
 "signals": [
-"PASS",
-"PASS_LOADED_MAXIMUM_CAPACITY",
-"PASS_LOADED_GC_ROLL_FORWARD_RECOVERY",
-"PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP",
-"PASS_DEFAULT_ASYNC_PREPARE",
 "PASS_DEFAULT_DELTA64_RESCUE",
 "PASS_WINDOW_CLOSE_REASONS",
 "PASS_WINDOW_OPEN_AGE",
@@ -819,11 +814,16 @@
 "PASS_LOADED_DISCARD_TRIM",
 "PASS_LOADED_SUSPEND_DRAIN",
 "PASS_RETAINED_SYNTHETIC_WRITE_FAULT",
-"BLOCKED",
-"FAIL"
+"PASS_LOADED_SYNTHETIC_READ_FAULT",
+"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT",
+"PASS_LOADED_CODEC_ERROR_PATHS",
+"PASS_LOADED_PACKED_PLACEMENT",
+"PASS_LOADED_COMPLETION_HANDOFF",
+"PASS_LOADED_OWNED_NULLBLK_SMOKE",
+"BLOCKED_PRIMARY_NULLBLK_LIFECYCLE"
 ],
 "status": "BLOCKED"
 }
 ],
-"tested_commit_sha": "2a98e3b8dc4a2379b0dc2b7e30eeed0d69cd4a89"
+"tested_commit_sha": "5cc839216190cf2052de521a532e0e7fbcad98a8"
 }
