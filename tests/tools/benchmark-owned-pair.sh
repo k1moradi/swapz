@@ -967,4 +967,4 @@ python3 -B tests/runtime/benchmark/io-replay.py compare \
     "${COMPARE_ARGS[@]}" \
     --reports "$SESSION/off.json" "$SESSION/swapz.json" |
     tee "$SESSION/pair.json" || fail 'pair verification rejected'
-note 'PASS: bounded same-work pilot, not sustained GC/CPU/p99 qualification'
+note 'PASS: bounded owned-RAM same-work pilot; not physical SD, full-card, real-swap or sustained qualification'

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Development-only N-target striped raw/swapz comparison on freshly owned RAM null_blk.
 # Never touches system swap, physical devices, or unrelated Device Mapper resources.
+# This is not physical-card, full-capacity, or anonymous-swap qualification.
 set -Eeuo pipefail
 umask 077
 

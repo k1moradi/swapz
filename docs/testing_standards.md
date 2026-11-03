@@ -613,6 +613,107 @@ clean state from the same Make invocation. Stage 2's Make-interface regression
 checks the generated string form required by kernel module metadata, including
 the clean source fixture case.
 
+### Dedicated SD performance and sustained-workload qualification
+
+Physical performance qualification is separate from the mandatory owned-RAM
+matrix and does not change the single supported \`make test\` interface. It is
+scheduled only when the current protected target passes the physical identity,
+source/artifact and lifecycle gates in \`AGENT_CONTEXT.md\`; no agent may start it
+while another host task owns the card. The private implementation is
+\`tests/runtime/benchmark/{sustained-replay.py,anonymous-swap.py,qualification.py}\`.
+Rootless contracts for these helpers live in the already-executed
+\`io-replay-test.py\`, so this addition does not create another official runner.
+
+The prospective contract is source-controlled and immutable for a confirmation
+campaign. It defines four workloads: five paired balanced-content service runs,
+five paired representative-content service runs, one directional high-occupancy
+hour-long pair, and three directional actual-anonymous-swap pairs. The service
+pairs use QD8, 20% READs, 10% occupancy, 65,536 warmup operations and 1,048,576
+fixed measured operations. Their arm order is fixed before sampling as
+raw-first, swapz-first, swapz-first, raw-first, raw-first. Each arm is externally
+bounded to 1,800 seconds. The sustained pair is raw-first, maps the manager's
+maximum logical capacity, fills 90% with proven entropy content, churns an 80%
+hot region at QD16/20% READ for 60 seconds warmup plus 3,600 measured seconds,
+and has a 14,400-second whole-arm timeout. The anonymous cohort order is
+raw-first, swapz-first, raw-first; each arm performs three full verified read
+rounds and is externally bounded to 1,800 seconds.
+
+Physical block replay must fail closed unless it is bare metal, root, clean
+\`HEAD == origin/main == source_sha\`, and holds the private nonblocking host
+benchmark lock. The protected \`/etc/swapz/primary-target\`, PARTUUID alias,
+partition major:minor/bytes, removable parent major:minor/model/transport,
+sole-partition topology and source-chain exclusions must all still match the
+scheduler's pinned admission record. Fixtures, reports and root storage may not
+reside on that parent disk. Raw replay requires no holder and starts at byte
+4096 so it cannot overwrite the SWZ header. Swapz replay requires exactly the
+expected fresh mapper holder/UUID/table and zero initial logical/physical WRITE,
+GC-victim, window and failed counters. Block replay refuses any active swap or
+mount identity; actual-swap qualification is performed only by the separate
+bounded anonymous worker after the scheduler intentionally activates the one
+admitted swap device.
+
+Content classification is metadata-bound. Each fixture's SHA-256, page count
+and 4096-byte page size must match its sidecar metadata. \`entropy\` requires all
+pages to be entropy-profile RAW pages; \`balanced\` requires exactly equal medium
+and entropy page counts; \`representative\` requires the private representative
+classification. Representative fixtures retain the existing no-dump/mlock
+protection and fail closed if it cannot be established. A filename never proves
+a content class.
+
+The sustained replay's write permutation has a closed-form inverse, so latest
+page generations are reconstructed from per-lane completed-write counters. It
+must never allocate a logical-page map proportional to the advertised swap
+capacity. In-flight buffers, latency histograms and minute buckets remain
+bounded by queue depth/run duration; the final oracle streams every occupied
+page and compares the independently regenerated expected bytes. The untouched
+filled tail is read before that full sweep and is the cold-read phase. A
+physical maximum-capacity run therefore proves high logical occupancy without
+allocating the logical capacity in host RAM.
+
+Every arm preserves a JSON result on success or failure. Pair records embed
+both arms, exclusion state and every exclusion reason. There is no automatic
+retry. The 200 ms pre/post quiet windows reject busy >25%, CPU PSI \`some\` >5%,
+steal >1%, unavailable required counters, or timed-arm steal >1%. A five-pair
+service cohort is additionally unusable when raw useful-WRITE max/min spread
+exceeds 10%. Exclusion never converts a failing correctness result into a pass;
+it only prevents performance interpretation. Confirmation remains incomplete
+unless every prospectively fixed pair survives screening.
+
+Five-pair service claims use paired fractional deltas and a two-sided Student-t
+95% confidence interval (df=4). PASS requires: useful-WRITE CI lower bound
+>=+5%; normalized lower-WRITE-byte and lower-WRITE-request CI upper bounds
+<=-10%; READ and WRITE p95/p99 CI upper bounds <=+25%; and measured
+CPU-per-useful-byte CI upper bound <=+50%. The single sustained pair is
+explicitly directional and requires swapz/raw useful WRITE >=1.05, normalized
+lower WRITE bytes/requests <=0.90, READ/WRITE/cold p99 <=1.25, last/first
+quartile throughput >=0.75, last/first quartile p99 <=1.25, GC wall <=20%, zero
+GC no-headroom skips, positive victim relocation and segment programming, zero
+target failure, zero byte mismatches, <=10 seconds maximum no-progress, <=128
+MiB replay RSS and <=1.25 GiB observed metadata+target peak RAM.
+
+Anonymous-swap evidence is also directional: all three pairs must observe at
+least 128 MiB of workload-specific process/cgroup swap and at least that usage
+on the sole admitted swap device before each timed reread. Every pair requires
+byte-exact recovery, swapz/raw swap-in p95/p99 <=1.25, useful read >=0.80,
+normalized lower WRITE bytes/requests <=0.90, and measured CPU/useful-byte
+<=1.50. This is the only benchmark cohort that establishes actual anonymous
+swap-in-sensitive reads; direct block replays and representative fixture
+emulation must not be described as Linux swap behavior.
+
+Independent lower-device accounting uses the selected card's parent block
+statistics bracketed around each measured interval and separate cold-read
+brackets. Peak target RAM is sampled every 100 ms from a one-second pre-create
+baseline through mapper creation/workload plus two seconds of quiescence; record
+\`MemAvailable\`, \`SUnreclaim\` and \`VmallocUsed\`, and use the baseline-median minus
+minimum-\`MemAvailable\` delta as the conservative metadata+target peak. Repeat the
+same host sampler for the raw control. This whole-host observation is deliberately
+conservative and not exact allocation attribution, but an estimate from C type
+sizes alone cannot satisfy the gate. Reports include useful throughput, p95/p99,
+CPU, peak RAM, GC and allocator costs, lower bytes/requests, minute drift and
+forward progress. Host lower-WRITE reduction is not a direct NAND endurance/wear
+measurement and must not be reported as one.
+
+
 ## Report contract
 
 Official human-readable and JSON reports use `swapz`, not implementation-generation labels. Schema keys are version-neutral. SWZ is the current unversioned on-disk format identity.

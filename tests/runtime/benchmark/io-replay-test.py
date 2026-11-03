@@ -2147,6 +2147,209 @@ class PairReplayContract(unittest.TestCase):
                 mod.LowerInflightSampler._read_fd = orig_read_fd
                 sampler.close()
 
+    def test_physical_qualification_contract_and_o1_oracle(self):
+        import importlib.util
+
+        qualification_path = SCRIPT.with_name("qualification.py")
+        spec = importlib.util.spec_from_file_location(
+            "swapz_performance_qualification", qualification_path)
+        qualification = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(qualification)
+        contract = qualification.contract()
+        self.assertEqual(contract["schema"], "swapz-performance-qualification-v1")
+        balanced = contract["workloads"]["sd-service-balanced"]
+        self.assertEqual(balanced["pairs"], 5)
+        self.assertEqual(balanced["warmup_operations"], 65536)
+        self.assertEqual(balanced["measure_operations"], 1048576)
+        self.assertEqual(balanced["qd"], 8)
+        self.assertEqual(balanced["read_percent"], 20)
+        self.assertEqual(
+            balanced["counterbalanced_order"],
+            ["raw-first", "swapz-first", "swapz-first", "raw-first", "raw-first"])
+        sustained_contract = contract["workloads"]["sd-high-occupancy-churn"]
+        self.assertEqual(sustained_contract["logical_occupancy_percent"], 90)
+        self.assertEqual(sustained_contract["hot_region_percent"], 80)
+        self.assertEqual(sustained_contract["measure_seconds"], 3600)
+        self.assertEqual(
+            contract["acceptance"]["service"][
+                "useful_write_ci_lower_min"], .05)
+        self.assertEqual(
+            contract["acceptance"]["sustained"]["gc_wall_fraction_max"], .20)
+        self.assertIn("not direct NAND-wear", contract["claim_boundary"])
+        with self.assertRaisesRegex(ValueError, "exactly five"):
+            qualification.paired_ci95([.1] * 4)
+
+        sustained_path = SCRIPT.with_name("sustained-replay.py")
+        sustained_spec = importlib.util.spec_from_file_location(
+            "swapz_sustained_replay", sustained_path)
+        sustained = importlib.util.module_from_spec(sustained_spec)
+        sustained_spec.loader.exec_module(sustained)
+        self.assertEqual(sustained.maximum_logical_pages(124787884032), 27080448)
+        lane_pages = 17
+        stride = sustained.coprime_stride(lane_pages, 0x1234)
+        offset = sustained.sequence_offset(lane_pages, 0x5678)
+        sequence = [(index * stride + offset) % lane_pages for index in range(53)]
+        for page in range(lane_pages):
+            expected = max((index for index, item in enumerate(sequence)
+                            if item == page), default=None)
+            self.assertEqual(
+                sustained.latest_write_index(page, 53, lane_pages, stride, offset),
+                expected)
+        histogram = sustained.LatencyHistogram()
+        for value in range(1, 1001):
+            histogram.observe(value)
+        self.assertGreaterEqual(histogram.percentile(.95), 950)
+        self.assertLessEqual(histogram.percentile(.95), 1024)
+        self.assertGreaterEqual(histogram.percentile(.99), 990)
+        self.assertLessEqual(histogram.percentile(.99), 1024)
+
+    def test_sustained_replay_rootless_fixed_work_and_failure_record(self):
+        sustained = SCRIPT.with_name("sustained-replay.py")
+        with tempfile.TemporaryDirectory(prefix="swapz-sustain-test-") as directory:
+            root = Path(directory)
+            fill = root / "fill.bin"
+            churn = root / "churn.bin"
+            fill.write_bytes(bytes([0x11]) * PAGE + bytes([0x22]) * PAGE)
+            churn.write_bytes(bytes([0x33]) * PAGE + bytes([0x44]) * PAGE)
+            import hashlib
+            (root / "fill.json").write_text(json.dumps({
+                "pages": 2, "page_bytes": PAGE, "profile_pages": {"medium": 2},
+                "fixture_sha256": hashlib.sha256(fill.read_bytes()).hexdigest()}))
+            (root / "churn.json").write_text(json.dumps({
+                "pages": 2, "page_bytes": PAGE, "profile_pages": {"medium": 2},
+                "fixture_sha256": hashlib.sha256(churn.read_bytes()).hexdigest()}))
+            target = root / "swapz-sustain-raw.bin"
+            with target.open("wb") as stream:
+                stream.truncate(128 * PAGE)
+            result = root / "result.json"
+            command = [
+                sys.executable, str(sustained), "--workload-id", "rootless-test",
+                "--candidate", "raw", "--source-sha", "rootless-no-module",
+                "--device", str(target), "--result", str(result),
+                "--fill-fixture", str(fill), "--churn-fixture", str(churn),
+                "--fill-content-profile", "medium", "--churn-content-profile", "medium",
+                "--logical-pages", "128", "--occupancy-percent", "75",
+                "--hot-percent", "50", "--qd", "4", "--read-percent", "20",
+                "--warmup-operations", "32", "--measure-operations", "256",
+                "--cold-read-pages", "8", "--regular-file-test",
+            ]
+            run = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            report = json.loads(result.read_text())
+            self.assertEqual(report["verdict"], "PASS")
+            self.assertEqual(report["read_ops"] + report["write_ops"], 256)
+            self.assertEqual(report["oracle"]["mismatches"], 0)
+            self.assertEqual(report["oracle"]["verified_pages"], 96)
+            self.assertEqual(report["cold_read"]["pages"], 8)
+            self.assertIn(report["performance_screening"]["status"],
+                          ("SCREENED", "EXCLUDED"))
+            self.assertLessEqual(report["resources"]["replay_peak_rss_bytes"],
+                                 128 * 1024 * 1024)
+
+            failed = root / "failed.json"
+            bad = command.copy()
+            bad[bad.index(str(result))] = str(failed)
+            bad[bad.index("75")] = "101"
+            run = subprocess.run(bad, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(run.returncode, 0)
+            failure = json.loads(failed.read_text())
+            self.assertEqual(failure["verdict"], "FAIL")
+            self.assertIn("occupancy", failure["failure_reason"])
+
+    def test_qualification_preserves_exclusions_and_rejects_raw_drift(self):
+        import importlib.util
+
+        path = SCRIPT.with_name("qualification.py")
+        spec = importlib.util.spec_from_file_location("swapz_qualification_eval", path)
+        qualification = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(qualification)
+
+        def arm(candidate, raw_write=100.0, screened=True):
+            swapz = candidate == "swapz"
+            return {
+                "candidate": candidate, "verdict": "PASS", "source_sha": "a" * 40,
+                "logical_pages": 4096, "occupied_pages": 408, "hot_pages": 328,
+                "occupancy_percent": 10, "hot_percent": 8,
+                "qd": 8, "read_percent": 20, "fill_fixture_sha256": "f" * 64,
+                "churn_fixture_sha256": "c" * 64,
+                "fill_content_profile": "balanced", "churn_content_profile": "balanced",
+                "workload_seed": 1,
+                "operation_recipe_sha256": "r" * 64,
+                "warmup_operations": 65536, "warmup_seconds": None,
+                "measure_operations": 1048576, "measure_seconds_requested": None,
+                "read_ops": 209716,
+                "write_ops": 838860, "oracle": {"mismatches": 0},
+                "performance_screening": {
+                    "status": "SCREENED" if screened else "EXCLUDED",
+                    "reasons": [] if screened else ["synthetic noise"]},
+                "throughput": {"logical_write_mbps":
+                               raw_write * 1.06 if swapz else raw_write},
+                "lower_io": {
+                    "lower_write_bytes_per_logical_write_byte": .80 if swapz else 1.0,
+                    "lower_write_requests_per_1000_logical_writes": 80 if swapz else 100},
+                "latency": {
+                    "read_p95_ns": 105 if swapz else 100,
+                    "read_p99_ns": 105 if swapz else 100,
+                    "write_p95_ns": 105 if swapz else 100,
+                    "write_p99_ns": 105 if swapz else 100},
+                "cpu": {"measured_cpu_seconds_per_useful_byte":
+                        1.1e-9 if swapz else 1.0e-9},
+                "resources": {
+                    "replay_peak_rss_bytes": 32 * 1024 * 1024,
+                    "metadata_and_target_peak_ram_bytes":
+                        512 * 1024 * 1024 if swapz else 0,
+                },
+                "device_identity": {
+                    "physical_partuuid": "f13428f6-01",
+                    "physical_device_bytes": 124787884032,
+                    "lower_major_minor": "8:1",
+                    "dm_uuid": "SWAPZ-BENCH-0123456789abcdef0123456789abcdef"
+                        if swapz else None,
+                },
+            }
+
+        excluded = qualification.compare_pair(
+            arm("raw", screened=False), arm("swapz"), "sd-service-balanced",
+            "excluded", 1, "raw-first")
+        self.assertTrue(excluded["excluded"])
+        self.assertIn("synthetic noise", " ".join(excluded["exclusion_reasons"]))
+        incomplete = qualification.evaluate([excluded])
+        self.assertFalse(incomplete["records"][0]["analysis_usable"])
+        self.assertEqual(
+            incomplete["decisions"]["sd-service-balanced"]["status"], "INCOMPLETE")
+
+        orders = ["raw-first", "swapz-first", "swapz-first", "raw-first", "raw-first"]
+        raw_rates = [100.0, 100.0, 100.0, 100.0, 120.0]
+        pairs = [qualification.compare_pair(
+            arm("raw", raw_write=rate), arm("swapz", raw_write=rate),
+            "sd-service-balanced", f"pair-{index}", index, orders[index - 1])
+            for index, rate in enumerate(raw_rates, 1)]
+        summary = qualification.evaluate(pairs)
+        self.assertGreater(summary["raw_repeat_spread"]["sd-service-balanced"], .10)
+        self.assertEqual(
+            summary["decisions"]["sd-service-balanced"]["status"], "INCOMPLETE")
+        self.assertTrue(all(
+            not row["analysis_usable"] for row in summary["records"]
+            if row["workload"] == "sd-service-balanced"))
+
+    def test_anonymous_swap_page_recipe_is_deterministic_and_bimodal(self):
+        import importlib.util
+
+        path = SCRIPT.with_name("anonymous-swap.py")
+        spec = importlib.util.spec_from_file_location("swapz_anonymous_swap", path)
+        anonymous = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(anonymous)
+        medium = anonymous.page_bytes(2)
+        entropy = anonymous.page_bytes(3)
+        self.assertEqual(len(medium), PAGE)
+        self.assertEqual(len(entropy), PAGE)
+        self.assertEqual(medium, anonymous.page_bytes(2))
+        self.assertEqual(entropy, anonymous.page_bytes(3))
+        self.assertNotEqual(medium, entropy)
+        self.assertTrue(medium.startswith(b"swapz-anonymous-page:2\0"))
+        self.assertGreater(len(set(entropy)), 200)
+
+
 
 if __name__ == "__main__":
     unittest.main()

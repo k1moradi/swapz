@@ -453,13 +453,116 @@ scalar fallback. arm64 selects kernel-mode NEON when available. Qualification re
 remain authoritative for end-to-end cost. SWZ now carries one explicit
 per-record delta64 encoding bit without enlarging the 16-byte record.
 
-## Physical media
+## Physical media and workload validity
 
-No current benchmark authorizes physical storage or active swap. A future
-real-device study requires separate owner authorization, exact device ownership
-and alias checks, backup/data-loss acceptance, independent safety review and a
-pinned source/procedure. RAM `null_blk` evidence must never be relabeled as
-physical-media evidence.
+The owned-RAM matrix remains useful for kernel scheduling/correctness, but it is
+not a model of the dedicated SD card's flash controller, queueing, erase/program
+behavior or long-duration service. The current standing authorization in
+\`AGENT_CONTEXT.md\` permits bounded work on the positively identified selected
+card; physical work is still scheduled exclusively by the host/Codex owner and
+must not overlap another card user. A RAM \`null_blk\` result is never promoted to
+physical evidence.
+
+The existing benchmark surfaces have the following evidence boundaries:
+
+| Requirement | Existing short replay / loaded matrix | Physical qualification addition |
+|---|---|---|
+| Actual swap-in-sensitive reads | No. \`io-replay.py\` is a block-path replay; its packed-read phase is direct block I/O and explicitly does not claim a cold first pass. | \`anonymous-swap.py\` faults deterministic anonymous pages under a bounded cgroup, requires workload-specific swap occupancy, then byte-verifies timed rereads with the admitted swap device as the sole active swap. |
+| Anonymous-page swap activity | Representative fixtures emulate page bytes only; they never activate swap. | Three raw/swapz anonymous-swap pairs exercise real Linux swap-out/swap-in. |
+| Compressible / incompressible / representative content | \`medium\`, \`entropy\`, \`balanced\`, and private owner-sampled representative fixtures exist. | Physical helpers bind the exact fixture SHA and metadata; filenames do not establish a content class. |
+| Low queue depth | QD1 controls exist on RAM models. | Physical service conclusions are QD8 mixed; anonymous swap supplies reclaim-driven service. QD1 remains a guard, not a physical headline. |
+| Sustained queues | Persistent QD1/4/8/32 write workers exist on RAM models. | Physical mixed workers are persistent and bounded; the long run uses QD16. |
+| High logical occupancy | The ordinary replay pre-fills only a small working range and its Python oracle scales with logical pages. | \`sustained-replay.py\` maps the source-derived maximum logical capacity, fills 90%, and keeps oracle state O(queue depth + fixture pages), not O(logical capacity). |
+| Repeated overwrites / GC relocation | The 4096-page loaded GC pressure oracle proves bounded synthetic correctness. | A one-hour 80%-hot-region churn phase requires positive GC victims/relocated pages, repeated segment programming, zero no-headroom skips and byte-exact final recovery. |
+| Cold reads | Ordinary packed-read evidence is not a cold-cache claim. | An untouched filled tail is sampled before the final full-volume verification; its latency and independent lower READ accounting are separate from the churn interval. |
+| Concurrent mixed activity | Mixed synthetic QD traces exist. | The physical service and sustained workloads use deterministic lane-owned writes with concurrent verified reads. |
+
+### Prospective dedicated-SD acceptance contract
+
+Thresholds are fixed in \`tests/runtime/benchmark/qualification.py\` before any
+confirmation run. Changing a threshold creates a new protocol; results from the
+old and new protocols are not pooled. The private helper is an implementation
+detail, not a second supported test command.
+
+Two short-service cohorts run on the exact card: one 50/50 synthetic
+medium/entropy cohort and one immutable owner-supplied representative cohort.
+Each uses five adjacent raw/swapz pairs, fixed counterbalanced arm order,
+QD8/20% READs, 10% logical occupancy, 65,536 warmup operations and 1,048,576
+measured operations per arm. Fixed work keeps the useful logical recipe equal
+between arms; elapsed time is the throughput observation. Each arm has an
+external 1,800-second safety timeout. Statistical claims use the five paired
+fractional deltas and a two-sided Student-t 95% interval (df=4).
+
+The sustained cohort is one directional raw/swapz pair over the maximum logical
+capacity derived by the same reserve/segment rule as the primary manager. It
+fills 90% of logical pages with metadata-proven entropy pages, churns an 80%
+hot region with balanced pages at QD16/20% READ for 60 seconds of warmup plus
+3,600 measured seconds, retains an untouched filled tail for cold reads, and
+then verifies every occupied page. Each arm has a 14,400-second scheduler
+safety timeout to include the large initial fill and final oracle. One pair is
+directional evidence, never a significance claim.
+
+The anonymous-swap cohort uses three counterbalanced pairs and three verified
+read rounds per arm. The worker alternates deterministic compressible and
+incompressible anonymous pages. Each round requires at least 128 MiB of
+workload-specific \`VmSwap\`/cgroup swap plus at least that much usage on the sole
+admitted swap device before timed rereads can count as swap-in evidence. These
+three pairs are replicated directional evidence, not a t-test.
+
+For physical block service the raw arm uses the same selected partition with a
+4096-byte data offset so the SWZ authorization header is not overwritten. It
+requires no holder, mount or active-swap alias. The swapz arm requires a fresh
+empty mapper whose sole holder/slave relationship is the same partition. Both
+arms use the exact manager maximum logical capacity, fixture hashes, content
+profiles, queue geometry and deterministic operation recipe. Independent
+parent-device \`/sys/block/<disk>/stat\` deltas bracket only the measured phase;
+lower WRITE bytes/requests are normalized by completed useful writes for the
+hour-long throughput comparison.
+
+Every physical arm records useful READ/WRITE throughput, p95/p99 and maximum
+latency, replay CPU plus exported swapz worker CPU, host CPU/PSI context, replay
+RSS, a separately measured mapper metadata/target peak-RAM observation, lower
+READ/WRITE bytes and requests, cold-read lower I/O, GC wall/victims/relocation,
+allocator probe cost, repeated segment programming, minute throughput/p99
+buckets and maximum forward-progress gap. The swapz scheduler samples
+\`/proc/meminfo\` every 100 ms from a one-second pre-create baseline through mapper
+creation, the measured workload and two seconds of post-workload quiescence. It
+records the minimum \`MemAvailable\` plus \`SUnreclaim\`/\`VmallocUsed\` context and
+supplies \`max(0, median(pre-create MemAvailable) - minimum MemAvailable)\` as the
+conservative observed metadata+target peak. The same host sampler surrounds the
+raw control so unrelated host drift is visible. This is a whole-host upper-bound
+observation, not exact per-allocation attribution; compiled array-size evidence
+remains complementary and cannot substitute for it. The fixed ceilings are 128
+MiB replay RSS and 1.25 GiB for metadata plus target peak RAM.
+
+A 200 ms quiet window immediately before and after each arm must have busy
+fraction <=25%, CPU PSI \`some\` <=5% and steal <=1%; timed-arm steal must also be
+<=1%. Across the five service pairs, raw useful-WRITE max/min spread must be
+<=10%. A noisy, missing-counter, failed or excluded sample is retained with its
+reason and is never automatically retried. Fewer than all prospectively fixed
+pairs is incomplete evidence.
+
+For each five-pair service cohort, PASS requires the paired 95% interval lower
+bound for useful WRITE to be at least +5%; interval upper bounds for normalized
+lower WRITE bytes and requests to be at most -10%; READ and WRITE p95/p99 upper
+bounds to be at most +25%; and the measured CPU-per-useful-byte upper bound to
+be at most +50%. An interval crossing a threshold fails that threshold; means
+alone do not promote a result.
+
+The sustained directional pair additionally requires swapz/raw useful WRITE
+>=1.05, normalized lower WRITE bytes and requests <=0.90, READ/WRITE/cold-read
+p99 ratios <=1.25, last-quartile/first-quartile throughput >=0.75, the analogous
+p99 ratio <=1.25, GC wall <=20% of measured wall time, zero GC no-headroom
+skips, positive GC relocation and segment programming, zero target failure,
+zero oracle mismatches and no >10-second interval without forward progress.
+The anonymous cohort requires every pair to keep swap-in p95/p99 <=1.25x raw,
+useful read service >=0.80x raw, normalized lower WRITE bytes/requests <=0.90x
+raw, measured CPU/useful-byte <=1.50x raw, the 128 MiB swap-occupancy floor and
+zero byte-oracle mismatches.
+
+Reduced host-visible lower WRITE bytes/requests are a physical I/O-cost result.
+They must never be described as directly measured NAND wear, write amplification
+or endurance improvement.
 
 ## Settled experiment memory
 
