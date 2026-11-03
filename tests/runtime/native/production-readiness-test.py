@@ -514,6 +514,33 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "target binding mismatch" in blocker
             for blocker in result["code_blockers"]))
 
+    def test_release_target_partuuid_uses_production_selector_grammar(self):
+        valid = {
+            "partuuid": "550e8400-e29b-41d4-a716-446655440000",
+            "size_bytes": TARGET["size_bytes"],
+        }
+        self.assertEqual(
+            EVALUATOR._normalize_target(valid),
+            (valid["partuuid"], valid["size_bytes"]))
+        for partuuid in (
+                "--------", "-f13428f6", "f13428f6-",
+                "f13428f6--01", "1234-567", "F13428F6-01"):
+            with self.subTest(partuuid=partuuid):
+                self.assertIsNone(EVALUATOR._normalize_target({
+                    "partuuid": partuuid,
+                    "size_bytes": TARGET["size_bytes"],
+                }))
+
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        evidence["authorized_target"]["partuuid"] = "f13428f6--01"
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "canonical authorized target identity is invalid" in blocker
+            for blocker in result["code_blockers"]))
+
     def test_full_capacity_peak_ram_must_fit_frozen_limit(self):
         report = owner_report()
         policy = acceptance_policy()
