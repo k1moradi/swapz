@@ -165,6 +165,9 @@ int swapz_primary_replace_record_at(int recovery_fd, const char *name,
 int swapz_primary_state_write_at(int recovery_fd, int lock_fd,
 				 const struct swapz_primary_state *next,
 				 uid_t expected_owner);
+/* Persist RECOVERY_REQUIRED while preserving the original interrupted stage. */
+int swapz_primary_state_require_recovery_at(
+	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner);
 /* Save/read the run's immutable exact 4096-byte original partition header. */
 int swapz_primary_header_backup_write_at(
 	int recovery_fd, int lock_fd, const char *run_id,

@@ -393,6 +393,31 @@ int swapz_primary_state_transition_allowed(
 						      next->stage);
 }
 
+static int swapz_primary_recovery_required_state(
+	const struct swapz_primary_state *current,
+	struct swapz_primary_state *recovery_required)
+{
+	struct swapz_primary_state candidate;
+
+	if (!swapz_primary_state_valid(current) || !recovery_required ||
+	    current->stage == SWAPZ_PRIMARY_STAGE_COMPLETE) {
+		errno = EINVAL;
+		return -1;
+	}
+	candidate = *current;
+	candidate.stage = SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED;
+	if (!candidate.has_recovery_previous_stage) {
+		candidate.has_recovery_previous_stage = 1;
+		candidate.recovery_previous_stage = current->stage;
+	}
+	if (!swapz_primary_state_transition_allowed(current, &candidate)) {
+		errno = EPERM;
+		return -1;
+	}
+	*recovery_required = candidate;
+	return 0;
+}
+
 int swapz_primary_run_id_generate(
 	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U])
 {
@@ -4480,6 +4505,40 @@ int swapz_primary_state_write_at(int recovery_fd, int lock_fd,
 					   expected_owner) < 0)
 		return -1;
 	return 0;
+}
+
+int swapz_primary_state_require_recovery_at(
+	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner)
+{
+	struct swapz_primary_state current;
+	struct swapz_primary_state recovery_required;
+	char current_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	size_t current_length;
+
+	if (!swapz_primary_valid_run_id(run_id)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner) ||
+	    !swapz_primary_owner_claim_matches_at(
+		    recovery_fd, run_id, expected_owner))
+		return -1;
+	if (swapz_primary_record_read_at(
+		    recovery_fd, "primary-state.json", expected_owner,
+		    current_record, sizeof(current_record), &current_length,
+		    NULL) < 0 ||
+	    swapz_primary_state_parse(
+		    current_record, current_length, &current) < 0 ||
+	    strcmp(current.run_id, run_id)) {
+		errno = EPERM;
+		return -1;
+	}
+	if (swapz_primary_recovery_required_state(
+		    &current, &recovery_required) < 0)
+		return -1;
+	return swapz_primary_state_write_at(
+		recovery_fd, lock_fd, &recovery_required, expected_owner);
 }
 
 int swapz_primary_release_partition_owner_at(int recovery_fd, int lock_fd,

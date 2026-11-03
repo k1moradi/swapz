@@ -3533,9 +3533,14 @@ marker requires a matching `COMPLETE` record and must leave the consumed record
 in place. Rootless tests must cover a competing lock, representative accepted
 state updates, rejected edges with byte-identical state preservation, recovery
 provenance retention, fresh-run admission, and marker release only after
-completion. These primitives are not lifecycle commands; keep privileged
-actions disabled until provisioning, mapper ownership, rollback and recovery
-actually use them.
+completion. A coordinator that has durably entered an in-progress stage must
+use the recovery-required writer on any later failure: it atomically persists
+`RECOVERY_REQUIRED`, preserves the first interrupted stage across repeated
+failure marking and failures during `RECOVERING`, and refuses terminal
+`COMPLETE`. Rootless direct-C coverage must prove both the state construction
+and durable idempotent update under the held owner lock. These primitives are
+not lifecycle commands; keep privileged actions disabled until provisioning,
+mapper ownership, rollback and recovery actually use them.
 
 The owner-claim writer must fsync the consumed record, then atomically persist
 the initial `READY` state, then fsync and publish the active marker. Under the

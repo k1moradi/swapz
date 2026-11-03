@@ -52,6 +52,42 @@ static void assert_primary_state_equals(
 	assert_record_equals(directory_fd, "primary-state.json", record);
 }
 
+static void test_recovery_required_state_builder(void)
+{
+	const char *run_id = "0123456789abcdef0123456789abcdef";
+	struct swapz_primary_state current = {0};
+	struct swapz_primary_state recovery_required = {0};
+	struct swapz_primary_state unchanged;
+
+	memcpy(current.run_id, run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U);
+	current.stage = SWAPZ_PRIMARY_STAGE_STARTING;
+	assert(swapz_primary_recovery_required_state(
+		&current, &recovery_required) == 0);
+	assert(recovery_required.stage == SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED);
+	assert(recovery_required.has_recovery_previous_stage);
+	assert(recovery_required.recovery_previous_stage ==
+	       SWAPZ_PRIMARY_STAGE_STARTING);
+
+	current = recovery_required;
+	current.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;
+	memset(&recovery_required, 0, sizeof(recovery_required));
+	assert(swapz_primary_recovery_required_state(
+		&current, &recovery_required) == 0);
+	assert(recovery_required.stage == SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED);
+	assert(recovery_required.has_recovery_previous_stage);
+	assert(recovery_required.recovery_previous_stage ==
+	       SWAPZ_PRIMARY_STAGE_STARTING);
+
+	current.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	unchanged = recovery_required;
+	errno = 0;
+	assert(swapz_primary_recovery_required_state(
+		&current, &recovery_required) < 0);
+	assert(errno == EINVAL);
+	assert(!memcmp(&recovery_required, &unchanged,
+		       sizeof(recovery_required)));
+}
+
 static void test_swap_inventory_parser(void)
 {
 	struct swapz_primary_swap_entry rows[4];
@@ -1947,6 +1983,7 @@ int main(void)
 						 pages));
 	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						  pages + 1ULL));
+	test_recovery_required_state_builder();
 	test_swap_inventory_parser();
 	test_selected_target_swap_quiescence();
 	test_target_identity_and_header_policy();
@@ -2046,11 +2083,16 @@ int main(void)
 	lifecycle.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
 	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
 						    &lifecycle, geteuid()) == 0);
-	lifecycle.recovery_previous_stage = lifecycle.stage;
+	assert(swapz_primary_state_require_recovery_at(
+		recovery_fd, first_lock, run_id, geteuid()) == 0);
+	lifecycle.recovery_previous_stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
 	lifecycle.has_recovery_previous_stage = 1;
 	lifecycle.stage = SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED;
-	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
-						    &lifecycle, geteuid()) == 0);
+	assert_primary_state_equals(recovery_fd, &lifecycle);
+	/* Re-marking the same failure is idempotent and keeps its origin. */
+	assert(swapz_primary_state_require_recovery_at(
+		recovery_fd, first_lock, run_id, geteuid()) == 0);
+	assert_primary_state_equals(recovery_fd, &lifecycle);
 	lifecycle.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;
 	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
 						    &lifecycle, geteuid()) == 0);
