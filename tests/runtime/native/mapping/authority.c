@@ -146,9 +146,14 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 	 * RAW pages. A distinct overwrite-bootstrap candidate retains an
 	 * untouched foreground segment in addition to the GC reserve.
 	 */
-	CHECK(((physical_blocks - expected_reserve_blocks) /
-	       SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS ==
-	      expected_logical_pages);
+	/* Refresh after the previous rejected geometry left a poison
+	 * sentinel in reserve; never derive headroom from failed output. */
+	CHECK(swapz_authority_validate_geometry(expected_logical_pages,
+						 physical_blocks,
+						 &reserve) == 0);
+	CHECK(reserve == expected_reserve_blocks);
+	CHECK(((physical_blocks - reserve) / SWAPZ_SEGMENT_BLOCKS) *
+	      SWAPZ_SEGMENT_BLOCKS == expected_logical_pages);
 	CHECK(swapz_authority_validate_geometry(safe_raw_overwrite_pages,
 						 physical_blocks,
 						 &reserve) == 0);

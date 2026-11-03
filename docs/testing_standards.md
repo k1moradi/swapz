@@ -424,6 +424,9 @@ rejection do not truncate or wrap. On 32-bit builds, reject otherwise-admissible
 geometries with -EOVERFLOW if map or physical-liveness array byte lengths exceed
 size_t; the output reserve and caller-owned arrays remain untouched. The native
 oracle distinguishes that rejection from arithmetic admission on 64-bit builds.
+A rejected geometry leaves the output reserve untouched: the test must refresh
+a successful preflight before using its reserve for foreground-headroom checks,
+not accidentally compute from an earlier poison sentinel.
 
 That selected-card value is an authority-admission limit, not a worst-case RAW
 forward-progress limit. With 30,465,536 data blocks, the current 27,080,448-page
