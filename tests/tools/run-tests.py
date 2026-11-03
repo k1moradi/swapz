@@ -1663,6 +1663,12 @@ def parse_loaded_correctness(output):
             r"discards:(\d+) discard_sectors:(\d+) "
             r"discard_unsupported:(\d+) discard_failed:(\d+) "
             r"verified_pages:(\d+)$"),
+        "gc_roll_forward": re.compile(
+            r"PASS_LOADED_GC_ROLL_FORWARD_RECOVERY=foreground_writes:(\d+) "
+            r"fault_nth:(\d+) injected:(\d+) retry_attempts:(\d+) "
+            r"roll_forwards:(\d+) destination_advances:(\d+) "
+            r"reserve_initial:(\d+) reserve_current:(\d+) "
+            r"relocated_pages:(\d+) verified_pages:(\d+)$"),
         "gc_pressure": re.compile(
             r"PASS_LOADED_GC_PRESSURE=rounds:(\d+) write_wall_ns:(\d+) "
             r"baseline_p99_ns:(\d+) pressure_p99_ns:(\d+) "
@@ -1808,6 +1814,12 @@ def parse_loaded_correctness(output):
      gc_last_victim, gc_last_destination, gc_segment_discards,
      gc_segment_discard_sectors, gc_discard_unsupported,
      gc_discard_failed, gc_verified_pages) = found["gc"]
+    (gc_roll_forward_foreground_writes, gc_roll_forward_fault_nth,
+     gc_roll_forward_injected, gc_roll_forward_retry_attempts,
+     gc_roll_forwards, gc_roll_forward_destination_advances,
+     gc_roll_forward_reserve_initial, gc_roll_forward_reserve_current,
+     gc_roll_forward_relocated_pages,
+     gc_roll_forward_verified_pages) = found["gc_roll_forward"]
     (gc_pressure_rounds, gc_useful_write_wall_ns, gc_baseline_p99_ns,
      gc_pressure_p99_ns, gc_wall_ns, gc_fraction_ppm,
      gc_choose_wall_ns, gc_choose_calls, gc_choose_map_entries,
@@ -1857,6 +1869,17 @@ def parse_loaded_correctness(output):
             gc_verified_pages != 4096):
         return {"overall": "INCOMPLETE",
                 "reason": "loaded live-GC evidence is incomplete"}
+    if (gc_roll_forward_foreground_writes != 768 or
+            gc_roll_forward_fault_nth != 769 or
+            gc_roll_forward_injected != 1 or
+            gc_roll_forward_retry_attempts != 2 or gc_roll_forwards != 1 or
+            gc_roll_forward_destination_advances != 0 or
+            gc_roll_forward_reserve_initial != 2 or
+            gc_roll_forward_reserve_current != 2 or
+            gc_roll_forward_relocated_pages != 510 or
+            gc_roll_forward_verified_pages != 512):
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded GC roll-forward recovery evidence is incomplete"}
     if (gc_pressure_rounds != 5 or gc_useful_write_wall_ns <= 0 or
             gc_baseline_p99_ns <= 0 or gc_pressure_p99_ns <= 0 or
             gc_wall_ns <= 0 or gc_choose_wall_ns <= 0 or
@@ -1956,6 +1979,10 @@ def parse_loaded_correctness(output):
         "gc_segment_discards": gc_segment_discards,
         "gc_segment_discard_sectors": gc_segment_discard_sectors,
         "gc_verified_pages": gc_verified_pages,
+        "gc_roll_forwards": gc_roll_forwards,
+        "gc_roll_forward_retry_attempts": gc_roll_forward_retry_attempts,
+        "gc_roll_forward_relocated_pages": gc_roll_forward_relocated_pages,
+        "gc_roll_forward_verified_pages": gc_roll_forward_verified_pages,
         "gc_pressure_rounds": gc_pressure_rounds,
         "gc_useful_write_wall_ns": gc_useful_write_wall_ns,
         "gc_baseline_p99_ns": gc_baseline_p99_ns,
@@ -2124,6 +2151,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
         for line in output.splitlines():
             if line.startswith("START_LOADED_MAXIMUM_CAPACITY"):
                 phase = "owned RAM maximum-capacity constructor"
+            elif line.startswith("START_LOADED_GC_ROLL_FORWARD_RECOVERY"):
+                phase = "owned RAM GC full-destination roll-forward recovery"
             elif line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "owned RAM kernel smoke"
             elif line.startswith("START_LOADED_COMPOUND_BIO"):

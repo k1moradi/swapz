@@ -720,6 +720,7 @@ struct swapz_dm {
 	u64 gc_victims;
 	u64 gc_role_rotations;
 	u64 gc_destination_advances; /* successful recovery-only reserve degradation */
+	u64 gc_roll_forwards; /* successful full-destination recovery handoffs */
 	swapz_u32 gc_reserve_segments_initial;
 	swapz_u32 gc_reserve_segments_current;
 	swapz_u32 last_gc_victim;
@@ -4106,7 +4107,12 @@ static int swapz_gc_recovery_roll_forward(struct swapz_dm *ctx)
 	recovery->forbidden_open = a->gc_forbidden_open;
 	recovery->next_segment_probe = a->next_segment_probe;
 	recovery->minimum_next_block = a->next_block;
-	return swapz_gc_recovery_validate(ctx);
+	error = swapz_gc_recovery_validate(ctx);
+	if (error)
+		return error;
+	if (ctx->gc_roll_forwards != U64_MAX)
+		ctx->gc_roll_forwards++;
+	return 0;
 }
 
 static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
@@ -9220,7 +9226,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		DMEMIT(
 			   " reserve=%u gc_reserve_segments_initial=%u "
 			   "gc_reserve_segments_current=%u gc_destination_advances=%llu "
-			   "gc_victims=%llu gc_role_rotations=%llu "
+			   "gc_roll_forwards=%llu gc_victims=%llu gc_role_rotations=%llu "
 			   "gc_distinct_victims=%u gc_victim_min_evictions=%u "
 			   "gc_victim_max_evictions=%u last_gc_victim=%u last_gc_destination=%u "
 			   "gc_pages=%llu gc_read=%llu gc_write=%llu gc_policy=%u "
@@ -9233,6 +9239,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       READ_ONCE(ctx->gc_reserve_segments_initial),
 		       READ_ONCE(ctx->gc_reserve_segments_current),
 		       READ_ONCE(ctx->gc_destination_advances),
+		       READ_ONCE(ctx->gc_roll_forwards),
 		       ctx->gc_victims,
 		       ctx->gc_role_rotations,
 		       gc_distinct_victims,

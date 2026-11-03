@@ -847,6 +847,7 @@ def synthetic_log():
            "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 reports:0 swapz_reports:0",
            "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0",
            "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727616 logical_bytes:15268315136 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 initial_mapper_read_bytes:4096 constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:8192 boundary_lower_write_bytes:8192",
+           "PASS_LOADED_GC_ROLL_FORWARD_RECOVERY=foreground_writes:768 fault_nth:769 injected:1 retry_attempts:2 roll_forwards:1 destination_advances:0 reserve_initial:2 reserve_current:2 relocated_pages:510 verified_pages:512",
            "PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 async_batches:64 lower_read_reqs:512",
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:128 adopted:128",
@@ -1998,6 +1999,57 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(result["overall"], "INCOMPLETE")
                 self.assertIn("write", result["reason"].lower())
 
+
+    def test_loaded_gc_roll_forward_recovery_is_mandatory(self):
+        marker = (
+            "PASS_LOADED_GC_ROLL_FORWARD_RECOVERY=foreground_writes:768 "
+            "fault_nth:769 injected:1 retry_attempts:2 roll_forwards:1 "
+            "destination_advances:0 reserve_initial:2 reserve_current:2 "
+            "relocated_pages:510 verified_pages:512")
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        oracle = (ROOT / "tests/tools/device-roundtrip.c").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        make_interface = (
+            ROOT / "tests/runtime/native/make-interface-test.py").read_text()
+        self.assertIn(
+            '--table "0 $GC_LOGICAL_SECTORS swapz $LOWER '
+            '0 1 0 2 0 0 $GC_FAULT_WRITE 0"', deploy)
+        self.assertIn(
+            "GC_ROLL_FORWARD_FAULT_ORACLE=foreground_writes:768 "
+            "fault_write:769 retry_attempts:2 verified_pages:512", deploy)
+        self.assertIn(
+            "foreground_writes != GC_RECOVERY_FOREGROUND_WRITES", oracle)
+        self.assertIn("errno == ENOSPC", oracle)
+        self.assertIn(
+            "PASS_LOADED_GC_ROLL_FORWARD_RECOVERY=foreground_writes:"
+            "$GC_FOREGROUND_WRITES", deploy)
+        self.assertIn("--gc-recovery-fault-probe", loaded)
+        self.assertIn(marker, make_interface)
+        self.assertIn(marker, synthetic_log())
+
+        evidence = runner.parse_loaded_correctness(synthetic_log())
+        self.assertEqual(evidence["overall"], "PASS", evidence)
+        self.assertEqual(evidence["gc_roll_forwards"], 1)
+        self.assertEqual(evidence["gc_roll_forward_retry_attempts"], 2)
+        self.assertEqual(evidence["gc_roll_forward_relocated_pages"], 510)
+        self.assertEqual(evidence["gc_roll_forward_verified_pages"], 512)
+
+        for replacement in (
+                "",
+                marker.replace("injected:1", "injected:0"),
+                marker.replace("retry_attempts:2", "retry_attempts:3"),
+                marker.replace("roll_forwards:1", "roll_forwards:0"),
+                marker.replace(
+                    "destination_advances:0", "destination_advances:1"),
+                marker.replace("reserve_current:2", "reserve_current:1"),
+                marker.replace("relocated_pages:510", "relocated_pages:509"),
+                marker.replace("verified_pages:512", "verified_pages:511"),
+        ):
+            with self.subTest(invalid_gc_roll_forward_marker=replacement):
+                result = runner.parse_loaded_correctness(
+                    synthetic_log().replace(marker, replacement))
+                self.assertEqual(result["overall"], "INCOMPLETE")
+                self.assertIn("roll-forward", result["reason"].lower())
 
     def test_loaded_read_fault_evidence_is_mandatory_and_pre_submission(self):
         marker = (

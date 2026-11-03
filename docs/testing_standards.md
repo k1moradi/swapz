@@ -598,8 +598,19 @@ After restoring consistency, roll-forward must evacuate that full intermediate
 segment into the verified-dead original victim, preserve every byte/CRC and the
 expected generation increments, leave the other reserve untouched, and permit
 a subsequent foreground write. Native authority/engine tests remain supporting
-evidence for this state transition; loaded worker qualification is still
-required for production release.
+evidence for this state transition. Loaded qualification must additionally use
+an owned 5MiB null_blk with exactly three foreground and two reserve segments,
+512 logical RAW pages, window one and lower aggregation disabled. It must keep
+255 survivors in each of the two closed foreground segments, inject synchronous
+lower WRITE attempt 769 after exactly 768 successful foreground writes, observe
+one failed GC reservation, resume the authenticated rotation, then observe one
+ENOSPC retry after the first reserve becomes exactly full. The following retry
+must execute exactly one full-destination roll-forward without a
+reserve-degrading destination advance, relocate 510 pages across both recovery
+legs, preserve both reserve roles, regain foreground progress, and verify all
+512 logical pages byte-for-byte. PASS_LOADED_GC_ROLL_FORWARD_RECOVERY is
+mandatory loaded evidence; native-only evidence is insufficient for production
+release.
 
 Qualification must separately cover a non-full recovery tail: leave one block
 in the current GC destination while the original victim remains live, then

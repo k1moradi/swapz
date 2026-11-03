@@ -34,6 +34,9 @@ enum {
 	CHURN_COLD_PAGES = 2294,
 	CHURN_HOT_PAGES = 573,
 	CHURN_HOT_WRITES = 40960,
+	GC_RECOVERY_LOGICAL_PAGES = 512,
+	GC_RECOVERY_FOREGROUND_WRITES = 768,
+	GC_RECOVERY_FAULT_WRITE = 769,
 	MAX_CAPACITY_LOGICAL_PAGES = 3727616U,
 	CHURN_FSYNC_INTERVAL = 256
 };
@@ -632,6 +635,117 @@ static unsigned int gc_expected_round(unsigned int page,
 	return offset < rounds - 1U ? offset : rounds - 1U;
 }
 
+/*
+ * Exact full-destination GC recovery boundary on a 5MiB owned null_blk.
+ * Three foreground segments are filled with RAW pages. Closed segments 0 and 1
+ * retain exactly 255 authoritative survivors each; open segment 2 is forbidden
+ * as a victim. The mapper injects lower WRITE #769, which is therefore the
+ * first GC relocation write.
+ */
+static int gc_roll_forward_fault_recovery(int fd, unsigned char *buf,
+					  unsigned char *expected)
+{
+	const unsigned int hot_page = GC_RECOVERY_LOGICAL_PAGES - 1U;
+	const unsigned int last_cold_page = hot_page - 1U;
+	const unsigned int trigger_round = 257U;
+	unsigned int page, round, retry_attempts = 0, foreground_writes = 0;
+	ssize_t count;
+
+	for (page = 0; page < 255U; ++page) {
+		raw_pattern(buf, page, 0U);
+		if (transfer(fd, buf, page, 1))
+			return -1;
+		foreground_writes++;
+	}
+	raw_pattern(buf, hot_page, 0U);
+	if (transfer(fd, buf, hot_page, 1))
+		return -1;
+	foreground_writes++;
+
+	for (page = 255U; page < 510U; ++page) {
+		raw_pattern(buf, page, 0U);
+		if (transfer(fd, buf, page, 1))
+			return -1;
+		foreground_writes++;
+	}
+	raw_pattern(buf, hot_page, 1U);
+	if (transfer(fd, buf, hot_page, 1))
+		return -1;
+	foreground_writes++;
+
+	raw_pattern(buf, last_cold_page, 0U);
+	if (transfer(fd, buf, last_cold_page, 1))
+		return -1;
+	foreground_writes++;
+	for (round = 2U; round <= 256U; ++round) {
+		raw_pattern(buf, hot_page, round);
+		if (transfer(fd, buf, hot_page, 1))
+			return -1;
+		foreground_writes++;
+	}
+	if (foreground_writes != GC_RECOVERY_FOREGROUND_WRITES) {
+		fprintf(stderr,
+			"FAIL GC recovery setup writes=%u expected=%u\n",
+			foreground_writes, GC_RECOVERY_FOREGROUND_WRITES);
+		return -1;
+	}
+
+	raw_pattern(buf, hot_page, trigger_round);
+	do {
+		errno = 0;
+		count = pwrite(fd, buf, PAGE, (off_t)hot_page * PAGE);
+	} while (count == -1 && errno == EINTR);
+	if (count != -1 || errno != EIO) {
+		fprintf(stderr,
+			"FAIL GC recovery trigger expected EIO n=%zd errno=%d\n",
+			count, errno);
+		return -1;
+	}
+
+	for (retry_attempts = 1U; retry_attempts <= 3U; ++retry_attempts) {
+		do {
+			errno = 0;
+			count = pwrite(fd, buf, PAGE, (off_t)hot_page * PAGE);
+		} while (count == -1 && errno == EINTR);
+		if (count == PAGE)
+			break;
+		if (count == -1 && errno == ENOSPC)
+			continue;
+		fprintf(stderr,
+			"FAIL GC recovery retry=%u n=%zd errno=%d\n",
+			retry_attempts, count, errno);
+		return -1;
+	}
+	if (count != PAGE) {
+		fprintf(stderr, "FAIL GC recovery did not regain foreground progress\n");
+		return -1;
+	}
+	if (fsync(fd)) {
+		perror("FAIL GC recovery fsync");
+		return -1;
+	}
+
+	for (page = 0; page < hot_page; ++page) {
+		raw_pattern(expected, page, 0U);
+		if (transfer(fd, buf, page, 0) || memcmp(buf, expected, PAGE)) {
+			fprintf(stderr,
+				"FAIL GC recovery byte-exact cold page=%u\n", page);
+			return -1;
+		}
+	}
+	raw_pattern(expected, hot_page, trigger_round);
+	if (transfer(fd, buf, hot_page, 0) || memcmp(buf, expected, PAGE)) {
+		fprintf(stderr, "FAIL GC recovery byte-exact hot page\n");
+		return -1;
+	}
+
+	printf("GC_ROLL_FORWARD_FAULT_ORACLE=foreground_writes:%u "
+	       "fault_write:%u retry_attempts:%u verified_pages:%u\n",
+	       foreground_writes, GC_RECOVERY_FAULT_WRITE,
+	       retry_attempts, GC_RECOVERY_LOGICAL_PAGES);
+	return 0;
+}
+
 static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
 		    unsigned int rounds)
 {
@@ -852,6 +966,7 @@ int main(int argc, char **argv)
 	unsigned char *buf = NULL, *expected = NULL;
 	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
 	int raw_series = 0, discard_pages = 0, gc_mode = 0, churn_mode = 0;
+	int gc_roll_forward_fault_mode = 0;
 	int segmented_series_mode = 0, thp_series_mode = 0;
 	int parallel_series_mode = 0;
 	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
@@ -862,7 +977,8 @@ int main(int argc, char **argv)
 	if (argc != 2 && argc != 3 && argc != 5 && argc != 4) {
 		fprintf(stderr,
 		"Usage: device-roundtrip /dev/mapper/swapz-demo-<owned-id> "
-		"[private series mode | --maximum-capacity-boundary SWAPZ-TEST-<owned-id>]\n");
+		"[private series mode | --maximum-capacity-boundary SWAPZ-TEST-<owned-id> "
+		"| --gc-roll-forward-fault SWAPZ-TEST-<owned-id>]\n");
 		return 2;
 	}
 	if (strncmp(argv[1], prefix, strlen(prefix)) ||
@@ -895,6 +1011,16 @@ int main(int argc, char **argv)
 			expected_dm_uuid = argv[3];
 			expected_device_bytes =
 				(uint64_t)MAX_CAPACITY_LOGICAL_PAGES * PAGE;
+		} else if (!strcmp(argv[2], "--gc-roll-forward-fault")) {
+			if (!valid_owned_dm_uuid(argv[3])) {
+				fprintf(stderr, "FAIL invalid owned GC-recovery DM UUID\n");
+				return 2;
+			}
+			gc_roll_forward_fault_mode = 1;
+			expected_dm_uuid = argv[3];
+			expected_device_bytes =
+				(uint64_t)GC_RECOVERY_LOGICAL_PAGES * PAGE;
+			open_flags &= ~O_SYNC;
 		} else {
 			if (strcmp(argv[2], "--gc-stress") ||
 			    parse_uint(argv[3], 8U, &gc_rounds) ||
@@ -970,7 +1096,7 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	if (expected_dm_uuid &&
-	    (maximum_capacity_mode ?
+	    ((maximum_capacity_mode || gc_roll_forward_fault_mode) ?
 	     verify_dm_uuid_exact(opened_mapper_device, expected_dm_uuid) :
 	     verify_physical_dm_uuid(opened_mapper_device, expected_dm_uuid))) {
 		fprintf(stderr, "FAIL opened DM UUID missing or not the expected identity\n");
@@ -981,6 +1107,13 @@ int main(int argc, char **argv)
 			goto out;
 		printf("PASS: maximum-capacity boundary byte-exact pages=2 highest_page=%u\n",
 		       MAX_CAPACITY_LOGICAL_PAGES - 1U);
+		rc = 0;
+		goto out;
+	}
+	if (gc_roll_forward_fault_mode) {
+		if (gc_roll_forward_fault_recovery(fd, buf, expected))
+			goto out;
+		puts("PASS: owned swapz full-destination GC roll-forward recovery");
 		rc = 0;
 		goto out;
 	}

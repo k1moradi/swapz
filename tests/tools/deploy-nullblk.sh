@@ -5,17 +5,23 @@ set -Eeuo pipefail
 umask 077
 VALIDATED_SOURCE=""
 MAX_BOUNDARY_PROBE=0
-if [[ ( $# == 2 || ( $# == 3 && ${3:-} == --max-boundary-probe ) ) &&
+GC_RECOVERY_FAULT_PROBE=0
+if [[ ( $# == 2 || $# == 3 ) &&
       ${1:-} == --validated-source &&
-      ${2:-} =~ ^[0-9a-f]{40}$ &&
-      ( $# == 2 || ${3:-} == --max-boundary-probe ) ]]; then
+      ${2:-} =~ ^[0-9a-f]{40}$ ]]; then
     VALIDATED_SOURCE="$2"
-    if (( $# == 3 )); then
-        MAX_BOUNDARY_PROBE=1
-    fi
+    case "${3:-}" in
+        "") ;;
+        --max-boundary-probe) MAX_BOUNDARY_PROBE=1 ;;
+        --gc-recovery-fault-probe) GC_RECOVERY_FAULT_PROBE=1 ;;
+        *)
+            printf '%s\n' 'BLOCKED: unsupported owned null_blk probe mode' >&2
+            exit 2
+            ;;
+    esac
 else
     printf '%s\n' \
-        'BLOCKED: validated source revision and optional max-boundary probe required' >&2
+        'BLOCKED: validated source revision and optional owned probe required' >&2
     exit 2
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -197,6 +203,8 @@ cleanup() {
 	if (( rc == 0 )); then
 		if (( MAX_BOUNDARY_PROBE )); then
 			note "PASS: loaded maximum-capacity constructor and boundary roundtrip, clean teardown"
+		elif (( GC_RECOVERY_FAULT_PROBE )); then
+			note "PASS: loaded GC roll-forward fault recovery, clean teardown"
 		else
 			note "PASS: loaded isolated swapz byte-exact I/O, clean teardown"
 		fi
@@ -240,6 +248,8 @@ done
 NULLBLK_SIZE_MIB=64
 if (( MAX_BOUNDARY_PROBE )); then
 	NULLBLK_SIZE_MIB=16383
+elif (( GC_RECOVERY_FAULT_PROBE )); then
+	NULLBLK_SIZE_MIB=5
 fi
 echo "$NULLBLK_SIZE_MIB" > "$CONFIG/size"
 echo 4096 > "$CONFIG/blocksize"
@@ -311,7 +321,7 @@ modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 # The module parameter is null_blk-only and every create must fail before target
 # admission. No failed constructor may retain a mapper, lower holder, lower I/O
 # accounting, workqueue/module reference, or other resource that blocks unload.
-if (( ! MAX_BOUNDARY_PROBE )); then
+if (( ! MAX_BOUNDARY_PROBE && ! GC_RECOVERY_FAULT_PROBE )); then
 	note "START_LOADED_CONSTRUCTOR_FAILURE_CLEANUP"
 	constructor_lower_before="$(cat "/sys/block/$DISK/stat")" ||
 		fail "cannot read lower statistics before constructor failure matrix"
@@ -500,6 +510,94 @@ if (( MAX_BOUNDARY_PROBE )); then
 	note "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES logical_bytes:$MAX_LOGICAL_BYTES lower_bytes:$EXPECTED_LOWER_BYTES physical_blocks:$EXPECTED_PHYSICAL_BLOCKS segments:$EXPECTED_SEGMENTS initial_mapper_read_bytes:$capacity_logical_read_bytes constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:$boundary_lower_read_bytes boundary_lower_write_bytes:$boundary_lower_write_bytes"
 	exit 0
 fi
+if (( GC_RECOVERY_FAULT_PROBE )); then
+	GC_LOGICAL_PAGES=512
+	GC_LOGICAL_SECTORS=4096
+	GC_LOGICAL_BYTES=2097152
+	GC_FOREGROUND_WRITES=768
+	GC_FAULT_WRITE=769
+	[[ "$EXPECTED_LOWER_BYTES" == 5242880 ]] ||
+		fail "GC recovery null_blk lower geometry mismatch"
+	note "START_LOADED_GC_ROLL_FORWARD_RECOVERY"
+	dmsetup create "$DMNAME" --uuid "$UUID" \
+		--table "0 $GC_LOGICAL_SECTORS swapz $LOWER 0 1 0 2 0 0 $GC_FAULT_WRITE 0" ||
+		fail "cannot create GC roll-forward recovery mapping"
+	OWN_DM=1
+	[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+	      tr -d '[:space:]')" == "$UUID" ]] ||
+		fail "GC recovery DM UUID mismatch"
+	swapz_verify_owned_dm_node
+	[[ "$(blockdev --getsize64 "/dev/mapper/$DMNAME")" == "$GC_LOGICAL_BYTES" ]] ||
+		fail "GC recovery mapper geometry mismatch"
+	gc_recovery_table="$(dmsetup table "$DMNAME")" ||
+		fail "cannot inspect GC recovery DM table"
+	read -r table_start table_sectors table_target table_lower \
+		table_budget table_window table_verify table_gc table_flush \
+		table_bulk table_write_fail table_retain table_extra <<< "$gc_recovery_table"
+	[[ "$table_start" == 0 && "$table_sectors" == "$GC_LOGICAL_SECTORS" &&
+	   "$table_target" == swapz &&
+	   ( "$table_lower" == "$LOWER" || "$table_lower" == "$DEVNO" ||
+	     "$table_lower" == "$DISK" ) &&
+	   "$table_budget" == 0 && "$table_window" == 1 &&
+	   "$table_verify" == 0 && "$table_gc" == 2 &&
+	   "$table_flush" == 0 && "$table_bulk" == 0 &&
+	   "$table_write_fail" == "$GC_FAULT_WRITE" &&
+	   "$table_retain" == 0 && -z "${table_extra:-}" ]] ||
+		fail "GC recovery DM table mismatch"
+	gc_recovery_before="$(dmsetup status "$DMNAME")" ||
+		fail "cannot read GC recovery status before I/O"
+	(( $(status_u64 "$gc_recovery_before" failed) == 0 &&
+	   $(status_u64 "$gc_recovery_before" write_fault_nth) == GC_FAULT_WRITE &&
+	   $(status_u64 "$gc_recovery_before" write_fault_calls) == 0 &&
+	   $(status_u64 "$gc_recovery_before" write_fault_injected) == 0 &&
+	   $(status_u64 "$gc_recovery_before" gc_roll_forwards) == 0 &&
+	   $(status_u64 "$gc_recovery_before" gc_destination_advances) == 0 &&
+	   $(status_u64 "$gc_recovery_before" gc_reserve_segments_initial) == 2 &&
+	   $(status_u64 "$gc_recovery_before" gc_reserve_segments_current) == 2 )) ||
+		fail "GC recovery initial status mismatch"
+	if ! gc_recovery_oracle_output="$(timeout --signal=TERM --kill-after=5s 120s \
+		"$ORACLE" "/dev/mapper/$DMNAME" --gc-roll-forward-fault "$UUID" 2>&1)"; then
+		printf '%s\n' "$gc_recovery_oracle_output"
+		fail "GC roll-forward fault oracle failed or timed out"
+	fi
+	printf '%s\n' "$gc_recovery_oracle_output"
+	gc_recovery_oracle_line="$(printf '%s\n' "$gc_recovery_oracle_output" |
+		awk '/^GC_ROLL_FORWARD_FAULT_ORACLE=/ {
+			count++; line=$0
+		} END { if (count == 1) print line }')" ||
+		fail "cannot parse GC recovery oracle evidence"
+	[[ "$gc_recovery_oracle_line" ==
+	   "GC_ROLL_FORWARD_FAULT_ORACLE=foreground_writes:768 fault_write:769 retry_attempts:2 verified_pages:512" ]] ||
+		fail "GC recovery oracle did not prove exact bounded retry sequence"
+	gc_recovery_after="$(dmsetup status "$DMNAME")" ||
+		fail "cannot read GC recovery status after I/O"
+	gc_recovery_pages="$(status_u64 "$gc_recovery_after" gc_pages)" ||
+		fail "GC recovery status lacks relocated-page count"
+	gc_recovery_roll_forwards="$(status_u64 "$gc_recovery_after" gc_roll_forwards)" ||
+		fail "GC recovery status lacks roll-forward count"
+	gc_recovery_advances="$(status_u64 "$gc_recovery_after" gc_destination_advances)" ||
+		fail "GC recovery status lacks destination-advance count"
+	gc_recovery_reserve_initial="$(status_u64 "$gc_recovery_after" gc_reserve_segments_initial)" ||
+		fail "GC recovery status lacks initial reserve count"
+	gc_recovery_reserve_current="$(status_u64 "$gc_recovery_after" gc_reserve_segments_current)" ||
+		fail "GC recovery status lacks current reserve count"
+	(( $(status_u64 "$gc_recovery_after" failed) == 0 &&
+	   $(status_u64 "$gc_recovery_after" write_fault_calls) > GC_FAULT_WRITE &&
+	   $(status_u64 "$gc_recovery_after" write_fault_injected) == 1 &&
+	   gc_recovery_roll_forwards == 1 &&
+	   gc_recovery_advances == 0 &&
+	   gc_recovery_reserve_initial == 2 &&
+	   gc_recovery_reserve_current == 2 &&
+	   gc_recovery_pages == 510 &&
+	   $(status_u64 "$gc_recovery_after" gc_role_rotations) >= 1 )) ||
+		fail "GC recovery did not prove bounded full-destination roll-forward"
+	note "PASS_LOADED_GC_ROLL_FORWARD_RECOVERY=foreground_writes:$GC_FOREGROUND_WRITES fault_nth:$GC_FAULT_WRITE injected:1 retry_attempts:2 roll_forwards:$gc_recovery_roll_forwards destination_advances:$gc_recovery_advances reserve_initial:$gc_recovery_reserve_initial reserve_current:$gc_recovery_reserve_current relocated_pages:$gc_recovery_pages verified_pages:$GC_LOGICAL_PAGES"
+	timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
+		fail "cannot remove GC roll-forward recovery mapping"
+	OWN_DM=0
+	exit 0
+fi
+
 # 16 MiB upper table; current constructor arguments, no injected errors.
 dmsetup create "$DMNAME" --uuid "$UUID" \
 	--table "0 32768 swapz $LOWER 0 64 1 2 0 1 0" ||

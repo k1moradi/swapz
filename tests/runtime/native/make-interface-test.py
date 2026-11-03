@@ -768,6 +768,7 @@ class PublicMakeContract(unittest.TestCase):
             records = [
                 "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0",
                 "PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727616 logical_bytes:15268315136 lower_bytes:17178820608 physical_blocks:4194048 segments:16383 initial_mapper_read_bytes:4096 constructor_lower_io_delta:0 boundary_pages:2 boundary_page_bytes:4096 boundary_lower_read_bytes:8192 boundary_lower_write_bytes:8192",
+                "PASS_LOADED_GC_ROLL_FORWARD_RECOVERY=foreground_writes:768 fault_nth:769 injected:1 retry_attempts:2 roll_forwards:1 destination_advances:0 reserve_initial:2 reserve_current:2 relocated_pages:510 verified_pages:512",
                 "PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 async_batches:64 lower_read_reqs:512",
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_DELTA64_POSITIVE=pages:128 classifier_pass:128 adopted:128",
