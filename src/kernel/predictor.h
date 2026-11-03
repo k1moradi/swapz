@@ -34,6 +34,11 @@ const char *swapz_predictor_inverse_backend_name(void);
 
 swapz_u32 swapz_predict_delta64_sample_score(const swapz_u8 *input);
 int swapz_predict_should_try_delta64(const swapz_u8 *input, swapz_u32 threshold);
+/*
+ * Delta64 treats each 8-byte word as a little-endian unsigned integer. Full
+ * 4KiB page buffers may be unaligned, but input and output must be distinct,
+ * non-overlapping storage.
+ */
 swapz_u32 swapz_predict_delta64(const swapz_u8 *input, swapz_u8 *output);
 void swapz_unpredict_delta64(const swapz_u8 *input, swapz_u8 *output);
 /*

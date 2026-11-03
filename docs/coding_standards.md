@@ -960,6 +960,16 @@ uniform payload limit in a maintained extent class; adoption must cross that
 limit and remain strictly smaller.
 Portable unsigned,
 memcpy-safe C delta64 is the mandatory correctness oracle and fallback.
+Delta64 interprets every 8-byte word as a little-endian unsigned integer so the
+stored transform is architecture-independent. Scalar loads/stores byte-swap on
+big-endian hosts; numeric-lane SIMD dispatch remains little-endian-only until a
+big-endian ISA backend has direct byte-exact runtime qualification. Predictor
+page pointers may be unaligned, but transform input/output and combined-shuffle
+scratch must be distinct, non-overlapping 4KiB buffers. Native qualification
+must deliberately offset these buffers for scalar and every executable ISA
+backend. Native CRC32C wide-word acceleration likewise runs only where host
+numeric byte order matches the byte stream; other hosts use the portable
+byte-stream implementation.
 
 Production attribution uses separate cacheline-aligned single-writer preparation
 and ordered worker accumulators. Count eligible baselines, classifier passes, transform

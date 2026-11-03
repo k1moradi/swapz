@@ -7,14 +7,26 @@
 #else
 #include <string.h>
 #endif
+/*
+ * Delta64 is a byte-stable wire transform. Interpret every 8-byte source word
+ * as little-endian rather than inheriting the host CPU's integer byte order.
+ * memcpy keeps unaligned page addresses valid on every supported target.
+ */
 static inline unsigned long long swapz_predictor_load64(const swapz_u8 *bytes)
 {
 	unsigned long long value;
+
 	memcpy(&value, bytes, sizeof(value));
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	value = __builtin_bswap64(value);
+#endif
 	return value;
 }
 static inline void swapz_predictor_store64(swapz_u8 *bytes, unsigned long long value)
 {
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	value = __builtin_bswap64(value);
+#endif
 	memcpy(bytes, &value, sizeof(value));
 }
 static inline int swapz_predictor_small_nonzero_delta32(swapz_u32 value, swapz_u32 previous)

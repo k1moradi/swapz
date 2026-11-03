@@ -142,7 +142,8 @@ SWAPZ_X86_SHUF8_WRAPPERS(avx512)
 #undef SWAPZ_X86_INVERSE_WRAPPER
 #undef SWAPZ_X86_SHUF8_WRAPPERS
 #endif
-#if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)
+#if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON) && \
+	__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 static swapz_u32 swapz_predict_neon_guarded(const swapz_u8 *input, swapz_u8 *output)
 {
 	swapz_u32 result;
@@ -227,7 +228,8 @@ int swapz_predictor_init(void)
 				   swapz_unpredict_shuf8_sse2);
 		swapz_transform_backend = "sse2"; swapz_inverse_backend = "sse2";
 	}
-#elif defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)
+#elif defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON) && \
+	__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 	if (kernel_fpu_available()) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_neon_guarded);
 		static_call_update(swapz_predictor_inverse_call, swapz_unpredict_neon_guarded);
@@ -292,7 +294,7 @@ int swapz_predictor_init(void)
 		swapz_unshuffle_impl = swapz_unshuffle8_sse2;
 		swapz_transform_backend = "sse2"; swapz_inverse_backend = "sse2";
 	}
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 	swapz_predict_impl = swapz_predict_delta64_neon;
 	swapz_unpredict_impl = swapz_unpredict_delta64_neon;
 	swapz_shuffle_impl = swapz_shuffle8_neon;

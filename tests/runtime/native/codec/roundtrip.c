@@ -22,6 +22,8 @@
 
 static uint8_t extent[SWAPZ_MAX_EXTENT_BYTES];
 static uint8_t payload[SWAPZ_MAX_COMPRESSED];
+static uint8_t misaligned_extent[SWAPZ_BLOCK_BYTES + 1U];
+static uint8_t misaligned_payload[SWAPZ_MAX_COMPRESSED + 1U];
 
 static void set_payload(unsigned int length, unsigned int salt)
 {
@@ -226,6 +228,41 @@ static int test_seal_clears_only_unwritten_gap(void)
 	return 0;
 }
 
+static int test_alignment_and_payload_boundaries(void)
+{
+	struct swapz_builder b;
+	struct swapz_decoded d;
+	const uint8_t *readable;
+	uint8_t *bytes = misaligned_extent + 1U;
+	uint8_t *input = misaligned_payload + 1U;
+	unsigned int index;
+
+	for (index = 0; index < SWAPZ_MAX_COMPRESSED; ++index)
+		input[index] = (uint8_t)((index * 29U + 7U) & 255U);
+	memcpy(payload, input, SWAPZ_MAX_COMPRESSED);
+	CHECK(swapz_crc32c_bytes(input, SWAPZ_MAX_COMPRESSED) ==
+	      swapz_crc32c_bytes(payload, SWAPZ_MAX_COMPRESSED));
+
+	CHECK(swapz_begin(&b, bytes, SWAPZ_BLOCK_BYTES, 101) == 0);
+	CHECK(swapz_append_encoded(&b, 17, 1, input, 1,
+				   SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_seal(&b) == 0);
+	CHECK(swapz_validate(bytes, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_lookup(bytes, SWAPZ_BLOCK_BYTES, 0, &d, &readable) == 0);
+	CHECK(d.payload_length == 1 && readable[0] == input[0]);
+
+	CHECK(swapz_begin(&b, bytes, SWAPZ_BLOCK_BYTES, 102) == 0);
+	CHECK(swapz_append_encoded(&b, 18, 2, input, SWAPZ_MAX_COMPRESSED,
+				   SWAPZ_ENCODING_DELTA64_SHUF8) == 0);
+	CHECK(swapz_seal(&b) == 0);
+	CHECK(swapz_validate(bytes, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_lookup(bytes, SWAPZ_BLOCK_BYTES, 0, &d, &readable) == 0);
+	CHECK(d.payload_length == SWAPZ_MAX_COMPRESSED);
+	CHECK(d.encoding == SWAPZ_ENCODING_DELTA64_SHUF8);
+	CHECK(!memcmp(readable, input, SWAPZ_MAX_COMPRESSED));
+	return 0;
+}
+
 static int test_bad_inputs(void)
 {
 	struct swapz_builder b;
@@ -395,6 +432,7 @@ int main(void)
 	CHECK(test_delta64_shuf8_record_encoding() == 0); tests++;
 	CHECK(test_map_encoding_packing() == 0); tests++;
 	CHECK(test_seal_clears_only_unwritten_gap() == 0); tests++;
+	CHECK(test_alignment_and_payload_boundaries() == 0); tests++;
 	CHECK(test_bad_inputs() == 0); tests++;
 	CHECK(test_integrity() == 0); tests++;
 	CHECK(test_read_spans() == 0); tests++;

@@ -31,6 +31,7 @@
 #define LZ4_ACCEL_BENCH_REPEATS 16U
 #define LZ4_ACCELERATION_COUNT 4U
 #define MAX_BACKEND_BENCHMARKS 4U
+#define MISALIGNED_TEST_SLACK 16U
 #define SD_EMULATED_BLOCK_NS 390625ULL
 #define SSD_EMULATED_BLOCK_NS 48828ULL
 
@@ -160,6 +161,10 @@ static swapz_u8 scalar_recovered_page[SWAPZ_BLOCK_BYTES];
 static int lz4_acceleration_lengths[MAX_EVIDENCE_PAGES];
 static char compressed_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 planner_dummy[SWAPZ_BLOCK_BYTES];
+static swapz_u8 misaligned_input[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
+static swapz_u8 misaligned_output[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
+static swapz_u8 misaligned_recovered[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
+static swapz_u8 misaligned_scratch[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
 
 static const struct transform transforms[TRANSFORM_COUNT] = {
 	{ "delta64", swapz_predict_delta64, swapz_unpredict_delta64 },
@@ -213,6 +218,35 @@ static void put_u32(swapz_u8 *bytes, swapz_u32 value)
 static void put_u64(swapz_u8 *bytes, uint64_t value)
 {
 	memcpy(bytes, &value, sizeof(value));
+}
+
+static int verify_delta64_known_answer(void)
+{
+	static const swapz_u8 input_prefix[] = {
+		0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+		0x10, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	};
+	static const swapz_u8 expected_prefix[] = {
+		0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+		0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0xf0, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe,
+	};
+	swapz_u32 index;
+
+	memset(misaligned_input, 0, SWAPZ_BLOCK_BYTES);
+	memcpy(misaligned_input, input_prefix, sizeof(input_prefix));
+	if (swapz_predict_delta64_scalar(misaligned_input, scalar_transform_page) ||
+	    memcmp(scalar_transform_page, expected_prefix, sizeof(expected_prefix)))
+		return -EUCLEAN;
+	for (index = (swapz_u32)sizeof(expected_prefix);
+	     index < SWAPZ_BLOCK_BYTES; ++index)
+		if (scalar_transform_page[index])
+			return -EUCLEAN;
+	swapz_unpredict_delta64_scalar(scalar_transform_page,
+					 scalar_recovered_page);
+	return memcmp(scalar_recovered_page, misaligned_input,
+		      SWAPZ_BLOCK_BYTES) ? -EUCLEAN : 0;
 }
 
 static void generate_structured_page(unsigned int kind, unsigned int page_index,
@@ -803,6 +837,17 @@ static int benchmark_backend(struct backend_benchmark *backend, swapz_u32 count)
 		backend->unpredict(delta64_pages[index], recovered_page);
 		if (memcmp(recovered_page, evidence_pages[index], SWAPZ_BLOCK_BYTES)) return -EUCLEAN;
 	}
+	/* Deliberately offset every pointer: no backend may depend on page/vector
+	 * alignment that the public predictor contract does not require. */
+	memcpy(misaligned_input + 1U, evidence_pages[0], SWAPZ_BLOCK_BYTES);
+	if (backend->predict(misaligned_input + 1U, misaligned_output + 3U) ||
+	    memcmp(misaligned_output + 3U, delta64_pages[0],
+		   SWAPZ_BLOCK_BYTES))
+		return -EUCLEAN;
+	backend->unpredict(misaligned_output + 3U, misaligned_recovered + 5U);
+	if (memcmp(misaligned_recovered + 5U, evidence_pages[0],
+		   SWAPZ_BLOCK_BYTES))
+		return -EUCLEAN;
 	start = now_ns();
 	for (repeat = 0; repeat < TRANSFORM_BENCH_REPEATS; ++repeat)
 		for (index = 0; index < count; ++index) {
@@ -850,7 +895,7 @@ static int verify_shuffle_backends(swapz_u32 count)
 	if (__builtin_cpu_supports("avx512f"))
 		backends[backend_count++] = (struct shuffle_backend){
 			"avx512", swapz_shuffle8_avx512, swapz_unshuffle8_avx512 };
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 	backends[backend_count++] = (struct shuffle_backend){
 		"neon", swapz_shuffle8_neon, swapz_unshuffle8_neon };
 #endif
@@ -861,6 +906,8 @@ static int verify_shuffle_backends(swapz_u32 count)
 			for (byte = 0; byte < SWAPZ_PREDICTOR_U64_BYTES; ++byte)
 				shuffle_reference[byte * words + word] =
 					page[word * SWAPZ_PREDICTOR_U64_BYTES + byte];
+		if (!index)
+			memcpy(misaligned_input + 1U, page, SWAPZ_BLOCK_BYTES);
 		for (backend = 0; backend < backend_count; ++backend) {
 			backends[backend].shuffle(page, transform_page);
 			if (memcmp(transform_page, shuffle_reference, SWAPZ_BLOCK_BYTES)) {
@@ -873,6 +920,18 @@ static int verify_shuffle_backends(swapz_u32 count)
 				fprintf(stderr, "unshuffle8 %s mismatch page=%u\n",
 					backends[backend].name, index);
 				return -EUCLEAN;
+			}
+			if (!index) {
+				backends[backend].shuffle(misaligned_input + 1U,
+							 misaligned_output + 3U);
+				if (memcmp(misaligned_output + 3U, shuffle_reference,
+					   SWAPZ_BLOCK_BYTES))
+					return -EUCLEAN;
+				backends[backend].unshuffle(misaligned_output + 3U,
+							   misaligned_recovered + 5U);
+				if (memcmp(misaligned_recovered + 5U, page,
+					   SWAPZ_BLOCK_BYTES))
+					return -EUCLEAN;
 			}
 		}
 		/* Dispatched DELTA64_SHUF8 equals shuffle(delta64) and inverts. */
@@ -897,6 +956,20 @@ static int verify_shuffle_backends(swapz_u32 count)
 						     recovered_page);
 		if (memcmp(recovered_page, page, SWAPZ_BLOCK_BYTES))
 			return -EUCLEAN;
+		if (!index) {
+			if (swapz_predict_delta64_shuf8(
+				    misaligned_input + 1U, misaligned_scratch + 3U,
+				    misaligned_output + 5U) ||
+			    memcmp(misaligned_output + 5U, shuffle_reference,
+				   SWAPZ_BLOCK_BYTES))
+				return -EUCLEAN;
+			swapz_unpredict_delta64_shuf8(
+				misaligned_output + 5U, misaligned_scratch + 3U,
+				misaligned_recovered + 7U);
+			if (memcmp(misaligned_recovered + 7U, page,
+				   SWAPZ_BLOCK_BYTES))
+				return -EUCLEAN;
+		}
 	}
 	printf("SWAPZ_PREDICTOR_SHUFFLE8_BACKENDS=%u pages=%u byte_exact=1\n",
 	       backend_count, count);
@@ -915,7 +988,7 @@ static int collect_backend_benchmarks(struct backend_benchmark *backends,
 		backends[count++] = (struct backend_benchmark){ "avx2", swapz_predict_delta64_avx2, swapz_unpredict_delta64_avx2, 0, 0 };
 	if (__builtin_cpu_supports("avx512f"))
 		backends[count++] = (struct backend_benchmark){ "avx512", swapz_predict_delta64_avx512, swapz_unpredict_delta64_avx512, 0, 0 };
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 	backends[count++] = (struct backend_benchmark){ "neon", swapz_predict_delta64_neon, swapz_unpredict_delta64_neon, 0, 0 };
 #endif
 	if (count > MAX_BACKEND_BENCHMARKS) return -E2BIG;
@@ -1215,7 +1288,9 @@ int main(int argc, char **argv)
 			error);
 		return 1;
 	}
-	error = evaluate_sampling_controls(sampling_controls);
+	error = verify_delta64_known_answer();
+	if (!error)
+		error = evaluate_sampling_controls(sampling_controls);
 	if (!error)
 		error = evaluate_route_controls();
 	if (error) {
