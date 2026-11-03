@@ -1712,7 +1712,7 @@ def parse_loaded_correctness(output):
             r"PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:(\d+) "
             r"injected:(\d+) syscall_errno:EIO lower_write_delta:(\d+)$"),
         "read_fault": re.compile(
-            r"PASS_LOADED_SYNTHETIC_READ_FAULT=injected:(\d+) "
+            r"PASS_LOADED_SYNTHETIC_READ_FAULT=page:(\d+) injected:(\d+) "
             r"syscall_errno:EIO lower_read_delta:(\d+) "
             r"submitted_delta:(\d+)$"),
         "flush_fault": re.compile(
@@ -1859,7 +1859,8 @@ def parse_loaded_correctness(output):
      completion_fault_batches, completion_faults,
      completion_terminal_eio) = found["completion_handoff"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
-    read_injected, read_lower_delta, read_submitted_delta = found["read_fault"]
+    (read_fault_page, read_injected, read_lower_delta,
+     read_submitted_delta) = found["read_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
     (codec_error_owners, codec_error_injected, codec_inline_lower_delta,
      codec_submitter_lower_delta,
@@ -1940,7 +1941,8 @@ def parse_loaded_correctness(output):
     if write_retain != 2 or write_injected != 1 or write_lower_delta != 0:
         return {"overall": "INCOMPLETE",
                 "reason": "synthetic retained WRITE fault contract failed"}
-    if (read_injected != 1 or read_lower_delta != 0 or
+    if (not 2048 <= read_fault_page < 4096 or read_injected != 1 or
+            read_lower_delta != 0 or
             read_submitted_delta != 0):
         return {"overall": "INCOMPLETE",
                 "reason": "synthetic retained READ fault contract failed"}
@@ -2047,6 +2049,7 @@ def parse_loaded_correctness(output):
         "completion_fault_offloaded_batches": completion_fault_batches,
         "retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
         "retained_read_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_READ",
+        "retained_read_fault_page": read_fault_page,
         "retained_read_fault_submitted_delta": read_submitted_delta,
         "retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
         "codec_error_owners": codec_error_owners,

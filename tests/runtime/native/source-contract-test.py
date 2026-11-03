@@ -1930,6 +1930,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("read_fault_calls=%lld read_fault_injected=%d", status)
         self.assertIn("START_LOADED_SYNTHETIC_READ_FAULT", deploy)
         self.assertIn("PASS_LOADED_SYNTHETIC_READ_FAULT=", deploy)
+        self.assertIn('--write-page "$read_fault_seed_page" 73', deploy)
+        self.assertIn('"$READ_PROBE" "/dev/mapper/$DMNAME" "$read_fault_seed_page"', deploy)
+        self.assertIn('"PASS_LOADED_SYNTHETIC_READ_FAULT=page:$read_fault_seed_page', deploy)
         self.assertIn('READ_FAULT_SEED calls:$read_fault_seed_calls', deploy)
         self.assertIn('logical:$read_fault_seed_logical', deploy)
         self.assertIn('submitted:$read_fault_seed_submitted', deploy)
@@ -1946,7 +1949,13 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("read_fault_probe_rc", deploy)
         read_probe = (ROOT / "tests/tools/direct-read-probe.c").read_text()
         self.assertIn("O_RDONLY | O_DIRECT | O_CLOEXEC", read_probe)
-        self.assertIn("pread(fd, buffer, PROBE_BYTES, 0)", read_probe)
+        self.assertIn("pread(fd, buffer, PROBE_BYTES, offset)", read_probe)
+        self.assertIn("page > (unsigned long long)LLONG_MAX / PROBE_BYTES",
+                      read_probe)
+        self.assertIn('!strcmp(argv[2], "--write-page")',
+                      (ROOT / "tests/tools/device-roundtrip.c").read_text())
+        self.assertIn('!strcmp(argv[2], "--verify-page")',
+                      (ROOT / "tests/tools/device-roundtrip.c").read_text())
         self.assertIn("read_ret == -1 && read_errno == EIO", read_probe)
         self.assertIn("DIRECT_READ_PROBE", read_probe)
         mk = (ROOT / "Makefile").read_text()

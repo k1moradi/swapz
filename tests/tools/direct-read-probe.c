@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -19,10 +20,24 @@ int main(int argc, char **argv)
     int close_errno = 0;
     int fd;
     int alloc_error;
+    unsigned long long page = 0;
+    off_t offset = 0;
 
-    if (argc != 2) {
+    if (argc != 2 && argc != 3) {
         fprintf(stderr, "DIRECT_READ_PROBE usage_error=1\n");
         return 64;
+    }
+    if (argc == 3) {
+        char *end = NULL;
+
+        errno = 0;
+        page = strtoull(argv[2], &end, 10);
+        if (errno || end == argv[2] || !end || *end ||
+            page > (unsigned long long)LLONG_MAX / PROBE_BYTES) {
+            fprintf(stderr, "DIRECT_READ_PROBE usage_error=1\n");
+            return 64;
+        }
+        offset = (off_t)(page * PROBE_BYTES);
     }
 
     alloc_error = posix_memalign(&buffer, PROBE_ALIGN, PROBE_BYTES);
@@ -44,7 +59,7 @@ int main(int argc, char **argv)
     }
 
     errno = 0;
-    read_ret = pread(fd, buffer, PROBE_BYTES, 0);
+    read_ret = pread(fd, buffer, PROBE_BYTES, offset);
     if (read_ret < 0)
         read_errno = errno;
 
@@ -53,9 +68,9 @@ int main(int argc, char **argv)
     if (close_ret < 0)
         close_errno = errno;
 
-    printf("DIRECT_READ_PROBE open_ret=0 open_errno=0 "
+    printf("DIRECT_READ_PROBE page=%llu open_ret=0 open_errno=0 "
            "read_ret=%zd read_errno=%d close_ret=%d close_errno=%d\n",
-           read_ret, read_errno, close_ret, close_errno);
+           page, read_ret, read_errno, close_ret, close_errno);
     free(buffer);
 
     if (read_ret == -1 && read_errno == EIO)

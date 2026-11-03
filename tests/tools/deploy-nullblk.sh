@@ -1241,9 +1241,11 @@ timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fa
 OWN_DM=0
 
 # Pre-submission lower READ failure qualification. Seed one committed nonzero
-# page without verify-after-write, then inject the first physical READ. The
-# upper verify must fail, the target must fail closed, and neither target
-# submitted-read accounting nor the owned null_blk READ sectors may advance.
+# high logical page without verify-after-write, leaving LBA0 unmapped so an
+# asynchronous block-device probe cannot consume the one-shot fault. The
+# aligned O_DIRECT verification must fail, the target must fail closed, and
+# neither target submitted-read accounting nor owned null_blk READ sectors
+# may advance.
 note "START_LOADED_SYNTHETIC_READ_FAULT"
 UUID="SWAPZ-TEST-$TOKEN-readfault"
 dmsetup create "$DMNAME" --uuid "$UUID" \
@@ -1260,9 +1262,11 @@ read_fault_before="$(dmsetup status "$DMNAME")"
    $(status_u64 "$read_fault_before" read_fault_injected) == 0 &&
    $(status_u64 "$read_fault_before" failed) == 0 )) ||
     fail "retained READ-fault mapping policy mismatch"
+read_fault_token_low="${TOKEN: -3}"
+read_fault_seed_page=$((2048 + (16#$read_fault_token_low % 2048)))
 read -r -a read_fault_lower_preseed < "/sys/block/$DISK/stat"
 timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
-    "/dev/mapper/$DMNAME" --write-series 1 73 ||
+    "/dev/mapper/$DMNAME" --write-page "$read_fault_seed_page" 73 ||
     fail "READ-fault seed WRITE failed"
 read_fault_seeded="$(dmsetup status "$DMNAME")" ||
     fail "cannot read READ-fault status after seed WRITE"
@@ -1295,7 +1299,7 @@ read_fault_submitted_before="$(status_u64 "$read_fault_seeded" read_submitted_re
 read -r -a read_fault_lower_before < "/sys/block/$DISK/stat"
 set +e
 read_fault_probe_output="$(timeout --signal=TERM --kill-after=5s 20s \
-    "$READ_PROBE" "/dev/mapper/$DMNAME" 2>&1)"
+    "$READ_PROBE" "/dev/mapper/$DMNAME" "$read_fault_seed_page" 2>&1)"
 read_fault_probe_rc=$?
 set -e
 if (( read_fault_probe_rc != 0 )); then
@@ -1319,7 +1323,7 @@ read -r -a read_fault_lower_after < "/sys/block/$DISK/stat"
 read_fault_submitted_delta=$((read_fault_submitted_after - read_fault_submitted_before))
 (( read_fault_submitted_delta == 0 )) ||
     fail "pre-submission READ fault was counted as submitted lower I/O"
-note "PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 syscall_errno:EIO lower_read_delta:0 submitted_delta:$read_fault_submitted_delta"
+note "PASS_LOADED_SYNTHETIC_READ_FAULT=page:$read_fault_seed_page injected:1 syscall_errno:EIO lower_read_delta:0 submitted_delta:$read_fault_submitted_delta"
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
     fail "cannot remove retained READ-fault mapping"
 OWN_DM=0

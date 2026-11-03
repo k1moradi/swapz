@@ -969,7 +969,9 @@ int main(int argc, char **argv)
 	int gc_roll_forward_fault_mode = 0;
 	int segmented_series_mode = 0, thp_series_mode = 0;
 	int parallel_series_mode = 0;
+	int page_mode = 0;
 	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
+	unsigned int page_index = 0;
 	int maximum_capacity_mode = 0;
 	uint64_t expected_device_bytes = UINT64_C(16) * 1024 * 1024;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
@@ -1059,13 +1061,24 @@ int main(int argc, char **argv)
 			thp_series_mode = 1;
 		} else if (!strcmp(argv[2], "--thp-verify-series")) {
 			thp_series_mode = 1;
+		} else if (!strcmp(argv[2], "--write-page")) {
+			write_series = 1;
+			page_mode = 1;
+		} else if (!strcmp(argv[2], "--verify-page")) {
+			page_mode = 1;
 		} else if (!strcmp(argv[2], "--discard-pages")) {
 			discard_pages = 1;
 		} else if (strcmp(argv[2], "--verify-series")) {
 			fprintf(stderr, "FAIL unknown private oracle mode\n");
 			return 2;
 		}
-		if (discard_pages) {
+		if (page_mode) {
+			if (parse_uint(argv[3], GC_PAGES - 1U, &page_index) ||
+			    !page_index || parse_uint(argv[4], 255U, &round)) {
+				fprintf(stderr, "FAIL invalid private page/round\n");
+				return 2;
+			}
+		} else if (discard_pages) {
 			if (parse_uint(argv[3], GC_PAGES - 1U, &round) ||
 			    parse_uint(argv[4], GC_PAGES, &count) || !count ||
 			    count > GC_PAGES - round) {
@@ -1147,6 +1160,21 @@ int main(int argc, char **argv)
 			}
 			printf("PASS: owned swapz discard start=%u count=%u\n",
 			       round, count);
+		} else if (page_mode) {
+			pattern(expected, page_index, round);
+			if (write_series) {
+				if (transfer(fd, expected, page_index, 1))
+					goto out;
+			} else if (transfer(fd, buf, page_index, 0) ||
+				   memcmp(buf, expected, PAGE)) {
+				fprintf(stderr,
+					"FAIL byte-exact page=%u round=%u\n",
+					page_index, round);
+				goto out;
+			}
+			printf("PASS: owned swapz direct %s page=%u round=%u\n",
+			       write_series ? "write" : "verify",
+			       page_index, round);
 		} else if (parallel_series_mode) {
 			if (parallel_series(fd, count, round))
 				goto out;
