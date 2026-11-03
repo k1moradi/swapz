@@ -1,11 +1,21 @@
 # Historical old-host physical and live-swap evidence
 
-This file preserves the detailed physical-swap and live-swap evidence from the
-retired `/dev/sda4` development host. It is **historical evidence, not current
-operator policy or an active deployment path**. Current target identity,
-authorization, lifecycle gates, and completion criteria are canonical in
-[AGENT_CONTEXT.md](../AGENT_CONTEXT.md). The historical recovery protocol remains
-in [live-swap-trial-recovery.md](../live-swap-trial-recovery.md).
+This file preserves the physical-swap evidence and old-host capacity/trial
+records for the retired `/dev/sda4` development host. The second migrated
+ROADMAP section also contains a chronology of **early primary-manager
+implementation milestones**. Those present-tense progress notes describe
+their source revisions, not the implementation or qualification state on
+current `main`. None of this archive is current operator policy or an active
+deployment path.
+
+Current target identity, standing authorization, and release gates are
+canonical in [AGENT_CONTEXT.md](../AGENT_CONTEXT.md). Current primary-manager
+correctness and testing contracts live in
+[coding_standards.md](../coding_standards.md) and
+[testing_standards.md](../testing_standards.md); active engineering priorities
+and evidence pointers remain in [ROADMAP.md](../ROADMAP.md). The historical
+trial/recovery protocol remains in
+[live-swap-trial-recovery.md](../live-swap-trial-recovery.md).
 
 The two records below were migrated from `docs/ROADMAP.md` without rewriting
 their substantive evidence. The pre-migration ROADMAP is preserved at commit
