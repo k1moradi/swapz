@@ -686,14 +686,14 @@ run_failed_fsync_case() {
 	prepare_interruption_run
 	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=state-dir-fsync run_id:$RUN_ID"
 	set +e
-	output="$(SWAPZ_PRIMARY_TEST_FSYNC_FAIL_CALL=3 \
+	output="$(SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL=2 \
 		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary start 2>&1)"
 	rc=$?
 	set -e
 	printf '%s\n' "$output"
 	[[ "$rc" -ne 0 ]] || fail "injected state directory fsync failure was ignored"
-	grep -Fxq "SWAPZ_PRIMARY_TEST_FSYNC_HIT=3" <<< "$output" ||
-		fail "selected state-directory fsync did not fail"
+	grep -Fxq "SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT=2" <<< "$output" ||
+		fail "selected post-rename state-directory fsync did not fail"
 	assert_lifecycle_state "$RUN_ID" STARTING null ||
 		fail "fsync failure did not retain the renamed STARTING record"
 	[[ -f "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
