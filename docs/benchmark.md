@@ -671,9 +671,13 @@ the evidence boundary for that scheduler, not a scheduler itself. The host
 should run `snapshot --source-sha <exact-main-sha> --device <admitted-partition>`
 before the first arm and after the final arm. Snapshots bind the clean
 HEAD/origin-main source to kernel/CPU/affinity/frequency-policy, memory,
-admitted-device size/model/transport/queue/scheduler, block ancestry, swap and
-mount inventories, PSI, thermal-zone readings and loaded swapz module
-parameters. After `qualification.py evaluate --protocol v2`, the scheduler
+admitted-device size/model/transport/queue/scheduler, direct holders, block
+ancestry, swap and mount inventories, PSI, thermal-zone readings and loaded
+swapz module parameters. In addition to requiring the full mount/swap
+inventories to remain stable, the admitted partition itself must be quiescent
+in both boundary snapshots: no direct holder, no active-swap row with its exact
+major:minor, and no mount with its exact major:minor. After
+`qualification.py evaluate --protocol v2 --result <summary.json>`, the scheduler
 runs `physical-campaign-evidence.py seal` with both snapshots, the evaluator
 summary and **every** pair JSON, including failed/excluded attempts. Sealing is
 create-only, requires distinct before/after/summary/pair input files and
@@ -683,9 +687,10 @@ exactly. It hashes the frozen acceptance manifest, prospective amendment and
 evaluator. FAIL/INCOMPLETE evidence may still be sealed when pair/source
 provenance is inconsistent so the invalid campaign remains auditable; a PASS is
 blocked unless all pair/summary source identity matches the exact host source.
-Stable source/tree, full kernel identity, CPU model/policy/affinity, total
-RAM, mount and swap inventories, device identity/queue/scheduler and swapz
-module cleanup state are independently required for PASS. The resulting
+Stable source/tree, full kernel identity including one unchanged boot ID and
+nondecreasing host uptime, CPU model/policy/affinity, total RAM, mount and swap
+inventories, device identity/queue/scheduler and swapz module cleanup state are
+independently required for PASS. The resulting
 campaign JSON is the machine-readable provenance index; preserving the original
 arm/pair files remains mandatory.
 This methodology change intentionally does not add a second public test

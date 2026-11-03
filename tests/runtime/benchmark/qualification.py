@@ -14,6 +14,8 @@ import re
 import statistics
 from pathlib import Path
 
+from evidence_io import write_new_json
+
 SCHEMA = "swapz-performance-qualification-v1"
 PAIR_SCHEMA = "swapz-performance-pair-v1"
 SUMMARY_SCHEMA = "swapz-performance-summary-v1"
@@ -578,6 +580,14 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
             "decisions": decisions, "raw_repeat_spread": raw_spread, "records": preserved}
 
 
+def write_qualification_artifact(path: Path, value: dict,
+                                 description: str) -> None:
+    try:
+        write_new_json(path, value)
+    except FileExistsError as exc:
+        raise ValueError(f"refusing to overwrite {description}") from exc
+
+
 def load_records(paths: list[str]) -> list[dict]:
     result = []
     for path in paths:
@@ -599,6 +609,7 @@ def main() -> None:
     pair.add_argument("--exclude", action="append", default=[]); pair.add_argument("--result", required=True)
     summary = sub.add_parser("evaluate")
     summary.add_argument("--protocol", choices=("auto", "v1", "v2"), default="auto")
+    summary.add_argument("--result")
     summary.add_argument("reports", nargs="+")
     args = parser.parse_args()
     try:
@@ -610,15 +621,16 @@ def main() -> None:
             raw = json.loads(Path(args.raw).read_text()); swapz = json.loads(Path(args.swapz).read_text())
             record = compare_pair(raw, swapz, args.workload, args.pair_id,
                                   args.pair_index, args.order, args.exclude)
-            target = Path(args.result)
-            if target.exists(): raise ValueError("refusing to overwrite qualification pair")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+            write_qualification_artifact(
+                Path(args.result), record, "qualification pair")
             print(json.dumps(record, sort_keys=True))
         else:
-            print(json.dumps(
-                evaluate(load_records(args.reports), protocol=args.protocol),
-                sort_keys=True))
+            result = evaluate(
+                load_records(args.reports), protocol=args.protocol)
+            if args.result:
+                write_qualification_artifact(
+                    Path(args.result), result, "qualification summary")
+            print(json.dumps(result, sort_keys=True))
     except (OSError, ValueError, TypeError, KeyError) as exc:
         parser.exit(2, "BLOCKED/FAIL: " + str(exc) + "\n")
 

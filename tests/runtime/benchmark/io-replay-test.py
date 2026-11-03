@@ -2764,12 +2764,15 @@ class PairReplayContract(unittest.TestCase):
             "virtualization": "none",
             "kernel": {
                 "release": "6.8.0", "machine": "x86_64",
-                "version": "#1 SMP", "node": "physical-host"},
+                "version": "#1 SMP", "node": "physical-host",
+                "boot_id": "11111111-2222-3333-4444-555555555555",
+                "uptime_seconds": 1000.0},
             "device": {
                 "major_minor": "8:1", "size_bytes": 123456,
                 "physical_disk": "sda", "model": "SD", "transport": "usb",
                 "partuuid": "11111111-01", "serial": "serial-1",
                 "wwid": "wwid-1", "selected_scheduler": "mq-deadline",
+                "holders": [],
                 "queue": {
                     "logical_block_size": 512,
                     "physical_block_size": 512,
@@ -2821,10 +2824,32 @@ class PairReplayContract(unittest.TestCase):
             result_path = root / "campaign.json"
             before_path.write_text(json.dumps(host))
             after_host = {
-                **host, "captured_at_utc": "2026-11-03T19:00:00+00:00"}
+                **host,
+                "captured_at_utc": "2026-11-03T19:00:00+00:00",
+                "kernel": {**host["kernel"], "uptime_seconds": 1060.0},
+            }
             after_path.write_text(json.dumps(after_host))
             pair_path.write_text(json.dumps(pair))
             summary_path.write_text(json.dumps(summary))
+
+            cli_summary_path = root / "cli-summary.json"
+            cli_command = [
+                sys.executable, str(qualification_path), "evaluate",
+                "--protocol", "v2", "--result", str(cli_summary_path),
+                str(pair_path),
+            ]
+            cli_run = subprocess.run(
+                cli_command, capture_output=True, text=True, timeout=20)
+            self.assertEqual(cli_run.returncode, 0, cli_run.stderr)
+            self.assertEqual(json.loads(cli_summary_path.read_text()), summary)
+            cli_summary_bytes = cli_summary_path.read_bytes()
+            cli_rerun = subprocess.run(
+                cli_command, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(cli_rerun.returncode, 0)
+            self.assertIn(
+                "refusing to overwrite qualification summary",
+                cli_rerun.stderr)
+            self.assertEqual(cli_summary_path.read_bytes(), cli_summary_bytes)
 
             with mock.patch.object(
                     evidence, "require_clean_source", return_value=None), \
@@ -2845,6 +2870,65 @@ class PairReplayContract(unittest.TestCase):
                 evidence.git_blob_sha(
                     evidence.ACCEPTANCE_MANIFEST.read_bytes()))
             self.assertEqual(sealed["host_stability"]["status"], "STABLE")
+            self.assertTrue(
+                sealed["admitted_device_boundary"]["before"]["quiescent"])
+            self.assertTrue(
+                sealed["admitted_device_boundary"]["after"]["quiescent"])
+
+            dirty_swap = {
+                **after_host,
+                "swap_inventory": [{
+                    "path": "/dev/sda1", "type": "partition",
+                    "size_kib": 1024, "used_kib": 0, "priority": -2,
+                    "major_minor": "8:1",
+                }],
+            }
+            dirty_mount = {
+                **after_host,
+                "mount_inventory":
+                    "/ /dev/root ext4 8:2\n/mnt/sd /dev/sda1 ext4 8:1",
+            }
+            dirty_holder = {
+                **after_host,
+                "device": {
+                    **after_host["device"],
+                    "holders": [{
+                        "kernel_name": "dm-0", "major_minor": "253:0"}],
+                },
+            }
+            for dirty in (dirty_swap, dirty_mount, dirty_holder):
+                stability = evidence.host_stability(host, dirty)
+                self.assertEqual(stability["status"], "CHANGED")
+                self.assertIn(
+                    "admitted_device_quiescent_after",
+                    stability["failed_checks"])
+
+            rebooted = {
+                **after_host,
+                "kernel": {
+                    **after_host["kernel"],
+                    "boot_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                    "uptime_seconds": 30.0,
+                },
+            }
+            reboot_stability = evidence.host_stability(host, rebooted)
+            self.assertEqual(reboot_stability["status"], "CHANGED")
+            self.assertIn("kernel_boot_id", reboot_stability["failed_checks"])
+            self.assertIn(
+                "kernel_uptime_non_decreasing",
+                reboot_stability["failed_checks"])
+
+            malformed_swap = {
+                **host,
+                "swap_inventory": [{
+                    "path": "/dev/sda1", "type": "partition",
+                    "size_kib": 1024, "used_kib": 0, "priority": -2,
+                    "major_minor": None,
+                }],
+            }
+            with self.assertRaisesRegex(
+                    ValueError, "host context is incomplete"):
+                evidence.validate_host_snapshot(malformed_swap, source_sha)
 
             evidence.write_new_json(result_path, sealed)
             with self.assertRaises(FileExistsError):

@@ -11,6 +11,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import os
 import re
 import runpy
@@ -210,10 +211,22 @@ def swap_inventory() -> list[dict]:
         fields = line.split()
         if len(fields) != 5:
             raise ValueError("cannot parse /proc/swaps")
+        major_minor = None
+        try:
+            info = Path(fields[0]).stat()
+            if stat.S_ISBLK(info.st_mode):
+                major_minor = (
+                    f"{os.major(info.st_rdev)}:{os.minor(info.st_rdev)}")
+        except OSError as exc:
+            if fields[1] == "partition":
+                raise ValueError(
+                    "cannot resolve block-backed swap identity") from exc
+        if fields[1] == "partition" and major_minor is None:
+            raise ValueError("block-backed swap row lacks major:minor")
         rows.append({
             "path": fields[0], "type": fields[1],
             "size_kib": int(fields[2]), "used_kib": int(fields[3]),
-            "priority": int(fields[4]),
+            "priority": int(fields[4]), "major_minor": major_minor,
         })
     return rows
 
@@ -258,6 +271,19 @@ def block_device_snapshot(device: Path) -> dict:
             "rq_affinity", "nomerges", "io_poll"):
         queue_fields[name] = integer(queue / name)
     queue_fields["write_cache"] = read_optional_text(queue / "write_cache")
+    holders = []
+    holders_path = sys_path / "holders"
+    if holders_path.is_dir():
+        for holder in sorted(holders_path.iterdir()):
+            resolved_holder = holder.resolve(strict=True)
+            holder_major_minor = read_optional_text(resolved_holder / "dev")
+            if not holder_major_minor or not re.fullmatch(
+                    r"[0-9]+:[0-9]+", holder_major_minor):
+                raise ValueError("cannot resolve admitted-device holder identity")
+            holders.append({
+                "kernel_name": resolved_holder.name,
+                "major_minor": holder_major_minor,
+            })
     return {
         "requested_path": str(device),
         "resolved_path": str(resolved),
@@ -277,6 +303,7 @@ def block_device_snapshot(device: Path) -> dict:
         "scheduler": scheduler,
         "selected_scheduler": selected_scheduler,
         "queue": queue_fields,
+        "holders": holders,
         "ancestry": json.loads(run_text([
             "lsblk", "--json", "-s", "-o",
             "NAME,KNAME,TYPE,MAJ:MIN,SIZE,MODEL,TRAN,MOUNTPOINTS",
@@ -290,6 +317,16 @@ def source_tree_sha(source_sha: str) -> str:
     if not re.fullmatch(r"[0-9a-f]{40}", tree):
         raise ValueError("source tree SHA is unavailable")
     return tree
+
+
+def boot_uptime_seconds() -> float:
+    fields = Path("/proc/uptime").read_text(encoding="ascii").split()
+    if len(fields) != 2:
+        raise ValueError("host uptime is unavailable")
+    value = float(fields[0])
+    if not math.isfinite(value) or value < 0:
+        raise ValueError("host uptime is invalid")
+    return value
 
 
 def physical_virtualization() -> str:
@@ -317,6 +354,9 @@ def host_snapshot(source_sha: str, device: Path) -> dict:
             "release": run_text(["uname", "-r"]),
             "machine": run_text(["uname", "-m"]),
             "version": run_text(["uname", "-v"]),
+            "boot_id": read_optional_text(
+                Path("/proc/sys/kernel/random/boot_id")),
+            "uptime_seconds": boot_uptime_seconds(),
         },
         "cpu": cpu_snapshot(),
         "memory": {"total_bytes": parse_mem_total_bytes()},
@@ -360,7 +400,14 @@ def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
     device = snapshot.get("device")
     if not isinstance(kernel, dict) or not all(
             isinstance(kernel.get(key), str) and kernel.get(key)
-            for key in ("release", "machine", "version", "node")):
+            for key in ("release", "machine", "version", "node")) or \
+            not re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                str(kernel.get("boot_id") or "")) or \
+            not isinstance(kernel.get("uptime_seconds"), (int, float)) or \
+            isinstance(kernel.get("uptime_seconds"), bool) or \
+            not math.isfinite(float(kernel["uptime_seconds"])) or \
+            kernel["uptime_seconds"] < 0:
         raise ValueError("campaign host kernel identity is incomplete")
     if not isinstance(cpu, dict) or type(cpu.get("configured_cpus")) is not int or \
             type(cpu.get("online_cpus")) is not int or \
@@ -379,6 +426,14 @@ def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
                     for key in ("physical_disk", "model", "transport", "partuuid")):
         raise ValueError("campaign physical-device identity is incomplete")
     queue = device.get("queue")
+    holders = device.get("holders")
+    if not isinstance(holders, list) or any(
+            not isinstance(holder, dict) or
+            not isinstance(holder.get("kernel_name"), str) or
+            not re.fullmatch(
+                r"[0-9]+:[0-9]+", str(holder.get("major_minor") or ""))
+            for holder in holders):
+        raise ValueError("campaign physical-device holder identity is malformed")
     if not isinstance(queue, dict) or \
             type(queue.get("logical_block_size")) is not int or \
             type(queue.get("physical_block_size")) is not int or \
@@ -386,8 +441,21 @@ def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
         raise ValueError("campaign physical-device queue geometry is incomplete")
     pressure = snapshot.get("pressure")
     module = snapshot.get("dm_swapz_module")
-    if not isinstance(snapshot.get("swap_inventory"), list) or \
-            not isinstance(snapshot.get("mount_inventory"), str) or \
+    swaps = snapshot.get("swap_inventory")
+    mounts = snapshot.get("mount_inventory")
+    if not isinstance(swaps, list) or \
+            any(not isinstance(row, dict) or
+                not isinstance(row.get("path"), str) or
+                row.get("type") not in ("partition", "file") or
+                type(row.get("size_kib")) is not int or row["size_kib"] < 0 or
+                type(row.get("used_kib")) is not int or row["used_kib"] < 0 or
+                type(row.get("priority")) is not int or
+                (row.get("major_minor") is not None and not re.fullmatch(
+                    r"[0-9]+:[0-9]+", str(row.get("major_minor")))) or
+                (row.get("type") == "partition" and
+                 row.get("major_minor") is None)
+                for row in swaps) or \
+            not isinstance(mounts, str) or \
             not isinstance(pressure, dict) or \
             not all(isinstance(pressure.get(name), str)
                     for name in ("cpu", "io", "memory")) or \
@@ -396,6 +464,7 @@ def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
             module.get("status") not in ("LOADED", "NOT_LOADED") or \
             not isinstance(module.get("values"), dict):
         raise ValueError("campaign host context is incomplete")
+    mount_rows(mounts)
 
 
 def swap_identity(rows: list[dict]) -> list[tuple]:
@@ -405,8 +474,40 @@ def swap_identity(rows: list[dict]) -> list[tuple]:
             return []
         identity.append((
             row.get("path"), row.get("type"), row.get("size_kib"),
-            row.get("priority")))
+            row.get("priority"), row.get("major_minor")))
     return sorted(identity)
+
+
+def mount_rows(text: str) -> list[dict]:
+    rows = []
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) != 4 or not re.fullmatch(r"[0-9]+:[0-9]+", fields[3]):
+            raise ValueError("campaign mount inventory is malformed")
+        rows.append({
+            "target": fields[0], "source": fields[1],
+            "fstype": fields[2], "major_minor": fields[3],
+        })
+    return rows
+
+
+def admitted_device_boundary(snapshot: dict) -> dict:
+    device = snapshot.get("device") or {}
+    major_minor = device.get("major_minor")
+    swaps = [
+        row for row in snapshot.get("swap_inventory") or []
+        if isinstance(row, dict) and row.get("major_minor") == major_minor]
+    mounts = [
+        row for row in mount_rows(snapshot.get("mount_inventory") or "")
+        if row["major_minor"] == major_minor]
+    holders = device.get("holders") or []
+    return {
+        "major_minor": major_minor,
+        "swap_rows": swaps,
+        "mount_rows": mounts,
+        "holders": holders,
+        "quiescent": not swaps and not mounts and not holders,
+    }
 
 
 def pair_key(record: dict):
@@ -432,6 +533,12 @@ def host_stability(before: dict, after: dict) -> dict:
         "kernel_node":
             (before.get("kernel") or {}).get("node") ==
             (after.get("kernel") or {}).get("node"),
+        "kernel_boot_id":
+            (before.get("kernel") or {}).get("boot_id") ==
+            (after.get("kernel") or {}).get("boot_id"),
+        "kernel_uptime_non_decreasing":
+            (after.get("kernel") or {}).get("uptime_seconds", -1) >=
+            (before.get("kernel") or {}).get("uptime_seconds", 0),
         "device_major_minor":
             (before.get("device") or {}).get("major_minor") ==
             (after.get("device") or {}).get("major_minor"),
@@ -462,6 +569,10 @@ def host_stability(before: dict, after: dict) -> dict:
         "device_queue":
             (before.get("device") or {}).get("queue") ==
             (after.get("device") or {}).get("queue"),
+        "admitted_device_quiescent_before":
+            admitted_device_boundary(before)["quiescent"],
+        "admitted_device_quiescent_after":
+            admitted_device_boundary(after)["quiescent"],
         "cpu_model_names":
             (before.get("cpu") or {}).get("model_names") ==
             (after.get("cpu") or {}).get("model_names"),
@@ -663,6 +774,10 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         "qualification_status": summary_status,
         "evaluation_protocol": summary.get("evaluation_protocol"),
         "host_stability": stability,
+        "admitted_device_boundary": {
+            "before": admitted_device_boundary(before),
+            "after": admitted_device_boundary(after),
+        },
         "policy": {
             "acceptance_manifest": {
                 "name": ACCEPTANCE_MANIFEST.name,
