@@ -4699,3 +4699,10 @@ the kernel and initramfs resume configuration is also safe. Missing
 resolved both require fail-closed results. Assert bounded journal
 observation and portable mixed-case kernel error detection. These tests
 remain rootless and must never perform host swap or hibernation actions.
+
+ 
+Raw triple-quoted shell fixtures preserve the literal backslash preceding a
+newline and may lose their executable shebang after naïve dedenting. Normalize
+the fixture before `chmod +x`, and exercise a real subprocess launch with
+an asserted `#!/bin/sh` prefix; a registered or syntactically valid Python
+fixture that cannot execute is not passing systemd coverage.

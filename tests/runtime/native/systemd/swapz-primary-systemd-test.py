@@ -43,6 +43,10 @@ def read_text(path: Path) -> str:
 
 
 def write_executable(path: Path, body: str) -> None:
+    # Raw triple-quoted shell fixtures preserve the leading backslash/newline;
+    # normalize it and its indentation before executing a mock script.
+    if body.startswith("\\" + "\n"):
+        body = textwrap.dedent(body[2:])
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
 
@@ -274,6 +278,26 @@ class UnitContractTests(unittest.TestCase):
         self.assertNotIn("dmsetup remove", helper)
         self.assertNotIn("swapzctl primary start", helper)
         self.assertNotIn("swapzctl primary stop", helper)
+
+
+    def test_raw_multiline_mock_has_real_shell_shebang(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swapz-raw-shell-") as directory:
+            mock = Path(directory) / "mock"
+            write_executable(
+                mock,
+                textwrap.dedent(
+                    r"""\
+                    #!/bin/sh
+                    printf 'mock-ok\n'
+                    """
+                ),
+            )
+            self.assertTrue(read_text(mock).startswith("#!/bin/sh\n"))
+            result = subprocess.run(
+                [str(mock)], check=False, text=True, capture_output=True
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "mock-ok\n")
 
     def test_systemd_analyze_accepts_static_units(self) -> None:
         analyzer = shutil.which("systemd-analyze")
