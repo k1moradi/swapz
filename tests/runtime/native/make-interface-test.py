@@ -197,6 +197,8 @@ class PublicMakeContract(unittest.TestCase):
                 (ROOT / "src/kernel/VERSION").read_text())
             (fixture / "src/kernel/superblock.h").write_text(
                 (ROOT / "src/kernel/superblock.h").read_text())
+            (fixture / "src/kernel/swapz-build-info.h").write_text(
+                (ROOT / "src/kernel/swapz-build-info.h").read_text())
             kernel_source = fixture / "src/kernel/dm-target.c"
             kernel_source.write_text("int fake_kernel_source = 1;\n")
             (fixture / "src/kernel/dummy.h").write_text(

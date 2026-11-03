@@ -3568,3 +3568,6 @@ build-provenance header into its sandbox, compile `swapzctl` with that header,
 and prove DKMS receives byte-identical provenance in its owned source tree.
 The test override is valid only under the hermetic package sandbox and must
 not change the production package path.
+Incremental-build Makefile fixtures that compile or stage the primary manager
+must include the committed fallback `src/kernel/swapz-build-info.h`; otherwise
+they do not model the source inputs of the real checkout.

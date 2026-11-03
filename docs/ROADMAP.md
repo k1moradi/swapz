@@ -1473,4 +1473,7 @@ owner qualification is required before any primary live-swap execution.
 The DKMS lifecycle regression now supplies deterministic private provenance
 within its sandbox and verifies that the installed source manifest contains
 the exact header used to compile the packaged control binary; production
-package metadata remains fixed to the generated in-tree header.
+package metadata remains fixed to the generated in-tree header. The first
+native CI attempt caught a missing copy of the committed fallback header in
+the synthetic incremental-build fixture; the fixture now includes that input
+and the source-tree contract is documented.
