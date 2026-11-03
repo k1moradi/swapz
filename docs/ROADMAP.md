@@ -1385,7 +1385,9 @@ of that whole device. Btrfs remains excluded until multi-device ancestry can
 be verified. It also strictly parses mountinfo, confirms `/dev/sda4` is not
 mounted, and resolves the root mount to a direct physical partition distinct
 from 8:4. It reports separately that the root and recovery filesystems share
-the target's physical USB disk. Module/mapper ownership and the lifecycle
+the target's physical USB disk. It also inventories `/sys/module/dm_swapz` and
+`/sys/block/dm-*`, requiring the module and all SWAPZ-namespaced mappers to be
+absent. Exact runtime ownership, swapz target table/capacity, and the lifecycle
 remain unchecked, so the plan stays BLOCKED. Provision, activation, teardown
 and recovery are disabled.
 The earlier Python manager draft was removed because production Python is

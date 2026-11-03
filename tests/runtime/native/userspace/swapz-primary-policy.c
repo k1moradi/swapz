@@ -339,6 +339,26 @@ static void test_mountinfo_parser(void)
 		makedev(8U, 4U), &facts) < 0);
 }
 
+static void test_module_mapper_identity_policy(void)
+{
+	assert(swapz_primary_dm_block_name("dm-0"));
+	assert(swapz_primary_dm_block_name("dm-123"));
+	assert(!swapz_primary_dm_block_name("dm-"));
+	assert(!swapz_primary_dm_block_name("dm-1x"));
+	assert(!swapz_primary_dm_block_name("sda"));
+	assert(swapz_primary_mapper_identity_is_swapz(
+		"swapz-live-0123456789abcdef", "") == 1);
+	assert(swapz_primary_mapper_identity_is_swapz(
+		"swapz-demo-physical-0123456789abcdef", "") == 1);
+	assert(swapz_primary_mapper_identity_is_swapz(
+		"unrelated-map", "SWAPZ-LIVE-0123456789ABCDEF") == 1);
+	assert(swapz_primary_mapper_identity_is_swapz(
+		"crypt-root", "CRYPT-LUKS1-0123456789") == 0);
+	assert(swapz_primary_mapper_identity_is_swapz("", "") < 0);
+	assert(swapz_primary_mapper_identity_is_swapz("bad/name", "") < 0);
+	assert(swapz_primary_mapper_identity_is_swapz("map", "bad\001uuid") < 0);
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -376,6 +396,7 @@ int main(void)
 	test_recovery_filesystem_policy();
 	test_recovery_source_chain();
 	test_mountinfo_parser();
+	test_module_mapper_identity_policy();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);

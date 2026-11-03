@@ -39,6 +39,7 @@
 	"ace016a7a3ecd22b0aca05946a305aef2113bc50439452756ae68909010f0afe"
 #define SWAPZ_PRIMARY_PLAN_BUFFER_BYTES 16384U
 #define SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES 65536U
+#define SWAPZ_PRIMARY_DM_MAPPERS_MAX 512U
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_PARTUUID "7fb9401d-04"
@@ -802,6 +803,117 @@ static int swapz_primary_read_mount_facts(
 #endif
 }
 
+static int swapz_primary_dm_block_name(const char *name)
+{
+	const unsigned char *cursor;
+
+	if (!name || strncmp(name, "dm-", 3U) || !name[3])
+		return 0;
+	for (cursor = (const unsigned char *)name + 3U; *cursor; ++cursor)
+		if (*cursor < '0' || *cursor > '9')
+			return 0;
+	return 1;
+}
+
+static int swapz_primary_mapper_identity_is_swapz(const char *name,
+						 const char *uuid)
+{
+	const unsigned char *cursor;
+
+	if (!name || !name[0] || !uuid)
+		return -1;
+	for (cursor = (const unsigned char *)name; *cursor; ++cursor)
+		if (*cursor < 0x20U || *cursor == 0x7fU || *cursor == '/')
+			return -1;
+	for (cursor = (const unsigned char *)uuid; *cursor; ++cursor)
+		if (*cursor < 0x20U || *cursor == 0x7fU)
+			return -1;
+	return !strncmp(name, "swapz-", 6U) ||
+	       !strncmp(uuid, "SWAPZ-", 6U);
+}
+
+static int swapz_primary_read_module_mapper_inventory(
+	int *module_loaded, int *swapz_mapper_present)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)module_loaded;
+	(void)swapz_mapper_present;
+	errno = ENODEV;
+	return -1;
+#else
+	struct dirent *entry;
+	struct stat module_info;
+	DIR *block_directory;
+	unsigned int mapper_count = 0;
+	int saved_errno;
+
+	if (!module_loaded || !swapz_mapper_present) {
+		errno = EINVAL;
+		return -1;
+	}
+	*module_loaded = 0;
+	*swapz_mapper_present = 0;
+	if (stat("/sys/module/dm_swapz", &module_info) == 0) {
+		if (!S_ISDIR(module_info.st_mode)) {
+			errno = EINVAL;
+			return -1;
+		}
+		*module_loaded = 1;
+	} else if (errno != ENOENT) {
+		return -1;
+	}
+	block_directory = opendir("/sys/block");
+	if (!block_directory)
+		return -1;
+	errno = 0;
+	while ((entry = readdir(block_directory)) != NULL) {
+		char name_path[PATH_MAX];
+		char uuid_path[PATH_MAX];
+		char mapper_name[128];
+		char mapper_uuid[256];
+		int identity;
+
+		if (!swapz_primary_dm_block_name(entry->d_name))
+			continue;
+		if (++mapper_count > SWAPZ_PRIMARY_DM_MAPPERS_MAX) {
+			errno = EOVERFLOW;
+			break;
+		}
+		if (swapz_primary_path_format(name_path, sizeof(name_path),
+					      "/sys/block/%s/dm/name",
+					      entry->d_name) < 0 ||
+		    swapz_primary_path_format(uuid_path, sizeof(uuid_path),
+					      "/sys/block/%s/dm/uuid",
+					      entry->d_name) < 0 ||
+		    swapz_primary_read_sysfs_text(name_path, mapper_name,
+						      sizeof(mapper_name)) < 0 ||
+		    swapz_primary_read_sysfs_text(uuid_path, mapper_uuid,
+						      sizeof(mapper_uuid)) < 0) {
+			if (!errno)
+				errno = EIO;
+			break;
+		}
+		identity = swapz_primary_mapper_identity_is_swapz(mapper_name,
+								   mapper_uuid);
+		if (identity < 0) {
+			errno = EINVAL;
+			break;
+		}
+		if (identity)
+			*swapz_mapper_present = 1;
+		errno = 0;
+	}
+	saved_errno = errno;
+	if (closedir(block_directory) < 0)
+		return -1;
+	if (saved_errno) {
+		errno = saved_errno;
+		return -1;
+	}
+	return 0;
+#endif
+}
+
 static int swapz_primary_sysfs_directory_empty(const char *path,
 					      int missing_is_empty)
 {
@@ -1339,6 +1451,11 @@ static int swapz_primary_read_only_plan(void)
 			&root_physical_parent);
 	int root_same_physical_disk = root_mount_source_chain_checked &&
 		root_physical_parent == target_physical_parent;
+	int dm_swapz_module_loaded = 0;
+	int swapz_mapper_present = 0;
+	int module_mapper_inventory_read =
+		swapz_primary_read_module_mapper_inventory(
+			&dm_swapz_module_loaded, &swapz_mapper_present) == 0;
 
 	if (swaps_valid) {
 		for (i = 0; i < swap_count; ++i) {
@@ -1382,6 +1499,9 @@ static int swapz_primary_read_only_plan(void)
 	       "\"target_device_chain_checked\":%s,"
 	       "\"target_physical_parent_major\":%u,"
 	       "\"target_physical_parent_minor\":%u,"
+	       "\"module_mapper_inventory_read\":%s,"
+	       "\"dm_swapz_module_loaded\":%s,"
+	       "\"swapz_mapper_absent\":%s,"
 	       "\"mount_inventory_read\":%s,"
 	       "\"target_not_mounted\":%s,"
 	       "\"root_mount_device_major\":%u,"
@@ -1416,6 +1536,9 @@ static int swapz_primary_read_only_plan(void)
 	       target_device_chain_checked ? "true" : "false",
 	       major(target_physical_parent),
 	       minor(target_physical_parent),
+	       module_mapper_inventory_read ? "true" : "false",
+	       dm_swapz_module_loaded ? "true" : "false",
+	       !swapz_mapper_present ? "true" : "false",
 	       mount_inventory_read ? "true" : "false",
 	       target_not_mounted ? "true" : "false",
 	       major(mount_facts.root_device),

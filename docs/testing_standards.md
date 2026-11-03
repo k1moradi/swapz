@@ -3337,7 +3337,12 @@ reading host block devices. Parse mountinfo strictly, identify the unique `/`
 mount, verify its physical source chain excludes the selected swap partition,
 and reject any mount whose major:minor is that partition. Rootless mountinfo
 tests must include escaped mountpoints, special non-path filesystem roots,
-malformed device fields and duplicate root entries.
+malformed device fields and duplicate root entries. The plan must also inspect
+`/sys/module` and `/sys/block/dm-*`, failing closed on unreadable or malformed
+entries, any loaded `dm_swapz` module, or any mapper name/UUID in the `swapz-` /
+`SWAPZ-` namespace. Rootless tests must cover valid `dm-N` enumeration names,
+malformed names, matching name and UUID prefixes, and unrelated mapper
+identities without loading modules or querying the host inventory.
 The `/proc/swaps` parser must reject malformed or extra fields, duplicate paths,
 numeric overflow and invalid signed priorities. The read-only plan may report
 the active-entry count and whether `/dev/sda4` is the sole 16,777,212 KiB
