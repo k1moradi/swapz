@@ -5607,7 +5607,7 @@ int main(void) {
         status = body("swapz_status")
         self.assertIn("mapped_snapshot_input_pages=%llu", status)
         self.assertIn("prep->mapped_snapshot_pages + submitter->mapped_snapshot_pages", status)
-        self.assertIn("ctx->ordered_direct_lz4_pages,", status)
+        self.assertRegex(status, r"ctx->ordered_direct_lz4_pages\)")
         ordered = body("swapz_accept_write")
         force_raw = ordered.index("if (force_raw && bulk_raw_eligible)")
         direct = ordered.index("ctx->ordered_direct_lz4_pages++")
