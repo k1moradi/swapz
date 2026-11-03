@@ -769,10 +769,11 @@ class BootVerifierTests(unittest.TestCase):
             self.report / "runtime" / "primary-execution.env")
         self.assertEqual(
             runtime_authorization.read_text(encoding="ascii"),
-            "schema=swapz-primary-execution-v1\n"
+            "schema=swapz-primary-execution-v2\n"
             f"boot_id={BOOT_B}\n"
             f"source_sha={SOURCE_SHA}\n"
             f"partuuid={PARTUUID}\n"
+            "target_device=8:1\n"
             f"target_size_bytes={TARGET_BYTES}\n")
         self.assertEqual(runtime_authorization.stat().st_mode & 0o777, 0o600)
         observed = self.run_verifier("observe")

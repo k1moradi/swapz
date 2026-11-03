@@ -763,6 +763,7 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
                 "swapz_primary_read_current_boot_id(boot_id)",
                 "swapz_primary_configured_target(&target)",
                 "swapz_primary_execution_record_matches(",
+                "target.device_major", "target.device_minor",
                 "SWAPZ_BUILD_SOURCE_SHA"):
             self.assertIn(required, production_authorization)
         self.assertIn("swapz_primary_privileged_execution_enabled()", plan)

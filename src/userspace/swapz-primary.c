@@ -694,24 +694,27 @@ static int swapz_primary_boot_id_valid(const char *boot_id)
 
 static int swapz_primary_execution_record_matches(
 	const char *record, size_t length, const char *boot_id,
-	const char *source_sha, const char *partuuid, uint64_t target_size_bytes)
+	const char *source_sha, const char *partuuid, uint32_t target_device_major,
+	uint32_t target_device_minor, uint64_t target_size_bytes)
 {
 	char expected[SWAPZ_PRIMARY_EXECUTION_RECORD_BYTES];
 	int expected_length;
 
 	if (!record || !length || !swapz_primary_boot_id_valid(boot_id) ||
 	    !swapz_primary_valid_source_sha(source_sha) ||
-	    !swapz_primary_partuuid_valid(partuuid) || !target_size_bytes)
+	    !swapz_primary_partuuid_valid(partuuid) || !target_device_major ||
+	    !target_size_bytes)
 		return 0;
 	expected_length = snprintf(
 		expected, sizeof(expected),
-		"schema=swapz-primary-execution-v1\n"
+		"schema=swapz-primary-execution-v2\n"
 		"boot_id=%s\n"
 		"source_sha=%s\n"
 		"partuuid=%s\n"
+		"target_device=%u:%u\n"
 		"target_size_bytes=%llu\n",
-		boot_id, source_sha, partuuid,
-		(unsigned long long)target_size_bytes);
+		boot_id, source_sha, partuuid, target_device_major,
+		target_device_minor, (unsigned long long)target_size_bytes);
 	if (expected_length <= 0 ||
 	    (size_t)expected_length >= sizeof(expected))
 		return 0;
@@ -1280,7 +1283,7 @@ static int swapz_primary_production_execution_authorized(void)
 		goto out;
 	authorized = swapz_primary_execution_record_matches(
 		record, used, boot_id, SWAPZ_BUILD_SOURCE_SHA, target.partuuid,
-		target.device_bytes);
+		target.device_major, target.device_minor, target.device_bytes);
 out:
 	if (fd >= 0)
 		(void)close(fd);

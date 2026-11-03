@@ -188,13 +188,15 @@ commit_runtime_authorization()
 	source_sha=$2
 	partuuid=$3
 	target_size=$4
+	target_device=$5
 	temporary=$(mktemp "$runtime_base/.primary-execution.XXXXXX") ||
 		fail "cannot create runtime authorization temporary"
 	cat > "$temporary" <<AUTH
-schema=swapz-primary-execution-v1
+schema=swapz-primary-execution-v2
 boot_id=$boot_id
 source_sha=$source_sha
 partuuid=$partuuid
+target_device=$target_device
 target_size_bytes=$target_size
 AUTH
 	chmod 0600 "$temporary"
@@ -627,7 +629,8 @@ preflight_boot()
 	[ "$module_source_sha" = "$expected_source_sha" ] || fail "installed module source changed after arming"
 	[ "$module_source_clean" = "$expected_source_clean" ] || fail "installed module clean marker changed after arming"
 	commit_runtime_authorization \
-		"$boot_id" "$expected_source_sha" "$selected_partuuid" "$target_size_bytes"
+		"$boot_id" "$expected_source_sha" "$selected_partuuid" \
+		"$target_size_bytes" "$target_major_minor"
 	printf 'PRIMARY_BOOT_PREFLIGHT=PASS boot_id=%s armed_boot_id=%s partuuid=%s\n' \
 		"$boot_id" "$armed_boot_id" "$selected_partuuid"
 }
