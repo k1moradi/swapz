@@ -5,7 +5,7 @@ The behavioral model is intentionally independent of the production coordinator:
 it describes externally observable transaction/kernel-state invariants without
 performing swapon, swapoff, Device Mapper operations, or privileged I/O.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 import re
@@ -16,8 +16,21 @@ PRIMARY_SOURCE = ROOT / "src/userspace/swapz-primary.c"
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
 
 
+# C comments and quoted diagnostics must never satisfy native operation guards.
+_C_NON_CODE = re.compile(
+    r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
+    re.DOTALL)
+
+
+def _c_code_only(source: str) -> str:
+    # Keep character offsets and line numbers stable for source-order checks.
+    return _C_NON_CODE.sub(
+        lambda match: re.sub(r'[^\n]', ' ', match.group(0)), source)
+
+
 def c_function_body(source: str, symbol: str) -> str:
-    """Return one static-int function body without depending on formatting."""
+    """Return one static-int executable body, ignoring comments and literals."""
+    source = _c_code_only(source)
     match = re.search(
         r"static\s+int\s+" + re.escape(symbol) + r"\s*\([^;]*?\)\s*\{",
         source, re.S)
@@ -71,28 +84,48 @@ class FakeKernelAdapter:
     facts: KernelFacts
     swapon_result: OperationResult = OperationResult.SUCCESS
     swapoff_result: OperationResult = OperationResult.SUCCESS
-    inventory_results: tuple[InventoryResult, ...] = (
-        InventoryResult.EXACT_INACTIVE,
-    )
+    # Inventories cannot contradict actual fake kernel state. Only an
+    # unreadable inventory or an unexpected device may be injected freely.
+    inventory_results: tuple[InventoryResult, ...] = ()
+    swapon_applies: bool = True
+    swapoff_applies: bool = True
     swapon_calls: int = 0
     swapoff_calls: int = 0
     remove_calls: int = 0
     inventory_calls: int = 0
+    operation_trace: list[str] = field(default_factory=list)
 
     def swapon(self) -> OperationResult:
+        self.operation_trace.append("swapon")
         self.swapon_calls += 1
+        if (self.swapon_result is not OperationResult.FAILURE and
+                self.swapon_applies):
+            self.facts.mapper_active = True
         return self.swapon_result
 
     def swapoff(self) -> OperationResult:
+        self.operation_trace.append("swapoff")
         self.swapoff_calls += 1
+        if (self.swapoff_result is not OperationResult.FAILURE and
+                self.swapoff_applies):
+            self.facts.mapper_active = False
         return self.swapoff_result
 
     def inventory(self) -> InventoryResult:
-        index = min(self.inventory_calls, len(self.inventory_results) - 1)
+        self.operation_trace.append("inventory")
+        observed = (self.inventory_results[self.inventory_calls]
+                    if self.inventory_calls < len(self.inventory_results)
+                    else None)
         self.inventory_calls += 1
-        return self.inventory_results[index]
+        actual = (InventoryResult.EXACT_ACTIVE if self.facts.mapper_active
+                  else InventoryResult.EXACT_INACTIVE)
+        if observed in (InventoryResult.EXACT_ACTIVE,
+                        InventoryResult.EXACT_INACTIVE) and observed is not actual:
+            raise AssertionError("fake inventory contradicts kernel state")
+        return observed if observed is not None else actual
 
     def remove_mapper(self) -> bool:
+        self.operation_trace.append("remove_mapper")
         self.remove_calls += 1
         if self.facts.mapper_active:
             return False
@@ -126,7 +159,6 @@ class LifecycleModel:
 
         before = kernel.inventory()
         if before is InventoryResult.EXACT_ACTIVE:
-            kernel.facts.mapper_active = True
             self.stage = DurableStage.ACTIVE
             return True
         if before is not InventoryResult.EXACT_INACTIVE:
@@ -139,7 +171,6 @@ class LifecycleModel:
             return False
         after = kernel.inventory()
         if after is InventoryResult.EXACT_ACTIVE:
-            kernel.facts.mapper_active = True
             self.stage = DurableStage.ACTIVE
             return True
 
@@ -179,7 +210,6 @@ class LifecycleModel:
                 self.stage = DurableStage.RECOVERY_REQUIRED
                 return False
 
-        kernel.facts.mapper_active = False
         if kernel.facts.mapper_present and not kernel.remove_mapper():
             self.stage = DurableStage.RECOVERY_REQUIRED
             return False
@@ -213,6 +243,8 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
         self.assertTrue(model.activate(model.run_id, kernel))
         self.assertIs(model.stage, DurableStage.ACTIVE)
         self.assertEqual(kernel.swapon_calls, 1)
+        self.assertEqual(kernel.operation_trace,
+                         ["inventory", "swapon", "inventory"])
 
     def test_swapon_success_without_inventory_proof_requires_recovery(self):
         model = self.new_model()
@@ -278,6 +310,8 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
         self.assertEqual(kernel.swapoff_calls, 1)
         self.assertEqual(kernel.remove_calls, 1)
         self.assertFalse(kernel.facts.mapper_present)
+        self.assertEqual(kernel.operation_trace,
+                         ["inventory", "swapoff", "inventory", "remove_mapper"])
         self.assertIs(model.stage, DurableStage.COMPLETE)
 
     def test_definite_swapoff_failure_preserves_mapper(self):
@@ -301,6 +335,7 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
         kernel = FakeKernelAdapter(
             KernelFacts(mapper_active=True),
             swapoff_result=OperationResult.AMBIGUOUS,
+            swapoff_applies=False,
             inventory_results=(InventoryResult.EXACT_ACTIVE,
                                InventoryResult.EXACT_ACTIVE))
         self.assertFalse(model.deactivate_and_remove(model.run_id, kernel))
@@ -372,6 +407,45 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
         self.assertEqual(kernel.swapoff_calls, 0)
         self.assertEqual(kernel.remove_calls, 0)
 
+    def test_successful_swapon_without_kernel_effect_cannot_claim_active(self):
+        model = self.new_model()
+        self.assertTrue(model.begin_start(model.run_id))
+        kernel = FakeKernelAdapter(KernelFacts(), swapon_applies=False)
+        self.assertFalse(model.activate(model.run_id, kernel))
+        self.assertFalse(kernel.facts.mapper_active)
+        self.assertEqual(kernel.swapon_calls, 1)
+        self.assertIs(model.stage, DurableStage.RECOVERY_REQUIRED)
+
+    def test_successful_swapoff_without_kernel_effect_cannot_remove_mapper(self):
+        model = self.new_model()
+        model.stage = DurableStage.STOPPING
+        kernel = FakeKernelAdapter(KernelFacts(mapper_active=True),
+                                   swapoff_applies=False)
+        self.assertFalse(model.deactivate_and_remove(model.run_id, kernel))
+        self.assertEqual(kernel.swapoff_calls, 1)
+        self.assertEqual(kernel.remove_calls, 0)
+        self.assertTrue(kernel.facts.mapper_present)
+        self.assertTrue(kernel.facts.mapper_active)
+        self.assertIs(model.stage, DurableStage.RECOVERY_REQUIRED)
+
+    def test_inventory_cannot_fabricate_inactive_swap_state(self):
+        kernel = FakeKernelAdapter(
+            KernelFacts(mapper_active=True),
+            inventory_results=(InventoryResult.EXACT_INACTIVE,))
+        with self.assertRaisesRegex(AssertionError, "contradicts kernel state"):
+            kernel.inventory()
+        self.assertTrue(kernel.facts.mapper_active)
+
+    def test_ambiguous_swapon_without_kernel_effect_remains_recoverable(self):
+        model = self.new_model()
+        self.assertTrue(model.begin_start(model.run_id))
+        kernel = FakeKernelAdapter(KernelFacts(),
+                                   swapon_result=OperationResult.AMBIGUOUS,
+                                   swapon_applies=False)
+        self.assertFalse(model.activate(model.run_id, kernel))
+        self.assertIs(model.stage, DurableStage.RECOVERY_REQUIRED)
+        self.assertFalse(kernel.facts.mapper_active)
+
     def test_repeated_recovery_after_complete_is_rejected(self):
         model = self.new_model()
         model.stage = DurableStage.COMPLETE
@@ -427,12 +501,24 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertIsNotNone(gate, "primary execution gate must remain explicit")
         if gate.group(1) == "0":
             return
+        activate = c_function_body(source, "swapz_primary_activate_mapper_swap")
+        deactivate = c_function_body(source, "swapz_primary_deactivate_mapper_swap")
         self.assertRegex(
-            source, r"\b(?:SYS_swapon|swapon)\b",
-            "privileged lifecycle enabled without native swapon support")
+            activate, r"\bsyscall\s*\(\s*SYS_swapon\s*,",
+            "privileged lifecycle enabled without executable native swapon")
         self.assertRegex(
-            source, r"\b(?:SYS_swapoff|swapoff)\b",
-            "privileged lifecycle enabled without native swapoff support")
+            deactivate, r"\bsyscall\s*\(\s*SYS_swapoff\s*,",
+            "privileged lifecycle enabled without executable native swapoff")
+
+    def test_source_guard_ignores_comments_and_string_literals(self):
+        sample = """static int swapz_primary_activate_mapper_swap(void) {
+            /* } syscall(SYS_swapon, mapper_path, 0); */
+            const char *diagnostic = "syscall(SYS_swapon, mapper_path, 0)";
+            return -1;
+        }"""
+        executable = c_function_body(sample, "swapz_primary_activate_mapper_swap")
+        self.assertNotIn("syscall(SYS_swapon, mapper_path, 0)", executable)
+        self.assertIn("return -1;", executable)
 
     def test_rootless_runner_registers_lifecycle_audit(self):
         runner = ROOTLESS_RUNNER.read_text(encoding="utf-8")

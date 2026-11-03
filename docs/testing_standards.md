@@ -48,10 +48,15 @@ deactivate, remove, or complete a newer transaction.
 
 `tests/runtime/native/primary-lifecycle-audit-test.py` is a rootless
 adversarial model for those invariants and performs no privileged or physical
-device operations. It also prevents the privileged primary execution gate from
-being enabled before native `swapon` and `swapoff` support exists. This
-synthetic coverage is not current-host swap qualification and does not replace
-the required bounded real anonymous-page swap-out/swap-in evidence.
+device operations. Its fake swap inventory must agree with the model's current
+mapper state; only explicit inventory errors or wrong-device observations may
+be injected. Source checks strip comments and quoted diagnostics before
+verifying real syscall expressions and ordering, with a negative control that
+rejects comment-only mentions. These checks guard against enabling the
+privileged primary path without native swap operations, but the execution gate
+remaining disabled is a safety block, not lifecycle qualification. Synthetic
+model PASS does not establish current-host or production-C lifecycle correctness;
+bounded real anonymous-page swap-out/swap-in evidence remains required.
 
 ### Development decision loop
 
