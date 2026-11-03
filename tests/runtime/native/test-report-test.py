@@ -4334,6 +4334,16 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             stale_ci, self.SOURCE_SHA)
         self.assertEqual(verdict["evidence_statuses"]["required_ci"], "BLOCKED")
 
+        missing_package_ci = self.passing_snapshot()
+        missing_package_ci["release_evidence"]["required_ci"]["runs"] = [
+            run for run in
+            missing_package_ci["release_evidence"]["required_ci"]["runs"]
+            if run["workflow"] != "Systemd and package production-readiness"
+        ]
+        verdict = runner.evaluate_production_readiness(
+            missing_package_ci, self.SOURCE_SHA)
+        self.assertEqual(verdict["evidence_statuses"]["required_ci"], "BLOCKED")
+
     def test_release_hashes_are_cross_bound(self):
         owner_mismatch = self.passing_snapshot()
         owner_mismatch["release_evidence"]["exact_source_owner_make_test"][

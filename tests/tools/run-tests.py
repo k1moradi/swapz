@@ -65,6 +65,7 @@ PRODUCTION_READINESS_DEPLOYMENT_EVIDENCE = (
 PRODUCTION_READINESS_REQUIRED_CI = (
     "Native kernel-C project-goal regressions",
     "Experimental swapz production C qualification",
+    "Systemd and package production-readiness",
 )
 PRODUCTION_READINESS_PERSISTENT_EVIDENCE = (
     "real_linux_swap",
