@@ -875,39 +875,39 @@ static void test_qualified_module_fd(void)
 	memset(wrong_digest, '0', sizeof(wrong_digest) - 1U);
 	wrong_digest[sizeof(wrong_digest) - 1U] = '\0';
 	module_fd = swapz_primary_open_qualified_module_fd(
-		control_path, geteuid(), digest);
+		control_path, digest);
 	assert(module_fd >= 0);
 	assert(fstat(module_fd, &info) == 0 && S_ISREG(info.st_mode));
 	assert(info.st_uid == geteuid() && info.st_nlink == 1U);
 	assert((fcntl(module_fd, F_GETFL) & O_ACCMODE) == O_RDONLY);
 	assert(close(module_fd) == 0);
 	assert(swapz_primary_open_qualified_module_fd(
-		control_path, geteuid(), wrong_digest) < 0);
+		control_path, wrong_digest) < 0);
 	assert(errno == EBADMSG);
 	assert(chmod(module_path, 0664) == 0);
 	assert(swapz_primary_open_qualified_module_fd(
-		control_path, geteuid(), digest) < 0);
+		control_path, digest) < 0);
 	assert(errno == EPERM);
 	assert(chmod(module_path, 0644) == 0);
 	assert(link(module_path, hardlink_path) == 0);
 	assert(swapz_primary_open_qualified_module_fd(
-		control_path, geteuid(), digest) < 0);
+		control_path, digest) < 0);
 	assert(errno == EPERM);
 	assert(unlink(hardlink_path) == 0);
 	assert(rename(module_path, renamed_path) == 0);
 	assert(symlink(renamed_path, module_path) == 0);
 	assert(swapz_primary_open_qualified_module_fd(
-		control_path, geteuid(), digest) < 0);
+		control_path, digest) < 0);
 	assert(unlink(module_path) == 0);
 	assert(rename(renamed_path, module_path) == 0);
 	assert(rename(swapz_path, renamed_directory) == 0);
 	assert(symlink(renamed_directory, swapz_path) == 0);
 	assert(swapz_primary_open_qualified_module_fd(
-		control_path, geteuid(), digest) < 0);
+		control_path, digest) < 0);
 	assert(unlink(swapz_path) == 0);
 	assert(rename(renamed_directory, swapz_path) == 0);
 	assert(swapz_primary_open_qualified_module_fd(
-		wrong_path, geteuid(), digest) < 0);
+		wrong_path, digest) < 0);
 	assert(nftw(root_template, test_remove_tree_entry, 16,
 		    FTW_DEPTH | FTW_PHYS) == 0);
 }

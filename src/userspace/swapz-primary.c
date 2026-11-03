@@ -1112,9 +1112,8 @@ static int swapz_primary_module_directory_owner_allowed(uid_t observed,
 #endif
 }
 
-int swapz_primary_open_qualified_module_fd(const char *control_executable,
-					  uid_t expected_owner,
-					  const char expected_sha256[65])
+int swapz_primary_open_qualified_module_fd(
+	const char *control_executable, const char expected_sha256[65])
 {
 	struct stat opened;
 	struct stat named;
@@ -1129,10 +1128,14 @@ int swapz_primary_open_qualified_module_fd(const char *control_executable,
 	int length;
 	size_t prefix_length;
 	size_t remaining;
+	uid_t expected_owner = 0;
+
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	expected_owner = geteuid();
+#endif
 
 	if (!control_executable || control_executable[0] != '/' ||
 	    !swapz_primary_valid_sha256(expected_sha256) ||
-	    expected_owner == (uid_t)-1 ||
 	    strlen(control_executable) >= PATH_MAX) {
 		errno = EINVAL;
 		return -1;

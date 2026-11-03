@@ -227,9 +227,11 @@ absolute directory with descriptor-relative `openat()` and rejecting
 symlinks, non-root-owned or group/world-writable directories, and path
 components such as `.` or `..`. The final image must be a root-owned,
 read-only-opened regular file with one link, bounded size and stable identity.
-Hash that opened descriptor against the host-qualified report, then pass that
-same still-open descriptor to `finit_module()`; never hash a path and reopen
-it for loading. A preloaded module is not authenticated by source parameters
+Production APIs pin the required owner to UID 0; only the rootless test build
+may use the current test owner for synthetic files. Hash the opened descriptor
+against the host-qualified report, then pass that same still-open descriptor
+to `finit_module()`; never hash a path and reopen it for loading. A preloaded
+module is not authenticated by source parameters
 or package metadata and must be rejected unless a durable manager-owned exact
 load record proves its identity. The current descriptor-opening primitive
 does not itself load a module or authorize lifecycle execution.
