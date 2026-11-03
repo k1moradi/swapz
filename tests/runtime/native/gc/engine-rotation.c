@@ -32,6 +32,7 @@ static swapz_u8 bulk_scratch[SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES];
 static struct swapz_tx bulk_txs[SWAPZ_MAX_RECORDS];
 static unsigned int lower_reads, lower_writes;
 static int fail_read, fail_write, corrupt_replay_tail;
+static swapz_u16 partial_run_blocks;
 
 static int lower_write(void *opaque, swapz_u32 start, swapz_u8 blocks,
 		       const swapz_u8 *bytes, swapz_u8 *completed)
@@ -76,6 +77,22 @@ static int lower_write_run(void *opaque, swapz_u32 start, swapz_u16 blocks,
 	    start / SWAPZ_SEGMENT_BLOCKS !=
 		(start + blocks - 1U) / SWAPZ_SEGMENT_BLOCKS)
 		return -ERANGE;
+	if (partial_run_blocks) {
+		const swapz_u16 written_blocks = partial_run_blocks;
+
+		partial_run_blocks = 0;
+		if (written_blocks >= blocks)
+			return -EUCLEAN;
+		/*
+		 * A lower device may have written these blocks even though it reports
+		 * a terminal error. No part of this run is safe to publish or reuse.
+		 */
+		memcpy(lower + (size_t)start * SWAPZ_BLOCK_BYTES, bytes,
+		       (size_t)written_blocks * SWAPZ_BLOCK_BYTES);
+		lower_writes += written_blocks;
+		*completed = written_blocks;
+		return -EIO;
+	}
 	memcpy(lower + (size_t)start * SWAPZ_BLOCK_BYTES, bytes,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
 	lower_writes += blocks;
@@ -120,6 +137,7 @@ static int setup(void)
 	e.io.read_blocks = lower_read;
 	lower_reads = lower_writes = 0;
 	fail_read = fail_write = corrupt_replay_tail = 0;
+	partial_run_blocks = 0;
 	for (i = 0; i < 8; ++i)
 		memset(contents[i], (int)i + 1, sizeof(contents[i]));
 	return 0;
@@ -320,6 +338,68 @@ static int test_delayed_gc_completion_fences_mutation(void)
 	return 0;
 }
 
+static int test_torn_lower_run_quarantines_unpublished_prefix(void)
+{
+	struct swapz_compressed_page pages[5];
+	struct swapz_map original;
+	swapz_u8 committed = 99;
+	swapz_u32 logical, start;
+	unsigned int index;
+
+	CHECK(setup() == 0);
+	CHECK(write_one(0) == 0);
+	original = maps[0];
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	e.io.write_run = lower_write_run;
+	for (index = 0; index < 5; ++index) {
+		memset(late_payloads[index], (int)index + 0x51,
+		       sizeof(late_payloads[index]));
+		pages[index] = (struct swapz_compressed_page) {
+			.logical_page = index,
+			.payload = late_payloads[index],
+			.length = SWAPZ_MAX_COMPRESSED,
+		};
+	}
+
+	/* Simulate two blocks reaching media followed by a failed combined
+	 * WRITE. Earlier torn blocks must not become logical authority. */
+	start = a.next_block;
+	partial_run_blocks = 2;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 5,
+						 &committed) == -EIO);
+	CHECK(committed == 0 && partial_run_blocks == 0);
+	CHECK(lower_writes == 3); /* one initial, two failed lower blocks */
+	CHECK(a.next_block == start + 5U && a.abandoned_blocks == 5U);
+	CHECK(!a.in_flight && !a.batch_pending);
+	CHECK(maps[0].start_block == original.start_block &&
+	      maps[0].generation == original.generation);
+	CHECK(verify_page(0) == 0);
+	for (index = 1; index < 5; ++index)
+		CHECK(!maps[index].valid && !maps[index].generation);
+	for (logical = start; logical < a.next_block; ++logical)
+		CHECK(!live[logical] && !classes[logical]);
+
+	/* Retry cannot overwrite any of those uncertain physical blocks. */
+	committed = 0;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 5,
+						 &committed) == 0);
+	CHECK(committed == 5 && !a.in_flight && !a.batch_pending);
+	for (index = 0; index < 5; ++index) {
+		swapz_u16 length = 0;
+
+		CHECK(maps[index].valid &&
+		      maps[index].start_block >= start + 5U &&
+		      maps[index].generation == (index == 0 ? 2U : 1U));
+		CHECK(swapz_engine_read_page(&e, index, late_readback,
+						     sizeof(late_readback), &length) == 0);
+		CHECK(length == sizeof(late_payloads[index]));
+		CHECK(!memcmp(late_readback, late_payloads[index], length));
+	}
+	return 0;
+}
+
 static int test_late_replay_failure_reports_committed_prefix(void)
 {
 	struct swapz_compressed_page pages[5];
@@ -442,6 +522,7 @@ int main(void)
 	CHECK(test_failed_gc_write_preserves_live_mapping() == 0); passed++;
 	CHECK(test_failed_gc_read_preserves_live_mapping() == 0); passed++;
 	CHECK(test_delayed_gc_completion_fences_mutation() == 0); passed++;
+	CHECK(test_torn_lower_run_quarantines_unpublished_prefix() == 0); passed++;
 	CHECK(test_late_replay_failure_reports_committed_prefix() == 0); passed++;
 	CHECK(test_partial_gc_failures_pin_both_reserves_safely() == 0); passed++;
 	printf("SWAPZ_GC_ENGINE_ROTATION_TESTS_PASS=%d\n", passed);
