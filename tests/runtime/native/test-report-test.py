@@ -4236,6 +4236,8 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 "target": dict(target),
                 "acceptance_manifest_sha256": acceptance_manifest_sha256,
                 "qualified_installed_artifacts": dict(hashes),
+                "physical_execution_control_sha256": "e" * 64,
+                "installed_control_privileged_execution_enabled": False,
                 "evidence_sha256": self.DIGEST},
             "maximum_capacity_and_ram": {
                 **common, "overall": "PASS", "incompressible": "PASS",
@@ -4396,6 +4398,33 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             "qualified_installed_artifacts"]["module_sha256"] = "e" * 64
         verdict = runner.evaluate_production_readiness(
             real_swap_mismatch, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["real_linux_swap"], "BLOCKED")
+
+        missing_execution_control = self.passing_snapshot()
+        del missing_execution_control["release_evidence"]["real_linux_swap"][
+            "physical_execution_control_sha256"]
+        verdict = runner.evaluate_production_readiness(
+            missing_execution_control, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["real_linux_swap"], "BLOCKED")
+
+        aliased_execution_control = self.passing_snapshot()
+        aliased_execution_control["release_evidence"]["real_linux_swap"][
+            "physical_execution_control_sha256"] = (
+                aliased_execution_control["release_evidence"][
+                    "real_linux_swap"]["qualified_installed_artifacts"][
+                        "formatter_sha256"])
+        verdict = runner.evaluate_production_readiness(
+            aliased_execution_control, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["real_linux_swap"], "BLOCKED")
+
+        armed_installed_control = self.passing_snapshot()
+        armed_installed_control["release_evidence"]["real_linux_swap"][
+            "installed_control_privileged_execution_enabled"] = True
+        verdict = runner.evaluate_production_readiness(
+            armed_installed_control, self.SOURCE_SHA)
         self.assertEqual(
             verdict["evidence_statuses"]["real_linux_swap"], "BLOCKED")
 

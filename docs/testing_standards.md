@@ -4988,10 +4988,15 @@ rehearsal qualification report. The private formatter hash is required only for
 structural provenance; the lifecycle module and oracle hashes must exactly match
 the qualified release module and oracle. Missing, malformed, non-PASS, or
 module/oracle-mismatched lifecycle evidence is BLOCKED. Real-swap PASS evidence
-must carry the installed qualified formatter/module/oracle digests
-observed by the physical helper, and those digests plus installed artifact
-identity must match the exact qualified release
-artifacts. Real-swap, maximum-capacity/RAM and sustained-physical PASS evidence
+must carry the installed qualified formatter/module/oracle digests observed by
+the physical helper, the SHA-256 of the temporary physical execution control,
+and an explicit
+`installed_control_privileged_execution_enabled=false` observation made after
+qualification import. The temporary control digest must be valid and distinct
+from the installed formatter digest; otherwise the evidence does not prove the
+destructive run used only the private seam while the production control stayed
+runtime-locked. Those installed digests plus installed artifact identity must
+match the exact qualified release artifacts. Real-swap, maximum-capacity/RAM and sustained-physical PASS evidence
 must bind the SHA-256 of the exact current `FROZEN`
 `docs/production-acceptance.json`; changing that policy invalidates those
 physical PASS observations until they are requalified. Release evaluation must

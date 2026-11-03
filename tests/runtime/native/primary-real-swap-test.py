@@ -317,6 +317,17 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             self.assertIs(marked_plan["privileged_execution_enabled"], True)
             self.assertEqual(marked_plan["control_build_source_sha"], source_sha)
 
+    def test_installed_control_plan_never_receives_private_runtime_marker(self):
+        completed = __import__("subprocess").CompletedProcess
+        result = completed(
+            args=[], returncode=2,
+            stdout='{"privileged_execution_enabled":false}\n', stderr="")
+        with mock.patch.object(qualify, "_run", return_value=result) as run:
+            plan = qualify._read_installed_plan(
+                Path("/usr/local/sbin/swapzctl"))
+        self.assertIs(plan["privileged_execution_enabled"], False)
+        self.assertNotIn("extra_environment", run.call_args.kwargs)
+
     def test_private_control_invocations_receive_runtime_marker_only_as_child_env(self):
         completed = __import__("subprocess").CompletedProcess
         plan_result = completed(

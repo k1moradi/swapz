@@ -1268,6 +1268,15 @@ def _read_plan(swapzctl: Path) -> dict:
     return plan
 
 
+def _read_installed_plan(swapzctl: Path) -> dict:
+    result = _run(
+        [str(swapzctl), "primary", "plan"], check=False, timeout=30)
+    if not result.stdout.strip():
+        raise Blocked("installed primary plan produced no JSON")
+    return _load_unique_json(
+        result.stdout.strip(), "installed primary plan")
+
+
 def verify_provenance(plan: dict, validated_source: str, report_path: Path,
                       swapzctl: Path) -> dict[str, str]:
     # The module must be absent before primary start, so live module sysfs
@@ -2426,6 +2435,15 @@ def _execute_admitted(arguments: argparse.Namespace,
         plan = _read_plan(swapzctl)
         artifact_hashes = verify_provenance(
             plan, arguments.validated_source, report_path, qualified_swapzctl)
+        installed_plan = _read_installed_plan(qualified_swapzctl)
+        if installed_plan.get("privileged_execution_enabled") is not False:
+            raise Blocked(
+                "installed production control is already authorized for "
+                "privileged lifecycle execution")
+        if execution_control_sha256 == artifact_hashes["formatter_sha256"]:
+            raise Blocked(
+                "private physical execution control is not distinct from "
+                "the installed qualified control")
         selector_partuuid = _read_selector()
         _target_path, target_device, target_parent_device = verify_authorized_target(
             plan, selector_partuuid)
@@ -2449,6 +2467,7 @@ def _execute_admitted(arguments: argparse.Namespace,
                 "oracle_sha256": oracle_sha256,
                 "qualified_installed_artifacts": artifact_hashes,
                 "physical_execution_control_sha256": execution_control_sha256,
+                "installed_control_privileged_execution_enabled": False,
                 "partuuid": selector_partuuid,
                 "target_size_bytes": target_size_bytes,
                 "target_device": f"{target_device[0]}:{target_device[1]}",
@@ -2518,6 +2537,7 @@ def _execute_admitted(arguments: argparse.Namespace,
             "qualification_report_sha256": _sha256_file(report_path),
             "qualified_installed_artifacts": artifact_hashes,
             "physical_execution_control_sha256": execution_control_sha256,
+            "installed_control_privileged_execution_enabled": False,
             "partuuid": selector_partuuid,
             "target_size_bytes": target_size_bytes,
             "target_device": f"{target_device[0]}:{target_device[1]}",

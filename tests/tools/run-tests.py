@@ -243,12 +243,19 @@ def _readiness_pass_payload_valid(
         return (entry.get("authorized") is True and
                 _readiness_target_key(entry.get("target")) is not None)
     if name == "real_linux_swap":
+        installed_artifacts = entry.get("qualified_installed_artifacts")
+        execution_control_sha256 = entry.get(
+            "physical_execution_control_sha256")
         return (entry.get("overall") == "PASS" and
                 entry.get("swap_out_in") == "PASS" and
                 entry.get("acceptance_manifest_sha256") ==
                 acceptance_manifest_sha256 and
-                _readiness_artifact_hashes_valid(
-                    entry.get("qualified_installed_artifacts")) and
+                _readiness_artifact_hashes_valid(installed_artifacts) and
+                _valid_sha256(execution_control_sha256) and
+                execution_control_sha256 !=
+                installed_artifacts.get("formatter_sha256") and
+                entry.get("installed_control_privileged_execution_enabled")
+                is False and
                 _valid_sha256(entry.get("evidence_sha256")))
     if name == "maximum_capacity_and_ram":
         return (entry.get("overall") == "PASS" and
