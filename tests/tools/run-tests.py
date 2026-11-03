@@ -1565,6 +1565,9 @@ def safe_lines(log):
 def parse_loaded_correctness(output):
     """Parse fixed, non-identifying owned-RAM correctness evidence."""
     patterns = {
+        "constructor_cleanup": re.compile(
+            r"PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:(\d+) "
+            r"lower_io_delta:(\d+)$"),
         "maximum_capacity": re.compile(
             r"PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:(\d+) "
             r"logical_bytes:(\d+) lower_bytes:(\d+) physical_blocks:(\d+) "
@@ -1687,6 +1690,12 @@ def parse_loaded_correctness(output):
             "reason": (
                 "primary lifecycle interruption recovery evidence is incomplete"),
         }
+
+    constructor_cleanup_stages, constructor_cleanup_lower_io_delta = (
+        found["constructor_cleanup"])
+    if constructor_cleanup_stages != 8 or constructor_cleanup_lower_io_delta != 0:
+        return {"overall": "INCOMPLETE",
+                "reason": "constructor failure cleanup evidence is incomplete"}
 
     (capacity_pages, capacity_logical_bytes, capacity_lower_bytes,
      capacity_physical_blocks, capacity_segments, capacity_mapper_read_bytes,
@@ -1823,6 +1832,8 @@ def parse_loaded_correctness(output):
                 "reason": "ID36 low-RAM/heavy-CPU evidence is incomplete"}
     return {
         "overall": "PASS",
+        "constructor_cleanup_stages": constructor_cleanup_stages,
+        "constructor_cleanup_lower_io_delta": constructor_cleanup_lower_io_delta,
         "maximum_logical_pages": capacity_pages,
         "maximum_mapper_bytes": capacity_logical_bytes,
         "maximum_lower_bytes": capacity_lower_bytes,
@@ -2065,6 +2076,10 @@ def failure_context(output, *, loaded=True, default_phase=None):
                     r"START_STORAGE_ENVELOPE=(sd_card|sata_ssd|nvme_gen4|nvme_gen5)",
                     line)):
                 phase = f"{match.group(1)} synthetic service envelope"
+            elif line.startswith("START_LOADED_CONSTRUCTOR_FAILURE_CLEANUP"):
+                phase = "constructor failure cleanup matrix"
+            elif line.startswith("PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP"):
+                phase = "owned RAM target construction"
             elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "shared fixture allocation and workload generation"
             elif line.startswith("START_OWNED_RAM_REGIME="):
@@ -7507,6 +7522,9 @@ def print_bench(result, *, detailed=False):
             "Loaded correctness, lifecycle, GC, and reclaim checks",
             ("check", "result"),
             [
+                ("constructor cleanup",
+                 f"{loaded['constructor_cleanup_stages']} staged failures; "
+                 f"lower I/O delta {loaded['constructor_cleanup_lower_io_delta']}"),
                 ("max capacity",
                  f"{loaded['maximum_logical_pages']:,} pages, "
                  f"{loaded['maximum_mapper_bytes'] / (1024 ** 3):.2f} GiB; "
