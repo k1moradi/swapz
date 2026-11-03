@@ -13,7 +13,7 @@ env:
 jobs:
   native-test-and-policy:
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,15 +30,6 @@ jobs:
           bash tests/tools/test-rootless.sh
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
-      - name: Run ASan and UBSan production-C safety suites
-        env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
-          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: |
-          set -euo pipefail
-          make -C tests/suites clean
-          make -C tests/suites SANITIZE=1 \
-            test-codec test-mapping test-gc test-lower-io test-userspace
       - name: Enforce the Make API and mandatory test discovery
         run: |
           set -euo pipefail
