@@ -1021,6 +1021,37 @@ static void test_primary_dm_operations_disabled(void)
 	assert(errno == ENODEV);
 }
 
+static void test_recoverable_lifecycle_stages(void)
+{
+	const char *run_id = "0123456789abcdef0123456789abcdef";
+	struct swapz_primary_state state = {0};
+
+	memcpy(state.run_id, run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U);
+	state.stage = SWAPZ_PRIMARY_STAGE_READY;
+	assert(!swapz_primary_state_recoverable(&state));
+	state.stage = SWAPZ_PRIMARY_STAGE_STARTING;
+	assert(swapz_primary_state_recoverable(&state));
+	state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+	assert(swapz_primary_state_recoverable(&state));
+	state.stage = SWAPZ_PRIMARY_STAGE_STOPPING;
+	assert(swapz_primary_state_recoverable(&state));
+	state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
+	assert(swapz_primary_state_recoverable(&state));
+	state.stage = SWAPZ_PRIMARY_STAGE_DISABLING;
+	assert(!swapz_primary_state_recoverable(&state));
+	state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	assert(!swapz_primary_state_recoverable(&state));
+
+	state.stage = SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED;
+	state.has_recovery_previous_stage = 1;
+	state.recovery_previous_stage = SWAPZ_PRIMARY_STAGE_STARTING;
+	assert(swapz_primary_state_recoverable(&state));
+	state.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;
+	assert(swapz_primary_state_recoverable(&state));
+	state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
+	assert(swapz_primary_state_recoverable(&state));
+}
+
 static void test_recovery_header_recognition(void)
 {
 	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
@@ -2079,6 +2110,7 @@ int main(void)
 	test_primary_run_id_and_header_builder();
 	test_primary_stage_policy();
 	test_primary_state_records();
+	test_recoverable_lifecycle_stages();
 	test_recovery_header_recognition();
 	test_checked_header_write();
 	test_primary_dm_table();

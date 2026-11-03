@@ -8040,6 +8040,28 @@ out:
 }
 
 
+static int swapz_primary_state_recoverable(
+	const struct swapz_primary_state *state)
+{
+	if (!swapz_primary_state_valid(state))
+		return 0;
+	switch (state->stage) {
+	case SWAPZ_PRIMARY_STAGE_STARTING:
+	case SWAPZ_PRIMARY_STAGE_ACTIVE:
+	case SWAPZ_PRIMARY_STAGE_STOPPING:
+	case SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED:
+	case SWAPZ_PRIMARY_STAGE_RECOVERING:
+	case SWAPZ_PRIMARY_STAGE_RESTORED:
+		return 1;
+	case SWAPZ_PRIMARY_STAGE_READY:
+	case SWAPZ_PRIMARY_STAGE_DISABLING:
+	case SWAPZ_PRIMARY_STAGE_COMPLETE:
+	case SWAPZ_PRIMARY_STAGE_COUNT:
+		return 0;
+	}
+	return 0;
+}
+
 static int swapz_primary_recovery_header_known(
 	const unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES],
 	const unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES],
@@ -8249,16 +8271,11 @@ static int swapz_primary_recover(void)
 		    recovery_fd, "primary-state.json", 0, state_record,
 		    sizeof(state_record), &state_length, NULL) < 0 ||
 	    swapz_primary_state_parse(state_record, state_length, &state) < 0 ||
-	    state.stage != SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED ||
-	    !state.has_recovery_previous_stage ||
+	    !swapz_primary_state_recoverable(&state) ||
 	    swapz_primary_manifest_read_at(
 		    recovery_fd, lock_fd, state.run_id, target.partuuid, 0,
 		    &manifest) < 0 ||
-	    memcmp(&manifest.target, &target, sizeof(target)) ||
-	    swapz_primary_transaction_manifest_matches_at(
-		    recovery_fd, lock_fd, &manifest, recovery_required_stage,
-		    sizeof(recovery_required_stage) /
-			    sizeof(recovery_required_stage[0]), 0) < 0) {
+	    memcmp(&manifest.target, &target, sizeof(target))) {
 		errno = EPERM;
 		goto out;
 	}
@@ -8290,6 +8307,27 @@ static int swapz_primary_recover(void)
 		goto out;
 	}
 	target_fd = -1;
+
+	/*
+	 * An abrupt process exit cannot write RECOVERY_REQUIRED for itself.
+	 * Normalize every durable stage that may follow device mutation before
+	 * cleanup, preserving any earlier recovery origin.
+	 */
+	if (state.stage != SWAPZ_PRIMARY_STAGE_RECOVERY_REQUIRED) {
+		struct swapz_primary_state recovery_required_state;
+
+		if (swapz_primary_recovery_required_state(
+			    &state, &recovery_required_state) < 0 ||
+		    swapz_primary_state_write_at(
+			    recovery_fd, lock_fd, &recovery_required_state, 0) < 0)
+			goto out;
+		state = recovery_required_state;
+	}
+	if (swapz_primary_transaction_manifest_matches_at(
+		    recovery_fd, lock_fd, &manifest, recovery_required_stage,
+		    sizeof(recovery_required_stage) /
+			    sizeof(recovery_required_stage[0]), 0) < 0)
+		goto out;
 
 	recovering_state = state;
 	recovering_state.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;

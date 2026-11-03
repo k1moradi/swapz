@@ -3605,9 +3605,19 @@ leaving the SWZ authorization header prevents accidental raw-swap reuse. Any
 failure after `STOPPING` but before `COMPLETE` must mark
 `RECOVERY_REQUIRED`.
 
-Standalone recovery consumes only an exact owned `RECOVERY_REQUIRED` record
-and retains its original interrupted-stage provenance through `RECOVERING`,
-`RESTORED`, and `COMPLETE`. Before cleanup it must read block zero through
+Standalone recovery accepts an exact owned `RECOVERY_REQUIRED` record or a
+durable stage that may remain after an abrupt process exit once mutation could
+have begun: `STARTING`, `ACTIVE`, `STOPPING`, `RECOVERING`, or
+`RESTORED`. It must reject `READY`, `DISABLING`, and terminal `COMPLETE`.
+For a recoverable non-`RECOVERY_REQUIRED` stage it first validates the exact
+manifest and recognized block-zero bytes, then durably normalizes the state to
+`RECOVERY_REQUIRED` while preserving the original interrupted stage before
+entering `RECOVERING`. This covers process death before the failing coordinator
+could mark recovery itself, including stale `ACTIVE` after a reboot; a live
+swap mapper still cannot be removed because the mapper-removal gate refuses
+active swap and open references. Recovery retains the original interrupted-stage
+provenance through `RECOVERING`, `RESTORED`, and `COMPLETE`. Before cleanup
+it must read block zero through
 the revalidated PARTUUID path and accept only one of two byte-exact values: the
 digest-verified saved original header or the run-bound SWZ authorization
 header. Unknown or torn bytes stop recovery before cleanup. It then persists

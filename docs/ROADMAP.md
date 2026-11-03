@@ -1631,9 +1631,13 @@ unloads only the module proven by that run's LOADED record, verifies the
 run-bound SWZ backing header, then persists RESTORED/COMPLETE and releases the
 owner marker. It deliberately leaves the disposable card in SWZ-header form
 rather than restoring historical raw content. Standalone recovery is now wired
-behind the disabled gate: it accepts only exact RECOVERY_REQUIRED provenance,
-recognizes only the saved original or run-bound SWZ block-zero bytes, enters
-RECOVERING before cleanup, removes/proves absent only the exact mapper, and
+behind the disabled gate: it accepts exact RECOVERY_REQUIRED provenance plus
+recoverable durable STARTING/ACTIVE/STOPPING/RECOVERING/RESTORED states left by
+an abrupt process exit. After validating manifest/header identity it first
+normalizes those states to RECOVERY_REQUIRED with the first interrupted stage
+preserved. It recognizes only the saved original or run-bound SWZ block-zero
+bytes, enters RECOVERING before cleanup, removes/proves absent only the exact
+mapper, and
 unloads only a manifest/WAL-proven module (with INTENT accepted solely for the
 finit_module interruption window). It rechecks block zero after cleanup before
 RESTORED/COMPLETE and owner release; failures return durably to
