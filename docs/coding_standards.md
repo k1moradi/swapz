@@ -2432,3 +2432,18 @@ systemd generator must add read-only pre-hibernation guards to hibernate,
 hybrid-sleep, and suspend-then-hibernate paths; daemon-reload regeneration must
 preserve that boundary. Do not broadly disable unrelated suspend settings or
 rewrite administrator configuration: reject the unsafe path with diagnostics.
+
+ 
+### Primary swap observation fail-closed boundary
+
+Treat `/proc/swaps` as a complete kernel inventory, not an unchecked list
+of paths: require the exact five-column header and valid rows, normalize
+space/tab field boundaries, and distinguish an actually empty inventory
+from unreadable, truncated, or malformed data. Inability to prove swapz
+inactive must deny pre-hibernation admission without executing any
+swap/mapper operations. Unreadable current kernel command-line evidence
+must likewise deny resume admission. A live mapper without provable selected
+backing/run authority is a failure, not a degraded optional metric.
+Keep repeated kernel-journal queries capped to a small recent-error window,
+use portable case-insensitive matching, and report cumulative error counts
+from DM status separately from the recent journal window.

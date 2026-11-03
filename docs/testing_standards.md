@@ -4681,3 +4681,17 @@ and active mapper inventory. The generator must emit guards for
 drop-ins cannot be emitted. Cold-boot PASS remains exclusively the
 owner-triggered cross-boot verifier; rootless fixtures and daemon-reload checks
 cannot manufacture observed cold-boot evidence.
+
+
+### Primary runtime observer audit regressions
+
+Rootless systemd tests must use authentic tab-delimited `/proc/swaps`
+entries, including long absolute paths, to assert actual used/remaining
+capacity rather than accepting a zero-usage false positive. Empty, truncated,
+malformed, or unreadable inventories must not satisfy a hibernation guard;
+a correctly formed empty inventory may allow unrelated hibernation when
+the kernel and initramfs resume configuration is also safe. Missing
+`/proc/cmdline` and a live mapper whose target authority cannot be
+resolved both require fail-closed results. Assert bounded journal
+observation and portable mixed-case kernel error detection. These tests
+remain rootless and must never perform host swap or hibernation actions.

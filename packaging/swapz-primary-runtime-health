@@ -253,10 +253,16 @@ hibernation_config_check()
 	mapper_major_minor=$(path_major_minor "$mapper_path" 2>/dev/null || true)
 	manager_target_identity >/dev/null 2>&1 || true
 
-	if [ -r "$proc_root/cmdline" ]; then
-		cmdline=$(cat -- "$proc_root/cmdline" 2>/dev/null || true)
-		scan_cmdline_text kernel-cmdline "$cmdline" || return 1
-	fi
+	# Without the running kernel's command line we cannot exclude resume=.
+	[ -r "$proc_root/cmdline" ] || {
+		hibernation_conflict=kernel-cmdline:unavailable
+		return 1
+	}
+	cmdline=$(cat -- "$proc_root/cmdline" 2>/dev/null) || {
+		hibernation_conflict=kernel-cmdline:unreadable
+		return 1
+	}
+	scan_cmdline_text kernel-cmdline "$cmdline" || return 1
 	for command_line_file in "$etc_root/kernel/cmdline" "$etc_root/default/grub"; do
 		[ -r "$command_line_file" ] || continue
 		while IFS= read -r line || [ -n "$line" ]; do
@@ -286,11 +292,35 @@ hibernation_config_check()
 	return 0
 }
 
+# /proc/swaps is kernel-generated, tab-separated, and may have padded fields.
+# Validate the complete inventory before claiming that there is no live swap;
+# an unreadable, truncated, or malformed inventory is *not* evidence of safety.
+read_swap_inventory()
+{
+	[ -r "$proc_root/swaps" ] || return 1
+	LC_ALL=C awk '
+		NR == 1 {
+			if (NF != 5 || $1 != "Filename" || $2 != "Type" ||
+			    $3 != "Size" || $4 != "Used" || $5 != "Priority")
+				exit 2
+			header_seen = 1
+			next
+		}
+		NF != 5 || ($2 != "partition" && $2 != "file") ||
+		$3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ || $5 !~ /^-?[0-9]+$/ {
+			malformed = 1
+			next
+		}
+		{ print $1, $2, $3, $4, $5 }
+		END { if (!header_seen || malformed) exit 2 }
+	' "$proc_root/swaps"
+}
+
 active_swapz_swap()
 {
 	mapper_major_minor=$(path_major_minor "$mapper_path" 2>/dev/null || true)
-	[ -r "$proc_root/swaps" ] || return 2
-	if awk 'NR > 1 { print $1 }' "$proc_root/swaps" | while IFS= read -r source; do
+	swap_inventory=$(read_swap_inventory) || return 2
+	if printf '%s\n' "$swap_inventory" | while read -r source type size used priority; do
 		[ -n "$source" ] || continue
 		if [ "$source" = "$mapper_path" ] || [ "$source" = /dev/mapper/swapz-primary ]; then
 			exit 10
@@ -344,10 +374,13 @@ kernel_error_snapshot()
 	kernel_error_count=unavailable
 	kernel_error_latest=unavailable
 	command -v journalctl >/dev/null 2>&1 || return 1
-	journal=$(journalctl --boot=0 --kernel --priority=err..alert --no-pager --output=cat 2>/dev/null) || return 1
+	# Bound journal work and process memory independently of system uptime.
+	# The DM target keeps cumulative failure counters; this is a recent-error
+	# diagnostic window, not a cumulative all-boot error count.
+	journal=$(journalctl --boot=0 --kernel --priority=err..alert --lines=256 --no-pager --output=cat 2>/dev/null) || return 1
 	filtered=$(printf '%s\n' "$journal" | awk '
-		BEGIN { IGNORECASE=1 }
-		/swapz|dm-swapz|swapz-primary/ { print }
+		{ lowered = tolower($0) }
+		lowered ~ /swapz|dm-swapz|swapz-primary/ { print }
 	')
 	kernel_error_count=$(printf '%s\n' "$filtered" | awk 'NF { count++ } END { print count + 0 }')
 	if [ "$kernel_error_count" -gt 0 ]; then
@@ -406,7 +439,13 @@ observe_runtime()
 			append_reason failure_reasons active_transaction_identity_invalid
 		fi
 	else
-		append_reason observation_reasons selected_target_identity_unavailable
+		# A live mapper without provable selected authority is not merely a
+		# missing optional counter: its exact identity cannot be trusted.
+		if [ -e "$mapper_path" ]; then
+			append_reason failure_reasons selected_target_identity_unavailable
+		else
+			append_reason observation_reasons selected_target_identity_unavailable
+		fi
 	fi
 
 	if [ -e "$mapper_path" ]; then
@@ -475,13 +514,9 @@ observe_runtime()
 		append_reason failure_reasons mapper_missing
 	fi
 
-	if [ -r "$proc_root/swaps" ]; then
-		first_swap_line=1
-		while IFS=' ' read -r source type size used priority rest; do
-			if [ "$first_swap_line" -eq 1 ]; then
-				first_swap_line=0
-				continue
-			fi
+	if swap_inventory=$(read_swap_inventory); then
+		# Explicitly parse normalized whitespace, including kernel tabs.
+		while read -r source type size used priority; do
 			[ -n "$source" ] || continue
 			swap_total_entries=$((swap_total_entries + 1))
 			source_major_minor=$(path_major_minor "$source" 2>/dev/null || true)
@@ -496,11 +531,13 @@ observe_runtime()
 					append_reason observation_reasons swap_accounting_invalid
 				fi
 			fi
-		done < "$proc_root/swaps"
+		done <<EOF
+$swap_inventory
+EOF
 		[ "$swap_mapper_entries" -eq 1 ] || append_reason failure_reasons mapper_swap_inventory_invalid
 		[ "$swap_occupancy_percent" -lt 90 ] || append_reason warning_reasons swap_capacity_low
 	else
-		append_reason observation_reasons swap_inventory_unavailable
+		append_reason observation_reasons swap_inventory_unavailable_or_invalid
 	fi
 
 	mapper_active=$(unit_property "$mapper_service" ActiveState 2>/dev/null || printf 'unavailable')

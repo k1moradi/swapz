@@ -1196,5 +1196,84 @@ class RuntimeHealthTests(unittest.TestCase):
 
 
 
+    def test_tab_delimited_swap_inventory_tracks_real_occupancy(self) -> None:
+        # /proc/swaps uses tab-separated fields and may omit name padding
+        # when the source pathname is long.
+        (self.proc / "swaps").write_text(
+            "Filename\tType\tSize\tUsed\tPriority\n"
+            f"{self.dev / 'mapper' / 'swapz-primary'}\tpartition\t10000\t2000\t-1\n",
+            encoding="ascii",
+        )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", observed.stderr)
+        self.assertIn("swap_used_kib=2000", observed.stderr)
+        self.assertIn("swap_remaining_kib=8000", observed.stderr)
+        self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
+
+    def test_malformed_swap_inventory_never_proves_hibernation_safe(self) -> None:
+        for content in (
+            "",
+            "garbled swap inventory\n",
+            "Filename\tType\tSize\tUsed\tPriority\n"
+            "/dev/mapper/swapz-primary\tpartition\tbad-size\t1\t-1\n",
+        ):
+            (self.proc / "swaps").write_text(content, encoding="ascii")
+            guard = self.run_helper("hibernate-guard")
+            self.assertEqual(guard.returncode, 1, (content, guard.stderr))
+            self.assertIn("cannot prove swapz-primary inactive", guard.stderr)
+            observed = self.run_helper("once")
+            self.assertEqual(observed.returncode, 2, (content, observed.stderr))
+            self.assertIn("swap_inventory_unavailable_or_invalid", observed.stderr)
+
+        (self.proc / "swaps").unlink()
+        self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
+
+    def test_empty_valid_swap_inventory_does_not_disable_unrelated_hibernate(self) -> None:
+        (self.proc / "swaps").write_text(
+            "Filename\tType\tSize\tUsed\tPriority\n", encoding="ascii"
+        )
+        allowed = self.run_helper("hibernate-guard")
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+    def test_unreadable_kernel_cmdline_blocks_resume_admission(self) -> None:
+        (self.proc / "swaps").write_text(
+            "Filename\tType\tSize\tUsed\tPriority\n", encoding="ascii"
+        )
+        (self.proc / "cmdline").unlink()
+        configured = self.run_helper("hibernation-config-check")
+        self.assertEqual(configured.returncode, 1)
+        self.assertIn("kernel-cmdline:unavailable", configured.stderr)
+        self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
+
+    def test_live_mapper_without_selected_authority_is_failure(self) -> None:
+        write_executable(self.sbin / "swapzctl", "#!/bin/sh\nexit 2\n")
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("selected_target_identity_unavailable", observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
+
+    def test_kernel_error_tail_is_bounded_and_case_insensitive(self) -> None:
+        write_executable(
+            self.bin / "journalctl",
+            textwrap.dedent(
+                r"""\
+                #!/bin/sh
+                bounded=0
+                for argument do
+                    [ "$argument" != --lines=256 ] || bounded=1
+                done
+                [ "$bounded" -eq 1 ] || exit 2
+                printf 'DM-SWAPZ: lower I/O error\n'
+                """
+            ),
+        )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=WARN", observed.stderr)
+        self.assertIn("relevant_kernel_errors", observed.stderr)
+        self.assertIn("kernel_error_count=1", observed.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
