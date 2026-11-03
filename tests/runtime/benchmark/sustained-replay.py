@@ -848,6 +848,22 @@ class SustainedIntervalSampler:
         return list(self.rows)
 
 
+def stop_interval_sampler(interval_sampler, partial: dict,
+                          primary_failure_active: bool) -> list[dict]:
+    """Stop telemetry without ever hiding a standalone sampler failure."""
+    if interval_sampler is None:
+        return []
+    try:
+        rows = interval_sampler.stop()
+    except (OSError, ValueError) as sampler_error:
+        if not primary_failure_active:
+            raise
+        partial["interval_sampler_failure"] = str(sampler_error)
+        rows = list(interval_sampler.rows)
+    partial["sustained_intervals"] = rows
+    return rows
+
+
 def run(args):
     if not 1 <= args.qd <= 32 or not 0 <= args.read_percent <= 100:
         raise ValueError("invalid queue depth/read percentage")
@@ -935,18 +951,11 @@ def run(args):
                     cpu_after = process_cpu()
                     host_after = REPLAY["host_cpu_snapshot"]()
                 finally:
-                    interval_rows = []
-                    if interval_sampler is not None:
-                        try:
-                            interval_rows = interval_sampler.stop()
-                        except (OSError, ValueError) as sampler_error:
-                            # Do not mask an existing replay failure: preserve
-                            # both its primary reason and partial telemetry.
-                            if sys.exc_info()[0] is None:
-                                raise
-                            partial["interval_sampler_failure"] = str(sampler_error)
-                            interval_rows = list(interval_sampler.rows)
-                        partial["sustained_intervals"] = interval_rows
+                    # Capture the replay exception state before stop() can
+                    # replace sys.exc_info() with its own telemetry exception.
+                    primary_failure_active = sys.exc_info()[0] is not None
+                    interval_rows = stop_interval_sampler(
+                        interval_sampler, partial, primary_failure_active)
             status_after = status_snapshot(target, identity)
             read_after = REPLAY["kernel_read_snapshot"](target, identity)
             write_after = REPLAY["kernel_write_snapshot"](target, identity)

@@ -2478,6 +2478,36 @@ class PairReplayContract(unittest.TestCase):
         self.assertAlmostEqual(row["gc"]["wall_fraction"], .01)
         self.assertEqual(row["max_no_progress_seconds"], .02)
 
+    def test_sustained_interval_sampler_failure_is_fail_closed(self):
+        import importlib.util
+
+        path = SCRIPT.with_name("sustained-replay.py")
+        spec = importlib.util.spec_from_file_location(
+            "swapz_interval_failure_audit", path)
+        sustained = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sustained)
+
+        class FailingSampler:
+            def __init__(self):
+                self.rows = [{"interval": 0}]
+
+            def stop(self):
+                raise ValueError("telemetry failed")
+
+        partial = {}
+        with self.assertRaisesRegex(ValueError, "telemetry failed"):
+            sustained.stop_interval_sampler(
+                FailingSampler(), partial, primary_failure_active=False)
+        self.assertNotIn("interval_sampler_failure", partial)
+
+        partial = {}
+        rows = sustained.stop_interval_sampler(
+            FailingSampler(), partial, primary_failure_active=True)
+        self.assertEqual(rows, [{"interval": 0}])
+        self.assertEqual(partial["sustained_intervals"], rows)
+        self.assertEqual(
+            partial["interval_sampler_failure"], "telemetry failed")
+
     def test_prospective_amendment_and_attribution_fail_closed(self):
         import importlib.util
 
