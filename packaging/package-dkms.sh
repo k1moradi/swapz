@@ -665,15 +665,37 @@ if [[ "$action" == uninstall ]]; then
   fi
   swapz_mapper_present && blocked "active swapz mapping; refusing package removal"
   assert_no_primary_recovery_authority removal
-  if [[ -z "$test_root" ]]; then
-    for unit in swapz-primary-boot-verify.service swapz-primary-mapper.service \
-        swapz-primary-runtime-health.service "$swap_unit_name"; do
-      "$systemctl_bin" is-active --quiet "$unit" &&
+  # A passive .swap unit without [Install] is "static": systemctl reports
+  # is-enabled exit 0 for it, although it has no enabled activation link.
+  # Inspect both the state and the return code, and fail closed on errors.
+  for unit in swapz-primary-boot-verify.service swapz-primary-mapper.service \
+      swapz-primary-runtime-health.service "$swap_unit_name"; do
+    unit_active_rc=0
+    unit_active_state="$("$systemctl_bin" is-active "$unit" 2>/dev/null)" || unit_active_rc=$?
+    case "$unit_active_state" in
+      inactive|failed)
+        (( unit_active_rc == 3 )) || blocked "cannot verify $unit is inactive"
+        ;;
+      active|activating|reloading|deactivating)
         blocked "$unit is active; refusing package removal"
-      "$systemctl_bin" is-enabled --quiet "$unit" &&
+        ;;
+      *) blocked "cannot verify $unit is inactive" ;;
+    esac
+    unit_enabled_rc=0
+    unit_enabled_state="$("$systemctl_bin" is-enabled "$unit" 2>/dev/null)" || unit_enabled_rc=$?
+    case "$unit_enabled_state" in
+      static)
+        (( unit_enabled_rc == 0 )) || blocked "cannot verify $unit is static"
+        ;;
+      disabled|disabled-runtime|masked|masked-runtime)
+        (( unit_enabled_rc == 1 )) || blocked "cannot verify $unit is disabled"
+        ;;
+      enabled|enabled-runtime|linked|linked-runtime|alias|indirect|generated|transient)
         blocked "$unit is enabled; disable swapz through its recovery procedure first"
-    done
-  fi
+        ;;
+      *) blocked "cannot verify whether $unit is enabled" ;;
+    esac
+  done
   verify_owned || { echo "BLOCKED: foreign, absent or modified swapz package" >&2; exit 1; }
 
   ensure_transaction_parent

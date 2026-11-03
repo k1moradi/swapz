@@ -276,7 +276,26 @@ case "${1:-}" in
       exit 46
     fi
     ;;
-  is-active|is-enabled) exit 1 ;;
+  is-active)
+    [[ "${SWAPZ_FAKE_SYSTEMCTL_QUERY_FAILURE:-0}" != 1 ]] || exit 48
+    if [[ "${SWAPZ_FAKE_ACTIVE_SYSTEMD_UNIT:-}" == "${2:-}" ]]; then
+      printf 'active\n'
+      exit 0
+    fi
+    printf 'inactive\n'
+    exit 3
+    ;;
+  is-enabled)
+    [[ "${SWAPZ_FAKE_SYSTEMCTL_QUERY_FAILURE:-0}" != 1 ]] || exit 49
+    if [[ "${SWAPZ_FAKE_ENABLED_SYSTEMD_UNIT:-}" == "${2:-}" ]]; then
+      printf 'enabled\n'
+      exit 0
+    fi
+    case "${2:-}" in
+      *.swap) printf 'static\n'; exit 0 ;;
+      *) printf 'disabled\n'; exit 1 ;;
+    esac
+    ;;
   *) exit 2 ;;
 esac
 ''')
@@ -812,6 +831,28 @@ esac
         blocked = self.invoke("install")
         self.assertIn("incomplete package transaction retained", blocked.stderr)
         self.assertFalse((self.prefix / "sbin/swapz-primary-runtime-health").exists())
+
+    def test_uninstall_unit_queries_distinguish_static_and_fail_closed(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        # systemctl is-enabled returns success for a static passive .swap
+        # unit even though it cannot be enabled through an [Install] link.
+        for overrides, expected in (
+            ({"SWAPZ_FAKE_ACTIVE_SYSTEMD_UNIT":
+              "swapz-primary-runtime-health.service"}, "is active"),
+            ({"SWAPZ_FAKE_ENABLED_SYSTEMD_UNIT":
+              "swapz-primary-runtime-health.service"}, "is enabled"),
+            ({"SWAPZ_FAKE_SYSTEMCTL_QUERY_FAILURE": "1"}, "cannot verify"),
+        ):
+            with self.subTest(overrides=overrides):
+                result = self.invoke("uninstall", overrides)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+                self.assert_installed_exact()
+                self.assertEqual(self.uninstall_transactions(), [])
+
+        removed = self.invoke("uninstall")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assert_absent()
 
     def test_uninstall_refuses_active_mapping_or_module(self):
         self.assertEqual(self.invoke("install").returncode, 0)

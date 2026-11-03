@@ -4555,6 +4555,11 @@ files and exact installed module if DKMS, hashing, depmod, systemd reload or a
 caught HUP/INT/TERM fails. Uninstall must refuse loaded-module, active-mapper,
 active/enabled-unit, recovery-owner and digest/ownership mismatches; packaging
 must never call swapon/swapoff, unload a module, or remove a mapper.
+Uninstall must inspect systemd unit states rather than treat the `is-enabled`
+exit code alone as enabled: the passive static `.swap` unit can report `static`
+with exit 0. Only verified inactive and disabled/static/masked states permit
+removal; unexpected states, inconsistent return codes or unavailable systemd
+queries fail closed.
 
 Uninstall is a destructive transaction rather than a sequence of best-effort
 deletions. Before the first removal it must persist a private rollback snapshot
@@ -4596,7 +4601,8 @@ enrollment mismatch, cryptographically invalid signature despite matching
 signer metadata, an embedded foreign CMS signer certificate, vermagic mismatch,
 unexpected paths/symlinks, foreign
 artifacts, partial DKMS failure, active-module and active-mapper upgrade
-refusal, active uninstall refusal, rollback of a failed upgrade, every
+refusal, active uninstall refusal, systemd static-unit allowance and active/enabled/
+uninspectable-unit refusal, rollback of a failed upgrade, every
 destructive uninstall transition, failed depmod, failed systemd daemon-reload,
 reinstall after safe cleanup, installed-module/userspace digest mismatch,
 post-depmod tamper, install/uninstall signal interruption, stale rollback
