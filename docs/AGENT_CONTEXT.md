@@ -161,7 +161,22 @@ frozen manifest.
 
 ## Main synchronization contract
 
-There is one development branch: `main`.
+**Standing owner directive: `main` is the ONLY permitted development and
+publication branch. No agent or Codex session may create or use any other
+local or remote branch, including temporary, experimental, CI, backup,
+`agent-*` or `codex/*` branches. No pull requests of any kind, including
+draft PRs, PR-based qualification, or PR-based merges, may be created or used
+for current work. No secondary worktrees or forks. This applies to GitHub
+connector/API actions and CLI commands, not only to conventional Git use.**
+The root [AGENTS.md](../AGENTS.md) is the mandatory short entry point for
+every coding agent and contains explicit forbidden operations.
+
+Existing old branches and historical pull requests are read-only artifacts:
+fetching them does not authorize switching to them, creating more, opening
+PRs, or publishing to them. Do not delete them as a side effect of this
+policy. Direct `main` work is required even when a tool defaults to making
+a PR. If a tool or repository rule forbids direct `main` publication,
+report `BLOCKED`; never work around it by creating another branch/PR.
 
 Before beginning a new change or publishing evidence:
 
@@ -178,6 +193,11 @@ again before committing/publishing. If `origin/main` advanced while an
 **unpublished** local commit exists, reconcile that unpublished work onto the
 new remote head without rewriting published history, rerun affected checks, and
 then push normally. Do not leave completed work only locally between milestones.
+Use a non-force fast-forward to the *current* `origin/main`; never push to a
+separate head ref. If concurrent changes or local edits prevent immediate
+sync, preserve unpublished work on the existing local `main` and reconcile it
+without creating a branch, PR or extra worktree. Verify that local and remote
+main identify the same commit after every successful publication.
 
 This exact synchronization is required so another project manager can inspect
 the same current state remotely at any time.
