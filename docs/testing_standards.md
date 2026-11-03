@@ -755,6 +755,19 @@ lower-device bytes/requests; no improvement is asserted from native tests.
 
 Loaded tests use only newly created, positively owned, RAM-backed `null_blk`. Before and after use, verify device identity, size, major/minor, DM UUID, holders, mounts and active-swap aliases. Never substitute a physical or existing block device.
 
+Before the ordinary loaded smoke target is admitted, qualification must reload
+the exact module for each constructor failure stage and force deterministic
+`-ENOMEM` after: backing ownership, dm-io client creation, authority/sidecar
+initialization, core scratch allocation, per-read-slot scratch, the ordered
+workqueue, preparation scratch, and the preparation workqueue. Every failed
+`dmsetup create` must leave the mapper absent, the owned lower with zero holders,
+the lower block-stat line byte-identical, and `rmmod dm_swapz` successful.
+The exact marker
+`PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0` is a
+mandatory loaded-correctness input. The selector must remain default-off and
+must be rejected on non-null_blk backing so this qualification seam can never
+turn physical construction into a fault experiment.
+
 The deterministic lifecycle oracle must preserve exact readback, RAW fallback, zero elision and explicit flush behavior. The loaded qualification must also recreate a fresh target on the same positively identified RAM lower and force repeated live-GC evacuation under bounded capacity pressure. Passing GC evidence requires at least two nonzero victims/role rotations, nonzero GC lower READ and WRITE traffic, distinct victim/destination identities, and byte-exact verification of all 4096 logical pages after pressure. This proves loaded GC correctness/cost only on synthetic RAM; it is not physical-wear evidence.
 
 The loaded correctness report must recognize only the exact retained WRITE-fault
