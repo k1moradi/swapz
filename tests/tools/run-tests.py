@@ -66,6 +66,11 @@ PRODUCTION_READINESS_REQUIRED_CI = (
     "Native kernel-C project-goal regressions",
     "Experimental swapz production C qualification",
 )
+PRODUCTION_READINESS_PERSISTENT_EVIDENCE = (
+    "real_linux_swap",
+    "maximum_capacity_and_ram",
+    "sustained_physical_performance",
+)
 COLUMNS = ("off", "sync", "async")
 # Cap values are kernel null_blk MiB/s units; request delay is nanoseconds.
 # Labels describe SYNTHETIC profiles, never a real SD/SSD device.
@@ -345,6 +350,13 @@ def evaluate_production_readiness(snapshot, current_source_sha):
                     acceptance_manifest_sha256)):
             statuses[name] = "BLOCKED"
             reasons[name] = "PASS payload is incomplete or unqualified"
+            continue
+        if (status == "PASS" and
+                name in PRODUCTION_READINESS_PERSISTENT_EVIDENCE):
+            statuses[name] = "BLOCKED"
+            reasons[name] = (
+                "summary-only PASS requires canonical persistent-evidence "
+                "evaluation")
             continue
         statuses[name] = status
         reasons[name] = entry.get("reason", "")

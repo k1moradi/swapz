@@ -4210,15 +4210,22 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             "release_evidence": evidence,
         }
 
-    def test_complete_current_evidence_can_pass(self):
+    def test_summary_only_physical_evidence_cannot_pass_release(self):
         verdict = runner.evaluate_production_readiness(
             self.passing_snapshot(), self.SOURCE_SHA)
-        for field in (
-                "release_verdict", "CODE_PRODUCTION_READY",
-                "DEPLOYMENT_PRODUCTION_READY",
-                "PRODUCTION_READY_FOR_OWNER_REBOOT",
-                "COLD_BOOT_HARNESS", "COLD_BOOT_OBSERVED"):
-            self.assertEqual(verdict[field], "PASS", field)
+        for evidence_name in runner.PRODUCTION_READINESS_PERSISTENT_EVIDENCE:
+            self.assertEqual(
+                verdict["evidence_statuses"][evidence_name], "BLOCKED")
+            self.assertIn(
+                "canonical persistent-evidence evaluation",
+                verdict["reasons"][evidence_name])
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(verdict["DEPLOYMENT_PRODUCTION_READY"], "PASS")
+        self.assertEqual(
+            verdict["PRODUCTION_READY_FOR_OWNER_REBOOT"], "BLOCKED")
+        self.assertEqual(verdict["COLD_BOOT_HARNESS"], "PASS")
+        self.assertEqual(verdict["COLD_BOOT_OBSERVED"], "PASS")
+        self.assertEqual(verdict["release_verdict"], "BLOCKED")
 
     def test_missing_or_stale_required_evidence_never_passes(self):
         for name in runner.PRODUCTION_READINESS_REQUIRED_EVIDENCE:
@@ -4423,7 +4430,8 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         reboot.update({"status": "BLOCKED", "observed": False})
         verdict = runner.evaluate_production_readiness(
             snapshot, self.SOURCE_SHA)
-        self.assertEqual(verdict["PRODUCTION_READY_FOR_OWNER_REBOOT"], "PASS")
+        self.assertEqual(
+            verdict["PRODUCTION_READY_FOR_OWNER_REBOOT"], "BLOCKED")
         self.assertEqual(verdict["COLD_BOOT_OBSERVED"], "BLOCKED")
         self.assertEqual(verdict["release_verdict"], "BLOCKED")
 

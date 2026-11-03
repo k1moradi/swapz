@@ -5000,7 +5000,13 @@ perform the owner reboot” with “release qualification complete.”
 The private `tests/tools/evaluate-production-readiness.py` evaluator is the
 executable form of this release-evidence contract; it is not a new operator
 command and never performs privileged work. It must derive readiness rather
-than trust summary PASS fields. It strictly rejects duplicate JSON keys,
+than trust summary PASS fields. The legacy summary helper in
+`tests/tools/run-tests.py` is observational only: because it does not open the
+retained real-swap or physical-campaign artifacts, it must never promote
+`real_linux_swap`, `maximum_capacity_and_ram`, or
+`sustained_physical_performance` from summary PASS to release PASS. Those
+summary PASS values are BLOCKED until the canonical evaluator validates the
+persistent evidence bytes. It strictly rejects duplicate JSON keys,
 requires a FROZEN canonical production-acceptance policy, hashes the exact
 policy bytes, binds owner `make test`, all three required CI workflows
 (`Native kernel-C project-goal regressions`,
