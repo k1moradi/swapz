@@ -41,6 +41,7 @@
 #define SWAPZ_PRIMARY_DM_MAPPERS_MAX 512U
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
+#define SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES (64ULL * 1024ULL * 1024ULL)
 #define SWAPZ_PRIMARY_STATE_JSON_PREFIX \
 	"{\"schema\":\"swapz-primary-state-v1\",\"run_id\":"
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
@@ -946,6 +947,97 @@ static int swapz_primary_sha256(const unsigned char *bytes, size_t length,
 	digest[64] = '\0';
 	#undef SWAPZ_ROTR32
 	return 0;
+}
+
+
+int swapz_primary_sha256_regular_fd(int fd, uid_t expected_owner,
+				    uint64_t maximum_bytes, char digest[65])
+{
+	struct stat before;
+	struct stat after;
+	unsigned char *bytes = NULL;
+	char verified[65];
+	uint64_t length;
+	size_t completed = 0;
+	int flags;
+	int result = -1;
+
+	if (fd < 0 || !digest || !maximum_bytes ||
+	    maximum_bytes > SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES) {
+		errno = EINVAL;
+		return -1;
+	}
+	flags = fcntl(fd, F_GETFL);
+	if (flags < 0)
+		return -1;
+	if ((flags & O_ACCMODE) != O_RDONLY) {
+		errno = EBADF;
+		return -1;
+	}
+	if (fstat(fd, &before) < 0)
+		return -1;
+	if (!S_ISREG(before.st_mode) || before.st_uid != expected_owner ||
+	    (before.st_mode & 0022U) || before.st_nlink != 1 ||
+	    before.st_size < 0) {
+		errno = EPERM;
+		return -1;
+	}
+	length = (uint64_t)before.st_size;
+	if (length > maximum_bytes || length > SIZE_MAX) {
+		errno = EFBIG;
+		return -1;
+	}
+	bytes = malloc(length ? (size_t)length : 1U);
+	if (!bytes)
+		return -1;
+	while (completed < (size_t)length) {
+		ssize_t count = pread(fd, bytes + completed,
+				      (size_t)length - completed,
+				      (off_t)completed);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			goto out;
+		}
+		completed += (size_t)count;
+	}
+	{
+		unsigned char extra;
+		ssize_t count;
+
+		do {
+			count = pread(fd, &extra, sizeof(extra), (off_t)length);
+		} while (count < 0 && errno == EINTR);
+		if (count != 0) {
+			if (count > 0)
+				errno = ESTALE;
+			goto out;
+		}
+	}
+	if (fstat(fd, &after) < 0)
+		goto out;
+	if (after.st_dev != before.st_dev || after.st_ino != before.st_ino ||
+	    after.st_mode != before.st_mode || after.st_uid != before.st_uid ||
+	    after.st_gid != before.st_gid || after.st_nlink != before.st_nlink ||
+	    after.st_size != before.st_size ||
+	    after.st_mtim.tv_sec != before.st_mtim.tv_sec ||
+	    after.st_mtim.tv_nsec != before.st_mtim.tv_nsec ||
+	    after.st_ctim.tv_sec != before.st_ctim.tv_sec ||
+	    after.st_ctim.tv_nsec != before.st_ctim.tv_nsec) {
+		errno = ESTALE;
+		goto out;
+	}
+	if (swapz_primary_sha256(bytes, (size_t)length, verified) < 0)
+		goto out;
+	memcpy(digest, verified, sizeof(verified));
+	result = 0;
+
+out:
+	free(bytes);
+	return result;
 }
 
 static int swapz_primary_target_preflight(uint64_t *device_bytes,

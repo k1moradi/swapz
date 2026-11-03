@@ -572,6 +572,51 @@ static void test_sha256_helper(void)
 	assert(digest[0] == 'x');
 }
 
+static void test_sha256_regular_fd(void)
+{
+	static const char expected[] =
+		"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	char path[] = "/tmp/swapz-primary-hash-file-XXXXXX";
+	char link_path[PATH_MAX];
+	char digest[65];
+	int fd;
+	int write_fd;
+
+	fd = mkstemp(path);
+	assert(fd >= 0);
+	assert(write(fd, "abc", 3U) == 3);
+	assert(fsync(fd) == 0);
+	assert(close(fd) == 0);
+	fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	assert(fd >= 0);
+	assert(swapz_primary_sha256_regular_fd(
+		fd, geteuid(), 1024U, digest) == 0);
+	assert(!strcmp(digest, expected));
+	memset(digest, 'x', sizeof(digest));
+	assert(swapz_primary_sha256_regular_fd(
+		fd, geteuid(), 2U, digest) < 0);
+	assert(errno == EFBIG && digest[0] == 'x');
+	assert(fchmod(fd, 0660) == 0);
+	assert(swapz_primary_sha256_regular_fd(
+		fd, geteuid(), 1024U, digest) < 0);
+	assert(errno == EPERM && digest[0] == 'x');
+	assert(fchmod(fd, 0600) == 0);
+	assert(snprintf(link_path, sizeof(link_path), "%s.link", path) > 0);
+	assert(link(path, link_path) == 0);
+	assert(swapz_primary_sha256_regular_fd(
+		fd, geteuid(), 1024U, digest) < 0);
+	assert(errno == EPERM && digest[0] == 'x');
+	assert(unlink(link_path) == 0);
+	assert(close(fd) == 0);
+	write_fd = open(path, O_WRONLY | O_CLOEXEC);
+	assert(write_fd >= 0);
+	assert(swapz_primary_sha256_regular_fd(
+		write_fd, geteuid(), 1024U, digest) < 0);
+	assert(errno == EBADF && digest[0] == 'x');
+	assert(close(write_fd) == 0);
+	assert(unlink(path) == 0);
+}
+
 static void test_recovery_filesystem_policy(void)
 {
 	assert(swapz_primary_persistent_fs_magic(EXT2_SUPER_MAGIC));
@@ -821,6 +866,7 @@ int main(void)
 	test_exclusive_target_open_paths();
 	test_exact_block_read_helper();
 	test_sha256_helper();
+	test_sha256_regular_fd();
 	test_recovery_filesystem_policy();
 	test_recovery_source_chain();
 	test_mountinfo_parser();

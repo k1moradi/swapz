@@ -3,6 +3,7 @@
 #define SWAPZ_PRIMARY_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 enum swapz_primary_stage {
@@ -67,6 +68,9 @@ int swapz_primary_target_open_exclusive(void);
 int swapz_primary_write_header_checked_fd(
 	int fd, const unsigned char expected_current[4096],
 	const unsigned char replacement[4096]);
+/* Hash a stable, private regular-file descriptor with bounded allocation. */
+int swapz_primary_sha256_regular_fd(int fd, uid_t expected_owner,
+				    uint64_t maximum_bytes, char digest[65]);
 
 int swapz_primary_partition_lock_acquire(void);
 /* Internal lifecycle primitive; caller must hold the matching partition lock. */

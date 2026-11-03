@@ -1453,3 +1453,7 @@ remains disabled.
 Header digests now use an in-process SHA-256 implementation instead of
 spawning `/usr/bin/sha256sum`; rootless tests cover empty and `abc` vectors, a
 known multi-block digest, and overflow refusal with preserved output.
+The bounded artifact-FD hasher rejects writable, unsafe-mode, hard-linked,
+oversized, or changing regular files and preserves its output on refusal. Its
+rootless tests pass, but no primary lifecycle or qualification checker uses it
+yet.

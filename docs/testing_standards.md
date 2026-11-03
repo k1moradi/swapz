@@ -3539,3 +3539,12 @@ qualification artifacts. Keep the implementation bounded and check padding
 length overflow before processing. Native tests must include the standard
 empty-input and `abc` vectors, a multi-block input with a known digest, and an
 oversize-length refusal that leaves the output digest untouched.
+`swapz_primary_sha256_regular_fd()` is the artifact-file boundary: callers open
+the exact path with `O_NOFOLLOW`, and the primitive accepts only a read-only,
+single-link, private regular file owned by the expected account. It bounds
+allocation to 64 MiB, reads the full file, checks for growth, and compares
+device/inode/mode/owner/size/mtime/ctime before returning a digest. Tests must
+cover digest correctness, writable-FD refusal, oversized files, unsafe mode,
+hard-link refusal, and output preservation. This does not establish that a
+path names an accepted artifact; callers must bind the opened descriptor to
+the exact expected path and qualification record.
