@@ -38,6 +38,7 @@ SELECTOR = Path("/etc/swapz/primary-target")
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 AUTHORIZATION_SNAPSHOT = ROOT / "docs/handoff/production-readiness.json"
+ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
 MAPPER_NAME = "swapz-primary"
 PAGE_BYTES = 4096
 MIB = 1024 * 1024
@@ -618,12 +619,64 @@ def _read_readiness_snapshot() -> dict:
         raise Blocked(f"cannot read committed production readiness snapshot: {exc}") from exc
 
 
-def verify_acceptance_manifest() -> dict:
-    snapshot = _read_readiness_snapshot()
-    acceptance = snapshot.get("acceptance_manifest")
-    if not isinstance(acceptance, dict) or acceptance.get("status") != "FROZEN":
-        raise Blocked("quantitative production acceptance manifest is not frozen")
-    return snapshot
+def validate_acceptance_manifest(
+        manifest: dict, *, cycles: int, workload_mib: int, resident_mib: int,
+        swap_limit_mib: int, timeout_seconds: int) -> dict:
+    if set(manifest) != {
+            "schema", "status", "primary_real_swap", "physical_qualification"} or \
+            manifest.get("schema") != "swapz-production-acceptance-v1" or \
+            manifest.get("status") != "FROZEN":
+        raise Blocked(
+            "quantitative production acceptance manifest is not canonical and frozen")
+    real_swap = manifest.get("primary_real_swap")
+    expected = {
+        "page_bytes": PAGE_BYTES,
+        "cycles": cycles,
+        "workload_mib": workload_mib,
+        "resident_mib": resident_mib,
+        "swap_limit_mib": swap_limit_mib,
+        "minimum_mem_available_mib": MIN_AVAILABLE_MIB,
+        "minimum_swap_traffic_mib": MIN_TRAFFIC_MIB,
+        "verify_headroom_mib": VERIFY_HEADROOM_MIB,
+        "timeout_seconds": timeout_seconds,
+        "zswap_disabled": True,
+        "oom_events_max": 0,
+        "oom_kill_events_max": 0,
+        "byte_mismatches_max": 0,
+        "fresh_run_id_each_cycle": True,
+        "fresh_linux_swap_uuid_each_cycle": True,
+        "normal_teardown_only": True,
+    }
+    if not isinstance(real_swap, dict) or set(real_swap) != set(expected):
+        raise Blocked(
+            "frozen primary real-swap acceptance fields are not canonical")
+    for key, expected_value in expected.items():
+        observed = real_swap.get(key)
+        if type(observed) is not type(expected_value) or observed != expected_value:
+            raise Blocked(
+                f"requested primary real-swap {key} differs from frozen acceptance")
+    physical = manifest.get("physical_qualification")
+    if not isinstance(physical, dict) or \
+            physical.get("schema") != "swapz-performance-qualification-v1" or \
+            physical.get("prospective") is not True:
+        raise Blocked("frozen physical qualification contract is malformed")
+    return manifest
+
+
+def verify_acceptance_manifest(
+        *, cycles: int, workload_mib: int, resident_mib: int,
+        swap_limit_mib: int, timeout_seconds: int) -> dict:
+    try:
+        manifest = _load_unique_json(
+            ACCEPTANCE_MANIFEST.read_text(encoding="utf-8"),
+            "production acceptance manifest")
+    except OSError as exc:
+        raise Blocked(
+            f"cannot read production acceptance manifest: {exc}") from exc
+    return validate_acceptance_manifest(
+        manifest, cycles=cycles, workload_mib=workload_mib,
+        resident_mib=resident_mib, swap_limit_mib=swap_limit_mib,
+        timeout_seconds=timeout_seconds)
 
 
 def verify_authorized_target(plan: dict, selector_partuuid: str) -> tuple[Path, tuple[int, int]]:
@@ -681,7 +734,7 @@ def verify_authorized_target(plan: dict, selector_partuuid: str) -> tuple[Path, 
     require_sole_partition_topology(target_row, parent_row, f"{major}:{minor}")
 
     try:
-        snapshot = verify_acceptance_manifest()
+        snapshot = _read_readiness_snapshot()
         authorized = snapshot["authorized_target"]
         expected_parent = f"{parent_major}:{parent_minor}"
         if str(authorized.get("partuuid", "")).lower() != selector_partuuid or \
@@ -1560,7 +1613,12 @@ def execute(arguments: argparse.Namespace) -> dict:
     _check_git_source(arguments.validated_source)
     preflight_workload_environment(
         arguments.workload_mib, arguments.resident_mib, arguments.swap_limit_mib)
-    verify_acceptance_manifest()
+    verify_acceptance_manifest(
+        cycles=arguments.cycles,
+        workload_mib=arguments.workload_mib,
+        resident_mib=arguments.resident_mib,
+        swap_limit_mib=arguments.swap_limit_mib,
+        timeout_seconds=arguments.timeout_seconds)
     _kernel_log_snapshot()
     _import_qualification(swapzctl, report_path)
     plan = _read_plan(swapzctl)

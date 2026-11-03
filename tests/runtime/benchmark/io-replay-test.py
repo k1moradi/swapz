@@ -2156,6 +2156,10 @@ class PairReplayContract(unittest.TestCase):
         qualification = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(qualification)
         contract = qualification.contract()
+        frozen = json.loads(
+            (ROOT / "docs/production-acceptance.json").read_text())
+        self.assertEqual(frozen["status"], "FROZEN")
+        self.assertEqual(contract, frozen["physical_qualification"])
         self.assertEqual(contract["schema"], "swapz-performance-qualification-v1")
         balanced = contract["workloads"]["sd-service-balanced"]
         self.assertEqual(balanced["pairs"], 5)

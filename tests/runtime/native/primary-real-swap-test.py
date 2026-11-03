@@ -542,6 +542,50 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with self.assertRaises(qualify.Blocked):
             qualify.preflight_workload_environment(384, 128, 200)
 
+    def test_frozen_acceptance_manifest_binds_real_swap_parameters(self):
+        manifest = json.loads(
+            (ROOT / "docs/production-acceptance.json").read_text())
+        accepted = qualify.validate_acceptance_manifest(
+            manifest,
+            cycles=qualify.DEFAULT_CYCLES,
+            workload_mib=qualify.DEFAULT_WORKLOAD_MIB,
+            resident_mib=qualify.DEFAULT_RESIDENT_MIB,
+            swap_limit_mib=qualify.DEFAULT_SWAP_LIMIT_MIB,
+            timeout_seconds=qualify.DEFAULT_TIMEOUT_SECONDS)
+        self.assertEqual(accepted["status"], "FROZEN")
+
+        with self.assertRaisesRegex(qualify.Blocked, "workload_mib"):
+            qualify.validate_acceptance_manifest(
+                manifest,
+                cycles=qualify.DEFAULT_CYCLES,
+                workload_mib=qualify.DEFAULT_WORKLOAD_MIB - 1,
+                resident_mib=qualify.DEFAULT_RESIDENT_MIB,
+                swap_limit_mib=qualify.DEFAULT_SWAP_LIMIT_MIB,
+                timeout_seconds=qualify.DEFAULT_TIMEOUT_SECONDS)
+
+        weakened = json.loads(json.dumps(manifest))
+        weakened["primary_real_swap"]["minimum_swap_traffic_mib"] -= 1
+        with self.assertRaisesRegex(
+                qualify.Blocked, "minimum_swap_traffic_mib"):
+            qualify.validate_acceptance_manifest(
+                weakened,
+                cycles=qualify.DEFAULT_CYCLES,
+                workload_mib=qualify.DEFAULT_WORKLOAD_MIB,
+                resident_mib=qualify.DEFAULT_RESIDENT_MIB,
+                swap_limit_mib=qualify.DEFAULT_SWAP_LIMIT_MIB,
+                timeout_seconds=qualify.DEFAULT_TIMEOUT_SECONDS)
+
+        unfrozen = json.loads(json.dumps(manifest))
+        unfrozen["status"] = "DRAFT"
+        with self.assertRaisesRegex(qualify.Blocked, "canonical and frozen"):
+            qualify.validate_acceptance_manifest(
+                unfrozen,
+                cycles=qualify.DEFAULT_CYCLES,
+                workload_mib=qualify.DEFAULT_WORKLOAD_MIB,
+                resident_mib=qualify.DEFAULT_RESIDENT_MIB,
+                swap_limit_mib=qualify.DEFAULT_SWAP_LIMIT_MIB,
+                timeout_seconds=qualify.DEFAULT_TIMEOUT_SECONDS)
+
     def test_github_actions_is_always_blocked_before_physical_execution(self):
         args = qualify.build_parser().parse_args([
             "--validated-source", "a" * 40,

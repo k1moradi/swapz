@@ -17,100 +17,41 @@ PAIR_SCHEMA = "swapz-performance-pair-v1"
 SUMMARY_SCHEMA = "swapz-performance-summary-v1"
 T95_DF4 = 2.7764451051977987
 
-CONTRACT = {
-    "schema": SCHEMA,
-    "prospective": True,
-    "claim_boundary": (
-        "lower-device bytes and requests are host-visible physical I/O; "
-        "they are not direct NAND-wear or endurance measurements"
-    ),
-    "resource_measurement": {
-        "replay_peak_rss_bytes": "absolute post-exec process VmHWM through measured completion",
-        "replay_process_maxrss_bytes": "same VmHWM peak retained for schema clarity",
-        "replay_measurement_start_maxrss_bytes": "post-exec VmHWM at the measured boundary",
-        "replay_measurement_peak_rss_growth_bytes": "diagnostic measured-boundary VmHWM growth only",
-    },
-    "screening": {
-        "pre_post_busy_fraction_max": .25,
-        "pre_post_cpu_psi_some_fraction_max": .05,
-        "steal_fraction_max": .01,
-        "same_workload_raw_spread_max": .10,
-        "retry_policy": "none; preserve failed/excluded samples and reasons",
-    },
-    "workloads": {
-        "sd-service-balanced": {
-            "evidence": "statistical_paired", "pairs": 5,
-            "counterbalanced_order": ["raw-first", "swapz-first", "swapz-first", "raw-first", "raw-first"],
-            "fill_content_profile": "balanced", "churn_content_profile": "balanced",
-            "warmup_operations": 65536, "measure_operations": 1048576,
-            "qd": 8, "read_percent": 20,
-            "logical_occupancy_percent": 10, "hot_region_percent": 8,
-            "arm_timeout_seconds": 1800,
-        },
-        "sd-service-representative": {
-            "evidence": "statistical_paired", "pairs": 5,
-            "counterbalanced_order": ["raw-first", "swapz-first", "swapz-first", "raw-first", "raw-first"],
-            "fill_content_profile": "representative", "churn_content_profile": "representative",
-            "warmup_operations": 65536, "measure_operations": 1048576,
-            "qd": 8, "read_percent": 20,
-            "logical_occupancy_percent": 10, "hot_region_percent": 8,
-            "arm_timeout_seconds": 1800,
-        },
-        "sd-high-occupancy-churn": {
-            "evidence": "directional_single_pair", "pairs": 1,
-            "counterbalanced_order": ["raw-first"],
-            "fill_content_profile": "entropy", "churn_content_profile": "balanced",
-            "warmup_seconds": 60, "measure_seconds": 3600,
-            "qd": 16, "read_percent": 20,
-            "logical_occupancy_percent": 90, "hot_region_percent": 80,
-            "arm_timeout_seconds": 14400,
-        },
-        "anonymous-swap": {
-            "evidence": "directional_three_pair", "pairs": 3,
-            "counterbalanced_order": ["raw-first", "swapz-first", "raw-first"],
-            "content": "50% deterministic compressible + 50% deterministic entropy anonymous pages",
-            "bytes": 1073741824, "memory_max_bytes": 536870912,
-            "rounds": 3, "minimum_observed_swap_bytes": 134217728,
-            "arm_timeout_seconds": 1800,
-        },
-    },
-    "acceptance": {
-        "service": {
-            "useful_write_ci_lower_min": .05,
-            "lower_write_bytes_ci_upper_max": -.10,
-            "lower_write_requests_ci_upper_max": -.10,
-            "tail_ci_upper_max": .25,
-            "cpu_ci_upper_max": .50,
-        },
-        "sustained": {
-            "useful_write_ratio_min": 1.05,
-            "lower_write_bytes_ratio_max": .90,
-            "lower_write_requests_ratio_max": .90,
-            "tail_ratio_max": 1.25,
-            "throughput_drift_ratio_min": .75,
-            "p99_drift_ratio_max": 1.25,
-            "gc_wall_fraction_max": .20,
-            "gc_no_headroom_skips_max": 0,
-            "replay_peak_rss_bytes_max": 134217728,
-            "metadata_and_target_peak_ram_bytes_max": 1342177280,
-            "max_no_progress_seconds": 10.0,
-            "minimum_rewritten_hot_pages": 1,
-        },
-        "anonymous": {
-            "minimum_observed_swap_bytes": 134217728,
-            "swapin_tail_ratio_max": 1.25,
-            "useful_read_ratio_min": .80,
-            "lower_write_bytes_ratio_max": .90,
-            "lower_write_requests_ratio_max": .90,
-            "cpu_ratio_max": 1.50,
-        },
-    },
-    "raw_comparison": {
-        "raw_offset_bytes": 4096,
-        "work": "same card, source, content recipe, logical geometry and fixed work or duration",
-        "accounting": "parent-device block statistics bracket only measured intervals",
-    },
-}
+ROOT = Path(__file__).resolve().parents[3]
+ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate acceptance-manifest key {key}")
+        result[key] = value
+    return result
+
+
+def _load_frozen_physical_contract() -> dict:
+    try:
+        document = json.loads(
+            ACCEPTANCE_MANIFEST.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_object)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"cannot load frozen production acceptance manifest: {exc}") from exc
+    if set(document) != {
+            "schema", "status", "primary_real_swap", "physical_qualification"} or \
+            document.get("schema") != "swapz-production-acceptance-v1" or \
+            document.get("status") != "FROZEN":
+        raise ValueError(
+            "production acceptance manifest is not canonical and frozen")
+    contract = document.get("physical_qualification")
+    if not isinstance(contract, dict) or contract.get("schema") != SCHEMA or \
+            contract.get("prospective") is not True:
+        raise ValueError("frozen physical qualification contract is malformed")
+    return contract
+
+
+CONTRACT = _load_frozen_physical_contract()
 
 
 def contract() -> dict:

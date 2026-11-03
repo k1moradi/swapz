@@ -60,6 +60,17 @@ bounded real anonymous-page swap-out/swap-in evidence remains required.
 
 ### Primary real-swap native-host qualification
 
+`docs/production-acceptance.json` is the canonical frozen quantitative
+production-acceptance manifest. The real-swap helper and dedicated-SD
+performance evaluator must consume that same file; duplicated mutable
+threshold tables are not authoritative. A physical run must BLOCK if the
+manifest is absent, malformed, not `FROZEN`, or if any requested cycles,
+workload size, resident limit, swap limit or timeout differs from its
+`primary_real_swap` values. The manifest also carries the exact prospective
+physical workload/acceptance contract used by `qualification.py`, so a
+threshold change is an explicit source-controlled policy change rather than a
+runtime override.
+
 `tests/tools/qualify-primary-real-swap.py` is private Agent-8 test
 infrastructure, not a second public command; Agent 10 owns any eventual
 `make test` integration. It must BLOCK in GitHub-hosted CI and must never call
@@ -700,7 +711,10 @@ Rootless contracts for these helpers live in the already-executed
 \`io-replay-test.py\`, so this addition does not create another official runner.
 
 The prospective contract is source-controlled and immutable for a confirmation
-campaign. It defines four workloads: five paired balanced-content service runs,
+campaign. `tests/runtime/benchmark/qualification.py` loads its exact
+`physical_qualification` object from `docs/production-acceptance.json` and
+must fail closed if that frozen manifest is missing or malformed. It defines
+four workloads: five paired balanced-content service runs,
 five paired representative-content service runs, one directional high-occupancy
 hour-long pair, and three directional actual-anonymous-swap pairs. The service
 pairs use QD8, 20% READs, 10% occupancy, 65,536 warmup operations and 1,048,576

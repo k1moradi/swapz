@@ -152,6 +152,13 @@ processes/cgroups where practical, fixed allocation limits, timeouts,
 `MemAvailable`/PSI/OOM monitoring, swap-usage bounds and early-stop thresholds.
 A failed mapper `swapoff` is a stop condition; never force-remove it.
 
+The quantitative physical acceptance policy is frozen in
+`docs/production-acceptance.json`. Both the native real-swap helper and the
+dedicated-SD performance evaluator consume that file directly and fail closed
+on drift. The handoff readiness snapshot is observational and may lag this
+policy file; its historical `NOT_FROZEN` field does not override the canonical
+frozen manifest.
+
 ## Main synchronization contract
 
 There is one development branch: `main`.
