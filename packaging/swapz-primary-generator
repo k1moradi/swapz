@@ -1,0 +1,103 @@
+#!/bin/sh
+# Emit selected-target ordering for the disabled primary-swap systemd units.
+set -eu
+umask 022
+
+if [ "$#" -ne 3 ]; then
+	echo "swapz-primary-generator: expected systemd generator directories" >&2
+	exit 2
+fi
+
+normal_dir=$1
+case "$normal_dir" in
+	/*) ;;
+	*)
+		echo "swapz-primary-generator: invalid normal output directory" >&2
+		exit 2
+		;;
+esac
+if [ ! -d "$normal_dir" ] || [ -L "$normal_dir" ]; then
+	echo "swapz-primary-generator: normal output directory is unavailable" >&2
+	exit 2
+fi
+
+units=$("@SWAPZ_SBINDIR@/swapzctl" primary systemd-units) || {
+	echo "swapz-primary-generator: protected target selector is invalid" >&2
+	exit 1
+}
+case "$units" in
+	*'
+'*)
+		echo "swapz-primary-generator: malformed unit-name response" >&2
+		exit 1
+		;;
+esac
+
+# The control utility emits two strictly derived systemd-escape names on one
+# line. Disable pathname expansion before splitting its fixed-format response.
+set -f
+old_ifs=$IFS
+IFS=' '
+set -- $units
+IFS=$old_ifs
+if [ "$#" -ne 2 ] || [ "$1 $2" != "$units" ]; then
+	echo "swapz-primary-generator: malformed unit-name response" >&2
+	exit 1
+fi
+device_unit=$1
+swap_unit=$2
+case "$device_unit" in
+	'dev-disk-by\x2dpartuuid-'*.device) ;;
+	*)
+		echo "swapz-primary-generator: invalid target device unit" >&2
+		exit 1
+		;;
+esac
+case "$swap_unit" in
+	'dev-disk-by\x2dpartuuid-'*.swap) ;;
+	*)
+		echo "swapz-primary-generator: invalid target swap unit" >&2
+		exit 1
+		;;
+esac
+device_partuuid=${device_unit#'dev-disk-by\x2dpartuuid-'}
+device_partuuid=${device_partuuid%.device}
+swap_partuuid=${swap_unit#'dev-disk-by\x2dpartuuid-'}
+swap_partuuid=${swap_partuuid%.swap}
+if [ "$device_partuuid" != "$swap_partuuid" ]; then
+	echo "swapz-primary-generator: target unit names disagree" >&2
+	exit 1
+fi
+valid_encoded_partuuid() {
+	remaining=$1
+	decoded_length=0
+	[ -n "$remaining" ] || return 1
+	while [ -n "$remaining" ]; do
+		case "$remaining" in
+			[0-9a-f]*) remaining=${remaining#?} ;;
+			'\x2d'*) remaining=${remaining#'\x2d'} ;;
+			*) return 1 ;;
+		esac
+		decoded_length=$((decoded_length + 1))
+	done
+	[ "$decoded_length" -ge 8 ] && [ "$decoded_length" -le 64 ]
+}
+if ! valid_encoded_partuuid "$device_partuuid"; then
+	echo "swapz-primary-generator: malformed escaped PARTUUID" >&2
+	exit 1
+fi
+
+dropin_dir=$normal_dir/swapz-primary-mapper.service.d
+if [ -L "$dropin_dir" ]; then
+	echo "swapz-primary-generator: refusing symlinked drop-in directory" >&2
+	exit 1
+fi
+mkdir -p "$dropin_dir"
+dropin=$dropin_dir/50-selected-target.conf
+temporary=$dropin.tmp.$$
+trap 'rm -f -- "$temporary"' EXIT HUP INT TERM
+(set -C; printf '[Unit]\nRequires=%s\nAfter=%s\nConflicts=%s\nBefore=%s\nJobTimeoutSec=30s\n' \
+	"$device_unit" "$device_unit" "$swap_unit" "$swap_unit" > "$temporary")
+chmod 0644 "$temporary"
+mv -fT -- "$temporary" "$dropin"
+trap - EXIT HUP INT TERM

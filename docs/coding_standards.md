@@ -344,6 +344,22 @@ mutation. Keep privileged lifecycle actions disabled until the corresponding
 rootless/native/null_blk and safely bounded physical-host gates pass and
 exact-source qualification is current; VM coverage is not required.
 
+### Selector-derived systemd dependencies
+
+The package's systemd generator must obtain unit names only through the
+manager's validated protected-PARTUUID interface. Generate the escaped
+by-PARTUUID `.device` and `.swap` names at boot; do not compile a block path,
+major:minor, capacity, UUID or PARTUUID into a unit. The mapper service needs
+`Requires`/`After` on the selected device and `Conflicts`/`Before` on the
+matching by-PARTUUID swap unit, with a bounded device-job timeout. Do not use
+`BindsTo` for removable media: unplugging a device must not automatically stop
+a mapper that could still own live pages. Invalid selector data must not
+produce a target-specific drop-in. This dependency only names the PARTUUID
+alias; the deployment gate must also prevent the same partition from being
+started as raw swap through a by-UUID or other alias. Static units stay
+disabled and manual start/stop remains refused until lifecycle and boot
+qualification passes.
+
 ### Primary manager Device Mapper lifecycle primitives
 
 Build mapper tables and issue Device Mapper ioctls in process; do not invoke

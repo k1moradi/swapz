@@ -671,6 +671,76 @@ int swapz_primary_target_config_read(
 	return swapz_primary_target_config_parse(record, used, partuuid);
 }
 
+int swapz_primary_systemd_target_units(
+	const char *partuuid,
+	char device_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX],
+	char swap_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX])
+{
+	static const char prefix[] = "dev-disk-by\\x2dpartuuid-";
+	static const char device_suffix[] = ".device";
+	static const char swap_suffix[] = ".swap";
+	char normalized[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char device_candidate[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
+	char swap_candidate[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
+	size_t length;
+	size_t device_length;
+	size_t swap_length;
+	size_t i;
+	size_t offset;
+
+	if (device_unit)
+		device_unit[0] = '\0';
+	if (swap_unit)
+		swap_unit[0] = '\0';
+	if (!partuuid || !device_unit || !swap_unit ||
+	    device_unit == swap_unit ||
+	    swapz_primary_partuuid_normalize(partuuid, normalized) < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = strlen(normalized);
+	device_length = sizeof(prefix) - 1U + sizeof(device_suffix) - 1U;
+	swap_length = sizeof(prefix) - 1U + sizeof(swap_suffix) - 1U;
+	for (i = 0; i < length; ++i) {
+		size_t encoded_length = normalized[i] == '-' ? 4U : 1U;
+
+		if (device_length > 255U - encoded_length ||
+		    swap_length > 255U - encoded_length) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+		device_length += encoded_length;
+		swap_length += encoded_length;
+	}
+	if (device_length >= sizeof(device_candidate) ||
+	    swap_length >= sizeof(swap_candidate)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	memcpy(device_candidate, prefix, sizeof(prefix) - 1U);
+	memcpy(swap_candidate, prefix, sizeof(prefix) - 1U);
+	offset = sizeof(prefix) - 1U;
+	for (i = 0; i < length; ++i) {
+		if (normalized[i] == '-') {
+			memcpy(device_candidate + offset, "\\x2d", 4U);
+			memcpy(swap_candidate + offset, "\\x2d", 4U);
+			offset += 4U;
+		} else {
+			device_candidate[offset] = normalized[i];
+			swap_candidate[offset] = normalized[i];
+			++offset;
+		}
+	}
+	memcpy(device_candidate + offset, device_suffix, sizeof(device_suffix));
+	memcpy(swap_candidate + offset, swap_suffix, sizeof(swap_suffix));
+	memcpy(device_unit, device_candidate, device_length + 1U);
+	memcpy(swap_unit, swap_candidate, swap_length + 1U);
+	memset(normalized, 0, sizeof(normalized));
+	memset(device_candidate, 0, sizeof(device_candidate));
+	memset(swap_candidate, 0, sizeof(swap_candidate));
+	return 0;
+}
+
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_sysfs_partuuid_matches(
 	dev_t device, const char *expected_partuuid)
@@ -7722,6 +7792,29 @@ static int swapz_primary_read_only_plan(void)
 
 int swapz_primary_command(int argc, char **argv)
 {
+	if (argc == 1 && argv && argv[0] &&
+	    !strcmp(argv[0], "systemd-units")) {
+		char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+		char device_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
+		char swap_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
+
+		if (swapz_primary_target_config_read(partuuid) < 0 ||
+		    swapz_primary_systemd_target_units(partuuid, device_unit,
+						       swap_unit) < 0) {
+			fprintf(stderr,
+				"BLOCKED: cannot derive target systemd units: %s\n",
+				strerror(errno));
+			return 2;
+		}
+		if (printf("%s %s\n", device_unit, swap_unit) < 0 ||
+		    fflush(stdout) == EOF) {
+			fprintf(stderr,
+				"BLOCKED: cannot emit target systemd units: %s\n",
+				strerror(errno));
+			return 2;
+		}
+		return 0;
+	}
 	if (argc == 2 && argv && argv[0] && argv[1] &&
 	    !strcmp(argv[0], "qualification-import")) {
 		if (swapz_primary_qualification_import(argv[1]) < 0) {
@@ -7734,7 +7827,7 @@ int swapz_primary_command(int argc, char **argv)
 	}
 	if (argc != 1 || !argv || !argv[0]) {
 		fputs("Usage: swapzctl primary plan|qualification-import <report>"
-		      "|prepare|start|stop|recover\n",
+		      "|systemd-units|prepare|start|stop|recover\n",
 		      stderr);
 		return 2;
 	}

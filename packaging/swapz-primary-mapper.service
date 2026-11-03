@@ -4,8 +4,8 @@ DefaultDependencies=no
 Requires=-.mount
 After=-.mount systemd-modules-load.service
 Before=dev-mapper-swapz\x2dprimary.swap shutdown.target
-# No physical partition identity is compiled into this unit. Target-aware
-# swap-unit ordering remains a required gate before this disabled unit can run.
+# The systemd generator derives selected-device ordering/conflicts from the
+# protected PARTUUID selector; this unit contains no physical target identity.
 Conflicts=shutdown.target
 PartOf=dev-mapper-swapz\x2dprimary.swap
 RefuseManualStart=yes

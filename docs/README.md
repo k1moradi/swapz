@@ -59,6 +59,14 @@ owned-RAM `null_blk` matrix for that exact source. Current `main` has since
 advanced through settled-control cleanup, so a fresh complete `make test` is
 required before current HEAD can be called the qualified baseline.
 
+The most recent owner attempt published report-only commit
+`c86869bf8d7cee1372c90f13a8934f69b9f4e1b9` for tested source
+`9feb6b9df7710634bffbf394504257b2a4d2d8d3`. Stages 1–4 passed; stage 5 was
+BLOCKED because the ID36 low-RAM gate required at least 1 GiB of
+`MemAvailable`. The report is not an overall qualification, and it does not
+qualify later `main` changes. The current systemd-generator work also still
+needs exact-source tests and CI before it is qualified.
+
 The qualified positive-fixture delta64 rescue A/B exercised 4096 direct
 predictor-first adoptions that skipped ordinary LZ4. Lower WRITE bytes fell
 27.04% and useful WRITE throughput rose 5.15%; lower-request and p99 intervals

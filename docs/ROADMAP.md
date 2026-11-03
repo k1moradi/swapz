@@ -39,10 +39,13 @@ in each transaction manifest and rechecks the PARTUUID, descriptor, parent,
 root-device and recovery-device relationships before preparation. Selecting a
 different goal drive is a configuration and authorization update, not a source
 constant edit. Package cleanup protects every active PARTUUID ownership marker,
-and packaged units no longer name a historical device or UUID. Their
-target-aware swap ordering is still unimplemented, so the units and privileged
-lifecycle remain disabled. The historical live-swap supervisor remains tied to
-its old host and is not a deployment path for the current card.
+and packaged units no longer name a historical device or UUID. The installed
+systemd generator now derives the selected `.device` ordering and by-PARTUUID
+`.swap` conflict from the protected selector. The units and privileged
+lifecycle remain disabled pending full lifecycle qualification; deployment
+must also prevent a raw swap alias (for example a by-UUID fstab entry) from
+activating the same partition. The historical live-swap supervisor remains
+tied to its old host and is not a deployment path for the current card.
 
 Older primary-manager implementation notes later in this file document the
 former fixed-device design. Any `/dev/sda4`, `8:4`, 16 GiB, or original-header

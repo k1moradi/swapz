@@ -32,9 +32,15 @@ selector and this owner-observed target record after confirming the new
 partition and parent; do not patch C constants. The current authorization
 still applies only to the target identified above, and lifecycle execution
 must remain disabled until the manager's parent checks and physical acceptance
-cover the selected target. Packaged systemd units also must remain disabled
-until their ordering/conflict behavior is resolved from the selected target
-rather than a historical host UUID.
+cover the selected target. The installed systemd generator now derives the
+selected `.device` and by-PARTUUID `.swap` dependency names from the protected
+selector; it adds device ordering and a conflict against that selector's
+by-PARTUUID swap unit without embedding this host's path, device number or
+capacity. The generator does not activate units, and the static primary units
+remain disabled with manual start/stop refused until the full lifecycle and
+boot path are qualified. A deployment that enables them must also ensure the
+raw selected partition is not separately enabled as swap under a by-UUID or
+other alias; the PARTUUID dependency alone cannot identify every alias.
 
 The partition path and content UUID are observations, not sufficient identity.
 Before destructive work, prove that the opened partition and parent are the
@@ -240,8 +246,9 @@ production-readiness mission because Codex is explicitly forbidden to reboot.
 Unless evidence changes the order, work on:
 
 1. finish the target/configuration abstraction across the manager, package and
-   boot integration; the manager now resolves a protected PARTUUID selector,
-   while target-aware systemd ordering remains a gate before activation;
+   boot integration; the manager resolves a protected PARTUUID selector and
+   the package now generates selector-derived systemd dependencies, while the
+   actual start/stop/recovery lifecycle remains disabled pending qualification;
 2. native production lifecycle and standing-authorization policy cleanup;
 3. actual Linux swap correctness on the authorized card;
 4. maximum safe full-card capacity and bounded metadata RAM;

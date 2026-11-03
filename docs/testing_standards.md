@@ -3379,11 +3379,20 @@ never be reported as complete device admission.
 The package regression must prove that units are installed disabled and that
 package install/uninstall does not start or stop system swap. The primary
 mapper service and package templates must not contain a device pathname,
-major:minor, UUID or PARTUUID. Target-aware systemd ordering/conflict behavior
-must be generated from the protected selector and qualified before units can
-be enabled; current units remain disabled and
-`RefuseManualStart`/`Stop` stays in force until then. The package regression
-must verify target-independent unit content. The manager must use the same
+major:minor, UUID or PARTUUID. The installed systemd generator must derive
+the selected `.device` and by-PARTUUID `.swap` unit names through the manager's
+validated protected-selector interface, then emit `Requires`/`After` for the
+device and `Conflicts`/`Before` for its by-PARTUUID swap unit with a bounded
+device-job timeout. It must not use `BindsTo` on the removable device, because
+media removal must not automatically stop a mapper that may own live swap
+pages. Rootless package tests must use at least two selected PARTUUIDs and
+verify the generated names and dependencies change, and malformed selector
+output must fail without emitting a drop-in. These dependencies are not a
+complete activation policy: a raw swap entry may be named by UUID or another
+alias, so deployment must separately ensure the selected partition is not
+activated through that alias. Current units remain disabled and
+`RefuseManualStart`/`Stop` stays in force until the full lifecycle and boot
+path are qualified. The manager must use the same
 permanent selected-PARTUUID lock for all of its operations; tests must reject
 an unsafe lock directory, lock file or concurrent owner before any mutation.
 A persistent active-ownership marker is also required before the provisioning

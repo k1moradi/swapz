@@ -23,6 +23,7 @@ enum swapz_primary_stage {
 #define SWAPZ_PRIMARY_SOURCE_SHA_LENGTH 40U
 #define SWAPZ_PRIMARY_SHA256_LENGTH 64U
 #define SWAPZ_PRIMARY_PARTUUID_LENGTH 64U
+#define SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX 256U
 
 /* Stable target selection is PARTUUID-based; major:minor and size are bound
  * after opening the selected partition and are rechecked before each use. */
@@ -81,6 +82,11 @@ int swapz_primary_target_config_parse(
 	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U]);
 int swapz_primary_target_config_read(
 	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U]);
+/* Derive systemd .device and .swap names from a validated PARTUUID. */
+int swapz_primary_systemd_target_units(
+	const char *partuuid,
+	char device_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX],
+	char swap_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX]);
 int swapz_primary_target_inspect(const char *partuuid,
 				 struct swapz_primary_target *target);
 /* Build an SWZ authorization header for the opened target geometry. */

@@ -65,6 +65,8 @@ src="$srcbase/swapz-$version"
 cli_dir="$prefix/sbin"; cli="$cli_dir/swapzctl"
 helper_dir="$prefix/libexec/swapz"; helper="$helper_dir/device-roundtrip"
 unit_dir="$prefix/lib/systemd/system"
+generator_dir="$prefix/lib/systemd/system-generators"
+primary_generator="$generator_dir/swapz-primary-generator"
 mapper_service="$unit_dir/swapz-primary-mapper.service"
 swap_unit_name="$(systemd-escape --path --suffix=swap /dev/mapper/swapz-primary)"
 [[ "$swap_unit_name" == 'dev-mapper-swapz\x2dprimary.swap' ]] || {
@@ -75,7 +77,7 @@ marker=".swapz-owned"
 [[ ! -L "$srcbase" && ! -L "$prefix" &&
    ! -L "$cli_dir" && ! -L "$helper_dir" &&
    ! -L "$prefix/lib" && ! -L "$prefix/lib/systemd" &&
-   ! -L "$unit_dir" ]] || {
+   ! -L "$unit_dir" && ! -L "$generator_dir" ]] || {
   echo "BLOCKED: symlinked package prefix" >&2; exit 1;
 }
 if [[ -z "$test_root" && "$action" == uninstall ]] &&
@@ -110,6 +112,8 @@ verify_owned() {
      -f "$src/.swapz-binaries.sha256" &&
      -f "$cli" && ! -L "$cli" && -f "$helper" && ! -L "$helper" &&
      -f "$helper_dir/dm-swapz.ko" && ! -L "$helper_dir/dm-swapz.ko" &&
+     -f "$primary_generator" && -x "$primary_generator" &&
+     ! -L "$primary_generator" &&
      -f "$mapper_service" && ! -L "$mapper_service" &&
      -f "$primary_swap" && ! -L "$primary_swap" ]] || return 1
   grep -Fxq "swapz:$version" "$src/$marker" || return 1
@@ -123,7 +127,7 @@ cleanup_owned() {
     rm -r -- "$src/build"
   fi
   rm -f -- "$cli" "$helper" "$helper_dir/dm-swapz.ko" \
-    "$mapper_service" "$primary_swap"
+    "$primary_generator" "$mapper_service" "$primary_swap"
   rmdir -- "$helper_dir"
   for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
     rm -f -- "$src/src/kernel/$(basename "$file")"
@@ -159,11 +163,13 @@ fi
 [[ ! -e "$src" && ! -L "$src" &&
    ! -e "$cli" && ! -L "$cli" &&
    ! -e "$helper_dir" && ! -L "$helper_dir" &&
+   ! -e "$primary_generator" && ! -L "$primary_generator" &&
    ! -e "$mapper_service" && ! -L "$mapper_service" &&
    ! -e "$primary_swap" && ! -L "$primary_swap" ]] || {
   echo "BLOCKED: existing DKMS source/program; refusing overwrite" >&2; exit 1;
 }
-install -d -m0755 "$src/src/kernel" "$cli_dir" "$helper_dir" "$unit_dir"
+install -d -m0755 "$src/src/kernel" "$cli_dir" "$helper_dir" \
+  "$unit_dir" "$generator_dir"
 install -m0644 dkms.conf "$src/dkms.conf"
 install -m0644 src/kernel/VERSION "$src/src/kernel/VERSION"
 for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
@@ -178,12 +184,15 @@ install -m0644 "$module_artifact" \
   "$helper_dir/dm-swapz.ko"
 sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" \
   packaging/swapz-primary-mapper.service > "$mapper_service"
+sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" \
+  packaging/swapz-primary-generator > "$primary_generator"
+chmod 0755 "$primary_generator"
 install -m0644 packaging/swapz-primary.swap "$primary_swap"
 printf 'swapz:%s\n' "$version" > "$src/$marker"
 (cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
   src/kernel/*.c src/kernel/*.h) > "$src/.swapz-sources.sha256"
 sha256sum "$cli" "$helper" "$helper_dir/dm-swapz.ko" \
-  "$mapper_service" "$primary_swap" \
+  "$primary_generator" "$mapper_service" "$primary_swap" \
   > "$src/.swapz-binaries.sha256"
 rollback() {
   rc=$?

@@ -90,26 +90,113 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertEqual(primary_status.returncode, 2)
         self.assertIn("remain disabled", primary_status.stderr)
         unit_dir = self.prefix / "lib/systemd/system"
+        generator_dir = self.prefix / "lib/systemd/system-generators"
+        primary_generator = generator_dir / "swapz-primary-generator"
         mapper_service = unit_dir / "swapz-primary-mapper.service"
         swap_unit = unit_dir / "dev-mapper-swapz\\x2dprimary.swap"
         self.assertTrue(mapper_service.is_file())
         self.assertTrue(swap_unit.is_file())
+        self.assertTrue(primary_generator.is_file())
+        self.assertTrue(os.access(primary_generator, os.X_OK))
         service_text = mapper_service.read_text()
         swap_text = swap_unit.read_text()
+        generator_text = primary_generator.read_text()
         self.assertIn("RefuseManualStart=yes", service_text)
         self.assertIn("RefuseManualStop=yes", service_text)
-        self.assertNotIn("dev-disk-by", service_text)
+        self.assertIn(
+            "systemd generator derives selected-device ordering/conflicts",
+            service_text)
         self.assertNotIn("sda4", service_text)
         self.assertNotIn("7fb9401d-04", service_text)
+        self.assertNotIn("sda4", swap_text)
+        self.assertNotIn("7fb9401d-04", swap_text)
+        self.assertNotIn("f13428f6-01", generator_text)
         self.assertIn(
             "ConditionPathExists=/var/lib/swapz/physical-recovery/primary-state.json",
             service_text)
         self.assertIn("ExecStart=" + str(binary) + " primary start", service_text)
         self.assertIn("What=/dev/mapper/swapz-primary", swap_text)
         self.assertIn("Priority=-1", swap_text)
+        self.assertIn("primary systemd-units", generator_text)
+        self.assertNotIn("BindsTo=", generator_text)
         self.assertNotIn("discard", swap_text.lower())
         self.assertFalse((self.prefix / "etc/systemd/system/swap.target.wants" /
                           swap_unit.name).exists())
+        # Target dependencies follow the protected selector. Device removal
+        # does not stop the manager and risk tearing down a mapper with live
+        # swap pages.
+        original_cli = binary.read_bytes()
+        original_mode = binary.stat().st_mode & 0o777
+        try:
+            binary.write_text(
+                "#!/bin/sh\n"
+                "[ \"$1\" = primary ] && [ \"$2\" = systemd-units ] || exit 2\n"
+                "printf '%s %s\\n' "
+                "\"$SWAPZ_TEST_DEVICE_UNIT\" \"$SWAPZ_TEST_SWAP_UNIT\"\n")
+            binary.chmod(0o755)
+            generated = []
+            for suffix, part in (("first", "1a2b3c4d\\x2d01"),
+                                 ("second", "9abc8def\\x2d02")):
+                normal = self.home / ("generator-" + suffix)
+                early = self.home / ("generator-early-" + suffix)
+                late = self.home / ("generator-late-" + suffix)
+                normal.mkdir()
+                early.mkdir()
+                late.mkdir()
+                env = dict(
+                    self.env,
+                    SWAPZ_TEST_DEVICE_UNIT=
+                    "dev-disk-by\\x2dpartuuid-" + part + ".device",
+                    SWAPZ_TEST_SWAP_UNIT=
+                    "dev-disk-by\\x2dpartuuid-" + part + ".swap")
+                result = subprocess.run(
+                    [str(primary_generator), str(normal), str(early), str(late)],
+                    env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                dropin = (normal / "swapz-primary-mapper.service.d" /
+                          "50-selected-target.conf")
+                self.assertTrue(dropin.is_file())
+                content = dropin.read_text()
+                target_device = env["SWAPZ_TEST_DEVICE_UNIT"]
+                target_swap = env["SWAPZ_TEST_SWAP_UNIT"]
+                self.assertIn("Requires=" + target_device, content)
+                self.assertIn("After=" + target_device, content)
+                self.assertIn("Conflicts=" + target_swap, content)
+                self.assertIn("Before=" + target_swap, content)
+                self.assertIn("JobTimeoutSec=30s", content)
+                generated.append(content)
+            self.assertNotEqual(generated[0], generated[1])
+            invalid_cases = (
+                ("prefix", "untrusted.device", env["SWAPZ_TEST_SWAP_UNIT"]),
+                ("mismatch",
+                 "dev-disk-by\\x2dpartuuid-1a2b3c4d\\x2d01.device",
+                 "dev-disk-by\\x2dpartuuid-9abc8def\\x2d02.swap"),
+                ("tab",
+                 "dev-disk-by\\x2dpartuuid-1a2b3c4d\\x2d01.device\t",
+                 "dev-disk-by\\x2dpartuuid-1a2b3c4d\\x2d01.swap"),
+            )
+            for suffix, device, swap in invalid_cases:
+                with self.subTest(invalid_response=suffix):
+                    invalid_normal = self.home / ("generator-invalid-" + suffix)
+                    invalid_early = self.home / ("generator-early-invalid-" + suffix)
+                    invalid_late = self.home / ("generator-late-invalid-" + suffix)
+                    invalid_normal.mkdir()
+                    invalid_early.mkdir()
+                    invalid_late.mkdir()
+                    invalid_env = dict(
+                        self.env,
+                        SWAPZ_TEST_DEVICE_UNIT=device,
+                        SWAPZ_TEST_SWAP_UNIT=swap)
+                    invalid = subprocess.run(
+                        [str(primary_generator), str(invalid_normal),
+                         str(invalid_early), str(invalid_late)],
+                        env=invalid_env, capture_output=True, text=True)
+                    self.assertNotEqual(invalid.returncode, 0)
+                    self.assertFalse((invalid_normal /
+                                      "swapz-primary-mapper.service.d").exists())
+        finally:
+            binary.write_bytes(original_cli)
+            binary.chmod(original_mode)
         # Rootless safety: the format command rejects a regular file and
         # leaves its bytes untouched. No block-device formatting occurs here.
         regular = self.home / "not-a-block-device"
@@ -125,6 +212,7 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertFalse(binary.exists())
         self.assertFalse(mapper_service.exists())
         self.assertFalse(swap_unit.exists())
+        self.assertFalse(primary_generator.exists())
         self.assertFalse(module_snapshot.exists())
         self.assertFalse((self.home / "usr/src" / ("swapz-" + VERSION)).exists())
         self.assertEqual(self.log.read_text().splitlines(),

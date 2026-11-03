@@ -152,6 +152,9 @@ static void test_target_config_and_dynamic_geometry(void)
 	struct swapz_primary_manifest manifest = {0};
 	struct swapz_primary_manifest parsed = {0};
 	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char device_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
+	char swap_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
+	char overlong_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
 	char table[128];
 	char mapper_name[64];
 	char mapper_uuid[64];
@@ -166,6 +169,25 @@ static void test_target_config_and_dynamic_geometry(void)
 	assert(swapz_primary_target_config_parse(
 		target_two, sizeof(target_two) - 1U, partuuid) == 0);
 	assert(!strcmp(partuuid, alternate.partuuid));
+	assert(swapz_primary_systemd_target_units(
+		"1A2B3C4D-01", device_unit, swap_unit) == 0);
+	assert(!strcmp(device_unit,
+		       "dev-disk-by\\x2dpartuuid-1a2b3c4d\\x2d01.device"));
+	assert(!strcmp(swap_unit,
+		       "dev-disk-by\\x2dpartuuid-1a2b3c4d\\x2d01.swap"));
+	assert(swapz_primary_systemd_target_units(
+		alternate.partuuid, device_unit, swap_unit) == 0);
+	assert(!strcmp(device_unit,
+		       "dev-disk-by\\x2dpartuuid-9abc8def\\x2d02.device"));
+	assert(swapz_primary_systemd_target_units(
+		"not-a-partuuid", device_unit, swap_unit) < 0);
+	assert(!device_unit[0] && !swap_unit[0]);
+	memset(overlong_partuuid, '-', SWAPZ_PRIMARY_PARTUUID_LENGTH);
+	overlong_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH] = '\0';
+	assert(swapz_primary_systemd_target_units(
+		overlong_partuuid, device_unit, swap_unit) < 0);
+	assert(errno == ENAMETOOLONG);
+	assert(!device_unit[0] && !swap_unit[0]);
 	assert(swapz_primary_target_valid(&alternate));
 	assert(swapz_primary_target_identity_equal(&alternate, &alternate));
 	assert(swapz_primary_target_valid(&zero_minor));
