@@ -366,7 +366,13 @@ All package mutations and mutating primary commands, including
 serialize on the same root-owned global lock at
 `/run/lock/swapz/package.lock`. Primary lock order is global mutation lock
 first and target partition recovery lock second;
-never acquire those in reverse order. The global lock directory must be owned
+never acquire those in reverse order. Qualification evidence is exact-kernel
+evidence: its top-level `kernel_release` must use the same restricted release-
+token grammar as packaging and must equal the running Linux `uname(2)` release
+at import and every later lifecycle read. A kernel change invalidates prior
+qualification until `make test` and artifact qualification are repeated for
+that kernel; do not infer support from a version range or successful DKMS
+compilation alone. The global lock directory must be owned
 by root and not group/world-writable; the lock file must be a single-link 0600
 regular file owned by root, and the opened descriptor must still match the
 named file after nonblocking `flock(LOCK_EX)`. Because `/run` is volatile,

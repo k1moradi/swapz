@@ -2026,6 +2026,7 @@ static void test_primary_qualification_report_parser(void)
 		"\"host_identity\":{\"schema\":\"swapz-host-v1\","
 		"\"architecture\":\"x86_64\",\"id_sha256\":\"%s\"},"
 		"\"source_sha\":\"%s\",\"tested_commit_sha\":\"%s\","
+		"\"kernel_release\":\"6.8.0-48-generic\","
 		"\"overall\":\"PASS\","
 		"\"qualification\":\"RAM_BACKED_NULL_BLK_ONLY\","
 		"\"stages\":["
@@ -2061,6 +2062,7 @@ static void test_primary_qualification_report_parser(void)
 		(const unsigned char *)json, (size_t)length, source, host_sha,
 		&qualification) == 0);
 	assert(!strcmp(qualification.source_sha, source));
+	assert(!strcmp(qualification.kernel_release, "6.8.0-48-generic"));
 	assert(!strcmp(qualification.host_identity_sha256, host_sha));
 	assert(!strcmp(qualification.formatter_sha256, formatter_sha));
 	assert(!strcmp(qualification.module_sha256, module_sha));
@@ -2078,6 +2080,22 @@ static void test_primary_qualification_report_parser(void)
 	assert(swapz_primary_qualification_parse_json(
 		(const unsigned char *)json, (size_t)length, "unknown", host_sha,
 		&qualification) < 0);
+	assert(swapz_primary_valid_kernel_release("6.8.0-48-generic"));
+	assert(!swapz_primary_valid_kernel_release(""));
+	assert(!swapz_primary_valid_kernel_release("6.8.0/unsafe"));
+	{
+		char *kernel_release = strstr(json, "\"kernel_release\":\"");
+		char original;
+
+		assert(kernel_release);
+		kernel_release += strlen("\"kernel_release\":\"");
+		original = *kernel_release;
+		*kernel_release = '/';
+		assert(swapz_primary_qualification_parse_json(
+			(const unsigned char *)json, (size_t)length, source, host_sha,
+			&qualification) < 0);
+		*kernel_release = original;
+	}
 	{
 		char *overall = strstr(json, "\"overall\":\"PASS\"");
 

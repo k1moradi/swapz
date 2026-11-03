@@ -4796,7 +4796,11 @@ source path. Package ownership hashes and uninstall checks must cover the
 retained module image as well as the CLI, oracle and systemd files.
 
 `swapzctl primary qualification-import <report>` is an explicit root-only
-metadata operation. Before reading or replacing qualification state, production
+metadata operation. The report must contain exactly one well-formed top-level
+`kernel_release`; primary import and subsequent report reads compare it byte-
+for-byte with the current x86_64 Linux `uname -r`. A missing, malformed,
+duplicated or stale kernel release is BLOCKED and requires fresh exact-kernel
+qualification. Before reading or replacing qualification state, production
 and privileged qualification builds must acquire the shared global package/
 mutation lock; the import then acquires the partition recovery lock, preserving
 the global-before-partition order. It accepts only a stable, non-writable regular

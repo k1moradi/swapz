@@ -22,6 +22,7 @@ enum swapz_primary_stage {
 #define SWAPZ_PRIMARY_RUN_ID_LENGTH 32U
 #define SWAPZ_PRIMARY_SOURCE_SHA_LENGTH 40U
 #define SWAPZ_PRIMARY_SHA256_LENGTH 64U
+#define SWAPZ_PRIMARY_KERNEL_RELEASE_LENGTH 127U
 #define SWAPZ_PRIMARY_PARTUUID_LENGTH 64U
 #define SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX 256U
 
@@ -53,6 +54,7 @@ struct swapz_primary_manifest {
 
 struct swapz_primary_qualification {
 	char source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 1U];
+	char kernel_release[SWAPZ_PRIMARY_KERNEL_RELEASE_LENGTH + 1U];
 	char host_identity_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
 	char formatter_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
 	char module_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
