@@ -51,6 +51,15 @@ snapshots with identical relevant monotonic counters and validate
 `logical_write == (compressed + raw + zero_elided) * 4096`. A malformed,
 overflowing, unstable or failed target must not produce a numeric ratio.
 
+Kernel information-status emission may use multiple bounded `DMEMIT` calls to
+keep callback stack use bounded. The externally concatenated INFO stream is the
+contract: preserve token order, names and values across emission chunks.
+Source-contract helpers may reconstruct that stream for token-order checks,
+while counter-ownership assertions continue to inspect the actual C
+expressions. Large diagnostic snapshots may use bounded `GFP_NOIO` scratch
+allocation instead of kernel stack; allocation failure must emit an explicit
+error status without fabricated counters or backing-device I/O.
+
 ### Representative-memory tooling
 
 Representative-memory analysis must be explicitly owner supplied and offline.

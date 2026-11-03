@@ -788,7 +788,7 @@ static swapz_u16 swapz_probe_set(
                       "transform_wall_ns", "wall_ns"):
             self.assertIn(f"delta64_{field}=%llu", status)
             self.assertIn(f"READ_ONCE(ctx->ordered_delta64.{field})", status)
-            self.assertIn(f"prep.delta64.{field}", status)
+            self.assertIn(f"prep->delta64.{field}", status)
 
     def test_preparation_array_reservation_and_release_are_bounded(self):
         slots = (ROOT / "src/kernel/preparation-slots.h").read_text()
@@ -2953,8 +2953,8 @@ int main(void)
         self.assertNotIn("read_worker_cpu_ns +=", DM)
         self.assertIn("prep_worker_wall_ns=%llu", status)
         self.assertIn("prep_worker_cpu_ns=%llu", status)
-        self.assertIn("prep.worker_wall_ns", status)
-        self.assertIn("prep.worker_cpu_ns", status)
+        self.assertIn("prep->worker_wall_ns", status)
+        self.assertIn("prep->worker_cpu_ns", status)
         for key in ("lz4_wall_ns", "decode_wall_ns", "read_copy_wall_ns",
                     "read_copy_bytes", "read_engine_nonio_wall_ns",
                     "window_sort_wall_ns", "window_commit_wall_ns",
@@ -2975,7 +2975,7 @@ int main(void)
             self.assertIn(key + "=%llu", status)
         self.assertIn("engine_publish_auth_wall_ns=%llu", status)
         self.assertIn("prep_crc_wall_ns=%llu", status)
-        self.assertIn("prep.crc_wall_ns", status)
+        self.assertIn("prep->crc_wall_ns", status)
 
     def test_id61_native_gc_scan_scaling_is_bounded_and_reported(self):
         scale = (ROOT / "tests/runtime/native/gc/scan-scaling.c").read_text()
@@ -4363,8 +4363,8 @@ int main(void)
         self.assertRegex(
             status,
             r"ctx->ordered_copy_fallback_pages\s*\+\s*"
-            r"prep\.copy_fallback_pages\s*\+\s*"
-            r"submitter\.copy_fallback_pages")
+            r"prep->copy_fallback_pages\s*\+\s*"
+            r"submitter->copy_fallback_pages")
         self.assertIn("PageCompound(vec.bv_page)", mapper)
         self.assertIn("folio_test_large(page_folio(vec.bv_page))", mapper)
 
@@ -4479,8 +4479,8 @@ int main(void)
         self.assertIn("ctx->prep_lower_write_end_queued", lower)
         self.assertIn("prep_lower_read_overlap_starts=%llu", status)
         self.assertIn("prep_lower_read_overlap_ns=%llu", status)
-        self.assertRegex(status, r"prep\.prepared_during_lower_write,\s*"
-                         r"prep\.lower_write_overlap_ns,\s*0ULL, 0ULL,")
+        self.assertRegex(status, r"prep->prepared_during_lower_write,\s*"
+                         r"prep->lower_write_overlap_ns,\s*0ULL,\s*0ULL,")
         self.assertLess(lower.index("atomic_set(&ctx->lower_write_active, 1)"),
                         lower.index("swapz_queue_preparation_workers(ctx)"))
         self.assertLess(lower.index("swapz_queue_preparation_workers(ctx)"),
@@ -4574,10 +4574,10 @@ int main(void)
                       freeing)
         self.assertIn("kfree(ctx->preparation_lanes)", freeing)
         self.assertIn("vfree(ctx->preparation_pages)", freeing)
-        self.assertIn("ctx->lz4_wall_ns + prep.lz4_wall_ns", status)
-        self.assertIn("prep.copy_wall_ns", status)
-        self.assertIn("prep.worker_wall_ns", status)
-        self.assertIn("prep.worker_cpu_ns", status)
+        self.assertIn("ctx->lz4_wall_ns + prep->lz4_wall_ns", status)
+        self.assertIn("prep->copy_wall_ns", status)
+        self.assertIn("prep->worker_wall_ns", status)
+        self.assertIn("prep->worker_cpu_ns", status)
         self.assertIn("delta64_prepare_workers=%u", status)
         self.assertIn("delta64_prepare_active_max=%u", status)
         self.assertIn("delta64_prepare_pages=%llu", status)
@@ -5606,7 +5606,7 @@ int main(void) {
                       body("swapz_compress_prepared_page"))
         status = body("swapz_status")
         self.assertIn("mapped_snapshot_input_pages=%llu", status)
-        self.assertIn("prep.mapped_snapshot_pages + submitter.mapped_snapshot_pages", status)
+        self.assertIn("prep->mapped_snapshot_pages + submitter->mapped_snapshot_pages", status)
         self.assertIn("ctx->ordered_direct_lz4_pages,", status)
         ordered = body("swapz_accept_write")
         force_raw = ordered.index("if (force_raw && bulk_raw_eligible)")
