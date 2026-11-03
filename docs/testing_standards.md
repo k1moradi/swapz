@@ -124,7 +124,20 @@ persistent evidence whenever admission reaches durable evidence creation.
 
 The report values, private primary plan qualified/live values, embedded control
 source SHA, and observed installed bytes must all agree with the exact validated
-source. The plan's `privileged_execution_enabled=true` proves only that the
+source. Before `prepare`, the physical helper must independently derive the maximum
+logical mapper geometry from the admitted partition bytes using the same
+allocation-free policy as production authority: reserve block zero, round
+physical data down to 256-block segments, require
+`max(ceil(logical_pages / 8), 512)` GC-reserve blocks, and retain one separate
+256-block foreground COW segment. The helper must require the primary plan's
+`logical_pages`, `logical_bytes`, `linux_swap_kib`, and
+`gc_reserve_blocks` to match that independent result. After `prepare`, it
+must re-check the persisted manifest's logical pages/sectors against the same
+result before allowing `start`. Any stale zero-headroom geometry is BLOCKED
+before mutation or FAIL after a prepared transaction; manager success text is
+not capacity authority.
+
+The plan's `privileged_execution_enabled=true` proves only that the
 private physical seam and runtime marker are active; it never authorizes the
 ordinary production binary. The module is deliberately absent before start, so
 live module sysfs provenance is expected to be unavailable at admission and

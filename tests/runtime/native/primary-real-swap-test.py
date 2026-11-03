@@ -482,6 +482,68 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(parsed["logical_sectors_int"], 8192)
         self.assertEqual(parsed["device_major_int"], 8)
 
+    def test_independent_primary_geometry_matches_safe_current_card(self):
+        geometry = qualify.maximum_primary_geometry(124_787_884_032)
+        self.assertEqual(geometry["physical_blocks"], 30_465_536)
+        self.assertEqual(geometry["logical_pages"], 27_080_192)
+        self.assertEqual(geometry["logical_sectors"], 216_641_536)
+        self.assertEqual(geometry["logical_bytes"], 110_920_466_432)
+        self.assertEqual(geometry["linux_swap_kib"], 108_320_764)
+        self.assertEqual(geometry["gc_reserve_blocks"], 3_385_024)
+        self.assertNotEqual(geometry["logical_pages"], 27_080_448)
+
+        for invalid_bytes in (
+                0,
+                qualify.PAGE_BYTES + 1,
+                (qualify.UINT32_MAX + 2) * qualify.PAGE_BYTES):
+            with self.subTest(invalid_bytes=invalid_bytes), \
+                    self.assertRaises(qualify.Blocked):
+                qualify.maximum_primary_geometry(invalid_bytes)
+
+    def test_prepared_manifest_capacity_must_match_independent_geometry(self):
+        run_id = "1" * 32
+        geometry = qualify.maximum_primary_geometry(124_787_884_032)
+        text = (
+            "schema=swapz-primary-manifest-v2\n"
+            f"run_id={run_id}\n"
+            f"source_sha={'2' * 40}\n"
+            f"swapzctl_sha256={'3' * 64}\n"
+            f"module_sha256={'4' * 64}\n"
+            f"qualification_report_sha256={'5' * 64}\n"
+            "device_major=8\n"
+            "device_minor=1\n"
+            "partuuid=f13428f6-01\n"
+            "device_bytes=124787884032\n"
+            f"original_header_sha256={'6' * 64}\n"
+            f"logical_pages={geometry['logical_pages']}\n"
+            f"logical_sectors={geometry['logical_sectors']}\n"
+            "mapper_name=swapz-primary\n"
+            f"mapper_uuid=SWAPZ-PRIMARY-{run_id}\n"
+            f"dm_table=0 {geometry['logical_sectors']} swapz 8:1 0 64 0 2 0 1 0 0\n"
+        )
+        manifest = qualify.parse_manifest(text)
+        plan = {
+            "qualified_swapzctl_sha256": "3" * 64,
+            "qualified_module_sha256": "4" * 64,
+            "qualification_report_sha256": "5" * 64,
+            "target_device_major": 8,
+            "target_device_minor": 1,
+            "target_device_bytes": 124_787_884_032,
+            "logical_pages": geometry["logical_pages"],
+            "logical_bytes": geometry["logical_bytes"],
+            "linux_swap_kib": geometry["linux_swap_kib"],
+            "gc_reserve_blocks": geometry["gc_reserve_blocks"],
+        }
+        qualify._validate_prepared_manifest(
+            manifest, plan, "2" * 40, "f13428f6-01")
+
+        stale = dict(plan)
+        stale["logical_pages"] = 27_080_448
+        with self.assertRaisesRegex(
+                qualify.QualificationFailure, "production authority geometry"):
+            qualify._validate_prepared_manifest(
+                manifest, stale, "2" * 40, "f13428f6-01")
+
     def test_manifest_rejects_table_substitution_duplicate_and_bad_uuid(self):
         canonical = self.canonical_manifest()
         mutants = (

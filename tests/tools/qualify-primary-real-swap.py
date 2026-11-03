@@ -42,6 +42,10 @@ ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
 REAL_SWAP_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
 MAPPER_NAME = "swapz-primary"
 PAGE_BYTES = 4096
+SEGMENT_BLOCKS = 256
+MIN_RESERVE_BLOCKS = 2 * SEGMENT_BLOCKS
+FOREGROUND_HEADROOM_BLOCKS = SEGMENT_BLOCKS
+UINT32_MAX = (1 << 32) - 1
 MIB = 1024 * 1024
 SECTOR_BYTES = 512
 BLKGETSIZE64 = 0x80081272
@@ -569,6 +573,51 @@ def require_expected_swap_priority(expected: SwapRow, unrelated: list[SwapRow]) 
                 "real-swap traffic cannot be attributed without touching unrelated swap")
 
 
+def maximum_primary_geometry(device_bytes: int) -> dict[str, int]:
+    """Derive the allocation-free production capacity from backing bytes."""
+    if not isinstance(device_bytes, int) or isinstance(device_bytes, bool) or \
+            device_bytes < PAGE_BYTES or device_bytes % PAGE_BYTES:
+        raise Blocked("primary backing geometry is invalid")
+    blocks = device_bytes // PAGE_BYTES
+    physical_blocks = ((blocks - 1) // SEGMENT_BLOCKS) * SEGMENT_BLOCKS
+    if physical_blocks == 0 or physical_blocks > UINT32_MAX:
+        raise Blocked("primary physical block geometry is outside authority limits")
+
+    def fits(logical_pages: int) -> bool:
+        if logical_pages <= 0 or logical_pages > UINT32_MAX:
+            return False
+        reserve_blocks = (logical_pages + 7) // 8
+        reserve_blocks = max(reserve_blocks, MIN_RESERVE_BLOCKS)
+        if reserve_blocks >= physical_blocks:
+            return False
+        foreground_blocks = (
+            (physical_blocks - reserve_blocks) // SEGMENT_BLOCKS
+        ) * SEGMENT_BLOCKS
+        return logical_pages + FOREGROUND_HEADROOM_BLOCKS <= foreground_blocks
+
+    low = 0
+    high = physical_blocks
+    while low < high:
+        candidate = low + (high - low + 1) // 2
+        if fits(candidate):
+            low = candidate
+        else:
+            high = candidate - 1
+    if low == 0:
+        raise Blocked("primary backing has no admissible logical capacity")
+
+    reserve_blocks = max((low + 7) // 8, MIN_RESERVE_BLOCKS)
+    logical_bytes = low * PAGE_BYTES
+    return {
+        "physical_blocks": physical_blocks,
+        "logical_pages": low,
+        "logical_sectors": low * (PAGE_BYTES // SECTOR_BYTES),
+        "logical_bytes": logical_bytes,
+        "linux_swap_kib": logical_bytes // 1024 - PAGE_BYTES // 1024,
+        "gc_reserve_blocks": reserve_blocks,
+    }
+
+
 def parse_manifest(text: str) -> dict:
     values: dict[str, str] = {}
     for raw_line in text.splitlines():
@@ -1002,8 +1051,24 @@ def verify_authorized_target(
         size_bytes = int(plan["target_device_bytes"])
         parent_major = int(plan["target_physical_parent_major"])
         parent_minor = int(plan["target_physical_parent_minor"])
+        plan_logical_pages = int(plan["logical_pages"])
+        plan_logical_bytes = int(plan["logical_bytes"])
+        plan_linux_swap_kib = int(plan["linux_swap_kib"])
+        plan_reserve_blocks = int(plan["gc_reserve_blocks"])
     except (KeyError, TypeError, ValueError) as exc:
         raise Blocked("primary plan target geometry is unavailable") from exc
+
+    expected_geometry = maximum_primary_geometry(size_bytes)
+    plan_geometry = {
+        "logical_pages": plan_logical_pages,
+        "logical_bytes": plan_logical_bytes,
+        "linux_swap_kib": plan_linux_swap_kib,
+        "gc_reserve_blocks": plan_reserve_blocks,
+    }
+    for key, observed in plan_geometry.items():
+        if observed != expected_geometry[key]:
+            raise Blocked(
+                f"primary plan {key} differs from independently derived capacity")
 
     by_partuuid = Path("/dev/disk/by-partuuid") / selector_partuuid
     try:
@@ -2016,6 +2081,24 @@ def _validate_prepared_manifest(manifest: dict, plan: dict, validated_source: st
             manifest["device_minor_int"] != int(plan["target_device_minor"]) or \
             manifest["device_bytes_int"] != int(plan["target_device_bytes"]):
         raise QualificationFailure("prepared manifest target identity differs from admitted target")
+    try:
+        expected_geometry = maximum_primary_geometry(
+            manifest["device_bytes_int"])
+        plan_logical_pages = int(plan["logical_pages"])
+        plan_logical_bytes = int(plan["logical_bytes"])
+        plan_linux_swap_kib = int(plan["linux_swap_kib"])
+        plan_reserve_blocks = int(plan["gc_reserve_blocks"])
+    except (Blocked, KeyError, TypeError, ValueError) as exc:
+        raise QualificationFailure(
+            "prepared manifest capacity cannot be independently verified") from exc
+    if manifest["logical_pages_int"] != expected_geometry["logical_pages"] or \
+            manifest["logical_sectors_int"] != expected_geometry["logical_sectors"] or \
+            plan_logical_pages != expected_geometry["logical_pages"] or \
+            plan_logical_bytes != expected_geometry["logical_bytes"] or \
+            plan_linux_swap_kib != expected_geometry["linux_swap_kib"] or \
+            plan_reserve_blocks != expected_geometry["gc_reserve_blocks"]:
+        raise QualificationFailure(
+            "prepared manifest/plan capacity differs from production authority geometry")
 
 
 def _verify_completed_cleanup(manifest: dict, baseline_identity: set[tuple], partuuid: str) -> None:
