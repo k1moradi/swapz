@@ -4792,7 +4792,10 @@ digests plus installed artifact identity must match the exact qualified release
 artifacts. Real-swap, maximum-capacity/RAM and sustained-physical PASS evidence
 must bind the SHA-256 of the exact current `FROZEN`
 `docs/production-acceptance.json`; changing that policy invalidates those
-physical PASS observations until they are requalified. The physical real-swap
+physical PASS observations until they are requalified. Release evaluation must
+parse that policy with duplicate-key rejection, require exactly the canonical
+top-level fields and expected physical-contract schema, and BLOCK rather than
+hash a malformed merely-`FROZEN` document. The physical real-swap
 helper and physical-performance summary must emit that exact policy digest in
 their own result/evidence payloads so release aggregation never reconstructs or
 guesses the policy binding after the run. Release-evidence unit fixtures must

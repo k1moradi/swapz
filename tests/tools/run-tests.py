@@ -164,16 +164,33 @@ def _readiness_target_key(target):
 
 
 def production_acceptance_manifest_sha256():
-    """Return the exact frozen acceptance-policy digest, or None if unusable."""
+    """Return the exact canonical frozen-policy digest, or None if unusable."""
     path = ROOT / "docs/production-acceptance.json"
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate production-acceptance key {key}")
+            result[key] = value
+        return result
+
     try:
         payload = path.read_bytes()
-        manifest = json.loads(payload)
-    except (OSError, ValueError, TypeError):
+        manifest = json.loads(payload, object_pairs_hook=unique_object)
+    except (OSError, UnicodeError, ValueError, TypeError):
         return None
-    if (not isinstance(manifest, dict) or
+    required = {
+        "schema", "status", "primary_real_swap", "physical_qualification"}
+    physical = manifest.get("physical_qualification") if isinstance(
+        manifest, dict) else None
+    if (not isinstance(manifest, dict) or set(manifest) != required or
             manifest.get("schema") != "swapz-production-acceptance-v1" or
-            manifest.get("status") != "FROZEN"):
+            manifest.get("status") != "FROZEN" or
+            not isinstance(manifest.get("primary_real_swap"), dict) or
+            not isinstance(physical, dict) or
+            physical.get("schema") != "swapz-performance-qualification-v1" or
+            physical.get("prospective") is not True):
         return None
     return hashlib.sha256(payload).hexdigest()
 

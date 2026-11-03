@@ -4175,6 +4175,60 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             verdict["evidence_statuses"]["installed_artifact_identity"],
             "BLOCKED")
 
+    def test_release_acceptance_manifest_is_canonical_and_duplicate_free(self):
+        previous_root = runner.ROOT
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                runner.ROOT = Path(directory)
+                docs = runner.ROOT / "docs"
+                docs.mkdir()
+                manifest_path = docs / "production-acceptance.json"
+
+                valid = {
+                    "schema": "swapz-production-acceptance-v1",
+                    "status": "FROZEN",
+                    "primary_real_swap": {},
+                    "physical_qualification": {
+                        "schema": "swapz-performance-qualification-v1",
+                        "prospective": True,
+                    },
+                }
+                payload = (
+                    json.dumps(valid, sort_keys=True, separators=(",", ":")) +
+                    "\n").encode()
+                manifest_path.write_bytes(payload)
+                self.assertEqual(
+                    runner.production_acceptance_manifest_sha256(),
+                    hashlib.sha256(payload).hexdigest())
+
+                manifest_path.write_text(
+                    '{"schema":"swapz-production-acceptance-v1",'
+                    '"status":"FROZEN","status":"FROZEN",'
+                    '"primary_real_swap":{},'
+                    '"physical_qualification":{'
+                    '"schema":"swapz-performance-qualification-v1",'
+                    '"prospective":true}}',
+                    encoding="utf-8")
+                self.assertIsNone(
+                    runner.production_acceptance_manifest_sha256())
+
+                invalid = dict(valid)
+                invalid["unexpected"] = True
+                manifest_path.write_text(
+                    json.dumps(invalid), encoding="utf-8")
+                self.assertIsNone(
+                    runner.production_acceptance_manifest_sha256())
+
+                invalid = dict(valid)
+                invalid["physical_qualification"] = {
+                    "schema": "wrong", "prospective": True}
+                manifest_path.write_text(
+                    json.dumps(invalid), encoding="utf-8")
+                self.assertIsNone(
+                    runner.production_acceptance_manifest_sha256())
+        finally:
+            runner.ROOT = previous_root
+
     def test_physical_passes_bind_frozen_acceptance_manifest(self):
         for evidence_name in (
                 "real_linux_swap", "maximum_capacity_and_ram",
