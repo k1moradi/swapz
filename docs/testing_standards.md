@@ -3892,7 +3892,10 @@ install or expose either test seam. The source contract must inspect the root
 Makefile directly and reject the physical seam macro there. The lifecycle audit
 must identify the ordinary production gate independently of seam-local gate
 definitions, and must prove the native swapon/swapoff syscall implementations
-plus activate/deactivate routing through the shared transition ops. Rootless CI
+plus activate/deactivate routing through the shared transition ops. Its
+comment/string-stripping function-body extractor must recognize the production
+helpers' actual scalar return types, including `int` and syscall-width
+`long`, rather than treating a valid native syscall wrapper as absent. Rootless CI
 must warning-compile both seams, prove the physical seam fails compilation
 without its qualified-control path, and prove both seam macros cannot be
 combined. The production topology proof
