@@ -1600,10 +1600,36 @@ def parse_loaded_correctness(output):
             r"PASS_ID36_RESOURCE_PRESSURE=memory_high_events:(\d+) "
             r"memory_peak_bytes:(\d+) cpu_some_usec:(\d+) "
             r"cpu_workers:(\d+) pressure_mib:(\d+) oom:(\d+) oom_kill:(\d+)$"),
+        "primary_lifecycle": re.compile(
+            r"PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE="
+            r"run_id:[0-9a-f]{32} "
+            r"partuuid:[0-9a-f][0-9a-f-]{6,62}[0-9a-f] "
+            r"device:[0-9]+:[0-9]+ prepare:READY start:ACTIVE "
+            r"swapon:true stop:COMPLETE recovery_required:false$"),
+        "primary_interruption_recovery": re.compile(
+            r"PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY="
+            r"cases:6 fresh_process:true host_swap_identity:preserved "
+            r"repeat_recovery:safe$"),
+        "primary_negative_recovery": re.compile(
+            r"PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="
+            r"cases:11 ambiguous_syscall:true inventory_failure:true "
+            r"wrong_mapper:true failed_swapoff:true stale_run:true "
+            r"fsync_failure:true lost_provenance:true "
+            r"repeat_recovery:safe host_swap_identity:preserved$"),
     }
+    expected_interruption_phases = (
+        "start-starting", "start-module-loaded", "start-mapper-resumed",
+        "start-swapon", "stop-stopping", "stop-swapoff",
+    )
+    interruption_pattern = re.compile(
+        r"PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=([a-z0-9-]+)$")
+    observed_interruption_phases = []
     found = {}
     for line in output.splitlines():
         text = line.strip()
+        interruption_match = interruption_pattern.fullmatch(text)
+        if interruption_match:
+            observed_interruption_phases.append(interruption_match.group(1))
         for name, pattern in patterns.items():
             match = pattern.fullmatch(text)
             if match:
@@ -1612,6 +1638,12 @@ def parse_loaded_correctness(output):
     if missing:
         return {"overall": "INCOMPLETE",
                 "reason": "missing loaded correctness markers: " + ",".join(missing)}
+    if tuple(observed_interruption_phases) != expected_interruption_phases:
+        return {
+            "overall": "INCOMPLETE",
+            "reason": (
+                "primary lifecycle interruption recovery evidence is incomplete"),
+        }
 
     (capacity_pages, capacity_logical_bytes, capacity_lower_bytes,
      capacity_physical_blocks, capacity_segments, capacity_mapper_read_bytes,
@@ -1754,6 +1786,9 @@ def parse_loaded_correctness(output):
         "raw_read_verified_pages": raw_read_pages,
         "raw_read_async_batches": raw_read_batches,
         "raw_read_lower_requests": raw_read_reqs,
+        "primary_lifecycle": "PASS",
+        "primary_lifecycle_interruptions": len(expected_interruption_phases),
+        "primary_lifecycle_negative_cases": 11,
         "raw_pages": raw_pages,
         "zero_pages": zero_pages,
         "flush_calls": flush_calls,
