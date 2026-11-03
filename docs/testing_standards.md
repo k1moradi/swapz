@@ -831,8 +831,9 @@ must require the canonical primary lifecycle PASS record, the exact ordered six
 initial start/stop fresh-process interruption PASS phases plus the five
 fresh-process recovery interruption phases, the resulting eleven-case
 interruption-recovery aggregate, and the separate eleven-case negative-recovery
-aggregate. Missing, duplicated,
-substituted or malformed lifecycle markers make Stage 5 evidence incomplete;
+aggregate. Missing, duplicated (including repeated lifecycle or aggregate PASS
+records), substituted or malformed lifecycle markers make Stage 5 evidence
+incomplete; the parser must not silently overwrite an earlier PASS match.
 merely executing the helper or recognizing its failure markers is not sufficient
 for a qualification PASS. The loaded report parser must require those same
 eleven phases in canonical order and the `cases:11` recovery aggregate; a

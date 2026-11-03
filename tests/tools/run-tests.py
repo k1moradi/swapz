@@ -1636,6 +1636,15 @@ def parse_loaded_correctness(output):
         for name, pattern in patterns.items():
             match = pattern.fullmatch(text)
             if match:
+                # Repeated lifecycle PASS claims are not independent proof.
+                # Earlier matches must never be silently overwritten.
+                if name in (
+                        "primary_lifecycle", "primary_interruption_recovery",
+                        "primary_negative_recovery") and name in found:
+                    return {
+                        "overall": "INCOMPLETE",
+                        "reason": "duplicate primary lifecycle evidence marker",
+                    }
                 found[name] = tuple(int(value) for value in match.groups())
     missing = [name for name in patterns if name not in found]
     if missing:

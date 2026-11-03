@@ -1129,6 +1129,19 @@ class ReportContract(unittest.TestCase):
         result = runner.parse_loaded_correctness(duplicated)
         self.assertEqual(result["overall"], "INCOMPLETE")
 
+        # The three primary aggregate PASS records must each occur once.
+        for marker in required_markers:
+            with self.subTest(duplicated=marker):
+                original_line = next(
+                    line for line in output.splitlines()
+                    if line.startswith(marker))
+                duplicated_aggregate = output.replace(
+                    original_line + "\n",
+                    original_line + "\n" + original_line + "\n", 1)
+                result = runner.parse_loaded_correctness(duplicated_aggregate)
+                self.assertEqual(result["overall"], "INCOMPLETE")
+                self.assertIn("duplicate primary", result["reason"])
+
     def test_raw_read_fanout_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 "
                   "async_batches:64 lower_read_reqs:512")
