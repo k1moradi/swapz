@@ -89,6 +89,18 @@ static int swapz_primary_lifecycle_runtime_enabled(void)
 #endif
 }
 
+/*
+ * One source of truth for both read-only admission reporting and mutating
+ * command dispatch. Ordinary production resolves the compile-time gate to
+ * zero; private qualification seams still require their existing runtime
+ * admission before this can become true.
+ */
+static int swapz_primary_privileged_execution_enabled(void)
+{
+	return SWAPZ_PRIMARY_EXECUTION_ENABLED &&
+	       swapz_primary_lifecycle_runtime_enabled();
+}
+
 #ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
 static void swapz_primary_test_interrupt_after(const char *phase)
 {
@@ -9170,6 +9182,8 @@ static int swapz_primary_read_only_plan(void)
 		swapz_primary_qualification_artifacts_match(
 			&qualification, live_swapzctl_sha256, live_module_sha256,
 			live_oracle_sha256);
+	int privileged_execution_enabled =
+		swapz_primary_privileged_execution_enabled();
 
 	/* Each plan is a fresh identity decision; never report stale global target
 	 * state if this process is reused after a failed selector read. */
@@ -9237,7 +9251,7 @@ static int swapz_primary_read_only_plan(void)
 
 	printf("{\"schema\":\"swapz-primary-plan-v1\","
 	       "\"status\":\"BLOCKED\","
-	       "\"privileged_execution_enabled\":false,"
+	       "\"privileged_execution_enabled\":%s,"
 	       "\"control_build_source_sha\":\"%s\","
 	       "\"control_build_source_clean\":%s,"
 	       "\"module_build_provenance_read\":%s,"
@@ -9297,6 +9311,7 @@ static int swapz_primary_read_only_plan(void)
 	       "\"logical_pages\":%llu,\"logical_bytes\":%llu,"
 	       "\"linux_swap_kib\":%llu,\"gc_reserve_blocks\":%llu,"
 	       "\"reason\":\"device_identity_recovery_and_lifecycle_gates_not_qualified\"}\n",
+	       privileged_execution_enabled ? "true" : "false",
 	       SWAPZ_BUILD_SOURCE_SHA,
 	       SWAPZ_BUILD_SOURCE_CLEAN ? "true" : "false",
 	       module_build_provenance_read ? "true" : "false",
@@ -9413,8 +9428,7 @@ int swapz_primary_command(int argc, char **argv)
 		fputs("BLOCKED: unsupported primary-swap action\n", stderr);
 		return 2;
 	}
-	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED ||
-	    !swapz_primary_lifecycle_runtime_enabled()) {
+	if (!swapz_primary_privileged_execution_enabled()) {
 		fputs("BLOCKED: primary-swap provisioning, activation, teardown and "
 		      "recovery remain disabled pending qualification\n", stderr);
 		return 2;

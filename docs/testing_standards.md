@@ -4747,10 +4747,16 @@ Lifecycle execution-gate assertions must evaluate the active C preprocessor
 configuration rather than the first textual `#define`. Ordinary production
 must resolve `SWAPZ_PRIMARY_EXECUTION_ENABLED` to 0; owned-null_blk and
 physical qualification may resolve it to 1 only with all private controls
-present, and the two private modes must fail when combined. Ordinary
-preprocessed source must not read the physical runtime marker. Comments and
-string literals containing fake gate or syscall text never satisfy safety
-assertions.
+present, and the two private modes must fail when combined. The read-only
+primary plan and mutating command dispatcher must use the same derived
+compile-time-plus-runtime gate. `privileged_execution_enabled` must therefore
+report false for the ordinary build, true for owned-null_blk qualification, and
+true for physical qualification only while its explicit runtime marker is
+exactly enabled. A truthful true value in a private qualification binary is
+evidence about that test seam only: it does not authorize or enable ordinary
+production lifecycle execution. Ordinary preprocessed source must not read the
+physical runtime marker. Comments and string literals containing fake gate or
+syscall text never satisfy safety assertions.
 
 The official rootless stage directly executes every mandatory Python contract
 owned by that stage, including the owned-null_blk lifecycle qualifier and

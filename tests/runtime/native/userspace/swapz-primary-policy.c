@@ -2711,6 +2711,7 @@ int main(void)
 		base_template, geteuid()) < 0);
 	assert(chmod(base_template, 0700) == 0);
 	assert(rmdir(base_template) == 0);
+	assert(swapz_primary_privileged_execution_enabled() == 0);
 	assert(swapz_primary_command(1, plan) == 2);
 	assert(swapz_primary_command(1, prepare) == 2);
 	assert(swapz_primary_command(1, start) == 2);

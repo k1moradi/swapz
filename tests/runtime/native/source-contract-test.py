@@ -210,6 +210,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         live_hashes = source_body("swapz_primary_live_artifact_hashes", primary)
         runtime_gate = source_body(
             "swapz_primary_lifecycle_runtime_enabled", primary)
+        privileged_gate = source_body(
+            "swapz_primary_privileged_execution_enabled", primary)
+        plan = source_body("swapz_primary_read_only_plan", primary)
         rootless = (ROOT / "tests/tools/test-rootless.sh").read_text()
 
         self.assertIn("#define SWAPZ_PRIMARY_EXECUTION_ENABLED 0", primary)
@@ -226,8 +229,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn(
             'getenv("SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION")', runtime_gate)
         self.assertIn('!strcmp(enabled, "1")', runtime_gate)
+        self.assertIn("SWAPZ_PRIMARY_EXECUTION_ENABLED", privileged_gate)
         self.assertIn(
-            "!swapz_primary_lifecycle_runtime_enabled()", command)
+            "swapz_primary_lifecycle_runtime_enabled()", privileged_gate)
+        self.assertIn(
+            "!swapz_primary_privileged_execution_enabled()", command)
+        self.assertIn(
+            "swapz_primary_privileged_execution_enabled()", plan)
+        self.assertIn(
+            '"\\\"privileged_execution_enabled\\\":%s,"', plan)
+        self.assertNotIn(
+            '"\\\"privileged_execution_enabled\\\":false,"', plan)
         self.assertIn(
             "SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL", live_hashes)
         self.assertIn(

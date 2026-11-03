@@ -734,6 +734,20 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
                 owned_definitions + physical_definitions).returncode,
             0, "private lifecycle modes compiled together")
 
+        gate = c_function_body(
+            source, "swapz_primary_privileged_execution_enabled")
+        plan = c_function_body(source, "swapz_primary_read_only_plan")
+        command = c_function_body(source, "swapz_primary_command")
+        self.assertIn("SWAPZ_PRIMARY_EXECUTION_ENABLED", gate)
+        self.assertIn("swapz_primary_lifecycle_runtime_enabled()", gate)
+        self.assertIn("swapz_primary_privileged_execution_enabled()", plan)
+        self.assertIn(
+            '"\\\"privileged_execution_enabled\\\":%s,"', plan)
+        self.assertNotIn(
+            '"\\\"privileged_execution_enabled\\\":false,"', plan)
+        self.assertIn(
+            "!swapz_primary_privileged_execution_enabled()", command)
+
         ordinary_source = preprocessed_primary_source()
         physical_source = preprocessed_primary_source(physical_definitions)
         self.assertNotIn(
