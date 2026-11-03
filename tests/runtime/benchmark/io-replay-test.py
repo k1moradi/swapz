@@ -2403,7 +2403,8 @@ class PairReplayContract(unittest.TestCase):
         qualification = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(qualification)
 
-        def arm(candidate, raw_write=100.0, screened=True):
+        def arm(candidate, raw_write=100.0, screened=True,
+                partuuid="f13428f6-01", device_bytes=124787884032):
             swapz = candidate == "swapz"
             return {
                 "candidate": candidate, "verdict": "PASS", "source_sha": "a" * 40,
@@ -2439,8 +2440,8 @@ class PairReplayContract(unittest.TestCase):
                         512 * 1024 * 1024 if swapz else 0,
                 },
                 "device_identity": {
-                    "physical_partuuid": "f13428f6-01",
-                    "physical_device_bytes": 124787884032,
+                    "physical_partuuid": partuuid,
+                    "physical_device_bytes": device_bytes,
                     "lower_major_minor": "8:1",
                     "dm_uuid": "SWAPZ-BENCH-0123456789abcdef0123456789abcdef"
                         if swapz else None,
@@ -2478,6 +2479,9 @@ class PairReplayContract(unittest.TestCase):
             for index in range(1, 6)]
         stable = qualification.evaluate(stable_pairs)
         self.assertEqual(stable["campaign_source_sha"], "a" * 40)
+        self.assertEqual(
+            stable["target"],
+            {"partuuid": "f13428f6-01", "device_bytes": 124787884032})
         self.assertEqual(stable["decisions"]["sd-service-balanced"]["status"], "PASS")
 
         # An excluded original cannot be hidden by a full set of later PASS
@@ -2501,6 +2505,20 @@ class PairReplayContract(unittest.TestCase):
             mixed["decisions"]["sd-service-balanced"]["status"], "INCOMPLETE")
         self.assertTrue(all(
             not pair["analysis_usable"] for pair in mixed["records"]))
+
+        # Every attempt in a physical campaign must use one exact partition.
+        mixed_target_pairs = list(stable_pairs)
+        mixed_target_pairs[1] = qualification.compare_pair(
+            arm("raw", partuuid="9abc8def-02"),
+            arm("swapz", partuuid="9abc8def-02"),
+            "sd-service-balanced", "mixed-target", 2, orders[1])
+        mixed_target = qualification.evaluate(mixed_target_pairs)
+        self.assertIsNone(mixed_target["target"])
+        self.assertEqual(
+            mixed_target["decisions"]["sd-service-balanced"]["status"],
+            "INCOMPLETE")
+        self.assertTrue(all(
+            not pair["analysis_usable"] for pair in mixed_target["records"]))
 
         # Pair IDs must identify distinct attempted repeats.
         duplicate_ids = list(stable_pairs)
@@ -2890,6 +2908,29 @@ class PairReplayContract(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("swapz_anonymous_swap", path)
         anonymous = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(anonymous)
+        with tempfile.TemporaryDirectory() as directory:
+            sysdev = Path(directory)
+            (sysdev / "partition").write_text("1\n", encoding="ascii")
+            (sysdev / "size").write_text(
+                str(124787884032 // anonymous.SYSFS_SECTOR_BYTES) + "\n",
+                encoding="ascii")
+            (sysdev / "uevent").write_text(
+                "MAJOR=8\nMINOR=1\nDEVTYPE=partition\n"
+                "PARTUUID=F13428F6-01\n", encoding="ascii")
+            self.assertEqual(
+                anonymous._physical_partition_identity(sysdev),
+                {"physical_partuuid": "f13428f6-01",
+                 "physical_device_bytes": 124787884032})
+            (sysdev / "uevent").write_text(
+                "PARTUUID=a-b-c-d-e\n", encoding="ascii")
+            with self.assertRaisesRegex(ValueError, "PARTUUID"):
+                anonymous._physical_partition_identity(sysdev)
+            (sysdev / "uevent").write_text(
+                "PARTUUID=f13428f6-01\n", encoding="ascii")
+            (sysdev / "size").write_text("9\n", encoding="ascii")
+            with self.assertRaisesRegex(ValueError, "geometry"):
+                anonymous._physical_partition_identity(sysdev)
+
         medium = anonymous.page_bytes(2)
         entropy = anonymous.page_bytes(3)
         self.assertEqual(len(medium), PAGE)
@@ -2935,7 +2976,9 @@ class PairReplayContract(unittest.TestCase):
             "content": spec["content"],
             "swap_device_identity": {
                 "device": "8:1", "dm_uuid": None, "dm_target": None,
-                "lower_device": "8:1"},
+                "lower_device": "8:1",
+                "physical_partuuid": "f13428f6-01",
+                "physical_device_bytes": 124787884032},
             "cgroup_before": {"memory_max": spec["memory_max_bytes"]},
         }
         self.assertEqual(
