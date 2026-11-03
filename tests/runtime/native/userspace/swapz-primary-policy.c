@@ -2444,6 +2444,7 @@ static void test_orphan_ready_claim_reconciliation(void)
 
 int main(void)
 {
+	swapz_u32 reserve_blocks = 0;
 	uint64_t pages;
 	const char *home = getenv("HOME");
 	char base_template[PATH_MAX];
@@ -2479,6 +2480,10 @@ int main(void)
 	pages = swapz_primary_maximum_logical_pages(
 		SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
 	assert(pages == 3727616ULL);
+	assert(swapz_authority_capacity_window(
+		(swapz_u32)pages, (swapz_u32)SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
+		&reserve_blocks));
+	assert(reserve_blocks == 465952U);
 	assert(swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						 pages));
 	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
@@ -2487,6 +2492,10 @@ int main(void)
 		SWAPZ_PRIMARY_PHYSICAL_BLOCKS, 3727872ULL));
 	assert(swapz_primary_maximum_logical_pages(30465536ULL) ==
 	       27080192ULL);
+	reserve_blocks = 0;
+	assert(swapz_authority_capacity_window(
+		27080192U, 30465536U, &reserve_blocks));
+	assert(reserve_blocks == 3385024U);
 	assert(swapz_primary_page_limit_fits(30465536ULL, 27080192ULL));
 	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080193ULL));
 	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080448ULL));

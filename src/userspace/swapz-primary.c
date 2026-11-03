@@ -39,7 +39,7 @@ static void swapz_primary_selected_target_clear(void)
 	       sizeof(swapz_primary_selected_target));
 }
 
-#define SWAPZ_PRIMARY_BLOCK_BYTES 4096ULL
+#define SWAPZ_PRIMARY_BLOCK_BYTES ((uint64_t)SWAPZ_BLOCK_BYTES)
 #if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
 	defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
 #error "primary lifecycle test modes are mutually exclusive"
@@ -122,10 +122,11 @@ static void swapz_primary_test_interrupt_after(const char *phase)
 #define SWAPZ_PRIMARY_SWAP_UUID_BYTES 16U
 #define SWAPZ_PRIMARY_SWAP_MAGIC_BYTES 10U
 #define SWAPZ_PRIMARY_MKSWAP_PATH "/usr/sbin/mkswap"
-#define SWAPZ_PRIMARY_SEGMENT_BLOCKS 256ULL
-#define SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS 512ULL
-#define SWAPZ_PRIMARY_FOREGROUND_HEADROOM_BLOCKS SWAPZ_PRIMARY_SEGMENT_BLOCKS
-#define SWAPZ_PRIMARY_SECTORS_PER_PAGE 8ULL
+#define SWAPZ_PRIMARY_SEGMENT_BLOCKS ((uint64_t)SWAPZ_SEGMENT_BLOCKS)
+#define SWAPZ_PRIMARY_SECTORS_PER_PAGE (SWAPZ_PRIMARY_BLOCK_BYTES / 512ULL)
+
+_Static_assert(SWAPZ_BLOCK_BYTES % 512U == 0U,
+	       "primary mapper pages must contain whole 512-byte sectors");
 #define SWAPZ_PRIMARY_PARTUUID_PATH_FORMAT "/dev/disk/by-partuuid/%s"
 #define SWAPZ_PRIMARY_PARTITION_NAME_BYTES \
 	(sizeof("partition-") - 1U + SWAPZ_PRIMARY_PARTUUID_LENGTH + \
@@ -4854,9 +4855,6 @@ int swapz_primary_partition_lock_acquire(const char *partuuid)
 static int swapz_primary_page_limit_fits(uint64_t physical_blocks,
 					uint64_t logical_pages)
 {
-	uint64_t reserve;
-	uint64_t data_blocks;
-
 	if (!logical_pages || logical_pages > UINT32_MAX ||
 	    physical_blocks > UINT32_MAX ||
 	    logical_pages > (uint64_t)SIZE_MAX / sizeof(struct swapz_map) ||
@@ -4864,18 +4862,8 @@ static int swapz_primary_page_limit_fits(uint64_t physical_blocks,
 	    physical_blocks < 3ULL * SWAPZ_PRIMARY_SEGMENT_BLOCKS ||
 	    physical_blocks % SWAPZ_PRIMARY_SEGMENT_BLOCKS)
 		return 0;
-	reserve = logical_pages / 8ULL + (logical_pages % 8ULL != 0ULL);
-	if (reserve < SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS)
-		reserve = SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS;
-	if (reserve >= physical_blocks)
-		return 0;
-	data_blocks = ((physical_blocks - reserve) /
-		       SWAPZ_PRIMARY_SEGMENT_BLOCKS) *
-		      SWAPZ_PRIMARY_SEGMENT_BLOCKS;
-	if (logical_pages > data_blocks)
-		return 0;
-	return data_blocks - logical_pages >=
-	       SWAPZ_PRIMARY_FOREGROUND_HEADROOM_BLOCKS;
+	return swapz_authority_capacity_window(
+		(swapz_u32)logical_pages, (swapz_u32)physical_blocks, NULL);
 }
 
 static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks)
