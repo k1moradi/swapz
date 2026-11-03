@@ -149,6 +149,10 @@ class ProgressTracker:
             self.max_gap_ns = max(self.max_gap_ns, now - self.last_ns)
             self.last_ns = now
 
+    def snapshot_max_gap_ns(self) -> int:
+        with self.lock:
+            return self.max_gap_ns
+
 
 def digest_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -573,28 +577,53 @@ def phase_workers(fd, data_offset: int, args, hot_pages: int, fill_chunks, churn
     return results, progress, (time.monotonic_ns() - phase_start)
 
 
-def merge_phase(results, wall_ns: int):
+def merge_phase(results, wall_ns: int, hot_pages: int | None = None):
     read_hist, write_hist = LatencyHistogram(), LatencyHistogram()
     minutes = {}
+    lane_count = len(results)
     for result in results:
         read_hist.merge(result["read"])
         write_hist.merge(result["write"])
+        lane = result["lane"]
         for minute, row in result["minutes"].items():
             target = minutes.setdefault(minute, {
-                "read": LatencyHistogram(), "write": LatencyHistogram(), "writes": 0})
+                "read": LatencyHistogram(), "write": LatencyHistogram(),
+                "writes": 0, "lane_writes": [0] * lane_count})
             target["read"].merge(row["read"])
             target["write"].merge(row["write"])
             target["writes"] += row["writes"]
+            target["lane_writes"][lane] += row["writes"]
+
     rows = []
+    cumulative_lane_writes = [0] * lane_count
     for minute in sorted(minutes):
         row = minutes[minute]
         seconds = min(60.0, wall_ns / 1e9 - minute * 60.0)
         combined = LatencyHistogram()
         combined.merge(row["read"])
         combined.merge(row["write"])
-        rows.append({"minute": minute,
-                     "logical_write_mbps": row["writes"] * PAGE / max(seconds, 1e-9) / 1_000_000,
-                     "p99_ns": combined.percentile(.99), "operations": combined.count})
+        cumulative_lane_writes = [
+            total + current
+            for total, current in zip(cumulative_lane_writes, row["lane_writes"])
+        ]
+        output = {
+            "minute": minute,
+            "logical_write_mbps":
+                row["writes"] * PAGE / max(seconds, 1e-9) / 1_000_000,
+            "p95_ns": combined.percentile(.95),
+            "p99_ns": combined.percentile(.99),
+            "read_p95_ns": row["read"].percentile(.95),
+            "read_p99_ns": row["read"].percentile(.99),
+            "write_p95_ns": row["write"].percentile(.95),
+            "write_p99_ns": row["write"].percentile(.99),
+            "read_operations": row["read"].count,
+            "write_operations": row["write"].count,
+            "operations": combined.count,
+        }
+        if hot_pages is not None:
+            output["cumulative_overwrite"] = overwrite_coverage(
+                hot_pages, lane_count, cumulative_lane_writes)
+        rows.append(output)
     return read_hist, write_hist, rows
 
 
@@ -703,10 +732,12 @@ def status_snapshot(path: Path, identity: dict):
     if not identity.get("dm_uuid"):
         return None
     text = mapper_status(path)
-    fields = ("gc_wall_ns", "gc_no_headroom_skips", "gc_victims", "gc_pages",
-              "gc_read", "gc_write", "gc_read_reqs", "gc_write_reqs",
-              "alloc_probe_segments", "alloc_probe_full_scans", "alloc_probe_wall_ns",
-              "segment_program_sum", "failed", "error")
+    fields = ("gc_wall_ns", "gc_no_headroom_skips", "gc_victims",
+              "gc_role_rotations", "gc_pages", "gc_read", "gc_write",
+              "gc_read_reqs", "gc_write_reqs", "alloc_probe_segments",
+              "alloc_probe_full_scans", "alloc_probe_wall_ns",
+              "segment_program_sum", "cursor", "reserve", "last_gc_victim",
+              "last_gc_destination", "failed", "error")
     return {field: status_value(text, field) for field in fields}
 
 
@@ -715,7 +746,10 @@ def status_delta(before, after, wall_ns):
         return None
     if before is None or after is None:
         raise ValueError("incomplete target status interval")
-    gauges = {"failed", "error"}
+    gauges = {
+        "cursor", "reserve", "last_gc_victim", "last_gc_destination",
+        "failed", "error",
+    }
     result = {}
     for field in before:
         result[field] = after[field] if field in gauges else after[field] - before[field]
@@ -723,6 +757,84 @@ def status_delta(before, after, wall_ns):
             raise ValueError("target counter reset: " + field)
     result["wall_fraction"] = result["gc_wall_ns"] / wall_ns if wall_ns else None
     return result
+
+
+class SustainedIntervalSampler:
+    """Low-rate host/lower-device telemetry outside the replay hot path."""
+
+    def __init__(self, lower_disk: str | None, progress: ProgressTracker,
+                 interval_seconds: float = 60.0):
+        self.lower_disk = lower_disk
+        self.progress = progress
+        self.interval_seconds = interval_seconds
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.previous = None
+        self.rows = []
+        self.error = None
+        self.start_ns = None
+
+    def _snapshot(self) -> dict:
+        return {
+            "time_ns": time.monotonic_ns(),
+            "host_cpu": REPLAY["host_cpu_snapshot"](),
+            "lower": REPLAY["lower_stat"](self.lower_disk),
+            "max_no_progress_ns": self.progress.snapshot_max_gap_ns(),
+        }
+
+    def _append(self, current: dict, minimum_ns: int = 0) -> None:
+        previous = self.previous
+        if previous is None:
+            self.previous = current
+            return
+        duration_ns = current["time_ns"] - previous["time_ns"]
+        if duration_ns < minimum_ns:
+            return
+        lower = (
+            REPLAY["iostat_delta"](previous["lower"], current["lower"])
+            if previous["lower"] is not None else None)
+        self.rows.append({
+            "interval": len(self.rows),
+            "start_seconds": (previous["time_ns"] - self.start_ns) / 1e9,
+            "end_seconds": (current["time_ns"] - self.start_ns) / 1e9,
+            "duration_seconds": duration_ns / 1e9,
+            "host_cpu": REPLAY["host_cpu_delta"](
+                previous["host_cpu"], current["host_cpu"]),
+            "lower_io": lower,
+            "max_no_progress_seconds":
+                current["max_no_progress_ns"] / 1e9,
+        })
+        self.previous = current
+
+    def _run(self) -> None:
+        try:
+            while not self.stop_event.wait(self.interval_seconds):
+                self._append(self._snapshot())
+        except (OSError, ValueError) as exc:
+            self.error = exc
+            self.stop_event.set()
+
+    def start(self) -> None:
+        if self.thread is not None:
+            raise ValueError("sustained interval sampler already started")
+        self.start_ns = time.monotonic_ns()
+        self.previous = self._snapshot()
+        self.thread = threading.Thread(
+            target=self._run, name="swapz-sustained-telemetry", daemon=True)
+        self.thread.start()
+
+    def stop(self) -> list[dict]:
+        if self.thread is None:
+            return []
+        self.stop_event.set()
+        self.thread.join(timeout=max(5.0, self.interval_seconds / 2.0))
+        if self.thread.is_alive():
+            raise ValueError("sustained interval telemetry failed to stop")
+        if self.error is not None:
+            raise ValueError(
+                "sustained interval telemetry failed: " + str(self.error))
+        self._append(self._snapshot(), minimum_ns=1_000_000_000)
+        return list(self.rows)
 
 
 def run(args):
@@ -794,10 +906,21 @@ def run(args):
                 host_before = REPLAY["host_cpu_snapshot"]()
                 cpu_before = process_cpu()
                 measured_progress = ProgressTracker()
+                interval_sampler = (
+                    SustainedIntervalSampler(
+                        identity.get("owned_disk"), measured_progress)
+                    if args.measure_seconds is not None else None)
+                if interval_sampler is not None:
+                    interval_sampler.start()
                 start = time.monotonic_ns()
-                measured, measured_progress, wall_ns = phase_workers(
-                    fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
-                    pool, initial_writes, measured_progress)
+                try:
+                    measured, measured_progress, wall_ns = phase_workers(
+                        fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
+                        pool, initial_writes, measured_progress)
+                finally:
+                    interval_rows = (
+                        interval_sampler.stop()
+                        if interval_sampler is not None else [])
                 end = time.monotonic_ns()
                 cpu_after = process_cpu()
                 host_after = REPLAY["host_cpu_snapshot"]()
@@ -808,7 +931,8 @@ def run(args):
             post_quiet = quiet_window()
 
             seconds = (end - start) / 1e9
-            read_hist, write_hist, minute_rows = merge_phase(measured, wall_ns)
+            read_hist, write_hist, minute_rows = merge_phase(
+                measured, wall_ns, hot)
             read_ops, write_ops = read_hist.count, write_hist.count
             measured_writes_per_lane = [
                 row["writes"] - initial_writes[index]
@@ -926,7 +1050,20 @@ def run(args):
                 "lower_io": lower, "kernel_write_path": kernel_write,
                 "kernel_read_path": kernel_read, "gc": gc,
                 "cold_read": cold_read_result, "minute_buckets": minute_rows,
+                "sustained_intervals": interval_rows,
                 "overwrite": overwrite,
+                "occupancy_transitions": [
+                    {"phase": "initial", "occupied_pages": 0,
+                     "logical_occupancy_percent": 0},
+                    {"phase": "post-fill", "occupied_pages": occupied,
+                     "logical_occupancy_percent": args.occupancy_percent},
+                    {"phase": "post-warmup", "occupied_pages": occupied,
+                     "logical_occupancy_percent": args.occupancy_percent},
+                    {"phase": "measured-end", "occupied_pages": occupied,
+                     "logical_occupancy_percent": args.occupancy_percent},
+                ],
+                "target_status_before": status_before,
+                "target_status_after": status_after,
                 "max_no_progress_seconds": measured_progress.max_gap_ns / 1e9,
                 "oracle": oracle,
                 "claim_boundary": (
