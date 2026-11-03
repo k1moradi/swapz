@@ -79,14 +79,17 @@ fallback swap itself. Activation, deactivation, and recovery are requested only
 through the production primary coordinator.
 
 Before physical activation it must prove: exact clean source on `main` with
-local `HEAD == origin/main == validated source`; current qualification
+local `HEAD == origin/main == validated source` and a freshly queried remote
+`refs/heads/main` equal to that source (unreachable or stale remote is BLOCKED);
+current qualification
 provenance; a frozen production acceptance manifest; the protected PARTUUID
 selector; exact partition size and device number; the exact removable USB
 parent and its sole selected partition; explicit
 `root_same_physical_disk_as_target=false` and
 `recovery_same_physical_disk_as_target=false`; no unresolved primary
 transaction, mapper, module, or raw swap alias resolving to either the selected
-partition or its physical parent disk; at least 1 GiB `MemAvailable`; readable kernel diagnostics; and working cgroup-v2 memory,
+partition or its physical parent disk; any unresolvable active block-swap
+identity is BLOCKED; at least 1 GiB `MemAvailable`; readable kernel diagnostics; and working cgroup-v2 memory,
 swap, PSI, OOM, and zswap controls. A missing storage-separation fact is
 BLOCKED, not equivalent to false.
 
@@ -109,8 +112,11 @@ Default bounds are 384 MiB deterministic anonymous memory,
 128 MiB minimum real-swap evidence, two cycles, and 240-second finite waits.
 
 Each live mapper cycle must use two concurrent deterministic oracle processes
-and two complete allocate/swap-out/swap-in/byte-verify/release rounds. The first
-round must return both dedicated-cgroup swap charge and exact mapper Used KiB to
+and two complete allocate/swap-out/swap-in/byte-verify/release rounds. Every
+worker's readiness, fill, and verification page/byte counts must match its
+assigned memory, with worker PID/seed identity and fill-to-verification digest
+continuity; aggregate totals cannot compensate for an incomplete worker.
+The first round must return both dedicated-cgroup swap charge and exact mapper Used KiB to
 the fresh zero-use baseline before the second allocation; only then is repeated
 swap-slot reuse proven. While a round is resident under pressure, exact mapper
 Used bytes must equal the dedicated cgroup's swap charge. Any difference is
@@ -149,8 +155,9 @@ reports or successful `swapon` without traffic cannot qualify.
 
 Normal teardown is requested only through `swapzctl primary stop`. An
 independent sampler must witness active mapper swap, then mapper-present but
-swap-inactive, then mapper absence; disappearance while still in the known
-swap inventory is FAIL. A definite stop/`swapoff` failure is FAIL and cannot
+swap-inactive, then mapper absence in chronological order; out-of-order or
+regressing stable observations cannot qualify even if all states appear.
+Disappearance while still in the known swap inventory is FAIL. A definite stop/`swapoff` failure is FAIL and cannot
 be masked by sampling uncertainty. If correct teardown is too fast to prove
 the inactive-before-remove interval independently, the result is BLOCKED, not
 PASS. No force cleanup is allowed, including error paths.

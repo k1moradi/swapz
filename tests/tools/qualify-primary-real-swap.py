@@ -403,6 +403,11 @@ def require_no_conflicting_raw_swap_aliases(
         parent_device: "physical parent disk",
     }
     for row in rows:
+        # A path that cannot be stat'ed must never hide an active raw block
+        # swap alias. Ordinary swap files have type "file", not "partition".
+        if row.type == "partition" and row.device is None:
+            raise Blocked(
+                f"cannot resolve active block-swap alias identity: {row.path}")
         label = protected_devices.get(row.device)
         if label is not None:
             raise Blocked(
@@ -1009,6 +1014,15 @@ def _check_git_source(validated_source: str) -> None:
         raise Blocked(f"checkout HEAD {head} differs from validated source {validated_source}")
     if branch != "main" or origin_main != validated_source:
         raise Blocked("physical qualification requires main == origin/main == validated source")
+    # A local tracking ref may be stale even when the checkout is clean.
+    # Query the real remote head without mutating local branches or refs.
+    remote_main = _run(
+        ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
+        check=False, timeout=30)
+    if remote_main.returncode != 0:
+        raise Blocked("cannot verify the current remote main for physical qualification")
+    if remote_main.stdout.strip() != f"{validated_source}\trefs/heads/main":
+        raise Blocked("current remote main differs from the validated source")
     dirty = _run(["git", "status", "--porcelain"], timeout=10).stdout
     if dirty:
         raise Blocked("production source tree is not clean")
@@ -1336,6 +1350,19 @@ def split_concurrent_workload_mib(workload_mib: int) -> tuple[int, int]:
     return first, second
 
 
+def require_oracle_worker_geometry(
+        records: list[dict], worker_memory_mib: tuple[int, int],
+        page_field: str, byte_field: str, phase: str) -> None:
+    if len(records) != len(worker_memory_mib):
+        raise QualificationFailure(f"concurrent oracle {phase} record count is incomplete")
+    for worker_index, (record, memory_mib) in enumerate(zip(records, worker_memory_mib)):
+        expected_bytes = memory_mib * MIB
+        expected_pages = expected_bytes // PAGE_BYTES
+        if record.get(page_field) != expected_pages or record.get(byte_field) != expected_bytes:
+            raise QualificationFailure(
+                f"concurrent oracle worker {worker_index} {phase} page/byte count is incomplete")
+
+
 def aggregate_oracle_verification(records: list[dict]) -> dict:
     if len(records) != CONCURRENT_ORACLE_PROCESSES:
         raise QualificationFailure("concurrent oracle verification record count is incomplete")
@@ -1446,6 +1473,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     "exact mapper has nonzero use before dedicated round; unrelated pages may depend on it")
 
             round_processes: list[subprocess.Popen[str]] = []
+            worker_seeds: list[str] = []
             round_result: dict | None = None
             try:
                 for worker_index, memory_mib in enumerate(worker_memory_mib):
@@ -1453,6 +1481,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                         f"{manifest['run_id']}:{round_index}:{worker_index}".encode("ascii"),
                         digest_size=16,
                     ).hexdigest()
+                    worker_seeds.append(seed)
                     process = subprocess.Popen(
                         [sys.executable, "-B", str(oracle_path), "--seed", seed,
                          "--memory-mib", str(memory_mib)],
@@ -1477,12 +1506,13 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 ]
                 waiting_pids = [int(record.get("pid", -1)) for record in waiting]
                 if len(set(waiting_pids)) != CONCURRENT_ORACLE_PROCESSES or \
-                        set(waiting_pids) != {process.pid for process in round_processes}:
-                    raise QualificationFailure("concurrent oracle readiness identities are not unique")
+                        waiting_pids != [process.pid for process in round_processes] or \
+                        any(record.get("seed") != seed
+                            for record, seed in zip(waiting, worker_seeds)):
+                    raise QualificationFailure("concurrent oracle readiness PID/seed identities differ")
                 expected_pages = workload_mib * MIB // PAGE_BYTES
-                if sum(int(record.get("bytes", 0)) for record in waiting) != workload_mib * MIB or \
-                        sum(int(record.get("pages", 0)) for record in waiting) != expected_pages:
-                    raise QualificationFailure("concurrent oracle readiness geometry mismatch")
+                require_oracle_worker_geometry(
+                    waiting, worker_memory_mib, "pages", "bytes", "readiness")
 
                 fill_status_before = read_status()
                 lower_before = read_block_stats(
@@ -1498,11 +1528,11 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     _oracle_event(process, "ORACLE_FILLED=", deadline, guard)
                     for process in round_processes
                 ]
-                if sum(int(record.get("bytes", 0)) for record in filled_records) != workload_mib * MIB or \
-                        sum(int(record.get("pages", 0)) for record in filled_records) != expected_pages or \
-                        any(not re.fullmatch(r"[0-9a-f]{64}", str(record.get("digest", "")))
-                            for record in filled_records):
-                    raise QualificationFailure("concurrent oracle fill records are incomplete or malformed")
+                require_oracle_worker_geometry(
+                    filled_records, worker_memory_mib, "pages", "bytes", "fill")
+                if any(not re.fullmatch(r"[0-9a-f]{64}", str(record.get("digest", "")))
+                       for record in filled_records):
+                    raise QualificationFailure("concurrent oracle fill digests are malformed")
 
                 swap_current = _read_uint(cgroup / "memory.swap.current")
                 swap_peak = _read_uint(cgroup / "memory.swap.peak")
@@ -1537,13 +1567,21 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     admitted=True,
                 )
                 for process in round_processes:
-                    assert process.stdin is not None
+                    if process.stdin is None:
+                        raise QualificationFailure("oracle command pipe is unavailable")
                     process.stdin.write("VERIFY\n")
                     process.stdin.flush()
                 verified_records = [
                     _oracle_event(process, "ORACLE_VERIFIED=", deadline, guard)
                     for process in round_processes
                 ]
+                require_oracle_worker_geometry(
+                    verified_records, worker_memory_mib,
+                    "verified_pages", "verified_bytes", "verification")
+                if any(filled.get("digest") != verified.get("expected_digest")
+                       for filled, verified in zip(filled_records, verified_records)):
+                    raise QualificationFailure(
+                        "oracle fill digest differs from expected verification digest")
                 for process in round_processes:
                     try:
                         process.wait(timeout=max(1, int(deadline - time.monotonic())))
@@ -1687,22 +1725,45 @@ def _mapper_sysfs_state(device: tuple[int, int], expected_uuid: str) -> tuple[bo
 def evaluate_stop_samples(samples: list[StopSample]) -> dict:
     if not samples:
         raise Blocked("stop sampler collected no observations")
-    if any(not sample.identity_valid for sample in samples if sample.mapper_before or sample.mapper_after):
-        raise QualificationFailure("mapper identity changed during stop")
-    if any((not sample.mapper_before and not sample.mapper_after and sample.swap_active)
-           for sample in samples):
-        raise QualificationFailure("mapper disappeared while still present in swap inventory")
-    initial = any(sample.mapper_before and sample.mapper_after and sample.swap_active for sample in samples)
-    deactivated = any(sample.mapper_before and sample.mapper_after and not sample.swap_active for sample in samples)
-    absent = any(not sample.mapper_before and not sample.mapper_after and not sample.swap_active for sample in samples)
-    if not initial:
+    # Only stable two-sided observations can advance the proof. Their order is
+    # essential: witnessing all three states in arbitrary order is not proof
+    # that ordinary swapoff preceded mapper removal.
+    phase = 0  # 0: no active witness; 1: active; 2: swapoff; 3: removed
+    last_timestamp = -1
+    for sample in samples:
+        if sample.monotonic_ns <= last_timestamp:
+            raise Blocked("stop sampler timestamps are not strictly increasing")
+        last_timestamp = sample.monotonic_ns
+        if not sample.identity_valid and (sample.mapper_before or sample.mapper_after):
+            raise QualificationFailure("mapper identity changed during stop")
+        if not sample.mapper_before and not sample.mapper_after and sample.swap_active:
+            raise QualificationFailure("mapper disappeared while still present in swap inventory")
+        if sample.mapper_before != sample.mapper_after:
+            continue
+        if sample.mapper_before:
+            if sample.swap_active:
+                if phase >= 2:
+                    raise QualificationFailure("mapper swap reactivated after swapoff during stop")
+                phase = 1
+            else:
+                if phase == 0:
+                    raise Blocked("stop sampler did not witness initial active mapper")
+                if phase == 3:
+                    raise QualificationFailure("mapper reappeared after removal during stop")
+                phase = 2
+        else:
+            if phase < 2:
+                raise Blocked(
+                    "stop completed but sampler did not independently witness swapoff before mapper removal")
+            phase = 3
+    if phase == 0:
         raise Blocked("stop sampler did not witness initial active mapper")
-    if not deactivated:
+    if phase == 1:
         raise Blocked("stop completed but sampler did not independently witness swapoff before mapper removal")
-    if not absent:
+    if phase == 2:
         raise Blocked("stop sampler did not witness final mapper absence")
-    return {"initial_active": True, "swapoff_before_remove_witness": True, "final_absent": True,
-            "samples": len(samples)}
+    return {"initial_active": True, "swapoff_before_remove_witness": True,
+            "final_absent": True, "samples": len(samples)}
 
 
 class StopSampler:
@@ -2063,6 +2124,8 @@ def execute(arguments: argparse.Namespace) -> dict:
                 cycle=cycle_index,
                 run_id=result["run_id"],
             )
+        # A long physical run must not qualify a source superseded on main.
+        _check_git_source(arguments.validated_source)
         kernel_after = _kernel_log_snapshot()
         _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
         result = {

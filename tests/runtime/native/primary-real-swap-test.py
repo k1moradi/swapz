@@ -109,6 +109,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify.require_no_conflicting_raw_swap_aliases(
                     [unrelated, alias], (8, 1), (8, 0))
 
+    def test_unresolved_active_block_swap_alias_blocks_admission(self):
+        unresolved = qualify.SwapRow(
+            "/dev/disk/by-id/missing", "partition", 100, 0, -1, None)
+        with self.assertRaisesRegex(qualify.Blocked, "cannot resolve active block-swap alias"):
+            qualify.require_no_conflicting_raw_swap_aliases(
+                [unresolved], (8, 1), (8, 0))
+
     def test_plan_storage_separation_requires_explicit_false_current_keys(self):
         canonical = {
             "root_same_physical_disk_as_target": False,
@@ -241,6 +248,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             completed(args=[], returncode=0, stdout=source_sha + "\n", stderr=""),
             completed(args=[], returncode=0, stdout="main\n", stderr=""),
             completed(args=[], returncode=0, stdout=source_sha + "\n", stderr=""),
+            completed(args=[], returncode=0,
+                      stdout=source_sha + "\trefs/heads/main\n", stderr=""),
             completed(args=[], returncode=0, stdout="", stderr=""),
         ]
         with mock.patch.object(qualify, "_run", side_effect=good):
@@ -258,6 +267,20 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             args=[], returncode=0, stdout="HEAD\n", stderr="")
         with mock.patch.object(qualify, "_run", side_effect=detached), \
                 self.assertRaisesRegex(qualify.Blocked, "main == origin/main"):
+            qualify._check_git_source(source_sha)
+
+        stale_remote = list(good)
+        stale_remote[3] = completed(
+            args=[], returncode=0, stdout="b" * 40 + "\trefs/heads/main\n", stderr="")
+        with mock.patch.object(qualify, "_run", side_effect=stale_remote), \
+                self.assertRaisesRegex(qualify.Blocked, "current remote main differs"):
+            qualify._check_git_source(source_sha)
+
+        unreachable_remote = list(good)
+        unreachable_remote[3] = completed(
+            args=[], returncode=128, stdout="", stderr="remote unavailable")
+        with mock.patch.object(qualify, "_run", side_effect=unreachable_remote), \
+                self.assertRaisesRegex(qualify.Blocked, "cannot verify the current remote"):
             qualify._check_git_source(source_sha)
 
     def canonical_manifest(self):
@@ -453,6 +476,28 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         ]
         result = qualify.evaluate_stop_samples(samples)
         self.assertTrue(result["swapoff_before_remove_witness"])
+
+    def test_stop_order_rejects_out_of_order_and_regressing_witnesses(self):
+        active = lambda timestamp: qualify.StopSample(
+            timestamp, True, True, True, True)
+        inactive = lambda timestamp: qualify.StopSample(
+            timestamp, True, True, False, True)
+        absent = lambda timestamp: qualify.StopSample(
+            timestamp, False, False, False, True)
+        for samples in (
+            [inactive(1), active(2), absent(3)],
+            [active(1), absent(2), inactive(3)],
+            [active(1), inactive(2), absent(2)],
+        ):
+            with self.subTest(samples=samples), self.assertRaises(qualify.Blocked):
+                qualify.evaluate_stop_samples(samples)
+        for samples in (
+            [active(1), inactive(2), active(3), absent(4)],
+            [active(1), inactive(2), absent(3), inactive(4)],
+        ):
+            with self.subTest(samples=samples), self.assertRaises(
+                    qualify.QualificationFailure):
+                qualify.evaluate_stop_samples(samples)
 
     def test_stop_order_rejects_mapper_absent_while_swap_inventory_still_active(self):
         samples = [
@@ -663,6 +708,28 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(qualify.split_concurrent_workload_mib(129), (64, 65))
         with self.assertRaises(qualify.Blocked):
             qualify.split_concurrent_workload_mib(127)
+
+    def test_per_worker_oracle_geometry_cannot_hide_short_or_swapped_records(self):
+        worker_memory_mib = (64, 65)
+        records = [
+            {"pages": 64 * qualify.MIB // qualify.PAGE_BYTES,
+             "bytes": 64 * qualify.MIB},
+            {"pages": 65 * qualify.MIB // qualify.PAGE_BYTES,
+             "bytes": 65 * qualify.MIB},
+        ]
+        qualify.require_oracle_worker_geometry(
+            records, worker_memory_mib, "pages", "bytes", "fill")
+        for changed in (
+            [records[1], records[0]],
+            [dict(records[0], pages=records[0]["pages"] - 1), records[1]],
+            [dict(records[0], bytes=records[0]["bytes"] - qualify.PAGE_BYTES),
+             dict(records[1], bytes=records[1]["bytes"] + qualify.PAGE_BYTES)],
+            [records[0]],
+        ):
+            with self.subTest(changed=changed), self.assertRaises(
+                    qualify.QualificationFailure):
+                qualify.require_oracle_worker_geometry(
+                    changed, worker_memory_mib, "pages", "bytes", "fill")
 
     def test_aggregate_oracle_verification_requires_both_full_workers(self):
         record = {
