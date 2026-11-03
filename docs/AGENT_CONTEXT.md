@@ -298,24 +298,21 @@ Unless evidence changes the order, work on:
 1. **Target/configuration abstraction — implemented.** The manager, package
    and systemd generator use a protected PARTUUID selector; target path,
    major:minor and capacity are discovered at runtime. Alternate synthetic
-   identities and geometries are covered in direct-C tests. Current production
-   source `a31661f887f1fa7a88efdfff5186a84672217950` includes the prepared
+   identities and geometries are covered in direct-C tests. The prepared
    start/stop/recovery coordinator, bounded status emission, portable
    little-endian delta64 semantics, deliberately unaligned codec coverage,
-   authority geometry/generation checks, drain-wakeup closure and GC
-   failure-recovery/high-occupancy coverage, and hardened standalone physical
-   formatter identity. Current `main`
-   `a31661f887f1fa7a88efdfff5186a84672217950` passed production-C CI run
-   `41655643592` and native project-goal CI run `41655643668`. The latest
-   full owner `make test` passed on older source
-   `acdeba452aa142c702bed40010c083276a692711` and published report commit
-   `17ed3c639ce99708ee2bfbed7d979b35592c7a5a`; exact-current-source owner
-   qualification remains open. That run passed ID36 after the owner freed host
-   memory by closing programs. See the compact snapshot at
-   [docs/handoff/production-readiness.json](handoff/production-readiness.json).
-   The primary plan remains BLOCKED and the privileged lifecycle stays disabled.
-   The historical fixed-device live-swap supervisor is not the active selector
-   or deployment path.
+   authority geometry/generation checks, drain-wakeup closure, GC
+   failure-recovery/high-occupancy coverage and hardened standalone physical
+   formatter identity are implemented. Do not pin a moving `main` SHA or CI
+   result in this always-loaded decision list: determine current source and CI
+   from Git/GitHub and determine owner qualification from the canonical
+   `test_results.json`. An older PASS never qualifies a newer source.
+   [docs/handoff/production-readiness.json](handoff/production-readiness.json)
+   is historical unless it explicitly carries a current source-bound release
+   evidence set. The production lifecycle gate stays disabled until the exact
+   current source and card-specific acceptance gates pass. The historical
+   fixed-device live-swap supervisor is not the active selector or deployment
+   path.
 2. **Active:** directly qualify interruption and recovery behavior for the
    primary lifecycle coordinator. Prepared start, normal stop and standalone
    recovery are now wired behind the existing disabled execution gate. They
