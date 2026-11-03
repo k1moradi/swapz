@@ -93,18 +93,34 @@ identity is BLOCKED; at least 1 GiB `MemAvailable`; readable kernel diagnostics;
 swap, PSI, OOM, and zswap controls. A missing storage-separation fact is
 BLOCKED, not equivalent to false.
 
-The helper must execute an installed `<prefix>/sbin/swapzctl`, derive the same
+The helper must treat the installed `<prefix>/sbin/swapzctl` as the qualified
+artifact identity, derive the same
 `<prefix>/libexec/swapz/{dm-swapz.ko,device-roundtrip}` paths used by the
 manager, parse the supplied owner report's qualified artifact hashes, and
-independently SHA-256 all three installed files. The report values, primary
-plan qualified/live values, embedded control source SHA, and observed bytes
-must all agree with the exact validated source. The module is deliberately
-absent before start, so live module sysfs provenance is expected to be
-unavailable at admission and must not be required there. Immediately after
-successful start, the helper must independently require the loaded module's
-`build_source_sha`, clean bit, and physical-backing parameter to match the
-validated source and production physical mode. Trusting the plan's aggregate
-artifact-match boolean alone is insufficient.
+independently SHA-256 all three installed files. It must not rebuild, replace,
+or execute that installed production control for destructive qualification.
+After exact clean-source admission, the helper instead compiles a root-owned
+0700 temporary coordinator from the same current userspace sources with
+`SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1`, embeds the exact validated
+source/clean provenance, and binds
+`SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL` to the installed qualified
+`<prefix>/sbin/swapzctl`. Only subprocesses invoking that private coordinator
+receive `SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION=1`; the parent environment and
+ordinary installed binary remain disabled. The temporary coordinator must be
+removed on every admitted disposition and its SHA-256 recorded in persistent
+evidence.
+
+The report values, private primary plan qualified/live values, embedded control
+source SHA, and observed installed bytes must all agree with the exact validated
+source. The plan's `privileged_execution_enabled=true` proves only that the
+private physical seam and runtime marker are active; it never authorizes the
+ordinary production binary. The module is deliberately absent before start, so
+live module sysfs provenance is expected to be unavailable at admission and
+must not be required there. Immediately after successful start, the helper must
+independently require the loaded module's `build_source_sha`, clean bit, and
+physical-backing parameter to match the validated source and production
+physical mode. Trusting the plan's aggregate artifact-match boolean alone is
+insufficient.
 
 A disposable cgroup preflight must complete before primary `prepare/start`.
 Default bounds are 384 MiB deterministic anonymous memory,
