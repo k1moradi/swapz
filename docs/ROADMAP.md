@@ -1430,7 +1430,11 @@ for the fixed 8:4 target with exact 16 GiB geometry, compares the complete
 current 4096-byte header with an expected value, writes the replacement with
 short-write handling, fsyncs, and proves exact readback. Its rootless fixture
 uses a temporary regular file and confirms stale-header refusal. The API
-requires production callers to obtain the descriptor with `O_RDWR|O_EXCL`,
-but the primitive cannot introspect that open-time flag; a dedicated
-identity-checked target-open function and immutable device/artifact manifest
-must precede any lifecycle use. Privileged execution remains disabled.
+is paired with a fixed-path exclusive-open helper that checks `/dev/sda4`, the
+UUID link, and PARTUUID link before and after opening the UUID path with
+`O_RDWR|O_EXCL`, and checks the opened block descriptor's identity and exact
+geometry. Rootless alias tests verify same-target acceptance and substituted
+target refusal using temporary files. They do not prove block-device
+exclusive-open semantics, physical geometry, or recovery behavior. The
+immutable device/artifact manifest and lifecycle integration are still
+required before use. Privileged execution remains disabled.

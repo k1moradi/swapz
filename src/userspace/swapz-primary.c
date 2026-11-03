@@ -328,6 +328,103 @@ static int swapz_primary_device_number_matches(dev_t device)
 	return major(device) == 8U && minor(device) == 4U;
 }
 
+static int swapz_primary_same_target_identity(const struct stat *left,
+					     const struct stat *right)
+{
+	if (!left || !right)
+		return 0;
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	return S_ISREG(left->st_mode) && S_ISREG(right->st_mode) &&
+	       left->st_dev == right->st_dev && left->st_ino == right->st_ino;
+#else
+	return S_ISBLK(left->st_mode) && S_ISBLK(right->st_mode) &&
+	       swapz_primary_device_number_matches(left->st_rdev) &&
+	       left->st_rdev == right->st_rdev;
+#endif
+}
+
+static int swapz_primary_open_target_checked_paths(const char *device_path,
+						   const char *uuid_path,
+						   const char *partuuid_path)
+{
+	struct stat device_before;
+	struct stat uuid_before;
+	struct stat partuuid_before;
+	struct stat opened;
+	struct stat device_after;
+	struct stat uuid_after;
+	struct stat partuuid_after;
+	int fd;
+
+	if (!device_path || !uuid_path || !partuuid_path) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (stat(device_path, &device_before) < 0 ||
+	    stat(uuid_path, &uuid_before) < 0 ||
+	    stat(partuuid_path, &partuuid_before) < 0)
+		return -1;
+	if (!swapz_primary_same_target_identity(&device_before, &uuid_before) ||
+	    !swapz_primary_same_target_identity(&uuid_before, &partuuid_before)) {
+		errno = ENODEV;
+		return -1;
+	}
+	fd = open(uuid_path, O_RDWR | O_EXCL | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &opened) < 0)
+		goto failed;
+	if (!swapz_primary_same_target_identity(&uuid_before, &opened) ||
+	    stat(device_path, &device_after) < 0 ||
+	    stat(uuid_path, &uuid_after) < 0 ||
+	    stat(partuuid_path, &partuuid_after) < 0 ||
+	    !swapz_primary_same_target_identity(&opened, &device_after) ||
+	    !swapz_primary_same_target_identity(&opened, &uuid_after) ||
+	    !swapz_primary_same_target_identity(&opened, &partuuid_after)) {
+		errno = ENODEV;
+		goto failed;
+	}
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	if (opened.st_size < (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) {
+		errno = EINVAL;
+		goto failed;
+	}
+#else
+	{
+		uint64_t bytes = 0;
+
+		if (ioctl(fd, BLKGETSIZE64, &bytes) < 0)
+			goto failed;
+		if (bytes != SWAPZ_PRIMARY_DEVICE_BYTES) {
+			errno = EINVAL;
+			goto failed;
+		}
+	}
+#endif
+	return fd;
+
+failed:
+	{
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+	}
+	return -1;
+}
+
+int swapz_primary_target_open_exclusive(void)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	errno = ENOTSUP;
+	return -1;
+#else
+	return swapz_primary_open_target_checked_paths(
+		SWAPZ_PRIMARY_DEVICE_PATH, SWAPZ_PRIMARY_UUID_PATH,
+		SWAPZ_PRIMARY_PARTUUID_PATH);
+#endif
+}
+
 static int swapz_primary_original_swap_signature(
 	const unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES])
 {

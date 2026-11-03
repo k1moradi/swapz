@@ -392,6 +392,58 @@ static void test_checked_header_write(void)
 	assert(unlink(path) == 0);
 }
 
+static void test_exclusive_target_open_paths(void)
+{
+	char directory[] = "/tmp/swapz-primary-open-XXXXXX";
+	char target[PATH_MAX];
+	char other[PATH_MAX];
+	char uuid_path[PATH_MAX];
+	char partuuid_path[PATH_MAX];
+	char substituted[PATH_MAX];
+	struct stat info;
+	int fd;
+
+	assert(mkdtemp(directory) != NULL);
+	assert(snprintf(target, sizeof(target), "%s/target", directory) > 0);
+	assert(snprintf(other, sizeof(other), "%s/other", directory) > 0);
+	assert(snprintf(uuid_path, sizeof(uuid_path), "%s/by-uuid", directory) > 0);
+	assert(snprintf(partuuid_path, sizeof(partuuid_path), "%s/by-partuuid",
+			 directory) > 0);
+	assert(snprintf(substituted, sizeof(substituted), "%s/substituted",
+			 directory) > 0);
+	fd = open(target, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	assert(fd >= 0);
+	assert(ftruncate(fd, (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) == 0);
+	assert(close(fd) == 0);
+	fd = open(other, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	assert(fd >= 0);
+	assert(ftruncate(fd, (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) == 0);
+	assert(close(fd) == 0);
+	assert(symlink(target, uuid_path) == 0);
+	assert(symlink(target, partuuid_path) == 0);
+	fd = swapz_primary_open_target_checked_paths(target, uuid_path,
+						     partuuid_path);
+	assert(fd >= 0);
+	assert(fstat(fd, &info) == 0 && S_ISREG(info.st_mode));
+	assert((fcntl(fd, F_GETFL) & O_ACCMODE) == O_RDWR);
+	assert(close(fd) == 0);
+	assert(unlink(partuuid_path) == 0);
+	assert(symlink(other, substituted) == 0);
+	assert(symlink(substituted, partuuid_path) == 0);
+	assert(swapz_primary_open_target_checked_paths(target, uuid_path,
+						     partuuid_path) < 0);
+	assert(errno == ENODEV);
+	assert(swapz_primary_open_target_checked_paths(target, uuid_path,
+						     NULL) < 0);
+	assert(errno == EINVAL);
+	assert(unlink(partuuid_path) == 0);
+	assert(unlink(substituted) == 0);
+	assert(unlink(uuid_path) == 0);
+	assert(unlink(other) == 0);
+	assert(unlink(target) == 0);
+	assert(rmdir(directory) == 0);
+}
+
 static void test_exact_block_read_helper(void)
 {
 	const char *home = getenv("HOME");
@@ -677,6 +729,7 @@ int main(void)
 	test_primary_stage_policy();
 	test_primary_state_records();
 	test_checked_header_write();
+	test_exclusive_target_open_paths();
 	test_exact_block_read_helper();
 	test_sha256_helper();
 	test_recovery_filesystem_policy();

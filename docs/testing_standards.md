@@ -3495,12 +3495,20 @@ Any primary-swap block-zero write must use the checked descriptor primitive in
 `src/userspace/swapz-primary.c`. Production callers must first open the fixed
 target with `O_RDWR|O_EXCL`, verify the canonical UUID and PARTUUID paths name
 that same block device, and verify its major:minor and `BLKGETSIZE64` geometry.
+Use `swapz_primary_target_open_exclusive()` to perform that fixed-path open:
+it compares `/dev/sda4`, the exact by-UUID path, and the exact by-PARTUUID path
+before opening, opens the UUID path read/write and exclusively, then checks the
+opened descriptor and rechecks all three aliases to close path-substitution
+races. The helper rejects anything outside major:minor 8:4 and the exact
+16 GiB geometry.
 The primitive independently requires an open read/write descriptor for the
 fixed 8:4 device and exact 16 GiB geometry, compares all 4096 current bytes to
 the caller-bound expected header before writing, handles short writes, calls
 `fsync`, then rereads and compares all 4096 replacement bytes. A stale header
 must fail with no write. Rootless direct-C coverage uses only a temporary
 regular-file fixture to verify exact replacement and stale-header refusal; it
-does not qualify block-device locking or physical recovery. Keep this
-primitive disconnected from privileged lifecycle commands until the checked
-target-open path and full manifest binding are implemented and tested.
+does not qualify kernel block-device exclusive-open behavior or physical
+recovery. The alias-path fixture verifies matching identity and rejects a
+substituted target, but cannot model races in `/dev` or real block geometry.
+Keep both primitives disconnected from privileged lifecycle commands until
+the full manifest binding and recovery use are implemented and tested.
