@@ -53,6 +53,19 @@ def source_body(symbol: str, source: str) -> str:
     raise AssertionError("Unclosed source function: " + symbol)
 
 
+def status_format_sequence() -> str:
+    """Reconstruct INFO status text across bounded DMEMIT calls."""
+    emitted = []
+    for call in re.findall(r"DMEMIT\((.*?)(?=\n\s*\);)",
+                           body("swapz_status"), re.S):
+        literals = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', call)
+        if literals:
+            text = "".join(literals)
+            if not text.startswith("status_snapshot_error="):
+                emitted.append(text)
+    return "".join(emitted)
+
+
 class SwapzProductionSourceQualification(unittest.TestCase):
     def test_primary_manager_target_is_runtime_selected(self):
         # Historical trial paths and device numbers may appear in fixtures or
@@ -1251,8 +1264,9 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_issue_flush(ctx)", drain)
         self.assertIn("swapz_flush_accounted(&ctx->flush_meter", lower)
         self.assertIn("swapz_fail(ctx, error)", lower)
-        self.assertIn("flush_calls=%llu flush_ok=%llu flush_err=%llu", DM)
-        self.assertIn("flush_injected=%llu flush_fault_nth=%u", DM)
+        status = status_format_sequence()
+        self.assertIn("flush_calls=%llu flush_ok=%llu flush_err=%llu", status)
+        self.assertIn("flush_injected=%llu flush_fault_nth=%u", status)
         self.assertIn("flush_fail_nth > 64U", body("swapz_ctr"))
         self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("swapz_ctr"))
 
