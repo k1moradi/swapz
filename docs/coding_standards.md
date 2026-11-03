@@ -243,6 +243,29 @@ read-only parameter. Its ownership result remains set if post-load checks
 fail, so recovery cannot hide a module that may be live. This primitive does
 not authorize lifecycle execution through the CLI.
 
+### Primary manager Device Mapper lifecycle primitives
+
+Build mapper tables and issue Device Mapper ioctls in process; do not invoke
+`dmsetup` as a privileged subprocess. Align every ioctl buffer and validate
+its returned interface version, bounded lengths, target count, generated name
+and UUID before interpreting payloads. The primary table is one `swapz`
+target over exactly `8:4` at the manifest-derived maximum safe size. Verify
+its returned table parameters, one lower-device dependency, sysfs name/UUID,
+logical sector count and backing major:minor before admitting use.
+
+Persist and verify the matching owner claim, immutable manifest and
+`STARTING` state before mapper creation. Preserve side-effect flags when an
+ioctl sequence fails so recovery knows whether a mapper may exist. Cleanup
+must prove the mapper is inactive as swap, has zero open references and is
+identified by the exact run-bound name and UUID. It may remove only the exact
+active table or a suspended partial mapper with no active table and either no
+inactive table or the exact expected inactive table. Clear that inactive
+table only after parsing it exactly; remove without force; then independently
+prove both name and UUID absent. Unknown tables, extra dependencies, open
+references, identity drift or a failed query stop cleanup and preserve the
+durable recovery state. These primitives remain disabled until the complete
+provisioning, activation, teardown, recovery and boot lifecycle is qualified.
+
 ## MM, folio and zswap semantic boundary
 
 Read [context.md](context.md) for the kernel reclaim/BIO/zswap semantics and

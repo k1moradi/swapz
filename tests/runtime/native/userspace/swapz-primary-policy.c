@@ -432,6 +432,118 @@ static void test_primary_manifest(int recovery_fd, int lock_fd,
 	assert(fsync(recovery_fd) == 0);
 }
 
+static void test_primary_dm_table(void)
+{
+	const char *run_id = "0123456789abcdef0123456789abcdef";
+	struct swapz_primary_manifest manifest = {0};
+	_Alignas(struct dm_ioctl)
+	unsigned char buffer[SWAPZ_PRIMARY_DM_BUFFER_BYTES];
+	struct dm_ioctl *io = (struct dm_ioctl *)buffer;
+	struct dm_target_spec *target;
+	size_t used_bytes = 0;
+	uint64_t logical_sectors = 0;
+	char mapper_name[64];
+	char mapper_uuid[64];
+	char table[128];
+
+	memcpy(manifest.run_id, run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U);
+	memset(manifest.source_sha, 'a', SWAPZ_PRIMARY_SOURCE_SHA_LENGTH);
+	manifest.source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH] = '\0';
+	memset(manifest.swapzctl_sha256, 'b', SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.swapzctl_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	memset(manifest.module_sha256, 'c', SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.module_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	memset(manifest.qualification_report_sha256, 'd',
+	       SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.qualification_report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	memcpy(manifest.original_header_sha256,
+	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
+	       sizeof(manifest.original_header_sha256));
+	assert(swapz_primary_mapper_layout(&manifest, mapper_name, mapper_uuid,
+					 table, &logical_sectors) == 0);
+	assert(!strcmp(mapper_name, "swapz-primary-0123456789abcdef0123456789abcdef"));
+	assert(!strcmp(mapper_uuid,
+		       "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef"));
+	assert(logical_sectors == 29822976ULL);
+	assert(!strcmp(table,
+	       "0 29822976 swapz 8:4 0 64 0 2 0 1 0 0"));
+	assert(swapz_primary_dm_table_load_buffer(
+		&manifest, buffer, sizeof(buffer), &used_bytes) == 0);
+	assert(used_bytes <= sizeof(buffer));
+	assert(io->version[0] == DM_VERSION_MAJOR &&
+	       io->version[1] == DM_VERSION_MINOR);
+	assert(io->data_size == used_bytes && io->data_start == sizeof(*io));
+	assert(io->target_count == 1U);
+	assert(!strcmp(io->name, mapper_name) && !strcmp(io->uuid, mapper_uuid));
+	target = (struct dm_target_spec *)(buffer + io->data_start);
+	assert(target->sector_start == 0ULL &&
+	       target->length == logical_sectors && target->next == 0U);
+	assert(!strcmp(target->target_type, "swapz"));
+	assert(!strcmp((char *)(target + 1), "8:4 0 64 0 2 0 1 0 0"));
+	assert(swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	--target->length;
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	++target->length;
+	((char *)(target + 1))[0] = '9';
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	((char *)(target + 1))[0] = '8';
+	io->target_count = 2U;
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	io->target_count = 1U;
+	io->data_size = (uint32_t)(used_bytes + 1U);
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	io->data_size = (uint32_t)used_bytes;
+	io->version[0] = DM_VERSION_MAJOR + 1U;
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	io->version[0] = DM_VERSION_MAJOR;
+	io->data_start++;
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	io->data_start = sizeof(*io);
+	target->next = 8U;
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	target->next = 0U;
+	io->uuid[0] = 'X';
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	io->uuid[0] = 'S';
+	buffer[used_bytes - 1U] = 1U;
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, used_bytes, &manifest));
+	buffer[used_bytes - 1U] = 0U;
+	assert(swapz_primary_dm_table_load_buffer(
+		&manifest, buffer + 1U, sizeof(buffer) - 1U, &used_bytes) < 0);
+	assert(errno == EINVAL);
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer + 1U, sizeof(buffer) - 1U, &manifest));
+}
+
+static void test_primary_dm_operations_disabled(void)
+{
+	struct swapz_primary_manifest manifest = {0};
+	dev_t mapper_device = (dev_t)-1;
+	int created = 1;
+	int resumed = 1;
+	int removed = 1;
+
+	assert(swapz_primary_dm_create_mapper(
+		-1, -1, &manifest, 1, &created, &resumed,
+		&mapper_device) < 0);
+	assert(errno == ENODEV);
+	assert(created == 0 && resumed == 0 && mapper_device == 0);
+	assert(swapz_primary_dm_remove_mapper(-1, -1, &manifest,
+					     &removed) < 0);
+	assert(errno == ENODEV);
+	assert(removed == 0);
+}
+
 static void test_checked_header_write(void)
 {
 	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
@@ -1251,6 +1363,8 @@ int main(void)
 	test_primary_stage_policy();
 	test_primary_state_records();
 	test_checked_header_write();
+	test_primary_dm_table();
+	test_primary_dm_operations_disabled();
 	test_exclusive_target_open_paths();
 	test_exact_block_read_helper();
 	test_sha256_helper();

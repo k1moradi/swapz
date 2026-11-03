@@ -1516,3 +1516,20 @@ the loader yet; a caller must first persist and claim `STARTING`, and must
 retain recovery ownership when a post-load check fails. Privileged lifecycle
 commands remain disabled. Source parameters still cannot authenticate a
 module loaded by another actor; lifecycle admission must reject such modules.
+
+The primary manager now has a manifest-derived Device Mapper table builder and
+an in-process ioctl layer for creating, verifying and removing the maximum
+safe-capacity `/dev/sda4` mapper. Verification checks the run-bound name and
+UUID, active table parameters, exact logical sector count, one lower `8:4`
+dependency, sysfs identity and backing relationship. Removal refuses an
+active swap entry, open references, deferred removal and unknown table state;
+it handles a suspended mapper left before table resume only when its inactive
+table exactly matches the manifest, and proves both generated name and UUID
+absent after non-forced removal. Focused ASan/UBSan tests cover table-buffer
+construction and malformed or misaligned response rejection; a strict
+production userspace syntax compile covers the ioctl path. No real ioctl,
+mapper, module load or swap operation ran. The API and CLI execution gates
+remain disabled, and this change modifies `swapzctl`; it requires fresh
+exact-source owner qualification before it can be used. The loader and mapper
+primitives are not yet integrated into a complete prepare/start/stop/recover
+state machine, and no boot lifecycle is qualified.

@@ -3635,3 +3635,23 @@ refuse any preloaded module or swapz mapper, use the returned module FD for
 source and parameter. Rootless tests must verify strict module-boolean parsing
 and that the load command returns `ENODEV` without changing its ownership
 result or touching host paths.
+
+The primary manager's Device Mapper layer must keep privileged create/remove
+calls disabled until the whole coordinator is qualified. Rootless production-C
+tests must exercise the manifest-derived maximum table, exact run-bound name
+and UUID, ioctl buffer alignment, one-target bounds, exact `swapz` parameters,
+and rejection of altered lengths, target counts, versions, UUIDs, padding and
+unaligned payloads. The rootless build must prove that mapper create/remove
+return `ENODEV` without setting any side-effect result. A strict production
+userspace compile must also compile the guarded ioctl implementation. These
+checks do not emulate kernel Device Mapper behavior or authorize a mapper on
+the host.
+
+Before any future lifecycle enablement, isolated VM coverage must exercise
+interruption after device creation, after inactive-table load, after resume,
+and during cleanup. Recovery may remove only the exact run-bound mapper, an
+exact active table or exact suspended inactive table, zero open references,
+and an inactive swap mapping. It must prove both name and UUID absent after
+non-forced removal. Missing, substituted, extra-target, extra-dependency or
+unqueryable mapper state remains a recovery stop condition; rootless parser
+coverage alone cannot close these VM gates.

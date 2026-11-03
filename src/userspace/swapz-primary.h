@@ -92,6 +92,20 @@ int swapz_primary_open_qualified_module_fd(
 /* Caller must durably own a STARTING transaction before requesting this load.
  * loaded_by_call remains true if post-load verification subsequently fails. */
 int swapz_primary_load_qualified_module(int *loaded_by_call);
+/*
+ * These Device Mapper lifecycle primitives are not enabled by the public
+ * primary-swap command until the complete coordinator is qualified.
+ * `module_loaded_by_call` must come directly from the exact-image loader.
+ */
+int swapz_primary_dm_create_mapper(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest,
+	int module_loaded_by_call, int *created_by_call,
+	int *resumed_by_call, dev_t *mapper_device);
+int swapz_primary_dm_remove_mapper(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest,
+	int *removed_by_call);
 
 int swapz_primary_partition_lock_acquire(void);
 /* Internal lifecycle primitive; caller must hold the matching partition lock. */
