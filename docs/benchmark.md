@@ -608,6 +608,13 @@ kernel workers and other host work are not charged to that process/worker sum.
 Host-wide CPU ticks and PSI are reported separately and include swapz, the
 kernel and unrelated background activity, so they are context rather than a
 swapz-only cost. Process-only CPU must never be described as whole-swapz CPU.
+The anonymous worker additionally reports process-only CPU for deterministic
+fill and each reread/verification round; these are diagnostic phase splits and
+do not replace the frozen whole-arm CPU acceptance metric. Sustained one-minute
+telemetry reports its own sampling wall time and child-process CPU (including
+read-only `dmsetup status` where applicable). That observer overhead is excluded
+from the frozen replay+exported-worker CPU metric and must be considered when
+correlating minute-level GC events with service drift.
 
 A 200 ms quiet window immediately before and after each arm must have busy
 fraction <=25%, CPU PSI \`some\` <=5% and steal <=1%; timed-arm steal must also be
@@ -644,11 +651,28 @@ frozen v1 contract plus the v2 amendment, preserve the prescribed pair order,
 pass the exact DM UUID into the swapz anonymous arm, use a worker-only private
 cgroup, explicitly request `--protocol v2` for v2 qualification, serialize on
 the existing physical-performance lock, and retain every arm/pair JSON plus
-exclusion/failure reason. It must not rerun a failed/excluded pair to replace it with a passing
-sample. Physical execution is scheduled exclusively by the host/Codex owner;
-no VM/fallback run is an acceptable substitute and no two host experiments may
-overlap. This methodology change intentionally does not add a second public
-test command.
+exclusion/failure reason. It must not rerun a failed/excluded pair to replace it
+with a passing sample. Physical execution is scheduled exclusively by the
+host/Codex owner; no VM/fallback run is an acceptable substitute and no two
+host experiments may overlap.
+
+The read-only `tests/runtime/benchmark/physical-campaign-evidence.py` helper is
+the evidence boundary for that scheduler, not a scheduler itself. The host
+should run `snapshot --source-sha <exact-main-sha> --device <admitted-partition>`
+before the first arm and after the final arm. Snapshots bind the clean
+HEAD/origin-main source to kernel/CPU/affinity/frequency-policy, memory,
+admitted-device size/model/transport/queue/scheduler, block ancestry, swap and
+mount inventories, PSI, thermal-zone readings and loaded swapz module
+parameters. After `qualification.py evaluate --protocol v2`, the scheduler
+runs `physical-campaign-evidence.py seal` with both snapshots, the evaluator
+summary and **every** pair JSON, including failed/excluded attempts. Sealing is
+create-only, verifies exact pair fields against the evaluator records, hashes
+the frozen acceptance manifest, prospective amendment and evaluator, and marks
+an otherwise passing campaign BLOCKED if stable host/device identity changed
+between snapshots. The resulting campaign JSON is the machine-readable
+provenance index; preserving the original arm/pair files remains mandatory.
+This methodology change intentionally does not add a second public test
+command.
 
 Reduced host-visible lower WRITE bytes/requests are a physical I/O-cost result.
 They must never be described as directly measured NAND wear, write amplification

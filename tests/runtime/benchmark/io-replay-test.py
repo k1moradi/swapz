@@ -2536,6 +2536,15 @@ class PairReplayContract(unittest.TestCase):
             def stop(self):
                 raise ValueError("telemetry failed")
 
+            def observer_summary(self):
+                return {
+                    "samples": 1, "wall_seconds": .01,
+                    "child_user_seconds": .001,
+                    "child_system_seconds": .002,
+                    "child_cpu_seconds": .003,
+                    "scope": "synthetic observer",
+                }
+
         partial = {}
         with self.assertRaisesRegex(ValueError, "telemetry failed"):
             sustained.stop_interval_sampler(
@@ -2549,6 +2558,158 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(partial["sustained_intervals"], rows)
         self.assertEqual(
             partial["interval_sampler_failure"], "telemetry failed")
+        self.assertEqual(
+            partial["sustained_observer_overhead"]["child_cpu_seconds"], .003)
+
+        progress = sustained.ProgressTracker()
+        observer = sustained.SustainedIntervalSampler(None, progress)
+        observer._snapshot()
+        observer_cost = observer.observer_summary()
+        self.assertEqual(observer_cost["samples"], 1)
+        self.assertGreaterEqual(observer_cost["wall_seconds"], 0)
+        self.assertGreaterEqual(observer_cost["child_cpu_seconds"], 0)
+
+    def test_physical_campaign_evidence_seals_all_attempts_and_policy(self):
+        import importlib.util
+
+        evidence_path = SCRIPT.with_name("physical-campaign-evidence.py")
+        evidence_spec = importlib.util.spec_from_file_location(
+            "swapz_campaign_evidence", evidence_path)
+        evidence = importlib.util.module_from_spec(evidence_spec)
+        evidence_spec.loader.exec_module(evidence)
+
+        source_sha = "a" * 40
+        source_tree_sha = "b" * 40
+        host = {
+            "schema": evidence.HOST_SCHEMA,
+            "source_sha": source_sha,
+            "source_tree_sha": source_tree_sha,
+            "virtualization": "none",
+            "kernel": {
+                "release": "6.8.0", "machine": "x86_64",
+                "version": "#1 SMP", "node": "physical-host"},
+            "device": {
+                "major_minor": "8:1", "size_bytes": 123456,
+                "physical_disk": "sda", "model": "SD", "transport": "usb",
+                "partuuid": "11111111-01", "serial": "serial-1",
+                "wwid": "wwid-1",
+                "queue": {
+                    "logical_block_size": 512,
+                    "physical_block_size": 512,
+                },
+            },
+            "cpu": {
+                "configured_cpus": 4, "online_cpus": 4,
+                "affinity_cpus": [0, 1, 2, 3],
+            },
+            "memory": {"total_bytes": 8 * 1024 * 1024 * 1024},
+            "swap_inventory": [],
+            "mount_inventory": "/ /dev/root ext4 8:2",
+            "pressure": {"cpu": "some avg10=0.00", "io": "", "memory": ""},
+            "thermal": [],
+            "dm_swapz_module": {"status": "NOT_LOADED", "values": {}},
+        }
+        pair = {
+            "schema": evidence.PAIR_SCHEMA,
+            "workload": "sd-service-balanced",
+            "pair_id": "pair-1", "pair_index": 1, "order": "raw-first",
+            "source_sha": source_sha, "status": "EXCLUDED", "excluded": True,
+            "exclusion_reasons": ["synthetic exclusion"],
+            "raw": {"source_sha": source_sha},
+            "swapz": {"source_sha": source_sha},
+        }
+        summary_record = {
+            **pair, "analysis_usable": False,
+            "analysis_exclusion_reasons": ["synthetic exclusion"],
+        }
+        acceptance_bytes = evidence.ACCEPTANCE_MANIFEST.read_bytes()
+        amendment = json.loads(evidence.AMENDMENT_MANIFEST.read_text())
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            before_path = root / "host-before.json"
+            after_path = root / "host-after.json"
+            pair_path = root / "pair-1.json"
+            summary_path = root / "summary.json"
+            result_path = root / "campaign.json"
+            before_path.write_text(json.dumps(host))
+            after_path.write_text(json.dumps(host))
+            pair_path.write_text(json.dumps(pair))
+            summary = {
+                "schema": evidence.SUMMARY_SCHEMA,
+                "campaign_source_sha": source_sha,
+                "acceptance_manifest_sha256":
+                    hashlib.sha256(acceptance_bytes).hexdigest(),
+                "prospective_amendment": amendment,
+                "evaluation_protocol": "v2",
+                "status": "FAIL_OR_INCOMPLETE",
+                "records": [summary_record],
+            }
+            summary_path.write_text(json.dumps(summary))
+
+            with mock.patch.object(
+                    evidence, "require_clean_source", return_value=None), \
+                    mock.patch.object(
+                        evidence, "source_tree_sha",
+                        return_value=source_tree_sha):
+                sealed = evidence.seal_campaign(
+                    source_sha, before_path, after_path,
+                    summary_path, [pair_path])
+            self.assertEqual(sealed["record_count"], 1)
+            self.assertEqual(sealed["campaign_status"], "FAIL_OR_INCOMPLETE")
+            self.assertEqual(
+                sealed["artifacts"]["pairs"][0]["status"], "EXCLUDED")
+            self.assertEqual(
+                sealed["policy"]["acceptance_manifest"]["git_blob_sha"],
+                evidence.git_blob_sha(acceptance_bytes))
+            self.assertEqual(sealed["host_stability"]["status"], "STABLE")
+
+            evidence.write_new_json(result_path, sealed)
+            with self.assertRaises(FileExistsError):
+                evidence.write_new_json(result_path, sealed)
+
+            changed_host = {
+                **host, "device": {**host["device"], "major_minor": "8:2"}}
+            after_path.write_text(json.dumps(changed_host))
+            summary["status"] = "PASS"
+            summary_path.write_text(json.dumps(summary))
+            with mock.patch.object(
+                    evidence, "require_clean_source", return_value=None), \
+                    mock.patch.object(
+                        evidence, "source_tree_sha",
+                        return_value=source_tree_sha):
+                changed = evidence.seal_campaign(
+                    source_sha, before_path, after_path,
+                    summary_path, [pair_path])
+            self.assertEqual(
+                changed["campaign_status"],
+                "BLOCKED_HOST_IDENTITY_CHANGED")
+
+            summary["records"][0]["status"] = "PASS"
+            summary_path.write_text(json.dumps(summary))
+            with mock.patch.object(
+                    evidence, "require_clean_source", return_value=None), \
+                    mock.patch.object(
+                        evidence, "source_tree_sha",
+                        return_value=source_tree_sha):
+                with self.assertRaisesRegex(
+                        ValueError, "summary changed original pair field"):
+                    evidence.seal_campaign(
+                        source_sha, before_path, after_path,
+                        summary_path, [pair_path])
+
+            summary["records"] = [summary_record]
+            summary_path.write_text(json.dumps(summary))
+            with mock.patch.object(
+                    evidence, "require_clean_source", return_value=None), \
+                    mock.patch.object(
+                        evidence, "source_tree_sha",
+                        return_value=source_tree_sha):
+                with self.assertRaisesRegex(
+                        ValueError, "requires every evaluator record"):
+                    evidence.seal_campaign(
+                        source_sha, before_path, after_path,
+                        summary_path, [])
 
     def test_prospective_amendment_and_attribution_fail_closed(self):
         import importlib.util
@@ -2668,6 +2829,12 @@ class PairReplayContract(unittest.TestCase):
         self.assertNotEqual(medium, entropy)
         self.assertTrue(medium.startswith(b"swapz-anonymous-page:2\0"))
         self.assertGreater(len(set(entropy)), 200)
+        cpu_delta = anonymous.process_cpu_delta(
+            mock.Mock(ru_utime=1.0, ru_stime=.5),
+            mock.Mock(ru_utime=1.25, ru_stime=.75))
+        self.assertEqual(cpu_delta["user_seconds"], .25)
+        self.assertEqual(cpu_delta["system_seconds"], .25)
+        self.assertEqual(cpu_delta["total_seconds"], .5)
         self.assertEqual(
             anonymous.monotonic_counter_delta(
                 {"pswpin": 100, "pswpout": 200},

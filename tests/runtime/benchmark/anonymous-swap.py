@@ -73,6 +73,16 @@ def page_bytes(index: int) -> bytes:
     return header + (word * ((PAGE - len(header) + 15) // 16))[:PAGE - len(header)]
 
 
+def process_cpu_delta(before, after) -> dict:
+    user = max(0.0, after.ru_utime - before.ru_utime)
+    system = max(0.0, after.ru_stime - before.ru_stime)
+    return {
+        "user_seconds": user,
+        "system_seconds": system,
+        "total_seconds": user + system,
+    }
+
+
 def process_swap_bytes() -> int:
     for line in Path("/proc/self/status").read_text().splitlines():
         if line.startswith("VmSwap:"):
@@ -401,11 +411,14 @@ def run(args):
         -1, args.bytes, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS,
         prot=mmap.PROT_READ | mmap.PROT_WRITE)
     try:
+        fill_cpu_before = resource.getrusage(resource.RUSAGE_SELF)
         fill_start = time.monotonic_ns()
         for page in range(page_count):
             offset = page * PAGE
             mapping[offset:offset + PAGE] = page_bytes(page)
         fill_seconds = (time.monotonic_ns() - fill_start) / 1e9
+        fill_cpu_after = resource.getrusage(resource.RUSAGE_SELF)
+        fill_process_cpu = process_cpu_delta(fill_cpu_before, fill_cpu_after)
 
         rounds, mismatches, combined, max_observed = [], 0, array.array("Q"), 0
         for round_index in range(args.rounds):
@@ -431,6 +444,7 @@ def run(args):
             round_lower_before = REPLAY["lower_stat"](lower_disk)
             samples = array.array("Q")
             verification_ns = 0
+            round_cpu_before = resource.getrusage(resource.RUSAGE_SELF)
             start = time.monotonic_ns()
             for page in range(page_count):
                 offset = page * PAGE
@@ -450,6 +464,9 @@ def run(args):
                             "anonymous byte oracle exceeded mismatch limit")
                 verification_ns += time.monotonic_ns() - verify_begin
             round_seconds = (time.monotonic_ns() - start) / 1e9
+            round_cpu_after = resource.getrusage(resource.RUSAGE_SELF)
+            round_process_cpu = process_cpu_delta(
+                round_cpu_before, round_cpu_after)
             round_lower_after = REPLAY["lower_stat"](lower_disk)
             round_target_after = device_stat(args.expected_swap_device)
             round_cgroup_after = cgroup_values()
@@ -498,6 +515,13 @@ def run(args):
                 "cgroup_delta": cgroup_delta,
                 "latency": first_touch_latency,
                 "fault_first_touch_latency": first_touch_latency,
+                "process_cpu": {
+                    **round_process_cpu,
+                    "scope": (
+                        "worker-process CPU during page recipe generation, "
+                        "first-byte accesses, and 4KiB copy/verification; "
+                        "kernel swapz workers are excluded"),
+                },
                 "timing": {
                     "scope": (
                         "first-touch timing includes Python one-byte access "
@@ -549,9 +573,10 @@ def run(args):
             lower["lower_read_bytes_per_logical_read_byte"] = (
                 lower["lower_read_bytes"] / (args.bytes * args.rounds))
 
-        process_user = max(0., cpu_after.ru_utime - cpu_before.ru_utime)
-        process_system = max(0., cpu_after.ru_stime - cpu_before.ru_stime)
-        process_cpu_seconds = process_user + process_system
+        acceptance_process_cpu = process_cpu_delta(cpu_before, cpu_after)
+        process_user = acceptance_process_cpu["user_seconds"]
+        process_system = acceptance_process_cpu["system_seconds"]
+        process_cpu_seconds = acceptance_process_cpu["total_seconds"]
         worker_cpu = swapz_worker_cpu_delta(
             worker_cpu_before, worker_cpu_after)
         worker_cpu_seconds = sum(worker_cpu.values()) / 1e9
@@ -626,6 +651,15 @@ def run(args):
                 "attributed_cpu_seconds": attributed_cpu_seconds,
                 "measured_cpu_seconds_per_useful_byte": (
                     attributed_cpu_seconds / (args.bytes + useful_read_bytes)),
+                "phase_process_cpu": {
+                    "fill": fill_process_cpu,
+                    "reread_rounds": [
+                        row["process_cpu"] for row in rounds],
+                    "scope": (
+                        "diagnostic process-only phase attribution; the frozen "
+                        "acceptance metric remains the whole-arm process CPU "
+                        "plus exported swapz worker CPU"),
+                },
                 "peak_rss_bytes": cpu_after.ru_maxrss * 1024,
                 "scope": (
                     "workload process user+system CPU plus exported swapz "

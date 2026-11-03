@@ -777,10 +777,16 @@ class SustainedIntervalSampler:
         self.rows = []
         self.error = None
         self.start_ns = None
+        self.observer_samples = 0
+        self.observer_wall_ns = 0
+        self.observer_child_user_seconds = 0.0
+        self.observer_child_system_seconds = 0.0
 
     def _snapshot(self) -> dict:
-        return {
-            "time_ns": time.monotonic_ns(),
+        observer_start = time.monotonic_ns()
+        child_before = resource.getrusage(resource.RUSAGE_CHILDREN)
+        snapshot = {
+            "time_ns": observer_start,
             "host_cpu": REPLAY["host_cpu_snapshot"](),
             "lower": REPLAY["lower_stat"](self.lower_disk),
             "target_status": (
@@ -788,6 +794,37 @@ class SustainedIntervalSampler:
                 if self.target is not None and self.identity is not None
                 else None),
             "max_no_progress_ns": self.progress.snapshot_max_gap_ns(),
+        }
+        child_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        observer_wall_ns = time.monotonic_ns() - observer_start
+        child_user_seconds = max(
+            0.0, child_after.ru_utime - child_before.ru_utime)
+        child_system_seconds = max(
+            0.0, child_after.ru_stime - child_before.ru_stime)
+        self.observer_samples += 1
+        self.observer_wall_ns += observer_wall_ns
+        self.observer_child_user_seconds += child_user_seconds
+        self.observer_child_system_seconds += child_system_seconds
+        snapshot["observer_overhead"] = {
+            "wall_seconds": observer_wall_ns / 1e9,
+            "child_user_seconds": child_user_seconds,
+            "child_system_seconds": child_system_seconds,
+        }
+        return snapshot
+
+    def observer_summary(self) -> dict:
+        return {
+            "samples": self.observer_samples,
+            "wall_seconds": self.observer_wall_ns / 1e9,
+            "child_user_seconds": self.observer_child_user_seconds,
+            "child_system_seconds": self.observer_child_system_seconds,
+            "child_cpu_seconds": (
+                self.observer_child_user_seconds +
+                self.observer_child_system_seconds),
+            "scope": (
+                "low-rate telemetry observer only; includes read-only status "
+                "sampling and its child-process CPU where applicable; excluded "
+                "from the frozen measured CPU acceptance metric"),
         }
 
     def _append(self, current: dict, minimum_ns: int = 0) -> None:
@@ -852,6 +889,12 @@ def stop_interval_sampler(interval_sampler, partial: dict,
                           primary_failure_active: bool) -> list[dict]:
     """Stop telemetry without ever hiding a standalone sampler failure."""
     if interval_sampler is None:
+        partial["sustained_observer_overhead"] = {
+            "samples": 0, "wall_seconds": 0.0,
+            "child_user_seconds": 0.0, "child_system_seconds": 0.0,
+            "child_cpu_seconds": 0.0,
+            "scope": "no sustained interval sampler for this fixed-work arm",
+        }
         return []
     try:
         rows = interval_sampler.stop()
@@ -860,6 +903,9 @@ def stop_interval_sampler(interval_sampler, partial: dict,
             raise
         partial["interval_sampler_failure"] = str(sampler_error)
         rows = list(interval_sampler.rows)
+    finally:
+        partial["sustained_observer_overhead"] = (
+            interval_sampler.observer_summary())
     partial["sustained_intervals"] = rows
     return rows
 
@@ -1083,6 +1129,8 @@ def run(args):
                 "kernel_read_path": kernel_read, "gc": gc,
                 "cold_read": cold_read_result, "minute_buckets": minute_rows,
                 "sustained_intervals": interval_rows,
+                "sustained_observer_overhead":
+                    partial["sustained_observer_overhead"],
                 "overwrite": overwrite,
                 "occupancy_transitions": [
                     {"phase": "initial", "occupied_pages": 0,
