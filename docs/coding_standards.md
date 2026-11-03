@@ -1528,6 +1528,20 @@ ready-residency gauge. An ERROR reader acquires the terminal state before
 consuming the prepared-page errno and leaves BIO completion and slot release
 with the ordered owner.
 
+Loaded qualification may inject one synthetic codec `-EIO` through the exact
+submitter, background-preparation, or ordered-inline compression owner. The
+selector is an optional trailing Device Mapper constructor argument, defaults
+off, is restricted to null_blk, and must be rejected for physical backing
+alongside the existing lower-I/O fault controls. Injection occurs immediately
+before the selected compression call, exactly once per mapping, and then uses
+the ordinary negative-result path; it must not convert the error into RAW or
+create a separate completion owner. Submitter and inline injection must not
+submit the faulted page to the lower device. A background error may race a
+previously selected RAW lower write, but the RAW_SELECTED ACK barrier must make
+the upper BIO fail after the producer publishes its result. Default production
+mappings pay only the predictable disabled branch and perform no fault-counter
+atomic operation.
+
 
 Do not expose scheduler-accounted per-callback CPU as a portable module
 metric. The rejected task-cputime experiment undercounted short nonblocking

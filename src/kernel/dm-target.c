@@ -89,6 +89,18 @@ MODULE_INFO(swapz_build_source_clean, SWAPZ_BUILD_SOURCE_CLEAN_STRING);
 #define SWAPZ_DELTA64_PREPARATION_WORKERS 1U
 #define SWAPZ_SUBMITTER_PREPARATION_LANES_MAX 8U
 #define SWAPZ_READ_COALESCE_MAX_BLOCKS (2U * SWAPZ_MAX_BLOCKS)
+
+/*
+ * Null_blk-only codec fault ownership. This is a qualification seam, not a
+ * production policy control: nonzero values are rejected for physical backing.
+ */
+enum swapz_codec_fault_owner {
+	SWAPZ_CODEC_FAULT_NONE = 0,
+	SWAPZ_CODEC_FAULT_SUBMITTER = 1,
+	SWAPZ_CODEC_FAULT_BACKGROUND = 2,
+	SWAPZ_CODEC_FAULT_INLINE = 3,
+};
+
 /*
  * A separate bounded LZ4 producer may prepare future writes while synchronous
  * lower dm_io blocks the ordered commit worker or while a detached K=1 lower
@@ -895,6 +907,11 @@ struct swapz_dm {
 	u32 write_fault_nth;
 	u64 write_fault_calls;
 	u64 write_fault_injected;
+	/* Null_blk-only synthetic codec errno. The selected owner injects once
+	 * before compression and the normal target path must fail closed. */
+	u32 codec_fault_owner;
+	atomic64_t codec_fault_calls;
+	atomic_t codec_fault_injected;
 	u64 lower_read_submitted_bytes;
 	u64 lower_read_submitted_reqs;
 	struct swapz_flush_meter flush_meter;
@@ -989,6 +1006,17 @@ struct swapz_dm {
 	u64 reordered_records;
 	u64 io_failures;
 };
+
+static int swapz_maybe_inject_codec_fault(
+	struct swapz_dm *ctx, enum swapz_codec_fault_owner owner)
+{
+	if (unlikely(ctx->codec_fault_owner != (u32)owner))
+		return 0;
+	atomic64_inc(&ctx->codec_fault_calls);
+	if (atomic_cmpxchg(&ctx->codec_fault_injected, 0, 1))
+		return 0;
+	return -EIO;
+}
 
 static u64 swapz_worker_cpu_sample(void)
 {
@@ -3123,10 +3151,17 @@ static void swapz_submitter_prepare_payload(struct swapz_dm *ctx,
 	prepared->payload_crc32c = 0;
 	complete_all(&entry->preparation_snapshot_ready);
 
-	prepared->length = swapz_compress_prepared_page(
-		ctx, prepared,
-		lane->predictor_page, lane->delta64_candidate_page,
-		lane->lz4_workmem, &lane->lz4_wall_ns, &lane->delta64);
+	error = swapz_maybe_inject_codec_fault(
+		ctx, SWAPZ_CODEC_FAULT_SUBMITTER);
+	if (error) {
+		prepared->length = error;
+		prepared->lz4_wall_ns = 0;
+	} else {
+		prepared->length = swapz_compress_prepared_page(
+			ctx, prepared,
+			lane->predictor_page, lane->delta64_candidate_page,
+			lane->lz4_workmem, &lane->lz4_wall_ns, &lane->delta64);
+	}
 	lane->lz4_attempts++;
 	if (prepared->length == 0) {
 		lane->lz4_size_bins[5]++;
@@ -3374,10 +3409,17 @@ static void swapz_preparation_worker(struct work_struct *work)
 		if (lower_write_overlap)
 			lane->prepared_during_lower_write++;
 		section_start = lower_write_overlap ? ktime_get_ns() : 0;
-		prepared->length = swapz_compress_prepared_page(
-			ctx, prepared,
-			lane->predictor_page, lane->delta64_candidate_page,
-			lane->lz4_workmem, &lane->lz4_wall_ns, &lane->delta64);
+		error = swapz_maybe_inject_codec_fault(
+			ctx, SWAPZ_CODEC_FAULT_BACKGROUND);
+		if (error) {
+			prepared->length = error;
+			prepared->lz4_wall_ns = 0;
+		} else {
+			prepared->length = swapz_compress_prepared_page(
+				ctx, prepared,
+				lane->predictor_page, lane->delta64_candidate_page,
+				lane->lz4_workmem, &lane->lz4_wall_ns, &lane->delta64);
+		}
 		lane->lz4_attempts++;
 		if (prepared->length == 0) {
 			lane->lz4_size_bins[5]++;
@@ -5586,17 +5628,24 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 
 			if (mapped_input)
 				ctx->ordered_direct_lz4_pages++;
-			length = swapz_compress_page(
-				ctx, input,
-				ctx->batch_bytes +
-					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-				ctx->predictor_page, ctx->delta64_candidate_page,
-				ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding,
-				&ctx->ordered_delta64, &inline_zero);
-			ctx->ordered_lz4_page_ewma_ns =
-				swapz_window_ewma_update(
-					ctx->ordered_lz4_page_ewma_ns,
-					ctx->lz4_wall_ns - lz4_before);
+			error = swapz_maybe_inject_codec_fault(
+				ctx, SWAPZ_CODEC_FAULT_INLINE);
+			if (error) {
+				length = error;
+			} else {
+				length = swapz_compress_page(
+					ctx, input,
+					ctx->batch_bytes +
+						(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+					ctx->predictor_page,
+					ctx->delta64_candidate_page,
+					ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding,
+					&ctx->ordered_delta64, &inline_zero);
+				ctx->ordered_lz4_page_ewma_ns =
+					swapz_window_ewma_update(
+						ctx->ordered_lz4_page_ewma_ns,
+						ctx->lz4_wall_ns - lz4_before);
+			}
 			if (length > 0 && !inline_zero) {
 				section_start = ktime_get_ns();
 				payload_crc32c = swapz_crc32c_bytes(
@@ -8346,11 +8395,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	u32 budget = 0, window = SWAPZ_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, flush_fail_nth = 0;
 	u32 lower_bulk = 1, write_fail_nth = 0, retain = 0;
+	u32 codec_fault_owner = SWAPZ_CODEC_FAULT_NONE;
 	swapz_u8 read_slot, prep_lane;
 	int error;
 
-	if (argc < 1 || argc > 9 || ti->len % SWAPZ_SECTORS) {
-		ti->error = "Usage: <dedicated backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4; null_blk qualification 0..64]";
+	if (argc < 1 || argc > 10 || ti->len % SWAPZ_SECTORS) {
+		ti->error = "Usage: <dedicated backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4; null_blk qualification 0..64] [test_fail_codec_owner 0=off|1=submitter|2=background|3=inline]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -8378,6 +8428,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		return -EINVAL;
 	if (argc > 8 && (kstrtou32(argv[8], 10, &retain) ||
 			 retain > SWAPZ_NULLBLK_TEST_MAX_RETAIN_MS))
+		return -EINVAL;
+	if (argc > 9 && (kstrtou32(argv[9], 10, &codec_fault_owner) ||
+			 codec_fault_owner > SWAPZ_CODEC_FAULT_INLINE))
 		return -EINVAL;
 	if (!swapz_delta64_lz4_acceleration ||
 	    swapz_delta64_lz4_acceleration > 4U) {
@@ -8409,6 +8462,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->retain_ms = retain;
 	ctx->flush_meter.fail_nth = flush_fail_nth;
 	ctx->write_fault_nth = write_fail_nth;
+	ctx->codec_fault_owner = codec_fault_owner;
 	ctx->engine.max_read_blocks_per_record = (swapz_u8)budget;
 	ctx->engine.verify_after_write = verify;
 	ctx->engine.bulk_enabled = lower_bulk;
@@ -8450,6 +8504,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	atomic64_set(&ctx->endio_write_seen_ok, 0);
 	atomic64_set(&ctx->endio_write_seen_err, 0);
 	atomic64_set(&ctx->endio_write_forced_err, 0);
+	atomic64_set(&ctx->codec_fault_calls, 0);
+	atomic_set(&ctx->codec_fault_injected, 0);
 	atomic64_set(&ctx->preparation_free_mask,
 		     (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic64_set(&ctx->submitter_lane_free_mask,
@@ -8523,7 +8579,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			error = -EOPNOTSUPP;
 			goto fail;
 		}
-		if (flush_fail_nth || write_fail_nth) {
+		if (flush_fail_nth || write_fail_nth || codec_fault_owner) {
 			ti->error = "Fault injection is forbidden on physical backing";
 			error = -EINVAL;
 			goto fail;
@@ -9069,8 +9125,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_write_submitted_reqs);
 		DMEMIT(
 			   " read_submitted=%llu read_submitted_reqs=%llu write_fault_nth=%u "
-			   "write_fault_calls=%llu write_fault_injected=%llu flush_calls=%llu "
-			   "flush_ok=%llu flush_err=%llu flush_injected=%llu flush_fault_nth=%u "
+			   "write_fault_calls=%llu write_fault_injected=%llu "
+			   "codec_fault_owner=%u codec_fault_calls=%lld codec_fault_injected=%d "
+			   "flush_calls=%llu flush_ok=%llu flush_err=%llu flush_injected=%llu "
+			   "flush_fault_nth=%u "
 			   "packed_placement=%u logical_open_balance=%u bulk_mode=%u bulk_io=%u "
 			   "bulk_extents=%u bulk_padding=%u bulk_mixed_io=%u bulk_raw_only_io=%u "
 			   "bulk_raw_entries=%u worker_requeues=%llu one_page_windows=%llu "
@@ -9080,6 +9138,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->write_fault_nth,
 		       ctx->write_fault_calls,
 		       ctx->write_fault_injected,
+		       ctx->codec_fault_owner,
+		       atomic64_read(&ctx->codec_fault_calls),
+		       atomic_read(&ctx->codec_fault_injected),
 		       ctx->flush_meter.attempts,
 		       ctx->flush_meter.successes,
 		       ctx->flush_meter.failures,

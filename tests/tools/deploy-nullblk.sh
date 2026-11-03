@@ -1122,6 +1122,108 @@ note "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reac
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove retained FLUSH-fault mapping"
 OWN_DM=0
 
+# Codec errno injection exercises the three real foreground compression owners.
+# It is a null_blk-only constructor seam and returns -EIO before compression;
+# each case must reach the normal target error path, fail the upper BIO, and
+# never turn that negative result into RAW fallback.
+CODEC_FAULT_LAST_LOWER_DELTA=0
+run_codec_fault_direct_case() {
+	local owner="$1" label="$2"
+	shift 2
+	local probe_rc status
+	local -a before after
+
+	rmmod dm_swapz || fail "cannot reload swapz for $label codec-fault qualification"
+	OWN_MODULE=0
+	insmod "$MODULE" "$@" || fail "swapz $label codec-fault module reload rejected"
+	OWN_MODULE=1
+	UUID="SWAPZ-TEST-$TOKEN-codec-$label"
+	dmsetup create "$DMNAME" --uuid "$UUID" --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 2 $owner" ||
+		fail "cannot create $label codec-fault mapping"
+	OWN_DM=1
+	swapz_verify_owned_dm_node
+	status="$(dmsetup status "$DMNAME")" ||
+		fail "cannot read $label codec-fault status before WRITE"
+	(( $(status_u64 "$status" codec_fault_owner) == owner &&
+	   $(status_u64 "$status" codec_fault_calls) == 0 &&
+	   $(status_u64 "$status" codec_fault_injected) == 0 &&
+	   $(status_u64 "$status" failed) == 0 )) ||
+		fail "$label codec-fault mapping policy mismatch"
+	read -r -a before < "/sys/block/$DISK/stat"
+	set +e
+	timeout --signal=TERM --kill-after=5s 20s "$WRITE_PROBE" "/dev/mapper/$DMNAME" >/dev/null 2>&1
+	probe_rc=$?
+	set -e
+	if (( probe_rc != 0 )); then
+		status="$(dmsetup status "$DMNAME")" ||
+			fail "cannot read $label codec-fault status after unexpected probe result"
+		fail "$label codec-fault probe did not observe EIO: rc=$probe_rc calls=$(status_u64 "$status" codec_fault_calls) injected=$(status_u64 "$status" codec_fault_injected) failed=$(status_u64 "$status" failed)"
+	fi
+	status="$(dmsetup status "$DMNAME")" ||
+		fail "cannot read $label codec-fault status after WRITE"
+	read -r -a after < "/sys/block/$DISK/stat"
+	(( $(status_u64 "$status" codec_fault_owner) == owner &&
+	   $(status_u64 "$status" codec_fault_calls) == 1 &&
+	   $(status_u64 "$status" codec_fault_injected) == 1 &&
+	   $(status_u64 "$status" failed) == 1 &&
+	   $(status_u64 "$status" upper_write_completed_ok) == 0 &&
+	   $(status_u64 "$status" upper_write_completed_err) == 1 )) ||
+		fail "$label codec-fault path did not fail-close exactly once"
+	(( after[4] == before[4] && after[6] == before[6] )) ||
+		fail "$label codec-fault page reached the owned lower device"
+	CODEC_FAULT_LAST_LOWER_DELTA=$((after[6] - before[6]))
+	timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
+		fail "cannot remove $label codec-fault mapping"
+	OWN_DM=0
+}
+
+note "START_LOADED_CODEC_ERROR_PATHS"
+run_codec_fault_direct_case 3 inline async_prepare=0
+inline_codec_lower_delta="$CODEC_FAULT_LAST_LOWER_DELTA"
+run_codec_fault_direct_case 1 submitter async_prepare=1 submitter_prepare=1
+submitter_codec_lower_delta="$CODEC_FAULT_LAST_LOWER_DELTA"
+
+# With submitter preparation disabled, a parallel accepted backlog lets the
+# bounded background producer own real preparation work. Its first selected
+# compression returns the synthetic errno and must terminally fail the target.
+rmmod dm_swapz || fail "cannot reload swapz for background codec-fault qualification"
+OWN_MODULE=0
+insmod "$MODULE" async_prepare=1 submitter_prepare=0 ||
+	fail "swapz background codec-fault module reload rejected"
+OWN_MODULE=1
+UUID="SWAPZ-TEST-$TOKEN-codec-background"
+dmsetup create "$DMNAME" --uuid "$UUID" --table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2 2" ||
+	fail "cannot create background codec-fault mapping"
+OWN_DM=1
+swapz_verify_owned_dm_node
+background_codec_before="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$background_codec_before" codec_fault_owner) == 2 &&
+   $(status_u64 "$background_codec_before" codec_fault_calls) == 0 &&
+   $(status_u64 "$background_codec_before" codec_fault_injected) == 0 &&
+   $(status_u64 "$background_codec_before" failed) == 0 )) ||
+	fail "background codec-fault mapping policy mismatch"
+set +e
+timeout --signal=TERM --kill-after=5s 40s "$ORACLE" "/dev/mapper/$DMNAME" --parallel-write-series 128 64 >"$SESSION/codec-background.log" 2>&1
+background_codec_rc=$?
+set -e
+(( background_codec_rc != 0 && background_codec_rc != 124 &&
+   background_codec_rc != 137 )) ||
+	fail "background codec-fault workload did not terminate with an ordinary I/O failure"
+background_codec_after="$(dmsetup status "$DMNAME")" ||
+	fail "cannot read background codec-fault status"
+background_codec_errors="$(status_u64 "$background_codec_after" upper_write_completed_err)" ||
+	fail "background codec-fault status lacks upper error count"
+(( $(status_u64 "$background_codec_after" codec_fault_owner) == 2 &&
+   $(status_u64 "$background_codec_after" codec_fault_calls) >= 1 &&
+   $(status_u64 "$background_codec_after" codec_fault_injected) == 1 &&
+   $(status_u64 "$background_codec_after" failed) == 1 &&
+   background_codec_errors > 0 )) ||
+	fail "background codec-fault path was not exercised fail-closed"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
+	fail "cannot remove background codec-fault mapping"
+OWN_DM=0
+note "PASS_LOADED_CODEC_ERROR_PATHS=owners:3 injected:3 inline_lower_write_delta:$inline_codec_lower_delta submitter_lower_write_delta:$submitter_codec_lower_delta background_error_completions:$background_codec_errors"
+
 # ID69 packed placement is canonical. Reload the already-owned module without
 # any placement override, then prove the default path remains byte-exact and
 # generates no avoidable internal holes or hole-induced lower-run splits.

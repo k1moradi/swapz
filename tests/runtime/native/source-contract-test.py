@@ -1636,6 +1636,63 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("flush_fail_nth > 64U", body("swapz_ctr"))
         self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("swapz_ctr"))
 
+    def test_owned_nullblk_codec_fault_covers_all_compression_owners(self):
+        ctor = body("swapz_ctr")
+        submitter = body("swapz_submitter_prepare_payload")
+        background = body("swapz_preparation_worker")
+        ordered = body("swapz_accept_write")
+        injector = body("swapz_maybe_inject_codec_fault")
+        status = body("swapz_status")
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+
+        for owner in ("SWAPZ_CODEC_FAULT_SUBMITTER",
+                      "SWAPZ_CODEC_FAULT_BACKGROUND",
+                      "SWAPZ_CODEC_FAULT_INLINE"):
+            self.assertIn(owner, DM)
+        self.assertIn("ctx->codec_fault_owner != (u32)owner", injector)
+        self.assertIn("atomic64_inc(&ctx->codec_fault_calls)", injector)
+        self.assertIn("atomic_cmpxchg(&ctx->codec_fault_injected, 0, 1)",
+                      injector)
+        self.assertIn("return -EIO", injector)
+
+        submitter_fault = submitter.index("swapz_maybe_inject_codec_fault(")
+        self.assertLess(submitter_fault,
+                        submitter.index("swapz_compress_prepared_page("))
+        self.assertIn("SWAPZ_CODEC_FAULT_SUBMITTER", submitter)
+
+        background_fault = background.index("swapz_maybe_inject_codec_fault(")
+        self.assertLess(background_fault,
+                        background.index("swapz_compress_prepared_page("))
+        self.assertIn("SWAPZ_CODEC_FAULT_BACKGROUND", background)
+
+        inline_fault = ordered.index("swapz_maybe_inject_codec_fault(")
+        self.assertLess(inline_fault, ordered.index("swapz_compress_page("))
+        self.assertIn("SWAPZ_CODEC_FAULT_INLINE", ordered)
+        self.assertLess(inline_fault, ordered.index("if (unlikely(length < 0))"))
+        self.assertIn("swapz_fail(ctx, length)", ordered)
+
+        self.assertIn("argc < 1 || argc > 10", ctor)
+        self.assertIn("codec_fault_owner > SWAPZ_CODEC_FAULT_INLINE", ctor)
+        self.assertIn("ctx->codec_fault_owner = codec_fault_owner", ctor)
+        self.assertIn("flush_fail_nth || write_fail_nth || codec_fault_owner",
+                      ctor)
+        self.assertIn("codec_fault_owner=%u codec_fault_calls=%lld "
+                      "codec_fault_injected=%d", status)
+
+        self.assertIn("START_LOADED_CODEC_ERROR_PATHS", deploy)
+        self.assertIn("PASS_LOADED_CODEC_ERROR_PATHS=", deploy)
+        self.assertIn("run_codec_fault_direct_case 3 inline async_prepare=0",
+                      deploy)
+        self.assertIn(
+            "run_codec_fault_direct_case 1 submitter async_prepare=1 "
+            "submitter_prepare=1", deploy)
+        self.assertIn(
+            'insmod "$MODULE" async_prepare=1 submitter_prepare=0', deploy)
+        self.assertIn(
+            '--table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2 2"', deploy)
+        self.assertIn(
+            'after[4] == before[4] && after[6] == before[6]', deploy)
+
     def test_serialized_completed_lower_write_wall_wait_buckets(self):
         lower = body("swapz_lower")
         status = body("swapz_status")
@@ -1656,7 +1713,7 @@ static swapz_u16 swapz_probe_set(
         lower = body("swapz_lower")
         status = body("swapz_status")
         self.assertIn('disk_name, "nullb", 5', ctor)
-        self.assertIn("argc < 1 || argc > 9", ctor)
+        self.assertIn("argc < 1 || argc > 10", ctor)
         self.assertIn("write_fail_nth > 65535U", ctor)
         self.assertIn("ctx->write_fault_nth = write_fail_nth", ctor)
         self.assertIn("op == REQ_OP_WRITE", lower)
@@ -4453,7 +4510,7 @@ int main(void)
         self.assertIn("hrtimer_init(&ctx->retention_timer", ctr)
         self.assertIn("flush_delayed_work(&ctx->worker)", drain)
         self.assertIn("drain_workqueue(ctx->workqueue)", drain)
-        self.assertIn("argc > 9", ctr)
+        self.assertIn("argc > 10", ctr)
         self.assertIn("retain > SWAPZ_NULLBLK_TEST_MAX_RETAIN_MS", ctr)
         self.assertIn("!is_nullb && retain > SWAPZ_MAX_RETAIN_MS", ctr)
         self.assertIn("ctx->retain_ms = retain", ctr)
