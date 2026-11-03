@@ -59,7 +59,7 @@ build/tests/direct-write-probe: tests/tools/direct-write-probe.c Makefile
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-build/userspace/swapzctl: src/userspace/swapzctl.c src/userspace/swapz-primary.c src/userspace/swapz-primary.h src/kernel/VERSION src/kernel/superblock.h src/kernel/swapz-build-info.h build/source-build-info.h Makefile
+build/userspace/swapzctl: src/userspace/swapzctl.c src/userspace/swapz-primary.c src/userspace/swapz-primary.h src/kernel/VERSION src/kernel/authority.h src/kernel/codec.h src/kernel/superblock.h src/kernel/swapz-build-info.h build/source-build-info.h Makefile
 	@mkdir -p build/userspace
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror -include build/source-build-info.h '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' src/userspace/swapzctl.c src/userspace/swapz-primary.c -o $@
 

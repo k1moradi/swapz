@@ -430,6 +430,13 @@ target selected by the protected PARTUUID configuration. Resolve its current
 partition and parent identity at runtime; do not compile a device pathname,
 major:minor or capacity into the manager. The opened partition and parent must
 match the owner-authorized target recorded in AGENT_CONTEXT.
+The primary mapper's logical-capacity planner must use the same
+`swapz_authority_capacity_window()` policy as the kernel authority for GC
+reserve and foreground COW headroom; userspace must not carry an independent
+copy of that arithmetic. Shared authority/codec headers are direct inputs to
+the `swapzctl` build and must be declared as incremental-build prerequisites,
+so a capacity-policy change cannot leave a stale manager binary.
+
 Do not require preservation of historical card contents or an old Linux-swap
 header on this disposable target. If an active swapz/ordinary-swap entry exists,
 its identity and usage must be understood and safely drained before a destructive

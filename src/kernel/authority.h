@@ -12,6 +12,44 @@
 #define SWAPZ_MAP_SHUF8_FLAG 0x40U
 
 /*
+ * Shared admission window for kernel authority and userspace mapper planning.
+ * Callers validate the physical geometry and addressability appropriate to
+ * their execution environment before using this capacity-only predicate.
+ */
+static inline int swapz_authority_capacity_window(
+	swapz_u32 logical_pages, swapz_u32 physical_blocks,
+	swapz_u32 *reserve_blocks)
+{
+	swapz_u32 foreground_blocks;
+	swapz_u32 reserve;
+	swapz_u64 required_blocks;
+
+	if (!logical_pages)
+		return 0;
+	/* Division before addition keeps ceil(logical_pages / 8) in u32. */
+	reserve = (logical_pages / 8U) + (logical_pages % 8U != 0U);
+	if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)
+		reserve = 2U * SWAPZ_SEGMENT_BLOCKS;
+	if (reserve >= physical_blocks)
+		return 0;
+	foreground_blocks = ((physical_blocks - reserve) /
+			     SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
+	/*
+	 * The rotating GC reserve is not foreground allocation authority.
+	 * Retain one complete ordinary segment so a 100%-RAW logical fill can
+	 * publish its first COW overwrite before any victim becomes reclaimable.
+	 * Widen before addition so a near-u32 logical count cannot wrap.
+	 */
+	required_blocks = (swapz_u64)logical_pages +
+			  SWAPZ_FOREGROUND_HEADROOM_BLOCKS;
+	if (required_blocks > foreground_blocks)
+		return 0;
+	if (reserve_blocks)
+		*reserve_blocks = reserve;
+	return 1;
+}
+
+/*
  * Experimental worker-owned volatile mapping authority. Caller provisions
  * all arrays. It does NOT implement physical recycling or GC. On failure,
  * an allocated extent is permanently abandoned: NEVER reuse a possibly

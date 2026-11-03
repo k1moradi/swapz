@@ -54,7 +54,8 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("build/tests/direct-write-probe: tests/tools/direct-write-probe.c", MAKE)
         self.assertIn("build/userspace/swapzctl: src/userspace/swapzctl.c "
                       "src/userspace/swapz-primary.c src/userspace/swapz-primary.h "
-                      "src/kernel/VERSION", MAKE)
+                      "src/kernel/VERSION src/kernel/authority.h src/kernel/codec.h",
+                      MAKE)
         staged = (ROOT / "src/kernel/Makefile").read_text()
         self.assertIn('cmp -s "$$src" "$$dst"', staged)
         self.assertIn("build/kernel/w1", staged)
@@ -1047,6 +1048,20 @@ class PublicMakeContract(unittest.TestCase):
             for p in (module, w1_module, w2_module, staged,
                       w1_staged, w2_staged, staged_make, device, direct_probe):
                 self.assertEqual(first[p], p.stat().st_mtime_ns, str(p))
+
+            second = {p: p.stat().st_mtime_ns for p in tracked}
+            authority_header = fixture / "src/kernel/authority.h"
+            time.sleep(0.03)
+            authority_header.write_text(
+                authority_header.read_text() +
+                "\n/* incremental authority dependency probe */\n")
+            execute("authority-header")
+            self.assertGreater(
+                cli_out.stat().st_mtime_ns, second[cli_out],
+                "MAKE_INCREMENTAL_PHASE=authority-header")
+            for p in (module, w1_module, w2_module, staged,
+                      w1_staged, w2_staged, staged_make, device, direct_probe):
+                self.assertEqual(second[p], p.stat().st_mtime_ns, str(p))
 
             second = {p: p.stat().st_mtime_ns for p in tracked}
             time.sleep(0.03)
