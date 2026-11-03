@@ -291,9 +291,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         privileged_gate = source_body(
             "swapz_primary_privileged_execution_enabled", primary)
         plan = source_body("swapz_primary_read_only_plan", primary)
+        production_authorization = source_body(
+            "swapz_primary_production_execution_authorized", primary)
+        boot_verify = (
+            ROOT / "packaging/swapz-primary-boot-verify").read_text()
+        mapper_service = (
+            ROOT / "packaging/swapz-primary-mapper.service").read_text()
         rootless = (ROOT / "tests/tools/test-rootless.sh").read_text()
 
-        self.assertIn("#define SWAPZ_PRIMARY_EXECUTION_ENABLED 0", primary)
+        self.assertIn("#define SWAPZ_PRIMARY_EXECUTION_ENABLED 1", primary)
         self.assertIn(
             "#elif defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)",
             primary)
@@ -307,6 +313,19 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn(
             'getenv("SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION")', runtime_gate)
         self.assertIn('!strcmp(enabled, "1")', runtime_gate)
+        self.assertIn(
+            "swapz_primary_production_execution_authorized()", runtime_gate)
+        self.assertIn(
+            "SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY",
+            production_authorization)
+        self.assertIn(
+            "swapz_primary_execution_record_matches(",
+            production_authorization)
+        self.assertIn(
+            "swapz_primary_configured_target(&target)",
+            production_authorization)
+        self.assertIn(
+            "SWAPZ_BUILD_SOURCE_SHA", production_authorization)
         self.assertIn("SWAPZ_PRIMARY_EXECUTION_ENABLED", privileged_gate)
         self.assertIn(
             "swapz_primary_lifecycle_runtime_enabled()", privileged_gate)
@@ -330,6 +349,22 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn(
             "SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST",
             (ROOT / "Makefile").read_text())
+        self.assertIn(
+            "commit_runtime_authorization", boot_verify)
+        self.assertIn(
+            "clear_runtime_authorization", boot_verify)
+        self.assertLess(
+            boot_verify.index("clear_runtime_authorization",
+                              boot_verify.index("preflight_boot()")),
+            boot_verify.index("validate_arm_file",
+                              boot_verify.index("preflight_boot()")))
+        self.assertIn("RuntimeDirectory=swapz", mapper_service)
+        self.assertIn("RuntimeDirectoryMode=0700", mapper_service)
+        self.assertLess(
+            mapper_service.index(
+                "ExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-boot-verify preflight"),
+            mapper_service.index(
+                "ExecStartPre=-@SWAPZ_SBINDIR@/swapzctl primary recover"))
 
     def test_primary_manager_target_is_runtime_selected(self):
         # Historical trial paths and device numbers may appear in fixtures or
