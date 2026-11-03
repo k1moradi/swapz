@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#define SWAPZ_PRIMARY_ROOTLESS_TEST 1
 #define main swapzctl_program_main
 #include "../../../../src/userspace/swapz-primary.c"
 #undef main
@@ -84,6 +85,70 @@ static void test_swap_inventory_parser(void)
 		rows, 0U, &count) < 0);
 }
 
+static void test_target_identity_and_header_policy(void)
+{
+	unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	static const unsigned char swap_magic[] = "SWAPSPACE2";
+
+	assert(swapz_primary_device_number_matches(makedev(8, 4)));
+	assert(!swapz_primary_device_number_matches(makedev(8, 3)));
+	assert(!swapz_primary_device_number_matches(makedev(252, 0)));
+	memcpy(block + sizeof(block) - sizeof(swap_magic) + 1U,
+	       swap_magic, sizeof(swap_magic) - 1U);
+	assert(swapz_primary_original_swap_signature(block));
+	memset(block, 0, sizeof(block));
+	memcpy(block + SWAPZ_SUPERBLOCK_MAGIC_OFFSET, swapz_superblock_magic,
+	       SWAPZ_SUPERBLOCK_MAGIC_BYTES);
+	swapz_sb_put_u32(block + SWAPZ_SUPERBLOCK_VERSION_OFFSET,
+			 SWAPZ_SUPERBLOCK_VERSION);
+	swapz_sb_put_u32(block + SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET,
+			 SWAPZ_SUPERBLOCK_BYTES);
+	swapz_sb_put_u64(block + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET,
+			 SWAPZ_PRIMARY_DEVICE_BYTES);
+	block[SWAPZ_SUPERBLOCK_UUID_OFFSET] = 1U;
+	assert(swapz_sb_valid(block, SWAPZ_PRIMARY_DEVICE_BYTES));
+	assert(!swapz_primary_original_swap_signature(block));
+}
+
+static void test_exact_block_read_helper(void)
+{
+	const char *home = getenv("HOME");
+	char path[PATH_MAX];
+	unsigned char expected[SWAPZ_PRIMARY_BLOCK_BYTES];
+	unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES];
+	size_t i;
+	int fd;
+
+	assert(home && home[0] == '/');
+	assert(snprintf(path, sizeof(path),
+			 "%s/.swapz-primary-read-XXXXXX", home) > 0);
+	fd = mkstemp(path);
+	assert(fd >= 0);
+	for (i = 0; i < sizeof(expected); ++i)
+		expected[i] = (unsigned char)(i & 0xffU);
+	assert(write(fd, expected, sizeof(expected)) == (ssize_t)sizeof(expected));
+	assert(fsync(fd) == 0);
+	assert(swapz_primary_exact_read(fd, observed, sizeof(observed)) == 0);
+	assert(!memcmp(expected, observed, sizeof(expected)));
+	assert(ftruncate(fd, 0) == 0);
+	errno = 0;
+	assert(swapz_primary_exact_read(fd, observed, sizeof(observed)) < 0);
+	assert(errno == EIO);
+	assert(close(fd) == 0);
+	assert(unlink(path) == 0);
+}
+
+static void test_sha256_helper(void)
+{
+	static const char expected[] =
+		"ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7";
+	unsigned char zeroes[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	char digest[65];
+
+	assert(swapz_primary_sha256(zeroes, sizeof(zeroes), digest) == 0);
+	assert(!strcmp(digest, expected));
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -115,6 +180,9 @@ int main(void)
 	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						  pages + 1ULL));
 	test_swap_inventory_parser();
+	test_target_identity_and_header_policy();
+	test_exact_block_read_helper();
+	test_sha256_helper();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);

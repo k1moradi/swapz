@@ -6,20 +6,32 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <linux/fs.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/file.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+#include "../kernel/superblock.h"
 
 #define SWAPZ_PRIMARY_BLOCK_BYTES 4096ULL
 #define SWAPZ_PRIMARY_SEGMENT_BLOCKS 256ULL
 #define SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS 512ULL
 #define SWAPZ_PRIMARY_DEVICE_BYTES 17179869184ULL
 #define SWAPZ_PRIMARY_SWAP_SIZE_KIB 16777212ULL
+#define SWAPZ_PRIMARY_DEVICE_PATH "/dev/sda4"
+#define SWAPZ_PRIMARY_UUID_PATH \
+	"/dev/disk/by-uuid/728b4c06-44b0-46ee-91ec-560ab1bad358"
+#define SWAPZ_PRIMARY_PARTUUID_PATH "/dev/disk/by-partuuid/7fb9401d-04"
+#define SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256 \
+	"ace016a7a3ecd22b0aca05946a305aef2113bc50439452756ae68909010f0afe"
 #define SWAPZ_PRIMARY_PLAN_BUFFER_BYTES 16384U
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
@@ -38,6 +50,252 @@ struct swapz_primary_swap_entry {
 	uint64_t used_kib;
 	int priority;
 };
+
+static int swapz_primary_device_number_matches(dev_t device)
+{
+	return major(device) == 8U && minor(device) == 4U;
+}
+
+static int swapz_primary_original_swap_signature(
+	const unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES])
+{
+	static const unsigned char magic[] = "SWAPSPACE2";
+
+	return !swapz_sb_valid(block, SWAPZ_PRIMARY_DEVICE_BYTES) &&
+	       !memcmp(block + SWAPZ_PRIMARY_BLOCK_BYTES - sizeof(magic) + 1U,
+		       magic, sizeof(magic) - 1U);
+}
+
+static int swapz_primary_exact_read(int fd, unsigned char *buffer,
+				    size_t length)
+{
+	size_t completed = 0;
+
+	while (completed < length) {
+		ssize_t count = pread(fd, buffer + completed,
+				      length - completed, (off_t)completed);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			return -1;
+		}
+		completed += (size_t)count;
+	}
+	return 0;
+}
+
+static int swapz_primary_sha256(const unsigned char *bytes, size_t length,
+				char digest[65])
+{
+	char descriptor_path[64];
+	char output_buffer[128];
+	size_t output_length = 0;
+	int output_pipe[2];
+	int memory_fd;
+	int descriptor_flags;
+	pid_t child;
+	int status;
+
+	if (!bytes || !digest) {
+		errno = EINVAL;
+		return -1;
+	}
+	memory_fd = memfd_create("swapz-primary-digest", MFD_CLOEXEC);
+	if (memory_fd < 0)
+		return -1;
+	{
+		size_t written = 0;
+
+		while (written < length) {
+			ssize_t count = write(memory_fd, bytes + written,
+					      length - written);
+
+			if (count < 0 && errno == EINTR)
+				continue;
+			if (count <= 0) {
+				int saved_errno = count < 0 ? errno : EIO;
+
+				close(memory_fd);
+				errno = saved_errno;
+				return -1;
+			}
+			written += (size_t)count;
+		}
+	}
+	if (lseek(memory_fd, 0, SEEK_SET) < 0 ||
+	    pipe2(output_pipe, O_CLOEXEC) < 0) {
+		int saved_errno = errno;
+
+		close(memory_fd);
+		errno = saved_errno;
+		return -1;
+	}
+	descriptor_flags = fcntl(memory_fd, F_GETFD);
+	if (descriptor_flags < 0 ||
+	    fcntl(memory_fd, F_SETFD, descriptor_flags & ~FD_CLOEXEC) < 0 ||
+	    snprintf(descriptor_path, sizeof(descriptor_path),
+		     "/proc/self/fd/%d", memory_fd) < 0) {
+		int saved_errno = errno ? errno : EIO;
+
+		close(output_pipe[0]);
+		close(output_pipe[1]);
+		close(memory_fd);
+		errno = saved_errno;
+		return -1;
+	}
+	child = fork();
+	if (child < 0) {
+		int saved_errno = errno;
+
+		close(output_pipe[0]);
+		close(output_pipe[1]);
+		close(memory_fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (child == 0) {
+		if (dup2(output_pipe[1], STDOUT_FILENO) < 0)
+			_exit(127);
+		close(output_pipe[0]);
+		close(output_pipe[1]);
+		execl("/usr/bin/sha256sum", "sha256sum", descriptor_path,
+		      (char *)NULL);
+		_exit(127);
+	}
+	close(output_pipe[1]);
+	close(memory_fd);
+	while (output_length + 1U < sizeof(output_buffer)) {
+		ssize_t count = read(output_pipe[0], output_buffer + output_length,
+				     sizeof(output_buffer) - output_length - 1U);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			close(output_pipe[0]);
+			while (waitpid(child, &status, 0) < 0 && errno == EINTR)
+				;
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		output_length += (size_t)count;
+	}
+	close(output_pipe[0]);
+	while (waitpid(child, &status, 0) < 0) {
+		if (errno == EINTR)
+			continue;
+		return -1;
+	}
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
+	    output_length < 66U || output_buffer[64] != ' ' ||
+	    output_buffer[65] != ' ') {
+		errno = EIO;
+		return -1;
+	}
+	for (output_length = 0; output_length < 64U; ++output_length) {
+		char value = output_buffer[output_length];
+
+		if (!((value >= '0' && value <= '9') ||
+		      (value >= 'a' && value <= 'f'))) {
+			errno = EINVAL;
+			return -1;
+		}
+		digest[output_length] = value;
+	}
+	digest[64] = '\0';
+	return 0;
+}
+
+static int swapz_primary_target_preflight(uint64_t *device_bytes,
+						 int *original_swap_header,
+						 int *original_header_hash_matches)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)device_bytes;
+	(void)original_swap_header;
+	(void)original_header_hash_matches;
+	errno = ENODEV;
+	return -1;
+#else
+	struct stat uuid_info;
+	struct stat partuuid_info;
+	struct stat device_info;
+	struct stat opened_info;
+	unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES];
+	char digest[65];
+	int fd;
+
+	if (!device_bytes || !original_swap_header ||
+	    !original_header_hash_matches) {
+		errno = EINVAL;
+		return -1;
+	}
+	*original_swap_header = 0;
+	*original_header_hash_matches = 0;
+	if (stat(SWAPZ_PRIMARY_UUID_PATH, &uuid_info) < 0 ||
+	    stat(SWAPZ_PRIMARY_PARTUUID_PATH, &partuuid_info) < 0 ||
+	    stat(SWAPZ_PRIMARY_DEVICE_PATH, &device_info) < 0)
+		return -1;
+	if (!S_ISBLK(uuid_info.st_mode) || !S_ISBLK(partuuid_info.st_mode) ||
+	    !S_ISBLK(device_info.st_mode) ||
+	    !swapz_primary_device_number_matches(uuid_info.st_rdev) ||
+	    uuid_info.st_rdev != partuuid_info.st_rdev ||
+	    uuid_info.st_rdev != device_info.st_rdev) {
+		errno = ENODEV;
+		return -1;
+	}
+	fd = open(SWAPZ_PRIMARY_UUID_PATH, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &opened_info) < 0) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (!S_ISBLK(opened_info.st_mode) ||
+	    opened_info.st_rdev != uuid_info.st_rdev ||
+	    !swapz_primary_device_number_matches(opened_info.st_rdev)) {
+		close(fd);
+		errno = ENODEV;
+		return -1;
+	}
+	if (ioctl(fd, BLKGETSIZE64, device_bytes) < 0) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (*device_bytes != SWAPZ_PRIMARY_DEVICE_BYTES) {
+		close(fd);
+		errno = EINVAL;
+		return -1;
+	}
+	if (swapz_primary_exact_read(fd, block, sizeof(block)) < 0) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (close(fd) < 0)
+		return -1;
+	*original_swap_header = swapz_primary_original_swap_signature(block);
+	if (*original_swap_header &&
+	    swapz_primary_sha256(block, sizeof(block), digest) == 0)
+		*original_header_hash_matches =
+			!strcmp(digest, SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256);
+	return 0;
+#endif
+}
 
 static int swapz_primary_parse_u64(const char *text, uint64_t *value)
 {
@@ -171,6 +429,13 @@ static int swapz_primary_read_swap_inventory(
 	struct swapz_primary_swap_entry *entries, size_t capacity,
 	size_t *entry_count)
 {
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)entries;
+	(void)capacity;
+	(void)entry_count;
+	errno = ENODEV;
+	return -1;
+#else
 	char buffer[SWAPZ_PRIMARY_PLAN_BUFFER_BYTES];
 	size_t used = 0;
 	int fd = open("/proc/swaps", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -201,6 +466,7 @@ static int swapz_primary_read_swap_inventory(
 	}
 	buffer[used] = '\0';
 	return swapz_primary_parse_swaps(buffer, entries, capacity, entry_count);
+#endif
 }
 
 static int swapz_primary_valid_partuuid(const char *partuuid)
@@ -563,6 +829,7 @@ static int swapz_primary_read_only_plan(void)
 		SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
 	uint64_t logical_bytes = logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES;
 	uint64_t reserve = (logical_pages + 7ULL) / 8ULL;
+	uint64_t target_device_bytes = 0;
 	size_t swap_count = 0;
 	size_t target_count = 0;
 	size_t i;
@@ -572,6 +839,11 @@ static int swapz_primary_read_only_plan(void)
 	int target_swap_size_ok = 0;
 	int target_swap_zero_used = 0;
 	int target_swap_priority_ok = 0;
+	int original_swap_header = 0;
+	int original_header_hash_matches = 0;
+	int target_device_preflight = swapz_primary_target_preflight(
+		&target_device_bytes, &original_swap_header,
+		&original_header_hash_matches) == 0;
 
 	if (swaps_valid) {
 		for (i = 0; i < swap_count; ++i) {
@@ -597,6 +869,10 @@ static int swapz_primary_read_only_plan(void)
 	       "\"status\":\"BLOCKED\","
 	       "\"privileged_execution_enabled\":false,"
 	       "\"live_device_gates_checked\":false,"
+	       "\"target_device_preflight\":%s,"
+	       "\"target_device_bytes\":%llu,"
+	       "\"original_swap_signature\":%s,"
+	       "\"original_header_hash_matches\":%s,"
 	       "\"swap_inventory_read\":%s,"
 	       "\"active_swap_entries\":%llu,"
 	       "\"target_swap_entries\":%llu,"
@@ -607,6 +883,10 @@ static int swapz_primary_read_only_plan(void)
 	       "\"logical_pages\":%llu,\"logical_bytes\":%llu,"
 	       "\"linux_swap_kib\":%llu,\"gc_reserve_blocks\":%llu,"
 	       "\"reason\":\"device_identity_recovery_and_lifecycle_gates_not_qualified\"}\n",
+	       target_device_preflight ? "true" : "false",
+	       (unsigned long long)target_device_bytes,
+	       original_swap_header ? "true" : "false",
+	       original_header_hash_matches ? "true" : "false",
 	       swaps_valid ? "true" : "false",
 	       (unsigned long long)swap_count,
 	       (unsigned long long)target_count,

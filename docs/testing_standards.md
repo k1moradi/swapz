@@ -3316,6 +3316,11 @@ explicit in every review and result.
 The primary manager's direct production-C tests must exercise the exact maximum
 geometry, Device Mapper output variants, active-swap parsing, header recognition,
 and fail-closed ownership decisions without opening or modifying a block device.
+The direct-C fixture must compile the plan in a mode that refuses all host
+block-device and `/proc/swaps` reads; test the identity and signature parsers
+with synthetic major:minor values and bytes. Host admission must hash the exact
+4096-byte original swap header and compare it with the recorded device-bound
+digest before any destructive transition.
 The `/proc/swaps` parser must reject malformed or extra fields, duplicate paths,
 numeric overflow and invalid signed priorities. The read-only plan may report
 the active-entry count and whether `/dev/sda4` is the sole 16,777,212 KiB

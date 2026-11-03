@@ -1370,9 +1370,12 @@ asks for it.
 The primary systemd manager is being developed in native userspace C and its
 package units remain disabled. `swapzctl primary plan` reports the maximum
 capacity arithmetic and strictly parses `/proc/swaps` to report the active
-entry count and target size, priority and use. It explicitly marks the
-remaining live-device gates unchecked and the plan BLOCKED. Provision,
-activation, teardown and recovery are disabled.
+entry count and target size, priority and use. It also performs read-only
+by-UUID/by-PARTUUID/device identity, exact-size and original swap-signature
+checks when run on the host. The direct-C fixture disables those live reads.
+It verifies the original 4096-byte header against the recorded SHA-256 digest.
+The plan explicitly marks its remaining live-device gates unchecked and stays
+BLOCKED. Provision, activation, teardown and recovery are disabled.
 The earlier Python manager draft was removed because production Python is
 outside this repository's coding standards. The remaining implementation must
 integrate the permanent root-controlled PARTUUID lock primitive with each
