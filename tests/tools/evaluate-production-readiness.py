@@ -773,6 +773,12 @@ def evaluate_release(
 
     lifecycle = pass_record("lifecycle_deployment_state", deployment=True)
     require_target("lifecycle_deployment_state", lifecycle, deployment=True)
+    if lifecycle is not None and (
+            lifecycle.get("overall") != "PASS" or
+            lifecycle.get("lifecycle") != "PASS" or
+            lifecycle.get("deployment") != "PASS"):
+        block_deployment(
+            "lifecycle_deployment_state: lifecycle/deployment result is not PASS")
 
     installed = pass_record("installed_artifact_identity", deployment=True)
     require_target("installed_artifact_identity", installed, deployment=True)

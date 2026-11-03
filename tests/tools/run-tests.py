@@ -54,7 +54,6 @@ PRODUCTION_READINESS_CODE_EVIDENCE = (
     "owned_nullblk_qualification", "unresolved_critical_issues",
     "authorized_target_identity", "real_linux_swap",
     "maximum_capacity_and_ram", "sustained_physical_performance",
-    "lifecycle_deployment_state",
 )
 PRODUCTION_READINESS_DEPLOYMENT_EVIDENCE = (
     "production_source", "clean_build_state", "qualified_artifact_hashes",

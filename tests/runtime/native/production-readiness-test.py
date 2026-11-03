@@ -309,7 +309,8 @@ def current_evidence(
                 target=dict(TARGET),
                 evidence_sha256=hashlib.sha256(campaign_raw).hexdigest()),
             "lifecycle_deployment_state": pass_record(
-                target=dict(TARGET)),
+                target=dict(TARGET), overall="PASS",
+                lifecycle="PASS", deployment="PASS"),
             "installed_artifact_identity": pass_record(
                 target=dict(TARGET),
                 installed=True,
@@ -471,6 +472,22 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "installed artifact binding mismatch" in blocker
             for blocker in result["code_blockers"]))
+
+    def test_lifecycle_deployment_requires_explicit_pass_components(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        for field in ("overall", "lifecycle", "deployment"):
+            with self.subTest(field=field):
+                evidence = current_evidence(encoded(report), encoded(policy))
+                lifecycle = evidence["release_evidence"][
+                    "lifecycle_deployment_state"]
+                lifecycle[field] = "FAIL"
+                result = evaluate(report, evidence, policy)
+                self.assertEqual(
+                    result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    "lifecycle/deployment result is not PASS" in blocker
+                    for blocker in result["deployment_blockers"]))
 
     def test_owned_nullblk_pass_requires_lifecycle_result_digest_and_production_bytes(self):
         report = owner_report()
