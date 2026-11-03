@@ -16,6 +16,10 @@ RefuseManualStop=yes
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# systemd owns the volatile authorization directory for the entire mapper
+# service lifetime. The cross-boot preflight writes the only enable token.
+RuntimeDirectory=swapz
+RuntimeDirectoryMode=0700
 # Refuse any mutating recovery/start transaction while a hibernation-capable
 # systemd unit is active or activating. The hibernation side independently
 # refuses the entire configured-primary interval, closing both race directions.
