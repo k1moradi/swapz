@@ -2448,6 +2448,8 @@ int main(void)
 	uint64_t pages;
 	const char *home = getenv("HOME");
 	char base_template[PATH_MAX];
+	char mutation_directory[PATH_MAX];
+	char mutation_lock_path[PATH_MAX];
 	char lock_path[PATH_MAX];
 	char target_path[PATH_MAX];
 	char active_name[64];
@@ -2555,6 +2557,20 @@ int main(void)
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);
 	assert(mkdtemp(base_template));
+	assert(snprintf(mutation_directory, sizeof(mutation_directory),
+			 "%s/mutation-lock", base_template) > 0);
+	assert(snprintf(mutation_lock_path, sizeof(mutation_lock_path),
+			 "%s/%s", mutation_directory,
+			 SWAPZ_PRIMARY_MUTATION_LOCK_NAME) > 0);
+	errno = 0;
+	assert(access(mutation_directory, F_OK) < 0 && errno == ENOENT);
+	first_mutation_lock = swapz_primary_mutation_lock_at(
+		mutation_directory, geteuid());
+	assert(first_mutation_lock >= 0);
+	assert(access(mutation_directory, F_OK) == 0);
+	assert(close(first_mutation_lock) == 0);
+	assert(unlink(mutation_lock_path) == 0);
+	assert(rmdir(mutation_directory) == 0);
 	first_mutation_lock = swapz_primary_mutation_lock_at(
 		base_template, geteuid());
 	assert(first_mutation_lock >= 0);
