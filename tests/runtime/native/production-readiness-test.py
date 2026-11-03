@@ -17,6 +17,8 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(EVALUATOR)
 
 SOURCE = "a" * 40
+HOST_ID = "9" * 64
+KERNEL_RELEASE = "6.8.0-48-generic"
 ARTIFACTS = {
     "formatter_sha256": "1" * 64,
     "module_sha256": "2" * 64,
@@ -58,6 +60,12 @@ def owner_report():
         "schema": "swapz-test-results-v1",
         "source_sha": SOURCE,
         "tested_commit_sha": SOURCE,
+        "kernel_release": KERNEL_RELEASE,
+        "host_identity": {
+            "schema": "swapz-host-v1",
+            "architecture": "x86_64",
+            "id_sha256": HOST_ID,
+        },
         "qualification": "RAM_BACKED_NULL_BLK_ONLY",
         "overall": "PASS",
         "qualified_artifacts": {
@@ -149,6 +157,11 @@ def current_evidence(report_raw, policy_raw, physical_raw=None):
     return {
         "schema": "swapz-production-readiness-v2",
         "snapshot_kind": "CURRENT",
+        "host": {
+            "architecture": "x86_64",
+            "kernel_release": KERNEL_RELEASE,
+            "page_size_bytes": 4096,
+        },
         "repository": {
             "branch": "main",
             "local_sha": SOURCE,
@@ -238,6 +251,25 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
         self.assertEqual(result["code_blockers"], [])
         self.assertEqual(result["deployment_blockers"], [])
+
+    def test_release_kernel_must_match_owner_qualification(self):
+        report = owner_report()
+        report["kernel_release"] = "6.8.0-49-generic"
+        result = evaluate(report=report)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertIn(
+            "release host kernel does not match owner qualification",
+            result["code_blockers"])
+
+    def test_release_host_platform_is_fail_closed(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        evidence["host"]["page_size_bytes"] = 65536
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertIn(
+            "release host page size is unsupported", result["code_blockers"])
 
     def test_owner_reboot_is_separate_from_code_and_deployment_readiness(self):
         report = owner_report()

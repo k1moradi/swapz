@@ -3387,6 +3387,12 @@ continue to verify the kernel opt-in superblock gate, reserved data offset, and
 exclusion of block 0 from all data/discard paths. Exact-current-main must still
 pass ordinary `make test` before any physical-media evidence is considered.
 
+The production-readiness evaluator must also bind the CURRENT release-host
+platform to the owner qualification: x86_64, 4096-byte pages, and an exact
+well-formed `kernel_release` matching the owner `make test` report. A kernel
+upgrade or platform mismatch makes the release BLOCKED until fresh owner
+qualification and downstream exact-source evidence are regenerated.
+
 The primary manager's PARTUUID direct-C tests must reject all-hyphen,
 leading/trailing-hyphen and consecutive-hyphen values, require at least eight
 hexadecimal digits, preserve GPT-style hyphenated values, and prove canonical

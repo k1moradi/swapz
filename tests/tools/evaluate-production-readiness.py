@@ -22,6 +22,7 @@ REAL_SWAP_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 PARTUUID_RE = re.compile(r"^[0-9a-f][0-9a-f-]*$")
+KERNEL_RELEASE_RE = re.compile(r"^[A-Za-z0-9._+-]{1,127}$")
 
 REQUIRED_STAGES = (
     "Build module and helpers",
@@ -320,6 +321,19 @@ def evaluate_release(
         block_code(str(exc))
 
     report_hashes = test_results.get("qualified_artifacts")
+    owner_host = test_results.get("host_identity")
+    owner_kernel_release = test_results.get("kernel_release")
+    if not (
+            isinstance(owner_host, dict) and
+            owner_host.get("schema") == "swapz-host-v1" and
+            owner_host.get("architecture") == "x86_64" and
+            isinstance(owner_host.get("id_sha256"), str) and
+            SHA256_RE.fullmatch(owner_host["id_sha256"])):
+        block_code("owner qualification host identity is invalid")
+    if not (
+            isinstance(owner_kernel_release, str) and
+            KERNEL_RELEASE_RE.fullmatch(owner_kernel_release)):
+        block_code("owner qualification kernel release is invalid")
     if test_results.get("overall") != "PASS":
         block_code("exact-source owner make test is not PASS")
     if test_results.get("source_sha") != source_sha or             test_results.get("tested_commit_sha") != source_sha:
@@ -349,6 +363,25 @@ def evaluate_release(
         block_code("release evidence schema is invalid")
     if evidence.get("snapshot_kind") != "CURRENT":
         block_code("release evidence is historical rather than CURRENT")
+
+    release_host = evidence.get("host")
+    if not isinstance(release_host, dict):
+        block_code("release host identity is missing")
+    else:
+        release_kernel = release_host.get("kernel_release")
+        release_architecture = release_host.get("architecture")
+        if release_architecture != "x86_64":
+            block_code("release host architecture is unsupported")
+        if not (
+                isinstance(release_kernel, str) and
+                KERNEL_RELEASE_RE.fullmatch(release_kernel)):
+            block_code("release host kernel release is invalid")
+        elif (isinstance(owner_kernel_release, str) and
+              KERNEL_RELEASE_RE.fullmatch(owner_kernel_release) and
+              release_kernel != owner_kernel_release):
+            block_code("release host kernel does not match owner qualification")
+        if release_host.get("page_size_bytes") != 4096:
+            block_code("release host page size is unsupported")
 
     repository = evidence.get("repository")
     if not isinstance(repository, dict):
