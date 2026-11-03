@@ -6,6 +6,7 @@ After=swapz-primary-mapper.service
 [Swap]
 What=/dev/mapper/swapz-primary
 Priority=-1
+TimeoutSec=120s
 
 [Install]
 WantedBy=swap.target

@@ -32,15 +32,27 @@ selector and this owner-observed target record after confirming the new
 partition and parent; do not patch C constants. The current authorization
 still applies only to the target identified above, and lifecycle execution
 must remain disabled until the manager's parent checks and physical acceptance
-cover the selected target. The installed systemd generator now derives the
-selected `.device` and by-PARTUUID `.swap` dependency names from the protected
-selector; it adds device ordering and a conflict against that selector's
-by-PARTUUID swap unit without embedding this host's path, device number or
-capacity. The generator does not activate units, and the static primary units
-remain disabled with manual start/stop refused until the full lifecycle and
-boot path are qualified. A deployment that enables them must also ensure the
-raw selected partition is not separately enabled as swap under a by-UUID or
-other alias; the PARTUUID dependency alone cannot identify every alias.
+cover the selected target. The packaged systemd source derives the selected `.device` and by-PARTUUID
+`.swap` names only through the manager's validated selector interface. The
+generator adds exact device ordering, the raw by-PARTUUID conflict and a
+30-second job bound without embedding a host path, device number or capacity.
+The mapper unit requires the persistent recovery mount, runs cold-boot
+preflight before `recover -> prepare -> start`, bounds start and stop at 120
+seconds, and deliberately does not `BindsTo` removable media. The swap unit
+also bounds swapoff at 120 seconds so normal shutdown/reboot deactivates swap
+before mapper teardown. Static activation remains disabled and manual
+start/stop remains refused until the lifecycle and boot path are qualified.
+
+`packaging/swapz-primary-boot-verify` implements the fail-closed
+`arm`/`preflight`/`observe` harness. It persists root-only evidence under
+`/var/lib/swapz/boot-acceptance`, binds the next boot to boot ID, kernel,
+protected PARTUUID, target geometry/parent identity and installed-module
+provenance, rejects active/configured raw-swap aliases by resolved block
+identity, and never removes or enables swap itself. PASS additionally requires
+the exact manager Device Mapper table/UUID/capacity, one primary `/proc/swaps`
+entry at priority -1, healthy service states/counters and no relevant kernel
+errors. Same-boot observations are INCOMPLETE; only a different owner-initiated
+boot may become PASS or FAIL.
 
 The partition path and content UUID are observations, not sufficient identity.
 Before destructive work, prove that the opened partition and parent are the
@@ -241,6 +253,21 @@ service state and relevant kernel errors. Only that evidence may change
 Cold-boot observation is not a prerequisite for Codex to finish the **code**
 production-readiness mission because Codex is explicitly forbidden to reboot.
 
+Agent 7 owns installer integration for this harness. Before deployment can be
+armed, `package-dkms.sh` must install
+`$prefix/sbin/swapz-primary-boot-verify` mode 0755 and
+`swapz-primary-boot-verify.service` mode 0644 with the same substituted sbin
+path, include both in package ownership/hash and uninstall checks, and leave
+both the primary swap and verifier disabled; installation must never use
+`--now`. After the execution/physical qualification gates pass and any
+selected-partition raw-swap configuration is removed, the owner-side activation
+flow must run `swapz-primary-boot-verify arm`, enable the primary swap and
+verifier for the next boot without starting them in the arming boot, and leave
+the reboot to the owner. Agent 10 owns adding the isolated
+`tests/runtime/native/systemd/swapz-primary-systemd-test.py` fixture to the
+official test runner. Until those two integration steps land, the harness
+source is implemented but is neither installed nor armed.
+
 ## Current decision order
 
 Unless evidence changes the order, work on:
@@ -290,7 +317,10 @@ Unless evidence changes the order, work on:
    Recalculate from the runtime-selected geometry if the protected PARTUUID
    changes; these host-specific figures are not production capacity constants.
 5. sustained occupancy/GC/churn and physical service;
-6. persistent startup/shutdown integration and cold-boot acceptance harness;
+6. persistent startup/shutdown integration and cold-boot acceptance harness:
+   bounded fail-closed unit/harness source is implemented; Agent 7 installer
+   wiring, Agent 10 runner wiring, qualification, arming and owner reboot remain
+   open;
 7. performance optimization only after correctness/lifecycle gates are closed.
 
 At each milestone report exact `main` SHA, code/doc changes, tests, CI, current

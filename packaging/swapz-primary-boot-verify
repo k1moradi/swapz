@@ -1,0 +1,837 @@
+#!/bin/sh
+# Arm, gate, and persist cold-boot observations for the primary swapz mapping.
+set -eu
+umask 077
+
+usage()
+{
+	echo "Usage: swapz-primary-boot-verify arm|preflight|observe" >&2
+	exit 2
+}
+
+[ "$#" -eq 1 ] || usage
+mode=$1
+case "$mode" in
+arm|preflight|observe) ;;
+*) usage ;;
+esac
+
+self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+prefix_dir=$(dirname -- "$self_dir")
+swapzctl=$self_dir/swapzctl
+module_artifact=$prefix_dir/libexec/swapz/dm-swapz.ko
+proc_root=/proc
+sys_root=/sys
+dev_root=/dev
+report_base=/var/lib/swapz/boot-acceptance
+expected_uid=0
+
+# Isolated rootless regression fixtures override only observation roots and the
+# installed module path. Production systemd units never set this marker.
+if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
+	proc_root=${SWAPZ_PRIMARY_TEST_PROC_ROOT:?missing test proc root}
+	sys_root=${SWAPZ_PRIMARY_TEST_SYS_ROOT:?missing test sys root}
+	dev_root=${SWAPZ_PRIMARY_TEST_DEV_ROOT:?missing test dev root}
+	report_base=${SWAPZ_PRIMARY_TEST_REPORT_BASE:?missing test report base}
+	module_artifact=${SWAPZ_PRIMARY_TEST_MODULE_ARTIFACT:?missing test module artifact}
+	expected_uid=$(id -u)
+fi
+
+arm_file=$report_base/armed.env
+mapper_swap_unit='dev-mapper-swapz\x2dprimary.swap'
+mapper_service=swapz-primary-mapper.service
+mapper_path=$dev_root/mapper/swapz-primary
+failure_reasons=
+incomplete_reasons=
+
+fail()
+{
+	echo "swapz-primary-boot-verify: $*" >&2
+	exit 1
+}
+
+append_failure()
+{
+	if [ -n "$failure_reasons" ]; then
+		failure_reasons=$failure_reasons,$1
+	else
+		failure_reasons=$1
+	fi
+}
+
+append_incomplete()
+{
+	if [ -n "$incomplete_reasons" ]; then
+		incomplete_reasons=$incomplete_reasons,$1
+	else
+		incomplete_reasons=$1
+	fi
+}
+
+require_command()
+{
+	command -v "$1" >/dev/null 2>&1 || fail "required command is unavailable: $1"
+}
+
+single_line_file()
+{
+	file=$1
+	[ -f "$file" ] || return 1
+	value=$(cat -- "$file") || return 1
+	case "$value" in
+	*'
+'*) return 1 ;;
+	esac
+	[ -n "$value" ] || return 1
+	printf '%s\n' "$value"
+}
+
+valid_boot_id()
+{
+	printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+}
+
+current_boot_id()
+{
+	value=$(single_line_file "$proc_root/sys/kernel/random/boot_id") || return 1
+	valid_boot_id "$value" || return 1
+	printf '%s\n' "$value"
+}
+
+secure_report_directory()
+{
+	if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
+		[ ! -L "$report_base" ] || fail "test report directory is a symlink"
+		mkdir -p -- "$report_base"
+		chmod 0700 "$report_base"
+	else
+		[ "$(id -u)" -eq 0 ] || fail "root privileges are required"
+		parent=/var/lib/swapz
+		[ ! -L "$parent" ] || fail "$parent must not be a symlink"
+		if [ ! -e "$parent" ]; then
+			mkdir -m 0755 -- "$parent" || fail "cannot create $parent"
+		fi
+		[ -d "$parent" ] || fail "$parent is not a directory"
+		owner=$(stat -c '%u' -- "$parent") || fail "cannot inspect $parent"
+		permissions=$(stat -c '%a' -- "$parent") || fail "cannot inspect $parent permissions"
+		[ "$owner" -eq 0 ] || fail "$parent is not root-owned"
+		case "$permissions" in
+		[0-7][0145][0145]) ;;
+		*) fail "$parent is group/world writable or has unexpected permissions" ;;
+		esac
+		[ ! -L "$report_base" ] || fail "$report_base must not be a symlink"
+		if [ ! -e "$report_base" ]; then
+			mkdir -m 0700 -- "$report_base" || fail "cannot create $report_base"
+		fi
+	fi
+	[ -d "$report_base" ] || fail "$report_base is not a directory"
+	owner=$(stat -c '%u' -- "$report_base") || fail "cannot inspect report directory"
+	permissions=$(stat -c '%a' -- "$report_base") || fail "cannot inspect report directory permissions"
+	[ "$owner" -eq "$expected_uid" ] || fail "report directory has unexpected owner"
+	[ "$permissions" = 700 ] || fail "report directory mode must be 0700"
+}
+
+commit_file()
+{
+	temporary=$1
+	destination=$2
+	chmod 0600 "$temporary"
+	sync -f "$temporary"
+	mv -f -- "$temporary" "$destination"
+	sync -f "$report_base"
+}
+
+validate_arm_file()
+{
+	[ -f "$arm_file" ] && [ ! -L "$arm_file" ] || return 1
+	owner=$(stat -c '%u' -- "$arm_file") || return 1
+	permissions=$(stat -c '%a' -- "$arm_file") || return 1
+	links=$(stat -c '%h' -- "$arm_file") || return 1
+	[ "$owner" -eq "$expected_uid" ] && [ "$permissions" = 600 ] && [ "$links" -eq 1 ]
+}
+
+arm_field()
+{
+	key=$1
+	awk -v wanted="$key" '
+		BEGIN { count = 0 }
+		index($0, wanted "=") == 1 {
+			count++
+			value = substr($0, length(wanted) + 2)
+		}
+		END {
+			if (count != 1) exit 2
+			print value
+		}
+	' "$arm_file"
+}
+
+manager_target_identity()
+{
+	units=$("$swapzctl" primary systemd-units) || return 1
+	case "$units" in
+	*'
+'*) return 1 ;;
+	esac
+	set -f
+	old_ifs=$IFS
+	IFS=' '
+	# shellcheck disable=SC2086 # Strict split is checked by exact reconstruction.
+	set -- $units
+	IFS=$old_ifs
+	[ "$#" -eq 2 ] && [ "$1 $2" = "$units" ] || return 1
+	selected_device_unit=$1
+	selected_raw_swap_unit=$2
+	case "$selected_device_unit" in
+	'dev-disk-by\x2dpartuuid-'*.device) ;;
+	*) return 1 ;;
+	esac
+	case "$selected_raw_swap_unit" in
+	'dev-disk-by\x2dpartuuid-'*.swap) ;;
+	*) return 1 ;;
+	esac
+	encoded=${selected_device_unit#'dev-disk-by\x2dpartuuid-'}
+	encoded=${encoded%.device}
+	raw_encoded=${selected_raw_swap_unit#'dev-disk-by\x2dpartuuid-'}
+	raw_encoded=${raw_encoded%.swap}
+	[ "$encoded" = "$raw_encoded" ] || return 1
+	selected_partuuid=$(printf '%s\n' "$encoded" | sed 's/\\x2d/-/g')
+	printf '%s\n' "$selected_partuuid" | grep -Eq '^[0-9a-f][0-9a-f-]{6,62}[0-9a-f]$' || return 1
+	selected_path=$dev_root/disk/by-partuuid/$selected_partuuid
+	return 0
+}
+
+target_identity()
+{
+	[ -e "$selected_path" ] || return 1
+	target_type=$(lsblk -dnro TYPE -- "$selected_path" 2>/dev/null) || return 1
+	[ "$target_type" = part ] || return 1
+	target_major_minor=$(lsblk -dnro MAJ:MIN -- "$selected_path" 2>/dev/null) || return 1
+	printf '%s\n' "$target_major_minor" | grep -Eq '^[0-9]+:[0-9]+$' || return 1
+	target_size_bytes=$(blockdev --getsize64 "$selected_path" 2>/dev/null) || return 1
+	printf '%s\n' "$target_size_bytes" | grep -Eq '^[1-9][0-9]*$' || return 1
+	target_parent=$(lsblk -dnro PKNAME -- "$selected_path" 2>/dev/null || true)
+	target_parent=$(printf '%s' "$target_parent" | tr '\n\r\t' '   ')
+	target_model=unavailable
+	target_serial=unavailable
+	target_wwn=unavailable
+	target_transport=unavailable
+	target_removable=unavailable
+	case "$target_parent" in
+	''|*[!A-Za-z0-9._-]*) ;;
+	*)
+		parent_path=$dev_root/$target_parent
+		target_model=$(lsblk -dnro MODEL -- "$parent_path" 2>/dev/null || true)
+		target_serial=$(lsblk -dnro SERIAL -- "$parent_path" 2>/dev/null || true)
+		target_wwn=$(lsblk -dnro WWN -- "$parent_path" 2>/dev/null || true)
+		target_transport=$(lsblk -dnro TRAN -- "$parent_path" 2>/dev/null || true)
+		target_removable=$(lsblk -dnro RM -- "$parent_path" 2>/dev/null || true)
+		for variable_name in target_model target_serial target_wwn target_transport target_removable; do
+			eval "value=\${$variable_name}"
+			value=$(printf '%s' "$value" | tr '\n\r\t=' '    ')
+			[ -n "$value" ] || value=unavailable
+			eval "$variable_name=\$value"
+		done
+		;;
+	esac
+	return 0
+}
+
+module_artifact_metadata()
+{
+	[ -f "$module_artifact" ] && [ ! -L "$module_artifact" ] || return 1
+	module_sha256=$(sha256sum -- "$module_artifact" 2>/dev/null | awk '{print $1}') || return 1
+	printf '%s\n' "$module_sha256" | grep -Eq '^[0-9a-f]{64}$' || return 1
+	module_source_sha=$(modinfo -F swapz_build_source_sha "$module_artifact" 2>/dev/null) || return 1
+	module_source_clean=$(modinfo -F swapz_build_source_clean "$module_artifact" 2>/dev/null) || return 1
+	case "$module_source_sha" in *'
+'*|'') return 1 ;; esac
+	case "$module_source_clean" in *'
+'*|'') return 1 ;; esac
+	printf '%s\n' "$module_source_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
+	[ "$module_source_clean" = 1 ] || return 1
+	return 0
+}
+
+path_major_minor()
+{
+	candidate=$1
+	[ -n "$candidate" ] || return 1
+	value=$(lsblk -dnro MAJ:MIN -- "$candidate" 2>/dev/null) || return 1
+	case "$value" in *'
+'*|'') return 1 ;; esac
+	printf '%s\n' "$value" | grep -Eq '^[0-9]+:[0-9]+$' || return 1
+	printf '%s\n' "$value"
+}
+
+device_like_swap_source()
+{
+	case "$1" in
+	"$dev_root"/*|UUID=*|PARTUUID=*|LABEL=*|PARTLABEL=*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+raw_swap_alias_guard()
+{
+	# The stable by-PARTUUID unit is handled by the generator's Conflicts=. This
+	# identity scan closes by-UUID/by-id/by-path/plain-device aliases without
+	# ever stopping or modifying an unrelated swap area.
+	proc_swaps=$proc_root/swaps
+	if [ -r "$proc_swaps" ]; then
+		awk 'NR > 1 { print $1 }' "$proc_swaps" | while IFS= read -r source; do
+			[ -n "$source" ] || continue
+			major_minor=$(path_major_minor "$source" 2>/dev/null || true)
+			if [ "$major_minor" = "$target_major_minor" ]; then
+				echo "swapz-primary-boot-verify: selected partition is already active as raw swap: $source" >&2
+				exit 73
+			fi
+		done
+		status=$?
+		[ "$status" -ne 73 ] || return 1
+	else
+		return 1
+	fi
+
+	fstab_sources=$(mktemp "$report_base/.fstab-sources.XXXXXX") || return 1
+	fstab_errors=$(mktemp "$report_base/.fstab-errors.XXXXXX") || {
+		rm -f -- "$fstab_sources"
+		return 1
+	}
+	if findmnt --fstab --types swap --evaluate --noheadings --output SOURCE \
+		>"$fstab_sources" 2>"$fstab_errors"; then
+		:
+	else
+		findmnt_status=$?
+		if [ "$findmnt_status" -ne 1 ] || [ -s "$fstab_errors" ]; then
+			cat "$fstab_errors" >&2
+			rm -f -- "$fstab_sources" "$fstab_errors"
+			return 1
+		fi
+	fi
+	while IFS= read -r source; do
+		[ -n "$source" ] || continue
+		major_minor=$(path_major_minor "$source" 2>/dev/null || true)
+		if [ "$major_minor" = "$target_major_minor" ]; then
+			echo "swapz-primary-boot-verify: fstab still configures selected partition as raw swap: $source" >&2
+			rm -f -- "$fstab_sources" "$fstab_errors"
+			return 1
+		fi
+		if [ -z "$major_minor" ] && device_like_swap_source "$source"; then
+			echo "swapz-primary-boot-verify: unresolved fstab block-device swap source prevents alias proof: $source" >&2
+			rm -f -- "$fstab_sources" "$fstab_errors"
+			return 1
+		fi
+	done < "$fstab_sources"
+	rm -f -- "$fstab_sources" "$fstab_errors"
+
+	loaded_swaps=$(mktemp "$report_base/.loaded-swaps.XXXXXX") || return 1
+	if ! systemctl list-units --type=swap --all --plain --no-legend --no-pager \
+		>"$loaded_swaps" 2>/dev/null; then
+		rm -f -- "$loaded_swaps"
+		return 1
+	fi
+	while IFS=' ' read -r unit _rest; do
+		[ -n "$unit" ] || continue
+		[ "$unit" = "$mapper_swap_unit" ] && continue
+		what=$(systemctl show --property=What --value "$unit" 2>/dev/null || true)
+		case "$what" in *'
+'*) what= ;; esac
+		[ -n "$what" ] || continue
+		major_minor=$(path_major_minor "$what" 2>/dev/null || true)
+		if [ "$major_minor" = "$target_major_minor" ]; then
+			echo "swapz-primary-boot-verify: loaded raw swap unit aliases selected partition: $unit ($what)" >&2
+			rm -f -- "$loaded_swaps"
+			return 1
+		fi
+		if [ -z "$major_minor" ] && device_like_swap_source "$what"; then
+			echo "swapz-primary-boot-verify: unresolved loaded block-device swap source prevents alias proof: $unit ($what)" >&2
+			rm -f -- "$loaded_swaps"
+			return 1
+		fi
+	done < "$loaded_swaps"
+	rm -f -- "$loaded_swaps"
+	return 0
+}
+
+arm_harness()
+{
+	secure_report_directory
+	for command_name in grep sed awk stat sync lsblk blockdev sha256sum modinfo findmnt systemctl uname date; do
+		require_command "$command_name"
+	done
+	[ -x "$swapzctl" ] || fail "installed swapzctl is unavailable"
+	boot_id=$(current_boot_id) || fail "cannot read a valid boot ID"
+	kernel_release=$(uname -r) || fail "cannot read kernel release"
+	manager_target_identity || fail "protected primary selector is invalid"
+	target_identity || fail "selected PARTUUID device is unavailable or invalid"
+	[ "$target_removable" = 1 ] || fail "selected target parent is not reported as removable"
+	raw_swap_alias_guard || fail "selected partition has a raw-swap alias conflict or alias inventory is unavailable"
+	module_artifact_metadata || fail "installed module provenance is unavailable or unqualified"
+
+	temporary=$(mktemp "$report_base/.armed.env.XXXXXX") || fail "cannot create arm record"
+	cat > "$temporary" <<ARM
+schema=swapz-primary-boot-arm-v1
+arm_boot_id=$boot_id
+arm_kernel_release=$kernel_release
+armed_epoch=$(date +%s)
+expected_partuuid=$selected_partuuid
+expected_target_size_bytes=$target_size_bytes
+expected_target_model=$target_model
+expected_target_serial=$target_serial
+expected_target_wwn=$target_wwn
+expected_target_transport=$target_transport
+expected_target_removable=$target_removable
+expected_module_sha256=$module_sha256
+expected_module_source_sha=$module_source_sha
+expected_module_source_clean=$module_source_clean
+ARM
+	commit_file "$temporary" "$arm_file"
+	printf 'COLD_BOOT_HARNESS=ARMED arm_boot_id=%s partuuid=%s module_source=%s COLD_BOOT_OBSERVED=NO\n' \
+		"$boot_id" "$selected_partuuid" "$module_source_sha"
+}
+
+preflight_boot()
+{
+	secure_report_directory
+	for command_name in grep sed awk stat sync lsblk blockdev sha256sum modinfo findmnt systemctl uname; do
+		require_command "$command_name"
+	done
+	[ -x "$swapzctl" ] || fail "installed swapzctl is unavailable"
+	validate_arm_file || fail "cold-boot harness is not securely armed"
+	[ "$(arm_field schema)" = swapz-primary-boot-arm-v1 ] || fail "invalid arm-record schema"
+	armed_boot_id=$(arm_field arm_boot_id) || fail "arm record lacks boot ID"
+	valid_boot_id "$armed_boot_id" || fail "arm record contains invalid boot ID"
+	boot_id=$(current_boot_id) || fail "cannot read a valid boot ID"
+	[ "$boot_id" != "$armed_boot_id" ] || fail "owner reboot has not occurred since the cold-boot harness was armed"
+	expected_kernel_release=$(arm_field arm_kernel_release) || fail "arm record lacks kernel release"
+	expected_partuuid=$(arm_field expected_partuuid) || fail "arm record lacks PARTUUID"
+	expected_size=$(arm_field expected_target_size_bytes) || fail "arm record lacks target size"
+	expected_model=$(arm_field expected_target_model) || fail "arm record lacks target model"
+	expected_serial=$(arm_field expected_target_serial) || fail "arm record lacks target serial"
+	expected_wwn=$(arm_field expected_target_wwn) || fail "arm record lacks target WWN"
+	expected_transport=$(arm_field expected_target_transport) || fail "arm record lacks target transport"
+	expected_removable=$(arm_field expected_target_removable) || fail "arm record lacks removable marker"
+	expected_module_sha=$(arm_field expected_module_sha256) || fail "arm record lacks module hash"
+	expected_source_sha=$(arm_field expected_module_source_sha) || fail "arm record lacks source provenance"
+	expected_source_clean=$(arm_field expected_module_source_clean) || fail "arm record lacks clean-source marker"
+	current_kernel_release=$(uname -r) || fail "cannot read kernel release after reboot"
+	[ "$current_kernel_release" = "$expected_kernel_release" ] || fail "kernel release changed after arming"
+	manager_target_identity || fail "protected primary selector is invalid after reboot"
+	[ "$selected_partuuid" = "$expected_partuuid" ] || fail "selected PARTUUID changed after arming"
+	target_identity || fail "selected PARTUUID device is unavailable after reboot"
+	[ "$target_size_bytes" = "$expected_size" ] || fail "selected target size changed after arming"
+	[ "$target_removable" = 1 ] || fail "selected target parent is no longer reported as removable"
+	for attribute in model serial wwn transport removable; do
+		eval "expected_value=\$expected_$attribute"
+		eval "current_value=\$target_$attribute"
+		if [ "$expected_value" != unavailable ] && [ "$current_value" != "$expected_value" ]; then
+			fail "selected target $attribute changed after arming"
+		fi
+	done
+	raw_swap_alias_guard || fail "selected partition has a raw-swap alias conflict or alias inventory is unavailable"
+	module_artifact_metadata || fail "installed module provenance cannot be verified after reboot"
+	[ "$module_sha256" = "$expected_module_sha" ] || fail "installed module bytes changed after arming"
+	[ "$module_source_sha" = "$expected_source_sha" ] || fail "installed module source changed after arming"
+	[ "$module_source_clean" = "$expected_source_clean" ] || fail "installed module clean marker changed after arming"
+	printf 'PRIMARY_BOOT_PREFLIGHT=PASS boot_id=%s armed_boot_id=%s partuuid=%s\n' \
+		"$boot_id" "$armed_boot_id" "$selected_partuuid"
+}
+
+maximum_logical_sectors()
+{
+	device_bytes=$1
+	printf '%s\n' "$device_bytes" | grep -Eq '^[1-9][0-9]*$' || return 1
+	[ "${#device_bytes}" -le 18 ] || return 1
+	[ $((device_bytes % 4096)) -eq 0 ] || return 1
+	blocks=$((device_bytes / 4096))
+	[ "$blocks" -gt 1 ] || return 1
+	physical_blocks=$((((blocks - 1) / 256) * 256))
+	[ "$physical_blocks" -gt 0 ] || return 1
+	low=0
+	high=$physical_blocks
+	while [ "$low" -lt "$high" ]; do
+		candidate=$((low + (high - low + 1) / 2))
+		reserve=$(((candidate + 7) / 8))
+		[ "$reserve" -ge 512 ] || reserve=512
+		if [ "$reserve" -ge "$physical_blocks" ]; then
+			fits=0
+		else
+			data_blocks=$((((physical_blocks - reserve) / 256) * 256))
+			if [ "$candidate" -le "$data_blocks" ]; then fits=1; else fits=0; fi
+		fi
+		if [ "$fits" -eq 1 ]; then
+			low=$candidate
+		else
+			high=$((candidate - 1))
+		fi
+	done
+	[ "$low" -gt 0 ] || return 1
+	printf '%s\n' $((low * 8))
+}
+
+status_token()
+{
+	key=$1
+	text=$2
+	printf '%s\n' "$text" | awk -v wanted="$key" '
+		{
+			for (position = 1; position <= NF; ++position) {
+				split($position, pair, "=")
+				if (pair[1] == wanted && length(pair[2])) {
+					print pair[2]
+					exit
+				}
+			}
+		}
+	'
+}
+
+observe_boot()
+{
+	secure_report_directory
+	boot_id=$(current_boot_id 2>/dev/null || true)
+	if ! valid_boot_id "$boot_id" 2>/dev/null; then
+		boot_id=unknown
+		append_incomplete boot_id_unavailable
+	fi
+	kernel_release=$(uname -r 2>/dev/null || printf 'unavailable')
+	armed_boot_id=unavailable
+	expected_kernel_release=unavailable
+	expected_partuuid=unavailable
+	expected_target_size=unavailable
+	expected_module_sha=unavailable
+	expected_source_sha=unavailable
+	cold_boot_observed=no
+	observation_expected=0
+
+	if validate_arm_file && [ "$(arm_field schema 2>/dev/null || true)" = swapz-primary-boot-arm-v1 ]; then
+		armed_boot_id=$(arm_field arm_boot_id 2>/dev/null || printf 'unavailable')
+		expected_kernel_release=$(arm_field arm_kernel_release 2>/dev/null || printf 'unavailable')
+		expected_partuuid=$(arm_field expected_partuuid 2>/dev/null || printf 'unavailable')
+		expected_target_size=$(arm_field expected_target_size_bytes 2>/dev/null || printf 'unavailable')
+		expected_module_sha=$(arm_field expected_module_sha256 2>/dev/null || printf 'unavailable')
+		expected_source_sha=$(arm_field expected_module_source_sha 2>/dev/null || printf 'unavailable')
+		if valid_boot_id "$boot_id" 2>/dev/null && valid_boot_id "$armed_boot_id" 2>/dev/null; then
+			if [ "$boot_id" != "$armed_boot_id" ]; then
+				cold_boot_observed=yes
+				observation_expected=1
+				[ "$kernel_release" = "$expected_kernel_release" ] || append_failure kernel_release_mismatch
+			else
+				append_incomplete owner_reboot_not_observed
+			fi
+		else
+			append_incomplete arm_record_invalid
+		fi
+	else
+		append_incomplete harness_not_armed
+	fi
+
+	selected_partuuid=unavailable
+	selected_path=unavailable
+	target_major_minor=unavailable
+	target_size_bytes=unavailable
+	target_parent=unavailable
+	target_model=unavailable
+	target_serial=unavailable
+	target_wwn=unavailable
+	target_transport=unavailable
+	target_removable=unavailable
+	if [ -x "$swapzctl" ] && manager_target_identity && target_identity; then
+		if [ "$observation_expected" -eq 1 ]; then
+			[ "$selected_partuuid" = "$expected_partuuid" ] || append_failure selected_partuuid_mismatch
+			[ "$target_size_bytes" = "$expected_target_size" ] || append_failure selected_target_size_mismatch
+		fi
+	else
+		if [ "$observation_expected" -eq 1 ]; then
+			append_failure selected_target_unavailable
+		else
+			append_incomplete selected_target_unavailable
+		fi
+	fi
+
+	module_sha256=unavailable
+	module_source_sha=unavailable
+	module_source_clean=unavailable
+	if module_artifact_metadata 2>/dev/null; then
+		if [ "$observation_expected" -eq 1 ]; then
+			[ "$module_sha256" = "$expected_module_sha" ] || append_failure installed_module_hash_mismatch
+			[ "$module_source_sha" = "$expected_source_sha" ] || append_failure installed_module_source_mismatch
+		fi
+	else
+		if [ "$observation_expected" -eq 1 ]; then append_failure installed_module_unavailable; else append_incomplete installed_module_unavailable; fi
+	fi
+
+	loaded_module_source_sha=unavailable
+	loaded_module_source_clean=unavailable
+	loaded_source_file=$sys_root/module/dm_swapz/parameters/build_source_sha
+	loaded_clean_file=$sys_root/module/dm_swapz/parameters/build_source_clean
+	if loaded_module_source_sha=$(single_line_file "$loaded_source_file" 2>/dev/null) && \
+	   loaded_module_source_clean=$(single_line_file "$loaded_clean_file" 2>/dev/null); then
+		if [ "$observation_expected" -eq 1 ]; then
+			[ "$loaded_module_source_sha" = "$expected_source_sha" ] || append_failure loaded_module_source_mismatch
+			[ "$loaded_module_source_clean" = 1 ] || append_failure loaded_module_not_clean
+		fi
+	else
+		loaded_module_source_sha=unavailable
+		loaded_module_source_clean=unavailable
+		if [ "$observation_expected" -eq 1 ]; then append_failure module_not_loaded; else append_incomplete module_not_loaded; fi
+	fi
+
+	dm_uuid=unavailable
+	dm_table=unavailable
+	dm_logical_sectors=0
+	dm_logical_bytes=0
+	dm_status=unavailable
+	expected_dm_logical_sectors=unavailable
+	if [ "$target_size_bytes" != unavailable ]; then
+		expected_dm_logical_sectors=$(maximum_logical_sectors "$target_size_bytes" 2>/dev/null || printf 'unavailable')
+	fi
+	swapz_failed=unavailable
+	swapz_error=unavailable
+	swapz_flush_err=unavailable
+	swapz_segment_discards_failed=unavailable
+	swapz_upper_write_completed_err=unavailable
+	swapz_endio_write_seen_err=unavailable
+	swapz_endio_write_forced_err=unavailable
+	mapper_major_minor=unavailable
+	dm_status_file=$report_base/report-$boot_id.dm-status.txt
+	if command -v dmsetup >/dev/null 2>&1; then
+		dm_uuid=$(dmsetup info --columns --noheadings --separator '|' -o uuid swapz-primary 2>/dev/null | awk 'NR == 1 { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit }' || true)
+		dm_table=$(dmsetup table swapz-primary 2>/dev/null || true)
+		dm_status=$(dmsetup status swapz-primary 2>/dev/null || true)
+		mapper_major_minor=$(lsblk -dnro MAJ:MIN -- "$mapper_path" 2>/dev/null || printf 'unavailable')
+		case "$dm_table" in *'
+'*)
+			if [ "$(printf '%s\n' "$dm_table" | wc -l)" -ne 1 ]; then
+				[ "$observation_expected" -eq 1 ] && append_failure mapper_table_not_single_target
+			fi
+			;;
+		esac
+		set -f
+		old_ifs=$IFS
+		IFS=' '
+		# shellcheck disable=SC2086 # DM table fields are intentionally tokenized.
+		set -- $dm_table
+		IFS=$old_ifs
+		if [ "$#" -eq 12 ] && [ "$1" = 0 ] && \
+		   printf '%s\n' "$2" | grep -Eq '^[1-9][0-9]*$' && \
+		   [ "$3" = swapz ] && [ "$5" = 0 ] && [ "$6" = 64 ] && \
+		   [ "$7" = 0 ] && [ "$8" = 2 ] && [ "$9" = 0 ] && \
+		   [ "${10}" = 1 ] && [ "${11}" = 0 ] && [ "${12}" = 0 ]; then
+			dm_logical_sectors=$2
+			dm_logical_bytes=$((dm_logical_sectors * 512))
+			if [ "$observation_expected" -eq 1 ]; then
+				[ "$target_major_minor" != unavailable ] && [ "$4" = "$target_major_minor" ] || append_failure mapper_backing_identity_mismatch
+				[ "$expected_dm_logical_sectors" != unavailable ] && [ "$dm_logical_sectors" = "$expected_dm_logical_sectors" ] || append_failure mapper_logical_capacity_mismatch
+			fi
+		else
+			[ "$observation_expected" -eq 1 ] && append_failure mapper_table_invalid
+		fi
+		if [ "$observation_expected" -eq 1 ]; then
+			printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$' || append_failure mapper_uuid_invalid
+			printf '%s\n' "$mapper_major_minor" | grep -Eq '^[0-9]+:[0-9]+$' || append_failure mapper_device_unavailable
+		fi
+		if [ "$dm_status" != unavailable ] && [ -n "$dm_status" ]; then
+			set -f
+			old_ifs=$IFS
+			IFS=' '
+			# shellcheck disable=SC2086 # DM status prefix is intentionally tokenized.
+			set -- $dm_status
+			IFS=$old_ifs
+			if [ "$observation_expected" -eq 1 ]; then
+				[ "$#" -ge 3 ] && [ "$1" = 0 ] && [ "$2" = "$expected_dm_logical_sectors" ] && [ "$3" = swapz ] || append_failure mapper_status_geometry_invalid
+			fi
+			temporary=$(mktemp "$report_base/.dm-status.XXXXXX") || fail "cannot create DM status report"
+			printf '%s\n' "$dm_status" > "$temporary"
+			commit_file "$temporary" "$dm_status_file"
+			for token in failed error flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
+				value=$(status_token "$token" "$dm_status")
+				[ -n "$value" ] || value=unavailable
+				case "$token" in
+				failed) swapz_failed=$value ;;
+				error) swapz_error=$value ;;
+				flush_err) swapz_flush_err=$value ;;
+				segment_discards_failed) swapz_segment_discards_failed=$value ;;
+				upper_write_completed_err) swapz_upper_write_completed_err=$value ;;
+				endio_write_seen_err) swapz_endio_write_seen_err=$value ;;
+				endio_write_forced_err) swapz_endio_write_forced_err=$value ;;
+				esac
+			done
+			if [ "$observation_expected" -eq 1 ]; then
+				[ "$swapz_failed" = 0 ] || append_failure swapz_target_failed
+				[ "$swapz_error" = 0 ] || append_failure swapz_target_error
+				[ "$swapz_flush_err" = 0 ] || append_failure swapz_flush_errors
+				[ "$swapz_segment_discards_failed" = 0 ] || append_failure swapz_segment_discard_failures
+				[ "$swapz_upper_write_completed_err" = 0 ] || append_failure swapz_upper_write_errors
+				[ "$swapz_endio_write_seen_err" = 0 ] || append_failure swapz_endio_seen_errors
+				[ "$swapz_endio_write_forced_err" = 0 ] || append_failure swapz_endio_forced_errors
+			fi
+		else
+			if [ "$observation_expected" -eq 1 ]; then append_failure mapper_status_unavailable; else append_incomplete mapper_status_unavailable; fi
+		fi
+	else
+		append_incomplete dmsetup_unavailable
+	fi
+
+	swap_total_entries=0
+	swap_mapper_entries=0
+	swap_path=unavailable
+	swap_type=unavailable
+	swap_size_kib=0
+	swap_used_kib=0
+	swap_priority=unavailable
+	if [ -r "$proc_root/swaps" ]; then
+		while IFS=' ' read -r path type size used priority _rest; do
+			[ -n "$path" ] || continue
+			swap_total_entries=$((swap_total_entries + 1))
+			path_identity=$(path_major_minor "$path" 2>/dev/null || true)
+			if [ "$path_identity" = "$mapper_major_minor" ] && [ "$mapper_major_minor" != unavailable ]; then
+				swap_mapper_entries=$((swap_mapper_entries + 1))
+				swap_path=$path
+				swap_type=$type
+				swap_size_kib=$size
+				swap_used_kib=$used
+				swap_priority=$priority
+			fi
+		done <<SWAPS
+$(awk 'NR > 1 { print $1, $2, $3, $4, $5 }' "$proc_root/swaps")
+SWAPS
+		if [ "$observation_expected" -eq 1 ]; then
+			[ "$swap_total_entries" -eq 1 ] || append_failure unexpected_swap_entry_count
+			[ "$swap_mapper_entries" -eq 1 ] || append_failure primary_mapper_not_active_as_swap
+			[ "$swap_type" = partition ] || append_failure primary_swap_type_invalid
+			[ "$swap_priority" = -1 ] || append_failure primary_swap_priority_invalid
+			if printf '%s\n' "$swap_size_kib" | grep -Eq '^[1-9][0-9]*$' && [ "$dm_logical_bytes" -gt 0 ]; then
+				expected_swap_size_kib=$((dm_logical_bytes / 1024 - 4))
+				[ "$swap_size_kib" -eq "$expected_swap_size_kib" ] || append_failure primary_swap_capacity_invalid
+			else
+				append_failure primary_swap_capacity_unavailable
+			fi
+		fi
+	else
+		append_incomplete proc_swaps_unavailable
+	fi
+
+	mapper_active_state=unavailable
+	mapper_sub_state=unavailable
+	mapper_result=unavailable
+	swap_active_state=unavailable
+	swap_sub_state=unavailable
+	swap_result=unavailable
+	if command -v systemctl >/dev/null 2>&1; then
+		mapper_active_state=$(systemctl show --property=ActiveState --value "$mapper_service" 2>/dev/null || printf 'unavailable')
+		mapper_sub_state=$(systemctl show --property=SubState --value "$mapper_service" 2>/dev/null || printf 'unavailable')
+		mapper_result=$(systemctl show --property=Result --value "$mapper_service" 2>/dev/null || printf 'unavailable')
+		swap_active_state=$(systemctl show --property=ActiveState --value "$mapper_swap_unit" 2>/dev/null || printf 'unavailable')
+		swap_sub_state=$(systemctl show --property=SubState --value "$mapper_swap_unit" 2>/dev/null || printf 'unavailable')
+		swap_result=$(systemctl show --property=Result --value "$mapper_swap_unit" 2>/dev/null || printf 'unavailable')
+		if [ "$observation_expected" -eq 1 ]; then
+			[ "$mapper_active_state" = active ] || append_failure mapper_service_not_active
+			[ "$mapper_result" = success ] || append_failure mapper_service_result_failed
+			[ "$swap_active_state" = active ] || append_failure primary_swap_unit_not_active
+			[ "$swap_result" = success ] || append_failure primary_swap_unit_result_failed
+		fi
+	else
+		append_incomplete systemctl_unavailable
+	fi
+
+	kernel_error_count=unavailable
+	kernel_error_log=$report_base/report-$boot_id.kernel-errors.log
+	journal_raw=$(mktemp "$report_base/.kernel-journal.XXXXXX") || fail "cannot create kernel-journal temporary"
+	journal_filtered=$(mktemp "$report_base/.kernel-errors.XXXXXX") || {
+		rm -f -- "$journal_raw"
+		fail "cannot create kernel-error temporary"
+	}
+	if valid_boot_id "$boot_id" 2>/dev/null && command -v journalctl >/dev/null 2>&1 && \
+	   journalctl --boot "$boot_id" --kernel --priority=err..alert --no-pager --output=short-monotonic \
+		>"$journal_raw" 2>/dev/null; then
+		grep -Ei 'swapz|device-mapper|dm-[0-9]+|I/O error|blk_update_request|Buffer I/O' \
+			"$journal_raw" > "$journal_filtered" || :
+		kernel_error_count=$(wc -l < "$journal_filtered" | tr -d ' ')
+		commit_file "$journal_filtered" "$kernel_error_log"
+		if [ "$observation_expected" -eq 1 ] && [ "$kernel_error_count" -gt 0 ]; then
+			append_failure relevant_kernel_errors
+		fi
+	else
+		rm -f -- "$journal_filtered"
+		append_incomplete kernel_log_unavailable
+	fi
+	rm -f -- "$journal_raw"
+
+	if [ -n "$failure_reasons" ]; then
+		status=FAIL
+	elif [ -n "$incomplete_reasons" ]; then
+		status=INCOMPLETE
+	else
+		status=PASS
+	fi
+
+	report=$report_base/report-$boot_id.env
+	temporary=$(mktemp "$report_base/.boot-report.XXXXXX") || fail "cannot create boot report"
+	cat > "$temporary" <<REPORT
+schema=swapz-primary-cold-boot-v1
+status=$status
+cold_boot_observed=$cold_boot_observed
+boot_id=$boot_id
+armed_boot_id=$armed_boot_id
+kernel_release=$kernel_release
+selected_partuuid=$selected_partuuid
+selected_target_major_minor=$target_major_minor
+selected_target_size_bytes=$target_size_bytes
+selected_target_parent=$target_parent
+selected_target_model=$target_model
+selected_target_serial=$target_serial
+selected_target_wwn=$target_wwn
+selected_target_transport=$target_transport
+selected_target_removable=$target_removable
+module_artifact=$module_artifact
+module_artifact_sha256=$module_sha256
+module_build_source_sha=$module_source_sha
+module_build_source_clean=$module_source_clean
+loaded_module_build_source_sha=$loaded_module_source_sha
+loaded_module_build_source_clean=$loaded_module_source_clean
+dm_uuid=$dm_uuid
+dm_table=$dm_table
+dm_logical_sectors=$dm_logical_sectors
+expected_dm_logical_sectors=$expected_dm_logical_sectors
+dm_logical_bytes=$dm_logical_bytes
+dm_status_file=$dm_status_file
+swap_total_entries=$swap_total_entries
+swap_mapper_entries=$swap_mapper_entries
+swap_path=$swap_path
+swap_type=$swap_type
+swap_size_kib=$swap_size_kib
+swap_used_kib=$swap_used_kib
+swap_priority=$swap_priority
+mapper_service_active_state=$mapper_active_state
+mapper_service_sub_state=$mapper_sub_state
+mapper_service_result=$mapper_result
+swap_unit_active_state=$swap_active_state
+swap_unit_sub_state=$swap_sub_state
+swap_unit_result=$swap_result
+swapz_failed=$swapz_failed
+swapz_error=$swapz_error
+swapz_flush_err=$swapz_flush_err
+swapz_segment_discards_failed=$swapz_segment_discards_failed
+swapz_upper_write_completed_err=$swapz_upper_write_completed_err
+swapz_endio_write_seen_err=$swapz_endio_write_seen_err
+swapz_endio_write_forced_err=$swapz_endio_write_forced_err
+kernel_error_count=$kernel_error_count
+kernel_error_log=$kernel_error_log
+failure_reasons=$failure_reasons
+incomplete_reasons=$incomplete_reasons
+REPORT
+	commit_file "$temporary" "$report"
+	latest_temporary=$(mktemp "$report_base/.latest.XXXXXX") || fail "cannot create latest report"
+	cat -- "$report" > "$latest_temporary"
+	commit_file "$latest_temporary" "$report_base/latest.env"
+	printf 'COLD_BOOT_OBSERVATION=%s boot_id=%s armed_boot_id=%s report=%s\n' \
+		"$status" "$boot_id" "$armed_boot_id" "$report"
+}
+
+case "$mode" in
+arm) arm_harness ;;
+preflight) preflight_boot ;;
+observe) observe_boot ;;
+esac

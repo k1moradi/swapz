@@ -102,6 +102,15 @@ module ownership. The execution gate remains disabled. Deterministic
 interruption/owned-null_blk qualification, actual Linux swap, full-card memory
 and capacity, physical churn, installation, and boot acceptance remain open.
 
+The systemd packaging source now has bounded target discovery/start/stop,
+fresh-boot recovery/prepare/start sequencing, block-identity raw-alias
+preflight, and an automatic persistent cold-boot evidence collector. It cannot
+report PASS in the arming boot. Agent 7 still owns installation/ownership
+wiring for the new helper and verifier service, and Agent 10 owns official
+test-runner integration; therefore the harness is not installed or armed and
+boot acceptance remains open. No reboot or real swap activation was performed
+by this implementation work.
+
 The current host, target, build, CI, plan, and readiness-gate snapshot is
 tracked in [handoff/production-readiness.json](handoff/production-readiness.json).
 The geometry-derived logical capacity there is a candidate only; memory

@@ -2,21 +2,24 @@
 Description=Prepare the swapz primary swap mapper
 DefaultDependencies=no
 Requires=-.mount
+RequiresMountsFor=/var/lib/swapz/physical-recovery
 After=-.mount systemd-modules-load.service
 Before=dev-mapper-swapz\x2dprimary.swap shutdown.target
-# The systemd generator derives selected-device ordering/conflicts from the
-# protected PARTUUID selector; this unit contains no physical target identity.
 Conflicts=shutdown.target
 PartOf=dev-mapper-swapz\x2dprimary.swap
 RefuseManualStart=yes
 RefuseManualStop=yes
-ConditionPathExists=/var/lib/swapz/physical-recovery/primary-state.json
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# A failed recovery is intentionally followed by prepare: prepare can reconcile
+# metadata-only READY/COMPLETE records, but any unsafe stale state still blocks.
+ExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-boot-verify preflight
+ExecStartPre=-@SWAPZ_SBINDIR@/swapzctl primary recover
+ExecStartPre=@SWAPZ_SBINDIR@/swapzctl primary prepare
 ExecStart=@SWAPZ_SBINDIR@/swapzctl primary start
 ExecStop=@SWAPZ_SBINDIR@/swapzctl primary stop
 TimeoutStartSec=120s
-TimeoutStopSec=infinity
+TimeoutStopSec=120s
 UMask=0077

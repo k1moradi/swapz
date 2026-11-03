@@ -1,0 +1,12 @@
+[Unit]
+Description=Record swapz primary cold-boot acceptance evidence
+After=swapz-primary-mapper.service dev-mapper-swapz\x2dprimary.swap
+
+[Service]
+Type=oneshot
+ExecStart=@SWAPZ_SBINDIR@/swapz-primary-boot-verify observe
+TimeoutStartSec=30s
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
