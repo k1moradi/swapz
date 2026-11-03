@@ -1,16 +1,21 @@
-# Draft prompt: independent review for physical swap testing
+# Historical draft prompt: independent review for physical swap testing
 
-This is a copyable request for an external, independent code and safety
-reviewer. It is a draft only. It is not an approval, does not authorize
-physical writes, and does not replace the signed review gate in the project.
-Send it with the current local review packet at
-build/physical-swap-review/README.md and the unsigned
-build/physical-swap-review/review-record.json. Those files are ignored by Git
-because they contain computer- and device-specific review state.
+**Status: historical evidence for the previous computer.** This prompt was
+prepared for the 2026-11-02 one-use physical-swap review process. It is not a
+current approval gate and must not be refreshed or sent as a requirement for
+the dedicated SD-card mission. Standing authorization and current technical
+gates are canonical in [AGENT_CONTEXT.md](../AGENT_CONTEXT.md).
 
-The source and artifact values below were current on 2026-11-02. Refresh them
-and the attached packet if the source, helper, artifacts, selected partition,
-or qualification reports change.
+At the time, this was a copyable request for an external, independent code and
+safety reviewer. It was a draft only: it was not an approval, did not authorize
+physical writes, and did not replace the signed review gate then in effect. The
+historical workflow paired it with local ignored files under
+`build/physical-swap-review/` containing computer- and device-specific review
+state.
+
+The source and artifact values below were current on 2026-11-02 and are
+intentionally preserved rather than refreshed. The review questions remain
+useful as a record of what was checked, not as current operator instructions.
 
 ## Prompt to send
 
