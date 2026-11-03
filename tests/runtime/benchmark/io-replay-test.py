@@ -2585,7 +2585,11 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "telemetry failed"):
             sustained.stop_interval_sampler(
                 FailingSampler(), partial, primary_failure_active=False)
-        self.assertNotIn("interval_sampler_failure", partial)
+        self.assertEqual(
+            partial["interval_sampler_failure"], "telemetry failed")
+        self.assertEqual(partial["sustained_intervals"], [{"interval": 0}])
+        self.assertEqual(
+            partial["sustained_observer_overhead"]["child_cpu_seconds"], .003)
 
         partial = {}
         rows = sustained.stop_interval_sampler(
@@ -2615,10 +2619,18 @@ class PairReplayContract(unittest.TestCase):
         evidence = importlib.util.module_from_spec(evidence_spec)
         evidence_spec.loader.exec_module(evidence)
 
+        qualification_path = SCRIPT.with_name("qualification.py")
+        qualification_spec = importlib.util.spec_from_file_location(
+            "swapz_campaign_qualification", qualification_path)
+        qualification = importlib.util.module_from_spec(qualification_spec)
+        qualification_spec.loader.exec_module(qualification)
+
         source_sha = "a" * 40
+        other_source_sha = "c" * 40
         source_tree_sha = "b" * 40
         host = {
             "schema": evidence.HOST_SCHEMA,
+            "captured_at_utc": "2026-11-03T18:00:00+00:00",
             "source_sha": source_sha,
             "source_tree_sha": source_tree_sha,
             "virtualization": "none",
@@ -2629,7 +2641,7 @@ class PairReplayContract(unittest.TestCase):
                 "major_minor": "8:1", "size_bytes": 123456,
                 "physical_disk": "sda", "model": "SD", "transport": "usb",
                 "partuuid": "11111111-01", "serial": "serial-1",
-                "wwid": "wwid-1",
+                "wwid": "wwid-1", "selected_scheduler": "mq-deadline",
                 "queue": {
                     "logical_block_size": 512,
                     "physical_block_size": 512,
@@ -2638,32 +2650,39 @@ class PairReplayContract(unittest.TestCase):
             "cpu": {
                 "configured_cpus": 4, "online_cpus": 4,
                 "affinity_cpus": [0, 1, 2, 3],
+                "model_names": ["Synthetic CPU"],
+                "governors": ["performance"],
+                "frequency_drivers": ["synthetic"],
+                "scaling_min_khz": [1000000],
+                "scaling_max_khz": [2000000],
             },
             "memory": {"total_bytes": 8 * 1024 * 1024 * 1024},
             "swap_inventory": [],
             "mount_inventory": "/ /dev/root ext4 8:2",
-            "pressure": {"cpu": "some avg10=0.00", "io": "", "memory": ""},
+            "pressure": {
+                "cpu": "some avg10=0.00",
+                "io": "some avg10=0.00",
+                "memory": "some avg10=0.00"},
             "thermal": [],
             "dm_swapz_module": {"status": "NOT_LOADED", "values": {}},
         }
-        pair = {
-            "schema": evidence.PAIR_SCHEMA,
-            "workload": "sd-service-balanced",
-            "pair_id": "pair-1", "pair_index": 1, "order": "raw-first",
-            "source_sha": source_sha, "status": "EXCLUDED", "excluded": True,
-            "exclusion_reasons": ["synthetic exclusion"],
-            "raw": {"source_sha": source_sha},
-            "swapz": {"source_sha": source_sha},
-        }
-        summary_record = {
-            **pair, "analysis_usable": False,
-            "analysis_exclusion_reasons": ["synthetic exclusion"],
-        }
-        acceptance_bytes = evidence.ACCEPTANCE_MANIFEST.read_bytes()
-        acceptance = json.loads(acceptance_bytes)
-        contract = acceptance["physical_qualification"]
-        amendment = json.loads(evidence.AMENDMENT_MANIFEST.read_text())
-        workload_names = set(contract["workloads"]) | set(amendment["workloads"])
+
+        def excluded_pair(pair_id, pair_index, order, pair_source):
+            return {
+                "schema": qualification.PAIR_SCHEMA,
+                "workload": "sd-service-balanced",
+                "pair_id": pair_id, "pair_index": pair_index, "order": order,
+                "source_sha": pair_source,
+                "qualification_protocol": qualification.SCHEMA,
+                "status": "EXCLUDED", "excluded": True,
+                "exclusion_reasons": ["synthetic exclusion"],
+                "deltas": {},
+                "raw": {"source_sha": pair_source},
+                "swapz": {"source_sha": pair_source},
+            }
+
+        pair = excluded_pair("pair-1", 1, "raw-first", source_sha)
+        summary = qualification.evaluate([pair], protocol="v2")
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2673,23 +2692,10 @@ class PairReplayContract(unittest.TestCase):
             summary_path = root / "summary.json"
             result_path = root / "campaign.json"
             before_path.write_text(json.dumps(host))
-            after_path.write_text(json.dumps(host))
+            after_host = {
+                **host, "captured_at_utc": "2026-11-03T19:00:00+00:00"}
+            after_path.write_text(json.dumps(after_host))
             pair_path.write_text(json.dumps(pair))
-            summary = {
-                "schema": evidence.SUMMARY_SCHEMA,
-                "campaign_source_sha": source_sha,
-                "acceptance_manifest_sha256":
-                    hashlib.sha256(acceptance_bytes).hexdigest(),
-                "contract": contract,
-                "prospective_amendment": amendment,
-                "amendment_active": True,
-                "evaluation_protocol": "v2",
-                "status": "FAIL_OR_INCOMPLETE",
-                "decisions": {
-                    name: {"status": "INCOMPLETE"}
-                    for name in workload_names},
-                "records": [summary_record],
-            }
             summary_path.write_text(json.dumps(summary))
 
             with mock.patch.object(
@@ -2702,73 +2708,93 @@ class PairReplayContract(unittest.TestCase):
                     summary_path, [pair_path])
             self.assertEqual(sealed["record_count"], 1)
             self.assertEqual(sealed["campaign_status"], "FAIL_OR_INCOMPLETE")
+            self.assertTrue(sealed["source_consistent"])
+            self.assertEqual(sealed["pair_source_shas"], [source_sha])
             self.assertEqual(
                 sealed["artifacts"]["pairs"][0]["status"], "EXCLUDED")
             self.assertEqual(
                 sealed["policy"]["acceptance_manifest"]["git_blob_sha"],
-                evidence.git_blob_sha(acceptance_bytes))
+                evidence.git_blob_sha(
+                    evidence.ACCEPTANCE_MANIFEST.read_bytes()))
             self.assertEqual(sealed["host_stability"]["status"], "STABLE")
 
             evidence.write_new_json(result_path, sealed)
             with self.assertRaises(FileExistsError):
                 evidence.write_new_json(result_path, sealed)
 
-            changed_host = {
-                **host, "device": {**host["device"], "major_minor": "8:2"}}
-            after_path.write_text(json.dumps(changed_host))
-            summary["status"] = "PASS"
-            summary["decisions"] = {
-                name: {"status": "PASS"} for name in workload_names}
-            summary_path.write_text(json.dumps(summary))
-            with mock.patch.object(
-                    evidence, "require_clean_source", return_value=None), \
-                    mock.patch.object(
-                        evidence, "source_tree_sha",
-                        return_value=source_tree_sha):
-                changed = evidence.seal_campaign(
-                    source_sha, before_path, after_path,
-                    summary_path, [pair_path])
-            self.assertEqual(
-                changed["campaign_status"],
-                "BLOCKED_HOST_IDENTITY_CHANGED")
-
-            # A numerically passing legacy/v1 summary is not sufficient for
-            # the current production campaign that prospectively added v2.
-            after_path.write_text(json.dumps(host))
-            summary["evaluation_protocol"] = "v1"
-            summary["amendment_active"] = False
-            summary["decisions"] = {
-                name: {"status": "PASS"} for name in contract["workloads"]}
-            summary_path.write_text(json.dumps(summary))
-            with mock.patch.object(
-                    evidence, "require_clean_source", return_value=None), \
-                    mock.patch.object(
-                        evidence, "source_tree_sha",
-                        return_value=source_tree_sha):
-                legacy = evidence.seal_campaign(
-                    source_sha, before_path, after_path,
-                    summary_path, [pair_path])
-            self.assertEqual(
-                legacy["campaign_status"], "BLOCKED_PROTOCOL_NOT_V2")
-
-            summary["evaluation_protocol"] = "v2"
-            summary["amendment_active"] = True
-            summary["decisions"] = {
-                name: {"status": "PASS"} for name in workload_names}
-            summary["records"][0]["status"] = "PASS"
-            summary_path.write_text(json.dumps(summary))
+            # An edit to derived evaluator output must fail even if original
+            # pair fields in the summary remain untouched.
+            tampered_summary = dict(summary)
+            tampered_summary["raw_repeat_spread"] = {
+                "sd-service-balanced": 0.0}
+            summary_path.write_text(json.dumps(tampered_summary))
             with mock.patch.object(
                     evidence, "require_clean_source", return_value=None), \
                     mock.patch.object(
                         evidence, "source_tree_sha",
                         return_value=source_tree_sha):
                 with self.assertRaisesRegex(
-                        ValueError, "summary changed original pair field"):
+                        ValueError, "does not exactly match supplied pair"):
                     evidence.seal_campaign(
                         source_sha, before_path, after_path,
                         summary_path, [pair_path])
 
-            summary["records"] = [summary_record]
+            # Preserve an invalid mixed-source campaign as sealed failure
+            # evidence instead of refusing to record why it was incomplete.
+            pair_two = excluded_pair(
+                "pair-2", 2, "swapz-first", other_source_sha)
+            pair_two_path = root / "pair-2.json"
+            pair_two_path.write_text(json.dumps(pair_two))
+            mixed_summary = qualification.evaluate(
+                [pair, pair_two], protocol="v2")
+            self.assertIsNone(mixed_summary["campaign_source_sha"])
+            summary_path.write_text(json.dumps(mixed_summary))
+            with mock.patch.object(
+                    evidence, "require_clean_source", return_value=None), \
+                    mock.patch.object(
+                        evidence, "source_tree_sha",
+                        return_value=source_tree_sha):
+                mixed = evidence.seal_campaign(
+                    source_sha, before_path, after_path,
+                    summary_path, [pair_path, pair_two_path])
+            self.assertEqual(mixed["campaign_status"], "FAIL_OR_INCOMPLETE")
+            self.assertFalse(mixed["source_consistent"])
+            self.assertEqual(
+                mixed["pair_source_shas"],
+                [source_sha, other_source_sha])
+
+            with mock.patch.object(
+                    evidence, "require_clean_source", return_value=None):
+                with self.assertRaisesRegex(
+                        ValueError, "inputs must be distinct files"):
+                    evidence.seal_campaign(
+                        source_sha, before_path, before_path,
+                        summary_path, [pair_path, pair_two_path])
+
+            # Before/after chronology is itself part of campaign provenance.
+            backwards = {
+                **after_host,
+                "captured_at_utc": "2026-11-03T17:00:00+00:00"}
+            after_path.write_text(json.dumps(backwards))
+            summary_path.write_text(json.dumps(summary))
+            with mock.patch.object(
+                    evidence, "require_clean_source", return_value=None), \
+                    mock.patch.object(
+                        evidence, "source_tree_sha",
+                        return_value=source_tree_sha):
+                with self.assertRaisesRegex(ValueError, "time moved backwards"):
+                    evidence.seal_campaign(
+                        source_sha, before_path, after_path,
+                        summary_path, [pair_path])
+
+            changed_host = {
+                **after_host,
+                "device": {**after_host["device"], "major_minor": "8:2"}}
+            self.assertEqual(
+                evidence.host_stability(host, changed_host)["status"],
+                "CHANGED")
+
+            after_path.write_text(json.dumps(after_host))
             summary_path.write_text(json.dumps(summary))
             with mock.patch.object(
                     evidence, "require_clean_source", return_value=None), \

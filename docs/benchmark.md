@@ -581,8 +581,9 @@ polling the replay hot path. Boundary target snapshots retain allocator
 cursor/reserve/victim state. The explicit occupancy-transition records describe
 logical coverage after successful deterministic writes, not live physical
 segment utilization. The maximum no-progress gap includes trailing measured
-fsync stalls; any available interval samples and the primary failure reason
-are retained on replay failure. SIGTERM/SIGINT received by either physical
+fsync stalls; any available interval samples, observer-overhead summary and
+the primary failure reason are retained on replay failure, including when the
+telemetry sampler itself is the standalone failure. SIGTERM/SIGINT received by either physical
 benchmark worker are converted into explicit FAIL evidence when Python receives
 the signal; a later invocation never replaces an existing result path, so an
 interrupted attempt remains part of campaign history. Sustained
@@ -672,11 +673,16 @@ mount inventories, PSI, thermal-zone readings and loaded swapz module
 parameters. After `qualification.py evaluate --protocol v2`, the scheduler
 runs `physical-campaign-evidence.py seal` with both snapshots, the evaluator
 summary and **every** pair JSON, including failed/excluded attempts. Sealing is
-create-only, verifies exact pair fields against the evaluator records, hashes
-the frozen acceptance manifest, prospective amendment and evaluator, and marks
-an otherwise passing campaign BLOCKED if stable host/device identity changed
-between snapshots. The resulting campaign JSON is the machine-readable
-provenance index; preserving the original arm/pair files remains mandatory.
+create-only, requires distinct before/after/summary/pair input files and
+timezone-aware nondecreasing snapshot times, re-runs the qualification evaluator
+from the supplied pair JSONs, and requires the regenerated summary to match
+exactly. It hashes the frozen acceptance manifest, prospective amendment and
+evaluator. FAIL/INCOMPLETE evidence may still be sealed when pair/source
+provenance is inconsistent so the invalid campaign remains auditable; a PASS is
+blocked unless all pair/summary source identity matches the exact host source.
+Stable host/device state is independently required for PASS. The resulting
+campaign JSON is the machine-readable provenance index; preserving the original
+arm/pair files remains mandatory.
 This methodology change intentionally does not add a second public test
 command.
 

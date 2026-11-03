@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import stat
 import subprocess
 from pathlib import Path
@@ -28,6 +29,7 @@ HOST_SCHEMA = "swapz-performance-host-snapshot-v1"
 CAMPAIGN_SCHEMA = "swapz-performance-campaign-evidence-v1"
 PAIR_SCHEMA = "swapz-performance-pair-v1"
 SUMMARY_SCHEMA = "swapz-performance-summary-v1"
+QUALIFICATION = runpy.run_path(str(QUALIFICATION_PATH))
 
 
 def unique_object(pairs):
@@ -349,6 +351,16 @@ def host_snapshot(source_sha: str, device: Path) -> dict:
     return snapshot
 
 
+def snapshot_time(snapshot: dict) -> datetime.datetime:
+    try:
+        captured = datetime.datetime.fromisoformat(snapshot["captured_at_utc"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("campaign host snapshot capture time is invalid") from exc
+    if captured.tzinfo is None or captured.utcoffset() is None:
+        raise ValueError("campaign host snapshot capture time lacks timezone")
+    return captured
+
+
 def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
     if snapshot.get("schema") != HOST_SCHEMA:
         raise ValueError("campaign host snapshot uses an unknown schema")
@@ -359,6 +371,7 @@ def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
         raise ValueError("campaign host snapshot lacks exact source tree SHA")
     if snapshot.get("virtualization") != "none":
         raise ValueError("campaign host snapshot is not a physical host")
+    snapshot_time(snapshot)
 
     kernel = snapshot.get("kernel")
     cpu = snapshot.get("cpu")
@@ -511,19 +524,27 @@ def artifact(path: Path, data: bytes) -> dict:
 def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
                   summary_path: Path, pair_paths: list[Path]) -> dict:
     require_clean_source(source_sha)
+    evidence_paths = [before_path, after_path, summary_path, *pair_paths]
+    identities = []
+    for path in evidence_paths:
+        info = os.stat(path, follow_symlinks=False)
+        identities.append((info.st_dev, info.st_ino))
+    if len(set(identities)) != len(identities):
+        raise ValueError("campaign evidence inputs must be distinct files")
+
     before, before_data = read_json(before_path)
     after, after_data = read_json(after_path)
     summary, summary_data = read_json(summary_path)
     validate_host_snapshot(before, source_sha)
     validate_host_snapshot(after, source_sha)
+    if snapshot_time(after) < snapshot_time(before):
+        raise ValueError("campaign host snapshot time moved backwards")
     current_tree_sha = source_tree_sha(source_sha)
     if before["source_tree_sha"] != current_tree_sha or \
             after["source_tree_sha"] != current_tree_sha:
         raise ValueError("campaign host snapshots reference a different source tree")
     if summary.get("schema") != SUMMARY_SCHEMA:
         raise ValueError("campaign qualification summary uses an unknown schema")
-    if summary.get("campaign_source_sha") != source_sha:
-        raise ValueError("campaign summary does not match exact source SHA")
 
     acceptance_data = read_regular_bytes(ACCEPTANCE_MANIFEST)
     amendment_data = read_regular_bytes(AMENDMENT_MANIFEST)
@@ -574,13 +595,12 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
             raise ValueError("qualification summary contains duplicate pair identity")
         summary_by_key[key] = record
 
-    pair_artifacts, seen_names, seen_keys = [], set(), set()
+    pair_artifacts, pair_records, seen_names, seen_keys = [], [], set(), set()
     for path in pair_paths:
         pair, data = read_json(path)
         if pair.get("schema") != PAIR_SCHEMA:
             raise ValueError(f"invalid pair schema: {path}")
-        if pair.get("source_sha") != source_sha:
-            raise ValueError(f"pair source SHA differs from campaign: {path}")
+        pair_records.append(pair)
         key = pair_key(pair)
         if key in seen_keys:
             raise ValueError("duplicate pair evidence supplied to campaign sealer")
@@ -608,10 +628,24 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         raise ValueError(
             "campaign sealer requires every evaluator record, including failed/excluded attempts")
 
+    regenerated = QUALIFICATION["evaluate"](pair_records, protocol=protocol)
+    if regenerated != summary:
+        raise ValueError(
+            "qualification summary does not exactly match supplied pair evidence")
+
+    pair_source_shas = sorted({
+        pair.get("source_sha") for pair in pair_records
+        if isinstance(pair.get("source_sha"), str)})
+    summary_source_sha = summary.get("campaign_source_sha")
+    source_consistent = (
+        summary_source_sha == source_sha and pair_source_shas == [source_sha])
+
     stability = host_stability(before, after)
     summary_status = summary.get("status")
     if summary_status != "PASS":
         campaign_status = "FAIL_OR_INCOMPLETE"
+    elif not source_consistent:
+        campaign_status = "BLOCKED_SOURCE_IDENTITY_CHANGED"
     elif not protocol_v2:
         campaign_status = "BLOCKED_PROTOCOL_NOT_V2"
     elif stability["status"] != "STABLE":
@@ -625,6 +659,9 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
             datetime.timezone.utc).isoformat(),
         "source_sha": source_sha,
         "source_tree_sha": current_tree_sha,
+        "campaign_source_sha": summary_source_sha,
+        "pair_source_shas": pair_source_shas,
+        "source_consistent": source_consistent,
         "campaign_status": campaign_status,
         "qualification_status": summary_status,
         "evaluation_protocol": summary.get("evaluation_protocol"),

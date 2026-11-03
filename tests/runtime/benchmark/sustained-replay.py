@@ -920,10 +920,12 @@ def stop_interval_sampler(interval_sampler, partial: dict,
     try:
         rows = interval_sampler.stop()
     except (OSError, ValueError) as sampler_error:
+        rows = list(interval_sampler.rows)
+        partial["interval_sampler_failure"] = str(sampler_error)
+        partial["sustained_intervals"] = rows
         if not primary_failure_active:
             raise
-        partial["interval_sampler_failure"] = str(sampler_error)
-        rows = list(interval_sampler.rows)
+        return rows
     finally:
         partial["sustained_observer_overhead"] = (
             interval_sampler.observer_summary())
@@ -1129,8 +1131,9 @@ def run(args):
                     "measured_cpu_seconds_per_useful_byte": (
                         measured_cpu / useful if useful else None),
                     "scope": (
-                        "replay process plus exported swapz worker CPU; "
-                        "other kernel CPU excluded")},
+                        "replay process including low-rate telemetry-thread CPU "
+                        "plus exported swapz worker CPU; observer child-process "
+                        "CPU and other kernel CPU are excluded")},
                 "resources": {
                     "replay_peak_rss_bytes": cpu_after[2],
                     "replay_process_maxrss_bytes": cpu_after[2],
