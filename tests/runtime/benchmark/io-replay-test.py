@@ -4,6 +4,7 @@
 This does NOT load the swapz module: same regular-file replay code tests only
 the trace contract, oracle, safety guard and fail-closed pair comparator.
 """
+import hashlib
 import json
 import os
 import random
