@@ -130,11 +130,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "--expect-parent-model", "--expect-parent-transport",
                 "O_RDWR | O_EXCL | O_CLOEXEC",
                 "format_device_with_ops",
+                "swapz_primary_target_config_read(configured_partuuid)",
+                "format_default_authorized_target_verify",
+                "format_authorized_opened_verify",
                 "format_parent_only_partition",
                 "format_usb_transport_path",
                 "target identity changed before header write",
                 "SWZ header readback mismatch"):
             self.assertIn(required, SWAPZCTL)
+        self.assertIn("ssize_t count = pwrite(fd, bytes, length, 0);",
+                      SWAPZCTL)
+        self.assertNotIn("pwrite(fd, bytes + done", SWAPZCTL)
         for destructive in ("BLKDISCARD", "FITRIM"):
             self.assertNotIn(destructive, SWAPZCTL)
         for fixed_target in (

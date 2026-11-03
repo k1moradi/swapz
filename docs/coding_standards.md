@@ -244,6 +244,18 @@ Integers are canonical unsigned decimal values that must fit the platform
 single internal hyphens. The formatter contains no hard-coded development
 device path, major:minor, capacity, PARTUUID or parent identity.
 
+The supplied identity bundle is **not an authorization grant**. Before any
+device open, the standalone formatter must read the existing protected
+root-owned primary-target selector with the manager's read-only verified
+configuration API and require its canonical PARTUUID to match the expected
+partition exactly. Missing, changed, malformed or unreadable protected
+configuration refuses formatting even for an otherwise matching removable
+drive. Recheck that protected selector with every opened-descriptor
+revalidation, especially immediately before the header write. The standalone
+formatter does not acquire privileged lifecycle authority, perform an implicit
+selector update, or authorize a different card merely because its CLI
+arguments and sysfs topology agree.
+
 Before opening for mutation, the path and `/dev/disk/by-partuuid/<PARTUUID>`
 alias must both resolve to the expected partition device number. The matching
 `/sys/dev/block/<major>:<minor>` object must identify a real non-virtual
@@ -277,9 +289,11 @@ starts from a zeroed 4096-byte buffer, uses a cryptographically random UUID
 with RFC-4122 version/variant bits, leaves all reserved bytes zero, and must pass
 `swapz_sb_valid()` before publication.
 
-A new format performs exactly one 4096-byte header write at offset zero and an
-`fsync()`; the standalone formatter never issues DISCARD/TRIM and never
-creates a mapper or activates swap. After the write it revalidates device
+A new format attempts exactly one 4096-byte header `pwrite()` at offset zero
+and then an `fsync()`; it never resumes a short successful write, retries an
+interrupted write or issues DISCARD/TRIM. A short write means the header may
+be torn and needs explicit recovery. The standalone formatter never creates a
+mapper or activates swap. After the write it revalidates device
 identity, rereads the entire header, requires byte-for-byte equality and full
 SWZ validation, then revalidates identity once more before close. A short read,
 write, fsync failure, close failure, post-write identity uncertainty or

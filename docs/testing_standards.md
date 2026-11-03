@@ -2768,10 +2768,14 @@ sole-partition status, parent-model/USB-transport mismatch, invalid SWZ
 UUID/reserved bytes, stale identity immediately before the write, truncated
 reads, unexpected permissions, and device disappearance before and after the
 write. For every ownership/identity uncertainty before publication, the test
-must count zero destructive header writes. It must also prove exact valid-header
-repeat formatting performs no write, zero-header initialization writes exactly
-once, post-write readback/identity failures are never reported as success, and
-the standalone formatter contains no DISCARD/TRIM behavior. Source contracts
+must count zero destructive header writes. Rootless mocks must cover protected
+root-owned selector absence, mismatched PARTUUID, permission denial, and selector
+revocation at the last prewrite gate; these checks must precede any read-write
+device open or write. It must also prove exact valid-header repeat formatting
+performs no write, zero-header initialization attempts exactly one header
+`pwrite()`, a partial `pwrite()` is not resumed, post-write
+readback/identity failures are never reported as success, and the standalone
+formatter contains no DISCARD/TRIM behavior. Source contracts
 continue to verify the kernel opt-in superblock gate, reserved data offset, and
 exclusion of block 0 from all data/discard paths. Exact-current-main must still
 pass ordinary `make test` before any physical-media evidence is considered.

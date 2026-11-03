@@ -246,10 +246,24 @@ static int exact_io(int fd, void *buffer, size_t length, int write_io)
 	unsigned char *bytes = buffer;
 	size_t done = 0;
 
+	if (write_io) {
+		/*
+		 * A short successful block-zero write may have torn the header.
+		 * Never resume a destructive write after losing the complete
+		 * per-operation identity proof.
+		 */
+		ssize_t count = pwrite(fd, bytes, length, 0);
+
+		if (count < 0)
+			return -1;
+		if ((size_t)count != length) {
+			errno = EIO;
+			return -1;
+		}
+		return 0;
+	}
 	while (done < length) {
-		ssize_t count = write_io ?
-			pwrite(fd, bytes + done, length - done, (off_t)done) :
-			pread(fd, bytes + done, length - done, (off_t)done);
+		ssize_t count = pread(fd, bytes + done, length - done, (off_t)done);
 
 		if (count < 0) {
 			if (errno == EINTR)
@@ -1534,6 +1548,8 @@ static int format_opened_verify(int fd, const char *path,
 
 struct format_runtime_ops {
 	void *context;
+	int (*authorized_target_verify)(
+		void *context, const struct format_expectation *expected);
 	int (*preopen_verify)(void *context, const char *path,
 			      const struct format_expectation *expected);
 	int (*open_device)(void *context, const char *path);
@@ -1547,6 +1563,29 @@ struct format_runtime_ops {
 	int (*sync_device)(void *context, int fd);
 	int (*close_device)(void *context, int fd);
 };
+
+/*
+ * CLI identity assertions alone do not grant access to arbitrary media.
+ * Require the matching PARTUUID in the root-owned primary target selector.
+ */
+static int format_default_authorized_target_verify(
+	void *context, const struct format_expectation *expected)
+{
+	char configured_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+
+	(void)context;
+	if (!expected) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (swapz_primary_target_config_read(configured_partuuid) < 0)
+		return -1;
+	if (strcmp(configured_partuuid, expected->partuuid)) {
+		errno = EPERM;
+		return -1;
+	}
+	return 0;
+}
 
 static int format_default_preopen_verify(
 	void *context, const char *path,
@@ -1610,6 +1649,15 @@ static void format_report_refusal(const char *stage, int error)
 		strerror(error ? error : EPERM));
 }
 
+static int format_authorized_opened_verify(
+	const struct format_runtime_ops *ops, int fd, const char *path,
+	const struct format_expectation *expected)
+{
+	if (ops->authorized_target_verify(ops->context, expected) < 0)
+		return -1;
+	return ops->verify_opened(ops->context, fd, path, expected);
+}
+
 static int format_device_with_ops(
 	const char *path, const struct format_expectation *expected,
 	const struct format_runtime_ops *ops)
@@ -1621,12 +1669,19 @@ static int format_device_with_ops(
 	int result = 1;
 	int saved_errno;
 
-	if (!path || !expected || !ops || !ops->preopen_verify ||
+	if (!path || !expected || !ops || !ops->authorized_target_verify ||
+	    !ops->preopen_verify ||
 	    !ops->open_device || !ops->verify_opened || !ops->read_header ||
 	    !ops->random_bytes || !ops->write_header || !ops->sync_device ||
 	    !ops->close_device) {
 		errno = EINVAL;
 		return 1;
+	}
+	if (ops->authorized_target_verify(ops->context, expected) < 0) {
+		saved_errno = errno;
+		format_report_refusal("protected target selector does not authorize "
+				      "this partition", saved_errno);
+		return 2;
 	}
 	if (ops->preopen_verify(ops->context, path, expected) < 0) {
 		saved_errno = errno;
@@ -1639,7 +1694,7 @@ static int format_device_with_ops(
 		perror("swapzctl format: exclusive open");
 		return 1;
 	}
-	if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 		saved_errno = errno;
 		format_report_refusal("opened descriptor identity is not proven",
 				      saved_errno);
@@ -1652,7 +1707,7 @@ static int format_device_with_ops(
 	}
 	if (swapz_sb_valid(block, expected->device_bytes)) {
 		already_formatted = 1;
-		if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+		if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 			saved_errno = errno;
 			format_report_refusal(
 				"target identity changed while recognizing existing SWZ header",
@@ -1698,7 +1753,7 @@ static int format_device_with_ops(
 	}
 
 	/* This is the last gate before the only destructive operation. */
-	if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 		saved_errno = errno;
 		format_report_refusal("target identity changed before header write",
 				      saved_errno);
@@ -1713,7 +1768,7 @@ static int format_device_with_ops(
 		perror("swapzctl format: fsync header");
 		goto close_error;
 	}
-	if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 		saved_errno = errno;
 		fprintf(stderr,
 			"swapzctl format: ERROR: target identity became uncertain "
@@ -1732,7 +1787,7 @@ static int format_device_with_ops(
 		errno = EIO;
 		goto close_error;
 	}
-	if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 		saved_errno = errno;
 		fprintf(stderr,
 			"swapzctl format: ERROR: target identity changed after "
@@ -1770,6 +1825,7 @@ static int format_device(const char *path,
 {
 	static const struct format_runtime_ops ops = {
 		.context = NULL,
+		.authorized_target_verify = format_default_authorized_target_verify,
 		.preopen_verify = format_default_preopen_verify,
 		.open_device = format_default_open_device,
 		.verify_opened = format_default_verify_opened,

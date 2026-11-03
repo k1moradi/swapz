@@ -1,10 +1,49 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#define _GNU_SOURCE
+#include <sys/types.h>
+#include <unistd.h>
+
+/* Inject a short successful system write into the real formatter helper. */
+static unsigned int test_pwrite_calls;
+static int test_pwrite_short;
+static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
+				  off_t offset);
+
+#define pwrite test_format_pwrite
 #define main swapzctl_program_main
 #include "../../../../src/userspace/swapzctl.c"
 #undef main
+#undef pwrite
 
 #include <assert.h>
 #include <stdio.h>
+
+static const char *test_configured_partuuid = "f13428f6-01";
+static int test_config_error;
+
+int swapz_primary_target_config_read(
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
+{
+	if (test_config_error || !test_configured_partuuid) {
+		errno = test_config_error ? test_config_error : ENOENT;
+		return -1;
+	}
+	if (strlen(test_configured_partuuid) > SWAPZ_PRIMARY_PARTUUID_LENGTH) {
+		errno = EINVAL;
+		return -1;
+	}
+	strcpy(partuuid, test_configured_partuuid);
+	return 0;
+}
+
+static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
+				  off_t offset)
+{
+	++test_pwrite_calls;
+	if (test_pwrite_short)
+		return pwrite(fd, buffer, length / 2U, offset);
+	return pwrite(fd, buffer, length, offset);
+}
 
 int swapz_primary_command(int argc, char **argv)
 {
@@ -25,6 +64,10 @@ struct mock_format_context {
 	int verify_errors[8];
 	size_t verify_error_count;
 	size_t verify_error_index;
+	int authorization_errors[8];
+	size_t authorization_error_count;
+	size_t authorization_error_index;
+	unsigned int authorization_calls;
 	unsigned int preopen_calls;
 	unsigned int open_calls;
 	unsigned int verify_calls;
@@ -43,6 +86,25 @@ static struct format_expectation authorized_expectation(void)
 					"f13428f6-01", &expected) == 0);
 	assert(format_parent_expectation("Multi-Card", "usb", &expected) == 0);
 	return expected;
+}
+
+static int mock_authorized_target_verify(
+	void *opaque, const struct format_expectation *expected)
+{
+	struct mock_format_context *context = opaque;
+	int error = 0;
+
+	assert(expected != NULL);
+	context->authorization_calls++;
+	if (context->authorization_error_index <
+	    context->authorization_error_count)
+		error = context->authorization_errors[
+			context->authorization_error_index++];
+	if (error) {
+		errno = error;
+		return -1;
+	}
+	return 0;
 }
 
 static int mock_preopen_verify(void *opaque, const char *path,
@@ -166,6 +228,7 @@ static struct format_runtime_ops mock_ops(struct mock_format_context *context)
 {
 	const struct format_runtime_ops ops = {
 		.context = context,
+		.authorized_target_verify = mock_authorized_target_verify,
 		.preopen_verify = mock_preopen_verify,
 		.open_device = mock_open_device,
 		.verify_opened = mock_verify_opened,
@@ -377,6 +440,76 @@ static void test_unbound_cli_is_blocked_before_io(void)
 	assert(swapzctl_program_main(7, old_bound) == 2);
 }
 
+static void test_protected_selector_is_mandatory(void)
+{
+	struct format_expectation expected = authorized_expectation();
+	struct mock_format_context context = {
+		.authorization_errors = { EPERM },
+		.authorization_error_count = 1U,
+	};
+	struct format_runtime_ops ops = mock_ops(&context);
+
+	assert(format_default_authorized_target_verify(NULL, &expected) == 0);
+	test_configured_partuuid = "deadbeef-01";
+	errno = 0;
+	assert(format_default_authorized_target_verify(NULL, &expected) < 0);
+	assert(errno == EPERM);
+	test_configured_partuuid = NULL;
+	errno = 0;
+	assert(format_default_authorized_target_verify(NULL, &expected) < 0);
+	assert(errno == ENOENT);
+	test_configured_partuuid = "f13428f6-01";
+	test_config_error = EACCES;
+	errno = 0;
+	assert(format_default_authorized_target_verify(NULL, &expected) < 0);
+	assert(errno == EACCES);
+	test_config_error = 0;
+
+	/* An absent or mismatched selector cannot even open media. */
+	assert(format_device_with_ops("/synthetic/card", &expected, &ops) == 2);
+	assert(context.authorization_calls == 1U);
+	assert(context.preopen_calls == 0U);
+	assert(context.open_calls == 0U);
+	assert(context.write_calls == 0U);
+}
+
+static void test_selector_revocation_before_write_refuses(void)
+{
+	struct format_expectation expected = authorized_expectation();
+	struct mock_format_context context = {
+		.authorization_errors = { 0, 0, EPERM },
+		.authorization_error_count = 3U,
+	};
+	struct format_runtime_ops ops = mock_ops(&context);
+
+	assert(format_device_with_ops("/synthetic/card", &expected, &ops) == 2);
+	assert(context.authorization_calls == 3U);
+	assert(context.preopen_calls == 1U);
+	assert(context.verify_calls == 1U);
+	assert(context.read_calls == 1U);
+	assert(context.write_calls == 0U);
+	assert(context.close_calls == 1U);
+}
+
+static void test_partial_header_write_is_not_resumed(void)
+{
+	unsigned char header[SWAPZ_SUPERBLOCK_BYTES] = {0};
+	FILE *file = tmpfile();
+	int fd;
+
+	assert(file != NULL);
+	fd = fileno(file);
+	assert(fd >= 0);
+	test_pwrite_calls = 0;
+	test_pwrite_short = 1;
+	errno = 0;
+	assert(exact_io(fd, header, sizeof(header), 1) < 0);
+	assert(errno == EIO);
+	assert(test_pwrite_calls == 1U);
+	test_pwrite_short = 0;
+	assert(fclose(file) == 0);
+}
+
 static void test_preopen_permission_refuses_before_open_or_write(void)
 {
 	struct format_expectation expected = authorized_expectation();
@@ -466,6 +599,7 @@ static void test_zero_header_format_and_readback(void)
 	assert(context.preopen_calls == 1U);
 	assert(context.open_calls == 1U);
 	assert(context.verify_calls == 4U);
+	assert(context.authorization_calls == 5U);
 	assert(context.read_calls == 2U);
 	assert(context.random_calls == 1U);
 	assert(context.write_calls == 1U);
@@ -492,6 +626,7 @@ static void test_repeat_format_is_idempotent_and_non_destructive(void)
 	memcpy(original, context.media, sizeof(original));
 	assert(format_device_with_ops("/synthetic/card", &expected, &ops) == 0);
 	assert(context.verify_calls == 2U);
+	assert(context.authorization_calls == 3U);
 	assert(context.read_calls == 1U);
 	assert(context.random_calls == 0U);
 	assert(context.write_calls == 0U);
@@ -557,6 +692,9 @@ int main(void)
 	test_mount_and_swap_identity_conflicts();
 	test_superblock_validation_and_reserved_bytes();
 	test_unbound_cli_is_blocked_before_io();
+	test_protected_selector_is_mandatory();
+	test_selector_revocation_before_write_refuses();
+	test_partial_header_write_is_not_resumed();
 	test_preopen_permission_refuses_before_open_or_write();
 	test_wrong_opened_device_refuses_before_read_or_write();
 	test_invalid_header_refuses_without_write();
