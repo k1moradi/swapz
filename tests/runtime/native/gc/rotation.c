@@ -349,9 +349,9 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 {
 	static struct swapz_authority near_full_authority;
 	static struct swapz_map near_full_maps[SWAPZ_SEGMENT_BLOCKS + 1U];
-	static swapz_u16 near_full_liveness[NPHYS];
-	static swapz_u8 near_full_classes[NPHYS];
-	static swapz_u8 near_full_roles[4];
+	static swapz_u16 near_full_liveness[5U * SWAPZ_SEGMENT_BLOCKS];
+	static swapz_u8 near_full_classes[5U * SWAPZ_SEGMENT_BLOCKS];
+	static swapz_u8 near_full_roles[5];
 	const swapz_u32 survivors = SWAPZ_SEGMENT_BLOCKS - 1U;
 	struct swapz_tx tx;
 	swapz_u32 page, block, expected_raw_crc;
@@ -360,15 +360,18 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 	expected_raw_crc = swapz_crc32c_bytes(raw, SWAPZ_BLOCK_BYTES);
 	CHECK(swapz_authority_init(&near_full_authority, near_full_maps,
 				  near_full_liveness, near_full_classes,
-				  SWAPZ_SEGMENT_BLOCKS + 1U, NPHYS) == 0);
+				  SWAPZ_SEGMENT_BLOCKS + 1U,
+				  5U * SWAPZ_SEGMENT_BLOCKS) == 0);
 	near_full_authority.reuse_dead_segments = 1;
 	CHECK(swapz_enable_segment_rotation(&near_full_authority,
-					    near_full_roles, 4) == 0);
+					    near_full_roles, 5) == 0);
 	CHECK(swapz_gc_candidate_can_free_block(
 		      survivors * SWAPZ_BLOCK_BYTES,
 		      (swapz_u16)survivors));
 
-	/* 255 different RAW pages plus one overwrite fill victim 0 with
+	/* Five segments satisfy the mandatory complete foreground headroom.
+	 * Three foreground segments [0,1,2] and two reserves [3,4].
+	 * 255 different RAW pages plus one overwrite fill victim 0 with
 	 * 255 live records and one dead physical record. Open segment 1. */
 	for (page = 0; page < survivors; ++page) {
 		CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
@@ -382,7 +385,7 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 	CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
 	CHECK(near_full_authority.open_segment == 1U);
 	CHECK(swapz_gc_begin_rotation(&near_full_authority, 0) == 0);
-	CHECK(near_full_authority.gc_destination == 2U);
+	CHECK(near_full_authority.gc_destination == 3U);
 
 	/* First relocation publishes. The next lower write fails
 	 * uncertainly; abort quarantines its entire one-block reservation. */
@@ -391,7 +394,7 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 	CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
 	page = 1;
 	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == 0);
-	CHECK(tx.start_block == 2U * SWAPZ_SEGMENT_BLOCKS + 1U);
+	CHECK(tx.start_block == 3U * SWAPZ_SEGMENT_BLOCKS + 1U);
 	CHECK(swapz_abort(&near_full_authority, &tx) == 0);
 
 	/* All surviving pages can still be relocated, but the victim is
@@ -401,19 +404,20 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 		CHECK(swapz_finish_raw(&near_full_authority, &tx, raw, 1, 0) == 0);
 	}
 	CHECK(near_full_authority.next_block ==
-	      3U * SWAPZ_SEGMENT_BLOCKS);
+	      4U * SWAPZ_SEGMENT_BLOCKS);
 	CHECK(swapz_gc_commit_rotation(&near_full_authority, 0) == -ENOSPC);
 	CHECK(near_full_authority.gc_allocation &&
 	      near_full_authority.gc_forbidden_victim == 0U &&
-	      near_full_authority.gc_destination == 2U);
+	      near_full_authority.gc_destination == 3U);
 	CHECK(near_full_roles[0] == 1U && near_full_roles[1] == 1U &&
-	      near_full_roles[2] == 0U && near_full_roles[3] == 0U);
+	      near_full_roles[2] == 1U && near_full_roles[3] == 0U &&
+	      near_full_roles[4] == 0U);
 	page = SWAPZ_SEGMENT_BLOCKS;
 	CHECK(swapz_stage(&near_full_authority, &page, 1, 1, &tx) == -ENOSPC);
 	for (page = 0; page < survivors; ++page) {
 		CHECK(near_full_maps[page].valid &&
 		      near_full_maps[page].raw &&
-		      near_full_maps[page].start_block / SWAPZ_SEGMENT_BLOCKS == 2U &&
+		      near_full_maps[page].start_block / SWAPZ_SEGMENT_BLOCKS == 3U &&
 		      near_full_maps[page].raw_crc32c == expected_raw_crc &&
 		      near_full_maps[page].generation == (page == 0 ? 3U : 2U));
 	}
@@ -423,9 +427,10 @@ static int test_one_uncertain_block_exhausts_raw_recovery_headroom(void)
 	      near_full_maps[survivors].raw_crc32c == expected_raw_crc);
 	for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
 		CHECK(!near_full_liveness[block]);
-	for (block = 3U * SWAPZ_SEGMENT_BLOCKS; block < NPHYS; ++block)
+	for (block = 4U * SWAPZ_SEGMENT_BLOCKS;
+	     block < 5U * SWAPZ_SEGMENT_BLOCKS; ++block)
 		CHECK(!near_full_liveness[block]);
-	CHECK(!near_full_liveness[2U * SWAPZ_SEGMENT_BLOCKS + 1U]);
+	CHECK(!near_full_liveness[3U * SWAPZ_SEGMENT_BLOCKS + 1U]);
 	return 0;
 }
 
