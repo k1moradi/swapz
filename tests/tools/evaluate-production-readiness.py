@@ -30,6 +30,10 @@ GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 PARTUUID_RE = re.compile(r"^[0-9a-f]+(?:-[0-9a-f]+)*$")
 MAJOR_MINOR_RE = re.compile(r"^[0-9]+:[0-9]+$")
 KERNEL_RELEASE_RE = re.compile(r"^[A-Za-z0-9._+-]{1,127}$")
+BOOT_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+ENV_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 REQUIRED_STAGES = (
     "Build module and helpers",
@@ -83,6 +87,37 @@ def load_json_strict(path: Path) -> tuple[dict[str, Any], bytes]:
 
 def sha256_bytes(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def parse_env_strict(raw: bytes) -> dict[str, str]:
+    """Parse the verifier's newline-delimited key=value evidence fail closed."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise EvidenceError(f"cold-boot evidence is not UTF-8: {exc}") from exc
+    if not text.endswith("\n"):
+        raise EvidenceError("cold-boot evidence is not newline terminated")
+    result: dict[str, str] = {}
+    for line_number, line in enumerate(text.splitlines(), 1):
+        if not line or "=" not in line:
+            raise EvidenceError(
+                f"cold-boot evidence line {line_number} is malformed")
+        key, value = line.split("=", 1)
+        if not ENV_KEY_RE.fullmatch(key):
+            raise EvidenceError(
+                f"cold-boot evidence line {line_number} has invalid key")
+        if key in result:
+            raise EvidenceError(f"duplicate cold-boot evidence key: {key}")
+        if any(ord(character) < 0x20 for character in value):
+            raise EvidenceError(
+                f"cold-boot evidence line {line_number} has control characters")
+        result[key] = value
+    return result
+
+
+def load_env_strict(path: Path) -> tuple[dict[str, str], bytes]:
+    raw = path.read_bytes()
+    return parse_env_strict(raw), raw
 
 
 def _valid_hash_mapping(value: Any) -> bool:
@@ -497,6 +532,129 @@ def validate_physical_campaign_evidence(
     return issues
 
 
+def validate_cold_boot_evidence(
+        cold_boot: dict[str, str],
+        source_sha: str,
+        target: tuple[str, int] | None,
+        report_artifacts: dict[str, Any] | None,
+        owner_kernel_release: Any) -> list[str]:
+    """Validate the persisted boot verifier report behind a claimed reboot PASS."""
+    issues: list[str] = []
+
+    def reject(message: str) -> None:
+        if message not in issues:
+            issues.append(message)
+
+    required = {
+        "schema", "status", "cold_boot_observed", "boot_id", "armed_boot_id",
+        "kernel_release", "selected_partuuid", "selected_target_major_minor",
+        "selected_target_size_bytes", "selected_target_removable",
+        "module_artifact_sha256", "module_build_source_sha",
+        "module_build_source_clean", "loaded_module_build_source_sha",
+        "loaded_module_build_source_clean", "active_transaction_run_id",
+        "expected_dm_uuid", "dm_uuid", "dm_logical_sectors",
+        "expected_dm_logical_sectors", "dm_logical_bytes",
+        "swap_mapper_entries", "swap_type", "swap_size_kib", "swap_priority",
+        "mapper_service_active_state", "mapper_service_result",
+        "swap_unit_active_state", "swap_unit_result", "swapz_failed",
+        "swapz_error", "swapz_flush_err", "swapz_segment_discards_failed",
+        "swapz_upper_write_completed_err", "swapz_endio_write_seen_err",
+        "swapz_endio_write_forced_err", "kernel_error_count",
+        "failure_reasons", "incomplete_reasons",
+    }
+    if required - set(cold_boot):
+        reject("persistent cold-boot report is missing required fields")
+        return issues
+
+    if cold_boot["schema"] != "swapz-primary-cold-boot-v1":
+        reject("persistent cold-boot report schema is invalid")
+    if cold_boot["status"] != "PASS" or cold_boot["cold_boot_observed"] != "yes":
+        reject("persistent cold-boot report is not an observed PASS")
+    if (
+            not BOOT_ID_RE.fullmatch(cold_boot["boot_id"]) or
+            not BOOT_ID_RE.fullmatch(cold_boot["armed_boot_id"]) or
+            cold_boot["boot_id"] == cold_boot["armed_boot_id"]):
+        reject("persistent cold-boot boot identity is invalid")
+    if (
+            not isinstance(owner_kernel_release, str) or
+            cold_boot["kernel_release"] != owner_kernel_release):
+        reject("persistent cold-boot kernel differs from owner qualification")
+    if target is None:
+        reject("persistent cold-boot authorized target is unavailable")
+    else:
+        try:
+            selected_size = int(cold_boot["selected_target_size_bytes"], 10)
+        except ValueError:
+            selected_size = -1
+        if (
+                cold_boot["selected_partuuid"] != target[0] or
+                selected_size != target[1]):
+            reject("persistent cold-boot authorized target identity mismatch")
+    if not MAJOR_MINOR_RE.fullmatch(cold_boot["selected_target_major_minor"]):
+        reject("persistent cold-boot target device identity is invalid")
+    if cold_boot["selected_target_removable"] != "1":
+        reject("persistent cold-boot target is not the armed removable device")
+
+    module_hash = (
+        report_artifacts.get("module_sha256")
+        if isinstance(report_artifacts, dict) else None)
+    if (
+            not isinstance(module_hash, str) or
+            cold_boot["module_artifact_sha256"] != module_hash):
+        reject("persistent cold-boot module artifact binding mismatch")
+    if (
+            cold_boot["module_build_source_sha"] != source_sha or
+            cold_boot["module_build_source_clean"] != "1" or
+            cold_boot["loaded_module_build_source_sha"] != source_sha or
+            cold_boot["loaded_module_build_source_clean"] != "1"):
+        reject("persistent cold-boot module source binding is invalid")
+
+    run_id = cold_boot["active_transaction_run_id"]
+    expected_uuid = f"SWAPZ-PRIMARY-{run_id}"
+    if (
+            not RUN_ID_RE.fullmatch(run_id) or
+            cold_boot["expected_dm_uuid"] != expected_uuid or
+            cold_boot["dm_uuid"] != expected_uuid):
+        reject("persistent cold-boot mapper transaction identity is invalid")
+
+    try:
+        logical_sectors = int(cold_boot["dm_logical_sectors"], 10)
+        expected_sectors = int(cold_boot["expected_dm_logical_sectors"], 10)
+        logical_bytes = int(cold_boot["dm_logical_bytes"], 10)
+        swap_size_kib = int(cold_boot["swap_size_kib"], 10)
+    except ValueError:
+        logical_sectors = expected_sectors = logical_bytes = swap_size_kib = -1
+    if (
+            logical_sectors <= 0 or logical_sectors != expected_sectors or
+            logical_bytes != logical_sectors * 512):
+        reject("persistent cold-boot mapper capacity is inconsistent")
+    if (
+            cold_boot["swap_mapper_entries"] != "1" or
+            cold_boot["swap_type"] != "partition" or
+            cold_boot["swap_priority"] != "-1" or
+            logical_bytes <= 4096 or
+            swap_size_kib != logical_bytes // 1024 - 4):
+        reject("persistent cold-boot active swap evidence is inconsistent")
+    if (
+            cold_boot["mapper_service_active_state"] != "active" or
+            cold_boot["mapper_service_result"] != "success" or
+            cold_boot["swap_unit_active_state"] != "active" or
+            cold_boot["swap_unit_result"] != "success"):
+        reject("persistent cold-boot service state is not healthy")
+
+    zero_fields = (
+        "swapz_failed", "swapz_error", "swapz_flush_err",
+        "swapz_segment_discards_failed", "swapz_upper_write_completed_err",
+        "swapz_endio_write_seen_err", "swapz_endio_write_forced_err",
+        "kernel_error_count",
+    )
+    if any(cold_boot[field] != "0" for field in zero_fields):
+        reject("persistent cold-boot report contains runtime error evidence")
+    if cold_boot["failure_reasons"] or cold_boot["incomplete_reasons"]:
+        reject("persistent cold-boot report contains failure/incomplete reasons")
+    return issues
+
+
 def evaluate_release(
         source_sha: str,
         test_results: dict[str, Any],
@@ -507,9 +665,12 @@ def evaluate_release(
         real_swap_evidence: dict[str, Any] | None = None,
         real_swap_evidence_raw: bytes | None = None,
         physical_campaign_evidence: dict[str, Any] | None = None,
-        physical_campaign_evidence_raw: bytes | None = None) -> dict[str, Any]:
+        physical_campaign_evidence_raw: bytes | None = None,
+        cold_boot_evidence: dict[str, str] | None = None,
+        cold_boot_evidence_raw: bytes | None = None) -> dict[str, Any]:
     code_blockers: list[str] = []
     deployment_blockers: list[str] = []
+    cold_boot_blockers: list[str] = []
 
     def block_code(message: str) -> None:
         if message not in code_blockers:
@@ -822,9 +983,26 @@ def evaluate_release(
 
     reboot = release.get("owner_observed_reboot")
     cold_boot_observed = "NO"
-    if isinstance(reboot, dict) and reboot.get("current") is True and             reboot.get("source_sha") == source_sha and             (target is not None and _normalize_target(reboot.get("target")) == target):
+    if isinstance(reboot, dict) and reboot.get("current") is True and \
+            reboot.get("source_sha") == source_sha and \
+            (target is not None and
+             _normalize_target(reboot.get("target")) == target):
         if reboot.get("status") == "PASS" and reboot.get("observed") is True:
-            cold_boot_observed = "PASS"
+            if cold_boot_evidence is None or cold_boot_evidence_raw is None:
+                cold_boot_blockers.append(
+                    "owner_observed_reboot: persistent cold-boot evidence is missing")
+            elif reboot.get("evidence_sha256") != sha256_bytes(
+                    cold_boot_evidence_raw):
+                cold_boot_blockers.append(
+                    "owner_observed_reboot: persistent cold-boot evidence digest mismatch")
+            else:
+                for issue in validate_cold_boot_evidence(
+                        cold_boot_evidence, source_sha, target,
+                        report_artifacts, owner_kernel_release):
+                    cold_boot_blockers.append(
+                        "owner_observed_reboot: " + issue)
+                if not cold_boot_blockers:
+                    cold_boot_observed = "PASS"
         elif reboot.get("status") == "FAIL":
             cold_boot_observed = "FAIL"
 
@@ -851,6 +1029,7 @@ def evaluate_release(
         "COLD_BOOT_OBSERVED": cold_boot_observed,
         "code_blockers": code_blockers,
         "deployment_blockers": deployment_blockers,
+        "cold_boot_blockers": cold_boot_blockers,
     }
 
 
@@ -871,6 +1050,9 @@ def main() -> int:
     parser.add_argument(
         "--physical-campaign-evidence", type=Path,
         help="sealed physical performance campaign evidence for the release source")
+    parser.add_argument(
+        "--cold-boot-evidence", type=Path,
+        help="persistent swapz-primary-cold-boot-v1 report from the owner reboot")
     args = parser.parse_args()
 
     try:
@@ -889,10 +1071,17 @@ def main() -> int:
         else:
             physical_campaign_evidence, physical_campaign_evidence_raw = (
                 load_json_strict(args.physical_campaign_evidence))
+        if args.cold_boot_evidence is None:
+            cold_boot_evidence = None
+            cold_boot_evidence_raw = None
+        else:
+            cold_boot_evidence, cold_boot_evidence_raw = load_env_strict(
+                args.cold_boot_evidence)
         result = evaluate_release(
             args.source_sha, test_results, test_raw, evidence, policy, policy_raw,
             real_swap_evidence, real_swap_evidence_raw,
-            physical_campaign_evidence, physical_campaign_evidence_raw)
+            physical_campaign_evidence, physical_campaign_evidence_raw,
+            cold_boot_evidence, cold_boot_evidence_raw)
     except (OSError, EvidenceError) as exc:
         result = {
             "schema": "swapz-production-readiness-evaluation-v1",
@@ -906,6 +1095,7 @@ def main() -> int:
             "code_blockers": [str(exc)],
             "deployment_blockers": [
                 "code production-readiness gates are not all PASS"],
+            "cold_boot_blockers": [],
         }
 
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))

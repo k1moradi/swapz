@@ -56,6 +56,53 @@ def encoded(value):
         value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def cold_boot_evidence_raw(**overrides):
+    fields = {
+        "schema": "swapz-primary-cold-boot-v1",
+        "status": "PASS",
+        "cold_boot_observed": "yes",
+        "boot_id": "22222222-2222-4222-8222-222222222222",
+        "armed_boot_id": "11111111-1111-4111-8111-111111111111",
+        "kernel_release": KERNEL_RELEASE,
+        "selected_partuuid": TARGET["partuuid"],
+        "selected_target_major_minor": "8:1",
+        "selected_target_size_bytes": str(TARGET["size_bytes"]),
+        "selected_target_removable": "1",
+        "module_artifact_sha256": ARTIFACTS["module_sha256"],
+        "module_build_source_sha": SOURCE,
+        "module_build_source_clean": "1",
+        "loaded_module_build_source_sha": SOURCE,
+        "loaded_module_build_source_clean": "1",
+        "active_transaction_run_id": "0123456789abcdef0123456789abcdef",
+        "expected_dm_uuid":
+            "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef",
+        "dm_uuid": "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef",
+        "dm_logical_sectors": "216641536",
+        "expected_dm_logical_sectors": "216641536",
+        "dm_logical_bytes": "110920466432",
+        "swap_mapper_entries": "1",
+        "swap_type": "partition",
+        "swap_size_kib": "108320764",
+        "swap_priority": "-1",
+        "mapper_service_active_state": "active",
+        "mapper_service_result": "success",
+        "swap_unit_active_state": "active",
+        "swap_unit_result": "success",
+        "swapz_failed": "0",
+        "swapz_error": "0",
+        "swapz_flush_err": "0",
+        "swapz_segment_discards_failed": "0",
+        "swapz_upper_write_completed_err": "0",
+        "swapz_endio_write_seen_err": "0",
+        "swapz_endio_write_forced_err": "0",
+        "kernel_error_count": "0",
+        "failure_reasons": "",
+        "incomplete_reasons": "",
+    }
+    fields.update({key: str(value) for key, value in overrides.items()})
+    return "".join(f"{key}={value}\n" for key, value in fields.items()).encode()
+
+
 def owner_report():
     return {
         "schema": "swapz-test-results-v1",
@@ -332,7 +379,7 @@ def current_evidence(
 
 def evaluate(
         report=None, evidence=None, policy=None, physical=None,
-        campaign=None):
+        campaign=None, cold_boot_raw=None):
     report = owner_report() if report is None else report
     policy = acceptance_policy() if policy is None else policy
     report_raw = encoded(report)
@@ -348,9 +395,13 @@ def evaluate(
     if evidence is None:
         evidence = current_evidence(
             report_raw, policy_raw, physical_raw, campaign_raw)
+    cold_boot = (
+        None if cold_boot_raw is None
+        else EVALUATOR.parse_env_strict(cold_boot_raw))
     return EVALUATOR.evaluate_release(
         SOURCE, report, report_raw, evidence, policy, policy_raw,
-        physical, physical_raw, campaign, campaign_raw)
+        physical, physical_raw, campaign, campaign_raw,
+        cold_boot, cold_boot_raw)
 
 
 class ProductionReadinessEvaluatorTest(unittest.TestCase):
@@ -389,11 +440,16 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         policy = acceptance_policy()
         evidence = current_evidence(encoded(report), encoded(policy))
         reboot = evidence["release_evidence"]["owner_observed_reboot"]
-        reboot.update(status="PASS", observed=True)
-        result = evaluate(report, evidence, policy)
+        cold_boot_raw = cold_boot_evidence_raw()
+        reboot.update(
+            status="PASS", observed=True,
+            evidence_sha256=hashlib.sha256(cold_boot_raw).hexdigest())
+        result = evaluate(
+            report, evidence, policy, cold_boot_raw=cold_boot_raw)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "PASS")
+        self.assertEqual(result["cold_boot_blockers"], [])
         self.assertEqual(result["release_verdict"], "PASS")
 
         reboot.update(status="FAIL", observed=False)
@@ -402,6 +458,65 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "FAIL")
         self.assertEqual(result["release_verdict"], "FAIL")
+
+    def test_owner_reboot_pass_requires_persistent_cold_boot_evidence(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        reboot = evidence["release_evidence"]["owner_observed_reboot"]
+        cold_boot_raw = cold_boot_evidence_raw()
+        reboot.update(
+            status="PASS", observed=True,
+            evidence_sha256=hashlib.sha256(cold_boot_raw).hexdigest())
+
+        missing = evaluate(report, evidence, policy)
+        self.assertEqual(missing["CODE_PRODUCTION_READY"], "PASS")
+        self.assertEqual(missing["DEPLOYMENT_PRODUCTION_READY"], "PASS")
+        self.assertEqual(missing["COLD_BOOT_OBSERVED"], "NO")
+        self.assertEqual(missing["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "persistent cold-boot evidence is missing" in blocker
+            for blocker in missing["cold_boot_blockers"]))
+
+        reboot["evidence_sha256"] = "f" * 64
+        mismatched = evaluate(
+            report, evidence, policy, cold_boot_raw=cold_boot_raw)
+        self.assertEqual(mismatched["COLD_BOOT_OBSERVED"], "NO")
+        self.assertEqual(mismatched["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "evidence digest mismatch" in blocker
+            for blocker in mismatched["cold_boot_blockers"]))
+
+    def test_cold_boot_evidence_is_fail_closed_on_identity_and_errors(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        for label, overrides, reason in (
+                ("source", {"loaded_module_build_source_sha": "b" * 40},
+                 "module source binding"),
+                ("target", {"selected_target_size_bytes":
+                            str(TARGET["size_bytes"] + 4096)},
+                 "authorized target identity"),
+                ("errors", {"swapz_error": "5"}, "runtime error evidence")):
+            with self.subTest(label=label):
+                raw = cold_boot_evidence_raw(**overrides)
+                evidence = current_evidence(encoded(report), encoded(policy))
+                evidence["release_evidence"]["owner_observed_reboot"].update(
+                    status="PASS", observed=True,
+                    evidence_sha256=hashlib.sha256(raw).hexdigest())
+                result = evaluate(
+                    report, evidence, policy, cold_boot_raw=raw)
+                self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertTrue(any(
+                    reason in blocker
+                    for blocker in result["cold_boot_blockers"]))
+
+    def test_cold_boot_evidence_parser_rejects_duplicate_keys(self):
+        raw = cold_boot_evidence_raw() + b"status=PASS\n"
+        with self.assertRaisesRegex(
+                EVALUATOR.EvidenceError,
+                "duplicate cold-boot evidence key: status"):
+            EVALUATOR.parse_env_strict(raw)
 
     def test_historical_or_unsynchronized_source_cannot_pass(self):
         report = owner_report()

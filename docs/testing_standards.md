@@ -5022,6 +5022,18 @@ retained old host snapshot must be labeled HISTORICAL and cannot become a
 current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
+A summary `owner_observed_reboot: PASS` is insufficient for final release. It
+must SHA-256 bind the exact persisted `swapz-primary-cold-boot-v1` report
+written by the boot verifier, and the executable evaluator must ingest those
+bytes separately. The retained report must independently confirm a distinct
+armed/current boot ID, the exact release source and clean loaded module, the
+authorized PARTUUID and partition byte size, the run-bound mapper identity and
+capacity, one active mapper swap entry, healthy mapper/swap services, and zero
+swapz or relevant-kernel error counters. Missing, malformed, digest-mismatched,
+source/target-mismatched or non-PASS retained boot evidence keeps
+`COLD_BOOT_OBSERVED=NO` and the final release BLOCKED; it does not erase an
+otherwise valid pre-reboot code/deployment readiness result. A current summary
+FAIL remains conservatively FAIL.
 Owner `test_results.json` ingestion is strict: the stage list must contain
 exactly the five canonical stages in order, each with `status: PASS` and an
 integer `exit_code: 0`; duplicate, reordered, missing, extra, or internally
@@ -5034,7 +5046,7 @@ nonzero counts are BLOCKED.
 The executable evaluator's process success is stricter than the pre-reboot
 readiness fields: it returns 0 only when the full `release_verdict` is PASS,
 which requires code PASS, deployment PASS and a current owner-observed cold-boot
-PASS on the same authorized target. A current owner-observed reboot FAIL makes
+PASS backed by that retained report on the same authorized target. A current owner-observed reboot FAIL makes
 the release verdict FAIL and returns 1; missing or unobserved reboot evidence
 keeps the release verdict BLOCKED and returns 2. Therefore automation can use
 the command exit status as a final-release gate without confusing “safe to
