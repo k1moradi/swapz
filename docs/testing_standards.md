@@ -606,9 +606,14 @@ same 3,727,616-page / 15,268,315,136-byte boundary; the retired pre-headroom
 3,727,872-page marker is invalid evidence and must not be accepted as current.
 The primary manager must consume the shared authority capacity-window helper,
 and its rootless policy test must prove the helper's exact GC-reserve result for
-both the 16 GiB fixture and current-card geometry. Incremental-build coverage
-must also prove that changing `authority.h` rebuilds `swapzctl`; a stale
-manager compiled against an older capacity policy is not qualifying evidence.
+both the 16 GiB fixture and current-card geometry. The same test must distinguish
+raw backing swap size from Linux-usable mapper swap size: for the current-card
+geometry the latter is 108,320,764 KiB, derived from 27,080,192 logical pages
+minus the one mapper swap-header page. The read-only plan must emit that logical
+value and the shared-helper reserve count; reporting raw partition capacity as
+`linux_swap_kib` is invalid evidence. Incremental-build coverage must also
+prove that changing `authority.h` rebuilds `swapzctl`; a stale manager
+compiled against an older capacity policy is not qualifying evidence.
 
 The direct authority suite must also run an allocation-free preflight for the
 currently selected-card geometry recorded in AGENT_CONTEXT.md; this is a

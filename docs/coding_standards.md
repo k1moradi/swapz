@@ -458,9 +458,13 @@ match the owner-authorized target recorded in AGENT_CONTEXT.
 The primary mapper's logical-capacity planner must use the same
 `swapz_authority_capacity_window()` policy as the kernel authority for GC
 reserve and foreground COW headroom; userspace must not carry an independent
-copy of that arithmetic. Shared authority/codec headers are direct inputs to
-the `swapzctl` build and must be declared as incremental-build prerequisites,
-so a capacity-policy change cannot leave a stale manager binary.
+copy of that arithmetic. The read-only plan must report GC reserve from that
+shared helper and derive `linux_swap_kib` from the admitted logical mapper
+pages, not from raw backing bytes. Raw-partition swap size remains a separate
+identity check only for detecting an already-active raw swap alias. Shared
+authority/codec headers are direct inputs to the `swapzctl` build and must be
+declared as incremental-build prerequisites, so a capacity-policy change cannot
+leave a stale manager binary.
 
 Do not require preservation of historical card contents or an old Linux-swap
 header on this disposable target. If an active swapz/ordinary-swap entry exists,

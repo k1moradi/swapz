@@ -181,6 +181,7 @@ static int swapz_primary_valid_run_id(const char *run_id);
 static int swapz_primary_valid_sha256(const char *digest);
 static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks);
 static uint64_t swapz_primary_swap_size_kib(uint64_t device_bytes);
+static uint64_t swapz_primary_linux_swap_size_kib(uint64_t logical_pages);
 static int swapz_primary_parse_u64(const char *text, uint64_t *value);
 static int swapz_primary_sha256(const unsigned char *bytes, size_t length,
 				char digest[65]);
@@ -4882,11 +4883,26 @@ static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks)
 	return low;
 }
 
+/*
+ * Raw-partition swap geometry is used only to recognize a conflicting raw
+ * swap alias of the selected backing device. It is not the swapz mapper size.
+ */
 static uint64_t swapz_primary_swap_size_kib(uint64_t device_bytes)
 {
 	if (device_bytes < SWAPZ_PRIMARY_BLOCK_BYTES || device_bytes % 1024ULL)
 		return 0;
 	return device_bytes / 1024ULL - SWAPZ_PRIMARY_BLOCK_BYTES / 1024ULL;
+}
+
+static uint64_t swapz_primary_linux_swap_size_kib(uint64_t logical_pages)
+{
+	uint64_t logical_bytes;
+
+	if (!logical_pages ||
+	    logical_pages > UINT64_MAX / SWAPZ_PRIMARY_BLOCK_BYTES)
+		return 0;
+	logical_bytes = logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES;
+	return logical_bytes / 1024ULL - SWAPZ_PRIMARY_BLOCK_BYTES / 1024ULL;
 }
 
 struct swapz_primary_json_cursor {
@@ -8343,18 +8359,19 @@ static int swapz_primary_prepare_metadata(void)
 	memset(verified_current_header, 0, sizeof(verified_current_header));
 	memset(verified_header, 0, sizeof(verified_header));
 	memset(proposed_header, 0, sizeof(proposed_header));
-	if (result == 0)
+	if (result == 0) {
+		uint64_t logical_pages = swapz_primary_maximum_logical_pages(
+			SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
+
 		printf("PRIMARY_PREPARE=READY run_id=%s source=%s logical_pages=%llu "
 		       "logical_bytes=%llu swap_kib=%llu\n",
 		       run_id, manifest.source_sha,
-		       (unsigned long long)swapz_primary_maximum_logical_pages(
-			       SWAPZ_PRIMARY_PHYSICAL_BLOCKS),
-		       (unsigned long long)(swapz_primary_maximum_logical_pages(
-				       SWAPZ_PRIMARY_PHYSICAL_BLOCKS) *
-			       SWAPZ_PRIMARY_BLOCK_BYTES),
-		       (unsigned long long)(swapz_primary_maximum_logical_pages(
-			       SWAPZ_PRIMARY_PHYSICAL_BLOCKS) *
-		       SWAPZ_PRIMARY_BLOCK_BYTES / 1024ULL - 4ULL));
+		       (unsigned long long)logical_pages,
+		       (unsigned long long)(
+			       logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES),
+		       (unsigned long long)
+			       swapz_primary_linux_swap_size_kib(logical_pages));
+	}
 	if (result < 0 && claimed)
 		fprintf(stderr,
 			"PRIMARY_PREPARE=INCOMPLETE run_id=%s claim=retained "
@@ -9104,8 +9121,10 @@ static int swapz_primary_read_only_plan(void)
 	char configured_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U] = {0};
 	uint64_t logical_pages = 0;
 	uint64_t logical_bytes = 0;
-	uint64_t reserve = 0;
+	uint64_t linux_swap_kib = 0;
+	uint64_t physical_blocks = 0;
 	uint64_t target_device_bytes = 0;
+	swapz_u32 reserve_blocks = 0;
 	size_t swap_count = 0;
 	size_t target_count = 0;
 	size_t i;
@@ -9184,10 +9203,23 @@ static int swapz_primary_read_only_plan(void)
 			&original_swap_header,
 			&original_header_digest_available, NULL) == 0;
 	if (target_device_preflight) {
-		logical_pages = swapz_primary_maximum_logical_pages(
-			swapz_primary_physical_blocks(target.device_bytes));
-		logical_bytes = logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES;
-		reserve = (logical_pages + 7ULL) / 8ULL;
+		physical_blocks =
+			swapz_primary_physical_blocks(target.device_bytes);
+		logical_pages =
+			swapz_primary_maximum_logical_pages(physical_blocks);
+		if (logical_pages && logical_pages <= UINT32_MAX &&
+		    physical_blocks <= UINT32_MAX &&
+		    swapz_authority_capacity_window(
+			    (swapz_u32)logical_pages,
+			    (swapz_u32)physical_blocks, &reserve_blocks)) {
+			logical_bytes =
+				logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES;
+			linux_swap_kib =
+				swapz_primary_linux_swap_size_kib(logical_pages);
+		} else {
+			/* An inconsistent sizing result is not reportable capacity. */
+			logical_pages = 0;
+		}
 	}
 	swaps_valid = swapz_primary_read_swap_inventory(
 		swaps, SWAPZ_PRIMARY_SWAP_ROWS_MAX, &swap_count) == 0;
@@ -9363,8 +9395,8 @@ static int swapz_primary_read_only_plan(void)
 	       target_swap_priority_ok ? "true" : "false",
 	       (unsigned long long)logical_pages,
 	       (unsigned long long)logical_bytes,
-	       (unsigned long long)SWAPZ_PRIMARY_SWAP_SIZE_KIB,
-	       (unsigned long long)reserve);
+	       (unsigned long long)linux_swap_kib,
+	       (unsigned long long)reserve_blocks);
 	return 2;
 }
 

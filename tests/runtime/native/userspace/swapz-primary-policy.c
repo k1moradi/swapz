@@ -2500,6 +2500,12 @@ int main(void)
 	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080193ULL));
 	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080448ULL));
 	assert(27080192ULL * SWAPZ_PRIMARY_BLOCK_BYTES == 110920466432ULL);
+	assert(swapz_primary_swap_size_kib(124787884032ULL) == 121863164ULL);
+	assert(swapz_primary_linux_swap_size_kib(27080192ULL) == 108320764ULL);
+	assert(swapz_primary_swap_size_kib(124787884032ULL) !=
+	       swapz_primary_linux_swap_size_kib(27080192ULL));
+	assert(swapz_primary_linux_swap_size_kib(0ULL) == 0ULL);
+	assert(swapz_primary_linux_swap_size_kib(UINT64_MAX) == 0ULL);
 	assert(!swapz_primary_page_limit_fits(0ULL, 1ULL));
 	assert(!swapz_primary_page_limit_fits(
 		3ULL * SWAPZ_PRIMARY_SEGMENT_BLOCKS + 1ULL, 1ULL));
