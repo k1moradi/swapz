@@ -4602,6 +4602,10 @@ state manifest against the recovery bytes and prove later package operations
 refuse that durable incomplete transaction without reading or modifying host
 swap state. Sandbox artifacts must stay private to the package sandbox and
 must not replace the repository's qualification build outputs.
+The project-goals CI runs the same hermetic package fixture in an early
+independent step before the combined rootless gate, so unrelated test failures
+cannot mask packaging regressions. It neither replaces `make test` as the
+official operator interface nor proves real-host module acceptance.
 Incremental-build Makefile fixtures that compile or stage the primary manager
 must include the committed fallback `src/kernel/swapz-build-info.h`; otherwise
 they do not model the source inputs of the real checkout.

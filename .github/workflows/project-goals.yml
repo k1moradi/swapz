@@ -24,6 +24,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev
+      # Run the same package fixture independently so an unrelated source or
+      # benchmark failure cannot hide a transactional install regression.
+      - name: Hermetic package transaction and module trust regressions
+        run: |
+          set -euo pipefail
+          bash -n packaging/package-dkms.sh packaging/sign-module.sh
+          python3 -B tests/runtime/native/package-dkms-test.py -v
       - name: Build and execute production C/C++ tests
         run: |
           set -euo pipefail
