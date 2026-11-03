@@ -56,6 +56,23 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(qualify.Blocked):
                 qualify.parse_selector(text)
 
+    def test_release_target_identity_is_canonical_and_geometry_bound(self):
+        plan = {
+            "target_partuuid": "f13428f6-01",
+            "target_device_bytes": "124787884032",
+        }
+        self.assertEqual(
+            qualify.release_target_identity(plan, "f13428f6-01"),
+            {"partuuid": "f13428f6-01", "device_bytes": 124787884032})
+        for selector, mutation in (
+                ("F13428F6-01", {}),
+                ("f13428f6-01", {"target_partuuid": "9abc8def-02"}),
+                ("f13428f6-01", {"target_device_bytes": "4097"})):
+            with self.subTest(selector=selector, mutation=mutation):
+                candidate = {**plan, **mutation}
+                with self.assertRaises(qualify.Blocked):
+                    qualify.release_target_identity(candidate, selector)
+
     def test_swap_inventory_resolves_block_identity_and_preserves_used_as_volatile(self):
         contents = (
             "Filename Type Size Used Priority\n"
