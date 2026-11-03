@@ -834,7 +834,9 @@ interruption-recovery aggregate, and the separate eleven-case negative-recovery
 aggregate. Missing, duplicated,
 substituted or malformed lifecycle markers make Stage 5 evidence incomplete;
 merely executing the helper or recognizing its failure markers is not sufficient
-for a qualification PASS.
+for a qualification PASS. The loaded report parser must require those same
+eleven phases in canonical order and the `cases:11` recovery aggregate; a
+legacy six-phase marker is incomplete evidence.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 
