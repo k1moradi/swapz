@@ -80,8 +80,11 @@ through the production primary coordinator.
 
 Before physical activation it must prove: exact clean source on `main` with
 local `HEAD == origin/main == validated source` and a freshly queried remote
-`refs/heads/main` equal to that source (unreachable or stale remote is BLOCKED);
-current qualification
+`refs/heads/main` equal to that source (unreachable or stale remote is BLOCKED).
+Because admission and multi-cycle setup may outlive that first observation, the
+helper must repeat the same clean/local/tracking/remote-main proof immediately
+before every cycle's `primary prepare`; a concurrent push blocks before a new
+durable transaction or card mutation begins. Current qualification
 provenance; a frozen production acceptance manifest; the protected PARTUUID
 selector; exact partition size and device number; the exact removable USB
 parent and its sole selected partition; explicit

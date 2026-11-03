@@ -2030,6 +2030,11 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
         selector_partuuid, target_device, target_parent_device, baseline_rows)
     kernel_before = _kernel_log_snapshot()
 
+    # Re-query canonical main at the mutation boundary. Admission above may
+    # outlive a concurrent push; a superseded source must block before the
+    # selected card enters a new durable transaction.
+    _check_git_source(validated_source)
+
     prepared = _primary(swapzctl, "prepare", timeout_seconds, admitted=True)
     if prepared.returncode != 0:
         detail = (prepared.stderr or prepared.stdout).strip().replace("\n", "; ")

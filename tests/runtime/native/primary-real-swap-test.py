@@ -653,6 +653,34 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 Path("/synthetic/swapzctl"), manifest, active, set(),
                 "f13428f6-01", 60)
 
+    def test_run_cycle_rechecks_current_main_before_prepare(self):
+        source_sha = "2" * 40
+        source_guard = mock.Mock(
+            side_effect=qualify.Blocked(
+                "current remote main differs from validated source"))
+        primary = mock.Mock()
+        with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
+                mock.patch.object(
+                    qualify, "_validate_precycle_state", return_value=None), \
+                mock.patch.object(
+                    qualify, "_kernel_log_snapshot", return_value=[]), \
+                mock.patch.object(
+                    qualify, "_check_git_source", source_guard), \
+                mock.patch.object(qualify, "_primary", primary), \
+                self.assertRaisesRegex(
+                    qualify.Blocked, "current remote main differs"):
+            qualify.run_cycle(
+                1, swapzctl=Path("/synthetic/swapzctl"),
+                oracle_path=Path("/synthetic/oracle"),
+                validated_source=source_sha,
+                plan={}, selector_partuuid="f13428f6-01",
+                target_device=(8, 1), target_parent_device=(8, 0),
+                workload_mib=384, resident_mib=128, swap_limit_mib=384,
+                timeout_seconds=60, prior_run_ids=set(),
+                prior_swap_uuids=set())
+        source_guard.assert_called_once_with(source_sha)
+        primary.assert_not_called()
+
     def test_independent_active_verification_failure_still_requests_normal_stop(self):
         run_id = "1" * 32
         manifest = {"run_id": run_id}
@@ -664,6 +692,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
                 mock.patch.object(qualify, "_validate_precycle_state", return_value=None), \
                 mock.patch.object(qualify, "_kernel_log_snapshot", return_value=[]), \
+                mock.patch.object(qualify, "_check_git_source", return_value=None), \
                 mock.patch.object(qualify, "_reject_relevant_kernel_errors", return_value=None), \
                 mock.patch.object(qualify, "_primary", side_effect=[prepare, start]), \
                 mock.patch.object(qualify, "read_state", side_effect=[
