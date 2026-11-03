@@ -2171,6 +2171,26 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(
             balanced["counterbalanced_order"],
             ["raw-first", "swapz-first", "swapz-first", "raw-first", "raw-first"])
+        amendment = qualification.amendment()
+        self.assertEqual(
+            amendment["schema"],
+            "swapz-performance-qualification-amendment-v2")
+        self.assertEqual(amendment["status"], "FROZEN_PROSPECTIVE")
+        qd1 = amendment["workloads"]["sd-service-qd1-balanced"]
+        self.assertEqual(qd1["qd"], 1)
+        self.assertEqual(qd1["acceptance_profile"], "service-v1")
+        self.assertEqual(
+            qualification.service_limits("sd-service-qd1-balanced"),
+            contract["acceptance"]["service"])
+        incompressible = amendment["workloads"]["sd-service-incompressible"]
+        self.assertEqual(incompressible["fill_content_profile"], "entropy")
+        self.assertEqual(incompressible["churn_content_profile"], "entropy")
+        non_regression = qualification.service_limits(
+            "sd-service-incompressible")
+        self.assertEqual(non_regression["useful_write_ci_lower_min"], -.10)
+        self.assertEqual(non_regression["lower_write_bytes_ci_upper_max"], .10)
+        self.assertEqual(
+            non_regression["lower_write_requests_ci_upper_max"], .10)
         sustained_contract = contract["workloads"]["sd-high-occupancy-churn"]
         self.assertEqual(sustained_contract["logical_occupancy_percent"], 90)
         self.assertEqual(sustained_contract["hot_region_percent"], 80)
@@ -2225,6 +2245,15 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(coverage["measured_repeat_write_operations"], 4)
         self.assertEqual(coverage["measured_min_writes_per_hot_page"], 1)
         self.assertEqual(coverage["measured_max_writes_per_hot_page"], 2)
+        status = sustained.status_delta(
+            {"gc_wall_ns": 10, "gc_role_rotations": 2, "cursor": 4,
+             "failed": 0, "error": 0},
+            {"gc_wall_ns": 30, "gc_role_rotations": 5, "cursor": 9,
+             "failed": 0, "error": 0},
+            100)
+        self.assertEqual(status["gc_role_rotations"], 3)
+        self.assertEqual(status["cursor"], 9)
+        self.assertEqual(status["wall_fraction"], .20)
 
     def test_sustained_replay_vmhwm_parser_is_strict(self):
         import importlib.util
@@ -2287,6 +2316,16 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(report["cold_read"]["pages"], 8)
             self.assertGreater(report["overwrite"]["measured_hot_pages_rewritten"], 0)
             self.assertGreater(report["overwrite"]["measured_repeat_write_operations"], 0)
+            self.assertEqual(report["sustained_intervals"], [])
+            self.assertTrue(report["minute_buckets"])
+            minute = report["minute_buckets"][0]
+            self.assertIn("p95_ns", minute)
+            self.assertIn("read_p99_ns", minute)
+            self.assertIn("write_p99_ns", minute)
+            self.assertIn("cumulative_overwrite", minute)
+            self.assertEqual(
+                [row["phase"] for row in report["occupancy_transitions"]],
+                ["initial", "post-fill", "post-warmup", "measured-end"])
             self.assertIn(report["performance_screening"]["status"],
                           ("SCREENED", "EXCLUDED"))
             resources = report["resources"]
@@ -2409,6 +2448,23 @@ class PairReplayContract(unittest.TestCase):
         self.assertNotEqual(medium, entropy)
         self.assertTrue(medium.startswith(b"swapz-anonymous-page:2\0"))
         self.assertGreater(len(set(entropy)), 200)
+        self.assertEqual(
+            anonymous.monotonic_counter_delta(
+                {"pswpin": 100, "pswpout": 200},
+                {"pswpin": 104, "pswpout": 207},
+                ("pswpin", "pswpout")),
+            {"pswpin": 4, "pswpout": 7})
+        cgroup_delta = anonymous.cgroup_counter_delta(
+            {"memory_stat": {"pgmajfault": 10, "pgfault": 100},
+             "memory_events": {"oom": 0},
+             "memory_swap_events": {"fail": 0},
+             "memory_swap_current": 4096},
+            {"memory_stat": {"pgmajfault": 13, "pgfault": 120},
+             "memory_events": {"oom": 0},
+             "memory_swap_events": {"fail": 0},
+             "memory_swap_current": 2048})
+        self.assertEqual(cgroup_delta["memory_stat"]["pgmajfault"], 3)
+        self.assertEqual(cgroup_delta["memory_swap_current_delta_bytes"], -2048)
 
         qualification_path = SCRIPT.with_name("qualification.py")
         qualification_spec = importlib.util.spec_from_file_location(
@@ -2419,7 +2475,10 @@ class PairReplayContract(unittest.TestCase):
         arm = {
             "bytes": spec["bytes"], "round_count": spec["rounds"],
             "required_swap_bytes": spec["minimum_observed_swap_bytes"],
-            "content": spec["content"], "swap_device_identity": {},
+            "content": spec["content"],
+            "swap_device_identity": {
+                "device": "8:1", "dm_uuid": None, "dm_target": None,
+                "lower_device": "8:1"},
             "cgroup_before": {"memory_max": spec["memory_max_bytes"]},
         }
         self.assertEqual(
