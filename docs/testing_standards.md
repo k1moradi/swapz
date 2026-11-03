@@ -4283,7 +4283,11 @@ same qualified artifact is instead runtime-locked by volatile
 `/run/swapz/primary-execution.env`, created only by successful owner-armed
 cross-boot preflight. That record must be root-owned mode 0600 under a
 root-owned mode-0700 runtime directory and exactly bind current boot ID, build
-source SHA, canonical configured PARTUUID and target byte size. Failed or
+source SHA, canonical configured PARTUUID, the selected partition's current
+major:minor, and target byte size. The major:minor is deliberately boot-local:
+it need not match the pre-reboot arm record, but any detach/re-enumeration that
+changes the selected partition device number invalidates prepare/start until a
+fresh owner-armed preflight mints a new token. Failed or
 repeated preflight removes any earlier token before checking current facts.
 A cold-boot observation that durably records FAIL or INCOMPLETE must likewise
 remove the volatile token so the boot cannot authorize a later prepare/start;
