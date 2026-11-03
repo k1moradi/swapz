@@ -4958,7 +4958,10 @@ use independent artifact-hash mappings for qualified, owner-report and
 installed records; mutating one record must never mutate another and hide a
 cross-binding mismatch. Current release evidence must also include one canonical
 authorized-target identity consisting of the normalized lowercase PARTUUID and
-exact partition byte size. Real-swap, maximum-capacity/RAM, sustained-physical,
+exact partition byte size. The PARTUUID must use the same structural grammar as
+the production primary selector: 8..64 total characters, at least eight ASCII
+hex digits, single internal hyphens only, and no leading, trailing or consecutive
+hyphens. Real-swap, maximum-capacity/RAM, sustained-physical,
 lifecycle/deployment, armed cold-boot and owner-observed reboot PASS records
 must bind that same tuple. Runtime major:minor is deliberately excluded because
 it may change across attachment or boot; this is a consistency check and does
