@@ -697,6 +697,7 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             "SWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1",
             'SWAPZ_PRIMARY_TEST_CONFIG_BASE="/var/tmp/swapz-primary-owned-nullblk/config"',
             'SWAPZ_PRIMARY_TEST_RECOVERY_BASE="/var/tmp/swapz-primary-owned-nullblk/recovery"',
+            'SWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY="/var/tmp/swapz-primary-owned-nullblk/mutation-lock"',
             'SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"',
         )
         owned = active_preprocessor_macros(owned_definitions)
@@ -710,6 +711,7 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         for required in (
                 "SWAPZ_PRIMARY_TEST_CONFIG_BASE",
                 "SWAPZ_PRIMARY_TEST_RECOVERY_BASE",
+                "SWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY",
                 "SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT"):
             missing = tuple(
                 definition for definition in owned_definitions
