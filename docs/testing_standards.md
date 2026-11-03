@@ -4621,7 +4621,13 @@ Linux swap-out/in, maximum-capacity plus measured RAM evidence, sustained
 physical performance, lifecycle/deployment state, installed artifact identity,
 armed cold-boot harness, and owner-observed reboot. Missing, historical, stale,
 source-unbound, or structurally incomplete observations are BLOCKED or
-IN_PROGRESS, never PASS; a current FAIL stays FAIL. A retained old host
+IN_PROGRESS, never PASS; a current FAIL stays FAIL. The owner `make test`
+evidence must carry the same formatter/module/oracle digests as the qualified
+artifact evidence, and installed artifact identity must match those exact
+digests. Real-swap, maximum-capacity/RAM and sustained-physical PASS evidence
+must bind the SHA-256 of the exact current `FROZEN`
+`docs/production-acceptance.json`; changing that policy invalidates those
+physical PASS observations until they are requalified. A retained old host
 snapshot must be labeled HISTORICAL and cannot become a current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
