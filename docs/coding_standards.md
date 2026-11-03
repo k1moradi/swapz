@@ -232,36 +232,66 @@ ambiguous ownership/state stops teardown rather than authorizing force.
 
 ### Physical formatter descriptor and SWZ header contract
 
-`swapzctl format <blockdev>` retains its conservative standalone behavior:
-reject non-block devices, undersized geometry and nonzero block zero unless it
-is an exact existing SWZ authorization header; never create a mapper or
-activate swap. The private physical helper may instead invoke the fixed,
-identity-bound form `swapzctl format <blockdev> --expect-major-minor <major>:<minor> --expect-bytes <decimal-bytes>`.
-Require both options in that order, unsigned decimal integers only, no signs,
-whitespace, overflow, missing values, trailing characters or extra arguments.
-The given device number must be representable as a platform `dev_t`.
+The standalone formatter has no implicit authority derived from a pathname,
+root privilege, or the project's standing permission for one development card.
+There is no destructive `swapzctl format <blockdev>` form. Formatting requires
+one complete identity bundle in fixed order:
+`--expect-major-minor <major>:<minor> --expect-bytes <decimal-bytes>
+--expect-partuuid <partuuid> --expect-parent-major-minor <major>:<minor>
+--expect-parent-model <model> --expect-parent-transport usb`.
+Integers are canonical unsigned decimal values that must fit the platform
+`dev_t`/64-bit geometry, and the PARTUUID is canonical hexadecimal plus
+single internal hyphens. The formatter contains no hard-coded development
+device path, major:minor, capacity, PARTUUID or parent identity.
 
-After the pre-open block-device check, open exclusively with
-`O_RDWR | O_EXCL | O_CLOEXEC`, then require `fstat()` on that **same FD**
-to report a block device with `st_rdev` identical to the pre-open
-inspection. Identity-bound formatting additionally requires the exact opened
-major:minor. Query `BLKGETSIZE64` on that FD; when bound, its size
-must exactly equal the expected byte count. All FD/geometry checks and the
-minimum size check precede every block-zero read or write. A pathname recheck
-cannot replace FD validation. Close the opened descriptor on every exit path;
-a failed read, write, fsync or close is not a successful format. Incomplete
-media writes require explicit recovery, never an implicit retry that would
-accept an unknown partially written header.
+Before opening for mutation, the path and `/dev/disk/by-partuuid/<PARTUUID>`
+alias must both resolve to the expected partition device number. The matching
+`/sys/dev/block/<major>:<minor>` object must identify a real non-virtual
+partition, repeat the same PARTUUID in its uevent, have a distinct physical
+whole-device parent, and that parent must be the exact expected device, report
+removable media, match the expected printable model, and resolve through a USB
+transport path. The selected partition must be the parent's sole partition.
+Both the partition and its parent must have empty holders and slaves, and
+neither may appear mounted or as active swap. Missing,
+malformed, unreadable, permission-denied, changing or ambiguous evidence fails
+closed.
 
-The shared freestanding SWZ authorization validator and private Python helper
-must agree: exact eight-byte magic, format version, header length, opened-device
-size and nonzero 16-byte UUID, with **every reserved byte at offsets 40..4095
-zero**. A formatted header is idempotently recognized only when *all* those
-conditions hold; nonzero unrecognized block zero is refused without writing.
-Do not add kernel-only headers or libc dependencies to `superblock.h`.
-These protections remain mandatory for physical execution. On the current
-dedicated SD-card target, human permission comes from the standing owner scope
-in AGENT_CONTEXT rather than a separate per-run review gate.
+After that read-only preflight, open the requested path exactly once with
+`O_RDWR | O_EXCL | O_CLOEXEC`. The opened descriptor is the I/O authority.
+Before reading block zero, require `fstat()` on that same descriptor plus a
+fresh path/PARTUUID-alias/sysfs/topology/mount/swap snapshot to match the
+expected device, parent and exact `BLKGETSIZE64` byte count. Geometry must be
+4KiB aligned and large enough for the authorization header plus minimum data.
+Revalidate that same complete opened-descriptor identity immediately before the
+only destructive operation, so a replaced symlink, stale alias, changed
+PARTUUID, changed geometry, new holder/mount/swap use, parent substitution or
+device disappearance cannot reach a write.
+
+Block zero is accepted only when it is all zero or is an exact existing SWZ
+authorization header. The shared validator requires the eight-byte magic,
+format version, 4096-byte header length, exact opened-device byte size, nonzero
+16-byte UUID, and every reserved byte at offsets 40..4095 zero. A valid
+existing header is an idempotent success only after another identity recheck
+and performs no write. An unrecognized nonzero header is refused. A new header
+starts from a zeroed 4096-byte buffer, uses a cryptographically random UUID
+with RFC-4122 version/variant bits, leaves all reserved bytes zero, and must pass
+`swapz_sb_valid()` before publication.
+
+A new format performs exactly one 4096-byte header write at offset zero and an
+`fsync()`; the standalone formatter never issues DISCARD/TRIM and never
+creates a mapper or activates swap. After the write it revalidates device
+identity, rereads the entire header, requires byte-for-byte equality and full
+SWZ validation, then revalidates identity once more before close. A short read,
+write, fsync failure, close failure, post-write identity uncertainty or
+disappearance is not success. A partially written/unrecognized header is not
+silently retried.
+
+The privileged primary lifecycle is a separate authority domain. It selects a
+target from protected configuration, owns transaction state and may perform
+lifecycle mutation under its stronger production policy; it must not treat the
+standalone formatter's command-line identity bundle as an ownership grant. The
+historical physical-swap probe's older formatter invocation is retained only as
+historical correctness machinery and is not a production activation path.
 
 The primary manager's per-transaction SWZ authorization header must be built in
 memory from a freshly generated lowercase 32-hex transaction ID using the
@@ -271,14 +301,13 @@ Populate the shared unversioned header layout and bind the **currently verified
 configured target geometry**, never a fixed or historical target size. The
 configured target is resolved from the protected PARTUUID selector, and its
 opened descriptor, discovered device number, byte size and parent relationship
-are checked at runtime.
-Leave every reserved byte zero and validate the complete 4096-byte candidate
-with `swapz_sb_valid()` before exposing it to the caller. Reject malformed or
-all-zero IDs without changing the caller's output buffer. Header construction
-does not authorize a device write; the writer remains the checked,
-descriptor-bound primitive after the operation owns its durable lifecycle
-transaction. The one-use transaction claim is crash/ownership metadata, not a
-request for another human approval.
+are checked at runtime. Leave every reserved byte zero and validate the
+complete 4096-byte candidate with `swapz_sb_valid()` before exposing it to the
+caller. Reject malformed or all-zero IDs without changing the caller's output
+buffer. Header construction does not authorize a device write; the writer
+remains the checked, descriptor-bound primitive after the operation owns its
+durable lifecycle transaction. The one-use transaction claim is crash/ownership
+metadata, not a request for another human approval.
 
 ### Primary manager module admission
 

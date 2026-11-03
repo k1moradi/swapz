@@ -17,6 +17,7 @@ CODEC = (ROOT / "src/kernel/codec.c").read_text()
 MK = (ROOT / "src/kernel/Makefile").read_text()
 README = (ROOT / "docs/README.md").read_text()
 PRIMARY = (ROOT / "src/userspace/swapz-primary.c").read_text()
+SWAPZCTL = (ROOT / "src/userspace/swapzctl.c").read_text()
 
 
 def _raw_body(symbol: str) -> str:
@@ -119,6 +120,27 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_primary_selected_target.device_minor", PRIMARY)
         self.assertIn("swapz_primary_configured_target(&target)", PRIMARY)
         self.assertIn("manifest.target = target", PRIMARY)
+
+    def test_standalone_formatter_is_identity_bound_and_never_discards(self):
+        self.assertNotIn(
+            'if (argc == 3 && !strcmp(argv[1], "format"))', SWAPZCTL)
+        for required in (
+                "--expect-major-minor", "--expect-bytes",
+                "--expect-partuuid", "--expect-parent-major-minor",
+                "--expect-parent-model", "--expect-parent-transport",
+                "O_RDWR | O_EXCL | O_CLOEXEC",
+                "format_device_with_ops",
+                "format_parent_only_partition",
+                "format_usb_transport_path",
+                "target identity changed before header write",
+                "SWZ header readback mismatch"):
+            self.assertIn(required, SWAPZCTL)
+        for destructive in ("BLKDISCARD", "FITRIM"):
+            self.assertNotIn(destructive, SWAPZCTL)
+        for fixed_target in (
+                "/dev/sda1", "/dev/sda4", "124787884032", "f13428f6-01",
+                "Multi-Card"):
+            self.assertNotIn(fixed_target, SWAPZCTL)
 
     def test_lane_gap_observation_only_and_single_owner(self):
         header = (ROOT / "src/kernel/lane-gap.h").read_text()

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Explicit swapz administrative tool. It never activates a mapper or swapon. */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/dm-ioctl.h>
@@ -30,18 +31,24 @@
 #define SWAPZ_DM_BUFFER_INITIAL (64U * 1024U)
 #define SWAPZ_DM_BUFFER_MAX (1024U * 1024U)
 #define SWAPZ_STATUS_SNAPSHOT_RETRIES 8U
+#define SWAPZ_FORMAT_PROC_LINE_BYTES 8192U
+#define SWAPZ_FORMAT_PARENT_MODEL_BYTES 128U
 
 static void usage(FILE *out)
 {
-	fputs("Usage: swapzctl version | status | format <blockdev> | help\n", out);
+	fputs("Usage: swapzctl version | status | help\n", out);
 	fputs("       swapzctl primary plan|qualification-import <report>|"
 	      "prepare|start|stop|recover\n", out);
 	fputs("       swapzctl format <blockdev> --expect-major-minor <major>:<minor> "
-	      "--expect-bytes <decimal-bytes>\n", out);
+	      "--expect-bytes <decimal-bytes> --expect-partuuid <partuuid> "
+	      "--expect-parent-major-minor <major>:<minor> "
+	      "--expect-parent-model <model> --expect-parent-transport usb\n", out);
 	fputs("status reports cumulative committed foreground compression ratios "
 	      "for active swapz targets.\n", out);
-	fputs("format is conservative: block 0 must be all-zero or already SWAPZ.\n",
-	      out);
+	fputs("format is identity-bound: the partition, PARTUUID, exact geometry, "
+	      "removable parent, mounts and holders must all verify.\n", out);
+	fputs("format writes only the 4096-byte SWZ authorization header and never "
+	      "issues DISCARD/TRIM.\n", out);
 	fputs("Primary-swap lifecycle commands remain disabled until separately "
 	      "qualified.\n", out);
 	fputs("The format command creates no mapper target and never enables swap.\n",
@@ -51,7 +58,11 @@ static void usage(FILE *out)
 struct format_expectation {
 	unsigned int device_major;
 	unsigned int device_minor;
+	unsigned int parent_major;
+	unsigned int parent_minor;
 	unsigned long long device_bytes;
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char parent_model[SWAPZ_FORMAT_PARENT_MODEL_BYTES];
 };
 
 /* Parse unsigned decimal without accepting signs, whitespace or overflow. */
@@ -76,30 +87,126 @@ static int parse_unsigned_decimal(const char *text, unsigned long long limit,
 	return 0;
 }
 
-static int parse_format_expectation(const char *identity, const char *bytes,
+static int parse_device_identity(const char *identity,
+				 unsigned int *device_major,
+				 unsigned int *device_minor)
+{
+	const char *end;
+	unsigned long long parsed_major;
+	unsigned long long parsed_minor;
+	dev_t device;
+
+	if (!identity || !device_major || !device_minor ||
+	    parse_unsigned_decimal(identity, UINT_MAX, &end, &parsed_major) < 0 ||
+	    *end != ':' ||
+	    parse_unsigned_decimal(end + 1, UINT_MAX, &end, &parsed_minor) < 0 ||
+	    *end != '\0' || !parsed_major)
+		return -1;
+	device = makedev((unsigned int)parsed_major, (unsigned int)parsed_minor);
+	if (major(device) != (unsigned int)parsed_major ||
+	    minor(device) != (unsigned int)parsed_minor)
+		return -1;
+	*device_major = (unsigned int)parsed_major;
+	*device_minor = (unsigned int)parsed_minor;
+	return 0;
+}
+
+static int format_partuuid_normalize(
+	const char *text,
+	char normalized[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
+{
+	size_t length;
+	size_t i;
+	unsigned int hex_digits = 0;
+	int previous_dash = 0;
+
+	if (!text || !normalized)
+		return -1;
+	length = strnlen(text, SWAPZ_PRIMARY_PARTUUID_LENGTH + 2U);
+	if (length < 8U || length > SWAPZ_PRIMARY_PARTUUID_LENGTH ||
+	    text[0] == '-' || text[length - 1U] == '-')
+		return -1;
+	for (i = 0; i < length; ++i) {
+		unsigned char character = (unsigned char)text[i];
+
+		if (character >= '0' && character <= '9') {
+			normalized[i] = (char)character;
+			hex_digits++;
+			previous_dash = 0;
+		} else if (character >= 'a' && character <= 'f') {
+			normalized[i] = (char)character;
+			hex_digits++;
+			previous_dash = 0;
+		} else if (character >= 'A' && character <= 'F') {
+			normalized[i] = (char)(character - 'A' + 'a');
+			hex_digits++;
+			previous_dash = 0;
+		} else if (character == '-' && !previous_dash) {
+			normalized[i] = '-';
+			previous_dash = 1;
+		} else {
+			return -1;
+		}
+	}
+	if (hex_digits < 8U)
+		return -1;
+	normalized[length] = '\0';
+	return 0;
+}
+
+static int format_parent_expectation(
+	const char *model, const char *transport,
+	struct format_expectation *expected)
+{
+	size_t length;
+	size_t i;
+
+	if (!model || !transport || !expected || strcmp(transport, "usb"))
+		return -1;
+	length = strnlen(model, sizeof(expected->parent_model));
+	if (!length || length >= sizeof(expected->parent_model) ||
+	    model[0] == ' ' || model[length - 1U] == ' ')
+		return -1;
+	for (i = 0; i < length; ++i) {
+		unsigned char character = (unsigned char)model[i];
+
+		if (character < 0x20U || character > 0x7eU)
+			return -1;
+	}
+	memcpy(expected->parent_model, model, length + 1U);
+	return 0;
+}
+
+static int parse_format_expectation(const char *identity,
+				    const char *parent_identity,
+				    const char *bytes,
+				    const char *partuuid,
 				    struct format_expectation *expected)
 {
 	const char *end;
-	unsigned long long device_major;
-	unsigned long long device_minor;
-	dev_t expected_device;
+	unsigned long long device_bytes;
+	dev_t device;
+	dev_t parent_device;
+	struct format_expectation parsed = {0};
 
-	if (parse_unsigned_decimal(identity, UINT_MAX, &end, &device_major) < 0 ||
-	    *end != ':' ||
-	    parse_unsigned_decimal(end + 1, UINT_MAX, &end, &device_minor) < 0 ||
+	if (!expected ||
+	    parse_device_identity(identity, &parsed.device_major,
+				  &parsed.device_minor) < 0 ||
+	    parse_device_identity(parent_identity, &parsed.parent_major,
+				  &parsed.parent_minor) < 0 ||
+	    parse_unsigned_decimal(bytes, ULLONG_MAX, &end, &device_bytes) < 0 ||
 	    *end != '\0' ||
-	    parse_unsigned_decimal(bytes, ULLONG_MAX, &end,
-				   &expected->device_bytes) < 0 ||
-	    *end != '\0')
+	    format_partuuid_normalize(partuuid, parsed.partuuid) < 0)
 		return -1;
 
-	expected->device_major = (unsigned int)device_major;
-	expected->device_minor = (unsigned int)device_minor;
-	/* Reject numbers not round-trippable through the platform's dev_t. */
-	expected_device = makedev(expected->device_major, expected->device_minor);
-	if (major(expected_device) != expected->device_major ||
-	    minor(expected_device) != expected->device_minor)
+	device = makedev(parsed.device_major, parsed.device_minor);
+	parent_device = makedev(parsed.parent_major, parsed.parent_minor);
+	if (device == parent_device ||
+	    device_bytes < SWAPZ_SUPERBLOCK_BYTES + SWAPZ_MIN_DATA_BYTES ||
+	    device_bytes % SWAPZ_SUPERBLOCK_BYTES)
 		return -1;
+	parsed.device_bytes = device_bytes;
+	*expected = parsed;
 	return 0;
 }
 
@@ -669,76 +776,895 @@ out:
 	return result;
 }
 
-static int format_device(const char *path,
-			 const struct format_expectation *expected)
+static int format_read_text_file(const char *path, char *buffer,
+				 size_t capacity)
+{
+	size_t used = 0;
+	int fd;
+	int saved_errno;
+
+	if (!path || !buffer || capacity < 2U) {
+		errno = EINVAL;
+		return -1;
+	}
+	fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	if (fd < 0)
+		return -1;
+	while (used + 1U < capacity) {
+		ssize_t count = read(fd, buffer + used, capacity - used - 1U);
+
+		if (count < 0) {
+			if (errno == EINTR)
+				continue;
+			saved_errno = errno;
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (used + 1U == capacity) {
+		unsigned char extra;
+		ssize_t count;
+
+		do {
+			count = read(fd, &extra, 1U);
+		} while (count < 0 && errno == EINTR);
+		if (count != 0) {
+			saved_errno = count < 0 ? errno : EOVERFLOW;
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+	}
+	buffer[used] = '\0';
+	if (close(fd) < 0)
+		return -1;
+	return 0;
+}
+
+static int format_parse_text_u64(const char *text, unsigned long long limit,
+				 unsigned long long *value)
+{
+	const char *end;
+
+	if (!text || !value ||
+	    parse_unsigned_decimal(text, limit, &end, value) < 0)
+		return -1;
+	if (*end == '\n')
+		++end;
+	return *end == '\0' ? 0 : -1;
+}
+
+static int format_parse_device_text(const char *text, dev_t *device)
+{
+	unsigned int device_major;
+	unsigned int device_minor;
+	char identity[64];
+	const char *newline;
+	size_t length;
+
+	if (!text || !device)
+		return -1;
+	newline = strchr(text, '\n');
+	length = newline ? (size_t)(newline - text) : strlen(text);
+	if (!length || length >= sizeof(identity) ||
+	    (newline && newline[1] != '\0'))
+		return -1;
+	memcpy(identity, text, length);
+	identity[length] = '\0';
+	if (parse_device_identity(identity, &device_major, &device_minor) < 0)
+		return -1;
+	*device = makedev(device_major, device_minor);
+	return 0;
+}
+
+static int format_sysfs_directory_empty(const char *path)
+{
+	DIR *directory;
+	struct dirent *entry;
+	int saved_errno;
+
+	directory = opendir(path);
+	if (!directory)
+		return -1;
+	for (;;) {
+		errno = 0;
+		entry = readdir(directory);
+		if (!entry)
+			break;
+		if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
+			if (closedir(directory) < 0)
+				return -1;
+			return 0;
+		}
+	}
+	saved_errno = errno;
+	if (closedir(directory) < 0 && !saved_errno)
+		return -1;
+	if (saved_errno) {
+		errno = saved_errno;
+		return -1;
+	}
+	return 1;
+}
+
+static int format_parent_only_partition(const char *parent_path,
+					const char *partition_path)
+{
+	char attribute_path[PATH_MAX];
+	const char *expected_name;
+	DIR *directory;
+	struct dirent *entry;
+	unsigned int partition_count = 0;
+	int expected_found = 0;
+	int saved_errno = 0;
+
+	if (!parent_path || !partition_path) {
+		errno = EINVAL;
+		return -1;
+	}
+	expected_name = strrchr(partition_path, '/');
+	if (!expected_name || !expected_name[1]) {
+		errno = EINVAL;
+		return -1;
+	}
+	++expected_name;
+	directory = opendir(parent_path);
+	if (!directory)
+		return -1;
+	for (;;) {
+		struct stat info;
+		int length;
+
+		errno = 0;
+		entry = readdir(directory);
+		if (!entry)
+			break;
+		if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+			continue;
+		length = snprintf(attribute_path, sizeof(attribute_path),
+				  "%s/%s/partition", parent_path, entry->d_name);
+		if (length < 0 || (size_t)length >= sizeof(attribute_path)) {
+			saved_errno = ENAMETOOLONG;
+			break;
+		}
+		if (stat(attribute_path, &info) < 0) {
+			if (errno == ENOENT || errno == ENOTDIR)
+				continue;
+			saved_errno = errno;
+			break;
+		}
+		if (!S_ISREG(info.st_mode)) {
+			saved_errno = EPROTO;
+			break;
+		}
+		partition_count++;
+		if (!strcmp(entry->d_name, expected_name))
+			expected_found = 1;
+	}
+	if (!saved_errno && errno)
+		saved_errno = errno;
+	if (closedir(directory) < 0 && !saved_errno)
+		saved_errno = errno;
+	if (saved_errno) {
+		errno = saved_errno;
+		return -1;
+	}
+	return expected_found && partition_count == 1U;
+}
+
+static int format_usb_transport_path(const char *physical_path)
+{
+	const char *cursor = physical_path;
+
+	if (!physical_path)
+		return 0;
+	while ((cursor = strstr(cursor, "/usb")) != NULL) {
+		const char *digits = cursor + 4;
+
+		if (*digits >= '0' && *digits <= '9') {
+			while (*digits >= '0' && *digits <= '9')
+				++digits;
+			if (*digits == '/' || *digits == '\0')
+				return 1;
+		}
+		cursor += 4;
+	}
+	return 0;
+}
+
+static int format_observed_model_matches(
+	char *observed, const char *expected_model)
+{
+	size_t length;
+	size_t i;
+
+	if (!observed || !expected_model)
+		return 0;
+	length = strlen(observed);
+	while (length && (observed[length - 1U] == '\n' ||
+			  observed[length - 1U] == '\r' ||
+			  observed[length - 1U] == ' ' ||
+			  observed[length - 1U] == '\t'))
+		observed[--length] = '\0';
+	if (!length)
+		return 0;
+	for (i = 0; i < length; ++i) {
+		unsigned char character = (unsigned char)observed[i];
+
+		if (character < 0x20U || character > 0x7eU)
+			return 0;
+	}
+	return !strcmp(observed, expected_model);
+}
+
+static int format_topology_flags_allowed(int partition_number_valid,
+					 int sole_partition,
+					 int parent_removable,
+					 int parent_model_matches,
+					 int parent_transport_matches,
+					 int partition_holders_empty,
+					 int partition_slaves_empty,
+					 int parent_holders_empty,
+					 int parent_slaves_empty)
+{
+	return partition_number_valid && sole_partition && parent_removable &&
+	       parent_model_matches && parent_transport_matches &&
+	       partition_holders_empty == 1 && partition_slaves_empty == 1 &&
+	       parent_holders_empty == 1 && parent_slaves_empty == 1;
+}
+
+static int format_verify_parent_topology(
+	dev_t device, const struct format_expectation *expected,
+	dev_t *parent_device)
+{
+	static const char devices_prefix[] = "/sys/devices/";
+	char link_path[128];
+	char partition_path[PATH_MAX];
+	char parent_path[PATH_MAX];
+	char device_link[PATH_MAX];
+	char physical_path[PATH_MAX];
+	char path[PATH_MAX];
+	char text[128];
+	struct stat info;
+	struct stat link_info;
+	dev_t observed_device;
+	dev_t observed_parent;
+	unsigned long long partition_number;
+	unsigned long long removable;
+	char *slash;
+	int partition_holders_empty;
+	int partition_slaves_empty;
+	int parent_holders_empty;
+	int parent_slaves_empty;
+	int length;
+
+	if (!expected || !expected->parent_model[0] ||
+	    !parent_device || !major(device)) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(link_path, sizeof(link_path), "/sys/dev/block/%u:%u",
+			  major(device), minor(device));
+	if (length < 0 || (size_t)length >= sizeof(link_path))
+		goto path_overflow;
+	if (lstat(link_path, &link_info) < 0)
+		return -1;
+	if (!S_ISLNK(link_info.st_mode)) {
+		errno = ENODEV;
+		return -1;
+	}
+	if (!realpath(link_path, partition_path))
+		return -1;
+	if (strncmp(partition_path, devices_prefix,
+		    sizeof(devices_prefix) - 1U) ||
+	    strstr(partition_path, "/virtual/") != NULL) {
+		errno = ENODEV;
+		return -1;
+	}
+	if (stat(partition_path, &info) < 0)
+		return -1;
+	if (!S_ISDIR(info.st_mode)) {
+		errno = ENODEV;
+		return -1;
+	}
+
+	length = snprintf(path, sizeof(path), "%s/dev", partition_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	if (format_read_text_file(path, text, sizeof(text)) < 0)
+		return -1;
+	if (format_parse_device_text(text, &observed_device) < 0 ||
+	    observed_device != device) {
+		errno = ESTALE;
+		return -1;
+	}
+
+	length = snprintf(path, sizeof(path), "%s/partition", partition_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	if (format_read_text_file(path, text, sizeof(text)) < 0)
+		return -1;
+	if (format_parse_text_u64(text, ULLONG_MAX, &partition_number) < 0 ||
+	    !partition_number) {
+		errno = ENODEV;
+		return -1;
+	}
+
+	length = snprintf(parent_path, sizeof(parent_path), "%s", partition_path);
+	if (length < 0 || (size_t)length >= sizeof(parent_path))
+		goto path_overflow;
+	slash = strrchr(parent_path, '/');
+	if (!slash || slash == parent_path) {
+		errno = ENODEV;
+		return -1;
+	}
+	*slash = '\0';
+
+	length = snprintf(path, sizeof(path), "%s/dev", parent_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	if (format_read_text_file(path, text, sizeof(text)) < 0)
+		return -1;
+	if (format_parse_device_text(text, &observed_parent) < 0 ||
+	    observed_parent == device) {
+		errno = ENODEV;
+		return -1;
+	}
+
+	length = snprintf(path, sizeof(path), "%s/removable", parent_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	if (format_read_text_file(path, text, sizeof(text)) < 0)
+		return -1;
+	if (format_parse_text_u64(text, 1ULL, &removable) < 0) {
+		errno = EPROTO;
+		return -1;
+	}
+
+	length = snprintf(device_link, sizeof(device_link), "%s/device", parent_path);
+	if (length < 0 || (size_t)length >= sizeof(device_link))
+		goto path_overflow;
+	if (lstat(device_link, &link_info) < 0)
+		return -1;
+	if (!S_ISLNK(link_info.st_mode)) {
+		errno = ENODEV;
+		return -1;
+	}
+	if (!realpath(device_link, physical_path))
+		return -1;
+	if (strncmp(physical_path, devices_prefix, sizeof(devices_prefix) - 1U) ||
+	    strstr(physical_path, "/virtual/") != NULL) {
+		errno = ENODEV;
+		return -1;
+	}
+
+	length = snprintf(path, sizeof(path), "%s/device/model", parent_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	if (format_read_text_file(path, text, sizeof(text)) < 0)
+		return -1;
+	if (!format_observed_model_matches(text, expected->parent_model)) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (!format_usb_transport_path(physical_path)) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (format_parent_only_partition(parent_path, partition_path) != 1) {
+		if (!errno)
+			errno = EBUSY;
+		return -1;
+	}
+
+	length = snprintf(path, sizeof(path), "%s/queue", parent_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	if (stat(path, &info) < 0)
+		return -1;
+	if (!S_ISDIR(info.st_mode)) {
+		errno = ENODEV;
+		return -1;
+	}
+
+	length = snprintf(path, sizeof(path), "%s/holders", partition_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	partition_holders_empty = format_sysfs_directory_empty(path);
+	if (partition_holders_empty < 0)
+		return -1;
+	length = snprintf(path, sizeof(path), "%s/slaves", partition_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	partition_slaves_empty = format_sysfs_directory_empty(path);
+	if (partition_slaves_empty < 0)
+		return -1;
+	length = snprintf(path, sizeof(path), "%s/holders", parent_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	parent_holders_empty = format_sysfs_directory_empty(path);
+	if (parent_holders_empty < 0)
+		return -1;
+	length = snprintf(path, sizeof(path), "%s/slaves", parent_path);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		goto path_overflow;
+	parent_slaves_empty = format_sysfs_directory_empty(path);
+	if (parent_slaves_empty < 0)
+		return -1;
+
+	if (!format_topology_flags_allowed(
+		    1, 1, removable == 1ULL, 1, 1, partition_holders_empty,
+		    partition_slaves_empty, parent_holders_empty,
+		    parent_slaves_empty)) {
+		errno = EBUSY;
+		return -1;
+	}
+	*parent_device = observed_parent;
+	return 0;
+
+path_overflow:
+	errno = ENAMETOOLONG;
+	return -1;
+}
+
+static int format_sysfs_partuuid_matches(dev_t device,
+					 const char *expected_partuuid)
+{
+	char path[128];
+	char text[4096];
+	char normalized[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char observed[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	const char *cursor;
+	int found = 0;
+	int length;
+
+	length = snprintf(path, sizeof(path), "/sys/dev/block/%u:%u/uevent",
+			  major(device), minor(device));
+	if (length < 0 || (size_t)length >= sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (format_read_text_file(path, text, sizeof(text)) < 0)
+		return -1;
+	cursor = text;
+	while (*cursor) {
+		const char *line_end = strchr(cursor, '\n');
+		size_t line_length =
+			line_end ? (size_t)(line_end - cursor) : strlen(cursor);
+
+		if (line_length > sizeof("PARTUUID=") - 1U &&
+		    !memcmp(cursor, "PARTUUID=", sizeof("PARTUUID=") - 1U)) {
+			size_t value_length =
+				line_length - (sizeof("PARTUUID=") - 1U);
+
+			if (found || value_length > SWAPZ_PRIMARY_PARTUUID_LENGTH) {
+				errno = EPROTO;
+				return -1;
+			}
+			memcpy(observed, cursor + sizeof("PARTUUID=") - 1U,
+			       value_length);
+			observed[value_length] = '\0';
+			if (format_partuuid_normalize(observed, normalized) < 0 ||
+			    strcmp(normalized, expected_partuuid)) {
+				errno = ESTALE;
+				return -1;
+			}
+			found = 1;
+		}
+		if (!line_end)
+			break;
+		cursor = line_end + 1;
+	}
+	if (!found) {
+		errno = ENODEV;
+		return -1;
+	}
+	return 0;
+}
+
+static int format_mountinfo_line_device(const char *line, dev_t *device)
+{
+	const char *cursor = line;
+	const char *separator;
+	unsigned int field;
+
+	if (!line || !device)
+		return -1;
+	separator = strstr(line, " - ");
+	if (!separator)
+		return -1;
+	for (field = 0; field < 3U; ++field) {
+		const char *token_end;
+
+		while (*cursor == ' ' || *cursor == '\t')
+			++cursor;
+		if (!*cursor || *cursor == '\n')
+			return -1;
+		token_end = cursor;
+		while (*token_end && *token_end != ' ' && *token_end != '\t' &&
+		       *token_end != '\n')
+			++token_end;
+		if (field == 2U) {
+			char token[64];
+			size_t length = (size_t)(token_end - cursor);
+
+			if (!length || length >= sizeof(token) ||
+			    token_end >= separator)
+				return -1;
+			memcpy(token, cursor, length);
+			token[length] = '\0';
+			return format_parse_device_text(token, device);
+		}
+		cursor = token_end;
+	}
+	return -1;
+}
+
+static int format_inventory_device_conflicts(dev_t observed_device,
+					     dev_t device,
+					     dev_t parent_device)
+{
+	return observed_device == device || observed_device == parent_device;
+}
+
+static int format_mount_inventory_clear(dev_t device, dev_t parent_device)
+{
+	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
+	FILE *stream = fopen("/proc/self/mountinfo", "r");
+
+	if (!stream)
+		return -1;
+	while (fgets(line, sizeof(line), stream)) {
+		dev_t mounted_device;
+		size_t length = strlen(line);
+
+		if (length && line[length - 1U] != '\n' && !feof(stream)) {
+			fclose(stream);
+			errno = EOVERFLOW;
+			return -1;
+		}
+		if (format_mountinfo_line_device(line, &mounted_device) < 0) {
+			fclose(stream);
+			errno = EPROTO;
+			return -1;
+		}
+		if (format_inventory_device_conflicts(mounted_device, device,
+						     parent_device)) {
+			fclose(stream);
+			errno = EBUSY;
+			return -1;
+		}
+	}
+	if (ferror(stream)) {
+		int saved_errno = errno ? errno : EIO;
+
+		fclose(stream);
+		errno = saved_errno;
+		return -1;
+	}
+	if (fclose(stream) < 0)
+		return -1;
+	return 0;
+}
+
+static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
+{
+	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
+	FILE *stream = fopen("/proc/swaps", "r");
+	int first_line = 1;
+
+	if (!stream)
+		return -1;
+	while (fgets(line, sizeof(line), stream)) {
+		const char *cursor = line;
+		const char *end;
+		char swap_path[PATH_MAX];
+		struct stat info;
+		size_t length = strlen(line);
+		size_t path_length;
+
+		if (length && line[length - 1U] != '\n' && !feof(stream)) {
+			fclose(stream);
+			errno = EOVERFLOW;
+			return -1;
+		}
+		if (first_line) {
+			first_line = 0;
+			continue;
+		}
+		while (*cursor == ' ' || *cursor == '\t')
+			++cursor;
+		if (!*cursor || *cursor == '\n')
+			continue;
+		end = cursor;
+		while (*end && *end != ' ' && *end != '\t' && *end != '\n')
+			++end;
+		path_length = (size_t)(end - cursor);
+		if (!path_length || path_length >= sizeof(swap_path)) {
+			fclose(stream);
+			errno = EPROTO;
+			return -1;
+		}
+		memcpy(swap_path, cursor, path_length);
+		swap_path[path_length] = '\0';
+		if (stat(swap_path, &info) < 0) {
+			int saved_errno = errno;
+
+			fclose(stream);
+			errno = saved_errno;
+			return -1;
+		}
+		if (S_ISBLK(info.st_mode) &&
+		    format_inventory_device_conflicts(info.st_rdev, device,
+						     parent_device)) {
+			fclose(stream);
+			errno = EBUSY;
+			return -1;
+		}
+	}
+	if (ferror(stream)) {
+		int saved_errno = errno ? errno : EIO;
+
+		fclose(stream);
+		errno = saved_errno;
+		return -1;
+	}
+	if (fclose(stream) < 0)
+		return -1;
+	return 0;
+}
+
+static int format_identity_values_match(
+	const struct format_expectation *expected,
+	const struct stat *path_info,
+	const struct stat *opened_info,
+	const struct stat *partuuid_info,
+	unsigned long long opened_bytes,
+	dev_t parent_device)
+{
+	dev_t expected_device;
+	dev_t expected_parent;
+
+	if (!expected || !path_info || !opened_info || !partuuid_info)
+		return 0;
+	expected_device = makedev(expected->device_major, expected->device_minor);
+	expected_parent = makedev(expected->parent_major, expected->parent_minor);
+	return S_ISBLK(path_info->st_mode) &&
+	       S_ISBLK(opened_info->st_mode) &&
+	       S_ISBLK(partuuid_info->st_mode) &&
+	       path_info->st_rdev == expected_device &&
+	       opened_info->st_rdev == expected_device &&
+	       partuuid_info->st_rdev == expected_device &&
+	       opened_bytes == expected->device_bytes &&
+	       parent_device == expected_parent;
+}
+
+static int format_partuuid_alias_stat(const char *partuuid, struct stat *info)
+{
+	char path[PATH_MAX];
+	int length;
+
+	if (!partuuid || !info) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(path, sizeof(path), "/dev/disk/by-partuuid/%s", partuuid);
+	if (length < 0 || (size_t)length >= sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	return stat(path, info);
+}
+
+static int format_preopen_verify(const char *path,
+				 const struct format_expectation *expected)
+{
+	struct stat path_info;
+	struct stat partuuid_info;
+	dev_t expected_device;
+	dev_t expected_parent;
+	dev_t parent_device;
+
+	if (!path || !expected) {
+		errno = EINVAL;
+		return -1;
+	}
+	expected_device = makedev(expected->device_major, expected->device_minor);
+	expected_parent = makedev(expected->parent_major, expected->parent_minor);
+	if (stat(path, &path_info) < 0 ||
+	    format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0)
+		return -1;
+	if (!S_ISBLK(path_info.st_mode) || !S_ISBLK(partuuid_info.st_mode) ||
+	    path_info.st_rdev != expected_device ||
+	    partuuid_info.st_rdev != expected_device) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (format_sysfs_partuuid_matches(expected_device, expected->partuuid) < 0 ||
+	    format_verify_parent_topology(expected_device, expected,
+					  &parent_device) < 0)
+		return -1;
+	if (parent_device != expected_parent) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (format_mount_inventory_clear(expected_device, expected_parent) < 0 ||
+	    format_swap_inventory_clear(expected_device, expected_parent) < 0)
+		return -1;
+	return 0;
+}
+
+static int format_opened_verify(int fd, const char *path,
+				const struct format_expectation *expected)
+{
+	struct stat path_info;
+	struct stat opened_info;
+	struct stat partuuid_info;
+	unsigned long long opened_bytes = 0;
+	dev_t parent_device;
+
+	if (fd < 0 || !path || !expected) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (stat(path, &path_info) < 0 ||
+	    fstat(fd, &opened_info) < 0 ||
+	    format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0 ||
+	    ioctl(fd, BLKGETSIZE64, &opened_bytes) < 0 ||
+	    format_verify_parent_topology(opened_info.st_rdev, expected,
+					  &parent_device) < 0)
+		return -1;
+	if (!format_identity_values_match(expected, &path_info, &opened_info,
+					  &partuuid_info, opened_bytes,
+					  parent_device)) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (format_sysfs_partuuid_matches(opened_info.st_rdev,
+					 expected->partuuid) < 0 ||
+	    format_mount_inventory_clear(opened_info.st_rdev, parent_device) < 0 ||
+	    format_swap_inventory_clear(opened_info.st_rdev, parent_device) < 0)
+		return -1;
+	return 0;
+}
+
+struct format_runtime_ops {
+	void *context;
+	int (*preopen_verify)(void *context, const char *path,
+			      const struct format_expectation *expected);
+	int (*open_device)(void *context, const char *path);
+	int (*verify_opened)(void *context, int fd, const char *path,
+			     const struct format_expectation *expected);
+	int (*read_header)(void *context, int fd,
+			   unsigned char block[SWAPZ_SUPERBLOCK_BYTES]);
+	int (*random_bytes)(void *context, unsigned char *bytes, size_t length);
+	int (*write_header)(void *context, int fd,
+			    const unsigned char block[SWAPZ_SUPERBLOCK_BYTES]);
+	int (*sync_device)(void *context, int fd);
+	int (*close_device)(void *context, int fd);
+};
+
+static int format_default_preopen_verify(
+	void *context, const char *path,
+	const struct format_expectation *expected)
+{
+	(void)context;
+	return format_preopen_verify(path, expected);
+}
+
+static int format_default_open_device(void *context, const char *path)
+{
+	(void)context;
+	return open(path, O_RDWR | O_EXCL | O_CLOEXEC);
+}
+
+static int format_default_verify_opened(
+	void *context, int fd, const char *path,
+	const struct format_expectation *expected)
+{
+	(void)context;
+	return format_opened_verify(fd, path, expected);
+}
+
+static int format_default_read_header(
+	void *context, int fd, unsigned char block[SWAPZ_SUPERBLOCK_BYTES])
+{
+	(void)context;
+	return exact_io(fd, block, SWAPZ_SUPERBLOCK_BYTES, 0);
+}
+
+static int format_default_random_bytes(void *context, unsigned char *bytes,
+				       size_t length)
+{
+	(void)context;
+	return fill_random(bytes, length);
+}
+
+static int format_default_write_header(
+	void *context, int fd,
+	const unsigned char block[SWAPZ_SUPERBLOCK_BYTES])
+{
+	(void)context;
+	return exact_io(fd, (void *)block, SWAPZ_SUPERBLOCK_BYTES, 1);
+}
+
+static int format_default_sync_device(void *context, int fd)
+{
+	(void)context;
+	return fsync(fd);
+}
+
+static int format_default_close_device(void *context, int fd)
+{
+	(void)context;
+	return close(fd);
+}
+
+static void format_report_refusal(const char *stage, int error)
+{
+	fprintf(stderr, "swapzctl format: REFUSED: %s: %s\n", stage,
+		strerror(error ? error : EPERM));
+}
+
+static int format_device_with_ops(
+	const char *path, const struct format_expectation *expected,
+	const struct format_runtime_ops *ops)
 {
 	unsigned char block[SWAPZ_SUPERBLOCK_BYTES];
-	unsigned long long device_bytes = 0;
-	struct stat inspected_info;
-	struct stat opened_info;
+	unsigned char readback[SWAPZ_SUPERBLOCK_BYTES];
 	int already_formatted = 0;
+	int fd = -1;
 	int result = 1;
-	int fd;
+	int saved_errno;
 
-	if (stat(path, &inspected_info) < 0) {
-		perror("swapzctl format: stat");
+	if (!path || !expected || !ops || !ops->preopen_verify ||
+	    !ops->open_device || !ops->verify_opened || !ops->read_header ||
+	    !ops->random_bytes || !ops->write_header || !ops->sync_device ||
+	    !ops->close_device) {
+		errno = EINVAL;
 		return 1;
 	}
-	if (!S_ISBLK(inspected_info.st_mode)) {
-		fprintf(stderr, "swapzctl format: %s is not a block device\n", path);
+	if (ops->preopen_verify(ops->context, path, expected) < 0) {
+		saved_errno = errno;
+		format_report_refusal("pre-open target identity is not proven",
+				      saved_errno);
 		return 2;
 	}
-	fd = open(path, O_RDWR | O_EXCL | O_CLOEXEC);
+	fd = ops->open_device(ops->context, path);
 	if (fd < 0) {
 		perror("swapzctl format: exclusive open");
 		return 1;
 	}
-	/* The opened descriptor, not the path, is the authority for block-zero I/O. */
-	if (fstat(fd, &opened_info) < 0) {
-		perror("swapzctl format: fstat");
-		goto close_error;
-	}
-	if (!S_ISBLK(opened_info.st_mode) ||
-	    opened_info.st_rdev != inspected_info.st_rdev) {
-		fputs("swapzctl format: REFUSED: opened device identity changed\n",
-		      stderr);
+	if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+		saved_errno = errno;
+		format_report_refusal("opened descriptor identity is not proven",
+				      saved_errno);
 		result = 2;
 		goto close_error;
 	}
-	if (expected &&
-	    (major(opened_info.st_rdev) != expected->device_major ||
-	     minor(opened_info.st_rdev) != expected->device_minor)) {
-		fputs("swapzctl format: REFUSED: device major:minor mismatch\n",
-		      stderr);
-		result = 2;
-		goto close_error;
-	}
-	if (ioctl(fd, BLKGETSIZE64, &device_bytes) < 0) {
-		perror("swapzctl format: BLKGETSIZE64");
-		goto close_error;
-	}
-	if (expected && device_bytes != expected->device_bytes) {
-		fputs("swapzctl format: REFUSED: device size mismatch\n", stderr);
-		result = 2;
-		goto close_error;
-	}
-	if (device_bytes < SWAPZ_SUPERBLOCK_BYTES + SWAPZ_MIN_DATA_BYTES) {
-		fprintf(stderr, "swapzctl format: device is too small\n");
-		result = 2;
-		goto close_error;
-	}
-	/* No block-zero read or write occurs until all FD checks have passed. */
-	if (exact_io(fd, block, sizeof(block), 0) < 0) {
+	if (ops->read_header(ops->context, fd, block) < 0) {
 		perror("swapzctl format: read block 0");
 		goto close_error;
 	}
-	if (swapz_sb_valid(block, device_bytes)) {
+	if (swapz_sb_valid(block, expected->device_bytes)) {
 		already_formatted = 1;
+		if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+			saved_errno = errno;
+			format_report_refusal(
+				"target identity changed while recognizing existing SWZ header",
+				saved_errno);
+			result = 2;
+			goto close_error;
+		}
 		goto close_success;
 	}
 	if (!block_is_zero(block)) {
-		fputs("swapzctl format: REFUSED: block 0 contains nonzero data; "
-		      "use a dedicated zeroed device/partition\n", stderr);
+		fputs("swapzctl format: REFUSED: block 0 is neither zero nor a valid "
+		      "SWZ authorization header\n", stderr);
 		result = 2;
 		goto close_error;
 	}
@@ -751,9 +1677,10 @@ static int format_device(const char *path,
 	swapz_sb_put_u32(block + SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET,
 			 SWAPZ_SUPERBLOCK_BYTES);
 	swapz_sb_put_u64(block + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET,
-			 device_bytes);
-	if (fill_random(block + SWAPZ_SUPERBLOCK_UUID_OFFSET,
-			SWAPZ_SUPERBLOCK_UUID_BYTES) < 0) {
+			 expected->device_bytes);
+	if (ops->random_bytes(ops->context,
+			      block + SWAPZ_SUPERBLOCK_UUID_OFFSET,
+			      SWAPZ_SUPERBLOCK_UUID_BYTES) < 0) {
 		perror("swapzctl format: getrandom");
 		goto close_error;
 	}
@@ -763,36 +1690,97 @@ static int format_device(const char *path,
 	block[SWAPZ_SUPERBLOCK_UUID_OFFSET + 8U] =
 		(unsigned char)((block[SWAPZ_SUPERBLOCK_UUID_OFFSET + 8U] & 0x3fU) |
 				0x80U);
+	if (!swapz_sb_valid(block, expected->device_bytes)) {
+		fputs("swapzctl format: internal SWZ header construction failed\n",
+		      stderr);
+		errno = EINVAL;
+		goto close_error;
+	}
 
-	if (exact_io(fd, block, sizeof(block), 1) < 0) {
+	/* This is the last gate before the only destructive operation. */
+	if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+		saved_errno = errno;
+		format_report_refusal("target identity changed before header write",
+				      saved_errno);
+		result = 2;
+		goto close_error;
+	}
+	if (ops->write_header(ops->context, fd, block) < 0) {
 		perror("swapzctl format: write header");
 		goto close_error;
 	}
-	if (fsync(fd) < 0) {
+	if (ops->sync_device(ops->context, fd) < 0) {
 		perror("swapzctl format: fsync header");
+		goto close_error;
+	}
+	if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+		saved_errno = errno;
+		fprintf(stderr,
+			"swapzctl format: ERROR: target identity became uncertain "
+			"after header write: %s\n",
+			strerror(saved_errno ? saved_errno : ESTALE));
+		goto close_error;
+	}
+	if (ops->read_header(ops->context, fd, readback) < 0) {
+		perror("swapzctl format: reread header");
+		goto close_error;
+	}
+	if (memcmp(readback, block, sizeof(block)) ||
+	    !swapz_sb_valid(readback, expected->device_bytes)) {
+		fputs("swapzctl format: ERROR: SWZ header readback mismatch\n",
+		      stderr);
+		errno = EIO;
+		goto close_error;
+	}
+	if (ops->verify_opened(ops->context, fd, path, expected) < 0) {
+		saved_errno = errno;
+		fprintf(stderr,
+			"swapzctl format: ERROR: target identity changed after "
+			"header verification: %s\n",
+			strerror(saved_errno ? saved_errno : ESTALE));
 		goto close_error;
 	}
 
 close_success:
-	if (close(fd) < 0) {
+	if (ops->close_device(ops->context, fd) < 0) {
 		perror("swapzctl format: close");
 		return 1;
 	}
 	if (already_formatted) {
 		printf("swapzctl: already formatted SWAPZ device uuid=");
 		print_uuid(block + SWAPZ_SUPERBLOCK_UUID_OFFSET);
-		printf(" size=%llu\n", device_bytes);
+		printf(" size=%llu\n", expected->device_bytes);
 	} else {
 		printf("swapzctl: formatted SWAPZ authorization header uuid=");
 		print_uuid(block + SWAPZ_SUPERBLOCK_UUID_OFFSET);
-		printf(" size=%llu data_start=4096\n", device_bytes);
+		printf(" size=%llu data_start=4096\n", expected->device_bytes);
 	}
 	return 0;
 
 close_error:
-	if (close(fd) < 0)
+	saved_errno = errno;
+	if (fd >= 0 && ops->close_device(ops->context, fd) < 0)
 		perror("swapzctl format: close");
+	errno = saved_errno;
 	return result;
+}
+
+static int format_device(const char *path,
+			 const struct format_expectation *expected)
+{
+	static const struct format_runtime_ops ops = {
+		.context = NULL,
+		.preopen_verify = format_default_preopen_verify,
+		.open_device = format_default_open_device,
+		.verify_opened = format_default_verify_opened,
+		.read_header = format_default_read_header,
+		.random_bytes = format_default_random_bytes,
+		.write_header = format_default_write_header,
+		.sync_device = format_default_sync_device,
+		.close_device = format_default_close_device,
+	};
+
+	return format_device_with_ops(path, expected, &ops);
 }
 
 int main(int argc, char **argv)
@@ -821,19 +1809,29 @@ int main(int argc, char **argv)
 		puts("dm-swapz: not loaded (experimental)");
 		return 0;
 	}
-	if (argc == 3 && !strcmp(argv[1], "format"))
-		return format_device(argv[2], NULL);
-	if (argc == 7 && !strcmp(argv[1], "format") &&
+	if (argc == 15 && !strcmp(argv[1], "format") &&
 	    !strcmp(argv[3], "--expect-major-minor") &&
-	    !strcmp(argv[5], "--expect-bytes")) {
+	    !strcmp(argv[5], "--expect-bytes") &&
+	    !strcmp(argv[7], "--expect-partuuid") &&
+	    !strcmp(argv[9], "--expect-parent-major-minor") &&
+	    !strcmp(argv[11], "--expect-parent-model") &&
+	    !strcmp(argv[13], "--expect-parent-transport")) {
 		struct format_expectation expected;
 
-		if (parse_format_expectation(argv[4], argv[6], &expected) < 0) {
-			fputs("swapzctl format: BLOCKED: invalid expected identity or size\n",
-			      stderr);
+		if (parse_format_expectation(argv[4], argv[10], argv[6], argv[8],
+					     &expected) < 0 ||
+		    format_parent_expectation(argv[12], argv[14], &expected) < 0) {
+			fputs("swapzctl format: BLOCKED: invalid expected partition, "
+			      "parent, model, transport, PARTUUID or size\n", stderr);
 			return 2;
 		}
 		return format_device(argv[2], &expected);
+	}
+	if (argc >= 2 && !strcmp(argv[1], "format")) {
+		usage(stderr);
+		fputs("swapzctl format: BLOCKED: complete partition and parent "
+		      "identity binding is required; no write performed.\n", stderr);
+		return 2;
 	}
 
 	usage(stderr);

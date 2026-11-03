@@ -2718,11 +2718,27 @@ one-use `physical-swap-probe.py` protocol below records the older
 human-approval mechanics are not a current gate for repeated work on the
 dedicated `/dev/sda1` card. Its device-identity, provenance and fail-closed
 techniques remain useful patterns.
-Rootless qualification must verify that the administrative formatter refuses
-non-block-device inputs without modification, while source contracts verify
-the opt-in superblock gate, reserved data offset, and exclusion of block 0 from
-all data/discard paths. Exact-current-main must still pass ordinary `make test`
-before any physical-media evidence is considered.
+Rootless qualification must exercise the production formatter decision path
+with synthetic descriptor/kernel operations and identity tables. It must cover
+malformed PARTUUIDs and numeric overflow, replaced path/PARTUUID aliases, wrong
+opened device, wrong parent or geometry, non-removable/held topology, missing
+sole-partition status, parent-model/USB-transport mismatch, invalid SWZ
+UUID/reserved bytes, stale identity immediately before the write, truncated
+reads, unexpected permissions, and device disappearance before and after the
+write. For every ownership/identity uncertainty before publication, the test
+must count zero destructive header writes. It must also prove exact valid-header
+repeat formatting performs no write, zero-header initialization writes exactly
+once, post-write readback/identity failures are never reported as success, and
+the standalone formatter contains no DISCARD/TRIM behavior. Source contracts
+continue to verify the kernel opt-in superblock gate, reserved data offset, and
+exclusion of block 0 from all data/discard paths. Exact-current-main must still
+pass ordinary `make test` before any physical-media evidence is considered.
+
+The standalone CLI requires the complete partition/PARTUUID/geometry/removable-
+parent identity bundle documented in coding_standards.md. The older private
+physical-swap correctness probe remains historical machinery; do not relax the
+standalone formatter or repurpose that helper for production lifecycle
+activation merely to preserve its former formatter argument list.
 
 A separately owner-authorized physical swap-partition correctness smoke is
 implemented only by the private tests/tools/physical-swap-probe.py helper. It
