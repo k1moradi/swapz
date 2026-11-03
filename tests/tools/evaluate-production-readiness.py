@@ -279,6 +279,14 @@ def validate_real_swap_result(
     if not isinstance(execution_control, str) or not SHA256_RE.fullmatch(
             execution_control):
         reject("nested result private execution-control digest is invalid")
+    elif (
+            isinstance(report_artifacts, dict) and
+            execution_control == report_artifacts.get("formatter_sha256")):
+        reject(
+            "nested result private execution control aliases installed formatter")
+    if result.get("installed_control_privileged_execution_enabled") is not False:
+        reject(
+            "nested result installed production control was not runtime-locked")
 
     try:
         expected_helper = sha256_bytes(REAL_SWAP_HELPER.read_bytes())
@@ -400,6 +408,7 @@ def validate_real_swap_evidence(
             "source_sha", "acceptance_manifest_sha256",
             "qualification_report_sha256", "helper_sha256", "oracle_sha256",
             "qualified_installed_artifacts", "physical_execution_control_sha256",
+            "installed_control_privileged_execution_enabled",
             "partuuid", "target_size_bytes", "target_device",
             "cycles_requested", "workload_mib",
             "resident_limit_mib", "swap_limit_mib", "timeout_seconds",

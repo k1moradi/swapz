@@ -165,6 +165,7 @@ def real_swap_result(report_raw, policy_raw):
         "qualification_report_sha256": hashlib.sha256(report_raw).hexdigest(),
         "qualified_installed_artifacts": dict(ARTIFACTS),
         "physical_execution_control_sha256": "4" * 64,
+        "installed_control_privileged_execution_enabled": False,
         "partuuid": TARGET["partuuid"],
         "target_size_bytes": TARGET["size_bytes"],
         "target_device": "8:1",
@@ -195,6 +196,7 @@ def real_swap_evidence(report_raw, policy_raw):
         "source_sha", "acceptance_manifest_sha256",
         "qualification_report_sha256", "helper_sha256", "oracle_sha256",
         "qualified_installed_artifacts", "physical_execution_control_sha256",
+        "installed_control_privileged_execution_enabled",
         "partuuid", "target_size_bytes", "target_device",
         "cycles_requested", "workload_mib",
         "resident_limit_mib", "swap_limit_mib", "timeout_seconds",
@@ -900,6 +902,41 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     SOURCE, report, report_raw, evidence, policy, policy_raw,
                     physical, raw)
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+
+    def test_real_swap_private_executor_must_be_distinct_and_installed_locked(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+
+        aliased = real_swap_evidence(report_raw, policy_raw)
+        aliased["physical_execution_control_sha256"] = ARTIFACTS[
+            "formatter_sha256"]
+        aliased["result"]["physical_execution_control_sha256"] = ARTIFACTS[
+            "formatter_sha256"]
+        raw = encoded(aliased)
+        evidence = current_evidence(report_raw, policy_raw, raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            aliased, raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "private execution control aliases installed formatter" in blocker
+            for blocker in result["code_blockers"]))
+
+        unlocked = real_swap_evidence(report_raw, policy_raw)
+        unlocked["installed_control_privileged_execution_enabled"] = True
+        unlocked["result"][
+            "installed_control_privileged_execution_enabled"] = True
+        raw = encoded(unlocked)
+        evidence = current_evidence(report_raw, policy_raw, raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            unlocked, raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "installed production control was not runtime-locked" in blocker
+            for blocker in result["code_blockers"]))
 
     def test_real_swap_persistent_evidence_requires_fresh_ids_and_matching_envelope(self):
         report = owner_report()
