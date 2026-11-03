@@ -249,7 +249,9 @@ Unless evidence changes the order, work on:
    and systemd generator use a protected PARTUUID selector; target path,
    major:minor and capacity are discovered at runtime. Alternate synthetic
    identities and geometries are covered in direct-C tests, and both required
-   GitHub workflows pass on `6ebf6fd3c9a641c4fbf57c021ee0b9aad5b24efb`.
+   GitHub workflows pass on `1f390fa47f788c927d2eb8987bf2cd6f60ae7ede`
+   (runs `41638449351` and `41638449872`). The latest owner report remains
+   BLOCKED on older source `9feb6b9df7710634bffbf394504257b2a4d2d8d3`.
    Keep the privileged lifecycle disabled until separately qualified. The
    historical fixed-device live-swap supervisor is not the active selector or
    deployment path.

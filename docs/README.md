@@ -65,21 +65,25 @@ The most recent owner attempt published report-only commit
 BLOCKED because the ID36 low-RAM gate required at least 1 GiB of
 `MemAvailable`. The report is not an overall qualification, and it does not
 qualify later `main` changes. Current `main` at
-`6ebf6fd3c9a641c4fbf57c021ee0b9aad5b24efb` has passing GitHub runs for both
-required workflows: production-C qualification and native project-goal
-regressions. These validate the source and CI contracts, but do not replace an
-exact-source owner `make test`; loaded owner qualification for this `main` head
-is still outstanding.
+`1f390fa47f788c927d2eb8987bf2cd6f60ae7ede` has passing GitHub runs for both
+required workflows: [production-C qualification](https://github.com/k1moradi/swapz/actions/runs/41638449351)
+and [native project-goal regressions](https://github.com/k1moradi/swapz/actions/runs/41638449872).
+These validate the source and CI contracts, but do not replace an exact-source
+owner `make test`; loaded owner qualification for this `main` head is still
+outstanding. The current root `test_results.json` remains `BLOCKED` on source
+`9feb6b9df7710634bffbf394504257b2a4d2d8d3`.
 
 The primary manager and installed systemd generator are drive-neutral. The
 manager reads a root-protected PARTUUID selector and discovers the selected
 partition's current path, major:minor and size at runtime; direct-C coverage
 uses alternate PARTUUIDs, device numbers and geometries. A fixed `/dev/sda4`
 review finding against the earlier `ac665aee` source was superseded by
-`9feb6b9d` (`Make primary target selection drive-neutral`). The old live-swap
-supervisor still contains `/dev/sda4` trial constants, but its execution is
-hard-disabled and it is historical test code, not the current manager or
-deployment selector.
+`9feb6b9d` (`Make primary target selection drive-neutral`). A fresh source
+scan at `1f390fa4` finds no device path, major:minor, or partition-capacity
+constants in the active primary manager. The old live-swap supervisor still
+contains `/dev/sda4` trial constants, but its execution is hard-disabled and
+it is historical test code, not the current manager or deployment selector.
+Those legacy constants are not used to select or operate the current target.
 
 The qualified positive-fixture delta64 rescue A/B exercised 4096 direct
 predictor-first adoptions that skipped ordinary LZ4. Lower WRITE bytes fell
