@@ -62,6 +62,24 @@ static int test_codec_result_classification(void)
 	return 0;
 }
 
+static int test_codec_success_publication(void)
+{
+	atomic_t state;
+
+	atomic_init(&state.value, SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_publish_codec_result(&state, 0) ==
+	      SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_read_state(&state) ==
+	      SWAPZ_PREPARATION_READY_RAW);
+
+	atomic_store(&state.value, SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_publish_codec_result(&state, 1024) ==
+	      SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_read_state(&state) ==
+	      SWAPZ_PREPARATION_READY_COMPRESSED);
+	return 0;
+}
+
 static int test_codec_error_publication_wins(void)
 {
 	atomic_t state;
@@ -90,8 +108,9 @@ static int test_raw_selection_wins_late_codec_error(void)
 int main(void)
 {
 	CHECK(!test_codec_result_classification());
+	CHECK(!test_codec_success_publication());
 	CHECK(!test_codec_error_publication_wins());
 	CHECK(!test_raw_selection_wins_late_codec_error());
-	puts("SWAPZ_PREPARATION_CODEC_RESULT_PASS=3");
+	puts("SWAPZ_PREPARATION_CODEC_RESULT_PASS=4");
 	return 0;
 }

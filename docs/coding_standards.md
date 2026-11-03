@@ -1495,7 +1495,12 @@ negative result exists, the producer must still fail the target closed; the
 late result does not rewrite the already-selected state. The inline ordered
 caller must unmap any mapped input and return the negative error before staging
 RAW bytes. Zero remains the only codec result that authorizes ordinary RAW
-fallback.
+fallback. On an asynchronous codec error the producer elects target failure
+before publishing ERROR; it must never touch a BIO descriptor after the
+background snapshot handoff because RAW selection may already have completed
+that BIO. Only READY results charge the ready-residency gauge. An ERROR reader
+acquires the terminal state before consuming the prepared-page errno and leaves
+BIO completion and slot release with the ordered owner.
 
 
 Do not expose scheduler-accounted per-callback CPU as a portable module

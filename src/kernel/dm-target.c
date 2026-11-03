@@ -3088,9 +3088,9 @@ static void swapz_submitter_prepare_payload(struct swapz_dm *ctx,
 		lane->predictor_page, lane->delta64_candidate_page,
 		lane->lz4_workmem, &lane->lz4_wall_ns, &lane->delta64);
 	lane->lz4_attempts++;
-	if (prepared->length <= 0) {
+	if (prepared->length == 0) {
 		lane->lz4_size_bins[5]++;
-	} else {
+	} else if (prepared->length > 0) {
 		lane->lz4_accepted_bytes += prepared->length;
 		if (prepared->length <= 256)
 			lane->lz4_size_bins[0]++;
@@ -3111,13 +3111,24 @@ static void swapz_submitter_prepare_payload(struct swapz_dm *ctx,
 			swapz_elapsed_ns(section_start, ktime_get_ns());
 		prepared->payload_crc32c_valid = true;
 	}
-	final_state = prepared->length > 0 ?
-		SWAPZ_PREPARATION_READY_COMPRESSED :
-		SWAPZ_PREPARATION_READY_RAW;
-	active = atomic_inc_return(&ctx->preparation_ready_current);
-	publish_state = swapz_preparation_publish_result(&prepared->state,
-							 final_state);
-	if (publish_state == SWAPZ_PREPARATION_PREPARING) {
+	final_state = swapz_preparation_codec_result_state(prepared->length);
+	if (final_state == SWAPZ_PREPARATION_ERROR) {
+		/*
+		 * The submitter still owns entry until its active gate clears.
+		 * Elect failure before publishing ERROR so a racing completion
+		 * cannot report success after the codec error is known.
+		 */
+		WRITE_ONCE(entry->preparation_error, prepared->length);
+		swapz_fail(ctx, prepared->length);
+	} else {
+		active = atomic_inc_return(&ctx->preparation_ready_current);
+	}
+	publish_state = swapz_preparation_publish_codec_result(&prepared->state,
+							       prepared->length);
+	if (final_state == SWAPZ_PREPARATION_ERROR) {
+		if (publish_state != SWAPZ_PREPARATION_PREPARING)
+			swapz_fail(ctx, -EUCLEAN);
+	} else if (publish_state == SWAPZ_PREPARATION_PREPARING) {
 		peak = atomic_read(&ctx->preparation_ready_max);
 		while (active > peak) {
 			observed = atomic_cmpxchg(&ctx->preparation_ready_max,
@@ -3328,9 +3339,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 			lane->predictor_page, lane->delta64_candidate_page,
 			lane->lz4_workmem, &lane->lz4_wall_ns, &lane->delta64);
 		lane->lz4_attempts++;
-		if (prepared->length <= 0) {
+		if (prepared->length == 0) {
 			lane->lz4_size_bins[5]++;
-		} else {
+		} else if (prepared->length > 0) {
 			lane->lz4_accepted_bytes += prepared->length;
 			if (prepared->length <= 256)
 				lane->lz4_size_bins[0]++;
@@ -3359,18 +3370,25 @@ static void swapz_preparation_worker(struct work_struct *work)
 				swapz_elapsed_ns(section_start, ktime_get_ns());
 			prepared->payload_crc32c_valid = true;
 		}
-		final_state = prepared->length > 0 ?
-			SWAPZ_PREPARATION_READY_COMPRESSED :
-			SWAPZ_PREPARATION_READY_RAW;
+		final_state = swapz_preparation_codec_result_state(prepared->length);
 		/*
-		 * Charge READY residency before publishing the READY state. Once
-		 * READY is visible, the ordered consumer may immediately decrement
-		 * this gauge. If RAW won the state race, undo the speculative charge.
+		 * READY residency is charged before the state publication: the
+		 * ordered consumer may decrement it immediately after acquire.
+		 * A real codec error is never READY. Elect terminal failure before
+		 * publishing ERROR, even if the consumer already chose RAW.
+		 * After snapshot_ready the producer must not dereference entry.
 		 */
-		active = atomic_inc_return(&ctx->preparation_ready_current);
-		publish_state = swapz_preparation_publish_result(&prepared->state,
-							 final_state);
-		if (publish_state == SWAPZ_PREPARATION_PREPARING) {
+		if (final_state == SWAPZ_PREPARATION_ERROR)
+			swapz_fail(ctx, prepared->length);
+		else
+			active = atomic_inc_return(&ctx->preparation_ready_current);
+		publish_state = swapz_preparation_publish_codec_result(
+			&prepared->state, prepared->length);
+		if (final_state == SWAPZ_PREPARATION_ERROR) {
+			if (publish_state != SWAPZ_PREPARATION_PREPARING &&
+			    publish_state != SWAPZ_PREPARATION_RAW_SELECTED)
+				swapz_fail(ctx, -EUCLEAN);
+		} else if (publish_state == SWAPZ_PREPARATION_PREPARING) {
 			peak = atomic_read(&ctx->preparation_ready_max);
 			while (active > peak) {
 				observed = atomic_cmpxchg(&ctx->preparation_ready_max,
@@ -5278,7 +5296,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			return entry->preparation_error ? entry->preparation_error : -EIO;
 		prepared_state = bulk_raw_eligible ?
 			swapz_preparation_select_raw(&prepared->state) :
-			atomic_read(&prepared->state);
+			swapz_preparation_read_state(&prepared->state);
 		swapz_observe_prepared_lz4_cost(ctx, prepared, prepared_state);
 		if (prepared_state == SWAPZ_PREPARATION_READY_COMPRESSED) {
 			atomic_dec(&ctx->preparation_ready_current);
@@ -5299,9 +5317,24 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 					&ctx->ordered_write_copy_bytes);
 		} else if (prepared_state == SWAPZ_PREPARATION_READY_RAW) {
 			atomic_dec(&ctx->preparation_ready_current);
+			if (unlikely(prepared->length != 0)) {
+				swapz_fail(ctx, -EUCLEAN);
+				return -EUCLEAN;
+			}
 			ctx->work_conserving_raw_ready++;
 			ctx->work_conserving_window = true;
 			length = 0;
+		} else if (prepared_state == SWAPZ_PREPARATION_ERROR) {
+			/*
+			 * Acquiring ERROR makes the producer's errno visible.
+			 * Keep the prepared reference until swapz_process() owns
+			 * the single failed BIO completion.
+			 */
+			error = READ_ONCE(prepared->length);
+			if (error >= 0)
+				error = -EUCLEAN;
+			swapz_fail(ctx, error);
+			return error;
 		} else if (prepared_state == SWAPZ_PREPARATION_RAW_SELECTED &&
 			   bulk_raw_eligible) {
 			ctx->work_conserving_raw_not_ready++;
@@ -5353,7 +5386,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				payload_crc32c_valid = true;
 			}
 		}
-		if (length <= 0 && mapped_input && bulk_raw_eligible) {
+		if (length == 0 && mapped_input && bulk_raw_eligible) {
 			swapz_memcpy_accounted(
 				ctx->batch_bytes +
 					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
@@ -5364,6 +5397,15 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		}
 		if (mapped_input)
 			kunmap_local(mapped_input);
+	}
+	/*
+	 * Zero alone authorizes ordinary RAW fallback. A negative codec
+	 * result never reaches staging, CRC authority or successful completion.
+	 * The mapped input has already been unmapped on this failure path.
+	 */
+	if (unlikely(length < 0)) {
+		swapz_fail(ctx, length);
+		return length;
 	}
 	/* Account for compressibility as the kernel itself observes it.
 	 * A file extension or userspace fixture label is not the codec result;
