@@ -99,6 +99,9 @@ run_privileged_bounded 300 tests/tools/deploy-nullblk.sh \
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
 run_privileged_bounded 600 tests/tools/deploy-nullblk.sh --validated-source "$tested_source"
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
+printf '%s\n' 'START_LOADED_PRIMARY_NULLBLK_LIFECYCLE'
+run_privileged_bounded 300 tests/tools/qualify-primary-lifecycle-nullblk.sh \
+	--validated-source "$tested_source"
 
 # One deterministic, measured-LZ4 immutable fixture/trace for the paired
 # mixed/read/write benchmark families. Safe user-space preparation happens

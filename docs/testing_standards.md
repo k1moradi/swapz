@@ -3961,9 +3961,27 @@ atomic `READY` close and owner-marker release. Where platform behavior is
 needed, use deterministic fault injection on an owned RAM-backed `null_blk`
 target; no such test may open or write a host block device. The rootless build
 must keep the command unavailable and prove no host path or lifecycle side
-effect is reached. Rootless direct-C coverage must also prove the native
-activation/deactivation helpers return `ENODEV` with their side-effect outputs
-cleared. The shared production syscall/inventory transition helper must also
+effect is reached. After the ordinary loaded owned-null_blk smoke, the official
+loaded stage must also execute one private success-cycle rehearsal with
+`SWAPZ_PRIMARY_OWNED_NULLBLK_TEST`: create a uniquely owned memory-backed
+null_blk disk, create exactly one real partition with a kernel PARTUUID,
+initialize only that RAM partition, compile a noninstalled exact-source
+`swapzctl` under a root-owned private prefix, and generate a private
+parser-valid qualification record bound to the exact test binary/module/oracle
+hashes and live host identity. The production coordinator must then complete
+`prepare -> start -> stop` using its normal module load, Device Mapper,
+`mkswap`, native `swapon` and native `swapoff` paths. The rehearsal must
+prove one run ID through READY/ACTIVE/COMPLETE, the run-bound DM UUID, exact
+owned-partition dependency, active swap device identity, retained consumed
+provenance and LOADED module WAL, final COMPLETE state, owner-marker removal,
+and byte-identical host swap-device inventory before/after. On post-start
+failure cleanup must use only the manager's normal recovery command; if
+recovery, mapper/module cleanup, host swap identity, or owned-device identity
+cannot be proved, quarantine the RAM device and evidence instead of forcing
+removal. This private credential is never an owner qualification and must never
+be imported into production recovery storage. Rootless direct-C coverage must
+also prove the native activation/deactivation helpers return `ENODEV` with
+their side-effect outputs cleared. The shared production syscall/inventory transition helper must also
 be exercised from direct-C rootless tests with fake inventory and syscall
 adapters. Cover successful and failed `swapon`/`swapoff`, `EINTR` reconciliation,
 post-operation inventory failure, already-active/inactive state, and raw-backing

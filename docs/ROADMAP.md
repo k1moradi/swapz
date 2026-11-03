@@ -1652,11 +1652,17 @@ zero. The rootless direct-C suite now injects fake syscall and swap-inventory
 adapters into the same transition helper used by the native wrappers, covering
 success, definite failure, EINTR reconciliation, unreadable post-operation
 inventory and raw-backing refusal. Its independent Python lifecycle model is
-supplemental. This covers the bounded syscall/inventory decision logic only; it
-does not execute the complete Device Mapper coordinator or simulate process
-death. Interruption and owned-null_blk qualification, bounded physical live
-swap, cold-boot recovery, boot integration, workload performance and production
-qualification remain open.
+supplemental. This covers the bounded syscall/inventory decision logic only. The loaded
+qualification now also schedules a separate exact-source owned-null_blk
+success-cycle rehearsal through the production coordinator: a real RAM-backed
+partition/PARTUUID, private exact-artifact qualification, READY prepare,
+run-bound module/mapper creation, native swapon, ACTIVE, native swapoff, mapper
+remove/module unload and durable COMPLETE with host swap identity restored.
+This closes the no-interruption coordinator execution gap once owner `make test`
+observes its PASS marker; it does not yet simulate process death. Deterministic
+interruption/recovery on owned null_blk, bounded physical live swap, cold-boot
+recovery, boot integration, workload performance and production qualification
+remain open.
 
 Mapper lifecycle admission now also reads the per-run original-header backup,
 checks its SHA-256 against the immutable manifest, and verifies the Linux swap

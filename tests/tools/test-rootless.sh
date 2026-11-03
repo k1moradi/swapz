@@ -43,7 +43,8 @@ for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/tools/qualify-resource-pressure.sh \
   tests/tools/qualify-logical-open-balance.sh packaging/package-dkms.sh \
   packaging/swapz-primary-boot-verify packaging/sign-module.sh \
-  tests/tools/deploy-nullblk.sh tests/tools/loaded-preflight.sh tests/tools/swap-inventory.sh \
+  tests/tools/deploy-nullblk.sh tests/tools/qualify-primary-lifecycle-nullblk.sh \
+  tests/tools/loaded-preflight.sh tests/tools/swap-inventory.sh \
   tests/tools/quiet-lower-io.sh \
   tests/tools/benchmark-owned-pair.sh tests/tools/benchmark-striped-owned.sh \
   tests/tools/nullblk-identity.sh \
@@ -70,6 +71,15 @@ grep -Fq 'dmsetup create "$DMNAME" --uuid "$UUID"' tests/tools/deploy-nullblk.sh
 grep -Fq 'memory_backed' tests/tools/deploy-nullblk.sh
 grep -Fq 'modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"' tests/tools/deploy-nullblk.sh
 grep -Fq 'SWAPS_ID_BEFORE' tests/tools/deploy-nullblk.sh
+grep -Fq 'qualify-primary-lifecycle-nullblk.sh' tests/tools/test-loaded.sh
+grep -Fq 'SWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1' tests/tools/qualify-primary-lifecycle-nullblk.sh
+grep -Fq '"$CONTROL" primary prepare' tests/tools/qualify-primary-lifecycle-nullblk.sh
+grep -Fq '"$CONTROL" primary start' tests/tools/qualify-primary-lifecycle-nullblk.sh
+grep -Fq '"$CONTROL" primary stop' tests/tools/qualify-primary-lifecycle-nullblk.sh
+grep -Fq '"$CONTROL" primary recover' tests/tools/qualify-primary-lifecycle-nullblk.sh
+grep -Fq 'swapz_swap_inventory_identity /proc/swaps' tests/tools/qualify-primary-lifecycle-nullblk.sh
+grep -Fq 'QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=' tests/tools/qualify-primary-lifecycle-nullblk.sh
+! grep -Eq 'rmmod[[:space:]]|dmsetup remove.*--force' tests/tools/qualify-primary-lifecycle-nullblk.sh
 grep -Fq 'SWAPS_ID' tests/tools/benchmark-owned-pair.sh
 grep -Fq 'cat /sys/module/dm_swapz/refcnt' tests/tools/loaded-preflight.sh
 grep -Fq '[[ $refcount == 0 ]]' tests/tools/loaded-preflight.sh
