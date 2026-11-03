@@ -95,6 +95,16 @@ Use Linux-kernel-style C, kernel types/APIs, explicit ownership and checked arit
 
 Every accepted BIO must have exactly one completion owner. Never publish a mapping before all required lower data and ordering work succeeds. Preserve generation/CRC checks, PREFLUSH/FUA ordering, same-page dependencies, discard semantics, suspend/drain safety and fail-closed teardown.
 
+Target construction is pre-admission ownership: every failure after acquiring a
+backing device, dm-io client, authority arrays, scratch, read slots or workqueue
+must converge through the same idempotent teardown path before `accepting` can
+become true. The `test_fail_constructor_stage` module parameter is a
+qualification-only seam: zero by default, read-only after module load, restricted
+to positively identified `null_blk`, and rejected for physical backing. Its
+staged `-ENOMEM` failures must never issue lower I/O or leave a mapper, backing
+holder, workqueue, dm-io client or module reference behind. Do not use global
+kernel allocation fault injection to qualify this ownership contract.
+
 The detached lower-WRITE callback publishes `lower_done` and queues the ordered
 owner under the same `queue_lock` gate used by drain. A waiter can advance as
 soon as completion is visible; no target or in-flight-slot access may follow
