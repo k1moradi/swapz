@@ -75,9 +75,11 @@ class PublicMakeContract(unittest.TestCase):
         helper = ROOT / "packaging/sign-module.sh"
         content = helper.read_text()
         for required in ("mokutil --sb-state", "kmodsign sha512",
-                         "SWAPZ_MOK_PRIVATE_KEY", "SWAPZ_MOK_CERT",
-                         "SWAPZ_SIGN_NONINTERACTIVE", "sudo_command+=(-n)",
-                         "--verify", "SWAPZ_SIGN_TEST_ROOT"):
+                         "openssl cms -verify", "SWAPZ_MOK_PRIVATE_KEY",
+                         "SWAPZ_MOK_CERT", "SWAPZ_SIGN_NONINTERACTIVE",
+                         "sudo_command+=(-n)", "--verify",
+                         "SWAPZ_SIGN_TEST_ROOT",
+                         "kernel acceptance is not claimed"):
             self.assertIn(required, content)
         self.assertIn('bash packaging/sign-module.sh "$@"', MAKE)
 
@@ -98,20 +100,48 @@ class PublicMakeContract(unittest.TestCase):
             cert.write_text("certificate")
 
             commands = {
-                "mokutil": "#!/bin/sh\nprintf '%s\\n' 'SecureBoot enabled'\n",
-                "openssl": "#!/bin/sh\nprintf '%s\\n' 'serial=ABCD'\n",
-                "modinfo": (
+                "mokutil": (
                     "#!/bin/sh\n"
-                    "field=$2; module=$3\n"
-                    "if [ \"$field\" = sig_key ] && [ -f \"$module.signed\" ]; then\n"
-                    "  printf '%s\\n' 'AB:CD'\n"
-                    "fi\n"
+                    "case \"$1\" in\n"
+                    "  --sb-state) printf '%s\\n' 'SecureBoot enabled';;\n"
+                    "  --test-key) exit 0;;\n"
+                    "  *) exit 2;;\n"
+                    "esac\n"
+                ),
+                "openssl": (
+                    "#!/bin/sh\n"
+                    "case \"$1\" in\n"
+                    "  x509)\n"
+                    "    output=''\n"
+                    "    while [ \"$#\" -gt 0 ]; do\n"
+                    "      if [ \"$1\" = -out ]; then output=$2; shift 2; "
+                    "else shift; fi\n"
+                    "    done\n"
+                    "    if [ -n \"$output\" ]; then\n"
+                    "      printf '%s\\n' fixture-certificate > \"$output\"\n"
+                    "    else\n"
+                    "      printf '%s\\n' fixture-certificate\n"
+                    "    fi\n"
+                    "    ;;\n"
+                    "  cms) exit 0;;\n"
+                    "  *) exit 2;;\n"
+                    "esac\n"
                 ),
                 "kmodsign": (
                     "#!/bin/sh\n"
                     "module=$4\n"
                     "printf '%s\\n' call >> \"$module.calls\"\n"
-                    ": > \"$module.signed\"\n"
+                    "python3 - \"$module\" <<'PY'\n"
+                    "import sys\n"
+                    "from pathlib import Path\n"
+                    "module = Path(sys.argv[1])\n"
+                    "signature = b'fixture-signature'\n"
+                    "header = bytes((0, 0, 2, 0, 0, 0, 0, 0))\n"
+                    "header += len(signature).to_bytes(4, 'big')\n"
+                    "with module.open('ab') as stream:\n"
+                    "    stream.write(signature + header + "
+                    "b'~Module signature appended~\\n')\n"
+                    "PY\n"
                 ),
                 "sudo": "#!/bin/sh\n[ \"$1\" = -n ] && shift\nexec \"$@\"\n",
             }
@@ -139,13 +169,12 @@ class PublicMakeContract(unittest.TestCase):
                 capture_output=True, text=True, timeout=5)
             self.assertEqual(verified.returncode, 0,
                              verified.stdout + "\n" + verified.stderr)
-            (fixture / "dm-swapz.ko.signed").unlink()
+            module.write_bytes(b"module")
             unsigned = subprocess.run(
                 ["bash", str(helper), "--verify", str(module)], env=env,
                 capture_output=True, text=True, timeout=5)
             self.assertEqual(unsigned.returncode, 2)
-            self.assertIn("unsigned or signed by a different key",
-                          unsigned.stderr)
+            self.assertIn("qualified module is unsigned", unsigned.stderr)
 
     def test_make_test_is_only_official_documented_test_command(self):
         canonical = ("docs/README.md", "docs/VISION.md",
