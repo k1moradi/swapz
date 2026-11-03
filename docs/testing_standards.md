@@ -3682,6 +3682,16 @@ userspace compile must also compile the guarded ioctl implementation. These
 checks do not emulate kernel Device Mapper behavior or authorize a mapper on
 the host.
 
+The shared transaction-to-manifest admission check must require the matching
+owner claim, allowed durable stage, exact stored manifest, and the immutable
+4096-byte original-header backup. Rootless direct-C coverage must accept a
+valid saved Linux swap header and refuse a missing backup, digest-tampered
+backup, or disallowed stage before mapper lifecycle operations are admitted.
+The header-signature predicate must reject an SWZ header as an original swap
+header. A synthetic original-header digest may be injected
+only in the rootless test translation unit; production retains the fixed
+host-qualified digest. These tests do not perform or authorize block I/O.
+
 Before any future lifecycle enablement, isolated VM coverage must exercise
 interruption after device creation, after inactive-table load, after resume,
 and during cleanup. Recovery may remove only the exact manifest-bound mapper, an

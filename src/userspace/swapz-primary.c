@@ -39,8 +39,10 @@
 #define SWAPZ_PRIMARY_UUID_PATH \
 	"/dev/disk/by-uuid/728b4c06-44b0-46ee-91ec-560ab1bad358"
 #define SWAPZ_PRIMARY_PARTUUID_PATH "/dev/disk/by-partuuid/7fb9401d-04"
+#ifndef SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256
 #define SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256 \
 	"ace016a7a3ecd22b0aca05946a305aef2113bc50439452756ae68909010f0afe"
+#endif
 #define SWAPZ_PRIMARY_PLAN_BUFFER_BYTES 16384U
 #define SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES 65536U
 #define SWAPZ_PRIMARY_DM_MAPPERS_MAX 512U
@@ -4921,7 +4923,6 @@ out:
 #endif
 }
 
-#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_manifest_equal(
 	const struct swapz_primary_manifest *left,
 	const struct swapz_primary_manifest *right)
@@ -4944,12 +4945,16 @@ static int swapz_primary_transaction_manifest_matches_at(
 {
 	struct swapz_primary_state state;
 	struct swapz_primary_manifest stored_manifest;
+	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	char record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	size_t record_length = 0;
 	size_t i;
 	int stage_allowed = 0;
+	int result = -1;
+	int saved_errno;
 
-	if (!manifest || !allowed_stages || !stage_count ||
+	if (!swapz_primary_manifest_valid(manifest) || !allowed_stages ||
+	    !stage_count ||
 	    !swapz_primary_state_lock_valid(recovery_fd, lock_fd,
 					    expected_owner) ||
 	    !swapz_primary_owner_claim_matches_at(
@@ -4968,17 +4973,36 @@ static int swapz_primary_transaction_manifest_matches_at(
 	for (i = 0; i < stage_count; ++i)
 		if (state.stage == allowed_stages[i])
 			stage_allowed = 1;
-	if (!stage_allowed ||
-	    swapz_primary_manifest_read_at(
+	if (!stage_allowed) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_manifest_read_at(
 		    recovery_fd, lock_fd, manifest->run_id, expected_owner,
 		    &stored_manifest) < 0 ||
 	    !swapz_primary_manifest_equal(manifest, &stored_manifest)) {
 		errno = EPERM;
-		return -1;
+		goto out;
 	}
-	return 0;
+	/* A mapper must not exist unless its exact rollback header is durable. */
+	if (swapz_primary_header_backup_read_at(
+		    recovery_fd, lock_fd, manifest->run_id,
+		    manifest->original_header_sha256, expected_owner,
+		    original_header) < 0)
+		goto out;
+	if (!swapz_primary_original_swap_signature(original_header)) {
+		errno = EBADMSG;
+		goto out;
+	}
+	result = 0;
+out:
+	saved_errno = errno;
+	memset(original_header, 0, sizeof(original_header));
+	errno = saved_errno;
+	return result;
 }
 
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_swap_device_active(dev_t expected_device)
 {
 	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];

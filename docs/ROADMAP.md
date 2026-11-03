@@ -1567,3 +1567,13 @@ disabled, and the path has not yet received its isolated-VM interruption
 coverage or a new exact-source owner qualification. Start/stop/recover,
 live-swap, cold-boot recovery, boot integration, workload performance and
 production qualification remain open.
+
+Mapper lifecycle admission now also reads the per-run original-header backup,
+checks its SHA-256 against the immutable manifest, and verifies the Linux swap
+signature before allowing mapper create or remove primitives. Rootless direct-C
+coverage accepts the valid fixture and rejects a disallowed stage, altered
+backup, and missing backup. A digest override is confined to that test
+translation unit; the production digest remains fixed to the qualified host.
+This closes a rollback-evidence gap in the mapper primitives, not the missing
+start/stop/recovery coordinator or any live-swap, boot, performance, crash, or
+production-readiness gate.

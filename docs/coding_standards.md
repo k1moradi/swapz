@@ -326,6 +326,13 @@ references, identity drift or a failed query stop cleanup and preserve the
 durable recovery state. These primitives remain disabled until the complete
 provisioning, activation, teardown, recovery and boot lifecycle is qualified.
 
+The shared transaction admission check must also read the run's immutable
+4096-byte original-header backup, verify its recorded SHA-256, and confirm the
+original Linux swap signature before mapper creation or removal. Missing,
+altered, malformed or non-swap rollback evidence blocks either mapper
+operation; never create a mapping when the exact original swap state cannot be
+restored.
+
 ## MM, folio and zswap semantic boundary
 
 Read [context.md](context.md) for the kernel reclaim/BIO/zswap semantics and
