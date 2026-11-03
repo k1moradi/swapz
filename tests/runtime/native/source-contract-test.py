@@ -19,7 +19,7 @@ README = (ROOT / "docs/README.md").read_text()
 PRIMARY = (ROOT / "src/userspace/swapz-primary.c").read_text()
 
 
-def body(symbol: str) -> str:
+def _raw_body(symbol: str) -> str:
     match = re.search(r"static\s+(?:int|void|bool|u64|unsigned\s+long|enum\s+hrtimer_restart|const\s+u8\s*\*)\s*" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", DM, re.S)
     if not match:
@@ -34,6 +34,13 @@ def body(symbol: str) -> str:
             if depth == 0:
                 return DM[start:pos]
     raise AssertionError("Unclosed function: " + symbol)
+
+
+def body(symbol: str) -> str:
+    source = _raw_body(symbol)
+    if symbol == "swapz_status":
+        return source + "\n" + status_format_sequence(source)
+    return source
 
 
 def source_body(symbol: str, source: str) -> str:
@@ -53,11 +60,14 @@ def source_body(symbol: str, source: str) -> str:
     raise AssertionError("Unclosed source function: " + symbol)
 
 
-def status_format_sequence() -> str:
+def status_format_sequence(source: str = "") -> str:
     """Reconstruct INFO status text across bounded DMEMIT calls."""
+    if not source:
+        source = _raw_body("swapz_status")
+    source = source.split("case STATUSTYPE_INFO:", 1)[1]
+    source = source.split("case STATUSTYPE_TABLE:", 1)[0]
     emitted = []
-    for call in re.findall(r"DMEMIT\((.*?)(?=\n\s*\);)",
-                           body("swapz_status"), re.S):
+    for call in re.findall(r"DMEMIT\((.*?)(?=\n\s*\);)", source, re.S):
         literals = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', call)
         if literals:
             text = "".join(literals)
