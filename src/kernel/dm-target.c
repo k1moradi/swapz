@@ -4064,6 +4064,19 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 	int error = swapz_gc_compact_one_inner(ctx);
 
 	ctx->gc_wall_ns += swapz_elapsed_ns(start_ns, ktime_get_ns());
+	/*
+	 * The active recovery token proves ownership, NOT that every failure
+	 * was a transient lower-I/O fault. dm_io's failed completion is -EIO;
+	 * -ENOSPC remains a per-write capacity result. A corrupted source
+	 * record, invalid authority transaction, unsupported lower operation
+	 * or inconsistent GC state must instead fail the target closed.
+	 *
+	 * Classify here for both the packed-window and standalone RAW callers,
+	 * before either caller can suppress swapz_fail() based on recovery.
+	 */
+	if (error && error != -EIO && error != -ENOSPC &&
+	    ctx->gc_recovery.active)
+		swapz_fail(ctx, error);
 	return error;
 }
 
