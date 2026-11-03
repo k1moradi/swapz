@@ -5062,3 +5062,10 @@ assertions in the same change so a green qualifier cannot be hidden by stale
 summary metadata.
 
 Exact-source production-C evidence requires the production-C workflow to run on every `main` push. Path-filtered production-C triggers are prohibited because a documentation-only or evidence-contract commit would otherwise make the current Git SHA permanently ineligible for the exact-source required-CI gate.
+
+Package admission must verify the commands required by the installed
+runtime-health observer before mutating package state. In particular, the
+direct installer must reject hosts missing the bounded-execution utility,
+device-mapper/util-linux identity tools, journal reader, or basic text/path
+utilities used by the root helper. The hermetic package suite must retain a
+source-contract assertion for that runtime dependency set.

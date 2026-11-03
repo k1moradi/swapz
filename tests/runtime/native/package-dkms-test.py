@@ -578,6 +578,19 @@ esac
             content)
         self.assertNotIn('transaction_parent="/var/tmp"', content)
 
+    def test_runtime_health_dependencies_are_admitted_before_install(self):
+        content = SCRIPT.read_text()
+        required = (
+            "timeout", "lsblk", "dmsetup", "journalctl", "blkid",
+            "tr", "cut", "dirname", "sleep", "cat",
+        )
+        required_line = next(
+            line for line in content.splitlines()
+            if line.startswith("for required_command in "))
+        for command in required:
+            with self.subTest(command=command):
+                self.assertIn(f" {command}", required_line)
+
     def test_unexpected_paths_and_symlinks_refuse(self):
         for prefix in ("/", "/tmp/../wrong", "/usr/local"):
             result = subprocess.run(
