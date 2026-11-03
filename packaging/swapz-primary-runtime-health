@@ -423,8 +423,17 @@ active_swapz_swap()
 		if [ -n "$mapper_major_minor" ] && [ "$source_major_minor" = "$mapper_major_minor" ]; then
 			exit 10
 		fi
-		if [ -n "$source_major_minor" ] && [ -r "$sys_root/dev/block/$source_major_minor/dm/name" ]; then
-			dm_name=$(cat -- "$sys_root/dev/block/$source_major_minor/dm/name" 2>/dev/null | tr -d '\r\n' || true)
+		# A resolved block number does not prove a DM alias unrelated if
+		# the kernel's mapper-name identity is missing or unreadable.
+		dm_name_file=$sys_root/dev/block/$source_major_minor/dm/name
+		case "$source" in
+		/dev/dm-[0-9]*|/dev/mapper/*|"$dev_root"/dm-[0-9]*|"$dev_root"/mapper/*)
+			[ -r "$dm_name_file" ] || exit 11
+			;;
+		esac
+		if [ -r "$dm_name_file" ]; then
+			dm_name=$(cat -- "$dm_name_file" 2>/dev/null) || exit 11
+			[ -n "$dm_name" ] || exit 11
 			[ "$dm_name" = "$mapper_name" ] && exit 10
 		fi
 	done; then

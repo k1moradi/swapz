@@ -1461,6 +1461,25 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(blocked.returncode, 1, blocked.stderr)
         self.assertIn("cannot prove swapz-primary inactive", blocked.stderr)
 
+    def test_unconfigured_uninspectable_dm_alias_refuses_hibernate(self) -> None:
+        # lsblk can resolve major:minor after a DM alias becomes uninspectable;
+        # unavailable sysfs mapper-name evidence must not prove it unrelated.
+        (self.etc / "swapz" / "primary-target").unlink()
+        (self.dev / "mapper" / "swapz-primary").unlink()
+        write_executable(self.sbin / "swapzctl", "#!/bin/sh\nexit 2\n")
+        write_executable(
+            self.bin / "lsblk",
+            '#!/bin/sh\n[ "$2" = MAJ:MIN ] && [ "$4" = /dev/dm-7 ] && echo 253:7\n',
+        )
+        (self.proc / "swaps").write_text(
+            "Filename\tType\tSize\tUsed\tPriority\n"
+            "/dev/dm-7\tpartition\t10000\t2000\t-1\n",
+            encoding="ascii",
+        )
+        blocked = self.run_helper("hibernate-guard")
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("cannot prove swapz-primary inactive", blocked.stderr)
+
     def test_unresolved_resume_alias_blocks_when_selected_media_is_absent(self) -> None:
         (self.dev / "disk" / "by-partuuid" / PARTUUID).unlink()
 

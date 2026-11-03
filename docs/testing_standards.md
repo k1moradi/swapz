@@ -5097,7 +5097,9 @@ Exercise missing removable media plus unresolved `/dev` and tagged resume
 aliases; admit only a provably distinct stable identity. Also exercise an
 unconfigured primary selector plus a syntactically valid, active block-swap
 entry with an unresolvable device identity; the hibernation guard must refuse
-rather than infer that the unknown swap device is unrelated. Missing
+rather than infer that the unknown swap device is unrelated. Include a
+resolved Device Mapper alias with an unreadable or missing sysfs `dm/name`;
+major:minor alone must not be treated as proof of unrelated identity. Missing
 `/proc/cmdline` and a live mapper whose target authority cannot be
 resolved both require fail-closed results. Assert bounded journal observation,
 finite deadlines for external observer commands, a fixed production PATH, and
