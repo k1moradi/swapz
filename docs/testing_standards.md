@@ -4999,8 +4999,9 @@ partition byte size and the frozen policy SHA-256. A synthesized
 evaluation must also ingest the sealed
 `swapz-performance-campaign-evidence-v1` artifact, SHA-256 bind those exact
 bytes from the release record, require exact source and pair-source consistency,
-v2 PASS qualification, the same authorized target, STABLE host identity with
-quiescent admitted-device boundaries, and the exact current policy,
+v2 PASS qualification, the same authorized target, an exact MATCH between
+the accepted qualification-pair lower identity and the campaign host snapshot,
+STABLE host identity with quiescent admitted-device boundaries, and the exact current policy,
 prospective-amendment, campaign-evaluator and evidence-sealer digests. Its
 host/summary/pair artifact manifest must be structurally complete and internally
 count-consistent. Missing or stale sealed campaign evidence is BLOCKED.

@@ -174,6 +174,20 @@ def physical_campaign_evidence(policy_raw):
             "partuuid": TARGET["partuuid"],
             "device_bytes": TARGET["size_bytes"],
         },
+        "qualification_target_binding": {
+            "status": "MATCH",
+            "consistent": True,
+            "expected": {
+                "physical_partuuid": TARGET["partuuid"],
+                "physical_device_bytes": TARGET["size_bytes"],
+                "lower_major_minor": "8:1",
+            },
+            "observed": {
+                "physical_partuuid": TARGET["partuuid"],
+                "physical_device_bytes": TARGET["size_bytes"],
+                "lower_major_minor": "8:1",
+            },
+        },
         "host_stability": {
             "status": "STABLE",
             "checks": {
@@ -706,6 +720,10 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
              lambda value: value["policy"]["evidence_sealer"].__setitem__(
                  "sha256", "9" * 64),
              "evidence_sealer digest differs from current source"),
+            ("pair-target-binding",
+             lambda value: value["qualification_target_binding"].__setitem__(
+                 "consistent", False),
+             "qualification target binding is not MATCH"),
         )
         for name, mutate, expected in mutations:
             with self.subTest(name=name):

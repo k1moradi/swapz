@@ -28,6 +28,7 @@ PHYSICAL_CAMPAIGN_AMENDMENT = (
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 PARTUUID_RE = re.compile(r"^[0-9a-f][0-9a-f-]*$")
+MAJOR_MINOR_RE = re.compile(r"^[0-9]+:[0-9]+$")
 KERNEL_RELEASE_RE = re.compile(r"^[A-Za-z0-9._+-]{1,127}$")
 
 REQUIRED_STAGES = (
@@ -356,6 +357,31 @@ def validate_physical_campaign_evidence(
             target is None or
             _normalize_campaign_target(campaign.get("target")) != target):
         reject("sealed campaign authorized target binding mismatch")
+
+    target_binding = campaign.get("qualification_target_binding")
+    if (
+            not isinstance(target_binding, dict) or
+            target_binding.get("status") != "MATCH" or
+            target_binding.get("consistent") is not True):
+        reject("sealed campaign qualification target binding is not MATCH")
+    else:
+        expected = target_binding.get("expected")
+        observed = target_binding.get("observed")
+        expected_target = None
+        expected_lower = None
+        if isinstance(expected, dict):
+            expected_target = _normalize_target({
+                "partuuid": expected.get("physical_partuuid"),
+                "size_bytes": expected.get("physical_device_bytes"),
+            })
+            expected_lower = expected.get("lower_major_minor")
+        if (
+                expected_target != target or
+                not isinstance(expected_lower, str) or
+                not MAJOR_MINOR_RE.fullmatch(expected_lower)):
+            reject("sealed campaign qualification target binding is malformed")
+        if observed != expected:
+            reject("sealed campaign qualification target observations disagree")
 
     stability = campaign.get("host_stability")
     if not isinstance(stability, dict) or stability.get("status") != "STABLE":
