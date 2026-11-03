@@ -254,6 +254,13 @@ class PublicMakeContract(unittest.TestCase):
                 (ROOT / "src/kernel/VERSION").read_text())
             (fixture / "src/kernel/superblock.h").write_text(
                 (ROOT / "src/kernel/superblock.h").read_text())
+            # swapz-primary.c shares the kernel authority integer-width
+            # contract, so the isolated build must stage that exact header
+            # and its codec type dependency rather than a test-side stub.
+            (fixture / "src/kernel/authority.h").write_text(
+                (ROOT / "src/kernel/authority.h").read_text())
+            (fixture / "src/kernel/codec.h").write_text(
+                (ROOT / "src/kernel/codec.h").read_text())
             (fixture / "src/kernel/swapz-build-info.h").write_text(
                 (ROOT / "src/kernel/swapz-build-info.h").read_text())
             kernel_source = fixture / "src/kernel/dm-target.c"
