@@ -3094,7 +3094,9 @@ dedicated `/dev/sda1` card. Its device-identity, provenance and fail-closed
 techniques remain useful patterns.
 Rootless qualification must exercise the production formatter decision path
 with synthetic descriptor/kernel operations and identity tables. It must cover
-malformed PARTUUIDs and numeric overflow, copied cloneable identifiers with a
+malformed PARTUUIDs, numeric overflow and single digits exceeding small
+numeric bounds (for example removable=2 when maximum=1), copied cloneable
+identifiers with a
 different opened device/parent, replaced path/PARTUUID aliases, wrong opened
 device, wrong parent or geometry, a changed major:minor after reconnection,
 non-removable/held topology, missing sole-partition status,

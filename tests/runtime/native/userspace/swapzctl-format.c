@@ -264,6 +264,23 @@ static void make_valid_header(
 	       SWAPZ_SUPERBLOCK_UUID_BYTES);
 }
 
+static void test_numeric_bound_parser(void)
+{
+	const char *end = NULL;
+	unsigned long long value = 0;
+
+	assert(parse_unsigned_decimal("1", 1ULL, &end, &value) == 0);
+	assert(*end == '\0' && value == 1ULL);
+	assert(parse_unsigned_decimal("2", 1ULL, &end, &value) < 0);
+	assert(parse_unsigned_decimal("9", 0ULL, &end, &value) < 0);
+	assert(parse_unsigned_decimal(NULL, 1ULL, &end, &value) < 0);
+	assert(parse_unsigned_decimal("1", 1ULL, NULL, &value) < 0);
+	assert(parse_unsigned_decimal("1", 1ULL, &end, NULL) < 0);
+	assert(format_parse_text_u64("1\n", 1ULL, &value) == 0);
+	assert(value == 1ULL);
+	assert(format_parse_text_u64("2\n", 1ULL, &value) < 0);
+}
+
 static void test_format_expectation_parser(void)
 {
 	struct format_expectation expected;
@@ -762,6 +779,7 @@ static void test_truncated_read_and_close_failure_are_not_success(void)
 
 int main(void)
 {
+	test_numeric_bound_parser();
 	test_format_expectation_parser();
 	test_identity_table_rejects_substitution();
 	test_topology_flags_fail_closed();

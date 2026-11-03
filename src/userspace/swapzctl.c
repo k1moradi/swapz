@@ -76,12 +76,12 @@ static int parse_unsigned_decimal(const char *text, unsigned long long limit,
 	const char *cursor = text;
 	unsigned long long parsed = 0;
 
-	if (*cursor < '0' || *cursor > '9')
+	if (!text || !end || !value || *cursor < '0' || *cursor > '9')
 		return -1;
 	while (*cursor >= '0' && *cursor <= '9') {
 		unsigned int digit = (unsigned int)(*cursor - '0');
 
-		if (parsed > (limit - digit) / 10ULL)
+		if (digit > limit || parsed > (limit - digit) / 10ULL)
 			return -1;
 		parsed = parsed * 10ULL + digit;
 		++cursor;

@@ -241,7 +241,9 @@ one complete identity bundle in fixed order:
 --expect-parent-model <model> --expect-parent-transport usb`.
 Integers are canonical unsigned decimal values that must fit the platform
 `dev_t`/64-bit geometry, and the PARTUUID is canonical hexadecimal plus
-single internal hyphens. The formatter contains no hard-coded development
+single internal hyphens. Numeric parsing must compare each incoming digit to
+the field's limit before computing `limit - digit`, including small sysfs
+ranges such as the removable attribute's 0..1 bound. The formatter contains no hard-coded development
 device path, major:minor, capacity, PARTUUID or parent identity.
 
 The supplied identity bundle is **not an authorization grant**. Before any
