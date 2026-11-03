@@ -1255,6 +1255,14 @@ PARTUUID="$(blkid -s PARTUUID -o value "$PARTITION" | tr 'A-F' 'a-f')"
 grep -Fxq "PARTUUID=$PARTUUID" "$PART_SYSFS/uevent" ||
 	fail "owned partition sysfs PARTUUID disagrees with blkid"
 BY_PARTUUID="/dev/disk/by-partuuid/$PARTUUID"
+# settle drains queued work but does not generate a missing persistent-link
+# event. Re-run udev's normal add rules for only the identity-checked partition;
+# udev itself must publish the alias used by the production coordinator.
+udevadm trigger --action=add --subsystem-match=block \
+	"/sys/block/$DISK/$PART_NAME" ||
+	blocked "cannot trigger udev for the owned null_blk partition"
+udevadm settle --timeout=10 ||
+	blocked "udev did not settle the owned null_blk partition add event"
 for ignored in {1..50}; do
 	[[ -b "$BY_PARTUUID" ]] && break
 	udevadm settle --timeout=1 >/dev/null 2>&1 || true

@@ -4425,7 +4425,10 @@ effect is reached. After the ordinary loaded owned-null_blk smoke, the official
 loaded stage must also execute one private success-cycle rehearsal with
 `SWAPZ_PRIMARY_OWNED_NULLBLK_TEST`: create a uniquely owned memory-backed
 null_blk disk, create exactly one real partition with a kernel PARTUUID,
-initialize only that RAM partition, compile a noninstalled exact-source
+verify its PARTUUID against the partition's sysfs uevent, trigger udev's add
+event only for that exact sysfs partition path, and require udev to publish the
+real by-PARTUUID block-device alias with the same major:minor; never fabricate
+the alias. Initialize only that RAM partition, compile a noninstalled exact-source
 `swapzctl` under a root-owned private prefix, and generate a private
 parser-valid qualification record bound to the exact test binary/module/oracle
 hashes and live host identity. The production coordinator must then complete

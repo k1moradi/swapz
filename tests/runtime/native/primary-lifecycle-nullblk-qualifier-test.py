@@ -101,6 +101,23 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn("memory_backed", self.script)
         self.assertIn("nullb-swapz-$TOKEN", self.script)
 
+    def test_partuuid_alias_comes_from_udev_for_verified_owned_partition(self):
+        partuuid_proof = self.script.index(
+            'grep -Fxq "PARTUUID=$PARTUUID" "$PART_SYSFS/uevent"')
+        trigger = self.script.index(
+            'udevadm trigger --action=add --subsystem-match=block')
+        trigger_settle = self.script.index(
+            'udevadm settle --timeout=10', trigger)
+        trigger_command = self.script[trigger:trigger_settle]
+        alias_wait = self.script.index('[[ -b "$BY_PARTUUID" ]] ||')
+        alias_identity = self.script.index(
+            'stat -Lc \'%t:%T\' "$BY_PARTUUID"')
+        self.assertIn('"/sys/block/$DISK/$PART_NAME"', trigger_command)
+        self.assertLess(partuuid_proof, trigger)
+        self.assertLess(trigger, alias_wait)
+        self.assertLess(alias_wait, alias_identity)
+        self.assertNotRegex(self.script, r"(?m)^\s*ln\s+-s\b")
+
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)
