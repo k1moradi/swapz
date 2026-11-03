@@ -1102,6 +1102,9 @@ def run(args):
             if oracle["mismatches"]:
                 raise ValueError("final byte oracle failed")
             gc = status_delta(status_before, status_after, wall_ns)
+            if identity.get("dm_uuid") and not \
+                    QUALIFICATION["target_health_ok"](gc):
+                raise ValueError("swapz target reported failed/error status")
 
             report = {
                 "schema": SCHEMA, "verdict": "PASS",

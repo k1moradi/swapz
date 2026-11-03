@@ -516,7 +516,10 @@ bound must be at least -10%, normalized lower-WRITE byte and request upper
 bounds must each be at most +10%, READ/WRITE p95/p99 upper bounds at most +25%,
 and measured attributed CPU/useful-byte upper bound at most +50%. Exact byte
 verification, target health, provenance, screening and all-pairs completeness
-remain mandatory. These criteria are prospective; a disappointing result is a
+remain mandatory. Every swapz service arm must end with exact integer
+`failed=0` and `error=0` target status; missing, malformed or nonzero health
+evidence fails the arm before it can enter paired analysis. These criteria are
+prospective; a disappointing result is a
 FAIL, not a reason to revise the amendment in place.
 
 The sustained cohort is one directional raw/swapz pair over the maximum logical

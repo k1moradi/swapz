@@ -2473,6 +2473,7 @@ class PairReplayContract(unittest.TestCase):
                     "metadata_and_target_peak_ram_bytes":
                         512 * 1024 * 1024 if swapz else 0,
                 },
+                "gc": {"failed": 0, "error": 0} if swapz else None,
                 "device_identity": {
                     "physical_partuuid": "f13428f6-01",
                     "physical_device_bytes": 124787884032,
@@ -2523,6 +2524,29 @@ class PairReplayContract(unittest.TestCase):
                 "physical_device_bytes": 124787884032,
                 "lower_major_minor": "8:1",
             })
+
+        for failed_value, error_value in (
+                (1, 0), (0, -5), (False, 0), (0, "0")):
+            with self.subTest(
+                    failed_value=failed_value, error_value=error_value):
+                unhealthy_raw = arm("raw")
+                unhealthy_swapz = arm("swapz")
+                unhealthy_swapz["gc"] = {
+                    "failed": failed_value, "error": error_value}
+                unhealthy_pair = qualification.compare_pair(
+                    unhealthy_raw, unhealthy_swapz,
+                    "sd-service-balanced", "unhealthy", 1, "raw-first")
+                self.assertTrue(unhealthy_pair["excluded"])
+                self.assertIn(
+                    "swapz target health failed or is unavailable",
+                    unhealthy_pair["exclusion_reasons"])
+
+        self.assertTrue(
+            qualification.target_health_ok({"failed": 0, "error": 0}))
+        sustained_source = SCRIPT.with_name("sustained-replay.py").read_text()
+        self.assertIn(
+            'QUALIFICATION["target_health_ok"](gc)',
+            sustained_source)
 
         # Malformed physical PARTUUID evidence must never enter analysis even
         # when both arms repeat the same bad identity. Evidence is canonical

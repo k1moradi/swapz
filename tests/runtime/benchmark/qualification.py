@@ -313,6 +313,8 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
             reasons.append("swapz metadata/target peak RAM is missing")
         elif peak > CONTRACT["acceptance"]["sustained"]["metadata_and_target_peak_ram_bytes_max"]:
             reasons.append("swapz metadata/target peak RAM exceeds prospective bound")
+        if not target_health_ok(arm.get("gc")):
+            reasons.append("swapz target health failed or is unavailable")
     return reasons
 
 
@@ -553,6 +555,13 @@ def positive_counter(value) -> bool:
     return integer_at_least(value, 1)
 
 
+def target_health_ok(status) -> bool:
+    return (
+        isinstance(status, dict) and
+        type(status.get("failed")) is int and status["failed"] == 0 and
+        type(status.get("error")) is int and status["error"] == 0)
+
+
 def sustained_decision(pair: dict) -> dict:
     raw, swapz = pair["raw"], pair["swapz"]
     limit = CONTRACT["acceptance"]["sustained"]
@@ -589,9 +598,7 @@ def sustained_decision(pair: dict) -> dict:
             positive_counter(gc.get("gc_victims")) and
             positive_counter(gc.get("gc_pages"))),
         "segment_programming": positive_counter(gc.get("segment_program_sum")),
-        "target_not_failed": (
-            gc.get("failed") == 0 and type(gc.get("failed")) is int and
-            gc.get("error") == 0 and type(gc.get("error")) is int),
+        "target_not_failed": target_health_ok(gc),
         "forward_progress": number(swapz.get("max_no_progress_seconds"), "max_no_progress_seconds") <= limit["max_no_progress_seconds"],
         "raw_repeated_overwrite": integer_at_least(
             raw_overwrite.get("measured_hot_pages_rewritten"),
