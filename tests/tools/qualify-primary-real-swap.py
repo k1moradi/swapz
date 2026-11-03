@@ -471,9 +471,13 @@ def parse_selector(text: str) -> str:
     if len(lines) != 1 or not lines[0].startswith("PARTUUID="):
         raise Blocked("primary target selector must contain exactly one PARTUUID line")
     partuuid = lines[0][len("PARTUUID="):]
-    if not re.fullmatch(r"[0-9A-Fa-f][0-9A-Fa-f-]{6,62}[0-9A-Fa-f]", partuuid):
+    normalized = partuuid.lower()
+    if (
+            not 8 <= len(normalized) <= 64 or
+            not re.fullmatch(r"[0-9a-f]+(?:-[0-9a-f]+)*", normalized) or
+            sum(ch != "-" for ch in normalized) < 8):
         raise Blocked("primary target selector PARTUUID is malformed")
-    return partuuid.lower()
+    return normalized
 
 
 def _read_selector() -> str:
