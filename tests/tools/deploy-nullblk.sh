@@ -335,6 +335,15 @@ if (( ! MAX_BOUNDARY_PROBE )); then
 			fi
 			fail "constructor failure stage $constructor_stage left a mapper"
 		fi
+		constructor_configured_stage="$(
+			cat /sys/module/dm_swapz/parameters/test_fail_constructor_stage
+		)" || fail "cannot read configured constructor failure stage"
+		constructor_hits="$(
+			cat /sys/module/dm_swapz/parameters/test_fail_constructor_hits
+		)" || fail "cannot read constructor failure hit count"
+		[[ "$constructor_configured_stage" == "$constructor_stage" &&
+		   "$constructor_hits" == 1 ]] ||
+			fail "constructor failure stage $constructor_stage was not injected exactly once"
 		[[ -z "$(ls -A "/sys/block/$DISK/holders" 2>/dev/null)" ]] ||
 			fail "constructor failure stage $constructor_stage left a lower holder"
 		constructor_lower_after="$(cat "/sys/block/$DISK/stat")" ||

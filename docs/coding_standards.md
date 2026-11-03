@@ -102,8 +102,10 @@ become true. The `test_fail_constructor_stage` module parameter is a
 qualification-only seam: zero by default, read-only after module load, restricted
 to positively identified `null_blk`, and rejected for physical backing. Its
 staged `-ENOMEM` failures must never issue lower I/O or leave a mapper, backing
-holder, workqueue, dm-io client or module reference behind. Do not use global
-kernel allocation fault injection to qualify this ownership contract.
+holder, workqueue, dm-io client or module reference behind. A read-only atomic
+hit counter must advance exactly once for the configured stage so an unrelated
+table-load failure cannot masquerade as constructor-failure evidence. Do not use
+global kernel allocation fault injection to qualify this ownership contract.
 
 The detached lower-WRITE callback publishes `lower_done` and queues the ordered
 owner under the same `queue_lock` gate used by drain. A waiter can advance as

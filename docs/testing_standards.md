@@ -794,10 +794,12 @@ Before the ordinary loaded smoke target is admitted, qualification must reload
 the exact module for each constructor failure stage and force deterministic
 `-ENOMEM` after: backing ownership, dm-io client creation, authority/sidecar
 initialization, core scratch allocation, per-read-slot scratch, the ordered
-workqueue, preparation scratch, and the preparation workqueue. Every failed
-`dmsetup create` must leave the mapper absent, the owned lower with zero holders,
-the lower block-stat line byte-identical, and `rmmod dm_swapz` successful.
-The exact marker
+workqueue, preparation scratch, and the preparation workqueue. After each failed
+create, qualification must read back both the configured stage and a read-only
+atomic injection-hit counter and require exactly one hit; an unrelated table-load
+failure is not constructor-failure evidence. Every failed `dmsetup create` must
+leave the mapper absent, the owned lower with zero holders, the lower block-stat
+line byte-identical, and `rmmod dm_swapz` successful. The exact marker
 `PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0` is a
 mandatory loaded-correctness input. The selector must remain default-off and
 must be rejected on non-null_blk backing so this qualification seam can never

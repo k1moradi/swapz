@@ -5477,6 +5477,11 @@ int main(void)
 
         self.assertIn("module_param_named(test_fail_constructor_stage", DM)
         self.assertIn("swapz_test_fail_constructor_stage, uint, 0444", DM)
+        self.assertIn("module_param_cb(test_fail_constructor_hits", DM)
+        constructor_injector = body("swapz_constructor_test_should_fail")
+        self.assertIn(
+            "atomic_inc(&swapz_test_fail_constructor_hits)",
+            constructor_injector)
         self.assertIn(
             "Constructor fault injection is restricted to null_blk", ctor)
         self.assertIn("swapz_test_fail_constructor_stage >", ctor)
@@ -5513,6 +5518,9 @@ int main(void)
         self.assertIn(
             '[[ "$constructor_lower_after" == "$constructor_lower_before" ]]',
             deploy)
+        self.assertIn("parameters/test_fail_constructor_stage", deploy)
+        self.assertIn("parameters/test_fail_constructor_hits", deploy)
+        self.assertIn('"$constructor_hits" == 1', deploy)
         self.assertIn("rmmod dm_swapz ||", deploy)
         self.assertIn(
             "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0",

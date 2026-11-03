@@ -20,6 +20,7 @@
 #include <linux/highmem.h>
 #include <linux/hrtimer.h>
 #include <linux/ioprio.h>
+#include <linux/kernel.h>
 #include <linux/completion.h>
 #include <linux/ktime.h>
 #include <linux/lz4.h>
@@ -123,10 +124,31 @@ module_param_named(test_fail_constructor_stage,
 MODULE_PARM_DESC(test_fail_constructor_stage,
 		 "Owned null_blk constructor cleanup qualification stage 0..8; default 0");
 
+static atomic_t swapz_test_fail_constructor_hits = ATOMIC_INIT(0);
+
+static int swapz_constructor_test_fail_hits_get(
+	char *buffer, const struct kernel_param *parameter)
+{
+	(void)parameter;
+	return scnprintf(buffer, PAGE_SIZE, "%d",
+			 atomic_read(&swapz_test_fail_constructor_hits));
+}
+
+static const struct kernel_param_ops swapz_constructor_test_fail_hits_ops = {
+	.get = swapz_constructor_test_fail_hits_get,
+};
+module_param_cb(test_fail_constructor_hits,
+		&swapz_constructor_test_fail_hits_ops, NULL, 0444);
+MODULE_PARM_DESC(test_fail_constructor_hits,
+		 "Number of constructor qualification failures actually injected");
+
 static bool swapz_constructor_test_should_fail(
 	enum swapz_constructor_test_fail_stage stage)
 {
-	return swapz_test_fail_constructor_stage == (unsigned int)stage;
+	if (swapz_test_fail_constructor_stage != (unsigned int)stage)
+		return false;
+	atomic_inc(&swapz_test_fail_constructor_hits);
+	return true;
 }
 
 /*
