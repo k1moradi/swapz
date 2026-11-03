@@ -511,7 +511,7 @@ The generated source-provenance header is shared by native userspace and
 staged Kbuild sources. It must define the SHA, numeric clean state, and string
 clean state from the same Make invocation. Stage 2's Make-interface regression
 checks the generated string form required by kernel module metadata, including
-the dirty/unknown sandbox case.
+the clean source fixture case.
 
 ## Report contract
 

@@ -945,7 +945,7 @@ class PublicMakeContract(unittest.TestCase):
                 )
                 build_info = (fixture / "build/source-build-info.h").read_text()
                 self.assertIn(
-                    '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "0"',
+                    '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"',
                     build_info,
                     "generated provenance must provide the module metadata string",
                 )
