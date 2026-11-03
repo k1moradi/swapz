@@ -1,12 +1,13 @@
 [Unit]
 Description=Primary Linux swap on swapz
-BindsTo=swapz-primary-mapper.service
-After=swapz-primary-mapper.service
+# Passive systemd view of the already-active swap. The manager performs both
+# swapon and swapoff and owns the durable recovery state. This unit must never
+# be enabled in swap.target: that would queue a second swapon transaction.
+RefuseManualStart=yes
+RefuseManualStop=yes
 
 [Swap]
 What=/dev/mapper/swapz-primary
 Priority=-1
 TimeoutSec=120s
 
-[Install]
-WantedBy=swap.target

@@ -1,12 +1,15 @@
 [Unit]
-Description=Prepare the swapz primary swap mapper
+Description=Own the primary swapz mapper and swap lifecycle
 DefaultDependencies=no
 Requires=-.mount
 RequiresMountsFor=/var/lib/swapz/physical-recovery
-After=-.mount systemd-modules-load.service
-Before=dev-mapper-swapz\x2dprimary.swap shutdown.target
+After=-.mount systemd-modules-load.service dev-mapper-swapz\x2dprimary.swap
+Before=swap.target shutdown.target
 Conflicts=shutdown.target
-PartOf=dev-mapper-swapz\x2dprimary.swap
+# swapzctl primary start performs swapon; primary stop performs swapoff.
+# Do not start the passive .swap unit as a second activation job. This service
+# is WantedBy=swap.target and must stop *before* the observed .swap unit so
+# that the manager owns the only swapoff and durable ownership transition.
 RefuseManualStart=yes
 RefuseManualStop=yes
 
@@ -23,3 +26,6 @@ ExecStop=@SWAPZ_SBINDIR@/swapzctl primary stop
 TimeoutStartSec=120s
 TimeoutStopSec=120s
 UMask=0077
+
+[Install]
+WantedBy=swap.target

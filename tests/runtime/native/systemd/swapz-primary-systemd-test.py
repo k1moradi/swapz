@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Rootless regression fixture for swapz primary systemd packaging.
 
-This is intentionally not wired into the public test runner here; Agent 10 owns
-that integration. It never invokes swapon/swapoff, a real mapper, or reboot.
+The official rootless stage invokes this fixture. It never invokes swapon,
+swapoff, a real mapper, or reboot.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ BOOT_A = "11111111-1111-4111-8111-111111111111"
 BOOT_B = "22222222-2222-4222-8222-222222222222"
 SOURCE_SHA = "a" * 40
 MODULE_SHA = "b" * 64
+ACTIVE_RUN_ID = "0123456789abcdef0123456789abcdef"
 TARGET_BYTES = 124_787_884_032
 
 
@@ -115,7 +116,7 @@ class GeneratorTests(unittest.TestCase):
             f"After=dev-disk-by\\x2dpartuuid-{expected_encoded}.device\n"
             f"Conflicts=dev-disk-by\\x2dpartuuid-{expected_encoded}.swap\n"
             f"Before=dev-disk-by\\x2dpartuuid-{expected_encoded}.swap\n"
-            "JobTimeoutSec=30s\n"
+            "JobTimeoutSec=300s\n"
             "JobTimeoutAction=none\n"
         )
         self.assertEqual(self.dropin.read_text(encoding="ascii"), expected)
@@ -124,6 +125,15 @@ class GeneratorTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(self.dropin.read_text(encoding="ascii"), expected)
         self.assertNotEqual(first_identity, self.dropin.stat().st_ino)
+        # The separate udev .device job must be bounded as well as the mapper job.
+        device_dropin = (
+            self.normal / f"dev-disk-by\\x2dpartuuid-{expected_encoded}.device.d" /
+            "50-swapz-timeout.conf"
+        )
+        self.assertEqual(
+            device_dropin.read_text(encoding="ascii"),
+            "[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n",
+        )
 
     def test_invalid_synthetic_selectors_fail_without_target_dropin(self) -> None:
         cases = (
@@ -189,18 +199,23 @@ class UnitContractTests(unittest.TestCase):
                 "ExecStop=@SWAPZ_SBINDIR@/swapzctl primary stop",
             ],
         )
-        self.assertIn("Before=dev-mapper-swapz\\x2dprimary.swap shutdown.target", service)
+        self.assertIn("After=-.mount systemd-modules-load.service dev-mapper-swapz\\x2dprimary.swap", service)
+        self.assertIn("Before=swap.target shutdown.target", service)
+        self.assertIn("WantedBy=swap.target", service)
+        self.assertNotIn("PartOf=dev-mapper", service)
         self.assertIn("Conflicts=shutdown.target", service)
 
-    def test_swap_unit_has_bounded_swapoff_and_no_install_side_effect(self) -> None:
+    def test_swap_unit_is_passive_and_cannot_request_second_swapon(self) -> None:
         swap = read_text(PRIMARY_SWAP)
-        self.assertIn("After=swapz-primary-mapper.service", swap)
-        self.assertIn("BindsTo=swapz-primary-mapper.service", swap)
         self.assertIn("What=/dev/mapper/swapz-primary", swap)
         self.assertIn("Priority=-1", swap)
         self.assertRegex(swap, r"TimeoutSec=\d+s")
-        self.assertIn("WantedBy=swap.target", swap)
+        self.assertIn("RefuseManualStart=yes", swap)
+        self.assertIn("RefuseManualStop=yes", swap)
+        self.assertNotIn("WantedBy=swap.target", swap)
+        self.assertNotIn("BindsTo=swapz-primary-mapper.service", swap)
         self.assertNotIn("Alias=", swap)
+        self.assertIn("WantedBy=swap.target", read_text(MAPPER_SERVICE))
 
     def test_boot_verifier_is_automatic_observer_not_an_activator(self) -> None:
         service = read_text(BOOT_VERIFY_SERVICE)
@@ -335,9 +350,11 @@ class BootVerifierTests(unittest.TestCase):
         self.sys = self.root / "sys"
         self.dev = self.root / "dev"
         self.report = self.root / "var" / "lib" / "swapz" / "boot-acceptance"
-        for directory in (self.sbin, self.libexec, self.bin, self.proc, self.sys, self.dev, self.report):
+        self.recovery = self.report.parent / "physical-recovery"
+        for directory in (self.sbin, self.libexec, self.bin, self.proc, self.sys, self.dev, self.report, self.recovery):
             directory.mkdir(parents=True, exist_ok=True)
         self.report.chmod(0o700)
+        self.recovery.chmod(0o700)
         (self.proc / "sys" / "kernel" / "random").mkdir(parents=True)
         (self.sys / "module" / "dm_swapz" / "parameters").mkdir(parents=True)
         (self.dev / "disk" / "by-partuuid").mkdir(parents=True)
@@ -377,6 +394,7 @@ class BootVerifierTests(unittest.TestCase):
                 "SWAPZ_PRIMARY_TEST_SYS_ROOT": str(self.sys),
                 "SWAPZ_PRIMARY_TEST_DEV_ROOT": str(self.dev),
                 "SWAPZ_PRIMARY_TEST_REPORT_BASE": str(self.report),
+                "SWAPZ_PRIMARY_TEST_RECOVERY_BASE": str(self.recovery),
                 "SWAPZ_PRIMARY_TEST_MODULE_ARTIFACT": str(self.libexec / "dm-swapz.ko"),
                 "MOCK_PARTUUID": PARTUUID,
                 "MOCK_TARGET_BYTES": str(TARGET_BYTES),
@@ -416,7 +434,7 @@ class BootVerifierTests(unittest.TestCase):
                     case "$field" in TYPE) echo part ;; MAJ:MIN) echo 8:1 ;; SIZE) echo "$MOCK_TARGET_BYTES" ;; PKNAME) echo sda ;; *) echo ;; esac
                     ;;
                 */sda)
-                    case "$field" in MODEL) echo 'USB Multi-Card' ;; SERIAL) echo reader-serial ;; WWN) echo ;; TRAN) echo usb ;; RM) echo 1 ;; MAJ:MIN) echo 8:0 ;; TYPE) echo disk ;; PKNAME) echo ;; *) echo ;; esac
+                    case "$field" in MODEL) echo "${MOCK_READER_MODEL:-USB Multi-Card}" ;; SERIAL) echo "${MOCK_READER_SERIAL-reader-serial}" ;; WWN) echo "${MOCK_READER_WWN:-}" ;; TRAN) echo "${MOCK_READER_TRANSPORT:-usb}" ;; RM) echo "${MOCK_READER_REMOVABLE:-1}" ;; MAJ:MIN) echo 8:0 ;; TYPE) echo disk ;; PKNAME) echo ;; *) echo ;; esac
                     ;;
                 */zram0)
                     case "$field" in TYPE) echo disk ;; MAJ:MIN) echo 254:0 ;; SIZE) echo 1024 ;; PKNAME) echo ;; *) echo ;; esac
@@ -467,7 +485,7 @@ class BootVerifierTests(unittest.TestCase):
                 #!/bin/sh
                 if [ "$1" = list-units ]; then
                     printf 'dev-mapper-swapz\\x2dprimary.swap loaded %s %s Primary swap\n' "${MOCK_SWAP_ACTIVE:-active}" "${MOCK_SWAP_SUB:-active}"
-                    if [ -n "${MOCK_RAW_UNIT_WHAT:-}" ]; then
+                    if [ -n "${MOCK_RAW_UNIT_WHAT:-}" ] || [ "${MOCK_RAW_UNIT_PRESENT:-0}" = 1 ]; then
                         printf 'raw-target.swap loaded inactive dead Raw target\n'
                     fi
                     exit 0
@@ -508,7 +526,7 @@ class BootVerifierTests(unittest.TestCase):
                 """\
                 #!/bin/sh
                 case "$1" in
-                info) printf 'SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef\\n' ;;
+                info) printf '%s\\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}" ;;
                 table) printf '%s\\n' "${MOCK_DM_TABLE:-0 216643584 swapz 8:1 0 64 0 2 0 1 0 0}" ;;
                 status)
                     printf '0 216643584 swapz version=0 flush_err=0 segment_discards_failed=%s failed=%s error=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0\\n' "$MOCK_DM_DISCARD_FAIL" "$MOCK_DM_STATUS_FAIL"
@@ -565,10 +583,26 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("owner reboot has not occurred", same_boot.stderr)
         self.write_boot_id(BOOT_B)
         self.write_proc_swaps(active=True)
+        self.write_active_transaction()
+
+    def write_active_transaction(self) -> None:
+        (self.recovery / "primary-state.json").write_text(
+            f'{{"schema":"swapz-primary-state-v1","run_id":"{ACTIVE_RUN_ID}",'
+            '"stage":"ACTIVE","recovery_previous_stage":null}\n',
+            encoding="ascii",
+        )
+        claim = (
+            f'{{"major":8,"minor":1,"partuuid":"{PARTUUID}",'
+            f'"run_id":"{ACTIVE_RUN_ID}"}}\n'
+        )
+        (self.recovery / f"partition-{PARTUUID}.active").write_text(claim, encoding="ascii")
+        (self.recovery / f"consumed-{ACTIVE_RUN_ID}.json").write_text(claim, encoding="ascii")
+        for path in self.recovery.iterdir():
+            path.chmod(0o600)
 
     def test_observe_without_arm_is_incomplete(self) -> None:
         result = self.run_verifier("observe")
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("COLD_BOOT_OBSERVATION=INCOMPLETE", result.stdout)
         latest = (self.report / "latest.env").read_text(encoding="utf-8")
         self.assertIn("status=INCOMPLETE", latest)
@@ -629,6 +663,24 @@ class BootVerifierTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("loaded raw swap unit aliases selected partition", result.stderr)
 
+    def test_duplicate_mapper_unit_is_rejected_by_resolved_identity(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_RAW_UNIT_WHAT"] = str(self.dev / "mapper" / "swapz-primary")
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("selected_target_raw_swap_alias_or_inventory_unavailable", report)
+        self.assertIn("loaded swap unit duplicates primary mapper activation", observed.stderr)
+
+    def test_uninspectable_loaded_swap_unit_blocks_arm(self) -> None:
+        self.write_proc_swaps(active=False)
+        env = self.env.copy()
+        env["MOCK_RAW_UNIT_PRESENT"] = "1"
+        observed = self.run_verifier("arm", env=env)
+        self.assertNotEqual(observed.returncode, 0)
+        self.assertIn("ambiguous What= of loaded swap unit", observed.stderr)
+
     def test_active_raw_alias_blocks_arm(self) -> None:
         self.write_proc_swaps(active=False)
         raw_path = self.dev / "disk" / "by-uuid" / "target-uuid"
@@ -671,12 +723,41 @@ class BootVerifierTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("installed module bytes changed after arming", result.stderr)
 
+    def test_foreign_mapper_uuid_with_valid_prefix_cannot_pass(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_DM_UUID"] = "SWAPZ-PRIMARY-" + "f" * 32
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("mapper_uuid_not_bound_to_active_run", report)
+        self.assertIn(f"active_transaction_run_id={ACTIVE_RUN_ID}", report)
+
+    def test_missing_active_transaction_record_cannot_pass(self) -> None:
+        self.arm_then_reboot()
+        (self.recovery / "primary-state.json").unlink()
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("primary_active_transaction_or_owner_claim_invalid", report)
+
+    def test_stale_or_substituted_active_owner_claim_cannot_pass(self) -> None:
+        self.arm_then_reboot()
+        (self.recovery / f"partition-{PARTUUID}.active").write_text(
+            f'{{"major":8,"minor":1,"partuuid":"{PARTUUID}","run_id":"' + 'f' * 32 + '"}\n',
+            encoding="ascii",
+        )
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("primary_active_transaction_or_owner_claim_invalid", report)
+
     def test_wrong_mapper_geometry_records_fail(self) -> None:
         self.arm_then_reboot()
         env = self.env.copy()
         env["MOCK_DM_TABLE"] = "0 216643576 swapz 8:1 0 64 0 2 0 1 0 0"
         observed = self.run_verifier("observe", env=env)
-        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
         self.assertIn("COLD_BOOT_OBSERVATION=FAIL", observed.stdout)
         report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
         self.assertIn("mapper_logical_capacity_mismatch", report)
@@ -690,7 +771,7 @@ class BootVerifierTests(unittest.TestCase):
         env["MOCK_DM_DISCARD_FAIL"] = "1"
         env["MOCK_JOURNAL_ERROR"] = "1"
         observed = self.run_verifier("observe", env=env)
-        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
         self.assertIn("COLD_BOOT_OBSERVATION=FAIL", observed.stdout)
         report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
         self.assertIn("status=FAIL", report)
@@ -699,12 +780,93 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("mapper_service_not_active", report)
         self.assertIn("relevant_kernel_errors", report)
 
+    def test_unrelated_file_swap_is_allowed_but_primary_is_unique(self) -> None:
+        self.arm_then_reboot()
+        with (self.proc / "swaps").open("a", encoding="ascii") as swaps:
+            swaps.write("/swapfile file 32768 0 -2\n")
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("status=PASS", report)
+        self.assertIn("swap_total_entries=2", report)
+        self.assertIn("swap_mapper_entries=1", report)
+
+    def test_changed_parent_serial_cannot_pass_observation(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_READER_SERIAL"] = "substituted-reader"
+        self.assertNotEqual(self.run_verifier("preflight", env=env).returncode, 0)
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 1)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("selected_parent_serial_mismatch", report)
+
+    def test_parent_without_stable_serial_or_wwn_cannot_arm(self) -> None:
+        self.write_proc_swaps(active=False)
+        env = self.env.copy()
+        env["MOCK_READER_SERIAL"] = ""
+        observed = self.run_verifier("arm", env=env)
+        self.assertNotEqual(observed.returncode, 0)
+        self.assertIn("neither a stable serial nor WWN", observed.stderr)
+
+    def test_raw_swap_alias_configured_after_arm_prevents_pass(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_FSTAB_SOURCE"] = str(self.dev / "disk" / "by-uuid" / "target-uuid")
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 1)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("selected_target_raw_swap_alias_or_inventory_unavailable", report)
+
+    def test_unresolved_active_device_swap_is_rejected(self) -> None:
+        self.write_proc_swaps(active=False)
+        missing = self.dev / "disk" / "by-uuid" / "missing"
+        (self.proc / "swaps").write_text(
+            f"Filename Type Size Used Priority\n{missing} partition 4096 0 0\n",
+            encoding="ascii",
+        )
+        observed = self.run_verifier("arm")
+        self.assertNotEqual(observed.returncode, 0)
+        self.assertIn("unresolved active block-device swap", observed.stderr)
+
+    def test_oversized_mapper_length_produces_persistent_fail(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_DM_TABLE"] = "0 999999999999999999999999 swapz 8:1 0 64 0 2 0 1 0 0"
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("mapper_table_invalid", report)
+
+    def test_multiline_dm_table_cannot_inject_report_fields(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_DM_TABLE"] = "0 216643584 swapz 8:1 0 64 0 2 0 1 0 0\nstatus=PASS"
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertEqual(sum(line.startswith("status=") for line in report.splitlines()), 1)
+        self.assertIn("status=FAIL", report)
+
+    def test_early_kernel_mismatch_persists_fail_instead_of_exiting_unbound(self) -> None:
+        self.arm_then_reboot()
+        write_executable(
+            self.bin / "uname",
+            "#!/bin/sh\nif [ \"$1\" = -r ]; then echo unexpected-kernel; else exit 2; fi\n",
+        )
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("COLD_BOOT_OBSERVATION=FAIL", observed.stdout)
+        latest = (self.report / "latest.env").read_text(encoding="utf-8")
+        self.assertIn("kernel_release_mismatch", latest)
+        self.assertIn("status=FAIL", latest)
+
     def test_unavailable_kernel_log_is_incomplete_not_pass(self) -> None:
         self.arm_then_reboot()
         env = self.env.copy()
         env["MOCK_JOURNAL_UNAVAILABLE"] = "1"
         observed = self.run_verifier("observe", env=env)
-        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
         self.assertIn("COLD_BOOT_OBSERVATION=INCOMPLETE", observed.stdout)
         report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
         self.assertIn("kernel_log_unavailable", report)

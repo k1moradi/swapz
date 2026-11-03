@@ -34,25 +34,39 @@ still applies only to the target identified above, and lifecycle execution
 must remain disabled until the manager's parent checks and physical acceptance
 cover the selected target. The packaged systemd source derives the selected `.device` and by-PARTUUID
 `.swap` names only through the manager's validated selector interface. The
-generator adds exact device ordering, the raw by-PARTUUID conflict and a
-30-second job bound without embedding a host path, device number or capacity.
-The mapper unit requires the persistent recovery mount, runs cold-boot
-preflight before `recover -> prepare -> start`, bounds start and stop at 120
-seconds, and deliberately does not `BindsTo` removable media. The swap unit
-also bounds swapoff at 120 seconds so normal shutdown/reboot deactivates swap
-before mapper teardown. Static activation remains disabled and manual
-start/stop remains refused until the lifecycle and boot path are qualified.
+generator adds exact device ordering and the raw by-PARTUUID conflict without
+embedding a host path or capacity. The selected udev `.device` job has a 30s
+timeout; a separate 300s mapper-job bound allows the manager's 120s start/stop
+and kernel swapoff grace. The mapper service requires the persistent recovery
+mount and runs `preflight -> recover -> prepare -> start`. It deliberately does
+not `BindsTo` removable media. `swapzctl primary start` already performs
+`swapon` and `primary stop` performs `swapoff` and safe owned mapper teardown.
+Therefore the mapper service alone is WantedBy=swap.target and MUST be enabled
+only after qualification; the `.swap` unit is a passive view of the active
+swap and MUST NOT be enabled or started independently. For shutdown/reboot,
+the mapper's normal stop precedes the observed `.swap` stop, so the manager
+remains the only swapoff owner. Clear any legacy enabled `.swap` wants symlink
+before deployment. Units remain disabled and manual start/stop of the mapper
+and passive swap are refused until the lifecycle is qualified.
 
 `packaging/swapz-primary-boot-verify` implements the fail-closed
 `arm`/`preflight`/`observe` harness. It persists root-only evidence under
 `/var/lib/swapz/boot-acceptance`, binds the next boot to boot ID, kernel,
 protected PARTUUID, target geometry/parent identity and installed-module
-provenance, rejects active/configured raw-swap aliases by resolved block
-identity, and never removes or enables swap itself. PASS additionally requires
-the exact manager Device Mapper table/UUID/capacity, one primary `/proc/swaps`
-entry at priority -1, healthy service states/counters and no relevant kernel
-errors. Same-boot observations are INCOMPLETE; only a different owner-initiated
-boot may become PASS or FAIL.
+provenance, and rejects active/configured raw-swap aliases by resolved block
+identity, including unresolved block-device entries and second mapper
+activators. The verifier never enables, removes, or deactivates swap.
+Arming requires a stable removable-reader serial or WWN and a persistent
+report filesystem shared with the manager's qualified recovery storage,
+physically separate from the SD card. On the next boot, the verifier checks
+armed identity again, exact run-bound mapper UUID, ACTIVE transaction state and
+matching durable owner markers, full DM table/geometry, the primary mapper's
+`/proc/swaps` entry at priority -1 (unrelated host swapfile entries are
+allowed), healthy services/counters and relevant kernel errors.
+PASS/FAIL/INCOMPLETE evidence is committed to disk before the observer returns
+0/1/2 respectively. No same-boot PASS is possible. Reader serial does not
+establish the identity of the SD card itself: physical acceptance remains
+independently required.
 
 The partition path and content UUID are observations, not sufficient identity.
 Before destructive work, prove that the opened partition and parent are the
@@ -262,11 +276,13 @@ the primary swap and verifier disabled; installation never uses `--now`.
 The isolated `tests/runtime/native/systemd/swapz-primary-systemd-test.py`
 fixture is executed by the official rootless stage. After the
 execution/physical qualification gates pass and any selected-partition raw-swap
-configuration is removed, the owner-side activation flow still must run
-`swapz-primary-boot-verify arm`, enable the primary swap and verifier for the
-next boot without starting them in the arming boot, and leave the reboot to the
-owner. Integration is implemented; qualification, arming and owner reboot
-remain open.
+configuration is removed, the owner-side activation flow must confirm the
+passive `dev-mapper-swapz\\x2dprimary.swap` unit is disabled (including any
+legacy wants symlink), run `swapz-primary-boot-verify arm`, and enable
+`swapz-primary-mapper.service` plus `swapz-primary-boot-verify.service` for
+the next boot without starting them in the arming boot. The owner alone
+initiates reboot. Installer/test-runner integration is implemented;
+qualification, arming and owner reboot remain open.
 
 ## Current decision order
 
@@ -326,9 +342,8 @@ Unless evidence changes the order, work on:
    changes; these host-specific figures are not production capacity constants.
 5. sustained occupancy/GC/churn and physical service;
 6. persistent startup/shutdown integration and cold-boot acceptance harness:
-   bounded fail-closed unit/harness source is implemented; Agent 7 installer
-   wiring, Agent 10 runner wiring, qualification, arming and owner reboot remain
-   open;
+   bounded fail-closed units, packaged verifier and rootless runner are wired;
+   full qualification, owner-side arming and owner reboot remain open;
 7. performance optimization only after correctness/lifecycle gates are closed.
 
 At each milestone report exact `main` SHA, code/doc changes, tests, CI, current

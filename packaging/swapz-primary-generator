@@ -97,31 +97,42 @@ valid_encoded_partuuid "$encoded_device" || {
 	exit 1
 }
 
-dropin_dir=$normal_dir/swapz-primary-mapper.service.d
-if [ -L "$dropin_dir" ]; then
-	echo "swapz-primary-generator: refusing symlinked drop-in directory" >&2
-	exit 1
-fi
-mkdir -p -- "$dropin_dir"
-if [ ! -d "$dropin_dir" ] || [ -L "$dropin_dir" ]; then
-	echo "swapz-primary-generator: cannot create safe drop-in directory" >&2
-	exit 1
-fi
+# The mapper job spans bounded mapper start and, on shutdown, can include
+# swapoff followed by mapper teardown. Allow both 120s phases plus slack.
+# A mapper job timeout alone cannot bound the separate .device job queued by
+# Requires=, so cap that exact udev device job independently at 30s.
+mapper_dropin_dir=$normal_dir/swapz-primary-mapper.service.d
+device_dropin_dir=$normal_dir/$device_unit.d
+for dropin_dir in "$mapper_dropin_dir" "$device_dropin_dir"; do
+	if [ -L "$dropin_dir" ]; then
+		echo "swapz-primary-generator: refusing symlinked drop-in directory" >&2
+		exit 1
+	fi
+	mkdir -p -- "$dropin_dir"
+	if [ ! -d "$dropin_dir" ] || [ -L "$dropin_dir" ]; then
+		echo "swapz-primary-generator: cannot create safe drop-in directory" >&2
+		exit 1
+	fi
+done
 
-dropin=$dropin_dir/50-selected-target.conf
-temporary=$dropin.tmp.$$
+mapper_dropin=$mapper_dropin_dir/50-selected-target.conf
+device_dropin=$device_dropin_dir/50-swapz-timeout.conf
+mapper_temporary=$mapper_dropin.tmp.$$
+device_temporary=$device_dropin.tmp.$$
 cleanup()
 {
-	rm -f -- "$temporary"
+	rm -f -- "$mapper_temporary" "$device_temporary"
 }
 trap cleanup EXIT HUP INT TERM
-( set -C; : > "$temporary" ) 2>/dev/null || {
+( set -C; : > "$mapper_temporary" && : > "$device_temporary" ) 2>/dev/null || {
 	echo "swapz-primary-generator: cannot create drop-in" >&2
 	exit 1
 }
-printf '[Unit]\nRequires=%s\nAfter=%s\nConflicts=%s\nBefore=%s\nJobTimeoutSec=30s\nJobTimeoutAction=none\n' \
-	"$device_unit" "$device_unit" "$swap_unit" "$swap_unit" > "$temporary"
-chmod 0644 "$temporary"
-mv -fT -- "$temporary" "$dropin"
+printf '[Unit]\nRequires=%s\nAfter=%s\nConflicts=%s\nBefore=%s\nJobTimeoutSec=300s\nJobTimeoutAction=none\n' \
+	"$device_unit" "$device_unit" "$swap_unit" "$swap_unit" > "$mapper_temporary"
+printf '[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n' > "$device_temporary"
+chmod 0644 "$mapper_temporary" "$device_temporary"
+mv -fT -- "$device_temporary" "$device_dropin"
+mv -fT -- "$mapper_temporary" "$mapper_dropin"
 trap - EXIT HUP INT TERM
 exit 0

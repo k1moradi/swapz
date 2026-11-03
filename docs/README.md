@@ -102,14 +102,20 @@ module ownership. The execution gate remains disabled. Deterministic
 interruption/owned-null_blk qualification, actual Linux swap, full-card memory
 and capacity, physical churn, installation, and boot acceptance remain open.
 
-The systemd packaging source now has bounded target discovery/start/stop,
-fresh-boot recovery/prepare/start sequencing, block-identity raw-alias
-preflight, and an automatic persistent cold-boot evidence collector. It cannot
-report PASS in the arming boot. Agent 7 still owns installation/ownership
-wiring for the new helper and verifier service, and Agent 10 owns official
-test-runner integration; therefore the harness is not installed or armed and
-boot acceptance remains open. No reboot or real swap activation was performed
-by this implementation work.
+The systemd integration now bounds the selected udev device wait at 30s,
+mapper start and stop at 120s each, and the overall mapper job at 300s.
+The manager alone owns the `swapon`/`swapoff` lifecycle; the mapper service
+is the only installable swap.target entry, while the `.swap` unit is an
+uninstallable passive status view (never enable both). A reboot-free verifier
+checks the protected selector, parent reader identity, raw-swap aliases,
+persisted owner transaction and exact run-bound mapper UUID/table/geometry,
+service state, errors and counters. It writes persistent root-only PASS, FAIL
+or INCOMPLETE observations and cannot claim PASS in the arming boot.
+Agent 7 has integrated the verifier executable/unit into the disabled-by-default
+package and Agent 10 has integrated the isolated systemd fixture into the
+rootless test stage. Owner-side installation, qualification and arming remain
+open. No reboot, real swap activation, or physical-card write was performed
+by this systemd work.
 
 The current host, target, build, CI, plan, and readiness-gate snapshot is
 tracked in [handoff/production-readiness.json](handoff/production-readiness.json).

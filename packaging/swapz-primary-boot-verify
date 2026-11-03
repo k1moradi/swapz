@@ -37,6 +37,10 @@ if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
 	expected_uid=$(id -u)
 fi
 
+recovery_base=/var/lib/swapz/physical-recovery
+if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
+	recovery_base=${SWAPZ_PRIMARY_TEST_RECOVERY_BASE:?missing test recovery base}
+fi
 arm_file=$report_base/armed.env
 mapper_swap_unit='dev-mapper-swapz\x2dprimary.swap'
 mapper_service=swapz-primary-mapper.service
@@ -166,6 +170,16 @@ arm_field()
 	' "$arm_file"
 }
 
+identity_attribute()
+{
+	# lsblk strings can originate in removable-reader firmware. Strip control
+	# characters, delimiters and cap their size before saving them as evidence.
+	attribute=$(printf '%s' "$1" | LC_ALL=C tr '\r\n\t=' '    ' | LC_ALL=C tr -cd '[:print:]') || return 1
+	[ "${#attribute}" -le 128 ] || return 1
+	[ -n "$attribute" ] || attribute=unavailable
+	printf '%s\n' "$attribute"
+}
+
 manager_target_identity()
 {
 	units=$("$swapzctl" primary systemd-units) || return 1
@@ -226,12 +240,13 @@ target_identity()
 		target_wwn=$(lsblk -dnro WWN -- "$parent_path" 2>/dev/null || true)
 		target_transport=$(lsblk -dnro TRAN -- "$parent_path" 2>/dev/null || true)
 		target_removable=$(lsblk -dnro RM -- "$parent_path" 2>/dev/null || true)
-		for variable_name in target_model target_serial target_wwn target_transport target_removable; do
-			eval "value=\${$variable_name}"
-			value=$(printf '%s' "$value" | tr '\n\r\t=' '    ')
-			[ -n "$value" ] || value=unavailable
-			eval "$variable_name=\$value"
-		done
+		# Never evaluate reader-provided metadata as shell source. Keep one
+		# bounded, printable line per attribute for the persistent arm record.
+		target_model=$(identity_attribute "$target_model") || return 1
+		target_serial=$(identity_attribute "$target_serial") || return 1
+		target_wwn=$(identity_attribute "$target_wwn") || return 1
+		target_transport=$(identity_attribute "$target_transport") || return 1
+		target_removable=$(identity_attribute "$target_removable") || return 1
 		;;
 	esac
 	return 0
@@ -277,21 +292,32 @@ raw_swap_alias_guard()
 	# The stable by-PARTUUID unit is handled by the generator's Conflicts=. This
 	# identity scan closes by-UUID/by-id/by-path/plain-device aliases without
 	# ever stopping or modifying an unrelated swap area.
+	# No second unit may activate this mapper through a different pathname.
+	# Prior to mapper creation its block identity may be absent; the literal
+	# canonical path is rejected independently below.
+	mapper_alias_major_minor=$(path_major_minor "$mapper_path" 2>/dev/null || true)
 	proc_swaps=$proc_root/swaps
-	if [ -r "$proc_swaps" ]; then
-		awk 'NR > 1 { print $1 }' "$proc_swaps" | while IFS= read -r source; do
-			[ -n "$source" ] || continue
-			major_minor=$(path_major_minor "$source" 2>/dev/null || true)
-			if [ "$major_minor" = "$target_major_minor" ]; then
-				echo "swapz-primary-boot-verify: selected partition is already active as raw swap: $source" >&2
-				exit 73
-			fi
-		done
-		status=$?
-		[ "$status" -ne 73 ] || return 1
-	else
+	[ -r "$proc_swaps" ] || return 1
+	active_sources=$(mktemp "$report_base/.active-sources.XXXXXX") || return 1
+	if ! awk 'NR > 1 { print $1 }' "$proc_swaps" > "$active_sources"; then
+		rm -f -- "$active_sources"
 		return 1
 	fi
+	while IFS= read -r source; do
+		[ -n "$source" ] || continue
+		major_minor=$(path_major_minor "$source" 2>/dev/null || true)
+		if [ "$major_minor" = "$target_major_minor" ]; then
+			echo "swapz-primary-boot-verify: selected partition is already active as raw swap: $source" >&2
+			rm -f -- "$active_sources"
+			return 1
+		fi
+		if [ -z "$major_minor" ] && device_like_swap_source "$source"; then
+			echo "swapz-primary-boot-verify: unresolved active block-device swap prevents alias proof: $source" >&2
+			rm -f -- "$active_sources"
+			return 1
+		fi
+	done < "$active_sources"
+	rm -f -- "$active_sources"
 
 	fstab_sources=$(mktemp "$report_base/.fstab-sources.XXXXXX") || return 1
 	fstab_errors=$(mktemp "$report_base/.fstab-errors.XXXXXX") || {
@@ -317,6 +343,11 @@ raw_swap_alias_guard()
 			rm -f -- "$fstab_sources" "$fstab_errors"
 			return 1
 		fi
+		if [ "$source" = "$mapper_path" ] || { [ -n "$mapper_alias_major_minor" ] && [ "$major_minor" = "$mapper_alias_major_minor" ]; }; then
+			echo "swapz-primary-boot-verify: fstab configures duplicate mapper swap activation: $source" >&2
+			rm -f -- "$fstab_sources" "$fstab_errors"
+			return 1
+		fi
 		if [ -z "$major_minor" ] && device_like_swap_source "$source"; then
 			echo "swapz-primary-boot-verify: unresolved fstab block-device swap source prevents alias proof: $source" >&2
 			rm -f -- "$fstab_sources" "$fstab_errors"
@@ -334,13 +365,27 @@ raw_swap_alias_guard()
 	while IFS=' ' read -r unit _rest; do
 		[ -n "$unit" ] || continue
 		[ "$unit" = "$mapper_swap_unit" ] && continue
-		what=$(systemctl show --property=What --value "$unit" 2>/dev/null || true)
-		case "$what" in *'
-'*) what= ;; esac
-		[ -n "$what" ] || continue
+		if ! what=$(systemctl show --property=What --value "$unit" 2>/dev/null); then
+			echo "swapz-primary-boot-verify: cannot inspect loaded swap unit: $unit" >&2
+			rm -f -- "$loaded_swaps"
+			return 1
+		fi
+		case "$what" in
+		*'
+'*|'')
+			echo "swapz-primary-boot-verify: ambiguous What= of loaded swap unit: $unit" >&2
+			rm -f -- "$loaded_swaps"
+			return 1
+			;;
+		esac
 		major_minor=$(path_major_minor "$what" 2>/dev/null || true)
 		if [ "$major_minor" = "$target_major_minor" ]; then
 			echo "swapz-primary-boot-verify: loaded raw swap unit aliases selected partition: $unit ($what)" >&2
+			rm -f -- "$loaded_swaps"
+			return 1
+		fi
+		if [ "$what" = "$mapper_path" ] || { [ -n "$mapper_alias_major_minor" ] && [ "$major_minor" = "$mapper_alias_major_minor" ]; }; then
+			echo "swapz-primary-boot-verify: loaded swap unit duplicates primary mapper activation: $unit ($what)" >&2
 			rm -f -- "$loaded_swaps"
 			return 1
 		fi
@@ -352,6 +397,60 @@ raw_swap_alias_guard()
 	done < "$loaded_swaps"
 	rm -f -- "$loaded_swaps"
 	return 0
+}
+
+valid_primary_record()
+{
+	# Match the manager's 0600, root-owned, single-link recovery records.
+	[ -f "$1" ] && [ ! -L "$1" ] || return 1
+	[ "$(stat -c '%u' -- "$1")" -eq "$expected_uid" ] || return 1
+	[ "$(stat -c '%a' -- "$1")" = 600 ] || return 1
+	[ "$(stat -c '%h' -- "$1")" -eq 1 ] || return 1
+	[ "$(stat -c '%s' -- "$1")" -le 4096 ] || return 1
+}
+
+active_transaction_run_id()
+{
+	# This is an observer-only consistency check. The manager performs full
+	# transaction parsing and enforces immutable ownership at every mutation.
+	state=$recovery_base/primary-state.json
+	valid_primary_record "$state" || return 1
+	state_record=$(cat -- "$state") || return 1
+	run_id=$(printf '%s\n' "$state_record" | sed -nE \
+		's/^\{"schema":"swapz-primary-state-v1","run_id":"([0-9a-f]{32})","stage":"ACTIVE","recovery_previous_stage":null\}$/\1/p')
+	[ "${#run_id}" -eq 32 ] || return 1
+	[ "$(printf '%s\n' "$state_record" | wc -l)" -eq 1 ] || return 1
+	[ "$selected_partuuid" != unavailable ] && [ "$target_major_minor" != unavailable ] || return 1
+	major=${target_major_minor%:*}
+	minor=${target_major_minor#*:}
+	expected_claim=$(printf '{"major":%s,"minor":%s,"partuuid":"%s","run_id":"%s"}' \
+		"$major" "$minor" "$selected_partuuid" "$run_id")
+	for record in "$recovery_base/partition-$selected_partuuid.active" \
+		"$recovery_base/consumed-$run_id.json"; do
+		valid_primary_record "$record" || return 1
+		[ "$(cat -- "$record")" = "$expected_claim" ] || return 1
+	done
+	printf '%s\n' "$run_id"
+}
+
+verify_persistent_report_storage()
+{
+	# The manager already proves that its recovery filesystem is persistent and
+	# belongs to a different physical disk from the selected SD card. Keep the
+	# boot evidence on that *same filesystem* rather than trusting a pathname
+	# that might itself be a mount over the disposable card or a tmpfs.
+	[ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" != 1 ] || return 0
+	[ -d "$recovery_base" ] && [ ! -L "$recovery_base" ] ||
+		fail "primary recovery directory is unavailable or symlinked"
+	report_filesystem=$(stat -c '%d' -- "$report_base") || fail "cannot identify report filesystem"
+	recovery_filesystem=$(stat -c '%d' -- "$recovery_base") || fail "cannot identify recovery filesystem"
+	[ "$report_filesystem" = "$recovery_filesystem" ] ||
+		fail "boot evidence is not on the qualified recovery filesystem"
+	plan=$("$swapzctl" primary plan) || fail "cannot query read-only recovery storage plan"
+	case "$plan" in
+	*'"recovery_preflight_read":true'*'"recovery_filesystem_supported":true'*'"recovery_directly_not_target":true'*'"recovery_source_chain_checked":true'*'"recovery_same_physical_disk_as_target":false'*) ;;
+	*) fail "read-only plan cannot prove recovery and boot evidence are persistent and outside the selected SD card" ;;
+	esac
 }
 
 arm_harness()
@@ -366,6 +465,10 @@ arm_harness()
 	manager_target_identity || fail "protected primary selector is invalid"
 	target_identity || fail "selected PARTUUID device is unavailable or invalid"
 	[ "$target_removable" = 1 ] || fail "selected target parent is not reported as removable"
+	# A removable reader's model alone does not identify the selected parent.
+	[ "$target_serial" != unavailable ] || [ "$target_wwn" != unavailable ] || \
+		fail "selected target parent has neither a stable serial nor WWN"
+	verify_persistent_report_storage
 	raw_swap_alias_guard || fail "selected partition has a raw-swap alias conflict or alias inventory is unavailable"
 	module_artifact_metadata || fail "installed module provenance is unavailable or unqualified"
 
@@ -422,13 +525,17 @@ preflight_boot()
 	target_identity || fail "selected PARTUUID device is unavailable after reboot"
 	[ "$target_size_bytes" = "$expected_size" ] || fail "selected target size changed after arming"
 	[ "$target_removable" = 1 ] || fail "selected target parent is no longer reported as removable"
-	for attribute in model serial wwn transport removable; do
-		eval "expected_value=\$expected_$attribute"
-		eval "current_value=\$target_$attribute"
-		if [ "$expected_value" != unavailable ] && [ "$current_value" != "$expected_value" ]; then
-			fail "selected target $attribute changed after arming"
-		fi
-	done
+	# The parent device name (sda/sdb) may change on reboot; bind instead
+	# to the stable reader attributes recorded during arming.
+	[ "$expected_serial" != unavailable ] || [ "$expected_wwn" != unavailable ] || \
+		fail "arm record lacks stable selected-parent identity"
+	[ "$expected_removable" = 1 ] || fail "arm record lacks removable-parent identity"
+	[ "$target_model" = "$expected_model" ] || fail "selected target model changed after arming"
+	[ "$target_serial" = "$expected_serial" ] || fail "selected target serial changed after arming"
+	[ "$target_wwn" = "$expected_wwn" ] || fail "selected target WWN changed after arming"
+	[ "$target_transport" = "$expected_transport" ] || fail "selected target transport changed after arming"
+	[ "$target_removable" = "$expected_removable" ] || fail "selected target removable marker changed after arming"
+	verify_persistent_report_storage
 	raw_swap_alias_guard || fail "selected partition has a raw-swap alias conflict or alias inventory is unavailable"
 	module_artifact_metadata || fail "installed module provenance cannot be verified after reboot"
 	[ "$module_sha256" = "$expected_module_sha" ] || fail "installed module bytes changed after arming"
@@ -500,6 +607,11 @@ observe_boot()
 	expected_kernel_release=unavailable
 	expected_partuuid=unavailable
 	expected_target_size=unavailable
+	expected_target_model=unavailable
+	expected_target_serial=unavailable
+	expected_target_wwn=unavailable
+	expected_target_transport=unavailable
+	expected_target_removable=unavailable
 	expected_module_sha=unavailable
 	expected_source_sha=unavailable
 	cold_boot_observed=no
@@ -510,6 +622,11 @@ observe_boot()
 		expected_kernel_release=$(arm_field arm_kernel_release 2>/dev/null || printf 'unavailable')
 		expected_partuuid=$(arm_field expected_partuuid 2>/dev/null || printf 'unavailable')
 		expected_target_size=$(arm_field expected_target_size_bytes 2>/dev/null || printf 'unavailable')
+		expected_target_model=$(arm_field expected_target_model 2>/dev/null || printf 'unavailable')
+		expected_target_serial=$(arm_field expected_target_serial 2>/dev/null || printf 'unavailable')
+		expected_target_wwn=$(arm_field expected_target_wwn 2>/dev/null || printf 'unavailable')
+		expected_target_transport=$(arm_field expected_target_transport 2>/dev/null || printf 'unavailable')
+		expected_target_removable=$(arm_field expected_target_removable 2>/dev/null || printf 'unavailable')
 		expected_module_sha=$(arm_field expected_module_sha256 2>/dev/null || printf 'unavailable')
 		expected_source_sha=$(arm_field expected_module_source_sha 2>/dev/null || printf 'unavailable')
 		if valid_boot_id "$boot_id" 2>/dev/null && valid_boot_id "$armed_boot_id" 2>/dev/null; then
@@ -541,12 +658,32 @@ observe_boot()
 		if [ "$observation_expected" -eq 1 ]; then
 			[ "$selected_partuuid" = "$expected_partuuid" ] || append_failure selected_partuuid_mismatch
 			[ "$target_size_bytes" = "$expected_target_size" ] || append_failure selected_target_size_mismatch
+			[ "$expected_target_serial" != unavailable ] || [ "$expected_target_wwn" != unavailable ] || append_failure armed_parent_identity_unavailable
+			[ "$expected_target_removable" = 1 ] && [ "$target_removable" = 1 ] || append_failure selected_target_not_removable
+			[ "$target_model" = "$expected_target_model" ] || append_failure selected_parent_model_mismatch
+			[ "$target_serial" = "$expected_target_serial" ] || append_failure selected_parent_serial_mismatch
+			[ "$target_wwn" = "$expected_target_wwn" ] || append_failure selected_parent_wwn_mismatch
+			[ "$target_transport" = "$expected_target_transport" ] || append_failure selected_parent_transport_mismatch
+			if ! raw_swap_alias_guard; then
+				append_failure selected_target_raw_swap_alias_or_inventory_unavailable
+			fi
 		fi
 	else
 		if [ "$observation_expected" -eq 1 ]; then
 			append_failure selected_target_unavailable
 		else
 			append_incomplete selected_target_unavailable
+		fi
+	fi
+
+	active_run_id=unavailable
+	expected_dm_uuid=unavailable
+	if [ "$observation_expected" -eq 1 ]; then
+		if active_run_id=$(active_transaction_run_id); then
+			expected_dm_uuid=SWAPZ-PRIMARY-$active_run_id
+		else
+			active_run_id=unavailable
+			append_failure primary_active_transaction_or_owner_claim_invalid
 		fi
 	fi
 
@@ -615,7 +752,7 @@ observe_boot()
 		set -- $dm_table
 		IFS=$old_ifs
 		if [ "$#" -eq 12 ] && [ "$1" = 0 ] && \
-		   printf '%s\n' "$2" | grep -Eq '^[1-9][0-9]*$' && \
+		   [ "${#2}" -le 15 ] && printf '%s\n' "$2" | grep -Eq '^[1-9][0-9]*$' && \
 		   [ "$3" = swapz ] && [ "$5" = 0 ] && [ "$6" = 64 ] && \
 		   [ "$7" = 0 ] && [ "$8" = 2 ] && [ "$9" = 0 ] && \
 		   [ "${10}" = 1 ] && [ "${11}" = 0 ] && [ "${12}" = 0 ]; then
@@ -630,6 +767,7 @@ observe_boot()
 		fi
 		if [ "$observation_expected" -eq 1 ]; then
 			printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$' || append_failure mapper_uuid_invalid
+			[ "$expected_dm_uuid" != unavailable ] && [ "$dm_uuid" = "$expected_dm_uuid" ] || append_failure mapper_uuid_not_bound_to_active_run
 			printf '%s\n' "$mapper_major_minor" | grep -Eq '^[0-9]+:[0-9]+$' || append_failure mapper_device_unavailable
 		fi
 		if [ "$dm_status" != unavailable ] && [ -n "$dm_status" ]; then
@@ -698,7 +836,8 @@ observe_boot()
 $(awk 'NR > 1 { print $1, $2, $3, $4, $5 }' "$proc_root/swaps")
 SWAPS
 		if [ "$observation_expected" -eq 1 ]; then
-			[ "$swap_total_entries" -eq 1 ] || append_failure unexpected_swap_entry_count
+			# Other unrelated swap areas (e.g. an owner's /swapfile) are
+			# allowed. Only the selected mapper must appear exactly once.
 			[ "$swap_mapper_entries" -eq 1 ] || append_failure primary_mapper_not_active_as_swap
 			[ "$swap_type" = partition ] || append_failure primary_swap_type_invalid
 			[ "$swap_priority" = -1 ] || append_failure primary_swap_priority_invalid
@@ -767,6 +906,9 @@ SWAPS
 		status=PASS
 	fi
 
+	# The raw table is retained only as printable single-line evidence. Keep
+	# shell/kernel-sourced data from injecting extra keys into this env report.
+	dm_table=$(printf '%s' "$dm_table" | LC_ALL=C tr '\r\n=' '   ' | LC_ALL=C tr -cd '[:print:]')
 	report=$report_base/report-$boot_id.env
 	temporary=$(mktemp "$report_base/.boot-report.XXXXXX") || fail "cannot create boot report"
 	cat > "$temporary" <<REPORT
@@ -791,6 +933,8 @@ module_build_source_sha=$module_source_sha
 module_build_source_clean=$module_source_clean
 loaded_module_build_source_sha=$loaded_module_source_sha
 loaded_module_build_source_clean=$loaded_module_source_clean
+active_transaction_run_id=$active_run_id
+expected_dm_uuid=$expected_dm_uuid
 dm_uuid=$dm_uuid
 dm_table=$dm_table
 dm_logical_sectors=$dm_logical_sectors
@@ -828,6 +972,13 @@ REPORT
 	commit_file "$latest_temporary" "$report_base/latest.env"
 	printf 'COLD_BOOT_OBSERVATION=%s boot_id=%s armed_boot_id=%s report=%s\n' \
 		"$status" "$boot_id" "$armed_boot_id" "$report"
+	# systemd must not report this observer as successful when the acceptance
+	# verdict is FAIL or INCOMPLETE. Evidence is already durably committed.
+	case "$status" in
+	PASS) return 0 ;;
+	FAIL) return 1 ;;
+	INCOMPLETE) return 2 ;;
+	esac
 }
 
 case "$mode" in
