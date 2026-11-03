@@ -3932,6 +3932,10 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         acceptance_manifest_sha256 = (
             runner.production_acceptance_manifest_sha256())
         self.assertIsNotNone(acceptance_manifest_sha256)
+        target = {
+            "partuuid": "f13428f6-01",
+            "device_bytes": 124787884032,
+        }
         evidence = {
             "production_source": dict(common),
             "clean_build_state": {**common, "clean": True},
@@ -3954,29 +3958,36 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             "owned_nullblk_qualification": {
                 **common, "overall": "PASS",
                 "evidence_sha256": self.DIGEST},
+            "authorized_target_identity": {
+                **common, "authorized": True, "target": dict(target)},
             "real_linux_swap": {
                 **common, "overall": "PASS", "swap_out_in": "PASS",
+                "target": dict(target),
                 "acceptance_manifest_sha256": acceptance_manifest_sha256,
                 "evidence_sha256": self.DIGEST},
             "maximum_capacity_and_ram": {
                 **common, "overall": "PASS", "incompressible": "PASS",
+                "target": dict(target),
                 "logical_capacity_bytes": 4096, "peak_ram_bytes": 8192,
                 "acceptance_manifest_sha256": acceptance_manifest_sha256,
                 "evidence_sha256": self.DIGEST},
             "sustained_physical_performance": {
                 **common, "overall": "PASS", "sustained": "PASS",
+                "target": dict(target),
                 "acceptance_manifest_sha256": acceptance_manifest_sha256,
                 "evidence_sha256": self.DIGEST},
             "lifecycle_deployment_state": {
                 **common, "overall": "PASS", "lifecycle": "PASS",
-                "deployment": "PASS", "evidence_sha256": self.DIGEST},
+                "deployment": "PASS", "target": dict(target),
+                "evidence_sha256": self.DIGEST},
             "installed_artifact_identity": {
                 **common, "installed": True, "hashes": hashes},
             "cold_boot_harness": {
-                **common, "armed": True,
+                **common, "armed": True, "target": dict(target),
                 "evidence_sha256": self.DIGEST},
             "owner_observed_reboot": {
                 **common, "observed": True, "overall": "PASS",
+                "target": dict(target),
                 "evidence_sha256": self.DIGEST},
         }
         return {
@@ -4069,6 +4080,33 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 snapshot = self.passing_snapshot()
                 snapshot["release_evidence"][evidence_name][
                     "acceptance_manifest_sha256"] = "e" * 64
+                verdict = runner.evaluate_production_readiness(
+                    snapshot, self.SOURCE_SHA)
+                self.assertEqual(
+                    verdict["evidence_statuses"][evidence_name], "BLOCKED")
+                self.assertNotEqual(verdict["release_verdict"], "PASS")
+
+    def test_authorized_target_identity_is_required_and_cross_bound(self):
+        malformed = self.passing_snapshot()
+        malformed["release_evidence"]["authorized_target_identity"]["target"][
+            "partuuid"] = "F13428F6-01"
+        verdict = runner.evaluate_production_readiness(
+            malformed, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["authorized_target_identity"],
+            "BLOCKED")
+
+        for evidence_name in (
+                "real_linux_swap", "maximum_capacity_and_ram",
+                "sustained_physical_performance",
+                "lifecycle_deployment_state", "cold_boot_harness",
+                "owner_observed_reboot"):
+            with self.subTest(evidence=evidence_name):
+                snapshot = self.passing_snapshot()
+                snapshot["release_evidence"][evidence_name]["target"] = {
+                    "partuuid": "9abc8def-02",
+                    "device_bytes": 124787884032,
+                }
                 verdict = runner.evaluate_production_readiness(
                     snapshot, self.SOURCE_SHA)
                 self.assertEqual(
