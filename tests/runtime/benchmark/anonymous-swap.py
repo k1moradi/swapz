@@ -22,6 +22,8 @@ import sys
 import time
 from pathlib import Path
 
+from evidence_io import write_new_json
+
 PAGE = 4096
 MIB = 1024 * 1024
 SCHEMA = "swapz-anonymous-swap-v1"
@@ -679,11 +681,7 @@ def run(args):
             },
         }
         args._partial_report = report
-        output = Path(args.result)
-        if output.exists():
-            raise ValueError("refusing to overwrite anonymous swap result")
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        write_new_json(Path(args.result), report)
         print(json.dumps(report, sort_keys=True))
     finally:
         mapping.close()
@@ -708,9 +706,10 @@ def main():
         failure.update({"schema": SCHEMA, "verdict": "FAIL", "workload_id": args.workload_id,
                         "candidate": args.candidate, "source_sha": args.source_sha, "failure_reason": str(exc)})
         try:
-            output = Path(args.result)
-            if not output.exists(): output.parent.mkdir(parents=True, exist_ok=True); output.write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
-        except OSError: pass
+            write_new_json(Path(args.result), failure)
+        except (OSError, ValueError):
+            # Preserve any earlier result and the original worker exception.
+            pass
         error = exc
     finally:
         signal.signal(signal.SIGINT, previous_sigint)
