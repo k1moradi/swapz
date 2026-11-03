@@ -1104,9 +1104,9 @@ evaluation it must call \`physical-campaign-evidence.py seal\` with both snapsho
 the evaluator summary and every pair JSON. The create-only sealer hashes the
 frozen policy, prospective amendment, evaluator and itself; verifies original
 pair fields against the summary; preserves failed/excluded attempts; and only
-emits campaign_status PASS for a complete v2 PASS with stable source, kernel,
-device queue/scheduler, CPU policy/affinity, swap identity and module cleanup
-state. A v1 numerical PASS is sealed as BLOCKED rather than promoted. Host
+emits campaign_status PASS for a complete v2 PASS with stable source/tree,
+full kernel identity, CPU model/policy/affinity, total RAM, mount and swap
+inventories, device identity/queue/scheduler and module cleanup state. A v1 numerical PASS is sealed as BLOCKED rather than promoted. Host
 lower-WRITE reduction is not a direct NAND endurance/wear measurement and must
 not be reported as one.
 
