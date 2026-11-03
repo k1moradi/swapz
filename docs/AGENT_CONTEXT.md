@@ -335,7 +335,7 @@ Unless evidence changes the order, work on:
    path.
 2. **Active:** directly qualify interruption and recovery behavior for the
    primary lifecycle coordinator. Prepared start, normal stop and standalone
-   recovery are now wired behind the existing disabled execution gate. They
+   recovery are wired behind boot-scoped runtime execution authorization. They
    bind each operation to the run manifest, exact target header and recorded
    module ownership. Rootless deterministic interruption coverage now enumerates
    every durable STARTING/STOPPING/RECOVERING cleanup boundary plus
