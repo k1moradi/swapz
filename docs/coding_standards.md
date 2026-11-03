@@ -166,9 +166,18 @@ Before deleting production code, identify all current callers and preserve neces
 
 ## Change discipline
 
-Work directly on `main`; branches, secondary worktrees and pull requests are not
-part of the current project workflow. Before editing, fetch and require a clean
-local main synchronized with `origin/main` and the canonical remote head. After
+Work directly on `main` ONLY. **Creating or using ANY other branch and
+creating or using ANY pull request are prohibited**, including temporary/agent
+branches, drafts, CI-only PRs, forks and secondary worktrees. No GitHub
+`create_branch` or `create_pull_request` actions, `git switch -c`,
+`git checkout -b`, or branch-targeted pushes are allowed. Historical remote
+branches and PRs are read-only, not permitted alternatives. The mandatory
+root [AGENTS.md](../AGENTS.md) and [AGENT_CONTEXT.md](AGENT_CONTEXT.md)
+define the complete main-only protocol. If direct-main publication is denied,
+preserve unpublished work and report BLOCKED; do not fall back to a PR.
+
+Before editing, fetch and require a clean local main synchronized with
+`origin/main` and the canonical remote head. After
 each completed commit, push normally and verify local HEAD equals `origin/main`.
 After long tests, fetch again before publishing. If the remote advanced while an
 unpublished local commit exists, reconcile only that unpublished work onto the
