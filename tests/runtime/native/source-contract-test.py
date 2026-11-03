@@ -1380,7 +1380,7 @@ static swapz_u16 swapz_probe_set(
     def test_failed_target_cannot_complete_new_upper_write_success(self):
         complete = body("swapz_complete")
         status = body("swapz_status")
-        self.assertIn("if (!error && ctx && READ_ONCE(ctx->failed))", complete)
+        self.assertIn("if (!error && ctx && smp_load_acquire(&ctx->failed))", complete)
         self.assertIn("error = READ_ONCE(ctx->last_error)", complete)
         self.assertIn("error = -EIO", complete)
         self.assertIn("bio->bi_status = errno_to_blk_status(error)", complete)
@@ -1404,7 +1404,7 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("blk_status_t *error", DM)
         self.assertIn("if (*error)", endio)
         self.assertIn("atomic64_inc(&ctx->endio_write_seen_err)", endio)
-        self.assertIn("if (!*error && READ_ONCE(ctx->failed))", endio)
+        self.assertIn("if (!*error && smp_load_acquire(&ctx->failed))", endio)
         self.assertIn("*error = errno_to_blk_status(failure ? failure : -EIO)", endio)
         self.assertIn("atomic64_inc(&ctx->endio_write_forced_err)", endio)
         self.assertIn("return DM_ENDIO_DONE", endio)
@@ -1741,7 +1741,7 @@ static swapz_u16 swapz_probe_set(
                         handoff.rindex(pending_guard))
         self.assertNotIn("allow_without_lower_pending", handoff)
         self.assertLess(handoff.index("spin_lock_irqsave"),
-                        handoff.index("ctx->accepting && !ctx->failed"))
+                        handoff.index("ctx->accepting && !READ_ONCE(ctx->failed)"))
         self.assertLess(handoff.index("queue_work("),
                         handoff.index("spin_unlock_irqrestore"))
         self.assertIn("count > SWAPZ_MAX_RECORDS", handoff)
@@ -2017,6 +2017,7 @@ typedef int blk_status_t;
 typedef int atomic_t;
 typedef uint64_t atomic64_t;
 #define READ_ONCE(x) (x)
+#define smp_load_acquire(ptr) __atomic_load_n((ptr), __ATOMIC_ACQUIRE)
 #define SWAPZ_MAX_RECORDS 64U
 #define REQ_OP_WRITE 1
 #define DM_ENDIO_DONE 0
@@ -4227,7 +4228,7 @@ int main(void)
         self.assertIn("swapz_refresh_accepted_followup(ctx)", normal_read)
         self.assertNotIn("ctx->retained_window_read_bypasses++", normal_read)
         self.assertNotIn("swapz_note_single_tail_read_bypass(ctx)", normal_read)
-        abort = flush[flush.index("if (ctx->failed)"):
+        abort = flush[flush.index("if (smp_load_acquire(&ctx->failed))"):
                       flush.index("swapz_order_window(ctx)")]
         self.assertIn("swapz_complete(ctx->batch[index].bio, error)", abort)
         self.assertIn("goto accounted;", abort)
@@ -5492,7 +5493,7 @@ int main(void)
         self.assertLess(final_queue, final_unlock)
         self.assertLess(final_unlock, submitter_call)
         self.assertLess(submitter_call, submitted)
-        self.assertIn("return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;", admitted)
+        self.assertIn("return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;", admitted)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", admitted)
         self.assertIn("flush_delayed_work(&ctx->worker)", drained)
         self.assertLess(drained.index("WRITE_ONCE(ctx->accepting, false)"),
@@ -5844,7 +5845,7 @@ int main(void) {
                       "!ctx->engine.verify_after_write",
                       "!atomic_read(&ctx->lower_write_active)",
                       "swapz_has_inflight(ctx)", "ctx->accepting",
-                      "!ctx->failed"):
+                      "!READ_ONCE(ctx->failed)"):
             self.assertIn(proof, dispatch)
         self.assertIn("list_add(&entry->list, &ctx->incoming);", dispatch)
         self.assertNotIn("list_add_tail(&entry->list", dispatch)
