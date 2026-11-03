@@ -17,6 +17,7 @@ from unittest import mock
 import private_memory
 
 PAGE = 4096
+ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = Path(__file__).with_name("io-replay.py")
 
 

@@ -732,7 +732,9 @@ Rootless contracts for these helpers live in the already-executed
 The prospective contract is source-controlled and immutable for a confirmation
 campaign. `tests/runtime/benchmark/qualification.py` loads its exact
 `physical_qualification` object from `docs/production-acceptance.json` and
-must fail closed if that frozen manifest is missing or malformed. It defines
+must fail closed if that frozen manifest is missing or malformed. Rootless
+contract tests resolve that manifest from the repository root, never from the
+caller's current working directory. It defines
 four workloads: five paired balanced-content service runs,
 five paired representative-content service runs, one directional high-occupancy
 hour-long pair, and three directional actual-anonymous-swap pairs. The service
