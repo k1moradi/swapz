@@ -2509,7 +2509,13 @@ major:minor can no longer be queried; preserve the parsed identity long enough
 to report that distinction. Missing or uninspectable telemetry for an existing
 device is degraded/incomplete evidence; it never authorizes destructive
 recovery. Sustained GC-stall reporting requires repeated pressure/headroom
-evidence without GC victim/page progress. Cold-boot capacity verification must
+evidence without GC victim/page progress. Once the existing bounded consecutive
+stall threshold is reached, runtime health must latch FAIL and emit exactly one
+operator stop-required marker naming normal primary stop; the observer must
+continue collecting evidence and must not invoke swapoff, mapper removal, or any
+lifecycle mutation itself. A monitor restart or successful normal lifecycle
+teardown is the boundary for clearing that process-local latch. Cold-boot
+capacity verification must
 independently reproduce the kernel/manager admission boundary: the GC reserve is
 `max(ceil(logical_pages / 8), 512)` physical blocks and one additional
 256-block foreground COW segment must remain outside the advertised logical
