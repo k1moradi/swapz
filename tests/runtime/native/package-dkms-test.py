@@ -66,7 +66,11 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         r = self.invoke("install")
         self.assertEqual(r.returncode, 0, r.stderr)
         binary = self.prefix / "sbin/swapzctl"
+        boot_verifier = self.prefix / "sbin/swapz-primary-boot-verify"
         self.assertTrue(binary.is_file())
+        self.assertTrue(boot_verifier.is_file())
+        self.assertTrue(os.access(boot_verifier, os.X_OK))
+        self.assertEqual(boot_verifier.stat().st_mode & 0o777, 0o755)
         module_snapshot = self.prefix / "libexec/swapz/dm-swapz.ko"
         self.assertEqual(module_snapshot.read_bytes(),
                          self.module_artifact.read_bytes())
@@ -93,12 +97,16 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         generator_dir = self.prefix / "lib/systemd/system-generators"
         primary_generator = generator_dir / "swapz-primary-generator"
         mapper_service = unit_dir / "swapz-primary-mapper.service"
+        boot_verifier_service = unit_dir / "swapz-primary-boot-verify.service"
         swap_unit = unit_dir / "dev-mapper-swapz\\x2dprimary.swap"
         self.assertTrue(mapper_service.is_file())
+        self.assertTrue(boot_verifier_service.is_file())
+        self.assertEqual(boot_verifier_service.stat().st_mode & 0o777, 0o644)
         self.assertTrue(swap_unit.is_file())
         self.assertTrue(primary_generator.is_file())
         self.assertTrue(os.access(primary_generator, os.X_OK))
         service_text = mapper_service.read_text()
+        boot_verifier_service_text = boot_verifier_service.read_text()
         swap_text = swap_unit.read_text()
         generator_text = primary_generator.read_text()
         self.assertIn("RefuseManualStart=yes", service_text)
@@ -112,9 +120,12 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertNotIn("7fb9401d-04", swap_text)
         self.assertNotIn("f13428f6-01", generator_text)
         self.assertIn(
-            "ConditionPathExists=/var/lib/swapz/physical-recovery/primary-state.json",
-            service_text)
+            "ExecStartPre=" + str(boot_verifier) + " preflight", service_text)
         self.assertIn("ExecStart=" + str(binary) + " primary start", service_text)
+        self.assertIn(
+            "ExecStart=" + str(boot_verifier) + " observe",
+            boot_verifier_service_text)
+        self.assertIn("WantedBy=multi-user.target", boot_verifier_service_text)
         self.assertIn("What=/dev/mapper/swapz-primary", swap_text)
         self.assertIn("Priority=-1", swap_text)
         self.assertIn("primary systemd-units", generator_text)
@@ -122,6 +133,9 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertNotIn("discard", swap_text.lower())
         self.assertFalse((self.prefix / "etc/systemd/system/swap.target.wants" /
                           swap_unit.name).exists())
+        self.assertFalse(
+            (self.prefix / "etc/systemd/system/multi-user.target.wants" /
+             boot_verifier_service.name).exists())
         # Target dependencies follow the protected selector. Device removal
         # does not stop the manager and risk tearing down a mapper with live
         # swap pages.
@@ -210,7 +224,9 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         r = self.invoke("uninstall")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(binary.exists())
+        self.assertFalse(boot_verifier.exists())
         self.assertFalse(mapper_service.exists())
+        self.assertFalse(boot_verifier_service.exists())
         self.assertFalse(swap_unit.exists())
         self.assertFalse(primary_generator.exists())
         self.assertFalse(module_snapshot.exists())
@@ -247,6 +263,17 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         module_snapshot.write_bytes(b"tampered module")
         self.assertNotEqual(self.invoke("uninstall").returncode, 0)
         module_snapshot.write_bytes(original_module)
+        boot_verifier = self.prefix / "sbin/swapz-primary-boot-verify"
+        original_boot_verifier = boot_verifier.read_bytes()
+        boot_verifier.write_bytes(b"tampered boot verifier")
+        self.assertNotEqual(self.invoke("uninstall").returncode, 0)
+        boot_verifier.write_bytes(original_boot_verifier)
+        verifier_service = (
+            self.prefix / "lib/systemd/system/swapz-primary-boot-verify.service")
+        original_verifier_service = verifier_service.read_bytes()
+        verifier_service.write_bytes(b"tampered verifier service")
+        self.assertNotEqual(self.invoke("uninstall").returncode, 0)
+        verifier_service.write_bytes(original_verifier_service)
         recovery = self.home / "var/lib/swapz/physical-recovery"
         recovery.mkdir(parents=True)
         primary_state = recovery / "primary-state.json"
@@ -279,6 +306,9 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         r = self.invoke("install", {"SWAPZ_FAKE_FAIL_AT": "build"})
         self.assertNotEqual(r.returncode, 0)
         self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertFalse((self.prefix / "sbin/swapz-primary-boot-verify").exists())
+        self.assertFalse(
+            (self.prefix / "lib/systemd/system/swapz-primary-boot-verify.service").exists())
         self.assertFalse((self.home / "usr/src" / ("swapz-" + VERSION)).exists())
         self.assertIn("remove", self.log.read_text().splitlines())
 

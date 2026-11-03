@@ -3499,8 +3499,16 @@ is the sole partition entry at the size derived from its physical byte capacity,
 at the selected priority and with zero KiB used; this partial observation must
 never be reported as complete device admission.
 The package regression must prove that units are installed disabled and that
-package install/uninstall does not start or stop system swap. The primary
-mapper service and package templates must not contain a device pathname,
+package install/uninstall does not start or stop system swap. The package-owned
+file set and SHA-256 manifest must include the cold-boot verifier executable
+(mode 0755) and verifier service (mode 0644); uninstall must reject modified
+copies and remove only exact owned copies. Installation must substitute the
+installed sbin path into both lifecycle services without enabling or starting
+either one. The isolated systemd verifier fixture must run from the official
+rootless contract stage, covering arm/preflight/observe success and fail-closed
+raw-alias, identity, artifact, geometry, service and kernel-log cases without
+reading or changing host swap state. The primary mapper service and package
+templates must not contain a device pathname,
 major:minor, UUID or PARTUUID. The installed systemd generator must derive
 the selected `.device` and by-PARTUUID `.swap` unit names through the manager's
 validated protected-selector interface, then emit `Requires`/`After` for the

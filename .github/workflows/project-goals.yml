@@ -39,6 +39,7 @@ jobs:
           grep -Fq '@+python3 -B tests/tools/run-tests.py --kdir' Makefile
           grep -Fq 'tests/tools/test-rootless.sh' tests/tools/run-tests.py
           grep -Fq 'python3 -B tests/runtime/native/primary-lifecycle-audit-test.py -v' tests/tools/test-rootless.sh
+          grep -Fq 'python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v' tests/tools/test-rootless.sh
           grep -Fq 'tests/tools/test-loaded.sh' tests/tools/run-tests.py
           grep -Fq 'sudo -n true' tests/tools/test-loaded.sh
           grep -Fq 'BLOCKED_LOADED_QUALIFICATION' tests/tools/test-loaded.sh

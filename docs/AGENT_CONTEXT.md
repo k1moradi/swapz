@@ -253,20 +253,20 @@ service state and relevant kernel errors. Only that evidence may change
 Cold-boot observation is not a prerequisite for Codex to finish the **code**
 production-readiness mission because Codex is explicitly forbidden to reboot.
 
-Agent 7 owns installer integration for this harness. Before deployment can be
-armed, `package-dkms.sh` must install
+The cold-boot verifier is integrated into the owned package and official
+rootless contract path. `package-dkms.sh` installs
 `$prefix/sbin/swapz-primary-boot-verify` mode 0755 and
-`swapz-primary-boot-verify.service` mode 0644 with the same substituted sbin
-path, include both in package ownership/hash and uninstall checks, and leave
-both the primary swap and verifier disabled; installation must never use
-`--now`. After the execution/physical qualification gates pass and any
-selected-partition raw-swap configuration is removed, the owner-side activation
-flow must run `swapz-primary-boot-verify arm`, enable the primary swap and
-verifier for the next boot without starting them in the arming boot, and leave
-the reboot to the owner. Agent 10 owns adding the isolated
-`tests/runtime/native/systemd/swapz-primary-systemd-test.py` fixture to the
-official test runner. Until those two integration steps land, the harness
-source is implemented but is neither installed nor armed.
+`swapz-primary-boot-verify.service` mode 0644 with the installed sbin path,
+covers both in package ownership/hash and uninstall checks, and still leaves
+the primary swap and verifier disabled; installation never uses `--now`.
+The isolated `tests/runtime/native/systemd/swapz-primary-systemd-test.py`
+fixture is executed by the official rootless stage. After the
+execution/physical qualification gates pass and any selected-partition raw-swap
+configuration is removed, the owner-side activation flow still must run
+`swapz-primary-boot-verify arm`, enable the primary swap and verifier for the
+next boot without starting them in the arming boot, and leave the reboot to the
+owner. Integration is implemented; qualification, arming and owner reboot
+remain open.
 
 ## Current decision order
 

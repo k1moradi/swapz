@@ -18,6 +18,7 @@ python3 -B tests/runtime/benchmark/io-replay-test.py -v
 python3 -B tests/runtime/native/make-interface-test.py -v
 python3 -B tests/runtime/native/test-report-test.py -v
 python3 -B tests/runtime/native/package-dkms-test.py -v
+python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v
 python3 -B tests/runtime/native/physical-swap-probe-test.py -v
 python3 -B tests/runtime/native/live-swap-supervisor-test.py -v
 python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
@@ -32,7 +33,7 @@ python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
 for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/tools/qualify-resource-pressure.sh \
   tests/tools/qualify-logical-open-balance.sh packaging/package-dkms.sh \
-  packaging/sign-module.sh \
+  packaging/swapz-primary-boot-verify packaging/sign-module.sh \
   tests/tools/deploy-nullblk.sh tests/tools/loaded-preflight.sh tests/tools/swap-inventory.sh \
   tests/tools/quiet-lower-io.sh \
   tests/tools/benchmark-owned-pair.sh tests/tools/benchmark-striped-owned.sh \

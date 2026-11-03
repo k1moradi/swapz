@@ -67,7 +67,9 @@ helper_dir="$prefix/libexec/swapz"; helper="$helper_dir/device-roundtrip"
 unit_dir="$prefix/lib/systemd/system"
 generator_dir="$prefix/lib/systemd/system-generators"
 primary_generator="$generator_dir/swapz-primary-generator"
+boot_verifier="$cli_dir/swapz-primary-boot-verify"
 mapper_service="$unit_dir/swapz-primary-mapper.service"
+boot_verifier_service="$unit_dir/swapz-primary-boot-verify.service"
 swap_unit_name="$(systemd-escape --path --suffix=swap /dev/mapper/swapz-primary)"
 [[ "$swap_unit_name" == 'dev-mapper-swapz\x2dprimary.swap' ]] || {
   echo "BLOCKED: unexpected systemd-escaped primary swap unit name" >&2; exit 1;
@@ -95,7 +97,7 @@ if [[ "$action" == uninstall ]]; then
   fi
 fi
 if [[ -z "$test_root" && "$action" == uninstall ]]; then
-  for unit in swapz-primary-mapper.service \
+  for unit in swapz-primary-boot-verify.service swapz-primary-mapper.service \
       "$swap_unit_name"; do
     systemctl is-active --quiet "$unit" && {
       echo "BLOCKED: $unit is active; refusing package removal" >&2; exit 1;
@@ -114,7 +116,10 @@ verify_owned() {
      -f "$helper_dir/dm-swapz.ko" && ! -L "$helper_dir/dm-swapz.ko" &&
      -f "$primary_generator" && -x "$primary_generator" &&
      ! -L "$primary_generator" &&
+     -f "$boot_verifier" && -x "$boot_verifier" &&
+     ! -L "$boot_verifier" &&
      -f "$mapper_service" && ! -L "$mapper_service" &&
+     -f "$boot_verifier_service" && ! -L "$boot_verifier_service" &&
      -f "$primary_swap" && ! -L "$primary_swap" ]] || return 1
   grep -Fxq "swapz:$version" "$src/$marker" || return 1
   (cd "$src" && sha256sum --quiet -c .swapz-sources.sha256) || return 1
@@ -126,8 +131,9 @@ cleanup_owned() {
        -z "$(find "$src/build" -type l -print -quit)" ]] || return 1
     rm -r -- "$src/build"
   fi
-  rm -f -- "$cli" "$helper" "$helper_dir/dm-swapz.ko" \
-    "$primary_generator" "$mapper_service" "$primary_swap"
+  rm -f -- "$cli" "$boot_verifier" "$helper" "$helper_dir/dm-swapz.ko" \
+    "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+    "$primary_swap"
   rmdir -- "$helper_dir"
   for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
     rm -f -- "$src/src/kernel/$(basename "$file")"
@@ -164,7 +170,9 @@ fi
    ! -e "$cli" && ! -L "$cli" &&
    ! -e "$helper_dir" && ! -L "$helper_dir" &&
    ! -e "$primary_generator" && ! -L "$primary_generator" &&
+   ! -e "$boot_verifier" && ! -L "$boot_verifier" &&
    ! -e "$mapper_service" && ! -L "$mapper_service" &&
+   ! -e "$boot_verifier_service" && ! -L "$boot_verifier_service" &&
    ! -e "$primary_swap" && ! -L "$primary_swap" ]] || {
   echo "BLOCKED: existing DKMS source/program; refusing overwrite" >&2; exit 1;
 }
@@ -179,11 +187,16 @@ done
 # header used by the userspace binary and the development module build.
 install -m0644 "$build_info" "$src/src/kernel/swapz-build-info.h"
 install -m0755 build/userspace/swapzctl "$cli"
+install -m0755 packaging/swapz-primary-boot-verify "$boot_verifier"
 install -m0755 build/tests/device-roundtrip "$helper"
 install -m0644 "$module_artifact" \
   "$helper_dir/dm-swapz.ko"
 sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" \
   packaging/swapz-primary-mapper.service > "$mapper_service"
+chmod 0644 "$mapper_service"
+sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" \
+  packaging/swapz-primary-boot-verify.service > "$boot_verifier_service"
+chmod 0644 "$boot_verifier_service"
 sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" \
   packaging/swapz-primary-generator > "$primary_generator"
 chmod 0755 "$primary_generator"
@@ -191,9 +204,9 @@ install -m0644 packaging/swapz-primary.swap "$primary_swap"
 printf 'swapz:%s\n' "$version" > "$src/$marker"
 (cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
   src/kernel/*.c src/kernel/*.h) > "$src/.swapz-sources.sha256"
-sha256sum "$cli" "$helper" "$helper_dir/dm-swapz.ko" \
-  "$primary_generator" "$mapper_service" "$primary_swap" \
-  > "$src/.swapz-binaries.sha256"
+sha256sum "$cli" "$boot_verifier" "$helper" "$helper_dir/dm-swapz.ko" \
+  "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+  "$primary_swap" > "$src/.swapz-binaries.sha256"
 rollback() {
   rc=$?
   trap - ERR
