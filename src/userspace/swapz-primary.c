@@ -5587,6 +5587,7 @@ invalid:
 	return -1;
 }
 
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_running_kernel_matches_qualification(
 	const struct swapz_primary_qualification *qualification)
 {
@@ -5610,6 +5611,8 @@ static int swapz_primary_running_kernel_matches_qualification(
 	}
 	return 0;
 }
+#endif
+
 
 static int swapz_primary_live_host_identity_sha256(char digest[65])
 {
