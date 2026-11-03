@@ -2870,6 +2870,11 @@ class PairReplayContract(unittest.TestCase):
                 evidence.git_blob_sha(
                     evidence.ACCEPTANCE_MANIFEST.read_bytes()))
             self.assertEqual(sealed["host_stability"]["status"], "STABLE")
+            self.assertEqual(
+                sealed["target"],
+                {"partuuid": "11111111-01", "device_bytes": 123456})
+            self.assertEqual(
+                evidence.physical_target_identity(host), sealed["target"])
             self.assertTrue(
                 sealed["admitted_device_boundary"]["before"]["quiescent"])
             self.assertTrue(

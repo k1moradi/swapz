@@ -491,6 +491,19 @@ def mount_rows(text: str) -> list[dict]:
     return rows
 
 
+def physical_target_identity(snapshot: dict) -> dict:
+    device = snapshot.get("device") or {}
+    partuuid = device.get("partuuid")
+    size_bytes = device.get("size_bytes")
+    if not isinstance(partuuid, str) or not partuuid.strip() or \
+            type(size_bytes) is not int or size_bytes <= 0:
+        raise ValueError("campaign physical target identity is incomplete")
+    return {
+        "partuuid": partuuid.lower(),
+        "device_bytes": size_bytes,
+    }
+
+
 def admitted_device_boundary(snapshot: dict) -> dict:
     device = snapshot.get("device") or {}
     major_minor = device.get("major_minor")
@@ -773,6 +786,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         "campaign_status": sealed_status,
         "qualification_status": summary_status,
         "evaluation_protocol": summary.get("evaluation_protocol"),
+        "target": physical_target_identity(before),
         "host_stability": stability,
         "admitted_device_boundary": {
             "before": admitted_device_boundary(before),
