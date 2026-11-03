@@ -101,6 +101,13 @@ static void test_partuuid_validation_and_normalization(void)
 	assert(!swapz_primary_partuuid_valid(overlength));
 	assert(swapz_primary_partuuid_normalize(overlength, normalized) < 0);
 	assert(errno == EINVAL && normalized[0] == '\0');
+	length = snprintf(record, sizeof(record), "PARTUUID=%s\n", overlength);
+	assert(length > 0 && (size_t)length < sizeof(record));
+	memset(parsed, 'x', sizeof(parsed));
+	errno = 0;
+	assert(swapz_primary_target_config_parse(
+		       record, (size_t)length, parsed) < 0);
+	assert(errno == EINVAL && parsed[0] == '\0');
 
 	assert(swapz_primary_partuuid_valid("01234567"));
 	assert(swapz_primary_partuuid_normalize(
@@ -2454,11 +2461,22 @@ int main(void)
 	swapz_primary_selected_target.device_bytes = TEST_DEVICE_BYTES;
 	pages = swapz_primary_maximum_logical_pages(
 		SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
-	assert(pages == 3727872ULL);
+	assert(pages == 3727616ULL);
 	assert(swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						 pages));
 	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						  pages + 1ULL));
+	assert(!swapz_primary_page_limit_fits(
+		SWAPZ_PRIMARY_PHYSICAL_BLOCKS, 3727872ULL));
+	assert(swapz_primary_maximum_logical_pages(30465536ULL) ==
+	       27080192ULL);
+	assert(swapz_primary_page_limit_fits(30465536ULL, 27080192ULL));
+	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080193ULL));
+	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080448ULL));
+	assert(27080192ULL * SWAPZ_PRIMARY_BLOCK_BYTES == 110920466432ULL);
+	assert(!swapz_primary_page_limit_fits(0ULL, 1ULL));
+	assert(!swapz_primary_page_limit_fits(
+		3ULL * SWAPZ_PRIMARY_SEGMENT_BLOCKS + 1ULL, 1ULL));
 	test_partuuid_validation_and_normalization();
 	test_recovery_required_state_builder();
 	test_primary_swap_transition_adapter();

@@ -331,7 +331,17 @@ hexadecimal only, and canonical lowercase output. Do not specialize this to the
 current MBR-style `8hex-2hex` value because GPT PARTUUIDs remain valid inputs.
 Its configuration parser, sysfs matcher and systemd-unit derivation must share
 that validator/normalizer. Weak strings such as all hyphens, leading/trailing
-hyphens or repeated hyphens must fail before target discovery.
+hyphens or repeated hyphens must fail before target discovery. Config parsing
+must clear caller-visible selector output before any failure, including malformed
+record envelopes and overlength values, so stale authorization cannot survive a
+rejected update.
+
+Primary userspace mapper sizing must exactly match kernel authority admission.
+After SWZ-header removal and 1MiB segment rounding, keep
+`max(ceil(logical_pages / 8), 512)` GC-reserve blocks plus one independent
+256-block foreground COW segment. Use division-first reserve arithmetic to avoid
+overflow, reject misaligned or undersized physical geometry, and never publish
+a Device Mapper table larger than the kernel will admit.
 
 The privileged primary lifecycle is a separate authority domain. It selects a
 target from protected configuration, owns transaction state and may perform

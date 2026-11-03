@@ -111,6 +111,7 @@ static void swapz_primary_test_interrupt_after(const char *phase)
 #define SWAPZ_PRIMARY_MKSWAP_PATH "/usr/sbin/mkswap"
 #define SWAPZ_PRIMARY_SEGMENT_BLOCKS 256ULL
 #define SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS 512ULL
+#define SWAPZ_PRIMARY_FOREGROUND_HEADROOM_BLOCKS SWAPZ_PRIMARY_SEGMENT_BLOCKS
 #define SWAPZ_PRIMARY_SECTORS_PER_PAGE 8ULL
 #define SWAPZ_PRIMARY_PARTUUID_PATH_FORMAT "/dev/disk/by-partuuid/%s"
 #define SWAPZ_PRIMARY_PARTITION_NAME_BYTES \
@@ -644,14 +645,18 @@ int swapz_primary_target_config_parse(
 	size_t prefix_length = sizeof(prefix) - 1U;
 	size_t value_length;
 
-	if (!record || !partuuid || length <= prefix_length + 1U ||
+	if (!partuuid) {
+		errno = EINVAL;
+		return -1;
+	}
+	partuuid[0] = '\0';
+	if (!record || length <= prefix_length + 1U ||
 	    length > prefix_length + SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U ||
 	    memchr(record, '\0', length) || record[length - 1U] != '\n' ||
 	    memcmp(record, prefix, prefix_length)) {
 		errno = EINVAL;
 		return -1;
 	}
-	partuuid[0] = '\0';
 	value_length = length - prefix_length - 1U;
 	if (!value_length || value_length > SWAPZ_PRIMARY_PARTUUID_LENGTH) {
 		errno = EINVAL;
@@ -4834,7 +4839,11 @@ static int swapz_primary_page_limit_fits(uint64_t physical_blocks,
 	uint64_t reserve;
 	uint64_t data_blocks;
 
-	reserve = (logical_pages + 7ULL) / 8ULL;
+	if (!logical_pages ||
+	    physical_blocks < 3ULL * SWAPZ_PRIMARY_SEGMENT_BLOCKS ||
+	    physical_blocks % SWAPZ_PRIMARY_SEGMENT_BLOCKS)
+		return 0;
+	reserve = logical_pages / 8ULL + (logical_pages % 8ULL != 0ULL);
 	if (reserve < SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS)
 		reserve = SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS;
 	if (reserve >= physical_blocks)
@@ -4842,7 +4851,10 @@ static int swapz_primary_page_limit_fits(uint64_t physical_blocks,
 	data_blocks = ((physical_blocks - reserve) /
 		       SWAPZ_PRIMARY_SEGMENT_BLOCKS) *
 		      SWAPZ_PRIMARY_SEGMENT_BLOCKS;
-	return logical_pages <= data_blocks;
+	if (logical_pages > data_blocks)
+		return 0;
+	return data_blocks - logical_pages >=
+	       SWAPZ_PRIMARY_FOREGROUND_HEADROOM_BLOCKS;
 }
 
 static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks)
