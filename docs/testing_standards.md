@@ -3609,8 +3609,17 @@ The ordinary source must retain literal execution gate 0 and production
 `/etc/swapz`, recovery and qualification paths; the public Makefile must never
 define the test macro. A test build must fail compilation unless private
 config, recovery and qualification-report paths are supplied, and only that
-build may compile the lifecycle gate as 1. This seam is not deployment
-authorization and must never be installed. Do not intentionally crash or reboot
+build may compile the lifecycle gate as 1. The production topology proof still
+rejects every virtual backing chain. Under the owned-null_blk macro only, the
+selected target may use a virtual parent when it is exactly one
+`/sys/devices/virtual/block/<disk>` parent, its source is exactly one partition
+child, and that parent major equals the unique `nullb` block major parsed from
+`/proc/devices`; root and recovery filesystem chains keep the unchanged
+physical-device proof. The official rootless stage must compile this test-only
+translation-unit branch with `-Wall -Wextra -Werror -fsyntax-only` and
+nonexistent private paths on every CI architecture so dormant rehearsal code
+cannot rot. This seam is not deployment authorization and must never be
+installed. Do not intentionally crash or reboot
 the host to manufacture power-loss evidence.
 
 The plan, lifecycle mocks and CI do not by themselves establish live-swap

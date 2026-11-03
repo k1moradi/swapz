@@ -21,6 +21,15 @@ python3 -B tests/runtime/native/package-dkms-test.py -v
 python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v
 python3 -B tests/runtime/native/physical-swap-probe-test.py -v
 python3 -B tests/runtime/native/live-swap-supervisor-test.py -v
+# Compile the noninstalled lifecycle rehearsal branch on every rootless/CI
+# architecture. Private paths are deliberately nonexistent; this is syntax and
+# warning qualification only and cannot mutate a device.
+cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
+  -DSWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1 \
+  '-DSWAPZ_PRIMARY_TEST_CONFIG_BASE="/var/tmp/swapz-primary-owned-nullblk/config"' \
+  '-DSWAPZ_PRIMARY_TEST_RECOVERY_BASE="/var/tmp/swapz-primary-owned-nullblk/recovery"' \
+  '-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"' \
+  src/userspace/swapz-primary.c
 python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
 [[ -x tests/tools/loaded-preflight.sh ]] || {
   printf '%s\n' 'FAIL: loaded-preflight.sh must remain executable' >&2

@@ -596,6 +596,18 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             "SWAPZ_PRIMARY_OWNED_NULLBLK_TEST",
             ROOT_MAKEFILE.read_text(encoding="utf-8"),
             "public build must never enable the owned-null_blk lifecycle seam")
+        topology = c_function_body(source, "swapz_primary_recovery_source_chain")
+        self.assertIn(
+            "source_device == SWAPZ_PRIMARY_TARGET_DEVICE", topology)
+        self.assertIn("swapz_primary_owned_nullblk_parent(", topology)
+        self.assertIn('strstr(device_realpath, "/virtual/") != NULL', source)
+        self.assertLess(
+            topology.index("swapz_primary_owned_nullblk_parent("),
+            topology.index("strstr(device_realpath"))
+        self.assertIn(
+            'sscanf(line, " %u %63s %c", &major_number, name, &extra) != 2',
+            source)
+        self.assertIn('strcmp(name, "nullb")', source)
 
     def test_execution_gate_cannot_enable_without_native_swap_operations(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")

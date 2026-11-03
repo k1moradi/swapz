@@ -3146,6 +3146,110 @@ static int swapz_primary_sysfs_directory_empty(const char *path,
 	return 1;
 }
 
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+static int swapz_primary_owned_nullblk_major(unsigned int *nullblk_major)
+{
+	char buffer[8192];
+	char *line;
+	char *save = NULL;
+	size_t used = 0;
+	unsigned int found_major = 0;
+	int in_block_devices = 0;
+	int found = 0;
+	int fd;
+
+	if (!nullblk_major) {
+		errno = EINVAL;
+		return -1;
+	}
+	fd = open("/proc/devices", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	if (fd < 0)
+		return -1;
+	while (used + 1U < sizeof(buffer)) {
+		ssize_t count = read(fd, buffer + used,
+				     sizeof(buffer) - used - 1U);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (close(fd) < 0)
+		return -1;
+	if (used + 1U == sizeof(buffer)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	buffer[used] = '\0';
+	for (line = strtok_r(buffer, "\n", &save);
+	     line; line = strtok_r(NULL, "\n", &save)) {
+		unsigned int major_number;
+		char name[64];
+		char extra;
+
+		if (!strcmp(line, "Block devices:")) {
+			in_block_devices = 1;
+			continue;
+		}
+		if (!in_block_devices ||
+		    sscanf(line, " %u %63s %c", &major_number, name, &extra) != 2 ||
+		    strcmp(name, "nullb"))
+			continue;
+		if (found || !major_number) {
+			errno = EPROTO;
+			return -1;
+		}
+		found = 1;
+		found_major = major_number;
+	}
+	if (!found) {
+		errno = ENODEV;
+		return -1;
+	}
+	*nullblk_major = found_major;
+	return 0;
+}
+
+static int swapz_primary_owned_nullblk_parent(
+	const char *resolved_devices_root, const char *source_realpath,
+	const char *parent_path, dev_t observed_parent)
+{
+	static const char virtual_block[] = "/virtual/block/";
+	const char *disk_name;
+	size_t devices_root_length;
+	size_t parent_length;
+	unsigned int nullblk_major = 0;
+
+	if (!resolved_devices_root || !source_realpath || !parent_path ||
+	    swapz_primary_owned_nullblk_major(&nullblk_major) < 0 ||
+	    major(observed_parent) != nullblk_major)
+		return 0;
+	devices_root_length = strlen(resolved_devices_root);
+	if (strncmp(parent_path, resolved_devices_root, devices_root_length) ||
+	    strcmp(parent_path + devices_root_length, virtual_block) == 0 ||
+	    strncmp(parent_path + devices_root_length, virtual_block,
+		    sizeof(virtual_block) - 1U))
+		return 0;
+	disk_name = parent_path + devices_root_length +
+		    sizeof(virtual_block) - 1U;
+	if (!disk_name[0] || strchr(disk_name, '/'))
+		return 0;
+	parent_length = strlen(parent_path);
+	return !strncmp(source_realpath, parent_path, parent_length) &&
+	       source_realpath[parent_length] == '/' &&
+	       source_realpath[parent_length + 1U] != '\0' &&
+	       strchr(source_realpath + parent_length + 1U, '/') == NULL;
+}
+#endif
+
 static int swapz_primary_recovery_source_chain(
 	const char *sysfs_root, dev_t source_device, dev_t target_device,
 	dev_t *physical_parent_device)
@@ -3167,6 +3271,7 @@ static int swapz_primary_recovery_source_chain(
 	struct stat queue_info;
 	uint64_t partition_number;
 	size_t devices_root_length;
+	int parent_identity_valid = 0;
 
 	if (!sysfs_root || !physical_parent_device ||
 	    (major(source_device) == 0U && minor(source_device) == 0U) ||
@@ -3220,16 +3325,25 @@ static int swapz_primary_recovery_source_chain(
 	    ((major(target_device) != 0U || minor(target_device) != 0U) &&
 	     observed_parent == target_device))
 		goto rejected;
-	if (swapz_primary_path_format(device_path, sizeof(device_path),
-				       "%s/device", parent_path) < 0 ||
-	    lstat(device_path, &link_info) < 0 || !S_ISLNK(link_info.st_mode) ||
-	    !realpath(device_path, device_realpath))
-		goto rejected;
-	if (strncmp(device_realpath, resolved_devices_root,
-		    devices_root_length) ||
-	    device_realpath[devices_root_length] != '/' ||
-	    strstr(device_realpath, "/virtual/") != NULL)
-		goto rejected;
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	if (source_device == SWAPZ_PRIMARY_TARGET_DEVICE)
+		parent_identity_valid = swapz_primary_owned_nullblk_parent(
+			resolved_devices_root, source_realpath, parent_path,
+			observed_parent);
+#endif
+	if (!parent_identity_valid) {
+		if (swapz_primary_path_format(device_path, sizeof(device_path),
+					       "%s/device", parent_path) < 0 ||
+		    lstat(device_path, &link_info) < 0 ||
+		    !S_ISLNK(link_info.st_mode) ||
+		    !realpath(device_path, device_realpath))
+			goto rejected;
+		if (strncmp(device_realpath, resolved_devices_root,
+			    devices_root_length) ||
+		    device_realpath[devices_root_length] != '/' ||
+		    strstr(device_realpath, "/virtual/") != NULL)
+			goto rejected;
+	}
 	if (swapz_primary_path_format(path, sizeof(path), "%s/queue",
 				      parent_path) < 0 ||
 	    stat(path, &queue_info) < 0 || !S_ISDIR(queue_info.st_mode))
