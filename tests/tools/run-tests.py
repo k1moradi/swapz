@@ -141,7 +141,23 @@ def _readiness_artifact_hashes_valid(hashes):
         for name in ("formatter_sha256", "module_sha256", "oracle_sha256"))
 
 
-def _readiness_pass_payload_valid(name, entry, current_source_sha):
+def production_acceptance_manifest_sha256():
+    """Return the exact frozen acceptance-policy digest, or None if unusable."""
+    path = ROOT / "docs/production-acceptance.json"
+    try:
+        payload = path.read_bytes()
+        manifest = json.loads(payload)
+    except (OSError, ValueError, TypeError):
+        return None
+    if (not isinstance(manifest, dict) or
+            manifest.get("schema") != "swapz-production-acceptance-v1" or
+            manifest.get("status") != "FROZEN"):
+        return None
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _readiness_pass_payload_valid(
+        name, entry, current_source_sha, acceptance_manifest_sha256):
     observed = entry.get("observed_at_utc")
     if not isinstance(observed, str) or not observed.strip():
         return False
@@ -169,17 +185,23 @@ def _readiness_pass_payload_valid(name, entry, current_source_sha):
     if name == "exact_source_owner_make_test":
         return (entry.get("overall") == "PASS" and
                 entry.get("tested_source_sha") == current_source_sha and
-                _valid_sha256(entry.get("report_sha256")))
+                _valid_sha256(entry.get("report_sha256")) and
+                _readiness_artifact_hashes_valid(
+                    entry.get("qualified_artifacts")))
     if name == "owned_nullblk_qualification":
         return (entry.get("overall") == "PASS" and
                 _valid_sha256(entry.get("evidence_sha256")))
     if name == "real_linux_swap":
         return (entry.get("overall") == "PASS" and
                 entry.get("swap_out_in") == "PASS" and
+                entry.get("acceptance_manifest_sha256") ==
+                acceptance_manifest_sha256 and
                 _valid_sha256(entry.get("evidence_sha256")))
     if name == "maximum_capacity_and_ram":
         return (entry.get("overall") == "PASS" and
                 entry.get("incompressible") == "PASS" and
+                entry.get("acceptance_manifest_sha256") ==
+                acceptance_manifest_sha256 and
                 type(entry.get("logical_capacity_bytes")) is int and
                 entry["logical_capacity_bytes"] > 0 and
                 type(entry.get("peak_ram_bytes")) is int and
@@ -188,6 +210,8 @@ def _readiness_pass_payload_valid(name, entry, current_source_sha):
     if name == "sustained_physical_performance":
         return (entry.get("overall") == "PASS" and
                 entry.get("sustained") == "PASS" and
+                entry.get("acceptance_manifest_sha256") ==
+                acceptance_manifest_sha256 and
                 _valid_sha256(entry.get("evidence_sha256")))
     if name == "lifecycle_deployment_state":
         return (entry.get("overall") == "PASS" and
@@ -246,6 +270,11 @@ def evaluate_production_readiness(snapshot, current_source_sha):
     if not isinstance(evidence, dict):
         blocked["reasons"]["report"] = "release_evidence missing"
         return blocked
+    acceptance_manifest_sha256 = production_acceptance_manifest_sha256()
+    if acceptance_manifest_sha256 is None:
+        blocked["reasons"]["report"] = (
+            "frozen production acceptance manifest unavailable")
+        return blocked
 
     statuses = {}
     reasons = {}
@@ -267,12 +296,28 @@ def evaluate_production_readiness(snapshot, current_source_sha):
             continue
         if (status == "PASS" and
                 not _readiness_pass_payload_valid(
-                    name, entry, current_source_sha)):
+                    name, entry, current_source_sha,
+                    acceptance_manifest_sha256)):
             statuses[name] = "BLOCKED"
             reasons[name] = "PASS payload is incomplete or unqualified"
             continue
         statuses[name] = status
         reasons[name] = entry.get("reason", "")
+
+    if statuses.get("qualified_artifact_hashes") == "PASS":
+        qualified_hashes = evidence["qualified_artifact_hashes"]["hashes"]
+        owner_test = evidence.get("exact_source_owner_make_test", {})
+        if (statuses.get("exact_source_owner_make_test") == "PASS" and
+                owner_test.get("qualified_artifacts") != qualified_hashes):
+            statuses["exact_source_owner_make_test"] = "BLOCKED"
+            reasons["exact_source_owner_make_test"] = (
+                "owner qualification artifact hashes differ from release hashes")
+        installed = evidence.get("installed_artifact_identity", {})
+        if (statuses.get("installed_artifact_identity") == "PASS" and
+                installed.get("hashes") != qualified_hashes):
+            statuses["installed_artifact_identity"] = "BLOCKED"
+            reasons["installed_artifact_identity"] = (
+                "installed artifact hashes differ from qualified release hashes")
 
     code = _readiness_combine(
         statuses[name] for name in PRODUCTION_READINESS_CODE_EVIDENCE)
