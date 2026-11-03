@@ -58,6 +58,27 @@ POLICY_TOP_LEVEL_KEYS = {
     "primary_real_swap",
     "physical_qualification",
 }
+COLD_BOOT_REPORT_KEYS = {
+    "schema", "status", "cold_boot_observed", "boot_id", "armed_boot_id",
+    "kernel_release", "selected_partuuid", "selected_target_major_minor",
+    "selected_target_size_bytes", "selected_target_parent",
+    "selected_target_model", "selected_target_serial", "selected_target_wwn",
+    "selected_target_transport", "selected_target_removable",
+    "module_artifact", "module_artifact_sha256", "module_build_source_sha",
+    "module_build_source_clean", "loaded_module_build_source_sha",
+    "loaded_module_build_source_clean", "active_transaction_run_id",
+    "expected_dm_uuid", "dm_uuid", "dm_table", "dm_logical_sectors",
+    "expected_dm_logical_sectors", "dm_logical_bytes", "dm_status_file",
+    "swap_total_entries", "swap_mapper_entries", "swap_path", "swap_type",
+    "swap_size_kib", "swap_used_kib", "swap_priority",
+    "mapper_service_active_state", "mapper_service_sub_state",
+    "mapper_service_result", "swap_unit_active_state", "swap_unit_sub_state",
+    "swap_unit_result", "swapz_failed", "swapz_error", "swapz_flush_err",
+    "swapz_segment_discards_failed", "swapz_upper_write_completed_err",
+    "swapz_endio_write_seen_err", "swapz_endio_write_forced_err",
+    "kernel_error_count", "kernel_error_log", "failure_reasons",
+    "incomplete_reasons",
+}
 
 
 class EvidenceError(ValueError):
@@ -572,26 +593,10 @@ def validate_cold_boot_evidence(
         if message not in issues:
             issues.append(message)
 
-    required = {
-        "schema", "status", "cold_boot_observed", "boot_id", "armed_boot_id",
-        "kernel_release", "selected_partuuid", "selected_target_major_minor",
-        "selected_target_size_bytes", "selected_target_removable",
-        "module_artifact_sha256", "module_build_source_sha",
-        "module_build_source_clean", "loaded_module_build_source_sha",
-        "loaded_module_build_source_clean", "active_transaction_run_id",
-        "expected_dm_uuid", "dm_uuid", "dm_logical_sectors",
-        "expected_dm_logical_sectors", "dm_logical_bytes",
-        "swap_mapper_entries", "swap_type", "swap_size_kib", "swap_priority",
-        "mapper_service_active_state", "mapper_service_result",
-        "swap_unit_active_state", "swap_unit_result", "swapz_failed",
-        "swapz_error", "swapz_flush_err", "swapz_segment_discards_failed",
-        "swapz_upper_write_completed_err", "swapz_endio_write_seen_err",
-        "swapz_endio_write_forced_err", "kernel_error_count",
-        "failure_reasons", "incomplete_reasons",
-    }
-    if required - set(cold_boot):
-        reject("persistent cold-boot report is missing required fields")
+    if set(cold_boot) != COLD_BOOT_REPORT_KEYS:
+        reject("persistent cold-boot report field set is non-canonical")
         return issues
+
 
     if cold_boot["schema"] != "swapz-primary-cold-boot-v1":
         reject("persistent cold-boot report schema is invalid")
@@ -619,8 +624,13 @@ def validate_cold_boot_evidence(
             reject("persistent cold-boot authorized target identity mismatch")
     if not MAJOR_MINOR_RE.fullmatch(cold_boot["selected_target_major_minor"]):
         reject("persistent cold-boot target device identity is invalid")
-    if cold_boot["selected_target_removable"] != "1":
-        reject("persistent cold-boot target is not the armed removable device")
+    if (
+            cold_boot["selected_target_removable"] != "1" or
+            not re.fullmatch(r"[A-Za-z0-9._-]+",
+                             cold_boot["selected_target_parent"]) or
+            (cold_boot["selected_target_serial"] == "unavailable" and
+             cold_boot["selected_target_wwn"] == "unavailable")):
+        reject("persistent cold-boot removable parent identity is invalid")
 
     module_hash = (
         report_artifacts.get("module_sha256")
@@ -660,6 +670,14 @@ def validate_cold_boot_evidence(
             expected_sectors != authorized_sectors):
         reject(
             "persistent cold-boot mapper capacity differs from authorized target")
+    table_fields = cold_boot["dm_table"].split(" ")
+    expected_table = [
+        "0", str(authorized_sectors), "swapz",
+        cold_boot["selected_target_major_minor"],
+        "0", "64", "0", "2", "0", "1", "0", "0",
+    ]
+    if table_fields != expected_table:
+        reject("persistent cold-boot mapper table is inconsistent")
     if (
             cold_boot["swap_mapper_entries"] != "1" or
             cold_boot["swap_type"] != "partition" or

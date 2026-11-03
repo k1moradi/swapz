@@ -67,7 +67,13 @@ def cold_boot_evidence_raw(**overrides):
         "selected_partuuid": TARGET["partuuid"],
         "selected_target_major_minor": "8:1",
         "selected_target_size_bytes": str(TARGET["size_bytes"]),
+        "selected_target_parent": "sda",
+        "selected_target_model": "USB Multi-Card",
+        "selected_target_serial": "reader-serial-1",
+        "selected_target_wwn": "unavailable",
+        "selected_target_transport": "usb",
         "selected_target_removable": "1",
+        "module_artifact": "/usr/local/libexec/swapz/dm-swapz.ko",
         "module_artifact_sha256": ARTIFACTS["module_sha256"],
         "module_build_source_sha": SOURCE,
         "module_build_source_clean": "1",
@@ -77,16 +83,23 @@ def cold_boot_evidence_raw(**overrides):
         "expected_dm_uuid":
             "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef",
         "dm_uuid": "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef",
+        "dm_table": "0 216641536 swapz 8:1 0 64 0 2 0 1 0 0",
         "dm_logical_sectors": "216641536",
         "expected_dm_logical_sectors": "216641536",
         "dm_logical_bytes": "110920466432",
+        "dm_status_file": "/var/lib/swapz/boot/report.dm-status.txt",
+        "swap_total_entries": "2",
         "swap_mapper_entries": "1",
+        "swap_path": "/dev/mapper/swapz-primary",
         "swap_type": "partition",
         "swap_size_kib": "108320764",
+        "swap_used_kib": "0",
         "swap_priority": "-1",
         "mapper_service_active_state": "active",
+        "mapper_service_sub_state": "exited",
         "mapper_service_result": "success",
         "swap_unit_active_state": "active",
+        "swap_unit_sub_state": "active",
         "swap_unit_result": "success",
         "swapz_failed": "0",
         "swapz_error": "0",
@@ -96,6 +109,7 @@ def cold_boot_evidence_raw(**overrides):
         "swapz_endio_write_seen_err": "0",
         "swapz_endio_write_forced_err": "0",
         "kernel_error_count": "0",
+        "kernel_error_log": "/var/lib/swapz/boot/report.kernel-errors.log",
         "failure_reasons": "",
         "incomplete_reasons": "",
     }
@@ -523,6 +537,31 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 EVALUATOR.EvidenceError,
                 "duplicate cold-boot evidence key: status"):
             EVALUATOR.parse_env_strict(raw)
+
+    def test_cold_boot_report_field_set_and_dm_table_are_exact(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        for raw, reason in (
+                (cold_boot_evidence_raw(unexpected="value"),
+                 "field set is non-canonical"),
+                (cold_boot_evidence_raw(
+                    dm_table="0 216641536 swapz 8:2 0 64 0 2 0 1 0 0"),
+                 "mapper table is inconsistent"),
+                (cold_boot_evidence_raw(
+                    selected_target_serial="unavailable",
+                    selected_target_wwn="unavailable"),
+                 "removable parent identity is invalid")):
+            with self.subTest(reason=reason):
+                evidence = current_evidence(encoded(report), encoded(policy))
+                evidence["release_evidence"]["owner_observed_reboot"].update(
+                    status="PASS", observed=True,
+                    evidence_sha256=hashlib.sha256(raw).hexdigest())
+                result = evaluate(
+                    report, evidence, policy, cold_boot_raw=raw)
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertTrue(any(
+                    reason in blocker
+                    for blocker in result["cold_boot_blockers"]))
 
     def test_historical_or_unsynchronized_source_cannot_pass(self):
         report = owner_report()

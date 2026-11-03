@@ -5171,7 +5171,12 @@ drop-ins cannot be emitted. Its manager-failure regression must make the mocked
 `swapzctl primary systemd-units` command actually return nonzero; setting an
 unused fixture variable is not failure coverage. Cold-boot PASS remains exclusively the
 owner-triggered cross-boot verifier; rootless fixtures and daemon-reload checks
-cannot manufacture observed cold-boot evidence.
+cannot manufacture observed cold-boot evidence. The retained v1 report must
+have exactly the verifier's fixed field set, retain a removable parent with at
+least one stable serial/WWN identity, and carry the exact 12-field production
+DM table bound to the computed logical sector count and the observed selected
+target major:minor. Unknown/missing fields, a substituted lower device or a
+self-declared PASS with inconsistent mapper geometry are BLOCKED.
 
 
 ### Primary runtime observer audit regressions
