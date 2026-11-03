@@ -580,6 +580,71 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
  * roll-forward is inapplicable. Recovery must claim the other dead reserve
  * before promoting the blocked destination, then finish the same victim.
  */
+static int test_roll_forward_rejects_cross_segment_extent(void)
+{
+	static struct swapz_authority crossing_authority;
+	static struct swapz_map crossing_maps[1];
+	static swapz_u16 crossing_liveness[5U * SWAPZ_SEGMENT_BLOCKS];
+	static swapz_u8 crossing_classes[5U * SWAPZ_SEGMENT_BLOCKS];
+	static swapz_u8 crossing_roles[5];
+	static swapz_u32 crossing_mapped_pages[5];
+	const swapz_u32 victim = 1U;
+	const swapz_u32 destination = 3U;
+	const swapz_u32 crossing_start = SWAPZ_SEGMENT_BLOCKS - 1U;
+
+	CHECK(swapz_authority_init(&crossing_authority, crossing_maps,
+				  crossing_liveness, crossing_classes, 1U,
+				  5U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(swapz_enable_segment_rotation(
+		      &crossing_authority, crossing_roles, 5U) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(
+		      &crossing_authority, crossing_mapped_pages, 5U) == 0);
+
+	/*
+	 * Model corrupted authority metadata that normal allocation can never
+	 * create: a two-block extent starts in segment0 but overlaps victim1.
+	 * The victim's own mapping-count and liveness views remain zero, so a
+	 * start-block-only reclaim scan would incorrectly declare it dead.
+	 */
+	crossing_maps[0] = (struct swapz_map) {
+		.start_block = crossing_start,
+		.generation = 1U,
+		.payload_offset = 0U,
+		.payload_length = 16U,
+		.record_index = 0U,
+		.extent_blocks = 2U,
+		.raw = 0U,
+		.valid = 1U,
+	};
+	crossing_liveness[crossing_start] = 1U;
+	crossing_classes[crossing_start] = 2U;
+	crossing_mapped_pages[0] = 1U;
+	CHECK(crossing_mapped_pages[victim] == 0U);
+	CHECK(crossing_liveness[victim * SWAPZ_SEGMENT_BLOCKS] == 0U);
+
+	crossing_authority.gc_allocation = 1U;
+	crossing_authority.gc_forbidden_open = 2U;
+	crossing_authority.gc_forbidden_victim = victim;
+	crossing_authority.gc_destination = destination;
+	crossing_authority.open_segment = destination;
+	crossing_authority.next_block =
+		(destination + 1U) * SWAPZ_SEGMENT_BLOCKS;
+
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &crossing_authority, destination) == -EUCLEAN);
+	CHECK(crossing_authority.gc_allocation &&
+	      crossing_authority.gc_forbidden_victim == victim &&
+	      crossing_authority.gc_destination == destination &&
+	      crossing_authority.open_segment == destination &&
+	      crossing_authority.next_block ==
+		      (destination + 1U) * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(crossing_roles[victim] == 1U &&
+	      crossing_roles[destination] == 0U);
+	CHECK(crossing_liveness[crossing_start] == 1U &&
+	      crossing_classes[crossing_start] == 2U);
+	return 0;
+}
+
 static int test_nonfull_recovery_tail_advances_destination(void)
 {
 	static struct swapz_authority tail_authority;
@@ -696,6 +761,7 @@ int main(void)
 	CHECK(test_gc_cannot_spill_into_second_reserve() == 0); passed++;
 	CHECK(test_full_destination_is_not_gc_progress() == 0); passed++;
 	CHECK(test_one_uncertain_block_rolls_forward_raw_recovery_headroom() == 0); passed++;
+	CHECK(test_roll_forward_rejects_cross_segment_extent() == 0); passed++;
 	CHECK(test_nonfull_recovery_tail_advances_destination() == 0); passed++;
 	printf("SWAPZ_ROTATING_GC_TESTS_PASS=%d\n", passed);
 	return 0;

@@ -565,7 +565,11 @@ role handoff before foreground mutation can resume. If the old victim is not
 fully dead, the operation must remain fail-closed. The exceptional worker
 roll-forward path must independently verify every logical mapping and physical
 liveness counter, not rely only on segment-mapping counts, before allowing a
-recycle hook to touch the prior victim; contradictory metadata must be terminal. The exact-production DM GC
+recycle hook to touch the prior victim. Every valid map in that scan must have
+a legal in-bounds extent class, fit wholly inside one 1MiB segment, and agree
+with its extent-class and start-block liveness metadata. A malformed extent
+that starts outside the prior victim but overlaps it is terminal; contradictory
+metadata must never be hidden by start-block-only segment membership. The exact-production DM GC
 error boundary must still reject an integrity/authority failure (-EBADMSG or
 -EUCLEAN) as terminal even with a live recovery token, while preserving
 retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC.

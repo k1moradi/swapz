@@ -836,7 +836,8 @@ static int swapz_verify_recovery_victim_dead(
 {
 	swapz_u32 logical, start_block, end_block, block;
 
-	if (!a || !a->maps || !a->live_records || segment >= a->segment_count)
+	if (!a || !a->maps || !a->live_records || !a->extent_classes ||
+	    segment >= a->segment_count)
 		return -EINVAL;
 	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
 	end_block = start_block + SWAPZ_SEGMENT_BLOCKS;
@@ -850,12 +851,20 @@ static int swapz_verify_recovery_victim_dead(
 	 */
 	for (logical = 0; logical < a->logical_pages; ++logical) {
 		const struct swapz_map *map = &a->maps[logical];
+		swapz_u32 map_end_block;
 
 		if (!map->valid)
 			continue;
-		if (map->start_block >= a->physical_blocks)
+		if (map->start_block >= a->physical_blocks ||
+		    !swapz_legal_class(map->extent_blocks) ||
+		    map->extent_blocks > a->physical_blocks - map->start_block ||
+		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+		    a->extent_classes[map->start_block] != map->extent_blocks ||
+		    !a->live_records[map->start_block])
 			return -EUCLEAN;
-		if (map->start_block >= start_block && map->start_block < end_block)
+		map_end_block = map->start_block + map->extent_blocks;
+		if (map->start_block < end_block && map_end_block > start_block)
 			return -EUCLEAN;
 	}
 	if (a->segment_mapped_pages && a->segment_mapped_pages[segment])
