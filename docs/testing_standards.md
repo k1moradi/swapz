@@ -4654,8 +4654,15 @@ must bind the SHA-256 of the exact current `FROZEN`
 physical PASS observations until they are requalified. The physical real-swap
 helper and physical-performance summary must emit that exact policy digest in
 their own result/evidence payloads so release aggregation never reconstructs or
-guesses the policy binding after the run. A retained old host snapshot must be
-labeled HISTORICAL and cannot become a current release verdict.
+guesses the policy binding after the run. Current release evidence must also
+include one canonical authorized-target identity consisting of the normalized
+lowercase PARTUUID and exact partition byte size. Real-swap,
+maximum-capacity/RAM, sustained-physical, lifecycle/deployment, armed cold-boot
+and owner-observed reboot PASS records must bind that same tuple. Runtime
+major:minor is deliberately excluded because it may change across attachment or
+boot; this cross-binding is a consistency check and does not claim PARTUUID plus
+size is cryptographic or physical-card uniqueness. A retained old host snapshot
+must be labeled HISTORICAL and cannot become a current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
 
