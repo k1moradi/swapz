@@ -2739,6 +2739,31 @@ class PairReplayContract(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 evidence.write_new_json(result_path, sealed)
 
+            # Create-only publication must not follow an attacker-controlled
+            # final symlink or leave a partial final JSON on write failure.
+            sentinel_path = root / "sentinel.txt"
+            sentinel_path.write_text("unchanged")
+            symlink_path = root / "symlink-result.json"
+            symlink_path.symlink_to(sentinel_path)
+            with self.assertRaises(FileExistsError):
+                evidence.write_new_json(symlink_path, sealed)
+            self.assertEqual(sentinel_path.read_text(), "unchanged")
+
+            failed_publish = root / "failed-publish.json"
+            writer_module = sys.modules[
+                evidence.write_new_json.__module__]
+            with mock.patch.object(
+                    writer_module.os, "write",
+                    side_effect=OSError("synthetic evidence storage failure")):
+                with self.assertRaisesRegex(
+                        OSError, "synthetic evidence storage failure"):
+                    evidence.write_new_json(failed_publish, sealed)
+            self.assertFalse(failed_publish.exists())
+            self.assertFalse(any(
+                path.name.startswith(
+                    "." + failed_publish.name + ".swapz-tmp-")
+                for path in root.iterdir()))
+
             # An edit to derived evaluator output must fail even if original
             # pair fields in the summary remain untouched.
             tampered_summary = dict(summary)
