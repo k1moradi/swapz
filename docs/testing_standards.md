@@ -852,7 +852,9 @@ matrix and does not change the single supported \`make test\` interface. It is
 scheduled only when the current protected target passes the physical identity,
 source/artifact and lifecycle gates in \`AGENT_CONTEXT.md\`; no agent may start it
 while another host task owns the card. The private implementation is
-\`tests/runtime/benchmark/{sustained-replay.py,anonymous-swap.py,qualification.py}\`.
+\`tests/runtime/benchmark/{sustained-replay.py,anonymous-swap.py,qualification.py,physical-campaign-evidence.py}\`.
+The campaign-evidence helper is read-only with respect to devices and does not
+schedule workloads; it snapshots and seals scheduler-produced evidence.
 Rootless contracts for these helpers live in the already-executed
 \`io-replay-test.py\`, so this addition does not create another official runner.
 
@@ -861,12 +863,22 @@ campaign. `tests/runtime/benchmark/qualification.py` loads its exact
 `physical_qualification` object from `docs/production-acceptance.json` and
 must fail closed if that frozen manifest is missing or malformed. Rootless
 contract tests resolve that manifest from the repository root, never from the
-caller's current working directory. It defines
-four workloads: five paired balanced-content service runs,
-five paired representative-content service runs, one directional high-occupancy
-hour-long pair, and three directional actual-anonymous-swap pairs. The service
-pairs use QD8, 20% READs, 10% occupancy, 65,536 warmup operations and 1,048,576
-fixed measured operations. Their arm order is fixed before sampling as
+caller's current working directory. The frozen v1 contract defines four
+workloads: five paired balanced-content service runs, five paired
+representative-content service runs, one directional high-occupancy hour-long
+pair, and three directional actual-anonymous-swap pairs. The separately frozen
+prospective v2 amendment
+\`tests/runtime/benchmark/physical-qualification-amendment-v2.json\` is bound to
+the exact v1 manifest Git blob and adds two non-pooled five-pair cohorts:
+physical QD1 balanced service under the existing service-v1 criteria, and QD8
+entropy/incompressible service under its prospectively declared non-regression
+criteria. Editing the v2 amendment in place is forbidden; the evaluator pins
+its Git blob and any criteria change requires a new protocol version. A v2
+campaign must invoke the evaluator explicitly with \`--protocol v2\` and includes
+all six workloads. The service pairs use 20% READs, 10% occupancy, 65,536
+warmup operations and 1,048,576 fixed measured operations; the v1 and
+incompressible cohorts are QD8 while the dedicated QD1 cohort is QD1. Their
+arm order is fixed before sampling as
 raw-first, swapz-first, swapz-first, raw-first, raw-first. Each arm is externally
 bounded to 1,800 seconds. The sustained pair is raw-first, maps the manager's
 maximum logical capacity, fills 90% with proven entropy content, churns an 80%
@@ -917,7 +929,11 @@ allocating the logical capacity in host RAM.
 
 Every arm preserves a JSON result on success or failure. Pair records embed
 both arms, exclusion state and every exclusion reason. There is no automatic
-retry. The 200 ms pre/post quiet windows reject busy >25%, CPU PSI \`some\` >5%,
+retry. The evaluator counts every recorded attempt, including failed/excluded
+attempts: a later PASS cannot replace an earlier attempt, pair IDs must be
+unique within a workload, and every pair plus both embedded arms must share one
+exact source SHA across the campaign. Mixed-source evidence is incomplete and
+is never pooled. The 200 ms pre/post quiet windows reject busy >25%, CPU PSI \`some\` >5%,
 steal >1%, unavailable required counters, or timed-arm steal >1%. A five-pair
 service cohort is additionally unusable when raw useful-WRITE max/min spread
 exceeds 10%. Exclusion never converts a failing correctness result into a pass;
@@ -951,8 +967,15 @@ self-status reader so malformed accounting cannot silently qualify.
 Anonymous-swap evidence is also directional: all three pairs must observe at
 least 128 MiB of workload-specific process/cgroup swap and at least that usage
 on the sole admitted swap device before each timed reread. Every timed reread
-round must also show positive READ bytes on that admitted device. Every pair
-requires byte-exact recovery, swapz/raw swap-in p95/p99 <=1.25, useful read >=0.80,
+round must independently show positive \`pswpin\`, private-cgroup major faults,
+exact-target READ bytes and backing-device READ bytes; the whole arm must show
+positive \`pswpout\`, exact-target WRITE bytes and backing-device WRITE bytes.
+The worker must remain the sole process in a private cgroup with no descendant
+cgroups, and the admitted swap identity must remain unchanged. The first-byte
+latency histogram still includes Python access overhead and resident accesses;
+aggregate kernel/cgroup/I/O counters prove swap activity for the round, not
+that each individual latency sample was a major fault. Every pair requires
+byte-exact recovery, swapz/raw swap-in p95/p99 <=1.25, useful read >=0.80,
 normalized lower WRITE bytes/requests <=0.90, and measured CPU/useful-byte
 <=1.50. This is the only benchmark cohort that establishes actual anonymous
 swap-in-sensitive reads; direct block replays and representative fixture
@@ -968,8 +991,28 @@ same host sampler for the raw control. This whole-host observation is deliberate
 conservative and not exact allocation attribution, but an estimate from C type
 sizes alone cannot satisfy the gate. Reports include useful throughput, p95/p99,
 CPU, peak RAM, GC and allocator costs, lower bytes/requests, minute drift and
-forward progress. Host lower-WRITE reduction is not a direct NAND endurance/wear
-measurement and must not be reported as one.
+forward progress. Anonymous reports retain diagnostic process-CPU phase splits
+for fill and reread/verification without changing the frozen whole-arm CPU
+metric. Sustained interval telemetry reports observer wall time, sampler-thread
+CPU and child-process CPU: sampler-thread CPU remains charged to the replay
+process acceptance metric, child CPU is separate, and no observer cost is
+subtracted post hoc.
+
+The physical scheduler must take
+\`physical-campaign-evidence.py snapshot\` records before the first arm and after
+the last arm from the clean exact source and admitted partition. The snapshot
+captures source tree, bare-metal status, kernel/node, CPU/affinity/frequency
+policy, memory, PARTUUID/device/model/transport/queue/scheduler, block ancestry,
+swap/mount inventories, PSI, thermal readings and swapz module parameters. After
+evaluation it must call \`physical-campaign-evidence.py seal\` with both snapshots,
+the evaluator summary and every pair JSON. The create-only sealer hashes the
+frozen policy, prospective amendment, evaluator and itself; verifies original
+pair fields against the summary; preserves failed/excluded attempts; and only
+emits campaign_status PASS for a complete v2 PASS with stable source, kernel,
+device queue/scheduler, CPU policy/affinity, swap identity and module cleanup
+state. A v1 numerical PASS is sealed as BLOCKED rather than promoted. Host
+lower-WRITE reduction is not a direct NAND endurance/wear measurement and must
+not be reported as one.
 
 
 ## Report contract
