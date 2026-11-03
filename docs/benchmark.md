@@ -489,9 +489,13 @@ modified by new physical results. The prospectively frozen v2 extension lives
 in \`tests/runtime/benchmark/physical-qualification-amendment-v2.json\`; it is
 bound to the v1 manifest Git blob
 \`3a422599dee32e64811545441de7525b9479f782\`. The amendment was issued before
-any v2 confirmatory result. A v1-only evaluation keeps its historical workload
-set; once any v2 pair is supplied, the evaluator requires the complete v1+v2
-campaign, so an incomplete new campaign cannot accidentally promote itself.
+any v2 confirmatory result. Its own amendment Git blob
+`eac574fd204932e630e8bb45dca66b67c135a779` is pinned in the evaluator;
+an in-place criteria change must fail and be published as a new protocol.
+A v1-only evaluation keeps its historical workload set; a v2 evaluation requires
+all v1 and v2 workloads, without pooling their statistics. The host scheduler
+must explicitly select `qualification.py evaluate --protocol v2`, including
+when all new samples have failed or are missing, to prevent silent v1 promotion.
 
 Two v1 short-service cohorts run on the exact card: one 50/50 synthetic
 medium/entropy cohort and one immutable owner-supplied representative cohort.
@@ -543,8 +547,15 @@ swap-in evidence. The fault-latency sample times a one-byte first touch of each
 anonymous page; deterministic page generation and the subsequent 4096-byte
 Python copy/byte comparison are timed separately so interpreter verification
 work is not mislabeled as page-fault service. \`pswpout\`, cgroup swap/current
-state and cgroup event deltas are retained for attribution. These three pairs
-are replicated directional evidence, not a t-test.
+state and cgroup event deltas are retained for attribution. The worker requires
+an initially empty admitted swap device, a private cgroup without foreign
+processes/descendant cgroups, a clean HEAD == origin/main at the exact source
+SHA, and an unchanged swap mapper/partition identity. Positive whole-arm
+pswpout, exact-target WRITE and backing WRITE independently establish swap-out.
+The first-byte access histogram still includes resident pages and Python access
+overhead: aggregate counter deltas cannot prove that every sampled access
+resolved a major page fault. These three pairs are replicated directional
+evidence, not a t-test.
 
 For physical block service the raw arm uses the same selected partition with a
 4096-byte data offset so the SWZ authorization header is not overwritten. It
@@ -564,11 +575,14 @@ allocator probe cost, repeated segment programming and measured-interval-only
 maximum forward-progress gap. Sustained minute buckets additionally retain
 combined/read/write p95 and p99, operation counts and cumulative deterministic
 hot-page overwrite coverage. During duration-bounded sustained work, a
-low-rate one-minute sampler records host CPU/PSI and lower-device READ/WRITE
-bytes/requests without polling the replay hot path. Boundary target snapshots
-retain GC role-rotation count and allocator cursor/reserve/victim state, while
-explicit occupancy-transition records distinguish initial, post-fill,
-post-warmup and measured-end logical occupancy. Sustained
+low-rate one-minute sampler records host CPU/PSI, lower-device READ/WRITE
+bytes/requests and per-minute GC counters, including role rotations, without
+polling the replay hot path. Boundary target snapshots retain allocator
+cursor/reserve/victim state. The explicit occupancy-transition records describe
+logical coverage after successful deterministic writes, not live physical
+segment utilization. The maximum no-progress gap includes trailing measured
+fsync stalls; any available interval samples and the primary failure reason
+are retained on replay failure. Sustained
 latency histograms use 16 sub-buckets per power-of-two range, bounding
 percentile bucket width to 6.25% so the 25% p95/p99 gates are not dominated by
 coarse quantization. The swapz scheduler samples
@@ -623,9 +637,10 @@ READ evidence and zero byte-oracle mismatches.
 
 **Agent 12 runner handoff:** shared physical orchestration should enumerate the
 frozen v1 contract plus the v2 amendment, preserve the prescribed pair order,
-pass the exact DM UUID into the swapz anonymous arm, serialize on the existing
-physical-performance lock, and retain every arm/pair JSON plus exclusion/failure
-reason. It must not rerun a failed/excluded pair to replace it with a passing
+pass the exact DM UUID into the swapz anonymous arm, use a worker-only private
+cgroup, explicitly request `--protocol v2` for v2 qualification, serialize on
+the existing physical-performance lock, and retain every arm/pair JSON plus
+exclusion/failure reason. It must not rerun a failed/excluded pair to replace it with a passing
 sample. Physical execution is scheduled exclusively by the host/Codex owner;
 no VM/fallback run is an acceptable substitute and no two host experiments may
 overlap. This methodology change intentionally does not add a second public

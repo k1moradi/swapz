@@ -22,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[3]
 ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
 AMENDMENT_MANIFEST = ROOT / "tests/runtime/benchmark/physical-qualification-amendment-v2.json"
 AMENDMENT_SCHEMA = "swapz-performance-qualification-amendment-v2"
+# A change to this blob requires a new prospectively versioned protocol.
+AMENDMENT_GIT_BLOB_SHA = "eac574fd204932e630e8bb45dca66b67c135a779"
 
 
 def _unique_object(pairs):
@@ -67,6 +69,8 @@ def _git_blob_sha(path: Path) -> str:
 
 def _load_frozen_amendment() -> dict:
     try:
+        if _git_blob_sha(AMENDMENT_MANIFEST) != AMENDMENT_GIT_BLOB_SHA:
+            raise ValueError("prospective physical amendment blob hash changed")
         document = json.loads(
             AMENDMENT_MANIFEST.read_text(encoding="utf-8"),
             object_pairs_hook=_unique_object)
@@ -367,6 +371,10 @@ def sustained_decision(pair: dict) -> dict:
             "evidence": "directional_single_pair", "ratios": ratios, "checks": checks}
 
 
+def positive_counter(value) -> bool:
+    return type(value) is int and value > 0
+
+
 def anonymous_decision(pairs: list[dict]) -> dict:
     limit = CONTRACT["acceptance"]["anonymous"]
     rows, ok = [], True
@@ -383,21 +391,31 @@ def anonymous_decision(pairs: list[dict]) -> dict:
         for arm in (pair["raw"], pair["swapz"]):
             pair_ok &= int(arm.get("observed_swap_bytes", 0)) >= limit["minimum_observed_swap_bytes"]
             pair_ok &= (arm.get("oracle") or {}).get("mismatches") == 0
+            attribution = arm.get("anonymous_swap_attribution") or {}
+            pair_ok &= positive_counter(
+                (attribution.get("vmstat") or {}).get("pswpout_pages"))
+            pair_ok &= positive_counter(
+                (arm.get("target_io") or {}).get("target_write_bytes"))
+            pair_ok &= positive_counter(
+                (arm.get("lower_io") or {}).get("lower_write_bytes"))
             rounds = arm.get("rounds") or []
             pair_ok &= len(rounds) == CONTRACT["workloads"]["anonymous-swap"]["rounds"]
             pair_ok &= all(
-                int((row.get("lower_io") or {}).get("lower_read_bytes", 0)) > 0 and
-                int((row.get("target_io") or {}).get("target_read_bytes", 0)) > 0 and
-                int((row.get("vmstat") or {}).get("pswpin_pages", 0)) > 0 and
-                int((((row.get("cgroup_delta") or {}).get("memory_stat") or {})
-                     .get("pgmajfault", 0))) > 0
+                positive_counter((row.get("lower_io") or {}).get("lower_read_bytes")) and
+                positive_counter((row.get("target_io") or {}).get("target_read_bytes")) and
+                positive_counter((row.get("vmstat") or {}).get("pswpin_pages")) and
+                positive_counter(
+                    ((row.get("cgroup_delta") or {}).get("memory_stat") or {})
+                    .get("pgmajfault"))
                 for row in rounds)
         rows.append({"pair_id": pair["pair_id"], "status": "PASS" if pair_ok else "FAIL", "ratios": ratios})
         ok &= pair_ok
     return {"status": "PASS" if ok else "FAIL", "evidence": "directional_three_pair", "pairs": rows}
 
 
-def evaluate(records: list[dict]) -> dict:
+def evaluate(records: list[dict], protocol: str = "auto") -> dict:
+    if protocol not in ("auto", "v1", "v2"):
+        raise ValueError("unsupported physical qualification protocol")
     preserved = []
     for pair in records:
         if pair.get("schema") != PAIR_SCHEMA or pair.get("workload") not in WORKLOADS:
@@ -405,10 +423,22 @@ def evaluate(records: list[dict]) -> dict:
         saved = dict(pair)
         saved["analysis_usable"] = pair.get("status") == "PASS" and not pair.get("excluded")
         saved["analysis_exclusion_reasons"] = list(pair.get("exclusion_reasons") or [])
+        workload = pair["workload"]
+        expected_protocol = (
+            AMENDMENT_SCHEMA if workload in AMENDMENT["workloads"] else SCHEMA)
+        recorded_protocol = pair.get("qualification_protocol")
+        if recorded_protocol != expected_protocol and (
+                recorded_protocol is not None or workload in AMENDMENT["workloads"]):
+            saved["analysis_usable"] = False
+            saved["analysis_exclusion_reasons"].append(
+                "qualification protocol differs from workload contract")
         preserved.append(saved)
 
-    include_amendment = any(
+    has_amendment_records = any(
         row["workload"] in AMENDMENT["workloads"] for row in preserved)
+    if protocol == "v1" and has_amendment_records:
+        raise ValueError("v2 workload cannot be evaluated under v1 protocol")
+    include_amendment = protocol == "v2" or has_amendment_records
     evaluation_workloads = (
         WORKLOADS if include_amendment else CONTRACT["workloads"])
 
@@ -448,6 +478,7 @@ def evaluate(records: list[dict]) -> dict:
     return {"schema": SUMMARY_SCHEMA, "contract": contract(),
             "prospective_amendment": amendment(),
             "amendment_active": include_amendment,
+            "evaluation_protocol": "v2" if include_amendment else "v1",
             "status": "PASS" if overall else "FAIL_OR_INCOMPLETE",
             "decisions": decisions, "raw_repeat_spread": raw_spread, "records": preserved}
 
@@ -471,7 +502,9 @@ def main() -> None:
     pair.add_argument("--pair-index", type=int, required=True)
     pair.add_argument("--order", choices=("raw-first", "swapz-first"), required=True)
     pair.add_argument("--exclude", action="append", default=[]); pair.add_argument("--result", required=True)
-    summary = sub.add_parser("evaluate"); summary.add_argument("reports", nargs="+")
+    summary = sub.add_parser("evaluate")
+    summary.add_argument("--protocol", choices=("auto", "v1", "v2"), default="auto")
+    summary.add_argument("reports", nargs="+")
     args = parser.parse_args()
     try:
         if args.command == "contract":
@@ -488,7 +521,9 @@ def main() -> None:
             target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
             print(json.dumps(record, sort_keys=True))
         else:
-            print(json.dumps(evaluate(load_records(args.reports)), sort_keys=True))
+            print(json.dumps(
+                evaluate(load_records(args.reports), protocol=args.protocol),
+                sort_keys=True))
     except (OSError, ValueError, TypeError, KeyError) as exc:
         parser.exit(2, "BLOCKED/FAIL: " + str(exc) + "\n")
 

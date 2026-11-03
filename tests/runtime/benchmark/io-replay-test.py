@@ -2317,6 +2317,9 @@ class PairReplayContract(unittest.TestCase):
             self.assertGreater(report["overwrite"]["measured_hot_pages_rewritten"], 0)
             self.assertGreater(report["overwrite"]["measured_repeat_write_operations"], 0)
             self.assertEqual(report["sustained_intervals"], [])
+            self.assertIn("not live physical-segment utilization",
+                          report["occupancy_scope"])
+            self.assertGreaterEqual(report["max_no_progress_seconds"], 0)
             self.assertTrue(report["minute_buckets"])
             minute = report["minute_buckets"][0]
             self.assertIn("p95_ns", minute)
@@ -2431,6 +2434,146 @@ class PairReplayContract(unittest.TestCase):
         self.assertTrue(all(
             not row["analysis_usable"] for row in summary["records"]
             if row["workload"] == "sd-service-balanced"))
+
+    def test_sustained_interval_sampler_gc_and_trailing_gap(self):
+        import importlib.util
+        import time
+
+        path = SCRIPT.with_name("sustained-replay.py")
+        spec = importlib.util.spec_from_file_location(
+            "swapz_interval_audit", path)
+        sustained = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sustained)
+
+        progress = sustained.ProgressTracker()
+        with progress.lock:
+            progress.last_ns = time.monotonic_ns() - 20_000_000
+        self.assertGreaterEqual(progress.snapshot_max_gap_ns(), 20_000_000)
+
+        sampler = sustained.SustainedIntervalSampler(None, progress)
+        sampler.start_ns = 100
+        sampler.previous = {
+            "time_ns": 100, "host_cpu": {"ticks": (0,)},
+            "lower": None, "max_no_progress_ns": 0,
+            "target_status": {
+                "gc_wall_ns": 0, "gc_role_rotations": 2, "cursor": 8,
+                "failed": 0, "error": 0},
+        }
+        current = {
+            "time_ns": 1_000_000_100, "host_cpu": {"ticks": (1,)},
+            "lower": None, "max_no_progress_ns": 20_000_000,
+            "target_status": {
+                "gc_wall_ns": 10_000_000, "gc_role_rotations": 5,
+                "cursor": 1, "failed": 0, "error": 0},
+        }
+        with mock.patch.dict(
+                sustained.REPLAY,
+                {"host_cpu_delta": lambda before, after: {
+                    "status": "AVAILABLE"}}):
+            sampler._append(current)
+        self.assertEqual(len(sampler.rows), 1)
+        row = sampler.rows[0]
+        self.assertEqual(row["gc"]["gc_role_rotations"], 3)
+        self.assertEqual(row["gc"]["cursor"], 1)
+        self.assertAlmostEqual(row["gc"]["wall_fraction"], .01)
+        self.assertEqual(row["max_no_progress_seconds"], .02)
+
+    def test_prospective_amendment_and_attribution_fail_closed(self):
+        import importlib.util
+
+        qualification_path = SCRIPT.with_name("qualification.py")
+        qualification_spec = importlib.util.spec_from_file_location(
+            "swapz_protocol_audit", qualification_path)
+        qualification = importlib.util.module_from_spec(qualification_spec)
+        qualification_spec.loader.exec_module(qualification)
+
+        self.assertEqual(
+            qualification._git_blob_sha(qualification.AMENDMENT_MANIFEST),
+            qualification.AMENDMENT_GIT_BLOB_SHA)
+        with tempfile.TemporaryDirectory() as directory:
+            tampered = Path(directory) / "amendment.json"
+            tampered.write_text("{}")
+            original = qualification.AMENDMENT_MANIFEST
+            try:
+                qualification.AMENDMENT_MANIFEST = tampered
+                with self.assertRaisesRegex(ValueError, "blob hash changed"):
+                    qualification._load_frozen_amendment()
+            finally:
+                qualification.AMENDMENT_MANIFEST = original
+
+        v1_only = qualification.evaluate([], protocol="v1")
+        self.assertFalse(v1_only["amendment_active"])
+        self.assertNotIn("sd-service-qd1-balanced", v1_only["decisions"])
+        v2 = qualification.evaluate([], protocol="v2")
+        self.assertTrue(v2["amendment_active"])
+        self.assertEqual(v2["evaluation_protocol"], "v2")
+        self.assertEqual(
+            v2["decisions"]["sd-service-qd1-balanced"]["status"],
+            "INCOMPLETE")
+        self.assertEqual(
+            v2["decisions"]["sd-service-incompressible"]["status"],
+            "INCOMPLETE")
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            qualification.evaluate([], protocol="v3")
+        with self.assertRaisesRegex(ValueError, "v2 workload"):
+            qualification.evaluate([{
+                "schema": qualification.PAIR_SCHEMA,
+                "workload": "sd-service-qd1-balanced", "status": "EXCLUDED",
+                "excluded": True,
+            }], protocol="v1")
+
+        round_evidence = {
+            "lower_io": {"lower_read_bytes": 4096},
+            "target_io": {"target_read_bytes": 4096},
+            "vmstat": {"pswpin_pages": 1},
+            "cgroup_delta": {"memory_stat": {"pgmajfault": 1}},
+        }
+        arm = {
+            "observed_swap_bytes": 134217728,
+            "oracle": {"mismatches": 0},
+            "anonymous_swap_attribution": {
+                "vmstat": {"pswpout_pages": 128}},
+            "target_io": {"target_write_bytes": 1048576},
+            "lower_io": {"lower_write_bytes": 1048576},
+            "rounds": [round_evidence.copy() for _ in range(3)],
+        }
+        pair = {
+            "pair_id": "audit-pair",
+            "deltas": {
+                "swapin_p95": 0, "swapin_p99": 0, "useful_read": 0,
+                "lower_write_bytes": -.2,
+                "lower_write_requests": -.2, "cpu": 0,
+            },
+            "raw": arm, "swapz": arm,
+        }
+        def verdict():
+            return qualification.anonymous_decision([pair])["status"]
+
+        self.assertEqual(verdict(), "PASS")
+        arm["rounds"][0] = {
+            **round_evidence,
+            "cgroup_delta": {"memory_stat": {"pgmajfault": 0}},
+        }
+        self.assertEqual(verdict(), "FAIL")
+        arm["rounds"][0] = round_evidence.copy()
+        arm["anonymous_swap_attribution"]["vmstat"]["pswpout_pages"] = 0
+        self.assertEqual(verdict(), "FAIL")
+        arm["anonymous_swap_attribution"]["vmstat"]["pswpout_pages"] = 128
+        arm["target_io"]["target_write_bytes"] = 0
+        self.assertEqual(verdict(), "FAIL")
+
+        anonymous_path = SCRIPT.with_name("anonymous-swap.py")
+        anonymous_spec = importlib.util.spec_from_file_location(
+            "swapz_cgroup_audit", anonymous_path)
+        anonymous = importlib.util.module_from_spec(anonymous_spec)
+        anonymous_spec.loader.exec_module(anonymous)
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            (cgroup / "cgroup.procs").write_text(f"{os.getpid()}\n")
+            anonymous.require_isolated_cgroup({"path": str(cgroup)})
+            (cgroup / "child").mkdir()
+            with self.assertRaisesRegex(ValueError, "descendant cgroups"):
+                anonymous.require_isolated_cgroup({"path": str(cgroup)})
 
     def test_anonymous_swap_page_recipe_is_deterministic_and_bimodal(self):
         import importlib.util

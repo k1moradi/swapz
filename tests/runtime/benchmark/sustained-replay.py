@@ -764,10 +764,13 @@ class SustainedIntervalSampler:
     """Low-rate host/lower-device telemetry outside the replay hot path."""
 
     def __init__(self, lower_disk: str | None, progress: ProgressTracker,
-                 interval_seconds: float = 60.0):
+                 interval_seconds: float = 60.0, target: Path | None = None,
+                 identity: dict | None = None):
         self.lower_disk = lower_disk
         self.progress = progress
         self.interval_seconds = interval_seconds
+        self.target = target
+        self.identity = identity
         self.stop_event = threading.Event()
         self.thread = None
         self.previous = None
@@ -780,6 +783,10 @@ class SustainedIntervalSampler:
             "time_ns": time.monotonic_ns(),
             "host_cpu": REPLAY["host_cpu_snapshot"](),
             "lower": REPLAY["lower_stat"](self.lower_disk),
+            "target_status": (
+                status_snapshot(self.target, self.identity)
+                if self.target is not None and self.identity is not None
+                else None),
             "max_no_progress_ns": self.progress.snapshot_max_gap_ns(),
         }
 
@@ -802,6 +809,9 @@ class SustainedIntervalSampler:
             "host_cpu": REPLAY["host_cpu_delta"](
                 previous["host_cpu"], current["host_cpu"]),
             "lower_io": lower,
+            "gc": status_delta(
+                previous["target_status"], current["target_status"],
+                duration_ns),
             "max_no_progress_seconds":
                 current["max_no_progress_ns"] / 1e9,
         })
@@ -909,7 +919,8 @@ def run(args):
                 measured_progress = ProgressTracker()
                 interval_sampler = (
                     SustainedIntervalSampler(
-                        identity.get("owned_disk"), measured_progress)
+                        identity.get("owned_disk"), measured_progress,
+                        target=target, identity=identity)
                     if args.measure_seconds is not None else None)
                 if interval_sampler is not None:
                     interval_sampler.start()
@@ -919,12 +930,23 @@ def run(args):
                         fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
                         pool, initial_writes, measured_progress)
                     end = time.monotonic_ns()
+                    measured_max_no_progress_seconds = (
+                        measured_progress.snapshot_max_gap_ns() / 1e9)
                     cpu_after = process_cpu()
                     host_after = REPLAY["host_cpu_snapshot"]()
                 finally:
-                    interval_rows = (
-                        interval_sampler.stop()
-                        if interval_sampler is not None else [])
+                    interval_rows = []
+                    if interval_sampler is not None:
+                        try:
+                            interval_rows = interval_sampler.stop()
+                        except (OSError, ValueError) as sampler_error:
+                            # Do not mask an existing replay failure: preserve
+                            # both its primary reason and partial telemetry.
+                            if sys.exc_info()[0] is None:
+                                raise
+                            partial["interval_sampler_failure"] = str(sampler_error)
+                            interval_rows = list(interval_sampler.rows)
+                        partial["sustained_intervals"] = interval_rows
             status_after = status_snapshot(target, identity)
             read_after = REPLAY["kernel_read_snapshot"](target, identity)
             write_after = REPLAY["kernel_write_snapshot"](target, identity)
@@ -1065,7 +1087,10 @@ def run(args):
                 ],
                 "target_status_before": status_before,
                 "target_status_after": status_after,
-                "max_no_progress_seconds": measured_progress.max_gap_ns / 1e9,
+                "occupancy_scope": (
+                    "deterministic logical coverage after successful writes; "
+                    "not live physical-segment utilization"),
+                "max_no_progress_seconds": measured_max_no_progress_seconds,
                 "oracle": oracle,
                 "claim_boundary": (
                     "host-visible lower bytes/requests are physical I/O cost, "

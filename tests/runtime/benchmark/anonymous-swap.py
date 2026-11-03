@@ -30,6 +30,39 @@ QUALIFICATION = runpy.run_path(str(Path(__file__).with_name("qualification.py"))
 ANONYMOUS_SPEC = QUALIFICATION["CONTRACT"]["workloads"]["anonymous-swap"]
 
 
+def require_source_identity(source_sha: str) -> None:
+    """Read-only physical provenance check; never mutate the checkout."""
+    root = Path(__file__).resolve().parents[3]
+
+    def git(*args):
+        result = subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True,
+            text=True, check=False, timeout=20)
+        if result.returncode:
+            raise ValueError("physical anonymous source verification failed")
+        return result.stdout.strip()
+
+    if git("rev-parse", "HEAD") != source_sha or \
+            git("rev-parse", "origin/main") != source_sha:
+        raise ValueError(
+            "physical anonymous qualification requires HEAD == origin/main == source SHA")
+    if git("status", "--porcelain"):
+        raise ValueError("physical anonymous qualification requires clean source")
+
+
+def require_isolated_cgroup(cgroup: dict) -> None:
+    """Cgroup-v2 hierarchical fault/swap counters must belong to this worker."""
+    path = cgroup.get("path")
+    if not isinstance(path, str) or path in ("/", "/sys/fs/cgroup"):
+        raise ValueError("physical anonymous qualification requires a private cgroup")
+    base = Path(path)
+    processes = (base / "cgroup.procs").read_text(encoding="ascii").split()
+    if processes != [str(os.getpid())]:
+        raise ValueError("anonymous qualification cgroup has foreign processes")
+    if any(child.is_dir() for child in base.iterdir()):
+        raise ValueError("anonymous qualification cgroup has descendant cgroups")
+
+
 def page_bytes(index: int) -> bytes:
     if index < 0:
         raise ValueError("page index must be nonnegative")
@@ -318,8 +351,14 @@ def run(args):
     if args.candidate == "raw" and args.expected_dm_uuid:
         raise ValueError("raw anonymous qualification must not name a DM UUID")
 
+    if args.expected_swap_device:
+        require_source_identity(args.source_sha)
     rows_before = swap_inventory(args.expected_swap_device)
     cgroup_before = cgroup_values()
+    if args.expected_swap_device:
+        require_isolated_cgroup(cgroup_before)
+        if any(row["used_kib"] != 0 for row in rows_before):
+            raise ValueError("anonymous qualification swap device is not initially empty")
     identity = (
         swap_device_identity(
             args.expected_swap_device, args.candidate, args.expected_dm_uuid)
@@ -371,6 +410,8 @@ def run(args):
         rounds, mismatches, combined, max_observed = [], 0, array.array("Q"), 0
         for round_index in range(args.rounds):
             cgroup = cgroup_values()
+            if args.expected_swap_device:
+                require_isolated_cgroup(cgroup)
             vm_swap = process_swap_bytes()
             rows = swap_inventory(args.expected_swap_device)
             cgroup_swap = cgroup.get("memory_swap_current")
@@ -441,6 +482,7 @@ def run(args):
 
             first_touch_ns = sum(samples)
             total_ns = int(round_seconds * 1e9)
+            first_touch_latency = latency_summary(samples)
             rounds.append({
                 "round": round_index, "seconds": round_seconds,
                 "observed_swap_bytes_before_read": observed,
@@ -454,13 +496,15 @@ def run(args):
                     "pswpout_bytes": vmstat["pswpout"] * PAGE,
                 },
                 "cgroup_delta": cgroup_delta,
-                "latency": latency_summary(samples),
-                "fault_first_touch_latency": latency_summary(samples),
+                "latency": first_touch_latency,
+                "fault_first_touch_latency": first_touch_latency,
                 "timing": {
                     "scope": (
-                        "fault_first_touch times one-byte anonymous accesses; "
-                        "page generation, 4KiB Python copy and byte verification "
-                        "are outside that latency sample"),
+                        "first-touch timing includes Python one-byte access "
+                        "overhead and both resident and swap-faulted pages; "
+                        "kernel faults and swap I/O are verified only in aggregate. "
+                        "Page generation, 4KiB copy and byte comparison "
+                        "are excluded from the individual latency sample"),
                     "fault_first_touch_seconds": first_touch_ns / 1e9,
                     "verification_copy_compare_seconds": verification_ns / 1e9,
                     "other_loop_seconds": max(
@@ -485,6 +529,12 @@ def run(args):
         lower_after = REPLAY["lower_stat"](lower_disk)
         rows_after = swap_inventory(args.expected_swap_device)
         cgroup_after = cgroup_values()
+        if args.expected_swap_device:
+            require_isolated_cgroup(cgroup_after)
+            if swap_device_identity(
+                    args.expected_swap_device, args.candidate,
+                    args.expected_dm_uuid) != identity:
+                raise ValueError("anonymous swap-device identity changed during arm")
         post_quiet = quiet_window()
         host_cpu = REPLAY["host_cpu_delta"](host_before, host_after)
         lower = (
@@ -514,6 +564,13 @@ def run(args):
 
         arm_vmstat = monotonic_counter_delta(
             vmstat_before, vmstat_after, ("pswpin", "pswpout"))
+        if args.expected_swap_device:
+            if arm_vmstat["pswpout"] <= 0:
+                raise ValueError("anonymous workload produced no pswpout")
+            if target_io is None or target_io["target_write_bytes"] <= 0:
+                raise ValueError("anonymous workload produced no exact-target WRITE")
+            if lower is None or lower["lower_write_bytes"] <= 0:
+                raise ValueError("anonymous workload produced no backing-device WRITE")
         report = {
             "schema": SCHEMA, "verdict": "PASS", "workload_id": args.workload_id,
             "candidate": args.candidate, "source_sha": args.source_sha,
@@ -532,8 +589,11 @@ def run(args):
             },
             "swapin_latency": latency_summary(combined),
             "swapin_latency_scope": (
-                "one-byte first-touch anonymous page-fault latency; excludes "
-                "page recipe generation and subsequent 4KiB copy/verification"),
+                "first-byte Python access latency includes resident and "
+                "swap-faulted pages; positive per-round pswpin, cgroup major "
+                "faults, target READ and backing READ independently establish "
+                "aggregate swap-in, not individual-sample fault attribution; "
+                "page generation and full-page verification are excluded"),
             "throughput": {
                 "useful_read_mbps": useful_read_bytes / read_seconds / 1_000_000,
                 "useful_read_bytes": useful_read_bytes,
@@ -595,7 +655,8 @@ def main():
     parser.add_argument("--result", required=True)
     args = parser.parse_args(); error = None
     try: run(args)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError,
+            subprocess.SubprocessError) as exc:
         failure = dict(getattr(args, "_partial_report", {}) or {})
         failure.update({"schema": SCHEMA, "verdict": "FAIL", "workload_id": args.workload_id,
                         "candidate": args.candidate, "source_sha": args.source_sha, "failure_reason": str(exc)})
