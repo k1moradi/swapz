@@ -4862,13 +4862,19 @@ cannot manufacture observed cold-boot evidence.
 Rootless systemd tests must use authentic tab-delimited `/proc/swaps`
 entries, including long absolute paths, to assert actual used/remaining
 capacity rather than accepting a zero-usage false positive. Empty, truncated,
-malformed, or unreadable inventories must not satisfy a hibernation guard;
-a correctly formed empty inventory may allow unrelated hibernation when
-the kernel and initramfs resume configuration is also safe. Missing
+malformed, or unreadable inventories must not satisfy a hibernation guard.
+A correctly formed empty inventory may allow unrelated hibernation only when
+no primary target is configured, no swapz mapper is active, and kernel/initramfs
+resume evidence is safe. A configured primary target must block hibernation for
+the whole configured interval, and mapper activation must independently refuse
+to begin while a hibernation-capable systemd unit is active or activating.
+Exercise missing removable media plus unresolved `/dev` and tagged resume
+aliases; admit only a provably distinct stable identity. Missing
 `/proc/cmdline` and a live mapper whose target authority cannot be
-resolved both require fail-closed results. Assert bounded journal
-observation and portable mixed-case kernel error detection. These tests
-remain rootless and must never perform host swap or hibernation actions.
+resolved both require fail-closed results. Assert bounded journal observation,
+finite deadlines for external observer commands, a fixed production PATH, and
+portable mixed-case kernel error detection. These tests remain rootless and
+must never perform host swap or hibernation actions.
 
  
 Raw triple-quoted shell fixtures preserve the literal backslash preceding a
@@ -4876,3 +4882,9 @@ newline and may lose their executable shebang after naïve dedenting. Normalize
 the fixture before `chmod +x`, and exercise a real subprocess launch with
 an asserted `#!/bin/sh` prefix; a registered or syntactically valid Python
 fixture that cannot execute is not passing systemd coverage.
+
+A dedicated fast CI gate must run the hermetic package transaction suite and
+the rootless systemd/runtime-health suite independently of the broader product
+qualification workflow. This gate is release evidence for packaging and
+service contracts only; it does not replace loaded-kernel, physical-media, or
+owner-observed cold-boot qualification.

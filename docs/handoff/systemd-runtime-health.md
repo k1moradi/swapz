@@ -1,38 +1,53 @@
-# Systemd runtime-health integration handoff
+# Systemd runtime-health release readiness
 
-This change adds the source contract for `swapz-primary-runtime-health` and
-`swapz-primary-runtime-health.service`, generator hibernation guards, mapper
-post-stop diagnostics, cold-boot resume exclusion, and the rootless regression
-coverage. It intentionally does not edit the package installer owned by Agent
-10 and does not add a second test runner owned by Agent 12.
+The runtime-health helper and service are installed by
+`packaging/package-dkms.sh`, covered by package ownership hashes, upgrade
+rollback, modified-copy uninstall refusal, and exact uninstall cleanup. The
+official rootless runner still invokes
+`tests/runtime/native/systemd/swapz-primary-systemd-test.py`, and the separate
+systemd/package readiness workflow provides a fast CI result that cannot be
+hidden by an earlier benchmark or source-contract failure.
 
-## Agent 10 installation contract
+## Hibernation and resume boundary
 
-Install `packaging/swapz-primary-runtime-health` to the package sbin directory
-mode 0755 and `packaging/swapz-primary-runtime-health.service` to the systemd
-unit directory mode 0644. Substitute `@SWAPZ_SBINDIR@` in the new service as
-for existing lifecycle units. Include both files in package ownership hashes,
-upgrade rollback, modified-copy uninstall refusal, and exact uninstall cleanup.
-The helper must be installed before the package's daemon-reload so generated
-hibernation drop-ins never reference a missing executable.
+Primary swapz does not support hibernation because its mapper/run authority is
+volatile across a fresh boot. The generated hibernate, hybrid-sleep, and
+suspend-then-hibernate guards are read-only. While a valid primary target is
+configured, hibernation is refused for the complete configured interval even if
+`/proc/swaps` is currently empty. Mapper activation independently refuses to
+start while a hibernation-capable systemd unit is active or activating. This
+two-sided admission policy closes the check-then-activate race without
+automatically stopping swap.
 
-Package install must keep all primary units disabled and must not start the
-monitor, mapper, passive swap, hibernation action, swapon/swapoff, or mapper
-mutation. An upgrade must preserve the existing no-live-mapper safety gate.
+Resume aliases that cannot be resolved are rejected when a selected swapz
+identity exists. A provably distinct canonical PARTUUID may still be treated as
+unrelated when the removable target is absent. Current runtime/config checks do
+not by themselves prove the bytes embedded in every distribution's initramfs
+or UKI; release qualification must inspect the actual boot artifact and
+boot-loader configuration for the release host.
 
-## Agent 12 runner contract
+## Runtime operations
 
-No new runner registration is required: the owned test file
-`tests/runtime/native/systemd/swapz-primary-systemd-test.py` is already invoked
-by the official rootless stage. Preserve that registration and its CI contract;
-do not create an alternate public test command.
+`swapz-primary-runtime-health.service` is an observer only. Its active systemd
+state is not a health verdict: operators must use the latest
+`SWAPZ_RUNTIME_HEALTH=` journal record. `FAIL` preserves evidence and never
+causes automatic swapoff, mapper removal, reformatting, or lifecycle restart.
+External observation commands are time-bounded and the production helper uses a
+fixed system executable path and locale.
 
-## Real-host evidence still required
+Package installation keeps all primary units disabled and does not start the
+mapper, monitor, passive swap, hibernation action, or any swap mutation. The
+production userspace lifecycle compile gate remains disabled until a frozen
+release candidate completes the physical lifecycle/capacity qualification.
 
-After Agent 10 lands installation, the development host still needs exact-source
-package regression, install/upgrade/uninstall ownership checks, daemon-reload
-generation of all three hibernation guards, runtime monitor start/stop and
-journal state-change evidence, and a controlled native stop-failure diagnostic
-exercise where safe. No agent reboot is authorized. The existing owner-triggered
-cold-boot arm/reboot/observe harness remains the only source of observed
+## Release evidence still required
+
+Before promotion, use one immutable source SHA and exact artifact digests for
+all required gates. Required evidence includes the fast rootless
+systemd/package gate, the broader mandatory CI, exact-source physical lifecycle
+and capacity qualification, install/upgrade/uninstall verification,
+daemon-reload generation of all three hibernation guards, real monitor
+state-change evidence, controlled native stop-failure diagnostics, actual
+initramfs/UKI resume inspection, and the owner-triggered cold-boot
+arm/reboot/observe result. No rootless fixture may manufacture a physical or
 cold-boot PASS.

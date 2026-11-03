@@ -137,7 +137,7 @@ else
   trusted_system_executable "$systemctl_bin" ||
     blocked "no trusted systemctl executable"
 fi
-for required_command in python3 sha256sum stat install cp rm mkdir rmdir sed grep find realpath readlink flock modinfo systemd-escape awk cmp basename mktemp git uname mv; do
+for required_command in python3 sha256sum stat install cp rm mkdir rmdir sed grep find realpath readlink flock modinfo systemd-escape awk cmp basename mktemp git uname mv timeout; do
   command -v "$required_command" >/dev/null 2>&1 || blocked "$required_command unavailable"
 done
 if [[ -z "$test_root" ]]; then

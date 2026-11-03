@@ -234,6 +234,7 @@ class UnitContractTests(unittest.TestCase):
         self.assertEqual(
             lifecycle,
             [
+                "ExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-runtime-health activation-guard",
                 "ExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-boot-verify preflight",
                 "ExecStartPre=-@SWAPZ_SBINDIR@/swapzctl primary recover",
                 "ExecStartPre=@SWAPZ_SBINDIR@/swapzctl primary prepare",
@@ -277,6 +278,14 @@ class UnitContractTests(unittest.TestCase):
         self.assertIn("RestartSec=30s", service)
         self.assertIn("ConditionPathExists=/dev/mapper/swapz-primary", service)
         self.assertIn("WantedBy=swap.target", service)
+        for hardening in (
+            "ProtectKernelModules=yes",
+            "ProtectClock=yes",
+            "ProtectHostname=yes",
+            "RestrictRealtime=yes",
+            "SystemCallArchitectures=native",
+        ):
+            self.assertIn(hardening, service)
         self.assertNotIn("Wants=swapz-primary-mapper.service", service)
         self.assertNotIn("Requires=swapz-primary-mapper.service", service)
         helper = read_text(RUNTIME_HEALTH)
@@ -284,6 +293,8 @@ class UnitContractTests(unittest.TestCase):
         self.assertNotIn("dmsetup remove", helper)
         self.assertNotIn("swapzctl primary start", helper)
         self.assertNotIn("swapzctl primary stop", helper)
+        self.assertIn("PATH=/usr/sbin:/usr/bin:/sbin:/bin", helper)
+        self.assertIn("run_bounded()", helper)
 
 
     def test_raw_multiline_mock_has_real_shell_shebang(self) -> None:
@@ -425,7 +436,7 @@ class ControlledLifecycleTests(unittest.TestCase):
         self.assertEqual(self.execute_start_contract(env), 0)
         self.assertEqual(
             self.log.read_text(encoding="ascii").splitlines(),
-            ["verify:preflight", "swapzctl:recover", "swapzctl:prepare", "swapzctl:start"],
+            ["runtime:activation-guard", "verify:preflight", "swapzctl:recover", "swapzctl:prepare", "swapzctl:start"],
         )
         self.assertEqual(self.execute_stop_contract(env), 0)
         self.assertEqual(self.log.read_text(encoding="ascii").splitlines()[-1], "swapzctl:stop")
@@ -436,7 +447,7 @@ class ControlledLifecycleTests(unittest.TestCase):
         self.assertNotEqual(self.execute_start_contract(env), 0)
         self.assertEqual(
             self.log.read_text(encoding="ascii").splitlines(),
-            ["verify:preflight", "swapzctl:recover", "swapzctl:prepare"],
+            ["runtime:activation-guard", "verify:preflight", "swapzctl:recover", "swapzctl:prepare"],
         )
 
     def test_stop_failure_is_not_retried_and_diagnostics_do_not_mask_it(self) -> None:
@@ -507,6 +518,8 @@ class BootVerifierTests(unittest.TestCase):
             {
                 "PATH": f"{self.bin}:{self.env['PATH']}",
                 "SWAPZ_PRIMARY_SYSTEMD_TESTING": "1",
+                "SWAPZ_PRIMARY_TEST_PATH": f"{self.bin}:/usr/sbin:/usr/bin:/sbin:/bin",
+                "SWAPZ_PRIMARY_TEST_COMMAND_TIMEOUT_SECONDS": "2",
                 "SWAPZ_PRIMARY_TEST_PROC_ROOT": str(self.proc),
                 "SWAPZ_PRIMARY_TEST_SYS_ROOT": str(self.sys),
                 "SWAPZ_PRIMARY_TEST_DEV_ROOT": str(self.dev),
@@ -1036,6 +1049,11 @@ class RuntimeHealthTests(unittest.TestCase):
             directory.mkdir(parents=True, exist_ok=True)
         (self.dev / "mapper").mkdir()
         (self.dev / "disk" / "by-partuuid").mkdir(parents=True)
+        (self.etc / "swapz").mkdir()
+        (self.etc / "swapz" / "primary-target").write_text(
+            f"PARTUUID={PARTUUID}\n", encoding="ascii"
+        )
+        (self.etc / "swapz" / "primary-target").chmod(0o600)
         (self.dev / "mapper" / "swapz-primary").touch()
         (self.dev / "disk" / "by-partuuid" / PARTUUID).touch()
         (self.sys / "power").mkdir(parents=True)
@@ -1097,6 +1115,7 @@ class RuntimeHealthTests(unittest.TestCase):
                 info) printf '%s\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}" ;;
                 table) printf '0 216643584 swapz 8:1 0 64 0 2 0 1 0 0\n' ;;
                 status)
+                    if [ "${MOCK_DM_STATUS_SLEEP:-0}" != 0 ]; then sleep "$MOCK_DM_STATUS_SLEEP"; fi
                     if [ "${MOCK_DM_STATUS_UNAVAILABLE:-0}" = 1 ]; then exit 1; fi
                     printf '%s\n' "${MOCK_DM_STATUS:-0 216643584 swapz failed=0 error=0 flush_err=0 segment_discards_failed=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 window_gc_pressure=0}"
                     ;;
@@ -1115,7 +1134,8 @@ class RuntimeHealthTests(unittest.TestCase):
                     case "$argument" in --property=*) property=${argument#--property=} ;; esac
                 done
                 case "$property" in
-                ActiveState) echo active ;;
+                LoadState) echo "${MOCK_SYSTEMD_LOAD_STATE:-loaded}" ;;
+                ActiveState) echo "${MOCK_SYSTEMD_ACTIVE_STATE:-active}" ;;
                 SubState) echo running ;;
                 Result) echo success ;;
                 *) exit 1 ;;
@@ -1143,6 +1163,8 @@ class RuntimeHealthTests(unittest.TestCase):
             {
                 "PATH": f"{self.bin}:{self.env['PATH']}",
                 "SWAPZ_PRIMARY_SYSTEMD_TESTING": "1",
+                "SWAPZ_PRIMARY_TEST_PATH": f"{self.bin}:/usr/sbin:/usr/bin:/sbin:/bin",
+                "SWAPZ_PRIMARY_TEST_COMMAND_TIMEOUT_SECONDS": "2",
                 "SWAPZ_PRIMARY_TEST_PROC_ROOT": str(self.proc),
                 "SWAPZ_PRIMARY_TEST_SYS_ROOT": str(self.sys),
                 "SWAPZ_PRIMARY_TEST_DEV_ROOT": str(self.dev),
@@ -1158,13 +1180,19 @@ class RuntimeHealthTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def run_helper(self, action: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    def run_helper(
+        self,
+        action: str,
+        env: dict[str, str] | None = None,
+        timeout: float = 10,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(self.helper), action],
             check=False,
             text=True,
             capture_output=True,
             env=env or self.env,
+            timeout=timeout,
         )
 
     def test_healthy_snapshot_reports_capacity_and_identity(self) -> None:
@@ -1250,7 +1278,25 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("swap_remaining_kib=8000", observed.stderr)
         self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
 
+    def test_malformed_swap_inventory_degrades_runtime_observation(self) -> None:
+        for content in (
+            "",
+            "garbled swap inventory\n",
+            "Filename\tType\tSize\tUsed\tPriority\n"
+            "/dev/mapper/swapz-primary\tpartition\tbad-size\t1\t-1\n",
+        ):
+            (self.proc / "swaps").write_text(content, encoding="ascii")
+            observed = self.run_helper("once")
+            self.assertEqual(observed.returncode, 2, (content, observed.stderr))
+            self.assertIn("swap_inventory_unavailable_or_invalid", observed.stderr)
+
+        (self.proc / "swaps").unlink()
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+
     def test_malformed_swap_inventory_never_proves_hibernation_safe(self) -> None:
+        (self.etc / "swapz" / "primary-target").unlink()
+        write_executable(self.sbin / "swapzctl", "#!/bin/sh\nexit 2\n")
         for content in (
             "",
             "garbled swap inventory\n",
@@ -1261,19 +1307,74 @@ class RuntimeHealthTests(unittest.TestCase):
             guard = self.run_helper("hibernate-guard")
             self.assertEqual(guard.returncode, 1, (content, guard.stderr))
             self.assertIn("cannot prove swapz-primary inactive", guard.stderr)
-            observed = self.run_helper("once")
-            self.assertEqual(observed.returncode, 2, (content, observed.stderr))
-            self.assertIn("swap_inventory_unavailable_or_invalid", observed.stderr)
 
         (self.proc / "swaps").unlink()
-        self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
+        guard = self.run_helper("hibernate-guard")
+        self.assertEqual(guard.returncode, 1, guard.stderr)
+        self.assertIn("cannot prove swapz-primary inactive", guard.stderr)
 
-    def test_empty_valid_swap_inventory_does_not_disable_unrelated_hibernate(self) -> None:
+    def test_configured_primary_target_blocks_hibernate_even_when_inactive(self) -> None:
         (self.proc / "swaps").write_text(
             "Filename\tType\tSize\tUsed\tPriority\n", encoding="ascii"
         )
+        blocked = self.run_helper("hibernate-guard")
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("target is configured", blocked.stderr)
+
+    def test_unconfigured_inactive_swapz_does_not_disable_unrelated_hibernate(self) -> None:
+        (self.proc / "swaps").write_text(
+            "Filename\tType\tSize\tUsed\tPriority\n", encoding="ascii"
+        )
+        (self.etc / "swapz" / "primary-target").unlink()
+        (self.dev / "mapper" / "swapz-primary").unlink()
+        write_executable(self.sbin / "swapzctl", "#!/bin/sh\nexit 2\n")
         allowed = self.run_helper("hibernate-guard")
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+    def test_unresolved_resume_alias_blocks_when_selected_media_is_absent(self) -> None:
+        (self.dev / "disk" / "by-partuuid" / PARTUUID).unlink()
+
+        (self.proc / "cmdline").write_text(
+            "quiet resume=/dev/disk/by-id/missing-resume\n", encoding="ascii"
+        )
+        unresolved_path = self.run_helper("hibernation-config-check")
+        self.assertEqual(unresolved_path.returncode, 1, unresolved_path.stderr)
+        self.assertIn("unresolved:/dev/disk/by-id/missing-resume", unresolved_path.stderr)
+
+        (self.proc / "cmdline").write_text(
+            "quiet resume=UUID=missing\n", encoding="ascii"
+        )
+        unresolved_uuid = self.run_helper("hibernation-config-check")
+        self.assertEqual(unresolved_uuid.returncode, 1, unresolved_uuid.stderr)
+        self.assertIn("unresolved:UUID=missing", unresolved_uuid.stderr)
+
+        (self.proc / "cmdline").write_text(
+            f"quiet resume=PARTUUID={OTHER_PARTUUID}\n", encoding="ascii"
+        )
+        distinct_partuuid = self.run_helper("hibernation-config-check")
+        self.assertEqual(distinct_partuuid.returncode, 0, distinct_partuuid.stderr)
+
+    def test_activation_guard_serializes_against_hibernation_units(self) -> None:
+        blocked = self.run_helper("activation-guard")
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("systemd-hibernate.service state is active", blocked.stderr)
+
+        env = self.env.copy()
+        env["MOCK_SYSTEMD_ACTIVE_STATE"] = "inactive"
+        allowed = self.run_helper("activation-guard", env)
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+        env["MOCK_SYSTEMD_LOAD_STATE"] = "not-found"
+        absent_units = self.run_helper("activation-guard", env)
+        self.assertEqual(absent_units.returncode, 0, absent_units.stderr)
+
+    def test_external_status_probe_is_time_bounded(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_STATUS_SLEEP"] = "2"
+        env["SWAPZ_PRIMARY_TEST_COMMAND_TIMEOUT_SECONDS"] = "1"
+        observed = self.run_helper("once", env, timeout=5)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("mapper_status_unavailable", observed.stderr)
 
     def test_unreadable_kernel_cmdline_blocks_resume_admission(self) -> None:
         (self.proc / "swaps").write_text(

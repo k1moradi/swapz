@@ -1,0 +1,43 @@
+name: Systemd and package production-readiness
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: systemd-package-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPYCACHEPREFIX: ${{ github.workspace }}/build/python-cache
+
+jobs:
+  rootless-systemd-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare isolated Python cache
+        run: mkdir -p build/python-cache
+      - name: Validate shell syntax and systemd tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v systemd-analyze
+          command -v timeout
+          bash -n \
+            packaging/package-dkms.sh \
+            packaging/sign-module.sh \
+            packaging/swapz-primary-generator \
+            packaging/swapz-primary-runtime-health \
+            packaging/swapz-primary-boot-verify
+      - name: Hermetic package transaction readiness
+        run: python3 -B tests/runtime/native/package-dkms-test.py -v
+      - name: Rootless systemd runtime-health readiness
+        run: python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v
+      - name: Verify patch hygiene
+        run: git diff --check

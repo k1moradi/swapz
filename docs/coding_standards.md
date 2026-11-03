@@ -2480,8 +2480,16 @@ kernel, initramfs, boot-loader, sysfs resume, or persistent swap aliases select
 the swapz mapper/backing device or an ambiguous automatic resume target. The
 systemd generator must add read-only pre-hibernation guards to hibernate,
 hybrid-sleep, and suspend-then-hibernate paths; daemon-reload regeneration must
-preserve that boundary. Do not broadly disable unrelated suspend settings or
-rewrite administrator configuration: reject the unsafe path with diagnostics.
+preserve that boundary. Once a valid primary target is configured, hibernation
+is refused for the entire configured interval rather than only while an active
+swap row happens to be visible. The mapper's first pre-start check must also
+refuse recovery/activation while any hibernation-capable systemd unit is active
+or activating. These two read-only checks close both check/activation race
+directions without automatically stopping swap or rewriting sleep settings.
+An unresolved device/tag resume alias is unsafe whenever a selected swapz
+identity exists; only a provably distinct canonical identity may be admitted.
+Do not broadly disable unrelated suspend settings or rewrite administrator
+configuration: reject the unsafe path with diagnostics.
 
  
 ### Primary swap observation fail-closed boundary
@@ -2497,3 +2505,11 @@ backing/run authority is a failure, not a degraded optional metric.
 Keep repeated kernel-journal queries capped to a small recent-error window,
 use portable case-insensitive matching, and report cumulative error counts
 from DM status separately from the recent journal window.
+
+Production root helpers must use an explicit system executable search path and
+C locale rather than inheriting caller-controlled lookup semantics. External
+status probes used by a long-lived observer must have a finite per-command
+deadline so a wedged `dmsetup`, `systemctl`, `journalctl`, `lsblk`, or
+`blkid` cannot permanently stop health sampling. Test-only executable paths
+must require the existing explicit rootless-test marker and a separate fixture
+path.
