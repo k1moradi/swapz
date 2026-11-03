@@ -3564,6 +3564,18 @@ static int swapz_primary_mutation_lock_at(const char *directory,
 	}
 	directory_fd = open(directory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW |
 				    O_CLOEXEC);
+	if (directory_fd < 0 && errno == ENOENT) {
+		/*
+		 * /run is volatile. Recreate only the configured lock directory,
+		 * then reopen and validate its ownership/mode before trusting it.
+		 * mkdir() cannot replace an existing object; O_NOFOLLOW and the
+		 * metadata checks below reject a raced symlink or foreign inode.
+		 */
+		if (mkdir(directory, 0755) < 0 && errno != EEXIST)
+			return -1;
+		directory_fd = open(directory,
+				    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	}
 	if (directory_fd < 0)
 		return -1;
 	if (fstat(directory_fd, &directory_info) < 0)
