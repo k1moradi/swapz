@@ -30,6 +30,7 @@ static swapz_u8 payloads[3][2072];
 static struct swapz_compressed_page pages[3];
 static swapz_u32 writes, reads;
 static int corrupt_after_write, fail_read, lie_about_completion;
+static int partial_write_error, short_success;
 
 static int write_lower(void *unused, swapz_u32 block, swapz_u8 blocks,
 		       const swapz_u8 *bytes, swapz_u8 *completed)
@@ -47,6 +48,15 @@ static int write_lower(void *unused, swapz_u32 block, swapz_u8 blocks,
 	if (lie_about_completion) {
 		*completed = blocks + 1U;
 		return 0;
+	}
+	if (partial_write_error || short_success) {
+		swapz_u8 partial = blocks > 1U ? blocks - 1U : 0U;
+
+		if (partial)
+			memcpy(disk + offset, bytes,
+			       (size_t)partial * SWAPZ_BLOCK_BYTES);
+		*completed = partial;
+		return partial_write_error ? -EIO : 0;
 	}
 	memcpy(disk + offset, bytes, size);
 	*completed = blocks;
@@ -80,6 +90,7 @@ static int setup(void)
 	memset(disk, 0, sizeof(disk));
 	writes = reads = 0;
 	corrupt_after_write = fail_read = lie_about_completion = 0;
+	partial_write_error = short_success = 0;
 	if (swapz_authority_init(&auth, map, live, klass, 64, NPHYS) ||
 	    swapz_enable_extent_sequence_index(
 		    &auth, extent_sequence_delta, segment_sequence_base,
@@ -197,6 +208,29 @@ static int test_impossible_completion_never_fakes_write_or_readback(void)
 	CHECK(engine.submitted_blocks == 2 && engine.completed_blocks == 0);
 	CHECK(engine.write_verify_read_blocks == 0);
 	CHECK(auth.abandoned_blocks == 2 && !map[0].valid && !auth.in_flight);
+	return 0;
+}
+
+static int test_partial_or_short_write_never_publishes(void)
+{
+	unsigned int mode;
+
+	for (mode = 0; mode < 2U; ++mode) {
+		swapz_u8 committed = 99;
+
+		CHECK(setup() == 0);
+		engine.verify_after_write = 1;
+		partial_write_error = mode == 0U;
+		short_success = mode == 1U;
+		CHECK(swapz_engine_write_window_batched(
+			      &engine, pages, 3, &committed) == -EIO);
+		CHECK(committed == 0 && writes == 1 && reads == 0);
+		CHECK(engine.submitted_blocks == 2 &&
+		      engine.completed_blocks == 1);
+		CHECK(engine.write_verify_read_blocks == 0);
+		CHECK(auth.abandoned_blocks == 2 && !auth.in_flight);
+		CHECK(!map[0].valid && !map[1].valid && !map[2].valid);
+	}
 	return 0;
 }
 
@@ -415,6 +449,7 @@ int main(void)
 	CHECK(test_readback_io_failure_preserves_unmapped() == 0); passed++;
 	CHECK(test_unverified_mode_detects_corruption_later() == 0); passed++;
 	CHECK(test_impossible_completion_never_fakes_write_or_readback() == 0); passed++;
+	CHECK(test_partial_or_short_write_never_publishes() == 0); passed++;
 	CHECK(test_preflight_requires_distinct_readback_buffers() == 0); passed++;
 	CHECK(test_failed_overwrite_keeps_prior_generation() == 0); passed++;
 	CHECK(test_same_extent_read_cache_reuse_and_fail_closed() == 0); passed++;

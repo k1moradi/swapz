@@ -34,6 +34,7 @@ static struct swapz_compressed_page pages[SWAPZ_MAX_RECORDS];
 static swapz_u8 raw_payloads[SWAPZ_MAX_RECORDS][SWAPZ_BLOCK_BYTES];
 static unsigned int extent_calls, run_calls, read_calls;
 static unsigned int fail_on_run;
+static unsigned int partial_fail_on_run;
 static unsigned int corrupt_on_run;
 static unsigned int short_on_run;
 static unsigned int maps_visible_during_run;
@@ -138,12 +139,24 @@ static int write_run(void *opaque, swapz_u32 block, swapz_u16 blocks,
 				maps_visible_during_run++;
 		}
 	}
+	if (partial_fail_on_run && run_calls == partial_fail_on_run) {
+		*completed = blocks > 1U ? blocks - 1U : 0U;
+		if (*completed) {
+			memcpy(media + (size_t)block * SWAPZ_BLOCK_BYTES, src,
+			       (size_t)*completed * SWAPZ_BLOCK_BYTES);
+			lower_written_bytes +=
+				(unsigned long long)*completed * SWAPZ_BLOCK_BYTES;
+		}
+		return -EIO;
+	}
 	if (fail_on_run && run_calls == fail_on_run)
 		return -EIO;
 	if (short_on_run && run_calls == short_on_run) {
 		*completed = blocks - 1;
 		memcpy(media + (size_t)block * SWAPZ_BLOCK_BYTES, src,
 		       (size_t)*completed * SWAPZ_BLOCK_BYTES);
+		lower_written_bytes +=
+			(unsigned long long)*completed * SWAPZ_BLOCK_BYTES;
 		return 0;
 	}
 	memcpy(media + (size_t)block * SWAPZ_BLOCK_BYTES, src,
@@ -186,7 +199,7 @@ static int setup(void)
 	e.bulk_txs = bulk_txs;
 	e.bulk_enabled = 1;
 	extent_calls = run_calls = read_calls = 0;
-	fail_on_run = short_on_run = corrupt_on_run = 0;
+	fail_on_run = partial_fail_on_run = short_on_run = corrupt_on_run = 0;
 	maps_visible_during_run = 0;
 	ownership_violation = 0;
 	sealed_calls = sealed_pages = 0;
@@ -255,35 +268,43 @@ static int test_real_aggregation_and_readback(void)
  */
 static int test_overwrite_failed_run_preserves_old_pages(void)
 {
-	struct swapz_map original[16];
-	swapz_u8 committed = 0;
-	unsigned int i, j;
+	unsigned int mode;
 
-	CHECK(setup() == 0);
-	CHECK(swapz_engine_write_window_batched(&e, pages, 16,
-					     &committed) == 0);
-	CHECK(committed == 16);
-	memcpy(original, maps, sizeof(original));
-	for (i = 0; i < 16; ++i)
-		memset(payloads[i], 0xa7, pages[i].length);
-	fail_on_run = run_calls + 1;
-	committed = 91;
-	CHECK(swapz_engine_write_window_batched(&e, pages, 16,
-					     &committed) == -EIO);
-	CHECK(committed == 0 && !a.in_flight && !a.batch_pending);
-	CHECK(!ownership_violation && !maps_visible_during_run);
-	for (i = 0; i < 16; ++i) {
-		swapz_u8 output[SWAPZ_MAX_COMPRESSED];
-		swapz_u16 length = 0;
+	for (mode = 0; mode < 2U; ++mode) {
+		struct swapz_map original[16];
+		swapz_u8 committed = 0;
+		unsigned int i, j;
 
-		CHECK(maps[i].valid &&
-		      maps[i].start_block == original[i].start_block &&
-		      maps[i].generation == original[i].generation);
-		CHECK(swapz_engine_read_page(&e, i, output,
-					  sizeof(output), &length) == 0);
-		CHECK(length == pages[i].length);
-		for (j = 0; j < length; ++j)
-			CHECK(output[j] == (swapz_u8)(i + 1U));
+		CHECK(setup() == 0);
+		CHECK(swapz_engine_write_window_batched(&e, pages, 16,
+						     &committed) == 0);
+		CHECK(committed == 16);
+		memcpy(original, maps, sizeof(original));
+		for (i = 0; i < 16; ++i)
+			memset(payloads[i], 0xa7, pages[i].length);
+		if (mode == 0U)
+			fail_on_run = run_calls + 1;
+		else
+			partial_fail_on_run = run_calls + 1;
+		committed = 91;
+		CHECK(swapz_engine_write_window_batched(&e, pages, 16,
+						     &committed) == -EIO);
+		CHECK(committed == 0 && !a.in_flight && !a.batch_pending);
+		CHECK(a.abandoned_blocks > 0);
+		CHECK(!ownership_violation && !maps_visible_during_run);
+		for (i = 0; i < 16; ++i) {
+			swapz_u8 output[SWAPZ_MAX_COMPRESSED];
+			swapz_u16 length = 0;
+
+			CHECK(maps[i].valid &&
+			      maps[i].start_block == original[i].start_block &&
+			      maps[i].generation == original[i].generation);
+			CHECK(swapz_engine_read_page(&e, i, output,
+						  sizeof(output), &length) == 0);
+			CHECK(length == pages[i].length);
+			for (j = 0; j < length; ++j)
+				CHECK(output[j] == (swapz_u8)(i + 1U));
+		}
 	}
 	return 0;
 }

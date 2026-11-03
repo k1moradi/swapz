@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Execute the production preparation result classifier and publication race. */
+#define _POSIX_C_SOURCE 200809L
 #include <errno.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -105,12 +107,147 @@ static int test_raw_selection_wins_late_codec_error(void)
 	return 0;
 }
 
+#define PUBLICATION_RACE_ITERATIONS 8192U
+
+struct publication_race_context {
+	atomic_t state;
+	pthread_barrier_t start;
+	pthread_barrier_t finish;
+	_Atomic int failed;
+	int codec_result;
+	int preparation_error;
+	uint64_t payload;
+};
+
+static uint64_t publication_payload(unsigned int iteration)
+{
+	return 0x9e3779b97f4a7c15ULL ^
+	       ((uint64_t)iteration * 0xbf58476d1ce4e5b9ULL);
+}
+
+static void publication_race_fail(struct publication_race_context *context)
+{
+	atomic_store_explicit(&context->failed, 1, memory_order_relaxed);
+}
+
+static void *publish_codec_results(void *opaque)
+{
+	struct publication_race_context *context = opaque;
+	unsigned int iteration;
+
+	for (iteration = 1; iteration <= PUBLICATION_RACE_ITERATIONS; ++iteration) {
+		int observed;
+
+		(void)pthread_barrier_wait(&context->start);
+		if (context->codec_result < 0)
+			context->preparation_error = context->codec_result;
+		else
+			context->payload = publication_payload(iteration);
+		observed = swapz_preparation_publish_codec_result(
+			&context->state, context->codec_result);
+		if (observed != SWAPZ_PREPARATION_PREPARING &&
+		    observed != SWAPZ_PREPARATION_RAW_SELECTED)
+			publication_race_fail(context);
+		(void)pthread_barrier_wait(&context->finish);
+	}
+	return NULL;
+}
+
+static void *select_raw_concurrently(void *opaque)
+{
+	struct publication_race_context *context = opaque;
+	unsigned int iteration;
+
+	for (iteration = 1; iteration <= PUBLICATION_RACE_ITERATIONS; ++iteration) {
+		int observed;
+
+		(void)pthread_barrier_wait(&context->start);
+		observed = swapz_preparation_select_raw(&context->state);
+		switch (observed) {
+		case SWAPZ_PREPARATION_READY_COMPRESSED:
+			if (context->codec_result <= 0 ||
+			    context->payload != publication_payload(iteration))
+				publication_race_fail(context);
+			break;
+		case SWAPZ_PREPARATION_READY_RAW:
+			if (context->codec_result != 0 ||
+			    context->payload != publication_payload(iteration))
+				publication_race_fail(context);
+			break;
+		case SWAPZ_PREPARATION_ERROR:
+			if (context->codec_result >= 0 ||
+			    context->preparation_error != context->codec_result)
+				publication_race_fail(context);
+			break;
+		case SWAPZ_PREPARATION_RAW_SELECTED:
+			break;
+		default:
+			publication_race_fail(context);
+			break;
+		}
+		(void)pthread_barrier_wait(&context->finish);
+	}
+	return NULL;
+}
+
+static int test_concurrent_codec_publication_preserves_payload_visibility(void)
+{
+	struct publication_race_context context;
+	pthread_t producer, consumer;
+	unsigned int iteration;
+
+	atomic_init(&context.state.value, SWAPZ_PREPARATION_PREPARING);
+	atomic_init(&context.failed, 0);
+	CHECK(pthread_barrier_init(&context.start, NULL, 3) == 0);
+	CHECK(pthread_barrier_init(&context.finish, NULL, 3) == 0);
+	CHECK(pthread_create(&producer, NULL, publish_codec_results, &context) == 0);
+	CHECK(pthread_create(&consumer, NULL, select_raw_concurrently, &context) == 0);
+
+	for (iteration = 1; iteration <= PUBLICATION_RACE_ITERATIONS; ++iteration) {
+		int final_state;
+
+		atomic_store_explicit(&context.state.value,
+				      SWAPZ_PREPARATION_PREPARING,
+				      memory_order_relaxed);
+		context.codec_result = iteration % 3U == 0U ? -EIO :
+			(iteration % 3U == 1U ? 0 : 2048);
+		context.preparation_error = 0;
+		context.payload = 0;
+		(void)pthread_barrier_wait(&context.start);
+		(void)pthread_barrier_wait(&context.finish);
+
+		final_state = swapz_preparation_read_state(&context.state);
+		if (final_state == SWAPZ_PREPARATION_PREPARING ||
+		    final_state == SWAPZ_PREPARATION_EMPTY)
+			publication_race_fail(&context);
+		if (context.codec_result < 0 &&
+		    final_state != SWAPZ_PREPARATION_ERROR &&
+		    final_state != SWAPZ_PREPARATION_RAW_SELECTED)
+			publication_race_fail(&context);
+		if (context.codec_result == 0 &&
+		    final_state != SWAPZ_PREPARATION_READY_RAW &&
+		    final_state != SWAPZ_PREPARATION_RAW_SELECTED)
+			publication_race_fail(&context);
+		if (context.codec_result > 0 &&
+		    final_state != SWAPZ_PREPARATION_READY_COMPRESSED &&
+		    final_state != SWAPZ_PREPARATION_RAW_SELECTED)
+			publication_race_fail(&context);
+	}
+	CHECK(pthread_join(producer, NULL) == 0);
+	CHECK(pthread_join(consumer, NULL) == 0);
+	CHECK(pthread_barrier_destroy(&context.start) == 0);
+	CHECK(pthread_barrier_destroy(&context.finish) == 0);
+	CHECK(!atomic_load_explicit(&context.failed, memory_order_relaxed));
+	return 0;
+}
+
 int main(void)
 {
 	CHECK(!test_codec_result_classification());
 	CHECK(!test_codec_success_publication());
 	CHECK(!test_codec_error_publication_wins());
 	CHECK(!test_raw_selection_wins_late_codec_error());
-	puts("SWAPZ_PREPARATION_CODEC_RESULT_PASS=4");
+	CHECK(!test_concurrent_codec_publication_preserves_payload_visibility());
+	puts("SWAPZ_PREPARATION_CODEC_RESULT_PASS=5");
 	return 0;
 }

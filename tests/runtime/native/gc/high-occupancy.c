@@ -347,14 +347,18 @@ static int test_sustained_all_raw_gc_rotations(void)
 
 		/* A bounded sweep must exhaust all ordinary foreground allocation
 		 * even though the target remains 100% logically populated. */
-		for (attempts = 0;
-		     attempts < FOREGROUND_SEGMENTS * SWAPZ_SEGMENT_BLOCKS;
-		     ++attempts) {
+		for (attempts = 0; attempts <= SWAPZ_SEGMENT_BLOCKS; ++attempts) {
 			error = overwrite_outside_open(&next_logical);
 			if (error)
 				break;
 		}
 		CHECK(error == -ENOSPC);
+		/*
+		 * Every successful rotation must buy real foreground progress, and
+		 * worst-case RAW occupancy can consume at most one segment before
+		 * requiring the next bounded reserve exchange.
+		 */
+		CHECK(attempts > 0 && attempts <= SWAPZ_SEGMENT_BLOCKS);
 		CHECK(!a.in_flight && !a.batch_pending);
 		CHECK(choose_partial_victim(&victim) == 0);
 		CHECK(segment_maps[victim] < SWAPZ_SEGMENT_BLOCKS);

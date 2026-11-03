@@ -60,6 +60,7 @@ preparation-slots_HDR := $(KERNEL)/preparation-slots.h $(KERNEL)/codec.h
 preparation-slots_LDLIBS := -pthread
 preparation-codec-result_SRC := $(NATIVE)/io/preparation-codec-result.c
 preparation-codec-result_HDR := $(KERNEL)/preparation-slots.h $(KERNEL)/codec.h
+preparation-codec-result_LDLIBS := -pthread
 lane-gap_SRC := $(NATIVE)/io/lane-gap.c
 lane-gap_HDR := $(KERNEL)/lane-gap.h $(KERNEL)/codec.h
 superblock_SRC := $(NATIVE)/codec/superblock.c
