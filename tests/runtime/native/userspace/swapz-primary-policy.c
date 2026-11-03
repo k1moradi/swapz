@@ -1264,10 +1264,14 @@ static void test_primary_dm_table(void)
 	struct dm_ioctl *io = (struct dm_ioctl *)buffer;
 	struct dm_target_spec *target;
 	size_t used_bytes = 0;
+	uint64_t logical_pages;
+	uint64_t expected_logical_sectors;
 	uint64_t logical_sectors = 0;
 	char mapper_name[64];
 	char mapper_uuid[64];
 	char table[128];
+	char expected_table[128];
+	int table_length;
 
 	memcpy(manifest.run_id, run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U);
 	memset(manifest.source_sha, 'a', SWAPZ_PRIMARY_SOURCE_SHA_LENGTH);
@@ -1288,9 +1292,22 @@ static void test_primary_dm_table(void)
 	assert(!strcmp(mapper_name, "swapz-primary"));
 	assert(!strcmp(mapper_uuid,
 		       "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef"));
-	assert(logical_sectors == 29822976ULL);
-	assert(!strcmp(table,
-		"0 29822976 swapz 8:4 0 64 0 2 0 1 0 0"));
+	logical_pages = swapz_primary_maximum_logical_pages(
+		swapz_primary_physical_blocks(manifest.target.device_bytes));
+	assert(logical_pages > 0U);
+	assert(logical_pages <=
+	       UINT64_MAX / SWAPZ_PRIMARY_SECTORS_PER_PAGE);
+	expected_logical_sectors =
+		logical_pages * SWAPZ_PRIMARY_SECTORS_PER_PAGE;
+	assert(logical_sectors == expected_logical_sectors);
+	table_length = snprintf(
+		expected_table, sizeof(expected_table),
+		"0 %llu swapz %u:%u 0 64 0 2 0 1 0 0",
+		(unsigned long long)expected_logical_sectors,
+		manifest.target.device_major, manifest.target.device_minor);
+	assert(table_length > 0 &&
+	       (size_t)table_length < sizeof(expected_table));
+	assert(!strcmp(table, expected_table));
 	assert(swapz_primary_dm_table_load_buffer(
 		&manifest, buffer, sizeof(buffer), &used_bytes) == 0);
 	assert(used_bytes <= sizeof(buffer));
