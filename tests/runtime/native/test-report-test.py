@@ -3250,7 +3250,7 @@ class ReportContract(unittest.TestCase):
 
         missing = runner.parse_loaded_correctness(output.replace(marker, "", 1))
         self.assertEqual(missing["overall"], "INCOMPLETE")
-        self.assertIn("codec_errors", missing["reason"])
+        self.assertIn("codec-errors", missing["reason"])
 
         for before, after in (
                 ("owners:3", "owners:2"),
