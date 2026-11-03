@@ -917,7 +917,15 @@ allocating the logical capacity in host RAM.
 
 Every arm preserves a JSON result on success or failure. Pair records embed
 both arms, exclusion state and every exclusion reason. There is no automatic
-retry. The 200 ms pre/post quiet windows reject busy >25%, CPU PSI \`some\` >5%,
+retry. Every attempted arm must record the canonical lower-partition PARTUUID
+and exact byte size. Raw and swapz must match within each pair, and every
+attempted pair in one qualification campaign—including failed or excluded
+attempts—must use that same tuple. The evaluator emits it directly as the
+summary `target`; mixed, missing or malformed target identity makes the
+campaign incomplete rather than allowing cross-card pooling. The anonymous-swap
+worker derives the tuple from the verified lower partition's sysfs PARTUUID and
+512-byte-sector size, not from the mapper path. The 200 ms pre/post quiet
+windows reject busy >25%, CPU PSI \`some\` >5%,
 steal >1%, unavailable required counters, or timed-arm steal >1%. A five-pair
 service cohort is additionally unusable when raw useful-WRITE max/min spread
 exceeds 10%. Exclusion never converts a failing correctness result into a pass;
@@ -4703,7 +4711,11 @@ must bind the SHA-256 of the exact current `FROZEN`
 physical PASS observations until they are requalified. The physical real-swap
 helper and physical-performance summary must emit that exact policy digest in
 their own result/evidence payloads so release aggregation never reconstructs or
-guesses the policy binding after the run. Release-evidence unit fixtures must
+guesses the policy binding after the run. The physical real-swap helper must
+also persist its already verified target directly as
+`target={partuuid,device_bytes}`; release aggregation must not recover the byte
+size from a device path, historical snapshot, or nested lifecycle record.
+Release-evidence unit fixtures must
 use independent artifact-hash mappings for qualified, owner-report and
 installed records; mutating one record must never mutate another and hide a
 cross-binding mismatch. Current release evidence must also include one canonical
