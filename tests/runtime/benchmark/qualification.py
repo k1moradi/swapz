@@ -340,7 +340,8 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
     for label, arm in (("raw", raw), ("swapz", swapz)):
         if arm.get("verdict") != "PASS":
             reasons.append(f"{label} arm verdict is not PASS")
-        if (arm.get("oracle") or {}).get("mismatches") != 0:
+        oracle_mismatches = (arm.get("oracle") or {}).get("mismatches")
+        if type(oracle_mismatches) is not int or oracle_mismatches != 0:
             reasons.append(f"{label} byte oracle failed or is unavailable")
         screen = arm.get("performance_screening") or {}
         if screen.get("status") != "SCREENED":
@@ -597,7 +598,9 @@ def sustained_decision(pair: dict) -> dict:
                 resources.get("metadata_and_target_peak_ram_bytes"), 0) and
             resources["metadata_and_target_peak_ram_bytes"] <=
             limit["metadata_and_target_peak_ram_bytes_max"]),
-        "oracle": (swapz.get("oracle") or {}).get("mismatches") == 0,
+        "oracle": (
+            type((swapz.get("oracle") or {}).get("mismatches")) is int and
+            (swapz.get("oracle") or {}).get("mismatches") == 0),
         "cold_read": positive_counter((swapz.get("cold_read") or {}).get("pages")),
         "high_occupancy": integer_at_least(
             swapz.get("occupancy_percent"), 90),
@@ -623,7 +626,9 @@ def anonymous_decision(pairs: list[dict]) -> dict:
             pair_ok &= integer_at_least(
                 arm.get("observed_swap_bytes"),
                 limit["minimum_observed_swap_bytes"])
-            pair_ok &= (arm.get("oracle") or {}).get("mismatches") == 0
+            oracle_mismatches = (arm.get("oracle") or {}).get("mismatches")
+            pair_ok &= (
+                type(oracle_mismatches) is int and oracle_mismatches == 0)
             attribution = arm.get("anonymous_swap_attribution") or {}
             pair_ok &= positive_counter(
                 (attribution.get("vmstat") or {}).get("pswpout_pages"))

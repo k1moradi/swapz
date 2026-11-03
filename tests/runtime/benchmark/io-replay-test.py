@@ -2658,6 +2658,13 @@ class PairReplayContract(unittest.TestCase):
                 {"raw": raw, "swapz": malformed_cold_read})["status"],
             "FAIL")
 
+        malformed_oracle = {
+            **swapz, "oracle": {"mismatches": False}}
+        self.assertEqual(
+            qualification.sustained_decision(
+                {"raw": raw, "swapz": malformed_oracle})["status"],
+            "FAIL")
+
     def test_sustained_interval_sampler_gc_and_trailing_gap(self):
         import importlib.util
         import time
@@ -3323,6 +3330,9 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(verdict(), "FAIL")
         arm["target_io"]["target_write_bytes"] = 1048576
         arm["observed_swap_bytes"] = "134217728"
+        self.assertEqual(verdict(), "FAIL")
+        arm["observed_swap_bytes"] = 134217728
+        arm["oracle"]["mismatches"] = False
         self.assertEqual(verdict(), "FAIL")
 
         anonymous_path = SCRIPT.with_name("anonymous-swap.py")
