@@ -4430,8 +4430,9 @@ artifacts, partial DKMS failure, active-module and active-mapper upgrade
 refusal, active uninstall refusal, rollback of a failed upgrade, every
 destructive uninstall transition, failed depmod, failed systemd daemon-reload,
 reinstall after safe cleanup, installed-module/userspace digest mismatch,
-post-depmod tamper, install/uninstall signal interruption, and interruption of
-uninstall rollback. The interrupted-rollback fixture must verify the retained
+post-depmod tamper, install/uninstall signal interruption, stale rollback
+temporary-name collisions, and interruption of uninstall rollback. The
+interrupted-rollback fixture must verify the retained
 state manifest against the recovery bytes and prove later package operations
 refuse that durable incomplete transaction without reading or modifying host
 swap state. Sandbox artifacts must stay private to the package sandbox and

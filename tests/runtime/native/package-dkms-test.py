@@ -604,6 +604,10 @@ esac
             (self.prefix / "sbin/swapzctl").read_bytes(), old_binary)
         self.assertEqual(self.installed_module.read_bytes(), old_module)
 
+        # A stale file matching the accidental historical literal temp name
+        # must not prevent PID-scoped atomic CLI restoration.
+        stale_cli_restore = self.prefix / "sbin/.swapzctl.restore.$"
+        stale_cli_restore.write_text("foreign stale rollback temp\n")
         self.systemctl_fail_marker.unlink(missing_ok=True)
         result = self.invoke(
             "install", {"SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1"})
@@ -611,6 +615,8 @@ esac
         self.assertEqual(
             (self.prefix / "sbin/swapzctl").read_bytes(), old_binary)
         self.assertEqual(self.installed_module.read_bytes(), old_module)
+        self.assertEqual(
+            stale_cli_restore.read_text(), "foreign stale rollback temp\n")
         self.assertIn("daemon-reload", self.systemctl_log.read_text())
 
     def test_uninstall_refuses_active_mapping_or_module(self):

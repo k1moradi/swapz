@@ -890,7 +890,7 @@ restore_cli_backup() {
   backup_path="$backup_dir/files/$digest"
   [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
   install -d -m0755 "$cli_dir"
-  temporary_cli="$cli_dir/.swapzctl.restore.$"
+  temporary_cli="$cli_dir/.swapzctl.restore.$$"
   [[ ! -e "$temporary_cli" && ! -L "$temporary_cli" ]] || return 1
   install -m0755 "$backup_path" "$temporary_cli" || return 1
   cmp -s "$backup_path" "$temporary_cli" || {
