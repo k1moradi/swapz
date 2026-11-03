@@ -9005,16 +9005,22 @@ static int swapz_primary_recover(void)
 		    recovery_fd, lock_fd, &recovering_state, 0) < 0)
 		goto out;
 	recovering_persisted = 1;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-recovering");
 
 	if (swapz_primary_deactivate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest,
-		    &swap_deactivated_by_call) < 0 ||
-	    swapz_primary_dm_remove_mapper(
-		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0 ||
-	    swapz_primary_unload_owned_module(
+		    &swap_deactivated_by_call) < 0)
+		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-swapoff");
+	if (swapz_primary_dm_remove_mapper(
+		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0)
+		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-mapper-removed");
+	if (swapz_primary_unload_owned_module(
 		    recovery_fd, lock_fd, &manifest, 1,
 		    &module_unloaded_by_call) < 0)
 		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-module-unloaded");
 
 	/* After all holders are gone, prove the same known header through an
 	 * exclusive manifest-bound descriptor before closing the transaction. */
@@ -9039,6 +9045,7 @@ static int swapz_primary_recover(void)
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &restored_state, 0) < 0)
 		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-restored");
 	complete_state = restored_state;
 	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
 	if (swapz_primary_state_write_at(

@@ -335,11 +335,17 @@ assert_interruption_kernel_facts() {
 		start-mapper-resumed)
 			expected_module=1; expected_mapper=1; expected_swap=0
 			;;
-		start-swapon|stop-stopping)
+		start-swapon|stop-stopping|recover-recovering)
 			expected_module=1; expected_mapper=1; expected_swap=1
 			;;
-		stop-swapoff)
+		stop-swapoff|recover-swapoff)
 			expected_module=1; expected_mapper=1; expected_swap=0
+			;;
+		recover-mapper-removed)
+			expected_module=1; expected_mapper=0; expected_swap=0
+			;;
+		recover-module-unloaded|recover-restored)
+			expected_module=0; expected_mapper=0; expected_swap=0
 			;;
 		*)
 			fail "unknown interruption phase: $phase"
@@ -382,7 +388,10 @@ recovery_directory, evidence_directory, run_id, partuuid, phase = sys.argv[1:6]
 if (len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id) or
         phase not in {"start-starting", "start-module-loaded",
                       "start-mapper-resumed", "start-swapon",
-                      "stop-stopping", "stop-swapoff"}):
+                      "stop-stopping", "stop-swapoff",
+                      "recover-recovering", "recover-swapoff",
+                      "recover-mapper-removed", "recover-module-unloaded",
+                      "recover-restored"}):
     raise SystemExit("unsafe interruption snapshot identity")
 record_names = [
     "primary-state.json",
@@ -438,6 +447,7 @@ interrupt_lifecycle() {
 	local operation="$1"
 	local phase="$2"
 	local expected_stage="$3"
+	local expected_previous="${4:-null}"
 	local output rc
 
 	set +e
@@ -451,7 +461,7 @@ interrupt_lifecycle() {
 	printf '%s\n' "$output"
 	[[ "$rc" == 86 ]] ||
 		fail "$phase returned $rc instead of deterministic process-death status 86"
-	assert_lifecycle_state "$RUN_ID" "$expected_stage" null ||
+	assert_lifecycle_state "$RUN_ID" "$expected_stage" "$expected_previous" ||
 		fail "$phase did not leave expected durable $expected_stage state"
 	assert_owned_transaction_records 1 ||
 		fail "$phase did not retain exact run-bound ownership"
@@ -1365,7 +1375,36 @@ for phase in stop-stopping stop-swapoff; do
 	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
 done
 
-note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
+for phase in recover-recovering recover-swapoff recover-mapper-removed \
+	recover-module-unloaded recover-restored; do
+	prepare_interruption_run
+	# Enter recovery from the hardest ordinary crash shape: STARTING with the
+	# exact run-bound mapper already active as swap.
+	interrupt_lifecycle start start-swapon STARTING
+	note "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase run_id:$RUN_ID"
+	if [[ "$phase" == recover-restored ]]; then
+		interrupt_lifecycle recover "$phase" RESTORED STARTING
+	else
+		interrupt_lifecycle recover "$phase" RECOVERING STARTING
+	fi
+	case "$phase" in
+		recover-recovering)
+			recover_interruption_run "$phase" STARTING true true true
+			;;
+		recover-swapoff)
+			recover_interruption_run "$phase" STARTING false true true
+			;;
+		recover-mapper-removed)
+			recover_interruption_run "$phase" STARTING false false true
+			;;
+		recover-module-unloaded|recover-restored)
+			recover_interruption_run "$phase" STARTING false false false
+			;;
+	esac
+	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
+done
+
+note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
 
 # These cases mutate only the private process boundary or an inactive run-owned
 # mapper/state record. Every destructive mapper operation is a normal removal
