@@ -112,7 +112,7 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertIn("RefuseManualStart=yes", service_text)
         self.assertIn("RefuseManualStop=yes", service_text)
         self.assertIn(
-            "systemd generator derives selected-device ordering/conflicts",
+            "RequiresMountsFor=/var/lib/swapz/physical-recovery",
             service_text)
         self.assertNotIn("sda4", service_text)
         self.assertNotIn("7fb9401d-04", service_text)

@@ -3499,7 +3499,10 @@ is the sole partition entry at the size derived from its physical byte capacity,
 at the selected priority and with zero KiB used; this partial observation must
 never be reported as complete device admission.
 The package regression must prove that units are installed disabled and that
-package install/uninstall does not start or stop system swap. The package-owned
+package install/uninstall does not start or stop system swap. Assert executable
+systemd directives and generated dependencies, not descriptive unit comments;
+the mapper unit must require the persistent physical-recovery mount before its
+preflight/recovery/prepare chain. The package-owned
 file set and SHA-256 manifest must include the cold-boot verifier executable
 (mode 0755) and verifier service (mode 0644); uninstall must reject modified
 copies and remove only exact owned copies. Installation must substitute the
