@@ -4092,9 +4092,36 @@ facts and durable STARTING or STOPPING record, and a fresh process must run the
 normal recovery command. Recovery must finish COMPLETE with the interrupted
 stage preserved as recovery_previous_stage, remove the active owner marker,
 retain permanent consumed provenance, restore the exact pre-test host swap
-inventory, and leave no swapz mapper or module. The loaded-stage wrapper must
-bound the complete success plus six-interruption rehearsal without weakening
-the per-operation timeouts or quarantine-on-uncertain-cleanup policy. Rootless direct-C coverage must
+inventory, and leave no swapz mapper or module. At every interrupted phase
+where a mapper exists, the harness must independently prove the exact run-bound
+DM UUID and exact owned-partition table dependency, not merely mapper-name
+presence. It must also compare the unrelated host swap inventory while the
+private mapper is active. After each successful recovery, a second fresh
+recovery attempt must be safely rejected without changing the byte identity of
+the durable COMPLETE record, module/mapper state, or host swap inventory; this
+is the native idempotence proof for a terminal transaction.
+
+The same private rehearsal must exercise negative kernel-boundary cases against
+the real coordinator: ambiguous `swapon` and `swapoff` outcomes both with and
+without the kernel operation applied, unreadable post-operation swap inventory,
+a definite failed `swapoff`, a wrong inactive mapper identity, stale run ID,
+a failed durable state-directory `fsync`, and lost state provenance. A
+test-only linker-wrap fixture may intercept only the private owned-null_blk
+binary's `syscall`, `/proc/swaps` `open`, and `fsync` boundaries and must forward
+them unchanged when no named fault is selected. That fixture is never linked by
+the public Makefile, installed package, physical qualification seam, or
+production authority path. Wrong-mapper testing may normally remove/recreate
+only the exact private mapper after independently proving it is inactive and
+has zero users; it must never force removal. State-corruption cases must first
+preserve the exact durable bytes in the token-bound evidence directory, fsync
+the evidence, restore those exact bytes before cleanup, and quarantine the
+owned resources if restoration or normal recovery cannot be proved. Every
+negative refusal must independently inspect mapper/module/swap facts and
+unrelated host swap identity, then restore the controlled fixture and converge
+through ordinary fresh-process recovery or retain explicit quarantine evidence.
+The loaded-stage wrapper must bound the complete success, six interruptions and
+negative rehearsal without weakening per-operation timeouts or
+quarantine-on-uncertain-cleanup policy. Rootless direct-C coverage must
 also prove the native activation/deactivation helpers return `ENODEV` with
 their side-effect outputs cleared. The shared production syscall/inventory transition helper must also
 be exercised from direct-C rootless tests with fake inventory and syscall

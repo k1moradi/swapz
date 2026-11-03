@@ -58,6 +58,8 @@ RECOVERY_BASE="$TEST_BASE/recovery"
 PREFIX="$TEST_BASE/prefix"
 CONTROL="$PREFIX/sbin/swapzctl"
 REPORT="$RECOVERY_BASE/qualification.json"
+EVIDENCE_BASE="$TEST_BASE/evidence"
+FAULT_FIXTURE="tests/tools/primary-lifecycle-fault-shim.c"
 CONFIGFS=/sys/kernel/config/nullb
 DMNAME=swapz-primary
 NULLBLK_SIZE_MIB=256
@@ -147,6 +149,88 @@ mapper_swap_entry_count() {
 	printf '%s\n' "$count"
 }
 
+assert_exact_owned_mapper() {
+	local expected_present="$1"
+	local mapper_uuid mapper_table
+	local table_start table_sectors table_target table_lower table_rest
+
+	if [[ "$expected_present" == 0 ]]; then
+		! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+			fail "unexpected mapper exists outside transaction ownership"
+		return 0
+	fi
+	dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+		fail "expected run-bound mapper is missing"
+	mapper_uuid="$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+		tr -d '[:space:]')" ||
+		fail "cannot inspect interrupted mapper UUID"
+	[[ "$mapper_uuid" == "SWAPZ-PRIMARY-$RUN_ID" ]] ||
+		fail "interrupted mapper UUID is not owned by the current run"
+	mapper_table="$(dmsetup table "$DMNAME")" ||
+		fail "cannot inspect interrupted mapper table"
+	read -r table_start table_sectors table_target table_lower table_rest <<< "$mapper_table"
+	[[ "$table_start" == 0 && "$table_sectors" =~ ^[1-9][0-9]*$ &&
+	   "$table_target" == swapz && "$table_lower" == "$PART_DEVNO" ]] ||
+		fail "interrupted mapper table is not bound to the owned partition"
+}
+
+unrelated_swap_inventory_identity() {
+	local mapper_device=""
+	if dmsetup info "$DMNAME" >/dev/null 2>&1; then
+		mapper_device="$(dmsetup info -c --noheadings --separator ':' \
+			-o major,minor "$DMNAME" 2>/dev/null | tr -d '[:space:]')" ||
+			return 1
+		[[ "$mapper_device" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+	fi
+	python3 - "$mapper_device" <<'PY'
+import os
+import stat
+import sys
+
+mapper_device = sys.argv[1]
+with open("/proc/swaps", "r", encoding="utf-8") as swaps:
+    header = swaps.readline().split()
+    if header != ["Filename", "Type", "Size", "Used", "Priority"]:
+        raise SystemExit(1)
+    rows = []
+    seen = set()
+    for raw in swaps:
+        fields = raw.split()
+        if len(fields) != 5:
+            raise SystemExit(1)
+        path, swap_type, size_kib, used_kib, priority = fields
+        if (not path.startswith("/") or not size_kib.isdigit() or
+                not used_kib.isdigit()):
+            raise SystemExit(1)
+        try:
+            int(priority)
+        except ValueError:
+            raise SystemExit(1)
+        if path in seen:
+            raise SystemExit(1)
+        seen.add(path)
+        if mapper_device:
+            info = os.stat(path)
+            if stat.S_ISBLK(info.st_mode):
+                observed = f"{os.major(info.st_rdev)}:{os.minor(info.st_rdev)}"
+                if observed == mapper_device:
+                    continue
+        rows.append(f"{path}\t{swap_type}\t{size_kib}\t{priority}")
+for row in sorted(rows):
+    print(row)
+PY
+}
+
+assert_unrelated_host_swap_identity() {
+	local phase="$1"
+	local observed
+
+	observed="$(unrelated_swap_inventory_identity)" ||
+		fail "cannot inspect unrelated host swap identity during $phase"
+	[[ "$observed" == "$SWAPS_ID_BEFORE" ]] ||
+		fail "unrelated host swap identity changed during $phase"
+}
+
 prepare_interruption_run() {
 	local output
 
@@ -214,12 +298,14 @@ assert_interruption_kernel_facts() {
 
 	[[ ! -d /sys/module/dm_swapz ]] || observed_module=1
 	dmsetup info "$DMNAME" >/dev/null 2>&1 && observed_mapper=1
+	assert_exact_owned_mapper "$expected_mapper"
 	observed_swap="$(mapper_swap_entry_count)" ||
 		fail "cannot inspect interrupted mapper swap identity"
 	[[ "$observed_module" == "$expected_module" &&
 	   "$observed_mapper" == "$expected_mapper" &&
 	   "$observed_swap" == "$expected_swap" ]] ||
 		fail "unexpected kernel facts after $phase: module=$observed_module/$expected_module mapper=$observed_mapper/$expected_mapper swap=$observed_swap/$expected_swap"
+	assert_unrelated_host_swap_identity "$phase"
 
 	if [[ "$phase" == start-starting ]]; then
 		[[ ! -e "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ]] ||
@@ -298,6 +384,378 @@ recover_interruption_run() {
 		fail "cannot snapshot host swap identity after $phase recovery"
 	[[ "$swaps_after" == "$SWAPS_ID_BEFORE" ]] ||
 		fail "host swap identity differs after $phase recovery"
+	assert_repeat_recovery_is_safe "$phase" "$expected_previous"
+}
+
+assert_repeat_recovery_is_safe() {
+	local phase="$1"
+	local expected_previous="$2"
+	local before_state after_state before_swaps after_swaps output rc
+
+	before_state="$(sha256sum "$RECOVERY_BASE/primary-state.json" | awk '{print $1}')" ||
+		fail "cannot hash COMPLETE state before repeated recovery"
+	before_swaps="$(swapz_swap_inventory_identity /proc/swaps)" ||
+		fail "cannot snapshot swaps before repeated recovery"
+	set +e
+	output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary recover 2>&1)"
+	rc=$?
+	set -e
+	printf '%s\n' "$output"
+	[[ "$rc" -ne 0 ]] ||
+		fail "repeated recovery after $phase unexpectedly reopened COMPLETE"
+	after_state="$(sha256sum "$RECOVERY_BASE/primary-state.json" | awk '{print $1}')" ||
+		fail "cannot hash COMPLETE state after repeated recovery"
+	after_swaps="$(swapz_swap_inventory_identity /proc/swaps)" ||
+		fail "cannot snapshot swaps after repeated recovery"
+	[[ "$after_state" == "$before_state" && "$after_swaps" == "$before_swaps" &&
+	   "$after_swaps" == "$SWAPS_ID_BEFORE" ]] ||
+		fail "repeated recovery after $phase changed durable or kernel state"
+	assert_lifecycle_state "$RUN_ID" COMPLETE "$expected_previous" ||
+		fail "repeated recovery after $phase changed COMPLETE provenance"
+	[[ ! -d /sys/module/dm_swapz ]] ||
+		fail "repeated recovery after $phase loaded dm_swapz"
+	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+		fail "repeated recovery after $phase recreated swapz-primary"
+}
+
+run_faulted_start_failure() {
+	local fault="$1"
+	local expected_swap="$2"
+	local output rc observed_swap
+
+	prepare_interruption_run
+	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=$fault run_id:$RUN_ID"
+	set +e
+	output="$(SWAPZ_PRIMARY_TEST_FAULT="$fault" \
+		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary start 2>&1)"
+	rc=$?
+	set -e
+	printf '%s\n' "$output"
+	[[ "$rc" -ne 0 ]] || fail "$fault unexpectedly completed primary start"
+	assert_lifecycle_state "$RUN_ID" RECOVERY_REQUIRED STARTING ||
+		fail "$fault did not preserve STARTING recovery provenance"
+	assert_exact_owned_mapper 1
+	observed_swap="$(mapper_swap_entry_count)" ||
+		fail "cannot inspect mapper swap state after $fault"
+	[[ "$observed_swap" == "$expected_swap" ]] ||
+		fail "$fault left unexpected mapper swap state"
+	assert_unrelated_host_swap_identity "$fault"
+	if [[ "$expected_swap" == 1 ]]; then
+		recover_interruption_run "$fault" STARTING true true true
+	else
+		recover_interruption_run "$fault" STARTING false true true
+	fi
+}
+
+run_faulted_stop_failure() {
+	local fault="$1"
+	local expected_swap="$2"
+	local output rc observed_swap
+
+	prepare_interruption_run
+	start_interruption_baseline
+	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=$fault run_id:$RUN_ID"
+	set +e
+	output="$(SWAPZ_PRIMARY_TEST_FAULT="$fault" \
+		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary stop 2>&1)"
+	rc=$?
+	set -e
+	printf '%s\n' "$output"
+	[[ "$rc" -ne 0 ]] || fail "$fault unexpectedly completed primary stop"
+	assert_lifecycle_state "$RUN_ID" RECOVERY_REQUIRED STOPPING ||
+		fail "$fault did not preserve STOPPING recovery provenance"
+	assert_exact_owned_mapper 1
+	observed_swap="$(mapper_swap_entry_count)" ||
+		fail "cannot inspect mapper swap state after $fault"
+	[[ "$observed_swap" == "$expected_swap" ]] ||
+		fail "$fault left unexpected mapper swap state"
+	assert_unrelated_host_swap_identity "$fault"
+	if [[ "$expected_swap" == 1 ]]; then
+		recover_interruption_run "$fault" STOPPING true true true
+	else
+		recover_interruption_run "$fault" STOPPING false true true
+	fi
+}
+
+run_ambiguous_swapon_applied() {
+	local output start_run stop_run
+
+	prepare_interruption_run
+	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=swapon-eintr-applied run_id:$RUN_ID"
+	if ! output="$(SWAPZ_PRIMARY_TEST_FAULT=swapon-eintr-applied \
+		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary start 2>&1)"; then
+		printf '%s\n' "$output" >&2
+		fail "ambiguous swapon with exact active proof was not reconciled"
+	fi
+	printf '%s\n' "$output"
+	start_run="$(printf '%s\n' "$output" |
+		sed -n 's/^PRIMARY_START=ACTIVE run_id=\([0-9a-f]\{32\}\).*/\1/p')"
+	[[ "$start_run" == "$RUN_ID" ]] ||
+		fail "ambiguous swapon reconciliation changed run ID"
+	assert_lifecycle_state "$RUN_ID" ACTIVE null ||
+		fail "ambiguous swapon reconciliation did not publish ACTIVE"
+	assert_exact_owned_mapper 1
+	[[ "$(mapper_swap_entry_count)" == 1 ]] ||
+		fail "ambiguous swapon reconciliation lacks exact active inventory"
+	assert_unrelated_host_swap_identity "swapon-eintr-applied"
+	if ! output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary stop 2>&1)"; then
+		printf '%s\n' "$output" >&2
+		fail "normal stop failed after ambiguous swapon reconciliation"
+	fi
+	printf '%s\n' "$output"
+	stop_run="$(printf '%s\n' "$output" |
+		sed -n 's/^PRIMARY_STOP=COMPLETE run_id=\([0-9a-f]\{32\}\).*/\1/p')"
+	[[ "$stop_run" == "$RUN_ID" ]] ||
+		fail "normal stop after ambiguous swapon changed run ID"
+	assert_lifecycle_state "$RUN_ID" COMPLETE null ||
+		fail "normal stop after ambiguous swapon did not complete"
+	[[ ! -d /sys/module/dm_swapz ]] ||
+		fail "normal stop after ambiguous swapon left dm_swapz loaded"
+	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+		fail "normal stop after ambiguous swapon left mapper present"
+	assert_unrelated_host_swap_identity "swapon-eintr-applied-stop"
+	assert_repeat_recovery_is_safe "swapon-eintr-applied" null
+}
+
+run_ambiguous_swapoff_applied() {
+	local output stop_run
+
+	prepare_interruption_run
+	start_interruption_baseline
+	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=swapoff-eintr-applied run_id:$RUN_ID"
+	if ! output="$(SWAPZ_PRIMARY_TEST_FAULT=swapoff-eintr-applied \
+		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary stop 2>&1)"; then
+		printf '%s\n' "$output" >&2
+		fail "ambiguous swapoff with exact inactive proof was not reconciled"
+	fi
+	printf '%s\n' "$output"
+	stop_run="$(printf '%s\n' "$output" |
+		sed -n 's/^PRIMARY_STOP=COMPLETE run_id=\([0-9a-f]\{32\}\).*/\1/p')"
+	[[ "$stop_run" == "$RUN_ID" ]] ||
+		fail "ambiguous swapoff reconciliation changed run ID"
+	assert_lifecycle_state "$RUN_ID" COMPLETE null ||
+		fail "ambiguous swapoff reconciliation did not publish COMPLETE"
+	[[ ! -d /sys/module/dm_swapz ]] ||
+		fail "ambiguous swapoff reconciliation left dm_swapz loaded"
+	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+		fail "ambiguous swapoff reconciliation left mapper present"
+	assert_unrelated_host_swap_identity "swapoff-eintr-applied"
+	assert_repeat_recovery_is_safe "swapoff-eintr-applied" null
+}
+
+run_failed_fsync_case() {
+	local output rc
+
+	prepare_interruption_run
+	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=state-dir-fsync run_id:$RUN_ID"
+	set +e
+	output="$(SWAPZ_PRIMARY_TEST_FSYNC_FAIL_CALL=3 \
+		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary start 2>&1)"
+	rc=$?
+	set -e
+	printf '%s\n' "$output"
+	[[ "$rc" -ne 0 ]] || fail "injected state directory fsync failure was ignored"
+	assert_lifecycle_state "$RUN_ID" STARTING null ||
+		fail "fsync failure did not retain the renamed STARTING record"
+	[[ -f "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
+		fail "fsync failure lost transaction ownership marker"
+	assert_interruption_kernel_facts start-starting
+	recover_interruption_run "state-dir-fsync" STARTING false false false
+}
+
+preserve_state_file() {
+	local tag="$1"
+	local backup="$EVIDENCE_BASE/primary-state-$tag.bin"
+	python3 - "$RECOVERY_BASE/primary-state.json" "$backup" <<'PY'
+import os
+import sys
+
+source, backup = sys.argv[1:3]
+payload = open(source, "rb").read()
+fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+try:
+    offset = 0
+    while offset < len(payload):
+        count = os.write(fd, payload[offset:])
+        if count <= 0:
+            raise OSError("short state evidence write")
+        offset += count
+    os.fsync(fd)
+finally:
+    os.close(fd)
+directory = os.open(os.path.dirname(backup), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+	printf '%s\n' "$backup"
+}
+
+restore_state_file() {
+	local backup="$1"
+	python3 - "$backup" "$RECOVERY_BASE/primary-state.json" <<'PY'
+import os
+import sys
+
+backup, target = sys.argv[1:3]
+payload = open(backup, "rb").read()
+directory_path = os.path.dirname(target)
+temporary = target + ".agent7-restore.tmp"
+fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+try:
+    offset = 0
+    while offset < len(payload):
+        count = os.write(fd, payload[offset:])
+        if count <= 0:
+            raise OSError("short state restore write")
+        offset += count
+    os.fsync(fd)
+finally:
+    os.close(fd)
+os.replace(temporary, target)
+directory = os.open(directory_path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+}
+
+expect_recovery_refusal_preserves_kernel() {
+	local case_name="$1"
+	local phase="$2"
+	local output rc
+
+	set +e
+	output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary recover 2>&1)"
+	rc=$?
+	set -e
+	printf '%s\n' "$output"
+	[[ "$rc" -ne 0 ]] || fail "$case_name unexpectedly authorized recovery"
+	assert_interruption_kernel_facts "$phase"
+}
+
+run_stale_run_id_case() {
+	local backup alternate before_hash after_hash
+
+	prepare_interruption_run
+	interrupt_lifecycle start start-starting STARTING
+	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=stale-run-id run_id:$RUN_ID"
+	backup="$(preserve_state_file stale-run-id)" ||
+		fail "cannot preserve state for stale-run-id case"
+	before_hash="$(sha256sum "$backup" | awk '{print $1}')"
+	alternate=ffffffffffffffffffffffffffffffff
+	[[ "$RUN_ID" != "$alternate" ]] || alternate=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+	python3 - "$RECOVERY_BASE/primary-state.json" "$alternate" <<'PY'
+import json
+import os
+import sys
+
+path, alternate = sys.argv[1:3]
+state = json.load(open(path, "r", encoding="utf-8"))
+state["run_id"] = alternate
+payload = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
+temporary = path + ".agent7-stale.tmp"
+fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+try:
+    offset = 0
+    while offset < len(payload):
+        count = os.write(fd, payload[offset:])
+        if count <= 0:
+            raise OSError("short stale state write")
+        offset += count
+    os.fsync(fd)
+finally:
+    os.close(fd)
+os.replace(temporary, path)
+directory = os.open(os.path.dirname(path), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+	expect_recovery_refusal_preserves_kernel stale-run-id start-starting
+	restore_state_file "$backup" || fail "cannot restore exact stale-run-id state"
+	after_hash="$(sha256sum "$RECOVERY_BASE/primary-state.json" | awk '{print $1}')"
+	[[ "$after_hash" == "$before_hash" ]] ||
+		fail "stale-run-id state restoration was not byte-exact"
+	recover_interruption_run "stale-run-id" STARTING false false false
+}
+
+run_lost_state_provenance_case() {
+	local backup state_path
+
+	prepare_interruption_run
+	interrupt_lifecycle start start-mapper-resumed STARTING
+	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=lost-state-provenance run_id:$RUN_ID"
+	backup="$(preserve_state_file lost-state-provenance)" ||
+		fail "cannot preserve state for lost provenance case"
+	state_path="$RECOVERY_BASE/primary-state.json"
+	rm -- "$state_path" || fail "cannot hide state provenance for negative case"
+	python3 - "$RECOVERY_BASE" <<'PY'
+import os
+import sys
+
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+try:
+    os.fsync(fd)
+finally:
+    os.close(fd)
+PY
+	expect_recovery_refusal_preserves_kernel lost-state-provenance start-mapper-resumed
+	restore_state_file "$backup" || fail "cannot restore lost state provenance"
+	recover_interruption_run "lost-state-provenance" STARTING false true true
+}
+
+run_wrong_mapper_identity_case() {
+	local mapper_table exact_uuid wrong_uuid open_count output rc
+
+	prepare_interruption_run
+	interrupt_lifecycle start start-mapper-resumed STARTING
+	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=wrong-mapper-identity run_id:$RUN_ID"
+	mapper_table="$(dmsetup table "$DMNAME")" ||
+		fail "cannot preserve exact mapper table for wrong-identity case"
+	exact_uuid="SWAPZ-PRIMARY-$RUN_ID"
+	wrong_uuid="SWAPZ-PRIMARY-ffffffffffffffffffffffffffffffff"
+	[[ "$exact_uuid" != "$wrong_uuid" ]] ||
+		wrong_uuid="SWAPZ-PRIMARY-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	[[ "$(mapper_swap_entry_count)" == 0 ]] ||
+		fail "wrong-mapper case refuses to replace an active mapper"
+	open_count="$(dmsetup info -c --noheadings -o open "$DMNAME" 2>/dev/null |
+		tr -d '[:space:]')" ||
+		fail "cannot inspect mapper open count before identity mutation"
+	[[ "$open_count" == 0 ]] ||
+		fail "wrong-mapper case refuses to remove mapper with users"
+	dmsetup remove "$DMNAME" ||
+		fail "normal removal of inactive owned mapper failed"
+	dmsetup create "$DMNAME" --uuid "$wrong_uuid" --table "$mapper_table" ||
+		fail "cannot create wrong-identity negative mapper"
+	set +e
+	output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary recover 2>&1)"
+	rc=$?
+	set -e
+	printf '%s\n' "$output"
+	[[ "$rc" -ne 0 ]] || fail "recovery accepted wrong mapper identity"
+	[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+		tr -d '[:space:]')" == "$wrong_uuid" ]] ||
+		fail "recovery altered the wrong mapper"
+	[[ "$(mapper_swap_entry_count)" == 0 ]] ||
+		fail "wrong mapper became active during refused recovery"
+	assert_unrelated_host_swap_identity "wrong-mapper-identity"
+	assert_lifecycle_state "$RUN_ID" RECOVERY_REQUIRED STARTING ||
+		fail "wrong mapper refusal did not preserve recovery origin"
+	open_count="$(dmsetup info -c --noheadings -o open "$DMNAME" 2>/dev/null |
+		tr -d '[:space:]')" ||
+		fail "cannot inspect wrong mapper users before restoration"
+	[[ "$open_count" == 0 ]] ||
+		fail "wrong mapper gained users; quarantine required"
+	dmsetup remove "$DMNAME" ||
+		fail "normal removal of wrong inactive mapper failed"
+	dmsetup create "$DMNAME" --uuid "$exact_uuid" --table "$mapper_table" ||
+		fail "cannot restore exact owned mapper identity"
+	assert_exact_owned_mapper 1
+	recover_interruption_run "wrong-mapper-identity" STARTING false true true
 }
 
 cleanup() {
@@ -386,7 +844,7 @@ trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=setup"
-install -d -m 0700 "$TEST_BASE" "$CONFIG_BASE" "$RECOVERY_BASE" \
+install -d -m 0700 "$TEST_BASE" "$CONFIG_BASE" "$RECOVERY_BASE" "$EVIDENCE_BASE" \
 	"$PREFIX" "$PREFIX/sbin" "$PREFIX/libexec" "$PREFIX/libexec/swapz"
 TEST_BASE_CREATED=1
 
@@ -398,7 +856,8 @@ cc -std=c11 -O2 -g -Wall -Wextra -Werror \
 	"-DSWAPZ_PRIMARY_TEST_CONFIG_BASE=\"$CONFIG_BASE\"" \
 	"-DSWAPZ_PRIMARY_TEST_RECOVERY_BASE=\"$RECOVERY_BASE\"" \
 	"-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT=\"$REPORT\"" \
-	src/userspace/swapzctl.c src/userspace/swapz-primary.c -o "$CONTROL" ||
+	src/userspace/swapzctl.c src/userspace/swapz-primary.c "$FAULT_FIXTURE" \
+	-Wl,--wrap=syscall -Wl,--wrap=open -Wl,--wrap=fsync -o "$CONTROL" ||
 	fail "private exact-source swapzctl compilation failed"
 chmod 0500 "$CONTROL"
 install -m 0400 build/kernel/experimental/dm-swapz.ko \
@@ -704,4 +1163,21 @@ for phase in stop-stopping stop-swapoff; do
 	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
 done
 
-note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6 fresh_process:true host_swap_identity:preserved"
+note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
+
+# These cases mutate only the private process boundary or an inactive run-owned
+# mapper/state record. Every destructive mapper operation is a normal removal
+# after independent inactive/no-user proof; uncertainty falls into quarantine.
+run_ambiguous_swapon_applied
+run_faulted_start_failure swapon-eintr-noeffect 0
+run_faulted_start_failure post-swapon-inventory-eio 1
+run_ambiguous_swapoff_applied
+run_faulted_stop_failure swapoff-eintr-noeffect 1
+run_faulted_stop_failure swapoff-ebusy-noeffect 1
+run_faulted_stop_failure post-swapoff-inventory-eio 0
+run_failed_fsync_case
+run_stale_run_id_case
+run_lost_state_provenance_case
+run_wrong_mapper_identity_case
+
+note "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:11 ambiguous_syscall:true inventory_failure:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved"
