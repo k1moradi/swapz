@@ -483,6 +483,16 @@ control/module snapshots needed to reconcile an interrupted primary lifecycle.
 The rootless package suite must exercise both durable-state and ownership-marker
 refusals and prove the installed bytes remain unchanged.
 
+Package mutation and primary `prepare/start/stop/recover` must also contend on
+the exact same global `/run/lock/swapz/package.lock` before either side
+inspects mutable package/lifecycle state. Primary holds that lock for the whole
+operation and acquires its partition recovery lock only afterward. Native and
+rootless tests must prove a second lock attempt returns
+`EWOULDBLOCK`/`EAGAIN`, release permits a later holder, a held package lock
+blocks package mutation without installing bytes, and source contracts bind the
+C and shell lock paths. The owned-null_blk lifecycle rehearsal uses a private
+token-bound lock directory and must not contend on the host production lock.
+
 On Secure Boot-enabled hosts, stage 1 uses the same root-build signing hook as
 `make` and must leave the experimental `dm-swapz.ko` signed before any
 loaded work can begin. Qualification never prompts for signing privilege:

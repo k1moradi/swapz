@@ -18,6 +18,7 @@ MK = (ROOT / "src/kernel/Makefile").read_text()
 README = (ROOT / "docs/README.md").read_text()
 PRIMARY = (ROOT / "src/userspace/swapz-primary.c").read_text()
 SWAPZCTL = (ROOT / "src/userspace/swapzctl.c").read_text()
+PACKAGE_DKMS = (ROOT / "packaging/package-dkms.sh").read_text()
 MANDATORY_ROOTLESS_PYTHON_SUITES = (
     "tests/runtime/native/source-contract-test.py",
     "tests/runtime/native/primary-lifecycle-audit-test.py",
@@ -134,6 +135,36 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     runner.count(invocation), 1,
                     f"mandatory rootless suite must run exactly once: "
                     f"{relative_path}")
+
+    def test_package_and_primary_share_global_mutation_lock(self):
+        mutation = source_body("swapz_primary_run_mutating_action", PRIMARY)
+        command = source_body("swapz_primary_command", PRIMARY)
+        self.assertIn(
+            '#define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY "/run/lock/swapz"',
+            PRIMARY)
+        self.assertIn(
+            '#define SWAPZ_PRIMARY_MUTATION_LOCK_NAME "package.lock"',
+            PRIMARY)
+        self.assertIn(
+            'package_lock="/run/lock/swapz/package.lock"', PACKAGE_DKMS)
+        lock_position = mutation.index("swapz_primary_mutation_lock()")
+        for operation in (
+                "swapz_primary_prepare_metadata()",
+                "swapz_primary_start_prepared()",
+                "swapz_primary_stop_active()",
+                "swapz_primary_recover()"):
+            self.assertIn(operation, mutation)
+            self.assertLess(lock_position, mutation.index(operation))
+        for action in (
+                "SWAPZ_PRIMARY_MUTATING_PREPARE",
+                "SWAPZ_PRIMARY_MUTATING_START",
+                "SWAPZ_PRIMARY_MUTATING_STOP",
+                "SWAPZ_PRIMARY_MUTATING_RECOVER"):
+            self.assertIn(action, command)
+        self.assertNotIn("swapz_primary_prepare_metadata()", command)
+        self.assertNotIn("swapz_primary_start_prepared()", command)
+        self.assertNotIn("swapz_primary_stop_active()", command)
+        self.assertNotIn("swapz_primary_recover()", command)
 
     def test_native_make_stage_keeps_analyzer_contract_discovered(self):
         relative_path = (

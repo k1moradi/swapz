@@ -40,6 +40,7 @@ static void swapz_primary_selected_target_clear(void)
 }
 
 #define SWAPZ_PRIMARY_BLOCK_BYTES ((uint64_t)SWAPZ_BLOCK_BYTES)
+#define SWAPZ_PRIMARY_MUTATION_LOCK_NAME "package.lock"
 #if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
 	defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
 #error "primary lifecycle test modes are mutually exclusive"
@@ -55,10 +56,15 @@ static void swapz_primary_selected_target_clear(void)
 #ifndef SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
 #error "owned-null_blk lifecycle test requires private qualification report"
 #endif
+#ifndef SWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY
+#error "owned-null_blk lifecycle test requires private mutation lock directory"
+#endif
 #define SWAPZ_PRIMARY_CONFIG_BASE SWAPZ_PRIMARY_TEST_CONFIG_BASE
 #define SWAPZ_PRIMARY_RECOVERY_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
+#define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY \
+	SWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
 #elif defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
 #ifndef SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL
@@ -68,12 +74,14 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	"/var/lib/swapz/physical-recovery/primary-qualification.json"
+#define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY "/run/lock/swapz"
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
 #else
 #define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	"/var/lib/swapz/physical-recovery/primary-qualification.json"
+#define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY "/run/lock/swapz"
 /* Privileged lifecycle stays disabled until provisioning and recovery qualify. */
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 0
 #endif
@@ -3538,6 +3546,81 @@ static int swapz_primary_recovery_preflight(
 		return -1;
 	return 0;
 #endif
+}
+
+static int swapz_primary_mutation_lock_at(const char *directory,
+					      uid_t expected_owner)
+{
+	struct stat directory_info;
+	struct stat lock_info;
+	struct stat named_info;
+	int directory_fd = -1;
+	int lock_fd = -1;
+	int saved_errno;
+
+	if (!directory || directory[0] != '/') {
+		errno = EINVAL;
+		return -1;
+	}
+	directory_fd = open(directory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW |
+				    O_CLOEXEC);
+	if (directory_fd < 0)
+		return -1;
+	if (fstat(directory_fd, &directory_info) < 0)
+		goto failed;
+	if (!S_ISDIR(directory_info.st_mode) ||
+	    directory_info.st_uid != expected_owner ||
+	    (directory_info.st_mode & 0022U) != 0U) {
+		errno = EPERM;
+		goto failed;
+	}
+	lock_fd = openat(directory_fd, SWAPZ_PRIMARY_MUTATION_LOCK_NAME,
+			 O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (lock_fd < 0)
+		goto failed;
+	if (fstat(lock_fd, &lock_info) < 0)
+		goto failed;
+	if (!S_ISREG(lock_info.st_mode) || lock_info.st_uid != expected_owner ||
+	    (lock_info.st_mode & 0777U) != 0600U || lock_info.st_nlink != 1) {
+		errno = EPERM;
+		goto failed;
+	}
+	if (flock(lock_fd, LOCK_EX | LOCK_NB) < 0)
+		goto failed;
+	if (fstatat(directory_fd, SWAPZ_PRIMARY_MUTATION_LOCK_NAME, &named_info,
+		    AT_SYMLINK_NOFOLLOW) < 0)
+		goto failed;
+	if (!S_ISREG(named_info.st_mode) ||
+	    named_info.st_dev != lock_info.st_dev ||
+	    named_info.st_ino != lock_info.st_ino ||
+	    named_info.st_uid != expected_owner ||
+	    (named_info.st_mode & 0777U) != 0600U ||
+	    named_info.st_nlink != 1) {
+		errno = ESTALE;
+		goto failed;
+	}
+	if (close(directory_fd) < 0) {
+		saved_errno = errno;
+		(void)close(lock_fd);
+		errno = saved_errno;
+		return -1;
+	}
+	return lock_fd;
+
+failed:
+	saved_errno = errno ? errno : EIO;
+	if (lock_fd >= 0)
+		(void)close(lock_fd);
+	if (directory_fd >= 0)
+		(void)close(directory_fd);
+	errno = saved_errno;
+	return -1;
+}
+
+static int swapz_primary_mutation_lock(void)
+{
+	return swapz_primary_mutation_lock_at(
+		SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY, 0);
 }
 
 static int swapz_primary_partition_lock_at(int recovery_fd,
@@ -9400,6 +9483,54 @@ static int swapz_primary_read_only_plan(void)
 	return 2;
 }
 
+enum swapz_primary_mutating_action {
+	SWAPZ_PRIMARY_MUTATING_PREPARE,
+	SWAPZ_PRIMARY_MUTATING_START,
+	SWAPZ_PRIMARY_MUTATING_STOP,
+	SWAPZ_PRIMARY_MUTATING_RECOVER,
+};
+
+static int swapz_primary_run_mutating_action(
+	enum swapz_primary_mutating_action action)
+{
+	int mutation_lock_fd;
+	int result;
+	int saved_errno;
+
+	/*
+	 * Lock order is global package/mutation lock first, then the partition
+	 * recovery lock acquired by the selected lifecycle operation.
+	 */
+	mutation_lock_fd = swapz_primary_mutation_lock();
+	if (mutation_lock_fd < 0)
+		return -1;
+	switch (action) {
+	case SWAPZ_PRIMARY_MUTATING_PREPARE:
+		result = swapz_primary_prepare_metadata();
+		break;
+	case SWAPZ_PRIMARY_MUTATING_START:
+		result = swapz_primary_start_prepared();
+		break;
+	case SWAPZ_PRIMARY_MUTATING_STOP:
+		result = swapz_primary_stop_active();
+		break;
+	case SWAPZ_PRIMARY_MUTATING_RECOVER:
+		result = swapz_primary_recover();
+		break;
+	default:
+		errno = EINVAL;
+		result = -1;
+		break;
+	}
+	saved_errno = errno;
+	if (close(mutation_lock_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	errno = saved_errno;
+	return result;
+}
+
 int swapz_primary_command(int argc, char **argv)
 {
 	if (argc == 1 && argv && argv[0] &&
@@ -9454,7 +9585,8 @@ int swapz_primary_command(int argc, char **argv)
 		return 2;
 	}
 	if (!strcmp(argv[0], "prepare")) {
-		if (swapz_primary_prepare_metadata() < 0) {
+		if (swapz_primary_run_mutating_action(
+			    SWAPZ_PRIMARY_MUTATING_PREPARE) < 0) {
 			fprintf(stderr, "BLOCKED: primary-swap preparation failed: %s\n",
 				strerror(errno));
 			return 2;
@@ -9462,7 +9594,8 @@ int swapz_primary_command(int argc, char **argv)
 		return 0;
 	}
 	if (!strcmp(argv[0], "start")) {
-		if (swapz_primary_start_prepared() < 0) {
+		if (swapz_primary_run_mutating_action(
+			    SWAPZ_PRIMARY_MUTATING_START) < 0) {
 			fprintf(stderr, "BLOCKED: primary-swap start failed: %s\n",
 				strerror(errno));
 			return 2;
@@ -9470,7 +9603,8 @@ int swapz_primary_command(int argc, char **argv)
 		return 0;
 	}
 	if (!strcmp(argv[0], "stop")) {
-		if (swapz_primary_stop_active() < 0) {
+		if (swapz_primary_run_mutating_action(
+			    SWAPZ_PRIMARY_MUTATING_STOP) < 0) {
 			fprintf(stderr, "BLOCKED: primary-swap stop failed: %s\n",
 				strerror(errno));
 			return 2;
@@ -9478,7 +9612,8 @@ int swapz_primary_command(int argc, char **argv)
 		return 0;
 	}
 	if (!strcmp(argv[0], "recover")) {
-		if (swapz_primary_recover() < 0) {
+		if (swapz_primary_run_mutating_action(
+			    SWAPZ_PRIMARY_MUTATING_RECOVER) < 0) {
 			fprintf(stderr, "BLOCKED: primary-swap recovery failed: %s\n",
 				strerror(errno));
 			return 2;

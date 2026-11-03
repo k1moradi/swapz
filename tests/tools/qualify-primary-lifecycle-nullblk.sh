@@ -60,6 +60,7 @@ TOKEN="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 TEST_BASE="/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"
 CONFIG_BASE="$TEST_BASE/config"
 RECOVERY_BASE="$TEST_BASE/recovery"
+MUTATION_LOCK_BASE="$TEST_BASE/mutation-lock"
 PREFIX="$TEST_BASE/prefix"
 CONTROL="$PREFIX/sbin/swapzctl"
 REPORT="$RECOVERY_BASE/qualification.json"
@@ -685,14 +686,14 @@ run_failed_fsync_case() {
 	prepare_interruption_run
 	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=state-dir-fsync run_id:$RUN_ID"
 	set +e
-	output="$(SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL=2 \
+	output="$(SWAPZ_PRIMARY_TEST_FSYNC_FAIL_CALL=3 \
 		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary start 2>&1)"
 	rc=$?
 	set -e
 	printf '%s\n' "$output"
 	[[ "$rc" -ne 0 ]] || fail "injected state directory fsync failure was ignored"
-	grep -Fxq "SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT=2" <<< "$output" ||
-		fail "selected post-rename state-directory fsync did not fail"
+	grep -Fxq "SWAPZ_PRIMARY_TEST_FSYNC_HIT=3" <<< "$output" ||
+		fail "selected state-directory fsync did not fail"
 	assert_lifecycle_state "$RUN_ID" STARTING null ||
 		fail "fsync failure did not retain the renamed STARTING record"
 	[[ -f "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
@@ -1056,8 +1057,9 @@ trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=setup"
-install -d -m 0700 "$TEST_BASE" "$CONFIG_BASE" "$RECOVERY_BASE" "$EVIDENCE_BASE" \
-	"$PREFIX" "$PREFIX/sbin" "$PREFIX/libexec" "$PREFIX/libexec/swapz"
+install -d -m 0700 "$TEST_BASE" "$CONFIG_BASE" "$RECOVERY_BASE" \
+	"$MUTATION_LOCK_BASE" "$EVIDENCE_BASE" "$PREFIX" "$PREFIX/sbin" \
+	"$PREFIX/libexec" "$PREFIX/libexec/swapz"
 TEST_BASE_CREATED=1
 
 VERSION="$(cat src/kernel/VERSION)"
@@ -1067,6 +1069,7 @@ cc -std=c11 -O2 -g -Wall -Wextra -Werror \
 	-DSWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1 \
 	"-DSWAPZ_PRIMARY_TEST_CONFIG_BASE=\"$CONFIG_BASE\"" \
 	"-DSWAPZ_PRIMARY_TEST_RECOVERY_BASE=\"$RECOVERY_BASE\"" \
+	"-DSWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY=\"$MUTATION_LOCK_BASE\"" \
 	"-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT=\"$REPORT\"" \
 	src/userspace/swapzctl.c src/userspace/swapz-primary.c "$FAULT_FIXTURE" \
 	-Wl,--wrap=syscall -Wl,--wrap=open -Wl,--wrap=fsync -o "$CONTROL" ||

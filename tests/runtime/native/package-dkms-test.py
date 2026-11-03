@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Hermetic rootless swapz package transaction and provenance tests."""
+import fcntl
 import hashlib
 import json
 import os
@@ -344,6 +345,18 @@ esac
         if not transaction_parent.exists():
             return []
         return sorted(transaction_parent.glob("swapz-uninstall.*"))
+
+    def test_package_lock_refuses_parallel_mutation(self):
+        package_lock = self.home / "package.lock"
+        package_lock.touch(mode=0o600)
+        package_lock.chmod(0o600)
+        with package_lock.open("r+", encoding="ascii") as held:
+            fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.invoke("install")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "another swapz package operation is active", result.stderr)
+            self.assert_absent()
 
     def test_clean_repeat_uninstall_and_reinstall(self):
         first = self.invoke("install")

@@ -2464,6 +2464,8 @@ int main(void)
 	int first_lock;
 	int second_lock;
 	int unlocked_lock;
+	int first_mutation_lock;
+	int second_mutation_lock;
 	char *plan[] = {"plan"};
 	char *prepare[] = {"prepare"};
 	char *start[] = {"start"};
@@ -2553,6 +2555,18 @@ int main(void)
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);
 	assert(mkdtemp(base_template));
+	first_mutation_lock = swapz_primary_mutation_lock_at(
+		base_template, geteuid());
+	assert(first_mutation_lock >= 0);
+	second_mutation_lock = swapz_primary_mutation_lock_at(
+		base_template, geteuid());
+	assert(second_mutation_lock < 0);
+	assert(errno == EWOULDBLOCK || errno == EAGAIN);
+	assert(close(first_mutation_lock) == 0);
+	second_mutation_lock = swapz_primary_mutation_lock_at(
+		base_template, geteuid());
+	assert(second_mutation_lock >= 0);
+	assert(close(second_mutation_lock) == 0);
 	assert(snprintf(lock_path, sizeof(lock_path),
 			 "%s/partition-7fb9401d-04.lock", base_template) > 0);
 	assert(snprintf(target_path, sizeof(target_path),
