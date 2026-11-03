@@ -1615,9 +1615,15 @@ future SWZ header in memory, then durably claims a fresh run and stores/read-ver
 the original header backup and immutable manifest. It performs no target,
 swap, module or mapper mutation. The global privileged lifecycle gate remains
 disabled, and the path has not yet received its isolated-VM interruption
-coverage or a new exact-source owner qualification. Start/stop/recover,
-live-swap, cold-boot recovery, boot integration, workload performance and
-production qualification remain open.
+coverage or a new exact-source owner qualification. The prepared-start coordinator is now wired behind the still-disabled global
+execution gate. It revalidates the exact READY transaction, qualification,
+artifacts, target/topology and inactive selected-target swap state before
+persisting STARTING; only then may it write the run-bound SWZ header, load the
+qualified module, create/resume and format the run-bound mapper, and persist
+ACTIVE. Any post-STARTING failure is durably marked RECOVERY_REQUIRED while the
+owner lock remains held. Stop/recover, interruption/null_blk coverage, live
+swap, cold-boot recovery, boot integration, workload performance and production
+qualification remain open.
 
 Mapper lifecycle admission now also reads the per-run original-header backup,
 checks its SHA-256 against the immutable manifest, and verifies the Linux swap

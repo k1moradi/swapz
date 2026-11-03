@@ -3562,8 +3562,9 @@ attempt must fail while the active marker exists without changing the state,
 consumed record or marker; only a caller's explicit reconciliation step may
 close a metadata-only `READY` transaction.
 
-The metadata-only `primary prepare` command remains behind the global disabled
-lifecycle gate until the complete coordinator is qualified. Its production
+The metadata-only `primary prepare` command and the prepared-start coordinator
+remain behind the global disabled lifecycle gate until the complete coordinator
+is qualified. Its production
 path must reject any non-root, dirty-source, stale qualification, artifact
 mismatch, recovery-filesystem failure, target identity/header drift, nonzero
 selected-target swap use, duplicate or ambiguous selected-target swap aliases,
@@ -3578,6 +3579,21 @@ target; no such test may open or write a host block device. The rootless build
 must keep the command unavailable and prove no host path or lifecycle side
 effect is reached. A metadata-preparation PASS is not start, live-swap,
 loaded-recovery, boot, performance, or production qualification.
+
+The prepared-start coordinator may consume only an exact owned `READY`
+transaction whose current configured target, immutable manifest, accepted owner
+qualification and live artifact hashes still match. Before persisting
+`STARTING`, it must revalidate mount/root/recovery topology, prove the selected
+partition is not active swap, verify module/mapper absence, open the
+manifest-bound PARTUUID target exclusively, and compare all 4096 current
+block-zero bytes with the digest-verified saved header. Only after `STARTING`
+is durable may it write the run-bound SWZ header, load the exact qualified
+module, create/resume the exact run-bound mapper, initialize Linux swap metadata
+on that mapper, and persist `ACTIVE`. Every failure after durable `STARTING`
+must mark `RECOVERY_REQUIRED` while the owner lock is still held. The mapper
+service returning ACTIVE does not itself prove `swapon`; the systemd swap unit
+performs that later activation. Keep execution disabled until stop/recover and
+the required interruption/null_blk/physical evidence are complete.
 
 When the primary manager records an optional original-header backup, it is
 immutable per run ID. Its writer must require the exclusive lock and matching
