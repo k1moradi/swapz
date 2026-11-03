@@ -386,6 +386,8 @@ struct swapz_gc_recovery {
 	swapz_u32 destination;
 	swapz_u32 forbidden_open;
 	swapz_u32 next_segment_probe;
+	/* Monotonic high-water: never reuse any block reserved by a failed GC. */
+	swapz_u32 minimum_next_block;
 	bool active;
 };
 
@@ -3795,6 +3797,7 @@ static void swapz_gc_recovery_clear(struct swapz_dm *ctx)
 	recovery->destination = ~(swapz_u32)0;
 	recovery->forbidden_open = ~(swapz_u32)0;
 	recovery->next_segment_probe = ~(swapz_u32)0;
+	recovery->minimum_next_block = ~(swapz_u32)0;
 	recovery->active = false;
 }
 
@@ -3821,7 +3824,10 @@ static int swapz_gc_recovery_validate(const struct swapz_dm *ctx)
 	    ctx->segment_roles[recovery->destination])
 		return -EUCLEAN;
 	destination_start = recovery->destination * SWAPZ_SEGMENT_BLOCKS;
-	if (a->next_block < destination_start ||
+	if (recovery->minimum_next_block < destination_start ||
+	    recovery->minimum_next_block >
+		    destination_start + SWAPZ_SEGMENT_BLOCKS ||
+	    a->next_block < recovery->minimum_next_block ||
 	    a->next_block > destination_start + SWAPZ_SEGMENT_BLOCKS)
 		return -EUCLEAN;
 	return 0;
@@ -3838,6 +3844,7 @@ static int swapz_gc_recovery_record(struct swapz_dm *ctx, swapz_u32 victim)
 	recovery->destination = a->gc_destination;
 	recovery->forbidden_open = a->gc_forbidden_open;
 	recovery->next_segment_probe = a->next_segment_probe;
+	recovery->minimum_next_block = a->next_block;
 	recovery->active = true;
 	return swapz_gc_recovery_validate(ctx);
 }
@@ -3871,6 +3878,15 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 			return error;
 		}
 		victim = ctx->gc_recovery.victim;
+		/*
+		 * A fully consumed destination cannot produce a foreground
+		 * allocation: commit_rotation() rejects it. Reject later retries
+		 * without rereading the surviving victim or probing other reserves.
+		 * Roll-forward requires a separately authenticated authority API.
+		 */
+		if (a->next_block ==
+		    (ctx->gc_recovery.destination + 1U) * SWAPZ_SEGMENT_BLOCKS)
+			return -ENOSPC;
 	} else {
 		if (a->gc_allocation) {
 			/* An authority-side rotation without the worker token is stale
@@ -4022,6 +4038,9 @@ out:
 	ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs;
 	ctx->gc_write_reqs += ctx->physical_write_reqs - before_write_reqs;
 	ctx->gc_count = 0;
+	if (!rotation_committed && ctx->gc_recovery.active &&
+	    a->next_block > ctx->gc_recovery.minimum_next_block)
+		ctx->gc_recovery.minimum_next_block = a->next_block;
 	if (error && !rotation_committed && ctx->gc_recovery.active) {
 		/*
 		 * Keep the exact active destination and its monotonic cursor. Current

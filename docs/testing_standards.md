@@ -488,7 +488,13 @@ attempt failed, and must prove the evacuated source becomes reusable only after
 its mapping and physical liveness reach zero. If accumulated uncertain
 reservations exhaust the owned destination, qualification requires fail-closed
 behavior rather than cursor rollback, live-reserve reclassification or
-unbounded retry.
+unbounded retry. The exact-authority regression must additionally construct 255
+distinct surviving RAW pages in one victim, publish one relocation, abort one
+uncertain one-block lower WRITE and relocate all remaining pages. Its expected
+full destination and -ENOSPC outcome is an explicit UNRESOLVED forward-progress
+case even though all mappings, CRCs, generations and role/liveness guards
+remain intact. Do not claim #78 recovered until a bounded authenticated
+roll-forward can pass the same fixture with a successful new foreground write.
 
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
 regression fixture: one SWZ header block,
