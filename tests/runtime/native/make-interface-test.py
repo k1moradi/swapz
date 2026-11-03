@@ -794,7 +794,7 @@ class PublicMakeContract(unittest.TestCase):
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-module-unloaded",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-restored",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
-                "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:11 ambiguous_syscall:true inventory_failure:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
+                "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 ambiguous_syscall:true inventory_failure:true definite_io_error:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
             ]
             specs = (("sd_emulated", 10, 1000000, 2, 2, 1, 1),
                      ("ssd_emulated", 80, 150000, 2, 2, 1, 64))

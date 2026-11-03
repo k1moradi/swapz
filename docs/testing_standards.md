@@ -4932,3 +4932,5 @@ the rootless systemd/runtime-health suite independently of the broader product
 qualification workflow. This gate is release evidence for packaging and
 service contracts only; it does not replace loaded-kernel, physical-media, or
 owner-observed cold-boot qualification.
+
+Nested `make test` fixtures must track every mandatory loaded-correctness marker byte-for-byte when the parser contract grows; adding a new fail-closed recovery case requires updating the isolated fixture rather than weakening or making the marker optional.
