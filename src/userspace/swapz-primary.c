@@ -648,6 +648,8 @@ int swapz_primary_partuuid_valid(const char *partuuid)
 }
 
 
+#if !defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
+	!defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
 static int swapz_primary_boot_id_valid(const char *boot_id)
 {
 	unsigned int index;
@@ -699,6 +701,7 @@ static int swapz_primary_execution_record_matches(
 	return length == (size_t)expected_length &&
 	       !memcmp(record, expected, (size_t)expected_length);
 }
+#endif
 
 static int swapz_primary_target_valid(
 	const struct swapz_primary_target *target)
