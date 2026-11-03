@@ -82,6 +82,11 @@ long __wrap_syscall(long number, ...)
 			errno = EINTR;
 			return -1;
 		}
+		if (fault_is("swapon-eio-noeffect")) {
+			report_fault_hit("swapon-eio-noeffect");
+			errno = EIO;
+			return -1;
+		}
 		result = __real_syscall(number, path, flags);
 		if (result == 0 && fault_is("swapon-eintr-applied")) {
 			report_fault_hit("swapon-eintr-applied");
@@ -98,6 +103,11 @@ long __wrap_syscall(long number, ...)
 		if (fault_is("swapoff-ebusy-noeffect")) {
 			report_fault_hit("swapoff-ebusy-noeffect");
 			errno = EBUSY;
+			return -1;
+		}
+		if (fault_is("swapoff-eio-noeffect")) {
+			report_fault_hit("swapoff-eio-noeffect");
+			errno = EIO;
 			return -1;
 		}
 		if (fault_is("swapoff-eintr-noeffect")) {

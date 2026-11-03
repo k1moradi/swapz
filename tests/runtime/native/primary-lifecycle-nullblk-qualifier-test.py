@@ -55,9 +55,11 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         for case in (
             "swapon-eintr-applied",
             "swapon-eintr-noeffect",
+            "swapon-eio-noeffect",
             "post-swapon-inventory-eio",
             "swapoff-eintr-applied",
             "swapoff-eintr-noeffect",
+            "swapoff-eio-noeffect",
             "swapoff-ebusy-noeffect",
             "post-swapoff-inventory-eio",
             "state-dir-fsync",
@@ -67,8 +69,9 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         ):
             self.assertIn(case, self.script)
         self.assertIn(
-            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:11",
+            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13",
             self.script)
+        self.assertIn("definite_io_error:true", self.script)
 
     def test_interruption_oracle_proves_exact_mapper_and_repeat_recovery(self):
         self.assertIn('[[ "$mapper_uuid" == "SWAPZ-PRIMARY-$RUN_ID" ]]', self.script)
@@ -158,9 +161,11 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
                 "passthrough",
                 "swapon-eintr-applied",
                 "swapon-eintr-noeffect",
+                "swapon-eio-noeffect",
                 "post-swapon-inventory-eio",
                 "swapoff-eintr-applied",
                 "swapoff-eintr-noeffect",
+                "swapoff-eio-noeffect",
                 "swapoff-ebusy-noeffect",
                 "post-swapoff-inventory-eio",
                 "state-dir-fsync",

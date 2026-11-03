@@ -835,14 +835,20 @@ fixed historical evidence path still exists. Loaded correctness qualification
 must require the canonical primary lifecycle PASS record, the exact ordered six
 initial start/stop fresh-process interruption PASS phases plus the five
 fresh-process recovery interruption phases, the resulting eleven-case
-interruption-recovery aggregate, and the separate eleven-case negative-recovery
+interruption-recovery aggregate, and the separate thirteen-case negative-recovery
 aggregate. Missing, duplicated (including repeated lifecycle or aggregate PASS
 records), substituted or malformed lifecycle markers make Stage 5 evidence
 incomplete; the parser must not silently overwrite an earlier PASS match.
-merely executing the helper or recognizing its failure markers is not sufficient
+Merely executing the helper or recognizing its failure markers is not sufficient
 for a qualification PASS. The loaded report parser must require those same
-eleven phases in canonical order and the `cases:11` recovery aggregate; a
-legacy six-phase marker is incomplete evidence. The human qualification summary
+eleven phases in canonical order and the `cases:11` interruption-recovery
+aggregate; a legacy six-phase marker is incomplete evidence. The separate
+negative-recovery aggregate must require all thirteen mandatory cases, including
+definite pre-effect `EIO` failures for both `swapon` and `swapoff`, and
+must carry `definite_io_error:true`. Those definite errors are never reconciled
+as ambiguous success: start remains recoverable without activation, and stop
+preserves the active mapper until a later independently successful normal
+`swapoff` proves deactivation. The human qualification summary
 must also display the verified process-death recovery count and negative-case
 count so reviewers do not need to infer lifecycle coverage from raw log text.
 

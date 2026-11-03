@@ -1411,9 +1411,11 @@ note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11 fresh_process:t
 # after independent inactive/no-user proof; uncertainty falls into quarantine.
 run_ambiguous_swapon_applied
 run_faulted_start_failure swapon-eintr-noeffect 0
+run_faulted_start_failure swapon-eio-noeffect 0
 run_faulted_start_failure post-swapon-inventory-eio 1
 run_ambiguous_swapoff_applied
 run_faulted_stop_failure swapoff-eintr-noeffect 1
+run_faulted_stop_failure swapoff-eio-noeffect 1
 run_faulted_stop_failure swapoff-ebusy-noeffect 1
 run_faulted_stop_failure post-swapoff-inventory-eio 0
 run_failed_fsync_case
@@ -1421,4 +1423,4 @@ run_stale_run_id_case
 run_lost_state_provenance_case
 run_wrong_mapper_identity_case
 
-note "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:11 ambiguous_syscall:true inventory_failure:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved"
+note "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 ambiguous_syscall:true inventory_failure:true definite_io_error:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved"

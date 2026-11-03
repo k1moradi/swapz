@@ -1643,9 +1643,9 @@ def parse_loaded_correctness(output):
             r"repeat_recovery:safe$"),
         "primary_negative_recovery": re.compile(
             r"PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="
-            r"cases:11 ambiguous_syscall:true inventory_failure:true "
-            r"wrong_mapper:true failed_swapoff:true stale_run:true "
-            r"fsync_failure:true lost_provenance:true "
+            r"cases:13 ambiguous_syscall:true inventory_failure:true "
+            r"definite_io_error:true wrong_mapper:true failed_swapoff:true "
+            r"stale_run:true fsync_failure:true lost_provenance:true "
             r"repeat_recovery:safe host_swap_identity:preserved$"),
     }
     expected_interruption_phases = (

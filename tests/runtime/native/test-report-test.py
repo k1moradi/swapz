@@ -870,7 +870,7 @@ def synthetic_log():
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-module-unloaded",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-restored",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
-           "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:11 ambiguous_syscall:true inventory_failure:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
+           "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 ambiguous_syscall:true inventory_failure:true definite_io_error:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
            "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
@@ -1101,7 +1101,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(evidence["overall"], "PASS")
         self.assertEqual(evidence["primary_lifecycle"], "PASS")
         self.assertEqual(evidence["primary_lifecycle_interruptions"], 11)
-        self.assertEqual(evidence["primary_lifecycle_negative_cases"], 11)
+        self.assertEqual(evidence["primary_lifecycle_negative_cases"], 13)
 
         required_markers = (
             "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=",

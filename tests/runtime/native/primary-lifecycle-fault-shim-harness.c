@@ -140,11 +140,17 @@ int main(int argc, char **argv)
 				  swap_syscall_calls == 1);
 		require_condition(swap_is_active == !stopping);
 	} else if (!strcmp(case_name, "swapon-eintr-noeffect") ||
+		   !strcmp(case_name, "swapon-eio-noeffect") ||
 		   !strcmp(case_name, "swapoff-eintr-noeffect") ||
+		   !strcmp(case_name, "swapoff-eio-noeffect") ||
 		   !strcmp(case_name, "swapoff-ebusy-noeffect")) {
-		int expected_errno =
-			!strcmp(case_name, "swapoff-ebusy-noeffect") ?
-			EBUSY : EINTR;
+		int expected_errno = EINTR;
+
+		if (!strcmp(case_name, "swapoff-ebusy-noeffect"))
+			expected_errno = EBUSY;
+		else if (!strcmp(case_name, "swapon-eio-noeffect") ||
+			 !strcmp(case_name, "swapoff-eio-noeffect"))
+			expected_errno = EIO;
 
 		require_condition(syscall_result == -1 &&
 				  errno == expected_errno &&
