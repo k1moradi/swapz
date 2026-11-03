@@ -234,6 +234,59 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify.validate_loaded_module_provenance(
                     observed_source, clean, physical, source_sha)
 
+    def test_private_physical_control_build_binds_exact_source_and_installed_control(self):
+        source_sha = "a" * 40
+        completed = __import__("subprocess").CompletedProcess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            qualified = root / "prefix/sbin/swapzctl"
+            qualified.parent.mkdir(parents=True)
+            qualified.write_bytes(b"qualified-installed-control")
+            private_directory = root / "private"
+
+            def fake_compile(argv, **_kwargs):
+                output = Path(argv[argv.index("-o") + 1])
+                output.write_bytes(b"private-physical-control")
+                return completed(args=argv, returncode=0, stdout="", stderr="")
+
+            with mock.patch.object(qualify, "_run", side_effect=fake_compile) as run:
+                control, digest = qualify.build_physical_execution_control(
+                    source_sha, qualified, private_directory)
+
+            argv = run.call_args.args[0]
+            self.assertIn("-DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1", argv)
+            self.assertIn(
+                f"-DSWAPZ_BUILD_SOURCE_SHA={json.dumps(source_sha)}", argv)
+            self.assertIn(
+                "-DSWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL=" +
+                json.dumps(str(qualified.resolve())), argv)
+            self.assertEqual(control.read_bytes(), b"private-physical-control")
+            self.assertEqual(
+                digest, hashlib.sha256(b"private-physical-control").hexdigest())
+            self.assertEqual(stat.S_IMODE(control.stat().st_mode), 0o700)
+
+    def test_private_control_invocations_receive_runtime_marker_only_as_child_env(self):
+        completed = __import__("subprocess").CompletedProcess
+        plan_result = completed(
+            args=[], returncode=2,
+            stdout='{"privileged_execution_enabled":true}\n', stderr="")
+        with mock.patch.object(qualify, "_run", return_value=plan_result) as run:
+            plan = qualify._read_plan(Path("/tmp/private-swapzctl"))
+        self.assertIs(plan["privileged_execution_enabled"], True)
+        self.assertEqual(
+            run.call_args.kwargs["extra_environment"],
+            {"SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION": "1"})
+
+        primary_result = completed(args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch("subprocess.run", return_value=primary_result) as run:
+            qualify._primary(
+                Path("/tmp/private-swapzctl"), "prepare", 60, admitted=True)
+            self.assertNotIn("SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION", os.environ)
+        child_environment = run.call_args.kwargs["env"]
+        self.assertEqual(
+            child_environment["SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION"], "1")
+
     def test_default_control_path_uses_installed_package_layout(self):
         args = qualify.build_parser().parse_args([
             "--validated-source", "a" * 40,
