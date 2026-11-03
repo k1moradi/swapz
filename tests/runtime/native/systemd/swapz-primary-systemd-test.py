@@ -1163,6 +1163,16 @@ class RuntimeHealthTests(unittest.TestCase):
                 status)
                     if [ "${MOCK_DM_STATUS_SLEEP:-0}" != 0 ]; then sleep "$MOCK_DM_STATUS_SLEEP"; fi
                     if [ "${MOCK_DM_STATUS_UNAVAILABLE:-0}" = 1 ]; then exit 1; fi
+                    if [ -n "${MOCK_DM_STALL_COUNTER_FILE:-}" ]; then
+                        counter=0
+                        if [ -f "$MOCK_DM_STALL_COUNTER_FILE" ]; then
+                            IFS= read -r counter < "$MOCK_DM_STALL_COUNTER_FILE" || exit 2
+                        fi
+                        counter=$((counter + 1))
+                        printf '%s\n' "$counter" > "$MOCK_DM_STALL_COUNTER_FILE" || exit 2
+                        printf '0 216641536 swapz failed=0 error=0 flush_err=0 segment_discards_failed=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=%s gc_reserve_segments_initial=2 gc_reserve_segments_current=2 gc_destination_advances=0 window_gc_pressure=%s\n' "$counter" "$counter"
+                        exit 0
+                    fi
                     printf '%s\n' "${MOCK_DM_STATUS:-0 216641536 swapz failed=0 error=0 flush_err=0 segment_discards_failed=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 gc_reserve_segments_initial=2 gc_reserve_segments_current=2 gc_destination_advances=0 window_gc_pressure=0}"
                     ;;
                 *) exit 2 ;;
@@ -1313,6 +1323,25 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", result.stderr)
         self.assertIn("mapper_status_unavailable", result.stderr)
+
+    def test_sustained_gc_stall_requires_normal_operator_stop(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_STALL_COUNTER_FILE"] = str(self.root / "gc-stall-counter")
+        env["SWAPZ_PRIMARY_TEST_MAX_POLLS"] = "4"
+        env["SWAPZ_PRIMARY_TEST_STALL_POLLS"] = "3"
+        result = self.run_helper("monitor", env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", result.stderr)
+        self.assertIn("failures=sustained_gc_stall", result.stderr)
+        marker = (
+            "SWAPZ_RUNTIME_STOP_REQUIRED=1 reason=sustained_gc_stall "
+            "action=normal_primary_stop_required"
+        )
+        self.assertEqual(result.stderr.count(marker), 1)
+        helper = read_text(RUNTIME_HEALTH)
+        self.assertNotIn("swapzctl primary stop", helper)
+        self.assertNotRegex(helper, r"(^|[^A-Za-z])swapoff([^A-Za-z]|$)")
+        self.assertNotIn("dmsetup remove", helper)
 
     def test_unchanged_monitor_state_logs_only_once(self) -> None:
         env = self.env.copy()
