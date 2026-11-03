@@ -3116,6 +3116,33 @@ class ReportContract(unittest.TestCase):
         self.assertIn("suspend/drain", phase)
         self.assertIn("retained lifecycle bytes changed", reason)
 
+        primary_lifecycle = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: recovery failed for "
+            "/var/lib/private/run-0123456789abcdef0123456789abcdef\n"
+        )
+        phase, reason = runner.failure_context(primary_lifecycle)
+        self.assertIn("primary", phase.lower())
+        self.assertIn("FAIL_PRIMARY_NULLBLK_LIFECYCLE:", reason)
+        self.assertIn("recovery failed", reason)
+        self.assertNotIn("/var/lib/private", reason)
+        self.assertNotIn("0123456789abcdef0123456789abcdef", reason)
+        self.assertIn("FAIL_PRIMARY_NULLBLK_LIFECYCLE",
+                      runner.safe_lines(primary_lifecycle))
+        self.assertEqual(
+            runner.loaded_progress_line(
+                "FAIL_PRIMARY_NULLBLK_LIFECYCLE: private detail"),
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE")
+
+        blocked_primary = (
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: prior evidence at "
+            "/var/lib/private/0123456789abcdef0123456789abcdef\n"
+        )
+        _, reason = runner.failure_context(blocked_primary)
+        self.assertIn("BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:", reason)
+        self.assertNotIn("/var/lib/private", reason)
+        self.assertNotIn("0123456789abcdef0123456789abcdef", reason)
+
         discard_trim = (
             "START_LOADED_OWNED_NULLBLK_SMOKE\n"
             "START_LOADED_DISCARD_TRIM\n"

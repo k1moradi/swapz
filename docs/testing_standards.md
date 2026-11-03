@@ -686,7 +686,12 @@ After a lower passes the full identity/holder/mount/swap audit, power-off may
 boundedly wait for that exact null_blk sysfs device to disappear before configfs
 removal. No wait authorizes force removal or weakens identity checks. Sanitized
 reports must preserve the specific `QUARANTINED:` reason instead of collapsing
-all teardown failures into one generic diagnostic.
+all teardown failures into one generic diagnostic. The owned-null_blk primary
+lifecycle helper's fixed `FAIL_PRIMARY_NULLBLK_LIFECYCLE:` and
+`BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:` markers are also actionable loaded-stage
+diagnostics: the reporter must retain the marker plus a bounded sanitized reason,
+while stripping paths, long IDs and arbitrary host-specific text. Live progress
+may print only the fixed marker label, never its private detail.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 

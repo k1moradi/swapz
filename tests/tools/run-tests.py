@@ -1246,7 +1246,9 @@ def safe_lines(log):
     for line in log.splitlines():
         text = line.strip()
         if text.startswith(("PASS:", "FAIL:", "BLOCKED:", "QUARANTINED:",
-                            "PASS_", "BLOCKED_LOADED_QUALIFICATION")):
+                            "PASS_", "FAIL_PRIMARY_NULLBLK_LIFECYCLE:",
+                            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:",
+                            "BLOCKED_LOADED_QUALIFICATION")):
             label = text.split("=", 1)[0].split(":", 1)[0]
             if len(label) <= 90 and label.replace("_", "").replace("-", "").isalnum():
                 found.append(label)
@@ -1764,7 +1766,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
             if not candidate.startswith("QUARANTINED: "):
                 continue
             msg = candidate.partition(": ")[2]
-            msg = re.sub(r"(?<![A-Za-z0-9])/[^s'\"<>]+", "[path]", msg)
+            msg = re.sub(r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", msg)
             msg = re.sub(r"\b(?:[a-f0-9]{16,}|[0-9a-f]{8}-[0-9a-f-]{18,})\b",
                          "[id]", msg, flags=re.I)
             msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]>]", "?", msg)
@@ -1797,6 +1799,21 @@ def failure_context(output, *, loaded=True, default_phase=None):
             candidate = line.strip()
             if candidate == "FAIL: test exit 1; safe teardown attempted":
                 continue
+            lifecycle_prefix = next((
+                prefix for prefix in (
+                    "FAIL_PRIMARY_NULLBLK_LIFECYCLE: ",
+                    "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: ")
+                if candidate.startswith(prefix)), None)
+            if lifecycle_prefix is not None:
+                msg = candidate[len(lifecycle_prefix):]
+                msg = re.sub(r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", msg)
+                msg = re.sub(
+                    r"\b(?:[a-f0-9]{16,}|[0-9a-f]{8}-[0-9a-f-]{18,})\b",
+                    "[id]", msg, flags=re.I)
+                msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?", msg)
+                label = lifecycle_prefix.partition(":")[0]
+                reason = f"{label}: {msg[:155]}"
+                break
             if candidate.startswith(("BLOCKED: ", "FAIL: ")):
                 msg = candidate.partition(": ")[2]
                 msg = re.sub(r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", msg)
@@ -1846,6 +1863,11 @@ def loaded_progress_line(line):
     stripped = line.strip()
     if stripped.startswith(("BLOCKED:", "BLOCKED_LOADED_QUALIFICATION:", "FAIL:")):
         return stripped
+    for prefix in (
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE:",
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:"):
+        if stripped.startswith(prefix):
+            return prefix.rstrip(":")
     if not stripped.startswith(LOADED_PROGRESS_PREFIXES):
         return None
     if stripped.startswith(("PASS_LOADED_", "PASS_RETAINED_SYNTHETIC_",
