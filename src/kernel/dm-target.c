@@ -1459,7 +1459,7 @@ static void swapz_complete(struct bio *bio, int error)
 	/* Any BIO still owned when the target becomes terminally failed must
 	 * never receive a fresh success, even if its caller missed the error.
 	 * Preserve the preexisting BIO error (if any) rather than clearing it. */
-	if (!error && ctx && READ_ONCE(ctx->failed)) {
+	if (!error && ctx && smp_load_acquire(&ctx->failed)) {
 		error = READ_ONCE(ctx->last_error);
 		if (!error)
 			error = -EIO;
@@ -1534,7 +1534,7 @@ static bool swapz_try_completion_handoff(struct swapz_dm *ctx)
 	/* Close admission and publish work under the same lifetime gate: drain
 	 * must see this queued item before it can mark the queue draining. */
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	if (ctx->accepting && !ctx->failed &&
+	if (ctx->accepting && !READ_ONCE(ctx->failed) &&
 	    swapz_inflight_lower_pending(ctx) &&
 	    !atomic_cmpxchg(&ctx->completion_active, 0, 1)) {
 		ctx->completion_bios = ctx->deferred_upper_completions;
@@ -1606,7 +1606,7 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 		atomic64_inc(&ctx->endio_write_seen_err);
 	else
 		atomic64_inc(&ctx->endio_write_seen_ok);
-	if (!*error && READ_ONCE(ctx->failed)) {
+	if (!*error && smp_load_acquire(&ctx->failed)) {
 		int failure = READ_ONCE(ctx->last_error);
 
 		*error = errno_to_blk_status(failure ? failure : -EIO);
@@ -1617,18 +1617,33 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 
 static void swapz_fail(struct swapz_dm *ctx, int error)
 {
+	unsigned long flags;
+	int terminal_error;
+	bool first_failure = false;
+
 	/* Capacity exhaustion is a per-write result. Existing committed maps
 	 * remain authoritative and readable; only integrity/lower-I/O faults
 	 * poison the target. */
 	if (error == -ENOSPC)
 		return;
+	terminal_error = error < 0 ? error : -EIO;
+	/*
+	 * The preparation worker can fail concurrently with the ordered owner.
+	 * queue_lock elects exactly one terminal error and prevents a second
+	 * failure from rewriting it or double-charging the failure counter.
+	 * Publish the error before the flag observed at BIO completion/end_io.
+	 */
+	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!ctx->failed) {
-		ctx->failed = true;
-		ctx->last_error = error < 0 ? error : -EIO;
+		WRITE_ONCE(ctx->last_error, terminal_error);
 		ctx->io_failures++;
-		DMERR("swapz alpha: lower or mapping error %d; rejecting subsequent I/O",
-		      ctx->last_error);
+		smp_store_release(&ctx->failed, true);
+		first_failure = true;
 	}
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	if (first_failure)
+		DMERR("swapz alpha: lower or mapping error %d; rejecting subsequent I/O",
+		      terminal_error);
 }
 
 /*
@@ -2062,8 +2077,11 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 			ctx->write_wait_gt_4ms++;
 	}
 	error = lower_error;
-	if (!error && ctx->failed)
-		error = ctx->last_error ? ctx->last_error : -EIO;
+	if (!error && smp_load_acquire(&ctx->failed)) {
+		int failure = READ_ONCE(ctx->last_error);
+
+		error = failure ? failure : -EIO;
+	}
 	publish_before = ctx->engine.publish_wall_ns;
 	publish_crc_before = ctx->authority.publish_crc_wall_ns;
 	complete_start = ktime_get_ns();
@@ -4164,8 +4182,10 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	/* An independent READ can fail while older writes are only prepared.
 	 * Complete their original owners once, without ordering/staging or
 	 * submitting any unpublished bytes after the target has failed. */
-	if (ctx->failed) {
-		error = ctx->last_error ? ctx->last_error : -EIO;
+	if (smp_load_acquire(&ctx->failed)) {
+		int failure = READ_ONCE(ctx->last_error);
+
+		error = failure ? failure : -EIO;
 		for (index = 0; index < count; ++index)
 			swapz_complete(ctx->batch[index].bio, error);
 		goto accounted;
@@ -4488,7 +4508,7 @@ commit_done:
 	 * that observer mark, reuse this delivery mark as a conservative zero-dwell
 	 * fallback instead of taking another clock reading for each BIO.
 	 */
-	if (!async_submitted && committed && !ctx->failed)
+	if (!async_submitted && committed && !READ_ONCE(ctx->failed))
 		acknowledgements.delivered_ns = ktime_get_ns();
 	for (index = 0; index < count; ++index) {
 		struct bio *bio = ctx->batch[ctx->planned_to_batch[index]].bio;
@@ -4496,7 +4516,7 @@ commit_done:
 		if (async_submitted) {
 			detached_inflight->bios[index] = bio;
 			detached_inflight->raw[index] = ctx->planned[index].raw;
-		} else if (index < committed && !ctx->failed) {
+		} else if (index < committed && !READ_ONCE(ctx->failed)) {
 			struct swapz_bio_ref *entry =
 				dm_per_bio_data(bio, sizeof(*entry));
 
@@ -4760,7 +4780,7 @@ static bool swapz_tail_read_is_independent_locked(
 	if (!ctx->retain_ms || bio_op(bio) != REQ_OP_READ ||
 	    bio_sectors(bio) != SWAPZ_SECTORS ||
 	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
-	    !READ_ONCE(ctx->accepting) || ctx->failed ||
+	    !READ_ONCE(ctx->accepting) || READ_ONCE(ctx->failed) ||
 	    ctx->authority.in_flight || ctx->authority.batch_replaying ||
 	    ctx->authority.batch_pending || swapz_has_inflight(ctx))
 		return false;
@@ -5016,7 +5036,7 @@ static bool swapz_worker_pack_close_ready(struct swapz_dm *ctx)
 		!ctx->worker_has_immediate_followup &&
 		!(SWAPZ_WRITE_PIPELINE_DEPTH == 1U &&
 		  swapz_inflight_lower_pending(ctx)) &&
-		ctx->batch_count && !ctx->failed &&
+		ctx->batch_count && !READ_ONCE(ctx->failed) &&
 		READ_ONCE(ctx->accepting) &&
 		!swapz_retention_expired(ctx);
 }
@@ -5704,7 +5724,7 @@ static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 	bool inflight_active = swapz_has_inflight(ctx);
 	bool blocked = !ctx->retain_ms ||
 		(!ctx->batch_count && !inflight_active) ||
-		!READ_ONCE(ctx->accepting) || ctx->failed ||
+		!READ_ONCE(ctx->accepting) || READ_ONCE(ctx->failed) ||
 		ctx->authority.in_flight || ctx->authority.batch_replaying ||
 		(ctx->authority.batch_pending && !inflight_active) ||
 		(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
@@ -5740,7 +5760,7 @@ static bool swapz_read_can_parallel(struct swapz_dm *ctx, struct bio *bio)
 		return swapz_read_is_independent(ctx, bio);
 	logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	inflight_active = swapz_has_inflight(ctx);
-	blocked = !READ_ONCE(ctx->accepting) || ctx->failed ||
+	blocked = !READ_ONCE(ctx->accepting) || READ_ONCE(ctx->failed) ||
 		ctx->authority.in_flight || ctx->authority.batch_replaying ||
 		(ctx->authority.batch_pending && !inflight_active) ||
 		(inflight_active &&
@@ -6511,8 +6531,10 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 	    (op == REQ_OP_WRITE && ctx->invalidate_cache_on_write_admit) ||
 	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
 		swapz_invalidate_read_caches(ctx);
-	if (ctx->failed) {
-		swapz_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
+	if (smp_load_acquire(&ctx->failed)) {
+		int failure = READ_ONCE(ctx->last_error);
+
+		swapz_complete(bio, failure ? failure : -EIO);
 		return;
 	}
 	/* Future arrivals never refresh the retention budget. Expiry bounds
@@ -7052,7 +7074,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 
 			if (!inline_preparation || !ctx->retain_ms ||
 			    !ctx->batch_count || ctx->singleton_fast_close ||
-			    ctx->failed || !READ_ONCE(ctx->accepting))
+			    READ_ONCE(ctx->failed) || !READ_ONCE(ctx->accepting))
 				atomic_set(&ctx->preparation_tail_credit, 0);
 
 			/*
@@ -7095,7 +7117,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 					 ctx->retained_tail_target,
 					 ctx->work_conserving_hand_records,
 					 swapz_local_head_is_plain_write(&local)) &&
-				 !ctx->failed && READ_ONCE(ctx->accepting)) {
+				 !READ_ONCE(ctx->failed) && READ_ONCE(ctx->accepting)) {
 				ctx->work_conserving_hand_closes++;
 				if (ctx->batch_count >= 2U &&
 				    (ctx->single_pack_deferred ||
@@ -7129,7 +7151,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 		 * observing older writes; disjoint reads use committed maps.
 		 */
 		if (ctx->batch_count &&
-		    (!ctx->retain_ms || ctx->failed ||
+		    (!ctx->retain_ms || READ_ONCE(ctx->failed) ||
 		     !READ_ONCE(ctx->accepting) ||
 		     ctx->batch_count >= ctx->max_window ||
 		     swapz_retention_expired(ctx))) {
@@ -7245,7 +7267,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 				ctx->pack_close_pending_tail_sample = false;
 			}
 			if (ctx->batch_count >= 2U && ctx->work_conserving_window &&
-			    !swapz_has_inflight(ctx) && ctx->accepting && !ctx->failed &&
+			    !swapz_has_inflight(ctx) && ctx->accepting && !READ_ONCE(ctx->failed) &&
 			    !swapz_pure_write_below_burst(ctx, false) &&
 			    swapz_window_work_conserving_close_ready(
 				ctx->retain_ms,
@@ -7269,7 +7291,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 				continue;
 			}
 			if (ctx->batch_count && ctx->work_conserving_window &&
-			    swapz_has_inflight(ctx) && ctx->accepting && !ctx->failed) {
+			    swapz_has_inflight(ctx) && ctx->accepting && !READ_ONCE(ctx->failed)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
 							 wall_start_ns,
@@ -7285,7 +7307,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 			 * geometry: a one-record window already occupies one 4KiB block.
 			 * Any accepted concurrency above clears the learned bypass.
 			 */
-			if (ctx->accepting && !ctx->failed &&
+			if (ctx->accepting && !READ_ONCE(ctx->failed) &&
 			    ctx->singleton_fast_close && ctx->batch_count == 1U &&
 			    !ctx->retained_single_tail_deferred &&
 			    ctx->retain_ms && !swapz_retention_expired(ctx)) {
@@ -7300,7 +7322,7 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 			}
 			if (ctx->batch_count &&
 			    swapz_window_timer_enabled(ctx->retain_ms) &&
-			    ctx->accepting && !ctx->failed) {
+			    ctx->accepting && !READ_ONCE(ctx->failed)) {
 				if (!swapz_has_inflight(ctx) &&
 				    !ctx->accepted_work_lower_idle_start_ns) {
 					u64 idle_start_ns = ktime_get_ns();
@@ -7392,12 +7414,12 @@ static void swapz_worker(struct work_struct *work)
 	 * any worker-owned state; it never waits for this work item.
 	 */
 	mutex_lock(&ctx->ordered_owner);
-	if (!READ_ONCE(ctx->accepting) || ctx->failed)
+	if (!READ_ONCE(ctx->accepting) || READ_ONCE(ctx->failed))
 		WRITE_ONCE(ctx->lane_prev_valid, false);
 	ctx->defer_upper_completions = true;
 	swapz_worker_pass(ctx);
 	ctx->defer_upper_completions = false;
-	if (!READ_ONCE(ctx->accepting) || ctx->failed)
+	if (!READ_ONCE(ctx->accepting) || READ_ONCE(ctx->failed))
 		WRITE_ONCE(ctx->lane_prev_valid, false);
 	/*
 	 * Published successes are acknowledged after the ordered domain is free,
@@ -7446,7 +7468,7 @@ static void swapz_submitter_dispatch(struct swapz_dm *ctx,
 	state = prepared ? swapz_preparation_read_state(&prepared->state) :
 		SWAPZ_PREPARATION_ERROR;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	dispatch = ctx->accepting && !ctx->failed && prepared &&
+	dispatch = ctx->accepting && !READ_ONCE(ctx->failed) && prepared &&
 		!READ_ONCE(entry->preparation_error) &&
 		((state == SWAPZ_PREPARATION_READY_COMPRESSED &&
 		  !prepared->zero) ||
@@ -7514,7 +7536,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	bool ordered_owned = false, submitter_dispatch = false;
 
 	if (!READ_ONCE(ctx->accepting))
-		return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+		return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 	if (bio_op(bio) == REQ_OP_READ || bio_op(bio) == REQ_OP_WRITE) {
 		if ((bio_op(bio) == REQ_OP_WRITE && !count &&
 		     (bio->bi_opf & REQ_PREFLUSH))) {
@@ -7603,7 +7625,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			if (ordered_owned)
 				mutex_unlock(&ctx->ordered_owner);
-			return ctx->failed ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+			return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		}
 		if (count && (bio_op(bio) == REQ_OP_READ ||
 			      bio_op(bio) == REQ_OP_WRITE)) {
@@ -7789,7 +7811,7 @@ static void swapz_drain(struct dm_target *ti)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
 	/* Every admitted BIO was queued under the same lock before this drain. */
-	if (!ctx->failed) {
+	if (!READ_ONCE(ctx->failed)) {
 		int error = swapz_issue_flush(ctx);
 
 		if (error)
@@ -7805,7 +7827,7 @@ static void swapz_resume(struct dm_target *ti)
 	/* ID178: a predecessor from before suspend is a stale generation. */
 	atomic64_inc(&ctx->lane_profile_epoch);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	if (!ctx->failed)
+	if (!READ_ONCE(ctx->failed))
 		WRITE_ONCE(ctx->accepting, true);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 }
@@ -9024,8 +9046,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->parallel_read_coalesce_skip_noncontig_slot,
 		       ctx->parallel_read_coalesce_skip_gap,
 		       ctx->parallel_read_coalesce_skip_other,
-		       ctx->failed,
-		       ctx->last_error);
+		       READ_ONCE(ctx->failed),
+		       READ_ONCE(ctx->last_error));
 		/* Retired compatibility token: the read-bypass detach override is gone. */
 		DMEMIT(" k1_allow_after_read_bypass=0 "
 		       "read_coalesce_max_blocks=%u "

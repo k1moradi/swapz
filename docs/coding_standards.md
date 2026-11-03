@@ -744,7 +744,13 @@ belong in the ROADMAP decision table and Git history.
   same gate that closes drain; no work may be published to a draining queue.
   Completion and DM-endio counters are atomic across these contexts. Failed
   runs are acknowledged immediately with their error, and delivery re-checks
-  terminal failure at both target and DM boundaries. With nothing staged or
+  terminal failure at both target and DM boundaries. Terminal errors can
+  arrive concurrently from the preparation and ordered workers: elect the
+  first under `queue_lock`, store its immutable error and increment the
+  failure counter once, then release-publish the failed flag. Completion
+  and end_io acquire the flag before consuming the error; other cross-worker
+  reads must be marked. Log only after releasing the lock. A per-write
+  `-ENOSPC` still does not poison the target. With nothing staged or
   queued (QD1), acknowledgements stay inline. This adds no compression lane,
   I/O buffer, lower-WRITE slot or early success acknowledgement.
   Tail sampling is gated on `swapz_has_inflight(ctx)` so unfinalized completions

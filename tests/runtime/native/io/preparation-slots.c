@@ -6,6 +6,7 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 typedef int64_t s64;
 typedef struct { _Atomic int64_t value; } atomic64_t;
@@ -202,6 +203,89 @@ static int test_closed_admission_suppresses_producer_owner_wake(void)
 	return 0;
 }
 
+/*
+ * Kernel-side locking is not exercised by the pure preparation-slot policy.
+ * Read the actual target source to guard both wake/close critical sections
+ * and the first-terminal-error release-publication order.
+ */
+static int test_production_failure_and_wake_gates(void)
+{
+	static const char marker[] = "tests/runtime/native/io/preparation-slots.c";
+	static const char target[] = "src/kernel/dm-target.c";
+	char source_path[4096], line[1024], failure_body[2048] = { 0 };
+	const char *marker_position = strstr(__FILE__, marker);
+	const char *lock_position, *condition_position, *error_position;
+	const char *publication_position, *unlock_position, *log_position;
+	FILE *source;
+	size_t failure_bytes = 0;
+	unsigned int wake_guards = 0, wake_publications = 0;
+	int in_producer = 0, in_failure = 0, producer_locked = 0;
+	int pending_wake = 0, path_length;
+
+	CHECK(marker_position != NULL);
+	path_length = snprintf(source_path, sizeof(source_path), "%.*s%s",
+			       (int)(marker_position - __FILE__), __FILE__, target);
+	CHECK(path_length > 0 && (size_t)path_length < sizeof(source_path));
+	source = fopen(source_path, "r");
+	CHECK(source != NULL);
+	while (fgets(line, sizeof(line), source)) {
+		if (strstr(line, "static void swapz_preparation_worker("))
+			in_producer = 1;
+		if (strstr(line, "static void swapz_order_window_greedy("))
+			in_producer = 0;
+		if (strstr(line, "static void swapz_fail("))
+			in_failure = 1;
+		if (in_failure) {
+			size_t length = strlen(line);
+
+			CHECK(failure_bytes + length < sizeof(failure_body));
+			memcpy(failure_body + failure_bytes, line, length);
+			failure_bytes += length;
+			if (line[0] == '}')
+				in_failure = 0;
+		}
+		if (!in_producer)
+			continue;
+		if (strstr(line, "spin_lock_irqsave(&ctx->queue_lock, flags)"))
+			producer_locked = 1;
+		if (strstr(line, "swapz_preparation_owner_wake_allowed(")) {
+			CHECK(producer_locked && !pending_wake);
+			wake_guards++;
+			pending_wake = 1;
+		}
+		if (pending_wake &&
+		    strstr(line, "mod_delayed_work(ctx->workqueue, &ctx->worker, 0)")) {
+			CHECK(producer_locked);
+			wake_publications++;
+		}
+		if (strstr(line, "spin_unlock_irqrestore(&ctx->queue_lock, flags)")) {
+			if (pending_wake) {
+				CHECK(producer_locked);
+				pending_wake = 0;
+			}
+			producer_locked = 0;
+		}
+	}
+	CHECK(!ferror(source));
+	CHECK(!fclose(source));
+	CHECK(!in_failure && !pending_wake);
+	CHECK(wake_guards == 2 && wake_publications == 2);
+	lock_position = strstr(failure_body, "spin_lock_irqsave(&ctx->queue_lock, flags)");
+	condition_position = strstr(failure_body, "if (!ctx->failed)");
+	error_position = strstr(failure_body, "WRITE_ONCE(ctx->last_error, terminal_error)");
+	publication_position = strstr(failure_body, "smp_store_release(&ctx->failed, true)");
+	unlock_position = strstr(failure_body, "spin_unlock_irqrestore(&ctx->queue_lock, flags)");
+	log_position = strstr(failure_body, "DMERR(");
+	CHECK(lock_position && condition_position && error_position &&
+	      publication_position && unlock_position && log_position);
+	CHECK(lock_position < condition_position &&
+	      condition_position < error_position &&
+	      error_position < publication_position &&
+	      publication_position < unlock_position &&
+	      unlock_position < log_position);
+	return 0;
+}
+
 #define TRANSFERS 8192U
 static struct {
 	atomic64_t mask;
@@ -292,8 +376,9 @@ int main(void)
 	CHECK(!test_representation_race());
 	CHECK(!test_ready_publication_wins_raw_cas());
 	CHECK(!test_closed_admission_suppresses_producer_owner_wake());
+	CHECK(!test_production_failure_and_wake_gates());
 	CHECK(!test_capacity_high_bit_and_reuse());
 	CHECK(!test_concurrent_reuse());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=5");
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=6");
 	return 0;
 }
