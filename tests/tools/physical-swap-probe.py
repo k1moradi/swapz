@@ -228,18 +228,24 @@ def _partition_identity(device):
             raise ProbeError("cannot identify exactly one partition")
         row = rows[0]
         partuuid = row.get("partuuid")
-        if not isinstance(partuuid, str) or not re.fullmatch(
-                r"[0-9A-Fa-f-]{8,64}", partuuid):
+        normalized_partuuid = (
+            partuuid.lower() if isinstance(partuuid, str) else None)
+        if (
+                normalized_partuuid is None or
+                not 8 <= len(normalized_partuuid) <= 64 or
+                not re.fullmatch(
+                    r"[0-9a-f]+(?:-[0-9a-f]+)*", normalized_partuuid) or
+                sum(ch != "-" for ch in normalized_partuuid) < 8):
             raise ProbeError("partition lacks a stable PARTUUID")
         size = row.get("size")
         if type(size) is not int or size <= 0:
             raise ProbeError("partition lacks a valid size")
         # Filesystem UUID links disappear when the original swap header is
         # replaced. The partition-table UUID must survive that transition.
-        by_partuuid = Path("/dev/disk/by-partuuid") / partuuid.lower()
+        by_partuuid = Path("/dev/disk/by-partuuid") / normalized_partuuid
         if block_identity(by_partuuid) != block_identity(device):
             raise ProbeError("PARTUUID link does not identify the selected partition")
-        return partuuid.lower(), size
+        return normalized_partuuid, size
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise ProbeError("cannot verify stable partition identity") from exc
 
