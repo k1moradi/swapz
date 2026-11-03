@@ -943,6 +943,12 @@ class PublicMakeContract(unittest.TestCase):
                     proc.stdout,
                     r"independent compilation uses automatic -j[1-9][0-9]*[.]",
                 )
+                build_info = (fixture / "build/source-build-info.h").read_text()
+                self.assertIn(
+                    '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "0"',
+                    build_info,
+                    "generated provenance must provide the module metadata string",
+                )
                 order = (fixture / "build/order.log").read_text().splitlines()
                 self.assertEqual(order[-5:],
                                  ["kbuild:", "rootless", "kbuild:1",

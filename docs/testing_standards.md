@@ -507,6 +507,12 @@ Both arms of every session carry the same exact source SHA, fixture SHA-256 and 
 
 The write-only QD1/4/8/32 sweep is sustained offered-load evidence: workers are pre-created, warmup finishes before a common measured start gate, and each worker owns a disjoint ordered logical-page lane. No per-I/O Future submission or full-QD wave barrier is permitted in the timed path. Slow QDs and fast QD1 stay directional; fast QD4, QD8 and QD32 each use the ten-session confirmation sequence and paired 95% confidence intervals for logical write throughput, lower requests and lower bytes. This produces exactly 40 write-only sessions across both synthetic regimes. Historical wave-driver intervals are burst evidence only and cannot promote sustained-QD performance. Rootless Make-interface/source fixtures must assert the shared sequence, persistent replay mode and fast-QD4/QD8/QD32 mode selection.
 
+The generated source-provenance header is shared by native userspace and
+staged Kbuild sources. It must define the SHA, numeric clean state, and string
+clean state from the same Make invocation. Stage 2's Make-interface regression
+checks the generated string form required by kernel module metadata, including
+the dirty/unknown sandbox case.
+
 ## Report contract
 
 Official human-readable and JSON reports use `swapz`, not implementation-generation labels. Schema keys are version-neutral. SWZ is the current unversioned on-disk format identity.

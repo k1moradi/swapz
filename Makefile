@@ -31,7 +31,8 @@ endif
 build/source-build-info.h: build/source-build-info-force
 	@set -eu; mkdir -p build; tmp="$@.tmp.$$$$"; \
 	  printf '%s\n' '#define SWAPZ_BUILD_SOURCE_SHA "$(SWAPZ_BUILD_SOURCE_SHA)"' \
-		'#define SWAPZ_BUILD_SOURCE_CLEAN $(SWAPZ_BUILD_SOURCE_CLEAN)' > "$$tmp"; \
+		'#define SWAPZ_BUILD_SOURCE_CLEAN $(SWAPZ_BUILD_SOURCE_CLEAN)' \
+		'#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "$(SWAPZ_BUILD_SOURCE_CLEAN)"' > "$$tmp"; \
 	  if ! cmp -s "$$tmp" "$@"; then mv -f "$$tmp" "$@"; \
 	  else rm -f "$$tmp"; fi
 

@@ -14,6 +14,13 @@ Active product C/C++ and headers live under `src/`; test-only code lives under `
 
 Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ may appear only when discussing the current unversioned disk format.
 
+Build provenance must expose a single source SHA and a clean/dirty value to
+userspace and the kernel module. Generate the string form consumed by
+`MODULE_INFO()` alongside the numeric form; the checked-in fallback header must
+remain guarded against duplicate definitions when a generated header supplies
+both. The Make-interface regression must inspect the generated value, not only
+the fallback header.
+
 ### swapzctl status compression accounting
 
 `swapzctl status` is a read-only Device Mapper observer. It may enumerate
