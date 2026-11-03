@@ -1432,7 +1432,8 @@ failure. These storage and format primitives do not prove that supplied hashes
 came from accepted qualification evidence. No privileged lifecycle command
 uses these primitives yet; qualification-evidence validation, provisioning,
 mapper ownership, startup rollback and recovery remain unimplemented and
-unqualified.
+unqualified. Fixed-size manifest fields are validated within their declared
+buffer bounds before formatting or filename construction.
 
 The next checked-restoration primitive now accepts only a read/write descriptor
 for the fixed 8:4 target with exact 16 GiB geometry, compares the complete

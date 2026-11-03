@@ -396,7 +396,7 @@ static int swapz_primary_manifest_expect_line(const char **cursor,
 static int swapz_primary_manifest_valid(
 	const struct swapz_primary_manifest *manifest)
 {
-	return manifest && swapz_primary_valid_run_id(manifest->run_id) &&
+	return manifest && swapz_primary_state_run_id_valid(manifest->run_id) &&
 	       swapz_primary_valid_source_sha(manifest->source_sha) &&
 	       swapz_primary_valid_sha256(manifest->swapzctl_sha256) &&
 	       swapz_primary_valid_sha256(manifest->module_sha256) &&
@@ -499,6 +499,7 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 	const char *end;
 	uint64_t logical_pages;
 	uint64_t logical_sectors;
+	int formatted_length;
 	int canonical_length;
 
 	if (!record || !manifest || !length ||
@@ -509,6 +510,11 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 	logical_pages = swapz_primary_maximum_logical_pages(
 		SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
 	logical_sectors = logical_pages * SWAPZ_PRIMARY_SECTORS_PER_PAGE;
+	formatted_length = snprintf(expected, sizeof(expected), "%llu",
+				     (unsigned long long)SWAPZ_PRIMARY_DEVICE_BYTES);
+	if (formatted_length < 0 ||
+	    (size_t)formatted_length >= sizeof(expected))
+		return -1;
 	if (swapz_primary_manifest_expect_line(&cursor, end, "schema",
 					      "swapz-primary-manifest-v1") < 0 ||
 	    swapz_primary_manifest_take_line(&cursor, end, "run_id",
@@ -540,7 +546,7 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 	    swapz_primary_manifest_expect_line(
 		    &cursor, end, "partuuid_path", SWAPZ_PRIMARY_PARTUUID_PATH) < 0 ||
 	    swapz_primary_manifest_expect_line(&cursor, end, "device_bytes",
-					      "17179869184") < 0 ||
+					      expected) < 0 ||
 	    swapz_primary_manifest_take_line(
 		    &cursor, end, "original_header_sha256",
 		    parsed.original_header_sha256,
@@ -548,13 +554,15 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 	    !swapz_primary_manifest_valid(&parsed) ||
 	    swapz_primary_manifest_take_line(&cursor, end, "logical_pages",
 					     value, sizeof(value)) < 0 ||
-	    snprintf(expected, sizeof(expected), "%llu",
-		     (unsigned long long)logical_pages) < 0 ||
+	    (formatted_length = snprintf(expected, sizeof(expected), "%llu",
+			(unsigned long long)logical_pages)) < 0 ||
+	    (size_t)formatted_length >= sizeof(expected) ||
 	    strcmp(value, expected) ||
 	    swapz_primary_manifest_take_line(&cursor, end, "logical_sectors",
 					     value, sizeof(value)) < 0 ||
-	    snprintf(expected, sizeof(expected), "%llu",
-		     (unsigned long long)logical_sectors) < 0 ||
+	    (formatted_length = snprintf(expected, sizeof(expected), "%llu",
+			(unsigned long long)logical_sectors)) < 0 ||
+	    (size_t)formatted_length >= sizeof(expected) ||
 	    strcmp(value, expected))
 		return -1;
 	{
@@ -569,9 +577,10 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 			      parsed.run_id) < 0 ||
 		    swapz_primary_manifest_expect_line(&cursor, end, "mapper_uuid",
 						      mapper_uuid) < 0 ||
-		    snprintf(expected, sizeof(expected),
+		    (formatted_length = snprintf(expected, sizeof(expected),
 			     "0 %llu swapz 8:4 0 64 0 2 0 1 0 0",
-			     (unsigned long long)logical_sectors) < 0 ||
+			     (unsigned long long)logical_sectors)) < 0 ||
+		    (size_t)formatted_length >= sizeof(expected) ||
 		    swapz_primary_manifest_expect_line(
 			    &cursor, end, "dm_table", expected) < 0)
 			return -1;

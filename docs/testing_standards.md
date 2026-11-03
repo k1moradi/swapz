@@ -3529,4 +3529,6 @@ round-trip, malformed fixed identity, invalid source digest, no-overwrite,
 tamper refusal, and output preservation. These primitives do not validate that
 the supplied hashes came from an accepted owner qualification; a trusted
 qualification-evidence reader and lifecycle caller must prove that before
-creating or consuming the manifest.
+creating or consuming the manifest. Public format entry points must validate
+NUL termination within each fixed-size field before using it in names or
+formatted records; do not scan beyond a caller-provided manifest structure.
