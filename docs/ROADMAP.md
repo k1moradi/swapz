@@ -1625,9 +1625,14 @@ owner lock remains held. Module loading now also has a durable per-run
 write-ahead ownership record: INTENT is fsynced before `finit_module()`, then
 atomically advanced to LOADED only after loaded-module verification. This gives
 stop/recovery durable provenance instead of inferring ownership from sysfs
-parameters alone. Stop/recover, interruption/null_blk coverage, live swap,
-cold-boot recovery, boot integration, workload performance and production
-qualification remain open.
+parameters alone. Normal stop is now wired behind the disabled gate: it durably
+enters STOPPING, removes only the exact inactive run-bound mapper, non-forcibly
+unloads only the module proven by that run's LOADED record, verifies the
+run-bound SWZ backing header, then persists RESTORED/COMPLETE and releases the
+owner marker. It deliberately leaves the disposable card in SWZ-header form
+rather than restoring historical raw content. Recover, interruption/null_blk
+coverage, live swap, cold-boot recovery, boot integration, workload performance
+and production qualification remain open.
 
 Mapper lifecycle admission now also reads the per-run original-header backup,
 checks its SHA-256 against the immutable manifest, and verifies the Linux swap

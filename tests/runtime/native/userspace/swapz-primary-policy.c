@@ -1001,6 +1001,7 @@ static void test_primary_dm_operations_disabled(void)
 	int created = 1;
 	int resumed = 1;
 	int removed = 1;
+	int unloaded = 1;
 
 	assert(swapz_primary_dm_create_mapper(
 		-1, -1, &manifest, 1, &created, &resumed,
@@ -1011,6 +1012,10 @@ static void test_primary_dm_operations_disabled(void)
 					     &removed) < 0);
 	assert(errno == ENODEV);
 	assert(removed == 0);
+	assert(swapz_primary_unload_owned_module(
+		-1, -1, &manifest, 0, &unloaded) < 0);
+	assert(errno == ENODEV);
+	assert(unloaded == 0);
 	assert(swapz_primary_format_mapper_swap(
 		-1, -1, &manifest, (dev_t)-1) < 0);
 	assert(errno == ENODEV);

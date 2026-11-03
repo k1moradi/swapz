@@ -3592,8 +3592,19 @@ module, create/resume the exact run-bound mapper, initialize Linux swap metadata
 on that mapper, and persist `ACTIVE`. Every failure after durable `STARTING`
 must mark `RECOVERY_REQUIRED` while the owner lock is still held. The mapper
 service returning ACTIVE does not itself prove `swapon`; the systemd swap unit
-performs that later activation. Keep execution disabled until stop/recover and
-the required interruption/null_blk/physical evidence are complete.
+performs that later activation. Normal stop runs only after that swap unit has
+deactivated the mapper. It must persist `STOPPING` before cleanup, remove only
+the exact manifest-bound mapper with zero swap/open references, and unload only
+a module backed by the same run's exact `LOADED` ownership record, matching
+loaded source provenance and physical-backing parameter, using non-forced
+`delete_module`. After cleanup it must verify the backing partition still has
+the exact run-bound SWZ header, persist `RESTORED` then terminal `COMPLETE`,
+and release the active owner marker. The disposable-card mission intentionally
+does not restore a historical raw swap/filesystem header during normal stop;
+leaving the SWZ authorization header prevents accidental raw-swap reuse. Any
+failure after `STOPPING` but before `COMPLETE` must mark
+`RECOVERY_REQUIRED`. Keep execution disabled until recover and the required
+interruption/null_blk/physical evidence are complete.
 
 When the primary manager records an optional original-header backup, it is
 immutable per run ID. Its writer must require the exclusive lock and matching
