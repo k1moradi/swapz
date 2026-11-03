@@ -18,6 +18,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+from evidence_io import write_new_json
+
 ROOT = Path(__file__).resolve().parents[3]
 EVIDENCE_PATH = Path(__file__)
 QUALIFICATION_PATH = EVIDENCE_PATH.with_name("qualification.py")
@@ -84,28 +86,7 @@ def read_json(path: Path) -> tuple[dict, bytes]:
     return value, data
 
 
-def write_new_json(path: Path, value: dict) -> None:
-    parent = path.parent
-    if not parent.exists() or not parent.is_dir() or parent.is_symlink():
-        raise ValueError("evidence output parent must be an existing real directory")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(path, flags, 0o600)
-    try:
-        payload = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
-        offset = 0
-        while offset < len(payload):
-            written = os.write(fd, payload[offset:])
-            if written <= 0:
-                raise OSError("short campaign evidence write")
-            offset += written
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def run_text(command: list[str]) -> str:
+remove local writerdef run_text(command: list[str]) -> str:
     result = subprocess.run(
         command, text=True, capture_output=True, check=False, timeout=20)
     if result.returncode:
