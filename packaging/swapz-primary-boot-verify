@@ -577,7 +577,15 @@ maximum_logical_sectors()
 			fits=0
 		else
 			data_blocks=$((((physical_blocks - reserve) / 256) * 256))
-			if [ "$candidate" -le "$data_blocks" ]; then fits=1; else fits=0; fi
+			# Match swapz_authority_capacity_window(): GC reserve is not
+			# foreground COW authority. Keep one complete 256-page segment
+			# beyond the logical mapper so a 100%-RAW fill can publish its
+			# first overwrite before any victim is reclaimable.
+			if [ "$candidate" -le $((data_blocks - 256)) ]; then
+				fits=1
+			else
+				fits=0
+			fi
 		fi
 		if [ "$fits" -eq 1 ]; then
 			low=$candidate
