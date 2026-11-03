@@ -518,6 +518,28 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "arm module source binding is invalid" in blocker
             for blocker in result["deployment_blockers"]))
 
+    def test_invalid_arm_cannot_authenticate_cold_boot_pass(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        invalid_arm_raw = cold_boot_arm_evidence_raw(
+            expected_module_source_sha="b" * 40)
+        cold_raw = cold_boot_evidence_raw()
+        evidence = current_evidence(
+            encoded(report), encoded(policy),
+            cold_boot_arm_raw=invalid_arm_raw)
+        evidence["release_evidence"]["owner_observed_reboot"].update(
+            status="PASS", observed=True, overall="PASS",
+            evidence_sha256=hashlib.sha256(cold_raw).hexdigest())
+        result = evaluate(
+            report, evidence, policy, cold_boot_raw=cold_raw,
+            cold_boot_arm_raw=invalid_arm_raw)
+        self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "no validated arm record" in blocker
+            for blocker in result["cold_boot_blockers"]))
+
     def test_cold_boot_report_is_cross_bound_to_exact_arm_record(self):
         report = owner_report()
         policy = acceptance_policy()

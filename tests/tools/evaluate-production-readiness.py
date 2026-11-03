@@ -1182,10 +1182,12 @@ def evaluate_release(
                 cold_boot_blockers.append(
                     "owner_observed_reboot: persistent cold-boot evidence digest mismatch")
             else:
+                validated_cold_boot_arm = (
+                    cold_boot_arm_evidence if harness_armed else None)
                 for issue in validate_cold_boot_evidence(
                         cold_boot_evidence, source_sha, target,
                         report_artifacts, owner_kernel_release,
-                        cold_boot_arm_evidence):
+                        validated_cold_boot_arm):
                     cold_boot_blockers.append(
                         "owner_observed_reboot: " + issue)
                 if not cold_boot_blockers:
