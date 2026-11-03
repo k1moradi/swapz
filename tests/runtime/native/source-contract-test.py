@@ -1681,8 +1681,20 @@ static swapz_u16 swapz_probe_set(
         process = body("swapz_process")
 
         self.assertIn('disk_name, "nullb", 5', ctr)
+        arch_gate = body("swapz_physical_backing_arch_supported")
+        self.assertIn("#if defined(CONFIG_X86_64)", arch_gate)
+        self.assertIn("return true", arch_gate)
+        self.assertIn("return false", arch_gate)
+        self.assertIn("swapz_physical_backing_arch_supported()", ctr)
+        self.assertIn("Physical backing is qualified only on x86_64", ctr)
         self.assertIn("swapz_allow_physical_backing", ctr)
         self.assertIn("swapz_validate_physical_superblock(ctx, device_bytes)", ctr)
+        self.assertLess(
+            ctr.index("swapz_physical_backing_arch_supported()"),
+            ctr.index("swapz_allow_physical_backing"))
+        self.assertLess(
+            ctr.index("swapz_physical_backing_arch_supported()"),
+            ctr.index("swapz_validate_physical_superblock(ctx, device_bytes)"))
         self.assertIn("ctx->data_start_block = 0", ctr)
         self.assertIn("ctx->data_start_block = 1U", ctr)
         self.assertIn("flush_fail_nth || write_fail_nth", ctr)

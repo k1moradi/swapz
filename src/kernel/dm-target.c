@@ -186,6 +186,15 @@ module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0
 MODULE_PARM_DESC(allow_physical_backing,
 		 "Allow explicitly formatted non-null_blk backing; default off");
 
+static bool swapz_physical_backing_arch_supported(void)
+{
+#if defined(CONFIG_X86_64)
+	return true;
+#else
+	return false;
+#endif
+}
+
 static bool swapz_delta64_rescue_enabled = true;
 module_param_named(delta64_rescue, swapz_delta64_rescue_enabled, bool, 0444);
 MODULE_PARM_DESC(delta64_rescue,
@@ -8710,6 +8719,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ctx->data_start_block = 0;
 		ctx->physical_backing = false;
 	} else {
+		if (!swapz_physical_backing_arch_supported()) {
+			ti->error = "Physical backing is qualified only on x86_64";
+			error = -EOPNOTSUPP;
+			goto fail;
+		}
 		if (!swapz_allow_physical_backing) {
 			ti->error = "Physical backing requires allow_physical_backing=1";
 			error = -EOPNOTSUPP;

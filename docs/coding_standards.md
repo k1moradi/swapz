@@ -461,7 +461,12 @@ be called only after the caller durably records and owns the `STARTING`
 transaction. It rechecks the owner report, all three qualified artifacts and
 the absence of any loaded swapz module or mapper, passes only
 `allow_physical_backing=1`, then verifies the loaded source provenance and
-read-only parameter. Its ownership result remains set if post-load checks
+read-only parameter. The kernel target independently rejects non-`null_blk`
+physical backing unless it was built for `CONFIG_X86_64`; userspace release
+admission is not the sole architecture boundary. ARM64 remains supported for
+RAM-backed qualification and compile/native coverage, but physical admission
+must stay fail-closed until that architecture receives separate bare-metal
+qualification. Its ownership result remains set if post-load checks
 fail, so recovery cannot hide a module that may be live. This primitive does
 not authorize lifecycle execution through the CLI.
 
