@@ -44,6 +44,14 @@ jobs:
           make -C tests/suites SANITIZE=1 test-all
           python3 -B tests/runtime/native/source-contract-test.py -v
           git diff --check
+      - name: ThreadSanitizer publication and slot-reuse probes
+        if: matrix.arch == 'x86_64'
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: |
+          set -euo pipefail
+          make -C tests/suites clean
+          make -C tests/suites THREAD_SANITIZE=1 test-concurrency
   compile-only:
     strategy:
       fail-fast: false
