@@ -3512,3 +3512,21 @@ recovery. The alias-path fixture verifies matching identity and rejects a
 substituted target, but cannot model races in `/dev` or real block geometry.
 Keep both primitives disconnected from privileged lifecycle commands until
 the full manifest binding and recovery use are implemented and tested.
+
+The native primary manager's immutable run manifest is separate from the
+mutable lifecycle stage. Its canonical newline-delimited schema has fixed field
+order and rejects duplicate or unknown fields, alternate numeric spellings,
+and trailing data. It binds the run ID, 40-character lowercase qualified
+source commit, `swapzctl` and module SHA-256 values, qualification-report
+SHA-256, exact `/dev/sda4` UUID and PARTUUID paths, 8:4 identity, 16 GiB size,
+original header digest, maximum `/8` logical capacity, generated per-run mapper
+name/UUID, and exact Device Mapper table. The writer requires the held PARTUUID
+lock and matching active/consumed claim, installs a root-owned 0600 file with
+fsync and no-replace atomic rename, fsyncs the directory, and verifies exact
+readback. The reader validates file identity and metadata, canonical contents,
+and requested run ID before returning data. Rootless direct-C tests cover
+round-trip, malformed fixed identity, invalid source digest, no-overwrite,
+tamper refusal, and output preservation. These primitives do not validate that
+the supplied hashes came from an accepted owner qualification; a trusted
+qualification-evidence reader and lifecycle caller must prove that before
+creating or consuming the manifest.

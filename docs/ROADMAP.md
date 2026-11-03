@@ -1420,10 +1420,19 @@ lock and a new run after completion. The record is only a stage envelope, not
 the immutable device/artifact/backup recovery manifest. A per-run original
 4096-byte header backup now has an exclusive-lock/claim-bound writer, atomic
 no-replace installation, fsyncs, SHA-256 verification and a strict reader with
-rootless round-trip and tamper-refusal coverage. The manifest that binds this
-backup to device identity and qualified artifact hashes is still missing. No
-privileged lifecycle command uses these primitives yet; provisioning, mapper
-ownership, startup rollback and recovery remain unimplemented and unqualified.
+rootless round-trip and tamper-refusal coverage. The immutable manifest now
+binds run ID, qualified source commit, userspace and module artifact digests,
+qualification-report digest, fixed partition identity, original-header
+digest, maximum logical capacity, and exact generated mapper identity and
+table. Its parser is canonical and fail-closed; its writer and reader require
+the owner claim and lock and enforce durable no-overwrite installation and
+verified readback. Rootless regressions cover round-trip, invalid source
+digest, fixed-identity tampering, no-overwrite, and output preservation on
+failure. These storage and format primitives do not prove that supplied hashes
+came from accepted qualification evidence. No privileged lifecycle command
+uses these primitives yet; qualification-evidence validation, provisioning,
+mapper ownership, startup rollback and recovery remain unimplemented and
+unqualified.
 
 The next checked-restoration primitive now accepts only a read/write descriptor
 for the fixed 8:4 target with exact 16 GiB geometry, compares the complete
@@ -1436,5 +1445,6 @@ UUID link, and PARTUUID link before and after opening the UUID path with
 geometry. Rootless alias tests verify same-target acceptance and substituted
 target refusal using temporary files. They do not prove block-device
 exclusive-open semantics, physical geometry, or recovery behavior. The
-immutable device/artifact manifest and lifecycle integration are still
-required before use. Privileged execution remains disabled.
+immutable manifest primitive now exists, but qualification-evidence validation
+and lifecycle integration are still required before use. Privileged execution
+remains disabled.

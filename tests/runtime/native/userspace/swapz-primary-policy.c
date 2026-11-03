@@ -356,6 +356,82 @@ static void test_primary_header_backup(int recovery_fd, int lock_fd,
 	assert(fsync(recovery_fd) == 0);
 }
 
+static void test_primary_manifest(int recovery_fd, int lock_fd,
+				  const char *run_id)
+{
+	struct swapz_primary_manifest manifest = {0};
+	struct swapz_primary_manifest parsed = {0};
+	struct swapz_primary_manifest observed = {0};
+	char record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char damaged[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char file_name[96];
+	char *field;
+	int length;
+	int fd;
+
+	memcpy(manifest.run_id, run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U);
+	memset(manifest.source_sha, 'a', SWAPZ_PRIMARY_SOURCE_SHA_LENGTH);
+	manifest.source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH] = '\0';
+	memset(manifest.swapzctl_sha256, 'b', SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.swapzctl_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	memset(manifest.module_sha256, 'c', SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.module_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	memset(manifest.qualification_report_sha256, 'd',
+	       SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.qualification_report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	memcpy(manifest.original_header_sha256,
+	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
+	       sizeof(manifest.original_header_sha256));
+	length = swapz_primary_manifest_format(&manifest, record,
+					      sizeof(record));
+	assert(length > 0);
+	assert(swapz_primary_manifest_parse(record, (size_t)length, &parsed) == 0);
+	assert(!memcmp(&manifest, &parsed, sizeof(manifest)));
+	manifest.source_sha[0] = 'A';
+	assert(swapz_primary_manifest_format(&manifest, damaged,
+					     sizeof(damaged)) < 0);
+	manifest.source_sha[0] = 'a';
+	memcpy(damaged, record, (size_t)length);
+	field = strstr(damaged, "device_major=8\n");
+	assert(field);
+	field[strlen("device_major=")] = '9';
+	memset(&parsed, 0xa5, sizeof(parsed));
+	assert(swapz_primary_manifest_parse(damaged, (size_t)length,
+					    &parsed) < 0);
+	assert(((const unsigned char *)&parsed)[0] == 0xa5U);
+	assert(swapz_primary_manifest_write_at(
+		recovery_fd, lock_fd, &manifest, geteuid()) == 0);
+	memset(&observed, 0, sizeof(observed));
+	assert(swapz_primary_manifest_read_at(recovery_fd, lock_fd, run_id,
+					      geteuid(), &observed) == 0);
+	assert(!memcmp(&manifest, &observed, sizeof(manifest)));
+	assert(swapz_primary_manifest_write_at(
+		recovery_fd, lock_fd, &manifest, geteuid()) < 0);
+	assert(errno == EEXIST);
+	assert(snprintf(file_name, sizeof(file_name), "primary-manifest-%s.txt",
+			run_id) > 0);
+	fd = openat(recovery_fd, file_name, O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+	assert(fd >= 0);
+	field = strstr(record, "device_major=8\n");
+	assert(field);
+	assert(pwrite(fd, "9", 1, (off_t)(field - record +
+					    strlen("device_major="))) == 1);
+	assert(fsync(fd) == 0);
+	memset(&observed, 0xa5, sizeof(observed));
+	assert(swapz_primary_manifest_read_at(recovery_fd, lock_fd, run_id,
+					      geteuid(), &observed) < 0);
+	assert(((const unsigned char *)&observed)[0] == 0xa5U);
+	assert(pwrite(fd, "8", 1, (off_t)(field - record +
+					    strlen("device_major="))) == 1);
+	assert(fsync(fd) == 0);
+	assert(close(fd) == 0);
+	assert(swapz_primary_manifest_read_at(recovery_fd, lock_fd, run_id,
+					      geteuid(), &observed) == 0);
+	assert(!memcmp(&manifest, &observed, sizeof(manifest)));
+	assert(unlinkat(recovery_fd, file_name, 0) == 0);
+	assert(fsync(recovery_fd) == 0);
+}
+
 static void test_checked_header_write(void)
 {
 	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
@@ -781,6 +857,7 @@ int main(void)
 	assert_record_equals(recovery_fd, active_name, expected_record);
 	assert_record_equals(recovery_fd, consumed_name, expected_record);
 	test_primary_header_backup(recovery_fd, first_lock, run_id);
+	test_primary_manifest(recovery_fd, first_lock, run_id);
 	memcpy(lifecycle.run_id, run_id, sizeof(lifecycle.run_id));
 	lifecycle.stage = SWAPZ_PRIMARY_STAGE_READY;
 	unlocked_lock = openat(recovery_fd, "partition-7fb9401d-04.lock",

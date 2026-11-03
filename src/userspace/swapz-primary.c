@@ -30,6 +30,7 @@
 #define SWAPZ_PRIMARY_SEGMENT_BLOCKS 256ULL
 #define SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS 512ULL
 #define SWAPZ_PRIMARY_DEVICE_BYTES 17179869184ULL
+#define SWAPZ_PRIMARY_SECTORS_PER_PAGE 8ULL
 #define SWAPZ_PRIMARY_SWAP_SIZE_KIB 16777212ULL
 #define SWAPZ_PRIMARY_DEVICE_PATH "/dev/sda4"
 #define SWAPZ_PRIMARY_UUID_PATH \
@@ -74,6 +75,8 @@ static const char *const swapz_primary_stage_names[] = {
 };
 
 static int swapz_primary_valid_run_id(const char *run_id);
+static int swapz_primary_valid_sha256(const char *digest);
+static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks);
 
 const char *swapz_primary_stage_name(enum swapz_primary_stage stage)
 {
@@ -170,6 +173,21 @@ static int swapz_primary_state_run_id_valid(const char *run_id)
 	for (i = 0; i < SWAPZ_PRIMARY_RUN_ID_LENGTH; ++i)
 		if (!((run_id[i] >= '0' && run_id[i] <= '9') ||
 		      (run_id[i] >= 'a' && run_id[i] <= 'f')))
+			return 0;
+	return 1;
+}
+
+static int swapz_primary_valid_source_sha(const char *source_sha)
+{
+	unsigned int i;
+
+	if (!source_sha ||
+	    strnlen(source_sha, SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 1U) !=
+		    SWAPZ_PRIMARY_SOURCE_SHA_LENGTH)
+		return 0;
+	for (i = 0; i < SWAPZ_PRIMARY_SOURCE_SHA_LENGTH; ++i)
+		if (!((source_sha[i] >= '0' && source_sha[i] <= '9') ||
+		      (source_sha[i] >= 'a' && source_sha[i] <= 'f')))
 			return 0;
 	return 1;
 }
@@ -321,6 +339,252 @@ int swapz_primary_state_transition_allowed(
 	}
 	return swapz_primary_stage_transition_allowed(current->stage,
 						      next->stage);
+}
+
+static int swapz_primary_manifest_take_line(const char **cursor,
+					    const char *end,
+					    const char *key,
+					    char *value,
+					    size_t capacity)
+{
+	const char *line_end;
+	char prefix[96];
+	int prefix_length;
+	size_t value_length;
+	size_t i;
+
+	if (!cursor || !*cursor || !key || !value || !capacity || *cursor >= end)
+		return -1;
+	prefix_length = snprintf(prefix, sizeof(prefix), "%s=", key);
+	if (prefix_length < 0 || (size_t)prefix_length >= sizeof(prefix) ||
+	    (size_t)(end - *cursor) < (size_t)prefix_length ||
+	    memcmp(*cursor, prefix, (size_t)prefix_length))
+		return -1;
+	*cursor += prefix_length;
+	line_end = memchr(*cursor, '\n', (size_t)(end - *cursor));
+	if (!line_end)
+		return -1;
+	value_length = (size_t)(line_end - *cursor);
+	if (!value_length || value_length >= capacity)
+		return -1;
+	for (i = 0; i < value_length; ++i) {
+		unsigned char byte = (unsigned char)(*cursor)[i];
+
+		if (byte < 0x20U || byte > 0x7eU)
+			return -1;
+	}
+	memcpy(value, *cursor, value_length);
+	value[value_length] = '\0';
+	*cursor = line_end + 1;
+	return 0;
+}
+
+static int swapz_primary_manifest_expect_line(const char **cursor,
+					      const char *end,
+					      const char *key,
+					      const char *expected)
+{
+	char observed[256];
+
+	if (swapz_primary_manifest_take_line(cursor, end, key, observed,
+					     sizeof(observed)) < 0 ||
+	    strcmp(observed, expected))
+		return -1;
+	return 0;
+}
+
+static int swapz_primary_manifest_valid(
+	const struct swapz_primary_manifest *manifest)
+{
+	return manifest && swapz_primary_valid_run_id(manifest->run_id) &&
+	       swapz_primary_valid_source_sha(manifest->source_sha) &&
+	       swapz_primary_valid_sha256(manifest->swapzctl_sha256) &&
+	       swapz_primary_valid_sha256(manifest->module_sha256) &&
+	       swapz_primary_valid_sha256(
+		       manifest->qualification_report_sha256) &&
+	       swapz_primary_valid_sha256(
+		       manifest->original_header_sha256) &&
+	       !strcmp(manifest->original_header_sha256,
+		       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256);
+}
+
+int swapz_primary_manifest_format(
+	const struct swapz_primary_manifest *manifest, char *record,
+	size_t capacity)
+{
+	uint64_t logical_pages;
+	uint64_t logical_sectors;
+	char mapper_name[64];
+	char mapper_uuid[64];
+	char table[128];
+	int length;
+
+	if (!swapz_primary_manifest_valid(manifest) || !record || !capacity) {
+		errno = EINVAL;
+		return -1;
+	}
+	logical_pages = swapz_primary_maximum_logical_pages(
+		SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
+	if (!logical_pages ||
+	    logical_pages > UINT64_MAX / SWAPZ_PRIMARY_SECTORS_PER_PAGE) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	logical_sectors = logical_pages * SWAPZ_PRIMARY_SECTORS_PER_PAGE;
+	length = snprintf(mapper_name, sizeof(mapper_name),
+			  "swapz-primary-%s", manifest->run_id);
+	if (length < 0 || (size_t)length >= sizeof(mapper_name)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	length = snprintf(mapper_uuid, sizeof(mapper_uuid),
+			  "SWAPZ-PRIMARY-%s", manifest->run_id);
+	if (length < 0 || (size_t)length >= sizeof(mapper_uuid)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	length = snprintf(table, sizeof(table),
+			  "0 %llu swapz 8:4 0 64 0 2 0 1 0 0",
+			  (unsigned long long)logical_sectors);
+	if (length < 0 || (size_t)length >= sizeof(table)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	length = snprintf(record, capacity,
+			  "schema=swapz-primary-manifest-v1\n"
+			  "run_id=%s\n"
+			  "source_sha=%s\n"
+			  "swapzctl_sha256=%s\n"
+			  "module_sha256=%s\n"
+			  "qualification_report_sha256=%s\n"
+			  "device_path=%s\n"
+			  "device_major=8\n"
+			  "device_minor=4\n"
+			  "partuuid=%s\n"
+			  "uuid_path=%s\n"
+			  "partuuid_path=%s\n"
+			  "device_bytes=%llu\n"
+			  "original_header_sha256=%s\n"
+			  "logical_pages=%llu\n"
+			  "logical_sectors=%llu\n"
+			  "mapper_name=%s\n"
+			  "mapper_uuid=%s\n"
+			  "dm_table=%s\n",
+			  manifest->run_id, manifest->source_sha,
+			  manifest->swapzctl_sha256, manifest->module_sha256,
+			  manifest->qualification_report_sha256,
+			  SWAPZ_PRIMARY_DEVICE_PATH, SWAPZ_PRIMARY_PARTUUID,
+			  SWAPZ_PRIMARY_UUID_PATH, SWAPZ_PRIMARY_PARTUUID_PATH,
+			  (unsigned long long)SWAPZ_PRIMARY_DEVICE_BYTES,
+			  manifest->original_header_sha256,
+			  (unsigned long long)logical_pages,
+			  (unsigned long long)logical_sectors, mapper_name, mapper_uuid,
+			  table);
+	if (length < 0 || (size_t)length >= capacity ||
+	    (size_t)length > SWAPZ_PRIMARY_STATE_RECORD_MAX) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	return length;
+}
+
+int swapz_primary_manifest_parse(const char *record, size_t length,
+				 struct swapz_primary_manifest *manifest)
+{
+	struct swapz_primary_manifest parsed = {0};
+	char value[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char canonical[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char expected[160];
+	const char *cursor = record;
+	const char *end;
+	uint64_t logical_pages;
+	uint64_t logical_sectors;
+	int canonical_length;
+
+	if (!record || !manifest || !length ||
+	    length > SWAPZ_PRIMARY_STATE_RECORD_MAX ||
+	    memchr(record, '\0', length))
+		return -1;
+	end = record + length;
+	logical_pages = swapz_primary_maximum_logical_pages(
+		SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
+	logical_sectors = logical_pages * SWAPZ_PRIMARY_SECTORS_PER_PAGE;
+	if (swapz_primary_manifest_expect_line(&cursor, end, "schema",
+					      "swapz-primary-manifest-v1") < 0 ||
+	    swapz_primary_manifest_take_line(&cursor, end, "run_id",
+					     parsed.run_id,
+					     sizeof(parsed.run_id)) < 0 ||
+	    swapz_primary_manifest_take_line(&cursor, end, "source_sha",
+					     parsed.source_sha,
+					     sizeof(parsed.source_sha)) < 0 ||
+	    swapz_primary_manifest_take_line(&cursor, end, "swapzctl_sha256",
+					     parsed.swapzctl_sha256,
+					     sizeof(parsed.swapzctl_sha256)) < 0 ||
+	    swapz_primary_manifest_take_line(&cursor, end, "module_sha256",
+					     parsed.module_sha256,
+					     sizeof(parsed.module_sha256)) < 0 ||
+	    swapz_primary_manifest_take_line(
+		    &cursor, end, "qualification_report_sha256",
+		    parsed.qualification_report_sha256,
+		    sizeof(parsed.qualification_report_sha256)) < 0 ||
+	    swapz_primary_manifest_expect_line(&cursor, end, "device_path",
+					      SWAPZ_PRIMARY_DEVICE_PATH) < 0 ||
+	    swapz_primary_manifest_expect_line(&cursor, end, "device_major",
+					      "8") < 0 ||
+	    swapz_primary_manifest_expect_line(&cursor, end, "device_minor",
+					      "4") < 0 ||
+	    swapz_primary_manifest_expect_line(&cursor, end, "partuuid",
+					      SWAPZ_PRIMARY_PARTUUID) < 0 ||
+	    swapz_primary_manifest_expect_line(&cursor, end, "uuid_path",
+					      SWAPZ_PRIMARY_UUID_PATH) < 0 ||
+	    swapz_primary_manifest_expect_line(
+		    &cursor, end, "partuuid_path", SWAPZ_PRIMARY_PARTUUID_PATH) < 0 ||
+	    swapz_primary_manifest_expect_line(&cursor, end, "device_bytes",
+					      "17179869184") < 0 ||
+	    swapz_primary_manifest_take_line(
+		    &cursor, end, "original_header_sha256",
+		    parsed.original_header_sha256,
+		    sizeof(parsed.original_header_sha256)) < 0 ||
+	    !swapz_primary_manifest_valid(&parsed) ||
+	    swapz_primary_manifest_take_line(&cursor, end, "logical_pages",
+					     value, sizeof(value)) < 0 ||
+	    snprintf(expected, sizeof(expected), "%llu",
+		     (unsigned long long)logical_pages) < 0 ||
+	    strcmp(value, expected) ||
+	    swapz_primary_manifest_take_line(&cursor, end, "logical_sectors",
+					     value, sizeof(value)) < 0 ||
+	    snprintf(expected, sizeof(expected), "%llu",
+		     (unsigned long long)logical_sectors) < 0 ||
+	    strcmp(value, expected))
+		return -1;
+	{
+		char mapper_name[64];
+		char mapper_uuid[64];
+
+		if (snprintf(mapper_name, sizeof(mapper_name), "swapz-primary-%s",
+			      parsed.run_id) < 0 ||
+		    swapz_primary_manifest_expect_line(&cursor, end, "mapper_name",
+						      mapper_name) < 0 ||
+		    snprintf(mapper_uuid, sizeof(mapper_uuid), "SWAPZ-PRIMARY-%s",
+			      parsed.run_id) < 0 ||
+		    swapz_primary_manifest_expect_line(&cursor, end, "mapper_uuid",
+						      mapper_uuid) < 0 ||
+		    snprintf(expected, sizeof(expected),
+			     "0 %llu swapz 8:4 0 64 0 2 0 1 0 0",
+			     (unsigned long long)logical_sectors) < 0 ||
+		    swapz_primary_manifest_expect_line(
+			    &cursor, end, "dm_table", expected) < 0)
+			return -1;
+	}
+	if (cursor != end)
+		return -1;
+	canonical_length = swapz_primary_manifest_format(
+		&parsed, canonical, sizeof(canonical));
+	if (canonical_length < 0 || (size_t)canonical_length != length ||
+	    memcmp(canonical, record, length))
+		return -1;
+	*manifest = parsed;
+	return 0;
 }
 
 static int swapz_primary_device_number_matches(dev_t device)
@@ -2140,6 +2404,196 @@ static int swapz_primary_valid_sha256(const char *digest)
 		      (digest[i] >= 'a' && digest[i] <= 'f')))
 			return 0;
 	return 1;
+}
+
+static int swapz_primary_manifest_name(const char *run_id, char *name,
+					       size_t capacity)
+{
+	int length;
+
+	if (!swapz_primary_valid_run_id(run_id) || !name || !capacity) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(name, capacity, "primary-manifest-%s.txt", run_id);
+	if (length < 0 || (size_t)length >= capacity) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	return 0;
+}
+
+int swapz_primary_manifest_read_at(
+	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner,
+	struct swapz_primary_manifest *manifest)
+{
+	struct swapz_primary_manifest parsed;
+	char name[96];
+	char record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	size_t length;
+
+	if (recovery_fd < 0 || lock_fd < 0 || !manifest ||
+	    swapz_primary_manifest_name(run_id, name, sizeof(name)) < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner) ||
+	    !swapz_primary_owner_claim_matches_at(recovery_fd, run_id,
+						 expected_owner))
+		return -1;
+	if (swapz_primary_record_read_at(recovery_fd, name, expected_owner,
+					 record, sizeof(record), &length, NULL) < 0)
+		return -1;
+	if (swapz_primary_manifest_parse(record, length, &parsed) < 0) {
+		errno = EBADMSG;
+		return -1;
+	}
+	if (strcmp(parsed.run_id, run_id)) {
+		errno = EPERM;
+		return -1;
+	}
+	*manifest = parsed;
+	return 0;
+}
+
+int swapz_primary_manifest_write_at(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest, uid_t expected_owner)
+{
+	struct stat directory_info;
+	struct stat temporary_info;
+	struct stat named_info;
+	struct stat named_temporary_info;
+	struct swapz_primary_manifest verified_manifest;
+	char name[96];
+	char temporary[128];
+	char record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char verified[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	size_t record_length;
+	size_t verified_length;
+	size_t written = 0;
+	int fd = -1;
+	int temporary_identity_valid = 0;
+	int saved_errno = 0;
+	int length;
+
+	if (recovery_fd < 0 || lock_fd < 0 ||
+	    !swapz_primary_manifest_valid(manifest) ||
+	    swapz_primary_manifest_name(manifest->run_id, name, sizeof(name)) < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner) ||
+	    !swapz_primary_owner_claim_matches_at(recovery_fd, manifest->run_id,
+						 expected_owner))
+		return -1;
+	length = swapz_primary_manifest_format(manifest, record,
+					       sizeof(record));
+	if (length < 0)
+		return -1;
+	record_length = (size_t)length;
+	if (fstat(recovery_fd, &directory_info) < 0)
+		return -1;
+	if (!S_ISDIR(directory_info.st_mode) ||
+	    directory_info.st_uid != expected_owner ||
+	    (directory_info.st_mode & 0777U) != 0700U) {
+		errno = EPERM;
+		return -1;
+	}
+	length = snprintf(temporary, sizeof(temporary), ".%s.%s.tmp", name,
+			  manifest->run_id);
+	if (length < 0 || (size_t)length >= sizeof(temporary)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (fstatat(recovery_fd, name, &named_info, AT_SYMLINK_NOFOLLOW) == 0) {
+		errno = EEXIST;
+		return -1;
+	}
+	if (errno != ENOENT)
+		return -1;
+	fd = openat(recovery_fd, temporary,
+		    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &temporary_info) < 0)
+		goto failed;
+	if (!S_ISREG(temporary_info.st_mode) ||
+	    temporary_info.st_uid != expected_owner ||
+	    (temporary_info.st_mode & 0777U) != 0600U ||
+	    temporary_info.st_nlink != 1) {
+		errno = EPERM;
+		goto failed;
+	}
+	temporary_identity_valid = 1;
+	while (written < record_length) {
+		ssize_t count = write(fd, record + written, record_length - written);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			goto failed;
+		}
+		written += (size_t)count;
+	}
+	if (fsync(fd) < 0 || fstat(fd, &named_info) < 0 ||
+	    fstatat(recovery_fd, temporary, &named_temporary_info,
+		    AT_SYMLINK_NOFOLLOW) < 0)
+		goto failed;
+	if (named_info.st_dev != temporary_info.st_dev ||
+	    named_info.st_ino != temporary_info.st_ino ||
+	    named_info.st_size != (off_t)record_length ||
+	    !S_ISREG(named_info.st_mode) || named_info.st_uid != expected_owner ||
+	    (named_info.st_mode & 0777U) != 0600U || named_info.st_nlink != 1 ||
+	    named_temporary_info.st_dev != temporary_info.st_dev ||
+	    named_temporary_info.st_ino != temporary_info.st_ino) {
+		errno = EPERM;
+		goto failed;
+	}
+	if (close(fd) < 0) {
+		saved_errno = errno;
+		fd = -1;
+		errno = saved_errno;
+		goto failed;
+	}
+	fd = -1;
+	if (renameat2(recovery_fd, temporary, recovery_fd, name,
+		      RENAME_NOREPLACE) < 0)
+		goto failed;
+	if (fsync(recovery_fd) < 0 ||
+	    swapz_primary_record_read_at(recovery_fd, name, expected_owner,
+					 verified, sizeof(verified),
+					 &verified_length, NULL) < 0)
+		return -1;
+	if (verified_length != record_length ||
+	    swapz_primary_manifest_parse(verified, verified_length,
+					 &verified_manifest) < 0 ||
+	    memcmp(record, verified, verified_length) ||
+	    memcmp(manifest, &verified_manifest, sizeof(*manifest))) {
+		errno = EBADMSG;
+		return -1;
+	}
+	return 0;
+
+failed:
+	if (!saved_errno)
+		saved_errno = errno;
+	if (temporary_identity_valid &&
+	    fstatat(recovery_fd, temporary, &named_info,
+		    AT_SYMLINK_NOFOLLOW) == 0 &&
+	    named_info.st_dev == temporary_info.st_dev &&
+	    named_info.st_ino == temporary_info.st_ino) {
+		(void)unlinkat(recovery_fd, temporary, 0);
+		(void)fsync(recovery_fd);
+	}
+	if (fd >= 0)
+		(void)close(fd);
+	errno = saved_errno;
+	return -1;
 }
 
 static int swapz_primary_header_backup_name(const char *run_id,
