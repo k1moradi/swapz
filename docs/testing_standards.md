@@ -5209,3 +5209,5 @@ direct installer must reject hosts missing the bounded-execution utility,
 device-mapper/util-linux identity tools, journal reader, or basic text/path
 utilities used by the root helper. The hermetic package suite must retain a
 source-contract assertion for that runtime dependency set.
+
+Incremental `make test` fixtures that exercise the real `tests/suites/Makefile` must stage every native probe source that Makefile consumes, including both direct-write and direct-read probes, and must track those outputs when asserting that unrelated CLI or authority-header edits do not spuriously rebuild native probes.
