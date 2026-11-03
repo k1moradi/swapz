@@ -264,9 +264,12 @@ whole-device parent, and that parent must be the exact expected device, report
 removable media, match the expected printable model, and resolve through a USB
 transport path. The selected partition must be the parent's sole partition.
 Both the partition and its parent must have empty holders and slaves, and
-neither may appear mounted or as active swap. Missing,
-malformed, unreadable, permission-denied, changing or ambiguous evidence fails
-closed.
+neither may appear mounted or as active swap. Mount inventory parsing
+must accept Linux pseudo-filesystem major-zero device identifiers (for example
+`0:20`) without mistaking them for the selected nonzero-major block device.
+Malformed mountinfo rows and unverified target identities still fail closed.
+Missing, malformed, unreadable, permission-denied, changing or ambiguous
+evidence fails closed.
 
 After that read-only preflight, open the requested path exactly once with
 `O_RDWR | O_EXCL | O_CLOEXEC`. The opened descriptor is the I/O authority.

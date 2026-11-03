@@ -3095,7 +3095,10 @@ non-removable/held topology, missing sole-partition status,
 parent-model/USB-transport mismatch, an opened descriptor that becomes
 read-only, invalid SWZ UUID/reserved bytes, stale identity immediately before
 the write, truncated reads, unexpected permissions, USB/transport-style I/O
-failure, and device disappearance before and after the write. For every ownership/identity uncertainty before publication, the test
+failure, and device disappearance before and after the write. The mountinfo parser must accept normal major-zero pseudo-filesystem
+entries (including `0:0`) while still rejecting malformed/overflowed rows;
+major zero must remain forbidden for a configured physical partition or parent.
+For every ownership/identity uncertainty before publication, the test
 must count zero destructive header writes. Rootless mocks must cover protected
 root-owned selector absence, mismatched PARTUUID, permission denial, and selector
 revocation at the last prewrite gate; these checks must precede any read-write

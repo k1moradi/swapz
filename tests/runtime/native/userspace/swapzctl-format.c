@@ -304,6 +304,10 @@ static void test_format_expectation_parser(void)
 
 	assert(parse_format_expectation("-8:1", "8:0", "124787884032",
 					"f13428f6-01", &expected) < 0);
+	assert(parse_format_expectation("0:1", "8:0", "124787884032",
+					"f13428f6-01", &expected) < 0);
+	assert(parse_format_expectation("8:1", "0:0", "124787884032",
+					"f13428f6-01", &expected) < 0);
 	assert(parse_format_expectation("8:1 ", "8:0", "124787884032",
 					"f13428f6-01", &expected) < 0);
 	assert(parse_format_expectation("8:1", "8:1", "124787884032",
@@ -399,8 +403,23 @@ static void test_mountinfo_device_parser(void)
 	assert(format_mountinfo_line_device("36 25 bad / /mnt rw\n",
 					    &device) < 0);
 	assert(format_mountinfo_line_device("36 25 8:1\n", &device) < 0);
-	assert(format_mountinfo_line_device("36 25 0:1 / / rw\n",
-					    &device) < 0);
+	/*
+	 * Pseudo-filesystem mounts (major zero) are normal on Linux hosts.
+	 * They must be parseable without ever authorizing a physical target.
+	 */
+	assert(format_mountinfo_line_device(
+		"36 25 0:20 / /proc rw - proc proc rw\n", &device) == 0);
+	assert(device == makedev(0U, 20U));
+	assert(!format_inventory_device_conflicts(device, makedev(8U, 1U),
+						 makedev(8U, 0U)));
+	assert(format_mountinfo_line_device(
+		"37 25 0:0 / /tmp rw - tmpfs tmpfs rw\n", &device) == 0);
+	assert(device == makedev(0U, 0U));
+	assert(format_mountinfo_line_device(
+		"36 25 0:4294967296 / /proc rw - proc proc rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 -1:20 / /proc rw - proc proc rw\n", &device) < 0);
 }
 
 static void test_mount_and_swap_identity_conflicts(void)

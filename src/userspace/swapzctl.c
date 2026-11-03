@@ -91,9 +91,14 @@ static int parse_unsigned_decimal(const char *text, unsigned long long limit,
 	return 0;
 }
 
-static int parse_device_identity(const char *identity,
-				 unsigned int *device_major,
-				 unsigned int *device_minor)
+/*
+ * Kernel mountinfo uses major zero for pseudofilesystems. Only the inventory
+ * parser accepts it; physical partition/parent identity remains nonzero.
+ */
+static int parse_device_identity_fields(const char *identity,
+					unsigned int *device_major,
+					unsigned int *device_minor,
+					int require_nonzero_major)
 {
 	const char *end;
 	unsigned long long parsed_major;
@@ -104,7 +109,7 @@ static int parse_device_identity(const char *identity,
 	    parse_unsigned_decimal(identity, UINT_MAX, &end, &parsed_major) < 0 ||
 	    *end != ':' ||
 	    parse_unsigned_decimal(end + 1, UINT_MAX, &end, &parsed_minor) < 0 ||
-	    *end != '\0' || !parsed_major)
+	    *end != '\0' || (require_nonzero_major && !parsed_major))
 		return -1;
 	device = makedev((unsigned int)parsed_major, (unsigned int)parsed_minor);
 	if (major(device) != (unsigned int)parsed_major ||
@@ -113,6 +118,13 @@ static int parse_device_identity(const char *identity,
 	*device_major = (unsigned int)parsed_major;
 	*device_minor = (unsigned int)parsed_minor;
 	return 0;
+}
+
+static int parse_device_identity(const char *identity,
+				 unsigned int *device_major,
+				 unsigned int *device_minor)
+{
+	return parse_device_identity_fields(identity, device_major, device_minor, 1);
 }
 
 static int format_partuuid_normalize(
@@ -1313,9 +1325,16 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 			if (!length || length >= sizeof(token) ||
 			    token_end >= separator)
 				return -1;
+			unsigned int mounted_major;
+			unsigned int mounted_minor;
+
 			memcpy(token, cursor, length);
 			token[length] = '\0';
-			return format_parse_device_text(token, device);
+			if (parse_device_identity_fields(token, &mounted_major,
+							 &mounted_minor, 0) < 0)
+				return -1;
+			*device = makedev(mounted_major, mounted_minor);
+			return 0;
 		}
 		cursor = token_end;
 	}
