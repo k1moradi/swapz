@@ -2495,6 +2495,15 @@ class PairReplayContract(unittest.TestCase):
                 "lower_major_minor": "8:1",
             })
 
+        # Historical v1 pair records may predate the explicit protocol
+        # field; retain that deliberate compatibility. V2 still requires it.
+        legacy_v1_pairs = json.loads(json.dumps(stable_pairs))
+        for legacy_pair in legacy_v1_pairs:
+            legacy_pair.pop("qualification_protocol")
+        legacy_v1 = qualification.evaluate(legacy_v1_pairs, protocol="v1")
+        self.assertEqual(
+            legacy_v1["decisions"]["sd-service-balanced"]["status"], "PASS")
+
         # Stored pair deltas are derived evidence, not an editable acceptance
         # surface. A changed delta with unchanged arms must be excluded.
         tampered_pairs = json.loads(json.dumps(stable_pairs))

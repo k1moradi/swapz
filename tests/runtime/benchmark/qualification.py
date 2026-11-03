@@ -399,10 +399,16 @@ def pair_integrity_reasons(pair: dict) -> list[str]:
     reasons = []
     if pair.get("deltas") != derived["deltas"]:
         reasons.append("stored pair deltas differ from recomputed arm evidence")
-    for field in ("source_sha", "qualification_protocol"):
-        if pair.get(field) != derived[field]:
-            reasons.append(
-                f"stored pair {field} differs from recomputed arm evidence")
+    if pair.get("source_sha") != derived["source_sha"]:
+        reasons.append(
+            "stored pair source_sha differs from recomputed arm evidence")
+    recorded_protocol = pair.get("qualification_protocol")
+    expected_protocol = derived["qualification_protocol"]
+    if recorded_protocol != expected_protocol and (
+            recorded_protocol is not None or
+            pair.get("workload") in AMENDMENT["workloads"]):
+        reasons.append(
+            "stored pair qualification_protocol differs from recomputed arm evidence")
 
     recorded_reasons = pair.get("exclusion_reasons")
     if (not isinstance(recorded_reasons, list) or
