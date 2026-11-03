@@ -19,6 +19,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
 #include <sys/utsname.h>
@@ -4184,13 +4185,16 @@ static int swapz_primary_hash_regular_path(const char *path, int follow_final,
 static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 						     char module_sha256[65],
 						     char oracle_sha256[65],
-						     const char *expected_module_sha256)
+						     const char *expected_module_sha256,
+						     int *module_fd_out)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
 	(void)swapzctl_sha256;
 	(void)module_sha256;
 	(void)oracle_sha256;
 	(void)expected_module_sha256;
+	if (module_fd_out)
+		*module_fd_out = -1;
 	errno = ENODEV;
 	return -1;
 #else
@@ -4203,6 +4207,8 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 	int module_fd = -1;
 	int result = -1;
 
+	if (module_fd_out)
+		*module_fd_out = -1;
 	if (!swapzctl_sha256 || !module_sha256 || !oracle_sha256 ||
 	    !swapz_primary_valid_sha256(expected_module_sha256)) {
 		errno = EINVAL;
@@ -4247,6 +4253,10 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 	result = swapz_primary_sha256_regular_fd(
 		module_fd, 0, SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES,
 		module_sha256);
+	if (result == 0 && module_fd_out) {
+		*module_fd_out = module_fd;
+		return 0;
+	}
 	{
 		int saved_errno = errno;
 
@@ -4256,6 +4266,133 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 		}
 		errno = saved_errno;
 	}
+	return result;
+#endif
+}
+
+static int swapz_primary_parse_module_bool(const char *value, int *enabled)
+{
+	if (!value || !enabled) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!strcmp(value, "Y") || !strcmp(value, "1")) {
+		*enabled = 1;
+		return 0;
+	}
+	if (!strcmp(value, "N") || !strcmp(value, "0")) {
+		*enabled = 0;
+		return 0;
+	}
+	errno = EINVAL;
+	return -1;
+}
+
+int swapz_primary_load_qualified_module(int *loaded_by_call)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	if (!loaded_by_call) {
+		errno = EINVAL;
+		return -1;
+	}
+	*loaded_by_call = 0;
+	errno = ENODEV;
+	return -1;
+#else
+	struct swapz_primary_qualification qualification;
+	char swapzctl_sha256[65];
+	char module_sha256[65];
+	char oracle_sha256[65];
+	char module_source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 8U];
+	char module_parameter_path[PATH_MAX];
+	char module_parameter[16];
+	int module_loaded = 0;
+	int swapz_mapper_present = 0;
+	int module_inventory_read;
+	int module_source_clean = 0;
+	int physical_backing_enabled = 0;
+	int module_fd = -1;
+	int result = -1;
+	int saved_errno;
+
+	if (!loaded_by_call) {
+		errno = EINVAL;
+		return -1;
+	}
+	*loaded_by_call = 0;
+	if (geteuid() != 0 || SWAPZ_BUILD_SOURCE_CLEAN != 1 ||
+	    !swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA)) {
+		errno = EPERM;
+		return -1;
+	}
+	if (swapz_primary_read_qualification_report(&qualification) < 0 ||
+	    strcmp(qualification.source_sha, SWAPZ_BUILD_SOURCE_SHA)) {
+		errno = EPERM;
+		return -1;
+	}
+	module_inventory_read = swapz_primary_read_module_mapper_inventory(
+		&module_loaded, &swapz_mapper_present) == 0;
+	if (!module_inventory_read)
+		return -1;
+	if (module_loaded || swapz_mapper_present) {
+		errno = EBUSY;
+		return -1;
+	}
+	if (swapz_primary_live_artifact_hashes(
+		    swapzctl_sha256, module_sha256, oracle_sha256,
+		    qualification.module_sha256, &module_fd) < 0)
+		return -1;
+	if (!swapz_primary_qualification_artifacts_match(
+		    &qualification, swapzctl_sha256, module_sha256,
+		    oracle_sha256)) {
+		errno = EBADMSG;
+		goto out;
+	}
+	if (syscall(SYS_finit_module, module_fd,
+		    "allow_physical_backing=1", 0U) < 0)
+		goto out;
+	*loaded_by_call = 1;
+	if (close(module_fd) < 0) {
+		module_fd = -1;
+		goto out;
+	}
+	module_fd = -1;
+	if (swapz_primary_read_module_mapper_inventory(
+		    &module_loaded, &swapz_mapper_present) < 0)
+		goto out;
+	if (!module_loaded || swapz_mapper_present) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_read_module_build_provenance(
+		    module_loaded, module_source_sha,
+		    &module_source_clean) < 0 ||
+	    !swapz_primary_build_sources_match(
+		    qualification.source_sha, 1, module_source_sha,
+		    module_source_clean)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_path_format(
+		    module_parameter_path, sizeof(module_parameter_path),
+		    "/sys/module/dm_swapz/parameters/allow_physical_backing") < 0 ||
+	    swapz_primary_read_sysfs_text(module_parameter_path,
+				      module_parameter,
+				      sizeof(module_parameter)) < 0 ||
+	    swapz_primary_parse_module_bool(module_parameter,
+					    &physical_backing_enabled) < 0 ||
+	    !physical_backing_enabled) {
+		errno = EPERM;
+		goto out;
+	}
+	result = 0;
+out:
+	saved_errno = errno;
+	if (module_fd >= 0 && close(module_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	errno = saved_errno;
 	return result;
 #endif
 }
@@ -4694,7 +4831,7 @@ static int swapz_primary_qualification_import(const char *source_path)
 	    strcmp(qualification.report_sha256, source_digest) ||
 	    swapz_primary_live_artifact_hashes(
 		    swapzctl_digest, module_digest, oracle_digest,
-		    qualification.module_sha256) < 0 ||
+		    qualification.module_sha256, NULL) < 0 ||
 	    !swapz_primary_qualification_artifacts_match(
 		    &qualification, swapzctl_digest, module_digest,
 		    oracle_digest)) {
@@ -4837,7 +4974,7 @@ static int swapz_primary_read_only_plan(void)
 	int live_artifact_hashes_read = qualification_report_valid &&
 		swapz_primary_live_artifact_hashes(
 			live_swapzctl_sha256, live_module_sha256,
-			live_oracle_sha256, qualification.module_sha256) == 0;
+			live_oracle_sha256, qualification.module_sha256, NULL) == 0;
 	int live_artifacts_match_qualification = live_artifact_hashes_read &&
 		swapz_primary_qualification_artifacts_match(
 			&qualification, live_swapzctl_sha256, live_module_sha256,

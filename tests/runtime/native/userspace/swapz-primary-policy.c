@@ -825,6 +825,22 @@ static void test_module_mapper_identity_policy(void)
 	assert(swapz_primary_mapper_identity_is_swapz("map", "bad\001uuid") < 0);
 }
 
+static void test_primary_module_parameter_parser(void)
+{
+	int enabled = -1;
+
+	assert(swapz_primary_parse_module_bool("Y", &enabled) == 0 && enabled);
+	assert(swapz_primary_parse_module_bool("1", &enabled) == 0 && enabled);
+	assert(swapz_primary_parse_module_bool("N", &enabled) == 0 && !enabled);
+	assert(swapz_primary_parse_module_bool("0", &enabled) == 0 && !enabled);
+	enabled = -1;
+	assert(swapz_primary_parse_module_bool("yes", &enabled) < 0);
+	assert(errno == EINVAL && enabled == -1);
+	assert(swapz_primary_parse_module_bool("Y\n", &enabled) < 0);
+	assert(swapz_primary_parse_module_bool(NULL, &enabled) < 0);
+	assert(swapz_primary_parse_module_bool("Y", NULL) < 0);
+}
+
 static void test_qualified_module_fd(void)
 {
 	static const unsigned char module_bytes[] = "exact module image bytes\n";
@@ -1157,6 +1173,7 @@ static void test_primary_qualification_live_reader_disabled_in_rootless(void)
 	char *import_args[] = {
 		"qualification-import", "/not-a-real-qualification-report"
 	};
+	int loaded_by_call = 1;
 	struct swapz_primary_qualification qualification;
 	struct swapz_primary_qualification original;
 	char host_identity_sha256[65];
@@ -1180,8 +1197,11 @@ static void test_primary_qualification_live_reader_disabled_in_rootless(void)
 	memcpy(original_hashes[2], oracle_sha256, sizeof(oracle_sha256));
 	assert(swapz_primary_live_artifact_hashes(
 		swapzctl_sha256, module_sha256, oracle_sha256,
-		SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256) < 0);
+		SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256, NULL) < 0);
 	assert(errno == ENODEV);
+	errno = 0;
+	assert(swapz_primary_load_qualified_module(&loaded_by_call) < 0);
+	assert(errno == ENODEV && loaded_by_call == 0);
 	assert(!memcmp(swapzctl_sha256, original_hashes[0],
 		       sizeof(swapzctl_sha256)));
 	assert(!memcmp(module_sha256, original_hashes[1],
@@ -1239,6 +1259,7 @@ int main(void)
 	test_recovery_source_chain();
 	test_mountinfo_parser();
 	test_module_mapper_identity_policy();
+	test_primary_module_parameter_parser();
 	test_qualified_module_fd();
 	test_build_source_provenance_policy();
 	test_primary_qualification_report_parser();

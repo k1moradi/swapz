@@ -3629,3 +3629,9 @@ components. The validated descriptor is the object that the later
 The read-only plan and qualification import must use this opener with the
 owner-report module digest; a failed path or digest check keeps the artifact
 gate false.
+The checked loader must repeat the current report and three-artifact checks,
+refuse any preloaded module or swapz mapper, use the returned module FD for
+`finit_module()` with the physical-backing opt-in, and verify the loaded
+source and parameter. Rootless tests must verify strict module-boolean parsing
+and that the load command returns `ENODEV` without changing its ownership
+result or touching host paths.

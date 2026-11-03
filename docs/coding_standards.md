@@ -234,7 +234,14 @@ to `finit_module()`; never hash a path and reopen it for loading. A preloaded
 module is not authenticated by source parameters
 or package metadata and must be rejected unless a durable manager-owned exact
 load record proves its identity. The current descriptor-opening primitive
-does not itself load a module or authorize lifecycle execution.
+is used by qualification admission and by the checked loader. The loader must
+be called only after the caller durably records and owns the `STARTING`
+transaction. It rechecks the owner report, all three qualified artifacts and
+the absence of any loaded swapz module or mapper, passes only
+`allow_physical_backing=1`, then verifies the loaded source provenance and
+read-only parameter. Its ownership result remains set if post-load checks
+fail, so recovery cannot hide a module that may be live. This primitive does
+not authorize lifecycle execution through the CLI.
 
 ## MM, folio and zswap semantic boundary
 

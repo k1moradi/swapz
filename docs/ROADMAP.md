@@ -1507,8 +1507,12 @@ hashes that descriptor against the qualified module digest and returns the
 same read-only FD for a future exact load. Rootless regressions cover digest,
 mode, hard-link, final symlink, parent symlink and traversal failures. The
 read-only plan and qualification import now use that same path opener and
-expected report digest. The FD is not yet passed to `finit_module()` and no
-lifecycle operation consumes the hashes. Source provenance cannot
-authenticate a preloaded module's exact bytes; the future manager must load
-the checked descriptor itself or reject the preloaded module. Privileged
-execution remains disabled.
+expected report digest. A root-only checked loader now revalidates the host
+report and all artifact hashes, refuses a preloaded module or swapz mapper,
+loads the exact pinned FD with `allow_physical_backing=1`, and verifies loaded
+source provenance and the parameter readback. Rootless tests prove the loader
+is unavailable and strict boolean parsing. No CLI lifecycle operation calls
+the loader yet; a caller must first persist and claim `STARTING`, and must
+retain recovery ownership when a post-load check fails. Privileged lifecycle
+commands remain disabled. Source parameters still cannot authenticate a
+module loaded by another actor; lifecycle admission must reject such modules.

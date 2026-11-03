@@ -89,6 +89,9 @@ int swapz_primary_sha256_regular_fd(int fd, uid_t expected_owner,
  * The returned read-only descriptor must be used directly for finit_module. */
 int swapz_primary_open_qualified_module_fd(
 	const char *control_executable, const char expected_sha256[65]);
+/* Caller must durably own a STARTING transaction before requesting this load.
+ * loaded_by_call remains true if post-load verification subsequently fails. */
+int swapz_primary_load_qualified_module(int *loaded_by_call);
 
 int swapz_primary_partition_lock_acquire(void);
 /* Internal lifecycle primitive; caller must hold the matching partition lock. */
