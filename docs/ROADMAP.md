@@ -1373,8 +1373,10 @@ capacity arithmetic but explicitly marks all live-device gates unchecked and
 the plan BLOCKED. Provision, activation, teardown and recovery are disabled.
 The earlier Python manager draft was removed because production Python is
 outside this repository's coding standards. The remaining implementation must
-add the durable active marker and shared partition lock, initial provisioning,
+integrate the permanent root-controlled PARTUUID lock primitive with each
+lifecycle operation and add the durable active marker, initial provisioning,
 checked restoration, startup-failure rollback, exact mapper/module ownership,
-and interruption recovery. No live swap or boot integration has been
-qualified through this manager. Do not enable its units until those paths and
-the exact-host qualification gates are closed.
+and interruption recovery. The shared lock primitive is not yet held by any
+primary lifecycle command. No live swap or boot integration has been qualified
+through this manager. Do not enable its units until those paths and the
+exact-host qualification gates are closed.

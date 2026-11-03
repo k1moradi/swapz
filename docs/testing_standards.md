@@ -3322,6 +3322,13 @@ The manager must use the same permanent `/dev/sda4` partition lock as the
 physical-swap helpers; tests must reject an unsafe lock directory, lock file or
 concurrent owner before any mutation. A persistent active-ownership marker is
 also required before the provisioning path can be enabled.
+The native lock primitive must open the same permanent
+`partition-7fb9401d-04.lock` inode under
+`/var/lib/swapz/physical-recovery`, reject symlinks and unsafe ownership or
+modes, acquire a nonblocking exclusive `flock`, and fsync the recovery-base
+directory. It must never unlink or replace that inode. Until lifecycle commands
+actually acquire and hold this lock for their full operation, the primitive's
+presence alone does not satisfy the manager's shared-lock requirement.
 
 Recovery must refuse while any `swapoff` process runs in a swapoff stage, even
 when the kernel still lists the device, and an unreadable `/proc` entry fails

@@ -207,6 +207,10 @@ class PublicMakeContract(unittest.TestCase):
                 "int main(void) { return 0; }\n")
             cli = fixture / "src/userspace/swapzctl.c"
             cli.write_text("int main(void) { return 0; }\n")
+            (fixture / "src/userspace/swapz-primary.c").write_text(
+                (ROOT / "src/userspace/swapz-primary.c").read_text())
+            (fixture / "src/userspace/swapz-primary.h").write_text(
+                (ROOT / "src/userspace/swapz-primary.h").read_text())
 
             # This Kbuild substitute checks the staged source but
             # never compiles, loads, or inserts any kernel module.
