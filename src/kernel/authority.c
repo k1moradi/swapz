@@ -312,23 +312,48 @@ static int swapz_gc_account_transition_commit(struct swapz_authority *a,
 	return 0;
 }
 
-int swapz_authority_validate_geometry(swapz_u32 logical_pages,
-				      swapz_u32 physical_blocks,
-				      swapz_u32 *reserve_blocks)
+static int swapz_authority_physical_geometry(swapz_u32 physical_blocks)
 {
-	swapz_u32 reserve;
-
-	if (!logical_pages || physical_blocks < 3U * SWAPZ_SEGMENT_BLOCKS ||
+	if (physical_blocks < 3U * SWAPZ_SEGMENT_BLOCKS ||
 	    physical_blocks % SWAPZ_SEGMENT_BLOCKS)
 		return -EINVAL;
+	return 0;
+}
+
+static int swapz_authority_validate_candidate(swapz_u32 logical_pages,
+					      swapz_u32 physical_blocks,
+					      swapz_u32 *reserve_blocks)
+{
+	swapz_u32 foreground_blocks;
+	swapz_u32 reserve;
+	swapz_u64 required_blocks;
+	int error;
+
+	if (!logical_pages)
+		return -EINVAL;
+	error = swapz_authority_physical_geometry(physical_blocks);
+	if (error)
+		return error;
+
 	/* Division before addition keeps ceil(logical_pages / 8) in u32. */
 	reserve = (logical_pages / 8U) + (logical_pages % 8U != 0);
 	if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)
 		reserve = 2U * SWAPZ_SEGMENT_BLOCKS;
-	if (reserve >= physical_blocks ||
-	    logical_pages > ((physical_blocks - reserve) /
-			     SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS)
+	if (reserve >= physical_blocks)
 		return -ENOSPC;
+	foreground_blocks = ((physical_blocks - reserve) /
+			     SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
+	/*
+	 * The rotating GC reserve is not foreground allocation authority.
+	 * Retain one complete ordinary segment so a 100%-RAW logical fill can
+	 * publish its first COW overwrite before any victim becomes reclaimable.
+	 * Widen before addition so a near-u32 logical count cannot wrap.
+	 */
+	required_blocks = (swapz_u64)logical_pages +
+			  SWAPZ_FOREGROUND_HEADROOM_BLOCKS;
+	if (required_blocks > foreground_blocks)
+		return -ENOSPC;
+
 	/*
 	 * Before authority_init() clears arrays, reject an unaddressable byte
 	 * count on 32-bit kernels. The map is the widest per-logical-page array;
@@ -343,6 +368,73 @@ int swapz_authority_validate_geometry(swapz_u32 logical_pages,
 	if (reserve_blocks)
 		*reserve_blocks = reserve;
 	return 0;
+}
+
+int swapz_authority_capacity(swapz_u32 physical_blocks,
+			     struct swapz_authority_geometry *geometry)
+{
+	swapz_u32 low = 1U;
+	swapz_u32 high = physical_blocks;
+	swapz_u32 maximum = 0;
+	swapz_u32 reserve = 0;
+	int error;
+
+	if (!geometry)
+		return -EINVAL;
+	error = swapz_authority_physical_geometry(physical_blocks);
+	if (error)
+		return error;
+	/*
+	 * This failure is independent of logical capacity. Detect it before the
+	 * binary search so a 32-bit physical-index overflow is not misreported as
+	 * an empty but otherwise valid geometry.
+	 */
+	if ((swapz_u64)physical_blocks * sizeof(swapz_u16) >
+	    (swapz_u64)(size_t)-1)
+		return -EOVERFLOW;
+
+	while (low <= high) {
+		swapz_u32 middle = low + (high - low) / 2U;
+
+		error = swapz_authority_validate_candidate(middle, physical_blocks,
+							   NULL);
+		if (!error) {
+			maximum = middle;
+			low = middle + 1U;
+			continue;
+		}
+		if (error != -ENOSPC && error != -EOVERFLOW)
+			return error;
+		high = middle - 1U;
+	}
+	if (!maximum)
+		return -ENOSPC;
+	error = swapz_authority_validate_candidate(maximum, physical_blocks,
+						   &reserve);
+	if (error)
+		return error;
+
+	*geometry = (struct swapz_authority_geometry){
+		.usable_physical_blocks = physical_blocks,
+		.gc_reserve_blocks = reserve,
+		.required_foreground_headroom_blocks =
+			SWAPZ_FOREGROUND_HEADROOM_BLOCKS,
+		.maximum_logical_pages = maximum,
+		.logical_mapper_bytes =
+			(swapz_u64)maximum * SWAPZ_BLOCK_BYTES,
+		.linux_usable_swap_bytes =
+			(swapz_u64)(maximum - SWAPZ_LINUX_SWAP_HEADER_BLOCKS) *
+			SWAPZ_BLOCK_BYTES,
+	};
+	return 0;
+}
+
+int swapz_authority_validate_geometry(swapz_u32 logical_pages,
+				      swapz_u32 physical_blocks,
+				      swapz_u32 *reserve_blocks)
+{
+	return swapz_authority_validate_candidate(logical_pages, physical_blocks,
+						  reserve_blocks);
 }
 
 int swapz_authority_init(struct swapz_authority *a,

@@ -4,6 +4,8 @@
 #include "codec.h"
 
 #define SWAPZ_SEGMENT_BLOCKS 256U
+#define SWAPZ_FOREGROUND_HEADROOM_BLOCKS SWAPZ_SEGMENT_BLOCKS
+#define SWAPZ_LINUX_SWAP_HEADER_BLOCKS 1U
 #define SWAPZ_MAP_RECORD_INDEX_MASK 0x3fU
 #define SWAPZ_MAP_DELTA64_FLAG 0x80U
 /* Set only together with SWAPZ_MAP_DELTA64_FLAG (DELTA64_SHUF8 records). */
@@ -254,17 +256,41 @@ int swapz_gc_begin_rotation(struct swapz_authority *authority, swapz_u32 victim)
  * Leaves foreground cursor inside new (formerly reserve) destination. */
 int swapz_gc_commit_rotation(struct swapz_authority *authority, swapz_u32 victim);
 
+struct swapz_authority_geometry {
+	/* Caller-provided data blocks after the SWZ header and segment rounding. */
+	swapz_u32 usable_physical_blocks;
+	/* GC reserve at maximum_logical_pages; never includes foreground headroom. */
+	swapz_u32 gc_reserve_blocks;
+	/* Ordinary COW bootstrap space retained separately from the GC reserve. */
+	swapz_u32 required_foreground_headroom_blocks;
+	/* Largest logical page count admitted on this build's integer widths. */
+	swapz_u32 maximum_logical_pages;
+	swapz_u64 logical_mapper_bytes;
+	/* Linux swap page zero is metadata and is not usable anonymous-page swap. */
+	swapz_u64 linux_usable_swap_bytes;
+};
+
 /*
- * Allocation-free geometry gate for callers that provision capacity-dependent
- * arrays. swapz_authority_init() rechecks this exact policy before touching
- * caller memory. Returns -EOVERFLOW if a capacity-index byte length exceeds
- * size_t; successful admission does not prove allocation feasibility.
- * reserve_blocks may be NULL when only admission is needed.
+ * Allocation-free capacity calculator for constructor/userspace preflight.
+ * Returns the maximum logical geometry admitted by the same policy used by
+ * swapz_authority_validate_geometry(), including this build's size_t limits.
+ */
+int swapz_authority_capacity(swapz_u32 physical_blocks,
+			     struct swapz_authority_geometry *geometry);
+
+/*
+ * Single allocation-free geometry admission gate. swapz_authority_init()
+ * rechecks this exact policy before touching caller memory. The GC reserve is
+ * max(ceil(logical_pages / 8), two segments), and one additional foreground
+ * segment is retained for RAW copy-on-write bootstrap. Returns -EOVERFLOW if a
+ * capacity-index byte length exceeds size_t; successful admission does not
+ * prove allocation feasibility. reserve_blocks may be NULL when only admission
+ * is needed and remains untouched on failure.
  */
 int swapz_authority_validate_geometry(swapz_u32 logical_pages,
 				      swapz_u32 physical_blocks,
 				      swapz_u32 *reserve_blocks);
-/* Returns -ENOSPC unless capacity supports logical pages plus GC reserve. */
+/* Returns -ENOSPC unless capacity supports pages + COW headroom + GC reserve. */
 int swapz_authority_init(struct swapz_authority *authority,
 		       struct swapz_map *maps, swapz_u16 *live_records,
 		       swapz_u8 *extent_classes, swapz_u32 logical_pages,

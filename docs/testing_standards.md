@@ -489,11 +489,12 @@ other interpretation. The transaction sequence is retained separately with
 one byte per physical block for a compressed extent's offset from its segment's
 first compressed sequence, plus one 32-bit sequence base per segment. The
 native test must cover the maximum 255 offset and fail closed on overflow. For the current
-16 GiB fixture geometry this is 4,194,048 usable physical blocks, 3,727,872
-logical pages (15,269,363,712 mapper bytes), 465,984 reserve blocks, and
-106,834,908 bytes (101.89 MiB) of capacity-index arrays. Compared with the
-20-byte map and no sequence index, the net compiled-array reduction is
-10,651,908 bytes (10.15 MiB). The array figure excludes the target structure,
+16 GiB fixture geometry this is 4,194,048 usable physical blocks, 3,727,616
+logical pages (15,268,315,136 mapper bytes), 465,952 GC-reserve blocks, one
+separate 256-block foreground COW segment, 15,268,311,040 Linux-usable swap
+bytes, and 106,828,764 bytes (101.88 MiB) of capacity-index arrays. Compared
+with the 20-byte map and no sequence index, the net compiled-array reduction is
+10,650,884 bytes (10.16 MiB). The array figure excludes the target structure,
 fixed scratch/cache/workspace allocations and allocator overhead; it is not a
 total module-RAM measurement. Native
 authority success does not prove that the loaded Device Mapper target can
@@ -519,13 +520,15 @@ currently selected-card geometry recorded in AGENT_CONTEXT.md; this is a
 source-level sizing oracle, not a host allocation attempt. For the current
 124,787,884,032-byte partition, reserving physical block zero and rounding the
 remainder down to 1MiB segments yields 30,465,536 physical data blocks and
-119,006 segments. The maximum admitted logical capacity is 27,080,448 pages
-(110,921,515,008 mapper bytes), with maximum logical index 27,080,447 and
-3,385,056 reserve blocks. The first page beyond that limit must fail
-allocation-free with `-ENOSPC`. Capacity-index payload is 776,077,112 bytes
-(740.1248 MiB); on a 4KiB-page host, independently rounding each current array
-to an allocation-page boundary is 776,118,272 bytes, 41,160 bytes of page
-rounding. The largest one is the 433,287,168-byte mapping array. vmalloc
+119,006 segments. The maximum admitted logical capacity is 27,080,192 pages
+(110,920,466,432 mapper bytes), with maximum logical index 27,080,191,
+3,385,024 GC-reserve blocks, and one separate 256-block foreground COW
+segment. Linux can use 110,920,462,336 bytes after its mapper page-zero swap
+header. The first page beyond that limit must fail allocation-free with
+`-ENOSPC`. Capacity-index payload is 776,070,968 bytes (740.1189 MiB); on a
+4KiB-page host, independently rounding each current array to an allocation-page
+boundary is 776,114,176 bytes, 43,208 bytes of page rounding. The largest one
+is the 433,283,072-byte mapping array. vmalloc
 metadata, page tables, fixed target scratch/caches/workspaces and allocator
 implementation overhead remain outside those figures and require loaded-host
 measurement. The same preflight must exercise an aligned near-`u32` physical
@@ -538,17 +541,33 @@ A rejected geometry leaves the output reserve untouched: the test must refresh
 a successful preflight before using its reserve for foreground-headroom checks,
 not accidentally compute from an earlier poison sentinel.
 
-That selected-card value is an authority-admission limit, not a worst-case RAW
-forward-progress limit. With 30,465,536 data blocks, the current 27,080,448-page
-admission and 3,385,056-block reserve leave exactly 27,080,448 foreground
-blocks: an all-RAW fill therefore leaves no copy-on-write block for the first
-overwrite. Under the current rotating-role allocator, full-capacity
-qualification must preserve at least one unused 256-block foreground segment
-after GC reserves. Solving the existing `ceil(logical_pages / 8)` reserve policy
-with that headroom gives at most 27,080,192 logical pages, a 3,385,024-block GC
-reserve, and a 110,920,466,432-byte mapper. A different allocator may exceed
-that limit only if direct production-C and loaded tests prove equivalent
-overwrite bootstrap without reusing a referenced or uncertain extent.
+The authority policy now enforces worst-case RAW forward progress instead of
+merely documenting it. Its reusable contract takes usable physical blocks
+(after the SWZ header and 1MiB rounding), keeps the GC reserve at
+`max(ceil(logical_pages / 8), 512)` blocks, and independently requires one
+256-block foreground COW segment. A candidate is admissible only when
+`logical_pages + 256 <= floor((physical_blocks - gc_reserve_blocks) / 256) *
+256`. The capacity helper applies that same gate plus the build's `size_t`
+array-addressability checks, then reports the maximum logical pages, mapper
+bytes (`logical_pages * 4096`), and Linux-usable swap bytes
+(`(logical_pages - 1) * 4096`). Misaligned backing is `-EINVAL`; a valid but
+too-small or one-past-capacity geometry is `-ENOSPC`; an otherwise admissible
+map/liveness byte count that cannot fit `size_t` is `-EOVERFLOW`, with all
+failure outputs untouched. The GC reserve is never reduced to recover page
+count.
+
+The native mapping suite must bind acceptance to allocator behavior on exact
+production authority C: derive the maximum for an eight-segment fixture, reject
+the next page, fill every admitted logical page as RAW, perform the first COW
+overwrite from the mandatory foreground headroom, then force repeated
+high-live GC reserve rotations while checking every surviving byte, generation
+and RAW CRC. The GC high-occupancy suite remains the longer 64-rotation stress
+proof; together these establish that capacity acceptance corresponds to actual
+allocator forward progress rather than mapper construction alone. Allocator
+edge fixtures that are not themselves capacity tests must still use an
+admissible geometry: under this policy three physical segments have no positive
+logical capacity because the two GC-reserve segments plus one foreground COW
+segment consume the entire device, so the smallest such fixture uses four.
 
 The `/8` reserve change updates the admitted-capacity policy, not the serialized
 SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
@@ -2793,12 +2812,14 @@ Keep offline timings, loaded positive-fixture pairs and the full owner matrix
 distinct. Historical plain-delta64 timings do not measure the new path.
 
 Compression-result qualification must exercise the signed target boundary with
-positive, zero, and artificial negative results. A negative result must retain
-its exact errno, must not increment RAW-fallback accounting, and must not
-publish or stage a RAW page. Prepared and ordered owners are separate required
-cases; the ordered mapped-input case must prove unmapping precedes the error
-return. Positive and zero controls must continue to select compressed and RAW
-storage respectively.
+positive, zero, and artificial negative results. When an error wins prepared
+publication, it must retain its exact errno, must not increment RAW-fallback
+accounting, and must not publish or stage RAW as a no-fit result. When
+RAW_SELECTED linearizes first, a late negative result must leave that selected
+state unchanged but terminally fail the target before any upper success can be
+reported. Prepared and ordered owners are separate required cases; the ordered
+mapped-input case must prove unmapping precedes the error return. Positive and
+zero controls must continue to select compressed and RAW storage respectively.
 
 Direct codec qualification must include deterministic nonzero randomized
 payload bytes, boundary lengths around 8-byte/CRC lanes and production packing
@@ -3034,23 +3055,36 @@ dedicated `/dev/sda1` card. Its device-identity, provenance and fail-closed
 techniques remain useful patterns.
 Rootless qualification must exercise the production formatter decision path
 with synthetic descriptor/kernel operations and identity tables. It must cover
-malformed PARTUUIDs and numeric overflow, replaced path/PARTUUID aliases, wrong
-opened device, wrong parent or geometry, non-removable/held topology, missing
-sole-partition status, parent-model/USB-transport mismatch, invalid SWZ
-UUID/reserved bytes, stale identity immediately before the write, truncated
-reads, unexpected permissions, and device disappearance before and after the
-write. For every ownership/identity uncertainty before publication, the test
+malformed PARTUUIDs and numeric overflow, copied cloneable identifiers with a
+different opened device/parent, replaced path/PARTUUID aliases, wrong opened
+device, wrong parent or geometry, a changed major:minor after reconnection,
+non-removable/held topology, missing sole-partition status,
+parent-model/USB-transport mismatch, an opened descriptor that becomes
+read-only, invalid SWZ UUID/reserved bytes, stale identity immediately before
+the write, truncated reads, unexpected permissions, USB/transport-style I/O
+failure, and device disappearance before and after the write. For every ownership/identity uncertainty before publication, the test
 must count zero destructive header writes. Rootless mocks must cover protected
 root-owned selector absence, mismatched PARTUUID, permission denial, and selector
 revocation at the last prewrite gate; these checks must precede any read-write
 device open or write. It must also prove exact valid-header repeat formatting
 performs no write, zero-header initialization attempts exactly one header
-`pwrite()`, a partial `pwrite()` is not resumed, post-write
-readback/identity failures are never reported as success, and the standalone
-formatter contains no DISCARD/TRIM behavior. Source contracts
+`pwrite()`, a partial `pwrite()` is not resumed, and every failure after the
+publication call is issued has the explicit status-3 `UNCERTAIN`/recovery
+disposition rather than being reported as an ordinary no-write failure.
+Post-write readback/identity failures are never success, unknown nonzero block
+zero remains a recovery condition, and the standalone formatter contains no
+DISCARD/TRIM behavior. A focused removable-media identity binary must cover
+copied identifiers, alias replacement, parent/geometry drift, holder/activity
+conflicts and reconnection repinning without opening any host block device. Source contracts
 continue to verify the kernel opt-in superblock gate, reserved data offset, and
 exclusion of block 0 from all data/discard paths. Exact-current-main must still
 pass ordinary `make test` before any physical-media evidence is considered.
+
+The primary manager's PARTUUID direct-C tests must reject all-hyphen,
+leading/trailing-hyphen and consecutive-hyphen values, require at least eight
+hexadecimal digits, preserve GPT-style hyphenated values, and prove canonical
+lowercase normalization. This is a Codex-owned integration requirement; the
+standalone formatter tests do not authorize edits to primary-manager source.
 
 The standalone CLI requires the complete partition/PARTUUID/geometry/removable-
 parent identity bundle documented in coding_standards.md. The older private
@@ -4064,9 +4098,36 @@ facts and durable STARTING or STOPPING record, and a fresh process must run the
 normal recovery command. Recovery must finish COMPLETE with the interrupted
 stage preserved as recovery_previous_stage, remove the active owner marker,
 retain permanent consumed provenance, restore the exact pre-test host swap
-inventory, and leave no swapz mapper or module. The loaded-stage wrapper must
-bound the complete success plus six-interruption rehearsal without weakening
-the per-operation timeouts or quarantine-on-uncertain-cleanup policy. Rootless direct-C coverage must
+inventory, and leave no swapz mapper or module. At every interrupted phase
+where a mapper exists, the harness must independently prove the exact run-bound
+DM UUID and exact owned-partition table dependency, not merely mapper-name
+presence. It must also compare the unrelated host swap inventory while the
+private mapper is active. After each successful recovery, a second fresh
+recovery attempt must be safely rejected without changing the byte identity of
+the durable COMPLETE record, module/mapper state, or host swap inventory; this
+is the native idempotence proof for a terminal transaction.
+
+The same private rehearsal must exercise negative kernel-boundary cases against
+the real coordinator: ambiguous `swapon` and `swapoff` outcomes both with and
+without the kernel operation applied, unreadable post-operation swap inventory,
+a definite failed `swapoff`, a wrong inactive mapper identity, stale run ID,
+a failed durable state-directory `fsync`, and lost state provenance. A
+test-only linker-wrap fixture may intercept only the private owned-null_blk
+binary's `syscall`, `/proc/swaps` `open`, and `fsync` boundaries and must forward
+them unchanged when no named fault is selected. That fixture is never linked by
+the public Makefile, installed package, physical qualification seam, or
+production authority path. Wrong-mapper testing may normally remove/recreate
+only the exact private mapper after independently proving it is inactive and
+has zero users; it must never force removal. State-corruption cases must first
+preserve the exact durable bytes in the token-bound evidence directory, fsync
+the evidence, restore those exact bytes before cleanup, and quarantine the
+owned resources if restoration or normal recovery cannot be proved. Every
+negative refusal must independently inspect mapper/module/swap facts and
+unrelated host swap identity, then restore the controlled fixture and converge
+through ordinary fresh-process recovery or retain explicit quarantine evidence.
+The loaded-stage wrapper must bound the complete success, six interruptions and
+negative rehearsal without weakening per-operation timeouts or
+quarantine-on-uncertain-cleanup policy. Rootless direct-C coverage must
 also prove the native activation/deactivation helpers return `ENODEV` with
 their side-effect outputs cleared. The shared production syscall/inventory transition helper must also
 be exercised from direct-C rootless tests with fake inventory and syscall
