@@ -1661,10 +1661,13 @@ remove/module unload and durable COMPLETE with host swap identity restored.
 This closes the no-interruption coordinator execution gap once owner `make test`
 observes its PASS marker. The private owned-null_blk build now also has
 production-elided deterministic process-death hooks after STARTING, module WAL
-LOADED, mapper resume, swapon-before-ACTIVE, STOPPING and swapoff; the next
-loaded qualification slice must drive each hook and recover from a fresh
-process. Deterministic interruption/recovery evidence, bounded physical live
-swap, cold-boot
+LOADED, mapper resume, swapon-before-ACTIVE, STOPPING and swapoff. The owned
+null_blk lifecycle rehearsal now drives all six hooks sequentially, verifies the
+expected stale durable/kernel state, then invokes normal recovery from a fresh
+process and requires COMPLETE with preserved interruption provenance, permanent
+consumed evidence, no mapper/module, and byte-identical host swap inventory.
+This evidence is produced only when the exact-source owner make test loaded
+stage observes the new six-case PASS marker. Bounded physical live swap, cold-boot
 recovery, boot integration, workload performance and production qualification
 remain open.
 

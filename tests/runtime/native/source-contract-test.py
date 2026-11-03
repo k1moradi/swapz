@@ -125,6 +125,19 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         for phase in ("stop-stopping", "stop-swapoff"):
             self.assertIn(
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', stop)
+        rehearsal = (
+            ROOT / "tests/tools/qualify-primary-lifecycle-nullblk.sh").read_text()
+        for phase in (
+                "start-starting", "start-module-loaded",
+                "start-mapper-resumed", "start-swapon",
+                "stop-stopping", "stop-swapoff"):
+            self.assertIn(phase, rehearsal)
+        self.assertIn(
+            'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER="$phase"', rehearsal)
+        self.assertIn('"$CONTROL" primary recover', rehearsal)
+        self.assertIn(
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6",
+            rehearsal)
 
     def test_primary_manager_target_is_runtime_selected(self):
         # Historical trial paths and device numbers may appear in fixtures or

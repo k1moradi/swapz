@@ -96,6 +96,207 @@ if isinstance(value, str):
 PY
 }
 
+assert_lifecycle_state() {
+	local run_id="$1"
+	local expected_stage="$2"
+	local expected_previous="$3"
+	python3 - "$RECOVERY_BASE/primary-state.json" \
+		"$run_id" "$expected_stage" "$expected_previous" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+if state.get("run_id") != sys.argv[2] or state.get("stage") != sys.argv[3]:
+    raise SystemExit(1)
+previous = state.get("recovery_previous_stage")
+if sys.argv[4] == "null":
+    if previous is not None:
+        raise SystemExit(1)
+elif previous != sys.argv[4]:
+    raise SystemExit(1)
+PY
+}
+
+mapper_swap_entry_count() {
+	local mapper_dev
+	local swap_path swap_type swap_size swap_used swap_priority
+	local swap_hex swap_major_hex swap_minor_hex swap_dev
+	local count=0
+
+	if ! dmsetup info "$DMNAME" >/dev/null 2>&1; then
+		printf '0\n'
+		return 0
+	fi
+	mapper_dev="$(
+		dmsetup info -c --noheadings --separator ':' -o major,minor \
+			"$DMNAME" 2>/dev/null | tr -d '[:space:]'
+	)" || return 1
+	[[ "$mapper_dev" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+	while read -r swap_path swap_type swap_size swap_used swap_priority; do
+		[[ "$swap_path" == Filename || ! -e "$swap_path" ]] && continue
+		[[ -b "$swap_path" ]] || continue
+		swap_hex="$(stat -Lc '%t:%T' "$swap_path")" || return 1
+		IFS=: read -r swap_major_hex swap_minor_hex <<< "$swap_hex"
+		printf -v swap_dev '%d:%d' \
+			"0x$swap_major_hex" "0x$swap_minor_hex"
+		[[ "$swap_dev" != "$mapper_dev" ]] || count=$((count + 1))
+	done < /proc/swaps
+	printf '%s\n' "$count"
+}
+
+prepare_interruption_run() {
+	local output
+
+	if ! output="$("$CONTROL" primary prepare 2>&1)"; then
+		printf '%s\n' "$output" >&2
+		fail "interruption prepare failed"
+	fi
+	printf '%s\n' "$output"
+	RUN_ID="$(printf '%s\n' "$output" |
+		sed -n 's/^PRIMARY_PREPARE=READY run_id=\([0-9a-f]\{32\}\).*/\1/p')"
+	[[ "$RUN_ID" =~ ^[0-9a-f]{32}$ ]] ||
+		fail "interruption prepare did not emit one valid run ID"
+	assert_lifecycle_state "$RUN_ID" READY null ||
+		fail "interruption prepare did not persist clean READY"
+}
+
+start_interruption_baseline() {
+	local output start_run
+
+	if ! output="$(
+		timeout --signal=TERM --kill-after=10s 90s \
+			"$CONTROL" primary start 2>&1
+	)"; then
+		printf '%s\n' "$output" >&2
+		fail "interruption baseline start failed"
+	fi
+	printf '%s\n' "$output"
+	start_run="$(printf '%s\n' "$output" |
+		sed -n 's/^PRIMARY_START=ACTIVE run_id=\([0-9a-f]\{32\}\).*/\1/p')"
+	[[ "$start_run" == "$RUN_ID" ]] ||
+		fail "interruption baseline start changed run ID"
+	grep -Fq 'swapon=true' <<< "$output" ||
+		fail "interruption baseline start did not activate swap"
+	assert_lifecycle_state "$RUN_ID" ACTIVE null ||
+		fail "interruption baseline start did not persist clean ACTIVE"
+}
+
+assert_interruption_kernel_facts() {
+	local phase="$1"
+	local expected_module expected_mapper expected_swap
+	local observed_module=0
+	local observed_mapper=0
+	local observed_swap
+
+	case "$phase" in
+		start-starting)
+			expected_module=0; expected_mapper=0; expected_swap=0
+			;;
+		start-module-loaded)
+			expected_module=1; expected_mapper=0; expected_swap=0
+			;;
+		start-mapper-resumed)
+			expected_module=1; expected_mapper=1; expected_swap=0
+			;;
+		start-swapon|stop-stopping)
+			expected_module=1; expected_mapper=1; expected_swap=1
+			;;
+		stop-swapoff)
+			expected_module=1; expected_mapper=1; expected_swap=0
+			;;
+		*)
+			fail "unknown interruption phase: $phase"
+			;;
+	esac
+
+	[[ ! -d /sys/module/dm_swapz ]] || observed_module=1
+	dmsetup info "$DMNAME" >/dev/null 2>&1 && observed_mapper=1
+	observed_swap="$(mapper_swap_entry_count)" ||
+		fail "cannot inspect interrupted mapper swap identity"
+	[[ "$observed_module" == "$expected_module" &&
+	   "$observed_mapper" == "$expected_mapper" &&
+	   "$observed_swap" == "$expected_swap" ]] ||
+		fail "unexpected kernel facts after $phase: module=$observed_module/$expected_module mapper=$observed_mapper/$expected_mapper swap=$observed_swap/$expected_swap"
+
+	if [[ "$phase" == start-starting ]]; then
+		[[ ! -e "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ]] ||
+			fail "STARTING interruption unexpectedly published module WAL"
+	else
+		[[ -f "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ]] &&
+			grep -Fq "\"run_id\":\"$RUN_ID\"" \
+				"$RECOVERY_BASE/primary-module-load-$RUN_ID.json" &&
+			grep -Fq '"phase":"LOADED"' \
+				"$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ||
+			fail "interruption does not retain exact LOADED module WAL"
+	fi
+}
+
+interrupt_lifecycle() {
+	local operation="$1"
+	local phase="$2"
+	local expected_stage="$3"
+	local output rc
+
+	set +e
+	output="$(
+		SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER="$phase" \
+		timeout --signal=TERM --kill-after=10s 90s \
+			"$CONTROL" primary "$operation" 2>&1
+	)"
+	rc=$?
+	set -e
+	printf '%s\n' "$output"
+	[[ "$rc" == 86 ]] ||
+		fail "$phase returned $rc instead of deterministic process-death status 86"
+	assert_lifecycle_state "$RUN_ID" "$expected_stage" null ||
+		fail "$phase did not leave expected durable $expected_stage state"
+	[[ -f "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
+		fail "$phase did not retain active ownership marker"
+	assert_interruption_kernel_facts "$phase"
+}
+
+recover_interruption_run() {
+	local phase="$1"
+	local expected_previous="$2"
+	local expected_swapoff="$3"
+	local expected_mapper_removed="$4"
+	local expected_module_unloaded="$5"
+	local output recovered_run swaps_after
+
+	if ! output="$(
+		timeout --signal=TERM --kill-after=10s 90s \
+			"$CONTROL" primary recover 2>&1
+	)"; then
+		printf '%s\n' "$output" >&2
+		fail "fresh-process recovery failed after $phase"
+	fi
+	printf '%s\n' "$output"
+	recovered_run="$(printf '%s\n' "$output" |
+		sed -n 's/^PRIMARY_RECOVER=COMPLETE run_id=\([0-9a-f]\{32\}\).*/\1/p')"
+	[[ "$recovered_run" == "$RUN_ID" ]] ||
+		fail "recovery after $phase changed run ID"
+	grep -Fq "swapoff=$expected_swapoff" <<< "$output" ||
+		fail "recovery after $phase reported unexpected swapoff ownership"
+	grep -Fq "mapper_removed=$expected_mapper_removed" <<< "$output" ||
+		fail "recovery after $phase reported unexpected mapper ownership"
+	grep -Fq "module_unloaded=$expected_module_unloaded" <<< "$output" ||
+		fail "recovery after $phase reported unexpected module ownership"
+	assert_lifecycle_state "$RUN_ID" COMPLETE "$expected_previous" ||
+		fail "recovery after $phase did not preserve origin in COMPLETE"
+	[[ ! -e "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
+		fail "recovery after $phase left active owner marker"
+	[[ -f "$RECOVERY_BASE/consumed-$RUN_ID.json" ]] ||
+		fail "recovery after $phase removed consumed provenance"
+	[[ ! -d /sys/module/dm_swapz ]] ||
+		fail "recovery after $phase left dm_swapz loaded"
+	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+		fail "recovery after $phase left swapz-primary mapper"
+	swaps_after="$(swapz_swap_inventory_identity /proc/swaps)" ||
+		fail "cannot snapshot host swap identity after $phase recovery"
+	[[ "$swaps_after" == "$SWAPS_ID_BEFORE" ]] ||
+		fail "host swap identity differs after $phase recovery"
+}
+
 cleanup() {
 	local original_rc=$?
 	local stage=""
@@ -462,3 +663,39 @@ SWAPS_ID_AFTER="$(swapz_swap_inventory_identity /proc/swaps)" ||
 	fail "host swap identity differs after normal lifecycle teardown"
 
 note "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:$RUN_ID partuuid:$PARTUUID device:$PART_DEVNO prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false"
+
+for phase in start-starting start-module-loaded start-mapper-resumed start-swapon; do
+	prepare_interruption_run
+	note "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase run_id:$RUN_ID"
+	interrupt_lifecycle start "$phase" STARTING
+	case "$phase" in
+		start-starting)
+			recover_interruption_run "$phase" STARTING false false false
+			;;
+		start-module-loaded)
+			recover_interruption_run "$phase" STARTING false false true
+			;;
+		start-mapper-resumed)
+			recover_interruption_run "$phase" STARTING false true true
+			;;
+		start-swapon)
+			recover_interruption_run "$phase" STARTING true true true
+			;;
+	esac
+	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
+done
+
+for phase in stop-stopping stop-swapoff; do
+	prepare_interruption_run
+	start_interruption_baseline
+	note "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase run_id:$RUN_ID"
+	interrupt_lifecycle stop "$phase" STOPPING
+	if [[ "$phase" == stop-stopping ]]; then
+		recover_interruption_run "$phase" STOPPING true true true
+	else
+		recover_interruption_run "$phase" STOPPING false true true
+	fi
+	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
+done
+
+note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6 fresh_process:true host_swap_identity:preserved"

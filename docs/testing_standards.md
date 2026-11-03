@@ -3985,10 +3985,18 @@ also expose deterministic process-death points through
 such point to a no-op and must not read the environment. A selected test point
 terminates with `_exit(86)` after the named durable milestone, deliberately
 skipping in-process cleanup so a fresh `primary recover` invocation exercises
-the same stale state a killed process would leave. Initial required milestones
-are durable STARTING, module-load WAL LOADED, mapper resumed, native swapon
-before ACTIVE publication, durable STOPPING, and native swapoff before mapper
-removal. Rootless direct-C coverage must
+the same stale state a killed process would leave. The official owned-null_blk lifecycle rehearsal must drive all six initial
+milestones: durable STARTING, module-load WAL LOADED, mapper resumed, native
+swapon before ACTIVE publication, durable STOPPING, and native swapoff before
+mapper removal. Each injected process must exit with the private deterministic
+status, the harness must verify the expected intermediate module/mapper/swap
+facts and durable STARTING or STOPPING record, and a fresh process must run the
+normal recovery command. Recovery must finish COMPLETE with the interrupted
+stage preserved as recovery_previous_stage, remove the active owner marker,
+retain permanent consumed provenance, restore the exact pre-test host swap
+inventory, and leave no swapz mapper or module. The loaded-stage wrapper must
+bound the complete success plus six-interruption rehearsal without weakening
+the per-operation timeouts or quarantine-on-uncertain-cleanup policy. Rootless direct-C coverage must
 also prove the native activation/deactivation helpers return `ENODEV` with
 their side-effect outputs cleared. The shared production syscall/inventory transition helper must also
 be exercised from direct-C rootless tests with fake inventory and syscall
