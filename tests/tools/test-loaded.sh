@@ -93,6 +93,61 @@ run_privileged_bounded() {
 
 run_privileged_bounded 60 tests/tools/loaded-preflight.sh
 printf 'LOADED_QUALIFICATION_SOURCE=%s\n' "$tested_source"
+
+# Native ASan/UBSan/TSan cannot establish loaded-kernel instrumentation.
+# Record the running kernel's debug features as observational release evidence;
+# absence is not an ordinary make-test failure because production kernels often
+# disable these expensive diagnostics.
+kernel_debug_config_source=unavailable
+kernel_debug_config_path=
+kernel_debug_config_gzip=0
+if [[ -r /proc/config.gz ]] && command -v gzip >/dev/null 2>&1; then
+    kernel_debug_config_source=proc
+    kernel_debug_config_path=/proc/config.gz
+    kernel_debug_config_gzip=1
+elif [[ -r "/boot/config-$(uname -r)" ]]; then
+    kernel_debug_config_source=boot
+    kernel_debug_config_path="/boot/config-$(uname -r)"
+elif [[ -r "/lib/modules/$(uname -r)/build/.config" ]]; then
+    kernel_debug_config_source=build
+    kernel_debug_config_path="/lib/modules/$(uname -r)/build/.config"
+fi
+
+kernel_debug_value() {
+    local symbol="$1"
+    if [[ $kernel_debug_config_source == unavailable ]]; then
+        printf '%s' unknown
+        return 0
+    fi
+    if (( kernel_debug_config_gzip )); then
+        if gzip -cd -- "$kernel_debug_config_path" 2>/dev/null |
+                grep -Fx -- "$symbol=y" >/dev/null; then
+            printf '%s' 1
+            return 0
+        fi
+        if gzip -cd -- "$kernel_debug_config_path" 2>/dev/null |
+                grep -Fx -- "# $symbol is not set" >/dev/null; then
+            printf '%s' 0
+            return 0
+        fi
+    else
+        if grep -Fx -- "$symbol=y" "$kernel_debug_config_path" >/dev/null; then
+            printf '%s' 1
+            return 0
+        fi
+        if grep -Fx -- "# $symbol is not set" "$kernel_debug_config_path" >/dev/null; then
+            printf '%s' 0
+            return 0
+        fi
+    fi
+    printf '%s' unknown
+}
+printf 'KERNEL_DEBUG_FEATURES=kasan:%s kcsan:%s lockdep:%s config:%s\n' \
+    "$(kernel_debug_value CONFIG_KASAN)" \
+    "$(kernel_debug_value CONFIG_KCSAN)" \
+    "$(kernel_debug_value CONFIG_PROVE_LOCKING)" \
+    "$kernel_debug_config_source"
+
 printf '%s\n' 'START_LOADED_MAXIMUM_CAPACITY'
 run_privileged_bounded 300 tests/tools/deploy-nullblk.sh \
 	--validated-source "$tested_source" --max-boundary-probe
