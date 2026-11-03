@@ -3375,7 +3375,12 @@ Mutable lifecycle state must use a root-owned 0600 temporary file, bounded
 record size, file fsync, identity-checked atomic rename and recovery-directory
 fsync. Reject symlink or non-regular replacement targets, and fail closed if
 the durability step is uncertain. Rootless direct-C tests must update an
-existing record and preserve it when a symlink target is presented.
+existing record and preserve it when a symlink target is presented. The
+stable boot state is `/var/lib/swapz/physical-recovery/primary-state.json`,
+on the already-validated recovery filesystem. Package removal must refuse
+while this file or the active ownership marker exists, including dangling
+symlinks at either path; both remain preserved until an explicit completed
+recovery. The rootless package test must cover these refusal cases.
 
 Recovery must refuse while any `swapoff` process runs in a swapoff stage, even
 when the kernel still lists the device, and an unreadable `/proc` entry fails

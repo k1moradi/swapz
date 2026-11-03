@@ -10,7 +10,7 @@ Conflicts=shutdown.target
 PartOf=dev-mapper-swapz\x2dprimary.swap
 RefuseManualStart=yes
 RefuseManualStop=yes
-ConditionPathExists=/var/lib/swapz/primary/state.json
+ConditionPathExists=/var/lib/swapz/physical-recovery/primary-state.json
 
 [Service]
 Type=oneshot

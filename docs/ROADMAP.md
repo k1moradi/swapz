@@ -1393,6 +1393,9 @@ and recovery are disabled.
 The installed mapper service now orders before and conflicts with the exact
 UUID-generated systemd swap unit for `/dev/sda4`; package installation still
 leaves both swapz units disabled and does not alter the host's fstab.
+Its condition and uninstall guard now use the same stable
+`/var/lib/swapz/physical-recovery/primary-state.json` location as the durable
+state-record primitive. No lifecycle command writes or consumes that file yet.
 The earlier Python manager draft was removed because production Python is
 outside this repository's coding standards. The remaining implementation must
 integrate the permanent root-controlled PARTUUID lock primitive with each
