@@ -107,6 +107,25 @@ def status_format_sequence(source: str = "") -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_owned_nullblk_lifecycle_interruptions_are_test_only(self):
+        primary = PRIMARY
+        start = source_body("swapz_primary_start_prepared", primary)
+        stop = source_body("swapz_primary_stop_active", primary)
+        self.assertIn("#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST", primary)
+        self.assertIn(
+            'getenv("SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER")', primary)
+        self.assertIn(
+            "#define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) do { } while (0)",
+            primary)
+        for phase in (
+                "start-starting", "start-module-loaded",
+                "start-mapper-resumed", "start-swapon"):
+            self.assertIn(
+                f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', start)
+        for phase in ("stop-stopping", "stop-swapoff"):
+            self.assertIn(
+                f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', stop)
+
     def test_primary_manager_target_is_runtime_selected(self):
         # Historical trial paths and device numbers may appear in fixtures or
         # recovery documentation, but must never become production manager

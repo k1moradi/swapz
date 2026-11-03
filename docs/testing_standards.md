@@ -3979,7 +3979,16 @@ failure cleanup must use only the manager's normal recovery command; if
 recovery, mapper/module cleanup, host swap identity, or owned-device identity
 cannot be proved, quarantine the RAM device and evidence instead of forcing
 removal. This private credential is never an owner qualification and must never
-be imported into production recovery storage. Rootless direct-C coverage must
+be imported into production recovery storage. The owned-null_blk build may
+also expose deterministic process-death points through
+`SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER`; the production build must compile every
+such point to a no-op and must not read the environment. A selected test point
+terminates with `_exit(86)` after the named durable milestone, deliberately
+skipping in-process cleanup so a fresh `primary recover` invocation exercises
+the same stale state a killed process would leave. Initial required milestones
+are durable STARTING, module-load WAL LOADED, mapper resumed, native swapon
+before ACTIVE publication, durable STOPPING, and native swapoff before mapper
+removal. Rootless direct-C coverage must
 also prove the native activation/deactivation helpers return `ENODEV` with
 their side-effect outputs cleared. The shared production syscall/inventory transition helper must also
 be exercised from direct-C rootless tests with fake inventory and syscall

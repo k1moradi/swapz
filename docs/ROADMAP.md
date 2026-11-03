@@ -1659,8 +1659,12 @@ partition/PARTUUID, private exact-artifact qualification, READY prepare,
 run-bound module/mapper creation, native swapon, ACTIVE, native swapoff, mapper
 remove/module unload and durable COMPLETE with host swap identity restored.
 This closes the no-interruption coordinator execution gap once owner `make test`
-observes its PASS marker; it does not yet simulate process death. Deterministic
-interruption/recovery on owned null_blk, bounded physical live swap, cold-boot
+observes its PASS marker. The private owned-null_blk build now also has
+production-elided deterministic process-death hooks after STARTING, module WAL
+LOADED, mapper resume, swapon-before-ACTIVE, STOPPING and swapoff; the next
+loaded qualification slice must drive each hook and recover from a fresh
+process. Deterministic interruption/recovery evidence, bounded physical live
+swap, cold-boot
 recovery, boot integration, workload performance and production qualification
 remain open.
 

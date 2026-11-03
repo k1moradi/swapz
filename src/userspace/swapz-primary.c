@@ -63,6 +63,20 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
 #endif
 
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+static void swapz_primary_test_interrupt_after(const char *phase)
+{
+	const char *requested = getenv("SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER");
+
+	if (phase && requested && !strcmp(requested, phase))
+		_exit(86);
+}
+#define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) \
+	swapz_primary_test_interrupt_after(phase)
+#else
+#define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) do { } while (0)
+#endif
+
 #define SWAPZ_PRIMARY_SWAP_VERSION_OFFSET 1024U
 #define SWAPZ_PRIMARY_SWAP_LAST_PAGE_OFFSET 1028U
 #define SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET 1032U
@@ -8533,6 +8547,7 @@ static int swapz_primary_start_prepared(void)
 		    recovery_fd, lock_fd, &starting_state, 0) < 0)
 		goto out;
 	starting_persisted = 1;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting");
 	if (swapz_primary_module_load_intent_write_at(
 		    recovery_fd, lock_fd, &manifest, 0) < 0 ||
 	    swapz_primary_write_header_checked_fd(
@@ -8547,20 +8562,25 @@ static int swapz_primary_start_prepared(void)
 	    module_loaded_by_call != 1)
 		goto out;
 	if (swapz_primary_module_load_mark_loaded_at(
-		    recovery_fd, lock_fd, &manifest, 0) < 0 ||
-	    swapz_primary_dm_create_mapper(
+		    recovery_fd, lock_fd, &manifest, 0) < 0)
+		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-module-loaded");
+	if (swapz_primary_dm_create_mapper(
 		    recovery_fd, lock_fd, &manifest, module_loaded_by_call,
 		    &mapper_created_by_call, &mapper_resumed_by_call,
 		    &mapper_device) < 0 ||
 	    !mapper_created_by_call || !mapper_resumed_by_call ||
-	    mapper_device == 0 ||
-	    swapz_primary_format_mapper_swap(
+	    mapper_device == 0)
+		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mapper-resumed");
+	if (swapz_primary_format_mapper_swap(
 		    recovery_fd, lock_fd, &manifest, mapper_device) < 0 ||
 	    swapz_primary_activate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest, mapper_device,
 		    &swap_activated_by_call) < 0 ||
 	    !swap_activated_by_call)
 		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-swapon");
 	active_state = starting_state;
 	active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
 	if (swapz_primary_state_write_at(
@@ -8708,10 +8728,13 @@ static int swapz_primary_stop_active(void)
 		    recovery_fd, lock_fd, &stopping_state, 0) < 0)
 		goto out;
 	stopping_persisted = 1;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-stopping");
 	if (swapz_primary_deactivate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest,
-		    &swap_deactivated_by_call) < 0 ||
-	    swapz_primary_dm_remove_mapper(
+		    &swap_deactivated_by_call) < 0)
+		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-swapoff");
+	if (swapz_primary_dm_remove_mapper(
 		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0 ||
 	    swapz_primary_unload_owned_module(
 		    recovery_fd, lock_fd, &manifest, 0,
