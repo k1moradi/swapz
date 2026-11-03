@@ -323,12 +323,35 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(
             child_environment["SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION"], "1")
 
+    def test_real_swap_oracle_is_canonical_and_pinned_before_use(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-real-oracle-") as directory:
+            private = Path(directory)
+            pinned, digest = qualify.pin_real_swap_oracle(ORACLE, private)
+            self.assertEqual(pinned.parent, private)
+            self.assertNotEqual(pinned, ORACLE)
+            self.assertEqual(pinned.read_bytes(), ORACLE.read_bytes())
+            self.assertEqual(
+                digest, hashlib.sha256(ORACLE.read_bytes()).hexdigest())
+            self.assertEqual(stat.S_IMODE(pinned.stat().st_mode), 0o500)
+
+        with tempfile.TemporaryDirectory(prefix="swapz-fake-oracle-") as directory:
+            private = Path(directory)
+            fake = private / "fake.py"
+            fake.write_text("print('fabricated pass')\n", encoding="utf-8")
+            fake.chmod(0o700)
+            destination = private / "pinned"
+            destination.mkdir()
+            with self.assertRaisesRegex(
+                    qualify.Blocked, "exact source-controlled oracle"):
+                qualify.pin_real_swap_oracle(fake, destination)
+
     def test_default_control_path_uses_installed_package_layout(self):
         args = qualify.build_parser().parse_args([
             "--validated-source", "a" * 40,
             "--qualification-report", "/tmp/report.json",
         ])
         self.assertEqual(args.swapzctl, "/usr/local/sbin/swapzctl")
+        self.assertEqual(Path(args.oracle).resolve(), ORACLE.resolve())
 
     def test_physical_source_requires_main_equal_origin_main(self):
         source_sha = "a" * 40

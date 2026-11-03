@@ -96,6 +96,14 @@ identity is BLOCKED; at least 1 GiB `MemAvailable`; readable kernel diagnostics;
 swap, PSI, OOM, and zswap controls. A missing storage-separation fact is
 BLOCKED, not equivalent to false.
 
+The real-swap byte oracle is qualification authority: `--oracle` must resolve
+to the exact source-controlled `tests/tools/primary-real-swap-oracle.py`, never
+an arbitrary replacement. After the clean-source gate and before any admitted
+lifecycle mutation, the helper must snapshot those stable bytes into its
+root-only temporary workspace, record their SHA-256, and execute only that
+pinned copy for every cycle. A mid-run pathname replacement must therefore be
+unable to fabricate byte-exact PASS evidence.
+
 The helper must treat the installed `<prefix>/sbin/swapzctl` as the qualified
 artifact identity, derive the same
 `<prefix>/libexec/swapz/{dm-swapz.ko,device-roundtrip}` paths used by the

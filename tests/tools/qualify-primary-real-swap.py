@@ -39,6 +39,7 @@ RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 AUTHORIZATION_SNAPSHOT = ROOT / "docs/handoff/production-readiness.json"
 ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
+REAL_SWAP_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
 MAPPER_NAME = "swapz-primary"
 PAGE_BYTES = 4096
 MIB = 1024 * 1024
@@ -261,6 +262,79 @@ def _sha256_file(path: Path) -> str:
         raise Blocked(f"cannot hash {path}: {exc}") from exc
     return digest.hexdigest()
 
+
+
+
+def pin_real_swap_oracle(oracle_path: Path, private_directory: Path) -> tuple[Path, str]:
+    """Pin the exact source-controlled byte oracle before admitted mutation."""
+    try:
+        canonical = REAL_SWAP_ORACLE.resolve(strict=True)
+        supplied = oracle_path.resolve(strict=True)
+    except OSError as exc:
+        raise Blocked(f"cannot resolve real-swap oracle: {exc}") from exc
+    if supplied != canonical:
+        raise Blocked("real-swap oracle must be the exact source-controlled oracle")
+
+    source_fd = -1
+    try:
+        named_before = canonical.stat()
+        source_fd = os.open(canonical, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        opened = os.fstat(source_fd)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1 or \
+                opened.st_dev != named_before.st_dev or opened.st_ino != named_before.st_ino:
+            raise Blocked("real-swap oracle identity is unsafe")
+        payload = bytearray()
+        while True:
+            chunk = os.read(source_fd, 1024 * 1024)
+            if not chunk:
+                break
+            payload.extend(chunk)
+        opened_after = os.fstat(source_fd)
+        named_after = canonical.stat()
+        if (opened_after.st_dev, opened_after.st_ino, opened_after.st_size,
+                opened_after.st_mtime_ns, opened_after.st_ctime_ns) != (
+                    opened.st_dev, opened.st_ino, opened.st_size,
+                    opened.st_mtime_ns, opened.st_ctime_ns) or \
+                named_after.st_dev != opened.st_dev or \
+                named_after.st_ino != opened.st_ino:
+            raise Blocked("real-swap oracle changed while being pinned")
+        if len(payload) != opened.st_size:
+            raise Blocked("real-swap oracle read was incomplete")
+    except OSError as exc:
+        raise Blocked(f"cannot pin real-swap oracle: {exc}") from exc
+    finally:
+        if source_fd >= 0:
+            os.close(source_fd)
+
+    pinned = private_directory / "primary-real-swap-oracle.py"
+    output_fd = -1
+    try:
+        output_fd = os.open(
+            pinned,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o500,
+        )
+        offset = 0
+        while offset < len(payload):
+            written = os.write(output_fd, payload[offset:])
+            if written <= 0:
+                raise OSError("short oracle snapshot write")
+            offset += written
+        os.fsync(output_fd)
+        identity = os.fstat(output_fd)
+        if not stat.S_ISREG(identity.st_mode) or identity.st_nlink != 1 or \
+                stat.S_IMODE(identity.st_mode) != 0o500:
+            raise Blocked("pinned real-swap oracle identity is unsafe")
+    except OSError as exc:
+        raise Blocked(f"cannot create pinned real-swap oracle: {exc}") from exc
+    finally:
+        if output_fd >= 0:
+            os.close(output_fd)
+
+    digest = hashlib.sha256(payload).hexdigest()
+    if _sha256_file(pinned) != digest:
+        raise Blocked("pinned real-swap oracle digest mismatch")
+    return pinned, digest
 
 def installed_artifact_paths(swapzctl: Path) -> dict[str, Path]:
     """Derive the exact package artifacts the primary manager will consume."""
@@ -2142,14 +2216,15 @@ def execute(arguments: argparse.Namespace) -> dict:
         raise Blocked("primary real-swap qualification requires a 4096-byte host page")
     qualified_swapzctl = Path(arguments.swapzctl).resolve()
     report_path = Path(arguments.qualification_report).resolve()
-    oracle_path = Path(arguments.oracle).resolve()
+    requested_oracle_path = Path(arguments.oracle)
     for path, label in (
             (qualified_swapzctl, "qualified installed swapzctl"),
             (report_path, "qualification report"),
-            (oracle_path, "real-swap oracle")):
+            (requested_oracle_path, "real-swap oracle")):
         if not path.is_file():
             raise Blocked(f"{label} is unavailable: {path}")
-    if not os.access(qualified_swapzctl, os.X_OK) or not os.access(oracle_path, os.X_OK):
+    if not os.access(qualified_swapzctl, os.X_OK) or \
+            not os.access(requested_oracle_path, os.X_OK):
         raise Blocked("qualified swapzctl/oracle executable permission is missing")
     _check_git_source(arguments.validated_source)
 
@@ -2161,6 +2236,8 @@ def execute(arguments: argparse.Namespace) -> dict:
     try:
         swapzctl, execution_control_sha256 = build_physical_execution_control(
             arguments.validated_source, qualified_swapzctl, private_directory)
+        oracle_path, oracle_sha256 = pin_real_swap_oracle(
+            requested_oracle_path, private_parent)
     except Exception:
         private_workspace.cleanup()
         raise
@@ -2196,7 +2273,7 @@ def execute(arguments: argparse.Namespace) -> dict:
             "acceptance_manifest_sha256": acceptance_policy_sha256,
             "qualification_report_sha256": _sha256_file(report_path),
             "helper_sha256": _sha256_file(Path(__file__)),
-            "oracle_sha256": _sha256_file(oracle_path),
+            "oracle_sha256": oracle_sha256,
             "qualified_installed_artifacts": artifact_hashes,
             "physical_execution_control_sha256": execution_control_sha256,
             "partuuid": selector_partuuid,
@@ -2257,7 +2334,7 @@ def execute(arguments: argparse.Namespace) -> dict:
             "source_sha": arguments.validated_source,
             "acceptance_manifest_sha256": acceptance_policy_sha256,
             "helper_sha256": _sha256_file(Path(__file__)),
-            "oracle_sha256": _sha256_file(oracle_path),
+            "oracle_sha256": oracle_sha256,
             "qualification_report_sha256": _sha256_file(report_path),
             "qualified_installed_artifacts": artifact_hashes,
             "physical_execution_control_sha256": execution_control_sha256,
