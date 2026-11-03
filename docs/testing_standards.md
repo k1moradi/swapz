@@ -3655,3 +3655,14 @@ and an inactive swap mapping. It must prove both name and UUID absent after
 non-forced removal. Missing, substituted, extra-target, extra-dependency or
 unqueryable mapper state remains a recovery stop condition; rootless parser
 coverage alone cannot close these VM gates.
+
+The primary manager's transaction-ID generator must use the operating system's
+cryptographic random source, handle interrupted and partial reads, return only
+lowercase 32-hex IDs, and leave its output unchanged on failure. Rootless
+direct-C coverage must validate generated IDs and exercise deterministic
+header construction from a known ID. The 4096-byte candidate must pass the
+shared SWZ validator for the exact `/dev/sda4` geometry, contain the exact
+16-byte ID, and have zero reserved bytes. Malformed and all-zero IDs must be
+rejected without altering the caller's header buffer. These tests establish
+format construction only; they do not authorize writes or close lifecycle,
+crash-recovery, VM, or physical-swap qualification gates.

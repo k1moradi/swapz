@@ -18,6 +18,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
+#include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/syscall.h>
@@ -359,6 +360,92 @@ int swapz_primary_state_transition_allowed(
 	}
 	return swapz_primary_stage_transition_allowed(current->stage,
 						      next->stage);
+}
+
+int swapz_primary_run_id_generate(
+	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U])
+{
+	static const char hex[] = "0123456789abcdef";
+	unsigned char random_bytes[SWAPZ_PRIMARY_RUN_ID_LENGTH / 2U];
+	char candidate[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
+	size_t offset = 0;
+	size_t i;
+	unsigned char any = 0;
+
+	if (!run_id) {
+		errno = EINVAL;
+		return -1;
+	}
+	while (offset < sizeof(random_bytes)) {
+		ssize_t count = getrandom(random_bytes + offset,
+					  sizeof(random_bytes) - offset, 0);
+
+		if (count < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (count == 0) {
+			errno = EIO;
+			return -1;
+		}
+		offset += (size_t)count;
+	}
+	for (i = 0; i < sizeof(random_bytes); ++i) {
+		any |= random_bytes[i];
+		candidate[i * 2U] = hex[random_bytes[i] >> 4];
+		candidate[i * 2U + 1U] = hex[random_bytes[i] & 0x0fU];
+	}
+	memset(random_bytes, 0, sizeof(random_bytes));
+	if (!any) {
+		memset(candidate, 0, sizeof(candidate));
+		errno = EIO;
+		return -1;
+	}
+	candidate[SWAPZ_PRIMARY_RUN_ID_LENGTH] = '\0';
+	memcpy(run_id, candidate, sizeof(candidate));
+	memset(candidate, 0, sizeof(candidate));
+	return 0;
+}
+
+int swapz_primary_header_build(
+	const char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U],
+	unsigned char header[SWAPZ_SUPERBLOCK_BYTES])
+{
+	static const char hex[] = "0123456789abcdef";
+	unsigned char candidate[SWAPZ_SUPERBLOCK_BYTES] = {0};
+	unsigned int i;
+
+	if (!run_id || !header || !swapz_primary_valid_run_id(run_id)) {
+		errno = EINVAL;
+		return -1;
+	}
+	memcpy(candidate + SWAPZ_SUPERBLOCK_MAGIC_OFFSET,
+	       swapz_superblock_magic, SWAPZ_SUPERBLOCK_MAGIC_BYTES);
+	swapz_sb_put_u32(candidate + SWAPZ_SUPERBLOCK_VERSION_OFFSET,
+			 SWAPZ_SUPERBLOCK_VERSION);
+	swapz_sb_put_u32(candidate + SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET,
+			 SWAPZ_SUPERBLOCK_BYTES);
+	swapz_sb_put_u64(candidate + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET,
+			 (unsigned long long)SWAPZ_PRIMARY_DEVICE_BYTES);
+	for (i = 0; i < SWAPZ_SUPERBLOCK_UUID_BYTES; ++i) {
+		unsigned int high =
+			(unsigned int)(strchr(hex, run_id[i * 2U]) - hex);
+		unsigned int low =
+			(unsigned int)(strchr(hex, run_id[i * 2U + 1U]) - hex);
+
+		candidate[SWAPZ_SUPERBLOCK_UUID_OFFSET + i] =
+			(unsigned char)((high << 4) | low);
+	}
+	if (!swapz_sb_valid(candidate,
+			    (unsigned long long)SWAPZ_PRIMARY_DEVICE_BYTES)) {
+		memset(candidate, 0, sizeof(candidate));
+		errno = EINVAL;
+		return -1;
+	}
+	memcpy(header, candidate, sizeof(candidate));
+	memset(candidate, 0, sizeof(candidate));
+	return 0;
 }
 
 static int swapz_primary_manifest_take_line(const char **cursor,
@@ -2510,9 +2597,11 @@ static int swapz_primary_valid_run_id(const char *run_id)
 {
 	size_t i;
 
-	if (!run_id || strlen(run_id) != 32U)
+	if (!run_id ||
+	    strnlen(run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U) !=
+		    SWAPZ_PRIMARY_RUN_ID_LENGTH)
 		return 0;
-	for (i = 0; i < 32U; ++i) {
+	for (i = 0; i < SWAPZ_PRIMARY_RUN_ID_LENGTH; ++i) {
 		if (!((run_id[i] >= '0' && run_id[i] <= '9') ||
 		      (run_id[i] >= 'a' && run_id[i] <= 'f')))
 			return 0;

@@ -219,6 +219,17 @@ Do not add kernel-only headers or libc dependencies to `superblock.h`.
 These protections do not authorize physical test execution or bypass the
 separate physical-review gates.
 
+The primary manager's per-run SWZ authorization header must be built in memory
+from a freshly generated lowercase 32-hex transaction ID using the system
+random source. Convert those 16 bytes directly into the 16-byte header UUID;
+do not use timestamps, process IDs or caller-selected identifiers. Populate
+the shared unversioned header layout, bind the fixed `/dev/sda4` byte size,
+leave every reserved byte zero, and validate the complete 4096-byte candidate
+with `swapz_sb_valid()` before exposing it to the caller. Reject malformed or
+all-zero IDs without changing the caller's output buffer. Header construction
+does not authorize a device write; the only writer remains the checked,
+identity-bound descriptor primitive after durable recovery state exists.
+
 ### Primary manager module admission
 
 The primary manager must open the retained package image at

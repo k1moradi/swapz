@@ -60,6 +60,13 @@ int swapz_primary_state_format(const struct swapz_primary_state *state,
 int swapz_primary_state_transition_allowed(
 	const struct swapz_primary_state *current,
 	const struct swapz_primary_state *next);
+/* Mint a cryptographically random lowercase 32-hex-character transaction ID. */
+int swapz_primary_run_id_generate(
+	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U]);
+/* Build the exact fixed-geometry SWZ authorization header for a run ID. */
+int swapz_primary_header_build(
+	const char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U],
+	unsigned char header[4096]);
 int swapz_primary_manifest_parse(const char *record, size_t length,
 				 struct swapz_primary_manifest *manifest);
 /* Validate the exact five-stage owner report for this source and host. */

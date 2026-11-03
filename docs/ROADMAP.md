@@ -1533,3 +1533,12 @@ remain disabled, and this change modifies `swapzctl`; it requires fresh
 exact-source owner qualification before it can be used. The loader and mapper
 primitives are not yet integrated into a complete prepare/start/stop/recover
 state machine, and no boot lifecycle is qualified.
+
+The next primary-manager slice adds operating-system-random transaction IDs
+and pure construction of the fixed-size SWZ authorization header bound to the
+run ID and `/dev/sda4` geometry. Rootless tests validate the exact UUID bytes,
+reserved-zero region, shared header validator and output preservation on
+invalid input. This is format-construction groundwork only: no partition was
+written, the privileged lifecycle remains disabled, and cold-boot recovery,
+swap activation, stop/recovery integration, exact-source qualification and
+live swap-I/O evidence remain open.

@@ -122,6 +122,70 @@ static void test_target_identity_and_header_policy(void)
 	assert(!swapz_primary_original_swap_signature(block));
 }
 
+static void test_primary_run_id_and_header_builder(void)
+{
+	const char *run_id = "0123456789abcdef0123456789abcdef";
+	const char *all_zero = "00000000000000000000000000000000";
+	const char *uppercase = "0123456789ABCDEF0123456789ABCDEF";
+	unsigned char header[SWAPZ_SUPERBLOCK_BYTES];
+	unsigned char original[SWAPZ_SUPERBLOCK_BYTES];
+	char unterminated[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
+	char generated[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
+	unsigned int i;
+	unsigned char any = 0;
+
+	memset(header, 0xa5, sizeof(header));
+	assert(swapz_primary_header_build(run_id, header) == 0);
+	assert(swapz_sb_valid(header, SWAPZ_PRIMARY_DEVICE_BYTES));
+	assert(header[SWAPZ_SUPERBLOCK_UUID_OFFSET] == 0x01U);
+	assert(header[SWAPZ_SUPERBLOCK_UUID_OFFSET + 1U] == 0x23U);
+	assert(header[SWAPZ_SUPERBLOCK_UUID_OFFSET + 15U] == 0xefU);
+	for (i = SWAPZ_SUPERBLOCK_RESERVED_OFFSET;
+	     i < SWAPZ_SUPERBLOCK_BYTES; ++i)
+		assert(header[i] == 0U);
+
+	memcpy(original, header, sizeof(original));
+	errno = 0;
+	assert(swapz_primary_header_build(all_zero, header) < 0);
+	assert(errno == EINVAL);
+	assert(!memcmp(header, original, sizeof(header)));
+	errno = 0;
+	assert(swapz_primary_header_build(uppercase, header) < 0);
+	assert(errno == EINVAL);
+	assert(!memcmp(header, original, sizeof(header)));
+	errno = 0;
+	assert(swapz_primary_header_build("short", header) < 0);
+	assert(errno == EINVAL);
+	assert(!memcmp(header, original, sizeof(header)));
+	memset(unterminated, 'a', sizeof(unterminated));
+	errno = 0;
+	assert(swapz_primary_header_build(unterminated, header) < 0);
+	assert(errno == EINVAL);
+	assert(!memcmp(header, original, sizeof(header)));
+
+	memset(generated, 0xa5, sizeof(generated));
+	assert(swapz_primary_run_id_generate(generated) == 0);
+	assert(swapz_primary_valid_run_id(generated));
+	assert(swapz_primary_header_build(generated, header) == 0);
+	assert(swapz_sb_valid(header, SWAPZ_PRIMARY_DEVICE_BYTES));
+	for (i = 0; i < SWAPZ_SUPERBLOCK_UUID_BYTES; ++i) {
+		any |= header[SWAPZ_SUPERBLOCK_UUID_OFFSET + i];
+		unsigned int high = generated[i * 2U] <= '9' ?
+			(unsigned int)(generated[i * 2U] - '0') :
+			(unsigned int)(generated[i * 2U] - 'a' + 10);
+		unsigned int low = generated[i * 2U + 1U] <= '9' ?
+			(unsigned int)(generated[i * 2U + 1U] - '0') :
+			(unsigned int)(generated[i * 2U + 1U] - 'a' + 10);
+
+		assert(header[SWAPZ_SUPERBLOCK_UUID_OFFSET + i] ==
+		       (unsigned char)((high << 4) | low));
+	}
+	assert(any != 0U);
+	errno = 0;
+	assert(swapz_primary_run_id_generate(NULL) < 0);
+	assert(errno == EINVAL);
+}
+
 static void test_primary_stage_policy(void)
 {
 	static const unsigned char allowed[SWAPZ_PRIMARY_STAGE_COUNT]
@@ -1360,6 +1424,7 @@ int main(void)
 						  pages + 1ULL));
 	test_swap_inventory_parser();
 	test_target_identity_and_header_policy();
+	test_primary_run_id_and_header_builder();
 	test_primary_stage_policy();
 	test_primary_state_records();
 	test_checked_header_write();
