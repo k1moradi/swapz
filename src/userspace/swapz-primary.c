@@ -1268,6 +1268,9 @@ out:
 		(void)close(directory_fd);
 	memset(record, 0, sizeof(record));
 	memset(&target, 0, sizeof(target));
+	/* Authorization is only an admission decision. Lifecycle operations must
+	 * establish their own fresh selected-target state after the gate. */
+	swapz_primary_selected_target_clear();
 	return authorized;
 }
 #endif
