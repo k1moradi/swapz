@@ -1342,7 +1342,7 @@ if [[ ! -e "$BY_PARTUUID" && ! -L "$BY_PARTUUID" ]]; then
 		fail "owned null_blk partition sysfs path changed"
 	UDEV_DEVPATH="${PART_SYSFS_REAL#/sys}"
 	printf -v UDEV_RULE_CONTENT \
-		'ACTION=="add", SUBSYSTEM=="block", ENV{DEVPATH}=="%s", IMPORT{builtin}="blkid", ENV{ID_PART_ENTRY_UUID}=="%s", SYMLINK+="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"' \
+		'ACTION=="add", SUBSYSTEM=="block", DEVPATH=="%s", IMPORT{builtin}="blkid", ENV{ID_PART_ENTRY_UUID}=="%s", SYMLINK+="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"' \
 		"$UDEV_DEVPATH" "$PARTUUID"
 	if ! (
 		set -o noclobber

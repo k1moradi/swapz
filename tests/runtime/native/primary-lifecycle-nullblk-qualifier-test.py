@@ -116,7 +116,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertLess(partuuid_proof, trigger)
         self.assertLess(trigger, alias_wait)
         self.assertLess(partuuid_proof, alias_verifier)
-        self.assertIn('ENV{DEVPATH}=="%s"', self.script)
+        self.assertIn('DEVPATH=="%s"', self.script)
         self.assertIn('ENV{ID_PART_ENTRY_UUID}=="%s"', self.script)
         self.assertIn('SYMLINK+="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"',
                       self.script)

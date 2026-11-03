@@ -4433,7 +4433,7 @@ event only for that exact sysfs partition path, and require udev to publish the
 by-PARTUUID block-device alias with the same major:minor. Some host persistent-
 storage rule sets deliberately exclude `nullb*`; when the normal rules do not
 publish the link, install one temporary udev rule matching only the verified
-partition's exact DEVPATH and PARTUUID, reload the rules, and trigger that
+partition's exact `DEVPATH` rule key and PARTUUID, reload the rules, and trigger that
 partition again. Prove the link in udev's recorded `DEVLINKS` property as well
 as by block-device identity; never create the alias with a shell symlink.
 Remove the temporary rule after null_blk teardown and require its alias to be
