@@ -1117,7 +1117,7 @@ class RuntimeHealthTests(unittest.TestCase):
                 status)
                     if [ "${MOCK_DM_STATUS_SLEEP:-0}" != 0 ]; then sleep "$MOCK_DM_STATUS_SLEEP"; fi
                     if [ "${MOCK_DM_STATUS_UNAVAILABLE:-0}" = 1 ]; then exit 1; fi
-                    printf '%s\n' "${MOCK_DM_STATUS:-0 216643584 swapz failed=0 error=0 flush_err=0 segment_discards_failed=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 window_gc_pressure=0}"
+                    printf '%s\n' "${MOCK_DM_STATUS:-0 216643584 swapz failed=0 error=0 flush_err=0 segment_discards_failed=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 gc_reserve_segments_initial=2 gc_reserve_segments_current=2 gc_destination_advances=0 window_gc_pressure=0}"
                     ;;
                 *) exit 2 ;;
                 esac
