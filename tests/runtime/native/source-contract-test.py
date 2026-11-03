@@ -5532,12 +5532,17 @@ int main(void)
         self.assertLess(
             loaded.index("--max-boundary-probe"),
             loaded.index("START_LOADED_OWNED_NULLBLK_SMOKE"))
+        sizing_start = deploy.index("NULLBLK_SIZE_MIB=64")
+        sizing_end = deploy.index("\nfi", sizing_start)
+        sizing = deploy[sizing_start:sizing_end]
+        self.assertIn("if (( MAX_BOUNDARY_PROBE )); then", sizing)
+        self.assertIn("NULLBLK_SIZE_MIB=16383", sizing)
+
         capacity_start = deploy.index(
             "if (( MAX_BOUNDARY_PROBE )); then\n\tMAX_LOGICAL_PAGES=3727616")
         capacity_end = deploy.index("\n\texit 0\nfi", capacity_start)
         capacity = deploy[capacity_start:capacity_end]
         for evidence in (
-                "NULLBLK_SIZE_MIB=16383",
                 "MAX_LOGICAL_PAGES=3727616",
                 "MAX_LOGICAL_SECTORS=29820928",
                 "MAX_LOGICAL_BYTES=15268315136",
