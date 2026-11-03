@@ -426,6 +426,9 @@ def host_stability(before: dict, after: dict) -> dict:
         "kernel_machine":
             (before.get("kernel") or {}).get("machine") ==
             (after.get("kernel") or {}).get("machine"),
+        "kernel_version":
+            (before.get("kernel") or {}).get("version") ==
+            (after.get("kernel") or {}).get("version"),
         "kernel_node":
             (before.get("kernel") or {}).get("node") ==
             (after.get("kernel") or {}).get("node"),
@@ -459,6 +462,9 @@ def host_stability(before: dict, after: dict) -> dict:
         "device_queue":
             (before.get("device") or {}).get("queue") ==
             (after.get("device") or {}).get("queue"),
+        "cpu_model_names":
+            (before.get("cpu") or {}).get("model_names") ==
+            (after.get("cpu") or {}).get("model_names"),
         "configured_cpus":
             (before.get("cpu") or {}).get("configured_cpus") ==
             (after.get("cpu") or {}).get("configured_cpus"),
@@ -480,6 +486,11 @@ def host_stability(before: dict, after: dict) -> dict:
         "cpu_scaling_max":
             (before.get("cpu") or {}).get("scaling_max_khz") ==
             (after.get("cpu") or {}).get("scaling_max_khz"),
+        "memory_total_bytes":
+            (before.get("memory") or {}).get("total_bytes") ==
+            (after.get("memory") or {}).get("total_bytes"),
+        "mount_inventory":
+            before.get("mount_inventory") == after.get("mount_inventory"),
         "swap_inventory":
             swap_identity(before.get("swap_inventory") or []) ==
             swap_identity(after.get("swap_inventory") or []),
