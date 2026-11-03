@@ -145,9 +145,12 @@ result before allowing `start`. Any stale zero-headroom geometry is BLOCKED
 before mutation or FAIL after a prepared transaction; manager success text is
 not capacity authority.
 
-The plan's `privileged_execution_enabled=true` proves only that the
-private physical seam and runtime marker are active; it never authorizes the
-ordinary production binary. The module is deliberately absent before start, so
+The plan's `privileged_execution_enabled=true` proves only the execution
+authority of the binary being queried. The private physical seam still requires
+its explicit test-only runtime marker. Ordinary production is compiled capable
+but remains false until the owner-armed cross-boot preflight has minted a
+volatile authorization bound to the current boot, exact build source, canonical
+PARTUUID and target byte size. The module is deliberately absent before start, so
 live module sysfs provenance is expected to be unavailable at admission and
 must not be required there. Immediately after successful start, the helper must
 independently require the loaded module's `build_source_sha`, clean bit, and
@@ -4261,9 +4264,15 @@ must resolve/hash formatter/module/oracle artifacts from that installed control
 tree rather than from the temporary executor. Physical lifecycle commands must
 also require exact runtime marker
 `SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION=1`; without it the private executor
-remains blocked. The ordinary source must retain literal execution gate 0 and
-must not read that marker. The public Makefile and package must never define,
-install or expose either test seam. The source contract must inspect the root
+remains blocked. Ordinary production must not read that private marker. Its
+same qualified artifact is instead runtime-locked by volatile
+`/run/swapz/primary-execution.env`, created only by successful owner-armed
+cross-boot preflight. That record must be root-owned mode 0600 under a
+root-owned mode-0700 runtime directory and exactly bind current boot ID, build
+source SHA, canonical configured PARTUUID and target byte size. Failed or
+repeated preflight removes any earlier token before checking current facts. The
+public Makefile and package must never define, install or expose either test
+seam. The source contract must inspect the root
 Makefile directly and reject the physical seam macro there. The lifecycle audit
 must identify the ordinary production gate independently of seam-local gate
 definitions, and must prove the native swapon/swapoff syscall implementations
@@ -4498,11 +4507,9 @@ post-operation inventory failure, already-active/inactive state, and raw-backing
 swap refusal. The independent lifecycle model remains supplemental; it must not
 be the only behavioral evidence for production logic. The adversarial lifecycle
 audit must verify native `swapon` is ordered before durable `ACTIVE`, and native
-`swapoff` is ordered before mapper removal in both stop and recovery. The
-privileged execution gate remains
-explicitly zero until owned-RAM interruption coverage and bounded physical
-lifecycle evidence are added; source presence of the syscalls alone is not
-authorization. A metadata-preparation PASS is not start, live-swap,
+`swapoff` is ordered before mapper removal in both stop and recovery. The privileged execution capability remains runtime-disabled by default until
+the owner-armed cross-boot preflight authorizes the exact current source and
+target; source presence of the syscalls alone is not authorization. A metadata-preparation PASS is not start, live-swap,
 loaded-recovery, boot, performance, or production qualification.
 
 The prepared-start coordinator may consume only an exact owned `READY`
@@ -4907,19 +4914,19 @@ recovery, physical-swap, or production-acceptance gates.
 ## Qualification discovery and release-evidence integrity
 
 Lifecycle execution-gate assertions must evaluate the active C preprocessor
-configuration rather than the first textual `#define`. Ordinary production
-must resolve `SWAPZ_PRIMARY_EXECUTION_ENABLED` to 0; owned-null_blk and
-physical qualification may resolve it to 1 only with all private controls
-present, and the two private modes must fail when combined. The read-only
-primary plan and mutating command dispatcher must use the same derived
-compile-time-plus-runtime gate. `privileged_execution_enabled` must therefore
-report false for the ordinary build, true for owned-null_blk qualification, and
-true for physical qualification only while its explicit runtime marker is
-exactly enabled. A truthful true value in a private qualification binary is
-evidence about that test seam only: it does not authorize or enable ordinary
-production lifecycle execution. Ordinary preprocessed source must not read the
-physical runtime marker. Comments and string literals containing fake gate or
-syscall text never satisfy safety assertions.
+configuration rather than the first textual `#define`. Ordinary production,
+owned-null_blk qualification and physical qualification may compile lifecycle
+capability, but their runtime authorities are distinct and must fail closed.
+The read-only primary plan and mutating command dispatcher must use the same
+derived compile-time-plus-runtime gate. `privileged_execution_enabled` must
+report false for ordinary production until the boot-scoped authorization
+record exactly matches current boot ID, clean build source SHA, configured
+PARTUUID and target size; owned-null_blk qualification remains directly enabled
+inside its private fixture; physical qualification is true only while its
+explicit test-only runtime marker is exactly enabled. Ordinary production must
+not read the physical qualification marker, and a private seam cannot
+substitute for the production boot token. Comments and string literals
+containing fake gate or syscall text never satisfy safety assertions.
 
 The official rootless stage directly executes every mandatory Python contract
 owned by that stage, including the owned-null_blk lifecycle qualifier and
