@@ -4657,8 +4657,15 @@ their own result/evidence payloads so release aggregation never reconstructs or
 guesses the policy binding after the run. Release-evidence unit fixtures must
 use independent artifact-hash mappings for qualified, owner-report and
 installed records; mutating one record must never mutate another and hide a
-cross-binding mismatch. A retained old host snapshot must be
-labeled HISTORICAL and cannot become a current release verdict.
+cross-binding mismatch. Current release evidence must also include one canonical
+authorized-target identity consisting of the normalized lowercase PARTUUID and
+exact partition byte size. Real-swap, maximum-capacity/RAM, sustained-physical,
+lifecycle/deployment, armed cold-boot and owner-observed reboot PASS records
+must bind that same tuple. Runtime major:minor is deliberately excluded because
+it may change across attachment or boot; this is a consistency check and does
+not claim PARTUUID plus size is cryptographic or physical-card uniqueness. A
+retained old host snapshot must be labeled HISTORICAL and cannot become a
+current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
 
