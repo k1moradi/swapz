@@ -38,6 +38,7 @@ PRODUCTION_READINESS_REQUIRED_EVIDENCE = (
     "required_ci",
     "exact_source_owner_make_test",
     "owned_nullblk_qualification",
+    "unresolved_critical_issues",
     "authorized_target_identity",
     "real_linux_swap",
     "maximum_capacity_and_ram",
@@ -50,8 +51,8 @@ PRODUCTION_READINESS_REQUIRED_EVIDENCE = (
 PRODUCTION_READINESS_CODE_EVIDENCE = (
     "production_source", "clean_build_state", "qualified_artifact_hashes",
     "required_ci", "exact_source_owner_make_test",
-    "owned_nullblk_qualification", "authorized_target_identity",
-    "real_linux_swap",
+    "owned_nullblk_qualification", "unresolved_critical_issues",
+    "authorized_target_identity", "real_linux_swap",
     "maximum_capacity_and_ram", "sustained_physical_performance",
     "lifecycle_deployment_state",
 )
@@ -237,6 +238,8 @@ def _readiness_pass_payload_valid(
         return (entry.get("overall") == "PASS" and
                 _valid_sha256(entry.get("evidence_sha256")) and
                 _readiness_artifact_hashes_valid(entry.get("hashes")))
+    if name == "unresolved_critical_issues":
+        return type(entry.get("count")) is int and entry["count"] == 0
     if name == "authorized_target_identity":
         return (entry.get("authorized") is True and
                 _readiness_target_key(entry.get("target")) is not None)
