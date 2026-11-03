@@ -790,7 +790,9 @@ class PublicMakeContract(unittest.TestCase):
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-header-written",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-inserted",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-loaded",
+                "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-mapper-inactive",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-mapper-resumed",
+                "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-mkswap",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-swapon",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-stopping",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-swapoff",
@@ -799,7 +801,7 @@ class PublicMakeContract(unittest.TestCase):
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-mapper-removed",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-module-unloaded",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-restored",
-                "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:13 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
+                "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:15 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
                 "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 ambiguous_syscall:true inventory_failure:true definite_io_error:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
             ]
             specs = (("sd_emulated", 10, 1000000, 2, 2, 1, 1),

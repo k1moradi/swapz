@@ -223,9 +223,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         for phase in (
                 "start-starting", "start-header-written",
                 "start-module-inserted", "start-module-loaded",
-                "start-mapper-resumed", "start-swapon"):
+                "start-mapper-resumed", "start-mkswap", "start-swapon"):
             self.assertIn(
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', start)
+        self.assertIn(
+            'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mapper-inactive")',
+            source_body("swapz_primary_dm_create_mapper", primary))
         for phase in ("stop-stopping", "stop-swapoff"):
             self.assertIn(
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', stop)
@@ -285,7 +288,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         for phase in (
                 "start-starting", "start-header-written",
                 "start-module-inserted", "start-module-loaded",
-                "start-mapper-resumed", "start-swapon",
+                "start-mapper-inactive", "start-mapper-resumed",
+                "start-mkswap", "start-swapon",
                 "stop-stopping", "stop-swapoff", "recover-recovering",
                 "recover-swapoff",
                 "recover-mapper-removed", "recover-module-unloaded",
@@ -295,7 +299,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER="$phase"', rehearsal)
         self.assertIn('"$CONTROL" primary recover', rehearsal)
         self.assertIn(
-            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:13",
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:15",
             rehearsal)
         self.assertIn(
             'TEST_BASE="/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"',

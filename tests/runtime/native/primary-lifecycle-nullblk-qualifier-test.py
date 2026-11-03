@@ -38,7 +38,9 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "start-header-written",
             "start-module-inserted",
             "start-module-loaded",
+            "start-mapper-inactive",
             "start-mapper-resumed",
+            "start-mkswap",
             "start-swapon",
             "stop-stopping",
             "stop-swapoff",
@@ -53,7 +55,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")',
                 self.primary)
         self.assertIn(
-            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:13",
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:15",
             self.script)
         for case in (
             "swapon-eintr-applied",
@@ -78,6 +80,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
 
     def test_interruption_oracle_proves_exact_mapper_and_repeat_recovery(self):
         self.assertIn('[[ "$mapper_uuid" == "SWAPZ-PRIMARY-$RUN_ID" ]]', self.script)
+        self.assertIn('dmsetup table --inactive "$DMNAME"', self.script)
         self.assertIn('"$table_target" == swapz', self.script)
         self.assertIn('"$table_lower" == "$PART_DEVNO"', self.script)
         self.assertIn("assert_unrelated_host_swap_identity", self.script)

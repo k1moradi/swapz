@@ -157,6 +157,7 @@ mapper_swap_entry_count() {
 
 assert_exact_owned_mapper() {
 	local expected_present="$1"
+	local table_mode="${2:-active}"
 	local mapper_uuid mapper_table
 	local table_start table_sectors table_target table_lower table_rest
 
@@ -172,8 +173,19 @@ assert_exact_owned_mapper() {
 		fail "cannot inspect interrupted mapper UUID"
 	[[ "$mapper_uuid" == "SWAPZ-PRIMARY-$RUN_ID" ]] ||
 		fail "interrupted mapper UUID is not owned by the current run"
-	mapper_table="$(dmsetup table "$DMNAME")" ||
-		fail "cannot inspect interrupted mapper table"
+	case "$table_mode" in
+		active)
+			mapper_table="$(dmsetup table "$DMNAME")" ||
+				fail "cannot inspect interrupted active mapper table"
+			;;
+		inactive)
+			mapper_table="$(dmsetup table --inactive "$DMNAME")" ||
+				fail "cannot inspect interrupted inactive mapper table"
+			;;
+		*)
+			fail "invalid mapper table mode: $table_mode"
+			;;
+	esac
 	read -r table_start table_sectors table_target table_lower table_rest <<< "$mapper_table"
 	[[ "$table_start" == 0 && "$table_sectors" =~ ^[1-9][0-9]*$ &&
 	   "$table_target" == swapz && "$table_lower" == "$PART_DEVNO" ]] ||
@@ -320,6 +332,7 @@ start_interruption_baseline() {
 assert_interruption_kernel_facts() {
 	local phase="$1"
 	local expected_module expected_mapper expected_swap
+	local expected_table_mode=active
 	local observed_module=0
 	local observed_mapper=0
 	local observed_swap
@@ -331,7 +344,11 @@ assert_interruption_kernel_facts() {
 		start-module-inserted|start-module-loaded)
 			expected_module=1; expected_mapper=0; expected_swap=0
 			;;
-		start-mapper-resumed)
+		start-mapper-inactive)
+			expected_module=1; expected_mapper=1; expected_swap=0
+			expected_table_mode=inactive
+			;;
+		start-mapper-resumed|start-mkswap)
 			expected_module=1; expected_mapper=1; expected_swap=0
 			;;
 		start-swapon|stop-stopping|recover-recovering)
@@ -353,7 +370,7 @@ assert_interruption_kernel_facts() {
 
 	[[ ! -d /sys/module/dm_swapz ]] || observed_module=1
 	dmsetup info "$DMNAME" >/dev/null 2>&1 && observed_mapper=1
-	assert_exact_owned_mapper "$expected_mapper"
+	assert_exact_owned_mapper "$expected_mapper" "$expected_table_mode"
 	observed_swap="$(mapper_swap_entry_count)" ||
 		fail "cannot inspect interrupted mapper swap identity"
 	[[ "$observed_module" == "$expected_module" &&
@@ -392,7 +409,8 @@ recovery_directory, evidence_directory, run_id, partuuid, phase = sys.argv[1:6]
 if (len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id) or
         phase not in {"start-starting", "start-header-written",
                       "start-module-inserted", "start-module-loaded",
-                      "start-mapper-resumed", "start-swapon",
+                      "start-mapper-inactive", "start-mapper-resumed",
+                      "start-mkswap", "start-swapon",
                       "stop-stopping", "stop-swapoff",
                       "recover-recovering", "recover-swapoff",
                       "recover-mapper-removed", "recover-module-unloaded",
@@ -1349,7 +1367,8 @@ SWAPS_ID_AFTER="$(swapz_swap_inventory_identity /proc/swaps)" ||
 note "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:$RUN_ID partuuid:$PARTUUID device:$PART_DEVNO prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false"
 
 for phase in start-starting start-header-written start-module-inserted \
-	start-module-loaded start-mapper-resumed start-swapon; do
+	start-module-loaded start-mapper-inactive start-mapper-resumed \
+	start-mkswap start-swapon; do
 	prepare_interruption_run
 	note "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase run_id:$RUN_ID"
 	interrupt_lifecycle start "$phase" STARTING
@@ -1360,7 +1379,7 @@ for phase in start-starting start-header-written start-module-inserted \
 		start-module-inserted|start-module-loaded)
 			recover_interruption_run "$phase" STARTING false false true
 			;;
-		start-mapper-resumed)
+		start-mapper-inactive|start-mapper-resumed|start-mkswap)
 			recover_interruption_run "$phase" STARTING false true true
 			;;
 		start-swapon)
@@ -1412,7 +1431,7 @@ for phase in recover-recovering recover-swapoff recover-mapper-removed \
 	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
 done
 
-note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:13 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
+note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:15 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
 
 # These cases mutate only the private process boundary or an inactive run-owned
 # mapper/state record. Every destructive mapper operation is a normal removal

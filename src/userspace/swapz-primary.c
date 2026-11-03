@@ -7666,6 +7666,7 @@ int swapz_primary_dm_create_mapper(
 	}
 	if (swapz_primary_dm_table_query_fd(control_fd, manifest, 1) < 0)
 		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mapper-inactive");
 	if (swapz_primary_dm_existing_mapper_ioctl_initialize(
 		    &resume, sizeof(resume), mapper_name, mapper_uuid) < 0 ||
 	    ioctl(control_fd, DM_DEV_SUSPEND, &resume) < 0)
@@ -9081,8 +9082,10 @@ static int swapz_primary_start_prepared(void)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mapper-resumed");
 	if (swapz_primary_format_mapper_swap(
-		    recovery_fd, lock_fd, &manifest, mapper_device) < 0 ||
-	    swapz_primary_activate_mapper_swap(
+		    recovery_fd, lock_fd, &manifest, mapper_device) < 0)
+		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mkswap");
+	if (swapz_primary_activate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest, mapper_device,
 		    &swap_activated_by_call) < 0 ||
 	    !swap_activated_by_call)
