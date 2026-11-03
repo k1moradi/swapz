@@ -51,8 +51,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             oracle.page_pattern("a" * 32, -1)
 
     def test_selector_is_exact_single_partuuid_line(self):
-        self.assertEqual(qualify.parse_selector("PARTUUID=f13428f6-01\n"), "f13428f6-01")
-        for text in ("", "PARTUUID=x\n", "PARTUUID=deadbeef-01\nextra\n", "UUID=deadbeef-01\n"):
+        self.assertEqual(
+            qualify.parse_selector("PARTUUID=f13428f6-01\n"),
+            "f13428f6-01")
+        self.assertEqual(
+            qualify.parse_selector(
+                "PARTUUID=550E8400-E29B-41D4-A716-446655440000\n"),
+            "550e8400-e29b-41d4-a716-446655440000")
+        for text in (
+                "", "PARTUUID=x\n", "PARTUUID=--------\n",
+                "PARTUUID=-f13428f6\n", "PARTUUID=f13428f6-\n",
+                "PARTUUID=f13428f6--01\n", "PARTUUID=1234-567\n",
+                "PARTUUID=deadbeef-01\nextra\n", "UUID=deadbeef-01\n"):
             with self.subTest(text=text), self.assertRaises(qualify.Blocked):
                 qualify.parse_selector(text)
 
