@@ -175,8 +175,16 @@ static int evacuate(swapz_u32 victim)
 	struct swapz_compressed_page pages[8];
 	swapz_u8 completed = 0, count = 0;
 	swapz_u32 logical;
-	int error = swapz_gc_begin_rotation(&a, victim);
+	int error;
 
+	if (!a.gc_allocation)
+		error = swapz_gc_begin_rotation(&a, victim);
+	else if (a.gc_forbidden_victim != victim ||
+		 a.gc_destination == ~(swapz_u32)0 ||
+		 a.open_segment != a.gc_destination)
+		return -EUCLEAN;
+	else
+		error = 0;
 	if (error)
 		return error;
 	for (logical = 0; logical < 8; ++logical) {
@@ -289,6 +297,11 @@ static int test_failed_gc_read_preserves_live_mapping(void)
 	CHECK(roles[0] == 1 && roles[2] == 0);
 	CHECK(verify_page(0) == 0);
 	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	/* The failed READ consumed no destination blocks. The same authenticated
+	 * victim/destination can be resumed after the transient fault is gone. */
+	CHECK(evacuate(0) == 0);
+	CHECK(roles[0] == 0 && roles[2] == 1);
+	CHECK(verify_page(0) == 0);
 	return 0;
 }
 
@@ -440,31 +453,178 @@ static int test_late_replay_failure_reports_committed_prefix(void)
 	return 0;
 }
 
-/*
- * Audit of the current failure contract, NOT a forward-progress success.
- * If a GC read/write fails after a prior relocation has published, the
- * reserved destination contains authoritative mappings. The DM worker
- * restores foreground cursors, but it cannot reuse that reserve as dead.
- * Two such failures can pin both reserves; role checks must still refuse
- * to overwrite referenced extents. Authority/worker recovery is required.
- */
-static void restore_failed_gc_cursor(swapz_u32 next_block,
-				     swapz_u32 open_segment,
-				     swapz_u32 next_probe)
+static int setup_gc_bulk_victim(struct swapz_map original[5],
+				swapz_u32 *filler_generation)
 {
-	a.gc_allocation = 0;
-	a.gc_forbidden_open = ~(swapz_u32)0;
-	a.gc_forbidden_victim = ~(swapz_u32)0;
-	a.gc_destination = ~(swapz_u32)0;
-	a.next_block = next_block;
-	a.open_segment = open_segment;
-	a.next_segment_probe = next_probe;
+	struct swapz_compressed_page page;
+	swapz_u8 completed;
+	unsigned int index;
+	int error = setup();
+
+	if (error)
+		return error;
+	for (index = 0; index < 5; ++index) {
+		memset(late_payloads[index], (int)index + 0x61,
+		       sizeof(late_payloads[index]));
+		page = (struct swapz_compressed_page) {
+			.logical_page = index,
+			.payload = late_payloads[index],
+			.length = SWAPZ_MAX_COMPRESSED,
+		};
+		completed = 0;
+		error = swapz_engine_write_window_batched(&e, &page, 1,
+							 &completed);
+		if (error || completed != 1)
+			return error ? error : -EUCLEAN;
+		original[index] = maps[index];
+	}
+	while (a.next_block < SWAPZ_SEGMENT_BLOCKS) {
+		error = write_one(7);
+		if (error)
+			return error;
+	}
+	if (a.next_block != SWAPZ_SEGMENT_BLOCKS || !maps[7].valid)
+		return -EUCLEAN;
+	*filler_generation = maps[7].generation;
+	error = write_one(6);
+	if (error)
+		return error;
+	return a.open_segment == 1U ? 0 : -EUCLEAN;
 }
 
-static int test_partial_gc_failures_pin_both_reserves_safely(void)
+static void prepare_gc_bulk_pages(struct swapz_compressed_page pages[5])
+{
+	unsigned int index;
+
+	for (index = 0; index < 5; ++index)
+		pages[index] = (struct swapz_compressed_page) {
+			.logical_page = index,
+			.payload = late_payloads[index],
+			.length = SWAPZ_MAX_COMPRESSED,
+		};
+}
+
+static int verify_gc_bulk_page(unsigned int logical)
+{
+	swapz_u16 length = 0;
+	int error = swapz_engine_read_page(&e, logical, late_readback,
+					   sizeof(late_readback), &length);
+
+	if (error)
+		return error;
+	return length == sizeof(late_payloads[logical]) &&
+	       !memcmp(late_readback, late_payloads[logical], length) ?
+	       0 : -EUCLEAN;
+}
+
+static int test_gc_torn_run_resumes_same_destination(void)
+{
+	struct swapz_compressed_page pages[5];
+	struct swapz_map original[5];
+	swapz_u8 committed = 99;
+	swapz_u32 filler_generation, start, end, index;
+
+	CHECK(setup_gc_bulk_victim(original, &filler_generation) == 0);
+	prepare_gc_bulk_pages(pages);
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	e.io.write_run = lower_write_run;
+	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
+	start = a.next_block;
+	partial_run_blocks = 2;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 5,
+						 &committed) == -EIO);
+	CHECK(committed == 0 && !a.in_flight && !a.batch_pending);
+	CHECK(a.gc_allocation && a.gc_destination == 2U &&
+	      a.open_segment == a.gc_destination);
+	CHECK(a.next_block == start + 5U);
+	end = a.next_block;
+	for (index = 0; index < 5; ++index)
+		CHECK(maps[index].start_block == original[index].start_block &&
+		      maps[index].generation == original[index].generation);
+	for (index = start; index < end; ++index)
+		CHECK(!live[index] && !classes[index]);
+
+	/* The whole uncertain reservation stays quarantined. Retry starts after
+	 * it, publishes each generation once, then finishes the same rotation. */
+	committed = 0;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 5,
+						 &committed) == 0);
+	CHECK(committed == 5);
+	CHECK(write_one(7) == 0);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
+	for (index = 0; index < 5; ++index) {
+		CHECK(maps[index].generation == original[index].generation + 1U);
+		CHECK(maps[index].start_block >= end);
+		CHECK(verify_gc_bulk_page(index) == 0);
+	}
+	CHECK(maps[7].generation == filler_generation + 1U);
+	CHECK(verify_page(7) == 0 && verify_page(6) == 0);
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(!live[index]);
+	return 0;
+}
+
+static int test_gc_publication_prefix_is_not_republished(void)
+{
+	struct swapz_compressed_page pages[5];
+	struct swapz_map original[5];
+	swapz_u8 committed = 99;
+	swapz_u32 filler_generation, index;
+
+	CHECK(setup_gc_bulk_victim(original, &filler_generation) == 0);
+	prepare_gc_bulk_pages(pages);
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	e.io.write_run = lower_write_run;
+	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
+
+	/* Complete the lower run, then fail authority replay after its first
+	 * extent published. The exact prefix remains authoritative. */
+	corrupt_replay_tail = 1;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 5,
+						 &committed) == -EUCLEAN);
+	CHECK(committed == 4 && a.gc_allocation &&
+	      a.gc_destination == 2U && a.open_segment == 2U);
+	for (index = 0; index < 4; ++index)
+		CHECK(maps[index].generation == original[index].generation + 1U &&
+		      maps[index].start_block / SWAPZ_SEGMENT_BLOCKS == 2U);
+	CHECK(maps[4].start_block == original[4].start_block &&
+	      maps[4].generation == original[4].generation);
+
+	/* Recovery retries only the unpublished victim member. Replaying the
+	 * authoritative prefix would increment its generations a second time. */
+	committed = 0;
+	CHECK(swapz_engine_write_window_batched(&e, &pages[4], 1,
+						 &committed) == 0);
+	CHECK(committed == 1);
+	CHECK(write_one(7) == 0);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
+	for (index = 0; index < 5; ++index) {
+		CHECK(maps[index].generation == original[index].generation + 1U);
+		CHECK(verify_gc_bulk_page(index) == 0);
+	}
+	CHECK(maps[7].generation == filler_generation + 1U);
+	CHECK(verify_page(7) == 0 && verify_page(6) == 0);
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(!live[index]);
+	return 0;
+}
+
+
+/*
+ * Production recovery contract: once begin_rotation succeeds, a failed later
+ * relocation retains the SAME victim/destination ownership and monotonic
+ * destination cursor. Already-published pages are absent from the victim on
+ * retry, so they must not be republished or consume a second reserve.
+ */
+static int test_partial_gc_failures_resume_same_reserve(void)
 {
 	const swapz_u32 victim = 0U;
-	swapz_u32 saved_next, saved_open, saved_probe;
+	swapz_u32 generations[4];
+	swapz_u32 destination;
 	unsigned int index;
 
 	CHECK(setup() == 0);
@@ -475,40 +635,66 @@ static int test_partial_gc_failures_pin_both_reserves_safely(void)
 	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS; ++index)
 		CHECK(write_one(3) == 0);
 	CHECK(write_one(4) == -ENOSPC);
-	saved_next = a.next_block;
-	saved_open = a.open_segment;
-	saved_probe = a.next_segment_probe;
+	for (index = 0; index < 4; ++index)
+		generations[index] = maps[index].generation;
 
 	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
-	CHECK(a.gc_destination == 2U);
+	destination = a.gc_destination;
+	CHECK(destination == 2U);
 	CHECK(write_one(0) == 0);
 	fail_write = 1;
 	CHECK(write_one(1) == -EIO);
 	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
-	restore_failed_gc_cursor(saved_next, saved_open, saved_probe);
-	CHECK(roles[2] == 0 && maps[0].start_block == 512U);
-	CHECK(verify_page(0) == 0 && verify_page(1) == 0);
+	CHECK(a.gc_allocation && a.gc_destination == destination &&
+	      a.open_segment == destination);
+	CHECK(roles[destination] == 0);
+	CHECK(maps[0].start_block / SWAPZ_SEGMENT_BLOCKS == destination);
+	CHECK(maps[1].start_block / SWAPZ_SEGMENT_BLOCKS == victim);
 
-	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
-	CHECK(a.gc_destination == 3U);
+	/* Interrupt the SAME rotation again after one more publication. The
+	 * second reserve must remain untouched and available. */
 	CHECK(write_one(1) == 0);
 	fail_write = 1;
 	CHECK(write_one(2) == -EIO);
 	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
-	restore_failed_gc_cursor(saved_next, saved_open, saved_probe);
+	CHECK(a.gc_allocation && a.gc_destination == destination &&
+	      a.open_segment == destination);
+	CHECK(roles[3] == 0);
+	for (index = 3U * SWAPZ_SEGMENT_BLOCKS;
+	     index < 4U * SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(!live[index]);
 
-	/* The reserve roles remain reserved and each contains a live extent.
-	 * This is safe (no reference is reused), but GC cannot make progress
-	 * without an authority-owned resume/recovery protocol. */
-	CHECK(a.segment_foreground[2] == 0 && a.segment_foreground[3] == 0);
-	CHECK(maps[0].start_block / SWAPZ_SEGMENT_BLOCKS == 2);
-	CHECK(maps[1].start_block / SWAPZ_SEGMENT_BLOCKS == 3);
-	CHECK(maps[2].start_block / SWAPZ_SEGMENT_BLOCKS == victim);
-	CHECK(live[maps[0].start_block] && live[maps[1].start_block] &&
-	      live[maps[2].start_block]);
-	CHECK(swapz_gc_begin_rotation(&a, victim) == -ENOSPC);
-	CHECK(write_one(4) == -ENOSPC);
-	for (index = 0; index < 4; ++index)
+	/* Fault removed: relocate only the still-authoritative victim member,
+	 * commit the role exchange, and immediately prove foreground progress. */
+	CHECK(write_one(2) == 0);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == 0);
+	CHECK(!a.gc_allocation);
+	CHECK(roles[victim] == 0 && roles[destination] == 1 && roles[3] == 0);
+	CHECK(write_one(4) == 0);
+	for (index = 0; index < 4; ++index) {
+		CHECK(maps[index].generation == generations[index] +
+		      (index < 3 ? 1U : 0U));
+		CHECK(verify_page(index) == 0);
+	}
+	CHECK(verify_page(4) == 0);
+	/* The evacuated victim is reusable only after every authoritative
+	 * reference left it; the untouched reserve stayed dead throughout. */
+	for (index = victim * SWAPZ_SEGMENT_BLOCKS;
+	     index < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(!live[index]);
+
+	/* Remove the fault, then force another complete GC cycle. Forward
+	 * progress must not depend on this being the final rotation. */
+	while (a.next_block < (destination + 1U) * SWAPZ_SEGMENT_BLOCKS)
+		CHECK(write_one(4) == 0);
+	CHECK(write_one(5) == -ENOSPC);
+	fail_write = 1;
+	CHECK(evacuate(1) == -EIO);
+	CHECK(a.gc_allocation && a.gc_forbidden_victim == 1U &&
+	      a.gc_destination == 3U && a.open_segment == 3U);
+	CHECK(evacuate(1) == 0);
+	CHECK(write_one(5) == 0);
+	for (index = 0; index < 6; ++index)
 		CHECK(verify_page(index) == 0);
 	return 0;
 }
@@ -524,7 +710,9 @@ int main(void)
 	CHECK(test_delayed_gc_completion_fences_mutation() == 0); passed++;
 	CHECK(test_torn_lower_run_quarantines_unpublished_prefix() == 0); passed++;
 	CHECK(test_late_replay_failure_reports_committed_prefix() == 0); passed++;
-	CHECK(test_partial_gc_failures_pin_both_reserves_safely() == 0); passed++;
+	CHECK(test_gc_torn_run_resumes_same_destination() == 0); passed++;
+	CHECK(test_gc_publication_prefix_is_not_republished() == 0); passed++;
+	CHECK(test_partial_gc_failures_resume_same_reserve() == 0); passed++;
 	printf("SWAPZ_GC_ENGINE_ROTATION_TESTS_PASS=%d\n", passed);
 	return 0;
 }

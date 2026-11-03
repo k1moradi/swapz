@@ -376,6 +376,19 @@ enum swapz_burst_close_site {
 	SWAPZ_BURST_CLOSE_WORKER,
 };
 
+/*
+ * Owned only by the serialized DM worker. Authority fields remain the
+ * authenticated half of the token: a retry may resume only this exact
+ * victim/destination rotation and may never adopt unrelated reserve state.
+ */
+struct swapz_gc_recovery {
+	swapz_u32 victim;
+	swapz_u32 destination;
+	swapz_u32 forbidden_open;
+	swapz_u32 next_segment_probe;
+	bool active;
+};
+
 struct swapz_dm {
 	struct dm_target *target;
 	struct dm_dev *backing;
@@ -589,6 +602,7 @@ struct swapz_dm {
 	int last_error;
 
 	struct swapz_authority authority;
+	struct swapz_gc_recovery gc_recovery;
 	struct swapz_engine engine;
 	struct swapz_map *maps;
 	swapz_u16 *live_records;
@@ -3755,10 +3769,68 @@ static int swapz_gc_relocate_one(struct swapz_dm *ctx, swapz_u32 victim,
 	return 0;
 }
 
+static void swapz_gc_recovery_clear(struct swapz_dm *ctx)
+{
+	struct swapz_gc_recovery *recovery = &ctx->gc_recovery;
+
+	recovery->victim = ~(swapz_u32)0;
+	recovery->destination = ~(swapz_u32)0;
+	recovery->forbidden_open = ~(swapz_u32)0;
+	recovery->next_segment_probe = ~(swapz_u32)0;
+	recovery->active = false;
+}
+
+static int swapz_gc_recovery_validate(const struct swapz_dm *ctx)
+{
+	const struct swapz_authority *a = &ctx->authority;
+	const struct swapz_gc_recovery *recovery = &ctx->gc_recovery;
+	swapz_u32 destination_start;
+
+	if (!recovery->active)
+		return a->gc_allocation ? -EUCLEAN : 0;
+	if (!a->gc_allocation ||
+	    a->segment_foreground != ctx->segment_roles ||
+	    a->segment_count != ctx->segment_count ||
+	    recovery->victim >= ctx->segment_count ||
+	    recovery->destination >= ctx->segment_count ||
+	    recovery->victim == recovery->destination ||
+	    a->gc_forbidden_victim != recovery->victim ||
+	    a->gc_destination != recovery->destination ||
+	    a->gc_forbidden_open != recovery->forbidden_open ||
+	    a->open_segment != recovery->destination ||
+	    a->next_segment_probe != recovery->next_segment_probe ||
+	    !ctx->segment_roles[recovery->victim] ||
+	    ctx->segment_roles[recovery->destination])
+		return -EUCLEAN;
+	destination_start = recovery->destination * SWAPZ_SEGMENT_BLOCKS;
+	if (a->next_block < destination_start ||
+	    a->next_block > destination_start + SWAPZ_SEGMENT_BLOCKS)
+		return -EUCLEAN;
+	return 0;
+}
+
+static int swapz_gc_recovery_record(struct swapz_dm *ctx, swapz_u32 victim)
+{
+	struct swapz_authority *a = &ctx->authority;
+	struct swapz_gc_recovery *recovery = &ctx->gc_recovery;
+
+	if (recovery->active)
+		return -EUCLEAN;
+	recovery->victim = victim;
+	recovery->destination = a->gc_destination;
+	recovery->forbidden_open = a->gc_forbidden_open;
+	recovery->next_segment_probe = a->next_segment_probe;
+	recovery->active = true;
+	return swapz_gc_recovery_validate(ctx);
+}
+
 static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 {
 	struct swapz_authority *a = &ctx->authority;
-	swapz_u32 old_next, old_open, old_probe, victim, logical, block;
+	swapz_u32 old_next = a->next_block;
+	swapz_u32 old_open = a->open_segment;
+	swapz_u32 old_probe = a->next_segment_probe;
+	swapz_u32 victim, logical, block;
 	swapz_u32 expected_victim_pages = 0, visited_victim_pages = 0;
 	u64 before_read, before_write;
 	u64 before_read_reqs, before_write_reqs;
@@ -3767,41 +3839,65 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 	int error;
 
 	/*
-	 * GC may only begin after every deferred contiguous lower WRITE has
-	 * been completely replayed or aborted. An in-flight group has already
-	 * reserved real physical blocks but has NOT published its authority;
-	 * scanning its apparent zero-live segment here would risk recycling
-	 * those reservations before lower completion.
+	 * GC may only run after every deferred contiguous lower WRITE has been
+	 * completely replayed or aborted. A retained recovery owns its exact
+	 * victim/destination until commit; foreground mutation is fenced by the
+	 * serialized worker before another WRITE or DISCARD can reach authority.
 	 */
-	if (a->in_flight || a->batch_pending || a->batch_replaying ||
-	    a->gc_allocation)
+	if (a->in_flight || a->batch_pending || a->batch_replaying)
 		return -EBUSY;
-	choose_start = ktime_get_ns();
-	error = swapz_gc_choose_victim(ctx, &victim);
-	ctx->gc_choose_wall_ns +=
-		swapz_elapsed_ns(choose_start, ktime_get_ns());
-	if (error)
-		return error;
-	old_next = a->next_block;
-	old_open = a->open_segment;
-	old_probe = a->next_segment_probe;
-	if (a->segment_mapped_pages)
-		expected_victim_pages = a->segment_mapped_pages[victim];
+	if (ctx->gc_recovery.active) {
+		error = swapz_gc_recovery_validate(ctx);
+		if (error) {
+			swapz_fail(ctx, error);
+			return error;
+		}
+		victim = ctx->gc_recovery.victim;
+	} else {
+		if (a->gc_allocation) {
+			/* An authority-side rotation without the worker token is stale
+			 * or unrelated state. Never adopt it opportunistically. */
+			swapz_fail(ctx, -EUCLEAN);
+			return -EUCLEAN;
+		}
+		choose_start = ktime_get_ns();
+		error = swapz_gc_choose_victim(ctx, &victim);
+		ctx->gc_choose_wall_ns +=
+			swapz_elapsed_ns(choose_start, ktime_get_ns());
+		if (error)
+			return error;
+	}
 	before_read = ctx->physical_read_bytes;
 	before_write = ctx->physical_write_bytes;
 	before_read_reqs = ctx->physical_read_reqs;
 	before_write_reqs = ctx->physical_write_reqs;
-	/*
-	 * Copying GC: choose exactly ONE wholly dead reserve segment. After
-	 * successfully evacuating the foreground victim, exchange physical
-	 * roles and keep the foreground cursor inside the newly compacted
-	 * destination. This replenishes the reserve rather than gradually
-	 * filling a fixed tail or cycling between two reserve segments.
-	 */
-	error = swapz_gc_begin_rotation(a, victim);
-	if (error)
-		goto out;
+
+	if (!ctx->gc_recovery.active) {
+		/*
+		 * Copying GC: choose exactly ONE wholly dead reserve segment. Once
+		 * begin succeeds, the cursor becomes recovery-owned and is never
+		 * restored after a lower/publication failure: published mappings may
+		 * already make this reserve authoritative.
+		 */
+		error = swapz_gc_begin_rotation(a, victim);
+		if (error) {
+			/* begin_rotation may temporarily clear OPEN while searching. No
+			 * relocation was published, so restoring the saved foreground
+			 * cursor is still safe on this pre-ownership failure. */
+			a->next_block = old_next;
+			a->open_segment = old_open;
+			a->next_segment_probe = old_probe;
+			goto out;
+		}
+		error = swapz_gc_recovery_record(ctx, victim);
+		if (error) {
+			swapz_fail(ctx, error);
+			goto out;
+		}
+	}
 	ctx->gc_count = 0;
+	if (a->segment_mapped_pages)
+		expected_victim_pages = a->segment_mapped_pages[victim];
 
 	if (a->segment_first_page && a->page_next_in_segment) {
 		const swapz_u32 none = ~(swapz_u32)0;
@@ -3888,6 +3984,7 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 		if (error)
 			goto out;
 		rotation_committed = true;
+		swapz_gc_recovery_clear(ctx);
 		/* Only now is the old foreground victim a dead reserve. */
 		error = swapz_discard_dead_segment(ctx, victim);
 		if (error) {
@@ -3907,18 +4004,16 @@ out:
 	ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs;
 	ctx->gc_write_reqs += ctx->physical_write_reqs - before_write_reqs;
 	ctx->gc_count = 0;
-	if (error && !rotation_committed) {
-		/* No role exchange on failure. All previous authoritative
-		 * records remain intact; any committed partial relocation is
-		 * still live in its reserved destination. Fail closed rather
-		 * than treating that reserve as freely overwritable. */
-		a->gc_allocation = 0;
-		a->gc_forbidden_open = ~(swapz_u32)0;
-		a->gc_forbidden_victim = ~(swapz_u32)0;
-		a->gc_destination = ~(swapz_u32)0;
-		a->next_block = old_next;
-		a->open_segment = old_open;
-		a->next_segment_probe = old_probe;
+	if (error && !rotation_committed && ctx->gc_recovery.active) {
+		/*
+		 * Keep the exact active destination and its monotonic cursor. Current
+		 * victim membership is re-read on the next attempt, so already-
+		 * published relocations are skipped while failed/uncertain blocks
+		 * remain quarantined. If the destination itself reaches -ENOSPC,
+		 * the recovery remains fail-closed instead of consuming another
+		 * reserve or rolling authority backward.
+		 */
+		WARN_ON_ONCE(a->gc_destination != ctx->gc_recovery.destination);
 	}
 	return error;
 }
@@ -3933,6 +4028,17 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 
 	ctx->gc_wall_ns += swapz_elapsed_ns(start_ns, ktime_get_ns());
 	return error;
+}
+
+/*
+ * Foreground authority mutation must not enter an owned GC destination.
+ * READs remain safe because every published generation stays authoritative.
+ */
+static int swapz_gc_require_foreground(struct swapz_dm *ctx)
+{
+	if (!ctx->gc_recovery.active && !ctx->authority.gc_allocation)
+		return 0;
+	return swapz_gc_compact_one(ctx);
 }
 
 
@@ -3993,6 +4099,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	bool chain_continues;
 	bool deferred_single_tail = ctx->retained_single_tail_deferred;
 	bool async_submitted = false;
+	bool recoverable_gc_error = false;
 	bool async_detach_ready;
 	struct swapz_inflight_write *detached_inflight = NULL;
 	int error = 0;
@@ -4489,6 +4596,13 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			error = swapz_gc_compact_one(ctx);
 			if (!error)
 				continue;
+			/*
+			 * A post-begin GC fault owns a resumable destination. It did
+			 * not invalidate already-committed foreground generations, so
+			 * do not poison the entire target merely because this window
+			 * could not obtain space on this attempt.
+			 */
+			recoverable_gc_error = ctx->gc_recovery.active;
 		}
 		break;
 	}
@@ -4500,7 +4614,8 @@ commit_done:
 	 */
 	if (!error && committed == count && needs_fua)
 		error = swapz_issue_flush(ctx);
-	if (error && needs_fua)
+	if (error && needs_fua &&
+	    (!recoverable_gc_error || committed))
 		swapz_fail(ctx, error);
 	/*
 	 * Successful synchronous records are one terminal ACK cohort. The engine
@@ -4581,7 +4696,8 @@ accounted:
 		ctx->pack_close_pending_tail_sample = false;
 		ctx->retained_window_read_bypasses = 0;
 		ctx->retained_wave_interrupted = false;
-		swapz_fail(ctx, error ? error : -EIO);
+		if (!recoverable_gc_error || (needs_fua && committed))
+			swapz_fail(ctx, error ? error : -EIO);
 		return error ? error : -EIO;
 	}
 	if (chain_continues) {
@@ -6536,6 +6652,20 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 
 		swapz_complete(bio, failure ? failure : -EIO);
 		return;
+	}
+	/*
+	 * A failed partial GC keeps its destination authoritative and owned.
+	 * Before any later mapping mutation, resume that exact rotation. This
+	 * also rejects an authority-side GC state that has no worker token.
+	 */
+	if (((op == REQ_OP_WRITE && bio_sectors(bio)) ||
+	     op == REQ_OP_DISCARD) &&
+	    (ctx->gc_recovery.active || ctx->authority.gc_allocation)) {
+		error = swapz_gc_require_foreground(ctx);
+		if (error) {
+			swapz_complete(bio, error);
+			return;
+		}
 	}
 	/* Future arrivals never refresh the retention budget. Expiry bounds
 	 * idle waiting, not finite already-accepted work or synchronous service

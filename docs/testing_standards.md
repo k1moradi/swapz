@@ -473,15 +473,18 @@ cycle; a successful mapper construction or two rotations are insufficient.
 The test must distribute foreground rewrites across distinct physical source
 segments and relocate at least 128 4KiB RAW survivors per successful rotation
 on average; a sequence that leaves one survivor per victim is not sufficient.
-It must also reproduce repeated *partial* GC failures: a published relocation
-pins a reserved destination even if a later read/write fails. The current
-worker restores the foreground cursor but has no authority-level protocol to
-resume or safely undo that relocation, so two failures can leave both reserves
-pinned and subsequent GC returning `-ENOSPC` without any data corruption.
-This is a known forward-progress blocker, not a passed recovery qualification:
-fixing it requires coordinated authority and serialized-worker changes plus a
-recovery-success regression. Never reclassify a reserved segment with live
-references as dead to make this test pass.
+It must also reproduce repeated *partial* GC failures after at least one
+relocation has published. The serialized worker must retain and authenticate the
+same victim/destination rotation, preserve the monotonic destination cursor
+across failed READ/WRITE, short or uncertain lower WRITE, and interrupted
+authority publication, then resume only still-authoritative victim members
+after the fault is removed. Repeated recovery must verify byte-exact contents
+and generations, must not consume a second reserve merely because the first
+attempt failed, and must prove the evacuated source becomes reusable only after
+its mapping and physical liveness reach zero. If accumulated uncertain
+reservations exhaust the owned destination, qualification requires fail-closed
+behavior rather than cursor rollback, live-reserve reclassification or
+unbounded retry.
 
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
 regression fixture: one SWZ header block,

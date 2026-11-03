@@ -128,28 +128,43 @@ static int test_failed_handoff_does_not_change_roles(void)
 {
 	struct swapz_tx tx;
 	swapz_u32 page = 1;
-	swapz_u32 saved;
+	swapz_u32 saved, failed_block, generation;
 
 	CHECK(setup() == 0);
 	for (unsigned int i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
 		CHECK(write_raw(0) == 0);
 	CHECK(write_raw(1) == 0);
 	saved = maps[0].start_block;
+	generation = maps[0].generation;
 	CHECK(swapz_gc_begin_rotation(&a, 1) == -EINVAL); /* OPEN protected */
 	/* Normal writes never enter segments2/3 when they are reserved. */
 	CHECK(a.next_block == 257);
-	/* Start GC of foreground segment0 but do NOT relocate its live
-	 * page0. Even a staged/aborted reserve write cannot permit the
-	 * source victim to become foreground reusable. */
+	/* Start GC of foreground segment0 and model an uncertain failed lower
+	 * RAW write. Its reservation remains quarantined, while the same active
+	 * rotation must be able to resume after the transient failure. */
 	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
 	CHECK(swapz_stage(&a, &page, 1, 1, &tx) == 0);
 	CHECK(tx.start_block >= 512 && tx.start_block < 768);
+	failed_block = tx.start_block;
 	CHECK(swapz_abort(&a, &tx) == 0);
 	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
 	CHECK(roles[0] == 1 && roles[2] == 0);
 	CHECK(maps[0].start_block == saved && live[saved]);
+	CHECK(a.gc_allocation && a.gc_destination == 2);
+
+	page = 0;
+	CHECK(swapz_stage(&a, &page, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == failed_block + 1U);
+	CHECK(swapz_finish_raw(&a, &tx, raw, 1, 0) == 0);
+	CHECK(maps[0].generation == generation + 1U);
+	CHECK(!live[failed_block] && live[maps[0].start_block]);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
+	CHECK(roles[0] == 0 && roles[2] == 1);
+	for (page = 0; page < SWAPZ_SEGMENT_BLOCKS; ++page)
+		CHECK(!live[page]);
 	return 0;
 }
+
 
 /*
  * Match Codex's exact 32MiB / 1024-page geometry: 30 foreground segments
