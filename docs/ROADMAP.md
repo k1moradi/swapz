@@ -1577,3 +1577,17 @@ translation unit; the production digest remains fixed to the qualified host.
 This closes a rollback-evidence gap in the mapper primitives, not the missing
 start/stop/recovery coordinator or any live-swap, boot, performance, crash, or
 production-readiness gate.
+
+The primary manager now has a separately gated Linux swap initializer for the
+verified mapper. It pins the root-owned `mkswap` executable, supplies the
+already identity-checked mapper through an inherited descriptor, requires the
+durable transaction to be in `STARTING`, validates the v1 swap header against
+the exact logical page capacity, and verifies the original `/dev/sda4` SWZ
+header remains unchanged. Direct-C rootless coverage checks valid and malformed
+swap-header fields and confirms the privileged operation stub remains
+unavailable. No mapper formatting, `swapon`, or `/dev/sda4` mutation was run.
+This `swapzctl` production-source change requires fresh exact-source owner
+qualification before use. The full primary start/stop/recover coordinator,
+interruption recovery, boot integration, sustained-GC behavior, and production
+readiness remain open; packaged units and the global privileged execution gate
+remain disabled.

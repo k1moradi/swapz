@@ -124,6 +124,47 @@ static void test_target_identity_and_header_policy(void)
 	assert(!swapz_primary_original_swap_signature(block));
 }
 
+static void test_put_u32_le(unsigned char *buffer, size_t offset,
+			   uint32_t value)
+{
+	buffer[offset] = (unsigned char)value;
+	buffer[offset + 1U] = (unsigned char)(value >> 8);
+	buffer[offset + 2U] = (unsigned char)(value >> 16);
+	buffer[offset + 3U] = (unsigned char)(value >> 24);
+}
+
+static void test_primary_linux_swap_header(void)
+{
+	static const unsigned char magic[] = "SWAPSPACE2";
+	const uint64_t logical_pages =
+		swapz_primary_maximum_logical_pages(SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
+	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+
+	test_put_u32_le(header, 1024U, 1U);
+	test_put_u32_le(header, 1028U, (uint32_t)(logical_pages - 1U));
+	header[1036U] = 1U;
+	memcpy(header + sizeof(header) - sizeof(magic) + 1U,
+	       magic, sizeof(magic) - 1U);
+	assert(swapz_primary_linux_swap_header_valid(header, logical_pages));
+	assert(!swapz_primary_linux_swap_header_valid(header, 0U));
+	assert(!swapz_primary_linux_swap_header_valid(header,
+							  (uint64_t)UINT32_MAX + 1U));
+	test_put_u32_le(header, 1024U, 0U);
+	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
+	test_put_u32_le(header, 1024U, 1U);
+	test_put_u32_le(header, 1028U, (uint32_t)(logical_pages - 2U));
+	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
+	test_put_u32_le(header, 1028U, (uint32_t)(logical_pages - 1U));
+	test_put_u32_le(header, 1032U, 1U);
+	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
+	test_put_u32_le(header, 1032U, 0U);
+	memset(header + 1036U, 0, SWAPZ_PRIMARY_SWAP_UUID_BYTES);
+	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
+	header[1036U] = 1U;
+	header[sizeof(header) - 1U] ^= 1U;
+	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
+}
+
 static void test_primary_run_id_and_header_builder(void)
 {
 	const char *run_id = "0123456789abcdef0123456789abcdef";
@@ -693,6 +734,9 @@ static void test_primary_dm_operations_disabled(void)
 					     &removed) < 0);
 	assert(errno == ENODEV);
 	assert(removed == 0);
+	assert(swapz_primary_format_mapper_swap(
+		-1, -1, &manifest, (dev_t)-1) < 0);
+	assert(errno == ENODEV);
 }
 
 static void test_checked_header_write(void)
@@ -766,6 +810,14 @@ static void test_exclusive_target_open_paths(void)
 	assert(fstat(fd, &info) == 0 && S_ISREG(info.st_mode));
 	assert((fcntl(fd, F_GETFL) & O_ACCMODE) == O_RDWR);
 	assert(close(fd) == 0);
+	fd = swapz_primary_open_target_checked_paths_mode(
+		target, uuid_path, partuuid_path, O_RDONLY);
+	assert(fd >= 0);
+	assert(fstat(fd, &info) == 0 && S_ISREG(info.st_mode));
+	assert((fcntl(fd, F_GETFL) & O_ACCMODE) == O_RDONLY);
+	assert(close(fd) == 0);
+	assert(swapz_primary_target_open_readonly() < 0);
+	assert(errno == ENOTSUP);
 	assert(unlink(partuuid_path) == 0);
 	assert(symlink(other, substituted) == 0);
 	assert(symlink(substituted, partuuid_path) == 0);
@@ -1666,6 +1718,7 @@ int main(void)
 						  pages + 1ULL));
 	test_swap_inventory_parser();
 	test_target_identity_and_header_policy();
+	test_primary_linux_swap_header();
 	test_primary_run_id_and_header_builder();
 	test_primary_stage_policy();
 	test_primary_state_records();

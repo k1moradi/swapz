@@ -67,6 +67,9 @@ int swapz_primary_run_id_generate(
 int swapz_primary_header_build(
 	const char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U],
 	unsigned char header[4096]);
+/* Validate an mkswap v1 header for the exact 4KiB logical page capacity. */
+int swapz_primary_linux_swap_header_valid(
+	const unsigned char header[4096], uint64_t logical_pages);
 int swapz_primary_manifest_parse(const char *record, size_t length,
 				 struct swapz_primary_manifest *manifest);
 /* Validate the exact five-stage owner report for this source and host. */
@@ -109,6 +112,11 @@ int swapz_primary_dm_create_mapper(
 	const struct swapz_primary_manifest *manifest,
 	int module_loaded_by_call, int *created_by_call,
 	int *resumed_by_call, dev_t *mapper_device);
+/* Initialize Linux swap metadata on the exact verified primary mapper. */
+int swapz_primary_format_mapper_swap(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest,
+	dev_t expected_mapper_device);
 int swapz_primary_dm_remove_mapper(
 	int recovery_fd, int lock_fd,
 	const struct swapz_primary_manifest *manifest,

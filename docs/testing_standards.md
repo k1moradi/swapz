@@ -3398,12 +3398,19 @@ qualify Linux `swapon` behavior or performance.
 
 The read-only plan may print a mutation trace, but it must never invoke the
 mutation channel. `mkswap` may target only the exact verified mapper, without
-force. `swapon` must not request discard. Never remove an active swap mapper or
-unload a module while it may contain pages. A failed mapper `swapoff`, uncertain
-mapper/module ownership, ambiguous header, or recovery uncertainty leaves the
-mapping, module, fallback and recovery evidence in place for supervised review.
-Do not reboot, force-remove, overwrite an unrecognized header or retry a failed
-phase automatically.
+force. The primary C manager must pin a root-owned `mkswap` executable that is
+not group/world-writable, pass it only a descriptor path for the independently
+verified mapper, and verify the resulting Linux swap v1 header against the exact
+mapper capacity. It must also prove that the original `/dev/sda4` SWZ header is
+unchanged before and after initialization. The formatter operation is valid
+only in the durable `STARTING` state. Rootless direct-C tests must validate the
+header fields and prove the privileged formatter stub is unavailable without
+target mutation. `swapon` must not request discard. Never remove an active swap
+mapper or unload a module while it may contain pages. A failed mapper `swapoff`,
+uncertain mapper/module ownership, ambiguous header, or recovery uncertainty
+leaves the mapping, module, fallback and recovery evidence in place for
+supervised review. Do not reboot, force-remove, overwrite an unrecognized
+header or retry a failed phase automatically.
 
 Recovery-state tests must cover a second, standalone cleanup attempt
 after an earlier failed recovery. When cleanup writes `TRIAL_STOPPING` over

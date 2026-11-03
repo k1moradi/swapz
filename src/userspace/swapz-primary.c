@@ -24,12 +24,20 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
+#include <sys/wait.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
 #include "../kernel/superblock.h"
 
 #define SWAPZ_PRIMARY_BLOCK_BYTES 4096ULL
+#define SWAPZ_PRIMARY_SWAP_VERSION_OFFSET 1024U
+#define SWAPZ_PRIMARY_SWAP_LAST_PAGE_OFFSET 1028U
+#define SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET 1032U
+#define SWAPZ_PRIMARY_SWAP_UUID_OFFSET 1036U
+#define SWAPZ_PRIMARY_SWAP_UUID_BYTES 16U
+#define SWAPZ_PRIMARY_SWAP_MAGIC_BYTES 10U
+#define SWAPZ_PRIMARY_MKSWAP_PATH "/usr/sbin/mkswap"
 #define SWAPZ_PRIMARY_SEGMENT_BLOCKS 256ULL
 #define SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS 512ULL
 #define SWAPZ_PRIMARY_DEVICE_BYTES 17179869184ULL
@@ -926,9 +934,9 @@ static int swapz_primary_same_target_identity(const struct stat *left,
 #endif
 }
 
-static int swapz_primary_open_target_checked_paths(const char *device_path,
-						   const char *uuid_path,
-						   const char *partuuid_path)
+static int swapz_primary_open_target_checked_paths_mode(
+	const char *device_path, const char *uuid_path, const char *partuuid_path,
+	int open_flags)
 {
 	struct stat device_before;
 	struct stat uuid_before;
@@ -939,7 +947,8 @@ static int swapz_primary_open_target_checked_paths(const char *device_path,
 	struct stat partuuid_after;
 	int fd;
 
-	if (!device_path || !uuid_path || !partuuid_path) {
+	if (!device_path || !uuid_path || !partuuid_path ||
+	    (open_flags != (O_RDWR | O_EXCL) && open_flags != O_RDONLY)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -952,7 +961,7 @@ static int swapz_primary_open_target_checked_paths(const char *device_path,
 		errno = ENODEV;
 		return -1;
 	}
-	fd = open(uuid_path, O_RDWR | O_EXCL | O_NONBLOCK | O_CLOEXEC);
+	fd = open(uuid_path, open_flags | O_NONBLOCK | O_CLOEXEC);
 	if (fd < 0)
 		return -1;
 	if (fstat(fd, &opened) < 0)
@@ -996,6 +1005,26 @@ failed:
 	return -1;
 }
 
+static int swapz_primary_open_target_checked_paths(const char *device_path,
+						   const char *uuid_path,
+						   const char *partuuid_path)
+{
+	return swapz_primary_open_target_checked_paths_mode(
+		device_path, uuid_path, partuuid_path, O_RDWR | O_EXCL);
+}
+
+static int swapz_primary_target_open_readonly(void)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	errno = ENOTSUP;
+	return -1;
+#else
+	return swapz_primary_open_target_checked_paths_mode(
+		SWAPZ_PRIMARY_DEVICE_PATH, SWAPZ_PRIMARY_UUID_PATH,
+		SWAPZ_PRIMARY_PARTUUID_PATH, O_RDONLY);
+#endif
+}
+
 int swapz_primary_target_open_exclusive(void)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -1016,6 +1045,40 @@ static int swapz_primary_original_swap_signature(
 	return !swapz_sb_valid(block, SWAPZ_PRIMARY_DEVICE_BYTES) &&
 	       !memcmp(block + SWAPZ_PRIMARY_BLOCK_BYTES - sizeof(magic) + 1U,
 		       magic, sizeof(magic) - 1U);
+}
+
+static uint32_t swapz_primary_read_u32_le(const unsigned char *bytes)
+{
+	return (uint32_t)bytes[0] |
+	       ((uint32_t)bytes[1] << 8) |
+	       ((uint32_t)bytes[2] << 16) |
+	       ((uint32_t)bytes[3] << 24);
+}
+
+int swapz_primary_linux_swap_header_valid(
+	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
+	uint64_t logical_pages)
+{
+	static const unsigned char magic[SWAPZ_PRIMARY_SWAP_MAGIC_BYTES] =
+		"SWAPSPACE2";
+	unsigned char uuid_nonzero = 0;
+	unsigned int i;
+
+	if (!header || !logical_pages || logical_pages > UINT32_MAX ||
+	    swapz_primary_read_u32_le(
+		header + SWAPZ_PRIMARY_SWAP_VERSION_OFFSET) != 1U ||
+	    swapz_primary_read_u32_le(
+		header + SWAPZ_PRIMARY_SWAP_LAST_PAGE_OFFSET) !=
+		(uint32_t)(logical_pages - 1U) ||
+	    swapz_primary_read_u32_le(
+		header + SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET) != 0U ||
+	    memcmp(header + SWAPZ_PRIMARY_BLOCK_BYTES -
+		   SWAPZ_PRIMARY_SWAP_MAGIC_BYTES,
+		   magic, sizeof(magic)))
+		return 0;
+	for (i = 0; i < SWAPZ_PRIMARY_SWAP_UUID_BYTES; ++i)
+		uuid_nonzero |= header[SWAPZ_PRIMARY_SWAP_UUID_OFFSET + i];
+	return uuid_nonzero != 0U;
 }
 
 static int swapz_primary_exact_read(int fd, unsigned char *buffer,
@@ -5392,6 +5455,139 @@ static int swapz_primary_dm_prove_mapper_absent(
 	errno = 0;
 	return 0;
 }
+
+static int swapz_primary_mapper_device_open(
+	const char *mapper_name, dev_t expected_device,
+	uint64_t expected_bytes)
+{
+	struct stat before;
+	struct stat opened;
+	struct stat after;
+	char path[PATH_MAX];
+	uint64_t bytes = 0;
+	int fd;
+
+	if (!mapper_name || !mapper_name[0] ||
+	    swapz_primary_path_format(path, sizeof(path),
+				      "/dev/mapper/%s", mapper_name) < 0)
+		return -1;
+	if (stat(path, &before) < 0)
+		return -1;
+	if (!S_ISBLK(before.st_mode) || before.st_rdev != expected_device) {
+		errno = ENODEV;
+		return -1;
+	}
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &opened) < 0 || ioctl(fd, BLKGETSIZE64, &bytes) < 0 ||
+	    stat(path, &after) < 0)
+		goto failed;
+	if (!S_ISBLK(opened.st_mode) || opened.st_rdev != expected_device ||
+	    !S_ISBLK(after.st_mode) || after.st_rdev != expected_device ||
+	    bytes != expected_bytes) {
+		errno = ESTALE;
+		goto failed;
+	}
+	return fd;
+
+failed:
+	{
+		int saved_errno = errno;
+
+		(void)close(fd);
+		errno = saved_errno;
+	}
+	return -1;
+}
+
+static int swapz_primary_mkswap_open(void)
+{
+	struct stat path_info;
+	struct stat opened_info;
+	int fd;
+
+	if (lstat(SWAPZ_PRIMARY_MKSWAP_PATH, &path_info) < 0)
+		return -1;
+	if (!S_ISREG(path_info.st_mode) || path_info.st_uid != 0U ||
+	    path_info.st_nlink != 1U || (path_info.st_mode & 0022U) ||
+	    !(path_info.st_mode & S_IXUSR)) {
+		errno = EPERM;
+		return -1;
+	}
+	fd = open(SWAPZ_PRIMARY_MKSWAP_PATH,
+		  O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &opened_info) < 0 ||
+	    lstat(SWAPZ_PRIMARY_MKSWAP_PATH, &path_info) < 0)
+		goto failed;
+	if (!S_ISREG(opened_info.st_mode) || opened_info.st_uid != 0U ||
+	    opened_info.st_nlink != 1U || (opened_info.st_mode & 0022U) ||
+	    !(opened_info.st_mode & S_IXUSR) ||
+	    opened_info.st_dev != path_info.st_dev ||
+	    opened_info.st_ino != path_info.st_ino || !S_ISREG(path_info.st_mode) ||
+	    path_info.st_uid != 0U || path_info.st_nlink != 1U ||
+	    (path_info.st_mode & 0022U) || !(path_info.st_mode & S_IXUSR)) {
+		errno = EPERM;
+		goto failed;
+	}
+	return fd;
+
+failed:
+	{
+		int saved_errno = errno;
+
+		(void)close(fd);
+		errno = saved_errno;
+	}
+	return -1;
+}
+
+static int swapz_primary_run_mkswap(int mkswap_fd, int mapper_fd)
+{
+	char mapper_path[64];
+	char *const arguments[] = {
+		(char *)"mkswap", (char *)"--", mapper_path, NULL,
+	};
+	char *const environment[] = {
+		(char *)"LC_ALL=C", (char *)"PATH=/usr/sbin:/sbin", NULL,
+	};
+	pid_t child;
+	int length;
+	int status;
+
+	length = snprintf(mapper_path, sizeof(mapper_path),
+			   "/proc/self/fd/%d", mapper_fd);
+	if (length < 0 || (size_t)length >= sizeof(mapper_path)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	child = fork();
+	if (child < 0)
+		return -1;
+	if (child == 0) {
+		int descriptor_flags = fcntl(mapper_fd, F_GETFD);
+
+		if (descriptor_flags < 0 ||
+		    fcntl(mapper_fd, F_SETFD,
+			  descriptor_flags & ~FD_CLOEXEC) < 0)
+			_exit(126);
+		fexecve(mkswap_fd, arguments, environment);
+		_exit(127);
+	}
+	for (;;) {
+		if (waitpid(child, &status, 0) >= 0)
+			break;
+		if (errno != EINTR)
+			return -1;
+	}
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		errno = EIO;
+		return -1;
+	}
+	return 0;
+}
 #endif
 
 int swapz_primary_dm_create_mapper(
@@ -5578,6 +5774,184 @@ out:
 		result = -1;
 		saved_errno = errno;
 	}
+	errno = saved_errno;
+	return result;
+#endif
+}
+
+int swapz_primary_format_mapper_swap(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest,
+	dev_t expected_mapper_device)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)recovery_fd;
+	(void)lock_fd;
+	(void)manifest;
+	(void)expected_mapper_device;
+	errno = ENODEV;
+	return -1;
+#else
+	static const enum swapz_primary_stage starting[] = {
+		SWAPZ_PRIMARY_STAGE_STARTING,
+	};
+	unsigned char expected_backing_header[SWAPZ_PRIMARY_BLOCK_BYTES];
+	unsigned char observed_backing_header[SWAPZ_PRIMARY_BLOCK_BYTES];
+	unsigned char swap_header[SWAPZ_PRIMARY_BLOCK_BYTES];
+	char mapper_name[64];
+	char mapper_uuid[64];
+	char table[128];
+	uint64_t logical_sectors = 0;
+	uint64_t logical_pages;
+	uint64_t logical_bytes;
+	dev_t observed_mapper_device = 0;
+	int active_swap;
+	int control_fd = -1;
+	int target_fd = -1;
+	int mapper_fd = -1;
+	int mkswap_fd = -1;
+	int result = -1;
+	int saved_errno;
+
+	if (!manifest || expected_mapper_device == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	if (geteuid() != 0) {
+		errno = EPERM;
+		return -1;
+	}
+	if (swapz_primary_transaction_manifest_matches_at(
+		    recovery_fd, lock_fd, manifest, starting,
+		    sizeof(starting) / sizeof(starting[0]), 0) < 0 ||
+	    swapz_primary_mapper_layout(manifest, mapper_name, mapper_uuid,
+					table, &logical_sectors) < 0)
+		return -1;
+	if (!logical_sectors ||
+	    logical_sectors % SWAPZ_PRIMARY_SECTORS_PER_PAGE ||
+	    logical_sectors > UINT64_MAX / 512ULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	logical_pages = logical_sectors / SWAPZ_PRIMARY_SECTORS_PER_PAGE;
+	logical_bytes = logical_sectors * 512ULL;
+	if (logical_pages > UINT64_MAX / SWAPZ_PRIMARY_BLOCK_BYTES ||
+	    logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES != logical_bytes) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	control_fd = swapz_primary_dm_control_open();
+	if (control_fd < 0 ||
+	    swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 1,
+		    &observed_mapper_device) < 0 ||
+	    observed_mapper_device != expected_mapper_device) {
+		if (observed_mapper_device != expected_mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+	active_swap = swapz_primary_swap_device_active(makedev(8U, 4U));
+	if (active_swap != 0) {
+		if (active_swap > 0)
+			errno = EBUSY;
+		goto out;
+	}
+	active_swap = swapz_primary_swap_device_active(expected_mapper_device);
+	if (active_swap != 0) {
+		if (active_swap > 0)
+			errno = EBUSY;
+		goto out;
+	}
+	if (swapz_primary_header_build(manifest->run_id,
+				       expected_backing_header) < 0)
+		goto out;
+	target_fd = swapz_primary_target_open_readonly();
+	if (target_fd < 0 ||
+	    swapz_primary_exact_read(target_fd, observed_backing_header,
+				     sizeof(observed_backing_header)) < 0 ||
+	    memcmp(observed_backing_header, expected_backing_header,
+		   sizeof(expected_backing_header))) {
+		if (!errno)
+			errno = ESTALE;
+		goto out;
+	}
+	mapper_fd = swapz_primary_mapper_device_open(
+		mapper_name, expected_mapper_device, logical_bytes);
+	if (mapper_fd < 0)
+		goto out;
+	if (swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 0,
+		    &observed_mapper_device) < 0 ||
+	    observed_mapper_device != expected_mapper_device) {
+		if (observed_mapper_device != expected_mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+	mkswap_fd = swapz_primary_mkswap_open();
+	if (mkswap_fd < 0 ||
+	    swapz_primary_run_mkswap(mkswap_fd, mapper_fd) < 0)
+		goto out;
+	if (swapz_primary_dm_mapper_verify_fd(
+		    control_fd, manifest, 1, 0,
+		    &observed_mapper_device) < 0 ||
+	    observed_mapper_device != expected_mapper_device) {
+		if (observed_mapper_device != expected_mapper_device)
+			errno = ESTALE;
+		goto out;
+	}
+	active_swap = swapz_primary_swap_device_active(makedev(8U, 4U));
+	if (active_swap != 0) {
+		if (active_swap > 0)
+			errno = EBUSY;
+		goto out;
+	}
+	active_swap = swapz_primary_swap_device_active(expected_mapper_device);
+	if (active_swap != 0) {
+		if (active_swap > 0)
+			errno = EBUSY;
+		goto out;
+	}
+	if (swapz_primary_exact_read(mapper_fd, swap_header,
+				     sizeof(swap_header)) < 0 ||
+	    !swapz_primary_linux_swap_header_valid(swap_header, logical_pages)) {
+		if (!errno)
+			errno = EBADMSG;
+		goto out;
+	}
+	if (swapz_primary_exact_read(target_fd, observed_backing_header,
+				     sizeof(observed_backing_header)) < 0 ||
+	    memcmp(observed_backing_header, expected_backing_header,
+		   sizeof(expected_backing_header))) {
+		if (!errno)
+			errno = ESTALE;
+		goto out;
+	}
+	result = 0;
+out:
+	saved_errno = errno;
+	if (mkswap_fd >= 0 && close(mkswap_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (mapper_fd >= 0 && close(mapper_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (target_fd >= 0 && close(target_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (control_fd >= 0 && close(control_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	memset(expected_backing_header, 0, sizeof(expected_backing_header));
+	memset(observed_backing_header, 0, sizeof(observed_backing_header));
+	memset(swap_header, 0, sizeof(swap_header));
 	errno = saved_errno;
 	return result;
 #endif
