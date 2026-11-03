@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -48,6 +49,46 @@ def c_function_body(source: str, symbol: str) -> str:
             if depth == 0:
                 return source[start:position]
     raise AssertionError("unclosed production function " + symbol)
+
+
+def _primary_preprocessor(definitions=(), source_text=None):
+    command = ["cc", "-std=c11", "-E", "-dM"]
+    command.extend(f"-D{definition}" for definition in definitions)
+    if source_text is None:
+        command.append(str(PRIMARY_SOURCE))
+    else:
+        command.extend(("-x", "c", "-"))
+    return subprocess.run(
+        command, cwd=ROOT, input=source_text, text=True, encoding="utf-8",
+        errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        check=False)
+
+
+def active_preprocessor_macros(definitions=(), source_text=None):
+    result = _primary_preprocessor(definitions, source_text)
+    if result.returncode:
+        raise AssertionError(
+            "primary preprocessor configuration failed:\n" + result.stderr)
+    macros = {}
+    for line in result.stdout.splitlines():
+        match = re.fullmatch(
+            r"#define\s+([A-Za-z_]\w*)(?:\s+(.*))?", line)
+        if match:
+            macros[match.group(1)] = match.group(2) or ""
+    return macros
+
+
+def preprocessed_primary_source(definitions=()):
+    command = ["cc", "-std=c11", "-E", "-P"]
+    command.extend(f"-D{definition}" for definition in definitions)
+    command.append(str(PRIMARY_SOURCE))
+    result = subprocess.run(
+        command, cwd=ROOT, text=True, encoding="utf-8", errors="replace",
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if result.returncode:
+        raise AssertionError(
+            "primary preprocessor source failed:\n" + result.stderr)
+    return result.stdout
 
 
 class DurableStage(Enum):
@@ -641,31 +682,86 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
 
     def test_execution_gate_remains_disabled_pending_live_lifecycle_evidence(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
-        gate = re.search(
-            r"/\* Privileged lifecycle stays disabled until provisioning "
-            r"and recovery qualify\. \*/\s*"
-            r"#define\s+SWAPZ_PRIMARY_EXECUTION_ENABLED\s+([01])",
-            source)
-        self.assertIsNotNone(
-            gate, "production primary execution gate must remain explicit")
+        ordinary = active_preprocessor_macros()
         self.assertEqual(
-            gate.group(1), "0",
-            "privileged production lifecycle needs physical evidence")
-        self.assertIn("#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST)", source)
-        self.assertIn(
-            "#elif defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)",
-            source)
-        self.assertIn(
-            "#define SWAPZ_PRIMARY_CONFIG_BASE \"/etc/swapz\"", source)
-        self.assertIn(
-            "#define SWAPZ_PRIMARY_RECOVERY_BASE "
-            "\"/var/lib/swapz/physical-recovery\"", source)
-        self.assertIn(
-            "#define SWAPZ_PRIMARY_EXECUTION_ENABLED 1", source)
+            ordinary.get("SWAPZ_PRIMARY_EXECUTION_ENABLED"), "0",
+            "ordinary production lifecycle needs physical evidence")
+        self.assertEqual(
+            ordinary.get("SWAPZ_PRIMARY_CONFIG_BASE"), '"/etc/swapz"')
+        self.assertEqual(
+            ordinary.get("SWAPZ_PRIMARY_RECOVERY_BASE"),
+            '"/var/lib/swapz/physical-recovery"')
+
+        owned_definitions = (
+            "SWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1",
+            'SWAPZ_PRIMARY_TEST_CONFIG_BASE="/var/tmp/swapz-primary-owned-nullblk/config"',
+            'SWAPZ_PRIMARY_TEST_RECOVERY_BASE="/var/tmp/swapz-primary-owned-nullblk/recovery"',
+            'SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"',
+        )
+        owned = active_preprocessor_macros(owned_definitions)
+        self.assertEqual(owned.get("SWAPZ_PRIMARY_EXECUTION_ENABLED"), "1")
+        self.assertEqual(
+            owned.get("SWAPZ_PRIMARY_CONFIG_BASE"),
+            "SWAPZ_PRIMARY_TEST_CONFIG_BASE")
+        self.assertEqual(
+            owned.get("SWAPZ_PRIMARY_RECOVERY_BASE"),
+            "SWAPZ_PRIMARY_TEST_RECOVERY_BASE")
+        for required in (
+                "SWAPZ_PRIMARY_TEST_CONFIG_BASE",
+                "SWAPZ_PRIMARY_TEST_RECOVERY_BASE",
+                "SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT"):
+            missing = tuple(
+                definition for definition in owned_definitions
+                if not definition.startswith(required + "="))
+            self.assertNotEqual(
+                _primary_preprocessor(missing).returncode, 0,
+                f"owned-null_blk seam compiled without {required}")
+
+        physical_definitions = (
+            "SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1",
+            'SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL="/usr/local/sbin/swapzctl"',
+        )
+        physical = active_preprocessor_macros(physical_definitions)
+        self.assertEqual(physical.get("SWAPZ_PRIMARY_EXECUTION_ENABLED"), "1")
+        self.assertEqual(
+            physical.get("SWAPZ_PRIMARY_CONFIG_BASE"), '"/etc/swapz"')
+        self.assertNotEqual(
+            _primary_preprocessor(
+                ("SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1",)).returncode,
+            0, "physical qualification compiled without explicit control path")
+        self.assertNotEqual(
+            _primary_preprocessor(
+                owned_definitions + physical_definitions).returncode,
+            0, "private lifecycle modes compiled together")
+
+        ordinary_source = preprocessed_primary_source()
+        physical_source = preprocessed_primary_source(physical_definitions)
         self.assertNotIn(
-            "SWAPZ_PRIMARY_OWNED_NULLBLK_TEST",
-            ROOT_MAKEFILE.read_text(encoding="utf-8"),
-            "public build must never enable the owned-null_blk lifecycle seam")
+            "SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION", ordinary_source,
+            "ordinary production build must not read the physical marker")
+        self.assertRegex(
+            physical_source,
+            r'\bgetenv\s*\(\s*"SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION"\s*\)')
+        self.assertRegex(
+            physical_source,
+            r'return\s+enabled\s*&&\s*!strcmp\s*\(\s*enabled\s*,\s*"1"'
+            r'\s*\)\s*;')
+
+        public_build_files = [ROOT_MAKEFILE]
+        public_build_files.extend(sorted(ROOT.glob("src/**/Makefile")))
+        public_build_files.extend(
+            path for path in sorted((ROOT / "packaging").rglob("*"))
+            if path.is_file())
+        for path in public_build_files:
+            contents = path.read_text(encoding="utf-8")
+            for seam in (
+                    "SWAPZ_PRIMARY_OWNED_NULLBLK_TEST",
+                    "SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST"):
+                self.assertNotIn(
+                    seam, contents,
+                    f"public build/install file exposes private seam: "
+                    f"{path.relative_to(ROOT)}")
+
         topology = c_function_body(source, "swapz_primary_recovery_source_chain")
         self.assertIn(
             "source_device == SWAPZ_PRIMARY_TARGET_DEVICE", topology)
@@ -673,7 +769,7 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertIn('strstr(device_realpath, "/virtual/") != NULL', source)
         self.assertLess(
             topology.index("swapz_primary_owned_nullblk_parent("),
-            topology.index("strstr(device_realpath"))
+            topology.index("strstr(device_realpath")))
         self.assertIn(
             'sscanf(line, " %u %63s %c", &major_number, name, &extra) != 2',
             source)
@@ -705,6 +801,15 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         executable = c_function_body(sample, "swapz_primary_activate_mapper_swap")
         self.assertNotIn("syscall(SYS_swapon, mapper_path, 0)", executable)
         self.assertIn("return -1;", executable)
+
+        gate_sample = """
+            /* #define SWAPZ_PRIMARY_EXECUTION_ENABLED 1 */
+            static const char *fake =
+                "#define SWAPZ_PRIMARY_EXECUTION_ENABLED 1";
+            #define SWAPZ_PRIMARY_EXECUTION_ENABLED 0
+        """
+        macros = active_preprocessor_macros(source_text=gate_sample)
+        self.assertEqual(macros.get("SWAPZ_PRIMARY_EXECUTION_ENABLED"), "0")
 
     def test_rootless_runner_registers_lifecycle_audit(self):
         runner = ROOTLESS_RUNNER.read_text(encoding="utf-8")

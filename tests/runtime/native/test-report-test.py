@@ -3913,6 +3913,156 @@ class ReportContract(unittest.TestCase):
                 runner.ROOT, runner.REPORT = previous_root, previous_report
 
 
+class ProductionReadinessEvidenceTest(unittest.TestCase):
+    SOURCE_SHA = "a" * 40
+    DIGEST = "b" * 64
+    OBSERVED_AT = "2026-11-03T00:00:00Z"
+
+    def passing_snapshot(self):
+        common = {
+            "status": "PASS", "current": True,
+            "source_sha": self.SOURCE_SHA,
+            "observed_at_utc": self.OBSERVED_AT,
+        }
+        hashes = {
+            "formatter_sha256": self.DIGEST,
+            "module_sha256": "c" * 64,
+            "oracle_sha256": "d" * 64,
+        }
+        evidence = {
+            "production_source": dict(common),
+            "clean_build_state": {**common, "clean": True},
+            "qualified_artifact_hashes": {
+                **common, "qualified": True, "hashes": hashes},
+            "required_ci": {
+                **common,
+                "runs": [
+                    {"workflow": workflow, "head_sha": self.SOURCE_SHA,
+                     "result": "PASS", "run_id": str(index + 1)}
+                    for index, workflow in enumerate(
+                        runner.PRODUCTION_READINESS_REQUIRED_CI)
+                ],
+            },
+            "exact_source_owner_make_test": {
+                **common, "overall": "PASS",
+                "tested_source_sha": self.SOURCE_SHA,
+                "report_sha256": self.DIGEST},
+            "owned_nullblk_qualification": {
+                **common, "overall": "PASS",
+                "evidence_sha256": self.DIGEST},
+            "real_linux_swap": {
+                **common, "overall": "PASS", "swap_out_in": "PASS",
+                "evidence_sha256": self.DIGEST},
+            "maximum_capacity_and_ram": {
+                **common, "overall": "PASS", "incompressible": "PASS",
+                "logical_capacity_bytes": 4096, "peak_ram_bytes": 8192,
+                "evidence_sha256": self.DIGEST},
+            "sustained_physical_performance": {
+                **common, "overall": "PASS", "sustained": "PASS",
+                "evidence_sha256": self.DIGEST},
+            "lifecycle_deployment_state": {
+                **common, "overall": "PASS", "lifecycle": "PASS",
+                "deployment": "PASS", "evidence_sha256": self.DIGEST},
+            "installed_artifact_identity": {
+                **common, "installed": True, "hashes": hashes},
+            "cold_boot_harness": {
+                **common, "armed": True,
+                "evidence_sha256": self.DIGEST},
+            "owner_observed_reboot": {
+                **common, "observed": True, "overall": "PASS",
+                "evidence_sha256": self.DIGEST},
+        }
+        return {
+            "schema": runner.PRODUCTION_READINESS_SCHEMA,
+            "snapshot_kind": "CURRENT",
+            "release_evidence": evidence,
+        }
+
+    def test_complete_current_evidence_can_pass(self):
+        verdict = runner.evaluate_production_readiness(
+            self.passing_snapshot(), self.SOURCE_SHA)
+        for field in (
+                "release_verdict", "CODE_PRODUCTION_READY",
+                "DEPLOYMENT_PRODUCTION_READY",
+                "PRODUCTION_READY_FOR_OWNER_REBOOT",
+                "COLD_BOOT_HARNESS", "COLD_BOOT_OBSERVED"):
+            self.assertEqual(verdict[field], "PASS", field)
+
+    def test_missing_or_stale_required_evidence_never_passes(self):
+        for name in runner.PRODUCTION_READINESS_REQUIRED_EVIDENCE:
+            with self.subTest(missing=name):
+                snapshot = self.passing_snapshot()
+                del snapshot["release_evidence"][name]
+                verdict = runner.evaluate_production_readiness(
+                    snapshot, self.SOURCE_SHA)
+                self.assertNotEqual(verdict["release_verdict"], "PASS")
+            with self.subTest(stale=name):
+                snapshot = self.passing_snapshot()
+                snapshot["release_evidence"][name]["current"] = False
+                verdict = runner.evaluate_production_readiness(
+                    snapshot, self.SOURCE_SHA)
+                self.assertNotEqual(verdict["release_verdict"], "PASS")
+
+    def test_fail_and_in_progress_remain_distinct(self):
+        failed = self.passing_snapshot()
+        failed["release_evidence"]["real_linux_swap"]["status"] = "FAIL"
+        verdict = runner.evaluate_production_readiness(failed, self.SOURCE_SHA)
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "FAIL")
+        self.assertEqual(verdict["release_verdict"], "FAIL")
+
+        progressing = self.passing_snapshot()
+        progressing["release_evidence"]["real_linux_swap"]["status"] = (
+            "IN_PROGRESS")
+        verdict = runner.evaluate_production_readiness(
+            progressing, self.SOURCE_SHA)
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "IN_PROGRESS")
+        self.assertEqual(verdict["release_verdict"], "IN_PROGRESS")
+
+    def test_pass_requires_qualified_hashes_and_current_ci(self):
+        missing_hash = self.passing_snapshot()
+        del missing_hash["release_evidence"]["qualified_artifact_hashes"][
+            "hashes"]["module_sha256"]
+        verdict = runner.evaluate_production_readiness(
+            missing_hash, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["qualified_artifact_hashes"],
+            "BLOCKED")
+
+        stale_ci = self.passing_snapshot()
+        stale_ci["release_evidence"]["required_ci"]["runs"][0][
+            "head_sha"] = "e" * 40
+        verdict = runner.evaluate_production_readiness(
+            stale_ci, self.SOURCE_SHA)
+        self.assertEqual(verdict["evidence_statuses"]["required_ci"], "BLOCKED")
+
+    def test_ready_for_owner_reboot_does_not_forge_reboot_observation(self):
+        snapshot = self.passing_snapshot()
+        reboot = snapshot["release_evidence"]["owner_observed_reboot"]
+        reboot.update({"status": "BLOCKED", "observed": False})
+        verdict = runner.evaluate_production_readiness(
+            snapshot, self.SOURCE_SHA)
+        self.assertEqual(verdict["PRODUCTION_READY_FOR_OWNER_REBOOT"], "PASS")
+        self.assertEqual(verdict["COLD_BOOT_OBSERVED"], "BLOCKED")
+        self.assertEqual(verdict["release_verdict"], "BLOCKED")
+
+    def test_historical_snapshot_is_never_current_release_evidence(self):
+        snapshot = self.passing_snapshot()
+        snapshot["snapshot_kind"] = "HISTORICAL"
+        verdict = runner.evaluate_production_readiness(
+            snapshot, self.SOURCE_SHA)
+        self.assertEqual(verdict["release_verdict"], "BLOCKED")
+
+    def test_committed_handoff_snapshot_is_historical_and_blocked(self):
+        snapshot = json.loads(
+            (ROOT / "docs/handoff/production-readiness.json").read_text(
+                encoding="utf-8"))
+        self.assertEqual(snapshot["snapshot_kind"], "HISTORICAL")
+        verdict = runner.evaluate_production_readiness(
+            snapshot, runner.git_sha())
+        self.assertEqual(verdict["release_verdict"], "BLOCKED")
+        self.assertNotEqual(verdict["CODE_PRODUCTION_READY"], "PASS")
+        self.assertNotEqual(verdict["DEPLOYMENT_PRODUCTION_READY"], "PASS")
+
 
 if __name__ == "__main__":
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)

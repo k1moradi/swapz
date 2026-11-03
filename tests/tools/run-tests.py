@@ -30,6 +30,39 @@ QUALIFIED_ARTIFACTS = (
     ("module_sha256", "build/kernel/experimental/dm-swapz.ko", False),
     ("oracle_sha256", "build/tests/device-roundtrip", True),
 )
+PRODUCTION_READINESS_SCHEMA = "swapz-production-readiness-v2"
+PRODUCTION_READINESS_REQUIRED_EVIDENCE = (
+    "production_source",
+    "clean_build_state",
+    "qualified_artifact_hashes",
+    "required_ci",
+    "exact_source_owner_make_test",
+    "owned_nullblk_qualification",
+    "real_linux_swap",
+    "maximum_capacity_and_ram",
+    "sustained_physical_performance",
+    "lifecycle_deployment_state",
+    "installed_artifact_identity",
+    "cold_boot_harness",
+    "owner_observed_reboot",
+)
+PRODUCTION_READINESS_CODE_EVIDENCE = (
+    "production_source", "clean_build_state", "qualified_artifact_hashes",
+    "required_ci", "exact_source_owner_make_test",
+    "owned_nullblk_qualification", "real_linux_swap",
+    "maximum_capacity_and_ram", "sustained_physical_performance",
+    "lifecycle_deployment_state",
+)
+PRODUCTION_READINESS_DEPLOYMENT_EVIDENCE = (
+    "production_source", "clean_build_state", "qualified_artifact_hashes",
+    "required_ci", "exact_source_owner_make_test",
+    "lifecycle_deployment_state", "installed_artifact_identity",
+    "cold_boot_harness",
+)
+PRODUCTION_READINESS_REQUIRED_CI = (
+    "Native kernel-C project-goal regressions",
+    "Experimental swapz production C qualification",
+)
 COLUMNS = ("off", "sync", "async")
 # Cap values are kernel null_blk MiB/s units; request delay is nanoseconds.
 # Labels describe SYNTHETIC profiles, never a real SD/SSD device.
@@ -95,6 +128,168 @@ def device_model_limits(spec, offered_qd=None):
         "effective_queue_depth": effective_depth,
         "unmerged_4k_latency_ceiling_mbps": latency_mbps,
         "effective_4k_model_ceiling_mbps": min(cap_mbps, latency_mbps),
+    }
+
+
+def _valid_sha256(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _readiness_artifact_hashes_valid(hashes):
+    return isinstance(hashes, dict) and all(
+        _valid_sha256(hashes.get(name))
+        for name in ("formatter_sha256", "module_sha256", "oracle_sha256"))
+
+
+def _readiness_pass_payload_valid(name, entry, current_source_sha):
+    observed = entry.get("observed_at_utc")
+    if not isinstance(observed, str) or not observed.strip():
+        return False
+    if name == "production_source":
+        return True
+    if name == "clean_build_state":
+        return entry.get("clean") is True
+    if name == "qualified_artifact_hashes":
+        return (entry.get("qualified") is True and
+                _readiness_artifact_hashes_valid(entry.get("hashes")))
+    if name == "required_ci":
+        runs = entry.get("runs")
+        if not isinstance(runs, list):
+            return False
+        for workflow in PRODUCTION_READINESS_REQUIRED_CI:
+            matching = [run for run in runs if isinstance(run, dict) and
+                        run.get("workflow") == workflow]
+            if len(matching) != 1:
+                return False
+            run = matching[0]
+            if (run.get("head_sha") != current_source_sha or
+                    run.get("result") != "PASS" or not run.get("run_id")):
+                return False
+        return True
+    if name == "exact_source_owner_make_test":
+        return (entry.get("overall") == "PASS" and
+                entry.get("tested_source_sha") == current_source_sha and
+                _valid_sha256(entry.get("report_sha256")))
+    if name == "owned_nullblk_qualification":
+        return (entry.get("overall") == "PASS" and
+                _valid_sha256(entry.get("evidence_sha256")))
+    if name == "real_linux_swap":
+        return (entry.get("overall") == "PASS" and
+                entry.get("swap_out_in") == "PASS" and
+                _valid_sha256(entry.get("evidence_sha256")))
+    if name == "maximum_capacity_and_ram":
+        return (entry.get("overall") == "PASS" and
+                entry.get("incompressible") == "PASS" and
+                type(entry.get("logical_capacity_bytes")) is int and
+                entry["logical_capacity_bytes"] > 0 and
+                type(entry.get("peak_ram_bytes")) is int and
+                entry["peak_ram_bytes"] > 0 and
+                _valid_sha256(entry.get("evidence_sha256")))
+    if name == "sustained_physical_performance":
+        return (entry.get("overall") == "PASS" and
+                entry.get("sustained") == "PASS" and
+                _valid_sha256(entry.get("evidence_sha256")))
+    if name == "lifecycle_deployment_state":
+        return (entry.get("overall") == "PASS" and
+                entry.get("lifecycle") == "PASS" and
+                entry.get("deployment") == "PASS" and
+                _valid_sha256(entry.get("evidence_sha256")))
+    if name == "installed_artifact_identity":
+        return (entry.get("installed") is True and
+                _readiness_artifact_hashes_valid(entry.get("hashes")))
+    if name == "cold_boot_harness":
+        return (entry.get("armed") is True and
+                _valid_sha256(entry.get("evidence_sha256")))
+    if name == "owner_observed_reboot":
+        return (entry.get("observed") is True and
+                entry.get("overall") == "PASS" and
+                _valid_sha256(entry.get("evidence_sha256")))
+    return False
+
+
+def _readiness_combine(statuses):
+    statuses = tuple(statuses)
+    if "FAIL" in statuses:
+        return "FAIL"
+    if "BLOCKED" in statuses:
+        return "BLOCKED"
+    if "IN_PROGRESS" in statuses:
+        return "IN_PROGRESS"
+    return ("PASS" if statuses and
+            all(status == "PASS" for status in statuses) else "BLOCKED")
+
+
+def evaluate_production_readiness(snapshot, current_source_sha):
+    """Evaluate release evidence without upgrading stale or missing observations."""
+    blocked = {
+        "release_verdict": "BLOCKED",
+        "CODE_PRODUCTION_READY": "BLOCKED",
+        "DEPLOYMENT_PRODUCTION_READY": "BLOCKED",
+        "PRODUCTION_READY_FOR_OWNER_REBOOT": "BLOCKED",
+        "COLD_BOOT_HARNESS": "BLOCKED",
+        "COLD_BOOT_OBSERVED": "BLOCKED",
+        "evidence_statuses": {},
+        "reasons": {},
+    }
+    if not isinstance(current_source_sha, str) or not re.fullmatch(
+            r"[0-9a-f]{40}", current_source_sha):
+        blocked["reasons"]["report"] = "current production source SHA unavailable"
+        return blocked
+    if (not isinstance(snapshot, dict) or
+            snapshot.get("schema") != PRODUCTION_READINESS_SCHEMA):
+        blocked["reasons"]["report"] = "unsupported readiness schema"
+        return blocked
+    if snapshot.get("snapshot_kind") != "CURRENT":
+        blocked["reasons"]["report"] = "historical readiness snapshot"
+        return blocked
+    evidence = snapshot.get("release_evidence")
+    if not isinstance(evidence, dict):
+        blocked["reasons"]["report"] = "release_evidence missing"
+        return blocked
+
+    statuses = {}
+    reasons = {}
+    for name in PRODUCTION_READINESS_REQUIRED_EVIDENCE:
+        entry = evidence.get(name)
+        if not isinstance(entry, dict):
+            statuses[name] = "BLOCKED"
+            reasons[name] = "required evidence missing"
+            continue
+        if (entry.get("current") is not True or
+                entry.get("source_sha") != current_source_sha):
+            statuses[name] = "BLOCKED"
+            reasons[name] = "evidence is historical or source-unbound"
+            continue
+        status = entry.get("status")
+        if status not in ("PASS", "FAIL", "BLOCKED", "IN_PROGRESS"):
+            statuses[name] = "BLOCKED"
+            reasons[name] = "unrecognized or historical evidence status"
+            continue
+        if (status == "PASS" and
+                not _readiness_pass_payload_valid(
+                    name, entry, current_source_sha)):
+            statuses[name] = "BLOCKED"
+            reasons[name] = "PASS payload is incomplete or unqualified"
+            continue
+        statuses[name] = status
+        reasons[name] = entry.get("reason", "")
+
+    code = _readiness_combine(
+        statuses[name] for name in PRODUCTION_READINESS_CODE_EVIDENCE)
+    deployment = _readiness_combine(
+        statuses[name] for name in PRODUCTION_READINESS_DEPLOYMENT_EVIDENCE)
+    ready_for_reboot = _readiness_combine((code, deployment))
+    release = _readiness_combine(
+        statuses[name] for name in PRODUCTION_READINESS_REQUIRED_EVIDENCE)
+    return {
+        "release_verdict": release,
+        "CODE_PRODUCTION_READY": code,
+        "DEPLOYMENT_PRODUCTION_READY": deployment,
+        "PRODUCTION_READY_FOR_OWNER_REBOOT": ready_for_reboot,
+        "COLD_BOOT_HARNESS": statuses["cold_boot_harness"],
+        "COLD_BOOT_OBSERVED": statuses["owner_observed_reboot"],
+        "evidence_statuses": statuses,
+        "reasons": reasons,
     }
 
 

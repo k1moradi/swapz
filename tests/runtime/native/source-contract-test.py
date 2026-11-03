@@ -18,6 +18,19 @@ MK = (ROOT / "src/kernel/Makefile").read_text()
 README = (ROOT / "docs/README.md").read_text()
 PRIMARY = (ROOT / "src/userspace/swapz-primary.c").read_text()
 SWAPZCTL = (ROOT / "src/userspace/swapzctl.c").read_text()
+MANDATORY_ROOTLESS_PYTHON_SUITES = (
+    "tests/runtime/native/source-contract-test.py",
+    "tests/runtime/native/primary-lifecycle-audit-test.py",
+    "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py",
+    "tests/runtime/native/primary-real-swap-test.py",
+    "tests/runtime/benchmark/io-replay-test.py",
+    "tests/runtime/native/make-interface-test.py",
+    "tests/runtime/native/test-report-test.py",
+    "tests/runtime/native/package-dkms-test.py",
+    "tests/runtime/native/systemd/swapz-primary-systemd-test.py",
+    "tests/runtime/native/physical-swap-probe-test.py",
+    "tests/runtime/native/live-swap-supervisor-test.py",
+)
 
 
 def _raw_body(symbol: str) -> str:
@@ -107,6 +120,36 @@ def status_format_sequence(source: str = "") -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_rootless_runner_registers_every_mandatory_python_suite_once(self):
+        runner = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        for relative_path in MANDATORY_ROOTLESS_PYTHON_SUITES:
+            with self.subTest(relative_path=relative_path):
+                self.assertTrue(
+                    (ROOT / relative_path).is_file(),
+                    f"mandatory rootless suite missing: {relative_path}")
+                invocation = f"python3 -B {relative_path} -v"
+                self.assertEqual(
+                    runner.count(invocation), 1,
+                    f"mandatory rootless suite must run exactly once: "
+                    f"{relative_path}")
+
+    def test_native_make_stage_keeps_analyzer_contract_discovered(self):
+        relative_path = (
+            "tests/runtime/native/codec/anon-page-analyzer-test.py")
+        suites = (ROOT / "tests/suites/Makefile").read_text(
+            encoding="utf-8")
+        self.assertTrue((ROOT / relative_path).is_file())
+        self.assertEqual(
+            suites.count(
+                'python3 -B "$(NATIVE)/codec/anon-page-analyzer-test.py" '
+                '"$(OUT)/anon-page-analyzer"'),
+            1)
+        self.assertIn(
+            "test-predictor: $(OUT)/predictor-qualification "
+            "test-anon-page-analyzer", suites)
+        self.assertIn("test-all: test-codec test-predictor", suites)
+
     def test_owned_nullblk_lifecycle_interruptions_are_test_only(self):
         primary = PRIMARY
         start = source_body("swapz_primary_start_prepared", primary)

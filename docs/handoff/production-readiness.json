@@ -1,5 +1,13 @@
 {
-  "schema": "swapz-production-readiness-v1",
+  "schema": "swapz-production-readiness-v2",
+  "snapshot_kind": "HISTORICAL",
+  "snapshot_observed_at_utc": "2026-11-03T14:40:24Z",
+  "snapshot_semantics": {
+    "historical_observations_are_not_current_release_evidence": true,
+    "missing_observation_policy": "BLOCKED_OR_IN_PROGRESS_NEVER_PASS",
+    "current_release_verdict": "BLOCKED",
+    "reason": "snapshot source and qualification evidence predate current main"
+  },
   "updated_at_utc": "2026-11-03T14:40:24Z",
   "repository": {
     "branch": "main",
@@ -167,7 +175,10 @@
   ],
   "acceptance_manifest": {
     "status": "NOT_FROZEN",
-    "required_before": "decisive owner physical, full-capacity, sustained-churn, or performance qualification"
+    "required_before": "decisive owner physical, full-capacity, sustained-churn, or performance qualification",
+    "historical": true,
+    "canonical_policy_path": "docs/production-acceptance.json",
+    "current_policy_status": "FROZEN"
   },
   "readiness": {
     "CODE_PRODUCTION_READY": "IN_PROGRESS",
@@ -180,7 +191,9 @@
     "MAX_SAFE_LOGICAL_CAPACITY_BYTES": null,
     "GC_AND_CHURN": "NOT_RUN",
     "HOST_STABILITY": "IN_PROGRESS",
-    "MAIN_SYNC": "PASS"
+    "MAIN_SYNC": "HISTORICAL_PASS",
+    "SNAPSHOT_CURRENT": "NO",
+    "RELEASE_EVIDENCE_VERDICT": "BLOCKED"
   },
   "open_gates": [
     "obtain exact-current-source official owner make test qualification; latest completed report tests older source acdeba452aa1",
@@ -192,5 +205,130 @@
     "qualify high-occupancy physical GC/churn and removable-media failure behavior",
     "install and verify production artifacts, lifecycle units, monitoring, and cold-boot acceptance harness"
   ],
-  "next_action": "run make test on the exact synchronized source after required CI passes; then close deterministic lifecycle interruption and owned-null_blk coverage before any physical start"
+  "next_action": "run make test on the exact synchronized source after required CI passes; then close deterministic lifecycle interruption and owned-null_blk coverage before any physical start",
+  "release_evidence": {
+    "production_source": {
+      "status": "HISTORICAL_PASS",
+      "current": false,
+      "source_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
+      "observed_at_utc": "2026-11-03T14:40:24Z",
+      "reason": "snapshot source was synchronized when observed but is not current main"
+    },
+    "clean_build_state": {
+      "status": "HISTORICAL_FAIL",
+      "current": false,
+      "source_sha": "ead8c12f2b06fd1d361e8b9c5f833de58c1c8d45",
+      "observed_at_utc": "2026-11-03T14:40:24Z",
+      "clean": false,
+      "reason": "recorded build was explicitly unqualified and dirty"
+    },
+    "qualified_artifact_hashes": {
+      "status": "HISTORICAL_UNQUALIFIED",
+      "current": false,
+      "source_sha": "ead8c12f2b06fd1d361e8b9c5f833de58c1c8d45",
+      "observed_at_utc": "2026-11-03T14:40:24Z",
+      "qualified": false,
+      "hashes": {
+        "formatter_sha256": "3b066b31496b4dd5cc8457eecc1e5bb9f06dd0ca8a3d004f49f08d47866f7362",
+        "module_sha256": "b7fa80c48318bd99d2ea6b5a76c785e315f47ae86269f095d82f7213e0538e0c",
+        "oracle_sha256": null
+      },
+      "reason": "recorded build hashes were not qualified and no oracle hash was recorded"
+    },
+    "required_ci": {
+      "status": "HISTORICAL_PASS",
+      "current": false,
+      "source_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
+      "observed_at_utc": "2026-11-03T14:40:24Z",
+      "runs": [
+        {
+          "workflow": "Native kernel-C project-goal regressions",
+          "head_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
+          "run_id": "41655643668",
+          "result": "PASS",
+          "url": "https://github.com/k1moradi/swapz/actions/runs/41655643668"
+        },
+        {
+          "workflow": "Experimental swapz production C qualification",
+          "head_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
+          "run_id": "41655643592",
+          "result": "PASS",
+          "url": "https://github.com/k1moradi/swapz/actions/runs/41655643592"
+        }
+      ],
+      "reason": "required CI passed only for the historical snapshot source"
+    },
+    "exact_source_owner_make_test": {
+      "status": "HISTORICAL_PASS",
+      "current": false,
+      "source_sha": "acdeba452aa142c702bed40010c083276a692711",
+      "observed_at_utc": "2026-11-03T14:40:24Z",
+      "overall": "PASS",
+      "tested_source_sha": "acdeba452aa142c702bed40010c083276a692711",
+      "report_sha256": "e82b4054fbc51daf7bc99f2b60cc1c41581530ac0c59283229b891cb6cb40651",
+      "reason": "owner make test PASS applies to an older source"
+    },
+    "owned_nullblk_qualification": {
+      "status": "IN_PROGRESS",
+      "current": false,
+      "source_sha": null,
+      "observed_at_utc": null,
+      "reason": "primary owned-null_blk lifecycle qualification was not complete in this snapshot"
+    },
+    "real_linux_swap": {
+      "status": "IN_PROGRESS",
+      "current": false,
+      "source_sha": null,
+      "observed_at_utc": null,
+      "reason": "actual Linux swap-out and swap-in through current swapz were not observed"
+    },
+    "maximum_capacity_and_ram": {
+      "status": "IN_PROGRESS",
+      "current": false,
+      "source_sha": null,
+      "observed_at_utc": null,
+      "logical_capacity_bytes": null,
+      "peak_ram_bytes": null,
+      "reason": "candidate geometry and source-derived estimates are not measured full-capacity RAM evidence"
+    },
+    "sustained_physical_performance": {
+      "status": "IN_PROGRESS",
+      "current": false,
+      "source_sha": null,
+      "observed_at_utc": null,
+      "reason": "sustained current-source physical performance evidence was not observed"
+    },
+    "lifecycle_deployment_state": {
+      "status": "IN_PROGRESS",
+      "current": false,
+      "source_sha": null,
+      "observed_at_utc": null,
+      "reason": "privileged lifecycle remained disabled and deployment acceptance was incomplete"
+    },
+    "installed_artifact_identity": {
+      "status": "BLOCKED",
+      "current": false,
+      "source_sha": null,
+      "observed_at_utc": null,
+      "installed": false,
+      "hashes": null,
+      "reason": "qualified production artifacts were not installed"
+    },
+    "cold_boot_harness": {
+      "status": "BLOCKED",
+      "current": false,
+      "source_sha": null,
+      "observed_at_utc": null,
+      "armed": false,
+      "reason": "cold-boot harness was not armed"
+    },
+    "owner_observed_reboot": {
+      "status": "BLOCKED",
+      "current": false,
+      "source_sha": null,
+      "observed_at_utc": null,
+      "observed": false,
+      "reason": "owner reboot had not been observed"
+    }
+  }
 }

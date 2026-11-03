@@ -4523,3 +4523,40 @@ device capacity, contain the exact
 rejected without altering the caller's header buffer. These tests establish
 format construction only; they do not authorize writes or close loaded
 recovery, physical-swap, or production-acceptance gates.
+
+## Qualification discovery and release-evidence integrity
+
+Lifecycle execution-gate assertions must evaluate the active C preprocessor
+configuration rather than the first textual `#define`. Ordinary production
+must resolve `SWAPZ_PRIMARY_EXECUTION_ENABLED` to 0; owned-null_blk and
+physical qualification may resolve it to 1 only with all private controls
+present, and the two private modes must fail when combined. Ordinary
+preprocessed source must not read the physical runtime marker. Comments and
+string literals containing fake gate or syscall text never satisfy safety
+assertions.
+
+The official rootless stage directly executes every mandatory Python contract
+owned by that stage, including the owned-null_blk lifecycle qualifier and
+`primary-real-swap-test.py`; the latter remains unit-only in GitHub Actions
+and its privileged helper must block there. The source contract keeps an
+explicit direct-suite registry and requires each path to exist and appear
+exactly once in `test-rootless.sh`. The analyzer contract remains mandatory
+through `tests -> suites test-all -> test-predictor -> test-anon-page-analyzer`
+and is checked without duplicating its execution. Project-goal CI separately
+pins the source-contract invocation and these discovery paths so removal or
+renaming cannot silently reduce qualification coverage. `make test` remains
+the sole qualification interface; `make fast_test` remains development-only.
+
+`docs/handoff/production-readiness.json` is observational release evidence,
+not a qualification result. Every current PASS must bind to the exact
+production source and carry the evidence appropriate to its gate: clean build
+state, qualified formatter/module/oracle hashes, both required CI runs,
+exact-source owner `make test`, owned-null_blk lifecycle qualification, real
+Linux swap-out/in, maximum-capacity plus measured RAM evidence, sustained
+physical performance, lifecycle/deployment state, installed artifact identity,
+armed cold-boot harness, and owner-observed reboot. Missing, historical, stale,
+source-unbound, or structurally incomplete observations are BLOCKED or
+IN_PROGRESS, never PASS; a current FAIL stays FAIL. A retained old host
+snapshot must be labeled HISTORICAL and cannot become a current release verdict.
+Code/deployment readiness-for-owner-reboot is reported separately from the
+owner-observed cold-boot result so automation never fabricates reboot evidence.
