@@ -102,6 +102,34 @@ enum swapz_codec_fault_owner {
 };
 
 /*
+ * Null_blk-only constructor teardown qualification. Each nonzero stage fails
+ * after a progressively later ownership milestone but before the target can
+ * accept BIOs. Production leaves this at zero; physical backing rejects it.
+ */
+enum swapz_constructor_test_fail_stage {
+	SWAPZ_CONSTRUCTOR_FAIL_AFTER_BACKING = 1,
+	SWAPZ_CONSTRUCTOR_FAIL_AFTER_IO_CLIENT = 2,
+	SWAPZ_CONSTRUCTOR_FAIL_AFTER_AUTHORITY = 3,
+	SWAPZ_CONSTRUCTOR_FAIL_AFTER_CORE_SCRATCH = 4,
+	SWAPZ_CONSTRUCTOR_FAIL_AFTER_READ_SLOTS = 5,
+	SWAPZ_CONSTRUCTOR_FAIL_AFTER_WORKQUEUE = 6,
+	SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_SCRATCH = 7,
+	SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE = 8,
+};
+
+static unsigned int swapz_test_fail_constructor_stage;
+module_param_named(test_fail_constructor_stage,
+		   swapz_test_fail_constructor_stage, uint, 0444);
+MODULE_PARM_DESC(test_fail_constructor_stage,
+		 "Owned null_blk constructor cleanup qualification stage 0..8; default 0");
+
+static bool swapz_constructor_test_should_fail(
+	enum swapz_constructor_test_fail_stage stage)
+{
+	return swapz_test_fail_constructor_stage == (unsigned int)stage;
+}
+
+/*
  * A separate bounded LZ4 producer may prepare future writes while synchronous
  * lower dm_io blocks the ordered commit worker or while a detached K=1 lower
  * WRITE is active. WRITE physical I/O and all mapping authority remain
@@ -8463,6 +8491,18 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			"nondefault hand threshold requires async_prepare=1 retain_ms>0";
 		return -EINVAL;
 	}
+	if (swapz_test_fail_constructor_stage >
+		    SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE) {
+		ti->error = "test_fail_constructor_stage must be in 0..8";
+		return -EINVAL;
+	}
+	if (!swapz_async_prepare &&
+	    swapz_test_fail_constructor_stage >=
+		    SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_SCRATCH) {
+		ti->error =
+			"late constructor fault stages require async_prepare=1";
+		return -EINVAL;
+	}
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -8556,6 +8596,17 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
+	if (swapz_test_fail_constructor_stage && !is_nullb) {
+		ti->error =
+			"Constructor fault injection is restricted to null_blk";
+		error = -EOPNOTSUPP;
+		goto fail;
+	}
+	if (swapz_constructor_test_should_fail(
+		    SWAPZ_CONSTRUCTOR_FAIL_AFTER_BACKING)) {
+		error = -ENOMEM;
+		goto fail;
+	}
 	if (ctx->work_conserving_hand_records != SWAPZ_WORK_CONSERVING_HAND_RECORDS &&
 	    !is_nullb) {
 		ti->error = "nondefault hand threshold is restricted to null_blk";
@@ -8579,6 +8630,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (IS_ERR(ctx->io_client)) {
 		error = PTR_ERR(ctx->io_client);
 		ctx->io_client = NULL;
+		goto fail;
+	}
+	if (swapz_constructor_test_should_fail(
+		    SWAPZ_CONSTRUCTOR_FAIL_AFTER_IO_CLIENT)) {
+		error = -ENOMEM;
 		goto fail;
 	}
 	device_bytes = (u64)bdev_nr_sectors(ctx->backing->bdev) << SECTOR_SHIFT;
@@ -8756,6 +8812,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	ctx->authority.dead_segment_recycle = swapz_discard_dead_segment;
 	ctx->authority.dead_segment_recycle_opaque = ctx;
+	if (swapz_constructor_test_should_fail(
+		    SWAPZ_CONSTRUCTOR_FAIL_AFTER_AUTHORITY)) {
+		error = -ENOMEM;
+		goto fail;
+	}
 	ctx->batch_bytes = vzalloc(SWAPZ_BATCH_BYTES);
 	ctx->gc_bytes_store = vzalloc(SWAPZ_BATCH_BYTES);
 	ctx->input_page = vzalloc(SWAPZ_BLOCK_BYTES);
@@ -8799,6 +8860,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		error = -ENOMEM;
 		goto fail;
 	}
+	if (swapz_constructor_test_should_fail(
+		    SWAPZ_CONSTRUCTOR_FAIL_AFTER_CORE_SCRATCH)) {
+		error = -ENOMEM;
+		goto fail;
+	}
 	ctx->engine.authority = &ctx->authority;
 	ctx->engine.io.opaque = ctx;
 	ctx->engine.io.write_extent = swapz_lower_write;
@@ -8826,6 +8892,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			goto fail;
 		}
 	}
+	if (swapz_constructor_test_should_fail(
+		    SWAPZ_CONSTRUCTOR_FAIL_AFTER_READ_SLOTS)) {
+		error = -ENOMEM;
+		goto fail;
+	}
 	ctx->inflight_write.run.bytes = ctx->engine.bulk_scratch;
 	ctx->inflight_write.run.txs = ctx->engine.bulk_txs;
 	ctx->inflight_write.ctx = ctx;
@@ -8833,6 +8904,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->workqueue = alloc_workqueue(
 				"swapz", WQ_MEM_RECLAIM, 1);
 	if (!ctx->workqueue) {
+		error = -ENOMEM;
+		goto fail;
+	}
+	if (swapz_constructor_test_should_fail(
+		    SWAPZ_CONSTRUCTOR_FAIL_AFTER_WORKQUEUE)) {
 		error = -ENOMEM;
 		goto fail;
 	}
@@ -8902,10 +8978,20 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 				goto fail;
 			}
 		}
+		if (swapz_constructor_test_should_fail(
+			    SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_SCRATCH)) {
+			error = -ENOMEM;
+			goto fail;
+		}
 		ctx->preparation_workqueue = alloc_workqueue(
 					"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,
 					ctx->preparation_worker_count);
 		if (!ctx->preparation_workqueue) {
+			error = -ENOMEM;
+			goto fail;
+		}
+		if (swapz_constructor_test_should_fail(
+			    SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE)) {
 			error = -ENOMEM;
 			goto fail;
 		}
