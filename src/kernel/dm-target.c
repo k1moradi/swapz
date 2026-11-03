@@ -1121,7 +1121,9 @@ static void swapz_prepared_put(struct swapz_dm *ctx,
  * The ordered consumer drops one slot reference before bio_endio(). The
  * producer keeps the other until optional compression has stopped touching it.
  * Release before bio_endio(), which can invalidate dm_per_bio_data.
- * Early release after copying into batch_bytes bounds producer memory.
+ * READY representations may release after copying into batch_bytes. A
+ * speculative RAW_SELECTED representation retains the consumer reference until
+ * result_ready so a late codec error cannot race past successful upper ACK.
  */
 static void swapz_release_prepared(struct bio *bio)
 {
@@ -1133,6 +1135,27 @@ static void swapz_release_prepared(struct bio *bio)
 		return;
 	WRITE_ONCE(entry->prepared_page, NULL);
 	swapz_prepared_put(ctx, prepared);
+}
+
+/*
+ * RAW selection may overlap optional compression with the already-selected
+ * lower write, but successful upper completion must not outrun that producer.
+ * The consumer reference keeps the slot alive across this wait. Call only from
+ * sleepable ordered-owner paths before generic/preempt-disabled ACK delivery.
+ */
+static int swapz_wait_raw_selected_preparation(struct bio *bio)
+{
+	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	struct swapz_prepared_page *prepared = READ_ONCE(entry->prepared_page);
+	int error;
+
+	if (!prepared ||
+	    swapz_preparation_read_state(&prepared->state) !=
+		    SWAPZ_PREPARATION_RAW_SELECTED)
+		return 0;
+	wait_for_completion(&prepared->result_ready);
+	error = READ_ONCE(prepared->length);
+	return error < 0 ? error : 0;
 }
 
 
@@ -2132,6 +2155,21 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 			ctx->accepted_work_lower_idle_post_lower_ns += post_lower_ns;
 	}
 
+	/*
+	 * RAW_SELECTED may have reached lower I/O while its speculative codec
+	 * still ran. Preserve that overlap, but do not publish a successful run
+	 * to upper completion until every selected-RAW producer has terminated.
+	 */
+	if (!error && committed == inflight->count) {
+		for (index = 0; index < inflight->count; ++index) {
+			error = swapz_wait_raw_selected_preparation(
+				inflight->bios[index]);
+			if (error) {
+				swapz_fail(ctx, error);
+				break;
+			}
+		}
+	}
 	/* No successor may treat this run as complete before publication. */
 	swapz_lane_gap_publish(ctx, inflight->lane_epoch, lower_end,
 			       lane_observed_ns, finalize_end,
@@ -4730,6 +4768,25 @@ commit_done:
 	    (!recoverable_gc_error || committed))
 		swapz_fail(ctx, error);
 	/*
+	 * A synchronous lower run may also contain scheduler-selected RAW pages.
+	 * The lower write may overlap their speculative compression, but a success
+	 * ACK must wait for that producer so a late negative result fails this BIO.
+	 */
+	if (!async_submitted && committed && !READ_ONCE(ctx->failed)) {
+		for (index = 0; index < committed; ++index) {
+			struct bio *bio =
+				ctx->batch[ctx->planned_to_batch[index]].bio;
+			int preparation_error =
+				swapz_wait_raw_selected_preparation(bio);
+
+			if (preparation_error) {
+				error = preparation_error;
+				swapz_fail(ctx, error);
+				break;
+			}
+		}
+	}
+	/*
 	 * Successful synchronous records are one terminal ACK cohort. The engine
 	 * normally stamps publication; if an exceptional successful mapping lacks
 	 * that observer mark, reuse this delivery mark as a conservative zero-dwell
@@ -5592,7 +5649,9 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				ctx->input_page, SWAPZ_BLOCK_BYTES,
 				&ctx->ordered_write_copy_wall_ns,
 				&ctx->ordered_write_copy_bytes);
-		swapz_release_prepared(bio);
+		if (!prepared_async ||
+		    prepared_state != SWAPZ_PREPARATION_RAW_SELECTED)
+			swapz_release_prepared(bio);
 		swapz_window_admit_clock(ctx);
 		ctx->batch[ctx->batch_count++] = (struct swapz_pending_bio) {
 			.bio = bio,

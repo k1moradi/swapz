@@ -2900,12 +2900,15 @@ publication, it must retain its exact errno, must not increment RAW-fallback
 accounting, and must not publish or stage RAW as a no-fit result. When
 RAW_SELECTED linearizes first, a late negative result must leave that selected
 state unchanged, must not be counted as codec no-fit, and must fail the target
-closed as soon as the producer observes it. The ordered owner can complete a
-correct, independently selected RAW write before speculative compression
-finishes: a later target failure cannot revoke an already-acknowledged BIO.
-Qualification must distinguish those orderings; requiring the same BIO to fail
-in both cases needs explicit producer/completion synchronization, not only a
-post-result failed-target check. Prepared and ordered owners are separate
+closed as soon as the producer observes it. The selected RAW lower write may
+overlap speculative compression, but successful upper ACK must wait on the
+producer's result completion while the consumer retains its prepared-page
+reference. Qualification must prove the ACK waiter remains blocked until that
+completion, returns the exact late negative errno, permits a nonnegative late
+result, and bypasses the wait for an already-terminal READY representation.
+Source ordering must place this barrier before both synchronous success ACK and
+detached-run success publication/defer delivery; generic/preempt-disabled
+completion paths must not sleep. Prepared and ordered owners are separate
 required cases; the ordered mapped-input case must prove unmapping precedes the
 error return. Positive and zero controls must continue to select compressed and
 RAW storage respectively.

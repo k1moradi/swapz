@@ -658,6 +658,156 @@ int main(void)
             self.assertEqual(executed.returncode, 0, executed.stderr)
 
 
+    def test_raw_selected_codec_error_gates_success_ack(self):
+        helper = body("swapz_wait_raw_selected_preparation")
+        accept = body("swapz_accept_write")
+        flush = body("swapz_flush_window")
+        finalize = body("swapz_finalize_inflight_write")
+
+        self.assertIn("SWAPZ_PREPARATION_RAW_SELECTED", helper)
+        self.assertIn("wait_for_completion(&prepared->result_ready)", helper)
+        self.assertIn("error = READ_ONCE(prepared->length)", helper)
+        self.assertIn("return error < 0 ? error : 0;", helper)
+        self.assertIn(
+            "prepared_state != SWAPZ_PREPARATION_RAW_SELECTED", accept)
+        self.assertLess(
+            flush.index("swapz_wait_raw_selected_preparation(bio)"),
+            flush.index("acknowledgements.delivered_ns = ktime_get_ns();"))
+        self.assertLess(
+            finalize.index("swapz_wait_raw_selected_preparation("),
+            finalize.index("swapz_lane_gap_publish(ctx,"))
+        self.assertLess(
+            finalize.index("swapz_wait_raw_selected_preparation("),
+            finalize.index("swapz_defer_upper_completion(ctx,"))
+
+        import subprocess
+        import tempfile
+
+        source = r"""
+#include <assert.h>
+#include <errno.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define SWAPZ_PREPARATION_READY_RAW 3
+#define SWAPZ_PREPARATION_RAW_SELECTED 4
+typedef struct { _Atomic int value; } atomic_t;
+struct completion {
+    pthread_mutex_t lock;
+    pthread_cond_t condition;
+    bool done;
+    bool waiter_present;
+};
+struct swapz_prepared_page {
+    atomic_t state;
+    struct completion result_ready;
+    int length;
+};
+struct swapz_bio_ref { struct swapz_prepared_page *prepared_page; };
+struct bio { struct swapz_bio_ref reference; };
+#define READ_ONCE(value) (value)
+#define dm_per_bio_data(bio, size) ((void)(size), &(bio)->reference)
+static int swapz_preparation_read_state(const atomic_t *state)
+{
+    return atomic_load_explicit(&state->value, memory_order_acquire);
+}
+static void wait_for_completion(struct completion *completion)
+{
+    assert(pthread_mutex_lock(&completion->lock) == 0);
+    completion->waiter_present = true;
+    assert(pthread_cond_broadcast(&completion->condition) == 0);
+    while (!completion->done)
+        assert(pthread_cond_wait(&completion->condition,
+                                 &completion->lock) == 0);
+    assert(pthread_mutex_unlock(&completion->lock) == 0);
+}
+"""
+        source += (
+            "static int swapz_wait_raw_selected_preparation(struct bio *bio) {\n" +
+            helper + "\n}\n")
+        source += r"""
+struct waiter_context {
+    struct bio *bio;
+    _Atomic bool returned;
+    int result;
+};
+static void *waiter(void *opaque)
+{
+    struct waiter_context *context = opaque;
+    context->result = swapz_wait_raw_selected_preparation(context->bio);
+    atomic_store_explicit(&context->returned, true, memory_order_release);
+    return NULL;
+}
+static void init_completion(struct completion *completion)
+{
+    memset(completion, 0, sizeof(*completion));
+    assert(pthread_mutex_init(&completion->lock, NULL) == 0);
+    assert(pthread_cond_init(&completion->condition, NULL) == 0);
+}
+static void complete_result(struct swapz_prepared_page *prepared, int result)
+{
+    assert(pthread_mutex_lock(&prepared->result_ready.lock) == 0);
+    prepared->length = result;
+    prepared->result_ready.done = true;
+    assert(pthread_cond_broadcast(&prepared->result_ready.condition) == 0);
+    assert(pthread_mutex_unlock(&prepared->result_ready.lock) == 0);
+}
+static void wait_until_blocked(struct completion *completion)
+{
+    assert(pthread_mutex_lock(&completion->lock) == 0);
+    while (!completion->waiter_present)
+        assert(pthread_cond_wait(&completion->condition,
+                                 &completion->lock) == 0);
+    assert(pthread_mutex_unlock(&completion->lock) == 0);
+}
+int main(void)
+{
+    struct swapz_prepared_page prepared;
+    struct bio bio = {0};
+    struct waiter_context context = {.bio = &bio};
+    pthread_t thread;
+
+    memset(&prepared, 0, sizeof(prepared));
+    init_completion(&prepared.result_ready);
+    atomic_init(&prepared.state.value, SWAPZ_PREPARATION_RAW_SELECTED);
+    atomic_init(&context.returned, false);
+    bio.reference.prepared_page = &prepared;
+    assert(pthread_create(&thread, NULL, waiter, &context) == 0);
+    wait_until_blocked(&prepared.result_ready);
+    assert(!atomic_load_explicit(&context.returned, memory_order_acquire));
+    complete_result(&prepared, -EIO);
+    assert(pthread_join(thread, NULL) == 0);
+    assert(context.result == -EIO);
+
+    prepared.result_ready.done = false;
+    prepared.result_ready.waiter_present = false;
+    atomic_store(&context.returned, false);
+    context.result = -1;
+    assert(pthread_create(&thread, NULL, waiter, &context) == 0);
+    wait_until_blocked(&prepared.result_ready);
+    complete_result(&prepared, 2048);
+    assert(pthread_join(thread, NULL) == 0);
+    assert(context.result == 0);
+
+    atomic_store(&prepared.state.value, SWAPZ_PREPARATION_READY_RAW);
+    prepared.result_ready.done = false;
+    assert(swapz_wait_raw_selected_preparation(&bio) == 0);
+    return 0;
+}
+"""
+        with tempfile.TemporaryDirectory(prefix="swapz-raw-ack-barrier-") as temp:
+            binary = Path(temp) / "probe"
+            compiled = subprocess.run(
+                ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+                 "-pthread", "-x", "c", "-", "-o", str(binary)],
+                input=source, text=True, capture_output=True, timeout=30)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            executed = subprocess.run(
+                [str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(executed.returncode, 0, executed.stderr)
+
     def test_pressure_hand_requires_completed_representation(self):
         ready = body("swapz_next_local_write_ready")
         policy = (ROOT / "src/kernel/window-policy.h").read_text()

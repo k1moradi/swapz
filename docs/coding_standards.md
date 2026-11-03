@@ -1501,16 +1501,22 @@ enter either RAW publication path. Submitter/background preparation publishes
 the exact errno before an ERROR terminal state; the ordered consumer observes
 that state with acquire semantics and completes the BIO with an error. If
 RAW_SELECTED already won the speculative representation race before a late
-negative result exists, the producer must still fail the target closed; the
-late result does not rewrite the already-selected state. The inline ordered
-caller must unmap any mapped input and return the negative error before staging
-RAW bytes. Zero remains the only codec result that authorizes ordinary RAW
-fallback. On an asynchronous codec error the producer elects target failure
-before publishing ERROR; it must never touch a BIO descriptor after the
-background snapshot handoff because RAW selection may already have completed
-that BIO. Only READY results charge the ready-residency gauge. An ERROR reader
-acquires the terminal state before consuming the prepared-page errno and leaves
-BIO completion and slot release with the ordered owner.
+negative result exists, the producer must still fail the target closed and the
+late result does not rewrite the already-selected state. Lower I/O may proceed
+from the stable RAW snapshot while compression finishes, but the ordered owner
+must retain its prepared-page reference and gate successful upper ACK on the
+existing result_ready completion. A late negative result therefore fails that
+same BIO; zero or positive speculative results permit the already-selected RAW
+representation to complete. This ACK-only wait must run in a sleepable
+ordered-owner path after lower publication, never inside generic or
+preempt-disabled BIO completion. The inline ordered caller must unmap any mapped
+input and return the negative error before staging RAW bytes. Zero remains the
+only codec result that authorizes ordinary RAW fallback. On an asynchronous
+codec error the producer elects target failure before publishing ERROR and must
+never touch the handed-off BIO descriptor. Only READY results charge the
+ready-residency gauge. An ERROR reader acquires the terminal state before
+consuming the prepared-page errno and leaves BIO completion and slot release
+with the ordered owner.
 
 
 Do not expose scheduler-accounted per-callback CPU as a portable module
