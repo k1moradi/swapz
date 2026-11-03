@@ -2792,6 +2792,21 @@ ARM64 runtime coverage and x86 assembly inspection do not qualify x86 runtime.
 Keep offline timings, loaded positive-fixture pairs and the full owner matrix
 distinct. Historical plain-delta64 timings do not measure the new path.
 
+Compression-result qualification must exercise the signed target boundary with
+positive, zero, and artificial negative results. A negative result must retain
+its exact errno, must not increment RAW-fallback accounting, and must not
+publish or stage a RAW page. Prepared and ordered owners are separate required
+cases; the ordered mapped-input case must prove unmapping precedes the error
+return. Positive and zero controls must continue to select compressed and RAW
+storage respectively.
+
+Direct codec qualification must include deterministic nonzero randomized
+payload bytes, boundary lengths around 8-byte/CRC lanes and production packing
+cliffs, the maximum accepted payload, deliberately unaligned extent/payload
+addresses, and every stored encoding. These cases supplement, rather than
+replace, the full-page structured/entropy predictor corpus and independent
+scalar/SIMD transform/shuffle oracles.
+
 The delta64 transform unit is one 4KiB logical page, never a whole packed
 extent. Direct production-C coverage must prove ordinary LZ4 and delta64 records
 share the unchanged 16-byte SWZ record size, decode the encoding bit exactly,

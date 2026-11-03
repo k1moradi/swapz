@@ -1001,6 +1001,16 @@ delta64 encoding support; reads of an encoded record require their scratch and
 fail closed if it is missing. Only an enabled target may write new delta64
 records. A `delta64_rescue=0` result is not a measured classifier rejection.
 
+The page-compression boundary is a signed tri-state contract: a positive
+`int` is the exact encoded payload length, zero is the valid no-fit result
+that selects whole-page RAW storage, and a negative value is an errno. Keep
+that result signed until the caller has separated all three cases. Prepared
+owners must publish a negative result through their ERROR/`preparation_error`
+path, and the ordered owner must return it after releasing any mapped input;
+only exactly zero may enter RAW fallback accounting, staging, or publication.
+Never use `<= 0` as a RAW selector and never cast an unchecked result to an
+unsigned payload length.
+
 Current rescue writes `SWAPZ_ENCODING_DELTA64_SHUF8`: delta64, eight byte
 planes, then LZ4. Preserve decoding of plain DELTA64. Codec validation must
 reject a shuffle flag without delta64, including with a valid metadata CRC;

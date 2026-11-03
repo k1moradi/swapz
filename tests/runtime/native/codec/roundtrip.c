@@ -290,6 +290,105 @@ static int test_alignment_and_payload_boundaries(void)
 	return 0;
 }
 
+static swapz_u32 next_random_word(swapz_u32 *state)
+{
+	swapz_u32 value = *state;
+
+	value ^= value << 13;
+	value ^= value >> 17;
+	value ^= value << 5;
+	*state = value;
+	return value;
+}
+
+static int verify_unaligned_encoded_record(swapz_u16 length,
+					    swapz_u8 encoding,
+					    swapz_u32 seed)
+{
+	struct swapz_builder builder;
+	struct swapz_decoded decoded;
+	const swapz_u8 *readable;
+	swapz_u8 *bytes = misaligned_extent + 1U;
+	swapz_u8 *input = misaligned_payload + 1U;
+	swapz_u32 payload_crc32c;
+	swapz_u32 random_state = seed | 1U;
+	swapz_u32 index;
+
+	for (index = 0; index < length; ++index) {
+		swapz_u32 random_word = next_random_word(&random_state);
+
+		input[index] = (swapz_u8)(random_word >> ((index & 3U) * 8U));
+	}
+	/* Keep every corpus member observably nonzero even if the PRNG changes. */
+	input[length / 2U] |= 1U;
+	payload_crc32c = reference_crc32c(input, length);
+
+	CHECK(swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES, seed | 1U) == 0);
+	CHECK(swapz_append_prehashed_encoded(
+		      &builder, seed, (seed ^ 0xa5a5a5a5U) | 1U,
+		      input, length, payload_crc32c, encoding) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(swapz_validate(bytes, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_lookup_validated(bytes, SWAPZ_BLOCK_BYTES, 0,
+				     &decoded, &readable) == 0);
+	CHECK(decoded.logical_page == seed);
+	CHECK(decoded.generation == ((seed ^ 0xa5a5a5a5U) | 1U));
+	CHECK(decoded.payload_length == length);
+	CHECK(decoded.payload_crc32c == payload_crc32c);
+	CHECK(decoded.encoding == encoding);
+	CHECK(readable >= bytes);
+	CHECK((size_t)(readable - bytes) + length <= SWAPZ_BLOCK_BYTES);
+	CHECK(!memcmp(readable, input, length));
+	CHECK(swapz_crc32c_bytes(readable, length) == payload_crc32c);
+	return 0;
+}
+
+static int test_randomized_unaligned_encoded_boundaries(void)
+{
+	static const swapz_u16 boundary_lengths[] = {
+		1U, 2U, 7U, 8U, 9U, 15U, 16U, 17U,
+		63U, 64U, 65U, 255U, 256U, 257U,
+		511U, 512U, 513U, 1023U, 1024U, 1025U,
+		2023U, 2024U, 2025U, 2047U, 2048U, 2049U,
+		3071U, 3072U, 3073U,
+		SWAPZ_MAX_COMPRESSED - 1U, SWAPZ_MAX_COMPRESSED,
+	};
+	static const swapz_u8 encodings[] = {
+		SWAPZ_ENCODING_LZ4,
+		SWAPZ_ENCODING_DELTA64,
+		SWAPZ_ENCODING_DELTA64_SHUF8,
+	};
+	swapz_u32 random_state = 0x6a09e667U;
+	unsigned int length_index, encoding_index, case_index;
+
+	for (length_index = 0;
+	     length_index < sizeof(boundary_lengths) / sizeof(boundary_lengths[0]);
+	     ++length_index)
+		for (encoding_index = 0;
+		     encoding_index < sizeof(encodings) / sizeof(encodings[0]);
+		     ++encoding_index) {
+			swapz_u32 seed = 0x9e3779b9U ^
+				((swapz_u32)length_index + 1U) * 0x85ebca6bU ^
+				((swapz_u32)encoding_index + 1U) * 0xc2b2ae35U;
+
+			CHECK(verify_unaligned_encoded_record(
+				      boundary_lengths[length_index],
+				      encodings[encoding_index], seed | 1U) == 0);
+		}
+
+	for (case_index = 0; case_index < 128U; ++case_index) {
+		swapz_u16 length = (swapz_u16)(
+			1U + next_random_word(&random_state) % SWAPZ_MAX_COMPRESSED);
+		swapz_u8 encoding = encodings[
+			next_random_word(&random_state) %
+			(sizeof(encodings) / sizeof(encodings[0]))];
+		swapz_u32 seed = next_random_word(&random_state) | 1U;
+
+		CHECK(verify_unaligned_encoded_record(length, encoding, seed) == 0);
+	}
+	return 0;
+}
+
 static int test_bad_inputs(void)
 {
 	struct swapz_builder b;
@@ -460,6 +559,7 @@ int main(void)
 	CHECK(test_map_encoding_packing() == 0); tests++;
 	CHECK(test_seal_clears_only_unwritten_gap() == 0); tests++;
 	CHECK(test_alignment_and_payload_boundaries() == 0); tests++;
+	CHECK(test_randomized_unaligned_encoded_boundaries() == 0); tests++;
 	CHECK(test_bad_inputs() == 0); tests++;
 	CHECK(test_integrity() == 0); tests++;
 	CHECK(test_read_spans() == 0); tests++;
