@@ -2,7 +2,6 @@
 """Rootless contract checks for the Agent 7 owned-null_blk qualifier."""
 
 from pathlib import Path
-import re
 import subprocess
 import unittest
 
@@ -59,7 +58,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             self.script)
 
     def test_interruption_oracle_proves_exact_mapper_and_repeat_recovery(self):
-        self.assertIn('mapper_uuid == "SWAPZ-PRIMARY-$RUN_ID"', self.script)
+        self.assertIn('[[ "$mapper_uuid" == "SWAPZ-PRIMARY-$RUN_ID" ]]', self.script)
         self.assertIn('"$table_target" == swapz', self.script)
         self.assertIn('"$table_lower" == "$PART_DEVNO"', self.script)
         self.assertIn("assert_unrelated_host_swap_identity", self.script)
