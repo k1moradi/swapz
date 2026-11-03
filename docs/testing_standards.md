@@ -67,13 +67,31 @@ infrastructure, not a second public command; Agent 10 owns any eventual
 fallback swap itself. Activation, deactivation, and recovery are requested only
 through the production primary coordinator.
 
-Before physical activation it must prove: exact clean source and current
-qualification provenance; matching qualified userspace/module hashes; a frozen
-production acceptance manifest; the protected PARTUUID selector; exact
-partition size, device number, removable USB parent/topology, and separation
-from root/recovery storage; no unresolved primary transaction, mapper, module,
-or raw-target swap alias; at least 1 GiB `MemAvailable`; readable kernel
-diagnostics; and working cgroup-v2 memory, swap, PSI, OOM, and zswap controls.
+Before physical activation it must prove: exact clean source on `main` with
+local `HEAD == origin/main == validated source`; current qualification
+provenance; a frozen production acceptance manifest; the protected PARTUUID
+selector; exact partition size and device number; the exact removable USB
+parent and its sole selected partition; explicit
+`root_same_physical_disk_as_target=false` and
+`recovery_same_physical_disk_as_target=false`; no unresolved primary
+transaction, mapper, module, or raw-target swap alias; at least 1 GiB
+`MemAvailable`; readable kernel diagnostics; and working cgroup-v2 memory,
+swap, PSI, OOM, and zswap controls. A missing storage-separation fact is
+BLOCKED, not equivalent to false.
+
+The helper must execute an installed `<prefix>/sbin/swapzctl`, derive the same
+`<prefix>/libexec/swapz/{dm-swapz.ko,device-roundtrip}` paths used by the
+manager, parse the supplied owner report's qualified artifact hashes, and
+independently SHA-256 all three installed files. The report values, primary
+plan qualified/live values, embedded control source SHA, and observed bytes
+must all agree with the exact validated source. The module is deliberately
+absent before start, so live module sysfs provenance is expected to be
+unavailable at admission and must not be required there. Immediately after
+successful start, the helper must independently require the loaded module's
+`build_source_sha`, clean bit, and physical-backing parameter to match the
+validated source and production physical mode. Trusting the plan's aggregate
+artifact-match boolean alone is insufficient.
+
 A disposable cgroup preflight must complete before primary `prepare/start`.
 Default bounds are 384 MiB deterministic anonymous memory,
 `memory.max=128 MiB`, `memory.swap.max=384 MiB`, cgroup zswap disabled,
@@ -88,11 +106,13 @@ highest swap priority for attributable cgroup traffic. Ambiguous attribution
 is BLOCKED.
 
 PASS requires actual reclaim and swap-in: at least 128 MiB cgroup swap
-occupancy, increasing exact-mapper use, positive swapz logical/physical WRITE
-and READ counters, backing-partition WRITE and READ sector deltas, positive
+occupancy, at least the same 128 MiB increase in exact-mapper `/proc/swaps`
+usage and swapz logical WRITE/READ counters, positive swapz physical WRITE and
+READ counters, backing-partition WRITE and READ sector deltas, positive
 `pswpout` and `pswpin`, zero OOM events, healthy target status, and
-byte-exact verification of every deterministic 4 KiB page. PSI and relevant
-kernel errors are recorded. Current-host evidence is mandatory; historical
+byte-exact verification of exactly the admitted deterministic 4 KiB page
+count and byte count; a truncated oracle report cannot qualify. PSI and
+relevant kernel errors are recorded. Current-host evidence is mandatory; historical
 reports or successful `swapon` without traffic cannot qualify.
 
 Normal teardown is requested only through `swapzctl primary stop`. An

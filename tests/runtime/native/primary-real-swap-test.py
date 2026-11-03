@@ -3,6 +3,7 @@
 
 from dataclasses import replace
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -92,6 +93,154 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             with self.subTest(priority=priority), self.assertRaises(qualify.Blocked):
                 qualify.require_expected_swap_priority(
                     expected, [qualify.SwapRow("/swapfile", "file", 100, 0, priority, None)])
+
+    def test_plan_storage_separation_requires_explicit_false_current_keys(self):
+        canonical = {
+            "root_same_physical_disk_as_target": False,
+            "recovery_same_physical_disk_as_target": False,
+        }
+        qualify.require_plan_storage_separation(canonical)
+        for key in canonical:
+            with self.subTest(key=key):
+                mutant = dict(canonical)
+                mutant[key] = True
+                with self.assertRaises(qualify.Blocked):
+                    qualify.require_plan_storage_separation(mutant)
+                missing = dict(canonical)
+                del missing[key]
+                with self.assertRaises(qualify.Blocked):
+                    qualify.require_plan_storage_separation(missing)
+
+    def test_authorized_parent_requires_exact_sole_partition_topology(self):
+        target = {"pkname": "sda"}
+        parent = {
+            "path": "/dev/sda",
+            "children": [{"type": "part", "maj:min": "8:1"}],
+        }
+        qualify.require_sole_partition_topology(target, parent, "8:1")
+        mutants = (
+            ({}, parent),
+            (target, {"path": "/dev/sda"}),
+            (target, {"path": "/dev/sda", "children": [
+                {"type": "part", "maj:min": "8:1"},
+                {"type": "part", "maj:min": "8:2"},
+            ]}),
+            (target, {"path": "/dev/sdb", "children": [
+                {"type": "part", "maj:min": "8:1"},
+            ]}),
+        )
+        for mutant_target, mutant_parent in mutants:
+            with self.subTest(target=mutant_target, parent=mutant_parent), \
+                    self.assertRaises(qualify.Blocked):
+                qualify.require_sole_partition_topology(
+                    mutant_target, mutant_parent, "8:1")
+
+    def test_provenance_independently_hashes_all_installed_qualified_artifacts(self):
+        source_sha = "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory)
+            swapzctl = prefix / "sbin/swapzctl"
+            module = prefix / "libexec/swapz/dm-swapz.ko"
+            device_oracle = prefix / "libexec/swapz/device-roundtrip"
+            for path, contents in (
+                (swapzctl, b"qualified swapzctl"),
+                (module, b"qualified module"),
+                (device_oracle, b"qualified device oracle"),
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+            hashes = {
+                "formatter_sha256": hashlib.sha256(swapzctl.read_bytes()).hexdigest(),
+                "module_sha256": hashlib.sha256(module.read_bytes()).hexdigest(),
+                "oracle_sha256": hashlib.sha256(device_oracle.read_bytes()).hexdigest(),
+            }
+            report = {
+                "schema": "swapz-test-results-v1",
+                "source_sha": source_sha,
+                "tested_commit_sha": source_sha,
+                "overall": "PASS",
+                "qualification": "RAM_BACKED_NULL_BLK_ONLY",
+                "qualified_artifacts": {"status": "AVAILABLE", **hashes},
+            }
+            report_path = prefix / "qualification.json"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            report_digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
+            plan = {
+                "control_build_source_clean": True,
+                # Pre-start module provenance is unavailable by design because
+                # the admitted cycle requires dm_swapz to be absent.
+                "module_build_provenance_read": False,
+                "module_build_source_clean": False,
+                "control_module_source_matches": False,
+                "qualification_report_valid": True,
+                "qualification_source_matches_build": True,
+                "live_artifact_hashes_read": True,
+                "live_artifacts_match_qualification": True,
+                "control_build_source_sha": source_sha,
+                "module_build_source_sha": "unavailable",
+                "qualification_report_sha256": report_digest,
+                "qualified_swapzctl_sha256": hashes["formatter_sha256"],
+                "live_swapzctl_sha256": hashes["formatter_sha256"],
+                "qualified_module_sha256": hashes["module_sha256"],
+                "live_module_sha256": hashes["module_sha256"],
+                "qualified_oracle_sha256": hashes["oracle_sha256"],
+                "live_oracle_sha256": hashes["oracle_sha256"],
+                "privileged_execution_enabled": True,
+            }
+            self.assertEqual(
+                qualify.verify_provenance(plan, source_sha, report_path, swapzctl),
+                hashes)
+            module.write_bytes(b"substituted module")
+            with self.assertRaisesRegex(qualify.Blocked, "installed module_sha256"):
+                qualify.verify_provenance(plan, source_sha, report_path, swapzctl)
+
+    def test_loaded_module_provenance_is_checked_only_after_start(self):
+        source_sha = "a" * 40
+        qualify.validate_loaded_module_provenance(source_sha, "1", "Y", source_sha)
+        qualify.validate_loaded_module_provenance(source_sha, "1", "1", source_sha)
+        for observed_source, clean, physical in (
+            ("b" * 40, "1", "Y"),
+            (source_sha, "0", "Y"),
+            (source_sha, "1", "N"),
+            (source_sha, "1", "0"),
+        ):
+            with self.subTest(source=observed_source, clean=clean, physical=physical), \
+                    self.assertRaises(qualify.QualificationFailure):
+                qualify.validate_loaded_module_provenance(
+                    observed_source, clean, physical, source_sha)
+
+    def test_default_control_path_uses_installed_package_layout(self):
+        args = qualify.build_parser().parse_args([
+            "--validated-source", "a" * 40,
+            "--qualification-report", "/tmp/report.json",
+        ])
+        self.assertEqual(args.swapzctl, "/usr/local/sbin/swapzctl")
+
+    def test_physical_source_requires_main_equal_origin_main(self):
+        source_sha = "a" * 40
+        completed = __import__("subprocess").CompletedProcess
+        good = [
+            completed(args=[], returncode=0, stdout=source_sha + "\n", stderr=""),
+            completed(args=[], returncode=0, stdout="main\n", stderr=""),
+            completed(args=[], returncode=0, stdout=source_sha + "\n", stderr=""),
+            completed(args=[], returncode=0, stdout="", stderr=""),
+        ]
+        with mock.patch.object(qualify, "_run", side_effect=good):
+            qualify._check_git_source(source_sha)
+
+        wrong_origin = list(good)
+        wrong_origin[2] = completed(
+            args=[], returncode=0, stdout="b" * 40 + "\n", stderr="")
+        with mock.patch.object(qualify, "_run", side_effect=wrong_origin), \
+                self.assertRaisesRegex(qualify.Blocked, "main == origin/main"):
+            qualify._check_git_source(source_sha)
+
+        detached = list(good)
+        detached[1] = completed(
+            args=[], returncode=0, stdout="HEAD\n", stderr="")
+        with mock.patch.object(qualify, "_run", side_effect=detached), \
+                self.assertRaisesRegex(qualify.Blocked, "main == origin/main"):
+            qualify._check_git_source(source_sha)
 
     def canonical_manifest(self):
         run_id = "1" * 32
@@ -210,13 +359,22 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             cgroup_swap_bytes=32 * qualify.MIB,
             cgroup_swap_peak=48 * qualify.MIB,
             min_swap_bytes=16 * qualify.MIB,
+            expected_verified_pages=1024,
             oom_delta=0,
             oom_kill_delta=0,
-            mapper_used_delta_kib=8192,
+            mapper_used_delta_kib=32 * 1024,
             fill_status_before={"logical_write": 0, "logical_read": 0, "physical_write": 0, "physical_read": 0, "failed": 0, "last_error": 0},
-            fill_status_after={"logical_write": 65536, "logical_read": 0, "physical_write": 32768, "physical_read": 0, "failed": 0, "last_error": 0},
-            verify_status_before={"logical_write": 65536, "logical_read": 0, "physical_write": 32768, "physical_read": 0, "failed": 0, "last_error": 0},
-            verify_status_after={"logical_write": 65536, "logical_read": 65536, "physical_write": 32768, "physical_read": 32768, "failed": 0, "last_error": 0},
+            fill_status_after={"logical_write": 32 * qualify.MIB, "logical_read": 0,
+                               "physical_write": 8 * qualify.MIB, "physical_read": 0,
+                               "failed": 0, "last_error": 0},
+            verify_status_before={"logical_write": 32 * qualify.MIB, "logical_read": 0,
+                                  "physical_write": 8 * qualify.MIB, "physical_read": 0,
+                                  "failed": 0, "last_error": 0},
+            verify_status_after={"logical_write": 32 * qualify.MIB,
+                                 "logical_read": 32 * qualify.MIB,
+                                 "physical_write": 8 * qualify.MIB,
+                                 "physical_read": 8 * qualify.MIB,
+                                 "failed": 0, "last_error": 0},
             lower_before=qualify.BlockStats(0, 0),
             lower_after_fill=qualify.BlockStats(0, 64),
             lower_before_verify=qualify.BlockStats(0, 64),
@@ -225,7 +383,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             vm_after_fill={"pswpin": 0, "pswpout": 10},
             vm_before_verify={"pswpin": 0, "pswpout": 10},
             vm_after_verify={"pswpin": 10, "pswpout": 10},
-            oracle={"verified_pages": 1024, "mismatches": 0, "digest": "aa", "expected_digest": "aa"},
+            oracle={"verified_pages": 1024, "verified_bytes": 1024 * qualify.PAGE_BYTES,
+                    "mismatches": 0, "digest": "aa", "expected_digest": "aa"},
         )
 
     def test_workload_pass_requires_swap_usage_target_write_read_lower_io_and_byte_oracle(self):
@@ -236,17 +395,28 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         mutants = [
             {"cgroup_swap_bytes": 0},
             {"mapper_used_delta_kib": 0},
+            {"mapper_used_delta_kib": 8 * 1024},
             {"oom_kill_delta": 1},
             {"fill_status_after": {**base["fill_status_after"], "logical_write": 0}},
+            {"fill_status_after": {**base["fill_status_after"],
+                                   "logical_write": 8 * qualify.MIB}},
             {"fill_status_after": {**base["fill_status_after"], "physical_write": 0}},
             {"verify_status_after": {**base["verify_status_after"], "logical_read": 0}},
+            {"verify_status_after": {**base["verify_status_after"],
+                                     "logical_read": 8 * qualify.MIB}},
             {"verify_status_after": {**base["verify_status_after"], "physical_read": 0}},
             {"lower_after_fill": qualify.BlockStats(0, 0)},
             {"lower_after_verify": qualify.BlockStats(0, 64)},
             {"vm_after_fill": {"pswpin": 0, "pswpout": 0}},
             {"vm_after_verify": {"pswpin": 0, "pswpout": 10}},
-            {"oracle": {"verified_pages": 1024, "mismatches": 1, "digest": "aa", "expected_digest": "aa"}},
-            {"oracle": {"verified_pages": 1024, "mismatches": 0, "digest": "aa", "expected_digest": "bb"}},
+            {"oracle": {"verified_pages": 1024, "verified_bytes": 1024 * qualify.PAGE_BYTES,
+                        "mismatches": 1, "digest": "aa", "expected_digest": "aa"}},
+            {"oracle": {"verified_pages": 1024, "verified_bytes": 1024 * qualify.PAGE_BYTES,
+                        "mismatches": 0, "digest": "aa", "expected_digest": "bb"}},
+            {"oracle": {"verified_pages": 1023, "verified_bytes": 1024 * qualify.PAGE_BYTES,
+                        "mismatches": 0, "digest": "aa", "expected_digest": "aa"}},
+            {"oracle": {"verified_pages": 1024, "verified_bytes": 1023 * qualify.PAGE_BYTES,
+                        "mismatches": 0, "digest": "aa", "expected_digest": "aa"}},
             {"verify_status_after": {**base["verify_status_after"], "failed": 1}},
         ]
         for mutant in mutants:
@@ -326,6 +496,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 ]), \
                 mock.patch.object(qualify, "read_manifest", return_value=manifest), \
                 mock.patch.object(qualify, "_validate_prepared_manifest", return_value=None), \
+                mock.patch.object(qualify, "verify_loaded_module_provenance",
+                                  return_value={"build_source_sha": "2" * 40}), \
                 mock.patch.object(qualify, "verify_active_mapper",
                                   side_effect=qualify.QualificationFailure("independent active proof failed")), \
                 mock.patch.object(qualify, "_normal_stop", normal_stop), \

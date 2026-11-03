@@ -137,6 +137,47 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def installed_artifact_paths(swapzctl: Path) -> dict[str, Path]:
+    """Derive the exact package artifacts the primary manager will consume."""
+    try:
+        control = swapzctl.resolve(strict=True)
+    except OSError as exc:
+        raise Blocked(f"cannot resolve installed swapzctl: {exc}") from exc
+    if control.name != "swapzctl" or control.parent.name != "sbin":
+        raise Blocked("primary real-swap qualification requires installed <prefix>/sbin/swapzctl")
+    prefix = control.parent.parent
+    return {
+        "formatter_sha256": control,
+        "module_sha256": prefix / "libexec/swapz/dm-swapz.ko",
+        "oracle_sha256": prefix / "libexec/swapz/device-roundtrip",
+    }
+
+
+def qualification_artifact_hashes(report_path: Path, validated_source: str) -> dict[str, str]:
+    """Read qualified artifact digests directly from the supplied owner report."""
+    try:
+        report = _load_unique_json(
+            report_path.read_text(encoding="utf-8"), "qualification report")
+    except OSError as exc:
+        raise Blocked(f"cannot read qualification report: {exc}") from exc
+    if report.get("schema") != "swapz-test-results-v1" or \
+            report.get("source_sha") != validated_source or \
+            report.get("tested_commit_sha") != validated_source or \
+            report.get("overall") != "PASS" or \
+            report.get("qualification") != "RAM_BACKED_NULL_BLK_ONLY":
+        raise Blocked("qualification report does not bind the validated source and PASS scope")
+    artifacts = report.get("qualified_artifacts")
+    if not isinstance(artifacts, dict) or artifacts.get("status") != "AVAILABLE":
+        raise Blocked("qualification report has no available qualified artifacts")
+    result: dict[str, str] = {}
+    for key in ("formatter_sha256", "module_sha256", "oracle_sha256"):
+        digest = artifacts.get(key)
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise Blocked(f"qualification report {key} is unavailable or malformed")
+        result[key] = digest
+    return result
+
+
 def _load_unique_json(text: str, label: str) -> dict:
     def unique(pairs):
         result = {}
@@ -544,6 +585,30 @@ def _flatten_lsblk(rows: list[dict]) -> list[dict]:
     return result
 
 
+def require_plan_storage_separation(plan: dict) -> None:
+    for key in (
+        "root_same_physical_disk_as_target",
+        "recovery_same_physical_disk_as_target",
+    ):
+        if plan.get(key) is not False:
+            raise Blocked(f"primary plan does not prove {key}=false")
+
+
+def require_sole_partition_topology(target_row: dict, parent_row: dict,
+                                    target_major_minor: str) -> None:
+    parent_path = parent_row.get("path")
+    if not isinstance(parent_path, str) or not parent_path.startswith("/dev/"):
+        raise Blocked("physical parent path is unavailable")
+    if target_row.get("pkname") != Path(parent_path).name:
+        raise Blocked("selected partition does not name the admitted physical parent")
+    children = parent_row.get("children")
+    if not isinstance(children, list):
+        raise Blocked("physical parent partition topology is unavailable")
+    partitions = [child for child in children if child.get("type") == "part"]
+    if len(partitions) != 1 or partitions[0].get("maj:min") != target_major_minor:
+        raise Blocked("authorized parent must contain exactly the selected partition")
+
+
 def _read_readiness_snapshot() -> dict:
     try:
         return _load_unique_json(
@@ -571,8 +636,7 @@ def verify_authorized_target(plan: dict, selector_partuuid: str) -> tuple[Path, 
     for key in required_true:
         if plan.get(key) is not True:
             raise Blocked(f"primary plan safety gate {key} is not true")
-    if plan.get("root_same_physical_disk") is True or plan.get("recovery_same_physical_disk") is True:
-        raise Blocked("target shares a physical disk with root or recovery storage")
+    require_plan_storage_separation(plan)
     if str(plan.get("target_partuuid", "")).lower() != selector_partuuid:
         raise Blocked("primary plan target differs from protected selector")
     try:
@@ -614,6 +678,7 @@ def verify_authorized_target(plan: dict, selector_partuuid: str) -> tuple[Path, 
     if parent_row.get("type") != "disk" or int(parent_row.get("rm", 0)) != 1 or \
             str(parent_row.get("tran", "")).lower() != "usb":
         raise Blocked("physical parent is not the authorized removable USB topology")
+    require_sole_partition_topology(target_row, parent_row, f"{major}:{minor}")
 
     try:
         snapshot = verify_acceptance_manifest()
@@ -664,10 +729,13 @@ def _read_plan(swapzctl: Path) -> dict:
 
 
 def verify_provenance(plan: dict, validated_source: str, report_path: Path,
-                      swapzctl: Path) -> None:
+                      swapzctl: Path) -> dict[str, str]:
+    # The module must be absent before primary start, so live module sysfs
+    # provenance is intentionally unavailable here. Bind the package-held
+    # module bytes to the owner report now; verify live module provenance only
+    # after the coordinator has loaded that exact artifact.
     required_true = (
-        "control_build_source_clean", "module_build_provenance_read",
-        "module_build_source_clean", "control_module_source_matches",
+        "control_build_source_clean",
         "qualification_report_valid", "qualification_source_matches_build",
         "live_artifact_hashes_read", "live_artifacts_match_qualification",
     )
@@ -679,21 +747,72 @@ def verify_provenance(plan: dict, validated_source: str, report_path: Path,
     report_digest = _sha256_file(report_path)
     if plan.get("qualification_report_sha256") != report_digest:
         raise Blocked("imported qualification report digest differs from supplied report")
-    if plan.get("qualified_swapzctl_sha256") != plan.get("live_swapzctl_sha256") or \
-            plan.get("qualified_module_sha256") != plan.get("live_module_sha256"):
-        raise Blocked("live userspace/module artifacts differ from qualification")
-    if _sha256_file(swapzctl) != plan.get("qualified_swapzctl_sha256"):
-        raise Blocked("executed swapzctl bytes differ from qualified userspace artifact")
+
+    report_hashes = qualification_artifact_hashes(report_path, validated_source)
+    installed_paths = installed_artifact_paths(swapzctl)
+    plan_keys = {
+        "formatter_sha256": ("qualified_swapzctl_sha256", "live_swapzctl_sha256"),
+        "module_sha256": ("qualified_module_sha256", "live_module_sha256"),
+        "oracle_sha256": ("qualified_oracle_sha256", "live_oracle_sha256"),
+    }
+    observed: dict[str, str] = {}
+    for artifact_key, path in installed_paths.items():
+        qualified_key, live_key = plan_keys[artifact_key]
+        expected = report_hashes[artifact_key]
+        if plan.get(qualified_key) != expected or plan.get(live_key) != expected:
+            raise Blocked(f"primary plan {artifact_key} differs from supplied qualification report")
+        digest = _sha256_file(path)
+        if digest != expected:
+            raise Blocked(f"installed {artifact_key} bytes differ from qualification")
+        observed[artifact_key] = digest
+
     if plan.get("privileged_execution_enabled") is not True:
         raise Blocked("primary privileged lifecycle execution gate is still disabled")
+    return observed
+
+
+def validate_loaded_module_provenance(source_sha: str, source_clean: str,
+                                      physical_backing: str,
+                                      validated_source: str) -> None:
+    if source_sha != validated_source or source_clean != "1" or \
+            physical_backing not in {"1", "Y"}:
+        raise QualificationFailure(
+            "loaded dm_swapz provenance/physical-backing parameter is not exact")
+
+
+def verify_loaded_module_provenance(validated_source: str) -> dict[str, str]:
+    parameter_base = Path("/sys/module/dm_swapz/parameters")
+    try:
+        source_sha = (parameter_base / "build_source_sha").read_text(
+            encoding="ascii").strip()
+        source_clean = (parameter_base / "build_source_clean").read_text(
+            encoding="ascii").strip()
+        physical_backing = (parameter_base / "allow_physical_backing").read_text(
+            encoding="ascii").strip()
+    except OSError as exc:
+        raise QualificationFailure(
+            f"cannot independently read loaded dm_swapz provenance: {exc}") from exc
+    validate_loaded_module_provenance(
+        source_sha, source_clean, physical_backing, validated_source)
+    return {
+        "build_source_sha": source_sha,
+        "build_source_clean": source_clean,
+        "allow_physical_backing": physical_backing,
+    }
 
 
 def _check_git_source(validated_source: str) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", validated_source):
         raise Blocked("validated source must be one full lowercase SHA")
     head = _run(["git", "rev-parse", "HEAD"], timeout=10).stdout.strip()
+    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=10).stdout.strip()
+    origin_main = _run(
+        ["git", "rev-parse", "--verify", "refs/remotes/origin/main"],
+        timeout=10).stdout.strip()
     if head != validated_source:
         raise Blocked(f"checkout HEAD {head} differs from validated source {validated_source}")
+    if branch != "main" or origin_main != validated_source:
+        raise Blocked("physical qualification requires main == origin/main == validated source")
     dirty = _run(["git", "status", "--porcelain"], timeout=10).stdout
     if dirty:
         raise Blocked("production source tree is not clean")
@@ -952,7 +1071,8 @@ def _oracle_event(process: subprocess.Popen[str], prefix: str, deadline: float,
 
 
 def evaluate_workload_evidence(*, cgroup_swap_bytes: int, cgroup_swap_peak: int,
-                               min_swap_bytes: int, oom_delta: int, oom_kill_delta: int,
+                               min_swap_bytes: int, expected_verified_pages: int,
+                               oom_delta: int, oom_kill_delta: int,
                                mapper_used_delta_kib: int,
                                fill_status_before: dict[str, int], fill_status_after: dict[str, int],
                                verify_status_before: dict[str, int], verify_status_after: dict[str, int],
@@ -965,24 +1085,29 @@ def evaluate_workload_evidence(*, cgroup_swap_bytes: int, cgroup_swap_peak: int,
         raise QualificationFailure("bounded cgroup never accumulated required real swap usage")
     if oom_delta != 0 or oom_kill_delta != 0:
         raise QualificationFailure("bounded real-swap workload encountered cgroup OOM")
-    if mapper_used_delta_kib <= 0:
-        raise QualificationFailure("exact mapper /proc/swaps usage never increased")
-    if fill_status_after["logical_write"] <= fill_status_before["logical_write"] or \
+    if mapper_used_delta_kib * 1024 < min_swap_bytes:
+        raise QualificationFailure("exact mapper /proc/swaps usage stayed below required real-swap floor")
+    logical_write_delta = fill_status_after["logical_write"] - fill_status_before["logical_write"]
+    if logical_write_delta < min_swap_bytes or \
             fill_status_after["physical_write"] <= fill_status_before["physical_write"]:
-        raise QualificationFailure("swapz target counters show no real swap-out WRITE activity")
+        raise QualificationFailure("swapz target counters stay below required swap-out WRITE activity")
     if lower_after_fill.write_sectors <= lower_before.write_sectors:
         raise QualificationFailure("backing partition counters show no lower WRITE activity")
     if vm_after_fill["pswpout"] <= vm_before["pswpout"]:
         raise QualificationFailure("kernel vmstat shows no swap-out during admitted workload")
-    if verify_status_after["logical_read"] <= verify_status_before["logical_read"] or \
+    logical_read_delta = verify_status_after["logical_read"] - verify_status_before["logical_read"]
+    if logical_read_delta < min_swap_bytes or \
             verify_status_after["physical_read"] <= verify_status_before["physical_read"]:
-        raise QualificationFailure("swapz target counters show no real swap-in READ activity")
+        raise QualificationFailure("swapz target counters stay below required swap-in READ activity")
     if lower_after_verify.read_sectors <= lower_before_verify.read_sectors:
         raise QualificationFailure("backing partition counters show no lower READ activity")
     if vm_after_verify["pswpin"] <= vm_before_verify["pswpin"]:
         raise QualificationFailure("kernel vmstat shows no swap-in during byte verification")
-    if oracle.get("mismatches") != 0 or oracle.get("digest") != oracle.get("expected_digest") or \
-            int(oracle.get("verified_pages", 0)) <= 0:
+    if expected_verified_pages <= 0 or \
+            oracle.get("verified_pages") != expected_verified_pages or \
+            oracle.get("verified_bytes") != expected_verified_pages * PAGE_BYTES or \
+            oracle.get("mismatches") != 0 or \
+            oracle.get("digest") != oracle.get("expected_digest"):
         raise QualificationFailure("real-swap byte oracle reported corruption or incomplete verification")
     for status in (fill_status_after, verify_status_after):
         if status["failed"] != 0 or status["last_error"] != 0:
@@ -1020,8 +1145,11 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             if _mem_available_mib() < 256:
                 raise QualificationFailure("host MemAvailable crossed 256 MiB early-stop threshold")
 
+        expected_pages = workload_mib * MIB // PAGE_BYTES
         waiting = _oracle_event(process, "ORACLE_WAITING=", deadline, guard)
-        if int(waiting.get("pid", -1)) != process.pid or int(waiting.get("bytes", 0)) != workload_mib * MIB:
+        if int(waiting.get("pid", -1)) != process.pid or \
+                int(waiting.get("bytes", 0)) != workload_mib * MIB or \
+                int(waiting.get("pages", 0)) != expected_pages:
             raise QualificationFailure("oracle readiness identity/geometry mismatch")
         fill_status_before = read_status()
         lower_before = read_block_stats((manifest["device_major_int"], manifest["device_minor_int"]))
@@ -1035,6 +1163,10 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         process.stdin.write("FILL\n")
         process.stdin.flush()
         filled = _oracle_event(process, "ORACLE_FILLED=", deadline, guard)
+        if int(filled.get("bytes", 0)) != workload_mib * MIB or \
+                int(filled.get("pages", 0)) != expected_pages or \
+                not re.fullmatch(r"[0-9a-f]{64}", str(filled.get("digest", ""))):
+            raise QualificationFailure("oracle fill record is incomplete or malformed")
         swap_current = _read_uint(cgroup / "memory.swap.current")
         swap_peak = _read_uint(cgroup / "memory.swap.peak")
         fill_status_after = read_status()
@@ -1074,6 +1206,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             cgroup_swap_bytes=swap_current,
             cgroup_swap_peak=swap_peak,
             min_swap_bytes=min_swap_bytes,
+            expected_verified_pages=expected_pages,
             oom_delta=oom_delta,
             oom_kill_delta=oom_kill_delta,
             mapper_used_delta_kib=mapper_used_delta,
@@ -1345,6 +1478,7 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
         if state is None or state.get("run_id") != run_id or state.get("stage") != "ACTIVE":
             raise QualificationFailure(
                 "primary reported success without matching durable ACTIVE state")
+        loaded_module = verify_loaded_module_provenance(validated_source)
         active = verify_active_mapper(manifest, baseline_identity)
         if active["swap_uuid"] in prior_swap_uuids:
             raise QualificationFailure("fresh mapper reused a previous Linux swap UUID")
@@ -1390,6 +1524,7 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
         "mapper_device": f"{active['mapper_device'][0]}:{active['mapper_device'][1]}",
         "linux_swap_uuid": active["swap_uuid"],
         "swap_priority": active["swap_priority"],
+        "loaded_module": loaded_module,
         "workload": workload_result,
         "stop_order": stop_evidence,
         "fresh_mapper_used_kib": 0,
@@ -1429,7 +1564,8 @@ def execute(arguments: argparse.Namespace) -> dict:
     _kernel_log_snapshot()
     _import_qualification(swapzctl, report_path)
     plan = _read_plan(swapzctl)
-    verify_provenance(plan, arguments.validated_source, report_path, swapzctl)
+    artifact_hashes = verify_provenance(
+        plan, arguments.validated_source, report_path, swapzctl)
     selector_partuuid = _read_selector()
     _target_path, target_device = verify_authorized_target(plan, selector_partuuid)
     baseline = read_swap_rows()
@@ -1468,6 +1604,7 @@ def execute(arguments: argparse.Namespace) -> dict:
         "helper_sha256": _sha256_file(Path(__file__)),
         "oracle_sha256": _sha256_file(oracle_path),
         "qualification_report_sha256": _sha256_file(report_path),
+        "qualified_installed_artifacts": artifact_hashes,
         "partuuid": selector_partuuid,
         "target_device": f"{target_device[0]}:{target_device[1]}",
         "cycles_requested": arguments.cycles,
@@ -1484,7 +1621,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--validated-source", required=True)
     parser.add_argument("--qualification-report", required=True)
-    parser.add_argument("--swapzctl", default=str(ROOT / "build/userspace/swapzctl"))
+    parser.add_argument("--swapzctl", default="/usr/local/sbin/swapzctl",
+                        help="installed <prefix>/sbin/swapzctl (default: /usr/local/sbin/swapzctl)")
     parser.add_argument("--oracle", default=str(ROOT / "tests/tools/primary-real-swap-oracle.py"))
     parser.add_argument("--cycles", type=int, default=DEFAULT_CYCLES)
     parser.add_argument("--workload-mib", type=int, default=DEFAULT_WORKLOAD_MIB)
