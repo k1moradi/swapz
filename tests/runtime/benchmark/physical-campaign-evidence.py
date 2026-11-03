@@ -493,13 +493,12 @@ def mount_rows(text: str) -> list[dict]:
 
 def physical_target_identity(snapshot: dict) -> dict:
     device = snapshot.get("device") or {}
-    partuuid = device.get("partuuid")
+    partuuid = QUALIFICATION["normalize_partuuid"](device.get("partuuid"))
     size_bytes = device.get("size_bytes")
-    if not isinstance(partuuid, str) or not partuuid.strip() or \
-            type(size_bytes) is not int or size_bytes <= 0:
+    if partuuid is None or type(size_bytes) is not int or size_bytes <= 0:
         raise ValueError("campaign physical target identity is incomplete")
     return {
-        "partuuid": partuuid.lower(),
+        "partuuid": partuuid,
         "device_bytes": size_bytes,
     }
 
