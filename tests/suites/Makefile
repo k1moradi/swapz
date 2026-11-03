@@ -17,7 +17,7 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor test-anon-page-analyzer test-userspace test-replay-helper clean
-PROGRAMS := io-replay-native codec-roundtrip extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots lane-gap superblock swapzctl-status swapzctl-format swapz-primary-policy
+PROGRAMS := io-replay-native codec-roundtrip extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result lane-gap superblock swapzctl-status swapzctl-format swapz-primary-policy
 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
@@ -58,6 +58,8 @@ window-policy_HDR := $(KERNEL)/window-policy.h $(KERNEL)/codec.h
 preparation-slots_SRC := $(NATIVE)/io/preparation-slots.c
 preparation-slots_HDR := $(KERNEL)/preparation-slots.h $(KERNEL)/codec.h
 preparation-slots_LDLIBS := -pthread
+preparation-codec-result_SRC := $(NATIVE)/io/preparation-codec-result.c
+preparation-codec-result_HDR := $(KERNEL)/preparation-slots.h $(KERNEL)/codec.h
 lane-gap_SRC := $(NATIVE)/io/lane-gap.c
 lane-gap_HDR := $(KERNEL)/lane-gap.h $(KERNEL)/codec.h
 superblock_SRC := $(NATIVE)/codec/superblock.c
@@ -133,8 +135,8 @@ test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/authorit
 test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-scan-scaling $(OUT)/gc-rotation $(OUT)/gc-engine-rotation $(OUT)/gc-high-occupancy
 	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-scan-scaling"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"; "$(OUT)/gc-high-occupancy"
 
-test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots $(OUT)/lane-gap
-	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"; "$(OUT)/preparation-slots"; "$(OUT)/lane-gap"
+test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/lane-gap
+	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"; "$(OUT)/preparation-slots"; "$(OUT)/preparation-codec-result"; "$(OUT)/lane-gap"
 
 test-userspace: $(OUT)/swapzctl-status $(OUT)/swapzctl-format $(OUT)/swapz-primary-policy
 	@set -e; "$(OUT)/swapzctl-status"; "$(OUT)/swapzctl-format"; "$(OUT)/swapz-primary-policy"

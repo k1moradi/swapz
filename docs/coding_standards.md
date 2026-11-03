@@ -1450,6 +1450,20 @@ its prepared page and later released by the ordered consumer, or released on
 producer failure. Queue ownership, BIO completion and map publication remain
 unchanged.
 
+Page compression has a strict three-way result contract at every target-side
+caller of `swapz_compress_page()`: a positive value is a compressed payload,
+zero alone is the ordinary no-fit RAW fallback, and a negative errno is a
+genuine preparation error. A negative result must never become READY_RAW or
+enter either RAW publication path. Submitter/background preparation publishes
+the exact errno before an ERROR terminal state; the ordered consumer observes
+that state with acquire semantics and completes the BIO with an error. If
+RAW_SELECTED already won the speculative representation race before a late
+negative result exists, the producer must still fail the target closed; the
+late result does not rewrite the already-selected state. The inline ordered
+caller must unmap any mapped input and return the negative error before staging
+RAW bytes. Zero remains the only codec result that authorizes ordinary RAW
+fallback.
+
 
 Do not expose scheduler-accounted per-callback CPU as a portable module
 metric. The rejected task-cputime experiment undercounted short nonblocking

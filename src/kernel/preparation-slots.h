@@ -61,6 +61,29 @@ static inline int swapz_preparation_publish_result(atomic_t *state,
 }
 
 /*
+ * swapz_compress_page() has three distinct outcomes: positive means a valid
+ * compressed payload, zero is the ordinary no-fit RAW fallback, and a negative
+ * errno is a genuine codec/preparation error. Never collapse a negative result
+ * into READY_RAW. A caller publishing ERROR must make its exact errno visible
+ * before this terminal state; if RAW_SELECTED already won the speculative
+ * representation race, the caller still owns fail-closed error handling.
+ */
+static inline int swapz_preparation_codec_result_state(int codec_result)
+{
+	if (codec_result < 0)
+		return SWAPZ_PREPARATION_ERROR;
+	return codec_result == 0 ? SWAPZ_PREPARATION_READY_RAW :
+		SWAPZ_PREPARATION_READY_COMPRESSED;
+}
+
+static inline int swapz_preparation_publish_codec_result(atomic_t *state,
+							 int codec_result)
+{
+	return atomic_cmpxchg(state, SWAPZ_PREPARATION_PREPARING,
+			      swapz_preparation_codec_result_state(codec_result));
+}
+
+/*
  * The final preparation-workqueue drain runs after the ordered workqueue has
  * drained. Once admission is closed, a producer finishing there must not
  * publish a fresh ordered-worker wake. A producer that observed open admission
