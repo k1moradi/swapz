@@ -4397,9 +4397,12 @@ fresh-process recovery. Evidence reads must validate regular-file ownership,
 mode and link identity, and copied bytes and the evidence directory must be
 fsynced. Evidence preservation failures quarantine the owned resources. Swap
 inventory oracles must fail closed on a present but unstatable swap-device path,
-never infer swap inactivity from a skipped entry. The loaded rehearsal also
-requires a clean checkout at the exact validated HEAD, not just an earlier
-build-info hash.
+never infer swap inactivity from a skipped entry. The unprivileged loaded-test
+parent must establish the clean checkout at the exact validated HEAD before
+sudo, pass that SHA explicitly to the lifecycle helper, and recheck Git metadata
+after the child returns. The privileged lifecycle helper must not invoke Git; it
+must instead bind the passed SHA to the generated clean build-info provenance
+before using exact-source module/oracle artifacts.
 
 The same private rehearsal must exercise negative kernel-boundary cases against
 the real coordinator: ambiguous `swapon` and `swapoff` outcomes both with and
