@@ -2204,6 +2204,8 @@ class PairReplayContract(unittest.TestCase):
         self.assertLessEqual(histogram.percentile(.99), 1024)
 
     def test_sustained_replay_vmhwm_parser_is_strict(self):
+        import importlib.util
+
         sustained_path = SCRIPT.with_name("sustained-replay.py")
         sustained_spec = importlib.util.spec_from_file_location(
             "swapz_sustained_hwm", sustained_path)

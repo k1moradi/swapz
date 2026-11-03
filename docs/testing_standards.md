@@ -699,7 +699,9 @@ bounded, strictly parsed `VmHWM` field in `/proc/self/status`, not
 can therefore charge the replay for memory previously used by its launcher.
 The measurement-boundary VmHWM value and growth remain diagnostics only;
 setup-time allocations within the replay process cannot be excluded from the
-memory gate.
+memory gate. Rootless contract coverage must parse canonical Linux VmHWM text,
+reject missing, zero, wrong-unit and duplicate fields, and exercise the live
+self-status reader so malformed accounting cannot silently qualify.
 
 Anonymous-swap evidence is also directional: all three pairs must observe at
 least 128 MiB of workload-specific process/cgroup swap and at least that usage
