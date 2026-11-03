@@ -3626,3 +3626,6 @@ digest mismatch, a writable file, a hard link, a symlinked module, a
 symlinked parent directory and an executable path containing traversal
 components. The validated descriptor is the object that the later
 `finit_module()` caller must use; tests must not load a host module.
+The read-only plan and qualification import must use this opener with the
+owner-report module digest; a failed path or digest check keeps the artifact
+gate false.

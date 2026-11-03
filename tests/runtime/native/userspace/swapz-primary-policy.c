@@ -1179,7 +1179,8 @@ static void test_primary_qualification_live_reader_disabled_in_rootless(void)
 	memcpy(original_hashes[1], module_sha256, sizeof(module_sha256));
 	memcpy(original_hashes[2], oracle_sha256, sizeof(oracle_sha256));
 	assert(swapz_primary_live_artifact_hashes(
-		swapzctl_sha256, module_sha256, oracle_sha256) < 0);
+		swapzctl_sha256, module_sha256, oracle_sha256,
+		SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256) < 0);
 	assert(errno == ENODEV);
 	assert(!memcmp(swapzctl_sha256, original_hashes[0],
 		       sizeof(swapzctl_sha256)));

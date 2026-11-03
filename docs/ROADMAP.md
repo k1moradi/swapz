@@ -1505,8 +1505,10 @@ module opener that walks the installed path without symlinks, rejects unsafe
 directory/file ownership and permissions, pins a single-link regular file,
 hashes that descriptor against the qualified module digest and returns the
 same read-only FD for a future exact load. Rootless regressions cover digest,
-mode, hard-link, final symlink, parent symlink and traversal failures. The FD
-is not yet passed to `finit_module()` and no lifecycle operation consumes the
-hashes. Source provenance cannot authenticate a preloaded module's exact
-bytes; the future manager must load the checked descriptor itself or reject
-the preloaded module. Privileged execution remains disabled.
+mode, hard-link, final symlink, parent symlink and traversal failures. The
+read-only plan and qualification import now use that same path opener and
+expected report digest. The FD is not yet passed to `finit_module()` and no
+lifecycle operation consumes the hashes. Source provenance cannot
+authenticate a preloaded module's exact bytes; the future manager must load
+the checked descriptor itself or reject the preloaded module. Privileged
+execution remains disabled.
