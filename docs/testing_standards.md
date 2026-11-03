@@ -5029,7 +5029,12 @@ bytes separately. The retained report must independently confirm a distinct
 armed/current boot ID, the exact release source and clean loaded module, the
 authorized PARTUUID and partition byte size, the run-bound mapper identity and
 capacity, one active mapper swap entry, healthy mapper/swap services, and zero
-swapz or relevant-kernel error counters. Missing, malformed, digest-mismatched,
+swapz or relevant-kernel error counters. The evaluator must independently
+recompute the maximum logical mapper sectors from the authorized partition bytes
+using the production one-block header, segment alignment, reserve rule, u32
+physical-index limit and independent 256-block foreground COW headroom; matching
+report-side expected/actual capacity fields are not sufficient.
+Missing, malformed, digest-mismatched,
 source/target-mismatched or non-PASS retained boot evidence keeps
 `COLD_BOOT_OBSERVED=NO` and the final release BLOCKED; it does not erase an
 otherwise valid pre-reboot code/deployment readiness result. A current summary

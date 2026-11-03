@@ -120,6 +120,33 @@ def load_env_strict(path: Path) -> tuple[dict[str, str], bytes]:
     return parse_env_strict(raw), raw
 
 
+def maximum_logical_sectors(device_bytes: Any) -> int | None:
+    """Mirror the production boot/manager admission rule without device I/O."""
+    if (
+            type(device_bytes) is not int or device_bytes <= 4096 or
+            device_bytes % 4096):
+        return None
+    blocks = device_bytes // 4096
+    physical_blocks = ((blocks - 1) // 256) * 256
+    if physical_blocks <= 0 or physical_blocks > 0xFFFFFFFF:
+        return None
+
+    low = 0
+    high = physical_blocks
+    while low < high:
+        candidate = low + (high - low + 1) // 2
+        reserve = max((candidate + 7) // 8, 512)
+        fits = False
+        if reserve < physical_blocks:
+            data_blocks = ((physical_blocks - reserve) // 256) * 256
+            fits = data_blocks >= 256 and candidate <= data_blocks - 256
+        if fits:
+            low = candidate
+        else:
+            high = candidate - 1
+    return low * 8 if low else None
+
+
 def _valid_hash_mapping(value: Any) -> bool:
     return isinstance(value, dict) and set(value) == set(ARTIFACT_KEYS) and all(
         isinstance(value.get(key), str) and SHA256_RE.fullmatch(value[key])
@@ -624,10 +651,15 @@ def validate_cold_boot_evidence(
         swap_size_kib = int(cold_boot["swap_size_kib"], 10)
     except ValueError:
         logical_sectors = expected_sectors = logical_bytes = swap_size_kib = -1
+    authorized_sectors = (
+        maximum_logical_sectors(target[1]) if target is not None else None)
     if (
             logical_sectors <= 0 or logical_sectors != expected_sectors or
-            logical_bytes != logical_sectors * 512):
-        reject("persistent cold-boot mapper capacity is inconsistent")
+            logical_bytes != logical_sectors * 512 or
+            authorized_sectors is None or
+            expected_sectors != authorized_sectors):
+        reject(
+            "persistent cold-boot mapper capacity differs from authorized target")
     if (
             cold_boot["swap_mapper_entries"] != "1" or
             cold_boot["swap_type"] != "partition" or

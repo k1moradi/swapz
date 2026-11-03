@@ -496,6 +496,12 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 ("target", {"selected_target_size_bytes":
                             str(TARGET["size_bytes"] + 4096)},
                  "authorized target identity"),
+                ("capacity", {
+                    "dm_logical_sectors": "216641528",
+                    "expected_dm_logical_sectors": "216641528",
+                    "dm_logical_bytes": "110920462336",
+                    "swap_size_kib": "108320760",
+                }, "capacity differs from authorized target"),
                 ("errors", {"swapz_error": "5"}, "runtime error evidence")):
             with self.subTest(label=label):
                 raw = cold_boot_evidence_raw(**overrides)
