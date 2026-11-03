@@ -179,7 +179,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER="$phase"', rehearsal)
         self.assertIn('"$CONTROL" primary recover', rehearsal)
         self.assertIn(
-            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:6",
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11",
             rehearsal)
         self.assertIn(
             'TEST_BASE="/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"',
