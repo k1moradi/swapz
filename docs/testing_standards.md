@@ -4383,9 +4383,14 @@ The same private rehearsal must exercise negative kernel-boundary cases against
 the real coordinator: ambiguous `swapon` and `swapoff` outcomes both with and
 without the kernel operation applied, unreadable post-operation swap inventory,
 a definite failed `swapoff`, a wrong inactive mapper identity, stale run ID,
-a failed durable state-directory `fsync`, and lost state provenance. A
-test-only linker-wrap fixture may intercept only the private owned-null_blk
-binary's `syscall`, `/proc/swaps` `open`, and `fsync` boundaries and must forward
+a failed durable state-directory `fsync`, and lost state provenance. The
+state-directory fault must select the second *directory* `fsync` in the fresh
+start process: the first follows partition-lock creation, while the second is
+the durability barrier after the STARTING state temp file is fsynced and
+atomically renamed. Regular-file `fsync` calls must not advance that ordinal,
+so harmless file-sync changes cannot silently retarget the fault. A test-only
+linker-wrap fixture may intercept only the private owned-null_blk binary's
+`syscall`, `/proc/swaps` `open`, and `fsync` boundaries and must forward
 them unchanged when no named fault is selected. That fixture is never linked by
 the public Makefile, installed package, physical qualification seam, or
 production authority path. Wrong-mapper testing may normally remove/recreate
