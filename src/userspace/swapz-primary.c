@@ -5801,6 +5801,115 @@ out:
 	return result;
 }
 
+static int swapz_primary_module_load_record_format(
+	const struct swapz_primary_manifest *manifest, const char *phase,
+	char name[96], char record[512])
+{
+	int name_length;
+	int record_length;
+
+	if (!swapz_primary_manifest_valid(manifest) || !phase ||
+	    (strcmp(phase, "INTENT") && strcmp(phase, "LOADED"))) {
+		errno = EINVAL;
+		return -1;
+	}
+	name_length = snprintf(name, 96U, "primary-module-load-%s.json",
+			       manifest->run_id);
+	if (name_length < 0 || (size_t)name_length >= 96U) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	record_length = snprintf(
+		record, 512U,
+		"{\"schema\":\"swapz-primary-module-load-v1\","
+		"\"run_id\":\"%s\",\"source_sha\":\"%s\","
+		"\"module_sha256\":\"%s\","
+		"\"qualification_report_sha256\":\"%s\","
+		"\"phase\":\"%s\"}\n",
+		manifest->run_id, manifest->source_sha, manifest->module_sha256,
+		manifest->qualification_report_sha256, phase);
+	if (record_length < 0 || (size_t)record_length >= 512U) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	return 0;
+}
+
+static int swapz_primary_module_load_record_matches_at(
+	int recovery_fd, const struct swapz_primary_manifest *manifest,
+	const char *phase, uid_t expected_owner)
+{
+	char name[96];
+	char expected[512];
+	char observed[512];
+	size_t observed_length = 0;
+	size_t expected_length;
+
+	if (swapz_primary_module_load_record_format(
+		    manifest, phase, name, expected) < 0)
+		return -1;
+	expected_length = strlen(expected);
+	if (swapz_primary_record_read_at(
+		    recovery_fd, name, expected_owner, observed, sizeof(observed),
+		    &observed_length, NULL) < 0)
+		return -1;
+	if (observed_length != expected_length ||
+	    memcmp(observed, expected, expected_length)) {
+		errno = EBADMSG;
+		return -1;
+	}
+	return 0;
+}
+
+static int swapz_primary_module_load_intent_write_at(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest, uid_t expected_owner)
+{
+	static const enum swapz_primary_stage starting[] = {
+		SWAPZ_PRIMARY_STAGE_STARTING,
+	};
+	char name[96];
+	char record[512];
+
+	if (swapz_primary_transaction_manifest_matches_at(
+		    recovery_fd, lock_fd, manifest, starting,
+		    sizeof(starting) / sizeof(starting[0]), expected_owner) < 0 ||
+	    swapz_primary_module_load_record_format(
+		    manifest, "INTENT", name, record) < 0)
+		return -1;
+	if (swapz_primary_write_record_at(
+		    recovery_fd, name, record, expected_owner) < 0)
+		return -1;
+	return swapz_primary_module_load_record_matches_at(
+		recovery_fd, manifest, "INTENT", expected_owner);
+}
+
+static int swapz_primary_module_load_mark_loaded_at(
+	int recovery_fd, int lock_fd,
+	const struct swapz_primary_manifest *manifest, uid_t expected_owner)
+{
+	static const enum swapz_primary_stage starting[] = {
+		SWAPZ_PRIMARY_STAGE_STARTING,
+	};
+	char name[96];
+	char record[512];
+
+	if (swapz_primary_transaction_manifest_matches_at(
+		    recovery_fd, lock_fd, manifest, starting,
+		    sizeof(starting) / sizeof(starting[0]), expected_owner) < 0 ||
+	    swapz_primary_module_load_record_matches_at(
+		    recovery_fd, manifest, "INTENT", expected_owner) < 0 ||
+	    swapz_primary_module_load_record_format(
+		    manifest, "LOADED", name, record) < 0)
+		return -1;
+	if (swapz_primary_replace_record_at(
+		    recovery_fd, name, manifest->run_id, record,
+		    expected_owner) < 0)
+		return -1;
+	return swapz_primary_module_load_record_matches_at(
+		recovery_fd, manifest, "LOADED", expected_owner);
+}
+
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_swap_device_active(dev_t expected_device)
 {
@@ -7770,7 +7879,9 @@ static int swapz_primary_start_prepared(void)
 		    recovery_fd, lock_fd, &starting_state, 0) < 0)
 		goto out;
 	starting_persisted = 1;
-	if (swapz_primary_write_header_checked_fd(
+	if (swapz_primary_module_load_intent_write_at(
+		    recovery_fd, lock_fd, &manifest, 0) < 0 ||
+	    swapz_primary_write_header_checked_fd(
 		    target_fd, &manifest.target, original_header, swapz_header) < 0)
 		goto out;
 	if (close(target_fd) < 0) {
@@ -7779,7 +7890,10 @@ static int swapz_primary_start_prepared(void)
 	}
 	target_fd = -1;
 	if (swapz_primary_load_qualified_module(&module_loaded_by_call) < 0 ||
-	    module_loaded_by_call != 1 ||
+	    module_loaded_by_call != 1)
+		goto out;
+	if (swapz_primary_module_load_mark_loaded_at(
+		    recovery_fd, lock_fd, &manifest, 0) < 0 ||
 	    swapz_primary_dm_create_mapper(
 		    recovery_fd, lock_fd, &manifest, module_loaded_by_call,
 		    &mapper_created_by_call, &mapper_resumed_by_call,

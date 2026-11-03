@@ -1621,8 +1621,12 @@ artifacts, target/topology and inactive selected-target swap state before
 persisting STARTING; only then may it write the run-bound SWZ header, load the
 qualified module, create/resume and format the run-bound mapper, and persist
 ACTIVE. Any post-STARTING failure is durably marked RECOVERY_REQUIRED while the
-owner lock remains held. Stop/recover, interruption/null_blk coverage, live
-swap, cold-boot recovery, boot integration, workload performance and production
+owner lock remains held. Module loading now also has a durable per-run
+write-ahead ownership record: INTENT is fsynced before `finit_module()`, then
+atomically advanced to LOADED only after loaded-module verification. This gives
+stop/recovery durable provenance instead of inferring ownership from sysfs
+parameters alone. Stop/recover, interruption/null_blk coverage, live swap,
+cold-boot recovery, boot integration, workload performance and production
 qualification remain open.
 
 Mapper lifecycle admission now also reads the per-run original-header backup,

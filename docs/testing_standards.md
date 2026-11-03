@@ -3753,9 +3753,17 @@ gate false.
 The checked loader must repeat the current report and three-artifact checks,
 refuse any preloaded module or swapz mapper, use the returned module FD for
 `finit_module()` with the physical-backing opt-in, and verify the loaded
-source and parameter. Rootless tests must verify strict module-boolean parsing
-and that the load command returns `ENODEV` without changing its ownership
-result or touching host paths.
+source and parameter. Before the loader runs, the STARTING coordinator must
+durably create a no-replace per-run module-load record binding run ID, source,
+qualified module SHA-256 and qualification-report SHA-256 with phase `INTENT`.
+After successful loader verification it atomically replaces only that exact
+record with phase `LOADED` and verifies readback. A crash may therefore leave
+either an INTENT record with no module, or an INTENT/LOADED record that recovery
+must reconcile against live module state; absence of the record never permits
+adopting a preloaded module. Rootless direct-C tests must exercise exact
+INTENT-to-LOADED persistence, duplicate-intent refusal and phase mismatch.
+They must also verify strict module-boolean parsing and that the load command
+returns `ENODEV` without changing its ownership result or touching host paths.
 
 The primary manager's Device Mapper layer must keep privileged create/remove
 calls disabled until the whole coordinator is qualified. Rootless production-C
