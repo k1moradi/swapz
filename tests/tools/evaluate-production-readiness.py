@@ -15,6 +15,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[2]
+REAL_SWAP_HELPER = ROOT / "tests/tools/qualify-primary-real-swap.py"
+REAL_SWAP_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
+
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 PARTUUID_RE = re.compile(r"^[0-9a-f][0-9a-f-]*$")
@@ -126,13 +130,173 @@ def validate_acceptance_policy(
     return sha256_bytes(raw), memory_limit
 
 
+def validate_real_swap_result(
+        result: dict[str, Any],
+        source_sha: str,
+        test_results_raw: bytes,
+        policy: dict[str, Any],
+        policy_sha256: str | None,
+        report_artifacts: dict[str, Any] | None,
+        target: tuple[str, int] | None) -> list[str]:
+    issues: list[str] = []
+
+    def reject(message: str) -> None:
+        if message not in issues:
+            issues.append(message)
+
+    if result.get("schema") != "swapz-primary-real-swap-v1":
+        reject("nested result schema is invalid")
+    if result.get("status") != "PASS":
+        reject("nested result is not PASS")
+    if result.get("source_sha") != source_sha:
+        reject("nested result source binding mismatch")
+    if policy_sha256 is None or result.get(
+            "acceptance_manifest_sha256") != policy_sha256:
+        reject("nested result production policy binding mismatch")
+    if result.get("qualification_report_sha256") != sha256_bytes(
+            test_results_raw):
+        reject("nested result owner-report digest mismatch")
+    if not _same_hashes(
+            result.get("qualified_installed_artifacts"), report_artifacts):
+        reject("nested result installed artifact binding mismatch")
+
+    execution_control = result.get("physical_execution_control_sha256")
+    if not isinstance(execution_control, str) or not SHA256_RE.fullmatch(
+            execution_control):
+        reject("nested result private execution-control digest is invalid")
+
+    try:
+        expected_helper = sha256_bytes(REAL_SWAP_HELPER.read_bytes())
+        expected_oracle = sha256_bytes(REAL_SWAP_ORACLE.read_bytes())
+    except OSError:
+        expected_helper = None
+        expected_oracle = None
+        reject("current physical helper/oracle bytes are unreadable")
+    if expected_helper is not None and result.get("helper_sha256") != expected_helper:
+        reject("nested result helper digest differs from current source")
+    if expected_oracle is not None and result.get("oracle_sha256") != expected_oracle:
+        reject("nested result byte-oracle digest differs from current source")
+
+    primary_policy = policy.get("primary_real_swap")
+    if not isinstance(primary_policy, dict):
+        reject("frozen primary real-swap policy is missing")
+        primary_policy = {}
+    for result_key, policy_key in (
+            ("cycles_requested", "cycles"),
+            ("workload_mib", "workload_mib"),
+            ("resident_limit_mib", "resident_mib"),
+            ("swap_limit_mib", "swap_limit_mib"),
+            ("timeout_seconds", "timeout_seconds")):
+        expected = primary_policy.get(policy_key)
+        if not isinstance(expected, int) or isinstance(expected, bool) or expected <= 0:
+            reject(f"frozen primary real-swap policy {policy_key} is invalid")
+        elif result.get(result_key) != expected:
+            reject(f"nested result {result_key} differs from frozen policy")
+
+    expected_cycles = primary_policy.get("cycles")
+    if isinstance(expected_cycles, int) and not isinstance(expected_cycles, bool):
+        if result.get("cycles_passed") != expected_cycles:
+            reject("nested result did not pass every required real-swap cycle")
+    if result.get("concurrent_oracles") != 2:
+        reject("nested result did not use two concurrent byte oracles")
+    if result.get("reuse_rounds_per_cycle") != 2:
+        reject("nested result did not complete two reuse rounds per cycle")
+    if target is None or result.get("partuuid") != target[0]:
+        reject("nested result authorized target PARTUUID mismatch")
+
+    cycles = result.get("cycles")
+    if not isinstance(cycles, list) or (
+            isinstance(expected_cycles, int) and len(cycles) != expected_cycles):
+        reject("nested result cycle evidence count is invalid")
+    else:
+        run_ids: set[str] = set()
+        swap_uuids: set[str] = set()
+        run_id_re = re.compile(r"^[0-9a-f]{32}$")
+        swap_uuid_re = re.compile(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{4}-[0-9a-f]{12}$")
+        for cycle in cycles:
+            if not isinstance(cycle, dict):
+                reject("nested result contains a malformed cycle")
+                continue
+            run_id = cycle.get("run_id")
+            swap_uuid = cycle.get("linux_swap_uuid")
+            if not isinstance(run_id, str) or not run_id_re.fullmatch(run_id):
+                reject("nested result cycle run_id is malformed")
+            elif run_id in run_ids:
+                reject("nested result reused a transaction run_id")
+            else:
+                run_ids.add(run_id)
+            if not isinstance(swap_uuid, str) or not swap_uuid_re.fullmatch(
+                    swap_uuid):
+                reject("nested result Linux swap UUID is malformed")
+            elif swap_uuid in swap_uuids:
+                reject("nested result reused a Linux swap UUID")
+            else:
+                swap_uuids.add(swap_uuid)
+            if cycle.get("durable_final_stage") != "COMPLETE":
+                reject("nested result cycle did not end in durable COMPLETE")
+    return issues
+
+
+def validate_real_swap_evidence(
+        physical_evidence: dict[str, Any],
+        raw: bytes,
+        source_sha: str,
+        test_results_raw: bytes,
+        policy: dict[str, Any],
+        policy_sha256: str | None,
+        report_artifacts: dict[str, Any] | None,
+        target: tuple[str, int] | None) -> list[str]:
+    issues: list[str] = []
+
+    def reject(message: str) -> None:
+        if message not in issues:
+            issues.append(message)
+
+    if physical_evidence.get("schema") != "swapz-primary-real-swap-evidence-v1":
+        reject("persistent evidence schema is invalid")
+    if physical_evidence.get("status") != "PASS":
+        reject("persistent evidence disposition is not PASS")
+    if physical_evidence.get("phase") != "COMPLETE":
+        reject("persistent evidence is not COMPLETE")
+    attempt_id = physical_evidence.get("attempt_id")
+    if not isinstance(attempt_id, str) or not re.fullmatch(
+            r"[0-9a-f]{32}", attempt_id):
+        reject("persistent evidence attempt ID is malformed")
+    if not raw:
+        reject("persistent evidence bytes are empty")
+
+    result = physical_evidence.get("result")
+    if not isinstance(result, dict):
+        reject("persistent evidence final result is missing")
+        return issues
+    for issue in validate_real_swap_result(
+            result, source_sha, test_results_raw, policy, policy_sha256,
+            report_artifacts, target):
+        reject(issue)
+
+    for key in (
+            "source_sha", "acceptance_manifest_sha256",
+            "qualification_report_sha256", "helper_sha256", "oracle_sha256",
+            "qualified_installed_artifacts", "physical_execution_control_sha256",
+            "partuuid", "cycles_requested", "workload_mib",
+            "resident_limit_mib", "swap_limit_mib", "timeout_seconds",
+            "concurrent_oracles", "reuse_rounds_per_cycle", "cycles"):
+        if physical_evidence.get(key) != result.get(key):
+            reject(f"persistent evidence/result mismatch for {key}")
+    return issues
+
+
 def evaluate_release(
         source_sha: str,
         test_results: dict[str, Any],
         test_results_raw: bytes,
         evidence: dict[str, Any],
         policy: dict[str, Any],
-        policy_raw: bytes) -> dict[str, Any]:
+        policy_raw: bytes,
+        real_swap_evidence: dict[str, Any] | None = None,
+        real_swap_evidence_raw: bytes | None = None) -> dict[str, Any]:
     code_blockers: list[str] = []
     deployment_blockers: list[str] = []
 
@@ -304,6 +468,19 @@ def evaluate_release(
     if real_swap is not None and not _same_hashes(
             real_swap.get("hashes"), report_artifacts):
         block_code("real_linux_swap: installed artifact binding mismatch")
+    if real_swap is not None:
+        if real_swap_evidence is None or real_swap_evidence_raw is None:
+            block_code("real_linux_swap: persistent physical evidence is missing")
+        else:
+            if real_swap.get("evidence_sha256") != sha256_bytes(
+                    real_swap_evidence_raw):
+                block_code(
+                    "real_linux_swap: persistent evidence digest binding mismatch")
+            for issue in validate_real_swap_evidence(
+                    real_swap_evidence, real_swap_evidence_raw, source_sha,
+                    test_results_raw, policy, policy_sha256,
+                    report_artifacts, target):
+                block_code("real_linux_swap: " + issue)
 
     capacity = pass_record("maximum_capacity_and_ram")
     require_target("maximum_capacity_and_ram", capacity)
@@ -380,14 +557,24 @@ def main() -> int:
     parser.add_argument(
         "--acceptance", type=Path,
         default=Path("docs/production-acceptance.json"))
+    parser.add_argument(
+        "--real-swap-evidence", type=Path,
+        help="persistent primary-real-swap evidence emitted by the current qualifier")
     args = parser.parse_args()
 
     try:
         test_results, test_raw = load_json_strict(args.test_results)
         evidence, _ = load_json_strict(args.evidence)
         policy, policy_raw = load_json_strict(args.acceptance)
+        if args.real_swap_evidence is None:
+            real_swap_evidence = None
+            real_swap_evidence_raw = None
+        else:
+            real_swap_evidence, real_swap_evidence_raw = load_json_strict(
+                args.real_swap_evidence)
         result = evaluate_release(
-            args.source_sha, test_results, test_raw, evidence, policy, policy_raw)
+            args.source_sha, test_results, test_raw, evidence, policy, policy_raw,
+            real_swap_evidence, real_swap_evidence_raw)
     except (OSError, EvidenceError) as exc:
         result = {
             "schema": "swapz-production-readiness-evaluation-v1",

@@ -31,6 +31,11 @@ def acceptance_policy():
         "status": "FROZEN",
         "primary_real_swap": {
             "page_bytes": 4096,
+            "cycles": 2,
+            "workload_mib": 384,
+            "resident_mib": 128,
+            "swap_limit_mib": 384,
+            "timeout_seconds": 240,
         },
         "physical_qualification": {
             "schema": "swapz-performance-qualification-v1",
@@ -75,9 +80,72 @@ def pass_record(**extra):
     }
 
 
-def current_evidence(report_raw, policy_raw):
+def real_swap_result(report_raw, policy_raw):
+    policy = json.loads(policy_raw)
+    primary = policy["primary_real_swap"]
+    return {
+        "schema": "swapz-primary-real-swap-v1",
+        "status": "PASS",
+        "source_sha": SOURCE,
+        "acceptance_manifest_sha256": hashlib.sha256(policy_raw).hexdigest(),
+        "helper_sha256": hashlib.sha256(
+            EVALUATOR.REAL_SWAP_HELPER.read_bytes()).hexdigest(),
+        "oracle_sha256": hashlib.sha256(
+            EVALUATOR.REAL_SWAP_ORACLE.read_bytes()).hexdigest(),
+        "qualification_report_sha256": hashlib.sha256(report_raw).hexdigest(),
+        "qualified_installed_artifacts": dict(ARTIFACTS),
+        "physical_execution_control_sha256": "4" * 64,
+        "partuuid": TARGET["partuuid"],
+        "target_device": "8:1",
+        "cycles_requested": primary["cycles"],
+        "cycles_passed": primary["cycles"],
+        "workload_mib": primary["workload_mib"],
+        "resident_limit_mib": primary["resident_mib"],
+        "swap_limit_mib": primary["swap_limit_mib"],
+        "timeout_seconds": primary["timeout_seconds"],
+        "concurrent_oracles": 2,
+        "reuse_rounds_per_cycle": 2,
+        "evidence_path": "/var/lib/swapz/physical-recovery/test.json",
+        "cycles": [
+            {
+                "run_id": f"{index + 1:032x}",
+                "linux_swap_uuid":
+                    f"00000000-0000-0000-0000-{index + 1:012x}",
+                "durable_final_stage": "COMPLETE",
+            }
+            for index in range(primary["cycles"])
+        ],
+    }
+
+
+def real_swap_evidence(report_raw, policy_raw):
+    result = real_swap_result(report_raw, policy_raw)
+    envelope_keys = (
+        "source_sha", "acceptance_manifest_sha256",
+        "qualification_report_sha256", "helper_sha256", "oracle_sha256",
+        "qualified_installed_artifacts", "physical_execution_control_sha256",
+        "partuuid", "cycles_requested", "workload_mib",
+        "resident_limit_mib", "swap_limit_mib", "timeout_seconds",
+        "concurrent_oracles", "reuse_rounds_per_cycle", "cycles",
+    )
+    return {
+        "schema": "swapz-primary-real-swap-evidence-v1",
+        "attempt_id": "f" * 32,
+        "status": "PASS",
+        "reason": None,
+        "phase": "COMPLETE",
+        "started_unix_ns": 1,
+        "updated_unix_ns": 2,
+        **{key: copy.deepcopy(result[key]) for key in envelope_keys},
+        "result": result,
+    }
+
+
+def current_evidence(report_raw, policy_raw, physical_raw=None):
     policy_digest = hashlib.sha256(policy_raw).hexdigest()
     report_digest = hashlib.sha256(report_raw).hexdigest()
+    if physical_raw is None:
+        physical_raw = encoded(real_swap_evidence(report_raw, policy_raw))
     return {
         "schema": "swapz-production-readiness-v2",
         "snapshot_kind": "CURRENT",
@@ -114,7 +182,8 @@ def current_evidence(report_raw, policy_raw):
             "real_linux_swap": pass_record(
                 policy_sha256=policy_digest,
                 target=dict(TARGET),
-                hashes=dict(ARTIFACTS)),
+                hashes=dict(ARTIFACTS),
+                evidence_sha256=hashlib.sha256(physical_raw).hexdigest()),
             "maximum_capacity_and_ram": pass_record(
                 policy_sha256=policy_digest,
                 target=dict(TARGET),
@@ -143,15 +212,20 @@ def current_evidence(report_raw, policy_raw):
     }
 
 
-def evaluate(report=None, evidence=None, policy=None):
+def evaluate(report=None, evidence=None, policy=None, physical=None):
     report = owner_report() if report is None else report
     policy = acceptance_policy() if policy is None else policy
     report_raw = encoded(report)
     policy_raw = encoded(policy)
+    physical = (
+        real_swap_evidence(report_raw, policy_raw)
+        if physical is None else physical)
+    physical_raw = encoded(physical)
     if evidence is None:
-        evidence = current_evidence(report_raw, policy_raw)
+        evidence = current_evidence(report_raw, policy_raw, physical_raw)
     return EVALUATOR.evaluate_release(
-        SOURCE, report, report_raw, evidence, policy, policy_raw)
+        SOURCE, report, report_raw, evidence, policy, policy_raw,
+        physical, physical_raw)
 
 
 class ProductionReadinessEvaluatorTest(unittest.TestCase):
@@ -354,6 +428,89 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "installed bytes" in blocker for blocker in result["deployment_blockers"]))
         self.assertTrue(any(
             "not armed" in blocker for blocker in result["deployment_blockers"]))
+
+    def test_real_swap_requires_persistent_evidence_and_exact_digest_binding(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        raw = encoded(physical)
+        evidence = current_evidence(report_raw, policy_raw, raw)
+
+        missing = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw)
+        self.assertEqual(missing["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "persistent physical evidence is missing" in blocker
+            for blocker in missing["code_blockers"]))
+
+        evidence["release_evidence"]["real_linux_swap"]["evidence_sha256"] = (
+            "9" * 64)
+        mismatched = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, raw)
+        self.assertEqual(mismatched["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "persistent evidence digest binding mismatch" in blocker
+            for blocker in mismatched["code_blockers"]))
+
+    def test_real_swap_persistent_evidence_binds_nested_result_and_helpers(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        for name, key, value in (
+                ("execution-control", "physical_execution_control_sha256", "bad"),
+                ("helper", "helper_sha256", "5" * 64),
+                ("oracle", "oracle_sha256", "6" * 64),
+                ("cycles", "cycles_passed", 1),
+                ("owner-report", "qualification_report_sha256", "7" * 64)):
+            with self.subTest(name=name):
+                physical = real_swap_evidence(report_raw, policy_raw)
+                physical["result"][key] = value
+                raw = encoded(physical)
+                evidence = current_evidence(report_raw, policy_raw, raw)
+                result = EVALUATOR.evaluate_release(
+                    SOURCE, report, report_raw, evidence, policy, policy_raw,
+                    physical, raw)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+
+    def test_real_swap_persistent_evidence_requires_fresh_ids_and_matching_envelope(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        nested = physical["result"]
+        nested["cycles"][1]["run_id"] = nested["cycles"][0]["run_id"]
+        nested["cycles"][1]["linux_swap_uuid"] = nested["cycles"][0][
+            "linux_swap_uuid"]
+        physical["cycles"] = copy.deepcopy(nested["cycles"])
+        raw = encoded(physical)
+        evidence = current_evidence(report_raw, policy_raw, raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "reused a transaction run_id" in blocker
+            for blocker in result["code_blockers"]))
+        self.assertTrue(any(
+            "reused a Linux swap UUID" in blocker
+            for blocker in result["code_blockers"]))
+
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical["workload_mib"] += 1
+        raw = encoded(physical)
+        evidence = current_evidence(report_raw, policy_raw, raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "persistent evidence/result mismatch for workload_mib" in blocker
+            for blocker in result["code_blockers"]))
 
     def test_strict_json_rejects_duplicate_policy_keys(self):
         with TemporaryDirectory(prefix="swapz-release-json-") as directory:
