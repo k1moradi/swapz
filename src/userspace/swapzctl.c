@@ -34,7 +34,8 @@
 static void usage(FILE *out)
 {
 	fputs("Usage: swapzctl version | status | format <blockdev> | help\n", out);
-	fputs("       swapzctl primary plan|prepare|start|stop|recover\n", out);
+	fputs("       swapzctl primary plan|qualification-import <report>|"
+	      "prepare|start|stop|recover\n", out);
 	fputs("       swapzctl format <blockdev> --expect-major-minor <major>:<minor> "
 	      "--expect-bytes <decimal-bytes>\n", out);
 	fputs("status reports cumulative committed foreground compression ratios "

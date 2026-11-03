@@ -3607,3 +3607,14 @@ inside its private sandbox through `SWAPZ_TEST_MODULE_ARTIFACT`. That test hook
 must be rejected outside the sandbox and must not change the production module
 source path. Package ownership hashes and uninstall checks must cover the
 retained module image as well as the CLI, oracle and systemd files.
+
+`swapzctl primary qualification-import <report>` is an explicit root-only
+metadata operation. It accepts only a stable, non-writable regular input
+report that matches the running build source, this x86_64 host identity, all
+five passing stages and the live three-artifact hashes. It requires the
+validated persistent recovery directory, the partition lock, no active owner
+marker and no unfinished primary state. It durably stores the exact report
+bytes at the fixed path; a replaced report is preserved under a SHA-256 name.
+This command does not prepare the partition, load the module, create a mapper
+or enable swap. Rootless tests must exercise atomic store, repeat store,
+prior-report preservation and refusal while an active marker exists.

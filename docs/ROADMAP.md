@@ -1492,10 +1492,15 @@ copy of the qualified module retained under `libexec/swapz/dm-swapz.ko`, then
 exposes each digest and its match against the owner report. The package tracks
 that retained module image in ownership/tamper checks; a DKMS rebuild is not
 substituted for it. Rootless fixtures accept a matching report, reject
-host/source and stage mismatches, malformed JSON, trailing bytes, duplicate required keys,
+host/source and stage mismatches, malformed JSON, trailing bytes, duplicate
+required keys,
 nonzero stage exits and invalid artifact hashes, and ensure host artifact
-paths are unavailable in the fixture. The report is not installed
-automatically yet, and no lifecycle operation consumes the hashes. Source
-provenance cannot authenticate a preloaded module's exact bytes; the future
-manager must load a checked module descriptor itself or reject the preloaded
-module. Privileged execution remains disabled.
+paths are unavailable in the fixture. An explicit root-only
+`qualification-import` command verifies the source report, host, all live
+artifact hashes, persistent recovery base and inactive manager state before
+atomically storing it. Replaced reports are retained by their digest.
+Rootless store tests cover replacement, preservation, repeat store and
+active-marker refusal. No lifecycle operation consumes the
+hashes yet. Source provenance cannot authenticate a preloaded module's exact
+bytes; the future manager must load a checked module descriptor itself or
+reject the preloaded module. Privileged execution remains disabled.

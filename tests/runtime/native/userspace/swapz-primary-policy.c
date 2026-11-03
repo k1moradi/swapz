@@ -977,8 +977,99 @@ static void test_primary_qualification_report_parser(void)
 	}
 }
 
+static void test_primary_qualification_report_store(void)
+{
+	static const unsigned char first[] = "first qualification report\n";
+	static const unsigned char second[] = "replacement qualification report\n";
+	const char *home = getenv("HOME");
+	char directory_template[PATH_MAX];
+	char first_digest[65];
+	char second_digest[65];
+	char archive_name[112];
+	char fixed_name[] = "primary-qualification.json";
+	char active_name[] = "partition-7fb9401d-04.active";
+	char actual[128];
+	struct stat info;
+	int directory_fd = -1;
+	int lock_fd = -1;
+	int file_fd = -1;
+	ssize_t count;
+
+	assert(home && home[0] == '/');
+	assert(snprintf(directory_template, sizeof(directory_template),
+			 "%s/.swapz-primary-report-XXXXXX", home) > 0);
+	assert(mkdtemp(directory_template));
+	assert(chmod(directory_template, 0700) == 0);
+	directory_fd = open(directory_template,
+			    O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+	assert(directory_fd >= 0);
+	lock_fd = swapz_primary_partition_lock_at(
+		directory_fd, "7fb9401d-04", getuid());
+	assert(lock_fd >= 0);
+	assert(swapz_primary_sha256(first, sizeof(first) - 1U,
+				    first_digest) == 0);
+	assert(swapz_primary_sha256(second, sizeof(second) - 1U,
+				    second_digest) == 0);
+	assert(swapz_primary_qualification_report_store_at(
+		directory_fd, lock_fd, first, sizeof(first) - 1U,
+		first_digest, getuid()) == 0);
+	file_fd = openat(directory_fd, fixed_name,
+			 O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	assert(file_fd >= 0);
+	assert(fstat(file_fd, &info) == 0 && info.st_size == sizeof(first) - 1U);
+	count = pread(file_fd, actual, sizeof(actual), 0);
+	assert(count == (ssize_t)(sizeof(first) - 1U));
+	assert(!memcmp(actual, first, sizeof(first) - 1U));
+	assert(close(file_fd) == 0);
+	file_fd = -1;
+	assert(snprintf(archive_name, sizeof(archive_name),
+			 "primary-qualification-%s.json", first_digest) > 0);
+	assert(swapz_primary_qualification_report_store_at(
+		directory_fd, lock_fd, second, sizeof(second) - 1U,
+		second_digest, getuid()) == 0);
+	file_fd = openat(directory_fd, archive_name,
+			 O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	assert(file_fd >= 0);
+	count = pread(file_fd, actual, sizeof(actual), 0);
+	assert(count == (ssize_t)(sizeof(first) - 1U));
+	assert(!memcmp(actual, first, sizeof(first) - 1U));
+	assert(close(file_fd) == 0);
+	file_fd = openat(directory_fd, fixed_name,
+			 O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	assert(file_fd >= 0);
+	count = pread(file_fd, actual, sizeof(actual), 0);
+	assert(count == (ssize_t)(sizeof(second) - 1U));
+	assert(!memcmp(actual, second, sizeof(second) - 1U));
+	assert(close(file_fd) == 0);
+	file_fd = -1;
+	assert(swapz_primary_qualification_report_store_at(
+		directory_fd, lock_fd, second, sizeof(second) - 1U,
+		second_digest, getuid()) == 0);
+	file_fd = openat(directory_fd, active_name,
+			 O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+	assert(file_fd >= 0);
+	assert(close(file_fd) == 0);
+	file_fd = -1;
+	assert(swapz_primary_qualification_report_store_at(
+		directory_fd, lock_fd, first, sizeof(first) - 1U,
+		first_digest, getuid()) < 0);
+	assert(errno == EBUSY);
+	assert(unlinkat(directory_fd, active_name, 0) == 0);
+	assert(close(lock_fd) == 0);
+	lock_fd = -1;
+	assert(unlinkat(directory_fd, fixed_name, 0) == 0);
+	assert(unlinkat(directory_fd, archive_name, 0) == 0);
+	assert(unlinkat(directory_fd, "partition-7fb9401d-04.lock", 0) == 0);
+	assert(close(directory_fd) == 0);
+	directory_fd = -1;
+	assert(rmdir(directory_template) == 0);
+}
+
 static void test_primary_qualification_live_reader_disabled_in_rootless(void)
 {
+	char *import_args[] = {
+		"qualification-import", "/not-a-real-qualification-report"
+	};
 	struct swapz_primary_qualification qualification;
 	struct swapz_primary_qualification original;
 	char host_identity_sha256[65];
@@ -1009,6 +1100,9 @@ static void test_primary_qualification_live_reader_disabled_in_rootless(void)
 		       sizeof(module_sha256)));
 	assert(!memcmp(oracle_sha256, original_hashes[2],
 		       sizeof(oracle_sha256)));
+	errno = 0;
+	assert(swapz_primary_command(2, import_args) == 2);
+	assert(errno == ENODEV);
 }
 
 int main(void)
@@ -1059,6 +1153,7 @@ int main(void)
 	test_module_mapper_identity_policy();
 	test_build_source_provenance_policy();
 	test_primary_qualification_report_parser();
+	test_primary_qualification_report_store();
 	test_primary_qualification_live_reader_disabled_in_rootless();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),

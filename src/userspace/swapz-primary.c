@@ -4017,6 +4017,494 @@ static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
 #endif
 }
 
+static int swapz_primary_read_report_fd(
+	int fd, uid_t expected_owner, int require_private,
+	unsigned char **bytes_out, size_t *length_out, char digest_out[65])
+{
+	struct stat before;
+	struct stat after;
+	unsigned char *bytes = NULL;
+	size_t length;
+	size_t completed = 0;
+	char digest[65];
+	int flags;
+
+	if (fd < 0 || !bytes_out || !length_out || !digest_out) {
+		errno = EINVAL;
+		return -1;
+	}
+	flags = fcntl(fd, F_GETFL);
+	if (flags < 0)
+		return -1;
+	if ((flags & O_ACCMODE) != O_RDONLY) {
+		errno = EBADF;
+		return -1;
+	}
+	if (fstat(fd, &before) < 0)
+		return -1;
+	if (!S_ISREG(before.st_mode) ||
+	    (expected_owner != (uid_t)-1 && before.st_uid != expected_owner) ||
+	    before.st_nlink != 1U || (before.st_mode & 0022U) ||
+	    before.st_size <= 0 ||
+	    (uint64_t)before.st_size > SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES ||
+	    (require_private && (before.st_mode & 0777U) != 0600U)) {
+		errno = EPERM;
+		return -1;
+	}
+	length = (size_t)before.st_size;
+	bytes = malloc(length);
+	if (!bytes)
+		return -1;
+	while (completed < length) {
+		ssize_t count = pread(fd, bytes + completed, length - completed,
+				      (off_t)completed);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			goto failed;
+		}
+		completed += (size_t)count;
+	}
+	{
+		unsigned char extra;
+		ssize_t count;
+
+		do {
+			count = pread(fd, &extra, sizeof(extra), (off_t)length);
+		} while (count < 0 && errno == EINTR);
+		if (count != 0) {
+			if (count > 0)
+				errno = EFBIG;
+			goto failed;
+		}
+	}
+	if (fstat(fd, &after) < 0)
+		goto failed;
+	if (before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
+	    before.st_mode != after.st_mode || before.st_uid != after.st_uid ||
+	    before.st_gid != after.st_gid || before.st_nlink != after.st_nlink ||
+	    before.st_size != after.st_size ||
+	    before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
+	    before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
+	    before.st_ctim.tv_sec != after.st_ctim.tv_sec ||
+	    before.st_ctim.tv_nsec != after.st_ctim.tv_nsec) {
+		errno = EIO;
+		goto failed;
+	}
+	if (swapz_primary_sha256(bytes, length, digest) < 0)
+		goto failed;
+	*bytes_out = bytes;
+	*length_out = length;
+	memcpy(digest_out, digest, sizeof(digest));
+	return 0;
+
+failed:
+	{
+		int saved_errno = errno;
+
+		free(bytes);
+		errno = saved_errno;
+		return -1;
+	}
+}
+
+static int swapz_primary_read_report_at(
+	int recovery_fd, const char *name, uid_t expected_owner,
+	unsigned char **bytes_out, size_t *length_out, char digest_out[65])
+{
+	struct stat named;
+	struct stat opened;
+	int fd;
+	int result;
+
+	if (recovery_fd < 0 || !name || !bytes_out || !length_out ||
+	    !digest_out) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (fstatat(recovery_fd, name, &named, AT_SYMLINK_NOFOLLOW) < 0)
+		return -1;
+	fd = openat(recovery_fd, name,
+		    O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &opened) < 0 || opened.st_dev != named.st_dev ||
+	    opened.st_ino != named.st_ino) {
+		int saved_errno = errno ? errno : ESTALE;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	result = swapz_primary_read_report_fd(fd, expected_owner, 1, bytes_out,
+					     length_out, digest_out);
+	{
+		int saved_errno = errno;
+
+		if (close(fd) < 0 && result == 0) {
+			result = -1;
+			saved_errno = errno;
+		}
+		errno = saved_errno;
+	}
+	return result;
+}
+
+static int swapz_primary_write_report_at(
+	int recovery_fd, const char *name, const char *digest,
+	const unsigned char *bytes, size_t length, uid_t expected_owner,
+	int replace_existing)
+{
+	struct stat directory;
+	struct stat temporary;
+	struct stat named_temporary;
+	struct stat opened_final;
+	struct stat named_final;
+	char temporary_name[192];
+	char verified_digest[65];
+	size_t written = 0;
+	int fd = -1;
+	int saved_errno = 0;
+	int result = -1;
+	int temporary_identity_valid = 0;
+	int name_length;
+
+	if (recovery_fd < 0 || !name || !swapz_primary_valid_sha256(digest) ||
+	    !bytes || !length || length > SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES ||
+	    (replace_existing != 0 && replace_existing != 1)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (fstat(recovery_fd, &directory) < 0)
+		return -1;
+	if (!S_ISDIR(directory.st_mode) || directory.st_uid != expected_owner ||
+	    (directory.st_mode & 0777U) != 0700U) {
+		errno = EPERM;
+		return -1;
+	}
+	name_length = snprintf(temporary_name, sizeof(temporary_name),
+			       ".%s.%s.tmp", name, digest);
+	if (name_length < 0 || (size_t)name_length >= sizeof(temporary_name)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (fstatat(recovery_fd, temporary_name, &named_temporary,
+		    AT_SYMLINK_NOFOLLOW) == 0) {
+		errno = EEXIST;
+		return -1;
+	}
+	if (errno != ENOENT)
+		return -1;
+	fd = openat(recovery_fd, temporary_name,
+		    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &temporary) < 0)
+		goto out;
+	if (!S_ISREG(temporary.st_mode) ||
+	    temporary.st_uid != expected_owner ||
+	    (temporary.st_mode & 0777U) != 0600U || temporary.st_nlink != 1U ||
+	    temporary.st_dev != directory.st_dev) {
+		errno = EPERM;
+		goto out;
+	}
+	temporary_identity_valid = 1;
+	while (written < length) {
+		ssize_t count = write(fd, bytes + written, length - written);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			goto out;
+		}
+		written += (size_t)count;
+	}
+	if (fsync(fd) < 0 || fstat(fd, &named_final) < 0 ||
+	    fstatat(recovery_fd, temporary_name, &named_temporary,
+		    AT_SYMLINK_NOFOLLOW) < 0)
+		goto out;
+	if (named_final.st_dev != temporary.st_dev ||
+	    named_final.st_ino != temporary.st_ino ||
+	    named_final.st_size != (off_t)length ||
+	    !S_ISREG(named_final.st_mode) || named_final.st_uid != expected_owner ||
+	    (named_final.st_mode & 0777U) != 0600U || named_final.st_nlink != 1U ||
+	    named_temporary.st_dev != temporary.st_dev ||
+	    named_temporary.st_ino != temporary.st_ino) {
+		errno = EPERM;
+		goto out;
+	}
+	if (close(fd) < 0) {
+		fd = -1;
+		goto out;
+	}
+	fd = -1;
+	if (replace_existing) {
+		if (renameat(recovery_fd, temporary_name, recovery_fd, name) < 0)
+			goto out;
+	} else if (renameat2(recovery_fd, temporary_name, recovery_fd, name,
+			     RENAME_NOREPLACE) < 0) {
+		goto out;
+	}
+	if (fsync(recovery_fd) < 0)
+		goto out;
+	fd = openat(recovery_fd, name,
+		    O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+	if (fd < 0)
+		goto out;
+	if (fstat(fd, &opened_final) < 0 ||
+	    swapz_primary_sha256_regular_fd(fd, expected_owner,
+					    SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES,
+					    verified_digest) < 0)
+		goto out;
+	if (strcmp(verified_digest, digest)) {
+		errno = EBADMSG;
+		goto out;
+	}
+	if (fstatat(recovery_fd, name, &named_final,
+		    AT_SYMLINK_NOFOLLOW) < 0 ||
+	    opened_final.st_dev != named_final.st_dev ||
+	    opened_final.st_ino != named_final.st_ino ||
+	    !S_ISREG(named_final.st_mode) ||
+	    named_final.st_uid != expected_owner ||
+	    (named_final.st_mode & 0777U) != 0600U ||
+	    named_final.st_nlink != 1U) {
+		errno = ESTALE;
+		goto out;
+	}
+	result = 0;
+	out:
+	if (!result && close(fd) < 0) {
+		result = -1;
+		saved_errno = errno;
+		fd = -1;
+	}
+	if (fd >= 0) {
+		if (close(fd) < 0 && !saved_errno)
+			saved_errno = errno;
+		fd = -1;
+	}
+	if (result < 0) {
+		if (!saved_errno)
+			saved_errno = errno;
+		if (temporary_identity_valid &&
+		    fstatat(recovery_fd, temporary_name, &named_temporary,
+			    AT_SYMLINK_NOFOLLOW) == 0 &&
+		    named_temporary.st_dev == temporary.st_dev &&
+		    named_temporary.st_ino == temporary.st_ino) {
+			(void)unlinkat(recovery_fd, temporary_name, 0);
+			(void)fsync(recovery_fd);
+		}
+		errno = saved_errno;
+	}
+	return result;
+}
+
+static int swapz_primary_qualification_report_store_at(
+	int recovery_fd, int lock_fd, const unsigned char *bytes, size_t length,
+	const char *digest, uid_t expected_owner)
+{
+	struct stat marker;
+	struct swapz_primary_state state;
+	unsigned char *old_bytes = NULL;
+	char old_digest[65];
+	char archive_name[112];
+	char state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char current_digest[65];
+	char archive_digest[65];
+	unsigned char *archived_bytes = NULL;
+	size_t old_length = 0;
+	size_t archived_length = 0;
+	size_t state_length = 0;
+	int name_length;
+
+	if (recovery_fd < 0 || lock_fd < 0 || !bytes || !length ||
+	    !swapz_primary_valid_sha256(digest) ||
+	    !swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner))
+		return -1;
+	if (fstatat(recovery_fd, "partition-7fb9401d-04.active", &marker,
+		    AT_SYMLINK_NOFOLLOW) == 0) {
+		errno = EBUSY;
+		return -1;
+	}
+	if (errno != ENOENT)
+		return -1;
+	if (swapz_primary_record_read_at(
+		    recovery_fd, "primary-state.json", expected_owner,
+		    state_record, sizeof(state_record), &state_length, NULL) == 0) {
+		if (swapz_primary_state_parse(state_record, state_length, &state) < 0 ||
+		    state.stage != SWAPZ_PRIMARY_STAGE_COMPLETE) {
+			errno = EBUSY;
+			return -1;
+		}
+	} else if (errno != ENOENT) {
+		return -1;
+	}
+	if (swapz_primary_sha256(bytes, length, current_digest) < 0 ||
+	    strcmp(current_digest, digest)) {
+		errno = EBADMSG;
+		return -1;
+	}
+	if (swapz_primary_read_report_at(
+		    recovery_fd, "primary-qualification.json", expected_owner,
+		    &old_bytes, &old_length, old_digest) == 0) {
+		if (old_length == length && !strcmp(old_digest, digest) &&
+		    !memcmp(old_bytes, bytes, length)) {
+			free(old_bytes);
+			return 0;
+		}
+		name_length = snprintf(archive_name, sizeof(archive_name),
+				       "primary-qualification-%s.json", old_digest);
+		if (name_length < 0 || (size_t)name_length >= sizeof(archive_name)) {
+			free(old_bytes);
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+		if (swapz_primary_read_report_at(
+			    recovery_fd, archive_name, expected_owner,
+			    &archived_bytes, &archived_length, archive_digest) == 0) {
+			int identical = archived_length == old_length &&
+				!strcmp(archive_digest, old_digest) &&
+				!memcmp(archived_bytes, old_bytes, old_length);
+
+			free(archived_bytes);
+			if (!identical) {
+				free(old_bytes);
+				errno = EBADMSG;
+				return -1;
+			}
+		} else if (errno == ENOENT) {
+			if (swapz_primary_write_report_at(
+				    recovery_fd, archive_name, old_digest, old_bytes,
+				    old_length, expected_owner, 0) < 0) {
+				free(old_bytes);
+				return -1;
+			}
+		} else {
+			free(old_bytes);
+			return -1;
+		}
+		free(old_bytes);
+	} else if (errno != ENOENT) {
+		return -1;
+	}
+	return swapz_primary_write_report_at(
+		recovery_fd, "primary-qualification.json", digest, bytes,
+		length, expected_owner, 1);
+}
+
+static int swapz_primary_qualification_import(const char *source_path)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)source_path;
+	errno = ENODEV;
+	return -1;
+#else
+	struct swapz_primary_qualification qualification;
+	unsigned char *bytes = NULL;
+	char host_identity_sha256[65];
+	char source_digest[65];
+	char swapzctl_digest[65];
+	char module_digest[65];
+	char oracle_digest[65];
+	int directory_safe = 0;
+	int persistent_filesystem = 0;
+	unsigned int filesystem_major = 0;
+	unsigned int filesystem_minor = 0;
+	int directly_not_target = 0;
+	int source_chain_checked = 0;
+	unsigned int parent_major = 0;
+	unsigned int parent_minor = 0;
+	int active_marker_clear = 0;
+	size_t length = 0;
+	int input_fd = -1;
+	int recovery_fd = -1;
+	int lock_fd = -1;
+	int result = -1;
+
+	if (!source_path || !source_path[0] || geteuid() != 0 ||
+	    SWAPZ_BUILD_SOURCE_CLEAN != 1 ||
+	    !swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA)) {
+		errno = EPERM;
+		return -1;
+	}
+	input_fd = open(source_path,
+			O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+	if (input_fd < 0 ||
+	    swapz_primary_read_report_fd(input_fd, (uid_t)-1, 0, &bytes,
+					 &length, source_digest) < 0)
+		goto out;
+	if (close(input_fd) < 0) {
+		input_fd = -1;
+		goto out;
+	}
+	input_fd = -1;
+	if (swapz_primary_live_host_identity_sha256(host_identity_sha256) < 0 ||
+	    swapz_primary_qualification_parse_json(
+		    bytes, length, SWAPZ_BUILD_SOURCE_SHA,
+		    host_identity_sha256, &qualification) < 0 ||
+	    strcmp(qualification.report_sha256, source_digest) ||
+	    swapz_primary_live_artifact_hashes(
+		    swapzctl_digest, module_digest, oracle_digest) < 0 ||
+	    !swapz_primary_qualification_artifacts_match(
+		    &qualification, swapzctl_digest, module_digest,
+		    oracle_digest)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_recovery_preflight(
+		    &directory_safe, &persistent_filesystem, &filesystem_major,
+		    &filesystem_minor, &directly_not_target, &source_chain_checked,
+		    &parent_major, &parent_minor, &active_marker_clear) < 0 ||
+	    !directory_safe || !persistent_filesystem || !directly_not_target ||
+	    !source_chain_checked || !active_marker_clear) {
+		errno = EPERM;
+		goto out;
+	}
+	recovery_fd = swapz_primary_recovery_base_open(
+		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	if (recovery_fd < 0)
+		goto out;
+	lock_fd = swapz_primary_partition_lock_at(
+		recovery_fd, SWAPZ_PRIMARY_PARTUUID, 0);
+	if (lock_fd < 0)
+		goto out;
+	if (swapz_primary_qualification_report_store_at(
+		    recovery_fd, lock_fd, bytes, length,
+		    qualification.report_sha256, 0) < 0)
+		goto out;
+	result = 0;
+out:
+	{
+		int saved_errno = errno;
+
+		free(bytes);
+		if (input_fd >= 0 && close(input_fd) < 0 && result == 0) {
+			result = -1;
+			saved_errno = errno;
+		}
+		if (lock_fd >= 0 && close(lock_fd) < 0 && result == 0) {
+			result = -1;
+			saved_errno = errno;
+		}
+		if (recovery_fd >= 0 && close(recovery_fd) < 0 && result == 0) {
+			result = -1;
+			saved_errno = errno;
+		}
+		errno = saved_errno;
+	}
+	if (result == 0)
+		printf("Installed primary qualification source=%s report_sha256=%s\n",
+		       qualification.source_sha, qualification.report_sha256);
+	return result;
+#endif
+}
+
 static int swapz_primary_read_only_plan(void)
 {
 	struct swapz_primary_swap_entry swaps[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
@@ -4255,8 +4743,19 @@ static int swapz_primary_read_only_plan(void)
 
 int swapz_primary_command(int argc, char **argv)
 {
+	if (argc == 2 && argv && argv[0] && argv[1] &&
+	    !strcmp(argv[0], "qualification-import")) {
+		if (swapz_primary_qualification_import(argv[1]) < 0) {
+			fprintf(stderr,
+				"BLOCKED: qualification report import failed: %s\n",
+				strerror(errno));
+			return 2;
+		}
+		return 0;
+	}
 	if (argc != 1 || !argv || !argv[0]) {
-		fputs("Usage: swapzctl primary plan|prepare|start|stop|recover\n",
+		fputs("Usage: swapzctl primary plan|qualification-import <report>"
+		      "|prepare|start|stop|recover\n",
 		      stderr);
 		return 2;
 	}
