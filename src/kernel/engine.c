@@ -1907,6 +1907,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	struct swapz_map observed;
 	const swapz_u8 *stored, *metadata, *unused_payload;
 	swapz_u32 bytes, first, last, start, count, block;
+	swapz_u32 expected_sequence;
 	swapz_u32 payload_first, payload_last;
 	swapz_u8 initial_blocks = 1, cached_mask, coalesced_mask = 0;
 	swapz_u8 reusable_mask;
@@ -2023,7 +2024,8 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		return error;
 	/*
 	 * A cache hit was fully validated when it was published, but the
-	 * authoritative map remains the source of truth. Reject a sequence
+	 * authoritative map remains the source of truth. Its compact extent
+	 * sequence index binds this header to the published mapping. Reject a
 	 * mismatch before issuing any lower payload read.
 	 */
 	{
@@ -2033,7 +2035,10 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			((swapz_u32)metadata[10] << 16) |
 			((swapz_u32)metadata[11] << 24);
 
-		if (metadata_sequence != observed.sequence)
+		if (swapz_extent_sequence_lookup(engine->authority,
+						observed.start_block,
+						&expected_sequence) ||
+		    metadata_sequence != expected_sequence)
 			return -EUCLEAN;
 	}
 	if (peek.logical_page != logical_page ||

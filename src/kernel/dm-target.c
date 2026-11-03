@@ -593,6 +593,8 @@ struct swapz_dm {
 	struct swapz_map *maps;
 	swapz_u16 *live_records;
 	swapz_u8 *extent_classes;
+	swapz_u8 *extent_sequence_delta;
+	swapz_u32 *segment_sequence_base;
 	swapz_u32 physical_blocks;
 	swapz_u32 data_start_block;
 	bool physical_backing;
@@ -7848,6 +7850,8 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->maps);
 	kvfree(ctx->live_records);
 	kvfree(ctx->extent_classes);
+	kvfree(ctx->extent_sequence_delta);
+	kvfree(ctx->segment_sequence_base);
 	vfree(ctx->batch_bytes);
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
@@ -8153,7 +8157,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
+	ctx->extent_sequence_delta = kvcalloc(physical,
+						      sizeof(*ctx->extent_sequence_delta),
+						      GFP_KERNEL);
+	ctx->segment_sequence_base = kvcalloc(
+		ctx->segment_count, sizeof(*ctx->segment_sequence_base), GFP_KERNEL);
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
+	    !ctx->extent_sequence_delta || !ctx->segment_sequence_base ||
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
 	    !ctx->gc_min_live_blocks ||
 	    !ctx->gc_segment_evictions || !ctx->segment_mapped_pages ||
@@ -8169,6 +8179,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 				  (u32)logical, (u32)physical);
 	if (error) {
 		ti->error = "Insufficient capacity for uncompressed pages plus swapz reserve";
+		goto fail;
+	}
+	error = swapz_enable_extent_sequence_index(
+		&ctx->authority, ctx->extent_sequence_delta,
+		ctx->segment_sequence_base, ctx->segment_count);
+	if (error) {
+		ti->error = "Cannot initialize compact extent sequence index";
 		goto fail;
 	}
 	/* Production allocator exchanges ownership of one GC reserve segment

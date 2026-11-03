@@ -22,6 +22,8 @@ static struct swapz_authority a;
 static struct swapz_map maps[128];
 static swapz_u16 live[PHYSICAL];
 static swapz_u8 classes[PHYSICAL], roles[4];
+static swapz_u8 extent_sequence_delta[PHYSICAL];
+static swapz_u32 segment_sequence_base[4];
 static struct swapz_engine e;
 static struct swapz_tx bulk_txs[SWAPZ_MAX_RECORDS];
 static swapz_u8 scratch[SWAPZ_MAX_EXTENT_BYTES], reader[SWAPZ_MAX_EXTENT_BYTES];
@@ -161,6 +163,10 @@ static int setup(void)
 
 	if (error)
 		return error;
+	error = swapz_enable_extent_sequence_index(&a, extent_sequence_delta,
+						   segment_sequence_base, 4);
+	if (error)
+		return error;
 	a.reuse_dead_segments = 1;
 	error = swapz_enable_segment_rotation(&a, roles, 4);
 	if (error)
@@ -272,8 +278,7 @@ static int test_overwrite_failed_run_preserves_old_pages(void)
 
 		CHECK(maps[i].valid &&
 		      maps[i].start_block == original[i].start_block &&
-		      maps[i].generation == original[i].generation &&
-		      maps[i].sequence == original[i].sequence);
+		      maps[i].generation == original[i].generation);
 		CHECK(swapz_engine_read_page(&e, i, output,
 					  sizeof(output), &length) == 0);
 		CHECK(length == pages[i].length);

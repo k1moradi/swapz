@@ -352,6 +352,88 @@ int swapz_authority_init(struct swapz_authority *a,
 	return 0;
 }
 
+int swapz_enable_extent_sequence_index(struct swapz_authority *a,
+				       swapz_u8 *sequence_delta,
+				       swapz_u32 *segment_sequence_base,
+				       swapz_u32 segment_count)
+{
+	swapz_u32 expected_segments;
+
+	if (!a || !sequence_delta || !segment_sequence_base ||
+	    a->extent_sequence_delta || a->segment_sequence_base ||
+	    a->next_block ||
+	    a->open_segment != ~(swapz_u32)0 || a->in_flight || a->batch_pending)
+		return -EINVAL;
+	expected_segments = a->physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+	if (!expected_segments || segment_count != expected_segments)
+		return -EINVAL;
+	memset(sequence_delta, 0,
+	       (size_t)a->physical_blocks * sizeof(*sequence_delta));
+	memset(segment_sequence_base, 0,
+	       (size_t)segment_count * sizeof(*segment_sequence_base));
+	a->extent_sequence_delta = sequence_delta;
+	a->segment_sequence_base = segment_sequence_base;
+	a->sequence_segment_count = segment_count;
+	return 0;
+}
+
+static int swapz_extent_sequence_delta_for(const struct swapz_authority *a,
+					   swapz_u32 start_block,
+					   swapz_u32 sequence,
+					   swapz_u8 *delta)
+{
+	swapz_u32 segment, base;
+
+	if (!a || !sequence || !delta)
+		return -EINVAL;
+	if (!a->extent_sequence_delta && !a->segment_sequence_base) {
+		*delta = 0;
+		return 0;
+	}
+	if (!a->extent_sequence_delta || !a->segment_sequence_base ||
+	    start_block >= a->physical_blocks)
+		return -EUCLEAN;
+	segment = start_block / SWAPZ_SEGMENT_BLOCKS;
+	if (segment >= a->sequence_segment_count)
+		return -EUCLEAN;
+	base = a->segment_sequence_base[segment];
+	if (!base) {
+		*delta = 0;
+		return 0;
+	}
+	if (sequence < base || sequence - base > (swapz_u8)~0U)
+		return -EOVERFLOW;
+	*delta = (swapz_u8)(sequence - base);
+	return 0;
+}
+
+int swapz_extent_sequence_lookup(const struct swapz_authority *a,
+				swapz_u32 start_block,
+				swapz_u32 *sequence)
+{
+	swapz_u32 segment, base, value;
+
+	if (!a || !sequence || start_block >= a->physical_blocks)
+		return -EINVAL;
+	*sequence = 0;
+	if (!a->extent_sequence_delta || !a->segment_sequence_base ||
+	    start_block >= a->physical_blocks ||
+	    !a->live_records[start_block] || !a->extent_classes[start_block])
+		return -EUCLEAN;
+	segment = start_block / SWAPZ_SEGMENT_BLOCKS;
+	if (segment >= a->sequence_segment_count)
+		return -EUCLEAN;
+	base = a->segment_sequence_base[segment];
+	if (!base || base > ~(swapz_u32)0 -
+	    a->extent_sequence_delta[start_block])
+		return -EUCLEAN;
+	value = base + a->extent_sequence_delta[start_block];
+	if (!value)
+		return -EUCLEAN;
+	*sequence = value;
+	return 0;
+}
+
 /*
  * The safe, strictly limited first swapz GC step: reuse only wholly-dead
  * 1MiB segments.  A live object is NEVER copied or overwritten here.
@@ -415,6 +497,13 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 	if (used) {
 		memset(a->extent_classes + start, 0,
 		       SWAPZ_SEGMENT_BLOCKS * sizeof(*a->extent_classes));
+		if (a->extent_sequence_delta)
+			memset(a->extent_sequence_delta + start, 0,
+			       SWAPZ_SEGMENT_BLOCKS *
+			       sizeof(*a->extent_sequence_delta));
+		if (a->segment_sequence_base &&
+		    segment < a->sequence_segment_count)
+			a->segment_sequence_base[segment] = 0;
 		a->recycled_dead_segments++;
 	}
 	if (a->segment_program_counts &&
@@ -1148,7 +1237,6 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 	}
 	new_map = (struct swapz_map){
 		.start_block = tx->start_block,
-		.sequence = tx->sequence,
 		.generation = tx->records[0].generation,
 		.raw_crc32c = swapz_publish_crc32c(a, raw_page, SWAPZ_BLOCK_BYTES),
 		.payload_length = SWAPZ_BLOCK_BYTES,
@@ -1336,6 +1424,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	swapz_u32 new_segment;
 	swapz_u32 metadata_end, previous_end;
 	swapz_u32 new_record_read_penalty;
+	swapz_u8 new_sequence_delta = 0;
 	swapz_u32 new_gc_live_bytes = 0, new_gc_io_cost = 0;
 	swapz_u16 new_gc_min_live_blocks = 0;
 	swapz_u8 extent_delta_count = 0, segment_delta_count = 0;
@@ -1372,6 +1461,11 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = -EUCLEAN;
 		goto fail;
 	}
+	error = swapz_extent_sequence_delta_for(a, tx->start_block,
+						 tx->sequence,
+						 &new_sequence_delta);
+	if (error)
+		goto fail;
 	metadata_end = sizeof(struct swapz_header) +
 		(swapz_u32)tx->count * sizeof(struct swapz_record);
 	previous_end = bytes_total;
@@ -1611,6 +1705,11 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	 * distinct logical mappings and page-list links. No rollback is needed
 	 * because no operation below can fail.
 	 */
+	if (a->extent_sequence_delta) {
+		if (!a->segment_sequence_base[new_segment])
+			a->segment_sequence_base[new_segment] = tx->sequence;
+		a->extent_sequence_delta[tx->start_block] = new_sequence_delta;
+	}
 	a->live_records[tx->start_block] = tx->count;
 	a->extent_classes[tx->start_block] = tx->extent_blocks;
 	for (index = 0; index < extent_delta_count; ++index)
@@ -1644,7 +1743,6 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		struct swapz_map *entry = &a->maps[logical];
 		struct swapz_map new_map = {
 			.start_block = tx->start_block,
-			.sequence = tx->sequence,
 			.generation = tx->records[index].generation,
 			.payload_length = payload_lengths[index],
 			.payload_offset = payload_offsets[index],
@@ -1685,7 +1783,6 @@ static int swapz_read_observed_authority(
 	current_map = &a->maps[logical_page];
 	if (!current_map->valid || !observed->valid ||
 	    current_map->start_block != observed->start_block ||
-	    current_map->sequence != observed->sequence ||
 	    current_map->generation != observed->generation ||
 	    current_map->extent_blocks != observed->extent_blocks ||
 	    current_map->raw != observed->raw ||
@@ -1716,12 +1813,17 @@ int swapz_read_authoritative_peeked_payload(
 				  const swapz_u8 **payload)
 {
 	const struct swapz_map *current_map;
+	swapz_u32 expected_sequence;
 	int error;
 	if (!peeked || !stored || !payload) return -EINVAL;
 	*payload = NULL;
 	error = swapz_read_observed_authority(a, logical_page, observed,
 					     metadata, bytes_total, &current_map);
 	if (error) return error;
+	error = swapz_extent_sequence_lookup(a, current_map->start_block,
+					     &expected_sequence);
+	if (error)
+		return error;
 	if (peeked->logical_page != logical_page ||
 	    peeked->generation != current_map->generation ||
 	    peeked->encoding != swapz_map_encoding(current_map) ||
@@ -1731,7 +1833,7 @@ int swapz_read_authoritative_peeked_payload(
 	    peeked->payload_length > SWAPZ_MAX_COMPRESSED ||
 	    peeked->payload_offset >= bytes_total ||
 	    peeked->payload_length > bytes_total - peeked->payload_offset ||
-	    swapz_disk_sequence(metadata) != current_map->sequence)
+	    swapz_disk_sequence(metadata) != expected_sequence)
 		return -EUCLEAN;
 	if (swapz_crc32c_bytes(stored, peeked->payload_length) != peeked->payload_crc32c)
 		return -EBADMSG;

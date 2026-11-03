@@ -1031,9 +1031,10 @@ SWZ geometry, authority ordering or the default compression policy.
   metadata set, or validated extent LRU uses descriptor-only lookup rather than
   recomputing metadata CRC and duplicate-record validation. Cold metadata and
   provisional ID63 coalesced bytes still run full `swapz_validate()`.
-  Cached metadata sequence must match the observed authoritative map before
-  any payload lower read; logical identity, generation, offsets, authority
-  comparison and payload CRC still execute on every logical read.
+  Cached metadata sequence must match the compact per-extent sequence index
+  for the authoritative start block before any payload lower read; logical
+  identity, generation, offsets, authority comparison and payload CRC still
+  execute on every logical read.
 - **Publication preflight:** `swapz_finish()` builds bounded old-extent and
   old-segment deltas in authority-owned scratch, validates aggregate mapped/GC
   accounting without touching global arrays, then applies each aggregate once.

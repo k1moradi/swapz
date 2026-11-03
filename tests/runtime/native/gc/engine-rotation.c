@@ -20,6 +20,8 @@ static struct swapz_authority a;
 static struct swapz_map maps[32];
 static swapz_u16 live[PBLKS];
 static swapz_u8 classes[PBLKS], roles[4];
+static swapz_u8 extent_sequence_delta[PBLKS];
+static swapz_u32 segment_sequence_base[4];
 static struct swapz_engine e;
 static swapz_u8 write_scratch[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 read_scratch[SWAPZ_MAX_EXTENT_BYTES];
@@ -61,6 +63,10 @@ static int setup(void)
 	int error = swapz_authority_init(&a, maps, live, classes, 32, PBLKS);
 	unsigned int i;
 
+	if (error)
+		return error;
+	error = swapz_enable_extent_sequence_index(&a, extent_sequence_delta,
+						   segment_sequence_base, 4);
 	if (error)
 		return error;
 	a.reuse_dead_segments = 1;

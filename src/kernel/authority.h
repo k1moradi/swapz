@@ -17,7 +17,6 @@
  */
 struct swapz_map {
 	swapz_u32 start_block;
-	swapz_u32 sequence;
 	swapz_u32 generation;
 	/* These interpretations are exclusive: raw mappings keep their volatile
 	 * CRC here; compressed mappings keep their zero-extended on-extent payload
@@ -42,7 +41,7 @@ struct swapz_map {
 	};
 };
 
-_Static_assert(sizeof(struct swapz_map) == 20,
+_Static_assert(sizeof(struct swapz_map) == 16,
 	       "swapz_map must stay compact for full-capacity metadata");
 
 static inline swapz_u8 swapz_map_record_index(const struct swapz_map *map)
@@ -107,6 +106,11 @@ struct swapz_authority {
 	struct swapz_map *maps;		/* [logical_pages] */
 	swapz_u16 *live_records;		/* [physical_blocks]; extent START */
 	swapz_u8 *extent_classes;		/* [physical_blocks]; extent START */
+	/* Transaction sequence is extent-scoped, not page-scoped. Store its
+	 * offset from the first indexed compressed extent in each 1MiB segment. */
+	swapz_u8 *extent_sequence_delta;	/* [physical_blocks]; extent START */
+	swapz_u32 *segment_sequence_base;	/* [physical_segments] */
+	swapz_u32 sequence_segment_count;
 	swapz_u32 logical_pages;
 	swapz_u32 physical_blocks;
 	swapz_u32 reserve_blocks;
@@ -255,6 +259,15 @@ int swapz_authority_init(struct swapz_authority *authority,
 		       struct swapz_map *maps, swapz_u16 *live_records,
 		       swapz_u8 *extent_classes, swapz_u32 logical_pages,
 		       swapz_u32 physical_blocks);
+/* Install the compact per-extent sequence index before staging any writes. */
+int swapz_enable_extent_sequence_index(struct swapz_authority *authority,
+				       swapz_u8 *sequence_delta,
+				       swapz_u32 *segment_sequence_base,
+				       swapz_u32 segment_count);
+/* Resolve the authoritative on-media sequence for a live extent start. */
+int swapz_extent_sequence_lookup(const struct swapz_authority *authority,
+				swapz_u32 start_block,
+				swapz_u32 *sequence);
 /* Reserves physical blocks; single worker, one pending transaction. */
 int swapz_stage(struct swapz_authority *authority, const swapz_u32 *logical_pages,
 	      swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out);

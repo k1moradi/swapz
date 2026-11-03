@@ -20,6 +20,8 @@
 static struct swapz_map map[64];
 static swapz_u16 live[NPHYS];
 static swapz_u8 klass[NPHYS];
+static swapz_u8 extent_sequence_delta[NPHYS];
+static swapz_u32 segment_sequence_base[NPHYS / SWAPZ_SEGMENT_BLOCKS];
 static struct swapz_authority auth;
 static struct swapz_engine engine;
 static swapz_u8 scratch_w[16384], scratch_r[16384];
@@ -78,7 +80,10 @@ static int setup(void)
 	memset(disk, 0, sizeof(disk));
 	writes = reads = 0;
 	corrupt_after_write = fail_read = lie_about_completion = 0;
-	if (swapz_authority_init(&auth, map, live, klass, 64, NPHYS))
+	if (swapz_authority_init(&auth, map, live, klass, 64, NPHYS) ||
+	    swapz_enable_extent_sequence_index(
+		    &auth, extent_sequence_delta, segment_sequence_base,
+		    NPHYS / SWAPZ_SEGMENT_BLOCKS))
 		return 1;
 	engine.authority = &auth;
 	engine.write_scratch = scratch_w;

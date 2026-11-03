@@ -19,13 +19,21 @@ static struct swapz_authority authority;
 static struct swapz_map maps[128];
 static swapz_u16 live[2048];
 static swapz_u8 classes[2048];
+static swapz_u8 extent_sequence_delta[2048];
+static swapz_u32 segment_sequence_base[8];
 static swapz_u8 extent[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 previous_extent[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 content[2072];
 
 static int init(void)
 {
-	return swapz_authority_init(&authority, maps, live, classes, 64, 2048);
+	int error = swapz_authority_init(&authority, maps, live, classes,
+					 64, 2048);
+
+	if (error)
+		return error;
+	return swapz_enable_extent_sequence_index(
+		&authority, extent_sequence_delta, segment_sequence_base, 8);
 }
 
 static int encode(const struct swapz_tx *tx)
@@ -68,7 +76,7 @@ static int test_16gib_fixture_maximum_capacity(void)
 	const swapz_u32 expected_logical_pages = 3727872U;
 	const swapz_u32 expected_reserve_blocks = 465984U;
 	const swapz_u32 expected_segments = 16383U;
-	const swapz_u64 expected_index_bytes = 117486816ULL;
+	const swapz_u64 expected_index_bytes = 106834908ULL;
 	const swapz_u32 total_blocks =
 		(swapz_u32)(partition_bytes / SWAPZ_BLOCK_BYTES);
 	const swapz_u32 physical_blocks =
@@ -79,7 +87,9 @@ static int test_16gib_fixture_maximum_capacity(void)
 	struct swapz_authority a;
 	struct swapz_map *large_maps;
 	swapz_u16 *live_records;
-	swapz_u8 *extent_classes, *segment_roles, *segment_trimmed;
+	swapz_u8 *extent_classes, *extent_sequence_delta;
+	swapz_u8 *segment_roles, *segment_trimmed;
+	swapz_u32 *segment_sequence_base;
 	swapz_u32 *gc_scores, *gc_io_scores, *gc_segment_evictions;
 	swapz_u32 *segment_mapped_pages, *segment_program_counts;
 	swapz_u32 *segment_first_page, *segment_last_page;
@@ -94,16 +104,21 @@ static int test_16gib_fixture_maximum_capacity(void)
 	CHECK((swapz_u64)expected_logical_pages *
 	      (sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)) +
 	      (swapz_u64)physical_blocks *
-	      (sizeof(swapz_u16) + sizeof(swapz_u8)) +
+	      (sizeof(swapz_u16) + 2U * sizeof(swapz_u8)) +
 	      (swapz_u64)segment_count *
 	      (7U * sizeof(swapz_u32) + sizeof(swapz_u16) +
-	       2U * sizeof(swapz_u8)) == expected_index_bytes);
+	       2U * sizeof(swapz_u8) + sizeof(swapz_u32)) ==
+	      expected_index_bytes);
 
 	/* Allocate every capacity-dependent authority/index array used by ctr. */
 	large_maps = calloc((size_t)expected_logical_pages + 1U,
 			    sizeof(*large_maps));
 	live_records = calloc(physical_blocks, sizeof(*live_records));
 	extent_classes = calloc(physical_blocks, sizeof(*extent_classes));
+	extent_sequence_delta = calloc(physical_blocks,
+					sizeof(*extent_sequence_delta));
+	segment_sequence_base = calloc(segment_count,
+					       sizeof(*segment_sequence_base));
 	gc_scores = calloc(segment_count, sizeof(*gc_scores));
 	gc_io_scores = calloc(segment_count, sizeof(*gc_io_scores));
 	gc_min_live_blocks = calloc(segment_count, sizeof(*gc_min_live_blocks));
@@ -121,7 +136,8 @@ static int test_16gib_fixture_maximum_capacity(void)
 				      sizeof(*page_next_in_segment));
 	segment_trimmed = calloc(segment_count, sizeof(*segment_trimmed));
 	segment_roles = calloc(segment_count, sizeof(*segment_roles));
-	CHECK(large_maps && live_records && extent_classes && gc_scores &&
+	CHECK(large_maps && live_records && extent_classes &&
+	      extent_sequence_delta && segment_sequence_base && gc_scores &&
 	      gc_io_scores && gc_min_live_blocks && gc_segment_evictions &&
 	      segment_mapped_pages && segment_program_counts &&
 	      segment_first_page && segment_last_page && page_prev_in_segment &&
@@ -134,6 +150,9 @@ static int test_16gib_fixture_maximum_capacity(void)
 	CHECK(swapz_authority_init(&a, large_maps, live_records, extent_classes,
 				   expected_logical_pages,
 				   physical_blocks) == 0);
+	CHECK(swapz_enable_extent_sequence_index(&a, extent_sequence_delta,
+						  segment_sequence_base,
+						  segment_count) == 0);
 	CHECK(a.reserve_blocks == expected_reserve_blocks);
 	CHECK(a.logical_pages == expected_logical_pages);
 	CHECK(swapz_enable_segment_rotation(&a, segment_roles,
@@ -156,13 +175,15 @@ static int test_16gib_fixture_maximum_capacity(void)
 	index_bytes = (swapz_u64)expected_logical_pages *
 		(sizeof(*large_maps) + 2U * sizeof(swapz_u32)) +
 		(swapz_u64)physical_blocks *
-		(sizeof(*live_records) + sizeof(*extent_classes)) +
+		(sizeof(*live_records) + sizeof(*extent_classes) +
+		 sizeof(*extent_sequence_delta)) +
 		(swapz_u64)segment_count *
 		(7U * sizeof(swapz_u32) + sizeof(swapz_u16) +
-		 2U * sizeof(swapz_u8));
+		 2U * sizeof(swapz_u8) + sizeof(*segment_sequence_base));
 	CHECK(index_bytes == expected_index_bytes);
 
 	free(segment_roles);
+	free(segment_sequence_base);
 	free(segment_trimmed);
 	free(page_next_in_segment);
 	free(page_prev_in_segment);
@@ -175,6 +196,7 @@ static int test_16gib_fixture_maximum_capacity(void)
 	free(gc_io_scores);
 	free(gc_scores);
 	free(extent_classes);
+	free(extent_sequence_delta);
 	free(live_records);
 	free(large_maps);
 	return 0;
@@ -188,6 +210,7 @@ static int test_full_publish_and_authoritative_reads(void)
 	const swapz_u8 *payload;
 	struct swapz_map observed;
 	swapz_u32 index;
+	swapz_u32 sequence;
 
 	CHECK(init() == 0);
 	CHECK(swapz_stage(&authority, pages, 7, 4, &tx) == 0);
@@ -203,7 +226,11 @@ static int test_full_publish_and_authoritative_reads(void)
 		observed = maps[index];
 		CHECK(observed.valid && observed.start_block == 0 &&
 		      observed.generation == 1 && observed.record_index == index &&
-		      observed.extent_blocks == 4 && observed.sequence == 1);
+		      observed.extent_blocks == 4);
+		CHECK(swapz_extent_sequence_lookup(&authority,
+						  observed.start_block,
+						  &sequence) == 0 &&
+		      sequence == 1);
 		CHECK(swapz_peek(extent, 16384, observed.record_index, &decoded) == 0);
 		CHECK(swapz_read_authoritative_peeked(&authority, index, &observed,
 					    extent, 16384, &decoded, &payload) == 0);
@@ -435,7 +462,14 @@ static int advance_append_only_cursor(struct swapz_authority *a,
 static int init_append_only_authority(struct swapz_authority *a,
 				     swapz_u32 physical_blocks)
 {
-	return swapz_authority_init(a, maps, live, classes, 64, physical_blocks);
+	int error = swapz_authority_init(a, maps, live, classes, 64,
+					 physical_blocks);
+
+	if (error)
+		return error;
+	return swapz_enable_extent_sequence_index(
+		a, extent_sequence_delta, segment_sequence_base,
+		physical_blocks / SWAPZ_SEGMENT_BLOCKS);
 }
 
 static int verify_append_only_page(struct swapz_authority *a,
@@ -583,6 +617,56 @@ static int test_batch_tail_abort_preserves_older_snapshot(void)
 	return 0;
 }
 
+static int test_compact_extent_sequence_delta_bound(void)
+{
+	const swapz_u32 first_page[] = {0};
+	const swapz_u32 later_page[] = {1};
+	struct swapz_tx tx;
+	swapz_u32 index, sequence;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&authority, first_page, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == 0 && tx.sequence == 1 && encode(&tx) == 0);
+	CHECK(swapz_finish(&authority, &tx, extent, SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+
+	/* Aborted reservations still consume their unique physical block and
+	 * sequence. The last possible one-block extent in a segment must fit the
+	 * full 8-bit delta from the first committed extent. */
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS - 2U; ++index) {
+		CHECK(swapz_stage(&authority, later_page, 1, 1, &tx) == 0);
+		CHECK(tx.start_block == index + 1U);
+		CHECK(swapz_abort(&authority, &tx) == 0);
+	}
+	CHECK(swapz_stage(&authority, later_page, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS - 1U &&
+	      tx.sequence == SWAPZ_SEGMENT_BLOCKS && encode(&tx) == 0);
+	CHECK(swapz_finish(&authority, &tx, extent, SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+	CHECK(swapz_extent_sequence_lookup(&authority, tx.start_block,
+						  &sequence) == 0 &&
+	      sequence == tx.sequence);
+	CHECK(extent_sequence_delta[tx.start_block] == (swapz_u8)~0U);
+	return 0;
+}
+
+static int test_compact_extent_sequence_overflow_fails_closed(void)
+{
+	const swapz_u32 first_page[] = {0};
+	const swapz_u32 later_page[] = {1};
+	struct swapz_tx tx;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&authority, first_page, 1, 1, &tx) == 0);
+	CHECK(tx.sequence == 1 && encode(&tx) == 0);
+	CHECK(swapz_finish(&authority, &tx, extent, SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+	authority.next_sequence = 257;
+	CHECK(swapz_stage(&authority, later_page, 1, 1, &tx) == 0);
+	CHECK(tx.sequence == 257 && encode(&tx) == 0);
+	CHECK(swapz_finish(&authority, &tx, extent, SWAPZ_BLOCK_BYTES, 1, 0) ==
+	      -EOVERFLOW);
+	CHECK(maps[0].valid && !maps[1].valid && live[tx.start_block] == 0);
+	return 0;
+}
+
 static int test_short_write_always_quarantines(void)
 {
 	const swapz_u32 pages[] = {9};
@@ -636,6 +720,8 @@ int main(void)
 	CHECK(test_allocator_reserve_exhaustion() == 0); passed++;
 	CHECK(test_packed_append_only_segment_edges() == 0); passed++;
 	CHECK(test_batch_tail_abort_preserves_older_snapshot() == 0); passed++;
+	CHECK(test_compact_extent_sequence_delta_bound() == 0); passed++;
+	CHECK(test_compact_extent_sequence_overflow_fails_closed() == 0); passed++;
 	CHECK(test_short_write_always_quarantines() == 0); passed++;
 	CHECK(test_old_liveness_corruption_fail_closed() == 0); passed++;
 	printf("SWAPZ_EXACT_AUTHORITY_TESTS_PASS=%d\n", passed);

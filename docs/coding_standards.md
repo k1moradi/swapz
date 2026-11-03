@@ -1926,9 +1926,11 @@ costs without assuming a wider ISA or changing predictor policy.
 A metadata cache hit may skip full SWZ metadata validation only when the bytes
 were published to that cache after a successful authoritative read and are not
 still marked as provisional coalesced input. Descriptor-only lookup does not
-weaken read validation: compare the cached on-media sequence with the observed
-map before any payload lower read, then retain the existing logical-page,
-generation, payload bounds/encoding, authority and payload-CRC checks. Cold
+weaken read validation: compare the cached on-media sequence with the compact
+extent-sequence index for the authoritative start block before any payload
+lower read, then retain the existing logical-page, generation, payload
+bounds/encoding, authority and payload-CRC checks. The observed mapping still
+has to match current authority. Cold
 metadata and unvalidated coalesced seed bytes always use the full validator.
 When a validated extent-LRU block replaces provisional scratch, clear the
 corresponding provisional bit. Cache refresh and slot priming copy only blocks
@@ -2089,16 +2091,23 @@ there but must leave any existing failure unchanged, and must not treat a
 completion counter as proof of the user's write() return value.
 
 The volatile per-logical-page authority map is part of the full-capacity RAM
-budget and must remain exactly 20 bytes (`_Static_assert`). Its four-byte union
+budget and must remain exactly 16 bytes (`_Static_assert`). Its four-byte union
 has mutually exclusive meanings: a RAW mapping stores its volatile CRC32C;
 an LZ4 or delta64 mapping stores its zero-extended payload offset. Compressed
 read paths must reject RAW mappings before examining the offset member, while
 the RAW integrity path must compare the CRC member. The shared one-byte state
 stores extent size, RAW and valid flags; it is in-memory host state and must
-never be serialized as an on-media structure. Preserve both RAW CRC and
-compressed-offset behavior in native production-C tests whenever this layout
-changes. Capacity estimates must use `sizeof(struct swapz_map)` from the built
-source and label array-only totals separately from total target memory.
+never be serialized as an on-media structure. Transaction sequence is
+extent-scoped: retain it in the separate compact index as an 8-bit offset from
+the first compressed extent sequence in each 1MiB segment. A segment contains
+at most 256 one-block allocations, so the offset fits exactly; reject overflow
+rather than truncate it. Clear the index whenever a dead segment is recycled, and
+validate the decoded sequence against the index before payload I/O. Preserve
+RAW CRC, compressed-offset and sequence-binding behavior in native production-C
+tests whenever this layout changes. Capacity estimates must include the
+per-physical-block sequence offsets and per-segment sequence bases, use
+`sizeof(struct swapz_map)` from the built source, and label array-only totals
+separately from total target memory.
 
 
 ### Physical-smoke byte-exact oracle: opened DM identity

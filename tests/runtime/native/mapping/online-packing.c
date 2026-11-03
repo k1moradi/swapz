@@ -22,6 +22,9 @@ static struct swapz_authority authority;
 static struct swapz_map maps[LOGICAL_PAGES];
 static swapz_u16 live[PHYSICAL_BLOCKS];
 static swapz_u8 classes[PHYSICAL_BLOCKS];
+static swapz_u8 extent_sequence_delta[PHYSICAL_BLOCKS];
+static swapz_u32 segment_sequence_base[
+	PHYSICAL_BLOCKS / SWAPZ_SEGMENT_BLOCKS];
 static swapz_u8 scratch_write[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_read[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_read_second[SWAPZ_MAX_EXTENT_BYTES];
@@ -100,7 +103,10 @@ static int setup(void)
 	disk.fail_write_on_call = 0;
 	disk.fail_reads = 0;
 	if (swapz_authority_init(&authority, maps, live, classes,
-			       LOGICAL_PAGES, PHYSICAL_BLOCKS))
+			       LOGICAL_PAGES, PHYSICAL_BLOCKS) ||
+	    swapz_enable_extent_sequence_index(
+		    &authority, extent_sequence_delta, segment_sequence_base,
+		    PHYSICAL_BLOCKS / SWAPZ_SEGMENT_BLOCKS))
 		return 1;
 	memset(&engine, 0, sizeof(engine));
 	engine.authority = &authority;

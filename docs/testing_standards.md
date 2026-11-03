@@ -321,16 +321,20 @@ regression fixture: one SWZ header block,
 with its two-segment minimum. It must reject the first page beyond the maximum,
 initialize the maximum, attach every capacity-dependent production authority
 array, and calculate those array bytes from the compiled C types. The volatile
-`struct swapz_map` must remain 20 bytes: raw mappings store their CRC32C in
+`struct swapz_map` must remain 16 bytes: raw mappings store their CRC32C in
 the four-byte union, while compressed mappings store a zero-extended payload
 offset in that same union; encoding-specific readers must not inspect the
-other interpretation. For the current 16 GiB fixture geometry this is
-4,194,048 usable physical blocks, 3,727,872 logical pages (15,269,363,712
-mapper bytes), 465,984 reserve blocks, and 117,486,816 bytes (112.04 MiB) of
-capacity-index arrays. The map compaction reduces this compiled-array estimate
-by 14,911,488 bytes (14.22 MiB) from the former 24-byte map layout. The array
-figure excludes the target structure, fixed scratch/cache/workspace allocations
-and allocator overhead; it is not a total module-RAM measurement. Native
+other interpretation. The transaction sequence is retained separately with
+one byte per physical block for a compressed extent's offset from its segment's
+first compressed sequence, plus one 32-bit sequence base per segment. The
+native test must cover the maximum 255 offset and fail closed on overflow. For the current
+16 GiB fixture geometry this is 4,194,048 usable physical blocks, 3,727,872
+logical pages (15,269,363,712 mapper bytes), 465,984 reserve blocks, and
+106,834,908 bytes (101.89 MiB) of capacity-index arrays. Compared with the
+20-byte map and no sequence index, the net compiled-array reduction is
+10,651,908 bytes (10.15 MiB). The array figure excludes the target structure,
+fixed scratch/cache/workspace allocations and allocator overhead; it is not a
+total module-RAM measurement. Native
 authority success does not prove that the loaded Device Mapper target can
 allocate or operate at that size. The loaded 16 GiB fixture qualification must
 create the matching maximum logical target over a separately owned 16,383 MiB
@@ -2396,10 +2400,11 @@ noncandidate must remain untouched. Exercise epoch and age-clock wrap, as well
 as transfer/reset of both hit counters from private engines.
 
 An ordinary metadata-cache hit parses and sequence-checks the cached block
-directly. It must not copy all 4096 bytes into read scratch merely to decode one
-record. If the selected payload overlaps block zero, copy only that exact
-payload fragment; CRC validation must cover the reconstructed contiguous payload
-and remain bound to the separately validated metadata/authority identity.
+directly against the compact per-extent sequence index. It must not copy all
+4096 bytes into read scratch merely to decode one record. If the selected
+payload overlaps block zero, copy only that exact payload fragment; CRC
+validation must cover the reconstructed contiguous payload and remain bound to
+the separately validated metadata/authority identity.
 A separately cached block zero must never be advertised as direct/extent
 read-scratch residency unless all 4096 bytes are actually present there.
 
@@ -2562,7 +2567,8 @@ Source-contract qualification must pin the safety boundaries of the optimized
 paths: generic-planner duplicate protection remains enabled; only the
 prevalidated production planner sets the uniqueness fast flag; cached metadata
 uses descriptor-only lookup only behind a validated-source test; metadata
-sequence is checked before payload lower I/O; provisional coalesced blocks
+sequence is checked against the extent-sequence index before payload lower I/O;
+provisional coalesced blocks
 cannot be published as validated cache; publication preflight contains no
 global GC mutate/restore loop; and paused-batch hashing covers the active
 transaction prefix.
