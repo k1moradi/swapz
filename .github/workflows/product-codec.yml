@@ -3,15 +3,6 @@ name: Experimental swapz production C qualification
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/kernel/**'
-      - 'tests/suites/**'
-      - 'tests/runtime/native/**'
-      - 'tests/runtime/benchmark/**'
-      - 'Makefile'
-      - 'tests/tools/**'
-      - 'docs/ROADMAP.md'
-      - '.github/workflows/product-codec.yml'
   workflow_dispatch:
 
 permissions:

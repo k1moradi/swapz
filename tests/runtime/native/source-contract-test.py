@@ -199,6 +199,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             workflow)
         self.assertIn("TSAN_OPTIONS: halt_on_error=1", workflow)
 
+    def test_product_codec_runs_for_every_main_push(self):
+        workflow = (
+            ROOT / ".github/workflows/product-codec.yml").read_text(
+                encoding="utf-8")
+        trigger = workflow.split("jobs:", 1)[0]
+        self.assertIn("push:\n    branches: [main]", trigger)
+        self.assertNotIn(
+            "paths:", trigger,
+            "exact-source production-C evidence cannot use path-filtered pushes")
+
     def test_owned_nullblk_lifecycle_interruptions_are_test_only(self):
         primary = PRIMARY
         start = source_body("swapz_primary_start_prepared", primary)

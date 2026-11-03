@@ -5019,3 +5019,5 @@ negative-case totals with the qualification marker contract. When the null-block
 negative-recovery suite grows, update parser counters and rendered-report
 assertions in the same change so a green qualifier cannot be hidden by stale
 summary metadata.
+
+Exact-source production-C evidence requires the production-C workflow to run on every `main` push. Path-filtered production-C triggers are prohibited because a documentation-only or evidence-contract commit would otherwise make the current Git SHA permanently ineligible for the exact-source required-CI gate.
