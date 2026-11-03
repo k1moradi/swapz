@@ -22,8 +22,8 @@
 
 static uint8_t extent[SWAPZ_MAX_EXTENT_BYTES];
 static uint8_t payload[SWAPZ_MAX_COMPRESSED];
-static uint8_t misaligned_extent[SWAPZ_BLOCK_BYTES + 1U];
-static uint8_t misaligned_payload[SWAPZ_MAX_COMPRESSED + 1U];
+_Alignas(64) static uint8_t misaligned_extent[SWAPZ_BLOCK_BYTES + 1U];
+_Alignas(64) static uint8_t misaligned_payload[SWAPZ_MAX_COMPRESSED + 1U];
 
 static void set_payload(unsigned int length, unsigned int salt)
 {

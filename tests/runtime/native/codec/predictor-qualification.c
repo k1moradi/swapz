@@ -161,10 +161,10 @@ static swapz_u8 scalar_recovered_page[SWAPZ_BLOCK_BYTES];
 static int lz4_acceleration_lengths[MAX_EVIDENCE_PAGES];
 static char compressed_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 planner_dummy[SWAPZ_BLOCK_BYTES];
-static swapz_u8 misaligned_input[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
-static swapz_u8 misaligned_output[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
-static swapz_u8 misaligned_recovered[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
-static swapz_u8 misaligned_scratch[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
+_Alignas(64) static swapz_u8 misaligned_input[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
+_Alignas(64) static swapz_u8 misaligned_output[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
+_Alignas(64) static swapz_u8 misaligned_recovered[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
+_Alignas(64) static swapz_u8 misaligned_scratch[SWAPZ_BLOCK_BYTES + MISALIGNED_TEST_SLACK];
 
 static const struct transform transforms[TRANSFORM_COUNT] = {
 	{ "delta64", swapz_predict_delta64, swapz_unpredict_delta64 },
