@@ -109,6 +109,16 @@ bits are failures; asynchronous callback compatibility must not duplicate
 completion ownership or publication logic.
 
 Allocation and GC must never reuse a possibly live or partially written extent. GC may relocate only current authoritative records and must account for its lower READ/WRITE cost. Once a GC rotation owns a destination, the serialized worker must retain an authenticated victim/destination recovery token and the destination's monotonic allocation cursor until that same rotation commits. A later nonempty WRITE or DISCARD may not mutate authority until the owned recovery has resumed or failed closed. Retries rescan current victim membership so already-published generations are never duplicated; a reserve becomes reusable only after authoritative liveness reaches zero. Packed and standalone RAW callers must classify a lower-I/O failure that leaves this authenticated recovery active as retryable for the GC state rather than poisoning the whole target; unrelated RAW/FUA failures and authentication mismatches remain terminal. Recovery ownership alone cannot make a corruption error retryable: the shared GC return path permits only the synchronous lower-I/O -EIO and the nonterminal capacity -ENOSPC without target poisoning; integrity (-EBADMSG), authority (-EUCLEAN), unsupported operations and all other unexpected GC errors are terminal before either foreground caller can suppress failure. The worker recovery token also tracks the destination allocation high-water; a lower or backward cursor on resume is an authentication failure, not permission to reuse uncertain blocks. A completely full destination may roll forward only into its authenticated, independently verified-dead former victim; the exceptional worker preflight must scan all authoritative maps and every physical liveness entry, regardless of cached per-segment counts, before any recycle hook or role transition. The original destination remains live until evacuation finishes, and foreground mutations remain fenced throughout. If independent zero-liveness proof fails, keep the owned rotation fail-closed.
+A recovery destination can also become unusable before numerical fullness when
+a 2/4-block compressed extent cannot fit its remaining segment tail. That
+-ENOSPC must not retry the same placement forever. The serialized recovery path
+may claim one different independently verified-dead reserve, then and only then
+promote the blocked destination to foreground and rebind the exact worker token
+to the new destination while retaining the original victim and forbidden OPEN.
+This exceptional destination advance consumes one reserve role and is bounded
+to one role handoff per worker call. If no replacement reserve exists, convert
+the owned no-progress condition to terminal fail-closed state; ordinary
+foreground -ENOSPC outside an owned recovery remains nonterminal.
 
 ## Performance work
 

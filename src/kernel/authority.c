@@ -877,6 +877,82 @@ static int swapz_verify_recovery_victim_dead(
 	return 0;
 }
 
+/*
+ * Continue the same victim into a different reserve when a multi-block
+ * relocation cannot fit the current destination tail. Unlike full-destination
+ * roll-forward, the original victim can still be live, so it cannot be
+ * recycled. Claim another independently dead reserve first; only after that
+ * complete proof succeeds may the blocked destination become foreground.
+ *
+ * This is recovery-only capacity degradation: one reserve role is consumed by
+ * the blocked destination. Repeated advances are bounded by the finite reserve
+ * pool. No replacement reserve means the caller must fail the owned recovery
+ * closed rather than retry the same non-fitting extent forever.
+ */
+int swapz_gc_advance_rotation_destination(struct swapz_authority *a,
+					 swapz_u32 blocked_destination)
+{
+	swapz_u32 old_next, old_open, old_probe, scan;
+	unsigned long long probe_start;
+	int error;
+
+	if (!a || !a->segment_foreground || !a->gc_allocation ||
+	    a->in_flight || a->batch_pending || a->batch_replaying ||
+	    blocked_destination >= a->segment_count ||
+	    blocked_destination != a->gc_destination ||
+	    a->open_segment != blocked_destination ||
+	    a->gc_forbidden_victim >= a->segment_count ||
+	    a->gc_forbidden_victim == blocked_destination ||
+	    a->gc_forbidden_open == blocked_destination ||
+	    a->segment_foreground[blocked_destination] ||
+	    !a->segment_foreground[a->gc_forbidden_victim])
+		return -EINVAL;
+	old_next = a->next_block;
+	old_open = a->open_segment;
+	old_probe = a->next_segment_probe;
+	if (old_next <= blocked_destination * SWAPZ_SEGMENT_BLOCKS ||
+	    old_next > (blocked_destination + 1U) * SWAPZ_SEGMENT_BLOCKS)
+		return -EINVAL;
+
+	probe_start = swapz_authority_now_ns();
+	for (scan = 0; scan < a->segment_count; ++scan) {
+		swapz_u32 segment = (old_probe + scan) % a->segment_count;
+
+		a->alloc_probe_segments++;
+		if (segment == blocked_destination ||
+		    segment == a->gc_forbidden_open ||
+		    segment == a->gc_forbidden_victim ||
+		    a->segment_foreground[segment])
+			continue;
+		/*
+		 * A reserve should never carry authority unless it is the current
+		 * destination. Treat contradictory maps/liveness as corruption, not
+		 * as a candidate to skip and silently route around.
+		 */
+		error = swapz_verify_recovery_victim_dead(a, segment);
+		if (error)
+			return error;
+		error = swapz_claim_dead_segment(a, segment, probe_start);
+		if (error) {
+			a->next_block = old_next;
+			a->open_segment = old_open;
+			a->next_segment_probe = old_probe;
+			return error;
+		}
+		if (a->open_segment != segment ||
+		    a->next_block != segment * SWAPZ_SEGMENT_BLOCKS ||
+		    a->segment_foreground[segment]) {
+			/* Claimed only a dead reserve, so fail closed if internal state
+			 * contradicts the claim rather than attempting rollback. */
+			return -EUCLEAN;
+		}
+		a->segment_foreground[blocked_destination] = 1;
+		a->gc_destination = segment;
+		return 0;
+	}
+	return swapz_finish_alloc_probe(a, probe_start, -ENOSPC);
+}
+
 int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 				   swapz_u32 exhausted_destination)
 {

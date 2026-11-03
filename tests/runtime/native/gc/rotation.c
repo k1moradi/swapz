@@ -529,6 +529,119 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 	return 0;
 }
 
+
+/*
+ * Multi-block recovery boundary: one block remains in the owned destination
+ * while the original victim still has one live page. A 2-block extent cannot
+ * fit, but the destination is not numerically full, so full-destination
+ * roll-forward is inapplicable. Recovery must claim the other dead reserve
+ * before promoting the blocked destination, then finish the same victim.
+ */
+static int test_nonfull_recovery_tail_advances_destination(void)
+{
+	static struct swapz_authority tail_authority;
+	static struct swapz_map tail_maps[4];
+	static swapz_u16 tail_liveness[5U * SWAPZ_SEGMENT_BLOCKS];
+	static swapz_u8 tail_classes[5U * SWAPZ_SEGMENT_BLOCKS];
+	static swapz_u8 tail_roles[5];
+	static swapz_u32 tail_mapped_pages[5];
+	struct swapz_tx tx;
+	swapz_u32 blocked_destination, replacement_destination;
+	swapz_u32 page, block, index;
+	const swapz_u32 victim = 0U;
+
+	memset(raw, 0x3c, sizeof(raw));
+	CHECK(swapz_authority_init(&tail_authority, tail_maps,
+				  tail_liveness, tail_classes, 4U,
+				  5U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	tail_authority.reuse_dead_segments = 1;
+	CHECK(swapz_enable_segment_rotation(
+		      &tail_authority, tail_roles, 5U) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(
+		      &tail_authority, tail_mapped_pages, 5U) == 0);
+
+	/* Leave two authoritative pages in victim0, then move OPEN to segment1. */
+	page = 0U;
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS - 1U; ++index) {
+		CHECK(swapz_stage(&tail_authority, &page, 1, 1, &tx) == 0);
+		CHECK(swapz_finish_raw(&tail_authority, &tx, raw, 1, 0) == 0);
+	}
+	page = 1U;
+	CHECK(swapz_stage(&tail_authority, &page, 1, 1, &tx) == 0);
+	CHECK(swapz_finish_raw(&tail_authority, &tx, raw, 1, 0) == 0);
+	page = 2U;
+	CHECK(swapz_stage(&tail_authority, &page, 1, 1, &tx) == 0);
+	CHECK(swapz_finish_raw(&tail_authority, &tx, raw, 1, 0) == 0);
+	CHECK(tail_authority.open_segment == 1U);
+	CHECK(tail_mapped_pages[victim] == 2U);
+
+	CHECK(swapz_gc_begin_rotation(&tail_authority, victim) == 0);
+	blocked_destination = tail_authority.gc_destination;
+	CHECK(blocked_destination == 3U);
+
+	/* Publish page0, then consume only reservation space until one block
+	 * remains. Aborted ranges are quarantined by the monotonic cursor. */
+	page = 0U;
+	CHECK(swapz_stage(&tail_authority, &page, 1, 1, &tx) == 0);
+	CHECK(swapz_finish_raw(&tail_authority, &tx, raw, 1, 0) == 0);
+	page = 3U;
+	while (tail_authority.next_block <
+	       (blocked_destination + 1U) * SWAPZ_SEGMENT_BLOCKS - 1U) {
+		CHECK(swapz_stage(&tail_authority, &page, 1, 1, &tx) == 0);
+		CHECK(swapz_abort(&tail_authority, &tx) == 0);
+	}
+	CHECK(tail_authority.next_block ==
+	      (blocked_destination + 1U) * SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(tail_mapped_pages[victim] == 1U);
+
+	/* The remaining victim page models a compressed extent that requires two
+	 * blocks. The ordinary allocator cannot spill while gc_destination owns
+	 * the current reserve, so this is the non-full -ENOSPC boundary. */
+	page = 1U;
+	CHECK(swapz_stage(&tail_authority, &page, 1, 2, &tx) == -ENOSPC);
+	CHECK(tail_authority.gc_destination == blocked_destination);
+	CHECK(!tail_roles[blocked_destination]);
+
+	CHECK(swapz_gc_advance_rotation_destination(
+		      &tail_authority, blocked_destination) == 0);
+	replacement_destination = tail_authority.gc_destination;
+	CHECK(replacement_destination == 4U);
+	CHECK(tail_roles[blocked_destination] == 1U);
+	CHECK(tail_roles[replacement_destination] == 0U);
+	CHECK(tail_authority.gc_forbidden_victim == victim);
+	CHECK(tail_authority.open_segment == replacement_destination);
+	CHECK(tail_authority.next_block ==
+	      replacement_destination * SWAPZ_SEGMENT_BLOCKS);
+
+	/* Finish the same original victim, then prove foreground progress. */
+	CHECK(swapz_stage(&tail_authority, &page, 1, 1, &tx) == 0);
+	CHECK(swapz_finish_raw(&tail_authority, &tx, raw, 1, 0) == 0);
+	CHECK(tail_mapped_pages[victim] == 0U);
+	CHECK(swapz_gc_commit_rotation(&tail_authority, victim) == 0);
+	CHECK(!tail_authority.gc_allocation);
+	CHECK(tail_roles[victim] == 0U);
+	CHECK(tail_roles[blocked_destination] == 1U);
+	CHECK(tail_roles[replacement_destination] == 1U);
+
+	page = 3U;
+	CHECK(swapz_stage(&tail_authority, &page, 1, 1, &tx) == 0);
+	CHECK(swapz_finish_raw(&tail_authority, &tx, raw, 1, 0) == 0);
+	for (page = 0; page < 4U; ++page)
+		CHECK(swapz_verify_raw(&tail_authority, page, raw) == 0);
+
+	/* None of the abandoned tail blocks became authoritative mappings. */
+	for (page = 0; page < 4U; ++page)
+		CHECK(tail_maps[page].start_block <=
+		      blocked_destination * SWAPZ_SEGMENT_BLOCKS ||
+		      tail_maps[page].start_block >=
+			      replacement_destination * SWAPZ_SEGMENT_BLOCKS);
+	for (block = blocked_destination * SWAPZ_SEGMENT_BLOCKS + 1U;
+	     block < (blocked_destination + 1U) * SWAPZ_SEGMENT_BLOCKS;
+	     ++block)
+		CHECK(!tail_liveness[block]);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -540,6 +653,7 @@ int main(void)
 	CHECK(test_gc_cannot_spill_into_second_reserve() == 0); passed++;
 	CHECK(test_full_destination_is_not_gc_progress() == 0); passed++;
 	CHECK(test_one_uncertain_block_rolls_forward_raw_recovery_headroom() == 0); passed++;
+	CHECK(test_nonfull_recovery_tail_advances_destination() == 0); passed++;
 	printf("SWAPZ_ROTATING_GC_TESTS_PASS=%d\n", passed);
 	return 0;
 }

@@ -260,6 +260,14 @@ int swapz_gc_begin_rotation(struct swapz_authority *authority, swapz_u32 victim)
  */
 int swapz_gc_roll_forward_rotation(struct swapz_authority *authority,
 				   swapz_u32 exhausted_destination);
+/*
+ * Recovery-only destination advance for a 2/4-block extent that cannot fit
+ * the current destination tail while the original victim is still live.
+ * Claims another wholly-dead reserve before changing the blocked destination
+ * role; failure leaves the authenticated rotation cursor/roles unchanged.
+ */
+int swapz_gc_advance_rotation_destination(struct swapz_authority *authority,
+					 swapz_u32 blocked_destination);
 /* Swap physical roles ONLY after the source victim is wholly dead.
  * Leaves foreground cursor inside new (formerly reserve) destination. */
 int swapz_gc_commit_rotation(struct swapz_authority *authority, swapz_u32 victim);

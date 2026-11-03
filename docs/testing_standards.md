@@ -530,6 +530,19 @@ a subsequent foreground write. Native authority/engine tests remain supporting
 evidence for this state transition; loaded worker qualification is still
 required for production release.
 
+Qualification must separately cover a non-full recovery tail: leave one block
+in the current GC destination while the original victim remains live, then
+require a two-block relocation to return -ENOSPC. Recovery must claim a
+different independently dead reserve before promoting the blocked destination,
+keep the original victim/forbidden-OPEN identity unchanged, rebind the worker
+token to the replacement destination/probe/high-water, restart only the
+remaining authoritative victim members, commit, and prove a subsequent
+foreground write plus byte/CRC readback. Abandoned tail blocks must never
+become authoritative mappings. The worker may perform at most one destination
+role handoff per invocation; if no replacement reserve exists while foreground
+mutation is fenced, the owned recovery is terminal rather than indefinitely
+retryable foreground -ENOSPC.
+
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
 regression fixture: one SWZ header block,
 1 MiB segment rounding, and the authority's `ceil(logical_pages / 8)` reserve

@@ -3893,6 +3893,34 @@ static int swapz_gc_recovery_record(struct swapz_dm *ctx, swapz_u32 victim)
  * the verified-dead old victim becomes the next destination. Foreground
  * mutation remains fenced because gc_recovery.active never drops.
  */
+static int swapz_gc_recovery_advance_destination(struct swapz_dm *ctx)
+{
+	struct swapz_authority *a = &ctx->authority;
+	struct swapz_gc_recovery *recovery = &ctx->gc_recovery;
+	swapz_u32 blocked_destination, victim;
+	int error;
+
+	error = swapz_gc_recovery_validate(ctx);
+	if (error)
+		return error;
+	blocked_destination = recovery->destination;
+	victim = recovery->victim;
+	error = swapz_gc_advance_rotation_destination(
+		a, blocked_destination);
+	if (error)
+		return error;
+	if (a->gc_forbidden_victim != victim ||
+	    a->gc_destination == blocked_destination ||
+	    !ctx->segment_roles[blocked_destination] ||
+	    ctx->segment_roles[a->gc_destination])
+		return -EUCLEAN;
+
+	recovery->destination = a->gc_destination;
+	recovery->next_segment_probe = a->next_segment_probe;
+	recovery->minimum_next_block = a->next_block;
+	return swapz_gc_recovery_validate(ctx);
+}
+
 static int swapz_gc_recovery_roll_forward(struct swapz_dm *ctx)
 {
 	struct swapz_authority *a = &ctx->authority;
@@ -3955,6 +3983,7 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 	u64 before_read_reqs, before_write_reqs;
 	u64 choose_start;
 	bool rotation_committed = false;
+	bool recovery_rebound = false;
 	int error;
 
 	/*
@@ -3982,9 +4011,23 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 		 */
 		if (a->next_block ==
 		    (ctx->gc_recovery.destination + 1U) * SWAPZ_SEGMENT_BLOCKS) {
-			error = swapz_gc_recovery_roll_forward(ctx);
+			/*
+			 * Preserve the reserve pool when the original victim is already
+			 * empty. If it is still live, the full destination cannot become
+			 * useful foreground without first claiming another reserve.
+			 */
+			if (a->segment_mapped_pages &&
+			    a->segment_mapped_pages[victim])
+				error = swapz_gc_recovery_advance_destination(ctx);
+			else
+				error = swapz_gc_recovery_roll_forward(ctx);
+			if (error == -ENOSPC) {
+				error = -EUCLEAN;
+				swapz_fail(ctx, error);
+			}
 			if (error)
 				return error;
+			recovery_rebound = true;
 			victim = ctx->gc_recovery.victim;
 		}
 	} else {
@@ -4029,7 +4072,10 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 			goto out;
 		}
 	}
+retry_relocation:
 	ctx->gc_count = 0;
+	expected_victim_pages = 0;
+	visited_victim_pages = 0;
 	if (a->segment_mapped_pages)
 		expected_victim_pages = a->segment_mapped_pages[victim];
 
@@ -4133,6 +4179,31 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 	}
 	ctx->gc_victims++;
 out:
+	/*
+	 * A compressed 2/4-block extent can fail allocation with one to three
+	 * physical tail blocks still unused. Numerical fullness is therefore not
+	 * a sufficient recovery trigger. Advance into one separately proven dead
+	 * reserve, rebind the exact worker token, and restart the survivor scan.
+	 * One destination/role handoff per worker call keeps this path bounded.
+	 */
+	if (error == -ENOSPC && !rotation_committed &&
+	    ctx->gc_recovery.active && !recovery_rebound &&
+	    a->next_block <
+		(ctx->gc_recovery.destination + 1U) * SWAPZ_SEGMENT_BLOCKS) {
+		ctx->gc_count = 0;
+		error = swapz_gc_recovery_advance_destination(ctx);
+		if (!error) {
+			recovery_rebound = true;
+			victim = ctx->gc_recovery.victim;
+			goto retry_relocation;
+		}
+		if (error == -ENOSPC) {
+			/* Foreground mutation is fenced by this token, so with no spare
+			 * reserve the same non-fitting extent can never make progress. */
+			error = -EUCLEAN;
+			swapz_fail(ctx, error);
+		}
+	}
 	ctx->gc_read_bytes += ctx->physical_read_bytes - before_read;
 	ctx->gc_write_bytes += ctx->physical_write_bytes - before_write;
 	ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs;
