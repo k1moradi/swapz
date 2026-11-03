@@ -582,7 +582,10 @@ cursor/reserve/victim state. The explicit occupancy-transition records describe
 logical coverage after successful deterministic writes, not live physical
 segment utilization. The maximum no-progress gap includes trailing measured
 fsync stalls; any available interval samples and the primary failure reason
-are retained on replay failure. Sustained
+are retained on replay failure. SIGTERM/SIGINT received by either physical
+benchmark worker are converted into explicit FAIL evidence when Python receives
+the signal; a later invocation never replaces an existing result path, so an
+interrupted attempt remains part of campaign history. Sustained
 latency histograms use 16 sub-buckets per power-of-two range, bounding
 percentile bucket width to 6.25% so the 25% p95/p99 gates are not dominated by
 coarse quantization. The swapz scheduler samples

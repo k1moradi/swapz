@@ -947,8 +947,10 @@ physical maximum-capacity run therefore proves high logical occupancy without
 allocating the logical capacity in host RAM.
 
 Every arm preserves a JSON result on success or failure. Pair records embed
-both arms, exclusion state and every exclusion reason. There is no automatic
-retry. The evaluator counts every recorded attempt, including failed/excluded
+both arms, exclusion state and every exclusion reason. SIGTERM/SIGINT delivered
+to a physical benchmark worker must produce an explicit FAIL result when Python
+receives the signal, and a later attempt must not overwrite that existing
+result path. There is no automatic retry. The evaluator counts every recorded attempt, including failed/excluded
 attempts: a later PASS cannot replace an earlier attempt, pair IDs must be
 unique within a workload, and every pair plus both embedded arms must share one
 exact source SHA across the campaign. Mixed-source evidence is incomplete and

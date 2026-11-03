@@ -19,6 +19,7 @@ import os
 import re
 import resource
 import runpy
+import signal
 import stat
 import subprocess
 import sys
@@ -30,6 +31,17 @@ from pathlib import Path
 PAGE = 4096
 SCHEMA = "swapz-sustained-replay-v1"
 REPLAY = runpy.run_path(str(Path(__file__).with_name("io-replay.py")))
+
+
+class BenchmarkInterrupted(Exception):
+    pass
+
+
+def interrupt_benchmark(signum, _frame) -> None:
+    # Preserve one failure path rather than recursively interrupting cleanup.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    raise BenchmarkInterrupted(f"interrupted by signal {signum}")
 
 
 def splitmix64(value: int) -> int:
@@ -1218,10 +1230,12 @@ def main():
     parser.add_argument("--expected-dm-uuid")
     parser.add_argument("--metadata-and-target-peak-ram-bytes", type=int)
     args = parser.parse_args()
+    previous_sigint = signal.signal(signal.SIGINT, interrupt_benchmark)
+    previous_sigterm = signal.signal(signal.SIGTERM, interrupt_benchmark)
     exit_error = None
     try:
         run(args)
-    except (OSError, ValueError, KeyError, TypeError,
+    except (OSError, ValueError, KeyError, TypeError, BenchmarkInterrupted,
             subprocess.SubprocessError) as exc:
         failure = dict(getattr(args, "_partial_report", {}) or {})
         failure.update({
@@ -1244,6 +1258,8 @@ def main():
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
             finally:
                 os.close(lock_fd)
+        signal.signal(signal.SIGINT, previous_sigint)
+        signal.signal(signal.SIGTERM, previous_sigterm)
     if exit_error is not None:
         parser.exit(2, "BLOCKED/FAIL: " + str(exit_error) + "\n")
 

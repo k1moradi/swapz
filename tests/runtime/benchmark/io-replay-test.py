@@ -2364,6 +2364,37 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(failure["verdict"], "FAIL")
             self.assertIn("occupancy", failure["failure_reason"])
 
+            # External physical timeouts send SIGTERM. A bounded worker must
+            # preserve that first failure instead of disappearing silently.
+            import time
+            interrupted_result = root / "interrupted.json"
+            interrupted = command.copy()
+            interrupted[interrupted.index(str(result))] = str(interrupted_result)
+            measure_index = interrupted.index("--measure-operations")
+            interrupted[measure_index:measure_index + 2] = [
+                "--measure-seconds", "2"]
+            process = subprocess.Popen(
+                interrupted, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True)
+            time.sleep(.50)
+            process.terminate()
+            stdout, stderr = process.communicate(timeout=6)
+            self.assertNotEqual(process.returncode, 0, stdout + stderr)
+            interrupted_failure = json.loads(interrupted_result.read_text())
+            self.assertEqual(interrupted_failure["verdict"], "FAIL")
+            self.assertIn("interrupted by signal 15",
+                          interrupted_failure["failure_reason"])
+
+            # A later attempt targeting the same result path must not erase the
+            # original interruption evidence, even when it fails differently.
+            preserved = interrupted_result.read_bytes()
+            repeated = bad.copy()
+            repeated[repeated.index(str(failed))] = str(interrupted_result)
+            rerun = subprocess.run(
+                repeated, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(rerun.returncode, 0)
+            self.assertEqual(interrupted_result.read_bytes(), preserved)
+
     def test_qualification_preserves_exclusions_and_rejects_raw_drift(self):
         import importlib.util
 
