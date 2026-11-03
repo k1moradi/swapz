@@ -4742,7 +4742,9 @@ aliases, tagged UUID aliases, initramfs `RESUME=auto`, sysfs resume identity,
 and active mapper inventory. The generator must emit guards for
 `systemd-hibernate.service`, `systemd-hybrid-sleep.service`, and
 `systemd-suspend-then-hibernate.service` even when selector-derived mapper
-drop-ins cannot be emitted. Cold-boot PASS remains exclusively the
+drop-ins cannot be emitted. Its manager-failure regression must make the mocked
+`swapzctl primary systemd-units` command actually return nonzero; setting an
+unused fixture variable is not failure coverage. Cold-boot PASS remains exclusively the
 owner-triggered cross-boot verifier; rootless fixtures and daemon-reload checks
 cannot manufacture observed cold-boot evidence.
 

@@ -199,6 +199,12 @@ class GeneratorTests(unittest.TestCase):
             self.assertEqual(dropin.read_text(encoding="ascii"), expected)
 
         env = self.env.copy()
+        # Exercise the mocked manager's failure branch explicitly. MOCK_STATUS
+        # is only consumed when MOCK_UNITS is supplied.
+        env["MOCK_UNITS"] = (
+            f"dev-disk-by\\x2dpartuuid-{expected_encoded}.device "
+            f"dev-disk-by\\x2dpartuuid-{expected_encoded}.swap\n"
+        )
         env["MOCK_STATUS"] = "1"
         if self.dropin.parent.exists():
             shutil.rmtree(self.dropin.parent)
