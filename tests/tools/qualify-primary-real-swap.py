@@ -2242,52 +2242,57 @@ def execute(arguments: argparse.Namespace) -> dict:
         private_workspace.cleanup()
         raise
 
-    preflight_workload_environment(
-        arguments.workload_mib, arguments.resident_mib, arguments.swap_limit_mib)
-    verify_acceptance_manifest(
-        cycles=arguments.cycles,
-        workload_mib=arguments.workload_mib,
-        resident_mib=arguments.resident_mib,
-        swap_limit_mib=arguments.swap_limit_mib,
-        timeout_seconds=arguments.timeout_seconds)
-    acceptance_policy_sha256 = acceptance_manifest_sha256()
-    _kernel_log_snapshot()
-    _import_qualification(swapzctl, report_path)
-    plan = _read_plan(swapzctl)
-    artifact_hashes = verify_provenance(
-        plan, arguments.validated_source, report_path, qualified_swapzctl)
-    selector_partuuid = _read_selector()
-    _target_path, target_device, target_parent_device = verify_authorized_target(
-        plan, selector_partuuid)
-    baseline = read_swap_rows()
-    _validate_precycle_state(
-        selector_partuuid, target_device, target_parent_device, baseline)
-    kernel_before = _kernel_log_snapshot()
-    _reject_relevant_kernel_errors([])
-
-    evidence = PersistentEvidence(
-        RECOVERY_BASE,
-        os.urandom(16).hex(),
-        {
-            "source_sha": arguments.validated_source,
-            "acceptance_manifest_sha256": acceptance_policy_sha256,
-            "qualification_report_sha256": _sha256_file(report_path),
-            "helper_sha256": _sha256_file(Path(__file__)),
-            "oracle_sha256": oracle_sha256,
-            "qualified_installed_artifacts": artifact_hashes,
-            "physical_execution_control_sha256": execution_control_sha256,
-            "partuuid": selector_partuuid,
-            "target_device": f"{target_device[0]}:{target_device[1]}",
-            "cycles_requested": arguments.cycles,
-            "workload_mib": arguments.workload_mib,
-            "resident_limit_mib": arguments.resident_mib,
-            "swap_limit_mib": arguments.swap_limit_mib,
-            "timeout_seconds": arguments.timeout_seconds,
-            "concurrent_oracles": CONCURRENT_ORACLE_PROCESSES,
-            "reuse_rounds_per_cycle": REUSE_ROUNDS,
-            "cycles": [],
-        },
-    )
+    try:
+        preflight_workload_environment(
+            arguments.workload_mib, arguments.resident_mib, arguments.swap_limit_mib)
+        verify_acceptance_manifest(
+            cycles=arguments.cycles,
+            workload_mib=arguments.workload_mib,
+            resident_mib=arguments.resident_mib,
+            swap_limit_mib=arguments.swap_limit_mib,
+            timeout_seconds=arguments.timeout_seconds)
+        acceptance_policy_sha256 = acceptance_manifest_sha256()
+        _kernel_log_snapshot()
+        _import_qualification(swapzctl, report_path)
+        plan = _read_plan(swapzctl)
+        artifact_hashes = verify_provenance(
+            plan, arguments.validated_source, report_path, qualified_swapzctl)
+        selector_partuuid = _read_selector()
+        _target_path, target_device, target_parent_device = verify_authorized_target(
+            plan, selector_partuuid)
+        baseline = read_swap_rows()
+        _validate_precycle_state(
+            selector_partuuid, target_device, target_parent_device, baseline)
+        kernel_before = _kernel_log_snapshot()
+        _reject_relevant_kernel_errors([])
+    
+        evidence = PersistentEvidence(
+            RECOVERY_BASE,
+            os.urandom(16).hex(),
+            {
+                "source_sha": arguments.validated_source,
+                "acceptance_manifest_sha256": acceptance_policy_sha256,
+                "qualification_report_sha256": _sha256_file(report_path),
+                "helper_sha256": _sha256_file(Path(__file__)),
+                "oracle_sha256": oracle_sha256,
+                "qualified_installed_artifacts": artifact_hashes,
+                "physical_execution_control_sha256": execution_control_sha256,
+                "partuuid": selector_partuuid,
+                "target_device": f"{target_device[0]}:{target_device[1]}",
+                "cycles_requested": arguments.cycles,
+                "workload_mib": arguments.workload_mib,
+                "resident_limit_mib": arguments.resident_mib,
+                "swap_limit_mib": arguments.swap_limit_mib,
+                "timeout_seconds": arguments.timeout_seconds,
+                "concurrent_oracles": CONCURRENT_ORACLE_PROCESSES,
+                "reuse_rounds_per_cycle": REUSE_ROUNDS,
+                "cycles": [],
+            },
+        )
+    
+    except Exception:
+        private_workspace.cleanup()
+        raise
 
     run_ids: set[str] = set()
     swap_uuids: set[str] = set()

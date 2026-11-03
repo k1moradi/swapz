@@ -117,9 +117,10 @@ source/clean provenance, and binds
 `SWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL` to the installed qualified
 `<prefix>/sbin/swapzctl`. Only subprocesses invoking that private coordinator
 receive `SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION=1`; the parent environment and
-ordinary installed binary remain disabled. The temporary coordinator must be
-removed on every admitted disposition and its SHA-256 recorded in persistent
-evidence.
+ordinary installed binary remain disabled. The temporary coordinator must be removed explicitly on every path after it is
+created, including preflight/import/plan/device/evidence-construction failures;
+runtime finalizers are not cleanup authority. Its SHA-256 must be recorded in
+persistent evidence whenever admission reaches durable evidence creation.
 
 The report values, private primary plan qualified/live values, embedded control
 source SHA, and observed installed bytes must all agree with the exact validated

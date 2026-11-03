@@ -323,6 +323,64 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(
             child_environment["SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION"], "1")
 
+    def test_private_workspace_is_cleaned_when_admission_fails_before_evidence(self):
+        completed = __import__("subprocess").CompletedProcess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            qualified = root / "prefix/sbin/swapzctl"
+            report = root / "qualification.json"
+            oracle_path = root / "oracle.py"
+            for path, contents in (
+                    (qualified, b"qualified"),
+                    (report, b"{}"),
+                    (oracle_path, b"#!/usr/bin/env python3\n")):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+                path.chmod(0o700)
+
+            workspace_path = root / "workspace"
+            workspace_path.mkdir()
+            cleanup_called = []
+
+            class FakeWorkspace:
+                name = str(workspace_path)
+
+                def cleanup(self):
+                    cleanup_called.append(True)
+
+            args = qualify.build_parser().parse_args([
+                "--validated-source", "a" * 40,
+                "--qualification-report", str(report),
+                "--swapzctl", str(qualified),
+                "--oracle", str(oracle_path),
+            ])
+            private_control = workspace_path / "control/swapzctl"
+            private_control.parent.mkdir()
+            private_control.write_bytes(b"private")
+            private_control.chmod(0o700)
+
+            with mock.patch.dict(os.environ, {}, clear=True), \
+                    mock.patch.object(os, "geteuid", return_value=0), \
+                    mock.patch.object(os, "sysconf", return_value=qualify.PAGE_BYTES), \
+                    mock.patch.object(qualify, "_ensure_commands"), \
+                    mock.patch.object(qualify, "_check_git_source"), \
+                    mock.patch.object(
+                        qualify.tempfile, "TemporaryDirectory",
+                        return_value=FakeWorkspace()), \
+                    mock.patch.object(
+                        qualify, "build_physical_execution_control",
+                        return_value=(private_control, "1" * 64)), \
+                    mock.patch.object(
+                        qualify, "pin_real_swap_oracle",
+                        return_value=(oracle_path, "2" * 64)), \
+                    mock.patch.object(
+                        qualify, "preflight_workload_environment",
+                        side_effect=qualify.Blocked("synthetic preflight")):
+                with self.assertRaisesRegex(qualify.Blocked, "synthetic preflight"):
+                    qualify.execute(args)
+
+            self.assertEqual(cleanup_called, [True])
+
     def test_real_swap_oracle_is_canonical_and_pinned_before_use(self):
         with tempfile.TemporaryDirectory(prefix="swapz-real-oracle-") as directory:
             private = Path(directory)
