@@ -282,7 +282,7 @@ esac
 ''')
         self.tool(
             "systemd-escape",
-            "#!/bin/sh\nprintf '%s\\n' 'dev-mapper-swapz\\\\x2dprimary.swap'\n")
+            "#!/bin/sh\nprintf '%s\\n' 'dev-mapper-swapz\\x2dprimary.swap'\n")
 
     def invoke(self, action, extra=None, timeout=15):
         env = dict(self.env)
