@@ -856,7 +856,24 @@ matched loaded lower-request, throughput and p99 evidence.
 
 ## Release gates
 
-A release or physical-media trial remains blocked until the same pinned source has repeated byte-exact loaded correctness, genuine lower error coverage, sustained GC, bounded resource behavior, acceptable read p95/p99 and CPU/RAM, statistically defensible matched performance, and an independent safety review. Physical-device admission is not part of ordinary make test.
+**Bounded qualification trials are not production release.** Trials on the
+positively identified dedicated SD card follow the standing owner authorization,
+exact source/artifact provenance, device/parent/mapper ownership, frozen physical
+acceptance policy, active-page protection, fail-closed lifecycle behavior and
+normal teardown specified in [AGENT_CONTEXT.md](AGENT_CONTEXT.md),
+[VISION.md](VISION.md) and [testing_standards.md](testing_standards.md).
+The retired old-host per-run independent-review workflow and completed
+performance qualification are not prerequisites for a safely admitted trial.
+Physical-device admission is outside ordinary `make test`.
+
+**Production release remains blocked** until the same exact production source
+passes official owner qualification and required CI, then satisfies the real
+anonymous-swap, byte-exact full-card capacity, lower-error, high-occupancy GC,
+resource-bound, storage-semantics, lifecycle/recovery, physical service and
+deployment acceptance criteria defined by those canonical documents and the
+[frozen acceptance manifest](production-acceptance.json). Matched performance
+promotion follows correctness qualification; a historical report or trial PASS
+does not qualify current `main`.
 
 ### Owner-requested physical swap-partition smoke — bounded correctness only
 
