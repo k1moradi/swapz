@@ -91,15 +91,26 @@ be reported enrolled by `mokutil --test-key`; a matching signature made by an
 unenrolled certificate is refused. Secure Boot-disabled and non-EFI hosts do
 not sign the module.
 
-The signing hook compares the module's current signature key with the
-certificate serial and does not append a duplicate signature on an unchanged
-build. If the private key is not readable by the invoking user, plain `make`
-uses `sudo` only for `kmodsign`. The official `make test` build stage is
-noninteractive and therefore uses `sudo -n`; unavailable authorization,
-missing signing tools/key material, or an indeterminate EFI Secure Boot state
-is BLOCKED rather than silently producing an unloadable qualification module.
-The warning-only W=1/W=2 artifacts are never loaded and are not signed by this
-hook.
+The signing hook parses the Linux module-signature trailer and verifies the
+appended detached PKCS#7/CMS signature over the exact module payload against
+the configured certificate. Enrollment is checked separately with
+`mokutil --test-key`; `modinfo` signer/key identifiers are metadata and are
+not accepted as cryptographic proof. An unchanged module is not signed again
+only when its existing signature is already cryptographically valid for the
+configured enrolled certificate. A pre-existing malformed, invalid, or
+differently signed module is refused instead of receiving another appended
+signature.
+
+This verification establishes exact-payload signature validity plus configured
+certificate enrollment. It does not by itself claim that the running kernel
+accepted the module under its current enforcement policy; that fact requires a
+safe, authorized load of the same exact installed bytes. If the private key is
+not readable by the invoking user, plain `make` uses `sudo` only for
+`kmodsign`. The official `make test` build stage is noninteractive and
+therefore uses `sudo -n`; unavailable authorization, missing signing tools/key
+material, or an indeterminate EFI Secure Boot state is BLOCKED rather than
+silently producing an unloadable qualification module. The warning-only W=1/W=2
+artifacts are never loaded and are not signed by this hook.
 
 ## Packaging
 
@@ -121,25 +132,38 @@ Install/upgrade is serialized and transactional. An identical verified install
 is a no-op. A non-identical upgrade refuses a loaded swapz module or existing
 swapz mapper, stages replacement files first, and restores the previous
 verified package if DKMS, hashing, depmod, systemd reload, a signal, or another
-commit step fails. Uninstall likewise refuses active/enabled deployment state,
-active mapper/module use, recovery ownership, or any ownership/digest mismatch;
-it never unloads a module, removes a mapper, or calls swapon/swapoff. Production
-uses the fixed `/usr/local` prefix, trusted system executables, root-owned
-package files, a dedicated root-owned mode-0700 transaction directory outside
-shared temporary paths, and symlink/path substitution checks. Existing package
-source/destination metadata and every current-kernel module candidate are part
-of admission, so a stray compressed or uncompressed `dm-swapz.ko` cannot be
-silently overwritten. Distribution command symlinks are accepted only when
-their canonical executable is root-owned, non-writable and within trusted
-system executable directories.
+commit step fails.
+
+Uninstall is transactional too. It refuses active/enabled deployment state,
+active mapper/module use, recovery ownership, or any ownership/digest mismatch,
+then makes and fsyncs a private exact rollback snapshot plus a hash manifest
+before deleting anything. Activation entry points are removed first; DKMS,
+source/module removal, depmod and daemon-reload are journaled destructive
+transitions. A failure restores the exact source, DKMS registration, qualified
+module and package files, with `swapzctl` restored atomically only after depmod,
+the remaining files and systemd reload are valid. An interrupted or failed
+rollback retains its independently verifiable transaction state and blocks all
+later package operations rather than permitting uncertain activation.
+
+Packaging never unloads a module, removes a mapper, or calls swapon/swapoff.
+Production uses the fixed `/usr/local` prefix, trusted system executables,
+root-owned package files, a dedicated root-owned mode-0700 transaction
+directory outside shared temporary paths, and symlink/path substitution checks.
+Existing package source/destination metadata and every current-kernel module
+candidate are part of admission, so a stray compressed or uncompressed
+`dm-swapz.ko` cannot be silently overwritten. Distribution command symlinks
+are accepted only when their canonical executable is root-owned, non-writable
+and within trusted system executable directories.
 
 A kernel upgrade is deliberately not automatic deployment: because
 `AUTOINSTALL="no"` is retained, the new kernel needs matching headers, a
 qualified module for that kernel, and an explicit admission/install cycle.
-Rootless packaging tests exercise clean/repeated install, missing headers or
-signature verification, path substitution, partial failure, active
-upgrade/uninstall refusal, rollback, interruption cleanup and installed digest
-mismatch; they are not system-install qualification.
+Rootless packaging tests exercise repeated install/uninstall, missing headers,
+cryptographic signature/enrollment mismatch, path substitution, foreign and
+tampered artifacts, partial install/upgrade/uninstall failure, failed depmod
+and daemon-reload, active upgrade/uninstall refusal, signal rollback,
+interrupted rollback retention and cleanup. They are hermetic package contract
+evidence, not system-install or target-kernel module-acceptance qualification.
 
 ## Removed build paths
 

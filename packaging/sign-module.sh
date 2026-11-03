@@ -84,8 +84,9 @@ state="$(secure_boot_state)"
 key="${SWAPZ_MOK_PRIVATE_KEY:-/var/lib/shim-signed/mok/MOK.priv}"
 cert="${SWAPZ_MOK_CERT:-/var/lib/shim-signed/mok/MOK.der}"
 
-command -v modinfo >/dev/null 2>&1 || blocked "modinfo is required"
 command -v openssl >/dev/null 2>&1 || blocked "openssl is required"
+command -v python3 >/dev/null 2>&1 || blocked "python3 is required"
+command -v mktemp >/dev/null 2>&1 || blocked "mktemp is required"
 if [[ "$mode" == sign ]]; then
     command -v kmodsign >/dev/null 2>&1 || blocked "kmodsign is required"
 fi
@@ -102,16 +103,10 @@ need_sudo() {
     fi
 }
 
-normalize_hex() {
-    tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]'
-}
-
 cert_requires_sudo=0
 if [[ -r "$cert" ]]; then
     [[ -f "$cert" && ! -L "$cert" ]] ||
         blocked "MOK certificate is not a regular file"
-    cert_serial="$(openssl x509 -inform DER -in "$cert" -noout -serial 2>/dev/null |
-                   sed -n 's/^serial=//p' | normalize_hex)"
 else
     if [[ "$mode" == verify ]]; then
         blocked "MOK certificate is unavailable for signature verification"
@@ -121,11 +116,7 @@ else
         "${sudo_command[@]}" test ! -L "$cert" ||
         blocked "MOK certificate is missing, unsafe, or sudo authorization is unavailable"
     cert_requires_sudo=1
-    cert_serial="$("${sudo_command[@]}" openssl x509 -inform DER -in "$cert" \
-                     -noout -serial 2>/dev/null |
-                   sed -n 's/^serial=//p' | normalize_hex)"
 fi
-[[ -n "$cert_serial" ]] || blocked "cannot read MOK certificate serial"
 
 command -v mokutil >/dev/null 2>&1 ||
     blocked "mokutil is required to verify MOK enrollment"
@@ -137,18 +128,115 @@ else
         blocked "configured MOK certificate is not enrolled"
 fi
 
-module_sig_key="$(modinfo -F sig_key "$module" 2>/dev/null | normalize_hex)"
-if [[ -n "$module_sig_key" && "$module_sig_key" == "$cert_serial" ]]; then
-    if [[ "$mode" == verify ]]; then
-        printf '%s\n' "Secure Boot: qualified dm-swapz.ko signature verified"
+extract_module_signature() {
+    local payload_path="$1" signature_path="$2"
+    python3 - "$module" "$payload_path" "$signature_path" <<'PY'
+import sys
+from pathlib import Path
+
+marker = b"~Module signature appended~\n"
+header_size = 12
+module = Path(sys.argv[1]).read_bytes()
+if not module.endswith(marker):
+    raise SystemExit(10)
+header_offset = len(module) - len(marker) - header_size
+if header_offset < 0:
+    raise SystemExit(11)
+header = module[header_offset:header_offset + header_size]
+if len(header) != header_size:
+    raise SystemExit(11)
+signature_type = header[2]
+signer_length = header[3]
+key_id_length = header[4]
+signature_length = int.from_bytes(header[8:12], "big")
+if signature_type != 2 or signer_length != 0 or key_id_length != 0:
+    raise SystemExit(11)
+signature_offset = header_offset - signature_length
+if signature_length <= 0 or signature_offset < 0:
+    raise SystemExit(11)
+Path(sys.argv[2]).write_bytes(module[:signature_offset])
+Path(sys.argv[3]).write_bytes(module[signature_offset:header_offset])
+PY
+}
+
+write_public_certificate_pem() {
+    local output="$1"
+    if (( cert_requires_sudo == 1 )); then
+        "${sudo_command[@]}" openssl x509 -inform DER -in "$cert" \
+            -outform PEM 2>/dev/null > "$output"
     else
-        printf '%s\n' "Secure Boot: dm-swapz.ko already signed with configured MOK"
+        openssl x509 -inform DER -in "$cert" -outform PEM \
+            -out "$output" 2>/dev/null
     fi
-    exit 0
+}
+
+verify_module_signature() {
+    local temp_dir payload_path signature_path certificate_pem extract_rc=0
+    temp_dir="$(mktemp -d)" || return 20
+    chmod 0700 "$temp_dir" || {
+        rm -rf -- "$temp_dir"
+        return 20
+    }
+    payload_path="$temp_dir/module.payload"
+    signature_path="$temp_dir/module.p7s"
+    certificate_pem="$temp_dir/certificate.pem"
+
+    extract_module_signature "$payload_path" "$signature_path" ||
+        extract_rc=$?
+    if (( extract_rc != 0 )); then
+        rm -rf -- "$temp_dir"
+        return "$extract_rc"
+    fi
+    write_public_certificate_pem "$certificate_pem" || {
+        rm -rf -- "$temp_dir"
+        return 20
+    }
+    openssl cms -verify -binary -inform DER -in "$signature_path" \
+        -content "$payload_path" -certfile "$certificate_pem" -noverify \
+        -out /dev/null >/dev/null 2>&1 || {
+        rm -rf -- "$temp_dir"
+        return 12
+    }
+    rm -rf -- "$temp_dir"
+    return 0
+}
+
+signature_status=0
+if verify_module_signature; then
+    signature_status=0
+else
+    signature_status=$?
 fi
 
-[[ "$mode" == sign ]] ||
-    blocked "qualified module is unsigned or signed by a different key"
+if [[ "$mode" == verify ]]; then
+    case "$signature_status" in
+        0)
+            printf '%s\n' \
+                "Secure Boot: dm-swapz.ko cryptographic signature verified against the enrolled configured MOK; kernel acceptance is not claimed without a safe load"
+            exit 0
+            ;;
+        10)
+            blocked "qualified module is unsigned"
+            ;;
+        11)
+            blocked "qualified module has malformed signing metadata"
+            ;;
+        12)
+            blocked "qualified module signature is not cryptographically valid for the configured MOK certificate"
+            ;;
+        *)
+            blocked "qualified module signature verification failed"
+            ;;
+    esac
+fi
+
+if (( signature_status == 0 )); then
+    printf '%s\n' \
+        "Secure Boot: dm-swapz.ko already has a cryptographically valid signature from the enrolled configured MOK"
+    exit 0
+fi
+(( signature_status == 10 )) ||
+    blocked "existing module signature is malformed, invalid, or from a different certificate; refusing to append another signature"
 
 sign=(kmodsign sha512 "$key" "$cert" "$module")
 if [[ -r "$key" ]]; then
@@ -164,7 +252,7 @@ else
         blocked "sudo kmodsign failed or authorization is unavailable"
 fi
 
-module_sig_key="$(modinfo -F sig_key "$module" 2>/dev/null | normalize_hex)"
-[[ "$module_sig_key" == "$cert_serial" ]] ||
-    blocked "module signature does not match configured MOK after signing"
-printf '%s\n' "Secure Boot: signed dm-swapz.ko with configured MOK"
+verify_module_signature ||
+    blocked "new module signature failed cryptographic verification against the enrolled configured MOK"
+printf '%s\n' \
+    "Secure Boot: signed dm-swapz.ko and cryptographically verified it against the enrolled configured MOK"

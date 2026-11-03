@@ -6,12 +6,23 @@ umask 022
 transaction_active=0
 transaction_dir=""
 
+staging_abort() {
+  local rc="${1:-1}" reason="${2:-failure}"
+  trap - ERR HUP INT TERM
+  transaction_active=0
+  echo "BLOCKED: package $reason before mutation; removing staging data" >&2
+  [[ -z "$transaction_dir" ]] || rm -rf -- "$transaction_dir"
+  exit "$rc"
+}
+
 blocked() {
   printf 'BLOCKED: %s\n' "$*" >&2
   if (( transaction_active == 1 )); then
     rollback 2 failure
   elif (( transaction_active == 2 )); then
     staging_abort 2 failure
+  elif (( transaction_active == 3 )); then
+    uninstall_rollback 2 failure
   fi
   exit 2
 }
@@ -54,6 +65,7 @@ if [[ -n "$test_root" ]]; then
   modules_root="$sandbox/lib/modules"
   dkms_bin="$sandbox/bin/dkms"
   depmod_bin="$sandbox/bin/depmod"
+  systemctl_bin="$sandbox/bin/systemctl"
   build_info="${SWAPZ_TEST_BUILD_INFO:-$root/build/source-build-info.h}"
   build_info="$(realpath -m -- "$build_info")"
   case "$build_info" in "$sandbox"/*) ;; *)
@@ -97,6 +109,7 @@ else
   transaction_parent="/var/lib/swapz-package-transactions"
   dkms_bin="$(command -v dkms 2>/dev/null || true)"
   depmod_bin="$(command -v depmod 2>/dev/null || true)"
+  systemctl_bin="$(command -v systemctl 2>/dev/null || true)"
   modules_root="$(readlink -f -- "$modules_root" 2>/dev/null || true)"
   srcbase="$(readlink -f -- "$srcbase" 2>/dev/null || true)"
   [[ -n "$modules_root" && -n "$srcbase" ]] ||
@@ -116,17 +129,17 @@ trusted_system_executable() {
 if [[ -n "$test_root" ]]; then
   [[ -x "$dkms_bin" && ! -L "$dkms_bin" ]] || blocked "no trusted DKMS executable"
   [[ -x "$depmod_bin" && ! -L "$depmod_bin" ]] || blocked "no trusted depmod executable"
+  [[ -x "$systemctl_bin" && ! -L "$systemctl_bin" ]] ||
+    blocked "no trusted systemctl executable"
 else
   trusted_system_executable "$dkms_bin" || blocked "no trusted DKMS executable"
   trusted_system_executable "$depmod_bin" || blocked "no trusted depmod executable"
+  trusted_system_executable "$systemctl_bin" ||
+    blocked "no trusted systemctl executable"
 fi
-for required_command in python3 sha256sum stat install cp rm mkdir rmdir sed grep find realpath readlink flock modinfo systemd-escape awk cmp basename mktemp git uname; do
+for required_command in python3 sha256sum stat install cp rm mkdir rmdir sed grep find realpath readlink flock modinfo systemd-escape awk cmp basename mktemp git uname mv; do
   command -v "$required_command" >/dev/null 2>&1 || blocked "$required_command unavailable"
 done
-if [[ -z "$test_root" ]]; then
-  command -v systemctl >/dev/null 2>&1 || blocked "systemctl unavailable"
-fi
-
 if [[ -z "$test_root" ]]; then
   install -d -o 0 -g 0 -m0755 "$(dirname "$package_lock")"
 fi
@@ -345,16 +358,242 @@ package_paths_present() {
   return 1
 }
 
-cleanup_package_files() {
+cleanup_activation_files() {
   rm -f -- "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
     "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap"
   rmdir -- "$helper_dir" 2>/dev/null || true
+}
+
+cleanup_source_files() {
   if [[ -d "$src" && ! -L "$src" ]]; then
     rm -rf -- "$src"
   elif [[ -L "$src" ]]; then
     rm -f -- "$src"
   fi
 }
+
+cleanup_package_files() {
+  cleanup_activation_files
+  cleanup_source_files
+}
+
+ensure_transaction_parent() {
+  if [[ -e "$transaction_parent" || -L "$transaction_parent" ]]; then
+    installed_directory_metadata "$transaction_parent" 700 ||
+      blocked "unsafe package transaction directory"
+  elif [[ -z "$test_root" ]]; then
+    install -d -o 0 -g 0 -m0700 "$transaction_parent"
+  else
+    install -d -m0700 "$transaction_parent"
+  fi
+}
+
+assert_no_incomplete_package_transactions() {
+  local -a stale_transactions=()
+  [[ -e "$transaction_parent" || -L "$transaction_parent" ]] || return 0
+  installed_directory_metadata "$transaction_parent" 700 ||
+    blocked "unsafe package transaction directory"
+  shopt -s nullglob
+  stale_transactions=(
+    "$transaction_parent"/swapz-package.*
+    "$transaction_parent"/swapz-uninstall.*
+  )
+  shopt -u nullglob
+  (( ${#stale_transactions[@]} == 0 )) ||
+    blocked "incomplete package transaction retained at ${stale_transactions[0]}"
+}
+
+persist_uninstall_state() {
+  local phase="$1"
+  python3 - "$transaction_dir" "$phase" "$version" "$kernel_release" <<'PY'
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+transaction = Path(sys.argv[1])
+phase = sys.argv[2]
+version = sys.argv[3]
+kernel_release = sys.argv[4]
+backup = transaction / "backup"
+if not backup.is_dir() or backup.is_symlink():
+    raise SystemExit("missing backup directory")
+
+entries = []
+# Fsync the transaction parent too: the rollback directory entry itself must
+# survive before any installed artifact is removed.
+directories = {backup, transaction, transaction.parent}
+for path in sorted(backup.rglob("*")):
+    if path.is_symlink():
+        raise SystemExit(f"unsafe backup symlink: {path}")
+    metadata = path.stat()
+    if path.is_dir():
+        directories.add(path)
+        continue
+    if not path.is_file():
+        raise SystemExit(f"unsafe backup entry: {path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+        os.fsync(stream.fileno())
+    entries.append({
+        "path": str(path.relative_to(backup)),
+        "sha256": digest.hexdigest(),
+        "size": metadata.st_size,
+        "mode": stat.S_IMODE(metadata.st_mode),
+        "uid": metadata.st_uid,
+        "gid": metadata.st_gid,
+    })
+
+for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+state = {
+    "schema": "swapz-package-uninstall-v1",
+    "phase": phase,
+    "version": version,
+    "kernel_release": kernel_release,
+    "backup_files": entries,
+}
+temporary = transaction / "state.json.tmp"
+final = transaction / "state.json"
+with temporary.open("w", encoding="utf-8") as stream:
+    json.dump(state, stream, sort_keys=True, separators=(",", ":"))
+    stream.write("\n")
+    stream.flush()
+    os.fsync(stream.fileno())
+os.chmod(temporary, 0o600)
+os.replace(temporary, final)
+descriptor = os.open(transaction, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
+backup_verified_package_for_uninstall() {
+  backup_dir="$transaction_dir/backup"
+  mkdir -m0700 "$backup_dir" "$backup_dir/source" "$backup_dir/source/src" \
+    "$backup_dir/source/src/kernel" "$backup_dir/files"
+  cp -a -- "$src/dkms.conf" "$src/$marker" "$src/$qualification_marker" \
+    "$src/$source_manifest" "$src/$binary_manifest" "$backup_dir/source/"
+  cp -a -- "$src/src/kernel/VERSION" "$src/src/kernel/Makefile" \
+    "$src"/src/kernel/*.c "$src"/src/kernel/*.h "$backup_dir/source/src/kernel/"
+  for file in "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
+      "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap"; do
+    cp -a -- "$file" "$backup_dir/files/$(printf '%s' "$file" | sha256sum | awk '{print $1}')"
+  done
+  printf '%s\n' \
+    "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
+    "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap" \
+    > "$backup_dir/file-paths"
+  cp -a -- "$installed_module" "$backup_dir/installed-module"
+}
+
+restore_uninstall_file_backups_except_cli() {
+  local path digest backup_path
+  [[ -f "$backup_dir/file-paths" && ! -L "$backup_dir/file-paths" ]] || return 1
+  while IFS= read -r path; do
+    [[ "$path" == "$cli" ]] && continue
+    digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')"
+    backup_path="$backup_dir/files/$digest"
+    [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
+    install -d -m0755 "$(dirname "$path")"
+    cp -a -- "$backup_path" "$path"
+    cmp -s "$backup_path" "$path" || return 1
+  done < "$backup_dir/file-paths"
+}
+
+restore_uninstall_cli_backup() {
+  local digest backup_path temporary_cli
+  digest="$(printf '%s' "$cli" | sha256sum | awk '{print $1}')"
+  backup_path="$backup_dir/files/$digest"
+  [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
+  install -d -m0755 "$cli_dir"
+  temporary_cli="$cli_dir/.swapzctl.restore.$$"
+  [[ ! -e "$temporary_cli" && ! -L "$temporary_cli" ]] || return 1
+  install -m0755 "$backup_path" "$temporary_cli" || return 1
+  cmp -s "$backup_path" "$temporary_cli" || {
+    rm -f -- "$temporary_cli"
+    return 1
+  }
+  mv -f -- "$temporary_cli" "$cli"
+}
+
+restore_uninstall_backup() {
+  local current_status
+  backup_dir="$transaction_dir/backup"
+  cleanup_activation_files
+  cleanup_source_files
+  rm -f -- "$installed_module"
+  current_status="$({ "$dkms_bin" status -m swapz -v "$version" || true; } 2>/dev/null)"
+  if [[ -n "$current_status" ]]; then
+    "$dkms_bin" remove -m swapz -v "$version" --all || return 1
+  fi
+
+  install -d -m0755 "$src/src/kernel"
+  cp -a -- "$backup_dir/source/dkms.conf" "$src/dkms.conf"
+  cp -a -- "$backup_dir/source/$marker" "$src/$marker"
+  cp -a -- "$backup_dir/source/$qualification_marker" "$src/$qualification_marker"
+  cp -a -- "$backup_dir/source/$source_manifest" "$src/$source_manifest"
+  cp -a -- "$backup_dir/source/$binary_manifest" "$src/$binary_manifest"
+  cp -a -- "$backup_dir/source/src/kernel/"* "$src/src/kernel/"
+  (cd "$src" && sha256sum -c "$source_manifest" >/dev/null) || return 1
+
+  "$dkms_bin" add -m swapz -v "$version" || return 1
+  "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" || return 1
+  "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
+  install -d -m0755 "$installed_module_dir"
+  install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
+  cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
+  "$depmod_bin" "$kernel_release" || return 1
+  cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
+  persist_uninstall_state rollback-backend-restored || return 1
+
+  # Restore all non-CLI package files only after module/DKMS state and depmod
+  # are valid. The CLI is the activation gate and is restored atomically last.
+  restore_uninstall_file_backups_except_cli || return 1
+  persist_uninstall_state rollback-files-restored || return 1
+  "$systemctl_bin" daemon-reload || return 1
+  persist_uninstall_state rollback-systemd-reloaded || return 1
+  restore_uninstall_cli_backup || return 1
+  persist_uninstall_state rollback-cli-restored || return 1
+  verify_owned
+}
+
+uninstall_rollback() {
+  local rc="${1:-1}" reason="${2:-failure}"
+  trap - ERR HUP INT TERM
+  transaction_active=0
+  echo "BLOCKED: package uninstall $reason; attempting transaction rollback" >&2
+  persist_uninstall_state rollback-started >/dev/null 2>&1 || true
+  if restore_uninstall_backup; then
+    persist_uninstall_state rolled-back >/dev/null 2>&1 || true
+    rm -rf -- "$transaction_dir"
+  else
+    persist_uninstall_state rollback-incomplete >/dev/null 2>&1 || true
+    echo "BLOCKED: uninstall rollback incomplete; verified recovery data retained at $transaction_dir" >&2
+  fi
+  exit "$rc"
+}
+
+uninstall_test_checkpoint() {
+  local phase="$1"
+  [[ -n "$test_root" ]] || return 0
+  [[ ${SWAPZ_TEST_UNINSTALL_FAIL_AFTER:-never} != "$phase" ]] || {
+    blocked "test uninstall checkpoint after $phase"
+  }
+}
+
+assert_no_incomplete_package_transactions
 
 if [[ "$action" == uninstall ]]; then
   if [[ -z "$test_root" && "$action" == uninstall ]] &&
@@ -374,28 +613,66 @@ if [[ "$action" == uninstall ]]; then
   fi
   if [[ -z "$test_root" ]]; then
     for unit in swapz-primary-boot-verify.service swapz-primary-mapper.service "$swap_unit_name"; do
-      systemctl is-active --quiet "$unit" && blocked "$unit is active; refusing package removal"
-      systemctl is-enabled --quiet "$unit" &&
+      "$systemctl_bin" is-active --quiet "$unit" &&
+        blocked "$unit is active; refusing package removal"
+      "$systemctl_bin" is-enabled --quiet "$unit" &&
         blocked "$unit is enabled; disable swapz through its recovery procedure first"
     done
   fi
   verify_owned || { echo "BLOCKED: foreign, absent or modified swapz package" >&2; exit 1; }
-  "$dkms_bin" remove -m swapz -v "$version" --all || {
-    echo "BLOCKED: DKMS remove failed; package retained" >&2
-    exit 1
-  }
-  cleanup_package_files
+
+  ensure_transaction_parent
+  transaction_dir="$(mktemp -d "$transaction_parent/swapz-uninstall.XXXXXXXX")"
+  chmod 0700 "$transaction_dir"
+  transaction_active=2
+  trap 'staging_abort $? failure' ERR
+  trap 'staging_abort 129 interruption' HUP
+  trap 'staging_abort 130 interruption' INT
+  trap 'staging_abort 143 interruption' TERM
+  backup_verified_package_for_uninstall
+  persist_uninstall_state prepared
+
+  transaction_active=3
+  trap 'uninstall_rollback $? failure' ERR
+  trap 'uninstall_rollback 129 interruption' HUP
+  trap 'uninstall_rollback 130 interruption' INT
+  trap 'uninstall_rollback 143 interruption' TERM
+
+  # Remove all activation entry points only after the private rollback snapshot
+  # and its independently verifiable hash manifest are durable.
+  persist_uninstall_state removing-activation-files
+  cleanup_activation_files
+  persist_uninstall_state activation-files-removed
+  uninstall_test_checkpoint activation-files-removed
+
+  persist_uninstall_state removing-dkms
+  "$dkms_bin" remove -m swapz -v "$version" --all
+  persist_uninstall_state dkms-removed
+  uninstall_test_checkpoint dkms-removed
+
+  persist_uninstall_state removing-source
+  cleanup_source_files
+  persist_uninstall_state source-removed
+  uninstall_test_checkpoint source-removed
+
+  persist_uninstall_state removing-installed-module
   rm -f -- "$installed_module"
-  "$depmod_bin" "$kernel_release" || {
-    echo "BLOCKED: package files removed but depmod failed; inspect module index" >&2
-    exit 1
-  }
-  if [[ -z "$test_root" ]]; then
-    systemctl daemon-reload || {
-      echo "BLOCKED: package removed but systemd did not reload; inspect unit cache" >&2
-      exit 1
-    }
-  fi
+  persist_uninstall_state installed-module-removed
+  uninstall_test_checkpoint installed-module-removed
+
+  persist_uninstall_state depmod-pending
+  "$depmod_bin" "$kernel_release"
+  persist_uninstall_state depmod-complete
+  uninstall_test_checkpoint depmod-complete
+
+  persist_uninstall_state systemd-reload-pending
+  "$systemctl_bin" daemon-reload
+  persist_uninstall_state systemd-reload-complete
+  uninstall_test_checkpoint systemd-reload-complete
+
+  transaction_active=0
+  trap - ERR HUP INT TERM
+  rm -rf -- "$transaction_dir"
   echo "Uninstalled owned swapz package without touching swap"
   exit 0
 fi
@@ -551,25 +828,7 @@ fi
 swapz_module_loaded && blocked "loaded module; refusing package upgrade"
 swapz_mapper_present && blocked "active swapz mapping; refusing package upgrade"
 
-staging_abort() {
-  local rc="${1:-1}" reason="${2:-failure}"
-  trap - ERR HUP INT TERM
-  transaction_active=0
-  echo "BLOCKED: package $reason before mutation; removing staging data" >&2
-  [[ -z "$transaction_dir" ]] || rm -rf -- "$transaction_dir"
-  exit "$rc"
-}
-
-if [[ -e "$transaction_parent" || -L "$transaction_parent" ]]; then
-  installed_directory_metadata "$transaction_parent" 700 ||
-    blocked "unsafe package transaction directory"
-else
-  if [[ -z "$test_root" ]]; then
-    install -d -o 0 -g 0 -m0700 "$transaction_parent"
-  else
-    install -d -m0700 "$transaction_parent"
-  fi
-fi
+ensure_transaction_parent
 transaction_dir="$(mktemp -d "$transaction_parent/swapz-package.XXXXXXXX")"
 transaction_active=2
 trap 'staging_abort $? failure' ERR
@@ -610,16 +869,35 @@ new_dkms_registered=0
 new_files_committed=0
 rollback_in_progress=0
 
-restore_file_backups() {
+restore_file_backups_except_cli() {
   local path digest backup_path
   [[ -f "$backup_dir/file-paths" ]] || return 0
   while IFS= read -r path; do
+    [[ "$path" == "$cli" ]] && continue
     digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')"
     backup_path="$backup_dir/files/$digest"
     [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
     install -d -m0755 "$(dirname "$path")"
     cp -a -- "$backup_path" "$path"
+    cmp -s "$backup_path" "$path" || return 1
   done < "$backup_dir/file-paths"
+}
+
+restore_cli_backup() {
+  local digest backup_path temporary_cli
+  [[ -f "$backup_dir/file-paths" ]] || return 0
+  digest="$(printf '%s' "$cli" | sha256sum | awk '{print $1}')"
+  backup_path="$backup_dir/files/$digest"
+  [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
+  install -d -m0755 "$cli_dir"
+  temporary_cli="$cli_dir/.swapzctl.restore.$"
+  [[ ! -e "$temporary_cli" && ! -L "$temporary_cli" ]] || return 1
+  install -m0755 "$backup_path" "$temporary_cli" || return 1
+  cmp -s "$backup_path" "$temporary_cli" || {
+    rm -f -- "$temporary_cli"
+    return 1
+  }
+  mv -f -- "$temporary_cli" "$cli"
 }
 
 restore_previous_package() {
@@ -634,16 +912,23 @@ restore_previous_package() {
     cp -a -- "$backup_dir/source/$qualification_marker" "$src/$qualification_marker"
   fi
   cp -a -- "$backup_dir/source/src/kernel/"* "$src/src/kernel/"
-  restore_file_backups || return 1
+  (cd "$src" && sha256sum -c "$source_manifest" >/dev/null) || return 1
   "$dkms_bin" add -m swapz -v "$version" || return 1
   "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" || return 1
   "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
   if [[ -f "$backup_dir/installed-module" ]]; then
     install -d -m0755 "$installed_module_dir"
     install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
+    cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
   fi
   "$depmod_bin" "$kernel_release" || return 1
-  return 0
+  if [[ -f "$backup_dir/installed-module" ]]; then
+    cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
+  fi
+  restore_file_backups_except_cli || return 1
+  "$systemctl_bin" daemon-reload || return 1
+  restore_cli_backup || return 1
+  verify_owned
 }
 
 rollback() {
@@ -664,8 +949,14 @@ rollback() {
       echo "BLOCKED: previous package restoration failed; preserved rollback data at $transaction_dir" >&2
     fi
   else
-    "$depmod_bin" "$kernel_release" >/dev/null 2>&1 || true
-    rm -rf -- "$transaction_dir"
+    local cleanup_ok=1
+    "$depmod_bin" "$kernel_release" >/dev/null 2>&1 || cleanup_ok=0
+    "$systemctl_bin" daemon-reload >/dev/null 2>&1 || cleanup_ok=0
+    if (( cleanup_ok == 1 )); then
+      rm -rf -- "$transaction_dir"
+    else
+      echo "BLOCKED: rollback cleanup incomplete; preserved transaction data at $transaction_dir" >&2
+    fi
   fi
   exit "$rc"
 }
@@ -765,9 +1056,7 @@ verify_owned || blocked "installed ownership or digest verification failed"
    "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
   blocked "installed artifact digest mismatch"
 
-if [[ -z "$test_root" ]]; then
-  systemctl daemon-reload
-fi
+"$systemctl_bin" daemon-reload
 
 transaction_active=0
 trap - ERR HUP INT TERM

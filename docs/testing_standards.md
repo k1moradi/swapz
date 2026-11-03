@@ -4331,7 +4331,17 @@ digests, a report-only descendant checkout with no relevant dirty inputs,
 current-kernel headers, and matching module vermagic. Secure Boot admission is
 verification-only: packaging must never append or replace a signature after
 qualification, and an enabled host with unavailable certificate/signature
-verification must fail closed.
+verification must fail closed. Verification must parse the appended Linux
+module-signature trailer and cryptographically verify the detached PKCS#7/CMS
+signature over the exact module payload against the configured certificate.
+Certificate identity, `mokutil --test-key` enrollment, embedded signer/key
+metadata, cryptographic signature validity, and target-kernel acceptance are
+separate facts. `modinfo` signer or `sig_key` metadata is diagnostic only and
+must never substitute for cryptographic verification. Packaging may report
+cryptographic validity plus enrollment, but it must not claim that the target
+kernel accepted the module under its configured enforcement policy until the
+same exact installed bytes have been safely and authoritatively loaded by that
+kernel.
 
 DKMS remains the compatibility/header integration mechanism, not the artifact
 authority. After a successful current-kernel DKMS build/install, packaging must
@@ -4349,19 +4359,42 @@ before publishing them, and restore the previous verified source, userspace
 files and exact installed module if DKMS, hashing, depmod, systemd reload or a
 caught HUP/INT/TERM fails. Uninstall must refuse loaded-module, active-mapper,
 active/enabled-unit, recovery-owner and digest/ownership mismatches; packaging
-must never call swapon/swapoff, unload a module, or remove a mapper. Production
-uses the fixed `/usr/local` prefix, trusted executable paths, root-owned
-installed files with fixed modes, non-symlink package directories and
-single-link non-writable artifact/report inputs.
+must never call swapon/swapoff, unload a module, or remove a mapper.
 
-The hermetic regression must cover clean and repeated install, missing kernel
-headers, unavailable Secure Boot verification, vermagic mismatch, unexpected
-paths/symlinks, partial DKMS failure, active-module and active-mapper upgrade
-refusal, active uninstall refusal, rollback of a failed upgrade, reinstall
-after safe cleanup, installed-module digest mismatch, post-depmod tamper and
-signal interruption cleanup without reading or modifying host swap state.
-Sandbox artifacts must stay private to the package sandbox and must not replace
-the repository's qualification build outputs.
+Uninstall is a destructive transaction rather than a sequence of best-effort
+deletions. Before the first removal it must persist a private rollback snapshot
+of the verified source, userspace/systemd files and exact installed module,
+fsync that material, and atomically publish an independently verifiable state
+manifest containing hashes of every recovery file. Activation-capable entry
+points are removed before DKMS/module mutation. Every destructive transition,
+including DKMS removal, source/module removal, depmod and systemd reload, has a
+durable phase. Failure or a caught HUP/INT/TERM must restore the exact verified
+installation; rollback restores DKMS and the exact module and completes depmod
+before package entry points, with the CLI restored atomically only after the
+other files and systemd cache are valid. If rollback itself cannot finish or
+is interrupted, the transaction directory and hash manifest must remain, and
+all later package actions must fail closed on that durable incomplete state.
+The retained state must not expose an activation path before the recovered
+backend is valid.
+
+Production uses the fixed `/usr/local` prefix, trusted executable paths,
+root-owned installed files with fixed modes, non-symlink package directories
+and single-link non-writable artifact/report inputs.
+
+The hermetic regression must cover clean and repeated install/uninstall,
+missing kernel headers, unavailable Secure Boot verification, certificate
+enrollment mismatch, cryptographically invalid signature despite matching
+signer metadata, vermagic mismatch, unexpected paths/symlinks, foreign
+artifacts, partial DKMS failure, active-module and active-mapper upgrade
+refusal, active uninstall refusal, rollback of a failed upgrade, every
+destructive uninstall transition, failed depmod, failed systemd daemon-reload,
+reinstall after safe cleanup, installed-module/userspace digest mismatch,
+post-depmod tamper, install/uninstall signal interruption, and interruption of
+uninstall rollback. The interrupted-rollback fixture must verify the retained
+state manifest against the recovery bytes and prove later package operations
+refuse that durable incomplete transaction without reading or modifying host
+swap state. Sandbox artifacts must stay private to the package sandbox and
+must not replace the repository's qualification build outputs.
 Incremental-build Makefile fixtures that compile or stage the primary manager
 must include the committed fallback `src/kernel/swapz-build-info.h`; otherwise
 they do not model the source inputs of the real checkout.

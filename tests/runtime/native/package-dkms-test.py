@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -80,6 +81,10 @@ class PackageLifecycle(unittest.TestCase):
         self.dkms_log = self.home / "dkms.log"
         self.fail_marker = self.home / "fail.once"
         self.tamper_marker = self.home / "tamper.once"
+        self.depmod_fail_marker = self.home / "depmod-fail.once"
+        self.systemctl_fail_marker = self.home / "systemctl-fail.once"
+        self.systemctl_log = self.home / "systemctl.log"
+        self.remove_sleep_marker = self.home / "remove-sleep.once"
         self.cert = self.home / "MOK.der"
         self.cert.write_text("certificate")
         self.write_fake_tools()
@@ -99,12 +104,20 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_DKMS_LOG=str(self.dkms_log),
             SWAPZ_DKMS_FAIL_MARKER=str(self.fail_marker),
             SWAPZ_DEPMOD_TAMPER_MARKER=str(self.tamper_marker),
+            SWAPZ_DEPMOD_FAIL_MARKER=str(self.depmod_fail_marker),
+            SWAPZ_SYSTEMCTL_FAIL_MARKER=str(self.systemctl_fail_marker),
+            SWAPZ_SYSTEMCTL_LOG=str(self.systemctl_log),
+            SWAPZ_REMOVE_SLEEP_MARKER=str(self.remove_sleep_marker),
             SWAPZ_TEST_INSTALLED_MODULE=str(self.installed_module),
             SWAPZ_FAKE_FAIL_AT="never",
             SWAPZ_FAKE_BUILD_SLEEP="0",
+            SWAPZ_FAKE_REMOVE_SLEEP="0",
+            SWAPZ_FAKE_DEPMOD_FAIL_ONCE="0",
+            SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE="0",
             SWAPZ_FAKE_TAMPER_INSTALLED="0",
             SWAPZ_FAKE_SECURE_BOOT="disabled",
             SWAPZ_FAKE_MOK_ENROLLED="1",
+            SWAPZ_FAKE_SIGNATURE_VALID="1",
             SWAPZ_FAKE_SIG_KEY="ABCD",
             SWAPZ_FAKE_VERMAGIC=self.kernel_release,
             SWAPZ_MOK_CERT=str(self.cert),
@@ -130,6 +143,17 @@ class PackageLifecycle(unittest.TestCase):
         # even when the test runner inherits a group-writable umask.
         self.report.chmod(0o600)
 
+    def write_synthetic_signed_module(self):
+        signature = b"synthetic-cms-signature"
+        signature_header = bytes((0, 0, 2, 0, 0, 0, 0, 0))
+        signature_header += len(signature).to_bytes(4, "big")
+        self.module.write_bytes(
+            b"synthetic-qualified-dm-swapz-module\n" +
+            signature + signature_header +
+            b"~Module signature appended~\n")
+        self.module.chmod(0o600)
+        self.write_report()
+
     def tool(self, name, content):
         path = self.bin / name
         path.write_text(content)
@@ -143,6 +167,11 @@ printf '%s\n' "$cmd" >> "$SWAPZ_DKMS_LOG"
 if [[ "$cmd" == "$SWAPZ_FAKE_FAIL_AT" && ! -e "$SWAPZ_DKMS_FAIL_MARKER" ]]; then
   : > "$SWAPZ_DKMS_FAIL_MARKER"
   exit 44
+fi
+if [[ "$cmd" == remove && "$SWAPZ_FAKE_REMOVE_SLEEP" != 0 &&
+      ! -e "$SWAPZ_REMOVE_SLEEP_MARKER" ]]; then
+  : > "$SWAPZ_REMOVE_SLEEP_MARKER"
+  sleep "$SWAPZ_FAKE_REMOVE_SLEEP"
 fi
 case "$cmd" in
   status)
@@ -169,6 +198,10 @@ esac
         self.tool("depmod", r'''#!/usr/bin/env bash
 set -eu
 printf 'depmod\n' >> "$SWAPZ_DKMS_LOG"
+if [[ "$SWAPZ_FAKE_DEPMOD_FAIL_ONCE" == 1 && ! -e "$SWAPZ_DEPMOD_FAIL_MARKER" ]]; then
+  : > "$SWAPZ_DEPMOD_FAIL_MARKER"
+  exit 45
+fi
 if [[ "$SWAPZ_FAKE_TAMPER_INSTALLED" == 1 && ! -e "$SWAPZ_DEPMOD_TAMPER_MARKER" ]]; then
   : > "$SWAPZ_DEPMOD_TAMPER_MARKER"
   printf 'tampered-after-depmod\n' > "$SWAPZ_TEST_INSTALLED_MODULE"
@@ -203,12 +236,53 @@ case "${1:-}" in
   *) exit 2 ;;
 esac
 ''')
-        self.tool("openssl", "#!/bin/sh\nprintf '%s\\n' 'serial=ABCD'\n")
+        self.tool("openssl", r'''#!/usr/bin/env bash
+set -eu
+case "${1:-}" in
+  x509)
+    output=""
+    while (( $# > 0 )); do
+      if [[ "$1" == -out ]]; then
+        output="$2"
+        shift 2
+      else
+        shift
+      fi
+    done
+    if [[ -n "$output" ]]; then
+      printf '%s\n' '-----BEGIN CERTIFICATE-----' 'synthetic' \
+        '-----END CERTIFICATE-----' > "$output"
+    else
+      printf '%s\n' '-----BEGIN CERTIFICATE-----' 'synthetic' \
+        '-----END CERTIFICATE-----'
+    fi
+    ;;
+  cms)
+    [[ "${SWAPZ_FAKE_SIGNATURE_VALID:-0}" == 1 ]] || exit 47
+    ;;
+  *) exit 2 ;;
+esac
+''')
         self.tool("kmodsign", "#!/bin/sh\nexit 77\n")
         self.tool("sudo", "#!/bin/sh\n[ \"$1\" = -n ] && shift\nexec \"$@\"\n")
+        self.tool("systemctl", r'''#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >> "$SWAPZ_SYSTEMCTL_LOG"
+case "${1:-}" in
+  daemon-reload)
+    if [[ "$SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE" == 1 &&
+          ! -e "$SWAPZ_SYSTEMCTL_FAIL_MARKER" ]]; then
+      : > "$SWAPZ_SYSTEMCTL_FAIL_MARKER"
+      exit 46
+    fi
+    ;;
+  is-active|is-enabled) exit 1 ;;
+  *) exit 2 ;;
+esac
+''')
         self.tool(
             "systemd-escape",
-            "#!/bin/sh\nprintf '%s\\n' 'dev-mapper-swapz\\x2dprimary.swap'\n")
+            "#!/bin/sh\nprintf '%s\\n' 'dev-mapper-swapz\\\\x2dprimary.swap'\n")
 
     def invoke(self, action, extra=None, timeout=15):
         env = dict(self.env)
@@ -223,6 +297,25 @@ esac
         self.assertFalse(
             (self.home / "usr/src" / ("swapz-" + VERSION)).exists())
         self.assertFalse(self.installed_module.exists())
+
+    def assert_installed_exact(self):
+        self.assertEqual(
+            (self.prefix / "sbin/swapzctl").read_bytes(),
+            self.cli.read_bytes())
+        self.assertEqual(
+            (self.prefix / "libexec/swapz/device-roundtrip").read_bytes(),
+            self.oracle.read_bytes())
+        self.assertEqual(
+            (self.prefix / "libexec/swapz/dm-swapz.ko").read_bytes(),
+            self.module.read_bytes())
+        self.assertEqual(
+            self.installed_module.read_bytes(), self.module.read_bytes())
+
+    def uninstall_transactions(self):
+        transaction_parent = self.home / "transactions"
+        if not transaction_parent.exists():
+            return []
+        return sorted(transaction_parent.glob("swapz-uninstall.*"))
 
     def test_clean_repeat_uninstall_and_reinstall(self):
         first = self.invoke("install")
@@ -264,6 +357,10 @@ esac
         self.assertEqual(removed.returncode, 0, removed.stderr)
         self.assert_absent()
         self.assertEqual(self.invoke("install").returncode, 0)
+        removed_again = self.invoke("uninstall")
+        self.assertEqual(removed_again.returncode, 0, removed_again.stderr)
+        self.assert_absent()
+        self.assertEqual(self.invoke("install").returncode, 0)
 
     def test_missing_headers_signing_and_vermagic_refuse(self):
         self.headers_makefile.unlink()
@@ -290,11 +387,99 @@ esac
         self.assertIn("not enrolled", result.stderr)
         self.assert_absent()
 
+        # Matching signer metadata is deliberately insufficient. The synthetic
+        # appended signature must also validate against the configured cert.
+        self.write_synthetic_signed_module()
+        result = self.invoke(
+            "install", {
+                "SWAPZ_FAKE_SECURE_BOOT": "enabled",
+                "SWAPZ_FAKE_SIGNATURE_VALID": "0",
+            })
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not cryptographically valid", result.stderr)
+        self.assert_absent()
+
+        result = self.invoke(
+            "install", {"SWAPZ_FAKE_SECURE_BOOT": "enabled"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cryptographic signature verified", result.stdout)
+        self.assertEqual(self.invoke("uninstall").returncode, 0)
+
         result = self.invoke(
             "install", {"SWAPZ_FAKE_VERMAGIC": "other-kernel"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not match the running kernel", result.stderr)
         self.assert_absent()
+
+    def test_secure_boot_verifies_real_detached_cms_payload(self):
+        openssl = shutil.which("openssl")
+        self.assertIsNotNone(openssl)
+        crypto_bin = self.home / "crypto-bin"
+        crypto_bin.mkdir()
+        mokutil = crypto_bin / "mokutil"
+        mokutil.write_text(
+            "#!/bin/sh\n"
+            "case \"$1\" in\n"
+            "  --sb-state) echo 'SecureBoot enabled';;\n"
+            "  --test-key) exit 0;;\n"
+            "  *) exit 2;;\n"
+            "esac\n")
+        mokutil.chmod(0o755)
+
+        private_key = self.home / "crypto-test.key"
+        certificate_pem = self.home / "crypto-test.pem"
+        certificate_der = self.home / "crypto-test.der"
+        payload = self.home / "crypto-module.payload"
+        signature = self.home / "crypto-module.p7s"
+        signed_module = self.home / "crypto-dm-swapz.ko"
+        payload.write_bytes(b"exact swapz module payload for CMS verification\n")
+
+        subprocess.run(
+            [openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", str(private_key), "-out", str(certificate_pem),
+             "-subj", "/CN=swapz-package-test", "-days", "1"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [openssl, "x509", "-in", str(certificate_pem), "-outform", "DER",
+             "-out", str(certificate_der)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [openssl, "cms", "-sign", "-binary", "-in", str(payload),
+             "-signer", str(certificate_pem), "-inkey", str(private_key),
+             "-outform", "DER", "-out", str(signature), "-nocerts", "-noattr",
+             "-md", "sha512"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        signature_bytes = signature.read_bytes()
+        signature_header = bytes((0, 0, 2, 0, 0, 0, 0, 0))
+        signature_header += len(signature_bytes).to_bytes(4, "big")
+        signed_module.write_bytes(
+            payload.read_bytes() + signature_bytes + signature_header +
+            b"~Module signature appended~\n")
+
+        verify_env = dict(
+            os.environ,
+            PATH=str(crypto_bin) + os.pathsep + os.path.dirname(openssl) +
+                 os.pathsep + "/usr/bin:/bin",
+            SWAPZ_SIGN_TEST_ROOT=str(self.home),
+            SWAPZ_MOK_CERT=str(certificate_der),
+        )
+        verified = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             "--verify", str(signed_module)],
+            cwd=ROOT, env=verify_env, capture_output=True, text=True)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        self.assertIn("cryptographic signature verified", verified.stdout)
+
+        tampered = bytearray(signed_module.read_bytes())
+        tampered[0] ^= 1
+        signed_module.write_bytes(tampered)
+        rejected = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             "--verify", str(signed_module)],
+            cwd=ROOT, env=verify_env, capture_output=True, text=True)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("not cryptographically valid", rejected.stderr)
 
     def test_kernel_upgrade_requires_new_qualified_module(self):
         self.assertEqual(self.invoke("install").returncode, 0)
@@ -384,6 +569,22 @@ esac
         self.assertIn("changed during depmod", result.stderr)
         self.assert_absent()
 
+        self.tamper_marker.unlink(missing_ok=True)
+        self.depmod_fail_marker.unlink(missing_ok=True)
+        result = self.invoke(
+            "install", {"SWAPZ_FAKE_DEPMOD_FAIL_ONCE": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rollback", result.stderr)
+        self.assert_absent()
+
+        self.systemctl_fail_marker.unlink(missing_ok=True)
+        result = self.invoke(
+            "install", {"SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rollback", result.stderr)
+        self.assert_absent()
+        self.assertEqual(self.uninstall_transactions(), [])
+
     def test_upgrade_active_refusal_and_failed_upgrade_restores(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_binary = (self.prefix / "sbin/swapzctl").read_bytes()
@@ -403,6 +604,15 @@ esac
             (self.prefix / "sbin/swapzctl").read_bytes(), old_binary)
         self.assertEqual(self.installed_module.read_bytes(), old_module)
 
+        self.systemctl_fail_marker.unlink(missing_ok=True)
+        result = self.invoke(
+            "install", {"SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(
+            (self.prefix / "sbin/swapzctl").read_bytes(), old_binary)
+        self.assertEqual(self.installed_module.read_bytes(), old_module)
+        self.assertIn("daemon-reload", self.systemctl_log.read_text())
+
     def test_uninstall_refuses_active_mapping_or_module(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         for flag in ("SWAPZ_TEST_MAPPING_ACTIVE", "SWAPZ_TEST_MODULE_ACTIVE"):
@@ -410,6 +620,125 @@ esac
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue((self.prefix / "sbin/swapzctl").exists())
             self.assertTrue(self.installed_module.exists())
+
+    def test_uninstall_every_destructive_transition_rolls_back(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        phases = (
+            "activation-files-removed",
+            "dkms-removed",
+            "source-removed",
+            "installed-module-removed",
+            "depmod-complete",
+            "systemd-reload-complete",
+        )
+        for phase in phases:
+            with self.subTest(phase=phase):
+                result = self.invoke(
+                    "uninstall", {"SWAPZ_TEST_UNINSTALL_FAIL_AFTER": phase})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("attempting transaction rollback", result.stderr)
+                self.assert_installed_exact()
+                self.assertEqual(self.uninstall_transactions(), [])
+
+        self.fail_marker.unlink(missing_ok=True)
+        result = self.invoke(
+            "uninstall", {"SWAPZ_FAKE_FAIL_AT": "remove"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+
+    def test_uninstall_depmod_and_daemon_reload_failures_restore(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+
+        result = self.invoke(
+            "uninstall", {"SWAPZ_FAKE_DEPMOD_FAIL_ONCE": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("attempting transaction rollback", result.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+
+        self.systemctl_fail_marker.unlink(missing_ok=True)
+        result = self.invoke(
+            "uninstall", {"SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("attempting transaction rollback", result.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+
+        removed = self.invoke("uninstall")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assert_absent()
+
+    def test_interrupt_during_uninstall_rolls_back(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        env = dict(self.env, SWAPZ_FAKE_REMOVE_SLEEP="30")
+        process = subprocess.Popen(
+            ["bash", str(SCRIPT), "uninstall", str(self.prefix)],
+            cwd=ROOT, env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if self.remove_sleep_marker.exists():
+                break
+            time.sleep(0.05)
+        else:
+            process.kill()
+            self.fail("mock DKMS remove did not start")
+        os.killpg(process.pid, signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=8)
+        self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
+        self.assertIn("interruption", stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+
+    def test_interrupted_uninstall_rollback_retains_verifiable_state(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        build_count = self.dkms_log.read_text().splitlines().count("build")
+        env = dict(
+            self.env,
+            SWAPZ_FAKE_DEPMOD_FAIL_ONCE="1",
+            SWAPZ_FAKE_BUILD_SLEEP="30",
+        )
+        process = subprocess.Popen(
+            ["bash", str(SCRIPT), "uninstall", str(self.prefix)],
+            cwd=ROOT, env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            lines = self.dkms_log.read_text().splitlines()
+            if lines.count("build") > build_count:
+                break
+            time.sleep(0.05)
+        else:
+            process.kill()
+            self.fail("uninstall rollback DKMS build did not start")
+
+        os.killpg(process.pid, signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=8)
+        self.assertIn(
+            process.returncode,
+            (-signal.SIGTERM, 128 + signal.SIGTERM),
+            stdout + "\n" + stderr)
+        transactions = self.uninstall_transactions()
+        self.assertEqual(len(transactions), 1)
+        transaction = transactions[0]
+        state_path = transaction / "state.json"
+        self.assertEqual(state_path.stat().st_mode & 0o777, 0o600)
+        state = json.loads(state_path.read_text())
+        self.assertEqual(state["schema"], "swapz-package-uninstall-v1")
+        self.assertEqual(state["phase"], "rollback-started")
+        self.assertGreater(len(state["backup_files"]), 0)
+        for entry in state["backup_files"]:
+            backup = transaction / "backup" / entry["path"]
+            self.assertTrue(backup.is_file())
+            self.assertEqual(sha256(backup), entry["sha256"])
+
+        # Rollback restores the CLI only after DKMS, the exact module, depmod,
+        # the other package files and systemd reload are valid again.
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        blocked = self.invoke("install")
+        self.assertNotEqual(blocked.returncode, 0)
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
 
     def test_installed_source_symlink_is_not_silently_accepted(self):
         self.assertEqual(self.invoke("install").returncode, 0)
