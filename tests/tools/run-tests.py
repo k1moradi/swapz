@@ -7512,6 +7512,10 @@ def print_bench(result, *, detailed=False):
                  f"{loaded['maximum_mapper_bytes'] / (1024 ** 3):.2f} GiB; "
                  f"{loaded['maximum_boundary_pages']} edge pages verified; "
                  "lower I/O checked"),
+                ("primary lifecycle",
+                 f"{loaded['primary_lifecycle_interruptions']} process-death "
+                 f"recoveries; {loaded['primary_lifecycle_negative_cases']} "
+                 "negative cases"),
                 ("RAW/zero pages",
                  f"{loaded['raw_pages']}/{loaded['zero_pages']}"),
                 ("flushes", loaded["flush_calls"]),

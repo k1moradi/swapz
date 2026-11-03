@@ -2707,6 +2707,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
         self.assertIn("max capacity", rendered)
+        self.assertIn("primary lifecycle", rendered)
+        self.assertIn("11 process-death recoveries; 11 negative cases", rendered)
         self.assertIn("2 edge pages verified", rendered)
         self.assertIn("lower I/O checked", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)

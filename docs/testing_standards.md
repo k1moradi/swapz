@@ -842,7 +842,9 @@ incomplete; the parser must not silently overwrite an earlier PASS match.
 merely executing the helper or recognizing its failure markers is not sufficient
 for a qualification PASS. The loaded report parser must require those same
 eleven phases in canonical order and the `cases:11` recovery aggregate; a
-legacy six-phase marker is incomplete evidence.
+legacy six-phase marker is incomplete evidence. The human qualification summary
+must also display the verified process-death recovery count and negative-case
+count so reviewers do not need to infer lifecycle coverage from raw log text.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 
