@@ -1449,3 +1449,7 @@ exclusive-open semantics, physical geometry, or recovery behavior. The
 immutable manifest primitive now exists, but qualification-evidence validation
 and lifecycle integration are still required before use. Privileged execution
 remains disabled.
+
+Header digests now use an in-process SHA-256 implementation instead of
+spawning `/usr/bin/sha256sum`; rootless tests cover empty and `abc` vectors, a
+known multi-block digest, and overflow refusal with preserved output.

@@ -16,12 +16,10 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include "../kernel/superblock.h"
@@ -815,125 +813,138 @@ int swapz_primary_write_header_checked_fd(
 static int swapz_primary_sha256(const unsigned char *bytes, size_t length,
 				char digest[65])
 {
-	char descriptor_path[64];
-	char output_buffer[128];
-	size_t output_length = 0;
-	int output_pipe[2];
-	int memory_fd;
-	int descriptor_flags;
-	pid_t child;
-	int status;
+	static const uint32_t round_constants[64] = {
+		0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U,
+		0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
+		0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U,
+		0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,
+		0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU,
+		0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU,
+		0x983e5152U, 0xa831c66dU, 0xb00327c8U, 0xbf597fc7U,
+		0xc6e00bf3U, 0xd5a79147U, 0x06ca6351U, 0x14292967U,
+		0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU, 0x53380d13U,
+		0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U,
+		0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U,
+		0xd192e819U, 0xd6990624U, 0xf40e3585U, 0x106aa070U,
+		0x19a4c116U, 0x1e376c08U, 0x2748774cU, 0x34b0bcb5U,
+		0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU, 0x682e6ff3U,
+		0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U,
+		0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U,
+	};
+	static const uint32_t initial_state[8] = {
+		0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
+		0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U,
+	};
+	static const char hex_digits[] = "0123456789abcdef";
+	uint32_t state[8];
+	uint64_t bit_length;
+	size_t padded_length;
+	size_t offset;
+	size_t i;
+
+	#define SWAPZ_ROTR32(value, shift) \
+		(((value) >> (shift)) | ((value) << (32U - (shift))))
 
 	if (!bytes || !digest) {
 		errno = EINVAL;
 		return -1;
 	}
-	memory_fd = memfd_create("swapz-primary-digest", MFD_CLOEXEC);
-	if (memory_fd < 0)
+	if (length > UINT64_MAX / 8ULL || length > SIZE_MAX - 72U) {
+		errno = EOVERFLOW;
 		return -1;
-	{
-		size_t written = 0;
+	}
+	bit_length = (uint64_t)length * 8ULL;
+	padded_length = ((length + 9U + 63U) / 64U) * 64U;
+	memcpy(state, initial_state, sizeof(state));
+	for (offset = 0; offset < padded_length; offset += 64U) {
+		unsigned char block[64];
+		uint32_t words[64];
+		uint32_t a, b, c, d, e, f, g, h;
 
-		while (written < length) {
-			ssize_t count = write(memory_fd, bytes + written,
-					      length - written);
+		for (i = 0; i < sizeof(block); ++i) {
+			size_t position = offset + i;
 
-			if (count < 0 && errno == EINTR)
-				continue;
-			if (count <= 0) {
-				int saved_errno = count < 0 ? errno : EIO;
+			if (position < length) {
+				block[i] = bytes[position];
+			} else if (position == length) {
+				block[i] = 0x80U;
+			} else if (position >= padded_length - 8U) {
+				unsigned int shift = (unsigned int)(
+					(padded_length - 1U - position) * 8U);
 
-				close(memory_fd);
-				errno = saved_errno;
-				return -1;
+				block[i] = (unsigned char)(bit_length >> shift);
+			} else {
+				block[i] = 0;
 			}
-			written += (size_t)count;
 		}
-	}
-	if (lseek(memory_fd, 0, SEEK_SET) < 0 ||
-	    pipe2(output_pipe, O_CLOEXEC) < 0) {
-		int saved_errno = errno;
+		for (i = 0; i < 16U; ++i)
+			words[i] = ((uint32_t)block[i * 4U] << 24) |
+				   ((uint32_t)block[i * 4U + 1U] << 16) |
+				   ((uint32_t)block[i * 4U + 2U] << 8) |
+				   (uint32_t)block[i * 4U + 3U];
+		for (i = 16U; i < 64U; ++i) {
+			uint32_t small0 = SWAPZ_ROTR32(words[i - 15U], 7U) ^
+					   SWAPZ_ROTR32(words[i - 15U], 18U) ^
+					   (words[i - 15U] >> 3);
+			uint32_t small1 = SWAPZ_ROTR32(words[i - 2U], 17U) ^
+					   SWAPZ_ROTR32(words[i - 2U], 19U) ^
+					   (words[i - 2U] >> 10);
 
-		close(memory_fd);
-		errno = saved_errno;
-		return -1;
-	}
-	descriptor_flags = fcntl(memory_fd, F_GETFD);
-	if (descriptor_flags < 0 ||
-	    fcntl(memory_fd, F_SETFD, descriptor_flags & ~FD_CLOEXEC) < 0 ||
-	    snprintf(descriptor_path, sizeof(descriptor_path),
-		     "/proc/self/fd/%d", memory_fd) < 0) {
-		int saved_errno = errno ? errno : EIO;
-
-		close(output_pipe[0]);
-		close(output_pipe[1]);
-		close(memory_fd);
-		errno = saved_errno;
-		return -1;
-	}
-	child = fork();
-	if (child < 0) {
-		int saved_errno = errno;
-
-		close(output_pipe[0]);
-		close(output_pipe[1]);
-		close(memory_fd);
-		errno = saved_errno;
-		return -1;
-	}
-	if (child == 0) {
-		if (dup2(output_pipe[1], STDOUT_FILENO) < 0)
-			_exit(127);
-		close(output_pipe[0]);
-		close(output_pipe[1]);
-		execl("/usr/bin/sha256sum", "sha256sum", descriptor_path,
-		      (char *)NULL);
-		_exit(127);
-	}
-	close(output_pipe[1]);
-	close(memory_fd);
-	while (output_length + 1U < sizeof(output_buffer)) {
-		ssize_t count = read(output_pipe[0], output_buffer + output_length,
-				     sizeof(output_buffer) - output_length - 1U);
-
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count < 0) {
-			int saved_errno = errno;
-
-			close(output_pipe[0]);
-			while (waitpid(child, &status, 0) < 0 && errno == EINTR)
-				;
-			errno = saved_errno;
-			return -1;
+			words[i] = words[i - 16U] + small0 + words[i - 7U] + small1;
 		}
-		if (!count)
-			break;
-		output_length += (size_t)count;
-	}
-	close(output_pipe[0]);
-	while (waitpid(child, &status, 0) < 0) {
-		if (errno == EINTR)
-			continue;
-		return -1;
-	}
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
-	    output_length < 66U || output_buffer[64] != ' ' ||
-	    output_buffer[65] != ' ') {
-		errno = EIO;
-		return -1;
-	}
-	for (output_length = 0; output_length < 64U; ++output_length) {
-		char value = output_buffer[output_length];
+		a = state[0];
+		b = state[1];
+		c = state[2];
+		d = state[3];
+		e = state[4];
+		f = state[5];
+		g = state[6];
+		h = state[7];
+		for (i = 0; i < 64U; ++i) {
+			uint32_t large1 = SWAPZ_ROTR32(e, 6U) ^
+					  SWAPZ_ROTR32(e, 11U) ^
+					  SWAPZ_ROTR32(e, 25U);
+			uint32_t choose = (e & f) ^ (~e & g);
+			uint32_t temp1 = h + large1 + choose + round_constants[i] +
+					 words[i];
+			uint32_t large0 = SWAPZ_ROTR32(a, 2U) ^
+					  SWAPZ_ROTR32(a, 13U) ^
+					  SWAPZ_ROTR32(a, 22U);
+			uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+			uint32_t temp2 = large0 + majority;
 
-		if (!((value >= '0' && value <= '9') ||
-		      (value >= 'a' && value <= 'f'))) {
-			errno = EINVAL;
-			return -1;
+			h = g;
+			g = f;
+			f = e;
+			e = d + temp1;
+			d = c;
+			c = b;
+			b = a;
+			a = temp1 + temp2;
 		}
-		digest[output_length] = value;
+		state[0] += a;
+		state[1] += b;
+		state[2] += c;
+		state[3] += d;
+		state[4] += e;
+		state[5] += f;
+		state[6] += g;
+		state[7] += h;
+	}
+	for (i = 0; i < 8U; ++i) {
+		unsigned int byte;
+
+		for (byte = 0; byte < 4U; ++byte) {
+			unsigned int shift = 24U - byte * 8U;
+			unsigned char value = (unsigned char)(state[i] >> shift);
+
+			digest[(i * 4U + byte) * 2U] = hex_digits[value >> 4];
+			digest[(i * 4U + byte) * 2U + 1U] =
+				hex_digits[value & 0x0fU];
+		}
 	}
 	digest[64] = '\0';
+	#undef SWAPZ_ROTR32
 	return 0;
 }
 

@@ -3532,3 +3532,10 @@ qualification-evidence reader and lifecycle caller must prove that before
 creating or consuming the manifest. Public format entry points must validate
 NUL termination within each fixed-size field before using it in names or
 formatted records; do not scan beyond a caller-provided manifest structure.
+
+The userspace recovery code must calculate SHA-256 in process. Do not invoke a
+PATH-resolved or fixed-path hashing subprocess for the original header or
+qualification artifacts. Keep the implementation bounded and check padding
+length overflow before processing. Native tests must include the standard
+empty-input and `abc` vectors, a multi-block input with a known digest, and an
+oversize-length refusal that leaves the output digest untouched.

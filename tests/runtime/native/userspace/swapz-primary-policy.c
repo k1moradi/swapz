@@ -550,13 +550,26 @@ static void test_exact_block_read_helper(void)
 
 static void test_sha256_helper(void)
 {
+	static const unsigned char abc[] = "abc";
+	static const char abc_expected[] =
+		"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+	static const char empty_expected[] =
+		"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 	static const char expected[] =
 		"ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7";
 	unsigned char zeroes[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	char digest[65];
 
+	assert(swapz_primary_sha256(abc, sizeof(abc) - 1U, digest) == 0);
+	assert(!strcmp(digest, abc_expected));
+	assert(swapz_primary_sha256(abc, 0, digest) == 0);
+	assert(!strcmp(digest, empty_expected));
 	assert(swapz_primary_sha256(zeroes, sizeof(zeroes), digest) == 0);
 	assert(!strcmp(digest, expected));
+	memset(digest, 'x', sizeof(digest));
+	assert(swapz_primary_sha256(abc, SIZE_MAX, digest) < 0);
+	assert(errno == EOVERFLOW);
+	assert(digest[0] == 'x');
 }
 
 static void test_recovery_filesystem_policy(void)
