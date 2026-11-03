@@ -1383,6 +1383,242 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                 [["swapon", "--", supervisor.DEVICE_PATH]])
             released.assert_called_once()
 
+    def standalone_recovery_state(self, ops, *, stage):
+        return {
+            "schema": "swapz-live-swap-state-v1", "run_id": RUN_ID,
+            "stage": stage, "original_swapoff_complete": False,
+            "device": supervisor.DEVICE_PATH,
+            "major": supervisor.DEVICE_MAJOR, "minor": supervisor.DEVICE_MINOR,
+            "partuuid": supervisor.DEVICE_PARTUUID,
+            "size_bytes": supervisor.DEVICE_SIZE_BYTES,
+            "original_header_sha256": hashlib.sha256(ops.original).hexdigest(),
+            "swap_path": supervisor.DEVICE_PATH,
+            "swap_size_kib": supervisor.DEVICE_SIZE_BYTES // 1024 - 4,
+            "swap_priority": -1, "dm_name": None, "dm_uuid": None,
+            "active_mapper_swap": False, "module_loaded_by_process": False,
+        }
+
+    def run_standalone_recovery(self, state, ops):
+        """Run standalone recovery on a saved state and return what it recorded."""
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / f"swapz-live-{RUN_ID}"
+            state_dir.mkdir()
+            (state_dir / supervisor.STATE_NAME).write_text(json.dumps(state))
+            (state_dir / supervisor.BACKUP_NAME).write_bytes(ops.original)
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    supervisor, "ORIGINAL_HEADER_SHA256",
+                    hashlib.sha256(ops.original).hexdigest()))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_read_recovery_file",
+                    side_effect=lambda path, **_kw: Path(path).read_bytes()))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_validate_state"))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_assert_recovery_ownership", return_value=True))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_release_marker"))
+                try:
+                    outcome = supervisor.recover_state(
+                        state_dir, ops=ops)["status"]
+                except supervisor.LiveSwapError as exc:
+                    outcome = f"REFUSED: {exc}"
+            persisted = json.loads(
+                (state_dir / supervisor.STATE_NAME).read_text())
+            results_path = state_dir / supervisor.RESULTS_NAME
+            results = (json.loads(results_path.read_text())
+                       if results_path.exists() else {})
+        return outcome, persisted, results
+
+    def test_recovery_completes_after_orphaned_swapoff_finished_without_flag(self):
+        """A drain that finished before the flag was saved must not strand swap."""
+        ops = FakeOps()
+        ops.original_active = False
+        state = self.standalone_recovery_state(
+            ops, stage="ORIGINAL_SWAPOFF_PENDING")
+        outcome, persisted, _ = self.run_standalone_recovery(state, ops)
+        self.assertEqual(outcome, "COMPLETE")
+        self.assertEqual(persisted["stage"], "COMPLETE")
+        self.assertTrue(ops.original_active)
+        self.assertEqual(
+            [call for call in ops.mutations if call[0] == "swapon"],
+            [["swapon", "--", supervisor.DEVICE_PATH]])
+
+    def test_recovery_refuses_while_original_swapoff_is_still_draining(self):
+        """A listed device with a live swapoff process has not finished draining."""
+        ops = FakeOps()
+        ops.swapoff_processes = lambda: [4242]
+        state = self.standalone_recovery_state(
+            ops, stage="ORIGINAL_SWAPOFF_PENDING")
+        outcome, persisted, results = self.run_standalone_recovery(state, ops)
+        self.assertIn("orphaned swapoff", outcome)
+        self.assertEqual(persisted["stage"], "RECOVERY_REQUIRED")
+        self.assertEqual(persisted["recovery_previous_stage"],
+                         "ORIGINAL_SWAPOFF_PENDING")
+        self.assertEqual(results["recovery_disposition"], "REQUIRES_REVIEW")
+        self.assertEqual(ops.mutations, [])
+
+    def test_recovery_refuses_when_drain_runs_after_listing_cleared(self):
+        ops = FakeOps()
+        ops.original_active = False
+        ops.swapoff_processes = lambda: [4242]
+        state = self.standalone_recovery_state(
+            ops, stage="ORIGINAL_SWAPOFF_PENDING")
+        outcome, persisted, _ = self.run_standalone_recovery(state, ops)
+        self.assertIn("orphaned swapoff", outcome)
+        self.assertEqual(persisted["stage"], "RECOVERY_REQUIRED")
+        self.assertEqual(ops.mutations, [])
+
+    def test_recovery_wrapper_does_not_hide_a_running_swapoff(self):
+        ops = FakeOps()
+        ops.swapoff_processes = lambda: [4242]
+        state = self.standalone_recovery_state(ops, stage="RECOVERY_REQUIRED")
+        state["recovery_previous_stage"] = "ORIGINAL_SWAPOFF_PENDING"
+        outcome, _, _ = self.run_standalone_recovery(state, ops)
+        self.assertIn("orphaned swapoff", outcome)
+        self.assertEqual(ops.mutations, [])
+
+    def test_reconcile_refuses_while_mapper_swapoff_is_draining(self):
+        ops = FakeOps()
+        ops.swapoff_processes = lambda: [4242]
+        state = {"run_id": RUN_ID, "stage": "MAPPER_SWAPOFF_PENDING",
+                 "active_mapper_swap": True, "original_swapoff_complete": True,
+                 "dm_name": "swapz-live-0123456789abcdef",
+                 "dm_uuid": "SWAPZ-LIVE-0123456789abcdef",
+                 "major": supervisor.DEVICE_MAJOR,
+                 "minor": supervisor.DEVICE_MINOR}
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(supervisor.LiveSwapError,
+                                        "orphaned swapoff"):
+                supervisor._reconcile_trial_state(Path(directory), state, ops)
+        self.assertTrue(state["active_mapper_swap"])
+
+    def test_zeroed_block_zero_completes_a_retried_header_restore(self):
+        """A restore that stopped before its checked write must remain retryable."""
+        ops = FakeOps()
+        ops.original_active = False
+        ops.header = bytes(supervisor.PAGE_BYTES)
+        state = self.standalone_recovery_state(
+            ops, stage="HEADER_RESTORE_PENDING")
+        state["original_swapoff_complete"] = True
+        outcome, persisted, _ = self.run_standalone_recovery(state, ops)
+        self.assertEqual(outcome, "COMPLETE")
+        self.assertEqual(persisted["stage"], "COMPLETE")
+        self.assertEqual(ops.header, ops.original)
+        self.assertEqual(
+            [call for call in ops.mutations if call[0] == "swapon"],
+            [["swapon", "--", supervisor.DEVICE_PATH]])
+
+    def test_torn_header_refusal_is_recorded_as_requires_review(self):
+        ops = FakeOps()
+        ops.header = b"?" * supervisor.PAGE_BYTES
+        state = self.standalone_recovery_state(ops, stage="LIVE_SWAP_ACTIVE")
+        outcome, persisted, results = self.run_standalone_recovery(state, ops)
+        self.assertIn("ambiguous or torn", outcome)
+        self.assertEqual(persisted["stage"], "RECOVERY_REQUIRED")
+        self.assertEqual(persisted["recovery_previous_stage"], "LIVE_SWAP_ACTIVE")
+        self.assertEqual(results["recovery_disposition"], "REQUIRES_REVIEW")
+        self.assertEqual(ops.mutations, [])
+
+    def test_swapoff_scan_fails_closed_on_unreadable_process_entry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc = Path(directory)
+            (proc / "100" / "cmdline").mkdir(parents=True)
+            (proc / "200").mkdir()
+            (proc / "300").mkdir()
+            (proc / "300" / "cmdline").write_bytes(b"swapoff\0--\0/dev/sda4\0")
+            (proc / "400").mkdir()
+            (proc / "400" / "cmdline").write_bytes(b"bash\0-c\0true\0")
+            (proc / "self").mkdir()
+            with mock.patch.object(supervisor, "PROC_ROOT", proc):
+                with self.assertRaisesRegex(supervisor.LiveSwapError,
+                                            "cannot read"):
+                    supervisor.LinuxOps().swapoff_processes()
+                (proc / "100" / "cmdline").rmdir()
+                self.assertEqual(supervisor.LinuxOps().swapoff_processes(), [300])
+
+    def test_restored_original_completes_after_crash_before_restored_flag(self):
+        """A swapon that ran before a crash must not block the recovery after it."""
+        ops = FakeOps()
+        state = self.standalone_recovery_state(
+            ops, stage="ORIGINAL_SWAPON_PENDING")
+        state["original_swapoff_complete"] = True
+        outcome, persisted, _ = self.run_standalone_recovery(state, ops)
+        self.assertEqual(outcome, "COMPLETE")
+        self.assertEqual(persisted["stage"], "COMPLETE")
+        self.assertEqual(
+            [call for call in ops.mutations if call[0] == "swapon"], [])
+
+    def test_crash_before_original_swapon_still_restores_the_original(self):
+        ops = FakeOps()
+        ops.original_active = False
+        state = self.standalone_recovery_state(
+            ops, stage="ORIGINAL_SWAPON_PENDING")
+        state["original_swapoff_complete"] = True
+        outcome, _, _ = self.run_standalone_recovery(state, ops)
+        self.assertEqual(outcome, "COMPLETE")
+        self.assertEqual(
+            [call for call in ops.mutations if call[0] == "swapon"],
+            [["swapon", "--", supervisor.DEVICE_PATH]])
+
+    def test_completed_state_keeps_its_stage_when_the_header_is_later_torn(self):
+        ops = FakeOps()
+        ops.header = b"?" * supervisor.PAGE_BYTES
+        state = self.standalone_recovery_state(ops, stage="COMPLETE")
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / f"swapz-live-{RUN_ID}"
+            state_dir.mkdir()
+            (state_dir / supervisor.STATE_NAME).write_text(json.dumps(state))
+            (state_dir / supervisor.BACKUP_NAME).write_bytes(ops.original)
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    supervisor, "ORIGINAL_HEADER_SHA256",
+                    hashlib.sha256(ops.original).hexdigest()))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_read_recovery_file",
+                    side_effect=lambda path, **_kw: Path(path).read_bytes()))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_validate_state"))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_assert_recovery_ownership", return_value=False))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_release_marker"))
+                with self.assertRaisesRegex(supervisor.LiveSwapError,
+                                            "ambiguous or torn"):
+                    supervisor.recover_state(state_dir, ops=ops)
+                saved = json.loads((state_dir / supervisor.STATE_NAME).read_text())
+                self.assertEqual(saved["stage"], "COMPLETE")
+                ops.header = ops.original
+                result = supervisor.recover_state(state_dir, ops=ops)
+        self.assertEqual(result["status"], "COMPLETE")
+
+    def test_substituted_block_identity_refusal_is_recorded_as_requires_review(self):
+        ops = FakeOps()
+        ops.target_valid = False
+        state = self.standalone_recovery_state(ops, stage="LIVE_SWAP_ACTIVE")
+        outcome, persisted, results = self.run_standalone_recovery(state, ops)
+        self.assertIn("substituted", outcome)
+        self.assertEqual(persisted["stage"], "RECOVERY_REQUIRED")
+        self.assertEqual(results["recovery_disposition"], "REQUIRES_REVIEW")
+        self.assertEqual(ops.mutations, [])
+
+    def test_swapoff_scan_skips_a_process_reaped_during_the_read(self):
+        class ReapedEntry:
+            name = "500"
+
+            def __truediv__(self, _part):
+                return self
+
+            def read_bytes(self):
+                raise ProcessLookupError(3, "No such process")
+
+        class FakeProc:
+            def iterdir(self):
+                return [ReapedEntry()]
+
+        with mock.patch.object(supervisor, "PROC_ROOT", FakeProc()):
+            self.assertEqual(supervisor.LinuxOps().swapoff_processes(), [])
+
     def test_header_recovery_rejects_cyclic_or_missing_stage_provenance(self):
         header = b"S" * supervisor.PAGE_BYTES
         state = {

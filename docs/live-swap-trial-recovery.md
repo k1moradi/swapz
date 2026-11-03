@@ -1,6 +1,6 @@
 # Experimental live-swap trial and recovery
 
-**Status: owner-waived, one bounded trial authorized; not a production deployment.**
+**Status: the one owner-waived trial ran on 2026-11-02 and passed. Its approval is consumed, no further trial is authorized, and this is not a production deployment.**
 `LIVE_SWAP_EXECUTION_ENABLED` is true in the commit that carries this text. Each
 `run` still needs a one-use approval record bound to that exact commit, to both
 current CI workflows, to the qualified artifact hashes and to the live target.
@@ -46,7 +46,7 @@ endurance measurement or performance claims.
 
 After the baseline observation, the coordinator starts one child process inside
 a new cgroup v2 directory with `memory.max` set to 128 MiB. The child fills a
-320 MiB working set of 80,000 pages. Each page is 4 KiB, derived from the run ID
+312.5 MiB (320,000 KiB) working set of 80,000 pages. Each page is 4 KiB, derived from the run ID
 with SHAKE-256, and incompressible. It then reads every page back and compares
 it byte for byte. The cgroup limit forces the kernel to swap pages out to the
 swapz mapper and to swap them back in.
@@ -99,6 +99,13 @@ Both modes require the owner's authorization text. The waiver covers only the
 external-review step for this one trial. It does not authorize later trials,
 boot integration or production use.
 
+The approval record is an operator-supplied file. The pins, the one-use consumed
+record and the GitHub CI query stop stale, altered or repeated use. They do not
+authenticate the person who wrote the record. Any process with root on this host
+can write a record that matches every pin, so the approval is an operator control
+on this host, not a cryptographic authorization. A signed approval would need a
+key that root on this host cannot read or replace.
+
 ## Durable state
 
 All state lives under `/var/lib/swapz/physical-recovery/swapz-live-<run_id>/`
@@ -148,10 +155,20 @@ A live mapper may hold the only readable copy of swapped pages.
 
 Before any cleanup step, the coordinator reconciles its persisted flags with the
 kernel's tables. A mapper that is gone is recorded as gone. A live mapper whose
-flag was never set is treated as live, so it is drained. The original swap is
-treated as already off only when it is inactive, its stage was
-`ORIGINAL_SWAPOFF_PENDING`, and no `swapoff` process is still running. Any
-refusal is recorded as `REQUIRES_REVIEW` in the state and the results.
+flag was never set is treated as live, so it is drained. The stage is read past
+the recovery wrappers, so a retry sees the stage that was interrupted. While any
+`swapoff` process runs in `ORIGINAL_SWAPOFF_PENDING` or `MAPPER_SWAPOFF_PENDING`,
+reconciliation refuses, even if `/proc/swaps` still lists the device, because a
+listed device does not show that a drain has ended. The scan reads `/proc` as
+root and refuses on any unreadable entry. A `hidepid` mount would hide some
+processes from it; this host mounts `/proc` without `hidepid`. Once no `swapoff` process
+runs, the original swap is treated as already off only when it is inactive and
+its stage was `ORIGINAL_SWAPOFF_PENDING`. Any refusal is recorded as
+`REQUIRES_REVIEW` in the state and the results, except on a COMPLETE state, which
+keeps its stage so a repaired host can be re-confirmed. A refusal raised before the first
+swap, mapper or module command leaves them untouched. A refusal later in cleanup
+can follow commands that already ran, so check `/proc/swaps`, the mapper and the
+module before acting. Rerun `recover` after the `swapoff` process exits.
 
 After a cold boot the former mapper and module are gone. `/dev/sda4` may still
 hold a zeroed, SWZ-formatted or torn header. The fstab swap entry for that
@@ -171,7 +188,7 @@ provenance fails closed.
 
 ## Validation completed
 
-Rootless tests (`tests/runtime/native/live-swap-supervisor-test.py`, 59 tests)
+Rootless tests (`tests/runtime/native/live-swap-supervisor-test.py`, 72 tests)
 cover the capacity arithmetic against the kernel formula; drain and memory
 gates; the approval modes and exact bindings; the plan gates, including the
 no-fallback requirement; the exact mutation allowlist; mapper observation and
@@ -183,6 +200,37 @@ ambiguous and torn headers; standalone recovery; reconciliation of persisted
 flags with the kernel's swap and mapper tables (a vanished mapper, a live mapper
 whose flag was never set, an orphaned swapoff); recorded REQUIRES_REVIEW for
 recovery refusals; the CI query and its exact allowlist; the approval digest
-pin; and the isolated-session mutation runner. These tests use mocks and
+pin; stage resolution past the recovery wrappers and the refusal while a
+swapoff drains; the zeroed block-zero restore retry; the recorded torn-header
+refusal; the fail-closed process scan; the restored-original recovery after a
+crash; the completed-state refusal that keeps its stage; the recorded
+block-identity refusal; a process reaped during the scan; and the
+isolated-session mutation runner. These tests use mocks and
 a temporary cgroup root. They do not exercise the kernel, real `swapon`, real
 cgroup reclaim, a true cold boot or a physical trial.
+
+## Physical trial record
+
+Run `ace87d53cfeaa856d043dd44fd7fc29c` used the owner waiver on commit
+`c85a1d7b`. It ran once, consumed its approval, and ended with `PASS` from
+`_trial_outcome`: `stop_reason` `duration_complete` and
+`actual_swap_io_observed` true. It ran from 22:16:13Z to 22:46:13Z, 1,800
+seconds. Before the original swapoff, `/dev/sda4` held 2,433,500 KiB of swapped
+pages, which the swapoff returned to RAM.
+
+- Swap-pressure check: 80,000 of 80,000 pages verified, zero mismatches, exit
+  status 0, no OOM kill, zswap maximum 0, mapper peak 320,076 KiB and swap peak
+  327,761,920 bytes. Kernel `pswpout` rose by 80,020 and `pswpin` by 81,869.
+  `dmsetup` logical writes rose by 327,761,920 bytes and logical reads by
+  335,335,424 bytes. The lower device's write sectors rose by 640,088.
+- All 306 observation samples read zero mapper use. The pages were released
+  when the pressure child exited, so the mapper-use evidence is the peak sampled
+  during the check.
+- Restoration, verified read-only afterwards: state `COMPLETE`; header SHA-256
+  equal to the original `ace016a7…`; `/proc/swaps` lists only `/dev/sda4`, at
+  priority -1 and size 16,777,212 KiB; no mapper; `dm_swapz` unloaded by the
+  owner process; the active marker removed; the consumed record kept.
+
+This is one bounded run. It shows nothing about sustained garbage collection,
+power-loss recovery, boot integration or capacity fill, and it is not evidence
+of production readiness.

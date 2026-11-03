@@ -160,6 +160,8 @@ OWNER_WAIVER_TEXT = (
     "I waive the separate external-review requirement for this one no-fallback "
     "live-swap trial only. This is an owner decision, not a reviewer approval."
 )
+PROC_ROOT = Path("/proc")
+SWAPOFF_STAGES = {"ORIGINAL_SWAPOFF_PENDING", "MAPPER_SWAPOFF_PENDING"}
 RECOVERY_RECOGNIZED_STAGES = {
     "ORIGINAL_SWAPOFF_PENDING", "ORIGINAL_SWAP_OFF",
     "HEADER_CLEAR_PENDING", "HEADER_CLEARED", "FORMAT_PENDING",
@@ -997,15 +999,22 @@ class LinuxOps:
         return True
 
     def swapoff_processes(self):
-        """Pids whose command is swapoff, so recovery never races a live swapoff."""
+        """Pids whose command is swapoff, so recovery never races a live swapoff.
+
+        A process that exits during the scan is skipped. Any other read failure
+        is an error: an entry that cannot be read could be a live swapoff.
+        """
         found = []
-        for entry in Path("/proc").iterdir():
+        for entry in PROC_ROOT.iterdir():
             if not entry.name.isdigit():
                 continue
             try:
                 argv = (entry / "cmdline").read_bytes().split(b"\0")
-            except OSError:
+            except (FileNotFoundError, ProcessLookupError):
                 continue
+            except OSError as exc:
+                raise LiveSwapError(
+                    f"cannot read {entry.name}/cmdline; manual review") from exc
             if argv and argv[0] and \
                     Path(argv[0].decode("utf-8", "replace")).name == "swapoff":
                 found.append(int(entry.name))
@@ -1067,8 +1076,14 @@ def _reconcile_trial_state(state_dir, state, ops):
 
     The mapper flag is set only after a successful post-swapon check, so a
     failed check or a crash can leave it false while the mapper is live, or
-    true after the mapper vanished. The kernel's tables decide.
+    true after the mapper vanished. The kernel's tables decide. A device that
+    is still listed may be draining, so no swapoff process may run in a swapoff
+    stage, whether or not the listing still shows the device.
     """
+    stage = _resolved_stage(state)
+    if stage in SWAPOFF_STAGES and ops.swapoff_processes():
+        raise LiveSwapError(
+            "an orphaned swapoff is still running; manual review")
     rows = _mapper_rows_for_state(ops, state)
     if not rows:
         state["active_mapper_swap"] = False
@@ -1077,25 +1092,26 @@ def _reconcile_trial_state(state_dir, state, ops):
         state["dm_major"], state["dm_minor"] = dm_major, dm_minor
         state["active_mapper_swap"] = \
             ops.active_swap_for(dm_major, dm_minor) is not None
-    if state.get("stage") == "ORIGINAL_SWAPOFF_PENDING" and \
+    if stage == "ORIGINAL_SWAPOFF_PENDING" and \
             not state.get("original_swapoff_complete") and \
             ops.active_swap_for(state["major"], state["minor"]) is None:
-        if ops.swapoff_processes():
-            raise LiveSwapError(
-                "an orphaned swapoff is still running; manual review")
         state["original_swapoff_complete"] = True
     _save_state(state_dir, state)
 
 
 def _verify_trial_swap_inventory(ops, state):
+    original = {f"block:{DEVICE_MAJOR}:{DEVICE_MINOR}"}
     if state.get("active_mapper_swap"):
-        expected = {f"block:{state['dm_major']}:{state['dm_minor']}"}
+        allowed = [{f"block:{state['dm_major']}:{state['dm_minor']}"}]
     elif state.get("original_swap_restored") or \
             not state.get("original_swapoff_complete"):
-        expected = {f"block:{DEVICE_MAJOR}:{DEVICE_MINOR}"}
+        allowed = [original]
+    elif _resolved_stage(state) == "ORIGINAL_SWAPON_PENDING":
+        # A crash can fall before or after the swapon; both outcomes are valid.
+        allowed = [set(), original]
     else:
-        expected = set()
-    if _observed_swap_identities(ops) != expected:
+        allowed = [set()]
+    if _observed_swap_identities(ops) not in allowed:
         raise LiveSwapError("live swap inventory differs from the sole owned swap area")
     return True
 
@@ -2231,15 +2247,14 @@ def _activate_trial(state_dir, state, results, target, snapshots, ops,
     _transition(state_dir, state, "TRIAL_STOPPING", results)
 
 
-def _recognized_current_header(header, state):
-    digest = hashlib.sha256(header).hexdigest()
-    if digest == state["original_header_sha256"]:
-        return "ORIGINAL"
+def _resolved_stage(state):
+    """The stage recovery reasons about, past the durable wrappers.
+
+    Standalone recovery can re-enter cleanup after RECOVERY_REQUIRED, and the
+    cleanup entry records TRIAL_STOPPING over that wrapper. Missing or cyclic
+    provenance raises, so no caller acts on a guessed stage.
+    """
     stage = state.get("stage")
-    # Standalone recovery can re-enter cleanup after RECOVERY_REQUIRED.
-    # The cleanup entry records TRIAL_STOPPING over that wrapper. Resolve both
-    # durable wrappers without allowing missing or cyclic provenance to
-    # authorize any physical block-zero write.
     visited_stages = set()
     while stage in {"RECOVERY_REQUIRED", "TRIAL_STOPPING"}:
         if stage in visited_stages:
@@ -2251,8 +2266,19 @@ def _recognized_current_header(header, state):
         stage = state.get(previous_stage_key)
     if not isinstance(stage, str):
         raise LiveSwapError("saved recovery stage provenance is ambiguous")
-    if stage in {"HEADER_CLEAR_PENDING", "HEADER_CLEARED", "FORMAT_PENDING"} and \
-            header == bytes(PAGE_BYTES):
+    return stage
+
+
+def _recognized_current_header(header, state):
+    digest = hashlib.sha256(header).hexdigest()
+    if digest == state["original_header_sha256"]:
+        return "ORIGINAL"
+    stage = _resolved_stage(state)
+    # HEADER_RESTORE_PENDING is recorded before the checked restore write, so a
+    # zero page there is an interrupted restore that a retry must still finish.
+    zeroed_stages = {"HEADER_CLEAR_PENDING", "HEADER_CLEARED", "FORMAT_PENDING",
+                     "HEADER_RESTORE_PENDING"}
+    if stage in zeroed_stages and header == bytes(PAGE_BYTES):
         return "ZEROED"
     formatted_stages = {
         "FORMAT_PENDING", "SWZ_FORMATTED", "MODULE_LOAD_PENDING",
@@ -2425,8 +2451,19 @@ def _existing_results(state_dir, state):
 
 
 def _recovery_refusal(state_dir, state, message):
-    """Record REQUIRES_REVIEW for a refusal, so stranded swap is never silent."""
+    """Record REQUIRES_REVIEW for a refusal, so stranded swap is never silent.
+
+    A COMPLETE state keeps its stage, so a repaired host can still re-confirm
+    the completed restoration. The refusal is then recorded in the results only.
+    """
     error = LiveSwapError(message)
+    if state.get("stage") == "COMPLETE":
+        results = _existing_results(state_dir, state)
+        results["recovery_disposition"] = "REQUIRES_REVIEW"
+        results["recovery_error"] = _bounded(error)
+        results["end_timestamp"] = _utc_now()
+        _save_results(state_dir, results)
+        return error
     _record_recovery_required(
         state_dir, state, _existing_results(state_dir, state), error)
     return error
@@ -2444,9 +2481,13 @@ def recover_state(state_dir, *, ops=None, module_owned_by_process=False,
     _validate_state(state, backup, state_dir)
     marker_present = _assert_recovery_ownership(
         state, allow_released=state.get("stage") == "COMPLETE")
-    target = ops.target_descriptor(state)
-    kind = _recognized_current_header(target["header"], state)
-    if _mapper_rows_for_state(ops, state):
+    try:
+        target = ops.target_descriptor(state)
+        kind = _recognized_current_header(target["header"], state)
+        mapper_rows = _mapper_rows_for_state(ops, state)
+    except LiveSwapError as exc:
+        raise _recovery_refusal(state_dir, state, str(exc)) from exc
+    if mapper_rows:
         raise _recovery_refusal(
             state_dir, state,
             "mapper still exists; standalone recovery will not remove a live mapping")
