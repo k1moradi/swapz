@@ -2946,6 +2946,28 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(
             evidence.campaign_status("PASS", True, True, "STABLE"),
             "PASS")
+        capacity_pair = {
+            "workload": "sd-high-occupancy-churn",
+            "status": "PASS",
+            "excluded": False,
+            "swapz": {
+                "logical_pages": 27,
+                "resources": {
+                    "metadata_and_target_peak_ram_bytes": 8192,
+                },
+            },
+        }
+        self.assertEqual(
+            evidence.campaign_capacity_and_ram(
+                [capacity_pair], 27 * 4096 + 4096),
+            {
+                "page_bytes": 4096,
+                "logical_pages": 27,
+                "logical_capacity_bytes": 27 * 4096,
+                "peak_ram_bytes": 8192,
+            })
+        self.assertIsNone(
+            evidence.campaign_capacity_and_ram([capacity_pair], 4096))
 
         qualification_path = SCRIPT.with_name("qualification.py")
         qualification_spec = importlib.util.spec_from_file_location(
@@ -3081,6 +3103,7 @@ class PairReplayContract(unittest.TestCase):
                     summary_path, [pair_path])
             self.assertEqual(sealed["record_count"], 1)
             self.assertEqual(sealed["campaign_status"], "FAIL_OR_INCOMPLETE")
+            self.assertIsNone(sealed["capacity_and_ram"])
             self.assertTrue(sealed["source_consistent"])
             self.assertEqual(sealed["pair_source_shas"], [source_sha])
             self.assertEqual(

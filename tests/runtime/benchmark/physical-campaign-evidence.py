@@ -664,6 +664,42 @@ def artifact(path: Path, data: bytes) -> dict:
     }
 
 
+def campaign_capacity_and_ram(
+        pair_records: list[dict], target_device_bytes: int) -> dict | None:
+    """Seal maximum logical capacity and measured target RAM from sustained I/O."""
+    accepted = [
+        pair for pair in pair_records
+        if pair.get("workload") == "sd-high-occupancy-churn" and
+        pair.get("status") == "PASS" and pair.get("excluded") is False
+    ]
+    if (
+            len(accepted) != 1 or
+            type(target_device_bytes) is not int or
+            target_device_bytes <= 0):
+        return None
+    swapz = accepted[0].get("swapz")
+    if not isinstance(swapz, dict):
+        return None
+    logical_pages = swapz.get("logical_pages")
+    resources = swapz.get("resources")
+    peak_ram_bytes = (
+        resources.get("metadata_and_target_peak_ram_bytes")
+        if isinstance(resources, dict) else None)
+    if (
+            type(logical_pages) is not int or logical_pages <= 0 or
+            type(peak_ram_bytes) is not int or peak_ram_bytes <= 0):
+        return None
+    logical_capacity_bytes = logical_pages * 4096
+    if logical_capacity_bytes > target_device_bytes:
+        return None
+    return {
+        "page_bytes": 4096,
+        "logical_pages": logical_pages,
+        "logical_capacity_bytes": logical_capacity_bytes,
+        "peak_ram_bytes": peak_ram_bytes,
+    }
+
+
 def campaign_status(summary_status: str, source_consistent: bool,
                     protocol_v2: bool, stability_status: str,
                     target_consistent: bool = True) -> str:
@@ -800,11 +836,17 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         summary_source_sha == source_sha and pair_source_shas == [source_sha])
 
     stability = host_stability(before, after)
+    target_identity = physical_target_identity(before)
     target_binding = qualification_target_binding(summary, before)
+    capacity_and_ram = campaign_capacity_and_ram(
+        pair_records, target_identity["device_bytes"])
     summary_status = summary.get("status")
     sealed_status = campaign_status(
         summary_status, source_consistent, protocol_v2, stability["status"],
         target_binding["consistent"])
+    if sealed_status == "PASS" and capacity_and_ram is None:
+        raise ValueError(
+            "PASS campaign lacks exact maximum-capacity/peak-RAM evidence")
 
     return {
         "schema": CAMPAIGN_SCHEMA,
@@ -818,8 +860,9 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         "campaign_status": sealed_status,
         "qualification_status": summary_status,
         "evaluation_protocol": summary.get("evaluation_protocol"),
-        "target": physical_target_identity(before),
+        "target": target_identity,
         "qualification_target_binding": target_binding,
+        "capacity_and_ram": capacity_and_ram,
         "host_stability": stability,
         "admitted_device_boundary": {
             "before": admitted_device_boundary(before),

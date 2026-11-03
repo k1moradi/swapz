@@ -188,6 +188,12 @@ def physical_campaign_evidence(policy_raw):
                 "lower_major_minor": "8:1",
             },
         },
+        "capacity_and_ram": {
+            "page_bytes": 4096,
+            "logical_pages": 27080192,
+            "logical_capacity_bytes": 110920466432,
+            "peak_ram_bytes": 900000000,
+        },
         "host_stability": {
             "status": "STABLE",
             "checks": {
@@ -295,7 +301,8 @@ def current_evidence(
                 policy_sha256=policy_digest,
                 target=dict(TARGET),
                 logical_capacity_bytes=110920466432,
-                peak_ram_bytes=900000000),
+                peak_ram_bytes=900000000,
+                evidence_sha256=hashlib.sha256(campaign_raw).hexdigest()),
             "sustained_physical_performance": pass_record(
                 policy_sha256=policy_digest,
                 target=dict(TARGET),
@@ -554,6 +561,41 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "peak exceeds frozen limit" in blocker
             for blocker in result["code_blockers"]))
+
+    def test_capacity_and_ram_are_bound_to_sealed_campaign(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+
+        evidence["release_evidence"]["maximum_capacity_and_ram"][
+            "logical_capacity_bytes"] += 4096
+        mismatch = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(mismatch["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "sealed campaign measurement mismatch" in blocker
+            for blocker in mismatch["code_blockers"]))
+
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+        evidence["release_evidence"]["maximum_capacity_and_ram"][
+            "evidence_sha256"] = "8" * 64
+        digest_mismatch = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(
+            digest_mismatch["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "campaign evidence digest binding mismatch" in blocker
+            for blocker in digest_mismatch["code_blockers"]))
 
     def test_unresolved_critical_issue_blocks_code_readiness(self):
         report = owner_report()

@@ -386,6 +386,25 @@ def validate_physical_campaign_evidence(
         if observed != expected:
             reject("sealed campaign qualification target observations disagree")
 
+    capacity_and_ram = campaign.get("capacity_and_ram")
+    if not isinstance(capacity_and_ram, dict):
+        reject("sealed campaign capacity/RAM evidence is missing")
+    else:
+        page_bytes = capacity_and_ram.get("page_bytes")
+        logical_pages = capacity_and_ram.get("logical_pages")
+        logical_capacity_bytes = capacity_and_ram.get(
+            "logical_capacity_bytes")
+        peak_ram_bytes = capacity_and_ram.get("peak_ram_bytes")
+        if (
+                page_bytes != 4096 or
+                type(logical_pages) is not int or logical_pages <= 0 or
+                type(logical_capacity_bytes) is not int or
+                logical_capacity_bytes <= 0 or
+                logical_capacity_bytes != logical_pages * 4096 or
+                target is None or logical_capacity_bytes > target[1] or
+                type(peak_ram_bytes) is not int or peak_ram_bytes <= 0):
+            reject("sealed campaign capacity/RAM evidence is invalid")
+
     stability = campaign.get("host_stability")
     if not isinstance(stability, dict) or stability.get("status") != "STABLE":
         reject("sealed campaign host stability is not STABLE")
@@ -713,6 +732,24 @@ def evaluate_release(
             block_code("maximum_capacity_and_ram: peak RAM is invalid")
         elif peak_ram_limit is not None and peak > peak_ram_limit:
             block_code("maximum_capacity_and_ram: measured peak exceeds frozen limit")
+        if (
+                physical_campaign_evidence is None or
+                physical_campaign_evidence_raw is None):
+            block_code(
+                "maximum_capacity_and_ram: persistent campaign evidence is missing")
+        else:
+            if capacity.get("evidence_sha256") != sha256_bytes(
+                    physical_campaign_evidence_raw):
+                block_code(
+                    "maximum_capacity_and_ram: campaign evidence digest binding mismatch")
+            sealed_capacity = physical_campaign_evidence.get(
+                "capacity_and_ram")
+            if (
+                    not isinstance(sealed_capacity, dict) or
+                    logical != sealed_capacity.get("logical_capacity_bytes") or
+                    peak != sealed_capacity.get("peak_ram_bytes")):
+                block_code(
+                    "maximum_capacity_and_ram: sealed campaign measurement mismatch")
 
     physical = pass_record("sustained_physical_performance")
     require_target("sustained_physical_performance", physical)
