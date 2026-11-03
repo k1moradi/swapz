@@ -855,6 +855,7 @@ def synthetic_log():
            "PASS_LOADED_COMPLETION_HANDOFF=offloaded:4 verified_pages:128 completed_writes:16512 active_after:0 fault_offloaded:2 fault_injected:1 post_failure_eio:1",
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 syscall_errno:EIO lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
+           "PASS_LOADED_CODEC_ERROR_PATHS=owners:3 injected:3 inline_lower_write_delta:0 submitter_lower_write_delta:0 background_error_completions:8",
            "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
            "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa partuuid:01234567-89abcdef device:251:1 prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-starting",
@@ -3073,6 +3074,37 @@ class ReportContract(unittest.TestCase):
                               stage["failed_phase"])
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
+
+    def test_loaded_codec_error_owner_paths_are_required_and_fail_closed(self):
+        marker = (
+            "PASS_LOADED_CODEC_ERROR_PATHS=owners:3 injected:3 "
+            "inline_lower_write_delta:0 submitter_lower_write_delta:0 "
+            "background_error_completions:8")
+        output = synthetic_log()
+        evidence = runner.parse_loaded_correctness(output)
+        self.assertEqual(evidence["overall"], "PASS", evidence)
+        self.assertEqual(evidence["codec_error_owners"], 3)
+        self.assertEqual(evidence["codec_error_injected"], 3)
+        self.assertEqual(evidence["codec_inline_lower_write_delta"], 0)
+        self.assertEqual(evidence["codec_submitter_lower_write_delta"], 0)
+        self.assertGreater(evidence["codec_background_error_completions"], 0)
+
+        missing = runner.parse_loaded_correctness(output.replace(marker, "", 1))
+        self.assertEqual(missing["overall"], "INCOMPLETE")
+        self.assertIn("codec_errors", missing["reason"])
+
+        for before, after in (
+                ("owners:3", "owners:2"),
+                ("injected:3", "injected:2"),
+                ("inline_lower_write_delta:0", "inline_lower_write_delta:8"),
+                ("submitter_lower_write_delta:0",
+                 "submitter_lower_write_delta:8"),
+                ("background_error_completions:8",
+                 "background_error_completions:0")):
+            bad = runner.parse_loaded_correctness(
+                output.replace(marker, marker.replace(before, after), 1))
+            self.assertEqual(bad["overall"], "INCOMPLETE")
+            self.assertIn("codec-error", bad["reason"])
 
     def test_id36_resource_pressure_is_required_and_fail_closed(self):
         evidence = runner.parse_loaded_correctness(synthetic_log())

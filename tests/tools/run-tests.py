@@ -1596,6 +1596,11 @@ def parse_loaded_correctness(output):
         "flush_fault": re.compile(
             r"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:(\d+) "
             r"injected:(\d+) data_write_reached_lower:(\d+)$"),
+        "codec_errors": re.compile(
+            r"PASS_LOADED_CODEC_ERROR_PATHS=owners:(\d+) injected:(\d+) "
+            r"inline_lower_write_delta:(\d+) "
+            r"submitter_lower_write_delta:(\d+) "
+            r"background_error_completions:(\d+)$"),
         "id36": re.compile(
             r"PASS_ID36_RESOURCE_PRESSURE=memory_high_events:(\d+) "
             r"memory_peak_bytes:(\d+) cpu_some_usec:(\d+) "
@@ -1707,6 +1712,9 @@ def parse_loaded_correctness(output):
      completion_terminal_eio) = found["completion_handoff"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
+    (codec_error_owners, codec_error_injected, codec_inline_lower_delta,
+     codec_submitter_lower_delta,
+     codec_background_error_completions) = found["codec_errors"]
     (id36_high_events, id36_peak_bytes, id36_cpu_some_usec,
      id36_cpu_workers, id36_pressure_mib, id36_oom,
      id36_oom_kill) = found["id36"]
@@ -1775,6 +1783,12 @@ def parse_loaded_correctness(output):
     if flush_retain != 2 or flush_injected != 1 or flush_data_lower != 1:
         return {"overall": "INCOMPLETE",
                 "reason": "synthetic retained FLUSH fault contract failed"}
+    if (codec_error_owners != 3 or codec_error_injected != 3 or
+            codec_inline_lower_delta != 0 or
+            codec_submitter_lower_delta != 0 or
+            codec_background_error_completions <= 0):
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded codec-error owner-path evidence is incomplete"}
     if (id36_high_events <= 0 or id36_peak_bytes <
             id36_pressure_mib * 1024 * 1024 or
             id36_cpu_some_usec <= 0 or id36_cpu_workers < 2 or
@@ -1863,6 +1877,12 @@ def parse_loaded_correctness(output):
         "completion_fault_offloaded_batches": completion_fault_batches,
         "retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
         "retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
+        "codec_error_owners": codec_error_owners,
+        "codec_error_injected": codec_error_injected,
+        "codec_inline_lower_write_delta": codec_inline_lower_delta,
+        "codec_submitter_lower_write_delta": codec_submitter_lower_delta,
+        "codec_background_error_completions":
+            codec_background_error_completions,
         "id36_memory_high_events": id36_high_events,
         "id36_memory_peak_bytes": id36_peak_bytes,
         "id36_cpu_some_usec": id36_cpu_some_usec,
@@ -1997,6 +2017,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = "owned RAM packed placement verification"
             elif line.startswith("START_LOADED_COMPLETION_HANDOFF"):
                 phase = "owned RAM published completion handoff/drain/failure"
+            elif line.startswith("START_LOADED_CODEC_ERROR_PATHS"):
+                phase = "owned RAM codec-error owner paths"
             elif (match := re.fullmatch(
                     r"START_LOADED_PRIMARY_NULLBLK_LIFECYCLE="
                     r"(setup|prepare|start|stop)", line)):
