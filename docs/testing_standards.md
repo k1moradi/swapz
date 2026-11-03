@@ -4639,8 +4639,15 @@ artifact evidence, and installed artifact identity must match those exact
 digests. Real-swap, maximum-capacity/RAM and sustained-physical PASS evidence
 must bind the SHA-256 of the exact current `FROZEN`
 `docs/production-acceptance.json`; changing that policy invalidates those
-physical PASS observations until they are requalified. A retained old host
-snapshot must be labeled HISTORICAL and cannot become a current release verdict.
+physical PASS observations until they are requalified. Current release evidence
+must also include one canonical authorized-target identity consisting of the
+normalized lowercase PARTUUID and exact partition byte size. Real-swap,
+maximum-capacity/RAM, sustained-physical, lifecycle/deployment, armed cold-boot
+and owner-observed reboot PASS records must bind that same tuple. Runtime
+major:minor is deliberately excluded because it may change across attachment or
+boot; this cross-binding is a consistency check and does not claim PARTUUID plus
+size is cryptographic or physical-card uniqueness. A retained old host snapshot
+must be labeled HISTORICAL and cannot become a current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
 
