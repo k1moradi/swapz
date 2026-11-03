@@ -68,7 +68,7 @@ static int test_designated_partition_maximum_capacity(void)
 	const swapz_u32 expected_logical_pages = 3727872U;
 	const swapz_u32 expected_reserve_blocks = 465984U;
 	const swapz_u32 expected_segments = 16383U;
-	const swapz_u64 expected_index_bytes = 120470752ULL;
+	const swapz_u64 expected_index_bytes = 132398304ULL;
 	const swapz_u32 total_blocks =
 		(swapz_u32)(partition_bytes / SWAPZ_BLOCK_BYTES);
 	const swapz_u32 physical_blocks =

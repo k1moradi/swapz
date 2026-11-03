@@ -322,8 +322,8 @@ with its two-segment minimum. It must reject the first page beyond the maximum,
 initialize the maximum, attach every capacity-dependent production authority
 array, and calculate those array bytes from the compiled C types. For the
 current geometry this is 4,194,048 usable physical blocks, 3,727,872 logical
-pages (15,269,363,712 mapper bytes), 465,984 reserve blocks, and 120,470,752
-bytes (114.89 MiB) of capacity-index arrays. The last figure excludes the
+pages (15,269,363,712 mapper bytes), 465,984 reserve blocks, and 132,398,304
+bytes (126.26 MiB) of capacity-index arrays. The last figure excludes the
 target structure, fixed scratch/cache/workspace allocations, and allocator
 overhead; it is not a total module-RAM measurement. Native authority success
 does not prove that the loaded Device Mapper target can allocate or operate at

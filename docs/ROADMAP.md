@@ -1305,7 +1305,7 @@ blocks remain. With the current `ceil(logical_pages / 8)` reserve rule, the
 largest admitted logical target is 3,727,872 pages: 15,269,363,712 mapper bytes
 and 14,911,484 KiB of Linux-usable swap after its first header page. The
 authority reserves 465,984 blocks (1,908,678,144 bytes) for GC. Capacity-index
-arrays are 120,470,752 bytes (114.89 MiB), excluding fixed caches, scratch,
+arrays are 132,398,304 bytes (126.26 MiB), excluding fixed caches, scratch,
 worker state and allocator overhead. The native boundary regression now passes
 through production authority C, including rejection of the next page and
 initialization of all capacity-dependent authority arrays. This does not
