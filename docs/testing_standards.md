@@ -4968,9 +4968,19 @@ formatter/module/oracle hashes for owner, real-swap and installed-artifact
 evidence, and requires owned-null_blk lifecycle evidence to carry an exact-source
 PASS result, a valid retained evidence digest, and production-matching module and
 oracle hashes while allowing its private test-seam formatter hash to differ.
-Current PASS physical records bind
-the normalized lowercase PARTUUID plus exact partition byte size and the frozen
-policy SHA-256. Full-capacity evidence must include measured positive logical
+A synthesized `real_linux_swap: PASS` record is never sufficient: code
+readiness must also ingest the strict crash-persistent
+`swapz-primary-real-swap-evidence-v1` file emitted by the physical helper,
+SHA-256 bind those exact evidence bytes from the release record, require final
+PASS/COMPLETE disposition, and independently validate its nested
+`swapz-primary-real-swap-v1` result. Envelope and nested result must agree on
+exact release source, frozen policy digest, owner-report digest, qualified
+installed artifact hashes, current source-controlled helper/oracle digests,
+valid private execution-control digest, frozen workload/cycle values, distinct
+transaction run IDs and Linux swap UUIDs, and durable COMPLETE for every
+required cycle. Missing persistent physical evidence is BLOCKED.
+Current PASS physical records bind the normalized lowercase PARTUUID plus exact
+partition byte size and the frozen policy SHA-256. Full-capacity evidence must include measured positive logical
 capacity and measured peak target/metadata RAM no greater than the frozen
 `metadata_and_target_peak_ram_bytes_max`. Current code readiness also requires
 zero explicitly recorded unresolved critical correctness/ownership/race issues.
