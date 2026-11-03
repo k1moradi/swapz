@@ -5005,3 +5005,9 @@ payload characters so uppercase `PARTUUID=` syntax cannot bypass stable-identity
 comparison.
 
 Loaded lifecycle summary counts must be emitted from the validated parsed evidence rather than duplicated numeric constants; when the negative-recovery matrix grows, the parser must validate the new count and report that parsed count so report regressions cannot silently lag the qualification contract.
+
+Lifecycle release-report parsing must derive or explicitly synchronize displayed
+negative-case totals with the qualification marker contract. When the null-block
+negative-recovery suite grows, update parser counters and rendered-report
+assertions in the same change so a green qualifier cannot be hidden by stale
+summary metadata.
