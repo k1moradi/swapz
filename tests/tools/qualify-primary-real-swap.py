@@ -1237,17 +1237,26 @@ def _remove_cgroup(cgroup: Path) -> None:
 
 def _terminate_child(process: subprocess.Popen[str], cgroup: Path) -> None:
     if process.poll() is None:
-        process.send_signal(signal.SIGTERM)
+        try:
+            process.send_signal(signal.SIGTERM)
+        except ProcessLookupError:
+            # The oracle may exit between poll() and signal delivery.
+            pass
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
             process.wait(timeout=5)
-    # The helper has exactly one child process and no grandchildren.
+    # Two independent oracles share this cgroup: wait only for this child.
+    # The final _remove_cgroup() independently requires every worker gone.
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         try:
-            if not (cgroup / "cgroup.procs").read_text(encoding="ascii").strip():
+            if str(process.pid) not in (cgroup / "cgroup.procs").read_text(
+                    encoding="ascii").split():
                 return
         except OSError:
             return

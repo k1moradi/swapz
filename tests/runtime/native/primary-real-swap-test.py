@@ -525,6 +525,29 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with self.assertRaisesRegex(qualify.QualificationFailure, "identity changed"):
             qualify.evaluate_stop_samples(samples)
 
+    def test_oracle_cleanup_handles_exit_races_without_waiting_for_other_workers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            (cgroup / "cgroup.procs").write_text("567\n", encoding="ascii")
+            process = mock.Mock(pid=123)
+            process.poll.return_value = None
+            process.send_signal.side_effect = ProcessLookupError()
+            process.wait.return_value = 0
+            with mock.patch.object(qualify.time, "sleep",
+                                   side_effect=AssertionError("waited for unrelated worker")):
+                qualify._terminate_child(process, cgroup)
+            process.wait.assert_called_once_with(timeout=5)
+
+            timed_out = mock.Mock(pid=234)
+            timed_out.poll.return_value = None
+            timed_out.wait.side_effect = [
+                __import__("subprocess").TimeoutExpired("oracle", 5), 0]
+            timed_out.kill.side_effect = ProcessLookupError()
+            with mock.patch.object(qualify.time, "sleep",
+                                   side_effect=AssertionError("waited for unrelated worker")):
+                qualify._terminate_child(timed_out, cgroup)
+            self.assertEqual(timed_out.wait.call_count, 2)
+
     def test_definite_primary_stop_failure_is_not_masked_by_sampler_blocked(self):
         manifest = {"run_id": "1" * 32}
         active = {"mapper_device": (252, 1), "mapper_uuid": "SWAPZ-PRIMARY-" + "1" * 32,

@@ -160,7 +160,11 @@ regressing stable observations cannot qualify even if all states appear.
 Disappearance while still in the known swap inventory is FAIL. A definite stop/`swapoff` failure is FAIL and cannot
 be masked by sampling uncertainty. If correct teardown is too fast to prove
 the inactive-before-remove interval independently, the result is BLOCKED, not
-PASS. No force cleanup is allowed, including error paths.
+PASS. No force cleanup is allowed, including error paths. Oracle-child
+termination may use bounded TERM/KILL for the dedicated test processes only;
+signal-delivery exit races must not mask the underlying qualification failure,
+and one worker's cleanup must not wait for the other worker to leave the shared
+cgroup. Removal of the dedicated cgroup still requires every worker exited.
 
 At least two passing cycles require new run IDs and Linux swap UUIDs, zero
 initial mapper usage, no stale mapper/module/ownership state, durable
