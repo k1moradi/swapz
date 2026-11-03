@@ -1524,6 +1524,7 @@ static int format_opened_verify(int fd, const char *path,
 	struct stat partuuid_info;
 	unsigned long long opened_bytes = 0;
 	dev_t parent_device;
+	int opened_read_only = 0;
 
 	if (fd < 0 || !path || !expected) {
 		errno = EINVAL;
@@ -1533,9 +1534,14 @@ static int format_opened_verify(int fd, const char *path,
 	    fstat(fd, &opened_info) < 0 ||
 	    format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0 ||
 	    ioctl(fd, BLKGETSIZE64, &opened_bytes) < 0 ||
+	    ioctl(fd, BLKROGET, &opened_read_only) < 0 ||
 	    format_verify_parent_topology(opened_info.st_rdev, expected,
 					  &parent_device) < 0)
 		return -1;
+	if (opened_read_only) {
+		errno = EROFS;
+		return -1;
+	}
 	if (!format_identity_values_match(expected, &path_info, &opened_info,
 					  &partuuid_info, opened_bytes,
 					  parent_device)) {
@@ -1653,6 +1659,13 @@ static void format_report_refusal(const char *stage, int error)
 		strerror(error ? error : EPERM));
 }
 
+static void format_report_uncertain(const char *stage, int error)
+{
+	fprintf(stderr,
+		"swapzctl format: UNCERTAIN: %s: %s; RECOVERY REQUIRED before retry\n",
+		stage, strerror(error ? error : EIO));
+}
+
 static int format_authorized_opened_verify(
 	const struct format_runtime_ops *ops, int fd, const char *path,
 	const struct format_expectation *expected)
@@ -1669,6 +1682,7 @@ static int format_device_with_ops(
 	unsigned char block[SWAPZ_SUPERBLOCK_BYTES];
 	unsigned char readback[SWAPZ_SUPERBLOCK_BYTES];
 	int already_formatted = 0;
+	int publication_attempted = 0;
 	int fd = -1;
 	int result = 1;
 	int saved_errno;
@@ -1723,7 +1737,8 @@ static int format_device_with_ops(
 	}
 	if (!block_is_zero(block)) {
 		fputs("swapzctl format: REFUSED: block 0 is neither zero nor a valid "
-		      "SWZ authorization header\n", stderr);
+		      "SWZ authorization header; RECOVERY REQUIRED before retry\n",
+		      stderr);
 		result = 2;
 		goto close_error;
 	}
@@ -1764,44 +1779,62 @@ static int format_device_with_ops(
 		result = 2;
 		goto close_error;
 	}
+	publication_attempted = 1;
 	if (ops->write_header(ops->context, fd, block) < 0) {
-		perror("swapzctl format: write header");
+		saved_errno = errno;
+		format_report_uncertain("header write did not complete",
+					saved_errno);
+		result = 3;
 		goto close_error;
 	}
 	if (ops->sync_device(ops->context, fd) < 0) {
-		perror("swapzctl format: fsync header");
+		saved_errno = errno;
+		format_report_uncertain("header durability is not proven",
+					saved_errno);
+		result = 3;
 		goto close_error;
 	}
 	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 		saved_errno = errno;
-		fprintf(stderr,
-			"swapzctl format: ERROR: target identity became uncertain "
-			"after header write: %s\n",
-			strerror(saved_errno ? saved_errno : ESTALE));
+		format_report_uncertain(
+			"target identity became uncertain after header write",
+			saved_errno);
+		result = 3;
 		goto close_error;
 	}
 	if (ops->read_header(ops->context, fd, readback) < 0) {
-		perror("swapzctl format: reread header");
+		saved_errno = errno;
+		format_report_uncertain("header readback could not be verified",
+					saved_errno);
+		result = 3;
 		goto close_error;
 	}
 	if (memcmp(readback, block, sizeof(block)) ||
 	    !swapz_sb_valid(readback, expected->device_bytes)) {
-		fputs("swapzctl format: ERROR: SWZ header readback mismatch\n",
-		      stderr);
 		errno = EIO;
+		format_report_uncertain("SWZ header readback mismatch", errno);
+		result = 3;
 		goto close_error;
 	}
 	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 		saved_errno = errno;
-		fprintf(stderr,
-			"swapzctl format: ERROR: target identity changed after "
-			"header verification: %s\n",
-			strerror(saved_errno ? saved_errno : ESTALE));
+		format_report_uncertain(
+			"target identity changed after header verification",
+			saved_errno);
+		result = 3;
 		goto close_error;
 	}
 
 close_success:
 	if (ops->close_device(ops->context, fd) < 0) {
+		saved_errno = errno;
+		if (publication_attempted) {
+			format_report_uncertain(
+				"device close failed after verified header publication",
+				saved_errno);
+			return 3;
+		}
+		errno = saved_errno;
 		perror("swapzctl format: close");
 		return 1;
 	}

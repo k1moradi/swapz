@@ -272,8 +272,10 @@ After that read-only preflight, open the requested path exactly once with
 `O_RDWR | O_EXCL | O_CLOEXEC`. The opened descriptor is the I/O authority.
 Before reading block zero, require `fstat()` on that same descriptor plus a
 fresh path/PARTUUID-alias/sysfs/topology/mount/swap snapshot to match the
-expected device, parent and exact `BLKGETSIZE64` byte count. Geometry must be
-4KiB aligned and large enough for the authorization header plus minimum data.
+expected device, parent and exact `BLKGETSIZE64` byte count. The same opened
+descriptor must report `BLKROGET == 0`; a read-only transition is an identity/
+state failure, not an invitation to try another path. Geometry must be 4KiB
+aligned and large enough for the authorization header plus minimum data.
 Revalidate that same complete opened-descriptor identity immediately before the
 only destructive operation, so a replaced symlink, stale alias, changed
 PARTUUID, changed geometry, new holder/mount/swap use, parent substitution or
@@ -291,14 +293,40 @@ with RFC-4122 version/variant bits, leaves all reserved bytes zero, and must pas
 
 A new format attempts exactly one 4096-byte header `pwrite()` at offset zero
 and then an `fsync()`; it never resumes a short successful write, retries an
-interrupted write or issues DISCARD/TRIM. A short write means the header may
-be torn and needs explicit recovery. The standalone formatter never creates a
-mapper or activates swap. After the write it revalidates device
-identity, rereads the entire header, requires byte-for-byte equality and full
-SWZ validation, then revalidates identity once more before close. A short read,
-write, fsync failure, close failure, post-write identity uncertainty or
-disappearance is not success. A partially written/unrecognized header is not
-silently retried.
+interrupted write or issues DISCARD/TRIM. The write is not assumed atomic.
+Once the publication call has been issued, a failed/short write, fsync failure,
+post-write transport/identity/readback failure, or close failure is reported as
+`UNCERTAIN` with process status 3 and requires explicit recovery before retry.
+Status 2 remains a pre-publication refusal and status 1 is reserved for
+operational errors where no header publication was attempted. The standalone
+formatter never creates a mapper or activates swap. After a successful write it
+revalidates device identity, rereads the entire header, requires byte-for-byte
+equality and full SWZ validation, then revalidates identity once more before
+close. A partially written or otherwise unrecognized nonzero header is a
+recovery condition and is never silently retried.
+
+The observable identity bundle does not prove physical-card uniqueness when a
+USB reader does not expose a stable card CID. PARTUUID, path, major:minor,
+capacity, reader model/transport and any reader serial are consistency signals;
+a substituted or exact-cloned card can reproduce some or all of them. The
+current SWZ UUID cannot be repurposed as a stable per-card token because the
+primary lifecycle deliberately derives that field from each transaction run ID.
+A future unpredictable per-card token plus protected off-card binding would
+improve accidental-substitution resistance only if it has a dedicated stable
+on-card location that lifecycle formatting never rewrites; an exact clone can
+still copy such a token. Until that coordinated format/lifecycle design exists,
+the enforceable policy is the complete descriptor/topology/configuration proof
+above, fail-closed on any uncertainty, with no claim of cryptographic or
+physical uniqueness.
+
+The primary manager must use the same structural PARTUUID grammar as the
+standalone formatter: 8..64 characters, at least eight hexadecimal digits,
+single internal hyphens only, no leading/trailing/consecutive hyphen, ASCII
+hexadecimal only, and canonical lowercase output. Do not specialize this to the
+current MBR-style `8hex-2hex` value because GPT PARTUUIDs remain valid inputs.
+Its configuration parser, sysfs matcher and systemd-unit derivation must share
+that validator/normalizer. Weak strings such as all hyphens, leading/trailing
+hyphens or repeated hyphens must fail before target discovery.
 
 The privileged primary lifecycle is a separate authority domain. It selects a
 target from protected configuration, owns transaction state and may perform

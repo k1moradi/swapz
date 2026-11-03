@@ -191,6 +191,11 @@ static int mock_write_header(
 	assert(fd == 17);
 	context->write_calls++;
 	if (context->write_error) {
+		/*
+		 * Model a transport failure after a possible torn publication:
+		 * callers must not infer "no bytes written" from an error return.
+		 */
+		memcpy(context->media, block, sizeof(context->media) / 2U);
 		errno = context->write_error;
 		return -1;
 	}
@@ -588,6 +593,55 @@ static void test_device_disappearance_before_write_refuses(void)
 	assert(context.close_calls == 1U);
 }
 
+static void test_read_only_transition_before_write_refuses(void)
+{
+	struct format_expectation expected = authorized_expectation();
+	struct mock_format_context context = {
+		.verify_errors = { 0, EROFS },
+		.verify_error_count = 2U,
+	};
+	struct format_runtime_ops ops = mock_ops(&context);
+
+	assert(format_device_with_ops("/synthetic/card", &expected, &ops) == 2);
+	assert(context.read_calls == 1U);
+	assert(context.write_calls == 0U);
+	assert(context.sync_calls == 0U);
+	assert(context.close_calls == 1U);
+}
+
+static void test_publication_failures_are_explicitly_uncertain(void)
+{
+	struct format_expectation expected = authorized_expectation();
+	struct mock_format_context write_context = { .write_error = EIO };
+	struct format_runtime_ops write_ops = mock_ops(&write_context);
+	struct mock_format_context sync_context = { .sync_error = EIO };
+	struct format_runtime_ops sync_ops = mock_ops(&sync_context);
+	struct mock_format_context close_context = { .close_error = EIO };
+	struct format_runtime_ops close_ops = mock_ops(&close_context);
+
+	assert(format_device_with_ops("/synthetic/card", &expected,
+				      &write_ops) == 3);
+	assert(write_context.write_calls == 1U);
+	assert(write_context.sync_calls == 0U);
+	assert(!block_is_zero(write_context.media));
+	assert(!swapz_sb_valid(write_context.media, expected.device_bytes));
+	assert(write_context.close_calls == 1U);
+
+	assert(format_device_with_ops("/synthetic/card", &expected,
+				      &sync_ops) == 3);
+	assert(sync_context.write_calls == 1U);
+	assert(sync_context.sync_calls == 1U);
+	assert(swapz_sb_valid(sync_context.media, expected.device_bytes));
+	assert(sync_context.close_calls == 1U);
+
+	assert(format_device_with_ops("/synthetic/card", &expected,
+				      &close_ops) == 3);
+	assert(close_context.write_calls == 1U);
+	assert(close_context.sync_calls == 1U);
+	assert(swapz_sb_valid(close_context.media, expected.device_bytes));
+	assert(close_context.close_calls == 1U);
+}
+
 static void test_zero_header_format_and_readback(void)
 {
 	struct format_expectation expected = authorized_expectation();
@@ -644,7 +698,7 @@ static void test_disappearance_after_write_is_never_success(void)
 	};
 	struct format_runtime_ops ops = mock_ops(&context);
 
-	assert(format_device_with_ops("/synthetic/card", &expected, &ops) == 1);
+	assert(format_device_with_ops("/synthetic/card", &expected, &ops) == 3);
 	assert(context.write_calls == 1U);
 	assert(context.sync_calls == 1U);
 	assert(context.read_calls == 1U);
@@ -700,6 +754,8 @@ int main(void)
 	test_invalid_header_refuses_without_write();
 	test_stale_identity_refuses_at_last_prewrite_gate();
 	test_device_disappearance_before_write_refuses();
+	test_read_only_transition_before_write_refuses();
+	test_publication_failures_are_explicitly_uncertain();
 	test_zero_header_format_and_readback();
 	test_repeat_format_is_idempotent_and_non_destructive();
 	test_disappearance_after_write_is_never_success();

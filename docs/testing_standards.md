@@ -3034,23 +3034,36 @@ dedicated `/dev/sda1` card. Its device-identity, provenance and fail-closed
 techniques remain useful patterns.
 Rootless qualification must exercise the production formatter decision path
 with synthetic descriptor/kernel operations and identity tables. It must cover
-malformed PARTUUIDs and numeric overflow, replaced path/PARTUUID aliases, wrong
-opened device, wrong parent or geometry, non-removable/held topology, missing
-sole-partition status, parent-model/USB-transport mismatch, invalid SWZ
-UUID/reserved bytes, stale identity immediately before the write, truncated
-reads, unexpected permissions, and device disappearance before and after the
-write. For every ownership/identity uncertainty before publication, the test
+malformed PARTUUIDs and numeric overflow, copied cloneable identifiers with a
+different opened device/parent, replaced path/PARTUUID aliases, wrong opened
+device, wrong parent or geometry, a changed major:minor after reconnection,
+non-removable/held topology, missing sole-partition status,
+parent-model/USB-transport mismatch, an opened descriptor that becomes
+read-only, invalid SWZ UUID/reserved bytes, stale identity immediately before
+the write, truncated reads, unexpected permissions, USB/transport-style I/O
+failure, and device disappearance before and after the write. For every ownership/identity uncertainty before publication, the test
 must count zero destructive header writes. Rootless mocks must cover protected
 root-owned selector absence, mismatched PARTUUID, permission denial, and selector
 revocation at the last prewrite gate; these checks must precede any read-write
 device open or write. It must also prove exact valid-header repeat formatting
 performs no write, zero-header initialization attempts exactly one header
-`pwrite()`, a partial `pwrite()` is not resumed, post-write
-readback/identity failures are never reported as success, and the standalone
-formatter contains no DISCARD/TRIM behavior. Source contracts
+`pwrite()`, a partial `pwrite()` is not resumed, and every failure after the
+publication call is issued has the explicit status-3 `UNCERTAIN`/recovery
+disposition rather than being reported as an ordinary no-write failure.
+Post-write readback/identity failures are never success, unknown nonzero block
+zero remains a recovery condition, and the standalone formatter contains no
+DISCARD/TRIM behavior. A focused removable-media identity binary must cover
+copied identifiers, alias replacement, parent/geometry drift, holder/activity
+conflicts and reconnection repinning without opening any host block device. Source contracts
 continue to verify the kernel opt-in superblock gate, reserved data offset, and
 exclusion of block 0 from all data/discard paths. Exact-current-main must still
 pass ordinary `make test` before any physical-media evidence is considered.
+
+The primary manager's PARTUUID direct-C tests must reject all-hyphen,
+leading/trailing-hyphen and consecutive-hyphen values, require at least eight
+hexadecimal digits, preserve GPT-style hyphenated values, and prove canonical
+lowercase normalization. This is a Codex-owned integration requirement; the
+standalone formatter tests do not authorize edits to primary-manager source.
 
 The standalone CLI requires the complete partition/PARTUUID/geometry/removable-
 parent identity bundle documented in coding_standards.md. The older private
