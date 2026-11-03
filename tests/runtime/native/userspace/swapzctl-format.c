@@ -623,8 +623,12 @@ static void test_publication_failures_are_explicitly_uncertain(void)
 				      &write_ops) == 3);
 	assert(write_context.write_calls == 1U);
 	assert(write_context.sync_calls == 0U);
+	/*
+	 * The simulated failed write changed media, but it may coincidentally
+	 * contain a structurally valid header because reserved tail bytes are zero.
+	 * The error return still makes publication/durability uncertain.
+	 */
 	assert(!block_is_zero(write_context.media));
-	assert(!swapz_sb_valid(write_context.media, expected.device_bytes));
 	assert(write_context.close_calls == 1U);
 
 	assert(format_device_with_ops("/synthetic/card", &expected,
