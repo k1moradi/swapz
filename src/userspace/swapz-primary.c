@@ -522,43 +522,64 @@ int swapz_primary_run_id_generate(
 	return 0;
 }
 
-int swapz_primary_partuuid_valid(const char *partuuid)
-{
-	size_t length;
-	size_t i;
-
-	if (!partuuid)
-		return 0;
-	length = strnlen(partuuid, SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U);
-	if (length < 8U || length > SWAPZ_PRIMARY_PARTUUID_LENGTH)
-		return 0;
-	for (i = 0; i < length; ++i) {
-		unsigned char ch = (unsigned char)partuuid[i];
-
-		if (!((ch >= '0' && ch <= '9') ||
-		      (ch >= 'a' && ch <= 'f') ||
-		      (ch >= 'A' && ch <= 'F') || ch == '-'))
-			return 0;
-	}
-	return 1;
-}
-
 static int swapz_primary_partuuid_normalize(
 	const char *partuuid,
 	char normalized[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
 {
+	char candidate[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	size_t hex_digits = 0;
 	size_t length;
 	size_t i;
+	int previous_hyphen = 0;
 
-	if (!normalized || !swapz_primary_partuuid_valid(partuuid)) {
+	if (!normalized) {
 		errno = EINVAL;
 		return -1;
 	}
-	length = strlen(partuuid);
-	for (i = 0; i < length; ++i)
-		normalized[i] = (char)tolower((unsigned char)partuuid[i]);
-	normalized[length] = '\0';
+	normalized[0] = '\0';
+	if (!partuuid) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = strnlen(partuuid, SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U);
+	if (length < 8U || length > SWAPZ_PRIMARY_PARTUUID_LENGTH) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (i = 0; i < length; ++i) {
+		unsigned char ch = (unsigned char)partuuid[i];
+		int is_hex = (ch >= '0' && ch <= '9') ||
+			     (ch >= 'a' && ch <= 'f') ||
+			     (ch >= 'A' && ch <= 'F');
+
+		if (is_hex) {
+			candidate[i] = (char)tolower(ch);
+			++hex_digits;
+			previous_hyphen = 0;
+			continue;
+		}
+		if (ch != '-' || i == 0U || i + 1U == length ||
+		    previous_hyphen) {
+			errno = EINVAL;
+			return -1;
+		}
+		candidate[i] = '-';
+		previous_hyphen = 1;
+	}
+	if (hex_digits < 8U) {
+		errno = EINVAL;
+		return -1;
+	}
+	candidate[length] = '\0';
+	memcpy(normalized, candidate, length + 1U);
 	return 0;
+}
+
+int swapz_primary_partuuid_valid(const char *partuuid)
+{
+	char normalized[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+
+	return swapz_primary_partuuid_normalize(partuuid, normalized) == 0;
 }
 
 static int swapz_primary_target_valid(
@@ -622,7 +643,6 @@ int swapz_primary_target_config_parse(
 	char normalized[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
 	size_t prefix_length = sizeof(prefix) - 1U;
 	size_t value_length;
-	size_t i;
 
 	if (!record || !partuuid || length <= prefix_length + 1U ||
 	    length > prefix_length + SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U ||
@@ -637,17 +657,7 @@ int swapz_primary_target_config_parse(
 		errno = EINVAL;
 		return -1;
 	}
-	for (i = 0; i < value_length; ++i) {
-		unsigned char ch = (unsigned char)record[prefix_length + i];
-
-		if (!((ch >= '0' && ch <= '9') ||
-		      (ch >= 'a' && ch <= 'f') ||
-		      (ch >= 'A' && ch <= 'F') || ch == '-')) {
-			errno = EINVAL;
-			return -1;
-		}
-		parsed[i] = (char)tolower(ch);
-	}
+	memcpy(parsed, record + prefix_length, value_length);
 	parsed[value_length] = '\0';
 	if (swapz_primary_partuuid_normalize(parsed, normalized) < 0) {
 		errno = EINVAL;

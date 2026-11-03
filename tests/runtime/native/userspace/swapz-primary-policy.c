@@ -52,6 +52,90 @@ static void assert_primary_state_equals(
 	assert_record_equals(directory_fd, "primary-state.json", record);
 }
 
+static void test_partuuid_validation_and_normalization(void)
+{
+	static const char *const invalid_partuuids[] = {
+		"--------",
+		"-f13428f6",
+		"f13428f6-",
+		"f13428f6--01",
+		"1234567",
+		"1234-567",
+		"1234567g",
+		"not-a-partuuid",
+	};
+	static const char uppercase_mbr[] = "7FB9401D-04";
+	static const char uppercase_gpt[] = "550E8400-E29B-41D4-A716-446655440000";
+	static const char canonical_gpt[] = "550e8400-e29b-41d4-a716-446655440000";
+	char normalized[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char parsed[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char overlength[SWAPZ_PRIMARY_PARTUUID_LENGTH + 2U];
+	char device_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
+	char swap_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
+	char record[sizeof("PARTUUID=") + SWAPZ_PRIMARY_PARTUUID_LENGTH + 2U];
+	size_t index;
+	int length;
+
+	for (index = 0;
+	     index < sizeof(invalid_partuuids) / sizeof(invalid_partuuids[0]);
+	     ++index) {
+		memset(normalized, 'x', sizeof(normalized));
+		errno = 0;
+		assert(!swapz_primary_partuuid_valid(invalid_partuuids[index]));
+		assert(swapz_primary_partuuid_normalize(
+			       invalid_partuuids[index], normalized) < 0);
+		assert(errno == EINVAL && normalized[0] == '\0');
+
+		memset(parsed, 'x', sizeof(parsed));
+		length = snprintf(record, sizeof(record), "PARTUUID=%s\n",
+				  invalid_partuuids[index]);
+		assert(length > 0 && (size_t)length < sizeof(record));
+		errno = 0;
+		assert(swapz_primary_target_config_parse(
+			       record, (size_t)length, parsed) < 0);
+		assert(errno == EINVAL && parsed[0] == '\0');
+	}
+
+	memset(overlength, 'a', sizeof(overlength) - 1U);
+	overlength[sizeof(overlength) - 1U] = '\0';
+	assert(!swapz_primary_partuuid_valid(overlength));
+	assert(swapz_primary_partuuid_normalize(overlength, normalized) < 0);
+	assert(errno == EINVAL && normalized[0] == '\0');
+
+	assert(swapz_primary_partuuid_valid("01234567"));
+	assert(swapz_primary_partuuid_normalize(
+		       uppercase_mbr, normalized) == 0);
+	assert(!strcmp(normalized, "7fb9401d-04"));
+	assert(swapz_primary_partuuid_normalize(
+		       uppercase_gpt, normalized) == 0);
+	assert(!strcmp(normalized, canonical_gpt));
+
+	length = snprintf(record, sizeof(record), "PARTUUID=%s\n",
+			  uppercase_gpt);
+	assert(length > 0 && (size_t)length < sizeof(record));
+	assert(swapz_primary_target_config_parse(
+		       record, (size_t)length, parsed) == 0);
+	assert(!strcmp(parsed, canonical_gpt));
+
+	assert(swapz_primary_systemd_target_units(
+		       uppercase_gpt, device_unit, swap_unit) == 0);
+	assert(!strcmp(
+		device_unit,
+		"dev-disk-by\\x2dpartuuid-550e8400\\x2de29b\\x2d41d4"
+		"\\x2da716\\x2d446655440000.device"));
+	assert(!strcmp(
+		swap_unit,
+		"dev-disk-by\\x2dpartuuid-550e8400\\x2de29b\\x2d41d4"
+		"\\x2da716\\x2d446655440000.swap"));
+
+	memset(device_unit, 'x', sizeof(device_unit));
+	memset(swap_unit, 'x', sizeof(swap_unit));
+	assert(swapz_primary_systemd_target_units(
+		       "f13428f6--01", device_unit, swap_unit) < 0);
+	assert(errno == EINVAL);
+	assert(device_unit[0] == '\0' && swap_unit[0] == '\0');
+}
+
 static void test_recovery_required_state_builder(void)
 {
 	const char *run_id = "0123456789abcdef0123456789abcdef";
@@ -511,7 +595,6 @@ static void test_target_config_and_dynamic_geometry(void)
 	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
 	char device_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
 	char swap_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX];
-	char overlong_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
 	char table[128];
 	char mapper_name[64];
 	char mapper_uuid[64];
@@ -538,12 +621,6 @@ static void test_target_config_and_dynamic_geometry(void)
 		       "dev-disk-by\\x2dpartuuid-9abc8def\\x2d02.device"));
 	assert(swapz_primary_systemd_target_units(
 		"not-a-partuuid", device_unit, swap_unit) < 0);
-	assert(!device_unit[0] && !swap_unit[0]);
-	memset(overlong_partuuid, '-', SWAPZ_PRIMARY_PARTUUID_LENGTH);
-	overlong_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH] = '\0';
-	assert(swapz_primary_systemd_target_units(
-		overlong_partuuid, device_unit, swap_unit) < 0);
-	assert(errno == ENAMETOOLONG);
 	assert(!device_unit[0] && !swap_unit[0]);
 	assert(swapz_primary_target_valid(&alternate));
 	assert(swapz_primary_target_identity_equal(&alternate, &alternate));
@@ -2382,6 +2459,7 @@ int main(void)
 						 pages));
 	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						  pages + 1ULL));
+	test_partuuid_validation_and_normalization();
 	test_recovery_required_state_builder();
 	test_primary_swap_transition_adapter();
 	test_swap_inventory_parser();
