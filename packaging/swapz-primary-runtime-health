@@ -558,6 +558,9 @@ observe_runtime()
 	gc_victims=unavailable
 	gc_pages=unavailable
 	gc_no_headroom_skips=unavailable
+	gc_reserve_segments_initial=unavailable
+	gc_reserve_segments_current=unavailable
+	gc_destination_advances=unavailable
 	window_gc_pressure=unavailable
 	kernel_error_count=unavailable
 	kernel_error_latest=unavailable
@@ -612,7 +615,7 @@ observe_runtime()
 			append_reason observation_reasons mapper_table_unavailable
 		fi
 		if [ "$dm_status" != unavailable ]; then
-			for token in failed error flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err gc_victims gc_pages gc_no_headroom_skips window_gc_pressure; do
+			for token in failed error flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err gc_victims gc_pages gc_no_headroom_skips gc_reserve_segments_initial gc_reserve_segments_current gc_destination_advances window_gc_pressure; do
 				value=$(status_token "$token" "$dm_status")
 				[ -n "$value" ] || value=unavailable
 				case "$token" in
@@ -626,6 +629,9 @@ observe_runtime()
 				gc_victims) gc_victims=$value ;;
 				gc_pages) gc_pages=$value ;;
 				gc_no_headroom_skips) gc_no_headroom_skips=$value ;;
+				gc_reserve_segments_initial) gc_reserve_segments_initial=$value ;;
+				gc_reserve_segments_current) gc_reserve_segments_current=$value ;;
+				gc_destination_advances) gc_destination_advances=$value ;;
 				window_gc_pressure) window_gc_pressure=$value ;;
 				esac
 			done
@@ -640,6 +646,20 @@ observe_runtime()
 			[ "$upper_write_completed_err" = 0 ] || [ "$upper_write_completed_err" = unavailable ] || append_reason warning_reasons logical_write_errors
 			[ "$endio_write_seen_err" = 0 ] || [ "$endio_write_seen_err" = unavailable ] || append_reason warning_reasons endio_write_errors
 			[ "$endio_write_forced_err" = 0 ] || [ "$endio_write_forced_err" = unavailable ] || append_reason warning_reasons forced_endio_errors
+			if canonical_unsigned "$gc_reserve_segments_initial" 2>/dev/null &&
+			   canonical_unsigned "$gc_reserve_segments_current" 2>/dev/null &&
+			   canonical_unsigned "$gc_destination_advances" 2>/dev/null; then
+				if [ "$gc_reserve_segments_initial" -eq 0 ] ||
+				   [ "$gc_reserve_segments_current" -gt "$gc_reserve_segments_initial" ]; then
+					append_reason failure_reasons gc_reserve_role_count_invalid
+				elif [ "$gc_reserve_segments_current" -eq 0 ]; then
+					append_reason failure_reasons gc_reserve_exhausted
+				elif [ "$gc_reserve_segments_current" -lt "$gc_reserve_segments_initial" ]; then
+					append_reason warning_reasons gc_reserve_degraded
+				fi
+			else
+				append_reason observation_reasons gc_reserve_telemetry_unavailable
+			fi
 		else
 			append_reason observation_reasons mapper_status_unavailable
 		fi
@@ -706,12 +726,13 @@ EOF
 
 log_runtime_state()
 {
-	printf 'SWAPZ_RUNTIME_HEALTH=%s failures=%s warnings=%s observation_errors=%s partuuid=%s backing=%s mapper_uuid=%s swap_used_kib=%s swap_size_kib=%s swap_remaining_kib=%s swap_occupancy_percent=%s failed=%s first_error=%s flush_err=%s logical_write_err=%s endio_write_err=%s forced_endio_err=%s lower_discard_err=%s gc_victims=%s gc_pages=%s gc_stall_polls=%s mapper_unit=%s/%s/%s swap_unit=%s/%s/%s kernel_error_count=%s\n' \
+	printf 'SWAPZ_RUNTIME_HEALTH=%s failures=%s warnings=%s observation_errors=%s partuuid=%s backing=%s mapper_uuid=%s swap_used_kib=%s swap_size_kib=%s swap_remaining_kib=%s swap_occupancy_percent=%s failed=%s first_error=%s flush_err=%s logical_write_err=%s endio_write_err=%s forced_endio_err=%s lower_discard_err=%s gc_victims=%s gc_pages=%s gc_reserve_segments_initial=%s gc_reserve_segments_current=%s gc_destination_advances=%s gc_stall_polls=%s mapper_unit=%s/%s/%s swap_unit=%s/%s/%s kernel_error_count=%s\n' \
 		"$health_state" "${failure_reasons:-none}" "${warning_reasons:-none}" "${observation_reasons:-none}" \
 		"$selected_partuuid" "$selected_major_minor" "$dm_uuid" "$swap_used_kib" "$swap_size_kib" \
 		"$swap_remaining_kib" "$swap_occupancy_percent" "$failed" "$first_error" "$flush_err" \
 		"$upper_write_completed_err" "$endio_write_seen_err" "$endio_write_forced_err" \
-		"$segment_discards_failed" "$gc_victims" "$gc_pages" "$gc_stall_polls" \
+		"$segment_discards_failed" "$gc_victims" "$gc_pages" \
+		"$gc_reserve_segments_initial" "$gc_reserve_segments_current" "$gc_destination_advances" "$gc_stall_polls" \
 		"$mapper_active" "$mapper_sub" "$mapper_result" "$swap_unit_active" "$swap_unit_sub" "$swap_unit_result" \
 		"$kernel_error_count" >&2
 	if [ "$kernel_error_latest" != unavailable ] && [ "$kernel_error_latest" != "${previous_kernel_error_latest:-unavailable}" ]; then
@@ -782,7 +803,7 @@ monitor_loop()
 		else
 			capacity_bucket=normal
 		fi
-		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count
+		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count
 		if [ "$signature" != "$previous_signature" ]; then
 			log_runtime_state
 			previous_signature=$signature
