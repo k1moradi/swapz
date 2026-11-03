@@ -42,6 +42,7 @@ ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
 MAPPER_NAME = "swapz-primary"
 PAGE_BYTES = 4096
 MIB = 1024 * 1024
+SECTOR_BYTES = 512
 BLKGETSIZE64 = 0x80081272
 SWAP_MAGIC = b"SWAPSPACE2"
 SWAP_VERSION_OFFSET = 1024
@@ -392,6 +393,20 @@ def _row_for_device(rows: list[SwapRow], device: tuple[int, int]) -> SwapRow | N
     if len(matches) > 1:
         raise QualificationFailure(f"multiple /proc/swaps aliases resolve to {device[0]}:{device[1]}")
     return matches[0] if matches else None
+
+
+def require_no_conflicting_raw_swap_aliases(
+        rows: list[SwapRow], target_device: tuple[int, int],
+        parent_device: tuple[int, int]) -> None:
+    protected_devices = {
+        target_device: "raw backing partition",
+        parent_device: "physical parent disk",
+    }
+    for row in rows:
+        label = protected_devices.get(row.device)
+        if label is not None:
+            raise Blocked(
+                f"{label} is already active swap through alias {row.path}")
 
 
 def require_expected_swap_priority(expected: SwapRow, unrelated: list[SwapRow]) -> None:
@@ -804,7 +819,9 @@ def verify_acceptance_manifest(
         timeout_seconds=timeout_seconds)
 
 
-def verify_authorized_target(plan: dict, selector_partuuid: str) -> tuple[Path, tuple[int, int]]:
+def verify_authorized_target(
+        plan: dict, selector_partuuid: str,
+) -> tuple[Path, tuple[int, int], tuple[int, int]]:
     required_true = (
         "target_config_read", "target_device_preflight", "target_not_mounted",
         "target_device_chain_checked", "recovery_directory_safe",
@@ -870,7 +887,7 @@ def verify_authorized_target(plan: dict, selector_partuuid: str) -> tuple[Path, 
             raise Blocked("live target differs from committed authorized-target snapshot")
     except (KeyError, TypeError, ValueError) as exc:
         raise Blocked(f"committed authorized-target snapshot is malformed: {exc}") from exc
-    return target, (major, minor)
+    return target, (major, minor), (parent_major, parent_minor)
 
 
 def _kernel_log_snapshot() -> list[str]:
@@ -1003,7 +1020,9 @@ def _ensure_commands(names: tuple[str, ...]) -> None:
             raise Blocked(f"missing required command {name}")
 
 
-def _validate_precycle_state(partuuid: str, target_device: tuple[int, int], baseline: list[SwapRow]) -> None:
+def _validate_precycle_state(
+        partuuid: str, target_device: tuple[int, int],
+        parent_device: tuple[int, int], baseline: list[SwapRow]) -> None:
     state = read_state()
     if state is not None and state.get("stage") != "COMPLETE":
         raise Blocked(f"unresolved primary state {state.get('stage')}")
@@ -1012,8 +1031,8 @@ def _validate_precycle_state(partuuid: str, target_device: tuple[int, int], base
         raise Blocked("selected partition already has an active ownership marker")
     if _dm_identity() is not None:
         raise Blocked("primary mapper already exists before cycle")
-    if _row_for_device(baseline, target_device) is not None:
-        raise Blocked("raw backing partition is already active swap")
+    require_no_conflicting_raw_swap_aliases(
+        baseline, target_device, parent_device)
     if Path("/sys/module/dm_swapz").exists():
         raise Blocked("dm_swapz is already loaded before primary cycle")
 
@@ -1275,19 +1294,27 @@ def evaluate_workload_evidence(*, cgroup_swap_bytes: int, cgroup_swap_peak: int,
     if mapper_used_delta_kib * 1024 < min_swap_bytes:
         raise QualificationFailure("exact mapper /proc/swaps usage stayed below required real-swap floor")
     logical_write_delta = fill_status_after["logical_write"] - fill_status_before["logical_write"]
-    if logical_write_delta < min_swap_bytes or \
-            fill_status_after["physical_write"] <= fill_status_before["physical_write"]:
+    physical_write_delta = fill_status_after["physical_write"] - fill_status_before["physical_write"]
+    if logical_write_delta < min_swap_bytes or physical_write_delta <= 0:
         raise QualificationFailure("swapz target counters stay below required swap-out WRITE activity")
-    if lower_after_fill.write_sectors <= lower_before.write_sectors:
+    lower_write_sector_delta = lower_after_fill.write_sectors - lower_before.write_sectors
+    if lower_write_sector_delta <= 0:
         raise QualificationFailure("backing partition counters show no lower WRITE activity")
+    if lower_write_sector_delta * SECTOR_BYTES < physical_write_delta:
+        raise QualificationFailure(
+            "backing partition WRITE counters do not cover swapz target physical WRITE bytes")
     if vm_after_fill["pswpout"] <= vm_before["pswpout"]:
         raise QualificationFailure("kernel vmstat shows no swap-out during admitted workload")
     logical_read_delta = verify_status_after["logical_read"] - verify_status_before["logical_read"]
-    if logical_read_delta < min_swap_bytes or \
-            verify_status_after["physical_read"] <= verify_status_before["physical_read"]:
+    physical_read_delta = verify_status_after["physical_read"] - verify_status_before["physical_read"]
+    if logical_read_delta < min_swap_bytes or physical_read_delta <= 0:
         raise QualificationFailure("swapz target counters stay below required swap-in READ activity")
-    if lower_after_verify.read_sectors <= lower_before_verify.read_sectors:
+    lower_read_sector_delta = lower_after_verify.read_sectors - lower_before_verify.read_sectors
+    if lower_read_sector_delta <= 0:
         raise QualificationFailure("backing partition counters show no lower READ activity")
+    if lower_read_sector_delta * SECTOR_BYTES < physical_read_delta:
+        raise QualificationFailure(
+            "backing partition READ counters do not cover swapz target physical READ bytes")
     if vm_after_verify["pswpin"] <= vm_before_verify["pswpin"]:
         raise QualificationFailure("kernel vmstat shows no swap-in during byte verification")
     if expected_verified_pages <= 0 or \
@@ -1580,8 +1607,12 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                         verify_status_after["physical_read"] - verify_status_before["physical_read"],
                     "lower_write_sector_delta":
                         lower_after_fill.write_sectors - lower_before.write_sectors,
+                    "lower_write_bytes_delta":
+                        (lower_after_fill.write_sectors - lower_before.write_sectors) * SECTOR_BYTES,
                     "lower_read_sector_delta":
                         lower_after_verify.read_sectors - lower_before_verify.read_sectors,
+                    "lower_read_bytes_delta":
+                        (lower_after_verify.read_sectors - lower_before_verify.read_sectors) * SECTOR_BYTES,
                     "pswpout_delta": vm_after_fill["pswpout"] - vm_before["pswpout"],
                     "pswpin_delta": vm_after_verify["pswpin"] - vm_before_verify["pswpin"],
                     "oom_delta": oom_delta,
@@ -1624,8 +1655,12 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 int(result["swapz_physical_read_delta"]) for result in rounds),
             "lower_write_sector_delta": sum(
                 int(result["lower_write_sector_delta"]) for result in rounds),
+            "lower_write_bytes_delta": sum(
+                int(result["lower_write_bytes_delta"]) for result in rounds),
             "lower_read_sector_delta": sum(
                 int(result["lower_read_sector_delta"]) for result in rounds),
+            "lower_read_bytes_delta": sum(
+                int(result["lower_read_bytes_delta"]) for result in rounds),
             "pswpout_delta": sum(int(result["pswpout_delta"]) for result in rounds),
             "pswpin_delta": sum(int(result["pswpin_delta"]) for result in rounds),
             "oom_delta": events_after.get("oom", 0) - events_before.get("oom", 0),
@@ -1827,11 +1862,13 @@ def _normal_stop(swapzctl: Path, manifest: dict, active: dict | None,
 
 def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source: str,
               plan: dict, selector_partuuid: str, target_device: tuple[int, int],
+              target_parent_device: tuple[int, int],
               workload_mib: int, resident_mib: int, swap_limit_mib: int,
               timeout_seconds: int, prior_run_ids: set[str], prior_swap_uuids: set[str]) -> dict:
     baseline_rows = read_swap_rows()
     baseline_identity = _swap_identity(baseline_rows)
-    _validate_precycle_state(selector_partuuid, target_device, baseline_rows)
+    _validate_precycle_state(
+        selector_partuuid, target_device, target_parent_device, baseline_rows)
     kernel_before = _kernel_log_snapshot()
 
     prepared = _primary(swapzctl, "prepare", timeout_seconds, admitted=True)
@@ -1961,9 +1998,11 @@ def execute(arguments: argparse.Namespace) -> dict:
     artifact_hashes = verify_provenance(
         plan, arguments.validated_source, report_path, swapzctl)
     selector_partuuid = _read_selector()
-    _target_path, target_device = verify_authorized_target(plan, selector_partuuid)
+    _target_path, target_device, target_parent_device = verify_authorized_target(
+        plan, selector_partuuid)
     baseline = read_swap_rows()
-    _validate_precycle_state(selector_partuuid, target_device, baseline)
+    _validate_precycle_state(
+        selector_partuuid, target_device, target_parent_device, baseline)
     kernel_before = _kernel_log_snapshot()
     _reject_relevant_kernel_errors([])
 
@@ -2007,6 +2046,7 @@ def execute(arguments: argparse.Namespace) -> dict:
                 plan=plan,
                 selector_partuuid=selector_partuuid,
                 target_device=target_device,
+                target_parent_device=target_parent_device,
                 workload_mib=arguments.workload_mib,
                 resident_mib=arguments.resident_mib,
                 swap_limit_mib=arguments.swap_limit_mib,

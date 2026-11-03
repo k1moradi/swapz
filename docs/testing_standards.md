@@ -72,8 +72,8 @@ threshold change is an explicit source-controlled policy change rather than a
 runtime override.
 
 `tests/tools/qualify-primary-real-swap.py` is private Agent-8 test
-infrastructure, not a second public command; Agent 10 owns any eventual
-`make test` integration. It must BLOCK in GitHub-hosted CI and must never call
+infrastructure, not a second public command; Agent 12 owns registration in
+`tests/tools/test-rootless.sh` and the official test pipeline. It must BLOCK in GitHub-hosted CI and must never call
 `swapon`, `swapoff`, Device Mapper removal, forced module removal, or create
 fallback swap itself. Activation, deactivation, and recovery are requested only
 through the production primary coordinator.
@@ -85,8 +85,8 @@ selector; exact partition size and device number; the exact removable USB
 parent and its sole selected partition; explicit
 `root_same_physical_disk_as_target=false` and
 `recovery_same_physical_disk_as_target=false`; no unresolved primary
-transaction, mapper, module, or raw-target swap alias; at least 1 GiB
-`MemAvailable`; readable kernel diagnostics; and working cgroup-v2 memory,
+transaction, mapper, module, or raw swap alias resolving to either the selected
+partition or its physical parent disk; at least 1 GiB `MemAvailable`; readable kernel diagnostics; and working cgroup-v2 memory,
 swap, PSI, OOM, and zswap controls. A missing storage-separation fact is
 BLOCKED, not equivalent to false.
 
@@ -138,8 +138,10 @@ is BLOCKED.
 PASS requires actual reclaim and swap-in: at least 128 MiB cgroup swap
 occupancy, at least the same 128 MiB increase in exact-mapper `/proc/swaps`
 usage and swapz logical WRITE/READ counters, positive swapz physical WRITE and
-READ counters using the production `failed=` and signed `error=` status fields, backing-partition WRITE and READ sector deltas, positive
-`pswpout` and `pswpin`, zero OOM events, healthy target status, and
+READ counters using the production `failed=` and signed `error=` status fields, backing-partition WRITE and READ sector deltas whose 512-byte sector totals
+cover the corresponding swapz physical-byte deltas (merely positive unrelated
+device I/O is insufficient), positive `pswpout` and `pswpin`, zero OOM
+events, healthy target status, and
 byte-exact verification of exactly the admitted deterministic 4 KiB page
 count and byte count; a truncated oracle report cannot qualify. PSI and
 relevant kernel errors are recorded. Current-host evidence is mandatory; historical
@@ -160,8 +162,8 @@ proves the non-reboot fresh-volatile-mapping property; cold-boot observation is
 separate. `tests/runtime/native/primary-real-swap-test.py` provides rootless
 parser, identity/provenance, traffic, byte-oracle, stop-order, disposition, and
 cleanup mutants. `tests/tools/primary-real-swap-oracle.py` only allocates and
-verifies memory; it configures no swap or mapper state. These private files stay
-out of shared runner/CI wiring until Agent 10 reviews them.
+verifies memory; it configures no swap or mapper state. Agent 12 owns shared
+runner/official-pipeline registration; Agent 8 must not edit that wiring.
 
 ### Development decision loop
 

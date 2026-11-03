@@ -94,6 +94,21 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify.require_expected_swap_priority(
                     expected, [qualify.SwapRow("/swapfile", "file", 100, 0, priority, None)])
 
+    def test_raw_swap_alias_rejects_target_partition_and_parent_disk(self):
+        unrelated = qualify.SwapRow("/swapfile", "file", 100, 0, -2, None)
+        qualify.require_no_conflicting_raw_swap_aliases(
+            [unrelated], (8, 1), (8, 0))
+        for alias in (
+            qualify.SwapRow(
+                "/dev/disk/by-uuid/target", "partition", 100, 0, -1, (8, 1)),
+            qualify.SwapRow(
+                "/dev/disk/by-id/parent", "partition", 100, 0, -1, (8, 0)),
+        ):
+            with self.subTest(alias=alias.path), self.assertRaisesRegex(
+                    qualify.Blocked, "active swap through alias"):
+                qualify.require_no_conflicting_raw_swap_aliases(
+                    [unrelated, alias], (8, 1), (8, 0))
+
     def test_plan_storage_separation_requires_explicit_false_current_keys(self):
         canonical = {
             "root_same_physical_disk_as_target": False,
@@ -379,9 +394,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                                  "physical_read": 8 * qualify.MIB,
                                  "failed": 0, "error": 0},
             lower_before=qualify.BlockStats(0, 0),
-            lower_after_fill=qualify.BlockStats(0, 64),
-            lower_before_verify=qualify.BlockStats(0, 64),
-            lower_after_verify=qualify.BlockStats(64, 64),
+            lower_after_fill=qualify.BlockStats(0, 16 * 1024),
+            lower_before_verify=qualify.BlockStats(0, 16 * 1024),
+            lower_after_verify=qualify.BlockStats(16 * 1024, 16 * 1024),
             vm_before={"pswpin": 0, "pswpout": 0},
             vm_after_fill={"pswpin": 0, "pswpout": 10},
             vm_before_verify={"pswpin": 0, "pswpout": 10},
@@ -409,7 +424,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                                      "logical_read": 8 * qualify.MIB}},
             {"verify_status_after": {**base["verify_status_after"], "physical_read": 0}},
             {"lower_after_fill": qualify.BlockStats(0, 0)},
-            {"lower_after_verify": qualify.BlockStats(0, 64)},
+            {"lower_after_fill": qualify.BlockStats(0, 1)},
+            {"lower_after_verify": qualify.BlockStats(0, 16 * 1024)},
+            {"lower_after_verify": qualify.BlockStats(1, 16 * 1024)},
             {"vm_after_fill": {"pswpin": 0, "pswpout": 0}},
             {"vm_after_verify": {"pswpin": 0, "pswpout": 10}},
             {"oracle": {"verified_pages": 1024, "verified_bytes": 1024 * qualify.PAGE_BYTES,
@@ -509,6 +526,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 1, swapzctl=Path("/synthetic/swapzctl"),
                 oracle_path=Path("/synthetic/oracle"), validated_source="2" * 40,
                 plan={}, selector_partuuid="f13428f6-01", target_device=(8, 1),
+                target_parent_device=(8, 0),
                 workload_mib=384, resident_mib=128, swap_limit_mib=384,
                 timeout_seconds=60, prior_run_ids=set(), prior_swap_uuids=set())
         normal_stop.assert_called_once()
