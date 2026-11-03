@@ -2006,7 +2006,15 @@ class ReportContract(unittest.TestCase):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         make_interface = (
             ROOT / "tests/runtime/native/make-interface-test.py").read_text()
-        self.assertIn('note "' + marker + '"', deploy)
+        self.assertIn(
+            'read_fault_submitted_delta=$((read_fault_submitted_after - '
+            'read_fault_submitted_before))', deploy)
+        self.assertIn(
+            '(( read_fault_submitted_delta == 0 )) ||', deploy)
+        self.assertIn(
+            'PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 '
+            'lower_read_delta:0 submitted_delta:$read_fault_submitted_delta',
+            deploy)
         self.assertIn(marker, make_interface)
         self.assertIn(marker, synthetic_log())
 
