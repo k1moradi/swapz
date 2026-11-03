@@ -51,11 +51,15 @@ build/kernel/experimental/dm-swapz.ko: build/source-build-info.h
 	$(MAKE) -C src/kernel KDIR="$(KDIR)" SWAPZ_BUILD_INFO="$(abspath build/source-build-info.h)" all
 	@bash packaging/sign-module.sh "$@"
 
-build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile build/tests/direct-write-probe
+build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile build/tests/direct-write-probe build/tests/direct-read-probe
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread $< -o $@
 
 build/tests/direct-write-probe: tests/tools/direct-write-probe.c Makefile
+	@mkdir -p build/tests
+	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
+
+build/tests/direct-read-probe: tests/tools/direct-read-probe.c Makefile
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 

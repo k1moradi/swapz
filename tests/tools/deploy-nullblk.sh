@@ -34,6 +34,7 @@ cd "$ROOT"
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
 WRITE_PROBE="$ROOT/build/tests/direct-write-probe"
+READ_PROBE="$ROOT/build/tests/direct-read-probe"
 CONFIG=""
 CONFIGNAME=""
 DISK=""
@@ -98,8 +99,9 @@ grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/s
     fail "staged kernel version header does not match canonical VERSION"
 [[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
     fail "built swapz module version does not match canonical VERSION"
-[[ -s "$MODULE" && -x "$ORACLE" && -x "$WRITE_PROBE" ]] ||
-    fail "swapz/oracle/direct-write probe not compiled"
+[[ -s "$MODULE" && -x "$ORACLE" && -x "$WRITE_PROBE" &&
+   -x "$READ_PROBE" ]] ||
+    fail "swapz/oracle/direct I/O probes not compiled"
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
 	fail "swapz vermagic does not match running kernel"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
@@ -1271,13 +1273,16 @@ read_fault_submitted_before="$(status_u64 "$read_fault_seeded" read_submitted_re
     fail "READ-fault status lacks submitted-read count"
 read -r -a read_fault_lower_before < "/sys/block/$DISK/stat"
 set +e
-timeout --signal=TERM --kill-after=5s 20s "$ORACLE" \
-    "/dev/mapper/$DMNAME" --verify-series 1 73 \
-    >"$SESSION/read-fault.log" 2>&1
-read_fault_rc=$?
+read_fault_probe_output="$(timeout --signal=TERM --kill-after=5s 20s \
+    "$READ_PROBE" "/dev/mapper/$DMNAME" 2>&1)"
+read_fault_probe_rc=$?
 set -e
-(( read_fault_rc != 0 && read_fault_rc != 124 && read_fault_rc != 137 )) ||
-    fail "synthetic retained READ fault did not terminate with ordinary I/O failure"
+if (( read_fault_probe_rc != 0 )); then
+    read_fault_unexpected_status="$(dmsetup status "$DMNAME")" ||
+        fail "cannot read status after unexpected direct READ syscall result"
+    read_fault_probe_output="${read_fault_probe_output//$'\n'/ }"
+    fail "READ-fault probe did not observe EIO: rc=$read_fault_probe_rc output=$read_fault_probe_output calls=$(status_u64 "$read_fault_unexpected_status" read_fault_calls) injected=$(status_u64 "$read_fault_unexpected_status" read_fault_injected) failed=$(status_u64 "$read_fault_unexpected_status" failed)"
+fi
 read_fault_after="$(dmsetup status "$DMNAME")" ||
     fail "cannot read status after synthetic READ fault"
 read_fault_submitted_after="$(status_u64 "$read_fault_after" read_submitted_reqs)" ||
@@ -1293,7 +1298,7 @@ read -r -a read_fault_lower_after < "/sys/block/$DISK/stat"
 read_fault_submitted_delta=$((read_fault_submitted_after - read_fault_submitted_before))
 (( read_fault_submitted_delta == 0 )) ||
     fail "pre-submission READ fault was counted as submitted lower I/O"
-note "PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 lower_read_delta:0 submitted_delta:$read_fault_submitted_delta"
+note "PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 syscall_errno:EIO lower_read_delta:0 submitted_delta:$read_fault_submitted_delta"
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
     fail "cannot remove retained READ-fault mapping"
 OWN_DM=0

@@ -1918,6 +1918,21 @@ static swapz_u16 swapz_probe_set(
             'read_fault_lower_after[2] == read_fault_lower_before[2]', deploy)
         self.assertIn(
             'read_fault_submitted_delta == 0', deploy)
+        self.assertIn('READ_PROBE="$ROOT/build/tests/direct-read-probe"', deploy)
+        self.assertIn('"$READ_PROBE" "/dev/mapper/$DMNAME"', deploy)
+        self.assertIn("read_fault_probe_rc", deploy)
+        read_probe = (ROOT / "tests/tools/direct-read-probe.c").read_text()
+        self.assertIn("O_RDONLY | O_DIRECT | O_CLOEXEC", read_probe)
+        self.assertIn("pread(fd, buffer, PROBE_BYTES, 0)", read_probe)
+        self.assertIn("read_ret == -1 && read_errno == EIO", read_probe)
+        self.assertIn("DIRECT_READ_PROBE", read_probe)
+        mk = (ROOT / "Makefile").read_text()
+        self.assertIn(
+            "build/tests/direct-read-probe: tests/tools/direct-read-probe.c Makefile",
+            mk)
+        device_roundtrip_rule = mk.split(
+            "build/tests/device-roundtrip:", 1)[1].split("\n", 1)[0]
+        self.assertIn("build/tests/direct-read-probe", device_roundtrip_rule)
 
     def test_owned_nullblk_lower_write_fault_is_pre_submission_and_counted(self):
         # This tests fail-closed propagation through the actual dm_io adapter.

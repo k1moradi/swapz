@@ -1702,7 +1702,8 @@ def parse_loaded_correctness(output):
             r"injected:(\d+) syscall_errno:EIO lower_write_delta:(\d+)$"),
         "read_fault": re.compile(
             r"PASS_LOADED_SYNTHETIC_READ_FAULT=injected:(\d+) "
-            r"lower_read_delta:(\d+) submitted_delta:(\d+)$"),
+            r"syscall_errno:EIO lower_read_delta:(\d+) "
+            r"submitted_delta:(\d+)$"),
         "flush_fault": re.compile(
             r"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:(\d+) "
             r"injected:(\d+) data_write_reached_lower:(\d+)$"),

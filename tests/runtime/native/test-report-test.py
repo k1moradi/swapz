@@ -858,7 +858,7 @@ def synthetic_log():
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:64 observed_open:1 verified_pages:128",
            "PASS_LOADED_COMPLETION_HANDOFF=offloaded:4 verified_pages:128 completed_writes:16512 active_after:0 fault_offloaded:2 fault_injected:1 post_failure_eio:1",
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 syscall_errno:EIO lower_write_delta:0",
-           "PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 lower_read_delta:0 submitted_delta:0",
+           "PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 syscall_errno:EIO lower_read_delta:0 submitted_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
            "PASS_LOADED_CODEC_ERROR_PATHS=owners:3 injected:3 inline_lower_write_delta:0 submitter_lower_write_delta:0 background_error_completions:8",
            "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
@@ -2065,8 +2065,11 @@ class ReportContract(unittest.TestCase):
             '(( read_fault_submitted_delta == 0 )) ||', deploy)
         self.assertIn(
             'PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 '
-            'lower_read_delta:0 submitted_delta:$read_fault_submitted_delta',
+            'syscall_errno:EIO lower_read_delta:0 '
+            'submitted_delta:$read_fault_submitted_delta',
             deploy)
+        self.assertIn('"$READ_PROBE" "/dev/mapper/$DMNAME"', deploy)
+        self.assertIn("read_fault_probe_rc", deploy)
         self.assertIn(marker, make_interface)
         self.assertIn(marker, synthetic_log())
 
@@ -2080,6 +2083,8 @@ class ReportContract(unittest.TestCase):
         for replacement in (
                 "",
                 marker.replace("injected:1", "injected:0"),
+                marker.replace("syscall_errno:EIO", "syscall_errno:0"),
+                marker.replace("syscall_errno:EIO", "syscall_errno:ENOSPC"),
                 marker.replace("lower_read_delta:0", "lower_read_delta:1"),
                 marker.replace("submitted_delta:0", "submitted_delta:1"),
                 marker.replace(
