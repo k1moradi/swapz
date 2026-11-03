@@ -4557,6 +4557,14 @@ leaving the SWZ authorization header prevents accidental raw-swap reuse. Any
 failure after `STOPPING` but before `COMPLETE` must mark
 `RECOVERY_REQUIRED`.
 
+Every Device Mapper lookup of an existing mapper must submit its exact
+run-bound UUID as the sole selector, then validate both the returned UUID and
+mapper name. Linux rejects an ioctl that supplies both name and UUID for a
+lookup. `DM_DEV_CREATE` is different: it creates the mapper and must bind both
+the expected name and UUID. Production-C tests must preserve this distinction.
+The target preflight input PARTUUID may alias the output target's `partuuid`
+field; normalize and snapshot it before clearing or replacing the output.
+
 Standalone recovery accepts an exact owned `RECOVERY_REQUIRED` record or a
 durable stage that may remain after an abrupt process exit once mutation could
 have begun: `STARTING`, `ACTIVE`, `STOPPING`, `RECOVERING`, or

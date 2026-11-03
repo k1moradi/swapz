@@ -1507,6 +1507,25 @@ static int swapz_primary_dm_ioctl_initialize(struct dm_ioctl *io,
 	return 0;
 }
 
+/*
+ * Existing mapper ioctls must select by the run-bound UUID only. Linux rejects
+ * a lookup that supplies both name and UUID; callers verify both returned IDs.
+ */
+static int swapz_primary_dm_existing_mapper_ioctl_initialize(
+	struct dm_ioctl *io, size_t buffer_bytes,
+	const char *expected_name, const char *expected_uuid)
+{
+	if (!io || !expected_name || !expected_uuid ||
+	    !expected_name[0] || !expected_uuid[0] ||
+	    strnlen(expected_name, sizeof(io->name)) >= sizeof(io->name) ||
+	    strnlen(expected_uuid, sizeof(io->uuid)) >= sizeof(io->uuid)) {
+		errno = EINVAL;
+		return -1;
+	}
+	return swapz_primary_dm_ioctl_initialize(
+		io, buffer_bytes, NULL, expected_uuid);
+}
+
 static int swapz_primary_dm_table_load_buffer(
 	const struct swapz_primary_manifest *manifest, unsigned char *buffer,
 	size_t capacity, size_t *used_bytes)
@@ -1552,8 +1571,8 @@ static int swapz_primary_dm_table_load_buffer(
 	}
 	memset(buffer, 0, total_bytes);
 	io = (struct dm_ioctl *)buffer;
-	if (swapz_primary_dm_ioctl_initialize(io, total_bytes, mapper_name,
-					      mapper_uuid) < 0)
+	if (swapz_primary_dm_existing_mapper_ioctl_initialize(
+		    io, total_bytes, mapper_name, mapper_uuid) < 0)
 		return -1;
 	io->target_count = 1U;
 	target = (struct dm_target_spec *)(buffer + io->data_start);
@@ -2669,14 +2688,25 @@ static int swapz_primary_target_preflight(
 	int *original_header_digest_available,
 	unsigned char *original_header)
 {
+	char expected_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+
+	/*
+	 * The input may point into target->partuuid. Snapshot it before clearing
+	 * output state so exact revalidation also works for an aliased caller.
+	 */
+	if (!partuuid || !target ||
+	    swapz_primary_partuuid_normalize(partuuid, expected_partuuid) < 0) {
+		errno = EINVAL;
+		return -1;
+	}
 	swapz_primary_selected_target_clear();
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
-	(void)partuuid;
-	(void)target;
+	memset(target, 0, sizeof(*target));
 	(void)device_bytes;
 	(void)original_swap_header;
 	(void)original_header_digest_available;
 	(void)original_header;
+	memset(expected_partuuid, 0, sizeof(expected_partuuid));
 	errno = ENODEV;
 	return -1;
 #else
@@ -2684,20 +2714,26 @@ static int swapz_primary_target_preflight(
 	char digest[65];
 	int fd;
 
-	if (!partuuid || !target || !device_bytes || !original_swap_header ||
+	if (!device_bytes || !original_swap_header ||
 	    !original_header_digest_available) {
 		errno = EINVAL;
+		memset(expected_partuuid, 0, sizeof(expected_partuuid));
 		return -1;
 	}
 	*original_swap_header = 0;
 	*original_header_digest_available = 0;
 	memset(target, 0, sizeof(*target));
-	if (swapz_primary_target_inspect(partuuid, target) < 0)
+	if (swapz_primary_target_inspect(expected_partuuid, target) < 0) {
+		memset(expected_partuuid, 0, sizeof(expected_partuuid));
 		return -1;
+	}
 	swapz_primary_selected_target = *target;
 	fd = swapz_primary_target_open_readonly();
-	if (fd < 0)
+	if (fd < 0) {
+		memset(expected_partuuid, 0, sizeof(expected_partuuid));
 		return -1;
+	}
+	memset(expected_partuuid, 0, sizeof(expected_partuuid));
 	*device_bytes = target->device_bytes;
 	if (swapz_primary_exact_read(fd, block, sizeof(block)) < 0) {
 		int saved_errno = errno;
@@ -6723,8 +6759,8 @@ static int swapz_primary_dm_status_fd(int fd, const char *name,
 				      const char *uuid, struct dm_ioctl *status)
 {
 	if (fd < 0 || !name || !uuid || !status ||
-	    swapz_primary_dm_ioctl_initialize(status, sizeof(*status),
-					      name, uuid) < 0)
+	    swapz_primary_dm_existing_mapper_ioctl_initialize(
+		    status, sizeof(*status), name, uuid) < 0)
 		return -1;
 	if (ioctl(fd, DM_DEV_STATUS, status) < 0)
 		return -1;
@@ -6776,8 +6812,8 @@ static int swapz_primary_dm_inactive_target_count_fd(
 					table, &logical_sectors) < 0)
 		return -1;
 	(void)logical_sectors;
-	if (swapz_primary_dm_ioctl_initialize(&status, sizeof(status),
-					      mapper_name, mapper_uuid) < 0)
+	if (swapz_primary_dm_existing_mapper_ioctl_initialize(
+		    &status, sizeof(status), mapper_name, mapper_uuid) < 0)
 		return -1;
 	status.flags = DM_QUERY_INACTIVE_TABLE_FLAG;
 	if (ioctl(fd, DM_DEV_STATUS, &status) < 0)
@@ -6815,8 +6851,8 @@ static int swapz_primary_dm_table_query_fd(
 		return -1;
 	(void)logical_sectors;
 	memset(buffer, 0, sizeof(buffer));
-	if (swapz_primary_dm_ioctl_initialize(io, sizeof(buffer), mapper_name,
-					      mapper_uuid) < 0)
+	if (swapz_primary_dm_existing_mapper_ioctl_initialize(
+		    io, sizeof(buffer), mapper_name, mapper_uuid) < 0)
 		return -1;
 	io->flags = DM_STATUS_TABLE_FLAG;
 	if (inactive)
@@ -6853,14 +6889,17 @@ static int swapz_primary_dm_dependencies_match_fd(
 		return -1;
 	(void)logical_sectors;
 	memset(buffer, 0, sizeof(buffer));
-	if (swapz_primary_dm_ioctl_initialize(io, sizeof(buffer), mapper_name,
-					      mapper_uuid) < 0 ||
+	if (swapz_primary_dm_existing_mapper_ioctl_initialize(
+		    io, sizeof(buffer), mapper_name, mapper_uuid) < 0 ||
 	    ioctl(fd, DM_TABLE_DEPS, io) < 0)
 		return -1;
 	if (io->version[0] != DM_VERSION_MAJOR ||
 	    io->data_size < sizeof(*io) || io->data_size > sizeof(buffer) ||
 	    io->data_start != sizeof(*io) ||
-	    io->data_start > io->data_size) {
+	    io->data_start > io->data_size ||
+	    strnlen(io->name, sizeof(io->name)) == sizeof(io->name) ||
+	    strnlen(io->uuid, sizeof(io->uuid)) == sizeof(io->uuid) ||
+	    strcmp(io->name, mapper_name) || strcmp(io->uuid, mapper_uuid)) {
 		errno = EPROTO;
 		return -1;
 	}
@@ -7624,8 +7663,8 @@ int swapz_primary_dm_create_mapper(
 	}
 	if (swapz_primary_dm_table_query_fd(control_fd, manifest, 1) < 0)
 		goto out;
-	if (swapz_primary_dm_ioctl_initialize(&resume, sizeof(resume),
-					      mapper_name, mapper_uuid) < 0 ||
+	if (swapz_primary_dm_existing_mapper_ioctl_initialize(
+		    &resume, sizeof(resume), mapper_name, mapper_uuid) < 0 ||
 	    ioctl(control_fd, DM_DEV_SUSPEND, &resume) < 0)
 		goto out;
 	*resumed_by_call = 1;
@@ -7943,7 +7982,7 @@ int swapz_primary_dm_remove_mapper(
 		if (inactive_targets == 1U) {
 			if (swapz_primary_dm_table_query_fd(
 				    control_fd, manifest, 1) < 0 ||
-			    swapz_primary_dm_ioctl_initialize(
+			    swapz_primary_dm_existing_mapper_ioctl_initialize(
 				    &remove, sizeof(remove), mapper_name,
 				    mapper_uuid) < 0 ||
 			    ioctl(control_fd, DM_TABLE_CLEAR, &remove) < 0 ||
@@ -7974,8 +8013,8 @@ int swapz_primary_dm_remove_mapper(
 			errno = EBUSY;
 		goto out;
 	}
-	if (swapz_primary_dm_ioctl_initialize(&remove, sizeof(remove),
-					      mapper_name, mapper_uuid) < 0 ||
+	if (swapz_primary_dm_existing_mapper_ioctl_initialize(
+		    &remove, sizeof(remove), mapper_name, mapper_uuid) < 0 ||
 	    ioctl(control_fd, DM_DEV_REMOVE, &remove) < 0)
 		goto out;
 	*removed_by_call = 1;

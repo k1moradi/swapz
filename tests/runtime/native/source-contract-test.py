@@ -229,18 +229,63 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             self.assertIn(
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', stop)
         for phase in (
-                "recover-recovering", "recover-swapoff",
-                "recover-mapper-removed", "recover-module-unloaded",
+                "recover-recovering", "recover-swapoff", "recover-mapper-removed",
+                "recover-module-unloaded",
                 "recover-restored"):
             self.assertIn(
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")', recover)
+        self.assertLess(
+            start.index("swapz_primary_activate_mapper_swap("),
+            start.index("active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE"))
+        self.assertLess(
+            stop.index("swapz_primary_deactivate_mapper_swap("),
+            stop.index("swapz_primary_dm_remove_mapper("))
+        self.assertLess(
+            recover.index("swapz_primary_deactivate_mapper_swap("),
+            recover.index("swapz_primary_dm_remove_mapper("))
+        preflight = source_body("swapz_primary_target_preflight", primary)
+        prepare = source_body("swapz_primary_prepare_metadata", primary)
+        self.assertLess(
+            preflight.index("swapz_primary_partuuid_normalize(partuuid"),
+            preflight.index("memset(target, 0, sizeof(*target))"))
+        self.assertIn(
+            "swapz_primary_target_inspect(expected_partuuid, target)",
+            preflight)
+        self.assertIn("target.partuuid, &target", prepare)
+
+        existing_mapper = source_body(
+            "swapz_primary_dm_existing_mapper_ioctl_initialize", primary)
+        self.assertIn(
+            "io, buffer_bytes, NULL, expected_uuid", existing_mapper)
+        for symbol in (
+                "swapz_primary_dm_table_load_buffer",
+                "swapz_primary_dm_status_fd",
+                "swapz_primary_dm_inactive_target_count_fd",
+                "swapz_primary_dm_table_query_fd",
+                "swapz_primary_dm_dependencies_match_fd",
+                "swapz_primary_dm_create_mapper",
+                "swapz_primary_dm_remove_mapper"):
+            self.assertIn(
+                "swapz_primary_dm_existing_mapper_ioctl_initialize(",
+                source_body(symbol, primary),
+                f"{symbol} must select an existing mapper by UUID only")
+        create = source_body("swapz_primary_dm_create_mapper", primary)
+        self.assertRegex(
+            create,
+            r"swapz_primary_dm_ioctl_initialize\([^;]*mapper_name\s*,\s*mapper_uuid",
+            "DM_DEV_CREATE must bind both the expected name and UUID")
+        self.assertNotRegex(
+            primary.replace(create, "", 1),
+            r"swapz_primary_dm_ioctl_initialize\([^;]*mapper_name\s*,\s*mapper_uuid",
+            "existing mapper lookups must not provide both Device Mapper selectors")
+
         rehearsal = (
             ROOT / "tests/tools/qualify-primary-lifecycle-nullblk.sh").read_text()
         for phase in (
                 "start-starting", "start-module-loaded",
                 "start-mapper-resumed", "start-swapon",
-                "stop-stopping", "stop-swapoff",
-                "recover-recovering", "recover-swapoff",
+                "stop-stopping", "stop-swapoff", "recover-recovering",
+                "recover-swapoff",
                 "recover-mapper-removed", "recover-module-unloaded",
                 "recover-restored"):
             self.assertIn(phase, rehearsal)

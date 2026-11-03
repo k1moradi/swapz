@@ -729,6 +729,31 @@ static void test_target_config_and_dynamic_geometry(void)
 	swapz_primary_selected_target = original_target;
 }
 
+static void test_target_preflight_snapshots_aliased_partuuid(void)
+{
+	struct swapz_primary_target original_selected_target =
+		swapz_primary_selected_target;
+	struct swapz_primary_target target = {
+		.partuuid = TEST_PARTUUID,
+		.device_major = 8U,
+		.device_minor = 4U,
+		.device_bytes = TEST_DEVICE_BYTES,
+	};
+	uint64_t device_bytes = 0;
+	int original_swap_header = 0;
+	int original_header_digest_available = 0;
+	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+
+	/* The production caller passes target.partuuid and &target together. */
+	errno = 0;
+	assert(swapz_primary_target_preflight(
+		target.partuuid, &target, &device_bytes, &original_swap_header,
+		&original_header_digest_available, original_header) < 0);
+	assert(errno == ENODEV);
+	assert(target.partuuid[0] == '\0');
+	swapz_primary_selected_target = original_selected_target;
+}
+
 static void test_put_u32_le(unsigned char *buffer, size_t offset,
 			   uint32_t value)
 {
@@ -1361,7 +1386,8 @@ static void test_primary_dm_table(void)
 	       io->version[1] == DM_VERSION_MINOR);
 	assert(io->data_size == used_bytes && io->data_start == sizeof(*io));
 	assert(io->target_count == 1U);
-	assert(!strcmp(io->name, mapper_name) && !strcmp(io->uuid, mapper_uuid));
+	assert(!io->name[0] && !strcmp(io->uuid, mapper_uuid));
+	memcpy(io->name, mapper_name, strlen(mapper_name) + 1U);
 	target = (struct dm_target_spec *)(buffer + io->data_start);
 	assert(target->sector_start == 0ULL &&
 	       target->length == logical_sectors && target->next == 0U);
@@ -1410,6 +1436,27 @@ static void test_primary_dm_table(void)
 	assert(errno == EINVAL);
 	assert(!swapz_primary_dm_table_status_matches(
 		buffer + 1U, sizeof(buffer) - 1U, &manifest));
+}
+
+static void test_primary_dm_existing_mapper_selector(void)
+{
+	struct dm_ioctl io;
+	const char *expected_name = "swapz-primary";
+	const char *expected_uuid =
+		"SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef";
+
+	assert(swapz_primary_dm_existing_mapper_ioctl_initialize(
+		&io, sizeof(io), expected_name, expected_uuid) == 0);
+	assert(io.name[0] == '\0');
+	assert(!strcmp(io.uuid, expected_uuid));
+	errno = 0;
+	assert(swapz_primary_dm_existing_mapper_ioctl_initialize(
+		&io, sizeof(io), "", expected_uuid) < 0);
+	assert(errno == EINVAL);
+	errno = 0;
+	assert(swapz_primary_dm_existing_mapper_ioctl_initialize(
+		&io, sizeof(io), expected_name, "") < 0);
+	assert(errno == EINVAL);
 }
 
 static void test_primary_dm_operations_disabled(void)
@@ -2594,6 +2641,7 @@ int main(void)
 	test_selected_target_swap_quiescence();
 	test_target_identity_and_header_policy();
 	test_target_config_and_dynamic_geometry();
+	test_target_preflight_snapshots_aliased_partuuid();
 	test_primary_linux_swap_header();
 	test_primary_run_id_and_header_builder();
 	test_primary_stage_policy();
@@ -2602,6 +2650,7 @@ int main(void)
 	test_recovery_header_recognition();
 	test_checked_header_write();
 	test_primary_dm_table();
+	test_primary_dm_existing_mapper_selector();
 	test_primary_dm_operations_disabled();
 	test_exclusive_target_open_paths();
 	test_exact_block_read_helper();
