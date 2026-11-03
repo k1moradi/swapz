@@ -3269,11 +3269,12 @@ static void swapz_preparation_worker(struct work_struct *work)
 				WRITE_ONCE(entry->preparation_error, error);
 				complete_all(&entry->preparation_snapshot_ready);
 				swapz_prepared_put(ctx, prepared);
-				if (swapz_preparation_owner_wake_allowed(
-					    READ_ONCE(ctx->accepting))) {
+				spin_lock_irqsave(&ctx->queue_lock, flags);
+				if (swapz_preparation_owner_wake_allowed(ctx->accepting)) {
 					swapz_note_accepted_lower_idle_wake(ctx);
 					mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 				}
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				continue;
 			}
 		}
@@ -3356,10 +3357,12 @@ static void swapz_preparation_worker(struct work_struct *work)
 		complete(&prepared->result_ready);
 		lane->prepared_pages++;
 		swapz_prepared_put(ctx, prepared);
-		if (swapz_preparation_owner_wake_allowed(READ_ONCE(ctx->accepting))) {
+		spin_lock_irqsave(&ctx->queue_lock, flags);
+		if (swapz_preparation_owner_wake_allowed(ctx->accepting)) {
 			swapz_note_accepted_lower_idle_wake(ctx);
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 		}
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 		    !atomic_read(&ctx->preparation_tail_credit))
 			goto out;
@@ -7759,7 +7762,8 @@ static void swapz_drain(struct dm_target *ti)
 	/* The ordered worker can queue a final producer invocation while it
 	 * drains. Wait for that invocation to release even an empty-queue slot
 	 * before checking the free mask. Admission and ordered work are now
-	 * quiescent, and the producer never queues ordered work itself. */
+	 * quiescent. Closed-admission producer wake publication is serialized
+	 * by queue_lock and suppressed. */
 	if (ctx->preparation_workqueue)
 		drain_workqueue(ctx->preparation_workqueue);
 	spin_lock_irqsave(&ctx->queue_lock, flags);

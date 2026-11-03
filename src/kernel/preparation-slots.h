@@ -65,7 +65,8 @@ static inline int swapz_preparation_publish_result(atomic_t *state,
  * drained. Once admission is closed, a producer finishing there must not
  * publish a fresh ordered-worker wake. A producer that observed open admission
  * before closure is joined by the first preparation drain, so the later
- * ordered drain still catches its wake.
+ * ordered drain still catches its wake. Callers sample admission and publish
+ * any wake while holding the same queue_lock that closes admission.
  */
 static inline int swapz_preparation_owner_wake_allowed(int accepting)
 {
