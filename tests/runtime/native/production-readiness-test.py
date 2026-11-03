@@ -134,7 +134,8 @@ def real_swap_evidence(report_raw, policy_raw):
         "source_sha", "acceptance_manifest_sha256",
         "qualification_report_sha256", "helper_sha256", "oracle_sha256",
         "qualified_installed_artifacts", "physical_execution_control_sha256",
-        "partuuid", "target_size_bytes", "cycles_requested", "workload_mib",
+        "partuuid", "target_size_bytes", "target_device",
+        "cycles_requested", "workload_mib",
         "resident_limit_mib", "swap_limit_mib", "timeout_seconds",
         "concurrent_oracles", "reuse_rounds_per_cycle", "cycles",
     )
@@ -734,6 +735,30 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertTrue(any(
             "persistent evidence/result mismatch for workload_mib" in blocker
+            for blocker in result["code_blockers"]))
+
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical["result"]["target_device"] = "invalid-device"
+        raw = encoded(physical)
+        evidence = current_evidence(report_raw, policy_raw, raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "target device identity is invalid" in blocker
+            for blocker in result["code_blockers"]))
+
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical["target_device"] = "8:2"
+        raw = encoded(physical)
+        evidence = current_evidence(report_raw, policy_raw, raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "persistent evidence/result mismatch for target_device" in blocker
             for blocker in result["code_blockers"]))
 
     def test_real_swap_persistent_evidence_binds_exact_target_byte_size(self):

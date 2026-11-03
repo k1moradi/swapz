@@ -5056,7 +5056,11 @@ exact release source, frozen policy digest, owner-report digest, qualified
 installed artifact hashes, current source-controlled helper/oracle digests,
 valid private execution-control digest, frozen workload/cycle values, distinct
 transaction run IDs and Linux swap UUIDs, and durable COMPLETE for every
-required cycle. Missing persistent physical evidence is BLOCKED.
+required cycle. The boot-scoped `target_device` major:minor recorded by the
+real-swap helper is diagnostic rather than part of the cross-boot canonical
+target tuple, but it must be a valid major:minor and the persistent envelope
+must exactly match the nested PASS result; malformed or mismatched device
+identity is BLOCKED. Missing persistent physical evidence is BLOCKED.
 Current PASS physical records bind the normalized lowercase PARTUUID plus exact
 partition byte size and the frozen policy SHA-256. A synthesized
 `sustained_physical_performance: PASS` record is not sufficient: release
