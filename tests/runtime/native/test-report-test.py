@@ -1162,7 +1162,7 @@ class ReportContract(unittest.TestCase):
         evidence = runner.parse_loaded_correctness(output)
         self.assertEqual(evidence["overall"], "PASS")
         self.assertEqual(evidence["primary_lifecycle"], "PASS")
-        self.assertEqual(evidence["primary_lifecycle_interruptions"], 11)
+        self.assertEqual(evidence["primary_lifecycle_interruptions"], 13)
         self.assertEqual(evidence["primary_lifecycle_negative_cases"], 13)
 
         required_markers = (
