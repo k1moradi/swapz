@@ -29,7 +29,8 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             self.assertIn(option, self.script)
         self.assertNotIn("primary-lifecycle-fault-shim", ROOT_MAKEFILE.read_text())
         self.assertNotIn("SWAPZ_PRIMARY_TEST_FAULT", self.primary)
-        self.assertNotIn("SWAPZ_PRIMARY_TEST_FSYNC_FAIL_CALL", self.primary)
+        self.assertNotIn(
+            "SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL", self.primary)
 
     def test_all_native_interruption_and_negative_cases_are_declared(self):
         for phase in (
@@ -98,13 +99,15 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)
-        self.assertIn("SWAPZ_PRIMARY_TEST_FSYNC_HIT", self.shim)
+        self.assertIn("SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT", self.shim)
         self.assertIn(
             'grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault"',
             self.script)
         for name in ("swapon-eintr-applied", "swapoff-eintr-applied"):
             self.assertIn(f"SWAPZ_PRIMARY_TEST_FAULT_HIT={name}", self.script)
-        self.assertIn("SWAPZ_PRIMARY_TEST_FSYNC_HIT=3", self.script)
+        self.assertIn(
+            "SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT=2", self.script)
+        self.assertIn("S_ISDIR(info.st_mode)", self.shim)
 
     def test_stale_run_mutation_preserves_canonical_serialization(self):
         self.assertIn('original.count(needle) != 1', self.script)
@@ -146,7 +149,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             check=True,
         )
 
-    def test_fault_shim_executes_nine_rootless_boundary_cases(self):
+    def test_fault_shim_executes_eleven_rootless_boundary_cases(self):
         # The harness provides fake syscall/open/fsync implementations: no
         # loaded kernel, swap device or privileged host action is touched.
         with TemporaryDirectory(prefix="swapz-primary-fault-") as directory:
@@ -179,7 +182,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
                                      result.stdout + result.stderr)
                     expected_marker = (
                         "" if fault == "passthrough" else
-                        "SWAPZ_PRIMARY_TEST_FSYNC_HIT=3"
+                        "SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT=2"
                         if fault == "state-dir-fsync" else
                         "SWAPZ_PRIMARY_TEST_FAULT_HIT=" + fault)
                     self.assertEqual(result.stderr.strip(), expected_marker)
