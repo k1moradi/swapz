@@ -1140,6 +1140,66 @@ note "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 syscall_errno:E
 timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fail "cannot remove retained WRITE-fault mapping"
 OWN_DM=0
 
+# Pre-submission lower READ failure qualification. Seed one committed nonzero
+# page without verify-after-write, then inject the first physical READ. The
+# upper verify must fail, the target must fail closed, and neither target
+# submitted-read accounting nor the owned null_blk READ sectors may advance.
+note "START_LOADED_SYNTHETIC_READ_FAULT"
+UUID="SWAPZ-TEST-$TOKEN-readfault"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2 0 1" ||
+    fail "cannot create retained READ-fault mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "retained READ-fault DM UUID mismatch"
+swapz_verify_owned_dm_node
+read_fault_before="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$read_fault_before" retain_ms) == 2 &&
+   $(status_u64 "$read_fault_before" read_fault_nth) == 1 &&
+   $(status_u64 "$read_fault_before" read_fault_calls) == 0 &&
+   $(status_u64 "$read_fault_before" read_fault_injected) == 0 &&
+   $(status_u64 "$read_fault_before" failed) == 0 )) ||
+    fail "retained READ-fault mapping policy mismatch"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --write-series 1 73 ||
+    fail "READ-fault seed WRITE failed"
+read_fault_seeded="$(dmsetup status "$DMNAME")" ||
+    fail "cannot read READ-fault status after seed WRITE"
+(( $(status_u64 "$read_fault_seeded" read_fault_calls) == 0 &&
+   $(status_u64 "$read_fault_seeded" read_fault_injected) == 0 &&
+   $(status_u64 "$read_fault_seeded" failed) == 0 )) ||
+    fail "READ-fault fired before the verification READ"
+read_fault_submitted_before="$(status_u64 "$read_fault_seeded" read_submitted_reqs)" ||
+    fail "READ-fault status lacks submitted-read count"
+read -r -a read_fault_lower_before < "/sys/block/$DISK/stat"
+set +e
+timeout --signal=TERM --kill-after=5s 20s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --verify-series 1 73 \
+    >"$SESSION/read-fault.log" 2>&1
+read_fault_rc=$?
+set -e
+(( read_fault_rc != 0 && read_fault_rc != 124 && read_fault_rc != 137 )) ||
+    fail "synthetic retained READ fault did not terminate with ordinary I/O failure"
+read_fault_after="$(dmsetup status "$DMNAME")" ||
+    fail "cannot read status after synthetic READ fault"
+read_fault_submitted_after="$(status_u64 "$read_fault_after" read_submitted_reqs)" ||
+    fail "READ-fault status lacks post-fault submitted-read count"
+read -r -a read_fault_lower_after < "/sys/block/$DISK/stat"
+(( $(status_u64 "$read_fault_after" read_fault_calls) == 1 &&
+   $(status_u64 "$read_fault_after" read_fault_injected) == 1 &&
+   $(status_u64 "$read_fault_after" failed) == 1 )) ||
+    fail "retained READ fault did not fail-close"
+(( read_fault_lower_after[0] == read_fault_lower_before[0] &&
+   read_fault_lower_after[2] == read_fault_lower_before[2] )) ||
+    fail "pre-submission READ fault reached the owned lower device"
+read_fault_submitted_delta=$((read_fault_submitted_after - read_fault_submitted_before))
+(( read_fault_submitted_delta == 0 )) ||
+    fail "pre-submission READ fault was counted as submitted lower I/O"
+note "PASS_LOADED_SYNTHETIC_READ_FAULT=injected:1 lower_read_delta:0 submitted_delta:$read_fault_submitted_delta"
+timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" ||
+    fail "cannot remove retained READ-fault mapping"
+OWN_DM=0
+
 # Retained-policy synthetic FLUSH failure qualification. The data WRITE must
 # reach the owned RAM lower first; only the subsequent explicit fsync/PREFLUSH
 # is injected. This is not a device-originated or torn-completion test.

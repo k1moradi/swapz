@@ -960,6 +960,11 @@ struct swapz_dm {
 	u32 write_fault_nth;
 	u64 write_fault_calls;
 	u64 write_fault_injected;
+	/* Null_blk-only, pre-submission lower READ fault injection. Reads may
+	 * execute on bounded helpers, so call/injection counters are atomic. */
+	u32 read_fault_nth;
+	atomic64_t read_fault_calls;
+	atomic_t read_fault_injected;
 	/* Null_blk-only synthetic codec errno. The selected owner injects once
 	 * before compression and the normal target path must fail closed. */
 	u32 codec_fault_owner;
@@ -1059,6 +1064,20 @@ struct swapz_dm {
 	u64 reordered_records;
 	u64 io_failures;
 };
+
+static int swapz_maybe_inject_read_fault(struct swapz_dm *ctx)
+{
+	s64 call;
+
+	if (unlikely(!ctx->read_fault_nth))
+		return 0;
+	call = atomic64_inc_return(&ctx->read_fault_calls);
+	if (call != (s64)ctx->read_fault_nth)
+		return 0;
+	if (atomic_cmpxchg(&ctx->read_fault_injected, 0, 1))
+		return 0;
+	return -EIO;
+}
 
 static int swapz_maybe_inject_codec_fault(
 	struct swapz_dm *ctx, enum swapz_codec_fault_owner owner)
@@ -2366,6 +2385,11 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 		ctx->write_fault_injected++;
 		return -EIO;
 	}
+	if (op == REQ_OP_READ) {
+		error = swapz_maybe_inject_read_fault(ctx);
+		if (error)
+			return error;
+	}
 	/* A submitted write may dirty media even if completion later fails. */
 	if (op == REQ_OP_WRITE)
 		swapz_mark_segments_dirty(ctx, block, blocks);
@@ -2650,6 +2674,9 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	region.bdev = ctx->backing->bdev;
 	region.sector = (sector_t)(ctx->data_start_block + block) * SWAPZ_SECTORS;
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
+	error = swapz_maybe_inject_read_fault(ctx);
+	if (error)
+		return error;
 	slot->lower_read_submitted_bytes += (u64)blocks * SWAPZ_BLOCK_BYTES;
 	slot->lower_read_submitted_reqs++;
 	start_ns = ktime_get_ns();
@@ -2706,6 +2733,12 @@ static int swapz_submit_read_slot_range(struct swapz_read_slot *slot,
 			      slot->start_block + first_block) *
 		SWAPZ_SECTORS;
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
+	error = swapz_maybe_inject_read_fault(ctx);
+	if (error) {
+		slot->lower_error = error;
+		slot->lower_submitted = false;
+		return error;
+	}
 	reinit_completion(&slot->lower_done);
 	slot->lower_error = 0;
 	slot->lower_first_block = first_block;
@@ -8458,12 +8491,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	u32 budget = 0, window = SWAPZ_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, flush_fail_nth = 0;
 	u32 lower_bulk = 1, write_fail_nth = 0, retain = 0;
-	u32 codec_fault_owner = SWAPZ_CODEC_FAULT_NONE;
+	u32 codec_fault_owner = SWAPZ_CODEC_FAULT_NONE, read_fail_nth = 0;
 	swapz_u8 read_slot, prep_lane;
 	int error;
 
-	if (argc < 1 || argc > 10 || ti->len % SWAPZ_SECTORS) {
-		ti->error = "Usage: <dedicated backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4; null_blk qualification 0..64] [test_fail_codec_owner 0=off|1=submitter|2=background|3=inline]";
+	if (argc < 1 || argc > 11 || ti->len % SWAPZ_SECTORS) {
+		ti->error = "Usage: <dedicated backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4; null_blk qualification 0..64] [test_fail_codec_owner 0=off|1=submitter|2=background|3=inline] [test_fail_read_nth 0..65535]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -8494,6 +8527,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		return -EINVAL;
 	if (argc > 9 && (kstrtou32(argv[9], 10, &codec_fault_owner) ||
 			 codec_fault_owner > SWAPZ_CODEC_FAULT_INLINE))
+		return -EINVAL;
+	if (argc > 10 && (kstrtou32(argv[10], 10, &read_fail_nth) ||
+			  read_fail_nth > 65535U))
 		return -EINVAL;
 	if (!swapz_delta64_lz4_acceleration ||
 	    swapz_delta64_lz4_acceleration > 4U) {
@@ -8537,6 +8573,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->retain_ms = retain;
 	ctx->flush_meter.fail_nth = flush_fail_nth;
 	ctx->write_fault_nth = write_fail_nth;
+	ctx->read_fault_nth = read_fail_nth;
 	ctx->codec_fault_owner = codec_fault_owner;
 	ctx->engine.max_read_blocks_per_record = (swapz_u8)budget;
 	ctx->engine.verify_after_write = verify;
@@ -8581,6 +8618,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	atomic64_set(&ctx->endio_write_forced_err, 0);
 	atomic64_set(&ctx->codec_fault_calls, 0);
 	atomic_set(&ctx->codec_fault_injected, 0);
+	atomic64_set(&ctx->read_fault_calls, 0);
+	atomic_set(&ctx->read_fault_injected, 0);
 	atomic64_set(&ctx->preparation_free_mask,
 		     (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic64_set(&ctx->submitter_lane_free_mask,
@@ -8670,7 +8709,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			error = -EOPNOTSUPP;
 			goto fail;
 		}
-		if (flush_fail_nth || write_fail_nth || codec_fault_owner) {
+		if (flush_fail_nth || write_fail_nth || codec_fault_owner ||
+		    read_fail_nth) {
 			ti->error = "Fault injection is forbidden on physical backing";
 			error = -EINVAL;
 			goto fail;
@@ -9255,7 +9295,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_write_submitted_bytes,
 		       ctx->lower_write_submitted_reqs);
 		DMEMIT(
-			   " read_submitted=%llu read_submitted_reqs=%llu write_fault_nth=%u "
+			   " read_submitted=%llu read_submitted_reqs=%llu read_fault_nth=%u "
+			   "read_fault_calls=%lld read_fault_injected=%d write_fault_nth=%u "
 			   "write_fault_calls=%llu write_fault_injected=%llu "
 			   "codec_fault_owner=%u codec_fault_calls=%lld codec_fault_injected=%d "
 			   "flush_calls=%llu flush_ok=%llu flush_err=%llu flush_injected=%llu "
@@ -9266,6 +9307,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			   "window_records=%llu win1=%llu win2=%llu",
 		       ctx->lower_read_submitted_bytes,
 		       ctx->lower_read_submitted_reqs,
+		       ctx->read_fault_nth,
+		       atomic64_read(&ctx->read_fault_calls),
+		       atomic_read(&ctx->read_fault_injected),
 		       ctx->write_fault_nth,
 		       ctx->write_fault_calls,
 		       ctx->write_fault_injected,

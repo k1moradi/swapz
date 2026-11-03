@@ -1742,11 +1742,12 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(inline_fault, ordered.index("if (unlikely(length < 0))"))
         self.assertIn("swapz_fail(ctx, length)", ordered)
 
-        self.assertIn("argc < 1 || argc > 10", ctor)
+        self.assertIn("argc < 1 || argc > 11", ctor)
         self.assertIn("codec_fault_owner > SWAPZ_CODEC_FAULT_INLINE", ctor)
         self.assertIn("ctx->codec_fault_owner = codec_fault_owner", ctor)
         self.assertIn("flush_fail_nth || write_fail_nth || codec_fault_owner",
                       ctor)
+        self.assertIn("read_fail_nth", ctor)
         self.assertIn("codec_fault_owner=%u codec_fault_calls=%lld "
                       "codec_fault_injected=%d", status)
 
@@ -1777,6 +1778,48 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("write_wait_le1ms=%llu write_wait_1to4ms=%llu", status)
         self.assertIn("write_wait_gt4ms=%llu", status)
 
+    def test_owned_nullblk_lower_read_fault_is_pre_submission_and_counted(self):
+        ctor = body("swapz_ctr")
+        injector = body("swapz_maybe_inject_read_fault")
+        lower = body("swapz_lower")
+        parallel = body("swapz_parallel_lower_read")
+        async_range = body("swapz_submit_read_slot_range")
+        status = body("swapz_status")
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+
+        self.assertIn("argc < 1 || argc > 11", ctor)
+        self.assertIn("read_fail_nth > 65535U", ctor)
+        self.assertIn("ctx->read_fault_nth = read_fail_nth", ctor)
+        self.assertIn("read_fail_nth", ctor)
+        self.assertIn("atomic64_inc_return(&ctx->read_fault_calls)", injector)
+        self.assertIn("atomic_cmpxchg(&ctx->read_fault_injected, 0, 1)",
+                      injector)
+        self.assertIn("return -EIO", injector)
+
+        for read_path in (lower, parallel, async_range):
+            fault = read_path.index("swapz_maybe_inject_read_fault(")
+            self.assertLess(fault, read_path.index("swapz_dm_io(&req"))
+        self.assertLess(
+            lower.index("swapz_maybe_inject_read_fault("),
+            lower.index("ctx->lower_read_submitted_reqs++"))
+        self.assertLess(
+            parallel.index("swapz_maybe_inject_read_fault("),
+            parallel.index("slot->lower_read_submitted_reqs++"))
+        self.assertLess(
+            async_range.index("swapz_maybe_inject_read_fault("),
+            async_range.index("slot->lower_read_submitted_reqs++"))
+
+        self.assertIn("read_fault_nth=%u", status)
+        self.assertIn("read_fault_calls=%lld read_fault_injected=%d", status)
+        self.assertIn("START_LOADED_SYNTHETIC_READ_FAULT", deploy)
+        self.assertIn("PASS_LOADED_SYNTHETIC_READ_FAULT=", deploy)
+        self.assertIn(
+            '--table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2 0 1"', deploy)
+        self.assertIn(
+            'read_fault_lower_after[2] == read_fault_lower_before[2]', deploy)
+        self.assertIn(
+            'read_fault_submitted_delta == 0', deploy)
+
     def test_owned_nullblk_lower_write_fault_is_pre_submission_and_counted(self):
         # This tests fail-closed propagation through the actual dm_io adapter.
         # It cannot model a device-originated partial/torn write.
@@ -1784,7 +1827,7 @@ static swapz_u16 swapz_probe_set(
         lower = body("swapz_lower")
         status = body("swapz_status")
         self.assertIn('disk_name, "nullb", 5', ctor)
-        self.assertIn("argc < 1 || argc > 10", ctor)
+        self.assertIn("argc < 1 || argc > 11", ctor)
         self.assertIn("write_fail_nth > 65535U", ctor)
         self.assertIn("ctx->write_fault_nth = write_fail_nth", ctor)
         self.assertIn("op == REQ_OP_WRITE", lower)
@@ -4589,7 +4632,7 @@ int main(void)
         self.assertIn("hrtimer_init(&ctx->retention_timer", ctr)
         self.assertIn("flush_delayed_work(&ctx->worker)", drain)
         self.assertIn("drain_workqueue(ctx->workqueue)", drain)
-        self.assertIn("argc > 10", ctr)
+        self.assertIn("argc > 11", ctr)
         self.assertIn("retain > SWAPZ_NULLBLK_TEST_MAX_RETAIN_MS", ctr)
         self.assertIn("!is_nullb && retain > SWAPZ_MAX_RETAIN_MS", ctr)
         self.assertIn("ctx->retain_ms = retain", ctr)
