@@ -100,6 +100,11 @@ AMENDMENT = _load_frozen_amendment()
 WORKLOADS = {**CONTRACT["workloads"], **AMENDMENT["workloads"]}
 
 
+def acceptance_manifest_sha256() -> str:
+    """Hash the exact frozen parent policy consumed by this evaluator."""
+    return hashlib.sha256(ACCEPTANCE_MANIFEST.read_bytes()).hexdigest()
+
+
 def contract() -> dict:
     return json.loads(json.dumps(CONTRACT))
 
@@ -475,7 +480,9 @@ def evaluate(records: list[dict], protocol: str = "auto") -> dict:
             decision = anonymous_decision(rows)
         decisions[name] = decision
         overall &= decision["status"] == "PASS"
-    return {"schema": SUMMARY_SCHEMA, "contract": contract(),
+    return {"schema": SUMMARY_SCHEMA,
+            "acceptance_manifest_sha256": acceptance_manifest_sha256(),
+            "contract": contract(),
             "prospective_amendment": amendment(),
             "amendment_active": include_amendment,
             "evaluation_protocol": "v2" if include_amendment else "v1",

@@ -642,6 +642,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             swap_limit_mib=qualify.DEFAULT_SWAP_LIMIT_MIB,
             timeout_seconds=qualify.DEFAULT_TIMEOUT_SECONDS)
         self.assertEqual(accepted["status"], "FROZEN")
+        self.assertEqual(
+            qualify.acceptance_manifest_sha256(),
+            hashlib.sha256(
+                (ROOT / "docs/production-acceptance.json").read_bytes()
+            ).hexdigest())
 
         with self.assertRaisesRegex(qualify.Blocked, "workload_mib"):
             qualify.validate_acceptance_manifest(

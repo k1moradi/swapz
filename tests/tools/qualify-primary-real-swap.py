@@ -824,6 +824,16 @@ def verify_acceptance_manifest(
         timeout_seconds=timeout_seconds)
 
 
+def acceptance_manifest_sha256() -> str:
+    """Hash the exact frozen policy bytes consumed by physical qualification."""
+    try:
+        payload = ACCEPTANCE_MANIFEST.read_bytes()
+    except OSError as exc:
+        raise Blocked(
+            f"cannot hash production acceptance manifest: {exc}") from exc
+    return hashlib.sha256(payload).hexdigest()
+
+
 def verify_authorized_target(
         plan: dict, selector_partuuid: str,
 ) -> tuple[Path, tuple[int, int], tuple[int, int]]:
@@ -2062,6 +2072,7 @@ def execute(arguments: argparse.Namespace) -> dict:
         resident_mib=arguments.resident_mib,
         swap_limit_mib=arguments.swap_limit_mib,
         timeout_seconds=arguments.timeout_seconds)
+    acceptance_policy_sha256 = acceptance_manifest_sha256()
     _kernel_log_snapshot()
     _import_qualification(swapzctl, report_path)
     plan = _read_plan(swapzctl)
@@ -2081,6 +2092,7 @@ def execute(arguments: argparse.Namespace) -> dict:
         os.urandom(16).hex(),
         {
             "source_sha": arguments.validated_source,
+            "acceptance_manifest_sha256": acceptance_policy_sha256,
             "qualification_report_sha256": _sha256_file(report_path),
             "helper_sha256": _sha256_file(Path(__file__)),
             "oracle_sha256": _sha256_file(oracle_path),
@@ -2141,6 +2153,7 @@ def execute(arguments: argparse.Namespace) -> dict:
             "schema": "swapz-primary-real-swap-v1",
             "status": "PASS",
             "source_sha": arguments.validated_source,
+            "acceptance_manifest_sha256": acceptance_policy_sha256,
             "helper_sha256": _sha256_file(Path(__file__)),
             "oracle_sha256": _sha256_file(oracle_path),
             "qualification_report_sha256": _sha256_file(report_path),

@@ -2532,6 +2532,11 @@ class PairReplayContract(unittest.TestCase):
                 qualification.AMENDMENT_MANIFEST = original
 
         v1_only = qualification.evaluate([], protocol="v1")
+        self.assertEqual(
+            v1_only["acceptance_manifest_sha256"],
+            hashlib.sha256(
+                qualification.ACCEPTANCE_MANIFEST.read_bytes()
+            ).hexdigest())
         self.assertFalse(v1_only["amendment_active"])
         self.assertNotIn("sd-service-qd1-balanced", v1_only["decisions"])
         v2 = qualification.evaluate([], protocol="v2")
