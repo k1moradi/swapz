@@ -70,13 +70,28 @@ static s64 atomic64_cmpxchg(atomic64_t *mask, s64 old, s64 value)
 	return old;
 }
 
+/*
+ * Linux release_slot() is a full barrier before a relaxed atomic OR. GCC's
+ * TSan rejects atomic_thread_fence() under -Werror because it cannot instrument
+ * standalone fences. Give the sanitizer an equivalent release edge on the RMW
+ * itself; successful slot claims use an acquire/seq_cst cmpxchg. Non-TSan
+ * builds retain the explicit fence model used by the production-header shim.
+ */
+#if defined(__SANITIZE_THREAD__)
+static void atomic64_or(s64 bits, atomic64_t *mask)
+{
+	atomic_fetch_or_explicit(&mask->value, bits, memory_order_release);
+}
+#define smp_mb__before_atomic() ((void)0)
+#else
 static void atomic64_or(s64 bits, atomic64_t *mask)
 {
 	atomic_fetch_or_explicit(&mask->value, bits, memory_order_relaxed);
 }
+#define smp_mb__before_atomic() atomic_thread_fence(memory_order_seq_cst)
+#endif
 
 #define __ffs64(word) ((unsigned int)__builtin_ctzll(word))
-#define smp_mb__before_atomic() atomic_thread_fence(memory_order_seq_cst)
 #include "preparation-slots.h"
 
 #define CHECK(x) do { if (!(x)) { \
