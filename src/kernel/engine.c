@@ -214,11 +214,17 @@ static int swapz_engine_plan_bounded_policy(
 			    int logical_pages_unique,
 			    swapz_u32 alignment_cursor)
 {
-	swapz_u32 costs[SWAPZ_MAX_RECORDS + 1U];
-	swapz_u32 reads[SWAPZ_MAX_RECORDS + 1U];
-	swapz_u8 batches[SWAPZ_MAX_RECORDS + 1U];
-	swapz_u8 selected_class[SWAPZ_MAX_RECORDS];
-	swapz_u8 selected_count[SWAPZ_MAX_RECORDS];
+	/*
+	 * Lexicographic objective in one bounded word:
+	 * bits 16..24 = physical blocks (<= 4 * 64 = 256),
+	 * bits 7..15  = cold read blocks (<= 3 * 64 = 192),
+	 * bits 0..6   = extent count (<= 64).
+	 * The fields cannot carry into one another, so unsigned comparison is
+	 * exactly the previous bytes/read/batch ordering. The caller's output
+	 * arrays temporarily hold the per-position class/take choice; compacting
+	 * the chosen path in place never overtakes a future logical position.
+	 */
+	swapz_u32 objectives[SWAPZ_MAX_RECORDS + 1U];
 	int index;
 	swapz_u8 out = 0;
 	swapz_u8 position = 0;
@@ -245,17 +251,14 @@ static int swapz_engine_plan_bounded_policy(
 		}
 		logical_pages_unique = unique;
 	}
-	costs[count] = 0;
-	reads[count] = 0;
-	batches[count] = 0;
+	objectives[count] = 0;
 	for (index = (int)count - 1; index >= 0; --index) {
 		swapz_u8 class_index;
 		swapz_u8 previous_take = 0;
 
-		costs[index] = ~(swapz_u32)0;
-		reads[index] = ~(swapz_u32)0;
-		batches[index] = SWAPZ_MAX_RECORDS;
-		selected_count[index] = 0;
+		objectives[index] = ~(swapz_u32)0;
+		classes[index] = 0;
+		records_per_extent[index] = 0;
 		for (class_index = 0; class_index < 3; ++class_index) {
 			swapz_u8 blocks = (swapz_u8)(1U << class_index);
 			swapz_u32 local_read_blocks = 0;
@@ -263,8 +266,7 @@ static int swapz_engine_plan_bounded_policy(
 							max_read_blocks,
 							logical_pages_unique,
 							&local_read_blocks);
-			swapz_u32 candidate_bytes, candidate_reads;
-			swapz_u8 candidate_batches;
+			swapz_u32 candidate_objective;
 
 			if (!take) {
 				previous_take = 0;
@@ -275,44 +277,30 @@ static int swapz_engine_plan_bounded_policy(
 				continue;
 			}
 			previous_take = take;
-			candidate_bytes = (swapz_u32)blocks * SWAPZ_BLOCK_BYTES +
-				costs[index + take];
-			candidate_reads = local_read_blocks + reads[index + take];
-			candidate_batches = batches[index + take] + 1U;
-			if (candidate_bytes < costs[index] ||
-			    (candidate_bytes == costs[index] &&
-			     candidate_reads < reads[index]) ||
-			    (candidate_bytes == costs[index] &&
-			     candidate_reads == reads[index] &&
-			     candidate_batches < batches[index]) ||
-			    /*
-			     * When bytes, cold-read cost and extent count are
-			     * identical, prefer the larger existing extent class.
-			     * Packed placement has no intra-segment alignment gap;
-			     * reconstruction below only needs to avoid crossing a
-			     * real segment edge.
-			     */
+			if (objectives[index + take] == ~(swapz_u32)0 ||
+			    local_read_blocks > 0x1ffU)
+				continue;
+			candidate_objective = objectives[index + take] +
+				((swapz_u32)blocks << 16) +
+				(local_read_blocks << 7) + 1U;
+			if (candidate_objective < objectives[index] ||
 			    (prefer_large_ties &&
-			     candidate_bytes == costs[index] &&
-			     candidate_reads == reads[index] &&
-			     candidate_batches == batches[index] &&
-			     blocks > selected_class[index])) {
-				costs[index] = candidate_bytes;
-				reads[index] = candidate_reads;
-				batches[index] = candidate_batches;
-				selected_class[index] = blocks;
-				selected_count[index] = take;
+			     candidate_objective == objectives[index] &&
+			     blocks > classes[index])) {
+				objectives[index] = candidate_objective;
+				classes[index] = blocks;
+				records_per_extent[index] = take;
 			}
 			if (take == (swapz_u8)(count - (swapz_u8)index) ||
 			    (class_index == 0 && max_read_blocks == 1U))
 				break;
 		}
-		if (!selected_count[index])
+		if (!records_per_extent[index])
 			return -E2BIG;
 	}
 	while (position < count) {
-		swapz_u8 chosen_class = selected_class[position];
-		swapz_u8 chosen_count = selected_count[position];
+		swapz_u8 chosen_class = classes[position];
+		swapz_u8 chosen_count = records_per_extent[position];
 
 		/*
 		 * Primary DP objectives are already fixed. The adjacent writer may
@@ -334,26 +322,22 @@ static int swapz_engine_plan_bounded_policy(
 				swapz_u8 take = swapz_fit_count(
 					pages, count, position, blocks, max_read_blocks,
 					logical_pages_unique, &local_read_blocks);
-				swapz_u32 candidate_bytes, candidate_reads;
-				swapz_u8 candidate_batches;
+				swapz_u32 candidate_objective;
 				swapz_u32 hole;
 
 				/*
 				 * Recompute only when the selected class crosses a segment
-				 * edge. This rare tie reconstruction avoids 576 bytes of
-				 * per-call planner stack cache.
+				 * edge. This rare tie reconstruction keeps ordinary
+				 * planning at one fit evaluation per extent class.
 				 */
-				if (!take)
+				if (!take ||
+				    objectives[position + take] == ~(swapz_u32)0 ||
+				    local_read_blocks > 0x1ffU)
 					continue;
-				candidate_bytes =
-					(swapz_u32)blocks * SWAPZ_BLOCK_BYTES +
-					costs[position + take];
-				candidate_reads =
-					local_read_blocks + reads[position + take];
-				candidate_batches = batches[position + take] + 1U;
-				if (candidate_bytes != costs[position] ||
-				    candidate_reads != reads[position] ||
-				    candidate_batches != batches[position])
+				candidate_objective = objectives[position + take] +
+					((swapz_u32)blocks << 16) +
+					(local_read_blocks << 7) + 1U;
+				if (candidate_objective != objectives[position])
 					continue;
 				{
 					swapz_u32 offset =
