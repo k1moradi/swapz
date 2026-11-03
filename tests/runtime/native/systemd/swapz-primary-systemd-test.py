@@ -666,9 +666,9 @@ class BootVerifierTests(unittest.TestCase):
                 #!/bin/sh
                 case "$1" in
                 info) printf '%s\\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}" ;;
-                table) printf '%s\\n' "${MOCK_DM_TABLE:-0 216643584 swapz 8:1 0 64 0 2 0 1 0 0}" ;;
+                table) printf '%s\\n' "${MOCK_DM_TABLE:-0 216641536 swapz 8:1 0 64 0 2 0 1 0 0}" ;;
                 status)
-                    printf '0 216643584 swapz version=0 flush_err=0 segment_discards_failed=%s failed=%s error=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0\\n' "$MOCK_DM_DISCARD_FAIL" "$MOCK_DM_STATUS_FAIL"
+                    printf '0 216641536 swapz version=0 flush_err=0 segment_discards_failed=%s failed=%s error=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0\\n' "$MOCK_DM_DISCARD_FAIL" "$MOCK_DM_STATUS_FAIL"
                     ;;
                 *) exit 2 ;;
                 esac
@@ -699,7 +699,7 @@ class BootVerifierTests(unittest.TestCase):
     def write_proc_swaps(self, *, active: bool) -> None:
         lines = ["Filename Type Size Used Priority"]
         if active:
-            lines.append(f"{self.dev / 'mapper' / 'swapz-primary'} partition 108321788 0 -1")
+            lines.append(f"{self.dev / 'mapper' / 'swapz-primary'} partition 108320764 0 -1")
         (self.proc / "swaps").write_text("\n".join(lines) + "\n", encoding="ascii")
 
     def run_verifier(self, action: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -767,9 +767,9 @@ class BootVerifierTests(unittest.TestCase):
             f"module_build_source_sha={SOURCE_SHA}",
             f"loaded_module_build_source_sha={SOURCE_SHA}",
             "dm_uuid=SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef",
-            "expected_dm_logical_sectors=216643584",
-            "dm_logical_bytes=110921515008",
-            "swap_size_kib=108321788",
+            "expected_dm_logical_sectors=216641536",
+            "dm_logical_bytes=110920466432",
+            "swap_size_kib=108320764",
             "swap_mapper_entries=1",
             "swap_priority=-1",
             "mapper_service_active_state=active",
@@ -980,7 +980,7 @@ class BootVerifierTests(unittest.TestCase):
     def test_multiline_dm_table_cannot_inject_report_fields(self) -> None:
         self.arm_then_reboot()
         env = self.env.copy()
-        env["MOCK_DM_TABLE"] = "0 216643584 swapz 8:1 0 64 0 2 0 1 0 0\nstatus=PASS"
+        env["MOCK_DM_TABLE"] = "0 216641536 swapz 8:1 0 64 0 2 0 1 0 0\nstatus=PASS"
         observed = self.run_verifier("observe", env=env)
         self.assertEqual(observed.returncode, 1, observed.stderr)
         report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
@@ -1073,7 +1073,7 @@ class RuntimeHealthTests(unittest.TestCase):
         (self.proc / "cmdline").write_text("quiet\n", encoding="ascii")
         (self.proc / "swaps").write_text(
             "Filename Type Size Used Priority\n"
-            f"{self.dev / 'mapper' / 'swapz-primary'} partition 108321788 1024 -1\n",
+            f"{self.dev / 'mapper' / 'swapz-primary'} partition 108320764 1024 -1\n",
             encoding="ascii",
         )
         (self.recovery / "primary-state.json").write_text(
@@ -1121,11 +1121,11 @@ class RuntimeHealthTests(unittest.TestCase):
                 #!/bin/sh
                 case "$1" in
                 info) printf '%s\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}" ;;
-                table) printf '0 216643584 swapz 8:1 0 64 0 2 0 1 0 0\n' ;;
+                table) printf '0 216641536 swapz 8:1 0 64 0 2 0 1 0 0\n' ;;
                 status)
                     if [ "${MOCK_DM_STATUS_SLEEP:-0}" != 0 ]; then sleep "$MOCK_DM_STATUS_SLEEP"; fi
                     if [ "${MOCK_DM_STATUS_UNAVAILABLE:-0}" = 1 ]; then exit 1; fi
-                    printf '%s\n' "${MOCK_DM_STATUS:-0 216643584 swapz failed=0 error=0 flush_err=0 segment_discards_failed=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 gc_reserve_segments_initial=2 gc_reserve_segments_current=2 gc_destination_advances=0 window_gc_pressure=0}"
+                    printf '%s\n' "${MOCK_DM_STATUS:-0 216641536 swapz failed=0 error=0 flush_err=0 segment_discards_failed=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 gc_reserve_segments_initial=2 gc_reserve_segments_current=2 gc_destination_advances=0 window_gc_pressure=0}"
                     ;;
                 *) exit 2 ;;
                 esac
@@ -1232,7 +1232,7 @@ class RuntimeHealthTests(unittest.TestCase):
     def test_reserve_role_erosion_is_observable_and_exhaustion_fails(self) -> None:
         env = self.env.copy()
         env["MOCK_DM_STATUS"] = (
-            "0 216643584 swapz failed=0 error=0 flush_err=0 "
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
             "segment_discards_failed=0 upper_write_completed_err=0 "
             "endio_write_seen_err=0 endio_write_forced_err=0 "
             "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
@@ -1257,7 +1257,7 @@ class RuntimeHealthTests(unittest.TestCase):
     def test_missing_reserve_role_telemetry_is_degraded(self) -> None:
         env = self.env.copy()
         env["MOCK_DM_STATUS"] = (
-            "0 216643584 swapz failed=0 error=0 flush_err=0 "
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
             "segment_discards_failed=0 upper_write_completed_err=0 "
             "endio_write_seen_err=0 endio_write_forced_err=0 "
             "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
