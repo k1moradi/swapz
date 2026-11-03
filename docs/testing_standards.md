@@ -4151,6 +4151,18 @@ recovery attempt must be safely rejected without changing the byte identity of
 the durable COMPLETE record, module/mapper state, or host swap inventory; this
 is the native idempotence proof for a terminal transaction.
 
+A negative-case process must emit a stable test-only marker proving the
+selected syscall, inventory or fsync boundary really fired; a nonzero process
+exit and plausible kernel facts alone do not establish fault coverage. The
+stale-run-ID fixture must mutate only the run-ID field of the original canonical
+state record, preserving every other byte so a rejection proves transaction
+ownership rather than JSON-parser strictness. For denied recovery, unchanged
+kernel inventory must be accompanied by byte-identical durable owner claims
+and state. Teardown must quarantine an unfinished READY transaction, an
+unparseable or non-COMPLETE durable record, or an orphan owner marker even when
+the module and mapper are already absent; no test cleanup may discard the last
+recovery provenance. The validated source SHA must name the current checkout.
+
 The same private rehearsal must exercise negative kernel-boundary cases against
 the real coordinator: ambiguous `swapon` and `swapoff` outcomes both with and
 without the kernel operation applied, unreadable post-operation swap inventory,

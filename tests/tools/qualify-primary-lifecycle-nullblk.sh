@@ -34,11 +34,13 @@ SOURCE_HEAD="$2"
 
 for command in cc dmsetup modprobe mountpoint mount blockdev sfdisk udevadm \
 	blkid mkswap sha256sum python3 timeout stat findmnt awk sed grep install od \
-	tr cut basename readlink rm rmdir ls sleep cat chmod; do
+	tr cut basename readlink rm rmdir ls sleep cat chmod git; do
 	command -v "$command" >/dev/null 2>&1 ||
 		blocked "required command is unavailable: $command"
 done
 
+[[ "$(git rev-parse --verify HEAD 2>/dev/null)" == "$SOURCE_HEAD" ]] ||
+	blocked "validated source does not match current checkout"
 [[ -r build/source-build-info.h &&
    -r build/kernel/experimental/dm-swapz.ko &&
    -x build/tests/device-roundtrip ]] ||
@@ -231,6 +233,45 @@ assert_unrelated_host_swap_identity() {
 		fail "unrelated host swap identity changed during $phase"
 }
 
+assert_owned_transaction_records() {
+	local expect_active="$1"
+	python3 - "$RECOVERY_BASE" "$RUN_ID" "$PARTUUID" "$PART_DEVNO" "$expect_active" <<'PY'
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+recovery_path, run_id, partuuid, devno, expect_active = sys.argv[1:6]
+major, minor = map(int, devno.split(":"))
+directory = Path(recovery_path)
+consumed = directory / ("consumed-" + run_id + ".json")
+active = directory / ("partition-" + partuuid + ".active")
+
+def canonical_owned_record(path):
+    identity = path.lstat()
+    if (not stat.S_ISREG(identity.st_mode) or identity.st_uid != 0 or
+            stat.S_IMODE(identity.st_mode) != 0o600 or identity.st_nlink != 1):
+        raise ValueError("unsafe transaction record identity")
+    payload = path.read_bytes()
+    record = json.loads(payload)
+    if record != {"major": major, "minor": minor,
+                  "partuuid": partuuid, "run_id": run_id}:
+        raise ValueError("wrong transaction owner")
+    return payload
+
+consumed_bytes = canonical_owned_record(consumed)
+if expect_active == "1":
+    if canonical_owned_record(active) != consumed_bytes:
+        raise ValueError("active claim differs from durable consumed ownership")
+elif expect_active == "0":
+    if active.exists() or active.is_symlink():
+        raise ValueError("completed transaction retains active ownership")
+else:
+    raise ValueError("invalid active owner expectation")
+PY
+}
+
 prepare_interruption_run() {
 	local output
 
@@ -245,6 +286,8 @@ prepare_interruption_run() {
 		fail "interruption prepare did not emit one valid run ID"
 	assert_lifecycle_state "$RUN_ID" READY null ||
 		fail "interruption prepare did not persist clean READY"
+	assert_owned_transaction_records 1 ||
+		fail "prepare did not prove exact durable transaction ownership"
 }
 
 start_interruption_baseline() {
@@ -339,8 +382,8 @@ interrupt_lifecycle() {
 		fail "$phase returned $rc instead of deterministic process-death status 86"
 	assert_lifecycle_state "$RUN_ID" "$expected_stage" null ||
 		fail "$phase did not leave expected durable $expected_stage state"
-	[[ -f "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
-		fail "$phase did not retain active ownership marker"
+	assert_owned_transaction_records 1 ||
+		fail "$phase did not retain exact run-bound ownership"
 	assert_interruption_kernel_facts "$phase"
 }
 
@@ -374,8 +417,8 @@ recover_interruption_run() {
 		fail "recovery after $phase did not preserve origin in COMPLETE"
 	[[ ! -e "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
 		fail "recovery after $phase left active owner marker"
-	[[ -f "$RECOVERY_BASE/consumed-$RUN_ID.json" ]] ||
-		fail "recovery after $phase removed consumed provenance"
+	assert_owned_transaction_records 0 ||
+		fail "recovery after $phase lost consumed or released ownership incorrectly"
 	[[ ! -d /sys/module/dm_swapz ]] ||
 		fail "recovery after $phase left dm_swapz loaded"
 	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
@@ -432,6 +475,8 @@ run_faulted_start_failure() {
 	set -e
 	printf '%s\n' "$output"
 	[[ "$rc" -ne 0 ]] || fail "$fault unexpectedly completed primary start"
+	grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault" <<< "$output" ||
+		fail "$fault failed for an unrelated reason: no selected fault hit"
 	assert_lifecycle_state "$RUN_ID" RECOVERY_REQUIRED STARTING ||
 		fail "$fault did not preserve STARTING recovery provenance"
 	assert_exact_owned_mapper 1
@@ -462,6 +507,8 @@ run_faulted_stop_failure() {
 	set -e
 	printf '%s\n' "$output"
 	[[ "$rc" -ne 0 ]] || fail "$fault unexpectedly completed primary stop"
+	grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault" <<< "$output" ||
+		fail "$fault failed for an unrelated reason: no selected fault hit"
 	assert_lifecycle_state "$RUN_ID" RECOVERY_REQUIRED STOPPING ||
 		fail "$fault did not preserve STOPPING recovery provenance"
 	assert_exact_owned_mapper 1
@@ -487,6 +534,8 @@ run_ambiguous_swapon_applied() {
 		printf '%s\n' "$output" >&2
 		fail "ambiguous swapon with exact active proof was not reconciled"
 	fi
+	grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=swapon-eintr-applied" <<< "$output" ||
+		fail "ambiguous swapon never reached the selected syscall"
 	printf '%s\n' "$output"
 	start_run="$(printf '%s\n' "$output" |
 		sed -n 's/^PRIMARY_START=ACTIVE run_id=\([0-9a-f]\{32\}\).*/\1/p')"
@@ -528,6 +577,8 @@ run_ambiguous_swapoff_applied() {
 		printf '%s\n' "$output" >&2
 		fail "ambiguous swapoff with exact inactive proof was not reconciled"
 	fi
+	grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=swapoff-eintr-applied" <<< "$output" ||
+		fail "ambiguous swapoff never reached the selected syscall"
 	printf '%s\n' "$output"
 	stop_run="$(printf '%s\n' "$output" |
 		sed -n 's/^PRIMARY_STOP=COMPLETE run_id=\([0-9a-f]\{32\}\).*/\1/p')"
@@ -555,6 +606,8 @@ run_failed_fsync_case() {
 	set -e
 	printf '%s\n' "$output"
 	[[ "$rc" -ne 0 ]] || fail "injected state directory fsync failure was ignored"
+	grep -Fxq "SWAPZ_PRIMARY_TEST_FSYNC_HIT=3" <<< "$output" ||
+		fail "selected state-directory fsync did not fail"
 	assert_lifecycle_state "$RUN_ID" STARTING null ||
 		fail "fsync failure did not retain the renamed STARTING record"
 	[[ -f "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
@@ -625,14 +678,32 @@ PY
 expect_recovery_refusal_preserves_kernel() {
 	local case_name="$1"
 	local phase="$2"
-	local output rc
+	local output rc before_state after_state before_claim after_claim
+	local state_file="$RECOVERY_BASE/primary-state.json"
+	local active_claim="$RECOVERY_BASE/partition-$PARTUUID.active"
+	local consumed_claim="$RECOVERY_BASE/consumed-$RUN_ID.json"
 
+	before_state=missing
+	[[ ! -e "$state_file" && ! -L "$state_file" ]] ||
+		before_state="$(sha256sum "$state_file" | awk '{print $1}')" ||
+		fail "cannot hash denied-recovery durable state"
+	before_claim="$(sha256sum "$active_claim" "$consumed_claim")" ||
+		fail "cannot snapshot denied-recovery ownership records"
 	set +e
 	output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary recover 2>&1)"
 	rc=$?
 	set -e
 	printf '%s\n' "$output"
 	[[ "$rc" -ne 0 ]] || fail "$case_name unexpectedly authorized recovery"
+	after_state=missing
+	[[ ! -e "$state_file" && ! -L "$state_file" ]] ||
+		after_state="$(sha256sum "$state_file" | awk '{print $1}')" ||
+		fail "cannot hash denied-recovery durable state after refusal"
+	after_claim="$(sha256sum "$active_claim" "$consumed_claim")" ||
+		fail "cannot resnapshot denied-recovery ownership records"
+	[[ "$before_state" == "$after_state" &&
+	   "$before_claim" == "$after_claim" ]] ||
+		fail "$case_name mutated durable state or transaction ownership on refusal"
 	assert_interruption_kernel_facts "$phase"
 }
 
@@ -647,15 +718,22 @@ run_stale_run_id_case() {
 	before_hash="$(sha256sum "$backup" | awk '{print $1}')"
 	alternate=ffffffffffffffffffffffffffffffff
 	[[ "$RUN_ID" != "$alternate" ]] || alternate=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-	python3 - "$RECOVERY_BASE/primary-state.json" "$alternate" <<'PY'
-import json
+	python3 - "$RECOVERY_BASE/primary-state.json" "$RUN_ID" "$alternate" <<'PY'
 import os
 import sys
 
-path, alternate = sys.argv[1:3]
-state = json.load(open(path, "r", encoding="utf-8"))
-state["run_id"] = alternate
-payload = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
+path, original_run_id, alternate_run_id = sys.argv[1:4]
+with open(path, "rb") as source:
+    original = source.read()
+needle = ('"run_id":"' + original_run_id + '"').encode("ascii")
+replacement = ('"run_id":"' + alternate_run_id + '"').encode("ascii")
+if (len(original_run_id) != 32 or len(alternate_run_id) != 32 or
+        original.count(needle) != 1 or not original.endswith(b"}\n")):
+    raise SystemExit("unsafe noncanonical run ID fixture")
+# Only mutate the transaction identity; preserve every other native state byte.
+payload = original.replace(needle, replacement, 1)
+if len(payload) != len(original):
+    raise SystemExit("stale run ID fixture changed record length")
 temporary = path + ".agent7-stale.tmp"
 fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
 try:
@@ -789,6 +867,45 @@ cleanup() {
 	if [[ $? -ne 0 || "$swaps_after" != "$SWAPS_ID_BEFORE" ]]; then
 		QUARANTINE=1
 		note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=host_swap_identity_changed"
+	fi
+
+	if [[ -d "$RECOVERY_BASE" && ! -L "$RECOVERY_BASE" ]]; then
+		# An earlier recovery attempt may have completed after the initial
+		# stage snapshot. Judge teardown only from the final durable record.
+		stage="$(state_stage 2>/dev/null)"
+		local state_file="$RECOVERY_BASE/primary-state.json"
+		local marker_path
+		if [[ -e "$state_file" || -L "$state_file" ]]; then
+			if [[ "$stage" != COMPLETE || ! "$RUN_ID" =~ ^[0-9a-f]{32}$ ]] ||
+			   ! python3 - "$state_file" "$RUN_ID" <<'PY'
+import json
+import sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as state_file:
+        state = json.load(state_file)
+    valid = (state.get("run_id") == sys.argv[2] and
+             state.get("stage") == "COMPLETE" and
+             state.get("recovery_previous_stage") in
+             (None, "STARTING", "STOPPING"))
+except (OSError, ValueError, TypeError, AttributeError):
+    valid = False
+raise SystemExit(0 if valid else 1)
+PY
+			then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=unfinished_or_ambiguous_durable_state"
+			fi
+		elif compgen -G "$RECOVERY_BASE/consumed-*.json" >/dev/null; then
+			QUARANTINE=1
+			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=lost_state_provenance"
+		fi
+		for marker_path in "$RECOVERY_BASE"/partition-*.active; do
+			if [[ -e "$marker_path" || -L "$marker_path" ]]; then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=unresolved_owner_record"
+				break
+			fi
+		done
 	fi
 
 	if (( OWN_NULL )) && (( ! QUARANTINE )); then

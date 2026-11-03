@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+
+/*
+ * Rootless fake kernel for the private linker-wrap fixture. No real swapon,
+ * swapoff, module load, inventory read, or fsync is performed by this binary.
+ * Its process-local fake inventory proves whether each fault did or did not
+ * apply the simulated syscall before the wrapper returned ambiguity.
+ */
+long __wrap_syscall(long number, ...);
+int __wrap_open(const char *path, int flags, ...);
+int __wrap_fsync(int fd);
+
+static int swap_is_active;
+static int swap_syscall_calls;
+static int normal_open_calls;
+static int normal_fsync_calls;
+static int module_syscall_calls;
+
+long syscall(long number, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, number);
+	if (number == SYS_swapon) {
+		const char *path = va_arg(arguments, const char *);
+		int flags = va_arg(arguments, int);
+
+		if (strcmp(path, "/test/owned-mapper") || flags != 0)
+			abort();
+		swap_is_active = 1;
+		++swap_syscall_calls;
+	} else if (number == SYS_swapoff) {
+		const char *path = va_arg(arguments, const char *);
+
+		if (strcmp(path, "/test/owned-mapper"))
+			abort();
+		swap_is_active = 0;
+		++swap_syscall_calls;
+	} else if (number == SYS_finit_module) {
+		int module_fd = va_arg(arguments, int);
+		const char *parameters = va_arg(arguments, const char *);
+		int flags = va_arg(arguments, int);
+
+		if (module_fd != 23 || strcmp(parameters, "") || flags != 0)
+			abort();
+		++module_syscall_calls;
+	} else if (number == SYS_delete_module) {
+		const char *name = va_arg(arguments, const char *);
+		int flags = va_arg(arguments, int);
+
+		if (strcmp(name, "dm_swapz") || flags != O_NONBLOCK)
+			abort();
+		++module_syscall_calls;
+	} else {
+		abort();
+	}
+	va_end(arguments);
+	return 0;
+}
+
+int open(const char *path, int flags, ...)
+{
+	if (strcmp(path, "/proc/swaps") || flags != O_RDONLY)
+		abort();
+	++normal_open_calls;
+	return 47;
+}
+
+int fsync(int fd)
+{
+	if (fd != 25)
+		abort();
+	++normal_fsync_calls;
+	return 0;
+}
+
+static void require_condition(int condition)
+{
+	if (!condition)
+		abort();
+}
+
+int main(int argc, char **argv)
+{
+	const char *case_name;
+	int stopping;
+	long syscall_result;
+
+	if (argc != 2)
+		return 2;
+	case_name = argv[1];
+	if (strcmp(case_name, "passthrough"))
+		require_condition(
+			setenv("SWAPZ_PRIMARY_TEST_FAULT", case_name, 1) == 0);
+	if (!strcmp(case_name, "state-dir-fsync")) {
+		require_condition(setenv(
+			"SWAPZ_PRIMARY_TEST_FSYNC_FAIL_CALL", "3", 1) == 0);
+		require_condition(__wrap_fsync(25) == 0);
+		require_condition(__wrap_fsync(25) == 0);
+		errno = 0;
+		require_condition(__wrap_fsync(25) == -1 && errno == EIO);
+		require_condition(normal_fsync_calls == 2);
+		return 0;
+	}
+	if (!strcmp(case_name, "passthrough")) {
+		require_condition(
+			__wrap_syscall(SYS_finit_module, 23, "", 0) == 0);
+		require_condition(
+			__wrap_syscall(SYS_swapon, "/test/owned-mapper", 0) == 0);
+		require_condition(__wrap_open("/proc/swaps", O_RDONLY) == 47);
+		require_condition(
+			__wrap_syscall(SYS_swapoff, "/test/owned-mapper") == 0);
+		require_condition(__wrap_syscall(
+			SYS_delete_module, "dm_swapz", O_NONBLOCK) == 0);
+		require_condition(__wrap_fsync(25) == 0);
+		require_condition(!swap_is_active && swap_syscall_calls == 2);
+		require_condition(module_syscall_calls == 2 &&
+				  normal_fsync_calls == 1 && normal_open_calls == 1);
+		return 0;
+	}
+	stopping = !strncmp(case_name, "swapoff-", 8) ||
+		   !strncmp(case_name, "post-swapoff-", 13);
+	swap_is_active = stopping;
+	errno = 0;
+	syscall_result = stopping ?
+		__wrap_syscall(SYS_swapoff, "/test/owned-mapper") :
+		__wrap_syscall(SYS_swapon, "/test/owned-mapper", 0);
+	if (!strcmp(case_name, "swapon-eintr-applied") ||
+	    !strcmp(case_name, "swapoff-eintr-applied")) {
+		require_condition(syscall_result == -1 && errno == EINTR &&
+				  swap_syscall_calls == 1);
+		require_condition(swap_is_active == !stopping);
+	} else if (!strcmp(case_name, "swapon-eintr-noeffect") ||
+		   !strcmp(case_name, "swapoff-eintr-noeffect") ||
+		   !strcmp(case_name, "swapoff-ebusy-noeffect")) {
+		int expected_errno =
+			!strcmp(case_name, "swapoff-ebusy-noeffect") ?
+			EBUSY : EINTR;
+
+		require_condition(syscall_result == -1 &&
+				  errno == expected_errno &&
+				  swap_syscall_calls == 0);
+		require_condition(swap_is_active == stopping);
+	} else if (!strcmp(case_name, "post-swapon-inventory-eio") ||
+		   !strcmp(case_name, "post-swapoff-inventory-eio")) {
+		require_condition(syscall_result == 0 &&
+				  swap_syscall_calls == 1 &&
+				  swap_is_active == !stopping);
+		errno = 0;
+		require_condition(__wrap_open("/proc/swaps", O_RDONLY) == -1 &&
+				  errno == EIO);
+		require_condition(__wrap_open("/proc/swaps", O_RDONLY) == 47 &&
+				  normal_open_calls == 1);
+	} else {
+		return 2;
+	}
+	return 0;
+}

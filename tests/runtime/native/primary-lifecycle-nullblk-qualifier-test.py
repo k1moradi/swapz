@@ -2,6 +2,7 @@
 """Rootless contract checks for the Agent 7 owned-null_blk qualifier."""
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import subprocess
 import unittest
 
@@ -9,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "tests/tools/qualify-primary-lifecycle-nullblk.sh"
 SHIM = ROOT / "tests/tools/primary-lifecycle-fault-shim.c"
+SHIM_HARNESS = ROOT / "tests/runtime/native/primary-lifecycle-fault-shim-harness.c"
 PRIMARY = ROOT / "src/userspace/swapz-primary.c"
 ROOT_MAKEFILE = ROOT / "Makefile"
 
@@ -79,6 +81,30 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn("memory_backed", self.script)
         self.assertIn("nullb-swapz-$TOKEN", self.script)
 
+    def test_fault_results_require_exact_hit_evidence(self):
+        self.assertIn("report_fault_hit", self.shim)
+        self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)
+        self.assertIn("SWAPZ_PRIMARY_TEST_FSYNC_HIT", self.shim)
+        self.assertIn(
+            'grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault"',
+            self.script)
+        for name in ("swapon-eintr-applied", "swapoff-eintr-applied"):
+            self.assertIn(f"SWAPZ_PRIMARY_TEST_FAULT_HIT={name}", self.script)
+        self.assertIn("SWAPZ_PRIMARY_TEST_FSYNC_HIT=3", self.script)
+
+    def test_stale_run_mutation_preserves_canonical_serialization(self):
+        self.assertIn('original.count(needle) != 1', self.script)
+        self.assertIn("payload = original.replace(needle, replacement, 1)",
+                      self.script)
+        self.assertNotIn('json.dumps(state, sort_keys=True', self.script)
+
+    def test_source_head_must_match_validated_source(self):
+        self.assertIn('git rev-parse --verify HEAD', self.script)
+
+    def test_cleanup_quarantines_unfinished_durable_state(self):
+        self.assertIn("unfinished_or_ambiguous_durable_state", self.script)
+        self.assertIn("unresolved_owner_record", self.script)
+
     def test_fault_shim_is_warning_clean(self):
         subprocess.run(
             [
@@ -88,6 +114,42 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             cwd=ROOT,
             check=True,
         )
+
+    def test_fault_shim_executes_nine_rootless_boundary_cases(self):
+        # The harness provides fake syscall/open/fsync implementations: no
+        # loaded kernel, swap device or privileged host action is touched.
+        with TemporaryDirectory(prefix="swapz-primary-fault-") as directory:
+            binary = Path(directory) / "fault-shim-test"
+            subprocess.run([
+                "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
+                str(SHIM), str(SHIM_HARNESS),
+                "-Wl,--wrap=syscall", "-Wl,--wrap=open", "-Wl,--wrap=fsync",
+                "-o", str(binary),
+            ], cwd=ROOT, check=True)
+            for fault in (
+                "passthrough",
+                "swapon-eintr-applied",
+                "swapon-eintr-noeffect",
+                "post-swapon-inventory-eio",
+                "swapoff-eintr-applied",
+                "swapoff-eintr-noeffect",
+                "swapoff-ebusy-noeffect",
+                "post-swapoff-inventory-eio",
+                "state-dir-fsync",
+            ):
+                with self.subTest(fault=fault):
+                    result = subprocess.run(
+                        [str(binary), fault], cwd=ROOT,
+                        capture_output=True, text=True, check=False,
+                        timeout=15)
+                    self.assertEqual(result.returncode, 0,
+                                     result.stdout + result.stderr)
+                    expected_marker = (
+                        "" if fault == "passthrough" else
+                        "SWAPZ_PRIMARY_TEST_FSYNC_HIT=3"
+                        if fault == "state-dir-fsync" else
+                        "SWAPZ_PRIMARY_TEST_FAULT_HIT=" + fault)
+                    self.assertEqual(result.stderr.strip(), expected_marker)
 
     def test_fault_shim_forwards_real_kernel_boundaries(self):
         for syscall in ("SYS_swapon", "SYS_swapoff",

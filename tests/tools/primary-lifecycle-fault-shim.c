@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,13 @@ int __real_fsync(int fd);
 
 static long last_swap_syscall;
 static unsigned long fsync_calls;
+
+/* Stable test-only evidence: a generic coordinator error is not an injected
+ * fault. Never print arbitrary environment values or test credentials. */
+static void report_fault_hit(const char *fault_name)
+{
+	fprintf(stderr, "SWAPZ_PRIMARY_TEST_FAULT_HIT=%s\n", fault_name);
+}
 
 static int fault_is(const char *name)
 {
@@ -41,7 +49,11 @@ static int fsync_should_fail(void)
 	call = strtoul(requested, &end, 10);
 	if (errno || end == requested || *end || !call)
 		return 0;
-	return call == fsync_calls;
+	if (call == fsync_calls) {
+		fprintf(stderr, "SWAPZ_PRIMARY_TEST_FSYNC_HIT=%lu\n", call);
+		return 1;
+	}
+	return 0;
 }
 
 long __wrap_syscall(long number, ...)
@@ -66,11 +78,13 @@ long __wrap_syscall(long number, ...)
 		va_end(arguments);
 		last_swap_syscall = SYS_swapon;
 		if (fault_is("swapon-eintr-noeffect")) {
+			report_fault_hit("swapon-eintr-noeffect");
 			errno = EINTR;
 			return -1;
 		}
 		result = __real_syscall(number, path, flags);
 		if (result == 0 && fault_is("swapon-eintr-applied")) {
+			report_fault_hit("swapon-eintr-applied");
 			errno = EINTR;
 			return -1;
 		}
@@ -82,15 +96,18 @@ long __wrap_syscall(long number, ...)
 		va_end(arguments);
 		last_swap_syscall = SYS_swapoff;
 		if (fault_is("swapoff-ebusy-noeffect")) {
+			report_fault_hit("swapoff-ebusy-noeffect");
 			errno = EBUSY;
 			return -1;
 		}
 		if (fault_is("swapoff-eintr-noeffect")) {
+			report_fault_hit("swapoff-eintr-noeffect");
 			errno = EINTR;
 			return -1;
 		}
 		result = __real_syscall(number, path);
 		if (result == 0 && fault_is("swapoff-eintr-applied")) {
+			report_fault_hit("swapoff-eintr-applied");
 			errno = EINTR;
 			return -1;
 		}
@@ -127,12 +144,14 @@ int __wrap_open(const char *path, int flags, ...)
 	if (path && !strcmp(path, "/proc/swaps")) {
 		if (last_swap_syscall == SYS_swapon &&
 		    fault_is("post-swapon-inventory-eio")) {
+			report_fault_hit("post-swapon-inventory-eio");
 			last_swap_syscall = 0;
 			errno = EIO;
 			return -1;
 		}
 		if (last_swap_syscall == SYS_swapoff &&
 		    fault_is("post-swapoff-inventory-eio")) {
+			report_fault_hit("post-swapoff-inventory-eio");
 			last_swap_syscall = 0;
 			errno = EIO;
 			return -1;
