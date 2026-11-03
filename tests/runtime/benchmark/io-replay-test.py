@@ -2619,6 +2619,23 @@ class PairReplayContract(unittest.TestCase):
         evidence = importlib.util.module_from_spec(evidence_spec)
         evidence_spec.loader.exec_module(evidence)
 
+        self.assertEqual(
+            evidence.campaign_status(
+                "FAIL_OR_INCOMPLETE", True, True, "STABLE"),
+            "FAIL_OR_INCOMPLETE")
+        self.assertEqual(
+            evidence.campaign_status("PASS", False, True, "STABLE"),
+            "BLOCKED_SOURCE_IDENTITY_CHANGED")
+        self.assertEqual(
+            evidence.campaign_status("PASS", True, False, "STABLE"),
+            "BLOCKED_PROTOCOL_NOT_V2")
+        self.assertEqual(
+            evidence.campaign_status("PASS", True, True, "CHANGED"),
+            "BLOCKED_HOST_IDENTITY_CHANGED")
+        self.assertEqual(
+            evidence.campaign_status("PASS", True, True, "STABLE"),
+            "PASS")
+
         qualification_path = SCRIPT.with_name("qualification.py")
         qualification_spec = importlib.util.spec_from_file_location(
             "swapz_campaign_qualification", qualification_path)

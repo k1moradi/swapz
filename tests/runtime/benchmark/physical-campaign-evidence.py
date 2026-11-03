@@ -521,6 +521,19 @@ def artifact(path: Path, data: bytes) -> dict:
     }
 
 
+def campaign_status(summary_status: str, source_consistent: bool,
+                    protocol_v2: bool, stability_status: str) -> str:
+    if summary_status != "PASS":
+        return "FAIL_OR_INCOMPLETE"
+    if not source_consistent:
+        return "BLOCKED_SOURCE_IDENTITY_CHANGED"
+    if not protocol_v2:
+        return "BLOCKED_PROTOCOL_NOT_V2"
+    if stability_status != "STABLE":
+        return "BLOCKED_HOST_IDENTITY_CHANGED"
+    return "PASS"
+
+
 def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
                   summary_path: Path, pair_paths: list[Path]) -> dict:
     require_clean_source(source_sha)
@@ -642,16 +655,8 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
 
     stability = host_stability(before, after)
     summary_status = summary.get("status")
-    if summary_status != "PASS":
-        campaign_status = "FAIL_OR_INCOMPLETE"
-    elif not source_consistent:
-        campaign_status = "BLOCKED_SOURCE_IDENTITY_CHANGED"
-    elif not protocol_v2:
-        campaign_status = "BLOCKED_PROTOCOL_NOT_V2"
-    elif stability["status"] != "STABLE":
-        campaign_status = "BLOCKED_HOST_IDENTITY_CHANGED"
-    else:
-        campaign_status = "PASS"
+    sealed_status = campaign_status(
+        summary_status, source_consistent, protocol_v2, stability["status"])
 
     return {
         "schema": CAMPAIGN_SCHEMA,
@@ -662,7 +667,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         "campaign_source_sha": summary_source_sha,
         "pair_source_shas": pair_source_shas,
         "source_consistent": source_consistent,
-        "campaign_status": campaign_status,
+        "campaign_status": sealed_status,
         "qualification_status": summary_status,
         "evaluation_protocol": summary.get("evaluation_protocol"),
         "host_stability": stability,
