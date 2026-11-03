@@ -1436,7 +1436,12 @@ static swapz_u16 swapz_probe_set(
         flush = body("swapz_flush_window")
         self.assertLess(flush.index("swapz_issue_flush(ctx)"),
                         flush.index("swapz_complete(bio, 0)"))
-        self.assertIn("if (error && needs_fua)", flush)
+        self.assertIn("if (error && needs_fua &&", flush)
+        self.assertIn("(!recoverable_gc_error || committed)", flush)
+        self.assertLess(
+            flush.index("error = swapz_issue_flush(ctx)"),
+            flush.index("if (error && needs_fua &&"))
+        self.assertIn("swapz_fail(ctx, error)", flush)
         self.assertNotIn("DM_MAPIO_KILL; /* Until FUA", body("swapz_map"))
 
     def test_valid_empty_flush_protocol_and_failure_accounting(self):
@@ -1792,10 +1797,14 @@ static swapz_u16 swapz_probe_set(
 
     def test_gc_does_not_consume_or_complete_upper_bios(self):
         gc = body("swapz_gc_compact_one_inner")
+        commit = source_body("swapz_gc_commit_rotation", AUTH)
         self.assertNotIn("swapz_complete(", gc)
         self.assertIn("ctx->gc_read_bytes", gc)
         self.assertIn("ctx->gc_write_bytes", gc)
-        self.assertIn("a->gc_allocation = 0", gc)
+        self.assertIn("swapz_gc_commit_rotation(a, victim)", gc)
+        self.assertIn("a->gc_allocation = 0", commit)
+        self.assertIn("a->gc_forbidden_open = ~(swapz_u32)0", commit)
+        self.assertIn("a->gc_forbidden_victim = ~(swapz_u32)0", commit)
 
     def test_deferred_upper_completions_have_one_owner_and_join_before_drain(self):
         wrapper = body("swapz_worker")
@@ -2672,17 +2681,26 @@ int main(void)
     def test_gc_explicitly_forbids_paused_open_and_victim(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()
         gc = body("swapz_gc_compact_one_inner")
-        for name in ("gc_forbidden_open", "gc_forbidden_victim"):
-            self.assertIn(name, authority)
-            self.assertIn("a->" + name, gc)
-        self.assertIn("segment == a->gc_forbidden_open", authority)
-        self.assertIn("segment == a->gc_forbidden_victim", authority)
+        begin = source_body("swapz_gc_begin_rotation", authority)
+        commit = source_body("swapz_gc_commit_rotation", authority)
+        eligible = source_body("swapz_dead_segment_eligible", authority)
+        recovery = body("swapz_gc_recovery_validate")
+        self.assertIn("a->gc_forbidden_open = a->open_segment", begin)
+        self.assertIn("a->gc_forbidden_victim = victim", begin)
+        self.assertIn("segment == a->gc_forbidden_open", eligible)
+        self.assertIn("segment == a->gc_forbidden_victim", eligible)
+        self.assertIn("victim != a->gc_forbidden_victim", commit)
+        self.assertIn("dest == a->gc_forbidden_open", commit)
+        self.assertIn(
+            "a->gc_forbidden_victim != recovery->victim", recovery)
+        self.assertIn(
+            "a->gc_forbidden_open != recovery->forbidden_open", recovery)
         self.assertIn("swapz_gc_begin_rotation(a, victim)", gc)
         self.assertIn("swapz_gc_commit_rotation(a, victim)", gc)
         self.assertIn("swapz_enable_segment_rotation(&ctx->authority", body("swapz_ctr"))
         self.assertIn("!ctx->segment_roles[segment]", body("swapz_gc_choose_victim"))
-        self.assertIn("a->segment_foreground[dest] = 1", authority)
-        self.assertIn("a->segment_foreground[victim] = 0", authority)
+        self.assertIn("a->segment_foreground[dest] = 1", commit)
+        self.assertIn("a->segment_foreground[victim] = 0", commit)
 
     def test_optional_write_verify_before_raw_publication(self):
         ctor = body("swapz_ctr")

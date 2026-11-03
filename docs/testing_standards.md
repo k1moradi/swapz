@@ -4573,3 +4573,13 @@ IN_PROGRESS, never PASS; a current FAIL stays FAIL. A retained old host
 snapshot must be labeled HISTORICAL and cannot become a current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
+
+Source-contract assertions follow the component that owns a safety transition.
+For FUA, the contract requires the lower flush before any successful upper BIO
+completion and requires unsafe flush errors to fail the target even when the GC
+path has a separately recoverable pre-publication case. For GC role rotation,
+the Device Mapper contract verifies begin/commit ordering and recovery-token
+binding, while direct `gc_allocation`, forbidden-segment and role-reset
+assertions are made against the authority begin/commit helpers that exclusively
+own those fields. Tests must not require obsolete direct field writes in a
+caller after ownership has moved behind those helpers.
