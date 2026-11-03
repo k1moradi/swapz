@@ -93,15 +93,19 @@ static int test_mutated_raw_token_does_not_publish(void)
 static int test_raw_descriptor_reads_fail_closed(void)
 {
 	struct swapz_tx tx;
-	struct swapz_decoded decoded;
+	struct swapz_map stale;
+	struct swapz_decoded decoded = {0};
 	const swapz_u8 *payload;
 
 	CHECK(init() == 0);
 	CHECK(stage_raw(0, &tx) == 0);
 	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
-	memset(&decoded, 0, sizeof(decoded));
 	CHECK(swapz_read_authoritative_peeked(&a, 0, &maps[0], disk_page, 4096,
 					    &decoded, &payload) == -EOPNOTSUPP);
+	stale = maps[0];
+	stale.raw_crc32c ^= 1U;
+	CHECK(swapz_read_authoritative_peeked(&a, 0, &stale, disk_page, 4096,
+					    &decoded, &payload) == -ESTALE);
 	return 0;
 }
 

@@ -256,7 +256,15 @@ Unless evidence changes the order, work on:
 2. **Active:** native production lifecycle and standing-authorization policy
    cleanup;
 3. actual Linux swap correctness on the authorized card;
-4. maximum safe full-card capacity and bounded metadata RAM;
+4. maximum safe full-card capacity and bounded metadata RAM. The current
+   `/dev/sda1` geometry admits 27,080,448 logical pages; the compact 20-byte
+   map reduces the source-derived capacity-index lower bound from 917.22 MiB
+   to 813.92 MiB (103.30 MiB saved). This estimate excludes fixed target
+   scratch, caches, workspaces and allocator overhead. It is not proof that a
+   full-capacity live target fits available RAM; measure actual allocation and
+   peak memory before advertising or activating that capacity. Recalculate
+   from the runtime-selected geometry if the protected PARTUUID changes; these
+   host-specific figures are not production capacity constants.
 5. sustained occupancy/GC/churn and physical service;
 6. persistent startup/shutdown integration and cold-boot acceptance harness;
 7. performance optimization only after correctness/lifecycle gates are closed.

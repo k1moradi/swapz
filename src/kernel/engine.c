@@ -1922,7 +1922,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	*payload_length = 0;
 	engine->read_validated_payload_crc32c = 0;
 	observed = engine->authority->maps[logical_page];
-	if (!observed.valid || !observed.extent_blocks ||
+	if (!observed.valid || observed.raw || !observed.extent_blocks ||
 	    observed.extent_blocks > SWAPZ_MAX_BLOCKS ||
 	    observed.start_block >= engine->authority->physical_blocks ||
 	    observed.extent_blocks >

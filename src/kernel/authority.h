@@ -19,20 +19,31 @@ struct swapz_map {
 	swapz_u32 start_block;
 	swapz_u32 sequence;
 	swapz_u32 generation;
-	/* Volatile sidecar integrity for a full raw 4KiB fallback page.
-	 * Raw has no space for an on-media CRC without another physical block. */
-	swapz_u32 raw_crc32c;
+	/* These interpretations are exclusive: raw mappings keep their volatile
+	 * CRC here; compressed mappings keep their zero-extended on-extent payload
+	 * offset. The u32 width initializes the full union in either encoding. */
+	union {
+		swapz_u32 raw_crc32c;
+		swapz_u32 payload_offset;
+	};
 	/* Volatile compressed payload bytes (4096 for raw). Required for
 	 * real live-byte GC victim selection without reading every extent. */
 	swapz_u16 payload_length;
-	/* Validated at publication; read hint only, cross-checked against the
-	 * on-media CRC-protected record before trusting returned payload. */
-	swapz_u16 payload_offset;
-	swapz_u8 extent_blocks;
 	swapz_u8 record_index;
-	swapz_u8 raw;
-	swapz_u8 valid;
+	/* One byte stores legal extent size plus raw/valid state. */
+	union {
+		swapz_u8 state;
+		struct {
+			swapz_u8 extent_blocks:3;
+			swapz_u8 raw:1;
+			swapz_u8 valid:1;
+			swapz_u8 reserved:3;
+		};
+	};
 };
+
+_Static_assert(sizeof(struct swapz_map) == 20,
+	       "swapz_map must stay compact for full-capacity metadata");
 
 static inline swapz_u8 swapz_map_record_index(const struct swapz_map *map)
 {

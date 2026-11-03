@@ -116,6 +116,24 @@ static int test_good_full_readback_publishes(void)
 	return 0;
 }
 
+static int test_compressed_engine_reader_rejects_raw_map_before_io(void)
+{
+	const swapz_u32 logical_page = 7;
+	struct swapz_tx tx;
+	swapz_u8 output[SWAPZ_BLOCK_BYTES];
+	swapz_u16 output_length = 99;
+
+	CHECK(setup() == 0);
+	memset(scratch_w, 0x5a, SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_stage(&auth, &logical_page, 1, 1, &tx) == 0);
+	CHECK(swapz_finish_raw(&auth, &tx, scratch_w, 1, 0) == 0);
+	CHECK(map[logical_page].valid && map[logical_page].raw);
+	CHECK(swapz_engine_read_page(&engine, logical_page, output,
+				     sizeof(output), &output_length) == -ESTALE);
+	CHECK(reads == 0 && output_length == 0);
+	return 0;
+}
+
 static int test_silent_media_corruption_rejected_before_publication(void)
 {
 	swapz_u8 committed = 99;
@@ -386,6 +404,7 @@ int main(void)
 {
 	int passed = 0;
 
+	CHECK(test_compressed_engine_reader_rejects_raw_map_before_io() == 0); passed++;
 	CHECK(test_good_full_readback_publishes() == 0); passed++;
 	CHECK(test_silent_media_corruption_rejected_before_publication() == 0); passed++;
 	CHECK(test_readback_io_failure_preserves_unmapped() == 0); passed++;

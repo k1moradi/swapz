@@ -2088,6 +2088,18 @@ propagates it to the original BIO. It may enforce terminal fail-closed status
 there but must leave any existing failure unchanged, and must not treat a
 completion counter as proof of the user's write() return value.
 
+The volatile per-logical-page authority map is part of the full-capacity RAM
+budget and must remain exactly 20 bytes (`_Static_assert`). Its four-byte union
+has mutually exclusive meanings: a RAW mapping stores its volatile CRC32C;
+an LZ4 or delta64 mapping stores its zero-extended payload offset. Compressed
+read paths must reject RAW mappings before examining the offset member, while
+the RAW integrity path must compare the CRC member. The shared one-byte state
+stores extent size, RAW and valid flags; it is in-memory host state and must
+never be serialized as an on-media structure. Preserve both RAW CRC and
+compressed-offset behavior in native production-C tests whenever this layout
+changes. Capacity estimates must use `sizeof(struct swapz_map)` from the built
+source and label array-only totals separately from total target memory.
+
 
 ### Physical-smoke byte-exact oracle: opened DM identity
 

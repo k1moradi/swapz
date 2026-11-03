@@ -2418,9 +2418,18 @@ int main(void)
     def test_raw_crc_protection_and_gc_relocation(self):
         auth = (ROOT / "src/kernel/authority.c").read_text()
         auth_h = (ROOT / "src/kernel/authority.h").read_text()
+        engine = (ROOT / "src/kernel/engine.c").read_text()
         self.assertIn("raw_crc32c", auth_h)
+        self.assertIn("_Static_assert(sizeof(struct swapz_map) == 20", auth_h)
         self.assertIn("swapz_verify_raw(", auth)
         self.assertIn("swapz_crc32c_bytes(raw_page, SWAPZ_BLOCK_BYTES)", auth)
+        engine_read = source_body("swapz_engine_read_page", engine)
+        observed_authority = source_body(
+            "swapz_read_observed_authority", auth)
+        self.assertLess(engine_read.index("observed.raw"),
+                        engine_read.index("observed.payload_offset"))
+        self.assertLess(observed_authority.index("current_map->raw"),
+                        observed_authority.index("current_map->payload_offset"))
         self.assertIn("swapz_verify_raw(&ctx->authority, logical, ctx->read_page)",
                       body("swapz_read"))
         self.assertIn("swapz_verify_raw(&ctx->authority, logical, ctx->input_page)",

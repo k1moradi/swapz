@@ -1688,12 +1688,17 @@ static int swapz_read_observed_authority(
 	    current_map->sequence != observed->sequence ||
 	    current_map->generation != observed->generation ||
 	    current_map->extent_blocks != observed->extent_blocks ||
+	    current_map->raw != observed->raw ||
 	    current_map->record_index != observed->record_index ||
-	    current_map->payload_length != observed->payload_length ||
-	    current_map->payload_offset != observed->payload_offset)
+	    current_map->payload_length != observed->payload_length)
 		return -ESTALE;
-	if (current_map->raw)
+	if (current_map->raw) {
+		if (current_map->raw_crc32c != observed->raw_crc32c)
+			return -ESTALE;
 		return -EOPNOTSUPP;
+	}
+	if (current_map->payload_offset != observed->payload_offset)
+		return -ESTALE;
 	if (!extent ||
 	    bytes_total != (swapz_u32)current_map->extent_blocks * SWAPZ_BLOCK_BYTES)
 		return -EINVAL;

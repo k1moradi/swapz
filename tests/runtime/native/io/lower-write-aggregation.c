@@ -870,8 +870,15 @@ static int test_mixed_default_equal_bytes_vs_serial_raw_control(void)
 	CHECK(validate_mixed_prefix(40, 40) == 0);
 	for (i = 0; i < 40; ++i) {
 		CHECK(maps[i].generation == combined[i].generation);
-		CHECK(maps[i].raw_crc32c == combined[i].raw_crc32c);
 		CHECK(maps[i].raw == combined[i].raw);
+		if (maps[i].raw) {
+			CHECK(maps[i].raw_crc32c == combined[i].raw_crc32c);
+		} else {
+			CHECK(maps[i].payload_length ==
+			      combined[i].payload_length);
+			CHECK(swapz_map_encoding(&maps[i]) ==
+			      swapz_map_encoding(&combined[i]));
+		}
 	}
 	return 0;
 }
@@ -929,7 +936,15 @@ static int test_mixed_failed_overwrite_preserves_old_generations(void)
 		CHECK(maps[i].valid);
 		CHECK(maps[i].start_block == previous[i].start_block);
 		CHECK(maps[i].generation == previous[i].generation);
-		CHECK(maps[i].raw_crc32c == previous[i].raw_crc32c);
+		CHECK(maps[i].raw == previous[i].raw);
+		if (maps[i].raw) {
+			CHECK(maps[i].raw_crc32c == previous[i].raw_crc32c);
+		} else {
+			CHECK(maps[i].payload_offset == previous[i].payload_offset);
+			CHECK(maps[i].payload_length == previous[i].payload_length);
+			CHECK(swapz_map_encoding(&maps[i]) ==
+			      swapz_map_encoding(&previous[i]));
+		}
 		if (i >= 8) {
 			CHECK(read_blocks(NULL, maps[i].start_block, 1, output) == 0);
 			CHECK(swapz_verify_raw(&a, i, output) == 0);

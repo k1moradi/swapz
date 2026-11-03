@@ -61,14 +61,14 @@ static int test_initial_rejects_unsafe_capacity(void)
 	return 0;
 }
 
-static int test_designated_partition_maximum_capacity(void)
+static int test_16gib_fixture_maximum_capacity(void)
 {
 	const swapz_u64 partition_bytes = 17179869184ULL;
 	const swapz_u32 expected_physical_blocks = 4194048U;
 	const swapz_u32 expected_logical_pages = 3727872U;
 	const swapz_u32 expected_reserve_blocks = 465984U;
 	const swapz_u32 expected_segments = 16383U;
-	const swapz_u64 expected_index_bytes = 132398304ULL;
+	const swapz_u64 expected_index_bytes = 117486816ULL;
 	const swapz_u32 total_blocks =
 		(swapz_u32)(partition_bytes / SWAPZ_BLOCK_BYTES);
 	const swapz_u32 physical_blocks =
@@ -625,7 +625,7 @@ int main(void)
 	int passed = 0;
 
 	CHECK(test_initial_rejects_unsafe_capacity() == 0); passed++;
-	CHECK(test_designated_partition_maximum_capacity() == 0); passed++;
+	CHECK(test_16gib_fixture_maximum_capacity() == 0); passed++;
 	CHECK(test_full_publish_and_authoritative_reads() == 0); passed++;
 	CHECK(test_peeked_authoritative_read_rechecks_payload_and_sequence() == 0); passed++;
 	CHECK(test_torn_write_no_old_mapping_invalidation() == 0); passed++;

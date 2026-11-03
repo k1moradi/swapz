@@ -315,22 +315,28 @@ signature to an unchanged module.
 
 Native tests compile the real `src/kernel/{codec,authority,engine}.c` where applicable. They cover codec integrity, authority publication, torn/short failure, overwrite generations, discard, zero-write representation, online packing, randomized authority, lower-run aggregation, flush/FUA accounting, retention/window policy and GC rotation/cost invariants.
 
-The native authority suite must also exercise the exact maximum logical-page
-boundary for the designated 16 GiB backing geometry: one SWZ header block,
+The native authority suite must also exercise a fixed 16 GiB maximum-capacity
+regression fixture: one SWZ header block,
 1 MiB segment rounding, and the authority's `ceil(logical_pages / 8)` reserve
 with its two-segment minimum. It must reject the first page beyond the maximum,
 initialize the maximum, attach every capacity-dependent production authority
-array, and calculate those array bytes from the compiled C types. For the
-current geometry this is 4,194,048 usable physical blocks, 3,727,872 logical
-pages (15,269,363,712 mapper bytes), 465,984 reserve blocks, and 132,398,304
-bytes (126.26 MiB) of capacity-index arrays. The last figure excludes the
-target structure, fixed scratch/cache/workspace allocations, and allocator
-overhead; it is not a total module-RAM measurement. Native authority success
-does not prove that the loaded Device Mapper target can allocate or operate at
-that size. The loaded qualification must first create the maximum logical
-target over a separately owned 16,383 MiB RAM-backed `null_blk` lower, then
-verify the exact DM UUID, table, mapper size and lower identity. Device discovery
-may issue logical reads after the mapper is published, so record the observed
+array, and calculate those array bytes from the compiled C types. The volatile
+`struct swapz_map` must remain 20 bytes: raw mappings store their CRC32C in
+the four-byte union, while compressed mappings store a zero-extended payload
+offset in that same union; encoding-specific readers must not inspect the
+other interpretation. For the current 16 GiB fixture geometry this is
+4,194,048 usable physical blocks, 3,727,872 logical pages (15,269,363,712
+mapper bytes), 465,984 reserve blocks, and 117,486,816 bytes (112.04 MiB) of
+capacity-index arrays. The map compaction reduces this compiled-array estimate
+by 14,911,488 bytes (14.22 MiB) from the former 24-byte map layout. The array
+figure excludes the target structure, fixed scratch/cache/workspace allocations
+and allocator overhead; it is not a total module-RAM measurement. Native
+authority success does not prove that the loaded Device Mapper target can
+allocate or operate at that size. The loaded 16 GiB fixture qualification must
+create the matching maximum logical target over a separately owned 16,383 MiB
+RAM-backed `null_blk` lower, then verify the exact DM UUID, table, mapper size
+and lower identity. Device discovery may issue logical reads after the mapper is
+published, so record the observed
 mapper READ bytes without attributing them to a particular process. Require zero
 logical writes, zero lower physical read/write counters, unchanged lower
 statistics at construction, then use the opened-UUID-checked oracle to write and
