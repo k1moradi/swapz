@@ -260,7 +260,11 @@ def evaluate_release(
         if not _same_hashes(owner.get("hashes"), report_artifacts):
             block_code("exact_source_owner_make_test: artifact binding mismatch")
 
-    pass_record("owned_nullblk_qualification")
+    owned_nullblk = pass_record("owned_nullblk_qualification")
+    if owned_nullblk is not None and not _same_hashes(
+            owned_nullblk.get("hashes"), report_artifacts):
+        block_code(
+            "owned_nullblk_qualification: artifact binding mismatch")
 
     critical = pass_record("unresolved_critical_issues")
     if critical is not None and critical.get("count") != 0:

@@ -107,7 +107,8 @@ def current_evidence(report_raw, policy_raw):
                 tested_source_sha=SOURCE,
                 report_sha256=report_digest,
                 hashes=dict(ARTIFACTS)),
-            "owned_nullblk_qualification": pass_record(),
+            "owned_nullblk_qualification": pass_record(
+                hashes=dict(ARTIFACTS)),
             "unresolved_critical_issues": pass_record(count=0),
             "real_linux_swap": pass_record(
                 policy_sha256=policy_digest,
@@ -249,6 +250,24 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertTrue(any(
             "installed artifact binding mismatch" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_owned_nullblk_pass_must_bind_qualified_artifacts(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        nullblk = evidence["release_evidence"]["owned_nullblk_qualification"][
+            "hashes"]
+        owner = evidence["release_evidence"]["exact_source_owner_make_test"][
+            "hashes"]
+        self.assertIsNot(nullblk, owner)
+
+        nullblk["module_sha256"] = "4" * 64
+        self.assertEqual(owner["module_sha256"], ARTIFACTS["module_sha256"])
+        result = evaluate(report, evidence, policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "owned_nullblk_qualification: artifact binding mismatch" in blocker
             for blocker in result["code_blockers"]))
 
     def test_policy_and_target_bindings_are_exact(self):

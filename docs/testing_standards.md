@@ -4883,9 +4883,13 @@ armed cold-boot harness, and owner-observed reboot. Missing, historical, stale,
 source-unbound, or structurally incomplete observations are BLOCKED or
 IN_PROGRESS, never PASS; a current FAIL stays FAIL. The owner `make test`
 evidence must carry the same formatter/module/oracle digests as the qualified
-artifact evidence. Real-swap PASS evidence must carry the installed qualified
-formatter/module/oracle digests observed by the physical helper, and those
-digests plus installed artifact identity must match the exact qualified release
+artifact evidence. Owned-null_blk lifecycle PASS evidence must likewise carry
+the exact private formatter/module/oracle digests emitted by its rehearsal
+qualification report and match the qualified release artifacts; a source-bound
+PASS with missing or mismatched lifecycle artifact hashes is BLOCKED. Real-swap
+PASS evidence must carry the installed qualified formatter/module/oracle digests
+observed by the physical helper, and those digests plus installed artifact
+identity must match the exact qualified release
 artifacts. Real-swap, maximum-capacity/RAM and sustained-physical PASS evidence
 must bind the SHA-256 of the exact current `FROZEN`
 `docs/production-acceptance.json`; changing that policy invalidates those
@@ -4919,8 +4923,9 @@ policy bytes, binds owner `make test`, all three required CI workflows
 (`Native kernel-C project-goal regressions`,
 `Experimental swapz production C qualification`, and
 `Systemd and package production-readiness`) and all qualified artifacts to one
-exact synchronized `main` SHA, and independently
-cross-checks formatter/module/oracle hashes. Current PASS physical records bind
+exact synchronized `main` SHA, and independently cross-checks
+formatter/module/oracle hashes for owner, owned-null_blk lifecycle, real-swap
+and installed-artifact evidence. Current PASS physical records bind
 the normalized lowercase PARTUUID plus exact partition byte size and the frozen
 policy SHA-256. Full-capacity evidence must include measured positive logical
 capacity and measured peak target/metadata RAM no greater than the frozen
