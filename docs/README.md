@@ -51,44 +51,62 @@ establish an idle host or make an idle historical run directly comparable.
 
 ## Current evidence
 
-The latest successful standard owner matrix tested source
-`174d42eb7135899d4bc0acb22ea82f5be1317f5f`, passed all five stages, and
-published report-only commit
-`edab5b87344b33f95b2152dab5efbc39fdb0b1a0`. This qualifies the complete
-owned-RAM `null_blk` matrix for that exact source. Current `main` has since
-advanced through settled-control cleanup, so a fresh complete `make test` is
-required before current HEAD can be called the qualified baseline.
+The latest complete owner `make test` passed all five stages for source
+`acdeba452aa142c702bed40010c083276a692711`. It published report-only commit
+`17ed3c639ce99708ee2bfbed7d979b35592c7a5a`; report SHA-256 is
+`e82b4054fbc51daf7bc99f2b60cc1c41581530ac0c59283229b891cb6cb40651`.
+Stage times were 22.474 s (build), 189.993 s (native/rootless), 18.180 s
+(W=1), 14.141 s (W=2), and 1403.514 s (owned RAM, mixed/QD). Its scope is
+`RAM_BACKED_NULL_BLK_ONLY`: it does not qualify physical SD, real Linux swap,
+or full-card capacity. This report predates the current lifecycle coordinator
+and kernel status change.
 
-The most recent owner attempt published report-only commit
-`c86869bf8d7cee1372c90f13a8934f69b9f4e1b9` for tested source
-`9feb6b9df7710634bffbf394504257b2a4d2d8d3`. Stages 1–4 passed; stage 5 was
-BLOCKED because the ID36 low-RAM gate required at least 1 GiB of
-`MemAvailable`. The report is not an overall qualification, and it does not
-qualify later `main` changes. Current `main` is
-`ed76ae2a7d1ef067732ec6c63151c054dac4a9c2`; its native project-goal workflow
-passed on that exact commit (run `41639975131`). The latest production-C
-qualification passed on `1f390fa47f788c927d2eb8987bf2cd6f60ae7ede`
-(run `41638449351`); production source is unchanged through current `main`.
-These CI results do not replace exact-source owner `make test`. The current
-root `test_results.json` remains `BLOCKED` on source
-`9feb6b9df7710634bffbf394504257b2a4d2d8d3`.
+The run began below the ID36 1 GiB `MemAvailable` gate (926,752 KiB). The owner
+reports closing programs to free memory and swap during the run. Later
+read-only snapshots showed about 2.1 GiB available and more than 260 MiB of
+swap free; the full run, including ID36, passed. This records host headroom
+for that run and does not change the gate.
+
+Current `main` is `a31661f887f1fa7a88efdfff5186a84672217950`, synchronized with
+`origin/main`. The latest production source is the same commit; it includes the
+primary lifecycle coordinator behind the disabled gate, bounded status
+emission, portable little-endian delta64 semantics, deliberately unaligned
+codec coverage, authority geometry/generation checks, drain-wakeup closure,
+GC failure-recovery/high-occupancy coverage, and hardened standalone physical
+formatter identity. Current head passed production-C CI run `41655643592` and
+native project-goal CI run `41655643668`. The latest owner report still tests older source
+`acdeba452aa142c702bed40010c083276a692711`, so a fresh exact-head `make test`
+is pending.
+
+The normal build is not installed or loaded. Its current artifacts were built
+before the source commit with `SWAPZ_BUILD_SOURCE_CLEAN=0`, so they are not
+eligible for the primary plan. The latest read-only primary plan reports
+`BLOCKED`; privileged execution remains disabled because exact artifact
+provenance, owner qualification and lifecycle evidence are not satisfied.
+
+At the read-only snapshot on 2026-11-03 14:40:24 UTC, the selected target was
+the removable USB card partition `/dev/sda1` (8:1,
+124,787,884,032 bytes, PARTUUID `f13428f6-01`, UUID
+`8c6a02a2-20e9-4e31-869a-48ef7f6c990b`). At the latest read-only check it was
+unmounted and inactive; the only active swap was the unrelated `/swapfile`
+(227.1 MiB used), which was not touched. No swapz mapper was present, and no
+physical-card write has been made. Host `MemAvailable` was 2,097,148 KiB and
+swap free was 291,696 KiB.
+
+The production manager and systemd generator select a drive through the
+protected PARTUUID file and discover its current path, device number and
+geometry at runtime. The current source allows unrelated host swap entries
+while rejecting an active or ambiguous alias of the selected target. Prepared
+start, normal stop, and standalone recovery are wired to durable run state and
+module ownership. The execution gate remains disabled. Deterministic
+interruption/owned-null_blk qualification, actual Linux swap, full-card memory
+and capacity, physical churn, installation, and boot acceptance remain open.
 
 The current host, target, build, CI, plan, and readiness-gate snapshot is
 tracked in [handoff/production-readiness.json](handoff/production-readiness.json).
-Its geometry-derived logical capacity is a candidate only; memory feasibility,
-full-card correctness, and actual swap behavior remain unqualified.
-
-The primary manager and installed systemd generator are drive-neutral. The
-manager reads a root-protected PARTUUID selector and discovers the selected
-partition's current path, major:minor and size at runtime; direct-C coverage
-uses alternate PARTUUIDs, device numbers and geometries. A fixed `/dev/sda4`
-review finding against the earlier `ac665aee` source was superseded by
-`9feb6b9d` (`Make primary target selection drive-neutral`). A fresh source
-scan at `1f390fa4` finds no device path, major:minor, or partition-capacity
-constants in the active primary manager. The old live-swap supervisor still
-contains `/dev/sda4` trial constants, but its execution is hard-disabled and
-it is historical test code, not the current manager or deployment selector.
-Those legacy constants are not used to select or operate the current target.
+The geometry-derived logical capacity there is a candidate only; memory
+feasibility, full-card correctness, and actual swap behavior remain
+unqualified.
 
 The qualified positive-fixture delta64 rescue A/B exercised 4096 direct
 predictor-first adoptions that skipped ordinary LZ4. Lower WRITE bytes fell

@@ -248,18 +248,33 @@ Unless evidence changes the order, work on:
 1. **Target/configuration abstraction — implemented.** The manager, package
    and systemd generator use a protected PARTUUID selector; target path,
    major:minor and capacity are discovered at runtime. Alternate synthetic
-   identities and geometries are covered in direct-C tests. Production-C CI
-   passes on source `1f390fa47f788c927d2eb8987bf2cd6f60ae7ede` (run
-   `41638449351`); native project-goal CI passes on current documentation-only
-   HEAD `ed76ae2a7d1ef067732ec6c63151c054dac4a9c2` (run `41639975131`). The
-   latest owner report remains BLOCKED on older source
-   `9feb6b9df7710634bffbf394504257b2a4d2d8d3`. See the compact snapshot at
+   identities and geometries are covered in direct-C tests. Current production
+   source `a31661f887f1fa7a88efdfff5186a84672217950` includes the prepared
+   start/stop/recovery coordinator, bounded status emission, portable
+   little-endian delta64 semantics, deliberately unaligned codec coverage,
+   authority geometry/generation checks, drain-wakeup closure and GC
+   failure-recovery/high-occupancy coverage, and hardened standalone physical
+   formatter identity. Current `main`
+   `a31661f887f1fa7a88efdfff5186a84672217950` passed production-C CI run
+   `41655643592` and native project-goal CI run `41655643668`. The latest
+   full owner `make test` passed on older source
+   `acdeba452aa142c702bed40010c083276a692711` and published report commit
+   `17ed3c639ce99708ee2bfbed7d979b35592c7a5a`; exact-current-source owner
+   qualification remains open. That run passed ID36 after the owner freed host
+   memory by closing programs. See the compact snapshot at
    [docs/handoff/production-readiness.json](handoff/production-readiness.json).
-   Keep the privileged lifecycle disabled until separately qualified. The
-   historical fixed-device live-swap supervisor is not the active selector or
-   deployment path.
-2. **Active:** native production lifecycle and standing-authorization policy
-   cleanup;
+   The primary plan remains BLOCKED and the privileged lifecycle stays disabled.
+   The historical fixed-device live-swap supervisor is not the active selector
+   or deployment path.
+2. **Active:** directly qualify interruption and recovery behavior for the
+   primary lifecycle coordinator. Prepared start, normal stop and standalone
+   recovery are now wired behind the existing disabled execution gate. They
+   bind each operation to the run manifest, exact target header and recorded
+   module ownership. The remaining lifecycle evidence is deterministic
+   interruption coverage and owned-`null_blk` behavior; the latest source also
+   permits unrelated swap entries such as `/swapfile` while rejecting an
+   active or ambiguous alias of the selected target. Do not enable the gate
+   before exact-source and card-specific acceptance gates pass.
 3. actual Linux swap correctness on the authorized card;
 4. maximum safe full-card capacity and bounded metadata RAM. The current
    `/dev/sda1` geometry admits 27,080,448 logical pages; a 16-byte map plus

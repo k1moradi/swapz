@@ -1,21 +1,23 @@
 {
   "schema": "swapz-production-readiness-v1",
-  "updated_at_utc": "2026-11-03T13:01:36Z",
+  "updated_at_utc": "2026-11-03T14:40:24Z",
   "repository": {
     "branch": "main",
-    "local_sha": "ed76ae2a7d1ef067732ec6c63151c054dac4a9c2",
-    "origin_main_sha": "ed76ae2a7d1ef067732ec6c63151c054dac4a9c2",
+    "local_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
+    "origin_main_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
     "synchronized": true,
-    "production_source_sha": "1f390fa47f788c927d2eb8987bf2cd6f60ae7ede"
+    "production_source_sha": "a31661f887f1fa7a88efdfff5186a84672217950"
   },
   "host": {
     "architecture": "x86_64",
     "kernel_release": "7.0.0-42-generic",
     "page_size_bytes": 4096,
     "mem_total_kib": 3863624,
-    "mem_available_kib": 940264,
-    "mem_available_observed_at_utc": "2026-11-03T13:01:36Z",
-    "secure_boot": "unverified"
+    "mem_available_kib": 2097148,
+    "mem_available_observed_at_utc": "2026-11-03T14:40:24Z",
+    "secure_boot": "unverified",
+    "swap_total_kib": 524284,
+    "swap_free_kib": 291696
   },
   "authorized_target": {
     "selector_path": "/etc/swapz/primary-target",
@@ -29,35 +31,38 @@
     "transport": "usb",
     "mounted": false,
     "active_swap": false,
-    "current_observation_scope": "read-only lsblk and primary-plan checks; no destructive preflight or mutation in this update"
+    "current_observation_scope": "read-only lsblk, swapon, dmsetup and primary-plan checks; no physical-card mutation"
   },
   "swap_and_mapper_state": {
     "active_swap": [
       {
         "path": "/swapfile",
-        "scope": "unrelated host swap; untouched"
+        "scope": "unrelated host swap; untouched",
+        "used_kib": 232588
       }
     ],
     "swapz_module_loaded": false,
     "swapz_mapper_present": false,
     "dmsetup_tree": "No devices found",
     "null_blk_module_loaded": true,
-    "null_blk_test_ownership": "not established; left untouched"
+    "null_blk_test_ownership": "not established; no test device present"
   },
   "current_build": {
-    "source_sha": "ed76ae2a7d1ef067732ec6c63151c054dac4a9c2",
-    "source_clean": true,
-    "build_result": "PASS",
-    "build_scope": "normal make -j4; not W=1/W=2 or owner qualification",
-    "swapzctl_sha256": "fb5366c39bd39247fb5262dc286b39803afdf78812c807e0f06f7b915c897b4e",
-    "module_sha256": "53f6a8e1ad124383e205633f4433fbb5b3d308c56d2564cc1629cef2b3fd312f",
+    "source_sha": "ead8c12f2b06fd1d361e8b9c5f833de58c1c8d45",
+    "source_clean": false,
+    "build_result": "PASS_UNQUALIFIED",
+    "build_command": "make -j4",
+    "build_scope": "normal build passed before source commit; build metadata records SWAPZ_BUILD_SOURCE_CLEAN=0 and is not eligible for the primary plan",
+    "swapzctl_path": "build/userspace/swapzctl",
+    "swapzctl_sha256": "3b066b31496b4dd5cc8457eecc1e5bb9f06dd0ca8a3d004f49f08d47866f7362",
+    "module_path": "build/kernel/experimental/dm-swapz.ko",
+    "module_sha256": "b7fa80c48318bd99d2ea6b5a76c785e315f47ae86269f095d82f7213e0538e0c",
     "installed": false,
     "loaded": false,
     "warnings": [
-      "compiler executable name differs from kernel build compiler name, though both report GCC 15.2.0",
-      "swapz_status frame size 2112 bytes exceeds 1024 bytes",
-      "pahole reports version 0; kernel was built with pahole version 131",
-      "BTF skipped because vmlinux is unavailable"
+      "compiler executable name differs from kernel build compiler name although both report GCC 15.2.0",
+      "pahole reports version 0 while the kernel build used version 131",
+      "BTF generation was skipped because vmlinux is unavailable"
     ]
   },
   "deployment_artifacts": {
@@ -69,54 +74,95 @@
   "primary_plan": {
     "status": "BLOCKED",
     "privileged_execution_enabled": false,
+    "control_build_source_sha": "ead8c12f2b06fd1d361e8b9c5f833de58c1c8d45",
+    "control_build_source_clean": false,
+    "module_build_provenance_read": false,
+    "module_build_source_sha": "unavailable",
+    "control_module_source_matches": false,
+    "qualification_report_valid": false,
+    "qualification_source_matches_build": false,
+    "live_artifacts_match_qualification": false,
+    "live_device_gates_checked": false,
+    "target_partuuid": "f13428f6-01",
     "target_device_preflight": true,
+    "target_device_bytes": 124787884032,
     "target_not_mounted": true,
     "target_swap_entries": 0,
     "recovery_directory_safe": true,
     "recovery_filesystem_supported": true,
     "recovery_on_separate_physical_disk": true,
-    "qualification_report_valid": false,
-    "live_artifacts_match_qualification": false,
     "swapz_module_loaded": false,
     "swapz_mapper_absent": true,
+    "active_swap_entries": 1,
     "logical_pages_candidate": 27080448,
     "logical_bytes_candidate": 110921515008,
     "linux_swap_kib_candidate": 121863164,
     "gc_reserve_blocks": 3385056,
     "candidate_capacity_is_production_verified": false,
-    "reason": "device_identity_recovery_and_lifecycle_gates_not_qualified"
+    "reason": "device_identity_recovery_and_lifecycle_gates_not_qualified",
+    "target_block0_digest_available": true,
+    "recovery_filesystem_major": 8,
+    "recovery_filesystem_minor": 22,
+    "recovery_physical_parent_major": 8,
+    "recovery_physical_parent_minor": 16,
+    "recovery_active_marker_clear": true,
+    "recovery_source_chain_checked": true,
+    "target_device_chain_checked": true,
+    "target_physical_parent_major": 8,
+    "target_physical_parent_minor": 0,
+    "swap_inventory_read": true,
+    "target_swap_size_ok": false,
+    "target_swap_zero_used": false,
+    "target_swap_priority_ok": false
   },
   "qualification": {
     "latest_report_path": "test_results.json",
-    "latest_report_sha256": "45f11b4e6ad37cf60d26a6a39692388854aa0a0ce20286eef6d283e3ec7949af",
-    "tested_source_sha": "9feb6b9df7710634bffbf394504257b2a4d2d8d3",
-    "overall": "BLOCKED",
+    "latest_report_commit": "17ed3c639ce99708ee2bfbed7d979b35592c7a5a",
+    "latest_report_sha256": "e82b4054fbc51daf7bc99f2b60cc1c41581530ac0c59283229b891cb6cb40651",
+    "tested_source_sha": "acdeba452aa142c702bed40010c083276a692711",
+    "current_production_source_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
+    "overall": "PASS",
     "qualification_scope": "RAM_BACKED_NULL_BLK_ONLY",
+    "stage_elapsed_seconds": {
+      "Build module and helpers": 22.474,
+      "Native and rootless contracts": 189.993,
+      "Kernel warnings W=1": 18.18,
+      "Kernel warnings W=2": 14.141,
+      "Owned RAM smoke + mixed/QD pilot": 1403.514
+    },
     "stages": {
       "Build module and helpers": "PASS",
       "Native and rootless contracts": "PASS",
       "Kernel warnings W=1": "PASS",
       "Kernel warnings W=2": "PASS",
-      "Owned RAM smoke + mixed/QD pilot": "BLOCKED"
+      "Owned RAM smoke + mixed/QD pilot": "PASS"
     },
-    "stage5_block_reason": "ID36 requires at least 1048576 KiB MemAvailable; the latest report did not pass that gate",
+    "run_context": {
+      "mem_available_at_run_start_kib": 926752,
+      "mem_available_after_owner_closed_programs_kib": 2138188,
+      "swap_free_at_run_start_kib": 336,
+      "swap_free_after_owner_closed_programs_kib": 266360,
+      "owner_reported_action": "closed programs to free memory and swap",
+      "id36_result": "PASS",
+      "physical_card_written": false,
+      "unrelated_swap_touched": false
+    },
     "current_main_exact_source_qualified": false
   },
   "ci": [
     {
       "workflow": "Native kernel-C project-goal regressions",
-      "head_sha": "ed76ae2a7d1ef067732ec6c63151c054dac4a9c2",
-      "run_id": "41639975131",
+      "head_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
+      "run_id": "41655643668",
       "result": "PASS",
-      "url": "https://github.com/k1moradi/swapz/actions/runs/41639975131"
+      "url": "https://github.com/k1moradi/swapz/actions/runs/41655643668"
     },
     {
       "workflow": "Experimental swapz production C qualification",
-      "head_sha": "1f390fa47f788c927d2eb8987bf2cd6f60ae7ede",
-      "run_id": "41638449351",
+      "head_sha": "a31661f887f1fa7a88efdfff5186a84672217950",
+      "run_id": "41655643592",
       "result": "PASS",
-      "scope_note": "same production source tree; later main commit is documentation-only",
-      "url": "https://github.com/k1moradi/swapz/actions/runs/41638449351"
+      "url": "https://github.com/k1moradi/swapz/actions/runs/41655643592"
     }
   ],
   "acceptance_manifest": {
@@ -137,14 +183,14 @@
     "MAIN_SYNC": "PASS"
   },
   "open_gates": [
-    "complete and test the primary start/stop/recovery coordinator; it is currently unimplemented and the execution gate remains disabled",
-    "freeze the quantitative production acceptance manifest before decisive qualification",
-    "obtain exact-current-source official owner qualification; the latest report is blocked on older source",
+    "obtain exact-current-source official owner make test qualification; latest completed report tests older source acdeba452aa1",
+    "qualify primary start/stop/recovery with deterministic interruption and owned-null_blk evidence",
+    "freeze the quantitative production acceptance manifest before decisive physical, full-capacity, churn, or performance qualification",
     "measure complete full-capacity target memory, including steady-state and initialization peak",
     "qualify maximum logical capacity with incompressible block-oracle coverage without equivalent RAM allocation",
     "verify actual Linux swap-out and swap-in with byte-exact expected data and safe teardown",
     "qualify high-occupancy physical GC/churn and removable-media failure behavior",
     "install and verify production artifacts, lifecycle units, monitoring, and cold-boot acceptance harness"
   ],
-  "next_action": "implement the primary lifecycle coordinator behind the existing disabled gate, with deterministic interruption/recovery coverage; do not enable the gate until required RAM-backed and authorized-card qualification passes"
+  "next_action": "run make test on the exact synchronized source after required CI passes; then close deterministic lifecycle interruption and owned-null_blk coverage before any physical start"
 }
