@@ -4,7 +4,7 @@ Current naming, operating, and test-interface policy is canonical in
 [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and [README.md](README.md). This long
 reference does not duplicate those always-loaded rules.
 
-This file is the project's **rolling engineering blueprint**: active priorities, proposals, decisions and acceptance gates. Linux MM/swap/zswap semantics and implementation context live in [context.md](context.md). Completed experimental transcripts belong in Git history.
+This file is the project's **rolling engineering blueprint**: active priorities, proposals, decisions and acceptance gates. Linux MM/swap/zswap semantics and implementation context live in [context.md](context.md). Completed experiment narratives belong in Git history or explicitly historical handoff records, not the active priority path.
 
 **Agent working-set rule:** keep [AGENT_CONTEXT.md](AGENT_CONTEXT.md),
 [VISION.md](VISION.md) and [README.md](README.md) continuously in context. This
