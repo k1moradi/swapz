@@ -9060,9 +9060,11 @@ static int swapz_primary_start_prepared(void)
 		goto out;
 	}
 	target_fd = -1;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-header-written");
 	if (swapz_primary_load_qualified_module(&module_loaded_by_call) < 0 ||
 	    module_loaded_by_call != 1)
 		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-module-inserted");
 	if (swapz_primary_module_load_mark_loaded_at(
 		    recovery_fd, lock_fd, &manifest, 0) < 0)
 		goto out;

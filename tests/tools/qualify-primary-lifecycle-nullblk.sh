@@ -325,10 +325,10 @@ assert_interruption_kernel_facts() {
 	local observed_swap
 
 	case "$phase" in
-		start-starting)
+		start-starting|start-header-written)
 			expected_module=0; expected_mapper=0; expected_swap=0
 			;;
-		start-module-loaded)
+		start-module-inserted|start-module-loaded)
 			expected_module=1; expected_mapper=0; expected_swap=0
 			;;
 		start-mapper-resumed)
@@ -366,12 +366,17 @@ assert_interruption_kernel_facts() {
 		[[ ! -e "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ]] ||
 			fail "STARTING interruption unexpectedly published module WAL"
 	else
+		local expected_wal_phase=LOADED
+		if [[ "$phase" == start-header-written ||
+		      "$phase" == start-module-inserted ]]; then
+			expected_wal_phase=INTENT
+		fi
 		[[ -f "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ]] &&
 			grep -Fq "\"run_id\":\"$RUN_ID\"" \
 				"$RECOVERY_BASE/primary-module-load-$RUN_ID.json" &&
-			grep -Fq '"phase":"LOADED"' \
+			grep -Fq "\"phase\":\"$expected_wal_phase\"" \
 				"$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ||
-			fail "interruption does not retain exact LOADED module WAL"
+			fail "interruption does not retain exact $expected_wal_phase module WAL"
 	fi
 }
 
@@ -385,7 +390,8 @@ import sys
 
 recovery_directory, evidence_directory, run_id, partuuid, phase = sys.argv[1:6]
 if (len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id) or
-        phase not in {"start-starting", "start-module-loaded",
+        phase not in {"start-starting", "start-header-written",
+                      "start-module-inserted", "start-module-loaded",
                       "start-mapper-resumed", "start-swapon",
                       "stop-stopping", "stop-swapoff",
                       "recover-recovering", "recover-swapoff",
@@ -1342,15 +1348,16 @@ SWAPS_ID_AFTER="$(swapz_swap_inventory_identity /proc/swaps)" ||
 
 note "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:$RUN_ID partuuid:$PARTUUID device:$PART_DEVNO prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false"
 
-for phase in start-starting start-module-loaded start-mapper-resumed start-swapon; do
+for phase in start-starting start-header-written start-module-inserted \
+	start-module-loaded start-mapper-resumed start-swapon; do
 	prepare_interruption_run
 	note "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase run_id:$RUN_ID"
 	interrupt_lifecycle start "$phase" STARTING
 	case "$phase" in
-		start-starting)
+		start-starting|start-header-written)
 			recover_interruption_run "$phase" STARTING false false false
 			;;
-		start-module-loaded)
+		start-module-inserted|start-module-loaded)
 			recover_interruption_run "$phase" STARTING false false true
 			;;
 		start-mapper-resumed)
@@ -1405,7 +1412,7 @@ for phase in recover-recovering recover-swapoff recover-mapper-removed \
 	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
 done
 
-note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
+note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:13 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
 
 # These cases mutate only the private process boundary or an inactive run-owned
 # mapper/state record. Every destructive mapper operation is a normal removal

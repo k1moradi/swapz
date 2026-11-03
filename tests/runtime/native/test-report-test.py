@@ -864,6 +864,8 @@ def synthetic_log():
            "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
            "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa partuuid:01234567-89abcdef device:251:1 prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-starting",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-header-written",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-inserted",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-loaded",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-mapper-resumed",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-swapon",
@@ -874,7 +876,7 @@ def synthetic_log():
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-mapper-removed",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-module-unloaded",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-restored",
-           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:13 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 ambiguous_syscall:true inventory_failure:true definite_io_error:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
            "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
     for regime in runner.MODEL_ORDER:
@@ -2865,7 +2867,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Lifecycle", rendered)
         self.assertIn("max capacity", rendered)
         self.assertIn("primary lifecycle", rendered)
-        self.assertIn("11 process-death recoveries; 13 negative cases", rendered)
+        self.assertIn("13 process-death recoveries; 13 negative cases", rendered)
         self.assertIn("2 edge pages verified", rendered)
         self.assertIn("lower I/O checked", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)

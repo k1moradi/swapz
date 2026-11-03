@@ -958,17 +958,20 @@ only that exact token-bound directory after the holder/mount/swap identity
 checks pass. Quarantined evidence from an earlier run is retained for
 investigation but must not block a later independent rehearsal merely because a
 fixed historical evidence path still exists. Loaded correctness qualification
-must require the canonical primary lifecycle PASS record, the exact ordered six
+must require the canonical primary lifecycle PASS record, the exact ordered eight
 initial start/stop fresh-process interruption PASS phases plus the five
-fresh-process recovery interruption phases, the resulting eleven-case
+fresh-process recovery interruption phases, the resulting thirteen-case
 interruption-recovery aggregate, and the separate thirteen-case negative-recovery
 aggregate. Missing, duplicated (including repeated lifecycle or aggregate PASS
 records), substituted or malformed lifecycle markers make Stage 5 evidence
 incomplete; the parser must not silently overwrite an earlier PASS match.
 Merely executing the helper or recognizing its failure markers is not sufficient
 for a qualification PASS. The loaded report parser must require those same
-eleven phases in canonical order and the `cases:11` interruption-recovery
-aggregate; a legacy six-phase marker is incomplete evidence. The separate
+thirteen phases in canonical order and the `cases:13` interruption-recovery
+aggregate; an older eleven-phase aggregate is incomplete evidence. The start
+matrix must include the post-header/pre-module INTENT shape and the
+post-`finit_module`/pre-LOADED INTENT shape so recovery's INTENT reconciliation
+path is exercised with both module-absent and module-present kernel state. The separate
 negative-recovery aggregate must require all thirteen mandatory cases, including
 definite pre-effect `EIO` failures for both `swapon` and `swapoff`, and
 must carry `definite_io_error:true`. Those definite errors are never reconciled

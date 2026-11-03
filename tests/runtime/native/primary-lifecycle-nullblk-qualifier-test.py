@@ -35,6 +35,8 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
     def test_all_native_interruption_and_negative_cases_are_declared(self):
         for phase in (
             "start-starting",
+            "start-header-written",
+            "start-module-inserted",
             "start-module-loaded",
             "start-mapper-resumed",
             "start-swapon",
@@ -51,7 +53,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")',
                 self.primary)
         self.assertIn(
-            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:11",
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:13",
             self.script)
         for case in (
             "swapon-eintr-applied",
