@@ -99,6 +99,14 @@ valid_boot_id()
 	printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 }
 
+valid_partuuid()
+{
+	value=$1
+	length=${#value}
+	[ "$length" -ge 8 ] && [ "$length" -le 64 ] || return 1
+	printf '%s\n' "$value" | grep -Eq '^[0-9a-f]+(-[0-9a-f]+)*$'
+}
+
 current_boot_id()
 {
 	value=$(single_line_file "$proc_root/sys/kernel/random/boot_id") || return 1
@@ -260,7 +268,7 @@ manager_target_identity()
 	raw_encoded=${raw_encoded%.swap}
 	[ "$encoded" = "$raw_encoded" ] || return 1
 	selected_partuuid=$(printf '%s\n' "$encoded" | sed 's/\\x2d/-/g')
-	printf '%s\n' "$selected_partuuid" | grep -Eq '^[0-9a-f][0-9a-f-]{6,62}[0-9a-f]$' || return 1
+	valid_partuuid "$selected_partuuid" || return 1
 	selected_path=$dev_root/disk/by-partuuid/$selected_partuuid
 	return 0
 }

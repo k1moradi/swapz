@@ -78,7 +78,8 @@ class GeneratorTests(unittest.TestCase):
                 line=$(cat -- "$selector") || exit 2
                 partuuid=${line#PARTUUID=}
                 [ "$line" != "$partuuid" ] || exit 2
-                printf '%s\n' "$partuuid" | grep -Eq '^[0-9a-f][0-9a-f-]{6,62}[0-9a-f]$' || exit 2
+                [ "${#partuuid}" -ge 8 ] && [ "${#partuuid}" -le 64 ] || exit 2
+                printf '%s\n' "$partuuid" | grep -Eq '^[0-9a-f]+(-[0-9a-f]+)*$' || exit 2
                 encoded=$(printf '%s\n' "$partuuid" | sed 's/-/\\x2d/g')
                 printf 'dev-disk-by\\x2dpartuuid-%s.device dev-disk-by\\x2dpartuuid-%s.swap\n' "$encoded" "$encoded"
                 """
@@ -889,6 +890,22 @@ class BootVerifierTests(unittest.TestCase):
         result = self.run_verifier("arm", env=env)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unresolved fstab block-device swap source", result.stderr)
+
+    def test_malformed_partuuid_structure_cannot_arm_cold_boot_harness(self) -> None:
+        self.write_proc_swaps(active=False)
+        for malformed in (
+                "0123456--89abcdef",
+                "-01234567-89abcdef",
+                "01234567-89abcdef-",
+                "0123--4567",
+        ):
+            with self.subTest(partuuid=malformed):
+                (self.dev / "disk" / "by-partuuid" / malformed).touch(exist_ok=True)
+                env = self.env.copy()
+                env["MOCK_PARTUUID"] = malformed
+                result = self.run_verifier("arm", env=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("protected primary selector is invalid", result.stderr)
 
     def test_substituted_selector_is_rejected_after_arm(self) -> None:
         self.arm_then_reboot()
