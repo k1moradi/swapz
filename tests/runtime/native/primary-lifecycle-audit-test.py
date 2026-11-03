@@ -30,24 +30,25 @@ def _c_code_only(source: str) -> str:
         lambda match: re.sub(r'[^\n]', ' ', match.group(0)), source)
 
 
-def c_function_body(source: str, symbol: str) -> str:
-    """Return one executable C body, ignoring comments and literals."""
-    source = _c_code_only(source)
+def c_function_body(source: str, symbol: str, *, code_only: bool = True) -> str:
+    """Return one executable C body, optionally preserving literals/comments."""
+    parsed_source = _c_code_only(source)
     match = re.search(
         r"(?:static\s+)?(?:int|long)\s+" + re.escape(symbol) +
         r"\s*\([^;]*?\)\s*\{",
-        source, re.S)
+        parsed_source, re.S)
     if not match:
         raise AssertionError("missing production function " + symbol)
     start = match.end()
     depth = 1
-    for position in range(start, len(source)):
-        if source[position] == "{":
+    for position in range(start, len(parsed_source)):
+        if parsed_source[position] == "{":
             depth += 1
-        elif source[position] == "}":
+        elif parsed_source[position] == "}":
             depth -= 1
             if depth == 0:
-                return source[start:position]
+                body_source = parsed_source if code_only else source
+                return body_source[start:position]
     raise AssertionError("unclosed production function " + symbol)
 
 
@@ -737,14 +738,16 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         gate = c_function_body(
             source, "swapz_primary_privileged_execution_enabled")
         plan = c_function_body(source, "swapz_primary_read_only_plan")
+        plan_raw = c_function_body(
+            source, "swapz_primary_read_only_plan", code_only=False)
         command = c_function_body(source, "swapz_primary_command")
         self.assertIn("SWAPZ_PRIMARY_EXECUTION_ENABLED", gate)
         self.assertIn("swapz_primary_lifecycle_runtime_enabled()", gate)
         self.assertIn("swapz_primary_privileged_execution_enabled()", plan)
         self.assertIn(
-            '"\\\"privileged_execution_enabled\\\":%s,"', plan)
+            '"\\\"privileged_execution_enabled\\\":%s,"', plan_raw)
         self.assertNotIn(
-            '"\\\"privileged_execution_enabled\\\":false,"', plan)
+            '"\\\"privileged_execution_enabled\\\":false,"', plan_raw)
         self.assertIn(
             "!swapz_primary_privileged_execution_enabled()", command)
 
