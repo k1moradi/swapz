@@ -5117,9 +5117,9 @@ int main(void)
                 "\nfi\n# 16 MiB upper table", 1)[0]
         for evidence in (
                 "NULLBLK_SIZE_MIB=16383",
-                "MAX_LOGICAL_PAGES=3727872",
-                "MAX_LOGICAL_SECTORS=29822976",
-                "MAX_LOGICAL_BYTES=15269363712",
+                "MAX_LOGICAL_PAGES=3727616",
+                "MAX_LOGICAL_SECTORS=29820928",
+                "MAX_LOGICAL_BYTES=15268315136",
                 "EXPECTED_PHYSICAL_BLOCKS=4194048",
                 "EXPECTED_SEGMENTS=16383",
                 "blockdev --getsize64 \"/dev/mapper/$DMNAME\"",
@@ -5142,7 +5142,7 @@ int main(void)
             self.assertNotIn(forbidden, capacity)
         roundtrip = (ROOT / "tests/tools/device-roundtrip.c").read_text()
         self.assertIn('"--maximum-capacity-boundary"', roundtrip)
-        self.assertIn("MAX_CAPACITY_LOGICAL_PAGES = 3727872U", roundtrip)
+        self.assertIn("MAX_CAPACITY_LOGICAL_PAGES = 3727616U", roundtrip)
         self.assertIn("maximum_capacity_boundary_roundtrip", roundtrip)
         self.assertIn("verify_dm_uuid_exact", roundtrip)
 
