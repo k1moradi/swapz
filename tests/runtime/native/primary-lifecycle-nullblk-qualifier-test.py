@@ -109,13 +109,21 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         trigger_settle = self.script.index(
             'udevadm settle --timeout=10', trigger)
         trigger_command = self.script[trigger:trigger_settle]
-        alias_wait = self.script.index('[[ -b "$BY_PARTUUID" ]] ||')
-        alias_identity = self.script.index(
-            'stat -Lc \'%t:%T\' "$BY_PARTUUID"')
-        self.assertIn('"/sys/block/$DISK/$PART_NAME"', trigger_command)
+        alias_wait = self.script.index(
+            'if [[ ! -e "$BY_PARTUUID" && ! -L "$BY_PARTUUID" ]]; then')
+        alias_verifier = self.script.index('udev_alias_verified() {')
+        self.assertIn('"$PART_SYSFS"', trigger_command)
         self.assertLess(partuuid_proof, trigger)
         self.assertLess(trigger, alias_wait)
-        self.assertLess(alias_wait, alias_identity)
+        self.assertLess(partuuid_proof, alias_verifier)
+        self.assertIn('ENV{DEVPATH}=="%s"', self.script)
+        self.assertIn('ENV{ID_PART_ENTRY_UUID}=="%s"', self.script)
+        self.assertIn('SYMLINK+="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"',
+                      self.script)
+        self.assertIn('udevadm info --query=property --path="$PART_SYSFS"',
+                      self.script)
+        self.assertIn('udevadm control --reload-rules', self.script)
+        self.assertIn('udev_alias_remains_after_device_removal', self.script)
         self.assertNotRegex(self.script, r"(?m)^\s*ln\s+-s\b")
 
     def test_partition_reread_is_locked_and_not_duplicated_after_sfdisk(self):

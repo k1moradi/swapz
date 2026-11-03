@@ -65,12 +65,17 @@ REPORT="$RECOVERY_BASE/qualification.json"
 EVIDENCE_BASE="$TEST_BASE/evidence"
 FAULT_FIXTURE="tests/tools/primary-lifecycle-fault-shim.c"
 CONFIGFS=/sys/kernel/config/nullb
+UDEV_RULES_DIR=/run/udev/rules.d
 DMNAME=swapz-primary
 NULLBLK_SIZE_MIB=256
 OWN_NULL=0
 TEST_BASE_CREATED=0
+UDEV_RULE_CREATED=0
+UDEV_RULES_DIR_CREATED=0
 QUARANTINE=0
 CONFIG=
+UDEV_RULE=
+UDEV_RULE_CONTENT=
 CONFIGNAME=
 DISK=
 LOWER=
@@ -78,6 +83,7 @@ PART_SYSFS=
 PARTITION=
 PARTUUID=
 PART_DEVNO=
+BY_PARTUUID=
 RUN_ID=
 
 [[ ! -e "$TEST_BASE" && ! -L "$TEST_BASE" ]] ||
@@ -1057,6 +1063,39 @@ PY
 		fi
 	fi
 
+	if (( OWN_NULL )) && (( ! QUARANTINE )); then
+		udevadm settle --timeout=10 >/dev/null 2>&1 || QUARANTINE=1
+		if [[ -n "$BY_PARTUUID" &&
+		      ( -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ) ]]; then
+			QUARANTINE=1
+			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=udev_alias_remains_after_device_removal"
+		fi
+	fi
+
+	if (( UDEV_RULE_CREATED )); then
+		if (( QUARANTINE )); then
+			note "RETAINED_PRIMARY_NULLBLK_UDEV_RULE=$UDEV_RULE"
+		elif [[ -d "$UDEV_RULES_DIR" && ! -L "$UDEV_RULES_DIR" &&
+		        -f "$UDEV_RULE" && ! -L "$UDEV_RULE" &&
+		        "$(stat -Lc '%u' "$UDEV_RULE" 2>/dev/null)" == 0 &&
+		        "$(cat "$UDEV_RULE" 2>/dev/null)" == "$UDEV_RULE_CONTENT" ]]; then
+			rm -- "$UDEV_RULE" || QUARANTINE=1
+			if (( !QUARANTINE )); then
+				udevadm control --reload-rules || QUARANTINE=1
+			fi
+			if (( QUARANTINE )); then
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=udev_rule_cleanup_failed"
+			fi
+		else
+			QUARANTINE=1
+			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=udev_rule_identity_changed"
+		fi
+	fi
+
+	if (( UDEV_RULES_DIR_CREATED )) && (( ! QUARANTINE )); then
+		rmdir -- "$UDEV_RULES_DIR" 2>/dev/null || true
+	fi
+
 	if (( TEST_BASE_CREATED )) && (( ! QUARANTINE )); then
 		if [[ ! "$TOKEN" =~ ^[a-f0-9]{16}$ ||
 		      "$TEST_BASE" != "/var/lib/swapz-primary-owned-nullblk-test-$TOKEN" ||
@@ -1253,23 +1292,84 @@ PARTUUID="$(blkid -s PARTUUID -o value "$PARTITION" | tr 'A-F' 'a-f')"
 grep -Fxq "PARTUUID=$PARTUUID" "$PART_SYSFS/uevent" ||
 	fail "owned partition sysfs PARTUUID disagrees with blkid"
 BY_PARTUUID="/dev/disk/by-partuuid/$PARTUUID"
-# settle drains queued work but does not generate a missing persistent-link
-# event. Re-run udev's normal add rules for only the identity-checked partition;
-# udev itself must publish the alias used by the production coordinator.
-udevadm trigger --action=add --subsystem-match=block \
-	"/sys/block/$DISK/$PART_NAME" ||
+
+udev_alias_verified() {
+	local alias_dev partition_dev udev_properties
+	[[ -b "$BY_PARTUUID" ]] || return 1
+	alias_dev="$(stat -Lc '%t:%T' "$BY_PARTUUID")" || return 1
+	partition_dev="$(stat -Lc '%t:%T' "$PARTITION")" || return 1
+	[[ "$alias_dev" == "$partition_dev" ]] || return 1
+	[[ "$(readlink -f "$BY_PARTUUID")" == "$(readlink -f "$PARTITION")" ]] ||
+		return 1
+	udev_properties="$(udevadm info --query=property --path="$PART_SYSFS" 2>/dev/null)" ||
+		return 1
+	printf '%s\n' "$udev_properties" | grep -F 'DEVLINKS=' |
+		grep -Fq -- "$BY_PARTUUID"
+}
+
+# The host's standard persistent-storage rules intentionally exclude nullb*
+# device names. Trigger those rules first; if they do not publish this exact
+# partition alias, add a temporary exact-DEVPATH rule. Udev must create and
+# record the alias used by the production coordinator; the shell never
+# fabricates the symlink.
+udevadm trigger --action=add --subsystem-match=block "$PART_SYSFS" ||
 	blocked "cannot trigger udev for the owned null_blk partition"
 udevadm settle --timeout=10 ||
 	blocked "udev did not settle the owned null_blk partition add event"
-for ignored in {1..50}; do
-	[[ -b "$BY_PARTUUID" ]] && break
+for ignored in {1..20}; do
+	if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then
+		break
+	fi
 	udevadm settle --timeout=1 >/dev/null 2>&1 || true
 	sleep 0.1
 done
-[[ -b "$BY_PARTUUID" ]] ||
+
+if [[ ! -e "$BY_PARTUUID" && ! -L "$BY_PARTUUID" ]]; then
+	[[ -d /run/udev && ! -L /run/udev ]] ||
+		blocked "udev runtime directory is unavailable for the owned fixture rule"
+	if [[ ! -d "$UDEV_RULES_DIR" ]]; then
+		install -d -m 0755 -- "$UDEV_RULES_DIR" ||
+			blocked "cannot create the temporary udev rules directory"
+		UDEV_RULES_DIR_CREATED=1
+	fi
+	[[ -d "$UDEV_RULES_DIR" && ! -L "$UDEV_RULES_DIR" ]] ||
+		blocked "temporary udev rules directory identity is invalid"
+	UDEV_RULE="$UDEV_RULES_DIR/99-swapz-owned-nullblk-$TOKEN.rules"
+	[[ ! -e "$UDEV_RULE" && ! -L "$UDEV_RULE" ]] ||
+		blocked "temporary udev rule path already exists"
+	PART_SYSFS_REAL="$(readlink -f "$PART_SYSFS")"
+	[[ "$PART_SYSFS_REAL" == "/sys/devices/virtual/block/$DISK/$PART_NAME" ]] ||
+		fail "owned null_blk partition sysfs path changed"
+	UDEV_DEVPATH="${PART_SYSFS_REAL#/sys}"
+	printf -v UDEV_RULE_CONTENT \
+		'ACTION=="add", SUBSYSTEM=="block", ENV{DEVPATH}=="%s", IMPORT{builtin}="blkid", ENV{ID_PART_ENTRY_UUID}=="%s", SYMLINK+="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"' \
+		"$UDEV_DEVPATH" "$PARTUUID"
+	if ! (
+		set -o noclobber
+		printf '%s\n' "$UDEV_RULE_CONTENT" > "$UDEV_RULE"
+	); then
+		blocked "cannot create the exact owned-null_blk udev rule"
+	fi
+	UDEV_RULE_CREATED=1
+	chmod 0644 "$UDEV_RULE" || blocked "cannot set temporary udev rule mode"
+	udevadm control --reload-rules ||
+		blocked "udev did not reload the temporary owned-null_blk rule"
+	udevadm trigger --action=add --subsystem-match=block "$PART_SYSFS" ||
+		blocked "cannot retrigger udev for the owned null_blk partition"
+	udevadm settle --timeout=10 ||
+		blocked "udev did not settle the exact owned-nullblk rule"
+	for ignored in {1..50}; do
+		udev_alias_verified && break
+		udevadm settle --timeout=1 >/dev/null 2>&1 || true
+		sleep 0.1
+	done
+fi
+
+if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then
+	udev_alias_verified || fail "by-PARTUUID alias is not udev-recorded for the owned partition"
+else
 	blocked "udev did not publish the owned partition by-PARTUUID node"
-[[ "$(stat -Lc '%t:%T' "$BY_PARTUUID")" == "$(stat -Lc '%t:%T' "$PARTITION")" ]] ||
-	fail "by-PARTUUID alias does not name the owned partition"
+fi
 
 mkswap --no-discard "$PARTITION" >/dev/null ||
 	fail "cannot initialize original swap header on owned RAM partition"
