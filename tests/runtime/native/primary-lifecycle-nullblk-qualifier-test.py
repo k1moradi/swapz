@@ -107,6 +107,21 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn("actual_bytes == canonical_bytes", self.script)
         self.assertIn("payload != canonical_bytes", self.script)
 
+    def test_interruption_evidence_is_durable_and_unique(self):
+        self.assertIn("capture_interruption_evidence() {", self.script)
+        self.assertIn('capture_interruption_evidence "$phase"', self.script)
+        self.assertIn('snapshot_name = f"{run_id}-{phase}-{name}"', self.script)
+        self.assertIn("os.fsync(snapshot_fd)", self.script)
+        self.assertIn("os.fsync(evidence_fd)", self.script)
+        self.assertIn('QUARANTINE=1\n\t\tfail "$phase could not preserve', self.script)
+
+    def test_missing_swap_path_cannot_be_counted_as_absent(self):
+        self.assertIn('[[ -e "$swap_path" ]] || return 1', self.script)
+
+    def test_dirty_checkout_cannot_be_used_for_loaded_proof(self):
+        self.assertIn("git diff --quiet --exit-code", self.script)
+        self.assertIn("git diff --cached --quiet --exit-code", self.script)
+
     def test_fault_shim_is_warning_clean(self):
         subprocess.run(
             [

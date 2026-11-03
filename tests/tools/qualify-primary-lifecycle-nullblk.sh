@@ -41,6 +41,9 @@ done
 
 [[ "$(git rev-parse --verify HEAD 2>/dev/null)" == "$SOURCE_HEAD" ]] ||
 	blocked "validated source does not match current checkout"
+git diff --quiet --exit-code &&
+	git diff --cached --quiet --exit-code ||
+	blocked "owned-nullblk qualifier requires a clean checkout"
 [[ -r build/source-build-info.h &&
    -r build/kernel/experimental/dm-swapz.ko &&
    -x build/tests/device-roundtrip ]] ||
@@ -140,7 +143,9 @@ mapper_swap_entry_count() {
 	)" || return 1
 	[[ "$mapper_dev" =~ ^[0-9]+:[0-9]+$ ]] || return 1
 	while read -r swap_path swap_type swap_size swap_used swap_priority; do
-		[[ "$swap_path" == Filename || ! -e "$swap_path" ]] && continue
+		[[ "$swap_path" == Filename ]] && continue
+		# A missing /proc/swaps device alias cannot establish swap absence.
+		[[ -e "$swap_path" ]] || return 1
 		[[ -b "$swap_path" ]] || continue
 		swap_hex="$(stat -Lc '%t:%T' "$swap_path")" || return 1
 		IFS=: read -r swap_major_hex swap_minor_hex <<< "$swap_hex"
@@ -365,6 +370,70 @@ assert_interruption_kernel_facts() {
 	fi
 }
 
+capture_interruption_evidence() {
+	local phase="$1"
+	python3 - "$RECOVERY_BASE" "$EVIDENCE_BASE" "$RUN_ID" "$PARTUUID" "$phase" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+recovery_directory, evidence_directory, run_id, partuuid, phase = sys.argv[1:6]
+if (len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id) or
+        phase not in {"start-starting", "start-module-loaded",
+                      "start-mapper-resumed", "start-swapon",
+                      "stop-stopping", "stop-swapoff"}):
+    raise SystemExit("unsafe interruption snapshot identity")
+record_names = [
+    "primary-state.json",
+    f"consumed-{run_id}.json",
+    f"partition-{partuuid}.active",
+    f"primary-manifest-{run_id}.txt",
+]
+if phase != "start-starting":
+    record_names.append(f"primary-module-load-{run_id}.json")
+source_fd = os.open(recovery_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+evidence_fd = os.open(evidence_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    for name in record_names:
+        source_file = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=source_fd)
+        try:
+            identity = os.fstat(source_file)
+            if (not stat.S_ISREG(identity.st_mode) or identity.st_uid != 0 or
+                    stat.S_IMODE(identity.st_mode) != 0o600 or identity.st_nlink != 1):
+                raise ValueError("unsafe durable record")
+            payload = bytearray()
+            while True:
+                chunk = os.read(source_file, 65536)
+                if not chunk:
+                    break
+                payload.extend(chunk)
+        finally:
+            os.close(source_file)
+        snapshot_name = f"{run_id}-{phase}-{name}"
+        snapshot_fd = os.open(snapshot_name,
+                              os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                              os.O_NOFOLLOW | os.O_CLOEXEC, 0o600,
+                              dir_fd=evidence_fd)
+        try:
+            offset = 0
+            while offset < len(payload):
+                written = os.write(snapshot_fd, payload[offset:])
+                if written <= 0:
+                    raise OSError("short interruption evidence write")
+                offset += written
+            os.fsync(snapshot_fd)
+        finally:
+            os.close(snapshot_fd)
+        print(f"PRIMARY_NULLBLK_INTERRUPTION_RECORD={snapshot_name} "
+              f"sha256={hashlib.sha256(payload).hexdigest()}")
+    os.fsync(evidence_fd)
+finally:
+    os.close(evidence_fd)
+    os.close(source_fd)
+PY
+}
+
 interrupt_lifecycle() {
 	local operation="$1"
 	local phase="$2"
@@ -387,6 +456,10 @@ interrupt_lifecycle() {
 	assert_owned_transaction_records 1 ||
 		fail "$phase did not retain exact run-bound ownership"
 	assert_interruption_kernel_facts "$phase"
+	capture_interruption_evidence "$phase" || {
+		QUARANTINE=1
+		fail "$phase could not preserve byte-exact interruption evidence"
+	}
 }
 
 recover_interruption_run() {

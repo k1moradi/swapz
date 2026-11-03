@@ -4164,6 +4164,17 @@ JSON decoder accepts it), a noncanonical owner claim, or an orphan owner marker 
 the module and mapper are already absent; no test cleanup may discard the last
 recovery provenance. The validated source SHA must name the current checkout.
 
+Every deterministic process-death point must snapshot its exact native
+durable state, consumed owner record, active marker, manifest, and (once
+published) module-load WAL in a run-and-phase-unique evidence directory before
+fresh-process recovery. Evidence reads must validate regular-file ownership,
+mode and link identity, and copied bytes and the evidence directory must be
+fsynced. Evidence preservation failures quarantine the owned resources. Swap
+inventory oracles must fail closed on a present but unstatable swap-device path,
+never infer swap inactivity from a skipped entry. The loaded rehearsal also
+requires a clean checkout at the exact validated HEAD, not just an earlier
+build-info hash.
+
 The same private rehearsal must exercise negative kernel-boundary cases against
 the real coordinator: ambiguous `swapon` and `swapoff` outcomes both with and
 without the kernel operation applied, unreadable post-operation swap inventory,
