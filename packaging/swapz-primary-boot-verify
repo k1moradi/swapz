@@ -449,16 +449,29 @@ verify_persistent_report_storage()
 	# belongs to a different physical disk from the selected SD card. Keep the
 	# boot evidence on that *same filesystem* rather than trusting a pathname
 	# that might itself be a mount over the disposable card or a tmpfs.
-	[ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" != 1 ] || return 0
-	[ -d "$recovery_base" ] && [ ! -L "$recovery_base" ] ||
-		fail "primary recovery directory is unavailable or symlinked"
-	report_filesystem=$(stat -c '%d' -- "$report_base") || fail "cannot identify report filesystem"
-	recovery_filesystem=$(stat -c '%d' -- "$recovery_base") || fail "cannot identify recovery filesystem"
-	[ "$report_filesystem" = "$recovery_filesystem" ] ||
-		fail "boot evidence is not on the qualified recovery filesystem"
-	plan=$("$swapzctl" primary plan) || fail "cannot query read-only recovery storage plan"
+	if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" != 1 ]; then
+		[ -d "$recovery_base" ] && [ ! -L "$recovery_base" ] ||
+			fail "primary recovery directory is unavailable or symlinked"
+		report_filesystem=$(stat -c '%d' -- "$report_base") ||
+			fail "cannot identify report filesystem"
+		recovery_filesystem=$(stat -c '%d' -- "$recovery_base") ||
+			fail "cannot identify recovery filesystem"
+		[ "$report_filesystem" = "$recovery_filesystem" ] ||
+			fail "boot evidence is not on the qualified recovery filesystem"
+	fi
+
+	# primary plan is deliberately a read-only BLOCKED report today, so its
+	# documented success path exits 2 after emitting complete JSON. Accept
+	# only that bounded status (or a future ordinary success status 0) and
+	# still require the exact persistence proof from the payload.
+	plan_status=0
+	plan=$("$swapzctl" primary plan) || plan_status=$?
+	case "$plan_status" in
+	0|2) ;;
+	*) fail "cannot query read-only recovery storage plan" ;;
+	esac
 	case "$plan" in
-	*'"recovery_preflight_read":true'*'"recovery_filesystem_supported":true'*'"recovery_directly_not_target":true'*'"recovery_source_chain_checked":true'*'"recovery_same_physical_disk_as_target":false'*) ;;
+	*'"schema":"swapz-primary-plan-v1"'*'"recovery_preflight_read":true'*'"recovery_filesystem_supported":true'*'"recovery_directly_not_target":true'*'"recovery_source_chain_checked":true'*'"recovery_same_physical_disk_as_target":false'*) ;;
 	*) fail "read-only plan cannot prove recovery and boot evidence are persistent and outside the selected SD card" ;;
 	esac
 }

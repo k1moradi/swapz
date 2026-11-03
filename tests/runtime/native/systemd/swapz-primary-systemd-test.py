@@ -508,6 +508,14 @@ class BootVerifierTests(unittest.TestCase):
             textwrap.dedent(
                 r"""\
                 #!/bin/sh
+                if [ "$1" = primary ] && [ "$2" = plan ]; then
+                    if [ "${MOCK_PLAN_BODY+x}" = x ]; then
+                        printf '%s\n' "$MOCK_PLAN_BODY"
+                    else
+                        printf '%s\n' '{"schema":"swapz-primary-plan-v1","status":"BLOCKED","recovery_preflight_read":true,"recovery_filesystem_supported":true,"recovery_directly_not_target":true,"recovery_source_chain_checked":true,"recovery_same_physical_disk_as_target":false}'
+                    fi
+                    exit "${MOCK_PLAN_STATUS:-2}"
+                fi
                 [ "$1" = primary ] && [ "$2" = systemd-units ] || exit 2
                 partuuid=${MOCK_PARTUUID:-01234567-89abcdef}
                 encoded=$(printf '%s\n' "$partuuid" | sed 's/-/\\x2d/g')
@@ -783,6 +791,35 @@ class BootVerifierTests(unittest.TestCase):
                 self.assertIn(marker, report)
         self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").exists())
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").exists())
+
+    def test_read_only_plan_exit_two_is_accepted_for_persistence_proof(self) -> None:
+        self.write_proc_swaps(active=False)
+        arm = self.run_verifier("arm")
+        self.assertEqual(arm.returncode, 0, arm.stderr)
+        self.assertIn("COLD_BOOT_HARNESS=ARMED", arm.stdout)
+
+    def test_unexpected_plan_status_blocks_arm(self) -> None:
+        self.write_proc_swaps(active=False)
+        env = self.env.copy()
+        env["MOCK_PLAN_STATUS"] = "1"
+        result = self.run_verifier("arm", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot query read-only recovery storage plan", result.stderr)
+
+    def test_missing_plan_persistence_proof_blocks_arm(self) -> None:
+        self.write_proc_swaps(active=False)
+        env = self.env.copy()
+        env["MOCK_PLAN_BODY"] = (
+            '{"schema":"swapz-primary-plan-v1","status":"BLOCKED",'
+            '"recovery_preflight_read":true,'
+            '"recovery_filesystem_supported":true,'
+            '"recovery_directly_not_target":true,'
+            '"recovery_source_chain_checked":true,'
+            '"recovery_same_physical_disk_as_target":true}'
+        )
+        result = self.run_verifier("arm", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot prove recovery and boot evidence", result.stderr)
 
     def test_raw_fstab_alias_blocks_preflight_without_swap_commands(self) -> None:
         self.arm_then_reboot()
