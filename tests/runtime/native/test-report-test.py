@@ -3936,7 +3936,7 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             "production_source": dict(common),
             "clean_build_state": {**common, "clean": True},
             "qualified_artifact_hashes": {
-                **common, "qualified": True, "hashes": hashes},
+                **common, "qualified": True, "hashes": dict(hashes)},
             "required_ci": {
                 **common,
                 "runs": [
@@ -3971,7 +3971,7 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 **common, "overall": "PASS", "lifecycle": "PASS",
                 "deployment": "PASS", "evidence_sha256": self.DIGEST},
             "installed_artifact_identity": {
-                **common, "installed": True, "hashes": hashes},
+                **common, "installed": True, "hashes": dict(hashes)},
             "cold_boot_harness": {
                 **common, "armed": True,
                 "evidence_sha256": self.DIGEST},

@@ -4654,7 +4654,10 @@ must bind the SHA-256 of the exact current `FROZEN`
 physical PASS observations until they are requalified. The physical real-swap
 helper and physical-performance summary must emit that exact policy digest in
 their own result/evidence payloads so release aggregation never reconstructs or
-guesses the policy binding after the run. A retained old host snapshot must be
+guesses the policy binding after the run. Release-evidence unit fixtures must
+use independent artifact-hash mappings for qualified, owner-report and
+installed records; mutating one record must never mutate another and hide a
+cross-binding mismatch. A retained old host snapshot must be
 labeled HISTORICAL and cannot become a current release verdict.
 Code/deployment readiness-for-owner-reboot is reported separately from the
 owner-observed cold-boot result so automation never fabricates reboot evidence.
