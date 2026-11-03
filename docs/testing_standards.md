@@ -505,10 +505,11 @@ control/module snapshots needed to reconcile an interrupted primary lifecycle.
 The rootless package suite must exercise both durable-state and ownership-marker
 refusals and prove the installed bytes remain unchanged.
 
-Package mutation and primary `prepare/start/stop/recover` must also contend on
-the exact same global `/run/lock/swapz/package.lock` before either side
-inspects mutable package/lifecycle state. Primary holds that lock for the whole
-operation and acquires its partition recovery lock only afterward. Native and
+Package mutation and every mutating primary command, including
+`qualification-import` and `prepare/start/stop/recover`, must contend on the
+exact same global `/run/lock/swapz/package.lock` before either side inspects
+mutable package/lifecycle state. Primary holds that lock for the whole operation
+and acquires its partition recovery lock only afterward. Native and
 rootless tests must prove a second lock attempt returns
 `EWOULDBLOCK`/`EAGAIN`, release permits a later holder, a held package lock
 blocks package mutation without installing bytes, and source contracts bind the
@@ -4791,8 +4792,11 @@ source path. Package ownership hashes and uninstall checks must cover the
 retained module image as well as the CLI, oracle and systemd files.
 
 `swapzctl primary qualification-import <report>` is an explicit root-only
-metadata operation. It accepts only a stable, non-writable regular input
-report that matches the running build source, this x86_64 host identity, all
+metadata operation. Before reading or replacing qualification state, production
+and privileged qualification builds must acquire the shared global package/
+mutation lock; the import then acquires the partition recovery lock, preserving
+the global-before-partition order. It accepts only a stable, non-writable regular
+input report that matches the running build source, this x86_64 host identity, all
 five passing stages and the live three-artifact hashes. It requires the
 validated persistent recovery directory, the partition lock, no active owner
 marker and no unfinished primary state. It durably stores the exact report
@@ -5088,5 +5092,3 @@ direct installer must reject hosts missing the bounded-execution utility,
 device-mapper/util-linux identity tools, journal reader, or basic text/path
 utilities used by the root helper. The hermetic package suite must retain a
 source-contract assertion for that runtime dependency set.
-
-Executable qualification entrypoints that are asserted by the public Make-interface contract must retain executable Git mode; mode regressions are qualification failures even when a Python interpreter could invoke the file explicitly.

@@ -361,9 +361,11 @@ the enforceable policy is the complete descriptor/topology/configuration proof
 above, fail-closed on any uncertainty, with no claim of cryptographic or
 physical uniqueness.
 
-All package mutations and mutating primary lifecycle commands serialize on the
-same root-owned global lock at `/run/lock/swapz/package.lock`. Primary lock
-order is global mutation lock first and target partition recovery lock second;
+All package mutations and mutating primary commands, including
+`qualification-import` and the `prepare/start/stop/recover` lifecycle,
+serialize on the same root-owned global lock at
+`/run/lock/swapz/package.lock`. Primary lock order is global mutation lock
+first and target partition recovery lock second;
 never acquire those in reverse order. The global lock directory must be owned
 by root and not group/world-writable; the lock file must be a single-link 0600
 regular file owned by root, and the opened descriptor must still match the

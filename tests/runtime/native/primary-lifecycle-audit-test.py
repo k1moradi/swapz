@@ -794,6 +794,24 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             source)
         self.assertIn('strcmp(name, "nullb")', source)
 
+    def test_qualification_import_serializes_before_partition_state(self):
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        ordinary = preprocessed_primary_source()
+        serialized = c_function_body(
+            ordinary, "swapz_primary_qualification_import_serialized")
+        command = c_function_body(source, "swapz_primary_command")
+
+        self.assertIn("swapz_primary_mutation_lock()", serialized)
+        self.assertIn(
+            "swapz_primary_qualification_import(report_path)", serialized)
+        self.assertLess(
+            serialized.index("swapz_primary_mutation_lock()"),
+            serialized.index("swapz_primary_qualification_import(report_path)"))
+        self.assertIn(
+            "swapz_primary_qualification_import_serialized(argv[1])", command)
+        self.assertNotIn(
+            "swapz_primary_qualification_import(argv[1])", command)
+
     def test_execution_gate_cannot_enable_without_native_swap_operations(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         native_swapon = c_function_body(source, "swapz_primary_native_swapon")

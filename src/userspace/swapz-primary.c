@@ -9543,6 +9543,35 @@ static int swapz_primary_run_mutating_action(
 	return result;
 }
 
+static int swapz_primary_qualification_import_serialized(
+	const char *report_path)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	/*
+	 * Rootless policy tests cannot touch the host package lock. The
+	 * production and privileged qualification builds take the global lock
+	 * below; rootless tests exercise the lock primitive independently.
+	 */
+	return swapz_primary_qualification_import(report_path);
+#else
+	int mutation_lock_fd;
+	int result;
+	int saved_errno;
+
+	mutation_lock_fd = swapz_primary_mutation_lock();
+	if (mutation_lock_fd < 0)
+		return -1;
+	result = swapz_primary_qualification_import(report_path);
+	saved_errno = errno;
+	if (close(mutation_lock_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	errno = saved_errno;
+	return result;
+#endif
+}
+
 int swapz_primary_command(int argc, char **argv)
 {
 	if (argc == 1 && argv && argv[0] &&
@@ -9570,7 +9599,7 @@ int swapz_primary_command(int argc, char **argv)
 	}
 	if (argc == 2 && argv && argv[0] && argv[1] &&
 	    !strcmp(argv[0], "qualification-import")) {
-		if (swapz_primary_qualification_import(argv[1]) < 0) {
+		if (swapz_primary_qualification_import_serialized(argv[1]) < 0) {
 			fprintf(stderr,
 				"BLOCKED: qualification report import failed: %s\n",
 				strerror(errno));
