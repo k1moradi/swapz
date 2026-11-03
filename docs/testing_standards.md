@@ -78,13 +78,21 @@ infrastructure, not a second public command; Agent 12 owns registration in
 fallback swap itself. Activation, deactivation, and recovery are requested only
 through the production primary coordinator.
 
-Before physical activation it must prove: exact clean source on `main` with
-local `HEAD == origin/main == validated source` and a freshly queried remote
+Before physical activation the unprivileged admission parent must prove: exact
+clean source on `main` with local
+`HEAD == origin/main == validated source` and a freshly queried remote
 `refs/heads/main` equal to that source (unreachable or stale remote is BLOCKED).
-Because admission and multi-cycle setup may outlive that first observation, the
-helper must repeat the same clean/local/tracking/remote-main proof immediately
-before every cycle's `primary prepare`; a concurrent push blocks before a new
-durable transaction or card mutation begins. Current qualification
+The privileged physical helper must not invoke Git or trust a one-shot SHA.
+Instead it connects to the parent through a private mode-0600 Unix-domain
+socket, authenticates the parent's unprivileged UID with `SO_PEERCRED`, and
+requires a nonce-bound approval at initial admission, immediately before every
+cycle's `primary prepare`, and again before emitting PASS. The parent repeats
+the same clean/local/tracking/remote-main proof for each request; requests must
+arrive in exact `initial`, `cycle-1..N`, `final` order. A concurrent push,
+parent disconnect, malformed/duplicated JSON, peer-identity change, missing
+approval or unavailable remote blocks before the next durable transaction/card
+mutation or prevents the final PASS. The unprivileged parent itself performs no
+swap, Device Mapper, module, block-device or primary lifecycle mutation. Current qualification
 provenance; a frozen production acceptance manifest; the protected PARTUUID
 selector; exact partition size and device number; the exact removable USB
 parent and its sole selected partition; explicit
