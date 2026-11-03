@@ -3592,8 +3592,19 @@ back to the original durable stage without guessing an unrecorded format.
 Missing, cyclic, torn or contradictory stage provenance must fail closed
 before any backing-header write. VM coverage is not part of the current project.
 Exercise interruption logic with rootless state-machine tests, direct-C tests,
-owned RAM-backed `null_blk` and safely bounded native-host resources. Do not
-intentionally crash or reboot the host to manufacture power-loss evidence.
+owned RAM-backed `null_blk` and safely bounded native-host resources. The
+rootless lifecycle audit must enumerate durable STARTING snapshots before mapper
+creation, after inactive mapper creation and after swapon; STOPPING snapshots
+before/after swapoff and after mapper removal; RECOVERING snapshots at the same
+cleanup boundaries; RECOVERY_REQUIRED; and RESTORED before COMPLETE/owner
+release. Every exact-owned snapshot must converge through standalone recovery,
+while a wrong mapper identity must issue neither swapoff nor remove. Source
+guards must prove RECOVERY_REQUIRED is durable before RECOVERING, cleanup
+precedes RESTORED/COMPLETE, owner release follows COMPLETE, and a failed
+in-progress recovery durably returns to RECOVERY_REQUIRED. This deterministic
+model evidence does not replace owned-null_blk/native-process interruption
+qualification. Do not intentionally crash or reboot the host to manufacture
+power-loss evidence.
 
 The plan, lifecycle mocks and CI do not by themselves establish live-swap
 correctness. Model each durable interruption boundary and add physical-host

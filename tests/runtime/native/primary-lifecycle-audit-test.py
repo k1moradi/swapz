@@ -55,6 +55,7 @@ class DurableStage(Enum):
     STOPPING = auto()
     RECOVERY_REQUIRED = auto()
     RECOVERING = auto()
+    RESTORED = auto()
     COMPLETE = auto()
 
 
@@ -223,7 +224,8 @@ class LifecycleModel:
                               DurableStage.ACTIVE,
                               DurableStage.STOPPING,
                               DurableStage.RECOVERY_REQUIRED,
-                              DurableStage.RECOVERING):
+                              DurableStage.RECOVERING,
+                              DurableStage.RESTORED):
             return False
         self.stage = DurableStage.RECOVERING
         return True
@@ -446,6 +448,64 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
         self.assertIs(model.stage, DurableStage.RECOVERY_REQUIRED)
         self.assertFalse(kernel.facts.mapper_active)
 
+    def test_durable_interruption_snapshots_recover_exact_owned_state(self):
+        snapshots = (
+            # STARTING can be durable before any mapper mutation, after mapper
+            # creation/resume, or after swapon but before ACTIVE is persisted.
+            ("start-before-mapper", DurableStage.STARTING, False, False, 0, 0),
+            ("start-mapper-inactive", DurableStage.STARTING, True, False, 0, 1),
+            ("start-after-swapon", DurableStage.STARTING, True, True, 1, 1),
+            ("active-before-stop", DurableStage.ACTIVE, True, True, 1, 1),
+            # STOPPING is durable before swapoff, after swapoff and after remove.
+            ("stop-before-swapoff", DurableStage.STOPPING, True, True, 1, 1),
+            ("stop-after-swapoff", DurableStage.STOPPING, True, False, 0, 1),
+            ("stop-after-remove", DurableStage.STOPPING, False, False, 0, 0),
+            ("required-active", DurableStage.RECOVERY_REQUIRED, True, True, 1, 1),
+            # RECOVERING itself can be interrupted at each cleanup boundary.
+            ("recover-before-swapoff", DurableStage.RECOVERING, True, True, 1, 1),
+            ("recover-after-swapoff", DurableStage.RECOVERING, True, False, 0, 1),
+            ("recover-after-remove", DurableStage.RECOVERING, False, False, 0, 0),
+            # RESTORED is durable after cleanup but before COMPLETE/owner release.
+            ("restored-before-complete", DurableStage.RESTORED, False, False, 0, 0),
+        )
+
+        for (name, stage, mapper_present, mapper_active,
+             expected_swapoff, expected_remove) in snapshots:
+            with self.subTest(snapshot=name):
+                model = self.new_model()
+                model.stage = stage
+                kernel = FakeKernelAdapter(KernelFacts(
+                    mapper_present=mapper_present,
+                    mapper_active=mapper_active))
+                self.assertTrue(model.begin_recovery(model.run_id))
+                self.assertIs(model.stage, DurableStage.RECOVERING)
+                self.assertTrue(
+                    model.deactivate_and_remove(model.run_id, kernel))
+                self.assertEqual(kernel.swapoff_calls, expected_swapoff)
+                self.assertEqual(kernel.remove_calls, expected_remove)
+                self.assertFalse(kernel.facts.mapper_active)
+                self.assertFalse(kernel.facts.mapper_present)
+                self.assertIs(model.stage, DurableStage.COMPLETE)
+
+    def test_interruption_recovery_never_touches_wrong_mapper(self):
+        for stage in (DurableStage.STARTING, DurableStage.ACTIVE,
+                      DurableStage.STOPPING, DurableStage.RECOVERY_REQUIRED,
+                      DurableStage.RECOVERING, DurableStage.RESTORED):
+            with self.subTest(stage=stage.name):
+                model = self.new_model()
+                model.stage = stage
+                kernel = FakeKernelAdapter(KernelFacts(
+                    mapper_present=True, mapper_active=True,
+                    mapper_identity_matches=False))
+                self.assertTrue(model.begin_recovery(model.run_id))
+                self.assertFalse(
+                    model.deactivate_and_remove(model.run_id, kernel))
+                self.assertEqual(kernel.swapoff_calls, 0)
+                self.assertEqual(kernel.remove_calls, 0)
+                self.assertTrue(kernel.facts.mapper_present)
+                self.assertTrue(kernel.facts.mapper_active)
+                self.assertIs(model.stage, DurableStage.RECOVERY_REQUIRED)
+
     def test_repeated_recovery_after_complete_is_rejected(self):
         model = self.new_model()
         model.stage = DurableStage.COMPLETE
@@ -482,6 +542,37 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertLess(
             recover.index("swapz_primary_deactivate_mapper_swap("),
             recover.index("swapz_primary_dm_remove_mapper("))
+
+    def test_recovery_persists_fail_closed_interruption_order(self):
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        recover = c_function_body(source, "swapz_primary_recover")
+
+        normalize = recover.index("swapz_primary_recovery_required_state(")
+        persist_required = recover.index(
+            "swapz_primary_state_write_at(", normalize)
+        persist_recovering = recover.index(
+            "recovering_state.stage = SWAPZ_PRIMARY_STAGE_RECOVERING")
+        deactivate = recover.index("swapz_primary_deactivate_mapper_swap(")
+        remove = recover.index("swapz_primary_dm_remove_mapper(")
+        restored = recover.index(
+            "restored_state.stage = SWAPZ_PRIMARY_STAGE_RESTORED")
+        complete = recover.index(
+            "complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE")
+        release = recover.index("swapz_primary_release_partition_owner_at(")
+
+        self.assertLess(normalize, persist_required)
+        self.assertLess(persist_required, persist_recovering)
+        self.assertLess(persist_recovering, deactivate)
+        self.assertLess(deactivate, remove)
+        self.assertLess(remove, restored)
+        self.assertLess(restored, complete)
+        self.assertLess(complete, release)
+        self.assertIn(
+            "recovering_persisted && !complete_persisted", recover)
+        self.assertIn("swapz_primary_state_require_recovery_at(", recover)
+        self.assertIn(
+            "case SWAPZ_PRIMARY_STAGE_RESTORED:",
+            c_function_body(source, "swapz_primary_state_recoverable"))
 
     def test_execution_gate_remains_disabled_pending_live_lifecycle_evidence(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")

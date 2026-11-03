@@ -297,11 +297,15 @@ Unless evidence changes the order, work on:
    primary lifecycle coordinator. Prepared start, normal stop and standalone
    recovery are now wired behind the existing disabled execution gate. They
    bind each operation to the run manifest, exact target header and recorded
-   module ownership. The remaining lifecycle evidence is deterministic
-   interruption coverage and owned-`null_blk` behavior; the latest source also
-   permits unrelated swap entries such as `/swapfile` while rejecting an
-   active or ambiguous alias of the selected target. Do not enable the gate
-   before exact-source and card-specific acceptance gates pass.
+   module ownership. Rootless deterministic interruption coverage now enumerates
+   every durable STARTING/STOPPING/RECOVERING cleanup boundary plus
+   RECOVERY_REQUIRED and RESTORED, requires exact-owned convergence, and proves
+   wrong mapper identity cannot trigger swapoff/remove. Remaining lifecycle
+   evidence is owned-`null_blk` execution and native-process interruption
+   behavior; the latest source also permits unrelated swap entries such as
+   `/swapfile` while rejecting an active or ambiguous alias of the selected
+   target. Do not enable the gate before exact-source and card-specific
+   acceptance gates pass.
 3. actual Linux swap correctness on the authorized card;
 4. maximum safe full-card capacity and bounded metadata RAM. The current
    `/dev/sda1` geometry admits 27,080,448 logical pages; a 16-byte map plus
