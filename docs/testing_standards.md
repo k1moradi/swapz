@@ -2812,12 +2812,14 @@ Keep offline timings, loaded positive-fixture pairs and the full owner matrix
 distinct. Historical plain-delta64 timings do not measure the new path.
 
 Compression-result qualification must exercise the signed target boundary with
-positive, zero, and artificial negative results. A negative result must retain
-its exact errno, must not increment RAW-fallback accounting, and must not
-publish or stage a RAW page. Prepared and ordered owners are separate required
-cases; the ordered mapped-input case must prove unmapping precedes the error
-return. Positive and zero controls must continue to select compressed and RAW
-storage respectively.
+positive, zero, and artificial negative results. When an error wins prepared
+publication, it must retain its exact errno, must not increment RAW-fallback
+accounting, and must not publish or stage RAW as a no-fit result. When
+RAW_SELECTED linearizes first, a late negative result must leave that selected
+state unchanged but terminally fail the target before any upper success can be
+reported. Prepared and ordered owners are separate required cases; the ordered
+mapped-input case must prove unmapping precedes the error return. Positive and
+zero controls must continue to select compressed and RAW storage respectively.
 
 Direct codec qualification must include deterministic nonzero randomized
 payload bytes, boundary lengths around 8-byte/CRC lanes and production packing
