@@ -4992,7 +4992,13 @@ without reading or changing host swap state. Cover exact mapper/run/backing
 identity, foreign mapper rejection, active swap inventory and capacity,
 configured backing-path disappearance as a hard failure, monitoring-command
 failure as degraded evidence, low-noise unchanged polling, kernel/systemd
-telemetry, and sustained GC pressure without progress. Cold-boot verification
+telemetry, and sustained GC pressure without progress. The sustained-GC fixture
+must increase pressure/no-headroom counters across consecutive polls while
+holding victim/page progress constant; reaching the existing stall threshold
+must latch runtime health FAIL, emit one
+`SWAPZ_RUNTIME_STOP_REQUIRED=1 reason=sustained_gc_stall
+action=normal_primary_stop_required` marker, and continue observation without
+executing swapoff, mapper removal, or `swapzctl primary stop`. Cold-boot verification
 must independently derive maximum mapper geometry from the selected backing
 bytes using the production reserve rule plus one 256-block foreground COW
 headroom segment. For the current-card geometry it must accept 216,641,536
