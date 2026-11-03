@@ -79,6 +79,14 @@ COLD_BOOT_REPORT_KEYS = {
     "kernel_error_count", "kernel_error_log", "failure_reasons",
     "incomplete_reasons",
 }
+COLD_BOOT_ARM_KEYS = {
+    "schema", "arm_boot_id", "arm_kernel_release", "armed_epoch",
+    "expected_partuuid", "expected_target_size_bytes",
+    "expected_target_model", "expected_target_serial", "expected_target_wwn",
+    "expected_target_transport", "expected_target_removable",
+    "expected_module_sha256", "expected_module_source_sha",
+    "expected_module_source_clean",
+}
 
 
 class EvidenceError(ValueError):
@@ -589,6 +597,56 @@ def validate_physical_campaign_evidence(
     return issues
 
 
+def validate_cold_boot_arm_evidence(
+        arm: dict[str, str],
+        source_sha: str,
+        target: tuple[str, int] | None,
+        report_artifacts: dict[str, Any] | None,
+        owner_kernel_release: Any,
+        cold_boot_arm: dict[str, str] | None = None) -> list[str]:
+    """Validate the durable pre-reboot arm record."""
+    issues: list[str] = []
+
+    def reject(message: str) -> None:
+        if message not in issues:
+            issues.append(message)
+
+    if set(arm) != COLD_BOOT_ARM_KEYS:
+        reject("cold-boot arm record field set is non-canonical")
+        return issues
+    if arm["schema"] != "swapz-primary-boot-arm-v1":
+        reject("cold-boot arm record schema is invalid")
+    if not BOOT_ID_RE.fullmatch(arm["arm_boot_id"]):
+        reject("cold-boot arm boot identity is invalid")
+    if arm["arm_kernel_release"] != owner_kernel_release:
+        reject("cold-boot arm kernel differs from owner qualification")
+    if not re.fullmatch(r"[1-9][0-9]*", arm["armed_epoch"]):
+        reject("cold-boot arm epoch is invalid")
+
+    size_text = arm["expected_target_size_bytes"]
+    size = int(size_text, 10) if re.fullmatch(r"[1-9][0-9]*", size_text) else -1
+    if (
+            target is None or arm["expected_partuuid"] != target[0] or
+            size != target[1]):
+        reject("cold-boot arm authorized target identity mismatch")
+    if (
+            arm["expected_target_removable"] != "1" or
+            (arm["expected_target_serial"] == "unavailable" and
+             arm["expected_target_wwn"] == "unavailable")):
+        reject("cold-boot arm stable removable-parent identity is invalid")
+
+    module_hash = (
+        report_artifacts.get("module_sha256")
+        if isinstance(report_artifacts, dict) else None)
+    if arm["expected_module_sha256"] != module_hash:
+        reject("cold-boot arm module artifact binding mismatch")
+    if (
+            arm["expected_module_source_sha"] != source_sha or
+            arm["expected_module_source_clean"] != "1"):
+        reject("cold-boot arm module source binding is invalid")
+    return issues
+
+
 def validate_cold_boot_evidence(
         cold_boot: dict[str, str],
         source_sha: str,
@@ -616,6 +674,23 @@ def validate_cold_boot_evidence(
             not BOOT_ID_RE.fullmatch(cold_boot["armed_boot_id"]) or
             cold_boot["boot_id"] == cold_boot["armed_boot_id"]):
         reject("persistent cold-boot boot identity is invalid")
+    if cold_boot_arm is None:
+        reject("persistent cold-boot report has no validated arm record")
+    else:
+        if cold_boot["armed_boot_id"] != cold_boot_arm.get("arm_boot_id"):
+            reject("persistent cold-boot report is not bound to the arm boot")
+        for observed_key, armed_key in (
+                ("selected_partuuid", "expected_partuuid"),
+                ("selected_target_size_bytes", "expected_target_size_bytes"),
+                ("selected_target_model", "expected_target_model"),
+                ("selected_target_serial", "expected_target_serial"),
+                ("selected_target_wwn", "expected_target_wwn"),
+                ("selected_target_transport", "expected_target_transport"),
+                ("selected_target_removable", "expected_target_removable")):
+            if cold_boot[observed_key] != cold_boot_arm.get(armed_key):
+                reject(
+                    "persistent cold-boot selected target differs from arm record")
+                break
     if (
             not isinstance(owner_kernel_release, str) or
             cold_boot["kernel_release"] != owner_kernel_release):
@@ -726,7 +801,9 @@ def evaluate_release(
         physical_campaign_evidence: dict[str, Any] | None = None,
         physical_campaign_evidence_raw: bytes | None = None,
         cold_boot_evidence: dict[str, str] | None = None,
-        cold_boot_evidence_raw: bytes | None = None) -> dict[str, Any]:
+        cold_boot_evidence_raw: bytes | None = None,
+        cold_boot_arm_evidence: dict[str, str] | None = None,
+        cold_boot_arm_evidence_raw: bytes | None = None) -> dict[str, Any]:
     code_blockers: list[str] = []
     deployment_blockers: list[str] = []
     cold_boot_blockers: list[str] = []
@@ -1030,9 +1107,24 @@ def evaluate_release(
 
     harness = pass_record("cold_boot_harness", deployment=True)
     require_target("cold_boot_harness", harness, deployment=True)
-    harness_armed = harness is not None and harness.get("armed") is True
-    if harness is not None and not harness_armed:
-        block_deployment("cold_boot_harness: harness is not armed")
+    harness_armed = False
+    if harness is not None:
+        if harness.get("armed") is not True:
+            block_deployment("cold_boot_harness: harness is not armed")
+        elif cold_boot_arm_evidence is None or cold_boot_arm_evidence_raw is None:
+            block_deployment(
+                "cold_boot_harness: persistent arm evidence is missing")
+        elif harness.get("evidence_sha256") != sha256_bytes(
+                cold_boot_arm_evidence_raw):
+            block_deployment(
+                "cold_boot_harness: arm evidence digest mismatch")
+        else:
+            arm_issues = validate_cold_boot_arm_evidence(
+                cold_boot_arm_evidence, source_sha, target,
+                report_artifacts, owner_kernel_release)
+            for issue in arm_issues:
+                block_deployment("cold_boot_harness: " + issue)
+            harness_armed = not arm_issues
 
     code_ready = not code_blockers
     if not code_ready:
@@ -1057,7 +1149,8 @@ def evaluate_release(
             else:
                 for issue in validate_cold_boot_evidence(
                         cold_boot_evidence, source_sha, target,
-                        report_artifacts, owner_kernel_release):
+                        report_artifacts, owner_kernel_release,
+                        cold_boot_arm_evidence):
                     cold_boot_blockers.append(
                         "owner_observed_reboot: " + issue)
                 if not cold_boot_blockers:
@@ -1110,6 +1203,9 @@ def main() -> int:
         "--physical-campaign-evidence", type=Path,
         help="sealed physical performance campaign evidence for the release source")
     parser.add_argument(
+        "--cold-boot-arm-evidence", type=Path,
+        help="durable swapz-primary-boot-arm-v1 record created before reboot")
+    parser.add_argument(
         "--cold-boot-evidence", type=Path,
         help="persistent swapz-primary-cold-boot-v1 report from the owner reboot")
     args = parser.parse_args()
@@ -1130,6 +1226,12 @@ def main() -> int:
         else:
             physical_campaign_evidence, physical_campaign_evidence_raw = (
                 load_json_strict(args.physical_campaign_evidence))
+        if args.cold_boot_arm_evidence is None:
+            cold_boot_arm_evidence = None
+            cold_boot_arm_evidence_raw = None
+        else:
+            cold_boot_arm_evidence, cold_boot_arm_evidence_raw = load_env_strict(
+                args.cold_boot_arm_evidence)
         if args.cold_boot_evidence is None:
             cold_boot_evidence = None
             cold_boot_evidence_raw = None
@@ -1140,7 +1242,8 @@ def main() -> int:
             args.source_sha, test_results, test_raw, evidence, policy, policy_raw,
             real_swap_evidence, real_swap_evidence_raw,
             physical_campaign_evidence, physical_campaign_evidence_raw,
-            cold_boot_evidence, cold_boot_evidence_raw)
+            cold_boot_evidence, cold_boot_evidence_raw,
+            cold_boot_arm_evidence, cold_boot_arm_evidence_raw)
     except (OSError, EvidenceError) as exc:
         result = {
             "schema": "swapz-production-readiness-evaluation-v1",

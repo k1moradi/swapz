@@ -5179,7 +5179,15 @@ have exactly the verifier's fixed field set, retain a removable parent with at
 least one stable serial/WWN identity, and carry the exact 12-field production
 DM table bound to the computed logical sector count and the observed selected
 target major:minor. Unknown/missing fields, a substituted lower device or a
-self-declared PASS with inconsistent mapper geometry are BLOCKED.
+self-declared PASS with inconsistent mapper geometry are BLOCKED. Before deployment may be
+declared ready for an owner reboot, the canonical evaluator must also ingest
+and SHA-256 bind the exact durable `swapz-primary-boot-arm-v1` record. That arm
+record must have its fixed canonical field set and bind the current owner
+kernel, release source/module bytes, authorized PARTUUID/size, removable parent
+and at least one stable serial/WWN identity. Final cold-boot PASS must
+cross-bind the observed report's `armed_boot_id` and stable selected-parent
+attributes to that same validated arm record; a summary `armed=true` bit alone
+must never make `PRODUCTION_READY_FOR_OWNER_REBOOT` PASS.
 
 
 ### Primary runtime observer audit regressions

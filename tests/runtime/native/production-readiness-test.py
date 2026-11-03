@@ -56,6 +56,27 @@ def encoded(value):
         value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def cold_boot_arm_evidence_raw(**overrides):
+    fields = {
+        "schema": "swapz-primary-boot-arm-v1",
+        "arm_boot_id": "11111111-1111-4111-8111-111111111111",
+        "arm_kernel_release": KERNEL_RELEASE,
+        "armed_epoch": "1",
+        "expected_partuuid": TARGET["partuuid"],
+        "expected_target_size_bytes": str(TARGET["size_bytes"]),
+        "expected_target_model": "USB Multi-Card",
+        "expected_target_serial": "reader-serial-1",
+        "expected_target_wwn": "unavailable",
+        "expected_target_transport": "usb",
+        "expected_target_removable": "1",
+        "expected_module_sha256": ARTIFACTS["module_sha256"],
+        "expected_module_source_sha": SOURCE,
+        "expected_module_source_clean": "1",
+    }
+    fields.update({key: str(value) for key, value in overrides.items()})
+    return "".join(f"{key}={value}\n" for key, value in fields.items()).encode()
+
+
 def cold_boot_evidence_raw(**overrides):
     fields = {
         "schema": "swapz-primary-cold-boot-v1",
@@ -312,13 +333,16 @@ def physical_campaign_evidence(policy_raw):
 
 
 def current_evidence(
-        report_raw, policy_raw, physical_raw=None, campaign_raw=None):
+        report_raw, policy_raw, physical_raw=None, campaign_raw=None,
+        cold_boot_arm_raw=None):
     policy_digest = hashlib.sha256(policy_raw).hexdigest()
     report_digest = hashlib.sha256(report_raw).hexdigest()
     if physical_raw is None:
         physical_raw = encoded(real_swap_evidence(report_raw, policy_raw))
     if campaign_raw is None:
         campaign_raw = encoded(physical_campaign_evidence(policy_raw))
+    if cold_boot_arm_raw is None:
+        cold_boot_arm_raw = cold_boot_arm_evidence_raw()
     return {
         "schema": "swapz-production-readiness-v2",
         "snapshot_kind": "CURRENT",
@@ -381,7 +405,9 @@ def current_evidence(
                 hashes=dict(ARTIFACTS)),
             "cold_boot_harness": pass_record(
                 target=dict(TARGET),
-                armed=True),
+                armed=True,
+                evidence_sha256=hashlib.sha256(
+                    cold_boot_arm_raw).hexdigest()),
             "owner_observed_reboot": {
                 "status": "BLOCKED",
                 "current": True,
@@ -393,9 +419,12 @@ def current_evidence(
     }
 
 
+_AUTO_ARM = object()
+
+
 def evaluate(
         report=None, evidence=None, policy=None, physical=None,
-        campaign=None, cold_boot_raw=None):
+        campaign=None, cold_boot_raw=None, cold_boot_arm_raw=_AUTO_ARM):
     report = owner_report() if report is None else report
     policy = acceptance_policy() if policy is None else policy
     report_raw = encoded(report)
@@ -408,16 +437,22 @@ def evaluate(
         physical_campaign_evidence(policy_raw)
         if campaign is None else campaign)
     campaign_raw = encoded(campaign)
+    if cold_boot_arm_raw is _AUTO_ARM:
+        cold_boot_arm_raw = cold_boot_arm_evidence_raw()
     if evidence is None:
         evidence = current_evidence(
-            report_raw, policy_raw, physical_raw, campaign_raw)
+            report_raw, policy_raw, physical_raw, campaign_raw,
+            cold_boot_arm_raw)
+    cold_boot_arm = (
+        None if cold_boot_arm_raw is None
+        else EVALUATOR.parse_env_strict(cold_boot_arm_raw))
     cold_boot = (
         None if cold_boot_raw is None
         else EVALUATOR.parse_env_strict(cold_boot_raw))
     return EVALUATOR.evaluate_release(
         SOURCE, report, report_raw, evidence, policy, policy_raw,
         physical, physical_raw, campaign, campaign_raw,
-        cold_boot, cold_boot_raw)
+        cold_boot, cold_boot_raw, cold_boot_arm, cold_boot_arm_raw)
 
 
 class ProductionReadinessEvaluatorTest(unittest.TestCase):
@@ -450,6 +485,50 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertIn(
             "release host page size is unsupported", result["code_blockers"])
+
+    def test_owner_reboot_readiness_requires_exact_durable_arm_record(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+
+        missing = evaluate(
+            report, evidence, policy, cold_boot_arm_raw=None)
+        self.assertEqual(
+            missing["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(missing["PRODUCTION_READY_FOR_OWNER_REBOOT"], "NO")
+        self.assertTrue(any(
+            "persistent arm evidence is missing" in blocker
+            for blocker in missing["deployment_blockers"]))
+
+        wrong = cold_boot_arm_evidence_raw(
+            expected_module_source_sha="b" * 40)
+        evidence = current_evidence(
+            encoded(report), encoded(policy), cold_boot_arm_raw=wrong)
+        result = evaluate(
+            report, evidence, policy, cold_boot_arm_raw=wrong)
+        self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "arm module source binding is invalid" in blocker
+            for blocker in result["deployment_blockers"]))
+
+    def test_cold_boot_report_is_cross_bound_to_exact_arm_record(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        arm_raw = cold_boot_arm_evidence_raw()
+        cold_raw = cold_boot_evidence_raw(
+            armed_boot_id="33333333-3333-4333-8333-333333333333")
+        evidence = current_evidence(
+            encoded(report), encoded(policy), cold_boot_arm_raw=arm_raw)
+        evidence["release_evidence"]["owner_observed_reboot"].update(
+            status="PASS", observed=True,
+            evidence_sha256=hashlib.sha256(cold_raw).hexdigest())
+        result = evaluate(
+            report, evidence, policy, cold_boot_raw=cold_raw,
+            cold_boot_arm_raw=arm_raw)
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "not bound to the arm boot" in blocker
+            for blocker in result["cold_boot_blockers"]))
 
     def test_owner_reboot_is_separate_from_code_and_deployment_readiness(self):
         report = owner_report()
