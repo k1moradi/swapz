@@ -294,6 +294,8 @@ esac
 
     def assert_absent(self):
         self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertFalse((self.prefix / "sbin/swapz-primary-runtime-health").exists())
+        self.assertFalse((self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service").exists())
         self.assertFalse(
             (self.home / "usr/src" / ("swapz-" + VERSION)).exists())
         self.assertFalse(self.installed_module.exists())
@@ -302,6 +304,13 @@ esac
         self.assertEqual(
             (self.prefix / "sbin/swapzctl").read_bytes(),
             self.cli.read_bytes())
+        self.assertEqual(
+            (self.prefix / "sbin/swapz-primary-runtime-health").read_bytes(),
+            (ROOT / "packaging/swapz-primary-runtime-health").read_bytes())
+        self.assertEqual(
+            (self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service").read_text(),
+            (ROOT / "packaging/swapz-primary-runtime-health.service").read_text().replace(
+                "@SWAPZ_SBINDIR@", str(self.prefix / "sbin")))
         self.assertEqual(
             (self.prefix / "libexec/swapz/device-roundtrip").read_bytes(),
             self.oracle.read_bytes())
@@ -351,6 +360,9 @@ esac
         self.assertIn("RefuseManualStart=yes", mapper.read_text())
         self.assertIn("observe", verifier.read_text())
         self.assertIn("primary systemd-units", generator.read_text())
+        self.assert_installed_exact()
+        health_unit = self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service"
+        self.assertIn("Restart=on-failure", health_unit.read_text())
         self.assertIn("What=/dev/mapper/swapz-primary", swap_unit.read_text())
 
         removed = self.invoke("uninstall")
@@ -480,6 +492,35 @@ esac
             cwd=ROOT, env=verify_env, capture_output=True, text=True)
         self.assertNotEqual(rejected.returncode, 0)
         self.assertIn("not cryptographically valid", rejected.stderr)
+
+        # An embedded foreign signer certificate must not be treated as the
+        # configured enrolled MOK merely because OpenSSL can validate it.
+        foreign_key = self.home / "foreign-test.key"
+        foreign_certificate = self.home / "foreign-test.pem"
+        foreign_signature = self.home / "foreign-module.p7s"
+        subprocess.run(
+            [openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", str(foreign_key), "-out", str(foreign_certificate),
+             "-subj", "/CN=foreign-unenrolled-test", "-days", "1"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [openssl, "cms", "-sign", "-binary", "-in", str(payload),
+             "-signer", str(foreign_certificate), "-inkey", str(foreign_key),
+             "-outform", "DER", "-out", str(foreign_signature),
+             "-noattr", "-md", "sha512"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        foreign_bytes = foreign_signature.read_bytes()
+        foreign_header = bytes((0, 0, 2, 0, 0, 0, 0, 0))
+        foreign_header += len(foreign_bytes).to_bytes(4, "big")
+        signed_module.write_bytes(
+            payload.read_bytes() + foreign_bytes + foreign_header +
+            b"~Module signature appended~\n")
+        foreign_result = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             "--verify", str(signed_module)],
+            cwd=ROOT, env=verify_env, capture_output=True, text=True)
+        self.assertEqual(foreign_result.returncode, 2, foreign_result.stdout)
+        self.assertIn("not cryptographically valid", foreign_result.stderr)
 
     def test_kernel_upgrade_requires_new_qualified_module(self):
         self.assertEqual(self.invoke("install").returncode, 0)
@@ -619,6 +660,23 @@ esac
             stale_cli_restore.read_text(), "foreign stale rollback temp\n")
         self.assertIn("daemon-reload", self.systemctl_log.read_text())
 
+        # Deliberate failure after the old CLI is restored must revoke it
+        # rather than retain an activatable incomplete upgrade.
+        self.systemctl_fail_marker.unlink(missing_ok=True)
+        failed_verify = self.invoke("install", {
+            "SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1",
+            "SWAPZ_TEST_UPGRADE_ROLLBACK_VERIFY_FAILURE": "1",
+        })
+        self.assertNotEqual(failed_verify.returncode, 0)
+        self.assertIn("previous package restoration failed", failed_verify.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertFalse(
+            (self.prefix / "lib/systemd/system/swapz-primary-mapper.service").exists())
+        transactions = list((self.home / "transactions").glob("swapz-package.*"))
+        self.assertEqual(len(transactions), 1)
+        blocked = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
     def test_upgrade_refuses_primary_recovery_authority(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_binary = (self.prefix / "sbin/swapzctl").read_bytes()
@@ -655,6 +713,94 @@ esac
         repeated = self.invoke("install")
         self.assertEqual(repeated.returncode, 0, repeated.stderr)
         self.assertIn("already matches", repeated.stdout)
+
+    def test_foreign_monitor_payload_refuses_admission(self):
+        health = self.prefix / "sbin/swapz-primary-runtime-health"
+        health.parent.mkdir(parents=True, exist_ok=True)
+        health.write_bytes(b"foreign-runtime-health\n")
+        health.chmod(0o755)
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertEqual(health.read_bytes(), b"foreign-runtime-health\n")
+        self.assertFalse(self.installed_module.exists())
+
+    def test_metadata_tamper_cannot_enter_legacy_upgrade_path(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        source = self.home / "usr/src" / ("swapz-" + VERSION)
+        for path, original_mode in (
+            (self.prefix / "sbin/swapzctl", 0o755),
+            (self.prefix / "sbin/swapz-primary-runtime-health", 0o755),
+            (self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service", 0o644),
+            (self.installed_module, 0o644),
+            (source / ".swapz-qualification", 0o644),
+        ):
+            with self.subTest(path=path.name):
+                path.chmod(0o666)
+                try:
+                    log_before = self.dkms_log.read_text()
+                    result = self.invoke("install")
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("partial, foreign, or modified", result.stderr)
+                    self.assertEqual(self.dkms_log.read_text(), log_before)
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o666)
+                finally:
+                    path.chmod(original_mode)
+
+    def test_legacy_upgrade_failure_restores_verified_legacy_install(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        original_cli = (self.prefix / "sbin/swapzctl").read_bytes()
+        original_module = self.installed_module.read_bytes()
+        source = self.home / "usr/src" / ("swapz-" + VERSION)
+        (source / ".swapz-qualification").unlink()
+        # Represent a verified installation from before Agent 9 added the
+        # observer: neither monitoring artifact nor manifest line exists.
+        (self.prefix / "sbin/swapz-primary-runtime-health").unlink()
+        (self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service").unlink()
+        binary_manifest = source / ".swapz-binaries.sha256"
+        binary_manifest.write_text("".join(
+            line for line in binary_manifest.read_text().splitlines(keepends=True)
+            if "swapz-primary-runtime-health" not in line))
+        manifest = source / ".swapz-sources.sha256"
+        manifest.write_text("".join(
+            line for line in manifest.read_text().splitlines(keepends=True)
+            if ".swapz-qualification" not in line))
+
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        result = self.invoke("install", {"SWAPZ_FAKE_FAIL_AT": "build"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("attempting transaction rollback", result.stderr)
+        self.assertEqual(
+            (self.prefix / "sbin/swapzctl").read_bytes(), original_cli)
+        self.assertEqual(self.installed_module.read_bytes(), original_module)
+        self.assertFalse((source / ".swapz-qualification").exists())
+        self.assertFalse((self.prefix / "sbin/swapz-primary-runtime-health").exists())
+        self.assertFalse((self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service").exists())
+        self.assertFalse(list((self.home / "transactions").glob("swapz-package.*")))
+
+    def test_uninstall_failed_reverification_revokes_activation(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        failed = self.invoke("uninstall", {
+            "SWAPZ_TEST_UNINSTALL_FAIL_AFTER": "dkms-removed",
+            "SWAPZ_TEST_UNINSTALL_ROLLBACK_VERIFY_FAILURE": "1",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("rollback incomplete", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertFalse(
+            (self.prefix / "lib/systemd/system/swapz-primary-mapper.service").exists())
+        transactions = self.uninstall_transactions()
+        self.assertEqual(len(transactions), 1)
+        state = json.loads((transactions[0] / "state.json").read_text())
+        self.assertEqual(state["phase"], "rollback-incomplete")
+        for entry in state["backup_files"]:
+            self.assertEqual(
+                sha256(transactions[0] / "backup" / entry["path"]),
+                entry["sha256"])
+        blocked = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+        self.assertFalse((self.prefix / "sbin/swapz-primary-runtime-health").exists())
 
     def test_uninstall_refuses_active_mapping_or_module(self):
         self.assertEqual(self.invoke("install").returncode, 0)

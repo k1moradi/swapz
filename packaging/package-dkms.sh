@@ -159,6 +159,7 @@ src="$srcbase/swapz-$version"
 cli_dir="$prefix/sbin"
 cli="$cli_dir/swapzctl"
 boot_verifier="$cli_dir/swapz-primary-boot-verify"
+runtime_health="$cli_dir/swapz-primary-runtime-health"
 helper_dir="$prefix/libexec/swapz"
 helper="$helper_dir/device-roundtrip"
 module_snapshot="$helper_dir/dm-swapz.ko"
@@ -167,6 +168,7 @@ generator_dir="$prefix/lib/systemd/system-generators"
 primary_generator="$generator_dir/swapz-primary-generator"
 mapper_service="$unit_dir/swapz-primary-mapper.service"
 boot_verifier_service="$unit_dir/swapz-primary-boot-verify.service"
+runtime_health_service="$unit_dir/swapz-primary-runtime-health.service"
 swap_unit_name="$(systemd-escape --path --suffix=swap /dev/mapper/swapz-primary)"
 [[ "$swap_unit_name" == 'dev-mapper-swapz\x2dprimary.swap' ]] ||
   blocked "unexpected systemd-escaped primary swap unit name"
@@ -317,6 +319,33 @@ verify_owned_legacy() {
      -f "$mapper_service" && ! -L "$mapper_service" &&
      -f "$boot_verifier_service" && ! -L "$boot_verifier_service" &&
      -f "$primary_swap" && ! -L "$primary_swap" ]] || return 1
+  # Legacy identity does not weaken installed file ownership or path safety.
+  # Without these checks a mode-tampered current package is accepted as legacy.
+  local legacy_path
+  for legacy_path in "$cli" "$boot_verifier" "$helper" "$primary_generator"; do
+    installed_file_metadata "$legacy_path" 755 || return 1
+  done
+  for legacy_path in "$module_snapshot" "$mapper_service" "$boot_verifier_service" "$primary_swap"; do
+    installed_file_metadata "$legacy_path" 644 || return 1
+  done
+  if [[ -e "$src/$qualification_marker" || -L "$src/$qualification_marker" ]]; then
+    installed_file_metadata "$src/$qualification_marker" 644 || return 1
+  fi
+  for legacy_path in "${module_candidate_paths[@]}"; do
+    if [[ "$legacy_path" != "$installed_module" ]] &&
+       [[ -e "$legacy_path" || -L "$legacy_path" ]]; then
+      return 1
+    fi
+  done
+  if [[ -e "$installed_module" || -L "$installed_module" ]]; then
+    installed_file_metadata "$installed_module" 644 || return 1
+  fi
+  # Both monitoring artifacts are optional only for older verified packages.
+  if [[ -e "$runtime_health" || -L "$runtime_health" ||
+        -e "$runtime_health_service" || -L "$runtime_health_service" ]]; then
+    installed_file_metadata "$runtime_health" 755 || return 1
+    installed_file_metadata "$runtime_health_service" 644 || return 1
+  fi
   grep -Fxq "swapz:$version" "$src/$marker" || return 1
   verify_source_manifest && verify_binary_manifest
 }
@@ -340,11 +369,13 @@ verify_owned() {
   installed_file_metadata "$src/$qualification_marker" 644 || return 1
   installed_file_metadata "$cli" 755 || return 1
   installed_file_metadata "$boot_verifier" 755 || return 1
+  installed_file_metadata "$runtime_health" 755 || return 1
   installed_file_metadata "$helper" 755 || return 1
   installed_file_metadata "$module_snapshot" 644 || return 1
   installed_file_metadata "$primary_generator" 755 || return 1
   installed_file_metadata "$mapper_service" 644 || return 1
   installed_file_metadata "$boot_verifier_service" 644 || return 1
+  installed_file_metadata "$runtime_health_service" 644 || return 1
   installed_file_metadata "$primary_swap" 644 || return 1
   installed_file_metadata "$installed_module" 644 || return 1
   verify_binary_manifest
@@ -354,10 +385,12 @@ package_paths_present() {
   local candidate
   if [[ -e "$src" || -L "$src" || -e "$cli" || -L "$cli" ||
         -e "$boot_verifier" || -L "$boot_verifier" ||
+        -e "$runtime_health" || -L "$runtime_health" ||
         -e "$helper_dir" || -L "$helper_dir" ||
         -e "$primary_generator" || -L "$primary_generator" ||
         -e "$mapper_service" || -L "$mapper_service" ||
         -e "$boot_verifier_service" || -L "$boot_verifier_service" ||
+        -e "$runtime_health_service" || -L "$runtime_health_service" ||
         -e "$primary_swap" || -L "$primary_swap" ]]; then
     return 0
   fi
@@ -368,8 +401,9 @@ package_paths_present() {
 }
 
 cleanup_activation_files() {
-  rm -f -- "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
-    "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap"
+  rm -f -- "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
+    "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+    "$runtime_health_service" "$primary_swap"
   rmdir -- "$helper_dir" 2>/dev/null || true
 }
 
@@ -496,14 +530,15 @@ backup_verified_package_for_uninstall() {
     "$src/$source_manifest" "$src/$binary_manifest" "$backup_dir/source/"
   cp -a -- "$src/src/kernel/VERSION" "$src/src/kernel/Makefile" \
     "$src"/src/kernel/*.c "$src"/src/kernel/*.h "$backup_dir/source/src/kernel/"
-  for file in "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
-      "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap"; do
+  for file in "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
+      "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+      "$runtime_health_service" "$primary_swap"; do
     cp -a -- "$file" "$backup_dir/files/$(printf '%s' "$file" | sha256sum | awk '{print $1}')"
   done
   printf '%s\n' \
-    "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
-    "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap" \
-    > "$backup_dir/file-paths"
+    "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
+    "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+    "$runtime_health_service" "$primary_swap" > "$backup_dir/file-paths"
   cp -a -- "$installed_module" "$backup_dir/installed-module"
 }
 
@@ -575,6 +610,10 @@ restore_uninstall_backup() {
   persist_uninstall_state rollback-systemd-reloaded || return 1
   restore_uninstall_cli_backup || return 1
   persist_uninstall_state rollback-cli-restored || return 1
+  # Hermetic failure at the last verification boundary after CLI publication.
+  if [[ -n "$test_root" && ${SWAPZ_TEST_UNINSTALL_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
+    return 1
+  fi
   verify_owned
 }
 
@@ -588,6 +627,8 @@ uninstall_rollback() {
     persist_uninstall_state rolled-back >/dev/null 2>&1 || true
     rm -rf -- "$transaction_dir"
   else
+    # A failed final check must never leave activation entry points online.
+    cleanup_activation_files || true
     persist_uninstall_state rollback-incomplete >/dev/null 2>&1 || true
     echo "BLOCKED: uninstall rollback incomplete; verified recovery data retained at $transaction_dir" >&2
   fi
@@ -617,7 +658,8 @@ if [[ "$action" == uninstall ]]; then
   swapz_mapper_present && blocked "active swapz mapping; refusing package removal"
   assert_no_primary_recovery_authority removal
   if [[ -z "$test_root" ]]; then
-    for unit in swapz-primary-boot-verify.service swapz-primary-mapper.service "$swap_unit_name"; do
+    for unit in swapz-primary-boot-verify.service swapz-primary-mapper.service \
+        swapz-primary-runtime-health.service "$swap_unit_name"; do
       "$systemctl_bin" is-active --quiet "$unit" &&
         blocked "$unit is active; refusing package removal"
       "$systemctl_bin" is-enabled --quiet "$unit" &&
@@ -692,8 +734,10 @@ done
   blocked "qualified userspace artifacts are not executable"
 for payload in dkms.conf src/kernel/VERSION \
     packaging/swapz-primary-boot-verify \
+    packaging/swapz-primary-runtime-health \
     packaging/swapz-primary-mapper.service \
     packaging/swapz-primary-boot-verify.service \
+    packaging/swapz-primary-runtime-health.service \
     packaging/swapz-primary-generator packaging/swapz-primary.swap; do
   safe_input_file "$payload" || blocked "unsafe package payload: $payload"
 done
@@ -857,14 +901,16 @@ if [[ -n "$existing_kind" ]]; then
   if [[ -f "$src/$qualification_marker" && ! -L "$src/$qualification_marker" ]]; then
     cp -a -- "$src/$qualification_marker" "$backup_dir/source/"
   fi
-  for file in "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
-      "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap"; do
+  # Older installed packages predate monitoring; snapshot only files verified
+  # to exist, and recover exactly that previous installed set.
+  : > "$backup_dir/file-paths"
+  for file in "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
+      "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+      "$runtime_health_service" "$primary_swap"; do
+    [[ -f "$file" && ! -L "$file" ]] || continue
     cp -a -- "$file" "$backup_dir/files/$(printf '%s' "$file" | sha256sum | awk '{print $1}')"
+    printf '%s\n' "$file" >> "$backup_dir/file-paths"
   done
-  printf '%s\n' \
-    "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
-    "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap" \
-    > "$backup_dir/file-paths"
   if [[ -f "$installed_module" && ! -L "$installed_module" ]]; then
     cp -a -- "$installed_module" "$backup_dir/installed-module"
   fi
@@ -934,7 +980,15 @@ restore_previous_package() {
   restore_file_backups_except_cli || return 1
   "$systemctl_bin" daemon-reload || return 1
   restore_cli_backup || return 1
-  verify_owned
+  if [[ -n "$test_root" && ${SWAPZ_TEST_UPGRADE_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
+    return 1
+  fi
+  # The previously verified legacy package had no qualification marker.
+  if [[ "$existing_kind" == legacy ]]; then
+    verify_owned_legacy
+  else
+    verify_owned
+  fi
 }
 
 rollback() {
@@ -952,6 +1006,8 @@ rollback() {
     if restore_previous_package; then
       rm -rf -- "$transaction_dir"
     else
+      # Do not publish a CLI after failed rollback re-verification.
+      cleanup_activation_files || true
       echo "BLOCKED: previous package restoration failed; preserved rollback data at $transaction_dir" >&2
     fi
   else
@@ -1027,12 +1083,15 @@ resolved_module="$(readlink -f -- "$resolved_module" 2>/dev/null || true)"
 # Prepare all userspace/systemd bytes before replacing any live package file.
 install -m0755 "$cli_artifact" "$stage_dir/swapzctl"
 install -m0755 packaging/swapz-primary-boot-verify "$stage_dir/swapz-primary-boot-verify"
+install -m0755 packaging/swapz-primary-runtime-health "$stage_dir/swapz-primary-runtime-health"
 install -m0755 "$oracle_artifact" "$stage_dir/device-roundtrip"
 install -m0644 "$module_artifact" "$stage_dir/dm-swapz.ko"
 sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-mapper.service > "$stage_dir/swapz-primary-mapper.service"
 sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-boot-verify.service > "$stage_dir/swapz-primary-boot-verify.service"
+sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-runtime-health.service > "$stage_dir/swapz-primary-runtime-health.service"
 sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-generator > "$stage_dir/swapz-primary-generator"
-chmod 0644 "$stage_dir/swapz-primary-mapper.service" "$stage_dir/swapz-primary-boot-verify.service"
+chmod 0644 "$stage_dir/swapz-primary-mapper.service" "$stage_dir/swapz-primary-boot-verify.service" \
+  "$stage_dir/swapz-primary-runtime-health.service"
 chmod 0755 "$stage_dir/swapz-primary-generator"
 install -m0644 packaging/swapz-primary.swap "$stage_dir/$swap_unit_name"
 
@@ -1044,16 +1103,19 @@ install -m0644 packaging/swapz-primary.swap "$stage_dir/$swap_unit_name"
 install -d -m0755 "$cli_dir" "$helper_dir" "$unit_dir" "$generator_dir"
 install -m0755 "$stage_dir/swapzctl" "$cli"
 install -m0755 "$stage_dir/swapz-primary-boot-verify" "$boot_verifier"
+install -m0755 "$stage_dir/swapz-primary-runtime-health" "$runtime_health"
 install -m0755 "$stage_dir/device-roundtrip" "$helper"
 install -m0644 "$stage_dir/dm-swapz.ko" "$module_snapshot"
 install -m0755 "$stage_dir/swapz-primary-generator" "$primary_generator"
 install -m0644 "$stage_dir/swapz-primary-mapper.service" "$mapper_service"
 install -m0644 "$stage_dir/swapz-primary-boot-verify.service" "$boot_verifier_service"
+install -m0644 "$stage_dir/swapz-primary-runtime-health.service" "$runtime_health_service"
 install -m0644 "$stage_dir/$swap_unit_name" "$primary_swap"
 new_files_committed=1
 
-sha256sum "$cli" "$boot_verifier" "$helper" "$module_snapshot" \
-  "$primary_generator" "$mapper_service" "$boot_verifier_service" "$primary_swap" \
+sha256sum "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
+  "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+  "$runtime_health_service" "$primary_swap" \
   "$installed_module" > "$src/$binary_manifest"
 verify_owned || blocked "installed ownership or digest verification failed"
 [[ "$(hash_file "$cli")" == "$qualified_cli_sha256" &&

@@ -191,7 +191,9 @@ verify_module_signature() {
         rm -rf -- "$temp_dir"
         return 20
     }
-    openssl cms -verify -binary -inform DER -in "$signature_path" \
+    # CMS may contain a foreign signer certificate. Ignore embedded certs:
+    # only the configured enrolled MOK certificate may verify this payload.
+    openssl cms -verify -binary -nointern -inform DER -in "$signature_path" \
         -content "$payload_path" -certfile "$certificate_pem" -noverify \
         -out /dev/null >/dev/null 2>&1 || {
         rm -rf -- "$temp_dir"

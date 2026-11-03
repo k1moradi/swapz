@@ -4440,6 +4440,9 @@ qualification, and an enabled host with unavailable certificate/signature
 verification must fail closed. Verification must parse the appended Linux
 module-signature trailer and cryptographically verify the detached PKCS#7/CMS
 signature over the exact module payload against the configured certificate.
+Embedded CMS signer certificates must be excluded from signer resolution
+(OpenSSL `-nointern`): `-certfile` alone does not force verification against
+that exact configured and enrolled certificate.
 Certificate identity, `mokutil --test-key` enrollment, embedded signer/key
 metadata, cryptographic signature validity, and target-kernel acceptance are
 separate facts. `modinfo` signer or `sig_key` metadata is diagnostic only and
@@ -4481,7 +4484,21 @@ other files and systemd cache are valid. If rollback itself cannot finish or
 is interrupted, the transaction directory and hash manifest must remain, and
 all later package actions must fail closed on that durable incomplete state.
 The retained state must not expose an activation path before the recovered
-backend is valid.
+backend is valid. If final re-verification fails after publishing the restored
+CLI, rollback must revoke the CLI and activation-capable systemd artifacts
+before retaining incomplete state. Legacy pre-qualification-marker packages
+must meet the same installed ownership and mode requirements as current ones;
+modified file metadata or foreign module paths may not be downgraded to
+permissive legacy upgrade admission.
+
+Production packaging includes Agent 9’s read-only
+`swapz-primary-runtime-health` helper and matching service in the installed
+binary manifest, exact ownership checks, staged unit rendering, uninstall
+snapshot and upgrade rollback. The monitoring unit is installed disabled;
+active/enabled instances block removal. Verified older installs lacking both
+monitoring artifacts may upgrade, and a failed upgrade restores their exact
+pre-monitoring file set. A foreign or half-installed monitoring payload
+must not be overwritten.
 
 Production uses the fixed `/usr/local` prefix, trusted executable paths,
 root-owned installed files with fixed modes, non-symlink package directories
@@ -4490,13 +4507,17 @@ and single-link non-writable artifact/report inputs.
 The hermetic regression must cover clean and repeated install/uninstall,
 missing kernel headers, unavailable Secure Boot verification, certificate
 enrollment mismatch, cryptographically invalid signature despite matching
-signer metadata, vermagic mismatch, unexpected paths/symlinks, foreign
+signer metadata, an embedded foreign CMS signer certificate, vermagic mismatch,
+unexpected paths/symlinks, foreign
 artifacts, partial DKMS failure, active-module and active-mapper upgrade
 refusal, active uninstall refusal, rollback of a failed upgrade, every
 destructive uninstall transition, failed depmod, failed systemd daemon-reload,
 reinstall after safe cleanup, installed-module/userspace digest mismatch,
 post-depmod tamper, install/uninstall signal interruption, stale rollback
-temporary-name collisions, and interruption of uninstall rollback. The
+temporary-name collisions, legacy rollback, metadata downgrade refusal,
+post-CLI re-verification failure, foreign monitoring payload refusal,
+monitor helper/service rollback from a pre-monitor installation, and
+interruption of uninstall rollback. The
 interrupted-rollback fixture must verify the retained
 state manifest against the recovery bytes and prove later package operations
 refuse that durable incomplete transaction without reading or modifying host
