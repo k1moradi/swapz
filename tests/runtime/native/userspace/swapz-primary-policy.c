@@ -2733,6 +2733,10 @@ int main(void)
 	assert(unlinkat(recovery_fd, "primary-state.json", 0) == 0);
 	assert(unlinkat(recovery_fd, "state-link", 0) == 0);
 	assert(unlinkat(recovery_fd, "state-target", 0) == 0);
+	/* swapz_primary_mutation_lock_at() intentionally leaves its stable lock
+	 * inode behind in production. This private fixture owns that inode and
+	 * must remove it before asserting the temporary directory is empty. */
+	assert(unlinkat(recovery_fd, SWAPZ_PRIMARY_MUTATION_LOCK_NAME, 0) == 0);
 	assert(fsync(recovery_fd) == 0);
 	assert(close(recovery_fd) == 0);
 	assert(chmod(base_template, 0755) == 0);
