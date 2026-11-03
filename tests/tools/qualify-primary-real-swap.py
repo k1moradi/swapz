@@ -58,6 +58,8 @@ VERIFY_HEADROOM_MIB = 128
 DEFAULT_TIMEOUT_SECONDS = 240
 DEFAULT_CYCLES = 2
 MAX_CYCLES = 4
+CONCURRENT_ORACLE_PROCESSES = 2
+REUSE_ROUNDS = 2
 RESULT_PREFIX = "PRIMARY_REAL_SWAP_RESULT="
 
 
@@ -101,6 +103,122 @@ class StopSample:
     mapper_after: bool
     swap_active: bool
     identity_valid: bool
+
+
+class PersistentEvidence:
+    """Crash-persistent qualification disposition under the validated recovery base."""
+
+    def __init__(self, directory: Path, attempt_id: str, initial: dict,
+                 expected_uid: int | None = None):
+        if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
+            raise Blocked("persistent evidence attempt ID is malformed")
+        self.expected_uid = os.geteuid() if expected_uid is None else expected_uid
+        self.directory = directory
+        self.path = directory / f"primary-real-swap-{attempt_id}.json"
+        try:
+            directory_info = directory.lstat()
+        except OSError as exc:
+            raise Blocked(f"persistent evidence directory is unavailable: {exc}") from exc
+        if not stat.S_ISDIR(directory_info.st_mode) or \
+                directory_info.st_uid != self.expected_uid or \
+                stat.S_IMODE(directory_info.st_mode) != 0o700:
+            raise Blocked("persistent evidence directory ownership/mode is unsafe")
+        try:
+            self.path.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise Blocked(f"cannot inspect persistent evidence path: {exc}") from exc
+        else:
+            raise Blocked("persistent evidence attempt path already exists")
+        self.record = {
+            "schema": "swapz-primary-real-swap-evidence-v1",
+            "attempt_id": attempt_id,
+            "status": "FAIL",
+            "reason": "qualification_interrupted_or_incomplete",
+            "phase": "ADMITTED",
+            "started_unix_ns": time.time_ns(),
+            "updated_unix_ns": time.time_ns(),
+            **initial,
+        }
+        self._write(first=True)
+
+    def _validate_existing(self, error_type=QualificationFailure) -> None:
+        try:
+            info = self.path.lstat()
+        except OSError as exc:
+            raise error_type(f"persistent evidence file is unavailable: {exc}") from exc
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != self.expected_uid or \
+                stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
+            raise error_type("persistent evidence file ownership/mode changed")
+
+    def _write(self, *, first: bool = False) -> None:
+        error_type = Blocked if first else QualificationFailure
+        if not first:
+            self._validate_existing(error_type)
+        payload = (json.dumps(self.record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        temporary = self.directory / f".{self.path.name}.{os.urandom(8).hex()}.tmp"
+        file_descriptor = -1
+        directory_descriptor = -1
+        try:
+            file_descriptor = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+                0o600,
+            )
+            info = os.fstat(file_descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != self.expected_uid or \
+                    stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
+                raise error_type("persistent evidence temporary file is unsafe")
+            offset = 0
+            while offset < len(payload):
+                written = os.write(file_descriptor, payload[offset:])
+                if written <= 0:
+                    raise OSError(errno.EIO, "short persistent evidence write")
+                offset += written
+            os.fsync(file_descriptor)
+            os.close(file_descriptor)
+            file_descriptor = -1
+            os.replace(temporary, self.path)
+            directory_descriptor = os.open(
+                self.directory,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            )
+            os.fsync(directory_descriptor)
+            self._validate_existing(error_type)
+            if self.path.read_bytes() != payload:
+                raise error_type("persistent evidence readback differs from written bytes")
+        except (Blocked, QualificationFailure):
+            raise
+        except OSError as exc:
+            raise error_type(f"cannot persist real-swap evidence: {exc}") from exc
+        finally:
+            if file_descriptor >= 0:
+                os.close(file_descriptor)
+            if directory_descriptor >= 0:
+                os.close(directory_descriptor)
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+    def update(self, phase: str, **fields) -> None:
+        self.record.update(fields)
+        self.record["phase"] = phase
+        self.record["updated_unix_ns"] = time.time_ns()
+        self._write()
+
+    def finish(self, status_value: str, reason: str | None = None, **fields) -> None:
+        if status_value not in {"PASS", "FAIL", "BLOCKED"}:
+            raise ValueError("terminal evidence status must be PASS, FAIL, or BLOCKED")
+        self.record.update(fields)
+        self.record["status"] = status_value
+        self.record["reason"] = reason
+        self.record["phase"] = "COMPLETE"
+        self.record["updated_unix_ns"] = time.time_ns()
+        self._write()
 
 
 def _run(argv: list[str], *, check: bool = True, timeout: float = 30,
@@ -479,7 +597,7 @@ def parse_status(text: str) -> dict[str, int]:
             raise QualificationFailure(f"duplicate swapz status token {key}")
         if re.fullmatch(r"-?[0-9]+", value):
             values[key] = int(value)
-    for key in ("logical_write", "logical_read", "physical_write", "physical_read", "failed", "last_error"):
+    for key in ("logical_write", "logical_read", "physical_write", "physical_read", "failed", "error"):
         if key not in values:
             raise QualificationFailure(f"swapz status lacks numeric token {key}")
     return values
@@ -593,6 +711,13 @@ def require_plan_storage_separation(plan: dict) -> None:
     ):
         if plan.get(key) is not False:
             raise Blocked(f"primary plan does not prove {key}=false")
+
+
+def require_clean_mapper_ownership(plan: dict) -> None:
+    if plan.get("module_mapper_inventory_read") is not True or \
+            plan.get("swapz_mapper_absent") is not True or \
+            plan.get("dm_swapz_module_loaded") is not False:
+        raise Blocked("unexpected swapz mapper/module ownership exists before qualification")
 
 
 def require_sole_partition_topology(target_row: dict, parent_row: dict,
@@ -795,6 +920,7 @@ def verify_provenance(plan: dict, validated_source: str, report_path: Path,
     for key in required_true:
         if plan.get(key) is not True:
             raise Blocked(f"primary provenance gate {key} is not true")
+    require_clean_mapper_ownership(plan)
     if plan.get("control_build_source_sha") != validated_source:
         raise Blocked("primary control binary source SHA differs from validated source")
     report_digest = _sha256_file(report_path)
@@ -959,7 +1085,7 @@ def verify_active_mapper(manifest: dict, baseline_swap_identity: set[tuple]) -> 
         raise QualificationFailure("fresh mapper begins with nonzero Linux swap usage")
     header = _read_mapper_header(mapper_path, manifest["logical_pages_int"])
     status = read_status()
-    if status["failed"] != 0 or status["last_error"] != 0:
+    if status["failed"] != 0 or status["error"] != 0:
         raise QualificationFailure("fresh primary mapper already reports target failure")
     return {
         "mapper_device": mapper_device,
@@ -1030,8 +1156,11 @@ def _cgroup_create(token: str, resident_mib: int, swap_limit_mib: int,
 
 def preflight_workload_environment(workload_mib: int, resident_mib: int,
                                    swap_limit_mib: int) -> None:
-    if not (64 <= resident_mib < workload_mib <= 512):
-        raise Blocked("workload must be 64..512 MiB with resident limit below workload")
+    if not (64 <= resident_mib < workload_mib <= 512) or \
+            workload_mib < CONCURRENT_ORACLE_PROCESSES * 64:
+        raise Blocked(
+            "workload must be 128..512 MiB with resident limit below workload "
+            "for two concurrent bounded oracles")
     if workload_mib - resident_mib < MIN_TRAFFIC_MIB:
         raise Blocked(
             f"workload must expose at least {MIN_TRAFFIC_MIB} MiB above the resident limit")
@@ -1099,17 +1228,22 @@ def _oracle_event(process: subprocess.Popen[str], prefix: str, deadline: float,
     fd = process.stdout.fileno()
     while True:
         guard()
-        if process.poll() is not None:
-            stderr = process.stderr.read().strip() if process.stderr else ""
-            raise QualificationFailure(f"real-swap oracle exited before {prefix}: rc={process.returncode} {stderr}")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise QualificationFailure(f"real-swap oracle timed out waiting for {prefix}")
         readable, _, _ = select.select([fd], [], [], min(0.1, remaining))
         if not readable:
+            if process.poll() is not None:
+                stderr = process.stderr.read().strip() if process.stderr else ""
+                raise QualificationFailure(
+                    f"real-swap oracle exited before {prefix}: rc={process.returncode} {stderr}")
             continue
         line = process.stdout.readline()
         if not line:
+            if process.poll() is not None:
+                stderr = process.stderr.read().strip() if process.stderr else ""
+                raise QualificationFailure(
+                    f"real-swap oracle exited before {prefix}: rc={process.returncode} {stderr}")
             continue
         line = line.strip()
         if not line.startswith(prefix):
@@ -1163,143 +1297,345 @@ def evaluate_workload_evidence(*, cgroup_swap_bytes: int, cgroup_swap_peak: int,
             oracle.get("digest") != oracle.get("expected_digest"):
         raise QualificationFailure("real-swap byte oracle reported corruption or incomplete verification")
     for status in (fill_status_after, verify_status_after):
-        if status["failed"] != 0 or status["last_error"] != 0:
+        if status["failed"] != 0 or status["error"] != 0:
             raise QualificationFailure("swapz target entered failed state during real-swap workload")
+
+
+def split_concurrent_workload_mib(workload_mib: int) -> tuple[int, int]:
+    first = workload_mib // CONCURRENT_ORACLE_PROCESSES
+    second = workload_mib - first
+    if first < 64 or second < 64:
+        raise Blocked("concurrent real-swap workers each require at least 64 MiB")
+    return first, second
+
+
+def aggregate_oracle_verification(records: list[dict]) -> dict:
+    if len(records) != CONCURRENT_ORACLE_PROCESSES:
+        raise QualificationFailure("concurrent oracle verification record count is incomplete")
+    observed_digest = hashlib.sha256()
+    expected_digest = hashlib.sha256()
+    verified_pages = 0
+    verified_bytes = 0
+    mismatches = 0
+    for record in records:
+        try:
+            pages = int(record["verified_pages"])
+            byte_count = int(record["verified_bytes"])
+            mismatch_count = int(record["mismatches"])
+            observed_bytes = bytes.fromhex(str(record["digest"]))
+            expected_bytes = bytes.fromhex(str(record["expected_digest"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise QualificationFailure("concurrent oracle verification record is malformed") from exc
+        if pages <= 0 or byte_count != pages * PAGE_BYTES or mismatch_count < 0 or \
+                len(observed_bytes) != 32 or len(expected_bytes) != 32:
+            raise QualificationFailure("concurrent oracle verification geometry/digest is invalid")
+        verified_pages += pages
+        verified_bytes += byte_count
+        mismatches += mismatch_count
+        observed_digest.update(observed_bytes)
+        expected_digest.update(expected_bytes)
+    return {
+        "verified_pages": verified_pages,
+        "verified_bytes": verified_bytes,
+        "mismatches": mismatches,
+        "digest": observed_digest.hexdigest(),
+        "expected_digest": expected_digest.hexdigest(),
+    }
+
+
+def evaluate_reuse_rounds(rounds: list[dict]) -> dict:
+    if len(rounds) < REUSE_ROUNDS:
+        raise QualificationFailure("real-swap qualification did not complete repeated slot-reuse rounds")
+    baseline_used_kib = int(rounds[0].get("mapper_used_start_kib", -1))
+    if baseline_used_kib != 0:
+        raise QualificationFailure("slot-reuse proof did not start from a fresh zero-use mapper")
+    for result in rounds:
+        if int(result.get("concurrent_workers", 0)) < CONCURRENT_ORACLE_PROCESSES:
+            raise QualificationFailure("real-swap round lacked concurrent test-process activity")
+        if int(result.get("mapper_used_start_kib", -1)) != baseline_used_kib or \
+                int(result.get("mapper_used_delta_kib", 0)) <= 0:
+            raise QualificationFailure("real-swap round did not allocate fresh swap slots")
+        if int(result.get("release_swap_current_bytes", -1)) != 0 or \
+                int(result.get("mapper_used_released_kib", -1)) != baseline_used_kib:
+            raise QualificationFailure("swap slots were not fully released before reuse")
+    return {
+        "rounds": len(rounds),
+        "concurrent_workers": CONCURRENT_ORACLE_PROCESSES,
+        "baseline_mapper_used_kib": baseline_used_kib,
+        "slot_reuse_proven": True,
+    }
+
+
+def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
+                            expected_used_kib: int, deadline: float,
+                            guard: Callable[[], None]) -> dict:
+    while time.monotonic() < deadline:
+        guard()
+        swap_current = _read_uint(cgroup / "memory.swap.current")
+        row = _row_for_device(read_swap_rows(), mapper_device)
+        if row is None:
+            raise QualificationFailure("expected mapper vanished while releasing swap slots")
+        if row.used_kib < expected_used_kib:
+            raise QualificationFailure("mapper swap usage fell below the round baseline")
+        if swap_current == 0 and row.used_kib == expected_used_kib:
+            return {
+                "release_swap_current_bytes": 0,
+                "mapper_used_released_kib": row.used_kib,
+            }
+        time.sleep(0.05)
+    raise QualificationFailure("swap slots did not return to baseline within the bounded release timeout")
 
 
 def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                   workload_mib: int, resident_mib: int, swap_limit_mib: int,
                   timeout_seconds: int) -> dict:
+    worker_memory_mib = split_concurrent_workload_mib(workload_mib)
     token = os.urandom(8).hex()
     cgroup = _cgroup_create(token, resident_mib, swap_limit_mib, admitted=True)
-    process: subprocess.Popen[str] | None = None
     events_before = _memory_events(cgroup / "memory.events")
     psi_before = _psi_total(cgroup / "memory.pressure")
+    rounds: list[dict] = []
+    active_processes: list[subprocess.Popen[str]] = []
+
+    def guard() -> None:
+        events = _memory_events(cgroup / "memory.events")
+        if events.get("oom", 0) > events_before.get("oom", 0) or \
+                events.get("oom_kill", 0) > events_before.get("oom_kill", 0):
+            raise QualificationFailure("cgroup OOM occurred during admitted real-swap workload")
+        if _read_uint(cgroup / "memory.swap.current") > swap_limit_mib * MIB:
+            raise QualificationFailure("cgroup exceeded configured swap-usage bound")
+        if _mem_available_mib() < 256:
+            raise QualificationFailure("host MemAvailable crossed 256 MiB early-stop threshold")
+
     try:
-        process = subprocess.Popen(
-            [sys.executable, "-B", str(oracle_path), "--seed", manifest["run_id"],
-             "--memory-mib", str(workload_mib)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1, env={**os.environ, "LC_ALL": "C", "LANG": "C"},
-        )
-        try:
-            (cgroup / "cgroup.procs").write_text(f"{process.pid}\n", encoding="ascii")
-        except OSError as exc:
-            raise Blocked(f"cannot move oracle into dedicated cgroup: {exc}") from exc
-        deadline = time.monotonic() + timeout_seconds
+        for round_index in range(1, REUSE_ROUNDS + 1):
+            _write_control(cgroup / "memory.max", str(resident_mib * MIB), admitted=True)
+            swaps_before = read_swap_rows()
+            expected_before = _row_for_device(swaps_before, active["mapper_device"])
+            if expected_before is None:
+                raise QualificationFailure("expected mapper vanished before real-swap round")
+            if expected_before.used_kib != 0:
+                raise QualificationFailure(
+                    "exact mapper has nonzero use before dedicated round; unrelated pages may depend on it")
 
-        def guard() -> None:
-            events = _memory_events(cgroup / "memory.events")
-            if events.get("oom", 0) > events_before.get("oom", 0) or \
-                    events.get("oom_kill", 0) > events_before.get("oom_kill", 0):
-                raise QualificationFailure("cgroup OOM occurred during admitted real-swap workload")
-            if _read_uint(cgroup / "memory.swap.current") > swap_limit_mib * MIB:
-                raise QualificationFailure("cgroup exceeded configured swap-usage bound")
-            if _mem_available_mib() < 256:
-                raise QualificationFailure("host MemAvailable crossed 256 MiB early-stop threshold")
+            round_processes: list[subprocess.Popen[str]] = []
+            round_result: dict | None = None
+            try:
+                for worker_index, memory_mib in enumerate(worker_memory_mib):
+                    seed = hashlib.blake2s(
+                        f"{manifest['run_id']}:{round_index}:{worker_index}".encode("ascii"),
+                        digest_size=16,
+                    ).hexdigest()
+                    process = subprocess.Popen(
+                        [sys.executable, "-B", str(oracle_path), "--seed", seed,
+                         "--memory-mib", str(memory_mib)],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        text=True, bufsize=1,
+                        env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+                    )
+                    try:
+                        (cgroup / "cgroup.procs").write_text(f"{process.pid}\n", encoding="ascii")
+                    except OSError as exc:
+                        process.terminate()
+                        process.wait(timeout=5)
+                        raise QualificationFailure(
+                            f"cannot move admitted oracle into dedicated cgroup: {exc}") from exc
+                    round_processes.append(process)
+                    active_processes.append(process)
 
-        expected_pages = workload_mib * MIB // PAGE_BYTES
-        waiting = _oracle_event(process, "ORACLE_WAITING=", deadline, guard)
-        if int(waiting.get("pid", -1)) != process.pid or \
-                int(waiting.get("bytes", 0)) != workload_mib * MIB or \
-                int(waiting.get("pages", 0)) != expected_pages:
-            raise QualificationFailure("oracle readiness identity/geometry mismatch")
-        fill_status_before = read_status()
-        lower_before = read_block_stats((manifest["device_major_int"], manifest["device_minor_int"]))
-        vm_before = read_vmstat()
-        swaps_before = read_swap_rows()
-        expected_before = _row_for_device(swaps_before, active["mapper_device"])
-        if expected_before is None:
-            raise QualificationFailure("expected mapper vanished before workload")
-        if process.stdin is None:
-            raise QualificationFailure("oracle command pipe is unavailable")
-        process.stdin.write("FILL\n")
-        process.stdin.flush()
-        filled = _oracle_event(process, "ORACLE_FILLED=", deadline, guard)
-        if int(filled.get("bytes", 0)) != workload_mib * MIB or \
-                int(filled.get("pages", 0)) != expected_pages or \
-                not re.fullmatch(r"[0-9a-f]{64}", str(filled.get("digest", ""))):
-            raise QualificationFailure("oracle fill record is incomplete or malformed")
-        swap_current = _read_uint(cgroup / "memory.swap.current")
-        swap_peak = _read_uint(cgroup / "memory.swap.peak")
-        fill_status_after = read_status()
-        lower_after_fill = read_block_stats((manifest["device_major_int"], manifest["device_minor_int"]))
-        vm_after_fill = read_vmstat()
-        swaps_after_fill = read_swap_rows()
-        expected_after_fill = _row_for_device(swaps_after_fill, active["mapper_device"])
-        if expected_after_fill is None:
-            raise QualificationFailure("expected mapper vanished during swap-out")
-        mapper_used_delta = expected_after_fill.used_kib - expected_before.used_kib
-        min_swap_bytes = MIN_TRAFFIC_MIB * MIB
-        if swap_current < min_swap_bytes or mapper_used_delta <= 0:
-            raise QualificationFailure("fill completed without independently proven swapz swap-out")
+                deadline = time.monotonic() + timeout_seconds
+                waiting = [
+                    _oracle_event(process, "ORACLE_WAITING=", deadline, guard)
+                    for process in round_processes
+                ]
+                waiting_pids = [int(record.get("pid", -1)) for record in waiting]
+                if len(set(waiting_pids)) != CONCURRENT_ORACLE_PROCESSES or \
+                        set(waiting_pids) != {process.pid for process in round_processes}:
+                    raise QualificationFailure("concurrent oracle readiness identities are not unique")
+                expected_pages = workload_mib * MIB // PAGE_BYTES
+                if sum(int(record.get("bytes", 0)) for record in waiting) != workload_mib * MIB or \
+                        sum(int(record.get("pages", 0)) for record in waiting) != expected_pages:
+                    raise QualificationFailure("concurrent oracle readiness geometry mismatch")
 
-        verify_status_before = read_status()
-        lower_before_verify = read_block_stats((manifest["device_major_int"], manifest["device_minor_int"]))
-        vm_before_verify = read_vmstat()
-        _write_control(cgroup / "memory.max", str((workload_mib + VERIFY_HEADROOM_MIB) * MIB), admitted=True)
-        process.stdin.write("VERIFY\n")
-        process.stdin.flush()
-        verified = _oracle_event(process, "ORACLE_VERIFIED=", deadline, guard)
-        try:
-            process.wait(timeout=max(1, int(deadline - time.monotonic())))
-        except subprocess.TimeoutExpired as exc:
-            raise QualificationFailure("oracle did not exit after byte verification") from exc
-        if process.returncode != 0:
-            stderr = process.stderr.read().strip() if process.stderr else ""
-            raise QualificationFailure(f"oracle verification failed rc={process.returncode}: {stderr}")
-        verify_status_after = read_status()
-        lower_after_verify = read_block_stats((manifest["device_major_int"], manifest["device_minor_int"]))
-        vm_after_verify = read_vmstat()
+                fill_status_before = read_status()
+                lower_before = read_block_stats(
+                    (manifest["device_major_int"], manifest["device_minor_int"]))
+                vm_before = read_vmstat()
+
+                for process in round_processes:
+                    if process.stdin is None:
+                        raise QualificationFailure("oracle command pipe is unavailable")
+                    process.stdin.write("FILL\n")
+                    process.stdin.flush()
+                filled_records = [
+                    _oracle_event(process, "ORACLE_FILLED=", deadline, guard)
+                    for process in round_processes
+                ]
+                if sum(int(record.get("bytes", 0)) for record in filled_records) != workload_mib * MIB or \
+                        sum(int(record.get("pages", 0)) for record in filled_records) != expected_pages or \
+                        any(not re.fullmatch(r"[0-9a-f]{64}", str(record.get("digest", "")))
+                            for record in filled_records):
+                    raise QualificationFailure("concurrent oracle fill records are incomplete or malformed")
+
+                swap_current = _read_uint(cgroup / "memory.swap.current")
+                swap_peak = _read_uint(cgroup / "memory.swap.peak")
+                fill_status_after = read_status()
+                lower_after_fill = read_block_stats(
+                    (manifest["device_major_int"], manifest["device_minor_int"]))
+                vm_after_fill = read_vmstat()
+                swaps_after_fill = read_swap_rows()
+                expected_after_fill = _row_for_device(
+                    swaps_after_fill, active["mapper_device"])
+                if expected_after_fill is None:
+                    raise QualificationFailure("expected mapper vanished during swap-out")
+                mapper_used_delta = expected_after_fill.used_kib - expected_before.used_kib
+                min_swap_bytes = MIN_TRAFFIC_MIB * MIB
+                if swap_current < min_swap_bytes or mapper_used_delta <= 0:
+                    raise QualificationFailure(
+                        "concurrent fill completed without independently proven swapz swap-out")
+
+                mapper_used_bytes = mapper_used_delta * 1024
+                if mapper_used_bytes != swap_current:
+                    raise Blocked(
+                        "exact mapper usage and dedicated-cgroup swap charge differ; "
+                        "traffic attribution or mapper ownership is ambiguous")
+
+                verify_status_before = read_status()
+                lower_before_verify = read_block_stats(
+                    (manifest["device_major_int"], manifest["device_minor_int"]))
+                vm_before_verify = read_vmstat()
+                _write_control(
+                    cgroup / "memory.max",
+                    str((workload_mib + VERIFY_HEADROOM_MIB) * MIB),
+                    admitted=True,
+                )
+                for process in round_processes:
+                    assert process.stdin is not None
+                    process.stdin.write("VERIFY\n")
+                    process.stdin.flush()
+                verified_records = [
+                    _oracle_event(process, "ORACLE_VERIFIED=", deadline, guard)
+                    for process in round_processes
+                ]
+                for process in round_processes:
+                    try:
+                        process.wait(timeout=max(1, int(deadline - time.monotonic())))
+                    except subprocess.TimeoutExpired as exc:
+                        raise QualificationFailure(
+                            "concurrent oracle did not exit after byte verification") from exc
+                    if process.returncode != 0:
+                        stderr = process.stderr.read().strip() if process.stderr else ""
+                        raise QualificationFailure(
+                            f"oracle verification failed rc={process.returncode}: {stderr}")
+
+                verified = aggregate_oracle_verification(verified_records)
+                verify_status_after = read_status()
+                lower_after_verify = read_block_stats(
+                    (manifest["device_major_int"], manifest["device_minor_int"]))
+                vm_after_verify = read_vmstat()
+                events_after = _memory_events(cgroup / "memory.events")
+                oom_delta = events_after.get("oom", 0) - events_before.get("oom", 0)
+                oom_kill_delta = events_after.get("oom_kill", 0) - events_before.get("oom_kill", 0)
+                evaluate_workload_evidence(
+                    cgroup_swap_bytes=swap_current,
+                    cgroup_swap_peak=swap_peak,
+                    min_swap_bytes=min_swap_bytes,
+                    expected_verified_pages=expected_pages,
+                    oom_delta=oom_delta,
+                    oom_kill_delta=oom_kill_delta,
+                    mapper_used_delta_kib=mapper_used_delta,
+                    fill_status_before=fill_status_before,
+                    fill_status_after=fill_status_after,
+                    verify_status_before=verify_status_before,
+                    verify_status_after=verify_status_after,
+                    lower_before=lower_before,
+                    lower_after_fill=lower_after_fill,
+                    lower_before_verify=lower_before_verify,
+                    lower_after_verify=lower_after_verify,
+                    vm_before=vm_before,
+                    vm_after_fill=vm_after_fill,
+                    vm_before_verify=vm_before_verify,
+                    vm_after_verify=vm_after_verify,
+                    oracle=verified,
+                )
+                round_result = {
+                    "round": round_index,
+                    "concurrent_workers": len(round_processes),
+                    "worker_pids": waiting_pids,
+                    "worker_memory_mib": list(worker_memory_mib),
+                    "oracle_filled": filled_records,
+                    "oracle_verified": verified_records,
+                    "aggregate_verified": verified,
+                    "cgroup_swap_current_bytes_after_fill": swap_current,
+                    "cgroup_swap_peak_bytes": swap_peak,
+                    "mapper_used_start_kib": expected_before.used_kib,
+                    "mapper_used_delta_kib": mapper_used_delta,
+                    "swapz_logical_write_delta":
+                        fill_status_after["logical_write"] - fill_status_before["logical_write"],
+                    "swapz_physical_write_delta":
+                        fill_status_after["physical_write"] - fill_status_before["physical_write"],
+                    "swapz_logical_read_delta":
+                        verify_status_after["logical_read"] - verify_status_before["logical_read"],
+                    "swapz_physical_read_delta":
+                        verify_status_after["physical_read"] - verify_status_before["physical_read"],
+                    "lower_write_sector_delta":
+                        lower_after_fill.write_sectors - lower_before.write_sectors,
+                    "lower_read_sector_delta":
+                        lower_after_verify.read_sectors - lower_before_verify.read_sectors,
+                    "pswpout_delta": vm_after_fill["pswpout"] - vm_before["pswpout"],
+                    "pswpin_delta": vm_after_verify["pswpin"] - vm_before_verify["pswpin"],
+                    "oom_delta": oom_delta,
+                    "oom_kill_delta": oom_kill_delta,
+                }
+            finally:
+                for process in round_processes:
+                    _terminate_child(process, cgroup)
+                    if process in active_processes:
+                        active_processes.remove(process)
+
+            if round_result is None:
+                raise QualificationFailure("real-swap round ended without evidence")
+            release = _wait_for_round_release(
+                cgroup, active["mapper_device"], expected_before.used_kib,
+                time.monotonic() + min(timeout_seconds, 30), guard)
+            round_result.update(release)
+            rounds.append(round_result)
+
+        reuse = evaluate_reuse_rounds(rounds)
         events_after = _memory_events(cgroup / "memory.events")
         psi_after = _psi_total(cgroup / "memory.pressure")
-        oom_delta = events_after.get("oom", 0) - events_before.get("oom", 0)
-        oom_kill_delta = events_after.get("oom_kill", 0) - events_before.get("oom_kill", 0)
-        evaluate_workload_evidence(
-            cgroup_swap_bytes=swap_current,
-            cgroup_swap_peak=swap_peak,
-            min_swap_bytes=min_swap_bytes,
-            expected_verified_pages=expected_pages,
-            oom_delta=oom_delta,
-            oom_kill_delta=oom_kill_delta,
-            mapper_used_delta_kib=mapper_used_delta,
-            fill_status_before=fill_status_before,
-            fill_status_after=fill_status_after,
-            verify_status_before=verify_status_before,
-            verify_status_after=verify_status_after,
-            lower_before=lower_before,
-            lower_after_fill=lower_after_fill,
-            lower_before_verify=lower_before_verify,
-            lower_after_verify=lower_after_verify,
-            vm_before=vm_before,
-            vm_after_fill=vm_after_fill,
-            vm_before_verify=vm_before_verify,
-            vm_after_verify=vm_after_verify,
-            oracle=verified,
-        )
         return {
-            "oracle_filled": filled,
-            "oracle_verified": verified,
-            "cgroup_swap_current_bytes_after_fill": swap_current,
-            "cgroup_swap_peak_bytes": swap_peak,
+            "concurrent_workers": CONCURRENT_ORACLE_PROCESSES,
+            "reuse_rounds": len(rounds),
+            "slot_reuse_proven": reuse["slot_reuse_proven"],
+            "rounds": rounds,
+            "cgroup_swap_peak_bytes": max(
+                int(result["cgroup_swap_peak_bytes"]) for result in rounds),
             "cgroup_memory_pressure_some_usec": psi_after - psi_before,
-            "mapper_used_delta_kib": mapper_used_delta,
-            "swapz_logical_write_delta": fill_status_after["logical_write"] - fill_status_before["logical_write"],
-            "swapz_physical_write_delta": fill_status_after["physical_write"] - fill_status_before["physical_write"],
-            "swapz_logical_read_delta": verify_status_after["logical_read"] - verify_status_before["logical_read"],
-            "swapz_physical_read_delta": verify_status_after["physical_read"] - verify_status_before["physical_read"],
-            "lower_write_sector_delta": lower_after_fill.write_sectors - lower_before.write_sectors,
-            "lower_read_sector_delta": lower_after_verify.read_sectors - lower_before_verify.read_sectors,
-            "pswpout_delta": vm_after_fill["pswpout"] - vm_before["pswpout"],
-            "pswpin_delta": vm_after_verify["pswpin"] - vm_before_verify["pswpin"],
-            "oom_delta": oom_delta,
-            "oom_kill_delta": oom_kill_delta,
+            "mapper_used_delta_kib": sum(
+                int(result["mapper_used_delta_kib"]) for result in rounds),
+            "swapz_logical_write_delta": sum(
+                int(result["swapz_logical_write_delta"]) for result in rounds),
+            "swapz_physical_write_delta": sum(
+                int(result["swapz_physical_write_delta"]) for result in rounds),
+            "swapz_logical_read_delta": sum(
+                int(result["swapz_logical_read_delta"]) for result in rounds),
+            "swapz_physical_read_delta": sum(
+                int(result["swapz_physical_read_delta"]) for result in rounds),
+            "lower_write_sector_delta": sum(
+                int(result["lower_write_sector_delta"]) for result in rounds),
+            "lower_read_sector_delta": sum(
+                int(result["lower_read_sector_delta"]) for result in rounds),
+            "pswpout_delta": sum(int(result["pswpout_delta"]) for result in rounds),
+            "pswpin_delta": sum(int(result["pswpin_delta"]) for result in rounds),
+            "oom_delta": events_after.get("oom", 0) - events_before.get("oom", 0),
+            "oom_kill_delta":
+                events_after.get("oom_kill", 0) - events_before.get("oom_kill", 0),
         }
     finally:
-        if process is not None:
+        for process in list(active_processes):
             _terminate_child(process, cgroup)
         _remove_cgroup(cgroup)
-
 
 def _mapper_sysfs_state(device: tuple[int, int], expected_uuid: str) -> tuple[bool, bool]:
     base = Path(f"/sys/dev/block/{device[0]}:{device[1]}")
@@ -1631,49 +1967,101 @@ def execute(arguments: argparse.Namespace) -> dict:
     kernel_before = _kernel_log_snapshot()
     _reject_relevant_kernel_errors([])
 
+    evidence = PersistentEvidence(
+        RECOVERY_BASE,
+        os.urandom(16).hex(),
+        {
+            "source_sha": arguments.validated_source,
+            "qualification_report_sha256": _sha256_file(report_path),
+            "helper_sha256": _sha256_file(Path(__file__)),
+            "oracle_sha256": _sha256_file(oracle_path),
+            "qualified_installed_artifacts": artifact_hashes,
+            "partuuid": selector_partuuid,
+            "target_device": f"{target_device[0]}:{target_device[1]}",
+            "cycles_requested": arguments.cycles,
+            "workload_mib": arguments.workload_mib,
+            "resident_limit_mib": arguments.resident_mib,
+            "swap_limit_mib": arguments.swap_limit_mib,
+            "timeout_seconds": arguments.timeout_seconds,
+            "concurrent_oracles": CONCURRENT_ORACLE_PROCESSES,
+            "reuse_rounds_per_cycle": REUSE_ROUNDS,
+            "cycles": [],
+        },
+    )
+
     run_ids: set[str] = set()
     swap_uuids: set[str] = set()
-    cycles = []
-    for cycle_index in range(1, arguments.cycles + 1):
-        result = run_cycle(
-            cycle_index,
-            swapzctl=swapzctl,
-            oracle_path=oracle_path,
-            validated_source=arguments.validated_source,
-            plan=plan,
-            selector_partuuid=selector_partuuid,
-            target_device=target_device,
-            workload_mib=arguments.workload_mib,
-            resident_mib=arguments.resident_mib,
-            swap_limit_mib=arguments.swap_limit_mib,
-            timeout_seconds=arguments.timeout_seconds,
-            prior_run_ids=run_ids,
-            prior_swap_uuids=swap_uuids,
-        )
-        run_ids.add(result["run_id"])
-        swap_uuids.add(result["linux_swap_uuid"])
-        cycles.append(result)
-    kernel_after = _kernel_log_snapshot()
-    _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
-    return {
-        "schema": "swapz-primary-real-swap-v1",
-        "status": "PASS",
-        "source_sha": arguments.validated_source,
-        "helper_sha256": _sha256_file(Path(__file__)),
-        "oracle_sha256": _sha256_file(oracle_path),
-        "qualification_report_sha256": _sha256_file(report_path),
-        "qualified_installed_artifacts": artifact_hashes,
-        "partuuid": selector_partuuid,
-        "target_device": f"{target_device[0]}:{target_device[1]}",
-        "cycles_requested": arguments.cycles,
-        "cycles_passed": len(cycles),
-        "workload_mib": arguments.workload_mib,
-        "resident_limit_mib": arguments.resident_mib,
-        "swap_limit_mib": arguments.swap_limit_mib,
-        "timeout_seconds": arguments.timeout_seconds,
-        "cycles": cycles,
-    }
-
+    cycles: list[dict] = []
+    try:
+        for cycle_index in range(1, arguments.cycles + 1):
+            evidence.update(
+                f"CYCLE_{cycle_index}_STARTING",
+                cycles=cycles,
+                cycle=cycle_index,
+            )
+            result = run_cycle(
+                cycle_index,
+                swapzctl=swapzctl,
+                oracle_path=oracle_path,
+                validated_source=arguments.validated_source,
+                plan=plan,
+                selector_partuuid=selector_partuuid,
+                target_device=target_device,
+                workload_mib=arguments.workload_mib,
+                resident_mib=arguments.resident_mib,
+                swap_limit_mib=arguments.swap_limit_mib,
+                timeout_seconds=arguments.timeout_seconds,
+                prior_run_ids=run_ids,
+                prior_swap_uuids=swap_uuids,
+            )
+            run_ids.add(result["run_id"])
+            swap_uuids.add(result["linux_swap_uuid"])
+            cycles.append(result)
+            evidence.update(
+                f"CYCLE_{cycle_index}_COMPLETE",
+                cycles=cycles,
+                cycle=cycle_index,
+                run_id=result["run_id"],
+            )
+        kernel_after = _kernel_log_snapshot()
+        _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
+        result = {
+            "schema": "swapz-primary-real-swap-v1",
+            "status": "PASS",
+            "source_sha": arguments.validated_source,
+            "helper_sha256": _sha256_file(Path(__file__)),
+            "oracle_sha256": _sha256_file(oracle_path),
+            "qualification_report_sha256": _sha256_file(report_path),
+            "qualified_installed_artifacts": artifact_hashes,
+            "partuuid": selector_partuuid,
+            "target_device": f"{target_device[0]}:{target_device[1]}",
+            "cycles_requested": arguments.cycles,
+            "cycles_passed": len(cycles),
+            "workload_mib": arguments.workload_mib,
+            "resident_limit_mib": arguments.resident_mib,
+            "swap_limit_mib": arguments.swap_limit_mib,
+            "timeout_seconds": arguments.timeout_seconds,
+            "concurrent_oracles": CONCURRENT_ORACLE_PROCESSES,
+            "reuse_rounds_per_cycle": REUSE_ROUNDS,
+            "evidence_path": str(evidence.path),
+            "cycles": cycles,
+        }
+        evidence.finish("PASS", cycles=cycles, result=result)
+        return result
+    except Blocked as exc:
+        setattr(exc, "evidence_path", str(evidence.path))
+        evidence.finish("BLOCKED", str(exc), cycles=cycles)
+        raise
+    except QualificationFailure as exc:
+        setattr(exc, "evidence_path", str(evidence.path))
+        evidence.finish("FAIL", str(exc), cycles=cycles)
+        raise
+    except Exception as exc:
+        failure = QualificationFailure(
+            f"internal qualification error: {type(exc).__name__}: {exc}")
+        setattr(failure, "evidence_path", str(evidence.path))
+        evidence.finish("FAIL", str(failure), cycles=cycles)
+        raise failure from exc
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1704,12 +2092,16 @@ def main() -> int:
     except Blocked as exc:
         payload = {"schema": "swapz-primary-real-swap-v1", "status": "BLOCKED",
                    "reason": str(exc)}
+        if getattr(exc, "evidence_path", None):
+            payload["evidence_path"] = exc.evidence_path
         print("BLOCKED_PRIMARY_REAL_SWAP=" + str(exc).replace("\n", "; "), file=sys.stderr)
         print(RESULT_PREFIX + json.dumps(payload, sort_keys=True, separators=(",", ":")))
         return 2
     except QualificationFailure as exc:
         payload = {"schema": "swapz-primary-real-swap-v1", "status": "FAIL",
                    "reason": str(exc)}
+        if getattr(exc, "evidence_path", None):
+            payload["evidence_path"] = exc.evidence_path
         print("FAIL_PRIMARY_REAL_SWAP=" + str(exc).replace("\n", "; "), file=sys.stderr)
         print(RESULT_PREFIX + json.dumps(payload, sort_keys=True, separators=(",", ":")))
         return 1

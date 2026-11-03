@@ -108,6 +108,25 @@ Default bounds are 384 MiB deterministic anonymous memory,
 `memory.max=128 MiB`, `memory.swap.max=384 MiB`, cgroup zswap disabled,
 128 MiB minimum real-swap evidence, two cycles, and 240-second finite waits.
 
+Each live mapper cycle must use two concurrent deterministic oracle processes
+and two complete allocate/swap-out/swap-in/byte-verify/release rounds. The first
+round must return both dedicated-cgroup swap charge and exact mapper Used KiB to
+the fresh zero-use baseline before the second allocation; only then is repeated
+swap-slot reuse proven. While a round is resident under pressure, exact mapper
+Used bytes must equal the dedicated cgroup's swap charge. Any difference is
+BLOCKED because traffic attribution or mapper ownership is ambiguous.
+
+Once recovery-storage admission is proven and before `prepare`, the helper
+must durably create a root-owned 0600 attempt record under the validated
+recovery base with a fail-closed
+`FAIL/qualification_interrupted_or_incomplete` sentinel. The helper updates
+that record before a cycle mutates state and after the cycle returns to durable
+COMPLETE, then atomically fsyncs and read-verifies terminal PASS/FAIL/BLOCKED.
+A crash or kill therefore leaves persistent non-PASS evidence without adding
+evidence-I/O failure points inside the live lifecycle. Pre-admission BLOCKED
+outcomes must not write to unverified recovery storage; Agent 10's official
+runner integration must persist those runner-level dispositions.
+
 A `PRIMARY_START=ACTIVE` message is insufficient. The helper independently
 proves the run-bound mapper name/DM UUID/device number, exact one-line `swapz`
 table and backing dependency, sysfs identity, valid Linux swap header with a
@@ -119,7 +138,7 @@ is BLOCKED.
 PASS requires actual reclaim and swap-in: at least 128 MiB cgroup swap
 occupancy, at least the same 128 MiB increase in exact-mapper `/proc/swaps`
 usage and swapz logical WRITE/READ counters, positive swapz physical WRITE and
-READ counters, backing-partition WRITE and READ sector deltas, positive
+READ counters using the production `failed=` and signed `error=` status fields, backing-partition WRITE and READ sector deltas, positive
 `pswpout` and `pswpin`, zero OOM events, healthy target status, and
 byte-exact verification of exactly the admitted deterministic 4 KiB page
 count and byte count; a truncated oracle report cannot qualify. PSI and

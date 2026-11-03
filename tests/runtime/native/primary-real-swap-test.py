@@ -186,6 +186,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 "qualified_oracle_sha256": hashes["oracle_sha256"],
                 "live_oracle_sha256": hashes["oracle_sha256"],
                 "privileged_execution_enabled": True,
+                "module_mapper_inventory_read": True,
+                "swapz_mapper_absent": True,
+                "dm_swapz_module_loaded": False,
             }
             self.assertEqual(
                 qualify.verify_provenance(plan, source_sha, report_path, swapzctl),
@@ -347,12 +350,12 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     def test_status_requires_swapz_and_core_io_failure_tokens(self):
         status = qualify.parse_status(
             "0 8192 swapz version=1 logical_write=4096 logical_read=8192 "
-            "physical_write=4096 physical_read=4096 failed=0 last_error=0\n")
+            "physical_write=4096 physical_read=4096 failed=0 error=0\n")
         self.assertEqual(status["logical_read"], 8192)
         with self.assertRaises(qualify.QualificationFailure):
-            qualify.parse_status("0 8192 linear logical_write=1 logical_read=1 physical_write=1 physical_read=1 failed=0 last_error=0")
+            qualify.parse_status("0 8192 linear logical_write=1 logical_read=1 physical_write=1 physical_read=1 failed=0 error=0")
         with self.assertRaises(qualify.QualificationFailure):
-            qualify.parse_status("0 8192 swapz logical_write=1 logical_read=1 physical_write=1 failed=0 last_error=0")
+            qualify.parse_status("0 8192 swapz logical_write=1 logical_read=1 physical_write=1 failed=0 error=0")
 
     def positive_evidence(self):
         return dict(
@@ -363,18 +366,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             oom_delta=0,
             oom_kill_delta=0,
             mapper_used_delta_kib=32 * 1024,
-            fill_status_before={"logical_write": 0, "logical_read": 0, "physical_write": 0, "physical_read": 0, "failed": 0, "last_error": 0},
+            fill_status_before={"logical_write": 0, "logical_read": 0, "physical_write": 0, "physical_read": 0, "failed": 0, "error": 0},
             fill_status_after={"logical_write": 32 * qualify.MIB, "logical_read": 0,
                                "physical_write": 8 * qualify.MIB, "physical_read": 0,
-                               "failed": 0, "last_error": 0},
+                               "failed": 0, "error": 0},
             verify_status_before={"logical_write": 32 * qualify.MIB, "logical_read": 0,
                                   "physical_write": 8 * qualify.MIB, "physical_read": 0,
-                                  "failed": 0, "last_error": 0},
+                                  "failed": 0, "error": 0},
             verify_status_after={"logical_write": 32 * qualify.MIB,
                                  "logical_read": 32 * qualify.MIB,
                                  "physical_write": 8 * qualify.MIB,
                                  "physical_read": 8 * qualify.MIB,
-                                 "failed": 0, "last_error": 0},
+                                 "failed": 0, "error": 0},
             lower_before=qualify.BlockStats(0, 0),
             lower_after_fill=qualify.BlockStats(0, 64),
             lower_before_verify=qualify.BlockStats(0, 64),
@@ -609,6 +612,100 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertIn("PASS_PRIMARY_REAL_SWAP=", HELPER.read_text(encoding="utf-8"))
         self.assertIn("FAIL_PRIMARY_REAL_SWAP=", HELPER.read_text(encoding="utf-8"))
         self.assertIn("BLOCKED_PRIMARY_REAL_SWAP=", HELPER.read_text(encoding="utf-8"))
+
+
+    def test_production_status_uses_signed_error_token(self):
+        status = qualify.parse_status(
+            "0 8192 swapz logical_write=4096 logical_read=4096 "
+            "physical_write=4096 physical_read=4096 failed=0 error=0\n")
+        self.assertEqual(status["error"], 0)
+        with self.assertRaisesRegex(qualify.QualificationFailure, "lacks numeric token error"):
+            qualify.parse_status(
+                "0 8192 swapz logical_write=4096 logical_read=4096 "
+                "physical_write=4096 physical_read=4096 failed=0 last_error=0\n")
+
+    def test_mapper_ownership_admission_rejects_preexisting_swapz_state(self):
+        canonical = {
+            "module_mapper_inventory_read": True,
+            "swapz_mapper_absent": True,
+            "dm_swapz_module_loaded": False,
+        }
+        qualify.require_clean_mapper_ownership(canonical)
+        for mutant in (
+            {**canonical, "module_mapper_inventory_read": False},
+            {**canonical, "swapz_mapper_absent": False},
+            {**canonical, "dm_swapz_module_loaded": True},
+        ):
+            with self.subTest(mutant=mutant), self.assertRaisesRegex(
+                    qualify.Blocked, "unexpected swapz mapper/module ownership"):
+                qualify.require_clean_mapper_ownership(mutant)
+
+    def test_concurrent_workload_split_keeps_two_finite_workers(self):
+        self.assertEqual(qualify.split_concurrent_workload_mib(384), (192, 192))
+        self.assertEqual(qualify.split_concurrent_workload_mib(129), (64, 65))
+        with self.assertRaises(qualify.Blocked):
+            qualify.split_concurrent_workload_mib(127)
+
+    def test_aggregate_oracle_verification_requires_both_full_workers(self):
+        record = {
+            "verified_pages": 16384,
+            "verified_bytes": 16384 * qualify.PAGE_BYTES,
+            "mismatches": 0,
+            "digest": "11" * 32,
+            "expected_digest": "11" * 32,
+        }
+        aggregated = qualify.aggregate_oracle_verification([record, record])
+        self.assertEqual(aggregated["verified_pages"], 32768)
+        self.assertEqual(aggregated["mismatches"], 0)
+        self.assertEqual(aggregated["digest"], aggregated["expected_digest"])
+        with self.assertRaises(qualify.QualificationFailure):
+            qualify.aggregate_oracle_verification([record])
+
+    def test_slot_reuse_requires_full_release_then_second_concurrent_allocation(self):
+        rounds = [
+            {
+                "concurrent_workers": 2,
+                "mapper_used_start_kib": 0,
+                "mapper_used_delta_kib": 131072,
+                "release_swap_current_bytes": 0,
+                "mapper_used_released_kib": 0,
+            },
+            {
+                "concurrent_workers": 2,
+                "mapper_used_start_kib": 0,
+                "mapper_used_delta_kib": 131072,
+                "release_swap_current_bytes": 0,
+                "mapper_used_released_kib": 0,
+            },
+        ]
+        self.assertTrue(qualify.evaluate_reuse_rounds(rounds)["slot_reuse_proven"])
+        for mutant in (
+            [dict(rounds[0], concurrent_workers=1), rounds[1]],
+            [dict(rounds[0], mapper_used_released_kib=4), rounds[1]],
+            [rounds[0], dict(rounds[1], mapper_used_delta_kib=0)],
+        ):
+            with self.subTest(mutant=mutant), self.assertRaises(
+                    qualify.QualificationFailure):
+                qualify.evaluate_reuse_rounds(mutant)
+
+    def test_persistent_evidence_starts_fail_closed_and_finishes_atomically(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            base.chmod(0o700)
+            evidence = qualify.PersistentEvidence(
+                base, "a" * 32, {"source_sha": "b" * 40}, expected_uid=os.geteuid())
+            initial = json.loads(evidence.path.read_text(encoding="utf-8"))
+            self.assertEqual(initial["status"], "FAIL")
+            self.assertEqual(initial["reason"], "qualification_interrupted_or_incomplete")
+            self.assertEqual(stat.S_IMODE(evidence.path.stat().st_mode), 0o600)
+            evidence.update("SYNTHETIC_ACTIVE", run_id="c" * 32)
+            active = json.loads(evidence.path.read_text(encoding="utf-8"))
+            self.assertEqual(active["status"], "FAIL")
+            self.assertEqual(active["phase"], "SYNTHETIC_ACTIVE")
+            evidence.finish("BLOCKED", "synthetic evidence gap")
+            final = json.loads(evidence.path.read_text(encoding="utf-8"))
+            self.assertEqual(final["status"], "BLOCKED")
+            self.assertEqual(final["reason"], "synthetic evidence gap")
 
 
 if __name__ == "__main__":
