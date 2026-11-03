@@ -16,13 +16,13 @@
 
 static struct swapz_authority a;
 static struct swapz_map maps[32];
-static swapz_u16 live[768];
-static swapz_u8 classes[768];
+static swapz_u16 live[1024];
+static swapz_u8 classes[1024];
 static swapz_u8 raw_page[SWAPZ_BLOCK_BYTES];
 
 static int initialize_gc(void)
 {
-	if (swapz_authority_init(&a, maps, live, classes, 32, 768))
+	if (swapz_authority_init(&a, maps, live, classes, 32, 1024))
 		return -1;
 	a.reuse_dead_segments = 1;
 	a.gc_allocation = 1;
@@ -58,14 +58,30 @@ static int test_fail_closed_when_only_forbidden_segments_are_free(void)
 	CHECK(initialize_gc() == 0);
 	for (i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i) {
 		CHECK(swapz_stage(&a, &page, 1, 1, &tx) == 0);
-		CHECK(tx.start_block == 512 + i);
+		CHECK(tx.start_block == 2U * SWAPZ_SEGMENT_BLOCKS + i);
 		CHECK(swapz_finish_raw(&a, &tx, raw_page, 1, 0) == 0);
 	}
-	CHECK(a.next_block == 768);
-	CHECK(live[767] == 1 && maps[0].start_block == 767);
+	CHECK(live[3U * SWAPZ_SEGMENT_BLOCKS - 1U] == 1 &&
+	      maps[0].start_block == 3U * SWAPZ_SEGMENT_BLOCKS - 1U);
+
+	page = 1;
+	for (i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i) {
+		CHECK(swapz_stage(&a, &page, 1, 1, &tx) == 0);
+		CHECK(tx.start_block == 3U * SWAPZ_SEGMENT_BLOCKS + i);
+		CHECK(swapz_finish_raw(&a, &tx, raw_page, 1, 0) == 0);
+	}
+	CHECK(a.next_block == 4U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(live[4U * SWAPZ_SEGMENT_BLOCKS - 1U] == 1 &&
+	      maps[1].start_block == 4U * SWAPZ_SEGMENT_BLOCKS - 1U);
+
+	page = 2;
 	CHECK(swapz_stage(&a, &page, 1, 1, &tx) == -ENOSPC);
-	CHECK(maps[0].start_block == 767 && maps[0].raw_crc32c ==
-	      swapz_crc32c_bytes(raw_page, SWAPZ_BLOCK_BYTES));
+	CHECK(maps[0].start_block == 3U * SWAPZ_SEGMENT_BLOCKS - 1U &&
+	      maps[1].start_block == 4U * SWAPZ_SEGMENT_BLOCKS - 1U &&
+	      maps[0].raw_crc32c ==
+		      swapz_crc32c_bytes(raw_page, SWAPZ_BLOCK_BYTES) &&
+	      maps[1].raw_crc32c ==
+		      swapz_crc32c_bytes(raw_page, SWAPZ_BLOCK_BYTES));
 	CHECK(a.gc_forbidden_open == 0 && a.gc_forbidden_victim == 1);
 	CHECK(a.in_flight == 0);
 	return 0;

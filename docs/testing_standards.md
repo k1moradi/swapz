@@ -583,7 +583,10 @@ when it intentionally needs exactly one foreground segment to exercise
 immediate recycle, hook-failure, and live-map refusal semantics; this test-only
 restriction must not bypass or weaken the production geometry validator.
 Indexed dead-segment metadata fixtures use the same admissible four-segment
-minimum.
+minimum. GC forbidden-victim fixtures also use at least four segments and must
+keep a live mapping in every otherwise permitted GC destination before asserting
+that only the paused foreground and still-live victim remain, so `-ENOSPC`
+proves the guards rather than relying on a rejected three-segment geometry.
 
 The `/8` reserve change updates the admitted-capacity policy, not the serialized
 SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
