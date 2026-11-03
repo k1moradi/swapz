@@ -2495,6 +2495,26 @@ class PairReplayContract(unittest.TestCase):
                 "lower_major_minor": "8:1",
             })
 
+        # Malformed physical PARTUUID evidence must never enter analysis even
+        # when both arms repeat the same bad identity. Evidence is canonical
+        # lowercase; hardware-facing normalization happens before pair records.
+        for bad_partuuid in (
+                "--------", "f13428f6--01", "f13428f6.",
+                "1234-567", "F13428F6-01"):
+            with self.subTest(bad_partuuid=bad_partuuid):
+                bad_raw = arm("raw")
+                bad_swapz = arm("swapz")
+                bad_raw["device_identity"]["physical_partuuid"] = bad_partuuid
+                bad_swapz["device_identity"]["physical_partuuid"] = bad_partuuid
+                bad_pair = qualification.compare_pair(
+                    bad_raw, bad_swapz, "sd-service-balanced",
+                    "bad-partuuid", 1, "raw-first")
+                self.assertTrue(bad_pair["excluded"])
+                self.assertIsNone(qualification.pair_target_identity(bad_pair))
+                self.assertIn(
+                    "physical identity is missing or malformed",
+                    " ".join(bad_pair["exclusion_reasons"]))
+
         # Historical v1 pair records may predate the explicit protocol
         # field; retain that deliberate compatibility. V2 still requires it.
         legacy_v1_pairs = json.loads(json.dumps(stable_pairs))
@@ -2948,6 +2968,26 @@ class PairReplayContract(unittest.TestCase):
             "thermal": [],
             "dm_swapz_module": {"status": "NOT_LOADED", "values": {}},
         }
+
+
+        # Campaign snapshots reject malformed PARTUUID identity before sealing;
+        # uppercase hardware output is accepted only by canonicalizing it.
+        for bad_partuuid in (
+                "--------", "11111111--01", "11111111.", "1234-567"):
+            with self.subTest(campaign_partuuid=bad_partuuid):
+                bad_host = {
+                    **host,
+                    "device": {**host["device"], "partuuid": bad_partuuid},
+                }
+                with self.assertRaises(ValueError):
+                    evidence.physical_target_identity(bad_host)
+        uppercase_host = {
+            **host,
+            "device": {**host["device"], "partuuid": "ABCDEF12-01"},
+        }
+        self.assertEqual(
+            evidence.physical_target_identity(uppercase_host),
+            {"partuuid": "abcdef12-01", "device_bytes": 123456})
 
         def excluded_pair(pair_id, pair_index, order, pair_source):
             return {
