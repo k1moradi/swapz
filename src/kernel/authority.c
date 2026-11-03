@@ -329,6 +329,17 @@ int swapz_authority_validate_geometry(swapz_u32 logical_pages,
 	    logical_pages > ((physical_blocks - reserve) /
 			     SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS)
 		return -ENOSPC;
+	/*
+	 * Before authority_init() clears arrays, reject an unaddressable byte
+	 * count on 32-bit kernels. The map is the widest per-logical-page array;
+	 * the u16 liveness index is the widest per-physical-block array.
+	 * This is a size_t bound, not a promise that allocation can succeed.
+	 */
+	if ((swapz_u64)logical_pages * sizeof(struct swapz_map) >
+		    (swapz_u64)(size_t)-1 ||
+	    (swapz_u64)physical_blocks * sizeof(swapz_u16) >
+		    (swapz_u64)(size_t)-1)
+		return -EOVERFLOW;
 	if (reserve_blocks)
 		*reserve_blocks = reserve;
 	return 0;

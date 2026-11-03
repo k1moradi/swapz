@@ -70,7 +70,8 @@ static swapz_u32 maximum_admitted_logical_pages(swapz_u32 physical_blocks)
 			maximum = middle;
 			low = middle + 1U;
 		} else {
-			if (error != -ENOSPC)
+			/* An unaddressable array length is also an upper bound. */
+			if (error != -ENOSPC && error != -EOVERFLOW)
 				return 0;
 			high = middle - 1U;
 		}
@@ -108,6 +109,8 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 	const swapz_u64 expected_index_bytes = 776077112ULL;
 	const swapz_u64 expected_page_rounded_bytes = 776118272ULL;
 	const swapz_u64 expected_largest_allocation = 433287168ULL;
+	const swapz_u32 safe_raw_overwrite_pages = 27080192U;
+	const swapz_u32 safe_raw_overwrite_reserve = 3385024U;
 	const swapz_u32 near_u32_physical = 0xffffff00U;
 	const swapz_u32 near_u32_logical = 3817748480U;
 	const swapz_u32 near_u32_reserve = 477218560U;
@@ -138,6 +141,26 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 	CHECK(expected_logical_pages - 1U == 27080447U);
 	CHECK((swapz_u64)expected_logical_pages * SWAPZ_BLOCK_BYTES ==
 	      expected_mapper_bytes);
+	/*
+	 * The admission ceiling alone can fill every foreground block with
+	 * RAW pages. A distinct overwrite-bootstrap candidate retains an
+	 * untouched foreground segment in addition to the GC reserve.
+	 */
+	CHECK(((physical_blocks - reserve) / SWAPZ_SEGMENT_BLOCKS) *
+	      SWAPZ_SEGMENT_BLOCKS == expected_logical_pages);
+	CHECK(swapz_authority_validate_geometry(safe_raw_overwrite_pages,
+						 physical_blocks,
+						 &reserve) == 0);
+	CHECK(reserve == safe_raw_overwrite_reserve);
+	CHECK(((physical_blocks - reserve) / SWAPZ_SEGMENT_BLOCKS) *
+	      SWAPZ_SEGMENT_BLOCKS - safe_raw_overwrite_pages ==
+	      SWAPZ_SEGMENT_BLOCKS);
+	CHECK(swapz_authority_validate_geometry(safe_raw_overwrite_pages + 1U,
+						 physical_blocks,
+						 &reserve) == 0);
+	CHECK(((physical_blocks - reserve) / SWAPZ_SEGMENT_BLOCKS) *
+	      SWAPZ_SEGMENT_BLOCKS - (safe_raw_overwrite_pages + 1U) <
+	      SWAPZ_SEGMENT_BLOCKS);
 
 	index_bytes = (swapz_u64)expected_logical_pages *
 		(sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)) +
@@ -168,13 +191,24 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 	CHECK(rounded_bytes == expected_page_rounded_bytes);
 	CHECK(rounded_bytes - index_bytes == 41160ULL);
 
-	/* Exercise the top aligned u32 physical geometry without allocating it. */
-	CHECK(maximum_admitted_logical_pages(near_u32_physical) ==
-	      near_u32_logical);
-	CHECK(swapz_authority_validate_geometry(near_u32_logical,
-						 near_u32_physical,
-						 &reserve) == 0);
-	CHECK(reserve == near_u32_reserve);
+	/* Exercise the top aligned u32 geometry without allocating it.
+	 * On 32-bit systems its array byte lengths are unaddressable even
+	 * though the reserve arithmetic itself remains valid. */
+	if (sizeof(size_t) < sizeof(swapz_u64)) {
+		reserve = 0x5a5a5a5aU;
+		CHECK(maximum_admitted_logical_pages(near_u32_physical) == 0);
+		CHECK(swapz_authority_validate_geometry(near_u32_logical,
+							 near_u32_physical,
+							 &reserve) == -EOVERFLOW);
+		CHECK(reserve == 0x5a5a5a5aU);
+	} else {
+		CHECK(maximum_admitted_logical_pages(near_u32_physical) ==
+		      near_u32_logical);
+		CHECK(swapz_authority_validate_geometry(near_u32_logical,
+							 near_u32_physical,
+							 &reserve) == 0);
+		CHECK(reserve == near_u32_reserve);
+	}
 	reserve = 0x5a5a5a5aU;
 	CHECK(swapz_authority_validate_geometry(near_u32_logical + 1U,
 						 near_u32_physical,
