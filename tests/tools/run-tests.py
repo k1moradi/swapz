@@ -221,6 +221,8 @@ def _readiness_pass_payload_valid(
                 entry.get("swap_out_in") == "PASS" and
                 entry.get("acceptance_manifest_sha256") ==
                 acceptance_manifest_sha256 and
+                _readiness_artifact_hashes_valid(
+                    entry.get("qualified_installed_artifacts")) and
                 _valid_sha256(entry.get("evidence_sha256")))
     if name == "maximum_capacity_and_ram":
         return (entry.get("overall") == "PASS" and
@@ -353,6 +355,13 @@ def evaluate_production_readiness(snapshot, current_source_sha):
             statuses["exact_source_owner_make_test"] = "BLOCKED"
             reasons["exact_source_owner_make_test"] = (
                 "owner qualification artifact hashes differ from release hashes")
+        real_swap = evidence.get("real_linux_swap", {})
+        if (statuses.get("real_linux_swap") == "PASS" and
+                real_swap.get("qualified_installed_artifacts") !=
+                qualified_hashes):
+            statuses["real_linux_swap"] = "BLOCKED"
+            reasons["real_linux_swap"] = (
+                "real-swap artifact hashes differ from qualified release hashes")
         installed = evidence.get("installed_artifact_identity", {})
         if (statuses.get("installed_artifact_identity") == "PASS" and
                 installed.get("hashes") != qualified_hashes):

@@ -4058,6 +4058,7 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 **common, "overall": "PASS", "swap_out_in": "PASS",
                 "target": dict(target),
                 "acceptance_manifest_sha256": acceptance_manifest_sha256,
+                "qualified_installed_artifacts": dict(hashes),
                 "evidence_sha256": self.DIGEST},
             "maximum_capacity_and_ram": {
                 **common, "overall": "PASS", "incompressible": "PASS",
@@ -4156,6 +4157,14 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         self.assertEqual(
             verdict["evidence_statuses"]["exact_source_owner_make_test"],
             "BLOCKED")
+
+        real_swap_mismatch = self.passing_snapshot()
+        real_swap_mismatch["release_evidence"]["real_linux_swap"][
+            "qualified_installed_artifacts"]["module_sha256"] = "e" * 64
+        verdict = runner.evaluate_production_readiness(
+            real_swap_mismatch, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["real_linux_swap"], "BLOCKED")
 
         installed_mismatch = self.passing_snapshot()
         installed_mismatch["release_evidence"]["installed_artifact_identity"][
