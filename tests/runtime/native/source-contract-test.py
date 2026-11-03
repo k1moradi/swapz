@@ -1930,6 +1930,11 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("read_fault_calls=%lld read_fault_injected=%d", status)
         self.assertIn("START_LOADED_SYNTHETIC_READ_FAULT", deploy)
         self.assertIn("PASS_LOADED_SYNTHETIC_READ_FAULT=", deploy)
+        self.assertIn('READ_FAULT_SEED calls:$read_fault_seed_calls', deploy)
+        self.assertIn('logical:$read_fault_seed_logical', deploy)
+        self.assertIn('submitted:$read_fault_seed_submitted', deploy)
+        self.assertIn('physical:$read_fault_seed_physical', deploy)
+        self.assertIn('lower:req$read_fault_seed_lower_reqs', deploy)
         self.assertIn(
             '--table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2 0 1"', deploy)
         self.assertIn(

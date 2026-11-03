@@ -1260,15 +1260,36 @@ read_fault_before="$(dmsetup status "$DMNAME")"
    $(status_u64 "$read_fault_before" read_fault_injected) == 0 &&
    $(status_u64 "$read_fault_before" failed) == 0 )) ||
     fail "retained READ-fault mapping policy mismatch"
+read -r -a read_fault_lower_preseed < "/sys/block/$DISK/stat"
 timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
     "/dev/mapper/$DMNAME" --write-series 1 73 ||
     fail "READ-fault seed WRITE failed"
 read_fault_seeded="$(dmsetup status "$DMNAME")" ||
     fail "cannot read READ-fault status after seed WRITE"
-(( $(status_u64 "$read_fault_seeded" read_fault_calls) == 0 &&
-   $(status_u64 "$read_fault_seeded" read_fault_injected) == 0 &&
-   $(status_u64 "$read_fault_seeded" failed) == 0 )) ||
+read -r -a read_fault_lower_seeded < "/sys/block/$DISK/stat"
+read_fault_seed_calls="$(status_u64 "$read_fault_seeded" read_fault_calls)" ||
+    fail "READ-fault status lacks seeded call count"
+read_fault_seed_injected="$(status_u64 "$read_fault_seeded" read_fault_injected)" ||
+    fail "READ-fault status lacks seeded injection count"
+read_fault_seed_failed="$(status_u64 "$read_fault_seeded" failed)" ||
+    fail "READ-fault status lacks seeded failure state"
+read_fault_seed_logical="$(status_u64 "$read_fault_seeded" logical_read)" ||
+    fail "READ-fault status lacks seeded logical READ bytes"
+read_fault_seed_submitted="$(status_u64 "$read_fault_seeded" read_submitted_reqs)" ||
+    fail "READ-fault status lacks seeded submitted-read count"
+read_fault_seed_physical="$(status_u64 "$read_fault_seeded" physical_read_reqs)" ||
+    fail "READ-fault status lacks seeded physical-read count"
+(( read_fault_lower_seeded[0] >= read_fault_lower_preseed[0] &&
+   read_fault_lower_seeded[2] >= read_fault_lower_preseed[2] )) ||
+    fail "owned lower READ counters regressed during READ-fault seed"
+read_fault_seed_lower_reqs=$((read_fault_lower_seeded[0] - read_fault_lower_preseed[0]))
+read_fault_seed_lower_sectors=$((read_fault_lower_seeded[2] - read_fault_lower_preseed[2]))
+if (( read_fault_seed_calls != 0 || read_fault_seed_injected != 0 ||
+      read_fault_seed_failed != 0 )); then
+    note "READ_FAULT_SEED calls:$read_fault_seed_calls injected:$read_fault_seed_injected failed:$read_fault_seed_failed logical:$read_fault_seed_logical"
+    note "READ_FAULT_SEED submitted:$read_fault_seed_submitted physical:$read_fault_seed_physical lower:req$read_fault_seed_lower_reqs sectors:$read_fault_seed_lower_sectors"
     fail "READ-fault fired before the verification READ"
+fi
 read_fault_submitted_before="$(status_u64 "$read_fault_seeded" read_submitted_reqs)" ||
     fail "READ-fault status lacks submitted-read count"
 read -r -a read_fault_lower_before < "/sys/block/$DISK/stat"
