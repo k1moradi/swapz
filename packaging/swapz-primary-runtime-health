@@ -776,6 +776,8 @@ monitor_loop()
 	previous_gc_no_headroom=unavailable
 	previous_kernel_error_latest=unavailable
 	gc_stall_polls=0
+	stop_required_latched=0
+	stop_required_reported=0
 	poll_count=0
 	while :; do
 		observe_runtime
@@ -791,8 +793,15 @@ monitor_loop()
 			gc_stall_polls=0
 		fi
 		if [ "$gc_stall_polls" -ge "$stall_poll_threshold" ]; then
-			append_reason warning_reasons sustained_gc_stall
-			[ "$health_state" = HEALTHY ] && health_state=WARN
+			stop_required_latched=1
+		fi
+		if [ "$stop_required_latched" -eq 1 ]; then
+			append_reason failure_reasons sustained_gc_stall
+			health_state=FAIL
+			if [ "$stop_required_reported" -eq 0 ]; then
+				printf '%s\n' 					'SWAPZ_RUNTIME_STOP_REQUIRED=1 reason=sustained_gc_stall action=normal_primary_stop_required' >&2
+				stop_required_reported=1
+			fi
 		fi
 		if [ "$swap_occupancy_percent" -ge 95 ]; then
 			capacity_bucket=critical
