@@ -2610,6 +2610,43 @@ class PairReplayContract(unittest.TestCase):
         self.assertGreaterEqual(observer_cost["thread_cpu_seconds"], 0)
         self.assertGreaterEqual(observer_cost["child_cpu_seconds"], 0)
 
+    def test_evidence_io_is_atomic_create_only_and_signal_safe(self):
+        import signal
+        import stat
+        import evidence_io
+
+        previous_sigint = signal.getsignal(signal.SIGINT)
+        previous_sigterm = signal.getsignal(signal.SIGTERM)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = root / "evidence.json"
+            evidence_io.write_new_json(result, {"status": "PASS", "value": 1})
+            expected = result.read_bytes()
+            self.assertEqual(
+                json.loads(expected), {"status": "PASS", "value": 1})
+            self.assertEqual(stat.S_IMODE(result.stat().st_mode), 0o600)
+            self.assertEqual(signal.getsignal(signal.SIGINT), previous_sigint)
+            self.assertEqual(signal.getsignal(signal.SIGTERM), previous_sigterm)
+
+            with self.assertRaises(FileExistsError):
+                evidence_io.write_new_json(
+                    result, {"status": "FAIL", "value": 2})
+            self.assertEqual(result.read_bytes(), expected)
+
+            failed = root / "link-failure.json"
+            with mock.patch.object(
+                    evidence_io.os, "link",
+                    side_effect=OSError("synthetic link failure")):
+                with self.assertRaisesRegex(OSError, "synthetic link failure"):
+                    evidence_io.write_new_json(failed, {"status": "FAIL"})
+            self.assertFalse(failed.exists())
+            self.assertEqual(
+                [path.name for path in root.iterdir()
+                 if ".swapz-tmp-" in path.name],
+                [])
+            self.assertEqual(signal.getsignal(signal.SIGINT), previous_sigint)
+            self.assertEqual(signal.getsignal(signal.SIGTERM), previous_sigterm)
+
     def test_physical_campaign_evidence_seals_all_attempts_and_policy(self):
         import importlib.util
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import signal
 import stat
+import threading
 from pathlib import Path
 
 
@@ -24,6 +26,12 @@ def write_new_json(path: Path, value: dict) -> None:
         directory_flags |= os.O_NOFOLLOW
     directory_fd = os.open(parent, directory_flags)
     temporary_name = None
+    previous_handlers = None
+    if threading.current_thread() is threading.main_thread():
+        previous_handlers = (
+            signal.signal(signal.SIGINT, signal.SIG_IGN),
+            signal.signal(signal.SIGTERM, signal.SIG_IGN),
+        )
     try:
         directory_info = os.fstat(directory_fd)
         if not stat.S_ISDIR(directory_info.st_mode):
@@ -77,3 +85,6 @@ def write_new_json(path: Path, value: dict) -> None:
             except FileNotFoundError:
                 pass
         os.close(directory_fd)
+        if previous_handlers is not None:
+            signal.signal(signal.SIGINT, previous_handlers[0])
+            signal.signal(signal.SIGTERM, previous_handlers[1])

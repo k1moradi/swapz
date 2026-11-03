@@ -86,7 +86,7 @@ def read_json(path: Path) -> tuple[dict, bytes]:
     return value, data
 
 
-remove local writerdef run_text(command: list[str]) -> str:
+def run_text(command: list[str]) -> str:
     result = subprocess.run(
         command, text=True, capture_output=True, check=False, timeout=20)
     if result.returncode:
