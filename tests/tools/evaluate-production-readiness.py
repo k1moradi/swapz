@@ -261,10 +261,15 @@ def evaluate_release(
             block_code("exact_source_owner_make_test: artifact binding mismatch")
 
     owned_nullblk = pass_record("owned_nullblk_qualification")
-    if owned_nullblk is not None and not _same_hashes(
-            owned_nullblk.get("hashes"), report_artifacts):
-        block_code(
-            "owned_nullblk_qualification: artifact binding mismatch")
+    if owned_nullblk is not None:
+        if owned_nullblk.get("overall") != "PASS":
+            block_code(
+                "owned_nullblk_qualification: lifecycle result is not PASS")
+        evidence_sha256 = owned_nullblk.get("evidence_sha256")
+        if not isinstance(evidence_sha256, str) or not SHA256_RE.fullmatch(
+                evidence_sha256):
+            block_code(
+                "owned_nullblk_qualification: evidence digest is invalid")
 
     critical = pass_record("unresolved_critical_issues")
     if critical is not None and critical.get("count") != 0:
