@@ -2013,7 +2013,9 @@ def run_stage(title, command, result, *, parse_bench=False):
             line.startswith("BLOCKED: Secure Boot module signing:")
             for line in output.splitlines()))
     blocked_marker = secure_boot_signing_blocked or (parse_bench and any(
-        line.startswith(("BLOCKED:", "BLOCKED_LOADED_QUALIFICATION"))
+        line.startswith((
+            "BLOCKED:", "BLOCKED_LOADED_QUALIFICATION",
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:"))
         for line in output.splitlines()))
     status = ("PASS" if rc == 0 else "BLOCKED" if blocked_marker else "FAIL")
     record = {"name": title, "status": status, "elapsed_s":

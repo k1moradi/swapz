@@ -3075,6 +3075,33 @@ class ReportContract(unittest.TestCase):
                          "adjacent READ coalescing A/B evidence")
         self.assertIn("confirmation", stage["diagnostic"])
 
+    def test_primary_lifecycle_blocked_marker_classifies_loaded_stage_blocked(self):
+        log = (
+            "START_LOADED_OWNED_NULLBLK_SMOKE\n"
+            "PASS_LOADED_OWNED_NULLBLK_SMOKE\n"
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=setup\n"
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: owned null_blk unavailable\n"
+        )
+        fake_process = FakeStreamingProcess(log, returncode=2)
+        original_popen = runner.subprocess.Popen
+        report = {"schema": "swapz-test-results-v1", "stages": [],
+                  "benchmarks": {"sessions": [], "verdicts": {}}}
+        try:
+            runner.subprocess.Popen = lambda *args, **kwargs: fake_process
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    runner.run_stage("Owned RAM smoke + mixed/QD pilot",
+                                     ["unused"], report, parse_bench=True), 2)
+        finally:
+            runner.subprocess.Popen = original_popen
+        stage = report["stages"][-1]
+        self.assertEqual(stage["status"], "BLOCKED")
+        self.assertEqual(stage["failed_phase"],
+                         "owned RAM primary lifecycle setup")
+        self.assertIn("BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:",
+                      stage["diagnostic"])
+
     def test_loaded_failure_identifies_failed_phase_without_private_paths(self):
         # This was a real regression: privileged benchmarks created
         # build/benchmark/ (mode 0700), then a non-root user attempted

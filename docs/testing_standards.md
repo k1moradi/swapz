@@ -696,7 +696,9 @@ attribution must recognize the primary lifecycle rehearsal, its fixed
 `setup`/`prepare`/`start`/`stop` subphase markers, and its named
 interruption phase before any later benchmark-fixture default can overwrite the
 operator-visible failure location. The subphase markers carry no device identity,
-run ID or path.
+run ID or path. A `BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:` marker from the loaded
+helper is a qualification BLOCKED outcome, not a code FAIL; the reporter must
+preserve that distinction while retaining the same sanitized diagnostic rules.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 
