@@ -42,7 +42,7 @@ All allocations, work queues, staging arrays, segment scans and retries must rem
 
 ## Safety scope
 
-Current official loaded qualification is restricted to newly created, positively identified, RAM-backed `null_blk`. Physical backing remains disabled by default and is admitted only behind an explicit module opt-in plus a matching block-0 SWAPZ authorization header on a dedicated device. The formatter/guard are safety prerequisites, not performance or endurance qualification. No current result authorizes active system swap, mounting, reboot, `swapon`, `swapoff`, force removal or touching unrelated mappings. Real-device work remains a separately authorized qualification project.
+Generic loaded qualification remains restricted to newly created, positively identified RAM-backed `null_blk`. Physical backing remains disabled by default and is admitted only behind the explicit module opt-in plus a matching SWZ authorization header. For the current dedicated development PC, the owner has granted standing destructive and live-swap authority over the positively identified removable SD card described in [AGENT_CONTEXT.md](AGENT_CONTEXT.md); repeated per-run owner/external-review permission is not a release gate for that target. Exact device identity, source/artifact qualification, active-page protection and fail-closed lifecycle checks remain mandatory. Codex must not reboot or intentionally crash the PC, and no fallback swap is required.
 
 ## Engineering direction
 
@@ -90,6 +90,8 @@ Longer-horizon opportunities remain explicit rather than being forgotten:
 nonzero same-filled-page representation, exact-content deduplication,
 compound/folio input coverage, background GC if foreground evidence justifies
 it, and new concurrency experiments only when a fresh workload proves measured
-pressure. Each must preserve the single authority/ordering model. Physical-
-device qualification remains a separately authorized future project, not an
-extension of the RAM-backed development harness.
+pressure. Each must preserve the single authority/ordering model. Physical-device
+qualification on the current dedicated SD card is an active production-readiness
+workstream under the standing scope in [AGENT_CONTEXT.md](AGENT_CONTEXT.md);
+generic physical-device claims still require device-specific evidence and never
+follow automatically from RAM-backed qualification.

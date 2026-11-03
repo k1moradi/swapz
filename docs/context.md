@@ -7,16 +7,22 @@ Device Mapper boundary. It is **not** a project history, experiment log, backlog
 or qualification claim. Decisions, implementation sequence and acceptance gates
 belong in [ROADMAP.md](ROADMAP.md); normative constraints belong in
 [coding_standards.md](coding_standards.md) and
-[testing_standards.md](testing_standards.md).
+[testing_standards.md](testing_standards.md). The compact current owner scope,
+target identity, autonomy rules, documentation budget and production-ready
+definition live in [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and take precedence over
+historical host-specific authorization text.
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
 
-**Device safety:** official loaded qualification uses only newly created,
-positively identified, RAM-backed `null_blk`. Nothing in this reference
-authorizes active system swap, `swapon`, `swapoff`, mounting, reboot or
-touching unrelated block devices; see [VISION.md](VISION.md).
+**Device safety:** generic loaded qualification continues to use newly created,
+positively identified RAM-backed `null_blk`. The current dedicated physical
+development target is separately governed by the standing owner scope in
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md), which permits repeated destructive and
+live-swap work on the positively identified SD card while still forbidding
+unrelated-device mutation and Codex-initiated reboot. This technical reference
+does not broaden that device scope; see [VISION.md](VISION.md).
 
 The upstream functions cited here were inspected on Linux master at
 `c339f4010dea8b0d754f84ace70cd1b089878ef8` and on tag `v7.0`; where the two

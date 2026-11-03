@@ -604,7 +604,7 @@ when one measurement includes both operations. The console must not use
 
 ## Evidence levels
 
-Source contracts show structure, not loaded semantics. Native C shows portable product logic, not Device Mapper runtime. W=1/W=2 shows compilation, not correctness. Owned RAM-backed loaded tests show real kernel BIO behavior on the test host, not physical-media benefit. Only separately authorized physical testing can establish behavior on a particular real device.
+Source contracts show structure, not loaded semantics. Native C shows portable product logic, not Device Mapper runtime. W=1/W=2 shows compilation, not correctness. Owned RAM-backed loaded tests show real kernel BIO behavior on the test host, not physical-media benefit. Behavior on a particular real device requires physical evidence from that device. The current dedicated SD-card target already has standing owner authorization under AGENT_CONTEXT; no additional per-run reviewer/owner permission upgrades a lower evidence level into physical evidence.
 
 ### Optimization-round history artifacts
 
@@ -993,18 +993,21 @@ only for reads already waiting behind active lower work.
 Genuine device-originated/partial lower errors, representative long-run
 resource/churn pressure, larger controlled cold-read working sets, automatic
 device-queue-depth policy, actual kernel swap, physical-device behavior and
-physical endurance remain open. The current owner matrix already satisfies the
-bounded ID36 deliberate CPU-oversubscription/low-RAM gate and the promoted
-five-pair statistical protocols. Physical-device admission remains separately
-blocked.
+physical endurance remain evidence gates. The current owner matrix already
+satisfies the bounded ID36 deliberate CPU-oversubscription/low-RAM gate and the
+promoted five-pair statistical protocols. On the dedicated SD-card host these
+physical/actual-swap gates are active work under AGENT_CONTEXT rather than
+blocked on another owner authorization.
 
 
 ### zswap collaboration qualification
 
 See [context.md](context.md) for Linux swap and zswap code paths and the staged
 [ROADMAP.md](ROADMAP.md) for planned origin and RAW-bypass experiments.
-This is a **future actual-swap gate**, not authorization for `swapon` or
-`swapoff` in today's owned-RAM `null_blk` qualification scope.
+This is an actual-swap qualification gate. It does not change the generic
+owned-RAM `null_blk` matrix, but the dedicated-host standing scope in
+AGENT_CONTEXT authorizes the bounded `swapon`/`swapoff` work needed to close
+it on the verified SD-card target.
 
 Before origin-aware code can promote, source/native fixtures must prove
 explicit origin propagation across simulated BIO split/clone, correct
@@ -1015,8 +1018,9 @@ byte-exact readback through the existing CRC/generation and GC mapping rules.
 Include duplicate-page ordering, overwrite, DISCARD, PREFLUSH/FUA,
 suspend/drain, fault/uncertain lower completion, and preparation-slot cleanup.
 
-After separate owner authorization for actual kernel swap, loaded tests must
-force and distinguish: zswap accepted with no backing write, initial zswap
+During authorized actual-kernel-swap qualification on the dedicated host,
+loaded tests must force and distinguish: zswap accepted with no backing write,
+initial zswap
 rejection with backing write, and later stored-then-evicted zswap writeback.
 Record tagged-origin counts, attempts skipped, useful throughput/p95/p99,
 CPU/RAM and independently measured lower READ/WRITE bytes/requests against
@@ -1042,8 +1046,8 @@ unknown, never a correctness input. Prove one completion owner and no
 change in authority, bytes, publication order or output without enabling
 any locality policy.
 
-Any subsequent actual-swap correlation claims require separately
-authorized safe kernel-swap qualification, including a fixed kernel source,
+Any subsequent actual-swap correlation claims require safe dedicated-host
+kernel-swap qualification under AGENT_CONTEXT, including a fixed kernel source,
 observed backing READ timing, comparison with logical adjacency and
 arrival order, cache coverage, and readahead / swap-cache / zswap effects.
 Target-only READ observations measure backing co-access, not all user
@@ -2647,6 +2651,13 @@ baseline-measured RAW/LZ4 rescues. The rescue A/B continues to pin
 
 
 Physical backing is outside the ordinary RAM-backed qualification matrix.
+For the **current** dedicated SD-card production mission, physical execution is
+owner-authorized by the standing scope in AGENT_CONTEXT. The historical
+one-use `physical-swap-probe.py` protocol below records the older
+`/dev/sda4` correctness-smoke workflow and its consumed approvals; those
+human-approval mechanics are not a current gate for repeated work on the
+dedicated `/dev/sda1` card. Its device-identity, provenance and fail-closed
+techniques remain useful patterns.
 Rootless qualification must verify that the administrative formatter refuses
 non-block-device inputs without modification, while source contracts verify
 the opt-in superblock gate, reserved data offset, and exclusion of block 0 from
@@ -3278,12 +3289,14 @@ change still needs exact-source owner qualification with the full codec stack.
 
 ## Experimental live-swap supervisor
 
-The experimental live-swap coordinator is separate from the physical-backed
-correctness helper. Its design and tests do not change the latter's prohibition
-on enabling its 16 MiB mapper as system swap. The new coordinator must default
-to read-only operation; until the exact change has passed independent source
-and recovery review plus a separate owner decision, its privileged `run` and
-`recover` commands must fail closed.
+The experimental live-swap coordinator is separate from the historical
+physical-backed correctness helper. The old `/dev/sda4` trial and its one-use
+owner waiver remain historical evidence. For the current dedicated SD-card
+mission, standing owner authorization in AGENT_CONTEXT replaces another
+per-run owner/external-review decision. Privileged lifecycle actions still
+remain fail-closed until their exact implementation has the required
+source/recovery tests, current exact-source qualification, current CI and live
+device-identity/ownership gates.
 
 The primary boot-manager package currently installs its systemd units disabled;
 package installation must never start the mapper, activate swap, or enable a
@@ -3298,7 +3311,10 @@ until live swap, orderly shutdown, recovery and boot lifecycle gates have been
 verified on the exact host and device.
 
 The live-swap trial is the owner-waived, no-fallback trial described in
-[live-swap-trial-recovery.md](live-swap-trial-recovery.md). It is limited to one
+[live-swap-trial-recovery.md](live-swap-trial-recovery.md). This paragraph and the fixed `/dev/sda4` geometry that follows are a
+historical old-host record, not the current production-target contract. Current
+target identity, no-fallback decision and completion criteria are in
+AGENT_CONTEXT. It is limited to one
 mapper at the maximum logical capacity admitted for the complete `/dev/sda4`
 partition (3,727,872 pages, 15,269,363,712 bytes) and to 30 minutes, with one
 bounded cgroup swap-pressure check inside the window. Admission requires the
@@ -3424,17 +3440,15 @@ after an earlier failed recovery. When cleanup writes `TRIAL_STOPPING` over
 `RECOVERY_REQUIRED`, header verification must resolve both saved wrappers
 back to the original durable stage without guessing an unrecorded format.
 Missing, cyclic, torn or contradictory stage provenance must fail closed
-before any backing-header write. A disposable VM may exercise the recovery
-state machine with substitute disk images that cannot alias host block devices.
-Such a VM does not qualify physical admission, host live-swap performance, or
-power-loss recovery of the physical device. The physical helper must continue
-to reject VM execution. Report modeled interruption and VM recovery separately
-from any physical-host cold-boot behavior.
+before any backing-header write. VM coverage is not part of the current project.
+Exercise interruption logic with rootless state-machine tests, direct-C tests,
+owned RAM-backed `null_blk` and safely bounded native-host resources. Do not
+intentionally crash or reboot the host to manufacture power-loss evidence.
 
-The plan, lifecycle mocks, VM fixtures and CI do not establish live-swap
-correctness. Model each durable interruption boundary with rootless tests and
-use disposable resources only when they are positively identified and cannot
-alias active system storage. Do not claim a mock proves power-loss behavior.
+The plan, lifecycle mocks and CI do not by themselves establish live-swap
+correctness. Model each durable interruption boundary and add physical-host
+evidence only where the test can fail without intentionally stranding ordinary
+system pages or crashing the PC. Do not claim a mock proves power-loss behavior.
 Document that loss of the volatile swapz mapping authority loses access to
 pages already stored through that mapping. Never describe a fallback swapfile
 on another partition of the same physical disk as independent-media

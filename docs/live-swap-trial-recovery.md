@@ -1,6 +1,12 @@
-# Experimental live-swap trial and recovery
+# Historical /dev/sda4 live-swap trial and recovery
 
-**Status: the one owner-waived trial ran on 2026-11-02 and passed. Its approval is consumed, no further trial is authorized, and this is not a production deployment.**
+**Status: historical evidence for the previous computer.** The one owner-waived
+trial ran on 2026-11-02 and passed; its approval remains consumed. The
+one-use/external-review mechanics in this file describe that old trial only.
+They are superseded for the current dedicated SD-card production mission by the
+standing owner scope in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). Preserve this
+file's evidence; do not use it to require another human approval for current
+`/dev/sda1` work.
 `LIVE_SWAP_EXECUTION_ENABLED` is true in the commit that carries this text. Each
 `run` still needs a one-use approval record bound to that exact commit, to both
 current CI workflows, to the qualified artifact hashes and to the live target.
@@ -78,7 +84,10 @@ counters increased; and mapper swap usage was above zero in at least one
 sample. A trial with no swap traffic reports `ACTIVATION_ONLY`, which is not a
 pass.
 
-## Approval records
+## Historical approval records
+
+The following protocol is retained to explain and audit the consumed
+`/dev/sda4` run. It is not the current authorization model.
 
 `run` accepts one JSON record. It must bind the run ID (32 lowercase hex),
 the reviewed commit and CI commit equal to HEAD, both required workflows

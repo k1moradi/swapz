@@ -6,6 +6,32 @@
 
 This file is the project's **rolling engineering blueprint**: active priorities, proposals, decisions and acceptance gates. Linux MM/swap/zswap semantics and implementation context live in [context.md](context.md). Completed experimental transcripts belong in Git history.
 
+**Agent working-set rule:** keep [AGENT_CONTEXT.md](AGENT_CONTEXT.md),
+[VISION.md](VISION.md) and [README.md](README.md) continuously in context. This
+ROADMAP is a long evidence reference; retrieve only the active rows/sections
+needed for the current decision so total documentation stays within the 64K-token
+budget defined in AGENT_CONTEXT.
+
+## Current production mission — dedicated SD-card host
+
+The current target is the owner-dedicated removable SD card whose observed
+partition is `/dev/sda1` (8:1, 124787884032 bytes, PARTUUID
+`f13428f6-01`). The whole positively identified card is disposable development
+media. Standing owner authorization permits repeated destructive physical and
+live-swap work on that card without another per-run reviewer/owner approval.
+No VM or fallback-swap work is required, and Codex must not reboot or
+intentionally crash the PC. Device identity, exact-source qualification,
+active-page protection and normal teardown remain mandatory.
+
+The production objective is full-card physical backing with the maximum logical
+capacity safe for incompressible data and required GC/forward-progress reserve,
+followed by actual Linux swap correctness, sustained occupancy/churn, native
+startup/shutdown integration and an automatic cold-boot acceptance harness.
+Detailed completion criteria and repository/documentation operating rules are
+canonical in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). Historical `/dev/sda4`
+trial narratives below remain evidence for the older computer, not current
+authorization policy.
+
 ## Current owner requirement: fixed production compression stack
 
 Every emulated device must run the production delta64 + `DELTA64_SHUF8`
@@ -291,7 +317,7 @@ changes.
 | 59 | Exact-content page deduplication / shared payload ownership | **4 representative-corpus + architecture evidence** | Synthetic trace reports 12,301 resident duplicate opportunities from only 128 payloads and 1,024 final duplicate pages. This proves the analyzer, not production prevalence. Measure representative lifetime overlap before implementing collision-free verification, bounded refcounts, generation-safe COW and GC/DISCARD ownership. |
 | 60 | Queued READ grouping within the same immutable extent | **5 refuted / retired** | Five matched hwq=1 rounds showed no request win and an unfavorable p99 direction; the qualified post-ID65 fast directional sample was also worse. Remove standalone slot grouping and its dedicated benchmark controls; ordinary reads keep the shared caches. |
 | 61 | Foreground GC scaling / background-GC question | **1 ID61b owner-qualified / keep; broader background-GC question remains open** | Report `85aeac4` proves the production survivor list in loaded GC: 20 relocated pages produced exactly 20 relocation-list visits, `gc_choose_map_entries=0`, 1,280 segment-score visits, 20 victims/rotations and byte-exact verification of all 4,096 pages. The same qualified report's native scaling measured full-map relocation at 1.215/4.901ms versus 0.00169/0.00196ms for the 256-survivor list at 1/4GiB-equivalent scale. Keep the per-segment list; realistic foreground-GC stall/headroom evidence remains separate. |
-| 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
+| 62 | Real-device / physical-media qualification | **1 active production gate on dedicated SD card** | Standing owner authorization now covers repeated destructive and live-swap work on the positively identified dedicated SD card in AGENT_CONTEXT. No per-run reviewer/owner permission, VM or fallback is required. Keep exact parent/partition identity, source/artifact qualification, bounded real-swap tests, active-page protection, GC/churn/resource evidence and fail-closed lifecycle checks. Generic claims beyond this card remain device-specific. |
 | 63 | Physically adjacent distinct-extent READ coalescing | **1 owner-qualified / active default-on / cap fixed at 8 blocks** | Current report `dc78c9bbffbd` on exact source `0155a09a0f2e` reconfirms the active path. Fast sequential lower requests fall 11.29% (95% CI -14.35..-8.24) while throughput and p99 overlap zero. Serial-depth sequential requests fall 25.89%, p99 13.69% and throughput rises 30.58%, all significant. Keep exact 2..8-range zero-padding-free coalescing and the fixed eight-block cap. |
 | 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
@@ -472,13 +498,14 @@ bounded cold-read cost, extent count or lower-device service. The technical
 explanation of Linux reclaim, folios, BIOs and the zswap writeback implementation
 lives in [context.md](context.md), not in this rolling blueprint.
 
-**Scope and priority.** This is planned cross-subsystem work, **not an enabled
-feature or evidence of a current performance win**. Keep the current near-term
-work-conserving four-record service effort and owner qualification ahead of
-this integration. Current host safety still forbids `swapon`/`swapoff`;
-none of the following authorizes actual kernel swap tests, physical devices,
-new public test commands or an SWZ format change. Move the actual-swap portion
-only after explicit owner authorization and the relevant safety design.
+**Scope and priority.** This remains planned cross-subsystem work, **not an
+enabled feature or evidence of a current performance win**. The current
+dedicated-host mission already authorizes bounded actual-kernel-swap and
+physical-card qualification under AGENT_CONTEXT; no additional owner permission
+is required. Any zswap-specific implementation still needs its own correctness
+design, exact-source qualification and measured evidence before promotion. Do
+not infer a new public test command, format change or performance win from this
+section.
 
 ### Goal, measurable hypothesis and non-goals
 
@@ -1348,8 +1375,9 @@ snapshot `MemAvailable` was 8,733,600 kB and memory PSI `full avg10` was 0.97%.
 The zero-used live-swap admission gate remains blocked; the pages must remain
 under normal Linux swap.
 
-Issue #76's live-swap supervisor now carries the owner's 2026-11-02 decision for
-one bounded no-fallback trial: swapz as the sole swap area on `/dev/sda4` at the
+**Historical old-host record.** Issue #76's live-swap supervisor carried the
+owner's 2026-11-02 decision for one bounded no-fallback trial on the previous
+computer: swapz as the sole swap area on `/dev/sda4` at the
 maximum admitted capacity (3,727,872 pages, 15,269,363,712 bytes), at most 30
 minutes, with RAM below 50 percent before the original swapoff and one bounded
 cgroup swap-pressure check inside the window. The owner waived the separate

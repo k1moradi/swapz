@@ -31,7 +31,7 @@ No legacy, recall, NBD, pressure, alternate-module, or historical-model subsyste
 
 ## Supported commands
 
-The root Make interface is exactly `make`, `make install`, `make uninstall`, `make test` and the development-only `make fast_test`. `make fast_test` builds the working tree (dirty trees allowed), runs the window-policy native checks and a single-pair subset of the owned null_blk matrix, and prints one raw-versus-swapz table; optional `SCENARIOS=fast-mixed,fast-w8` and `REPEAT=n` select scenarios and repeats. Every emulated scenario uses the production delta64 + `DELTA64_SHUF8` + LZ4 stack; there is no delta64-off development benchmark. Its numbers are unpaired single observations for development decisions only. Installation never activates swap. Official loaded qualification remains limited to positively owned RAM-backed `null_blk`. Physical backing is disabled by default; the implementation can attach only when `allow_physical_backing=1` and block 0 contains a valid matching SWAPZ authorization header created by the conservative `swapzctl format <blockdev>` command. That formatter writes block 0 and refuses non-block devices, busy devices, and nonzero unrecognized headers. This safety gate does not itself qualify physical media or authorize active system swap, reboot, `swapon`, `swapoff`, force removal, or unrelated block devices.
+The root Make interface is exactly `make`, `make install`, `make uninstall`, `make test` and the development-only `make fast_test`. `make fast_test` builds the working tree (dirty trees allowed), runs the window-policy native checks and a single-pair subset of the owned null_blk matrix, and prints one raw-versus-swapz table; optional `SCENARIOS=fast-mixed,fast-w8` and `REPEAT=n` select scenarios and repeats. Every emulated scenario uses the production delta64 + `DELTA64_SHUF8` + LZ4 stack; there is no delta64-off development benchmark. Its numbers are unpaired single observations for development decisions only. Installation currently never activates swap. Generic loaded qualification remains positively owned RAM-backed `null_blk`. Physical backing is disabled by default and still requires the explicit module opt-in plus a matching SWZ authorization header. The current dedicated SD-card production mission has standing owner authorization for bounded destructive/live-swap work as defined in [AGENT_CONTEXT.md](AGENT_CONTEXT.md); that standing authority does not permit reboot, force removal, device substitution or unrelated block-device mutation.
 
 Every completed `make test` run replaces exactly one generated evidence file,
 root `test_results.json`, with the latest sanitized PASS/FAIL/BLOCKED test
@@ -86,6 +86,9 @@ behavior and endurance remain open qualification gates.
 
 ## Documentation
 
+- [AGENT_CONTEXT.md](AGENT_CONTEXT.md): **always-loaded current operating
+  context** — target identity, standing owner scope, autonomy rules, main-sync
+  contract, documentation budget and production-ready completion criteria.
 - [VISION.md](VISION.md): product objective and non-negotiable constraints.
 - [ROADMAP.md](ROADMAP.md): active work plus the canonical optimization decision
   memory. Use its evidence table before proposing an experiment.
@@ -104,3 +107,8 @@ A settled idea should have one compact record in the ROADMAP evidence table:
 reopening it**. Do not duplicate the full experiment story across documents.
 Detailed trial narratives and superseded procedures belong in immutable Git
 history and report commits.
+
+Agents must keep documentation at or below 25% of the 256K context window
+(64K tokens). Keep AGENT_CONTEXT, VISION and README resident; retrieve only
+relevant sections of the long ROADMAP/coding/testing/context references. Reload
+the compact set after every sync that changes documentation.

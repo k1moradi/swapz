@@ -147,9 +147,28 @@ Before deleting production code, identify all current callers and preserve neces
 
 ## Change discipline
 
-Work directly on `main` unless the owner explicitly authorizes another branch. Check the current remote head before every write and use lease-protected fast-forward updates. Keep commits small enough to review. Do not force-push or overwrite concurrent work.
+Work directly on `main`; branches, secondary worktrees and pull requests are not
+part of the current project workflow. Before editing, fetch and require a clean
+local main synchronized with `origin/main` and the canonical remote head. After
+each completed commit, push normally and verify local HEAD equals `origin/main`.
+After long tests, fetch again before publishing. If the remote advanced while an
+unpublished local commit exists, reconcile only that unpublished work onto the
+new head without rewriting published history, rerun affected checks, and push
+normally. Never force-push or overwrite concurrent work.
 
 Every implementation task updates the relevant governing standard in the same commit. README/VISION change only when user-facing structure or acceptance criteria change.
+
+### Documentation working context
+
+Read [AGENT_CONTEXT.md](AGENT_CONTEXT.md) after every repository sync and after
+any documentation change. Keep AGENT_CONTEXT, VISION and README continuously in
+agent context; retrieve only relevant sections of ROADMAP, this file,
+testing_standards and context. Documentation must stay within 25 percent of a
+256K model context (64K tokens), with the always-loaded set normally <=24K.
+Compact settled narratives into one active rule/evidence anchor and rely on Git
+history for transcripts. Documentation changes are part of the implementation:
+if behavior, target scope, acceptance criteria or evidence changes, update the
+governing text in the same work cycle.
 
 Files under `docs/handoff/` are temporary: work orders and round results for
 one optimization round. When the round closes (owner results recorded in the
@@ -191,7 +210,15 @@ history or retune only one arm to make a desired model rate appear achievable.
 
 ## Host safety
 
-Never reboot, `swapon`, `swapoff`, mount test storage, force-remove mappings or touch physical/unowned devices. Loaded development uses only positively owned RAM-backed `null_blk` with exact identity checks and ordinary teardown/quarantine.
+Never intentionally reboot, panic or crash the development PC, force-remove an
+active mapping, unload a module with users, or touch an unrelated physical
+device. Generic loaded qualification uses positively owned RAM-backed
+`null_blk`. The current dedicated-host standing scope in AGENT_CONTEXT also
+permits destructive initialization, DISCARD/TRIM, benchmarking, `swapon`,
+`swapoff` and repeated live-swap work on the positively identified removable
+SD card. Before every destructive phase, reprove the opened partition and parent
+identity; a pathname alone is never authority. A failed mapper `swapoff` or
+ambiguous ownership/state stops teardown rather than authorizing force.
 
 
 ### Physical formatter descriptor and SWZ header contract
@@ -223,19 +250,23 @@ size and nonzero 16-byte UUID, with **every reserved byte at offsets 40..4095
 zero**. A formatted header is idempotently recognized only when *all* those
 conditions hold; nonzero unrecognized block zero is refused without writing.
 Do not add kernel-only headers or libc dependencies to `superblock.h`.
-These protections do not authorize physical test execution or bypass the
-separate physical-review gates.
+These protections remain mandatory for physical execution. On the current
+dedicated SD-card target, human permission comes from the standing owner scope
+in AGENT_CONTEXT rather than a separate per-run review gate.
 
-The primary manager's per-run SWZ authorization header must be built in memory
-from a freshly generated lowercase 32-hex transaction ID using the system
-random source. Convert those 16 bytes directly into the 16-byte header UUID;
-do not use timestamps, process IDs or caller-selected identifiers. Populate
-the shared unversioned header layout, bind the fixed `/dev/sda4` byte size,
-leave every reserved byte zero, and validate the complete 4096-byte candidate
+The primary manager's per-transaction SWZ authorization header must be built in
+memory from a freshly generated lowercase 32-hex transaction ID using the
+system random source. Convert those 16 bytes directly into the 16-byte header
+UUID; do not use timestamps, process IDs or caller-selected identifiers.
+Populate the shared unversioned header layout and bind the **currently verified
+configured target geometry**, never a historical hard-coded `/dev/sda4` size.
+Leave every reserved byte zero and validate the complete 4096-byte candidate
 with `swapz_sb_valid()` before exposing it to the caller. Reject malformed or
 all-zero IDs without changing the caller's output buffer. Header construction
-does not authorize a device write; the only writer remains the checked,
-identity-bound descriptor primitive after durable recovery state exists.
+does not authorize a device write; the writer remains the checked,
+descriptor-bound primitive after the operation owns its durable lifecycle
+transaction. The one-use transaction claim is crash/ownership metadata, not a
+request for another human approval.
 
 ### Primary manager module admission
 
@@ -284,27 +315,28 @@ refuse an existing active marker and must never silently retire a pending
 ### Metadata-only primary preparation
 
 `swapzctl primary prepare` may establish durable transaction metadata only.
-Before claiming a run, require a clean source build, the accepted exact-source
-owner qualification and live artifact hashes, the persistent recovery base,
-an unchanged identity-checked `/dev/sda4` geometry and original header, exactly
-one active `/dev/sda4` swap entry with the expected size, priority `-1` and
-zero use, no mount or root-filesystem dependency, and no loaded `dm_swapz` or
-swapz mapper. Recheck the swap inventory and reread the opened target header
-immediately before the one-use claim. Revalidate the UUID, PARTUUID and fixed
-device aliases against the opened descriptor after reading the header.
+Before claiming a run, require a clean synchronized main, accepted exact-source
+owner qualification and live artifact hashes, persistent lifecycle storage, no
+conflicting swapz module/mapper/transaction, and an identity-checked configured
+target whose opened partition and parent match the dedicated SD-card binding.
+Do not require preservation of historical card contents or an old Linux-swap
+header on this disposable target. If an active swapz/ordinary-swap entry exists,
+its identity and usage must be understood and safely drained before a destructive
+transition. Recheck the target, parent, swap inventory and current block-zero
+state immediately before the transaction claim.
 
 After those checks, generate a fresh OS-random run ID, build the candidate SWZ
-header only in memory, durably publish the consumed record, `READY` state and
-active marker, then save the exact original 4096-byte header and immutable
-manifest and read both back byte-for-byte. Preparation must not write the
-target, change swap state, load a module, or create a mapper. Any failure after
-claim retains the consumed record and active ownership for reconciliation; it
-must report an incomplete preparation rather than releasing ownership or
-claiming readiness. The later `start` path must revalidate the same device,
-qualification and saved records, persist `STARTING`, and only then perform its
-first device or swap mutation. Keep all privileged lifecycle actions disabled
-until preparation and every later transition have rootless and isolated-VM
-coverage, and exact-source qualification is current.
+header only in memory, durably publish the transaction record, `READY` state
+and active marker, then save the immutable source/artifact/device/geometry
+manifest and read it back byte-for-byte. An original-header backup is optional
+for this disposable SD card and must not become a production gate. Preparation
+must not write the target, change swap state, load a module, or create a mapper.
+Any failure after claim retains active ownership for reconciliation. The later
+`start` path must revalidate the same physical card, qualification and saved
+records, persist `STARTING`, and only then perform its first device or swap
+mutation. Keep privileged lifecycle actions disabled until the corresponding
+rootless/native/null_blk and safely bounded physical-host gates pass and
+exact-source qualification is current; VM coverage is not required.
 
 ### Primary manager Device Mapper lifecycle primitives
 
