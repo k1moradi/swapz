@@ -1221,6 +1221,45 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(monitor.returncode, 0)
         self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", monitor.stderr)
 
+    def test_reserve_role_erosion_is_observable_and_exhaustion_fails(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_STATUS"] = (
+            "0 216643584 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=1 "
+            "gc_destination_advances=1 window_gc_pressure=1"
+        )
+        degraded = self.run_helper("once", env)
+        self.assertEqual(degraded.returncode, 0, degraded.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=WARN", degraded.stderr)
+        self.assertIn("gc_reserve_degraded", degraded.stderr)
+        self.assertIn("gc_reserve_segments_current=1", degraded.stderr)
+        self.assertIn("gc_destination_advances=1", degraded.stderr)
+
+        env["MOCK_DM_STATUS"] = env["MOCK_DM_STATUS"].replace(
+            "gc_reserve_segments_current=1", "gc_reserve_segments_current=0"
+        )
+        exhausted = self.run_helper("once", env)
+        self.assertEqual(exhausted.returncode, 1, exhausted.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", exhausted.stderr)
+        self.assertIn("gc_reserve_exhausted", exhausted.stderr)
+
+    def test_missing_reserve_role_telemetry_is_degraded(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_STATUS"] = (
+            "0 216643584 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "window_gc_pressure=0"
+        )
+        result = self.run_helper("once", env)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", result.stderr)
+        self.assertIn("gc_reserve_telemetry_unavailable", result.stderr)
+
     def test_monitoring_error_is_degraded_not_a_destructive_action(self) -> None:
         env = self.env.copy()
         env["MOCK_DM_STATUS_UNAVAILABLE"] = "1"
