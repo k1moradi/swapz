@@ -986,7 +986,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 result = evaluate(report, evidence, policy)
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
                 self.assertTrue(any(
-                    "critical correctness issue count is not integer zero"
+                    "unresolved critical correctness issue count/list is inconsistent"
                     in blocker for blocker in result["code_blockers"]))
 
     def test_owner_report_stage_set_order_status_and_exit_are_exact(self):
