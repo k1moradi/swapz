@@ -783,6 +783,8 @@ static void test_exclusive_target_open_paths(void)
 	char uuid_path[PATH_MAX];
 	char partuuid_path[PATH_MAX];
 	char substituted[PATH_MAX];
+	char broken[PATH_MAX];
+	unsigned char swz_header[SWAPZ_PRIMARY_BLOCK_BYTES];
 	struct stat info;
 	int fd;
 
@@ -794,6 +796,7 @@ static void test_exclusive_target_open_paths(void)
 			 directory) > 0);
 	assert(snprintf(substituted, sizeof(substituted), "%s/substituted",
 			 directory) > 0);
+	assert(snprintf(broken, sizeof(broken), "%s/missing", directory) > 0);
 	fd = open(target, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
 	assert(fd >= 0);
 	assert(ftruncate(fd, (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) == 0);
@@ -804,8 +807,8 @@ static void test_exclusive_target_open_paths(void)
 	assert(close(fd) == 0);
 	assert(symlink(target, uuid_path) == 0);
 	assert(symlink(target, partuuid_path) == 0);
-	fd = swapz_primary_open_target_checked_paths(target, uuid_path,
-						     partuuid_path);
+	fd = swapz_primary_open_target_checked_paths_mode(
+		target, uuid_path, partuuid_path, O_RDWR | O_EXCL);
 	assert(fd >= 0);
 	assert(fstat(fd, &info) == 0 && S_ISREG(info.st_mode));
 	assert((fcntl(fd, F_GETFL) & O_ACCMODE) == O_RDWR);
@@ -816,16 +819,55 @@ static void test_exclusive_target_open_paths(void)
 	assert(fstat(fd, &info) == 0 && S_ISREG(info.st_mode));
 	assert((fcntl(fd, F_GETFL) & O_ACCMODE) == O_RDONLY);
 	assert(close(fd) == 0);
+	fd = swapz_primary_open_target_checked_partuuid_paths_mode(
+		target, uuid_path, partuuid_path, O_RDONLY);
+	assert(fd >= 0);
+	assert(close(fd) == 0);
+	fd = swapz_primary_open_target_checked_partuuid_paths_mode(
+		target, uuid_path, partuuid_path, O_RDWR | O_EXCL);
+	assert(fd >= 0);
+	assert((fcntl(fd, F_GETFL) & O_ACCMODE) == O_RDWR);
+	assert(close(fd) == 0);
+	assert(unlink(uuid_path) == 0);
+	assert(swapz_primary_open_target_checked_partuuid_paths_mode(
+		target, uuid_path, partuuid_path, O_RDONLY) < 0);
+	assert(errno == ENODEV);
+	assert(swapz_primary_header_build(
+		"0123456789abcdef0123456789abcdef", swz_header) == 0);
+	fd = open(target, O_WRONLY | O_CLOEXEC);
+	assert(fd >= 0);
+	assert(pwrite(fd, swz_header, sizeof(swz_header), 0) ==
+	       (ssize_t)sizeof(swz_header));
+	assert(close(fd) == 0);
+	fd = swapz_primary_open_target_checked_partuuid_paths_mode(
+		target, uuid_path, partuuid_path, O_RDONLY);
+	assert(fd >= 0);
+	assert(close(fd) == 0);
+	assert(symlink(broken, uuid_path) == 0);
+	assert(swapz_primary_open_target_checked_partuuid_paths_mode(
+		target, uuid_path, partuuid_path, O_RDONLY) < 0);
+	assert(errno == ENOENT);
+	assert(unlink(uuid_path) == 0);
+	assert(symlink(other, uuid_path) == 0);
+	assert(swapz_primary_open_target_checked_partuuid_paths_mode(
+		target, uuid_path, partuuid_path, O_RDONLY) < 0);
+	assert(errno == ESTALE);
+	assert(unlink(uuid_path) == 0);
+	fd = swapz_primary_open_target_checked_partuuid_paths_mode(
+		target, uuid_path, partuuid_path, O_RDONLY);
+	assert(fd >= 0);
+	assert(close(fd) == 0);
 	assert(swapz_primary_target_open_readonly() < 0);
 	assert(errno == ENOTSUP);
+	assert(symlink(target, uuid_path) == 0);
 	assert(unlink(partuuid_path) == 0);
 	assert(symlink(other, substituted) == 0);
 	assert(symlink(substituted, partuuid_path) == 0);
-	assert(swapz_primary_open_target_checked_paths(target, uuid_path,
-						     partuuid_path) < 0);
+	assert(swapz_primary_open_target_checked_paths_mode(
+		target, uuid_path, partuuid_path, O_RDWR | O_EXCL) < 0);
 	assert(errno == ENODEV);
-	assert(swapz_primary_open_target_checked_paths(target, uuid_path,
-						     NULL) < 0);
+	assert(swapz_primary_open_target_checked_paths_mode(
+		target, uuid_path, NULL, O_RDWR | O_EXCL) < 0);
 	assert(errno == EINVAL);
 	assert(unlink(partuuid_path) == 0);
 	assert(unlink(substituted) == 0);

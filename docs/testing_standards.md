@@ -3535,15 +3535,25 @@ preservation on read failure. The lifecycle caller must bind the expected hash
 to the freshly identity-checked `/dev/sda4` header before the first mutation.
 
 Any primary-swap block-zero write must use the checked descriptor primitive in
-`src/userspace/swapz-primary.c`. Production callers must first open the fixed
-target with `O_RDWR|O_EXCL`, verify the canonical UUID and PARTUUID paths name
-that same block device, and verify its major:minor and `BLKGETSIZE64` geometry.
-Use `swapz_primary_target_open_exclusive()` to perform that fixed-path open:
-it compares `/dev/sda4`, the exact by-UUID path, and the exact by-PARTUUID path
-before opening, opens the UUID path read/write and exclusively, then checks the
-opened descriptor and rechecks all three aliases to close path-substitution
-races. The helper rejects anything outside major:minor 8:4 and the exact
-16 GiB geometry.
+`src/userspace/swapz-primary.c`. Before replacing the original Linux swap
+signature, production callers must open the fixed target with `O_RDWR|O_EXCL`,
+verify the canonical UUID and PARTUUID paths name that same block device, and
+verify its major:minor and `BLKGETSIZE64` geometry. Once the SWZ header replaces
+the swap signature, the content-based by-UUID link may disappear. Post-format
+mapper and recovery operations must therefore open through the stable
+by-PARTUUID path and fixed `/dev/sda4` path, still checking exact 8:4 identity
+and 16 GiB geometry. If the by-UUID link exists, it must resolve to the opened
+device; a dangling, substituted or changing link fails closed. Its absence is
+accepted only when block zero on the opened device contains a valid SWZ header.
+The lifecycle caller must additionally validate that header's run ID against
+the durable manifest. Rootless path tests must cover a valid alias, absent
+by-UUID link with both original and valid SWZ headers, dangling link and
+mismatched link without opening host block devices.
+Use `swapz_primary_target_open_exclusive()` for the post-format fixed-path
+open; it opens the by-PARTUUID path read/write and exclusively, then checks the
+opened descriptor and rechecks `/dev/sda4`, the PARTUUID path and any present
+UUID alias to close path-substitution races. The helper rejects anything
+outside major:minor 8:4 and the exact 16 GiB geometry.
 The primitive independently requires an open read/write descriptor for the
 fixed 8:4 device and exact 16 GiB geometry, compares all 4096 current bytes to
 the caller-bound expected header before writing, handles short writes, calls

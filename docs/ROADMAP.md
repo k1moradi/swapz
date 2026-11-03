@@ -1593,3 +1593,14 @@ readiness remain open; packaged units and the global privileged execution gate
 remain disabled. The focused direct-C regression first caught a strict-compiler
 warning from the ten-byte magic declaration; the validator now compares the
 ten magic bytes while excluding the C string terminator.
+
+Post-format mapper operations now use the persistent by-PARTUUID path plus
+`/dev/sda4`, because replacing the Linux swap signature can remove the
+content-based by-UUID link. The helper allows that link to be absent only when
+the opened partition has a valid SWZ header; the lifecycle caller must also
+match its run ID. When the by-UUID link is present, it must still resolve to
+the same opened partition, and dangling or substituted links fail closed.
+Rootless coverage includes an original header without the link, the valid SWZ
+header, dangling alias and mismatched alias. This closes a path-resolution gap
+in the new initializer, not the missing lifecycle coordinator or any
+physical/boot qualification.

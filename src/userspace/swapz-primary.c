@@ -99,6 +99,8 @@ static int swapz_primary_valid_sha256(const char *digest);
 static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks);
 static int swapz_primary_reconcile_metadata_claim_at(
 	int recovery_fd, int lock_fd, uid_t expected_owner);
+static int swapz_primary_exact_read(int fd, unsigned char *buffer,
+				    size_t length);
 static int swapz_primary_record_read_at(
 	int recovery_fd, const char *name, uid_t expected_owner,
 	char *record, size_t capacity, size_t *length, struct stat *identity);
@@ -1005,12 +1007,68 @@ failed:
 	return -1;
 }
 
-static int swapz_primary_open_target_checked_paths(const char *device_path,
-						   const char *uuid_path,
-						   const char *partuuid_path)
+static int swapz_primary_optional_uuid_matches_fd(
+	const char *uuid_path, int fd)
 {
-	return swapz_primary_open_target_checked_paths_mode(
-		device_path, uuid_path, partuuid_path, O_RDWR | O_EXCL);
+	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES];
+	struct stat link_before;
+	struct stat link_after;
+	struct stat alias_info;
+	struct stat opened_info;
+
+	if (!uuid_path || fd < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (lstat(uuid_path, &link_before) < 0) {
+		if (errno != ENOENT)
+			return -1;
+		if (swapz_primary_exact_read(fd, header, sizeof(header)) < 0)
+			return -1;
+		if (!swapz_sb_valid(header, SWAPZ_PRIMARY_DEVICE_BYTES)) {
+			memset(header, 0, sizeof(header));
+			errno = ENODEV;
+			return -1;
+		}
+		memset(header, 0, sizeof(header));
+		errno = 0;
+		return 0;
+	}
+	if (stat(uuid_path, &alias_info) < 0 ||
+	    lstat(uuid_path, &link_after) < 0)
+		return -1;
+	if (link_before.st_dev != link_after.st_dev ||
+	    link_before.st_ino != link_after.st_ino ||
+	    link_before.st_mode != link_after.st_mode) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (fstat(fd, &opened_info) < 0)
+		return -1;
+	if (!swapz_primary_same_target_identity(&alias_info, &opened_info)) {
+		errno = ESTALE;
+		return -1;
+	}
+	return 0;
+}
+
+static int swapz_primary_open_target_checked_partuuid_paths_mode(
+	const char *device_path, const char *uuid_path, const char *partuuid_path,
+	int open_flags)
+{
+	int fd = swapz_primary_open_target_checked_paths_mode(
+		device_path, partuuid_path, partuuid_path, open_flags);
+
+	if (fd < 0)
+		return -1;
+	if (swapz_primary_optional_uuid_matches_fd(uuid_path, fd) < 0) {
+		int saved_errno = errno;
+
+		(void)close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	return fd;
 }
 
 static int swapz_primary_target_open_readonly(void)
@@ -1019,7 +1077,7 @@ static int swapz_primary_target_open_readonly(void)
 	errno = ENOTSUP;
 	return -1;
 #else
-	return swapz_primary_open_target_checked_paths_mode(
+	return swapz_primary_open_target_checked_partuuid_paths_mode(
 		SWAPZ_PRIMARY_DEVICE_PATH, SWAPZ_PRIMARY_UUID_PATH,
 		SWAPZ_PRIMARY_PARTUUID_PATH, O_RDONLY);
 #endif
@@ -1031,9 +1089,9 @@ int swapz_primary_target_open_exclusive(void)
 	errno = ENOTSUP;
 	return -1;
 #else
-	return swapz_primary_open_target_checked_paths(
+	return swapz_primary_open_target_checked_partuuid_paths_mode(
 		SWAPZ_PRIMARY_DEVICE_PATH, SWAPZ_PRIMARY_UUID_PATH,
-		SWAPZ_PRIMARY_PARTUUID_PATH);
+		SWAPZ_PRIMARY_PARTUUID_PATH, O_RDWR | O_EXCL);
 #endif
 }
 

@@ -86,7 +86,8 @@ int swapz_primary_manifest_write_at(
 int swapz_primary_manifest_read_at(
 	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner,
 	struct swapz_primary_manifest *manifest);
-/* Open only the fixed, identity-checked /dev/sda4 target, exclusively. */
+/* Open only the fixed 8:4 target through PARTUUID after SWZ formatting;
+ * a present content-UUID alias must still resolve to the opened partition. */
 int swapz_primary_target_open_exclusive(void);
 /* Production callers must open the target O_RDWR|O_EXCL before calling. */
 int swapz_primary_write_header_checked_fd(
