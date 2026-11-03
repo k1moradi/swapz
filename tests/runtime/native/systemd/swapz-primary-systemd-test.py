@@ -184,6 +184,7 @@ class GeneratorTests(unittest.TestCase):
         self.assertFalse((target / "50-selected-target.conf").exists())
 
     def test_hibernation_guards_are_generated_independently_of_mapper_activation(self) -> None:
+        expected_encoded = PARTUUID.replace("-", r"\x2d")
         result = self.run_generator()
         self.assertEqual(result.returncode, 0, result.stderr)
         expected = (
@@ -482,6 +483,12 @@ class BootVerifierTests(unittest.TestCase):
         self.report.chmod(0o700)
         self.recovery.chmod(0o700)
         (self.proc / "sys" / "kernel" / "random").mkdir(parents=True)
+        # Model a readable running-kernel hibernation state with no resume
+        # target configured. Individual tests override these files when they
+        # exercise conflicting or unreadable resume configuration.
+        (self.proc / "cmdline").write_text("quiet\n", encoding="ascii")
+        (self.sys / "power").mkdir(parents=True)
+        (self.sys / "power" / "resume").write_text("0:0\n", encoding="ascii")
         (self.sys / "module" / "dm_swapz" / "parameters").mkdir(parents=True)
         (self.dev / "disk" / "by-partuuid").mkdir(parents=True)
         (self.dev / "disk" / "by-uuid").mkdir(parents=True)
