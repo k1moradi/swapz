@@ -33,6 +33,22 @@ static void set_payload(unsigned int length, unsigned int salt)
 		payload[index] = (uint8_t)((index * 13U + salt * 17U) & 255U);
 }
 
+/* Independent bitwise Castagnoli oracle; used only in the native regression. */
+static swapz_u32 reference_crc32c(const swapz_u8 *bytes, swapz_u32 length)
+{
+	swapz_u32 state = ~0U;
+	swapz_u32 byte_index;
+
+	for (byte_index = 0; byte_index < length; ++byte_index) {
+		unsigned int bit_index;
+
+		state ^= bytes[byte_index];
+		for (bit_index = 0; bit_index < 8U; ++bit_index)
+			state = (state >> 1) ^ (0x82f63b78U & (0U - (state & 1U)));
+	}
+	return ~state;
+}
+
 static int test_crc_known_vector(void)
 {
 	CHECK(swapz_crc32c_bytes("123456789", 9) == 0xe3069283U);
@@ -235,13 +251,24 @@ static int test_alignment_and_payload_boundaries(void)
 	const uint8_t *readable;
 	uint8_t *bytes = misaligned_extent + 1U;
 	uint8_t *input = misaligned_payload + 1U;
+	static const swapz_u32 crc_lengths[] = {
+		0U, 1U, 7U, 8U, 9U, SWAPZ_MAX_COMPRESSED - 1U,
+		SWAPZ_MAX_COMPRESSED,
+	};
 	unsigned int index;
 
 	for (index = 0; index < SWAPZ_MAX_COMPRESSED; ++index)
 		input[index] = (uint8_t)((index * 29U + 7U) & 255U);
 	memcpy(payload, input, SWAPZ_MAX_COMPRESSED);
-	CHECK(swapz_crc32c_bytes(input, SWAPZ_MAX_COMPRESSED) ==
-	      swapz_crc32c_bytes(payload, SWAPZ_MAX_COMPRESSED));
+	for (index = 0; index < sizeof(crc_lengths) / sizeof(crc_lengths[0]);
+	     ++index) {
+		swapz_u32 length = crc_lengths[index];
+
+		CHECK(swapz_crc32c_bytes(input, length) ==
+		      reference_crc32c(input, length));
+		CHECK(swapz_crc32c_bytes(input, length) ==
+		      swapz_crc32c_bytes(payload, length));
+	}
 
 	CHECK(swapz_begin(&b, bytes, SWAPZ_BLOCK_BYTES, 101) == 0);
 	CHECK(swapz_append_encoded(&b, 17, 1, input, 1,

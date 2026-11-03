@@ -210,14 +210,26 @@ static int chosen_length(int baseline, int candidate)
 	return baseline;
 }
 
+/* Native fixtures must encode the canonical little-endian Delta64 words,
+ * independently of the host's numeric byte order. */
 static void put_u32(swapz_u8 *bytes, swapz_u32 value)
 {
-	memcpy(bytes, &value, sizeof(value));
+	unsigned int byte_index;
+
+	for (byte_index = 0; byte_index < sizeof(value); ++byte_index) {
+		bytes[byte_index] = (swapz_u8)value;
+		value >>= 8;
+	}
 }
 
 static void put_u64(swapz_u8 *bytes, uint64_t value)
 {
-	memcpy(bytes, &value, sizeof(value));
+	unsigned int byte_index;
+
+	for (byte_index = 0; byte_index < sizeof(value); ++byte_index) {
+		bytes[byte_index] = (swapz_u8)value;
+		value >>= 8;
+	}
 }
 
 static int verify_delta64_known_answer(void)
@@ -234,9 +246,10 @@ static int verify_delta64_known_answer(void)
 	};
 	swapz_u32 index;
 
-	memset(misaligned_input, 0, SWAPZ_BLOCK_BYTES);
-	memcpy(misaligned_input, input_prefix, sizeof(input_prefix));
-	if (swapz_predict_delta64_scalar(misaligned_input, scalar_transform_page) ||
+	memset(misaligned_input + 1U, 0, SWAPZ_BLOCK_BYTES);
+	memcpy(misaligned_input + 1U, input_prefix, sizeof(input_prefix));
+	if (swapz_predict_delta64_scalar(misaligned_input + 1U,
+					 scalar_transform_page) ||
 	    memcmp(scalar_transform_page, expected_prefix, sizeof(expected_prefix)))
 		return -EUCLEAN;
 	for (index = (swapz_u32)sizeof(expected_prefix);
@@ -245,7 +258,7 @@ static int verify_delta64_known_answer(void)
 			return -EUCLEAN;
 	swapz_unpredict_delta64_scalar(scalar_transform_page,
 					 scalar_recovered_page);
-	return memcmp(scalar_recovered_page, misaligned_input,
+	return memcmp(scalar_recovered_page, misaligned_input + 1U,
 		      SWAPZ_BLOCK_BYTES) ? -EUCLEAN : 0;
 }
 
@@ -836,18 +849,21 @@ static int benchmark_backend(struct backend_benchmark *backend, swapz_u32 count)
 		if (memcmp(transform_page, delta64_pages[index], SWAPZ_BLOCK_BYTES)) return -EUCLEAN;
 		backend->unpredict(delta64_pages[index], recovered_page);
 		if (memcmp(recovered_page, evidence_pages[index], SWAPZ_BLOCK_BYTES)) return -EUCLEAN;
+		/* Deliberately offset every pointer on every evidence page, not only
+		 * the first all-zero page. Include nonzero carries and RAW candidates. */
+		memcpy(misaligned_input + 1U, evidence_pages[index],
+		       SWAPZ_BLOCK_BYTES);
+		if (backend->predict(misaligned_input + 1U,
+				     misaligned_output + 3U) ||
+		    memcmp(misaligned_output + 3U, delta64_pages[index],
+			   SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
+		backend->unpredict(misaligned_output + 3U,
+					   misaligned_recovered + 5U);
+		if (memcmp(misaligned_recovered + 5U, evidence_pages[index],
+			   SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
 	}
-	/* Deliberately offset every pointer: no backend may depend on page/vector
-	 * alignment that the public predictor contract does not require. */
-	memcpy(misaligned_input + 1U, evidence_pages[0], SWAPZ_BLOCK_BYTES);
-	if (backend->predict(misaligned_input + 1U, misaligned_output + 3U) ||
-	    memcmp(misaligned_output + 3U, delta64_pages[0],
-		   SWAPZ_BLOCK_BYTES))
-		return -EUCLEAN;
-	backend->unpredict(misaligned_output + 3U, misaligned_recovered + 5U);
-	if (memcmp(misaligned_recovered + 5U, evidence_pages[0],
-		   SWAPZ_BLOCK_BYTES))
-		return -EUCLEAN;
 	start = now_ns();
 	for (repeat = 0; repeat < TRANSFORM_BENCH_REPEATS; ++repeat)
 		for (index = 0; index < count; ++index) {
@@ -906,8 +922,8 @@ static int verify_shuffle_backends(swapz_u32 count)
 			for (byte = 0; byte < SWAPZ_PREDICTOR_U64_BYTES; ++byte)
 				shuffle_reference[byte * words + word] =
 					page[word * SWAPZ_PREDICTOR_U64_BYTES + byte];
-		if (!index)
-			memcpy(misaligned_input + 1U, page, SWAPZ_BLOCK_BYTES);
+		/* Revisit every corpus page with all pointers deliberately unaligned. */
+		memcpy(misaligned_input + 1U, page, SWAPZ_BLOCK_BYTES);
 		for (backend = 0; backend < backend_count; ++backend) {
 			backends[backend].shuffle(page, transform_page);
 			if (memcmp(transform_page, shuffle_reference, SWAPZ_BLOCK_BYTES)) {
@@ -921,18 +937,16 @@ static int verify_shuffle_backends(swapz_u32 count)
 					backends[backend].name, index);
 				return -EUCLEAN;
 			}
-			if (!index) {
-				backends[backend].shuffle(misaligned_input + 1U,
-							 misaligned_output + 3U);
-				if (memcmp(misaligned_output + 3U, shuffle_reference,
-					   SWAPZ_BLOCK_BYTES))
-					return -EUCLEAN;
-				backends[backend].unshuffle(misaligned_output + 3U,
-							   misaligned_recovered + 5U);
-				if (memcmp(misaligned_recovered + 5U, page,
-					   SWAPZ_BLOCK_BYTES))
-					return -EUCLEAN;
-			}
+			backends[backend].shuffle(misaligned_input + 1U,
+						 misaligned_output + 3U);
+			if (memcmp(misaligned_output + 3U, shuffle_reference,
+				   SWAPZ_BLOCK_BYTES))
+				return -EUCLEAN;
+			backends[backend].unshuffle(misaligned_output + 3U,
+						   misaligned_recovered + 5U);
+			if (memcmp(misaligned_recovered + 5U, page,
+				   SWAPZ_BLOCK_BYTES))
+				return -EUCLEAN;
 		}
 		/* Dispatched DELTA64_SHUF8 equals shuffle(delta64) and inverts. */
 		if (swapz_predict_delta64_shuf8(page, shuffle_scratch, transform_page))
@@ -956,20 +970,18 @@ static int verify_shuffle_backends(swapz_u32 count)
 						     recovered_page);
 		if (memcmp(recovered_page, page, SWAPZ_BLOCK_BYTES))
 			return -EUCLEAN;
-		if (!index) {
-			if (swapz_predict_delta64_shuf8(
-				    misaligned_input + 1U, misaligned_scratch + 3U,
-				    misaligned_output + 5U) ||
-			    memcmp(misaligned_output + 5U, shuffle_reference,
-				   SWAPZ_BLOCK_BYTES))
-				return -EUCLEAN;
-			swapz_unpredict_delta64_shuf8(
-				misaligned_output + 5U, misaligned_scratch + 3U,
-				misaligned_recovered + 7U);
-			if (memcmp(misaligned_recovered + 7U, page,
-				   SWAPZ_BLOCK_BYTES))
-				return -EUCLEAN;
-		}
+		if (swapz_predict_delta64_shuf8(
+			    misaligned_input + 1U, misaligned_scratch + 3U,
+			    misaligned_output + 5U) ||
+		    memcmp(misaligned_output + 5U, shuffle_reference,
+			   SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
+		swapz_unpredict_delta64_shuf8(
+			misaligned_output + 5U, misaligned_scratch + 3U,
+			misaligned_recovered + 7U);
+		if (memcmp(misaligned_recovered + 7U, page,
+			   SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
 	}
 	printf("SWAPZ_PREDICTOR_SHUFFLE8_BACKENDS=%u pages=%u byte_exact=1\n",
 	       backend_count, count);

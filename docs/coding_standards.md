@@ -967,9 +967,13 @@ big-endian ISA backend has direct byte-exact runtime qualification. Predictor
 page pointers may be unaligned, but transform input/output and combined-shuffle
 scratch must be distinct, non-overlapping 4KiB buffers. Native qualification
 must deliberately offset these buffers for scalar and every executable ISA
-backend. Native CRC32C wide-word acceleration likewise runs only where host
-numeric byte order matches the byte stream; other hosts use the portable
-byte-stream implementation.
+backend across the full zero, repetitive, entropy and structured corpus, not
+only the first zero page. Native integer corpus words are explicitly
+little-endian rather than host-endian. Native CRC32C wide-word acceleration
+likewise runs only where host numeric byte order matches the byte stream;
+other hosts use the portable byte-stream implementation. The native codec
+tests compare aligned and misaligned CRC32C with an independent bitwise
+Castagnoli oracle at empty, tail, wide-word and maximum payload lengths.
 
 Production attribution uses separate cacheline-aligned single-writer preparation
 and ordered worker accumulators. Count eligible baselines, classifier passes, transform
