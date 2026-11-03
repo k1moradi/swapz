@@ -4661,8 +4661,9 @@ Mandatory Python qualification suites must remain syntactically valid; a path th
 The isolated systemd fixture must exercise the runtime-health helper and unit
 without reading or changing host swap state. Cover exact mapper/run/backing
 identity, foreign mapper rejection, active swap inventory and capacity,
-monitoring-command failure as degraded evidence, low-noise unchanged polling,
-kernel/systemd telemetry, and sustained GC pressure without progress. Target
+configured backing-path disappearance as a hard failure, monitoring-command
+failure as degraded evidence, low-noise unchanged polling, kernel/systemd
+telemetry, and sustained GC pressure without progress. Target
 health failures must remain observable rather than causing the monitor service
 to restart the primary lifecycle; only monitor-process failure is eligible for
 `Restart=on-failure`.

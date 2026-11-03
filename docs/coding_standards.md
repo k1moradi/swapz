@@ -2420,9 +2420,13 @@ not repetitive success. Bind the mapper to the ACTIVE run ID and exact selected
 backing identity, then observe active swap inventory, target terminal/error and
 lower/logical I/O counters, GC progress/headroom pressure, occupancy/remaining
 capacity, backing availability, mapper/passive-swap unit state, and attributable
-kernel errors. Missing telemetry is degraded/incomplete evidence; it never
-authorizes destructive recovery. Sustained GC-stall reporting requires repeated
-pressure/headroom evidence without GC victim/page progress.
+kernel errors. Once the configured PARTUUID parses successfully, an absent
+by-PARTUUID path is a definite backing-device failure even if its prior
+major:minor can no longer be queried; preserve the parsed identity long enough
+to report that distinction. Missing or uninspectable telemetry for an existing
+device is degraded/incomplete evidence; it never authorizes destructive
+recovery. Sustained GC-stall reporting requires repeated pressure/headroom
+evidence without GC victim/page progress.
 
 Hibernation/resume is unsupported because primary swapz mapping authority is
 volatile across a fresh boot. Arming and boot preflight must fail closed when

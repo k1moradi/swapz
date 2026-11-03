@@ -1144,6 +1144,15 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("swap_remaining_kib=", result.stderr)
         self.assertIn(f"mapper_uuid=SWAPZ-PRIMARY-{ACTIVE_RUN_ID}", result.stderr)
 
+    def test_backing_device_disappearance_is_failure_not_degraded(self) -> None:
+        selected = self.dev / "disk" / "by-partuuid" / PARTUUID
+        selected.unlink()
+        result = self.run_helper("once")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", result.stderr)
+        self.assertIn("backing_device_unavailable", result.stderr)
+        self.assertNotIn("selected_target_identity_unavailable", result.stderr)
+
     def test_foreign_mapper_is_failure_but_monitor_keeps_observing(self) -> None:
         env = self.env.copy()
         env["MOCK_DM_UUID"] = "SWAPZ-PRIMARY-" + "f" * 32

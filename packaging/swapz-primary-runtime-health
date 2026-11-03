@@ -101,6 +101,11 @@ manager_target_identity()
 	selected_partuuid=$(printf '%s\n' "$encoded" | sed 's/\\x2d/-/g')
 	printf '%s\n' "$selected_partuuid" | grep -Eq '^[0-9a-f][0-9a-f-]{6,62}[0-9a-f]$' || return 1
 	selected_path=$dev_root/disk/by-partuuid/$selected_partuuid
+	selected_major_minor=unavailable
+	# Keep the parsed selected identity even when removable media vanished.
+	# The observer can then report definite absence as FAIL instead of
+	# misclassifying it as unavailable telemetry.
+	[ -e "$selected_path" ] || return 0
 	selected_major_minor=$(path_major_minor "$selected_path") || return 1
 	return 0
 }
