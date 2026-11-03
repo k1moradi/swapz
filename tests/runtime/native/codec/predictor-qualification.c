@@ -1101,6 +1101,127 @@ static int benchmark_sse2_forward_ab(
 	return 0;
 }
 
+/*
+ * The randomized codec.c tests cover the serialized envelope, but their
+ * payload bytes are deliberately arbitrary. Verify actual LZ4 output here:
+ * encode a full page, store it in a real unaligned SWZ extent, validate the
+ * descriptor/payload CRC, then decompress and invert the selected predictor.
+ * Each stage owns distinct source/output buffers; no in-place transform or
+ * overlapping LZ4 input/output is permitted.
+ */
+static swapz_u8 stored_roundtrip_extent[SWAPZ_BLOCK_BYTES + 1U];
+
+static int verify_stored_page_roundtrips(swapz_u32 page_count)
+{
+	static const swapz_u8 encoding_modes[] = {
+		SWAPZ_ENCODING_LZ4,
+		SWAPZ_ENCODING_DELTA64,
+		SWAPZ_ENCODING_DELTA64_SHUF8,
+	};
+	swapz_u32 compressed_counts[3] = { 0 };
+	swapz_u32 nonzero_counts[3] = { 0 };
+	swapz_u32 no_fit_counts[3] = { 0 };
+	swapz_u32 page_index;
+	unsigned int mode_index;
+
+	for (page_index = 0; page_index < page_count; ++page_index) {
+		const swapz_u8 *original_page = evidence_pages[page_index];
+		int nonzero = 0;
+		swapz_u32 byte_index;
+
+		for (byte_index = 0; byte_index < SWAPZ_BLOCK_BYTES; ++byte_index)
+			if (original_page[byte_index]) {
+				nonzero = 1;
+				break;
+			}
+		for (mode_index = 0;
+		     mode_index < sizeof(encoding_modes) / sizeof(encoding_modes[0]);
+		     ++mode_index) {
+			struct swapz_builder builder;
+			struct swapz_decoded decoded;
+			const swapz_u8 *stored_payload = NULL;
+			const swapz_u8 *compression_input = original_page;
+			swapz_u8 encoding = encoding_modes[mode_index];
+			swapz_u8 *extent_bytes = stored_roundtrip_extent + 1U;
+			int compressed_length, decoded_length, error;
+
+			if (encoding == SWAPZ_ENCODING_DELTA64) {
+				if (swapz_predict_delta64(original_page, transform_page))
+					return -EUCLEAN;
+				compression_input = transform_page;
+			} else if (encoding == SWAPZ_ENCODING_DELTA64_SHUF8) {
+				if (swapz_predict_delta64_shuf8(
+					    original_page, shuffle_scratch, transform_page))
+					return -EUCLEAN;
+				compression_input = transform_page;
+			}
+			compressed_length = LZ4_compress_fast(
+				(const char *)compression_input, compressed_page,
+				SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED, 1);
+			if (compressed_length < 0 ||
+			    compressed_length > (int)SWAPZ_MAX_COMPRESSED)
+				return -EUCLEAN;
+			if (!compressed_length) {
+				no_fit_counts[mode_index]++;
+				continue; /* Valid no-fit: RAW is not a SWZ record. */
+			}
+
+			error = swapz_begin(&builder, extent_bytes, SWAPZ_BLOCK_BYTES,
+					    page_index + 1U);
+			if (!error)
+				error = swapz_append_prehashed_encoded(
+					&builder, page_index, 1U, compressed_page,
+					(swapz_u16)compressed_length,
+					swapz_crc32c_bytes(
+						compressed_page, (swapz_u32)compressed_length),
+					encoding);
+			if (!error)
+				error = swapz_seal(&builder);
+			if (!error)
+				error = swapz_lookup(extent_bytes, SWAPZ_BLOCK_BYTES,
+						     0, &decoded, &stored_payload);
+			if (error || !stored_payload ||
+			    decoded.encoding != encoding ||
+			    decoded.payload_length != (swapz_u16)compressed_length ||
+			    decoded.logical_page != page_index)
+				return -EUCLEAN;
+
+			decoded_length = LZ4_decompress_safe(
+				(const char *)stored_payload, (char *)scalar_transform_page,
+				decoded.payload_length, SWAPZ_BLOCK_BYTES);
+			if (decoded_length != (int)SWAPZ_BLOCK_BYTES ||
+			    memcmp(scalar_transform_page, compression_input,
+				   SWAPZ_BLOCK_BYTES))
+				return -EBADMSG;
+			if (encoding == SWAPZ_ENCODING_DELTA64)
+				swapz_unpredict_delta64(scalar_transform_page,
+							recovered_page);
+			else if (encoding == SWAPZ_ENCODING_DELTA64_SHUF8)
+				swapz_unpredict_delta64_shuf8(
+					scalar_transform_page, shuffle_scratch,
+					recovered_page);
+			else
+				memcpy(recovered_page, scalar_transform_page,
+				       SWAPZ_BLOCK_BYTES);
+			if (memcmp(recovered_page, original_page, SWAPZ_BLOCK_BYTES))
+				return -EBADMSG;
+			compressed_counts[mode_index]++;
+			nonzero_counts[mode_index] += nonzero;
+		}
+	}
+	for (mode_index = 0;
+	     mode_index < sizeof(encoding_modes) / sizeof(encoding_modes[0]);
+	     ++mode_index)
+		if (!compressed_counts[mode_index] || !nonzero_counts[mode_index] ||
+		    !no_fit_counts[mode_index])
+			return -EUCLEAN;
+
+	printf("SWAPZ_STORED_PAGE_ROUNDTRIPS=%u,%u,%u raw_no_fit=%u,%u,%u\n",
+	       compressed_counts[0], compressed_counts[1], compressed_counts[2],
+	       no_fit_counts[0], no_fit_counts[1], no_fit_counts[2]);
+	return 0;
+}
+
 static const struct backend_benchmark *find_backend(const struct backend_benchmark *backends,
 						     unsigned int count, const char *name)
 {
@@ -1362,6 +1483,7 @@ int main(int argc, char **argv)
 	}
 	error = build_delta64_pages(count);
 	if (!error) error = verify_shuffle_backends(count);
+	if (!error) error = verify_stored_page_roundtrips(count);
 	if (!error) error = collect_backend_benchmarks(backend_benchmarks, &backend_count, count);
 	if (!error) error = benchmark_sse2_forward_ab(count, sse2_forward_ab);
 	if (!error) error = benchmark_second_lz4(count, &second_lz4_ns_per_page);

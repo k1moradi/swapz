@@ -2851,6 +2851,16 @@ addresses, and every stored encoding. These cases supplement, rather than
 replace, the full-page structured/entropy predictor corpus and independent
 scalar/SIMD transform/shuffle oracles.
 
+Distinguish the stored-byte *envelope* oracle from a complete compressed page
+roundtrip: arbitrary record payload bytes verify descriptors, CRC, bounds and
+unaligned serialization but are not themselves valid LZ4 streams. The native
+predictor qualification must additionally compress real pages under each
+LZ4/DELTA64/DELTA64_SHUF8 representation, persist them through the exact
+production SWZ codec, verify the stored CRC/encoding/length, decompress LZ4,
+invert the selected transform, and compare all 4096 original bytes. Require
+nonzero successes and genuine no-fit controls for every encoding. Keep all
+compression, transform, decompression and extent buffers non-overlapping.
+
 The delta64 transform unit is one 4KiB logical page, never a whole packed
 extent. Direct production-C coverage must prove ordinary LZ4 and delta64 records
 share the unchanged 16-byte SWZ record size, decode the encoding bit exactly,

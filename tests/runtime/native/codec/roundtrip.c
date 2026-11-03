@@ -290,6 +290,11 @@ static int test_alignment_and_payload_boundaries(void)
 	return 0;
 }
 
+/*
+ * Record-envelope oracle: payloads are arbitrary stored bytes, not valid
+ * LZ4 streams. Full-page LZ4 -> SWZ -> decode -> inverse qualification lives
+ * in predictor-qualification.c and uses the exact production codec.c.
+ */
 static swapz_u32 next_random_word(swapz_u32 *state)
 {
 	swapz_u32 value = *state;
