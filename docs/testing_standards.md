@@ -3562,6 +3562,9 @@ qualification record and independently hash the live binary artifacts before
 it can be enabled. Changes to this build metadata alter the qualified module
 and userspace artifacts and therefore require exact-source owner
 qualification before live activation.
+The generated header must be written atomically and keep its timestamp when
+its contents are unchanged; repeated `make test` invocations must retain the
+existing incremental-build contract.
 
 The rootless package lifecycle regression must install a deterministic private
 build-provenance header into its sandbox, compile `swapzctl` with that header,

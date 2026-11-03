@@ -29,9 +29,11 @@ endif
 
 .PHONY: build/source-build-info-force
 build/source-build-info.h: build/source-build-info-force
-	@mkdir -p build
-	@printf '%s\n' '#define SWAPZ_BUILD_SOURCE_SHA "$(SWAPZ_BUILD_SOURCE_SHA)"' \
-		'#define SWAPZ_BUILD_SOURCE_CLEAN $(SWAPZ_BUILD_SOURCE_CLEAN)' > "$@"
+	@set -eu; mkdir -p build; tmp="$@.tmp.$$$$"; \
+	  printf '%s\n' '#define SWAPZ_BUILD_SOURCE_SHA "$(SWAPZ_BUILD_SOURCE_SHA)"' \
+		'#define SWAPZ_BUILD_SOURCE_CLEAN $(SWAPZ_BUILD_SOURCE_CLEAN)' > "$$tmp"; \
+	  if ! cmp -s "$$tmp" "$@"; then mv -f "$$tmp" "$@"; \
+	  else rm -f "$$tmp"; fi
 
 .PHONY: all install uninstall test fast_test
 .PHONY: build/kernel/experimental/dm-swapz.ko

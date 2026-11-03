@@ -1470,6 +1470,11 @@ qualification: the manager still needs an accepted owner-report reader, live
 module/userspace artifact hash comparison, and lifecycle integration. This
 build-input change alters both qualified artifacts, so a fresh exact-source
 owner qualification is required before any primary live-swap execution.
+The initial native CI run caught that unconditional provenance-header writes
+triggered an unnecessary `swapzctl` rebuild in the repeated-build contract.
+Header generation now uses a same-directory temporary and atomic replacement
+only when the bytes change, preserving both failure safety and incremental
+build reuse.
 The DKMS lifecycle regression now supplies deterministic private provenance
 within its sandbox and verifies that the installed source manifest contains
 the exact header used to compile the packaged control binary; production
