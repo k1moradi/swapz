@@ -246,6 +246,8 @@ class UnitContractTests(unittest.TestCase):
         self.assertIn("After=-.mount systemd-modules-load.service dev-mapper-swapz\\x2dprimary.swap", service)
         self.assertIn("Before=swap.target shutdown.target", service)
         self.assertIn("WantedBy=swap.target", service)
+        self.assertIn("RuntimeDirectory=swapz", service)
+        self.assertIn("RuntimeDirectoryMode=0700", service)
         self.assertNotIn("PartOf=dev-mapper", service)
         self.assertIn("Conflicts=shutdown.target", service)
         self.assertIn("ExecStopPost=-@SWAPZ_SBINDIR@/swapz-primary-runtime-health stop-observe", service)
@@ -728,6 +730,8 @@ class BootVerifierTests(unittest.TestCase):
         same_boot = self.run_verifier("preflight")
         self.assertNotEqual(same_boot.returncode, 0)
         self.assertIn("owner reboot has not occurred", same_boot.stderr)
+        same_boot_runtime = self.report / "runtime" / "primary-execution.env"
+        self.assertFalse(same_boot_runtime.exists())
         self.write_boot_id(BOOT_B)
         self.write_proc_swaps(active=True)
         self.write_active_transaction()
@@ -760,6 +764,16 @@ class BootVerifierTests(unittest.TestCase):
         preflight = self.run_verifier("preflight")
         self.assertEqual(preflight.returncode, 0, preflight.stderr)
         self.assertIn("PRIMARY_BOOT_PREFLIGHT=PASS", preflight.stdout)
+        runtime_authorization = (
+            self.report / "runtime" / "primary-execution.env")
+        self.assertEqual(
+            runtime_authorization.read_text(encoding="ascii"),
+            "schema=swapz-primary-execution-v1\n"
+            f"boot_id={BOOT_B}\n"
+            f"source_sha={SOURCE_SHA}\n"
+            f"partuuid={PARTUUID}\n"
+            f"target_size_bytes={TARGET_BYTES}\n")
+        self.assertEqual(runtime_authorization.stat().st_mode & 0o777, 0o600)
         observed = self.run_verifier("observe")
         self.assertEqual(observed.returncode, 0, observed.stderr)
         self.assertIn("COLD_BOOT_OBSERVATION=PASS", observed.stdout)
@@ -898,6 +912,23 @@ class BootVerifierTests(unittest.TestCase):
         result = self.run_verifier("preflight", env=env)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("installed module bytes changed after arming", result.stderr)
+
+    def test_failed_repreflight_revokes_runtime_authorization(self) -> None:
+        self.arm_then_reboot()
+        first = self.run_verifier("preflight")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        runtime_authorization = (
+            self.report / "runtime" / "primary-execution.env")
+        self.assertTrue(runtime_authorization.is_file())
+
+        env = self.env.copy()
+        env["MOCK_MODULE_SHA"] = "f" * 64
+        rejected = self.run_verifier("preflight", env=env)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn(
+            "installed module bytes changed after arming", rejected.stderr)
+        self.assertFalse(runtime_authorization.exists())
+
 
     def test_foreign_mapper_uuid_with_valid_prefix_cannot_pass(self) -> None:
         self.arm_then_reboot()
