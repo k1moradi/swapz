@@ -561,7 +561,9 @@ volume or qualify maximum-size occupancy, RAW-heavy sustained writes, allocation
 churn or GC. Require the target's failed-I/O counter to remain zero. Until loaded
 worst-case RAW/GC tests pass, report the value as a
 source-derived authority admission limit and keep maximum-capacity operation
-unqualified.
+unqualified. Report-parser and Make-interface fixtures must synthesize this
+same 3,727,616-page / 15,268,315,136-byte boundary; the retired pre-headroom
+3,727,872-page marker is invalid evidence and must not be accepted as current.
 
 The direct authority suite must also run an allocation-free preflight for the
 currently selected-card geometry recorded in AGENT_CONTEXT.md; this is a
