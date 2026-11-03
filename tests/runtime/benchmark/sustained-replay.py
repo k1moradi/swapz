@@ -33,6 +33,8 @@ from evidence_io import write_new_json
 PAGE = 4096
 SCHEMA = "swapz-sustained-replay-v1"
 REPLAY = runpy.run_path(str(Path(__file__).with_name("io-replay.py")))
+QUALIFICATION = runpy.run_path(
+    str(Path(__file__).with_name("qualification.py")))
 
 
 class BenchmarkInterrupted(Exception):
@@ -975,6 +977,10 @@ def run(args):
                "candidate": args.candidate, "source_sha": args.source_sha,
                "device_identity": identity}
     args._partial_report = partial
+    if physical:
+        partial["loaded_module_provenance"] = (
+            QUALIFICATION["capture_loaded_module_provenance"](
+                args.source_sha, args.candidate == "swapz"))
 
     fill_stream, fill_map, fill_view, fill_chunks = read_fixture(fill_path)
     churn_stream, churn_map, churn_view, churn_chunks = read_fixture(churn_path)
@@ -1094,6 +1100,8 @@ def run(args):
                 "schema": SCHEMA, "verdict": "PASS",
                 "workload_id": args.workload_id, "candidate": args.candidate,
                 "source_sha": args.source_sha, "device_identity": identity,
+                "loaded_module_provenance":
+                    partial.get("loaded_module_provenance"),
                 "logical_pages": logical, "occupied_pages": occupied,
                 "hot_pages": hot, "occupancy_percent": args.occupancy_percent,
                 "hot_percent": args.hot_percent, "qd": args.qd,

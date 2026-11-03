@@ -412,6 +412,10 @@ def run(args):
         "content": CONTENT_DEFINITION, "swap_inventory_before": rows_before,
         "swap_device_identity": identity,
     }
+    if args.expected_swap_device:
+        args._partial_report["loaded_module_provenance"] = (
+            QUALIFICATION["capture_loaded_module_provenance"](
+                args.source_sha, args.candidate == "swapz"))
     lower_disk = lower_disk_name(args.expected_swap_device)
     pre_quiet = quiet_window()
     lower_before = REPLAY["lower_stat"](lower_disk)
@@ -619,6 +623,8 @@ def run(args):
             "swap_inventory_before": rows_before,
             "swap_inventory_after": rows_after,
             "swap_device_identity": identity,
+            "loaded_module_provenance":
+                args._partial_report.get("loaded_module_provenance"),
             "cgroup_before": cgroup_before, "cgroup_after": cgroup_after,
             "host_cpu": host_cpu,
             "performance_screening": {

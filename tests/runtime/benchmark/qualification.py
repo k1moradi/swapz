@@ -167,9 +167,62 @@ def paired_ci95(values: list[float]) -> dict:
     return {"n": 5, "mean": mean, "lower": mean - half, "upper": mean + half}
 
 
+def capture_loaded_module_provenance(
+        source_sha: str, expect_loaded: bool,
+        parameter_base: Path = Path("/sys/module/dm_swapz/parameters")) -> dict:
+    """Read and validate the exact module state used by a physical arm."""
+    if not re.fullmatch(r"[0-9a-f]{40}", source_sha or ""):
+        raise ValueError("physical module provenance requires exact source SHA")
+    if not parameter_base.is_dir():
+        if expect_loaded:
+            raise ValueError("physical swapz arm requires loaded dm_swapz")
+        return {"status": "NOT_LOADED"}
+    if not expect_loaded:
+        raise ValueError("physical raw arm requires dm_swapz to be unloaded")
+
+    def read_parameter(name: str) -> str:
+        try:
+            value = (parameter_base / name).read_text(
+                encoding="ascii").strip()
+        except (OSError, UnicodeError) as exc:
+            raise ValueError(
+                f"cannot read loaded dm_swapz {name}: {exc}") from exc
+        if not value or any(ord(character) < 0x20 for character in value):
+            raise ValueError(f"loaded dm_swapz {name} is malformed")
+        return value
+
+    observed = {
+        "status": "LOADED",
+        "build_source_sha": read_parameter("build_source_sha"),
+        "build_source_clean": read_parameter("build_source_clean"),
+        "allow_physical_backing": read_parameter("allow_physical_backing"),
+    }
+    if (observed["build_source_sha"] != source_sha or
+            observed["build_source_clean"] != "1" or
+            observed["allow_physical_backing"] not in {"1", "Y"}):
+        raise ValueError(
+            "loaded dm_swapz provenance/physical-backing parameter is not exact")
+    return observed
+
+
+def validate_module_provenance(arm: dict, label: str) -> list[str]:
+    provenance = arm.get("loaded_module_provenance")
+    if label == "raw":
+        return ([] if provenance == {"status": "NOT_LOADED"} else
+                ["raw arm did not prove dm_swapz was unloaded"])
+    if (not isinstance(provenance, dict) or
+            provenance.get("status") != "LOADED" or
+            provenance.get("build_source_sha") != arm.get("source_sha") or
+            provenance.get("build_source_clean") != "1" or
+            provenance.get("allow_physical_backing") not in {"1", "Y"}):
+        return [
+            "swapz arm lacks exact clean loaded-module physical provenance"]
+    return []
+
+
 def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
     spec = workload_spec(workload)
-    reasons = []
+    reasons = validate_module_provenance(arm, label)
     if workload == "anonymous-swap":
         for field, expected in (("bytes", spec["bytes"]),
                                 ("round_count", spec["rounds"]),

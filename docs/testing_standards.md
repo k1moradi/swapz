@@ -1088,12 +1088,18 @@ CPU and child-process CPU: sampler-thread CPU remains charged to the replay
 process acceptance metric, child CPU is separate, and no observer cost is
 subtracted post hoc.
 
-The physical scheduler must take
+The physical campaign evidence helper is mandatory executable qualification code; rootless benchmark coverage must import it directly before physical evidence can qualify.\n\nThe physical scheduler must take
 \`physical-campaign-evidence.py snapshot\` records before the first arm and after
 the last arm from the clean exact source and admitted partition. The snapshot
 captures source tree, bare-metal status, kernel/node, CPU/affinity/frequency
 policy, memory, PARTUUID/device/model/transport/queue/scheduler, block ancestry,
-swap/mount inventories, PSI, thermal readings and swapz module parameters. After
+swap/mount inventories, PSI, thermal readings and swapz module parameters. Each
+physical arm must independently record the module boundary after admission:
+raw requires \`dm_swapz\` absent, while swapz requires loaded
+\`build_source_sha\` equal to the exact arm source, \`build_source_clean=1\`, and
+\`allow_physical_backing\` equal to \`1\` or \`Y\`. The evaluator excludes any
+pair missing or violating that provenance, and the campaign sealer re-runs the
+same evaluator before it can emit PASS. After
 evaluation it must call \`physical-campaign-evidence.py seal\` with both snapshots,
 the evaluator summary and every pair JSON. The create-only sealer hashes the
 frozen policy, prospective amendment, evaluator and itself; verifies original

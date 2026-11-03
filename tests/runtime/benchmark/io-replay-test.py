@@ -2407,6 +2407,12 @@ class PairReplayContract(unittest.TestCase):
             swapz = candidate == "swapz"
             return {
                 "candidate": candidate, "verdict": "PASS", "source_sha": "a" * 40,
+                "loaded_module_provenance": ({
+                    "status": "LOADED",
+                    "build_source_sha": "a" * 40,
+                    "build_source_clean": "1",
+                    "allow_physical_backing": "Y",
+                } if swapz else {"status": "NOT_LOADED"}),
                 "logical_pages": 4096, "occupied_pages": 408, "hot_pages": 328,
                 "occupancy_percent": 10, "hot_percent": 8,
                 "qd": 8, "read_percent": 20, "fill_fixture_sha256": "f" * 64,
@@ -2646,6 +2652,74 @@ class PairReplayContract(unittest.TestCase):
                 [])
             self.assertEqual(signal.getsignal(signal.SIGINT), previous_sigint)
             self.assertEqual(signal.getsignal(signal.SIGTERM), previous_sigterm)
+
+    def test_physical_module_provenance_is_fail_closed(self):
+        import importlib.util
+
+        path = SCRIPT.with_name("qualification.py")
+        spec = importlib.util.spec_from_file_location(
+            "swapz_physical_provenance_contract", path)
+        qualification_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(qualification_module)
+
+        source_sha = "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            parameter_base = Path(directory) / "parameters"
+            self.assertEqual(
+                qualification_module.capture_loaded_module_provenance(
+                    source_sha, False, parameter_base),
+                {"status": "NOT_LOADED"})
+            with self.assertRaisesRegex(ValueError, "requires loaded"):
+                qualification_module.capture_loaded_module_provenance(
+                    source_sha, True, parameter_base)
+
+            parameter_base.mkdir()
+            (parameter_base / "build_source_sha").write_text(source_sha)
+            (parameter_base / "build_source_clean").write_text("1\n")
+            (parameter_base / "allow_physical_backing").write_text("Y\n")
+            observed = qualification_module.capture_loaded_module_provenance(
+                source_sha, True, parameter_base)
+            self.assertEqual(observed["status"], "LOADED")
+            with self.assertRaisesRegex(ValueError, "requires dm_swapz"):
+                qualification_module.capture_loaded_module_provenance(
+                    source_sha, False, parameter_base)
+            (parameter_base / "build_source_clean").write_text("0\n")
+            with self.assertRaisesRegex(ValueError, "not exact"):
+                qualification_module.capture_loaded_module_provenance(
+                    source_sha, True, parameter_base)
+
+        good = {
+            "source_sha": source_sha,
+            "loaded_module_provenance": {
+                "status": "LOADED", "build_source_sha": source_sha,
+                "build_source_clean": "1",
+                "allow_physical_backing": "Y",
+            },
+        }
+        self.assertEqual(
+            qualification_module.validate_module_provenance(
+                good, "swapz"), [])
+        missing = dict(good)
+        del missing["loaded_module_provenance"]
+        self.assertTrue(
+            qualification_module.validate_module_provenance(
+                missing, "swapz"))
+        self.assertEqual(
+            qualification_module.validate_module_provenance(
+                {"loaded_module_provenance": {"status": "NOT_LOADED"}},
+                "raw"),
+            [])
+
+    def test_physical_campaign_evidence_helper_is_importable(self):
+        import importlib.util
+
+        path = SCRIPT.with_name("physical-campaign-evidence.py")
+        spec = importlib.util.spec_from_file_location(
+            "swapz_campaign_syntax_contract", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertTrue(callable(module.seal_campaign))
+        self.assertTrue(callable(module.write_new_json))
 
     def test_physical_campaign_evidence_seals_all_attempts_and_policy(self):
         import importlib.util
@@ -3038,6 +3112,7 @@ class PairReplayContract(unittest.TestCase):
             "bytes": spec["bytes"], "round_count": spec["rounds"],
             "required_swap_bytes": spec["minimum_observed_swap_bytes"],
             "content": spec["content"],
+            "loaded_module_provenance": {"status": "NOT_LOADED"},
             "swap_device_identity": {
                 "device": "8:1", "dm_uuid": None, "dm_target": None,
                 "lower_device": "8:1"},
