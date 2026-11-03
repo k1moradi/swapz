@@ -35,6 +35,55 @@ static void assert_record_equals(int directory_fd, const char *name,
 	assert(close(fd) == 0);
 }
 
+static void test_swap_inventory_parser(void)
+{
+	struct swapz_primary_swap_entry rows[4];
+	size_t count = 0;
+
+	assert(swapz_primary_parse_swaps(
+		"Filename Type Size Used Priority\n"
+		"/dev/sda4 partition 16777212 0 -1\n",
+		rows, 4U, &count) == 0);
+	assert(count == 1U);
+	assert(!strcmp(rows[0].path, "/dev/sda4"));
+	assert(!strcmp(rows[0].type, "partition"));
+	assert(rows[0].size_kib == SWAPZ_PRIMARY_SWAP_SIZE_KIB);
+	assert(rows[0].used_kib == 0ULL);
+	assert(rows[0].priority == -1);
+	assert(swapz_primary_parse_swaps(
+		"Filename Type Size Used Priority\r\n"
+		"/dev/sda4 partition 16777212 1 -1\r\n"
+		"/swapfile file 524284 2 10\r\n",
+		rows, 4U, &count) == 0);
+	assert(count == 2U);
+	assert(rows[1].priority == 10);
+	assert(swapz_primary_parse_swaps(
+		"Filename Type Size Used Priority\n"
+		"/dev/sda4 partition 16777212 0 -1 extra\n",
+		rows, 4U, &count) < 0);
+	assert(swapz_primary_parse_swaps(
+		"Filename Type Size Used Priority\n"
+		"/dev/sda4 partition 18446744073709551616 0 -1\n",
+		rows, 4U, &count) < 0);
+	assert(swapz_primary_parse_swaps(
+		"Filename Type Size Used Priority\n"
+		"/dev/sda4 partition 16777212 -1 -1\n",
+		rows, 4U, &count) < 0);
+	assert(swapz_primary_parse_swaps(
+		"Filename Type Size Used Priority\n"
+		"/dev/sda4 partition 16777212 0 +1\n",
+		rows, 4U, &count) < 0);
+	assert(swapz_primary_parse_swaps(
+		"Filename Type Size Used Priority\n"
+		"/dev/sda4 partition 16777212 0 -1\n"
+		"/dev/sda4 partition 16777212 0 -1\n",
+		rows, 4U, &count) < 0);
+	assert(swapz_primary_parse_swaps(
+		"Filename Type Size Used Priority\n"
+		"/dev/sda4 partition 16777212 0 -1\n",
+		rows, 0U, &count) < 0);
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -65,6 +114,7 @@ int main(void)
 						 pages));
 	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
 						  pages + 1ULL));
+	test_swap_inventory_parser();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);
@@ -149,6 +199,6 @@ int main(void)
 	assert(swapz_primary_command(1, start) == 2);
 	assert(swapz_primary_command(1, stop) == 2);
 	assert(swapz_primary_command(1, recover) == 2);
-	puts("PASS: primary swap capacity, durable owner claim, shared lock and disabled lifecycle gate");
+	puts("PASS: primary swap inventory, capacity, durable owner claim, shared lock and disabled lifecycle gate");
 	return 0;
 }

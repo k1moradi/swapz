@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "swapz-primary.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -10,6 +11,7 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -17,6 +19,9 @@
 #define SWAPZ_PRIMARY_SEGMENT_BLOCKS 256ULL
 #define SWAPZ_PRIMARY_MIN_RESERVE_BLOCKS 512ULL
 #define SWAPZ_PRIMARY_DEVICE_BYTES 17179869184ULL
+#define SWAPZ_PRIMARY_SWAP_SIZE_KIB 16777212ULL
+#define SWAPZ_PRIMARY_PLAN_BUFFER_BYTES 16384U
+#define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_PARTUUID "7fb9401d-04"
 #define SWAPZ_PRIMARY_PHYSICAL_BLOCKS \
@@ -25,6 +30,178 @@
 
 /* Privileged lifecycle stays disabled until provisioning and recovery qualify. */
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 0
+
+struct swapz_primary_swap_entry {
+	char path[PATH_MAX];
+	char type[32];
+	uint64_t size_kib;
+	uint64_t used_kib;
+	int priority;
+};
+
+static int swapz_primary_parse_u64(const char *text, uint64_t *value)
+{
+	uint64_t parsed = 0;
+	const unsigned char *cursor = (const unsigned char *)text;
+
+	if (!text || !*text || !value)
+		return -1;
+	while (*cursor) {
+		unsigned int digit;
+
+		if (*cursor < '0' || *cursor > '9')
+			return -1;
+		digit = (unsigned int)(*cursor - '0');
+		if (parsed > (UINT64_MAX - digit) / 10U)
+			return -1;
+		parsed = parsed * 10U + digit;
+		++cursor;
+	}
+	*value = parsed;
+	return 0;
+}
+
+static int swapz_primary_parse_priority(const char *text, int *priority)
+{
+	uint64_t magnitude;
+	int negative = 0;
+
+	if (!text || !*text || !priority)
+		return -1;
+	if (*text == '-') {
+		negative = 1;
+		++text;
+	}
+	if (swapz_primary_parse_u64(text, &magnitude) < 0 ||
+	    magnitude > (uint64_t)INT_MAX + (unsigned int)negative)
+		return -1;
+	if (negative && magnitude == (uint64_t)INT_MAX + 1U)
+		*priority = INT_MIN;
+	else
+		*priority = negative ? -(int)magnitude : (int)magnitude;
+	return 0;
+}
+
+static int swapz_primary_split_fields(char *line, char **fields,
+				      size_t field_capacity, size_t *field_count)
+{
+	char *cursor = line;
+	size_t count = 0;
+
+	while (*cursor) {
+		while (*cursor && isspace((unsigned char)*cursor))
+			++cursor;
+		if (!*cursor)
+			break;
+		if (count == field_capacity)
+			return -1;
+		fields[count++] = cursor;
+		while (*cursor && !isspace((unsigned char)*cursor))
+			++cursor;
+		if (*cursor)
+			*cursor++ = '\0';
+	}
+	*field_count = count;
+	return 0;
+}
+
+static int swapz_primary_parse_swaps(const char *text,
+				     struct swapz_primary_swap_entry *entries,
+				     size_t capacity, size_t *entry_count)
+{
+	const char *line = text;
+	int header_seen = 0;
+	size_t count = 0;
+
+	if (!text || !entries || !entry_count || !capacity)
+		return -1;
+	while (*line) {
+		char buffer[PATH_MAX + 128U];
+		char *fields[6];
+		const char *end = strchr(line, '\n');
+		size_t length = end ? (size_t)(end - line) : strlen(line);
+		size_t field_count = 0;
+
+		if (length >= sizeof(buffer))
+			return -1;
+		memcpy(buffer, line, length);
+		buffer[length] = '\0';
+		line = end ? end + 1 : line + length;
+		if (!buffer[0])
+			continue;
+		if (swapz_primary_split_fields(buffer, fields,
+					      sizeof(fields) / sizeof(fields[0]),
+					      &field_count) < 0)
+			return -1;
+		if (!header_seen) {
+			if (field_count != 5U || strcmp(fields[0], "Filename") ||
+			    strcmp(fields[1], "Type") || strcmp(fields[2], "Size") ||
+			    strcmp(fields[3], "Used") || strcmp(fields[4], "Priority"))
+				return -1;
+			header_seen = 1;
+			continue;
+		}
+		if (field_count != 5U || count == capacity ||
+		    strlen(fields[0]) >= sizeof(entries[count].path) ||
+		    strlen(fields[1]) >= sizeof(entries[count].type) ||
+		    !fields[0][0] || !fields[1][0] ||
+		    swapz_primary_parse_u64(fields[2], &entries[count].size_kib) < 0 ||
+		    swapz_primary_parse_u64(fields[3], &entries[count].used_kib) < 0 ||
+		    swapz_primary_parse_priority(fields[4],
+						&entries[count].priority) < 0)
+			return -1;
+		strcpy(entries[count].path, fields[0]);
+		strcpy(entries[count].type, fields[1]);
+		{
+			size_t prior;
+
+			for (prior = 0; prior < count; ++prior)
+				if (!strcmp(entries[prior].path, entries[count].path))
+					return -1;
+		}
+		++count;
+	}
+	if (!header_seen)
+		return -1;
+	*entry_count = count;
+	return 0;
+}
+
+static int swapz_primary_read_swap_inventory(
+	struct swapz_primary_swap_entry *entries, size_t capacity,
+	size_t *entry_count)
+{
+	char buffer[SWAPZ_PRIMARY_PLAN_BUFFER_BYTES];
+	size_t used = 0;
+	int fd = open("/proc/swaps", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+
+	if (fd < 0)
+		return -1;
+	while (used + 1U < sizeof(buffer)) {
+		ssize_t count = read(fd, buffer + used, sizeof(buffer) - used - 1U);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (close(fd) < 0)
+		return -1;
+	if (used + 1U == sizeof(buffer)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	buffer[used] = '\0';
+	return swapz_primary_parse_swaps(buffer, entries, capacity, entry_count);
+}
 
 static int swapz_primary_valid_partuuid(const char *partuuid)
 {
@@ -380,18 +557,63 @@ static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks)
 
 static int swapz_primary_read_only_plan(void)
 {
+	struct swapz_primary_swap_entry swaps[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
+	struct swapz_primary_swap_entry *target_swap = NULL;
 	uint64_t logical_pages = swapz_primary_maximum_logical_pages(
 		SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
 	uint64_t logical_bytes = logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES;
 	uint64_t reserve = (logical_pages + 7ULL) / 8ULL;
+	size_t swap_count = 0;
+	size_t target_count = 0;
+	size_t i;
+	int swaps_valid = swapz_primary_read_swap_inventory(
+		swaps, SWAPZ_PRIMARY_SWAP_ROWS_MAX, &swap_count) == 0;
+	int single_target_swap = 0;
+	int target_swap_size_ok = 0;
+	int target_swap_zero_used = 0;
+	int target_swap_priority_ok = 0;
+
+	if (swaps_valid) {
+		for (i = 0; i < swap_count; ++i) {
+			struct stat info;
+
+			if (stat(swaps[i].path, &info) == 0 && S_ISBLK(info.st_mode) &&
+			    major(info.st_rdev) == 8U && minor(info.st_rdev) == 4U) {
+				++target_count;
+				target_swap = &swaps[i];
+			}
+		}
+		single_target_swap = swap_count == 1U && target_count == 1U;
+		if (target_swap) {
+			target_swap_size_ok =
+				target_swap->size_kib == SWAPZ_PRIMARY_SWAP_SIZE_KIB &&
+				!strcmp(target_swap->type, "partition");
+			target_swap_zero_used = target_swap->used_kib == 0ULL;
+			target_swap_priority_ok = target_swap->priority == -1;
+		}
+	}
 
 	printf("{\"schema\":\"swapz-primary-plan-v1\","
 	       "\"status\":\"BLOCKED\","
 	       "\"privileged_execution_enabled\":false,"
 	       "\"live_device_gates_checked\":false,"
+	       "\"swap_inventory_read\":%s,"
+	       "\"active_swap_entries\":%llu,"
+	       "\"target_swap_entries\":%llu,"
+	       "\"single_target_swap_active\":%s,"
+	       "\"target_swap_size_ok\":%s,"
+	       "\"target_swap_zero_used\":%s,"
+	       "\"target_swap_priority_ok\":%s,"
 	       "\"logical_pages\":%llu,\"logical_bytes\":%llu,"
 	       "\"linux_swap_kib\":%llu,\"gc_reserve_blocks\":%llu,"
-	       "\"reason\":\"provisioning_and_recovery_not_qualified\"}\n",
+	       "\"reason\":\"device_identity_recovery_and_lifecycle_gates_not_qualified\"}\n",
+	       swaps_valid ? "true" : "false",
+	       (unsigned long long)swap_count,
+	       (unsigned long long)target_count,
+	       single_target_swap ? "true" : "false",
+	       target_swap_size_ok ? "true" : "false",
+	       target_swap_zero_used ? "true" : "false",
+	       target_swap_priority_ok ? "true" : "false",
 	       (unsigned long long)logical_pages,
 	       (unsigned long long)logical_bytes,
 	       (unsigned long long)(logical_bytes / 1024ULL - 4ULL),

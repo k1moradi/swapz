@@ -3316,6 +3316,11 @@ explicit in every review and result.
 The primary manager's direct production-C tests must exercise the exact maximum
 geometry, Device Mapper output variants, active-swap parsing, header recognition,
 and fail-closed ownership decisions without opening or modifying a block device.
+The `/proc/swaps` parser must reject malformed or extra fields, duplicate paths,
+numeric overflow and invalid signed priorities. The read-only plan may report
+the active-entry count and whether `/dev/sda4` is the sole 16,777,212 KiB
+partition entry at priority -1 with zero KiB used; this partial observation
+must never be reported as complete device admission.
 The package regression must prove that units are installed disabled and that
 package install/uninstall does not start or stop system swap.
 The manager must use the same permanent `/dev/sda4` partition lock as the
