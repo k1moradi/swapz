@@ -402,8 +402,13 @@ def evaluate(records: list[dict]) -> dict:
         saved["analysis_exclusion_reasons"] = list(pair.get("exclusion_reasons") or [])
         preserved.append(saved)
 
+    include_amendment = any(
+        row["workload"] in AMENDMENT["workloads"] for row in preserved)
+    evaluation_workloads = (
+        WORKLOADS if include_amendment else CONTRACT["workloads"])
+
     raw_spread = {}
-    for name, spec in WORKLOADS.items():
+    for name, spec in evaluation_workloads.items():
         if spec["evidence"] != "statistical_paired":
             continue
         rows = [row for row in preserved if row["workload"] == name and row["analysis_usable"]]
@@ -418,7 +423,7 @@ def evaluate(records: list[dict]) -> dict:
                     row["analysis_exclusion_reasons"].append(reason)
 
     decisions, overall = {}, True
-    for name, spec in WORKLOADS.items():
+    for name, spec in evaluation_workloads.items():
         rows = [row for row in preserved if row["workload"] == name and row["analysis_usable"]]
         required = spec["pairs"]
         order_ok = (sorted(row.get("pair_index") for row in rows) == list(range(1, required + 1)) and
@@ -437,6 +442,7 @@ def evaluate(records: list[dict]) -> dict:
         overall &= decision["status"] == "PASS"
     return {"schema": SUMMARY_SCHEMA, "contract": contract(),
             "prospective_amendment": amendment(),
+            "amendment_active": include_amendment,
             "status": "PASS" if overall else "FAIL_OR_INCOMPLETE",
             "decisions": decisions, "raw_repeat_spread": raw_spread, "records": preserved}
 
