@@ -24,6 +24,10 @@ CONTRACT = {
         "lower-device bytes and requests are host-visible physical I/O; "
         "they are not direct NAND-wear or endurance measurements"
     ),
+    "resource_measurement": {
+        "replay_peak_rss_bytes": "increment in process ru_maxrss from the pre-measurement boundary",
+        "replay_process_maxrss_bytes": "absolute process ru_maxrss retained as context",
+    },
     "screening": {
         "pre_post_busy_fraction_max": .25,
         "pre_post_cpu_psi_some_fraction_max": .05,

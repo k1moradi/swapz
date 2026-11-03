@@ -533,7 +533,9 @@ conservative observed metadata+target peak. The same host sampler surrounds the
 raw control so unrelated host drift is visible. This is a whole-host upper-bound
 observation, not exact per-allocation attribution; compiled array-size evidence
 remains complementary and cannot substitute for it. The fixed ceilings are 128
-MiB replay RSS and 1.25 GiB for metadata plus target peak RAM.
+MiB incremental replay peak RSS measured from the pre-measurement process boundary
+(the absolute process max RSS is retained as context) and 1.25 GiB for metadata
+plus target peak RAM.
 
 A 200 ms quiet window immediately before and after each arm must have busy
 fraction <=25%, CPU PSI \`some\` <=5% and steal <=1%; timed-arm steal must also be

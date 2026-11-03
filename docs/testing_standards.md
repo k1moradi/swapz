@@ -689,7 +689,10 @@ lower WRITE bytes/requests <=0.90, READ/WRITE/cold p99 <=1.25, last/first
 quartile throughput >=0.75, last/first quartile p99 <=1.25, GC wall <=20%, zero
 GC no-headroom skips, positive victim relocation and segment programming, zero
 target failure, zero byte mismatches, <=10 seconds maximum no-progress, <=128
-MiB replay RSS and <=1.25 GiB observed metadata+target peak RAM.
+MiB incremental replay peak RSS from the pre-measurement process boundary and
+<=1.25 GiB observed metadata+target peak RAM. The absolute process max RSS is
+retained as context and is not charged to the workload when it predates the
+measurement boundary.
 
 Anonymous-swap evidence is also directional: all three pairs must observe at
 least 128 MiB of workload-specific process/cgroup swap and at least that usage

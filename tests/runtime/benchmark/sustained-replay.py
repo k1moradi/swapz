@@ -813,7 +813,8 @@ def run(args):
                         "replay process plus exported swapz worker CPU; "
                         "other kernel CPU excluded")},
                 "resources": {
-                    "replay_peak_rss_bytes": cpu_after[2],
+                    "replay_peak_rss_bytes": max(0, cpu_after[2] - cpu_before[2]),
+                    "replay_process_maxrss_bytes": cpu_after[2],
                     "metadata_and_target_peak_ram_bytes":
                         args.metadata_and_target_peak_ram_bytes or 0,
                     "metadata_ram_scope": (
