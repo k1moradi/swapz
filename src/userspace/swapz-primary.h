@@ -39,6 +39,15 @@ struct swapz_primary_manifest {
 	char original_header_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
 };
 
+struct swapz_primary_qualification {
+	char source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 1U];
+	char host_identity_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
+	char formatter_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
+	char module_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
+	char oracle_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
+	char report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
+};
+
 const char *swapz_primary_stage_name(enum swapz_primary_stage stage);
 int swapz_primary_stage_parse(const char *name,
 			      enum swapz_primary_stage *stage);
@@ -53,6 +62,11 @@ int swapz_primary_state_transition_allowed(
 	const struct swapz_primary_state *next);
 int swapz_primary_manifest_parse(const char *record, size_t length,
 				 struct swapz_primary_manifest *manifest);
+/* Validate the exact five-stage owner report for this source and host. */
+int swapz_primary_qualification_parse_json(
+	const unsigned char *json, size_t length, const char *expected_source_sha,
+	const char *expected_host_identity_sha256,
+	struct swapz_primary_qualification *qualification);
 int swapz_primary_manifest_format(
 	const struct swapz_primary_manifest *manifest, char *record,
 	size_t capacity);

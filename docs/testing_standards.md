@@ -3574,3 +3574,28 @@ not change the production package path.
 Incremental-build Makefile fixtures that compile or stage the primary manager
 must include the committed fallback `src/kernel/swapz-build-info.h`; otherwise
 they do not model the source inputs of the real checkout.
+
+The primary qualification reader accepts only the root-owned
+`/var/lib/swapz/physical-recovery/primary-qualification.json` report. It must
+be a stable, single-link regular file with no group/world write permission and
+at most 64 MiB. The C parser requires schema `swapz-test-results-v1`, matching
+source and tested-commit SHAs, overall PASS, the RAM-backed qualification
+scope, the same x86_64 machine-id digest, all five named stages with PASS and
+exit code zero, and AVAILABLE SHA-256 values for the formatter, module and
+oracle. It rejects duplicate required keys, malformed or trailing JSON, a
+different source or host, and incomplete stages. This report-content check
+does not replace live executable/module hashing; those hashes must be matched
+before any primary lifecycle operation is enabled.
+
+The read-only primary plan must independently hash the running `swapzctl`
+through `/proc/self/exe`, the package-matched `libexec/swapz/device-roundtrip`,
+and the current kernel's DKMS-installed `dm-swapz.ko`. It must compare all
+three live SHA-256 values with the owner report (`formatter_sha256` is the
+historical report key for `swapzctl`) and report each observed digest and
+match result. Missing, unsafe, changed, or ambiguous files remain ineligible.
+The module file hash proves which bytes are available for a future checked
+load; source-provenance metadata alone cannot establish the bytes of a module
+that was already loaded. Lifecycle admission must either prove a durable
+manager-owned exact-load record for that live module or reject it. Rootless
+fixtures must prove that host artifact paths are never read and that a mismatch
+in any one digest fails the aggregate comparison.

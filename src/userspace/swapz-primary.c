@@ -21,6 +21,7 @@
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 #include "../kernel/superblock.h"
@@ -46,6 +47,8 @@
 #define SWAPZ_PRIMARY_STATE_JSON_PREFIX \
 	"{\"schema\":\"swapz-primary-state-v1\",\"run_id\":"
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
+#define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
+	"/var/lib/swapz/physical-recovery/primary-qualification.json"
 #define SWAPZ_PRIMARY_PARTUUID "7fb9401d-04"
 #define SWAPZ_PRIMARY_PHYSICAL_BLOCKS \
 	(((SWAPZ_PRIMARY_DEVICE_BYTES / SWAPZ_PRIMARY_BLOCK_BYTES - 1ULL) / \
@@ -3130,6 +3133,900 @@ static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks)
 	return low;
 }
 
+struct swapz_primary_json_cursor {
+	const unsigned char *cursor;
+	const unsigned char *end;
+	size_t nodes;
+};
+
+#define SWAPZ_PRIMARY_JSON_MAX_NODES 4000000U
+#define SWAPZ_PRIMARY_JSON_MAX_DEPTH 32U
+
+static void swapz_primary_json_space(struct swapz_primary_json_cursor *json)
+{
+	while (json->cursor < json->end &&
+	       (*json->cursor == ' ' || *json->cursor == '\t' ||
+		*json->cursor == '\r' || *json->cursor == '\n'))
+		++json->cursor;
+}
+
+static int swapz_primary_json_string_span(
+	struct swapz_primary_json_cursor *json,
+	const unsigned char **value, size_t *length, int allow_escapes)
+{
+	const unsigned char *start;
+
+	swapz_primary_json_space(json);
+	if (json->cursor >= json->end || *json->cursor++ != '"')
+		return -1;
+	start = json->cursor;
+	while (json->cursor < json->end) {
+		unsigned char byte = *json->cursor++;
+
+		if (byte == '"') {
+			*value = start;
+			*length = (size_t)(json->cursor - start - 1U);
+			return 0;
+		}
+		if (byte < 0x20U)
+			return -1;
+		if (byte != '\\')
+			continue;
+		if (!allow_escapes || json->cursor >= json->end)
+			return -1;
+		byte = *json->cursor++;
+		if (byte == '"' || byte == '\\' || byte == '/' || byte == 'b' ||
+		    byte == 'f' || byte == 'n' || byte == 'r' || byte == 't')
+			continue;
+		if (byte == 'u') {
+			unsigned int digit;
+
+			for (digit = 0; digit < 4U; ++digit) {
+				if (json->cursor >= json->end ||
+				    !isxdigit((unsigned char)*json->cursor++))
+					return -1;
+			}
+			continue;
+		}
+		return -1;
+	}
+	return -1;
+}
+
+static int swapz_primary_json_number(struct swapz_primary_json_cursor *json,
+					     const unsigned char **number,
+					     size_t *length)
+{
+	const unsigned char *start;
+
+	swapz_primary_json_space(json);
+	start = json->cursor;
+	if (json->cursor < json->end && *json->cursor == '-')
+		++json->cursor;
+	if (json->cursor >= json->end)
+		return -1;
+	if (*json->cursor == '0') {
+		++json->cursor;
+		if (json->cursor < json->end && isdigit(*json->cursor))
+			return -1;
+	} else {
+		if (*json->cursor < '1' || *json->cursor > '9')
+			return -1;
+		while (json->cursor < json->end && isdigit(*json->cursor))
+			++json->cursor;
+	}
+	if (json->cursor < json->end && *json->cursor == '.') {
+		++json->cursor;
+		if (json->cursor >= json->end || !isdigit(*json->cursor))
+			return -1;
+		while (json->cursor < json->end && isdigit(*json->cursor))
+			++json->cursor;
+	}
+	if (json->cursor < json->end &&
+	    (*json->cursor == 'e' || *json->cursor == 'E')) {
+		++json->cursor;
+		if (json->cursor < json->end &&
+		    (*json->cursor == '+' || *json->cursor == '-'))
+			++json->cursor;
+		if (json->cursor >= json->end || !isdigit(*json->cursor))
+			return -1;
+		while (json->cursor < json->end && isdigit(*json->cursor))
+			++json->cursor;
+	}
+	*number = start;
+	*length = (size_t)(json->cursor - start);
+	return 0;
+}
+
+static int swapz_primary_json_skip_value(
+	struct swapz_primary_json_cursor *json, unsigned int depth)
+{
+	swapz_primary_json_space(json);
+	if (depth > SWAPZ_PRIMARY_JSON_MAX_DEPTH ||
+	    ++json->nodes > SWAPZ_PRIMARY_JSON_MAX_NODES ||
+	    json->cursor >= json->end)
+		return -1;
+	if (*json->cursor == '"') {
+		const unsigned char *value;
+		size_t length;
+
+		return swapz_primary_json_string_span(json, &value, &length, 1);
+	}
+	if (*json->cursor == '{' || *json->cursor == '[') {
+		unsigned char close = *json->cursor == '{' ? '}' : ']';
+		int object = *json->cursor++ == '{';
+
+		swapz_primary_json_space(json);
+		if (json->cursor < json->end && *json->cursor == close) {
+			++json->cursor;
+			return 0;
+		}
+		for (;;) {
+			if (object) {
+				const unsigned char *key;
+				size_t key_length;
+
+				if (swapz_primary_json_string_span(
+					    json, &key, &key_length, 0) < 0)
+					return -1;
+				swapz_primary_json_space(json);
+				if (json->cursor >= json->end ||
+				    *json->cursor++ != ':')
+					return -1;
+			}
+			if (swapz_primary_json_skip_value(json, depth + 1U) < 0)
+				return -1;
+			swapz_primary_json_space(json);
+			if (json->cursor >= json->end)
+				return -1;
+			if (*json->cursor == close) {
+				++json->cursor;
+				return 0;
+			}
+			if (*json->cursor++ != ',')
+				return -1;
+			swapz_primary_json_space(json);
+		}
+	}
+	if ((size_t)(json->end - json->cursor) >= 4U &&
+	    !memcmp(json->cursor, "true", 4U)) {
+		json->cursor += 4U;
+		return 0;
+	}
+	if ((size_t)(json->end - json->cursor) >= 5U &&
+	    !memcmp(json->cursor, "false", 5U)) {
+		json->cursor += 5U;
+		return 0;
+	}
+	if ((size_t)(json->end - json->cursor) >= 4U &&
+	    !memcmp(json->cursor, "null", 4U)) {
+		json->cursor += 4U;
+		return 0;
+	}
+	{
+		const unsigned char *number;
+		size_t length;
+
+		return swapz_primary_json_number(json, &number, &length);
+	}
+}
+
+static int swapz_primary_json_key_is(const unsigned char *key,
+				     size_t key_length, const char *expected)
+{
+	return key_length == strlen(expected) &&
+	       !memcmp(key, expected, key_length);
+}
+
+static int swapz_primary_json_plain_string(
+	struct swapz_primary_json_cursor *json, char *value, size_t capacity)
+{
+	const unsigned char *span;
+	size_t length;
+
+	if (!capacity || swapz_primary_json_string_span(
+		json, &span, &length, 0) < 0 || length >= capacity)
+		return -1;
+	memcpy(value, span, length);
+	value[length] = '\0';
+	return 0;
+}
+
+static int swapz_primary_json_zero(struct swapz_primary_json_cursor *json)
+{
+	const unsigned char *number;
+	size_t length;
+
+	return swapz_primary_json_number(json, &number, &length) == 0 &&
+	       length == 1U && number[0] == '0';
+}
+
+static int swapz_primary_qualification_host_parse(
+	struct swapz_primary_json_cursor *json,
+	struct swapz_primary_qualification *qualification)
+{
+	unsigned int seen = 0;
+	char schema[32];
+	char architecture[32];
+	const unsigned char *key;
+	size_t key_length;
+
+	swapz_primary_json_space(json);
+	if (json->cursor >= json->end || *json->cursor++ != '{')
+		return -1;
+	for (;;) {
+		swapz_primary_json_space(json);
+		if (json->cursor < json->end && *json->cursor == '}') {
+			++json->cursor;
+			break;
+		}
+		if (swapz_primary_json_string_span(json, &key, &key_length, 0) < 0)
+			return -1;
+		swapz_primary_json_space(json);
+		if (json->cursor >= json->end || *json->cursor++ != ':')
+			return -1;
+		if (swapz_primary_json_key_is(key, key_length, "schema")) {
+			if (seen & 1U || swapz_primary_json_plain_string(
+				    json, schema, sizeof(schema)) < 0)
+				return -1;
+			seen |= 1U;
+		} else if (swapz_primary_json_key_is(key, key_length,
+						     "architecture")) {
+			if (seen & 2U || swapz_primary_json_plain_string(
+				    json, architecture, sizeof(architecture)) < 0)
+				return -1;
+			seen |= 2U;
+		} else if (swapz_primary_json_key_is(key, key_length,
+						     "id_sha256")) {
+			if (seen & 4U || swapz_primary_json_plain_string(
+				    json, qualification->host_identity_sha256,
+				    sizeof(qualification->host_identity_sha256)) < 0)
+				return -1;
+			seen |= 4U;
+		} else if (swapz_primary_json_skip_value(json, 1U) < 0) {
+			return -1;
+		}
+		swapz_primary_json_space(json);
+		if (json->cursor >= json->end)
+			return -1;
+		if (*json->cursor == '}') {
+			++json->cursor;
+			break;
+		}
+		if (*json->cursor++ != ',')
+			return -1;
+	}
+	if (seen == 7U && !strcmp(schema, "swapz-host-v1") &&
+	    !strcmp(architecture, "x86_64") &&
+	    swapz_primary_valid_sha256(
+		    qualification->host_identity_sha256))
+		return 0;
+	return -1;
+}
+
+static int swapz_primary_qualification_stage_parse(
+	struct swapz_primary_json_cursor *json, unsigned int stage_index)
+{
+	static const char *const expected_names[] = {
+		"Build module and helpers",
+		"Native and rootless contracts",
+		"Kernel warnings W=1",
+		"Kernel warnings W=2",
+		"Owned RAM smoke + mixed/QD pilot",
+	};
+	unsigned int seen = 0;
+	char name[96];
+	char status[16];
+	const unsigned char *key;
+	size_t key_length;
+
+	swapz_primary_json_space(json);
+	if (json->cursor >= json->end || *json->cursor++ != '{')
+		return -1;
+	for (;;) {
+		swapz_primary_json_space(json);
+		if (json->cursor < json->end && *json->cursor == '}') {
+			++json->cursor;
+			break;
+		}
+		if (swapz_primary_json_string_span(json, &key, &key_length, 0) < 0)
+			return -1;
+		swapz_primary_json_space(json);
+		if (json->cursor >= json->end || *json->cursor++ != ':')
+			return -1;
+		if (swapz_primary_json_key_is(key, key_length, "name")) {
+			if (seen & 1U || swapz_primary_json_plain_string(
+				    json, name, sizeof(name)) < 0)
+				return -1;
+			seen |= 1U;
+		} else if (swapz_primary_json_key_is(key, key_length, "status")) {
+			if (seen & 2U || swapz_primary_json_plain_string(
+				    json, status, sizeof(status)) < 0)
+				return -1;
+			seen |= 2U;
+		} else if (swapz_primary_json_key_is(key, key_length,
+						     "exit_code")) {
+			if (seen & 4U || !swapz_primary_json_zero(json))
+				return -1;
+			seen |= 4U;
+		} else if (swapz_primary_json_skip_value(json, 1U) < 0) {
+			return -1;
+		}
+		swapz_primary_json_space(json);
+		if (json->cursor >= json->end)
+			return -1;
+		if (*json->cursor == '}') {
+			++json->cursor;
+			break;
+		}
+		if (*json->cursor++ != ',')
+			return -1;
+	}
+	if (seen == 7U && stage_index < 5U &&
+	    !strcmp(name, expected_names[stage_index]) &&
+	    !strcmp(status, "PASS"))
+		return 0;
+	return -1;
+}
+
+static int swapz_primary_qualification_stages_parse(
+	struct swapz_primary_json_cursor *json)
+{
+	unsigned int count = 0;
+
+	swapz_primary_json_space(json);
+	if (json->cursor >= json->end || *json->cursor++ != '[')
+		return -1;
+	for (;;) {
+		swapz_primary_json_space(json);
+		if (json->cursor < json->end && *json->cursor == ']') {
+			++json->cursor;
+			break;
+		}
+		if (count >= 5U ||
+		    swapz_primary_qualification_stage_parse(json, count) < 0)
+			return -1;
+		++count;
+		swapz_primary_json_space(json);
+		if (json->cursor >= json->end)
+			return -1;
+		if (*json->cursor == ']') {
+			++json->cursor;
+			break;
+		}
+		if (*json->cursor++ != ',')
+			return -1;
+	}
+	return count == 5U ? 0 : -1;
+}
+
+static int swapz_primary_qualification_artifacts_parse(
+	struct swapz_primary_json_cursor *json,
+	struct swapz_primary_qualification *qualification)
+{
+	unsigned int seen = 0;
+	char status[24];
+	const unsigned char *key;
+	size_t key_length;
+
+	swapz_primary_json_space(json);
+	if (json->cursor >= json->end || *json->cursor++ != '{')
+		return -1;
+	for (;;) {
+		swapz_primary_json_space(json);
+		if (json->cursor < json->end && *json->cursor == '}') {
+			++json->cursor;
+			break;
+		}
+		if (swapz_primary_json_string_span(json, &key, &key_length, 0) < 0)
+			return -1;
+		swapz_primary_json_space(json);
+		if (json->cursor >= json->end || *json->cursor++ != ':')
+			return -1;
+		if (swapz_primary_json_key_is(key, key_length, "status")) {
+			if (seen & 1U || swapz_primary_json_plain_string(
+				    json, status, sizeof(status)) < 0)
+				return -1;
+			seen |= 1U;
+		} else if (swapz_primary_json_key_is(
+				   key, key_length, "formatter_sha256")) {
+			if (seen & 2U || swapz_primary_json_plain_string(
+				    json, qualification->formatter_sha256,
+				    sizeof(qualification->formatter_sha256)) < 0)
+				return -1;
+			seen |= 2U;
+		} else if (swapz_primary_json_key_is(
+				   key, key_length, "module_sha256")) {
+			if (seen & 4U || swapz_primary_json_plain_string(
+				    json, qualification->module_sha256,
+				    sizeof(qualification->module_sha256)) < 0)
+				return -1;
+			seen |= 4U;
+		} else if (swapz_primary_json_key_is(
+				   key, key_length, "oracle_sha256")) {
+			if (seen & 8U || swapz_primary_json_plain_string(
+				    json, qualification->oracle_sha256,
+				    sizeof(qualification->oracle_sha256)) < 0)
+				return -1;
+			seen |= 8U;
+		} else if (swapz_primary_json_skip_value(json, 1U) < 0) {
+			return -1;
+		}
+		swapz_primary_json_space(json);
+		if (json->cursor >= json->end)
+			return -1;
+		if (*json->cursor == '}') {
+			++json->cursor;
+			break;
+		}
+		if (*json->cursor++ != ',')
+			return -1;
+	}
+	if (seen == 15U && !strcmp(status, "AVAILABLE") &&
+	    swapz_primary_valid_sha256(qualification->formatter_sha256) &&
+	    swapz_primary_valid_sha256(qualification->module_sha256) &&
+	    swapz_primary_valid_sha256(qualification->oracle_sha256))
+		return 0;
+	return -1;
+}
+
+int swapz_primary_qualification_parse_json(
+	const unsigned char *bytes, size_t length, const char *expected_source_sha,
+	const char *expected_host_identity_sha256,
+	struct swapz_primary_qualification *qualification)
+{
+	struct swapz_primary_qualification parsed = {0};
+	struct swapz_primary_json_cursor json = {0};
+	unsigned int seen = 0;
+	char schema[40];
+	char tested_source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 1U];
+	char overall[16];
+	char qualification_kind[48];
+	const unsigned char *key;
+	size_t key_length;
+
+	if (!bytes || !length || length > SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES ||
+	    !qualification ||
+	    !swapz_primary_valid_source_sha(expected_source_sha) ||
+	    !swapz_primary_valid_sha256(expected_host_identity_sha256)) {
+		errno = EINVAL;
+		return -1;
+	}
+	json.cursor = bytes;
+	json.end = bytes + length;
+	swapz_primary_json_space(&json);
+	if (json.cursor >= json.end || *json.cursor++ != '{')
+		goto invalid;
+	for (;;) {
+		swapz_primary_json_space(&json);
+		if (json.cursor < json.end && *json.cursor == '}') {
+			++json.cursor;
+			break;
+		}
+		if (swapz_primary_json_string_span(&json, &key, &key_length, 0) < 0)
+			goto invalid;
+		swapz_primary_json_space(&json);
+		if (json.cursor >= json.end || *json.cursor++ != ':')
+			goto invalid;
+		if (swapz_primary_json_key_is(key, key_length, "schema")) {
+			if (seen & 1U || swapz_primary_json_plain_string(
+				    &json, schema, sizeof(schema)) < 0)
+				goto invalid;
+			seen |= 1U;
+		} else if (swapz_primary_json_key_is(key, key_length,
+						     "source_sha")) {
+			if (seen & 2U || swapz_primary_json_plain_string(
+				    &json, parsed.source_sha,
+				    sizeof(parsed.source_sha)) < 0)
+				goto invalid;
+			seen |= 2U;
+		} else if (swapz_primary_json_key_is(
+				   key, key_length, "tested_commit_sha")) {
+			if (seen & 4U || swapz_primary_json_plain_string(
+				    &json, tested_source_sha,
+				    sizeof(tested_source_sha)) < 0)
+				goto invalid;
+			seen |= 4U;
+		} else if (swapz_primary_json_key_is(key, key_length, "overall")) {
+			if (seen & 8U || swapz_primary_json_plain_string(
+				    &json, overall, sizeof(overall)) < 0)
+				goto invalid;
+			seen |= 8U;
+		} else if (swapz_primary_json_key_is(
+				   key, key_length, "qualification")) {
+			if (seen & 16U || swapz_primary_json_plain_string(
+				    &json, qualification_kind,
+				    sizeof(qualification_kind)) < 0)
+				goto invalid;
+			seen |= 16U;
+		} else if (swapz_primary_json_key_is(
+				   key, key_length, "host_identity")) {
+			if (seen & 32U ||
+			    swapz_primary_qualification_host_parse(
+				    &json, &parsed) < 0)
+				goto invalid;
+			seen |= 32U;
+		} else if (swapz_primary_json_key_is(key, key_length, "stages")) {
+			if (seen & 64U ||
+			    swapz_primary_qualification_stages_parse(&json) < 0)
+				goto invalid;
+			seen |= 64U;
+		} else if (swapz_primary_json_key_is(
+				   key, key_length, "qualified_artifacts")) {
+			if (seen & 128U ||
+			    swapz_primary_qualification_artifacts_parse(
+				    &json, &parsed) < 0)
+				goto invalid;
+			seen |= 128U;
+		} else if (swapz_primary_json_skip_value(&json, 1U) < 0) {
+			goto invalid;
+		}
+		swapz_primary_json_space(&json);
+		if (json.cursor >= json.end)
+			goto invalid;
+		if (*json.cursor == '}') {
+			++json.cursor;
+			break;
+		}
+		if (*json.cursor++ != ',')
+			goto invalid;
+	}
+	swapz_primary_json_space(&json);
+	if (json.cursor != json.end || seen != 255U ||
+	    strcmp(schema, "swapz-test-results-v1") ||
+	    strcmp(parsed.source_sha, expected_source_sha) ||
+	    strcmp(tested_source_sha, expected_source_sha) ||
+	    strcmp(overall, "PASS") ||
+	    strcmp(qualification_kind, "RAM_BACKED_NULL_BLK_ONLY") ||
+	    strcmp(parsed.host_identity_sha256,
+		   expected_host_identity_sha256) ||
+	    swapz_primary_sha256(bytes, length, parsed.report_sha256) < 0)
+		goto invalid;
+	*qualification = parsed;
+	return 0;
+
+invalid:
+	errno = EINVAL;
+	return -1;
+}
+
+static int swapz_primary_live_host_identity_sha256(char digest[65])
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)digest;
+	errno = ENODEV;
+	return -1;
+#else
+	static const unsigned char prefix[] = "swapz-host";
+	unsigned char identity[sizeof(prefix) + 32U];
+	char machine_id[64];
+	struct stat before;
+	struct stat after;
+	struct utsname system;
+	size_t length = 0;
+	size_t i;
+	int machine_id_nonzero = 0;
+	int fd;
+
+	if (!digest) {
+		errno = EINVAL;
+		return -1;
+	}
+	fd = open("/etc/machine-id", O_RDONLY | O_CLOEXEC | O_NOFOLLOW |
+		  O_NONBLOCK);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &before) < 0) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (!S_ISREG(before.st_mode) || before.st_uid != 0 ||
+	    before.st_nlink != 1U || (before.st_mode & 0022U)) {
+		close(fd);
+		errno = EPERM;
+		return -1;
+	}
+	while (length < sizeof(machine_id)) {
+		ssize_t count = read(fd, machine_id + length,
+				    sizeof(machine_id) - length);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		length += (size_t)count;
+	}
+	if (length == sizeof(machine_id)) {
+		close(fd);
+		errno = EOVERFLOW;
+		return -1;
+	}
+	if (fstat(fd, &after) < 0) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (close(fd) < 0)
+		return -1;
+	if (before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
+	    before.st_mode != after.st_mode || before.st_uid != after.st_uid ||
+	    before.st_gid != after.st_gid || before.st_nlink != after.st_nlink ||
+	    before.st_size != after.st_size ||
+	    before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
+	    before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
+	    before.st_ctim.tv_sec != after.st_ctim.tv_sec ||
+	    before.st_ctim.tv_nsec != after.st_ctim.tv_nsec) {
+		errno = EIO;
+		return -1;
+	}
+	if (uname(&system) < 0 || strcmp(system.sysname, "Linux") ||
+	    strcmp(system.machine, "x86_64")) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	if (length == 33U && machine_id[32] == '\n')
+		length = 32U;
+	if (length != 32U) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (i = 0; i < 32U; ++i) {
+		unsigned char byte = (unsigned char)machine_id[i];
+
+		if (!isxdigit(byte)) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (byte != '0')
+			machine_id_nonzero = 1;
+		identity[sizeof(prefix) + i] = (unsigned char)tolower(byte);
+	}
+	if (!machine_id_nonzero) {
+		errno = EINVAL;
+		return -1;
+	}
+	memcpy(identity, prefix, sizeof(prefix));
+	return swapz_primary_sha256(identity, sizeof(identity), digest);
+#endif
+}
+
+static int swapz_primary_read_qualification_report(
+	struct swapz_primary_qualification *qualification)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)qualification;
+	errno = ENODEV;
+	return -1;
+#else
+	struct stat before;
+	struct stat after;
+	char host_identity_sha256[65];
+	unsigned char *bytes = NULL;
+	size_t length;
+	size_t completed = 0;
+	int fd = -1;
+	int result = -1;
+
+	if (!qualification || SWAPZ_BUILD_SOURCE_CLEAN != 1 ||
+	    !swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA)) {
+		errno = EPERM;
+		return -1;
+	}
+	if (swapz_primary_live_host_identity_sha256(host_identity_sha256) < 0)
+		return -1;
+	fd = open(SWAPZ_PRIMARY_QUALIFICATION_REPORT,
+		  O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &before) < 0 || !S_ISREG(before.st_mode) ||
+	    before.st_uid != 0 || before.st_nlink != 1U ||
+	    (before.st_mode & 0022U) || before.st_size <= 0 ||
+	    (uint64_t)before.st_size > SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES) {
+		errno = EPERM;
+		goto out;
+	}
+	length = (size_t)before.st_size;
+	bytes = malloc(length);
+	if (!bytes)
+		goto out;
+	while (completed < length) {
+		ssize_t count = pread(fd, bytes + completed, length - completed,
+				      (off_t)completed);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			if (!count)
+				errno = EIO;
+			goto out;
+		}
+		completed += (size_t)count;
+	}
+	{
+		unsigned char extra;
+		ssize_t count;
+
+		do {
+			count = pread(fd, &extra, sizeof(extra), (off_t)length);
+		} while (count < 0 && errno == EINTR);
+		if (count != 0) {
+			if (count > 0)
+				errno = EFBIG;
+			goto out;
+		}
+	}
+	if (fstat(fd, &after) < 0)
+		goto out;
+	if (before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
+	    before.st_mode != after.st_mode || before.st_uid != after.st_uid ||
+	    before.st_gid != after.st_gid || before.st_nlink != after.st_nlink ||
+	    before.st_size != after.st_size ||
+	    before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
+	    before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
+	    before.st_ctim.tv_sec != after.st_ctim.tv_sec ||
+	    before.st_ctim.tv_nsec != after.st_ctim.tv_nsec) {
+		errno = EIO;
+		goto out;
+	}
+	if (swapz_primary_qualification_parse_json(
+		    bytes, length, SWAPZ_BUILD_SOURCE_SHA,
+		    host_identity_sha256, qualification) < 0)
+		goto out;
+	result = 0;
+out:
+	{
+		int saved_errno = errno;
+
+		free(bytes);
+		if (fd >= 0 && close(fd) < 0 && result == 0) {
+			result = -1;
+			saved_errno = errno;
+		}
+		errno = saved_errno;
+	}
+	return result;
+#endif
+}
+
+static int swapz_primary_qualification_artifacts_match(
+	const struct swapz_primary_qualification *qualification,
+	const char *swapzctl_sha256, const char *module_sha256,
+	const char *oracle_sha256)
+{
+	return qualification &&
+	       swapz_primary_valid_sha256(qualification->formatter_sha256) &&
+	       swapz_primary_valid_sha256(qualification->module_sha256) &&
+	       swapz_primary_valid_sha256(qualification->oracle_sha256) &&
+	       swapz_primary_valid_sha256(swapzctl_sha256) &&
+	       swapz_primary_valid_sha256(module_sha256) &&
+	       swapz_primary_valid_sha256(oracle_sha256) &&
+	       !strcmp(qualification->formatter_sha256, swapzctl_sha256) &&
+	       !strcmp(qualification->module_sha256, module_sha256) &&
+	       !strcmp(qualification->oracle_sha256, oracle_sha256);
+}
+
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
+static int swapz_primary_hash_regular_path(const char *path, int follow_final,
+					   char digest[65])
+{
+	int flags = O_RDONLY | O_CLOEXEC | O_NONBLOCK;
+	int fd;
+	int result;
+
+	if (!path || !digest) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!follow_final)
+		flags |= O_NOFOLLOW;
+	fd = open(path, flags);
+	if (fd < 0)
+		return -1;
+	result = swapz_primary_sha256_regular_fd(fd, 0,
+						SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES,
+						digest);
+	{
+		int saved_errno = errno;
+
+		if (close(fd) < 0 && result == 0) {
+			result = -1;
+			saved_errno = errno;
+		}
+		errno = saved_errno;
+	}
+	return result;
+}
+#endif
+
+static int swapz_primary_live_artifact_hashes(char swapzctl_sha256[65],
+						     char module_sha256[65],
+						     char oracle_sha256[65])
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)swapzctl_sha256;
+	(void)module_sha256;
+	(void)oracle_sha256;
+	errno = ENODEV;
+	return -1;
+#else
+	static const char control_suffix[] = "/sbin/swapzctl";
+	struct utsname system;
+	char control_path[PATH_MAX];
+	char oracle_path[PATH_MAX];
+	char module_path[PATH_MAX];
+	ssize_t control_length;
+	int prefix_length;
+	int length;
+
+	if (!swapzctl_sha256 || !module_sha256 || !oracle_sha256) {
+		errno = EINVAL;
+		return -1;
+	}
+	control_length = readlink("/proc/self/exe", control_path,
+				  sizeof(control_path) - 1U);
+	if (control_length < 0)
+		return -1;
+	if ((size_t)control_length >= sizeof(control_path) - 1U) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	control_path[control_length] = '\0';
+	if ((size_t)control_length < sizeof(control_suffix) - 1U ||
+	    strcmp(control_path + control_length -
+		   (ssize_t)(sizeof(control_suffix) - 1U), control_suffix)) {
+		errno = EPERM;
+		return -1;
+	}
+	prefix_length = (int)(control_length -
+			      (ssize_t)(sizeof(control_suffix) - 1U));
+	if (prefix_length <= 0) {
+		errno = EPERM;
+		return -1;
+	}
+	length = snprintf(oracle_path, sizeof(oracle_path),
+			  "%.*s/libexec/swapz/device-roundtrip",
+			  prefix_length, control_path);
+	if (length < 0 || (size_t)length >= sizeof(oracle_path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (uname(&system) < 0)
+		return -1;
+	if (!system.release[0] ||
+	    strspn(system.release,
+		   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-") !=
+		    strlen(system.release) || strstr(system.release, "..")) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(module_path, sizeof(module_path),
+			  "/lib/modules/%s/updates/dkms/dm-swapz.ko",
+			  system.release);
+	if (length < 0 || (size_t)length >= sizeof(module_path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (swapz_primary_hash_regular_path("/proc/self/exe", 1,
+					    swapzctl_sha256) < 0 ||
+	    swapz_primary_hash_regular_path(module_path, 0, module_sha256) < 0 ||
+	    swapz_primary_hash_regular_path(oracle_path, 0, oracle_sha256) < 0)
+		return -1;
+	return 0;
+#endif
+}
+
 static int swapz_primary_read_only_plan(void)
 {
 	struct swapz_primary_swap_entry swaps[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
@@ -3206,6 +4103,23 @@ static int swapz_primary_read_only_plan(void)
 		swapz_primary_build_sources_match(
 			SWAPZ_BUILD_SOURCE_SHA, SWAPZ_BUILD_SOURCE_CLEAN,
 			module_build_source_sha, module_build_source_clean);
+	struct swapz_primary_qualification qualification = {0};
+	char live_swapzctl_sha256[65] = "unavailable";
+	char live_module_sha256[65] = "unavailable";
+	char live_oracle_sha256[65] = "unavailable";
+	int qualification_report_valid =
+		swapz_primary_read_qualification_report(&qualification) == 0;
+	int qualification_source_matches_build = qualification_report_valid &&
+		SWAPZ_BUILD_SOURCE_CLEAN == 1 &&
+		!strcmp(qualification.source_sha, SWAPZ_BUILD_SOURCE_SHA);
+	int live_artifact_hashes_read = qualification_report_valid &&
+		swapz_primary_live_artifact_hashes(
+			live_swapzctl_sha256, live_module_sha256,
+			live_oracle_sha256) == 0;
+	int live_artifacts_match_qualification = live_artifact_hashes_read &&
+		swapz_primary_qualification_artifacts_match(
+			&qualification, live_swapzctl_sha256, live_module_sha256,
+			live_oracle_sha256);
 
 	if (swaps_valid) {
 		for (i = 0; i < swap_count; ++i) {
@@ -3236,6 +4150,17 @@ static int swapz_primary_read_only_plan(void)
 	       "\"module_build_source_sha\":\"%s\","
 	       "\"module_build_source_clean\":%s,"
 	       "\"control_module_source_matches\":%s,"
+	       "\"qualification_report_valid\":%s,"
+	       "\"qualification_source_matches_build\":%s,"
+	       "\"qualification_report_sha256\":\"%s\","
+	       "\"qualified_swapzctl_sha256\":\"%s\","
+	       "\"qualified_module_sha256\":\"%s\","
+	       "\"qualified_oracle_sha256\":\"%s\","
+	       "\"live_artifact_hashes_read\":%s,"
+	       "\"live_swapzctl_sha256\":\"%s\","
+	       "\"live_module_sha256\":\"%s\","
+	       "\"live_oracle_sha256\":\"%s\","
+	       "\"live_artifacts_match_qualification\":%s,"
 	       "\"live_device_gates_checked\":false,"
 	       "\"target_device_preflight\":%s,"
 	       "\"target_device_bytes\":%llu,"
@@ -3281,6 +4206,21 @@ static int swapz_primary_read_only_plan(void)
 	       module_build_provenance_read && module_build_source_clean ?
 		       "true" : "false",
 	       control_module_source_matches ? "true" : "false",
+	       qualification_report_valid ? "true" : "false",
+	       qualification_source_matches_build ? "true" : "false",
+	       qualification_report_valid ? qualification.report_sha256 :
+		       "unavailable",
+	       qualification_report_valid ? qualification.formatter_sha256 :
+		       "unavailable",
+	       qualification_report_valid ? qualification.module_sha256 :
+		       "unavailable",
+	       qualification_report_valid ? qualification.oracle_sha256 :
+		       "unavailable",
+	       live_artifact_hashes_read ? "true" : "false",
+	       live_swapzctl_sha256,
+	       live_module_sha256,
+	       live_oracle_sha256,
+	       live_artifacts_match_qualification ? "true" : "false",
 	       target_device_preflight ? "true" : "false",
 	       (unsigned long long)target_device_bytes,
 	       original_swap_header ? "true" : "false",

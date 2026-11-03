@@ -842,6 +842,175 @@ static void test_build_source_provenance_policy(void)
 	assert(!swapz_primary_build_sources_match("invalid", 1, same_sha, 1));
 }
 
+static void test_primary_qualification_report_parser(void)
+{
+	static const char report_template[] =
+		"{\"schema\":\"swapz-test-results-v1\","
+		"\"host_identity\":{\"schema\":\"swapz-host-v1\","
+		"\"architecture\":\"x86_64\",\"id_sha256\":\"%s\"},"
+		"\"source_sha\":\"%s\",\"tested_commit_sha\":\"%s\","
+		"\"overall\":\"PASS\","
+		"\"qualification\":\"RAM_BACKED_NULL_BLK_ONLY\","
+		"\"stages\":["
+		"{\"name\":\"Build module and helpers\",\"status\":\"PASS\",\"exit_code\":0},"
+		"{\"name\":\"Native and rootless contracts\",\"status\":\"PASS\",\"exit_code\":0},"
+		"{\"name\":\"Kernel warnings W=1\",\"status\":\"PASS\",\"exit_code\":0},"
+		"{\"name\":\"Kernel warnings W=2\",\"status\":\"PASS\",\"exit_code\":0},"
+		"{\"name\":\"Owned RAM smoke + mixed/QD pilot\",\"status\":\"PASS\",\"exit_code\":0}],"
+		"\"qualified_artifacts\":{\"status\":\"AVAILABLE\","
+		"\"formatter_sha256\":\"%s\",\"module_sha256\":\"%s\","
+		"\"oracle_sha256\":\"%s\"}}\n";
+	const char *source = "0123456789abcdef0123456789abcdef01234567";
+	char host_sha[65];
+	char formatter_sha[65];
+	char module_sha[65];
+	char oracle_sha[65];
+	char json[4096];
+	struct swapz_primary_qualification qualification;
+	int length;
+
+	memset(host_sha, 'a', 64U);
+	host_sha[64] = '\0';
+	memset(formatter_sha, 'b', 64U);
+	formatter_sha[64] = '\0';
+	memset(module_sha, 'c', 64U);
+	module_sha[64] = '\0';
+	memset(oracle_sha, 'd', 64U);
+	oracle_sha[64] = '\0';
+	length = snprintf(json, sizeof(json), report_template, host_sha,
+			  source, source, formatter_sha, module_sha, oracle_sha);
+	assert(length > 0 && (size_t)length < sizeof(json));
+	assert(swapz_primary_qualification_parse_json(
+		(const unsigned char *)json, (size_t)length, source, host_sha,
+		&qualification) == 0);
+	assert(!strcmp(qualification.source_sha, source));
+	assert(!strcmp(qualification.host_identity_sha256, host_sha));
+	assert(!strcmp(qualification.formatter_sha256, formatter_sha));
+	assert(!strcmp(qualification.module_sha256, module_sha));
+	assert(!strcmp(qualification.oracle_sha256, oracle_sha));
+	assert(swapz_primary_valid_sha256(qualification.report_sha256));
+	assert(swapz_primary_qualification_artifacts_match(
+		&qualification, formatter_sha, module_sha, oracle_sha));
+	assert(!swapz_primary_qualification_artifacts_match(
+		&qualification, module_sha, module_sha, oracle_sha));
+	assert(!swapz_primary_qualification_artifacts_match(
+		&qualification, formatter_sha, "invalid", oracle_sha));
+	assert(swapz_primary_qualification_parse_json(
+		(const unsigned char *)json, (size_t)length, source, module_sha,
+		&qualification) < 0);
+	assert(swapz_primary_qualification_parse_json(
+		(const unsigned char *)json, (size_t)length, "unknown", host_sha,
+		&qualification) < 0);
+	{
+		char *overall = strstr(json, "\"overall\":\"PASS\"");
+
+		assert(overall);
+		overall[strlen("\"overall\":\"")] = 'F';
+		assert(swapz_primary_qualification_parse_json(
+			(const unsigned char *)json, (size_t)length, source, host_sha,
+			&qualification) < 0);
+		overall[strlen("\"overall\":\"")] = 'P';
+	}
+	{
+		char *scope = strstr(json, "\"qualification\":\"");
+
+		assert(scope);
+		scope[strlen("\"qualification\":\"")] = 'X';
+		assert(swapz_primary_qualification_parse_json(
+			(const unsigned char *)json, (size_t)length, source, host_sha,
+			&qualification) < 0);
+		scope[strlen("\"qualification\":\"")] = 'R';
+	}
+	{
+		char *stage_status = strstr(json, "\"status\":\"PASS\"");
+
+		assert(stage_status);
+		memcpy(stage_status + strlen("\"status\":\""), "FAIL", 4U);
+		assert(swapz_primary_qualification_parse_json(
+			(const unsigned char *)json, (size_t)length, source, host_sha,
+			&qualification) < 0);
+		memcpy(stage_status + strlen("\"status\":\""), "PASS", 4U);
+	}
+	{
+		char *exit_code = strstr(json, "\"exit_code\":0");
+
+		assert(exit_code);
+		exit_code[strlen("\"exit_code\":")] = '1';
+		assert(swapz_primary_qualification_parse_json(
+			(const unsigned char *)json, (size_t)length, source, host_sha,
+			&qualification) < 0);
+		exit_code[strlen("\"exit_code\":")] = '0';
+	}
+	{
+		char *formatter = strstr(json, "\"formatter_sha256\":\"");
+		char original;
+
+		assert(formatter);
+		formatter += strlen("\"formatter_sha256\":\"");
+		original = *formatter;
+		*formatter = 'z';
+		assert(swapz_primary_qualification_parse_json(
+			(const unsigned char *)json, (size_t)length, source, host_sha,
+			&qualification) < 0);
+		*formatter = original;
+	}
+	json[length - 1] = 'x';
+	assert(swapz_primary_qualification_parse_json(
+		(const unsigned char *)json, (size_t)length, source, host_sha,
+		&qualification) < 0);
+	json[length - 1] = '\n';
+	{
+		char duplicate[4096];
+		static const char duplicate_field[] = "\"overall\":\"PASS\",";
+		size_t duplicate_length = sizeof(duplicate_field) - 1U;
+		char *needle;
+
+		memcpy(duplicate, json, (size_t)length + 1U);
+		needle = strstr(duplicate, "\"overall\":\"PASS\",");
+		assert(needle);
+		memmove(needle + duplicate_length, needle,
+			strlen(needle) + 1U);
+		memcpy(needle, duplicate_field, duplicate_length);
+		assert(swapz_primary_qualification_parse_json(
+			(const unsigned char *)duplicate, strlen(duplicate), source,
+			host_sha, &qualification) < 0);
+	}
+}
+
+static void test_primary_qualification_live_reader_disabled_in_rootless(void)
+{
+	struct swapz_primary_qualification qualification;
+	struct swapz_primary_qualification original;
+	char host_identity_sha256[65];
+	char swapzctl_sha256[65];
+	char module_sha256[65];
+	char oracle_sha256[65];
+	char original_hashes[3][65];
+
+	memset(&qualification, 0xa5, sizeof(qualification));
+	original = qualification;
+	assert(swapz_primary_read_qualification_report(&qualification) < 0);
+	assert(errno == ENODEV);
+	assert(!memcmp(&qualification, &original, sizeof(qualification)));
+	assert(swapz_primary_live_host_identity_sha256(host_identity_sha256) < 0);
+	assert(errno == ENODEV);
+	memset(swapzctl_sha256, 0xa5, sizeof(swapzctl_sha256));
+	memset(module_sha256, 0xa5, sizeof(module_sha256));
+	memset(oracle_sha256, 0xa5, sizeof(oracle_sha256));
+	memcpy(original_hashes[0], swapzctl_sha256, sizeof(swapzctl_sha256));
+	memcpy(original_hashes[1], module_sha256, sizeof(module_sha256));
+	memcpy(original_hashes[2], oracle_sha256, sizeof(oracle_sha256));
+	assert(swapz_primary_live_artifact_hashes(
+		swapzctl_sha256, module_sha256, oracle_sha256) < 0);
+	assert(errno == ENODEV);
+	assert(!memcmp(swapzctl_sha256, original_hashes[0],
+		       sizeof(swapzctl_sha256)));
+	assert(!memcmp(module_sha256, original_hashes[1],
+		       sizeof(module_sha256)));
+	assert(!memcmp(oracle_sha256, original_hashes[2],
+		       sizeof(oracle_sha256)));
+}
+
 int main(void)
 {
 	uint64_t pages = swapz_primary_maximum_logical_pages(
@@ -889,6 +1058,8 @@ int main(void)
 	test_mountinfo_parser();
 	test_module_mapper_identity_policy();
 	test_build_source_provenance_policy();
+	test_primary_qualification_report_parser();
+	test_primary_qualification_live_reader_disabled_in_rootless();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);
