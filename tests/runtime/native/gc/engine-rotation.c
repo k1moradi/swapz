@@ -26,8 +26,12 @@ static struct swapz_engine e;
 static swapz_u8 write_scratch[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 read_scratch[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 contents[8][2072];
+static swapz_u8 late_payloads[5][SWAPZ_MAX_COMPRESSED];
+static swapz_u8 late_readback[SWAPZ_MAX_COMPRESSED];
+static swapz_u8 bulk_scratch[SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES];
+static struct swapz_tx bulk_txs[SWAPZ_MAX_RECORDS];
 static unsigned int lower_reads, lower_writes;
-static int fail_write;
+static int fail_read, fail_write, corrupt_replay_tail;
 
 static int lower_write(void *opaque, swapz_u32 start, swapz_u8 blocks,
 		       const swapz_u8 *bytes, swapz_u8 *completed)
@@ -52,9 +56,44 @@ static int lower_read(void *opaque, swapz_u32 start, swapz_u8 blocks, swapz_u8 *
 	(void)opaque;
 	if (start >= PBLKS || blocks > PBLKS - start)
 		return -ERANGE;
+	if (fail_read) {
+		fail_read = 0;
+		return -EIO;
+	}
 	memcpy(out, lower + (size_t)start * SWAPZ_BLOCK_BYTES,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
 	lower_reads += blocks;
+	return 0;
+}
+
+static int lower_write_run(void *opaque, swapz_u32 start, swapz_u16 blocks,
+			   const swapz_u8 *bytes, swapz_u16 *completed)
+{
+	(void)opaque;
+	*completed = 0;
+	if (!blocks || blocks > SWAPZ_BULK_BLOCKS || start >= PBLKS ||
+	    blocks > PBLKS - start ||
+	    start / SWAPZ_SEGMENT_BLOCKS !=
+		(start + blocks - 1U) / SWAPZ_SEGMENT_BLOCKS)
+		return -ERANGE;
+	memcpy(lower + (size_t)start * SWAPZ_BLOCK_BYTES, bytes,
+	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
+	lower_writes += blocks;
+	*completed = blocks;
+	/* Corrupt only the replay image after the lower copy is complete. The
+	 * last paused transaction then fails authority validation after all older
+	 * extents in the same lower run have already replayed successfully. */
+	if (corrupt_replay_tail) {
+		swapz_u32 tail;
+
+		if (a.batch_pending < 2U)
+			return -EUCLEAN;
+		tail = bulk_txs[a.batch_pending - 1U].start_block - start;
+		if (tail >= blocks)
+			return -EUCLEAN;
+		bulk_scratch[(size_t)tail * SWAPZ_BLOCK_BYTES] ^= 1U;
+		corrupt_replay_tail = 0;
+	}
 	return 0;
 }
 
@@ -80,6 +119,7 @@ static int setup(void)
 	e.io.write_extent = lower_write;
 	e.io.read_blocks = lower_read;
 	lower_reads = lower_writes = 0;
+	fail_read = fail_write = corrupt_replay_tail = 0;
 	for (i = 0; i < 8; ++i)
 		memset(contents[i], (int)i + 1, sizeof(contents[i]));
 	return 0;
@@ -181,7 +221,7 @@ static int test_failed_gc_write_preserves_live_mapping(void)
 {
 	struct swapz_compressed_page p;
 	swapz_u8 completed = 99;
-	swapz_u32 previous;
+	swapz_u32 failed_block, previous;
 
 	CHECK(setup() == 0);
 	CHECK(write_one(0) == 0);
@@ -196,10 +236,127 @@ static int test_failed_gc_write_preserves_live_mapping(void)
 	};
 	fail_write = 1;
 	CHECK(swapz_engine_write_window_batched(&e, &p, 1, &completed) == -EIO);
+	failed_block = a.next_block - 1U;
 	CHECK(completed == 0 && maps[0].start_block == previous);
 	CHECK(maps[0].valid && verify_page(0) == 0);
+	CHECK(!live[failed_block] && !classes[failed_block]);
 	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
 	CHECK(roles[0] == 1 && roles[2] == 0);
+
+	/* The uncertain physical block is quarantined by the monotonic cursor.
+	 * Retrying relocation must publish into the next block, then the same
+	 * reserve rotation can complete without ever reusing failed media. */
+	completed = 0;
+	CHECK(swapz_engine_write_window_batched(&e, &p, 1, &completed) == 0);
+	CHECK(completed == 1 && maps[0].start_block == failed_block + 1U);
+	CHECK(!live[failed_block] && live[maps[0].start_block]);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
+	CHECK(roles[0] == 0 && roles[2] == 1);
+	CHECK(verify_page(0) == 0);
+	return 0;
+}
+
+static int test_failed_gc_read_preserves_live_mapping(void)
+{
+	swapz_u32 previous;
+
+	CHECK(setup() == 0);
+	for (unsigned int i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
+		CHECK(write_one(0) == 0);
+	previous = maps[0].start_block;
+	CHECK(write_one(1) == 0); /* move OPEN away from victim0 */
+	fail_read = 1;
+	CHECK(evacuate(0) == -EIO);
+	CHECK(maps[0].valid && maps[0].start_block == previous && live[previous]);
+	CHECK(roles[0] == 1 && roles[2] == 0);
+	CHECK(verify_page(0) == 0);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	return 0;
+}
+
+static int test_delayed_gc_completion_fences_mutation(void)
+{
+	struct swapz_compressed_page p;
+	struct swapz_io_run run = {
+		.bytes = bulk_scratch,
+		.txs = bulk_txs,
+	};
+	struct swapz_tx blocked;
+	swapz_u8 committed = 0, prepared = 0;
+	swapz_u16 completed = 0;
+	swapz_u32 logical = 0, previous;
+
+	CHECK(setup() == 0);
+	for (unsigned int i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
+		CHECK(write_one(0) == 0);
+	previous = maps[0].start_block;
+	CHECK(write_one(1) == 0);
+	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	p = (struct swapz_compressed_page) {
+		.logical_page = 0, .payload = contents[0], .length = 2072,
+	};
+	CHECK(swapz_engine_prepare_batched_run(&e, &p, 1, &run,
+					       &prepared, 0) == 0);
+	CHECK(prepared == 1 && a.batch_pending && !a.in_flight);
+	CHECK(maps[0].start_block == previous);
+	/* Model a delayed owned lower completion. Until completion is replayed,
+	 * neither an overwrite reservation nor DISCARD may change authority. */
+	CHECK(swapz_stage(&a, &logical, 1, 1, &blocked) == -EBUSY);
+	CHECK(swapz_discard_page(&a, logical) == -EBUSY);
+	CHECK(maps[0].start_block == previous && maps[0].valid);
+	CHECK(lower_write_run(NULL, run.start_block, run.blocks,
+			      run.bytes, &completed) == 0);
+	CHECK(completed == run.blocks);
+	CHECK(swapz_engine_complete_batched_run(&e, &run, completed, 0,
+						 &committed) == 0);
+	CHECK(committed == 1 && !a.batch_pending && !a.in_flight);
+	CHECK(maps[0].start_block != previous);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
+	CHECK(roles[0] == 0 && roles[2] == 1);
+	CHECK(verify_page(0) == 0);
+	return 0;
+}
+
+static int test_late_replay_failure_reports_committed_prefix(void)
+{
+	struct swapz_compressed_page pages[5];
+	swapz_u8 committed = 99;
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	e.io.write_run = lower_write_run;
+	for (i = 0; i < 5; ++i) {
+		memset(late_payloads[i], (int)i + 0x31, sizeof(late_payloads[i]));
+		pages[i] = (struct swapz_compressed_page) {
+			.logical_page = i,
+			.payload = late_payloads[i],
+			.length = SWAPZ_MAX_COMPRESSED,
+		};
+	}
+	/* Five maximum-size records require at least two extents in one completed
+	 * lower run. Corrupt only the last replay image so all earlier extents are
+	 * authoritative before the tail validation failure is observed. */
+	corrupt_replay_tail = 1;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 5, &committed) == -EUCLEAN);
+	CHECK(committed == 4);
+	CHECK(lower_writes == 5 && e.completed_blocks == 5);
+	CHECK(!a.in_flight && !a.batch_pending && a.abandoned_blocks == 1);
+	CHECK(!maps[4].valid && maps[4].generation == 0);
+	for (i = 0; i < 4; ++i) {
+		swapz_u16 length = 0;
+
+		CHECK(maps[i].valid && maps[i].generation == 1);
+		CHECK(swapz_engine_read_page(&e, i, late_readback,
+					     sizeof(late_readback), &length) == 0);
+		CHECK(length == sizeof(late_payloads[i]));
+		CHECK(!memcmp(late_readback, late_payloads[i], length));
+	}
 	return 0;
 }
 
@@ -209,6 +366,9 @@ int main(void)
 
 	CHECK(test_compressed_gc_handoff() == 0); passed++;
 	CHECK(test_failed_gc_write_preserves_live_mapping() == 0); passed++;
+	CHECK(test_failed_gc_read_preserves_live_mapping() == 0); passed++;
+	CHECK(test_delayed_gc_completion_fences_mutation() == 0); passed++;
+	CHECK(test_late_replay_failure_reports_committed_prefix() == 0); passed++;
 	printf("SWAPZ_GC_ENGINE_ROTATION_TESTS_PASS=%d\n", passed);
 	return 0;
 }

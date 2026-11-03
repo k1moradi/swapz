@@ -331,7 +331,7 @@ signature to an unchanged module.
 
 ## Direct production-C tests
 
-Native tests compile the real `src/kernel/{codec,authority,engine}.c` where applicable. They cover codec integrity, authority publication, torn/short failure, overwrite generations, discard, zero-write representation, online packing, randomized authority, lower-run aggregation, flush/FUA accounting, retention/window policy and GC rotation/cost invariants.
+Native tests compile the real `src/kernel/{codec,authority,engine}.c` where applicable. They cover codec integrity, authority publication, torn/short failure, overwrite generations, discard, zero-write representation, online packing, randomized authority, lower-run aggregation, flush/FUA accounting, retention/window policy and GC rotation/cost invariants. GC engine coverage must also force a fully completed batched lower write whose authority replay fails after at least one earlier extent has published; the wrapper must return the exact committed prefix while leaving the unpublished tail unreachable, so callers never retry already-authoritative pages as though the prefix were zero. A delayed GC lower completion must keep both overwrite staging and DISCARD fenced until replay, and failed GC lower I/O must leave the uncertain physical reservation unavailable for immediate reuse.
 
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
 regression fixture: one SWZ header block,
@@ -388,6 +388,18 @@ implementation overhead remain outside those figures and require loaded-host
 measurement. The same preflight must exercise an aligned near-`u32` physical
 geometry without allocating it, proving reserve arithmetic and one-past-limit
 rejection do not truncate or wrap.
+
+That selected-card value is an authority-admission limit, not a worst-case RAW
+forward-progress limit. With 30,465,536 data blocks, the current 27,080,448-page
+admission and 3,385,056-block reserve leave exactly 27,080,448 foreground
+blocks: an all-RAW fill therefore leaves no copy-on-write block for the first
+overwrite. Under the current rotating-role allocator, full-capacity
+qualification must preserve at least one unused 256-block foreground segment
+after GC reserves. Solving the existing `ceil(logical_pages / 8)` reserve policy
+with that headroom gives at most 27,080,192 logical pages, a 3,385,024-block GC
+reserve, and a 110,920,466,432-byte mapper. A different allocator may exceed
+that limit only if direct production-C and loaded tests prove equivalent
+overwrite bootstrap without reusing a referenced or uncertain extent.
 
 The `/8` reserve change updates the admitted-capacity policy, not the serialized
 SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains

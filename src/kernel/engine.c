@@ -1875,6 +1875,15 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 			int complete_error = swapz_engine_complete_batched_run(
 				e, &run, completed, error, &published);
 
+			/*
+			 * Replay can fail after an earlier extent in this completed lower
+			 * run has already published. That prefix is authoritative and must
+			 * remain visible to the caller so it is never retried as if absent.
+			 */
+			if (published > prepared || published > count - total)
+				return -EUCLEAN;
+			total += published;
+			*committed_pages = total;
 			if (complete_error)
 				return complete_error;
 		}
@@ -1882,8 +1891,6 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 			return -EUCLEAN;
 		if (e->io.write_published)
 			e->io.write_published(e->io.opaque, published);
-		total += published;
-		*committed_pages = total;
 	}
 	return 0;
 }
