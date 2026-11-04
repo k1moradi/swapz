@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Development-only quick decision loop behind `make fast_test`.
 
-It builds the working tree, runs native/replay contract checks and a small
-single-pair subset of the owned null_blk benchmark matrix, then prints one
-compact raw-versus-swapz table. Dirty trees are allowed so a policy change can
-be measured before it is committed.
+It builds the working tree, runs native/replay contract checks and defaults
+to three raw-versus-swapz repeats per owned null_blk scenario, then prints
+development tables. Dirty trees are allowed so a policy change can be measured
+before it is committed.
 
 `make fast_test` never qualifies a source revision, never writes or publishes
-test_results.json and never replaces `make test`. Its numbers are single,
-unpaired observations; promotion still requires the full owner matrix.
+test_results.json and never replaces `make test`. Repeats are noise-screened
+directional observations, not the matched confidence intervals required for
+qualification; promotion still requires the full owner matrix.
 """
 import argparse
 import hashlib
