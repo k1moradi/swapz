@@ -2817,6 +2817,18 @@ a mutable by-id/by-UUID pathname to infer a later kernel identity. Verified
 unrelated swapfiles remain permitted. Unreadable current kernel command-line evidence
 must likewise deny resume admission. A live mapper without provable selected
 backing/run authority is a failure, not a degraded optional metric.
+Runtime health must also inspect every active partition-swap row, not merely
+count rows that resolve to the expected mapper. Unresolved block or Device
+Mapper identity and missing sysfs DM name leave incomplete evidence
+(DEGRADED when those are the only defects). A nonzero bounded probe exit
+also invalidates its stdout even when it looks complete; missing run-bound
+mapper identity remains a definite FAIL rather than optional degradation.
+An active selected raw backing partition or competing primary mapper identity
+is a definite FAIL. Compare each alias using its captured major:minor while
+permitting verified unrelated swapfiles and unrelated resolved block devices.
+Emit bounded, path-free observer phase, expected state, classified observed
+state, original probe exit status and a read-only next check only when the
+reported state changes; never promote missing evidence to HEALTHY.
 Keep repeated kernel-journal queries capped to a small recent-error window,
 use portable case-insensitive matching, and report cumulative error counts
 from DM status separately from the recent journal window.

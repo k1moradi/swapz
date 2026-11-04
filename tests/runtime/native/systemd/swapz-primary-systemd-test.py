@@ -2791,8 +2791,8 @@ class RuntimeHealthTests(unittest.TestCase):
                 r"""\
                 #!/bin/sh
                 case "$1" in
-                info) printf '%s\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}" ;;
-                table) printf '0 216641536 swapz 8:1 0 64 0 2 0 1 0 0\n' ;;
+                info) printf '%s\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}"; exit "${MOCK_DM_INFO_EXIT_CODE:-0}" ;;
+                table) printf '0 216641536 swapz 8:1 0 64 0 2 0 1 0 0\n'; exit "${MOCK_DM_TABLE_EXIT_CODE:-0}" ;;
                 status)
                     if [ "${MOCK_DM_STATUS_SLEEP:-0}" != 0 ]; then sleep "$MOCK_DM_STATUS_SLEEP"; fi
                     if [ "${MOCK_DM_STATUS_UNAVAILABLE:-0}" = 1 ]; then exit 1; fi
@@ -2807,6 +2807,7 @@ class RuntimeHealthTests(unittest.TestCase):
                         exit 0
                     fi
                     printf '%s\n' "${MOCK_DM_STATUS:-0 216641536 swapz failed=0 error=0 flush_err=0 segment_discards_failed=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 gc_reserve_segments_initial=2 gc_reserve_segments_current=2 gc_destination_advances=0 window_gc_pressure=0}"
+                    exit "${MOCK_DM_STATUS_EXIT_CODE:-0}"
                     ;;
                 *) exit 2 ;;
                 esac
@@ -2919,6 +2920,88 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", result.stderr)
         self.assertIn("swap_remaining_kib=", result.stderr)
         self.assertIn(f"mapper_uuid=SWAPZ-PRIMARY-{ACTIVE_RUN_ID}", result.stderr)
+
+    def test_probe_output_after_nonzero_status_never_passes_as_healthy(self) -> None:
+        # A plausible partial response followed by an error previously passed,
+        # including through the old dmsetup info -> awk pipeline.
+        for variable, phase, exit_code, verdict, reason in (
+            ("MOCK_DM_INFO_EXIT_CODE", "mapper_info", "17", 1,
+             "mapper_uuid_not_bound_to_active_run"),
+            ("MOCK_DM_TABLE_EXIT_CODE", "mapper_table", "18", 2,
+             "mapper_table_unavailable"),
+            ("MOCK_DM_STATUS_EXIT_CODE", "mapper_status", "19", 2,
+             "mapper_status_unavailable"),
+        ):
+            with self.subTest(phase=phase):
+                env = self.env.copy()
+                env[variable] = exit_code
+                observed = self.run_helper("once", env)
+                self.assertEqual(observed.returncode, verdict, observed.stderr)
+                self.assertIn(reason, observed.stderr)
+                self.assertNotIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", observed.stderr)
+                self.assertIn(f"phase={phase} ", observed.stderr)
+                self.assertIn(f"command_status={exit_code} ", observed.stderr)
+                self.assertIn("next=inspect_dmsetup_", observed.stderr)
+
+    def test_extra_raw_backing_swap_row_fails_runtime_health(self) -> None:
+        # The expected mapper row cannot hide an active selected raw partition.
+        with (self.proc / "swaps").open("a", encoding="ascii") as inventory:
+            inventory.write(
+                f"{self.dev / 'disk' / 'by-partuuid' / PARTUUID} "
+                "partition 10000 12 -2\n"
+            )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("raw_backing_swap_active", observed.stderr)
+        self.assertIn("observed=raw_backing_active", observed.stderr)
+        self.assertIn("command_status=0", observed.stderr)
+
+    def test_extra_unresolved_block_swap_alias_degrades_runtime_health(self) -> None:
+        # This second row was ignored even while the hibernation guard
+        # correctly refused to use it as evidence of inactive swapz.
+        with (self.proc / "swaps").open("a", encoding="ascii") as inventory:
+            inventory.write("/dev/dm-7 partition 10000 12 -2\n")
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+        self.assertIn("swap_block_identity_unavailable", observed.stderr)
+        self.assertIn("phase=swap_inventory ", observed.stderr)
+        self.assertIn("observed=unresolved_block_alias", observed.stderr)
+        self.assertIn("command_status=1", observed.stderr)
+        self.assertNotIn("/dev/dm-7", observed.stderr)
+        self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
+
+    def test_swap_alias_sysfs_identity_cannot_change_health_to_false_pass(self) -> None:
+        write_executable(
+            self.bin / "lsblk",
+            "#!/bin/sh\n"
+            '[ "$2" = MAJ:MIN ] || exit 1\n'
+            'case "$4" in\n'
+            '  */disk/by-partuuid/*) echo 8:1 ;;\n'
+            '  */mapper/swapz-primary) echo 253:0 ;;\n'
+            '  /dev/dm-7) echo 253:7 ;;\n'
+            '  *) exit 1 ;;\n'
+            'esac\n',
+        )
+        with (self.proc / "swaps").open("a", encoding="ascii") as inventory:
+            inventory.write("/dev/dm-7 partition 10000 12 -2\n")
+        # A captured major:minor without inspectable sysfs remains incomplete.
+        missing = self.run_helper("once")
+        self.assertEqual(missing.returncode, 2, missing.stderr)
+        self.assertIn("observed=uninspectable_dm_alias", missing.stderr)
+
+        dm_name = self.sys / "dev" / "block" / "253:7" / "dm" / "name"
+        dm_name.parent.mkdir(parents=True)
+        dm_name.write_text("unrelated\n", encoding="ascii")
+        unrelated = self.run_helper("once")
+        self.assertEqual(unrelated.returncode, 0, unrelated.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", unrelated.stderr)
+
+        dm_name.write_text("swapz-primary\n", encoding="ascii")
+        conflicting = self.run_helper("once")
+        self.assertEqual(conflicting.returncode, 1, conflicting.stderr)
+        self.assertIn("conflicting_swap_mapper_identity", conflicting.stderr)
+        self.assertIn("observed=conflicting_dm_identity", conflicting.stderr)
 
     def test_backing_device_disappearance_is_failure_not_degraded(self) -> None:
         selected = self.dev / "disk" / "by-partuuid" / PARTUUID
@@ -3402,6 +3485,8 @@ class RuntimeHealthTests(unittest.TestCase):
         observed = self.run_helper("once", env, timeout=5)
         self.assertEqual(observed.returncode, 2, observed.stderr)
         self.assertIn("mapper_status_unavailable", observed.stderr)
+        self.assertIn("phase=mapper_status ", observed.stderr)
+        self.assertIn("command_status=124 ", observed.stderr)
 
     def test_unreadable_kernel_cmdline_blocks_resume_admission(self) -> None:
         (self.proc / "swaps").write_text(
