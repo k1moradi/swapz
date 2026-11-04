@@ -83,6 +83,7 @@ struct mock_format_context {
 	const char *replacement_path;
 	const char *retired_path;
 	int inventory_errno;
+	const char *inventory_check;
 	unsigned int replacement_calls;
 };
 
@@ -829,8 +830,10 @@ static int mock_inventory_verify(struct mock_format_context *context,
 
 	if (context->synthetic_proc_root &&
 	    format_mount_inventory_clear_from_proc(context->synthetic_proc_root,
-						    selected_device, parent_device) < 0)
+						    selected_device, parent_device) < 0) {
+		context->inventory_check = "mountinfo";
 		goto failed;
+	}
 	if (!swap_table)
 		return 0;
 	stream = test_inventory_binary_stream(swap_table, strlen(swap_table));
@@ -839,6 +842,7 @@ static int mock_inventory_verify(struct mock_format_context *context,
 	saved_errno = errno;
 	assert(fclose(stream) == 0);
 	if (result < 0) {
+		context->inventory_check = "/proc/swaps";
 		errno = saved_errno;
 		goto failed;
 	}
@@ -861,6 +865,9 @@ static void test_mock_admission_refusal(const char *proc_root,
 
 	assert(format_device_with_ops("/synthetic/card", &expected, &ops) == 2);
 	assert(context.inventory_errno == expected_error);
+	assert(context.inventory_check != NULL);
+	assert(!strcmp(context.inventory_check,
+		       expected_error == EOPNOTSUPP ? "/proc/swaps" : "mountinfo"));
 	assert(context.open_calls == 0U);
 	assert(context.write_calls == 0U);
 }
@@ -1136,8 +1143,8 @@ static void test_swap_adversarial_inventory(void)
 		assert(length > 0 && (size_t)length < sizeof(inventory));
 		stream = test_inventory_binary_stream(inventory, (size_t)length);
 		errno = 0;
-	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
-	assert(errno == EOPNOTSUPP);
+		assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+		assert(errno == EOPNOTSUPP);
 		assert(fclose(stream) == 0);
 		assert(close(spaced_fd) == 0);
 		assert(unlink(spaced_path) == 0);
@@ -1247,6 +1254,23 @@ static void test_namespace_swap_ambiguity_never_writes(void)
 		"37 25 8:2 / /sibling rw - ext4 /dev/sibling\n");
 	test_mock_admission_refusal(proc_root, swap_header, EPROTO);
 	test_mountinfo_fixture_write(proc_root, "3031/mountinfo", sibling_mount);
+	/* Device-node pathnames also lack authenticated /proc/swaps dev_t. */
+	{
+		static const char *const partition_rows[] = {
+			"/dev/selected partition 1 0 -2\n",
+			"/dev/parent partition 1 0 -2\n",
+			"/dev/sibling partition 1 0 -2\n",
+		};
+
+		for (size_t index = 0;
+		     index < sizeof(partition_rows) / sizeof(partition_rows[0]);
+		     ++index) {
+			length = snprintf(inventory, sizeof(inventory), "%s%s",
+					  swap_header, partition_rows[index]);
+			assert(length > 0 && (size_t)length < sizeof(inventory));
+			test_mock_admission_refusal(proc_root, inventory, EOPNOTSUPP);
+		}
+	}
 
 	/*
 	 * Foreign namespace: kernel still refers to inode A, but the reported
@@ -1311,6 +1335,8 @@ static void test_namespace_swap_ambiguity_never_writes(void)
 		assert(context.read_calls == 1U);
 		assert(context.replacement_calls == 1U);
 		assert(context.inventory_errno == EOPNOTSUPP);
+		assert(context.inventory_check != NULL);
+		assert(!strcmp(context.inventory_check, "/proc/swaps"));
 		assert(context.write_calls == 0U);
 	}
 	assert(lstat(swap_path, &replacement_info) == 0);
