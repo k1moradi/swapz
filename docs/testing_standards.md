@@ -977,7 +977,11 @@ matrix the complete success path can issue at most 144 such 90-second commands,
 so the loaded-stage aggregate watchdog must remain at least 14,400 seconds,
 above the 12,960-second command ceiling with bounded setup/cleanup headroom.
 Increasing coverage may raise the aggregate watchdog but must never lengthen or
-remove an individual lifecycle timeout. The normal-stop matrix
+remove an individual lifecycle timeout. Synthetic Make-interface and report
+fixtures that model a successful loaded stage must emit the same current ordered
+lifecycle phase set and aggregate case count as the real loaded parser; stale
+fixture markers must fail rather than silently weakening evidence validation.
+The normal-stop matrix
 must include fresh-process death after durable STOPPING, after native swapoff,
 after exact mapper removal, after owned-module unload, and after durable
 RESTORED before terminal COMPLETE/owner release. Recovery from those later
