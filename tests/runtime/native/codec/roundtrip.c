@@ -764,8 +764,9 @@ static int test_partial_metadata_and_extent_bounds(void)
 		reseal_metadata(metadata_only, 1);
 		CHECK(swapz_validate_metadata_crc(metadata_only,
 						 SWAPZ_MAX_EXTENT_BYTES) == 0);
-		CHECK(swapz_validate(metadata_only, SWAPZ_MAX_EXTENT_BYTES) ==
-		      -EUCLEAN);
+		CHECK(swapz_peek(metadata_only, SWAPZ_MAX_EXTENT_BYTES, 0,
+				 &decoded) == -EUCLEAN);
+		CHECK(decoded.payload_length == 0 && decoded.generation == 0);
 		CHECK(swapz_lookup_validated_descriptor(
 			      metadata_only, SWAPZ_MAX_EXTENT_BYTES, 0,
 			      &decoded, NULL) == -EUCLEAN);

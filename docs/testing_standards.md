@@ -615,8 +615,9 @@ The codec envelope regression must construct at least one complete canonical
 little-endian extent independently of the production builder and CRC helper,
 then compare the writer's entire serialized extent, including cleared padding,
 byte-for-byte. It must separately check metadata and payload CRC corruption,
-exercise metadata-only descriptor inspection from an actual 4KiB allocation
-while the physical extent class is 16KiB, reject CRC-valid metadata-aliasing
+exercise metadata-only structural and descriptor inspection through the documented
+peek/descriptor APIs from an actual 4KiB allocation while the physical extent
+class is 16KiB, reject CRC-valid metadata-aliasing
 and out-of-extent payload offsets, and verify the 64-record capacity boundary.
 Writer inputs must not overlap the exclusively owned builder extent. These
 checks are native/sanitizer evidence; they do not replace live mapper testing.
