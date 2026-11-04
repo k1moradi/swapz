@@ -1694,17 +1694,30 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("swapz_physical_backing_arch_supported()", ctr)
         self.assertIn("Physical backing is qualified only on x86_64", ctr)
         self.assertIn("swapz_allow_physical_backing", ctr)
-        self.assertIn("swapz_validate_physical_superblock(ctx, device_bytes)", ctr)
-        self.assertLess(
-            ctr.index("swapz_physical_backing_arch_supported()"),
-            ctr.index("swapz_allow_physical_backing"))
-        self.assertLess(
-            ctr.index("swapz_physical_backing_arch_supported()"),
-            ctr.index("swapz_validate_physical_superblock(ctx, device_bytes)"))
+        compact_ctr = re.sub(r"\s+", " ", ctr)
+        compact_validator = re.sub(r"\s+", " ", validator)
+        self.assertIn(
+            "swapz_validate_physical_superblock( ctx, device_bytes, "
+            "&superblock_magic_present)", compact_ctr)
+        self.assertIn(
+            "swapz_validate_physical_superblock( ctx, device_bytes, NULL)",
+            compact_ctr)
+        self.assertIn("error != -EPERM || superblock_magic_present", compact_ctr)
+        self.assertIn("if (!swapz_allow_physical_backing)", compact_ctr)
+        self.assertIn("ctx->physical_backing = true", compact_ctr)
+        self.assertIn("ctx->physical_backing = false", compact_ctr)
+        physical_path = compact_ctr.rsplit(
+            "if (!swapz_physical_backing_arch_supported())", 1)[1]
+        self.assertLess(physical_path.index("swapz_allow_physical_backing"),
+                        physical_path.index(
+                            "swapz_validate_physical_superblock("))
         self.assertIn("ctx->data_start_block = 0", ctr)
         self.assertIn("ctx->data_start_block = 1U", ctr)
         self.assertIn("flush_fail_nth || write_fail_nth", ctr)
         self.assertIn("swapz_sb_valid(block, device_bytes)", validator)
+        self.assertIn(
+            "if (!error && magic_present) *magic_present = "
+            "swapz_sb_magic_matches(block)", compact_validator)
         self.assertIn("region.sector = 0", validator)
         self.assertIn("ctx->data_start_block + block", lower)
         self.assertIn("ctx->data_start_block + block", parallel)
