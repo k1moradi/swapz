@@ -11,6 +11,7 @@
  */
 #include <stdio.h>
 #include <errno.h>
+#include <stdbool.h>
 #include "flush-qual.h"
 #define CHECK(x) do { if (!(x)) { \
 	fprintf(stderr, "%s:%d failed %s\n", __FILE__, __LINE__, #x); \
@@ -61,6 +62,21 @@ static int test_genuine_lower_error(void)
 	CHECK(!s.injected && lower.called == 1);
 	return 0;
 }
+static int test_unsupported_lower_flush_retains_errno(void)
+{
+	struct swapz_flush_meter meter = { 0 };
+	struct fake_lower lower = { .next_error = -EOPNOTSUPP };
+
+	CHECK(swapz_flush_accounted(&meter, lower_flush, &lower) ==
+	      -EOPNOTSUPP);
+	CHECK(lower.called == 1 && meter.attempts == 1);
+	CHECK(meter.failures == 1 && !meter.successes && !meter.injected);
+	CHECK(swapz_write_flush_before_publish(0, 1, lower_flush, &lower)
+	      == -EOPNOTSUPP);
+	CHECK(lower.called == 2);
+	return 0;
+}
+
 static int test_null_argument_rejected(void)
 {
 	struct swapz_flush_meter s = { 0 };
@@ -157,6 +173,79 @@ static int test_no_ack_or_new_generation_before_fua(void)
 	return 0;
 }
 
+
+/*
+ * Rootless callback/drain scheduling model, not a loaded DM callback.
+ * The final publication gate is the exact production FUA helper.
+ * SWAPZ_TEST_BYPASS_LOWER_COMPLETION_FENCE is the negative control.
+ */
+struct lower_completion_fixture {
+	struct durable_upper upper;
+	unsigned int callbacks;
+	unsigned int final_completions;
+	bool callback_done;
+	bool upper_done;
+	int lower_error;
+	int final_error;
+};
+
+static void lower_callback(struct lower_completion_fixture *fixture, int error)
+{
+	fixture->callbacks++;
+	fixture->callback_done = true;
+	fixture->lower_error = error;
+}
+
+static int finalize_or_drain(struct lower_completion_fixture *fixture)
+{
+	int error;
+
+	if (fixture->upper_done)
+		return fixture->final_error;
+#ifndef SWAPZ_TEST_BYPASS_LOWER_COMPLETION_FENCE
+	if (!fixture->callback_done)
+		return -EAGAIN;
+#endif
+	fixture->upper.lower_write_error = fixture->lower_error;
+	error = submit_durable_upper(&fixture->upper, 1);
+	fixture->upper_done = true;
+	fixture->final_completions++;
+	fixture->final_error = error;
+	return error;
+}
+
+static int test_callback_before_or_after_drain(void)
+{
+	unsigned int order, error_case;
+
+	for (order = 0; order < 2; ++order) {
+		for (error_case = 0; error_case < 3; ++error_case) {
+			struct lower_completion_fixture fixture = { 0 };
+			int expected_error = error_case == 0 ? 0 :
+				error_case == 1 ? -EIO : -EOPNOTSUPP;
+
+			if (order == 0)
+				lower_callback(&fixture, expected_error);
+			else
+				CHECK(finalize_or_drain(&fixture) == -EAGAIN);
+			if (order != 0)
+				lower_callback(&fixture, expected_error);
+			CHECK(finalize_or_drain(&fixture) == expected_error);
+			CHECK(finalize_or_drain(&fixture) == expected_error);
+			CHECK(fixture.callbacks == 1 &&
+			      fixture.final_completions == 1);
+			CHECK(fixture.upper.lower_write_calls == 1);
+			CHECK(fixture.upper.success_acks ==
+			      (expected_error == 0 ? 1U : 0U));
+			CHECK(fixture.upper.generation ==
+			      (expected_error == 0 ? 1U : 0U));
+			CHECK(fixture.upper.flush.called ==
+			      (expected_error == 0 ? 1U : 0U));
+		}
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -164,9 +253,11 @@ int main(void)
 	CHECK(test_completed_success() == 0); passed++;
 	CHECK(test_synthetic_failure_before_lower() == 0); passed++;
 	CHECK(test_genuine_lower_error() == 0); passed++;
+	CHECK(test_unsupported_lower_flush_retains_errno() == 0); passed++;
 	CHECK(test_null_argument_rejected() == 0); passed++;
 	CHECK(test_prepublication_fua_write_gate() == 0); passed++;
 	CHECK(test_no_ack_or_new_generation_before_fua() == 0); passed++;
+	CHECK(test_callback_before_or_after_drain() == 0); passed++;
 	printf("SWAPZ_FLUSH_ACCOUNTING_TESTS_PASS=%d\n", passed);
 	return 0;
 }

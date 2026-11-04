@@ -2185,6 +2185,8 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 		inflight->lower_error = error;
 		WRITE_ONCE(inflight->active, false);
 		ctx->inflight_count--;
+		swapz_fail_at(ctx, error, "write",
+			      swapz_failure_category(error), "async-submit");
 		return error;
 	}
 	ctx->pipeline_active_max =
@@ -2278,7 +2280,8 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 			&ctx->engine, &inflight->run,
 			error ? 0 : inflight->run.blocks, error, &committed);
 
-		if (complete_error)
+		/* Keep the callback's lower errno when cleanup also fails. */
+		if (complete_error && !error)
 			error = complete_error;
 	}
 	finalize_end = ktime_get_ns();
@@ -2524,8 +2527,16 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 		ctx->lower_read_wall_ns += elapsed_ns;
 	else
 		ctx->lower_write_wall_ns += elapsed_ns;
-	if (error || bitmap)
-		return error ? error : -EIO;
+	if (error || bitmap) {
+		int lower_error = error ? error : -EIO;
+
+		/* Record lower service errors before an abort can mask them. */
+		swapz_fail_at(ctx, lower_error,
+			      op == REQ_OP_READ ? "read" : "write",
+			      swapz_failure_category(lower_error),
+			      "sync-lower-completion");
+		return lower_error;
+	}
 	/* Count SUCCESSFUL dm_io callbacks, not attempted or error-injected
 	 * requests. Each accepted lower write is in exactly one wait bin. */
 	if (op == REQ_OP_WRITE) {
@@ -4864,7 +4875,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 					prepare_elapsed +
 					swapz_elapsed_ns(complete_start,
 							 ktime_get_ns());
-				if (complete_error)
+				/* An abort failure must not replace the submission errno. */
+				if (complete_error && !error)
 					error = complete_error;
 				inflight->count = 0;
 			}
@@ -7329,8 +7341,14 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 	case REQ_OP_WRITE:
 		/* A write BIO is completed by raw_write or flush_window. */
 		error = swapz_accept_write(ctx, bio);
-		if (error)
+		if (error) {
+			/* Capacity exhaustion remains local to this WRITE. */
+			if (error != -ENOSPC)
+				swapz_fail_at(ctx, error, "write",
+					      swapz_failure_category(error),
+					      "write-admission");
 			swapz_complete(bio, error);
+		}
 		return;
 	case REQ_OP_READ:
 		error = swapz_read(ctx, bio);
@@ -7344,12 +7362,9 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		error = -EOPNOTSUPP;
 		break;
 	}
-	/* Only an unsupported *upper opcode* is nonterminal. A supported
-	 * READ/WRITE with lower unsupported bits is a failed target, not a
-	 * permanently retriable per-BIO exception. */
-	if (error && error != -ENOSPC &&
-	    (error != -EOPNOTSUPP || op == REQ_OP_READ ||
-	     op == REQ_OP_WRITE))
+	/* ->map admits only READ, WRITE and DISCARD. Unsupported lower
+	 * service is terminal; only WRITE ENOSPC is a per-BIO result. */
+	if (error && (error != -ENOSPC || op != REQ_OP_WRITE))
 		swapz_fail_at(ctx, error,
 			      op == REQ_OP_READ ? "read" :
 			      op == REQ_OP_DISCARD ? "discard" : "write",
@@ -8471,8 +8486,9 @@ static void swapz_drain(struct dm_target *ti)
 	    !bio_list_empty(&ctx->completion_bios) ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
-		DMERR("swapz drain invariant: accepted BIOs remain after draining");
-		swapz_fail(ctx, -EUCLEAN);
+		/* One bounded terminal diagnostic names the drain stage. */
+		swapz_fail_at(ctx, -EUCLEAN, "target", "integrity",
+			      "drain-invariant");
 	} else {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
