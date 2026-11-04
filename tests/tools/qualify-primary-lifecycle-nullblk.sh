@@ -1046,10 +1046,32 @@ cleanup() {
 			if [[ "$stage" != COMPLETE || ! "$RUN_ID" =~ ^[0-9a-f]{32}$ ]] ||
 			   ! python3 - "$state_file" "$RUN_ID" <<'PY'
 import json
+import os
+import stat
 import sys
+
+state_fd = -1
+valid = False
 try:
-    with open(sys.argv[1], "r", encoding="utf-8") as state_file:
-        state = json.load(state_file)
+    # Never block on or follow an unsafe replacement for durable state.
+    state_fd = os.open(
+        sys.argv[1],
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    identity = os.fstat(state_fd)
+    if (not stat.S_ISREG(identity.st_mode) or identity.st_uid != 0 or
+            stat.S_IMODE(identity.st_mode) != 0o600 or identity.st_nlink != 1 or
+            identity.st_size <= 0 or identity.st_size > 4096):
+        raise ValueError("unsafe durable state identity")
+    payload = bytearray()
+    while len(payload) < identity.st_size:
+        chunk = os.read(state_fd, identity.st_size - len(payload))
+        if not chunk:
+            raise OSError("short durable state read")
+        payload.extend(chunk)
+    if os.read(state_fd, 1):
+        raise ValueError("durable state changed size while reading")
+    actual_bytes = bytes(payload)
+    state = json.loads(actual_bytes.decode("utf-8"))
     previous = state.get("recovery_previous_stage")
     if previous not in (None, "STARTING", "STOPPING"):
         raise ValueError("invalid recovery provenance")
@@ -1059,13 +1081,17 @@ try:
         sys.argv[2] + '","stage":"COMPLETE",'
         '"recovery_previous_stage":' + previous_token + '}\n'
     ).encode("ascii")
-    with open(sys.argv[1], "rb") as state_file:
-        actual_bytes = state_file.read()
     valid = (state.get("run_id") == sys.argv[2] and
              state.get("stage") == "COMPLETE" and
              actual_bytes == canonical_bytes)
 except (OSError, ValueError, TypeError, AttributeError):
     valid = False
+finally:
+    if state_fd >= 0:
+        try:
+            os.close(state_fd)
+        except OSError:
+            valid = False
 raise SystemExit(0 if valid else 1)
 PY
 			then

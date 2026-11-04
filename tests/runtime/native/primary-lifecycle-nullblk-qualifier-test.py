@@ -3,6 +3,7 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import os
 import subprocess
 import unittest
 
@@ -316,6 +317,40 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn("unresolved_owner_record", self.script)
         self.assertIn("actual_bytes == canonical_bytes", self.script)
         self.assertIn("payload != canonical_bytes", self.script)
+
+    def test_cleanup_state_verifier_rejects_fifo_without_blocking(self):
+        cleanup = self.script[
+            self.script.index("cleanup() {"):
+            self.script.index("trap cleanup EXIT")]
+        marker = 'python3 - "$state_file" "$RUN_ID" <<\'PY\'\n'
+        start = cleanup.index(marker) + len(marker)
+        end = cleanup.index("\nPY\n", start)
+        verifier = cleanup[start:end] + "\n"
+
+        self.assertIn("os.O_NOFOLLOW", verifier)
+        self.assertIn("os.O_NONBLOCK", verifier)
+        self.assertIn("identity = os.fstat(state_fd)", verifier)
+        self.assertIn("stat.S_ISREG(identity.st_mode)", verifier)
+        self.assertIn("stat.S_IMODE(identity.st_mode) != 0o600", verifier)
+        self.assertIn("identity.st_nlink != 1", verifier)
+        self.assertIn("identity.st_size > 4096", verifier)
+        self.assertLess(verifier.index("os.fstat(state_fd)"),
+                        verifier.index("json.loads(actual_bytes.decode"))
+        self.assertNotIn('with open(sys.argv[1]', verifier)
+
+        with TemporaryDirectory(prefix="swapz-primary-state-fifo-") as directory:
+            fifo = Path(directory) / "primary-state.json"
+            os.mkfifo(fifo, 0o600)
+            result = subprocess.run(
+                ["python3", "-", str(fifo), "a" * 32],
+                input=verifier,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1,
+                             result.stdout + result.stderr)
 
     def test_interruption_evidence_is_durable_and_unique(self):
         self.assertIn("capture_interruption_evidence() {", self.script)
