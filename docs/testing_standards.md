@@ -5944,6 +5944,30 @@ coverage, suspend/drain, completion-handoff accounting, and normal teardown.
 It never selects physical swap, enables global kernel fault injection, or
 force-removes a mapper. Any quarantine remains authoritative.
 
+The wrapper emits `LOADED_HOST_CHECKLIST` before host preflight. The
+future owner-host handoff must record the exact running kernel release and
+matching Kconfig, module SHA-256 and matching vermagic, clean embedded source
+SHA, unchanged boot ID across the pre/post runtime snapshots, and active
+KASAN+lockdep or separately active KCSAN instrumentation. Evidence includes
+exactly one each of `SOURCE_HEAD`, `RUNNING_KERNEL`, `MODULE_SHA256`,
+all ten `PASS_LOADED_*` / `PASS_RETAINED_*` run records enumerated by the
+private verifier, and the clean-teardown `PASS:` record. Baseline and final
+dmesg must be complete newline-terminated reads from the same boot, with the
+baseline an exact prefix of final, bracketing only the owned helper's bounded
+900s execution plus 5s termination grace. Reject disabled runtime checkers
+before helper admission using the read-only `snapshot-check` gate; a
+checker that disables during I/O remains an independent FAIL.
+
+The fixture uses inert temporary PATH mocks and a one-second timeout only
+under the private `ROOTLESS_VALIDATOR_ONLY` replay guard. It covers Kconfig
+gaps, KCSAN unavailable/inactive, KASAN and lockdep diagnostics, source/build
+provenance mismatch, boot-ID change, lost diagnostic prefix, missing markers,
+helper exit/timeout/signal and a clean synthetic observation. Each case checks
+exit status, bounded messages, child reaping and temporary evidence cleanup.
+No replay output can be accepted as `LOADED_KERNEL_PASS`; successful
+synthetic evidence is `ROOTLESS_VALIDATOR_ONLY=PASS` only. This fixture does
+not boot a kernel, load swapz or test actual KASAN/KCSAN/lockdep execution.
+
 Runtime verification binds the helper's exact `SOURCE_HEAD` marker to the
 validated SHA, requires each selected loaded PASS marker exactly once, requires
 the clean-teardown record, requires active pre/post runtime snapshots, and

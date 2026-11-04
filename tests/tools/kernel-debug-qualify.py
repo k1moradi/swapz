@@ -919,6 +919,9 @@ def main() -> int:
     static_parser.add_argument("--kdir", type=Path, required=True)
     runtime_parser = subcommands.add_parser("runtime-snapshot")
     runtime_parser.add_argument("--require", required=True)
+    snapshot_parser = subcommands.add_parser("snapshot-check")
+    snapshot_parser.add_argument("--require", required=True)
+    snapshot_parser.add_argument("--snapshot", type=Path, required=True)
     verify_parser = subcommands.add_parser("verify")
     verify_parser.add_argument("--config", type=Path)
     verify_parser.add_argument("--cmdline", type=Path, default=Path("/proc/cmdline"))
@@ -952,6 +955,23 @@ def main() -> int:
         if arguments.action == "runtime-snapshot":
             snapshot = capture_runtime_snapshot(required)
             print(json.dumps(snapshot, sort_keys=True, separators=(",", ":")))
+            return 0
+        if arguments.action == "snapshot-check":
+            # Reject inactive instrumentation before helper admission, not
+            # merely after an otherwise clean I/O session has finished.
+            snapshot = parse_runtime_snapshot(
+                arguments.snapshot.read_text(encoding="utf-8"), required)
+            current_boot_id = _read_runtime_text(
+                DEFAULT_BOOT_ID, "kernel boot identity").strip()
+            if snapshot["boot_id"] != current_boot_id:
+                raise ValueError("runtime-before boot mismatch")
+            age = time.monotonic_ns() - snapshot["observed_monotonic_ns"]
+            if not 0 <= age <= MAX_RUNTIME_AGE_NS:
+                raise ValueError("runtime-before snapshot stale or in the future")
+            inactive = inactive_runtime_reason(snapshot, required)
+            if inactive is not None:
+                print(f"BLOCKED_KERNEL_DEBUG_RUNTIME: {inactive}", file=sys.stderr)
+                return 2
             return 0
         if arguments.action == "probe":
             config_path = arguments.config or host_config_path()

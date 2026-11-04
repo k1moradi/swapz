@@ -1170,5 +1170,296 @@ class KernelDebugQualificationTests(unittest.TestCase):
             )
 
 
+    def test_runtime_snapshot_check_blocks_before_helper_admission(self) -> None:
+        directory = Path(self.temporary_directory.name)
+        boot_id = directory / "boot-id"
+        boot_id.write_text("01234567-89ab-cdef-0123-456789abcdef\n")
+        snapshot_file = directory / "runtime-before.json"
+        snapshot = {
+            "schema": qualification.RUNTIME_SCHEMA,
+            "required": ["kcsan"],
+            "boot_id": boot_id.read_text().strip(),
+            "observed_monotonic_ns": time.monotonic_ns(),
+            "kcsan_enabled": False,
+            "kcsan_filter_default": True,
+        }
+        snapshot_file.write_text(json.dumps(snapshot))
+        argv = [str(SCRIPT), "snapshot-check", "--require", "kcsan",
+                "--snapshot", str(snapshot_file)]
+        errors = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(qualification, "DEFAULT_BOOT_ID", boot_id), \
+             contextlib.redirect_stderr(errors):
+            self.assertEqual(qualification.main(), 2)
+        self.assertIn("KCSAN debugfs enabled=0", errors.getvalue())
+        snapshot["kcsan_enabled"] = True
+        snapshot_file.write_text(json.dumps(snapshot))
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(qualification, "DEFAULT_BOOT_ID", boot_id):
+            self.assertEqual(qualification.main(), 0)
+
+    def test_owned_wrapper_rootless_replay_matrix(self) -> None:
+        """Exercise the actual Bash control flow with inert commands and bounded children."""
+        import os
+        import textwrap
+
+        # One executable acts as all fake external commands. Only the existing
+        # verifier's pure evidence parser is used; no sudo, load, dmesg or
+        # device command from the host is ever invoked.
+        mock_program = textwrap.dedent(r'''
+            import importlib.util
+            import json
+            import os
+            from pathlib import Path
+            import signal
+            import sys
+            import time
+
+            state = Path(os.environ["SWAPZ_REPLAY_STATE"])
+            scenario = os.environ["SWAPZ_REPLAY_SCENARIO"]
+            source_sha = os.environ["SWAPZ_REPLAY_SOURCE_SHA"]
+            module_sha = os.environ["SWAPZ_REPLAY_MODULE_SHA"]
+            kernel_release = os.environ["SWAPZ_REPLAY_KERNEL_RELEASE"]
+            boot_id = "01234567-89ab-cdef-0123-456789abcdef"
+            program = Path(sys.argv[0]).name
+            arguments = sys.argv[1:]
+
+            def qualification_module():
+                spec = importlib.util.spec_from_file_location(
+                    "rootless_kernel_debug_verifier",
+                    os.environ["SWAPZ_REPLAY_VERIFIER"])
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                module.DEFAULT_BOOT_ID = state / "boot-id"
+                return module
+
+            if program == "git":
+                if arguments[:1] == ["branch"]:
+                    print("main")
+                elif arguments[:1] == ["rev-parse"]:
+                    print(source_sha)
+                elif arguments[:1] != ["status"]:
+                    sys.exit(97)
+            elif program == "make":
+                pass
+            elif program == "modinfo":
+                field = arguments[1]
+                if field == "swapz_build_source_sha":
+                    print("b" * 40 if scenario == "wrong_module_build_sha" else source_sha)
+                elif field == "swapz_build_source_clean":
+                    print("1")
+                else:
+                    sys.exit(97)
+            elif program == "nm":
+                print("__asan_load8 __tsan_read8")
+            elif program == "sudo":
+                if arguments[:2] == ["-n", "true"]:
+                    pass
+                elif arguments[:2] == ["-n", "dmesg"]:
+                    counter = state / "dmesg-count"
+                    count = int(counter.read_text()) if counter.exists() else 0
+                    counter.write_text(str(count + 1))
+                    if scenario == "final_capture_failure" and count:
+                        sys.exit(5)
+                    if count == 0:
+                        print("synthetic baseline")
+                    elif scenario == "truncated_dmesg":
+                        print("overwritten ring buffer")
+                    else:
+                        print("synthetic baseline")
+                        if scenario in {"lockdep_splat", "lockdep_with_preflight_gap"}:
+                            print("WARNING: possible circular locking dependency detected")
+                        elif scenario == "kasan_report":
+                            print("BUG: KASAN: synthetic use-after-free")
+                        else:
+                            print("synthetic normal completion")
+                elif arguments[:3] == ["-n", "python3", "-B"]:
+                    if scenario == "runtime_snapshot_failure":
+                        sys.exit(19)
+                    required = arguments[arguments.index("--require") + 1].split(",")
+                    snapshot = {
+                        "schema": "swapz-kernel-debug-runtime-v2",
+                        "required": required,
+                        "boot_id": boot_id,
+                        "observed_monotonic_ns": time.monotonic_ns(),
+                    }
+                    if "kcsan" in required:
+                        snapshot.update(kcsan_enabled=(
+                            scenario != "kcsan_disabled_runtime"),
+                            kcsan_filter_default=True)
+                    if "lockdep" in required:
+                        snapshot.update(lockdep_debug_locks=True,
+                                        lockdep_prove_locking=True)
+                    count_file = state / "runtime-count"
+                    count = int(count_file.read_text()) if count_file.exists() else 0
+                    count_file.write_text(str(count + 1))
+                    if scenario == "changed_boot_id" and count:
+                        snapshot["boot_id"] = "00000000-0000-0000-0000-000000000000"
+                    print(json.dumps(snapshot))
+                elif arguments[:2] == ["-n", "bash"]:
+                    (state / "helper.pid").write_text(str(os.getpid()))
+                    if scenario == "timeout":
+                        time.sleep(10)
+                    elif scenario == "abnormal_child_exit":
+                        os.kill(os.getpid(), signal.SIGKILL)
+                    elif scenario == "helper_failure":
+                        sys.exit(17)
+                    else:
+                        execution = (state / "good.log").read_text()
+                        if scenario == "missing_run_marker":
+                            execution = execution.replace(
+                                "PASS_LOADED_LIVE_GC=", "SKIPPED_LIVE_GC=")
+                        print(execution, end="")
+                else:
+                    sys.exit(98)
+            elif program == "python3":
+                if arguments[:1] == ["-B"]:
+                    arguments = arguments[1:]
+                action = arguments[1]
+                qualifier = qualification_module()
+                required_names = arguments[arguments.index("--require") + 1]
+                required = qualifier.required_features(required_names)
+                config = state / "config"
+                cmdline = state / "cmdline"
+                features = qualifier.probe(config, cmdline)
+                if action == "probe":
+                    print("KERNEL_DEBUG_PROBE=" + json.dumps(features, sort_keys=True))
+                    sys.exit(0 if qualifier.check_features(features, required) else 2)
+                if action == "snapshot-check":
+                    observed = Path(arguments[arguments.index("--snapshot") + 1])
+                    snapshot = qualifier.parse_runtime_snapshot(
+                        observed.read_text(), required)
+                    inactive = qualifier.inactive_runtime_reason(snapshot, required)
+                    if inactive:
+                        print("BLOCKED_KERNEL_DEBUG_RUNTIME: " + inactive,
+                              file=sys.stderr)
+                        sys.exit(2)
+                    sys.exit(0)
+                if action != "verify":
+                    sys.exit(99)
+                def read_argument(flag):
+                    return Path(arguments[arguments.index(flag) + 1]).read_text()
+                module_evidence = {
+                    "source_sha": source_sha,
+                    "source_clean": "1",
+                    "sha256": "b" * 64 if scenario == "module_hash_mismatch" else module_sha,
+                    "vermagic": kernel_release + " SMP",
+                    "symbols": "__asan_load8 __tsan_read8",
+                }
+                preflight_gap = (
+                    "running kernel config unavailable (synthetic)"
+                    if scenario == "lockdep_with_preflight_gap" else None)
+                status, reason = qualifier.verify_owned_run(
+                    required, features,
+                    read_argument("--baseline"), read_argument("--final"),
+                    read_argument("--execution"), read_argument("--runtime-before"),
+                    read_argument("--runtime-after"), source_sha,
+                    module_evidence=module_evidence,
+                    configuration=qualifier.load_config(config),
+                    kernel_release=kernel_release,
+                    preflight_block_reason=preflight_gap,
+                )
+                print(f"{status}_KERNEL_DEBUG_OWNED=features:{required_names} reason:{reason}")
+                sys.exit({"PASS": 0, "FAIL": 1, "BLOCKED": 2}[status])
+            else:
+                sys.exit(99)
+        ''').lstrip()
+
+        cases = (
+            ("missing_kconfig_option", "kasan-lockdep", 2, "kasan"),
+            ("kcsan_unavailable_config", "kcsan", 2, "kcsan"),
+            ("kcsan_disabled_runtime", "kcsan", 2, "KCSAN"),
+            ("lockdep_splat", "kasan-lockdep", 1, "circular locking dependency"),
+            ("kasan_report", "kasan-lockdep", 1, "KASAN"),
+            ("helper_failure", "kasan-lockdep", 1, "helper exit=17"),
+            ("runtime_snapshot_failure", "kasan-lockdep", 2, "exit=19"),
+            ("final_capture_failure", "kasan-lockdep", 2, "exit=5"),
+            ("wrong_module_build_sha", "kasan-lockdep", 2, "module build source"),
+            ("module_hash_mismatch", "kasan-lockdep", 2, "module SHA256 mismatch"),
+            ("changed_boot_id", "kasan-lockdep", 2, "runtime-after boot mismatch"),
+            ("truncated_dmesg", "kasan-lockdep", 2, "dmesg truncated"),
+            ("missing_run_marker", "kasan-lockdep", 2, "missing loaded run marker"),
+            ("timeout", "kasan-lockdep", 1, "helper exit=124"),
+            ("abnormal_child_exit", "kasan-lockdep", 1, "helper exit=137"),
+            ("lockdep_with_preflight_gap", "kasan-lockdep", 1, "circular locking dependency"),
+            ("clean", "kasan-lockdep", 0, "ROOTLESS_VALIDATOR_ONLY=PASS"),
+            ("clean_kcsan", "kcsan", 0, "ROOTLESS_VALIDATOR_ONLY=PASS"),
+        )
+        for scenario, lane, expected_exit, expected_message in cases:
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as root:
+                directory = Path(root)
+                fake_bin = directory / "bin"
+                fake_bin.mkdir()
+                (fake_bin / "ROOTLESS_VALIDATOR_ONLY").write_text("no host commands\n")
+                program = fake_bin / "fake-command"
+                program.write_text(f"#!{sys.executable}\n" + mock_program,
+                                   encoding="utf-8")
+                program.chmod(0o755)
+                for name in ("sudo", "python3", "git", "make", "modinfo", "nm"):
+                    (fake_bin / name).symlink_to(program.name)
+                (directory / "build/tests").mkdir(parents=True)
+                (directory / "boot-id").write_text(
+                    "01234567-89ab-cdef-0123-456789abcdef\n")
+                configuration = CONFIG
+                if scenario == "missing_kconfig_option":
+                    configuration = configuration.replace("CONFIG_KASAN=y\n", "")
+                if scenario == "kcsan_unavailable_config":
+                    configuration = configuration.replace(
+                        "CONFIG_KCSAN=y", "# CONFIG_KCSAN is not set")
+                (directory / "config").write_text(configuration)
+                (directory / "cmdline").write_text("quiet\n")
+                (directory / "good.log").write_text(GOOD_LOG + "\n")
+                environment = {
+                    **os.environ,
+                    "PATH": str(fake_bin) + os.pathsep + os.defpath,
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                    "SWAPZ_KERNEL_DEBUG_REPLAY_ONLY": "ROOTLESS_VALIDATOR_ONLY",
+                    "SWAPZ_KERNEL_DEBUG_REPLAY_BIN": str(fake_bin),
+                    "SWAPZ_DEBUG_OWNED_COORDINATED": "YES_OWNED_NULLBLK_ONLY",
+                    "SWAPZ_REPLAY_STATE": str(directory),
+                    "SWAPZ_REPLAY_SCENARIO": scenario,
+                    "SWAPZ_REPLAY_SOURCE_SHA": SOURCE_SHA,
+                    "SWAPZ_REPLAY_MODULE_SHA": MODULE_SHA256,
+                    "SWAPZ_REPLAY_KERNEL_RELEASE": KERNEL_RELEASE,
+                    "SWAPZ_REPLAY_VERIFIER": str(SCRIPT),
+                }
+                completed = subprocess.run(
+                    ["bash", str(WRAPPER), "--validated-source", SOURCE_SHA,
+                     "--lane", lane],
+                    cwd=directory, env=environment, capture_output=True,
+                    text=True, timeout=8, check=False)
+                output = completed.stdout + completed.stderr
+                self.assertEqual(completed.returncode, expected_exit, output)
+                self.assertIn(expected_message, output)
+                self.assertIn("ROOTLESS_VALIDATOR_ONLY=ACTIVE", output)
+                self.assertIn("LOADED_HOST_CHECKLIST", output)
+                self.assertIn("boot_id=pre/post-same-boot", output)
+                self.assertIn("SOURCE_HEAD,RUNNING_KERNEL,MODULE_SHA256", output)
+                self.assertNotIn("LOADED_KERNEL_PASS=PASS", output)
+                self.assertNotIn("PASS_KERNEL_DEBUG_OWNED=", output)
+                self.assertNotIn(str(directory), output)
+                helper_pid = directory / "helper.pid"
+                preflight_cases = {
+                    "missing_kconfig_option", "kcsan_unavailable_config",
+                    "kcsan_disabled_runtime", "runtime_snapshot_failure",
+                    "wrong_module_build_sha",
+                }
+                self.assertEqual(helper_pid.exists(),
+                                 scenario not in preflight_cases)
+                if helper_pid.exists():
+                    pid = int(helper_pid.read_text())
+                    # timeout must reap the mocked sudo child, even when it
+                    # is terminated by a signal rather than exiting normally.
+                    for _ in range(40):
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(0.01)
+                    else:
+                        self.fail(f"unreaped replay child for {scenario}")
+            self.assertFalse(Path(root).exists(), "replay evidence not cleaned")
+
+
 if __name__ == "__main__":
     unittest.main()
