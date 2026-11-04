@@ -3372,6 +3372,19 @@ class PairReplayContract(unittest.TestCase):
 
         capacity = evidence.campaign_capacity_and_ram(
             [capacity_pair], target_bytes, source_sha, trace)
+        # A transient whole-host dip after the exact mapper is already absent
+        # is not the target peak. Final teardown recovery is checked separately.
+        post_remove_dip = copy.deepcopy(trace)
+        first_absent = next(
+            sample for sample in post_remove_dip["samples"]
+            if sample["phase"] == "teardown" and
+            not sample["mapper_present"])
+        first_absent["mem_available_kib"] -= 16
+        post_remove_summary = validator(
+            post_remove_dip, source_sha=source_sha,
+            mapper_uuid=mapper_uuid, expected_peak_ram_bytes=8192)
+        self.assertEqual(post_remove_summary["peak_ram_bytes"], 8192)
+
         before = {
             "kernel": {
                 "boot_id": trace["host_boot_id"],
