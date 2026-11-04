@@ -1934,11 +1934,13 @@ int main(void) {
     initialize(PHYSICAL_BLOCKS-1,4); /* Overruns physical capacity. */
     assert(swapz_discard(&ctx,&whole)==-EUCLEAN);
     assert(!discarded && !ctx.discard_pages && live[0]==1 &&
-           live[PHYSICAL_BLOCKS-1]==1 && maps[0].valid && maps[1].valid);
+           live[PHYSICAL_BLOCKS-1]==1 && maps[0].valid && maps[1].valid &&
+           maps[0].generation==1 && maps[1].generation==1);
     initialize(SWAPZ_SEGMENT_BLOCKS-1,2); /* Crosses segment boundary. */
     assert(swapz_discard(&ctx,&whole)==-EUCLEAN);
     assert(!discarded && !ctx.discard_pages && live[0]==1 &&
-           live[SWAPZ_SEGMENT_BLOCKS-1]==1 && maps[0].valid && maps[1].valid);
+           live[SWAPZ_SEGMENT_BLOCKS-1]==1 && maps[0].valid && maps[1].valid &&
+           maps[0].generation==1 && maps[1].generation==1);
     initialize(4,2); /* Valid two-page DISCARD still succeeds. */
     assert(swapz_discard(&ctx,&whole)==0);
     assert(discarded==2 && ctx.discard_pages==2 && !live[0] && !live[4]);

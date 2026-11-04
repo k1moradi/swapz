@@ -120,6 +120,13 @@ For Device Mapper `dm_io`, both ordinary error bits and separate unsupported
 bits are failures; asynchronous callback compatibility must not duplicate
 completion ownership or publication logic.
 
+Range DISCARD must preflight every requested mapping before the first
+logical generation or liveness mutation. A valid extent start index alone is
+insufficient: the entire 1/2/4-block extent must fit physical capacity and
+stay inside its 256-block segment. If a later descriptor is corrupt, earlier
+generations and live-record counts must remain unchanged. This is a mapper
+preflight invariant; advisory lower TRIM must not weaken logical atomicity.
+
 Test-only lower-I/O injection must stay outside physical backing and fail before
 submission accounting. WRITE and READ injection are independent constructor
 seams; the READ seam is shared by the synchronous engine adapter and both
