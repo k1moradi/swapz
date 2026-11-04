@@ -1594,69 +1594,185 @@ static int format_mount_inventory_clear(dev_t device, dev_t parent_device)
 						      parent_device);
 }
 
-static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
+static int format_swap_inventory_header_valid(const char *line)
 {
-	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
-	FILE *stream = fopen("/proc/swaps", "r");
-	int first_line = 1;
+	static const char *const expected_fields[] = {
+		"Filename", "Type", "Size", "Used", "Priority",
+	};
+	const char *cursor = line;
+	size_t field;
 
-	if (!stream)
-		return -1;
-	while (fgets(line, sizeof(line), stream)) {
-		const char *cursor = line;
-		const char *end;
-		char swap_path[PATH_MAX];
-		struct stat info;
-		size_t length = strlen(line);
-		size_t path_length;
+	if (!line)
+		return 0;
+	for (field = 0U; field < sizeof(expected_fields) / sizeof(expected_fields[0]);
+	     ++field) {
+		const char *field_end;
+		size_t field_length;
+		size_t expected_length = strlen(expected_fields[field]);
 
-		if (length && line[length - 1U] != '\n' && !feof(stream)) {
-			fclose(stream);
-			errno = EOVERFLOW;
-			return -1;
-		}
-		if (first_line) {
-			first_line = 0;
-			continue;
-		}
 		while (*cursor == ' ' || *cursor == '\t')
 			++cursor;
 		if (!*cursor || *cursor == '\n')
+			return 0;
+		field_end = cursor;
+		while (*field_end && *field_end != ' ' && *field_end != '\t' &&
+		       *field_end != '\n')
+			++field_end;
+		field_length = (size_t)(field_end - cursor);
+		if (field_length != expected_length ||
+		    memcmp(cursor, expected_fields[field], expected_length))
+			return 0;
+		cursor = field_end;
+	}
+	while (*cursor == ' ' || *cursor == '\t')
+		++cursor;
+	return *cursor == '\0' || (*cursor == '\n' && cursor[1] == '\0');
+}
+
+static int format_swap_inventory_entry_parse(const char *line,
+					     char swap_path[PATH_MAX],
+					     int *block_entry)
+{
+	const char *field_begin[5];
+	const char *field_end[5];
+	const char *cursor = line;
+	const char *end;
+	unsigned long long size_kib;
+	unsigned long long used_kib;
+	unsigned long long priority_magnitude;
+	unsigned long long priority_limit = INT_MAX;
+	size_t path_length;
+	unsigned int field;
+
+	if (!line || !swap_path || !block_entry)
+		return -1;
+	for (field = 0U; field < 5U; ++field) {
+		while (*cursor == ' ' || *cursor == '\t')
+			++cursor;
+		if (!*cursor || *cursor == '\n')
+			return -1;
+		field_begin[field] = cursor;
+		while (*cursor && *cursor != ' ' && *cursor != '\t' &&
+		       *cursor != '\n')
+			++cursor;
+		field_end[field] = cursor;
+	}
+	while (*cursor == ' ' || *cursor == '\t')
+		++cursor;
+	if (*cursor != '\0' && (*cursor != '\n' || cursor[1] != '\0'))
+		return -1;
+
+	path_length = (size_t)(field_end[0] - field_begin[0]);
+	if (!path_length || path_length >= PATH_MAX)
+		return -1;
+	if ((size_t)(field_end[1] - field_begin[1]) == sizeof("partition") - 1U &&
+	    !memcmp(field_begin[1], "partition", sizeof("partition") - 1U)) {
+		*block_entry = 1;
+	} else if ((size_t)(field_end[1] - field_begin[1]) ==
+			   sizeof("file") - 1U &&
+		   !memcmp(field_begin[1], "file", sizeof("file") - 1U)) {
+		*block_entry = 0;
+	} else {
+		return -1;
+	}
+	if (parse_unsigned_decimal(field_begin[2], ULLONG_MAX, &end,
+				   &size_kib) < 0 ||
+	    end != field_end[2] ||
+	    parse_unsigned_decimal(field_begin[3], ULLONG_MAX, &end,
+				   &used_kib) < 0 ||
+	    end != field_end[3] || used_kib > size_kib)
+		return -1;
+
+	cursor = field_begin[4];
+	if (*cursor == '-') {
+		++cursor;
+		priority_limit = (unsigned long long)INT_MAX + 1ULL;
+		if (cursor == field_end[4])
+			return -1;
+	} else if (*cursor == '+') {
+		return -1;
+	}
+	if (parse_unsigned_decimal(cursor, priority_limit, &end,
+				   &priority_magnitude) < 0 ||
+	    end != field_end[4])
+		return -1;
+
+	memcpy(swap_path, field_begin[0], path_length);
+	swap_path[path_length] = '\0';
+	return 0;
+}
+
+static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
+					      dev_t parent_device)
+{
+	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
+	int saw_header = 0;
+
+	if (!stream) {
+		errno = EINVAL;
+		return -1;
+	}
+	while (fgets(line, sizeof(line), stream)) {
+		char swap_path[PATH_MAX];
+		struct stat info;
+		size_t length = strlen(line);
+		int block_entry;
+
+		if (length && line[length - 1U] != '\n' && !feof(stream)) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+		if (!saw_header) {
+			if (!format_swap_inventory_header_valid(line)) {
+				errno = EPROTO;
+				return -1;
+			}
+			saw_header = 1;
 			continue;
-		end = cursor;
-		while (*end && *end != ' ' && *end != '\t' && *end != '\n')
-			++end;
-		path_length = (size_t)(end - cursor);
-		if (!path_length || path_length >= sizeof(swap_path)) {
-			fclose(stream);
+		}
+		if (format_swap_inventory_entry_parse(line, swap_path,
+						     &block_entry) < 0) {
 			errno = EPROTO;
 			return -1;
 		}
-		memcpy(swap_path, cursor, path_length);
-		swap_path[path_length] = '\0';
-		if (stat(swap_path, &info) < 0) {
-			int saved_errno = errno;
-
-			fclose(stream);
-			errno = saved_errno;
+		if (stat(swap_path, &info) < 0)
+			return -1;
+		if ((block_entry && !S_ISBLK(info.st_mode)) ||
+		    (!block_entry && !S_ISREG(info.st_mode))) {
+			errno = EPROTO;
 			return -1;
 		}
 		if (format_swap_entry_conflicts(&info, device, parent_device)) {
-			fclose(stream);
 			errno = EBUSY;
 			return -1;
 		}
 	}
 	if (ferror(stream)) {
-		int saved_errno = errno ? errno : EIO;
+		if (!errno)
+			errno = EIO;
+		return -1;
+	}
+	if (!saw_header) {
+		errno = EPROTO;
+		return -1;
+	}
+	return 0;
+}
 
-		fclose(stream);
+static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
+{
+	FILE *stream = fopen("/proc/swaps", "r");
+	int saved_errno;
+
+	if (!stream)
+		return -1;
+	if (format_swap_inventory_stream_clear(stream, device, parent_device) < 0) {
+		saved_errno = errno;
+		(void)fclose(stream);
 		errno = saved_errno;
 		return -1;
 	}
-	if (fclose(stream) < 0)
-		return -1;
-	return 0;
+	return fclose(stream);
 }
 
 static int format_identity_values_match(

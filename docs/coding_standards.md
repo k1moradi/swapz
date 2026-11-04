@@ -326,9 +326,12 @@ Both the partition and its parent must have empty holders and slaves, and
 neither may appear mounted or as active swap. Active swap block nodes conflict
 by their `st_rdev`, and regular swapfiles conflict by their filesystem
 `st_dev` when it matches the partition or parent. Other swap-entry file types
-and unreadable entries refuse formatting. This catches directly backed swapfiles
-visible through `/proc/swaps` even if their mount is outside the formatter's
-mount namespace; it does not prove ancestry through arbitrary stacked filesystems.
+and unreadable entries refuse formatting. The readable `/proc/swaps` inventory
+must contain the kernel's five-column header; empty, headerless, malformed or
+type-inconsistent rows refuse formatting rather than being interpreted as no
+active swap. This catches directly backed swapfiles visible through
+`/proc/swaps` even if their mount is outside the formatter's mount namespace;
+it does not prove ancestry through arbitrary stacked filesystems.
 Mount inventory must inspect the formatter's own mount table and each
 visible process's /proc/<pid>/mountinfo, not just its own mount namespace.
 Normal process exit is not storage ambiguity: an EINVAL, ENOENT or ESRCH

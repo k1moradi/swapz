@@ -3557,7 +3557,9 @@ the write, truncated reads, unexpected permissions, USB/transport-style I/O
 failure, and device disappearance before and after the write. The swap-inventory gate must reject active regular swapfiles with filesystem
 `st_dev` matching the selected partition or parent, while leaving unrelated
 regular-file and block-device entries nonconflicting; unknown entry types must
-fail closed. A rootless proc-directory fixture must prove that a selected partition or
+fail closed. Rootless stream fixtures must also reject an empty or headerless
+`/proc/swaps` inventory, malformed headers/rows and a row whose reported
+file/partition type disagrees with the stat identity. A rootless proc-directory fixture must prove that a selected partition or
 parent mounted only in another visible PID's namespace blocks formatting,
 while unrelated sibling mounts remain nonconflicting. Missing or malformed
 mountinfo for a PID whose ns/mnt marker is still present must fail closed;

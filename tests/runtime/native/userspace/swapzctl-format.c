@@ -589,6 +589,93 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 	assert(rmdir(root) == 0);
 }
 
+static FILE *test_swap_inventory_stream(const char *contents)
+{
+	FILE *stream = tmpfile();
+
+	assert(stream);
+	if (contents && *contents)
+		assert(fputs(contents, stream) >= 0);
+	rewind(stream);
+	return stream;
+}
+
+static void test_swap_inventory_requires_complete_kernel_table(void)
+{
+	char swap_path[] = "/tmp/swapzctl-swapfile-XXXXXX";
+	char inventory[PATH_MAX + 128U];
+	struct stat info;
+	FILE *stream;
+	dev_t parent_device;
+	int swap_fd;
+	int length;
+
+	swap_fd = mkstemp(swap_path);
+	assert(swap_fd >= 0);
+	assert(fstat(swap_fd, &info) == 0);
+	parent_device = makedev(1U, 1U);
+	if (parent_device == info.st_dev)
+		parent_device = makedev(1U, 2U);
+
+	stream = test_swap_inventory_stream("");
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
+						  parent_device) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+
+	stream = test_swap_inventory_stream(
+		"Filename Type Size Used Priority\n");
+	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
+						  parent_device) == 0);
+	assert(fclose(stream) == 0);
+
+	stream = test_swap_inventory_stream(
+		"Filename Type Size Used\n");
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
+						  parent_device) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+
+	length = snprintf(inventory, sizeof(inventory), "%s file 1 0 -2\n",
+			  swap_path);
+	assert(length > 0 && (size_t)length < sizeof(inventory));
+	stream = test_swap_inventory_stream(inventory);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
+						  parent_device) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+
+	length = snprintf(
+		inventory, sizeof(inventory),
+		"Filename Type Size Used Priority\n%s file 1 0 -2\n",
+		swap_path);
+	assert(length > 0 && (size_t)length < sizeof(inventory));
+	stream = test_swap_inventory_stream(inventory);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
+						  parent_device) < 0);
+	assert(errno == EBUSY);
+	assert(fclose(stream) == 0);
+
+	length = snprintf(
+		inventory, sizeof(inventory),
+		"Filename Type Size Used Priority\n%s partition 1 0 -2\n",
+		swap_path);
+	assert(length > 0 && (size_t)length < sizeof(inventory));
+	stream = test_swap_inventory_stream(inventory);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
+						  parent_device) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+
+	assert(close(swap_fd) == 0);
+	assert(unlink(swap_path) == 0);
+}
+
 static void test_superblock_validation_and_reserved_bytes(void)
 {
 	struct format_expectation expected = authorized_expectation();
@@ -925,6 +1012,7 @@ int main(void)
 	test_mountinfo_device_parser();
 	test_mount_and_swap_identity_conflicts();
 	test_mounts_in_other_namespaces_refuse_formatting();
+	test_swap_inventory_requires_complete_kernel_table();
 	test_superblock_validation_and_reserved_bytes();
 	test_unbound_cli_is_blocked_before_io();
 	test_protected_selector_is_mandatory();
