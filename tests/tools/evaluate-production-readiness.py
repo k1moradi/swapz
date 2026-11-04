@@ -526,6 +526,9 @@ def validate_physical_campaign_evidence(
                 logical_capacity_bytes <= 0 or
                 logical_capacity_bytes != logical_pages * 4096 or
                 target is None or logical_capacity_bytes > target[1] or
+                logical_pages != RAM_TRACE_VALIDATOR[
+                    "maximum_logical_pages_for_partition"](
+                        target[1] if target is not None else None) or
                 type(peak_ram_bytes) is not int or peak_ram_bytes <= 0):
             reject("sealed campaign capacity/RAM evidence is invalid")
         else:
