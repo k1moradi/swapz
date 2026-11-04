@@ -3258,6 +3258,9 @@ class PairReplayContract(unittest.TestCase):
             trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
             expected_peak_ram_bytes=8192)
         self.assertEqual(ram_summary["peak_ram_bytes"], 8192)
+        self.assertEqual(
+            evidence.RAM_VALIDATOR["_median_twice"]([16_384, 16_383]),
+            32_767)
 
         parse_meminfo = evidence.RAM_VALIDATOR["parse_meminfo_counters"]
         self.assertEqual(
