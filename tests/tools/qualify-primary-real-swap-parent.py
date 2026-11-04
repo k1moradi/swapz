@@ -408,8 +408,10 @@ def _serve_admission(server: socket.socket,
             f"{type(exc).__name__}",
             file=sys.stderr)
 
+    parent_stopped_child = False
     if not passed_phases and child.poll() is None:
         _stop_unadmitted_child(child)
+        parent_stopped_child = True
     try:
         # Once the admission channel closes, no further phase can succeed.
         # Bound a stuck child so the parent does not lose terminal diagnostics.
@@ -420,7 +422,7 @@ def _serve_admission(server: socket.socket,
             "after source admission channel closed")
         _stop_unadmitted_child_preserving(child, failure)
         raise failure from exc
-    if result not in {0, 1, 2}:
+    if not parent_stopped_child and result not in {0, 1, 2}:
         detail = (
             f"terminated_by_signal:{-result}" if result < 0 else
             f"unexpected_exit_status:{result}")

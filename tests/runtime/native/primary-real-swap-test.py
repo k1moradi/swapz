@@ -1449,6 +1449,29 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             "privileged_child_skipped_source_admission", stderr.getvalue())
         child.wait.assert_called_once_with(timeout=45)
 
+        # If the parent must terminate a still-running child after EOF, the
+        # resulting -SIGTERM is cleanup evidence, not a child-originated crash.
+        connection.makefile.return_value = EarlyEofStream()
+        child = mock.Mock()
+        child.poll.return_value = None
+        child.wait.side_effect = [-15, -15]
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = parent._serve_admission(
+                server, child, "a" * 40, "/usr/bin/git", "d" * 64,
+                {path: "c" * 64
+                 for path in parent.PHYSICAL_CONTROL_INPUT_PATHS},
+                "8" * 64, 2)
+        self.assertEqual(result, 2)
+        self.assertIn(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+            "privileged_child_skipped_source_admission", stderr.getvalue())
+        self.assertNotIn("terminated_by_signal:15", stderr.getvalue())
+        child.terminate.assert_called_once_with()
+        self.assertEqual(
+            child.wait.call_args_list,
+            [mock.call(timeout=10), mock.call(timeout=45)])
+
     def test_parent_bounds_abnormal_child_teardown_after_admission(self):
         # A child that disconnects after initial admission must not hang the
         # unprivileged parent indefinitely or erase a termination error.
@@ -1556,7 +1579,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         server.accept.return_value = (connection, None)
         child = mock.Mock()
         child.poll.return_value = None
-        child.wait.side_effect = [2, 2]
+        # Real Popen.wait() reports -SIGTERM after the parent's intentional
+        # cleanup; do not misclassify that parent-induced status as a crash.
+        child.wait.side_effect = [-15, -15]
         stderr = io.StringIO()
         with mock.patch.object(parent, "_check_git_source"), \
                 mock.patch.object(
@@ -1571,6 +1596,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
             "source_admission_runtime_error:initial:BrokenPipeError",
             stderr.getvalue())
+        self.assertNotIn("terminated_by_signal:15", stderr.getvalue())
         child.terminate.assert_called_once_with()
         self.assertEqual(
             child.wait.call_args_list,
