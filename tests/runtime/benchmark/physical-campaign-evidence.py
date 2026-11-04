@@ -681,64 +681,13 @@ def artifact(path: Path, data: bytes) -> dict:
 
 def metadata_ram_trace_matches_swapz_arm(
         trace: dict, swapz_arm: dict) -> bool:
-    """Bind labeled RAM phases to the sustained swapz replay chronology."""
-    started = swapz_arm.get("arm_started_monotonic_ns")
-    finished = swapz_arm.get("arm_finished_monotonic_ns")
-    samples = trace.get("samples") if isinstance(trace, dict) else None
-    if (
-            type(started) is not int or type(finished) is not int or
-            started <= 0 or finished <= started or
-            not isinstance(samples, list) or not samples):
+    """Bind labeled RAM phases to measured sustained-arm GC chronology."""
+    try:
+        binding = RAM_VALIDATOR["metadata_ram_arm_binding"](swapz_arm)
+        RAM_VALIDATOR["validate_metadata_ram_arm_binding"](trace, binding)
+    except ValueError:
         return False
-    phases = {
-        phase: [
-            sample["monotonic_ns"] for sample in samples
-            if isinstance(sample, dict) and sample.get("phase") == phase and
-            type(sample.get("monotonic_ns")) is int
-        ]
-        for phase in ("baseline", "initialization", "steady", "gc", "teardown")
-    }
-    if any(not values for values in phases.values()):
-        return False
-    intervals = swapz_arm.get("sustained_intervals")
-    if not isinstance(intervals, list) or not intervals:
-        return False
-    measured_gc_windows = []
-    for row in intervals:
-        if not isinstance(row, dict):
-            return False
-        interval_start = row.get("start_monotonic_ns")
-        interval_end = row.get("end_monotonic_ns")
-        gc = row.get("gc")
-        if (
-                type(interval_start) is not int or
-                type(interval_end) is not int or
-                interval_end <= interval_start or
-                not isinstance(gc, dict)):
-            return False
-        activity = []
-        for field in ("gc_wall_ns", "gc_victims", "gc_pages"):
-            value = gc.get(field)
-            if type(value) is not int or value < 0:
-                return False
-            activity.append(value)
-        if any(activity):
-            measured_gc_windows.append((interval_start, interval_end))
-    if not measured_gc_windows:
-        return False
-    gc_samples_bound = all(
-        any(window_start <= sample_time <= window_end
-            for window_start, window_end in measured_gc_windows)
-        for sample_time in phases["gc"])
-    return (
-        max(phases["baseline"]) < min(phases["initialization"]) and
-        max(phases["initialization"]) <= started and
-        all(started <= value <= finished
-            for phase in ("steady", "gc") for value in phases[phase]) and
-        gc_samples_bound and
-        min(phases["teardown"]) >= finished
-    )
-
+    return True
 
 def campaign_capacity_and_ram(
         pair_records: list[dict], target_device_bytes: int,
@@ -775,9 +724,10 @@ def campaign_capacity_and_ram(
     try:
         ram_summary = RAM_VALIDATOR["validate_metadata_ram_trace"](
             trace, source_sha=source_sha, mapper_uuid=mapper_uuid)
+        arm_binding = RAM_VALIDATOR["metadata_ram_arm_binding"](swapz)
+        RAM_VALIDATOR["validate_metadata_ram_arm_binding"](
+            trace, arm_binding)
     except ValueError:
-        return None
-    if not metadata_ram_trace_matches_swapz_arm(trace, swapz):
         return None
     peak_ram_bytes = ram_summary["peak_ram_bytes"]
     limit = QUALIFICATION["CONTRACT"]["acceptance"]["sustained"][
@@ -800,6 +750,7 @@ def campaign_capacity_and_ram(
         "mapper_uuid": mapper_uuid,
         "metadata_ram_trace": trace,
         "metadata_ram_summary": ram_summary,
+        "metadata_ram_arm_binding": arm_binding,
     }
 
 
