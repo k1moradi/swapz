@@ -27,6 +27,16 @@ ROOT = Path(__file__).resolve().parents[2]
 PRIVILEGED_HELPER = ROOT / "tests/tools/qualify-primary-real-swap.py"
 DEFAULT_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
 SOURCE_ADMISSION_SCHEMA = "swapz-primary-real-swap-admission-v1"
+PHYSICAL_CONTROL_INPUT_PATHS = (
+    "src/kernel/VERSION",
+    "src/kernel/authority.h",
+    "src/kernel/codec.h",
+    "src/kernel/superblock.h",
+    "src/kernel/swapz-build-info.h",
+    "src/userspace/swapz-primary.h",
+    "src/userspace/swapz-primary.c",
+    "src/userspace/swapzctl.c",
+)
 MAX_LINE_BYTES = 4096
 MAX_CYCLES = 4
 
@@ -121,7 +131,9 @@ def _unique_json_object(pairs):
     return result
 
 
-def _read_request(stream, validated_source: str) -> dict:
+def _read_request(
+        stream, validated_source: str,
+        expected_physical_control_inputs_sha256: dict[str, str]) -> dict:
     line = stream.readline(MAX_LINE_BYTES + 2)
     if not line:
         raise EOFError
@@ -133,10 +145,24 @@ def _read_request(stream, validated_source: str) -> dict:
             object_pairs_hook=_unique_json_object)
     except (UnicodeError, ValueError, TypeError) as exc:
         raise Blocked("source admission request is malformed") from exc
-    required = {"schema", "phase", "source_sha", "nonce"}
+    required = {
+        "schema", "phase", "source_sha", "nonce",
+        "physical_control_inputs_sha256",
+    }
+    source_hashes = (
+        request.get("physical_control_inputs_sha256")
+        if isinstance(request, dict) else None)
+    hashes_valid = (
+        isinstance(source_hashes, dict) and
+        set(source_hashes) == set(PHYSICAL_CONTROL_INPUT_PATHS) and
+        all(isinstance(source_hashes.get(path), str) and
+            re.fullmatch(r"[0-9a-f]{64}", source_hashes[path]) is not None
+            for path in PHYSICAL_CONTROL_INPUT_PATHS))
     if (not isinstance(request, dict) or set(request) != required or
             request.get("schema") != SOURCE_ADMISSION_SCHEMA or
             request.get("source_sha") != validated_source or
+            not hashes_valid or
+            source_hashes != expected_physical_control_inputs_sha256 or
             not re.fullmatch(
                 r"[0-9a-f]{32}", str(request.get("nonce", ""))) or
             not re.fullmatch(
@@ -216,6 +242,7 @@ def _serve_admission(server: socket.socket,
                      validated_source: str,
                      git: str,
                      oracle_sha256: str,
+                     physical_control_inputs_sha256: dict[str, str],
                      cycles: int) -> int:
     expected_phases = (
         ["initial"] +
@@ -260,7 +287,9 @@ def _serve_admission(server: socket.socket,
         with stream_context as stream:
             while True:
                 try:
-                    request = _read_request(stream, validated_source)
+                    request = _read_request(
+                        stream, validated_source,
+                        physical_control_inputs_sha256)
                 except EOFError:
                     break
                 except Blocked as exc:
@@ -365,6 +394,11 @@ def main() -> int:
         _check_git_source(arguments.validated_source, git)
         oracle_sha256 = _git_file_sha256(
             arguments.validated_source, DEFAULT_ORACLE, git)
+        physical_control_inputs_sha256 = {
+            relative: _git_file_sha256(
+                arguments.validated_source, ROOT / relative, git)
+            for relative in PHYSICAL_CONTROL_INPUT_PATHS
+        }
         sudo = _trusted_executable("sudo")
         python3 = _trusted_executable("python3")
         true = _trusted_executable("true")
@@ -391,7 +425,8 @@ def main() -> int:
                     cwd=ROOT)
                 return _serve_admission(
                     server, child, arguments.validated_source,
-                    git, oracle_sha256, arguments.cycles)
+                    git, oracle_sha256, physical_control_inputs_sha256,
+                    arguments.cycles)
     except Blocked as exc:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),

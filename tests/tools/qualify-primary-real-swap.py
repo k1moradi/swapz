@@ -43,6 +43,16 @@ CGROUP_ROOT = Path("/sys/fs/cgroup")
 AUTHORIZATION_SNAPSHOT = ROOT / "docs/handoff/production-readiness.json"
 ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
 REAL_SWAP_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
+PHYSICAL_CONTROL_INPUT_PATHS = (
+    "src/kernel/VERSION",
+    "src/kernel/authority.h",
+    "src/kernel/codec.h",
+    "src/kernel/superblock.h",
+    "src/kernel/swapz-build-info.h",
+    "src/userspace/swapz-primary.h",
+    "src/userspace/swapz-primary.c",
+    "src/userspace/swapzctl.c",
+)
 MAPPER_NAME = "swapz-primary"
 PAGE_BYTES = 4096
 SEGMENT_BLOCKS = 256
@@ -224,6 +234,21 @@ class SourceAdmissionClient:
         self._channel = channel
         self._validated_source = validated_source
         self._oracle_sha256: str | None = None
+        self._physical_control_inputs_sha256: dict[str, str] | None = None
+
+    def bind_physical_control_inputs(self, hashes: dict[str, str]) -> None:
+        if not isinstance(hashes, dict) or set(hashes) != set(PHYSICAL_CONTROL_INPUT_PATHS):
+            raise Blocked("physical control source input inventory is incomplete")
+        normalized: dict[str, str] = {}
+        for path in PHYSICAL_CONTROL_INPUT_PATHS:
+            digest = hashes.get(path)
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise Blocked("physical control source input digest is malformed")
+            normalized[path] = digest
+        if self._physical_control_inputs_sha256 is not None and \
+                self._physical_control_inputs_sha256 != normalized:
+            raise Blocked("physical control source input identity changed")
+        self._physical_control_inputs_sha256 = normalized
 
     def close(self) -> None:
         channel = getattr(self, "_channel", None)
@@ -247,12 +272,15 @@ class SourceAdmissionClient:
     def require(self, phase: str) -> str:
         if not re.fullmatch(r"(?:initial|final|cycle-[1-4])", phase):
             raise Blocked("source admission phase is invalid")
+        if self._physical_control_inputs_sha256 is None:
+            raise Blocked("physical control source inputs are not pinned")
         nonce = os.urandom(16).hex()
         request = {
             "schema": SOURCE_ADMISSION_SCHEMA,
             "phase": phase,
             "source_sha": self._validated_source,
             "nonce": nonce,
+            "physical_control_inputs_sha256": self._physical_control_inputs_sha256,
         }
         try:
             self._channel.sendall(
@@ -479,20 +507,63 @@ def _run(argv: list[str], *, check: bool = True, timeout: float = 30,
     return result
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
+def _stable_file_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+        info.st_ctime_ns, info.st_mode, info.st_uid, info.st_gid,
+        info.st_nlink,
+    )
+
+
+def _read_stable_file_bytes(
+        path: Path, label: str,
+        error_type: type[Exception] = Blocked) -> bytes:
+    """Read one regular pathname without following or racing a replacement."""
+    file_descriptor = -1
     try:
-        with path.open("rb") as stream:
-            while True:
-                chunk = stream.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
+        named_before = path.lstat()
+        if not stat.S_ISREG(named_before.st_mode):
+            raise error_type(f"{label} is not a regular file")
+        file_descriptor = os.open(
+            path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        opened_before = os.fstat(file_descriptor)
+        if not stat.S_ISREG(opened_before.st_mode) or \
+                opened_before.st_dev != named_before.st_dev or \
+                opened_before.st_ino != named_before.st_ino:
+            raise error_type(f"{label} pathname identity changed before open")
+        payload = bytearray()
+        while True:
+            chunk = os.read(file_descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            payload.extend(chunk)
+        opened_after = os.fstat(file_descriptor)
+        named_after = path.lstat()
+        if _stable_file_identity(opened_after) != _stable_file_identity(opened_before) or \
+                _stable_file_identity(named_after) != _stable_file_identity(opened_after) or \
+                len(payload) != opened_after.st_size:
+            raise error_type(f"{label} changed while being read")
+        return bytes(payload)
+    except (Blocked, QualificationFailure):
+        raise
     except OSError as exc:
-        raise Blocked(f"cannot hash {path}: {exc}") from exc
-    return digest.hexdigest()
+        raise error_type(f"cannot read {label}: {exc}") from exc
+    finally:
+        original_error = sys.exc_info()[1]
+        if file_descriptor >= 0:
+            try:
+                os.close(file_descriptor)
+            except OSError as cleanup_error:
+                _raise_cleanup_errors(
+                    original_error, [f"{label} descriptor: {cleanup_error}"],
+                    error_type=error_type)
 
 
+def _sha256_file(
+        path: Path, *, error_type: type[Exception] = Blocked) -> str:
+    return hashlib.sha256(
+        _read_stable_file_bytes(path, f"hash input {path}", error_type)
+    ).hexdigest()
 
 
 def pin_real_swap_oracle(oracle_path: Path, private_directory: Path,
@@ -615,9 +686,75 @@ def _c_string_literal(value: str, label: str) -> str:
     return json.dumps(value)
 
 
+def pin_physical_control_inputs(
+        private_parent: Path) -> tuple[Path, dict[str, str]]:
+    """Snapshot every local C build input before unprivileged source admission."""
+    source_root = private_parent / "source"
+    source_root.mkdir(mode=0o700, parents=False, exist_ok=False)
+    os.chmod(source_root, 0o700)
+    hashes: dict[str, str] = {}
+    for relative_text in PHYSICAL_CONTROL_INPUT_PATHS:
+        relative = Path(relative_text)
+        payload = _read_stable_file_bytes(
+            ROOT / relative, f"physical control source {relative_text}")
+        digest = hashlib.sha256(payload).hexdigest()
+        destination_parent = source_root
+        for component in relative.parent.parts:
+            destination_parent = destination_parent / component
+            try:
+                destination_parent.mkdir(mode=0o700)
+            except FileExistsError:
+                pass
+            info = destination_parent.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+                raise Blocked("private physical source directory identity is unsafe")
+            os.chmod(destination_parent, 0o700)
+        destination = source_root / relative
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                os.O_CLOEXEC | os.O_NOFOLLOW,
+                0o400,
+            )
+            offset = 0
+            while offset < len(payload):
+                written = os.write(descriptor, payload[offset:])
+                if written <= 0:
+                    raise OSError(errno.EIO, "short private source snapshot write")
+                offset += written
+            os.fsync(descriptor)
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or \
+                    stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1:
+                raise Blocked("private physical source snapshot identity is unsafe")
+        except (Blocked, QualificationFailure):
+            raise
+        except OSError as exc:
+            raise Blocked(
+                f"cannot snapshot physical control source {relative_text}: {exc}") from exc
+        finally:
+            original_error = sys.exc_info()[1]
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError as cleanup_error:
+                    _raise_cleanup_errors(
+                        original_error,
+                        [f"physical control source {relative_text} descriptor: "
+                         f"{cleanup_error}"],
+                        error_type=Blocked)
+        if _sha256_file(destination) != digest:
+            raise Blocked("private physical source snapshot digest mismatch")
+        hashes[relative_text] = digest
+    return source_root, hashes
+
+
 def build_physical_execution_control(validated_source: str,
                                      qualified_swapzctl: Path,
-                                     private_directory: Path
+                                     private_directory: Path,
+                                     source_root: Path = ROOT
                                      ) -> tuple[Path, str]:
     """Build a noninstalled exact-source coordinator bound to qualified bytes."""
     if not re.fullmatch(r"[0-9a-f]{40}", validated_source):
@@ -632,7 +769,7 @@ def build_physical_execution_control(validated_source: str,
         raise Blocked("qualified control must use installed <prefix>/sbin/swapzctl layout")
 
     try:
-        version = (ROOT / "src/kernel/VERSION").read_text(
+        version = (source_root / "src/kernel/VERSION").read_text(
             encoding="ascii").strip()
     except OSError as exc:
         raise Blocked(f"cannot read exact-source version: {exc}") from exc
@@ -651,8 +788,8 @@ def build_physical_execution_control(validated_source: str,
         f"-DSWAPZ_VERSION={version_literal}",
         "-DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1",
         f"-DSWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL={control_literal}",
-        str(ROOT / "src/userspace/swapzctl.c"),
-        str(ROOT / "src/userspace/swapz-primary.c"),
+        str(source_root / "src/userspace/swapzctl.c"),
+        str(source_root / "src/userspace/swapz-primary.c"),
         "-o", str(output),
     ]
     result = _run(command, check=False, timeout=120)
@@ -671,13 +808,24 @@ def build_physical_execution_control(validated_source: str,
     return output, _sha256_file(output)
 
 
-def qualification_artifact_hashes(report_path: Path, validated_source: str) -> dict[str, str]:
-    """Read qualified artifact digests directly from the supplied owner report."""
+def qualification_artifact_hashes(
+        report_path: Path, validated_source: str,
+        expected_report_sha256: str | None = None) -> dict[str, str]:
+    """Read artifact digests from one stable, optionally digest-pinned report."""
+    payload = _read_stable_file_bytes(report_path, "qualification report")
+    digest = hashlib.sha256(payload).hexdigest()
+    if expected_report_sha256 is not None:
+        if not isinstance(expected_report_sha256, str) or \
+                re.fullmatch(r"[0-9a-f]{64}", expected_report_sha256) is None:
+            raise Blocked("imported qualification report digest is malformed")
+        if digest != expected_report_sha256:
+            raise Blocked(
+                "imported qualification report digest differs from supplied report")
     try:
-        report = _load_unique_json(
-            report_path.read_text(encoding="utf-8"), "qualification report")
-    except OSError as exc:
-        raise Blocked(f"cannot read qualification report: {exc}") from exc
+        text_payload = payload.decode("utf-8")
+    except UnicodeError as exc:
+        raise Blocked("qualification report is not valid UTF-8") from exc
+    report = _load_unique_json(text_payload, "qualification report")
     if report.get("schema") != "swapz-test-results-v1" or \
             report.get("source_sha") != validated_source or \
             report.get("tested_commit_sha") != validated_source or \
@@ -1345,30 +1493,37 @@ def validate_acceptance_manifest(
     return manifest
 
 
-def verify_acceptance_manifest(
+def _verify_acceptance_manifest_snapshot(
         *, cycles: int, workload_mib: int, resident_mib: int,
-        swap_limit_mib: int, timeout_seconds: int) -> dict:
+        swap_limit_mib: int, timeout_seconds: int) -> tuple[dict, str]:
+    payload = _read_stable_file_bytes(
+        ACCEPTANCE_MANIFEST, "production acceptance manifest")
     try:
-        manifest = _load_unique_json(
-            ACCEPTANCE_MANIFEST.read_text(encoding="utf-8"),
-            "production acceptance manifest")
-    except OSError as exc:
+        text_payload = payload.decode("utf-8")
+    except UnicodeError as exc:
         raise Blocked(
-            f"cannot read production acceptance manifest: {exc}") from exc
-    return validate_acceptance_manifest(
+            "production acceptance manifest is not valid UTF-8") from exc
+    manifest = _load_unique_json(text_payload, "production acceptance manifest")
+    accepted = validate_acceptance_manifest(
         manifest, cycles=cycles, workload_mib=workload_mib,
         resident_mib=resident_mib, swap_limit_mib=swap_limit_mib,
         timeout_seconds=timeout_seconds)
+    return accepted, hashlib.sha256(payload).hexdigest()
+
+
+def verify_acceptance_manifest(
+        *, cycles: int, workload_mib: int, resident_mib: int,
+        swap_limit_mib: int, timeout_seconds: int) -> dict:
+    accepted, _digest = _verify_acceptance_manifest_snapshot(
+        cycles=cycles, workload_mib=workload_mib,
+        resident_mib=resident_mib, swap_limit_mib=swap_limit_mib,
+        timeout_seconds=timeout_seconds)
+    return accepted
 
 
 def acceptance_manifest_sha256() -> str:
-    """Hash the exact frozen policy bytes consumed by physical qualification."""
-    try:
-        payload = ACCEPTANCE_MANIFEST.read_bytes()
-    except OSError as exc:
-        raise Blocked(
-            f"cannot hash production acceptance manifest: {exc}") from exc
-    return hashlib.sha256(payload).hexdigest()
+    """Hash the current stable frozen-policy pathname."""
+    return _sha256_file(ACCEPTANCE_MANIFEST)
 
 
 def verify_authorized_target(
@@ -1519,11 +1674,12 @@ def verify_provenance(plan: dict, validated_source: str, report_path: Path,
     require_clean_mapper_ownership(plan)
     if plan.get("control_build_source_sha") != validated_source:
         raise Blocked("primary control binary source SHA differs from validated source")
-    report_digest = _sha256_file(report_path)
-    if plan.get("qualification_report_sha256") != report_digest:
-        raise Blocked("imported qualification report digest differs from supplied report")
-
-    report_hashes = qualification_artifact_hashes(report_path, validated_source)
+    report_digest = plan.get("qualification_report_sha256")
+    if not isinstance(report_digest, str) or \
+            re.fullmatch(r"[0-9a-f]{64}", report_digest) is None:
+        raise Blocked("imported qualification report digest is malformed")
+    report_hashes = qualification_artifact_hashes(
+        report_path, validated_source, report_digest)
     installed_paths = installed_artifact_paths(swapzctl)
     plan_keys = {
         "formatter_sha256": ("qualified_swapzctl_sha256", "live_swapzctl_sha256"),
@@ -1843,37 +1999,62 @@ def _remove_cgroup(cgroup: Path) -> None:
             f"cannot remove empty real-swap cgroup: {exc}") from exc
 
 
+def _read_oracle_cgroup_members(cgroup: Path) -> set[int]:
+    try:
+        raw_processes = (cgroup / "cgroup.procs").read_text(
+            encoding="ascii").split()
+    except OSError as exc:
+        raise QualificationFailure(
+            "cannot read dedicated oracle cgroup membership") from exc
+    if any(not re.fullmatch(r"[1-9][0-9]*", value) for value in raw_processes):
+        raise QualificationFailure(
+            "dedicated oracle cgroup has malformed process identity")
+    observed = {int(value) for value in raw_processes}
+    if len(observed) != len(raw_processes):
+        raise QualificationFailure(
+            "dedicated oracle cgroup has duplicate process identity")
+    return observed
+
+
 def require_oracle_worker_cgroup_ownership(
         cgroup: Path, processes: list[subprocess.Popen], *,
         allow_worker_exit: bool = False) -> None:
-    """Require no foreign cgroup members and, unless allowed, every worker."""
-    try:
-        raw_processes = (cgroup / "cgroup.procs").read_text(encoding="ascii").split()
-    except OSError as exc:
-        raise QualificationFailure("cannot read dedicated oracle cgroup membership") from exc
-    if any(not re.fullmatch(r"[1-9][0-9]*", value) for value in raw_processes):
-        raise QualificationFailure("dedicated oracle cgroup has malformed process identity")
-    observed = {int(value) for value in raw_processes}
+    """Require exact live-worker membership and no foreign cgroup members."""
     expected = {process.pid for process in processes}
-    membership_valid = (
-        observed.issubset(expected) if allow_worker_exit else observed == expected)
-    if len(observed) != len(raw_processes) or not membership_valid or \
-            len(expected) != len(processes):
-        raise QualificationFailure(
-            "dedicated oracle cgroup membership differs from owned worker PIDs")
-    # An exited task cannot still be in cgroup.procs. Reject a recycled PID
-    # rather than incorrectly attributing a foreign process to that worker.
-    if any(process.pid in observed and process.poll() is not None
-           for process in processes):
-        raise QualificationFailure(
-            "exited oracle PID is present in dedicated cgroup")
-    # The cgroup may shrink after VERIFY only when a child has exited; a
-    # still-running oracle outside our cgroup invalidates swap attribution.
-    if allow_worker_exit and any(
-            process.pid not in observed and process.poll() is None
-            for process in processes):
-        raise QualificationFailure(
-            "live oracle worker left dedicated cgroup during verification")
+    if len(expected) != len(processes):
+        raise QualificationFailure("owned oracle worker PIDs are not unique")
+    # Each owned worker can transition from live to exited only once. Allow
+    # one fresh membership read per such transition plus the initial sample.
+    attempts = len(processes) + 1 if allow_worker_exit else 1
+    for attempt in range(attempts):
+        observed = _read_oracle_cgroup_members(cgroup)
+        membership_valid = (
+            observed.issubset(expected)
+            if allow_worker_exit else observed == expected)
+        if not membership_valid:
+            raise QualificationFailure(
+                "dedicated oracle cgroup membership differs from owned worker PIDs")
+        states = {process.pid: process.poll() for process in processes}
+        if not allow_worker_exit:
+            if any(state is not None for state in states.values()):
+                raise QualificationFailure(
+                    "oracle worker exited before verification was allowed")
+            return
+        if any(pid not in observed and states[pid] is None for pid in expected):
+            raise QualificationFailure(
+                "live oracle worker left dedicated cgroup during verification")
+        exited_present = [
+            pid for pid in expected
+            if pid in observed and states[pid] is not None
+        ]
+        if not exited_present:
+            return
+        # The first snapshot may precede a normal exit by a few instructions.
+        # Re-read after poll() made the exit definite. A terminal worker PID
+        # that remains in the fresh snapshot is recycled/foreign membership.
+        if attempt + 1 == attempts:
+            raise QualificationFailure(
+                "exited oracle PID is present in dedicated cgroup")
 
 
 def _close_oracle_pipes(process: subprocess.Popen) -> None:
@@ -2039,7 +2220,11 @@ def require_oracle_worker_geometry(
     for worker_index, (record, memory_mib) in enumerate(zip(records, worker_memory_mib)):
         expected_bytes = memory_mib * MIB
         expected_pages = expected_bytes // PAGE_BYTES
-        if record.get(page_field) != expected_pages or record.get(byte_field) != expected_bytes:
+        if not isinstance(record, dict) or \
+                type(record.get(page_field)) is not int or \
+                type(record.get(byte_field)) is not int or \
+                record[page_field] != expected_pages or \
+                record[byte_field] != expected_bytes:
             raise QualificationFailure(
                 f"concurrent oracle worker {worker_index} {phase} page/byte count is incomplete")
 
@@ -2218,7 +2403,10 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                                   oracle_buffers[process.pid])
                     for process in round_processes
                 ]
-                waiting_pids = [int(record.get("pid", -1)) for record in waiting]
+                if any(type(record.get("pid")) is not int for record in waiting):
+                    raise QualificationFailure(
+                        "concurrent oracle readiness PID identity is malformed")
+                waiting_pids = [record["pid"] for record in waiting]
                 if len(set(waiting_pids)) != CONCURRENT_ORACLE_PROCESSES or \
                         waiting_pids != [process.pid for process in round_processes] or \
                         any(record.get("seed") != seed
@@ -2246,7 +2434,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 ]
                 require_oracle_worker_geometry(
                     filled_records, worker_memory_mib, "pages", "bytes", "fill")
-                if any(not re.fullmatch(r"[0-9a-f]{64}", str(record.get("digest", "")))
+                if any(not isinstance(record.get("digest"), str) or
+                       re.fullmatch(r"[0-9a-f]{64}", record["digest"]) is None
                        for record in filled_records):
                     raise QualificationFailure("concurrent oracle fill digests are malformed")
                 require_oracle_worker_cgroup_ownership(cgroup, round_processes)
@@ -3128,7 +3317,8 @@ def require_final_installed_artifact_identity(
     if set(expected_hashes) != set(paths):
         raise QualificationFailure("final qualified artifact inventory is incomplete")
     for artifact_key, path in paths.items():
-        if _sha256_file(path) != expected_hashes[artifact_key]:
+        if _sha256_file(
+                path, error_type=QualificationFailure) != expected_hashes[artifact_key]:
             raise QualificationFailure(
                 f"installed {artifact_key} bytes changed during real-swap campaign")
 
@@ -3136,7 +3326,6 @@ def require_final_installed_artifact_identity(
 def _execute_admitted(
         arguments: argparse.Namespace, admission: SourceAdmissionClient,
         terminal_cleanup: Callable[[], None] | None = None) -> dict:
-    expected_oracle_sha256 = admission.require("initial")
     _ensure_commands(("cc", "dmsetup", "lsblk", "dmesg"))
     if os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
         raise Blocked("primary real-swap qualification requires a 4096-byte host page")
@@ -3161,9 +3350,15 @@ def _execute_admitted(
         except OSError as exc:
             raise Blocked(
                 f"cannot secure private physical workspace: {exc}") from exc
+        pinned_source_root, physical_control_inputs_sha256 = \
+            pin_physical_control_inputs(private_parent)
+        admission.bind_physical_control_inputs(
+            physical_control_inputs_sha256)
+        expected_oracle_sha256 = admission.require("initial")
         private_directory = private_parent / "control"
         swapzctl, execution_control_sha256 = build_physical_execution_control(
-            arguments.validated_source, qualified_swapzctl, private_directory)
+            arguments.validated_source, qualified_swapzctl, private_directory,
+            source_root=pinned_source_root)
         oracle_path, oracle_sha256 = pin_real_swap_oracle(
             requested_oracle_path, private_parent, expected_oracle_sha256)
     except BaseException as original_error:
@@ -3178,13 +3373,13 @@ def _execute_admitted(
     try:
         preflight_workload_environment(
             arguments.workload_mib, arguments.resident_mib, arguments.swap_limit_mib)
-        verify_acceptance_manifest(
-            cycles=arguments.cycles,
-            workload_mib=arguments.workload_mib,
-            resident_mib=arguments.resident_mib,
-            swap_limit_mib=arguments.swap_limit_mib,
-            timeout_seconds=arguments.timeout_seconds)
-        acceptance_policy_sha256 = acceptance_manifest_sha256()
+        _accepted_policy, acceptance_policy_sha256 = \
+            _verify_acceptance_manifest_snapshot(
+                cycles=arguments.cycles,
+                workload_mib=arguments.workload_mib,
+                resident_mib=arguments.resident_mib,
+                swap_limit_mib=arguments.swap_limit_mib,
+                timeout_seconds=arguments.timeout_seconds)
         _kernel_log_snapshot()
         _import_qualification(swapzctl, report_path)
         plan = _read_plan(swapzctl)
@@ -3226,6 +3421,8 @@ def _execute_admitted(
                 "oracle_sha256": oracle_sha256,
                 "qualified_installed_artifacts": artifact_hashes,
                 "physical_execution_control_sha256": execution_control_sha256,
+                "physical_control_inputs_sha256":
+                    physical_control_inputs_sha256,
                 "installed_control_privileged_execution_enabled": False,
                 "partuuid": selector_partuuid,
                 "target_size_bytes": target_size_bytes,
@@ -3314,6 +3511,8 @@ def _execute_admitted(
             "qualification_report_sha256": qualification_report_sha256,
             "qualified_installed_artifacts": artifact_hashes,
             "physical_execution_control_sha256": execution_control_sha256,
+            "physical_control_inputs_sha256":
+                physical_control_inputs_sha256,
             "installed_control_privileged_execution_enabled": False,
             "partuuid": selector_partuuid,
             "target_size_bytes": target_size_bytes,
