@@ -150,6 +150,30 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertNotIn('mkswap --no-discard', self.script)
 
 
+    def test_normal_start_proves_swap_and_durable_identity_fail_closed(self):
+        start = self.script.index(
+            'note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=start"')
+        stop = self.script.index(
+            'note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=stop"', start)
+        positive_path = self.script[start:stop]
+        self.assertIn('assert_exact_owned_mapper 1', positive_path)
+        self.assertIn('[[ "$mapper_node_dev" == "$mapper_dev" ]]', positive_path)
+        self.assertIn('active_mapper_entries="$(mapper_swap_entry_count)"',
+                      positive_path)
+        self.assertNotIn('|| ! -e "$swap_path"', positive_path)
+        self.assertIn('[[ "$active_mapper_entries" == 1 ]]', positive_path)
+        self.assertIn('assert_lifecycle_state "$RUN_ID" ACTIVE null',
+                      positive_path)
+        self.assertIn('assert_owned_transaction_records 1', positive_path)
+        self.assertIn('assert_unrelated_host_swap_identity "normal start"',
+                      positive_path)
+        self.assertLess(
+            positive_path.index('assert_unrelated_host_swap_identity "normal start"'),
+            positive_path.index('active_backing_header_sha256='))
+        # The shared swap oracle must abort on a missing inventory path,
+        # rather than interpreting it as proof of inactivity.
+        self.assertIn('[[ -e "$swap_path" ]] || return 1', self.script)
+
     def test_normal_stop_proves_backing_header_preservation(self):
         self.assertIn("block0_sha256() {", self.script)
         before_stop = self.script.index(
