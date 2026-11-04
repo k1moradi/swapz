@@ -5853,11 +5853,15 @@ post-removal memory use; failure to recover blocks qualification.
 Initialization must precede the exact sustained swapz
 arm, steady/GC samples must fall inside that arm's monotonic interval, and
 teardown must follow its completion; a correctly shaped trace from elsewhere
-in the same boot cannot qualify. Sustained telemetry preserves absolute
-monotonic interval bounds. Every RAM sample labeled `gc` must overlap an
-interval where at least one exported target counter among `gc_wall_ns`,
-`gc_victims` or `gc_pages` actually advanced; a caller-supplied GC phase
-label without measured target GC activity is invalid. The sealer derives the
+in the same boot cannot qualify. The phase-order contract is
+baseline -> initialization -> sustained -> teardown. Within the sustained
+stage, `steady` and `gc` labels may interleave because target GC can recur
+during a long workload; requiring all steady observations to precede all GC
+observations is a false BLOCKED result, not stronger evidence. Sustained
+telemetry preserves absolute monotonic interval bounds. Every RAM sample
+labeled `gc` must overlap an interval where at least one exported target
+counter among `gc_wall_ns`, `gc_victims` or `gc_pages` actually advanced;
+a caller-supplied GC phase label without measured target GC activity is invalid. The sealer derives the
 peak from those raw counters, stores the derived summary, and also seals the
 sustained arm's absolute start/end plus only the positive-GC telemetry windows.
 The release evaluator independently recomputes the RAM summary and revalidates
@@ -5879,8 +5883,12 @@ ambiguity or unrecovered teardown block the campaign and the release evaluator,
 even if the supplied campaign digest was recomputed. The sealed host-memory
 binding must also reject any `SUnreclaim` sample greater than independently
 observed host `memory_total_bytes`, converting the raw `kB` integer with
-checked bounds. Unreclaimable slab is physical RAM; `VmallocUsed` measures
-virtual address space and must not be subject to that physical bound. Reject
+checked bounds. The snapshot producer obtains `memory_total_bytes` by
+multiplying the integer `MemTotal` `kB` counter by 1024, so the sealed value
+must be a positive unsigned-64-bit multiple of 1024; a sub-KiB remainder is
+malformed/BLOCKED evidence, not extra measurement precision. Unreclaimable
+slab is physical RAM; `VmallocUsed` measures virtual address space and must
+not be subject to that physical bound. Reject
 a malformed or indented second required meminfo counter instead of silently
 ignoring contradictory values. Report a malformed sample's index, precise
 field and expected/observed numeric bounds without echoing arbitrary evidence
@@ -5888,8 +5896,11 @@ strings. An exact-mapper mismatch must identify the `mapper_uuid` field
 without printing the supplied identity. Such contradictions are unavailable/BLOCKED evidence, not a measured
 target failure; only a properly validated over-ceiling loaded-host peak is
 a genuine measured RAM FAIL. Neither a synthetic control nor the 740 MiB
-index-only capacity estimate can become physical RAM acceptance. The serialized
-Codex loaded-host collector remains a separate required qualification; an
+index-only capacity estimate can become physical RAM acceptance. The focused
+synthetic metadata-RAM validator regression is part of the official rootless
+`make test` discovery path; adding a test file that no rootless entry point
+executes does not establish regression coverage. The serialized Codex
+loaded-host collector remains a separate required qualification; an
 unbound scalar from `--metadata-and-target-peak-ram-bytes` alone is not a
 resource PASS.
 

@@ -23,6 +23,15 @@ CLOCK_AGREEMENT_TOLERANCE_NS = 500_000_000
 UNIX_EPOCH_ORDINAL = datetime.date(1970, 1, 1).toordinal()
 SIZE_T_MAX = (1 << (8 * struct.calcsize("P"))) - 1
 PHASES = ("baseline", "initialization", "steady", "gc", "teardown")
+PHASE_STAGES = {
+    "baseline": 0,
+    "initialization": 1,
+    # GC can recur throughout the sustained workload; a later steady sample
+    # must not be rejected merely because an earlier interval observed GC.
+    "steady": 2,
+    "gc": 2,
+    "teardown": 3,
+}
 MINIMUM_PHASE_SAMPLES = {
     "baseline": 11,
     "initialization": 2,
@@ -415,11 +424,23 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
         raise ValueError("metadata RAM host binding fields are invalid")
     boot_id = binding["host_boot_id"]
     total_bytes = binding["memory_total_bytes"]
+    if not isinstance(boot_id, str) or not BOOT_ID.fullmatch(boot_id):
+        raise ValueError(
+            "metadata RAM host binding identity is invalid: "
+            f"metric=host_boot_id observed={_bounded_observed(boot_id)} "
+            "expected=canonical_boot_id")
+    # The sealed snapshot derives this field from /proc/meminfo MemTotal,
+    # whose source unit is kB. Reject sub-KiB precision that the producer
+    # cannot have measured rather than silently flooring it below.
     if (
-            not isinstance(boot_id, str) or not BOOT_ID.fullmatch(boot_id) or
             type(total_bytes) is not int or
-            not 0 < total_bytes <= MAX_UINT64):
-        raise ValueError("metadata RAM host binding identity is invalid")
+            not MEMINFO_UNIT_BYTES <= total_bytes <= MAX_UINT64 or
+            total_bytes % MEMINFO_UNIT_BYTES):
+        raise ValueError(
+            "metadata RAM host binding memory total is invalid: "
+            f"metric=memory_total_bytes observed={_bounded_observed(total_bytes)} "
+            f"minimum={MEMINFO_UNIT_BYTES} maximum={MAX_UINT64} "
+            f"multiple={MEMINFO_UNIT_BYTES}")
     if any(
             not isinstance(binding[field], str) or
             HOST_UTC_TIME.fullmatch(binding[field]) is None
@@ -539,7 +560,7 @@ def validate_metadata_ram_trace(
             f"metric=sample_count observed={len(samples)} "
             f"minimum={minimum_samples} maximum=1000000")
 
-    phase_index = 0
+    phase_stage = 0
     phase_samples: dict[str, list[dict[str, Any]]] = {
         phase: [] for phase in PHASES
     }
@@ -565,10 +586,13 @@ def validate_metadata_ram_trace(
                 "metadata RAM sample phase is invalid: "
                 f"metric=samples[{sample_index}].phase "
                 f"observed={_bounded_observed(phase)} expected=known_phase")
-        next_index = PHASES.index(phase)
-        if next_index < phase_index or next_index > phase_index + 1:
-            raise ValueError("metadata RAM trace phase order is invalid")
-        phase_index = next_index
+        next_stage = PHASE_STAGES[phase]
+        if next_stage < phase_stage or next_stage > phase_stage + 1:
+            raise ValueError(
+                "metadata RAM trace phase order is invalid: "
+                f"metric=samples[{sample_index}].phase observed={phase} "
+                "required=baseline_then_initialization_then_sustained_then_teardown")
+        phase_stage = next_stage
 
         monotonic_ns = sample["monotonic_ns"]
         mem_available_kib = sample["mem_available_kib"]

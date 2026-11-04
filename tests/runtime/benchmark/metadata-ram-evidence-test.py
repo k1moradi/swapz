@@ -113,7 +113,43 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "metric=mapper_uuid"):
             self.validate_trace(trace)
 
-    def test_rejects_peak_steady_contradiction(self) -> None:
+    def test_steady_and_gc_samples_may_interleave(self) -> None:
+        trace, _ = synthetic_trace()
+        trace["samples"][14]["phase"] = "gc"
+        trace["samples"][15]["phase"] = "steady"
+        derived = self.validate_trace(trace)
+        self.assertEqual(derived["steady_samples"], 2)
+        self.assertEqual(derived["gc_samples"], 2)
+        ram.validate_metadata_ram_arm_binding(trace, {
+            "arm_started_monotonic_ns": 2_200_000_000,
+            "arm_finished_monotonic_ns": 2_700_000_000,
+            "gc_activity_intervals": [
+                {
+                    "start_monotonic_ns": 2_350_000_000,
+                    "end_monotonic_ns": 2_450_000_000,
+                    "gc_wall_ns": 1,
+                    "gc_victims": 1,
+                    "gc_pages": 1,
+                },
+                {
+                    "start_monotonic_ns": 2_550_000_000,
+                    "end_monotonic_ns": 2_650_000_000,
+                    "gc_wall_ns": 1,
+                    "gc_victims": 1,
+                    "gc_pages": 1,
+                },
+            ],
+        })
+
+    def test_host_memory_total_rejects_sub_kib_false_precision(self) -> None:
+        trace, host = synthetic_trace()
+        host["memory_total_bytes"] += 1
+        with self.assertRaisesRegex(
+                ValueError,
+                r"metric=memory_total_bytes.*observed=8589934593.*multiple=1024"):
+            ram.validate_metadata_ram_host_binding(trace, host)
+
+    def test_rejects_reported_peak_contradiction(self) -> None:
         trace, _ = synthetic_trace()
         peak = self.validate_trace(trace)["steady_peak_ram_bytes"]
         with self.assertRaisesRegex(ValueError, "metric=peak_ram_bytes"):
