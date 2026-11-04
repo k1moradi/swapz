@@ -5242,7 +5242,8 @@ substitute for the production boot token. Comments and string literals
 containing fake gate or syscall text never satisfy safety assertions.
 
 Canonical CI release evidence contains exactly one row for each of the three
-mandatory workflows, with distinct positive GitHub run IDs. Extra, malformed,
+mandatory workflows, with distinct canonical positive signed-64-bit GitHub
+run IDs. Extra, malformed,
 or duplicated rows cannot qualify the release even when the required rows
 claim completed success. Every mandatory loaded correctness marker is
 single-occurrence evidence, including the fault, kernel-debug and

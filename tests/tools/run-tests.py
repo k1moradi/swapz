@@ -159,13 +159,13 @@ def _readiness_artifact_hashes_valid(hashes):
 
 
 def _readiness_run_id_valid(value):
-    """Match GitHub's canonical positive ASCII workflow-run ID contract."""
-    if isinstance(value, bool):
+    """Accept only canonical positive signed-64-bit GitHub Actions run IDs."""
+    if type(value) is int:
+        return 0 < value <= (1 << 63) - 1
+    if not isinstance(value, str) or not 1 <= len(value) <= 19:
         return False
-    if isinstance(value, int):
-        return value > 0
-    return (isinstance(value, str) and
-            re.fullmatch(r"[1-9][0-9]*", value) is not None)
+    return (re.fullmatch(r"[1-9][0-9]*", value) is not None and
+            int(value) <= (1 << 63) - 1)
 
 
 def owner_qualification_artifacts_available(artifacts):
@@ -258,7 +258,7 @@ def _readiness_pass_payload_valid(
                     not _readiness_run_id_valid(run.get("run_id"))):
                 return False
         # A GitHub run belongs to one workflow: aliases cannot supply three.
-        run_ids = [str(run["run_id"]) for run in runs]
+        run_ids = [int(run["run_id"]) for run in runs]
         return len(run_ids) == len(set(run_ids))
     if name == "exact_source_owner_make_test":
         return (entry.get("overall") == "PASS" and

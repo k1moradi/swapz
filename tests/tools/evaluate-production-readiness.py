@@ -204,12 +204,13 @@ def _valid_observed_at_utc(value: Any) -> bool:
 
 
 def _valid_run_id(value: Any) -> bool:
-    if isinstance(value, bool):
+    """Validate bounded canonical IDs before numeric normalization."""
+    if type(value) is int:
+        return 0 < value <= (1 << 63) - 1
+    if not isinstance(value, str) or not 1 <= len(value) <= 19:
         return False
-    if isinstance(value, int):
-        return value > 0
-    return (isinstance(value, str) and
-            RUN_ID_DECIMAL_RE.fullmatch(value) is not None)
+    return (RUN_ID_DECIMAL_RE.fullmatch(value) is not None and
+            int(value) <= (1 << 63) - 1)
 
 
 def _normalize_target(value: Any) -> tuple[str, int] | None:
@@ -1023,7 +1024,7 @@ def evaluate_release(
                         for run in runs)):
                 block_code("required_ci: workflow run set has extra or malformed entries")
             # An Actions run ID is globally unique, not reusable across jobs.
-            run_ids = [str(run["run_id"]) for run in runs
+            run_ids = [int(run["run_id"]) for run in runs
                        if isinstance(run, dict) and
                        _valid_run_id(run.get("run_id"))]
             if len(run_ids) != len(set(run_ids)):

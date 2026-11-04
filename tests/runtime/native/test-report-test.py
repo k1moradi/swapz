@@ -4486,6 +4486,9 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 ("run_id", "01"),
                 ("run_id", "١"),
                 ("run_id", "0" * 5000),
+                ("run_id", "9" * 5000),
+                ("run_id", 1 << 63),
+                ("run_id", "9223372036854775808"),
                 ("run_id", "not-a-run-id")):
             with self.subTest(field=field, value=value):
                 snapshot = self.passing_snapshot()
