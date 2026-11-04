@@ -2462,7 +2462,10 @@ exactly five ordered PASS stages with integer-zero exits and valid final
 formatter/module/oracle artifact digests. An incomplete artifact identity
 must return nonzero and remain INCOMPLETE, preserving passed stage observations.
 The console cannot advertise loaded service as qualified unless the owner
-overall and final artifact identity both pass.
+overall and final artifact identity both pass. Per-I/O benchmark subphase
+diagnostics replace the previous subphase instead of accumulating labels:
+even a long fixed-source campaign must retain a bounded, actionable failed
+phase and the original sanitized failure reason.
 
 
 ### Immutable one-slot lower-I/O qualification

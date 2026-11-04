@@ -2261,7 +2261,11 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = f"owned RAM {where}comparison {pair_number}/8 ({mode})"
             elif (match := re.fullmatch(
                     r"BENCH_IO_PHASE=(off|swapz):(prefill|mixed|packed_read)", line)):
-                phase += f" [{match.group(1)} {match.group(2)}]"
+                # The same envelope can execute hundreds of subphases. Only
+                # its latest subphase is diagnostic; concatenation makes the
+                # failure label unbounded and obscures the first real block.
+                phase = (phase.split(" [", 1)[0] +
+                         f" [{match.group(1)} {match.group(2)}]")
             elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
                 phase = f"after completed owned RAM comparison {pair_number}/8"
 

@@ -3416,6 +3416,20 @@ class ReportContract(unittest.TestCase):
                         {**hashes, "extra": True}):
             self.assertFalse(runner.owner_qualification_artifacts_available(invalid))
 
+    def test_failure_phase_tracks_latest_benchmark_subphase_without_growth(self):
+        log = (
+            "START_STORAGE_ENVELOPE=nvme_gen5\n" +
+            ("BENCH_IO_PHASE=off:prefill\n"
+             "BENCH_IO_PHASE=off:mixed\n"
+             "BENCH_IO_PHASE=swapz:packed_read\n") * 200 +
+            "BLOCKED: ID36 host lacks 1 GiB MemAvailable safety headroom\n"
+        )
+        phase, reason = runner.failure_context(log)
+        self.assertEqual(
+            phase, "nvme_gen5 synthetic service envelope [swapz packed_read]")
+        self.assertLessEqual(len(phase), 96)
+        self.assertIn("ID36 host lacks", reason)
+
     def test_loaded_failure_identifies_failed_phase_without_private_paths(self):
         # This was a real regression: privileged benchmarks created
         # build/benchmark/ (mode 0700), then a non-root user attempted
