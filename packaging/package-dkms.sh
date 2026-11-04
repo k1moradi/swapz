@@ -556,6 +556,46 @@ cleanup_package_files() {
   cleanup_source_files
 }
 
+# Sync payloads and their directory entries before journaling publication.
+# A missing path records a deletion; no symlink or special file is followed.
+durable_package_paths() {
+  python3 - "$@" <<'PY'
+import os
+import stat
+import sys
+from pathlib import Path
+
+paths = set()
+for argument in sys.argv[1:]:
+    path = Path(argument)
+    if not path.is_absolute() or path.is_symlink():
+        raise SystemExit("unsafe package durability path")
+    if path.exists():
+        paths.add(path)
+    directory = path.parent
+    while not directory.exists():
+        if directory == directory.parent or directory.is_symlink():
+            raise SystemExit("unsafe package durability parent")
+        directory = directory.parent
+    if directory.is_symlink() or not directory.is_dir():
+        raise SystemExit("unsafe package durability parent")
+    paths.add(directory)
+
+for path in sorted(paths, key=lambda candidate: len(candidate.parts), reverse=True):
+    metadata = path.lstat()
+    if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+        raise SystemExit("unsafe package durability entry")
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    if stat.S_ISDIR(metadata.st_mode):
+        flags |= os.O_DIRECTORY
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+PY
+}
+
 ensure_transaction_parent() {
   if [[ -e "$transaction_parent" || -L "$transaction_parent" ]]; then
     installed_directory_metadata "$transaction_parent" 700 ||
@@ -955,22 +995,31 @@ restore_uninstall_backup() {
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
   verify_installed_module_set || return 1
   verify_module_resolution || return 1
+  durable_package_paths "$src" "$src/src" "$src/src/kernel" \
+    "$src/dkms.conf" "$src"/src/kernel/* "$src/$marker" \
+    "$src/$source_manifest" "$src/$binary_manifest" \
+    "$src/$qualification_marker" "$installed_module" || return 1
   persist_transaction_state rollback-backend-restored || return 1
 
   # Restore all non-CLI package files only after module/DKMS state, depmod and
   # module resolution are valid. The CLI is the activation gate and is restored
   # atomically last.
   restore_uninstall_file_backups_except_cli || return 1
+  local -a restored_files=()
+  mapfile -t restored_files < "$backup_dir/file-paths" || return 1
+  durable_package_paths "${restored_files[@]}" || return 1
   persist_transaction_state rollback-files-restored || return 1
   "$systemctl_bin" daemon-reload || return 1
   persist_transaction_state rollback-systemd-reloaded || return 1
   restore_uninstall_cli_backup || return 1
+  durable_package_paths "$cli" || return 1
   persist_transaction_state rollback-cli-restored || return 1
   # Hermetic failure at the last verification boundary after CLI publication.
   if [[ -n "$test_root" && ${SWAPZ_TEST_UNINSTALL_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
     return 1
   fi
-  verify_owned
+  verify_owned || return 1
+  durable_package_paths "$cli" "$installed_module" || return 1
 }
 
 uninstall_rollback() {
@@ -1080,21 +1129,29 @@ if [[ "$action" == uninstall ]]; then
   # and its independently verifiable hash manifest are durable.
   persist_transaction_state removing-activation-files
   cleanup_activation_files
+  durable_package_paths "$cli_dir" "$prefix/libexec" "$unit_dir" "$generator_dir"
   persist_transaction_state activation-files-removed
   uninstall_test_checkpoint activation-files-removed
 
   persist_transaction_state removing-dkms
   "$dkms_bin" remove -m swapz -v "$version" --all
+  removed_dkms_status=""
+  query_dkms_status removed_dkms_status -m swapz -v "$version" ||
+    blocked "cannot verify DKMS removal"
+  [[ -z "$removed_dkms_status" ]] || blocked "DKMS removal left registered state"
+  durable_package_paths "$installed_module_dir"
   persist_transaction_state dkms-removed
   uninstall_test_checkpoint dkms-removed
 
   persist_transaction_state removing-source
   cleanup_source_files
+  durable_package_paths "$srcbase"
   persist_transaction_state source-removed
   uninstall_test_checkpoint source-removed
 
   persist_transaction_state removing-installed-module
   rm -f -- "$installed_module"
+  durable_package_paths "$installed_module_dir"
   persist_transaction_state installed-module-removed
   uninstall_test_checkpoint installed-module-removed
 
@@ -1415,22 +1472,31 @@ restore_previous_package() {
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
   verify_installed_module_set || return 1
   verify_module_resolution || return 1
+  durable_package_paths "$src" "$src/src" "$src/src/kernel" \
+    "$src/dkms.conf" "$src"/src/kernel/* "$src/$marker" \
+    "$src/$source_manifest" "$src/$binary_manifest" \
+    "$src/$qualification_marker" "$installed_module" || return 1
   persist_transaction_state rollback-backend-restored || return 1
   restore_file_backups_except_cli || return 1
+  local -a restored_files=()
+  mapfile -t restored_files < "$backup_dir/file-paths" || return 1
+  durable_package_paths "${restored_files[@]}" || return 1
   persist_transaction_state rollback-files-restored || return 1
   "$systemctl_bin" daemon-reload || return 1
   persist_transaction_state rollback-systemd-reloaded || return 1
   restore_cli_backup || return 1
+  durable_package_paths "$cli" || return 1
   persist_transaction_state rollback-cli-restored || return 1
   if [[ -n "$test_root" && ${SWAPZ_TEST_UPGRADE_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
     return 1
   fi
   # The previously verified legacy package had no qualification marker.
   if [[ "$existing_kind" == legacy ]]; then
-    verify_owned_legacy
+    verify_owned_legacy || return 1
   else
-    verify_owned
+    verify_owned || return 1
   fi
+  durable_package_paths "$cli" "$installed_module" || return 1
 }
 
 rollback() {
@@ -1502,16 +1568,23 @@ if (( had_existing == 1 )); then
   # Revoke activation-capable entry points before replacing the backend.
   persist_transaction_state removing-activation-files
   cleanup_activation_files
+  durable_package_paths "$cli_dir" "$prefix/libexec" "$unit_dir" "$generator_dir"
   persist_transaction_state activation-files-removed
   install_test_checkpoint activation-files-removed
 
   persist_transaction_state removing-dkms
   "$dkms_bin" remove -m swapz -v "$version" --all
+  removed_dkms_status=""
+  query_dkms_status removed_dkms_status -m swapz -v "$version" ||
+    blocked "cannot verify DKMS removal"
+  [[ -z "$removed_dkms_status" ]] || blocked "DKMS removal left registered state"
+  durable_package_paths "$installed_module_dir"
   persist_transaction_state dkms-removed
   install_test_checkpoint dkms-removed
 
   persist_transaction_state removing-source
   rm -rf -- "$src"
+  durable_package_paths "$srcbase"
   persist_transaction_state source-removed
   install_test_checkpoint source-removed
 fi
@@ -1532,6 +1605,9 @@ incoming_identity > "$src/$qualification_marker"
 chmod 0644 "$src/$marker" "$src/$qualification_marker"
 (cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
   src/kernel/*.c src/kernel/*.h "$qualification_marker") > "$src/$source_manifest"
+durable_package_paths "$src" "$src/src" "$src/src/kernel" \
+  "$src/dkms.conf" "$src"/src/kernel/* "$src/$marker" \
+  "$src/$qualification_marker" "$src/$source_manifest"
 persist_transaction_state source-created
 install_test_checkpoint source-created
 
@@ -1572,6 +1648,7 @@ install -d -m0755 "$installed_module_dir"
 install -m0644 "$module_artifact" "$installed_module"
 [[ "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
   blocked "installed module digest mismatch"
+durable_package_paths "$installed_module"
 persist_transaction_state module-promoted
 install_test_checkpoint module-promoted
 
@@ -1609,6 +1686,10 @@ new_files_committed=1
    "$(hash_file "$module_snapshot")" == "$qualified_module_sha256" &&
    "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
   blocked "installed artifact digest mismatch"
+durable_package_paths "$boot_verifier" "$runtime_health" "$helper" \
+  "$module_snapshot" "$primary_generator" "$mapper_service" \
+  "$boot_verifier_service" "$runtime_health_service" "$primary_swap" \
+  "$src/$binary_manifest"
 persist_transaction_state package-files-published
 install_test_checkpoint package-files-published
 
@@ -1625,6 +1706,7 @@ install -m0755 "$stage_dir/swapzctl" "$temporary_cli"
 cmp -s "$stage_dir/swapzctl" "$temporary_cli" ||
   blocked "temporary CLI digest mismatch"
 mv -f -- "$temporary_cli" "$cli"
+durable_package_paths "$cli"
 persist_transaction_state cli-published
 install_test_checkpoint cli-published
 verify_owned || blocked "installed ownership or digest verification failed"
