@@ -139,12 +139,13 @@ def _reject_json_constant(value: str) -> None:
     raise EvidenceError(f"nonfinite JSON constant is not evidence: {value}")
 
 
-def load_json_strict(path: Path) -> tuple[dict[str, Any], bytes]:
-    with path.open("rb") as evidence_file:
-        raw = evidence_file.read(MAX_EVIDENCE_INPUT_BYTES + 1)
+def _parse_json_object_bytes(raw: Any, evidence_name: str) -> dict[str, Any]:
+    if not isinstance(raw, bytes) or not raw:
+        raise EvidenceError(f"{evidence_name}: serialized JSON evidence is empty")
     if len(raw) > MAX_EVIDENCE_INPUT_BYTES:
         raise EvidenceError(
-            f"{path}: evidence exceeds {MAX_EVIDENCE_INPUT_BYTES}-byte input bound")
+            f"{evidence_name}: evidence exceeds "
+            f"{MAX_EVIDENCE_INPUT_BYTES}-byte input bound")
     try:
         value = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_unique_object,
@@ -152,10 +153,16 @@ def load_json_strict(path: Path) -> tuple[dict[str, Any], bytes]:
             parse_float=_finite_json_float,
             parse_constant=_reject_json_constant)
     except (UnicodeDecodeError, ValueError, OverflowError) as exc:
-        raise EvidenceError(f"{path}: invalid JSON: {exc}") from exc
+        raise EvidenceError(f"{evidence_name}: invalid JSON: {exc}") from exc
     if not isinstance(value, dict):
-        raise EvidenceError(f"{path}: top level must be an object")
-    return value, raw
+        raise EvidenceError(f"{evidence_name}: top level must be an object")
+    return value
+
+
+def load_json_strict(path: Path) -> tuple[dict[str, Any], bytes]:
+    with path.open("rb") as evidence_file:
+        raw = evidence_file.read(MAX_EVIDENCE_INPUT_BYTES + 1)
+    return _parse_json_object_bytes(raw, str(path)), raw
 
 
 def sha256_bytes(raw: bytes) -> str:
@@ -249,6 +256,26 @@ def _same_json_value(left: Any, right: Any) -> bool:
             all(_same_json_value(a, b) for a, b in zip(left, right))
         )
     return left == right
+
+
+def _bound_json_object(
+        value: Any, raw: Any, evidence_name: str) -> dict[str, Any]:
+    serialized = _parse_json_object_bytes(raw, evidence_name)
+    if not _same_json_value(serialized, value):
+        raise EvidenceError(
+            f"{evidence_name}: parsed object differs from serialized bytes")
+    return serialized
+
+
+def _bound_env_record(
+        value: Any, raw: Any, evidence_name: str) -> dict[str, str]:
+    if not isinstance(raw, bytes) or not raw:
+        raise EvidenceError(f"{evidence_name}: serialized evidence is empty")
+    serialized = parse_env_strict(raw)
+    if serialized != value:
+        raise EvidenceError(
+            f"{evidence_name}: parsed object differs from serialized bytes")
+    return serialized
 
 
 def _valid_source(value: Any) -> bool:
@@ -362,6 +389,8 @@ def _valid_campaign_artifact(value: Any) -> bool:
 
 def validate_acceptance_policy(
         policy: dict[str, Any], raw: bytes) -> tuple[str, int]:
+    policy = _bound_json_object(
+        policy, raw, "production acceptance policy")
     if set(policy) != POLICY_TOP_LEVEL_KEYS:
         raise EvidenceError(
             "production acceptance policy has non-canonical top-level fields")
@@ -519,6 +548,13 @@ def validate_real_swap_evidence(
     def reject(message: str) -> None:
         if message not in issues:
             issues.append(message)
+
+    try:
+        physical_evidence = _bound_json_object(
+            physical_evidence, raw, "persistent real-swap evidence")
+    except EvidenceError as exc:
+        reject(str(exc))
+        return issues
 
     if physical_evidence.get("schema") != "swapz-primary-real-swap-evidence-v1":
         reject("persistent evidence schema is invalid")
@@ -1010,6 +1046,15 @@ def evaluate_release(
         block_code("source SHA is not a lowercase 40-hex Git commit")
 
     try:
+        test_results = _bound_json_object(
+            test_results, test_results_raw, "owner qualification report")
+    except EvidenceError as exc:
+        block_code(str(exc))
+        test_results = {}
+
+    try:
+        policy = _bound_json_object(
+            policy, policy_raw, "production acceptance policy")
         policy_sha256, peak_ram_limit = validate_acceptance_policy(
             policy, policy_raw)
     except EvidenceError as exc:
@@ -1377,6 +1422,7 @@ def evaluate_release(
     harness = pass_record("cold_boot_harness", deployment=True)
     require_target("cold_boot_harness", harness, deployment=True)
     harness_armed = False
+    bound_cold_boot_arm_evidence = None
     if harness is not None:
         if harness.get("armed") is not True:
             block_deployment("cold_boot_harness: harness is not armed")
@@ -1388,12 +1434,19 @@ def evaluate_release(
             block_deployment(
                 "cold_boot_harness: arm evidence digest mismatch")
         else:
-            arm_issues = validate_cold_boot_arm_evidence(
-                cold_boot_arm_evidence, source_sha, target,
-                report_artifacts, owner_kernel_release)
-            for issue in arm_issues:
-                block_deployment("cold_boot_harness: " + issue)
-            harness_armed = not arm_issues
+            try:
+                bound_cold_boot_arm_evidence = _bound_env_record(
+                    cold_boot_arm_evidence, cold_boot_arm_evidence_raw,
+                    "cold-boot arm evidence")
+            except EvidenceError as exc:
+                block_deployment("cold_boot_harness: " + str(exc))
+            else:
+                arm_issues = validate_cold_boot_arm_evidence(
+                    bound_cold_boot_arm_evidence, source_sha, target,
+                    report_artifacts, owner_kernel_release)
+                for issue in arm_issues:
+                    block_deployment("cold_boot_harness: " + issue)
+                harness_armed = not arm_issues
 
     code_ready = not code_blockers
     if not code_ready:
@@ -1420,16 +1473,25 @@ def evaluate_release(
                 cold_boot_blockers.append(
                     "owner_observed_reboot: persistent cold-boot evidence digest mismatch")
             else:
-                validated_cold_boot_arm = (
-                    cold_boot_arm_evidence if harness_armed else None)
-                for issue in validate_cold_boot_evidence(
-                        cold_boot_evidence, source_sha, target,
-                        report_artifacts, owner_kernel_release,
-                        validated_cold_boot_arm):
+                try:
+                    bound_cold_boot_evidence = _bound_env_record(
+                        cold_boot_evidence, cold_boot_evidence_raw,
+                        "cold-boot evidence")
+                except EvidenceError as exc:
                     cold_boot_blockers.append(
-                        "owner_observed_reboot: " + issue)
-                if not cold_boot_blockers:
-                    cold_boot_observed = "PASS"
+                        "owner_observed_reboot: " + str(exc))
+                else:
+                    validated_cold_boot_arm = (
+                        bound_cold_boot_arm_evidence
+                        if harness_armed else None)
+                    for issue in validate_cold_boot_evidence(
+                            bound_cold_boot_evidence, source_sha, target,
+                            report_artifacts, owner_kernel_release,
+                            validated_cold_boot_arm):
+                        cold_boot_blockers.append(
+                            "owner_observed_reboot: " + issue)
+                    if not cold_boot_blockers:
+                        cold_boot_observed = "PASS"
         elif (
                 reboot.get("status") == "FAIL" and
                 reboot.get("observed") is True and
