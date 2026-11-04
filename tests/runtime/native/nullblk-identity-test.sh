@@ -128,6 +128,11 @@ cat > "$STUBS/stat" <<SH
 if [[ \${SWAPZ_FIXTURE_CASE:-} == unreadable_identity ]]; then
     exit 13
 fi
+if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
+      "\$3" == "$FIXTURE/dev/mapper/swapz-demo-$TOKEN" ]]; then
+    printf '253:0\n'
+    exit 0
+fi
 exec "$REAL_STAT" "\$@"
 SH
 cat > "$STUBS/id" <<'SH'
@@ -184,6 +189,8 @@ case "$*" in
             printf 'swapz-demo-aaaaaaaaaaaaaaaa (0253:0)\n'
         elif [[ $SWAPZ_FIXTURE_CASE == malformed_mapper_fields ]]; then
             printf 'swapz-demo-aaaaaaaaaaaaaaaa (253:0) extra\n'
+        elif [[ $SWAPZ_FIXTURE_CASE == mapper_inventory_identity_mismatch ]]; then
+            printf 'swapz-demo-aaaaaaaaaaaaaaaa (254:9)\n'
         else
             printf 'swapz-demo-aaaaaaaaaaaaaaaa (253:0)\n'
         fi
@@ -259,7 +266,7 @@ run_case() {
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|stale_token|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -298,7 +305,7 @@ run_case() {
             setup_owned_lower
             setup_mapper_node
             ;;
-        noncanonical_mapper_major|malformed_mapper_fields|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
             setup_owned_lower
             setup_mapper_node
             ;;
@@ -344,6 +351,10 @@ run_case() {
         [[ "$output" == *'pipeline_status=2; '* &&
            "$output" == *'observed invalid or unreadable listing;'* ]] ||
             die "$case_name did not refuse malformed mapper identity before cleanup: $output"
+    elif [[ "$case_name" == mapper_inventory_identity_mismatch ]]; then
+        [[ "$output" == *'expected dmsetup inventory device identity to match canonical mapper node; observed mismatch; no holder signal; inspect device-mapper inventory and udev state without cleanup'* &&
+           "$output" != *"$FIXTURE/dev/"* ]] ||
+            die "$case_name did not refuse the stale mapper identity safely: $output"
     fi
     [[ -f "$FIXTURE/proc/swaps" ]] || die "host swap inventory was mutated"
     if [[ "$case_name" == unrelated_swap ]]; then
@@ -369,6 +380,7 @@ run_case busy_mapper mapper_inventory BLOCKED unavailable
 run_case mapper_inventory_error mapper_inventory BLOCKED unavailable
 run_case noncanonical_mapper_major mapper_inventory BLOCKED unavailable
 run_case malformed_mapper_fields mapper_inventory BLOCKED unavailable
+run_case mapper_inventory_identity_mismatch mapper_device_identity BLOCKED unavailable
 run_case stale_token stale_run_token BLOCKED unavailable
 run_case wrong_owner null_blk_owner BLOCKED unavailable
 run_case owned_swap active_owned_swap BLOCKED unavailable
@@ -389,4 +401,4 @@ run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity and 32 isolated preflight refusal/observation fixtures'
+printf '%s\n' 'PASS: null_blk identity and 33 isolated preflight refusal/observation fixtures'

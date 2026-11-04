@@ -253,7 +253,9 @@ if swapz_map_list="$(
                     malformed = 1
                     next
                 }
-                print $1
+                ++records
+                if (records <= 2)
+                    printf "%s\t%s\n", $1, substr($2, 2, length($2) - 2)
             }
             END { if (malformed) exit 2 }
         '
@@ -263,14 +265,26 @@ else
     inventory_status=$?
     refuse BLOCKED mapper_inventory unavailable "pipeline_status=$inventory_status; cannot enumerate pre-existing swapz mappings: expected bounded name (canonical decimal major:minor) records, observed invalid or unreadable listing; inspect dmsetup inventory without cleanup"
 fi
+swapz_map_records=()
 swapz_maps=()
+swapz_map_devnos=()
 if [[ -n $swapz_map_list ]]; then
-    mapfile -t swapz_maps <<< "$swapz_map_list" ||
+    mapfile -t swapz_map_records <<< "$swapz_map_list" ||
         refuse BLOCKED mapper_inventory unavailable "cannot parse pre-existing swapz mapping list"
+    for swapz_map_record in "${swapz_map_records[@]}"; do
+        IFS=$'\t' read -r swapz_map_name swapz_map_devno swapz_map_extra <<< "$swapz_map_record"
+        [[ -n $swapz_map_name && -n $swapz_map_devno && -z $swapz_map_extra ]] ||
+            refuse BLOCKED mapper_inventory unavailable "parsed mapper inventory record is incomplete"
+        swapz_maps+=("$swapz_map_name")
+        swapz_map_devnos+=("$swapz_map_devno")
+    done
 fi
 [[ ${#swapz_maps[@]} == 1 ]] ||
     refuse BLOCKED mapper_inventory unavailable "busy dm_swapz has zero or multiple mappings; no cleanup attempted"
+[[ ${#swapz_map_devnos[@]} == 1 ]] ||
+    refuse BLOCKED mapper_inventory unavailable "single mapper inventory lacks one device identity; no cleanup attempted"
 owned_map="${swapz_maps[0]}"
+listed_mapper_devno="${swapz_map_devnos[0]}"
 case "$owned_map" in
     swapz-demo-*) token="${owned_map#swapz-demo-}" ;;
     *) refuse BLOCKED stale_run_token unavailable "mapping name is not harness-owned; no cleanup attempted" ;;
@@ -446,13 +460,13 @@ assert_not_active_swap "$lower"
 mapper_node="$(readlink -f "$mapper" 2>/dev/null || true)"
 [[ -n $mapper_node && -b $mapper_node ]] ||
     refuse BLOCKED mapper_device_identity unavailable "canonical mapper block node is missing or unreadable; no holder signal"
-if mapper_dev="$(stat -Lc '%t:%T' "$mapper" 2>/dev/null)"; then
+if mapper_dev="$(stat -Lc '%Hr:%Lr' "$mapper" 2>/dev/null)"; then
     :
 else
     mapper_stat_status=$?
     refuse BLOCKED mapper_device_identity unavailable "stat_status=$mapper_stat_status; cannot stat mapper; no holder signal"
 fi
-if canonical_dev="$(stat -Lc '%t:%T' "$mapper_node" 2>/dev/null)"; then
+if canonical_dev="$(stat -Lc '%Hr:%Lr' "$mapper_node" 2>/dev/null)"; then
     :
 else
     canonical_stat_status=$?
@@ -460,6 +474,8 @@ else
 fi
 [[ -n $mapper_dev && $mapper_dev == "$canonical_dev" ]] ||
     refuse BLOCKED mapper_device_identity unavailable "canonical device identity changed; no holder signal"
+[[ $mapper_dev == "$listed_mapper_devno" ]] ||
+    refuse BLOCKED mapper_device_identity unavailable "expected dmsetup inventory device identity to match canonical mapper node; observed mismatch; no holder signal; inspect device-mapper inventory and udev state without cleanup"
 
 wait_for_zero_opens() {
     local attempt

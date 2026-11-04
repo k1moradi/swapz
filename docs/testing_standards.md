@@ -1231,7 +1231,12 @@ canonical unsigned-decimal major:minor tuple, without leading zeroes. Empty
 lines, extra fields, or malformed device numbers are not proof of a single
 owned mapper: refuse at `mapper_inventory` before any holder signaling or
 device cleanup, report the pipeline status and safe inventory inspection,
-never echo inventory/device paths. Stale-mapper identity, UUID, open-count and lower-device validation
+never echo inventory/device paths. The parser may retain at most two validated
+records because any second mapping already proves cleanup ambiguity. For the
+single admitted record, its decimal major:minor is part of the ownership proof
+and must match both the mapper node and its canonical resolved node before any
+holder signal or mapper removal; a syntactically valid but stale/raced device
+identity is `mapper_device_identity` BLOCKED, not ownership proof. Stale-mapper identity, UUID, open-count and lower-device validation
 must avoid runtime-dependent Bash extended-regex capture state; exact shell
 patterns and guarded parsers are preferred so malformed input reaches an
 explicit `BLOCKED:` path rather than shell status 2. Canonical mapper identity
