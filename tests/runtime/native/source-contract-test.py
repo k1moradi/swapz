@@ -1703,9 +1703,14 @@ static swapz_u16 swapz_probe_set(
             "swapz_validate_physical_superblock( ctx, device_bytes, NULL)",
             compact_ctr)
         self.assertIn("error != -EPERM || superblock_magic_present", compact_ctr)
-        self.assertIn("if (!swapz_allow_physical_backing)", compact_ctr)
+        self.assertIn("if (swapz_allow_physical_backing)", compact_ctr)
         self.assertIn("ctx->physical_backing = true", compact_ctr)
         self.assertIn("ctx->physical_backing = false", compact_ctr)
+        self.assertLess(
+            compact_ctr.rindex("if (swapz_allow_physical_backing)"),
+            compact_ctr.index(
+                "swapz_validate_physical_superblock( ctx, device_bytes, "
+                "&superblock_magic_present)"))
         physical_path = compact_ctr.rsplit(
             "if (!swapz_physical_backing_arch_supported())", 1)[1]
         self.assertLess(physical_path.index("swapz_allow_physical_backing"),

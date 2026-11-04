@@ -4457,6 +4457,8 @@ mapper. `dm_swapz` must recognize that header on the owned null_blk, require
 for other header-backed storage. This keeps mapper `mkswap` writes out of the
 transaction identity header; an invalid header with SWAPZ magic must fail
 closed, while an unformatted null_blk remains in the full-device test mode.
+With the opt-in disabled, the ordinary null_blk constructor must not probe
+block zero or change lower-device I/O counters.
 The start/stop rehearsal therefore verifies both exact Linux swap activation
 and preservation of the backing header.
 
