@@ -7472,6 +7472,97 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                     "destroy_workqueue(ctx->preparation_workqueue);",
                     "/* missing worker teardown */", 1))
 
+    def test_checked_geometry_oracle_tracks_production_headers(self):
+        """Cross-check source-defined geometry with bounded sizing, not RAM."""
+        import runpy
+
+        codec = (ROOT / "src/kernel/codec.h").read_text()
+        authority = (ROOT / "src/kernel/authority.h").read_text()
+        context = (ROOT / "docs/AGENT_CONTEXT.md").read_text()
+
+        def definition(header, name):
+            values = re.findall(
+                r"^#define\s+" + re.escape(name) + r"\s+([0-9]+)U?\s*$",
+                header, flags=re.M)
+            self.assertEqual(len(values), 1, name)
+            return int(values[0])
+
+        page_bytes = definition(codec, "SWAPZ_BLOCK_BYTES")
+        segment_blocks = definition(authority, "SWAPZ_SEGMENT_BLOCKS")
+        self.assertEqual(
+            definition(authority, "SWAPZ_LINUX_SWAP_HEADER_BLOCKS"), 1)
+        self.assertEqual((page_bytes, segment_blocks), (4096, 256))
+        for type_name, bits in (("swapz_u8", 8), ("swapz_u16", 16),
+                                ("swapz_u32", 32), ("swapz_u64", 64)):
+            self.assertIn(f"typedef uint{bits}_t {type_name};", codec)
+        self.assertIn("(swapz_u64)logical_pages +", authority)
+        self.assertIn("logical_pages / 8U", authority)
+        self.assertIn("logical_pages % 8U", authority)
+
+        model = runpy.run_path(
+            str(ROOT / "tests/runtime/benchmark/metadata_ram_evidence.py"))
+        self.assertEqual(model["BLOCK_BYTES"], page_bytes)
+        self.assertEqual(model["SEGMENT_BLOCKS"], segment_blocks)
+        self.assertEqual(model["FOREGROUND_HEADROOM_BLOCKS"], segment_blocks)
+        current_card = re.search(
+            r"^- size:\s*\x60([0-9]+)\x60 bytes\s*$", context, flags=re.M)
+        self.assertIsNotNone(current_card)
+        partition_bytes = int(current_card.group(1))
+        self.assertEqual(partition_bytes, 124787884032)
+        physical = ((partition_bytes // page_bytes - 1) //
+                    segment_blocks) * segment_blocks
+        segments = physical // segment_blocks
+        maximum = model["maximum_logical_pages_for_partition"]
+        logical = maximum(partition_bytes, size_t_max=(1 << 64) - 1)
+        self.assertEqual((physical, segments, logical),
+                         (30465536, 119006, 27080192))
+        self.assertEqual(logical * page_bytes, 110920466432)
+        reserve = max(logical // 8 + (logical % 8 != 0),
+                      2 * segment_blocks)
+        self.assertEqual(reserve, 3385024)
+        self.assertLessEqual(
+            logical + segment_blocks,
+            (physical - reserve) // segment_blocks * segment_blocks)
+        next_logical = logical + 1
+        next_reserve = max(next_logical // 8 +
+                           (next_logical % 8 != 0), 2 * segment_blocks)
+        self.assertGreater(
+            next_logical + segment_blocks,
+            (physical - next_reserve) // segment_blocks * segment_blocks)
+
+        def checked_length(count, width, limit):
+            if width <= 0 or count > limit // width:
+                raise OverflowError("capacity-index byte length overflow")
+            return count * width
+
+        dimensions = {
+            "logical": logical, "physical": physical,
+            "ctx->segment_count": segments,
+        }
+        lengths = [
+            (name, checked_length(dimensions[scale], width, (1 << 64) - 1))
+            for name, (scale, _, width) in self.INDEXES.items()
+        ]
+        self.assertEqual(len(lengths), 17)
+        self.assertEqual(sum(length for _, length in lengths), 776070968)
+        self.assertEqual(
+            sum((length + page_bytes - 1) // page_bytes * page_bytes
+                for _, length in lengths), 776114176)
+        self.assertEqual(dict(lengths)["maps"], 433283072)
+        self.assertEqual(
+            sum(((length + page_bytes - 1) // page_bytes + 511) // 512
+                for _, length in lengths) * page_bytes, 1564672)
+        self.assertIsNone(maximum(partition_bytes + 1))
+        self.assertIsNone(maximum(3 * segment_blocks * page_bytes))
+        self.assertIsNone(maximum(
+            ((1 << 32) + segment_blocks + 1) * page_bytes))
+        self.assertIsNone(maximum(
+            (0xffffff00 + 1) * page_bytes, size_t_max=(1 << 32) - 1))
+        self.assertIsNone(
+            model["_checked_product"](1 << 63, 2, (1 << 64) - 1))
+        with self.assertRaises(OverflowError):
+            checked_length(1 << 32, 16, (1 << 32) - 1)
+
     def test_selected_card_allocation_free_bytes_and_addressability(self):
         # Independently compute the current admission result and page-rounded
         # allocation footprint. These estimates exclude vmalloc metadata, PTEs,
