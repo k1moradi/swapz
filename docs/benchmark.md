@@ -712,9 +712,9 @@ merges a legacy report into an exact-computer history. An OS reinstall changes
 the history identity; cloned systems need distinct `/etc/machine-id` values.
 Install Python Matplotlib on each test computer. Rendering failures are reported
 as `NOT UPDATED` with a local diagnostic log, independently of qualification.
-For a failed gate, use the [original stage diagnostic](README.md#diagnose-the-first-record)
-before interpreting optional plot output. Plots are local generated artifacts;
-report publication keeps them reproducible.
+For a failed qualification, follow the [report triage path](README.md#diagnose-the-first-record)
+to the first failing stage or post-stage gate before interpreting optional plot
+output. Plots are local generated artifacts; report publication keeps them reproducible.
 
 
 ### Memory-backed lower-device allocation scope

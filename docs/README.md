@@ -111,12 +111,17 @@ explicitly **historical**, not a live release verdict.
 
 ### Diagnose the first record
 
-From the first non-`PASS` item in the report's `stages[]`, record `name`,
-optional `failed_phase` and `diagnostic`, and `exit_code`. Trace that gate to
-the producer's **earliest failed phase and original numeric errno**, when
-emitted; a downstream exception must not replace that diagnostic. Inspect the
-retained journal/backup and observed ownership **read-only** before selecting
-the safe recovery action below. The primary lifecycle emits `PRIMARY_PREPARE`, `PRIMARY_START`,
+Start with the report's `overall`. If `stages[]` contains a non-`PASS`
+item, use the first one and record `name`, optional `failed_phase` and
+`diagnostic`, and `exit_code`. If every recorded stage is `PASS` but
+`overall` is not, inspect the current runner's post-stage gates:
+`benchmarks.verdicts.{overall,reason}`,
+`benchmarks.write_saturation.{overall,reason}`, and
+`qualified_artifacts.{status,reason}`. Then trace that gate to the producer's
+**earliest failed phase and original numeric errno**, when emitted; a downstream
+exception must not replace that diagnostic. Inspect retained journal/backup
+state and observed ownership **read-only** before selecting the safe recovery
+action below. The primary lifecycle emits `PRIMARY_PREPARE`, `PRIMARY_START`,
 `PRIMARY_STOP` and `PRIMARY_RECOVER` with `phase` and `errno` on
 many execution failures; `PRIMARY_PREPARE` additionally reports `claim=none`
 or `claim=retained` after its ownership decision. Other operations may not
