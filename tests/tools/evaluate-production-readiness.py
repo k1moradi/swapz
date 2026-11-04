@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import re
+import runpy
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ PHYSICAL_CAMPAIGN_SEALER = (
     ROOT / "tests/runtime/benchmark/physical-campaign-evidence.py")
 PHYSICAL_CAMPAIGN_EVALUATOR = (
     ROOT / "tests/runtime/benchmark/qualification.py")
+METADATA_RAM_VALIDATOR = (
+    ROOT / "tests/runtime/benchmark/metadata_ram_evidence.py")
+RAM_TRACE_VALIDATOR = runpy.run_path(str(METADATA_RAM_VALIDATOR))
 PHYSICAL_CAMPAIGN_AMENDMENT = (
     ROOT / "tests/runtime/benchmark/physical-qualification-amendment-v2.json")
 
@@ -524,6 +528,15 @@ def validate_physical_campaign_evidence(
                 target is None or logical_capacity_bytes > target[1] or
                 type(peak_ram_bytes) is not int or peak_ram_bytes <= 0):
             reject("sealed campaign capacity/RAM evidence is invalid")
+        else:
+            try:
+                RAM_TRACE_VALIDATOR["validate_metadata_ram_trace"](
+                    capacity_and_ram.get("metadata_ram_trace"),
+                    source_sha=source_sha,
+                    mapper_uuid=capacity_and_ram.get("mapper_uuid"),
+                    expected_peak_ram_bytes=peak_ram_bytes)
+            except ValueError as exc:
+                reject(f"sealed campaign RAM trace is invalid: {exc}")
 
     stability = campaign.get("host_stability")
     if not isinstance(stability, dict) or stability.get("status") != "STABLE":
@@ -564,6 +577,7 @@ def validate_physical_campaign_evidence(
             ("prospective_amendment", PHYSICAL_CAMPAIGN_AMENDMENT),
             ("evaluator", PHYSICAL_CAMPAIGN_EVALUATOR),
             ("evidence_sealer", PHYSICAL_CAMPAIGN_SEALER),
+            ("metadata_ram_validator", METADATA_RAM_VALIDATOR),
         )
         for name, path in expected_files:
             record = policy.get(name)
