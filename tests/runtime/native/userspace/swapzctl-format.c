@@ -753,7 +753,7 @@ static void test_swap_inventory_requires_complete_kernel_table(void)
 	errno = 0;
 	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
 						  parent_device) < 0);
-	assert(errno == EBUSY);
+	assert(errno == EOPNOTSUPP);
 	assert(fclose(stream) == 0);
 
 	length = snprintf(
@@ -765,7 +765,7 @@ static void test_swap_inventory_requires_complete_kernel_table(void)
 	errno = 0;
 	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
 						  parent_device) < 0);
-	assert(errno == EPROTO);
+	assert(errno == EOPNOTSUPP);
 	assert(fclose(stream) == 0);
 
 	assert(close(swap_fd) == 0);
@@ -893,9 +893,11 @@ static void test_swap_adversarial_inventory(void)
 			  "%s%s file 1 0 -2\n", header, file_path);
 	assert(length > 0 && (size_t)length < sizeof(inventory));
 	stream = test_inventory_binary_stream(inventory, (size_t)length);
-	assert(format_swap_inventory_stream_clear(stream, device, parent) == 0);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+	assert(errno == EOPNOTSUPP);
 	assert(fclose(stream) == 0);
-	/* Distinct unrelated files on the same filesystem are both permitted. */
+	/* Distinct local inodes cannot authenticate foreign swap entries. */
 	second_fd = mkstemp(second_path);
 	assert(second_fd >= 0);
 	assert(fstat(second_fd, &other_info) == 0);
@@ -906,10 +908,12 @@ static void test_swap_adversarial_inventory(void)
 			  header, file_path, second_path);
 	assert(length > 0 && (size_t)length < sizeof(duplicate));
 	stream = test_inventory_binary_stream(duplicate, (size_t)length);
-	assert(format_swap_inventory_stream_clear(stream, device, parent) == 0);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+	assert(errno == EOPNOTSUPP);
 	assert(fclose(stream) == 0);
 
-	/* A hard-link alias of the SAME inode must not become a second swap. */
+	/* Hard-link aliases cannot authenticate a foreign active inode. */
 	alias_fd = mkstemp(alias_path);
 	assert(alias_fd >= 0);
 	assert(close(alias_fd) == 0);
@@ -922,7 +926,7 @@ static void test_swap_adversarial_inventory(void)
 	stream = test_inventory_binary_stream(duplicate, (size_t)length);
 	errno = 0;
 	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
-	assert(errno == EPROTO);
+	assert(errno == EOPNOTSUPP);
 	assert(fclose(stream) == 0);
 	assert(unlink(alias_path) == 0);
 	/*
@@ -936,7 +940,7 @@ static void test_swap_adversarial_inventory(void)
 	stream = test_inventory_binary_stream(duplicate, (size_t)length);
 	errno = 0;
 	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
-	assert(errno == EPROTO);
+	assert(errno == EOPNOTSUPP);
 	assert(fclose(stream) == 0);
 	assert(unlink(alias_path) == 0);
 	assert(close(second_fd) == 0);
@@ -948,7 +952,7 @@ static void test_swap_adversarial_inventory(void)
 	stream = test_inventory_binary_stream(duplicate, (size_t)length);
 	errno = 0;
 	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
-	assert(errno == EPROTO);
+	assert(errno == EOPNOTSUPP);
 	assert(fclose(stream) == 0);
 	stream = test_inventory_binary_stream(inventory,
 					     strlen(inventory) - 1U);
@@ -1033,7 +1037,7 @@ static void test_swap_adversarial_inventory(void)
 
 	/*
 	 * An unrelated active swapfile name is emitted escaped by the kernel.
-	 * Decode it before stat/lstat so a harmless filename cannot block format.
+	 * Decode the exact grammar, but local stat cannot grant clearance.
 	 */
 	{
 		char directory[] = "/tmp/swapzctl-escaped-XXXXXX";
@@ -1052,7 +1056,9 @@ static void test_swap_adversarial_inventory(void)
 				  "%s%s file 1 0 -2\n", header, encoded_path);
 		assert(length > 0 && (size_t)length < sizeof(inventory));
 		stream = test_inventory_binary_stream(inventory, (size_t)length);
-		assert(format_swap_inventory_stream_clear(stream, device, parent) == 0);
+		errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+	assert(errno == EOPNOTSUPP);
 		assert(fclose(stream) == 0);
 		assert(close(spaced_fd) == 0);
 		assert(unlink(spaced_path) == 0);
