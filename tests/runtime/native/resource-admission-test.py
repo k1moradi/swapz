@@ -240,7 +240,7 @@ swapz_clear_tmp_before_memory_check
         self.assertIn("CGROUP_ROOT=/sys/fs/cgroup", source)
         self.assertIn("MIN_AVAILABLE_KIB=$((1024 * 1024))", source)
         self.assertIn("sample_host_memory_admission || exit 2", source)
-        self.assertIn("required:%s unit:bytes", source)
+        self.assertIn("headroom:%s required:%s deficit:%s unit:bytes", source)
         self.assertNotIn("rm -rf /tmp", source)
         self.assertNotIn("drop_caches", source)
 
