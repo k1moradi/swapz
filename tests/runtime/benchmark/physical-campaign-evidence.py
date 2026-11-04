@@ -746,31 +746,18 @@ def metadata_ram_trace_within_host_window(
             not isinstance(first_kernel, dict) or
             not isinstance(last_kernel, dict) or
             trace.get("host_boot_id") != first_kernel.get("boot_id") or
-            trace.get("host_boot_id") != last_kernel.get("boot_id") or
-            type(first_kernel.get("uptime_seconds")) not in (int, float) or
-            type(last_kernel.get("uptime_seconds")) not in (int, float)):
+            trace.get("host_boot_id") != last_kernel.get("boot_id")):
         return False
     try:
         first = datetime.datetime.fromisoformat(
             samples[0]["timestamp_utc"].replace("Z", "+00:00"))
         last = datetime.datetime.fromisoformat(
             samples[-1]["timestamp_utc"].replace("Z", "+00:00"))
-        first_monotonic = samples[0]["monotonic_ns"]
-        last_monotonic = samples[-1]["monotonic_ns"]
-        # /proc/uptime is sampled after the before timestamp and after the
-        # campaign for the closing snapshot. One second covers its coarse text
-        # precision without allowing a trace from another part of the boot.
-        monotonic_slack_ns = 1_000_000_000
-        within_monotonic_window = (
-            first_monotonic + monotonic_slack_ns >=
-                int(first_kernel["uptime_seconds"] * 1_000_000_000) and
-            last_monotonic <=
-                int(last_kernel["uptime_seconds"] * 1_000_000_000) +
-                monotonic_slack_ns)
-        return (
-            snapshot_time(before) <= first < last <= snapshot_time(after) and
-            within_monotonic_window)
-    except (KeyError, TypeError, ValueError, OverflowError):
+        # Boot ID plus the UTC snapshot envelope binds the trace to this
+        # campaign. Do not compare CLOCK_MONOTONIC samples with /proc/uptime:
+        # their suspend-time semantics differ on Linux.
+        return snapshot_time(before) <= first < last <= snapshot_time(after)
+    except (KeyError, TypeError, ValueError):
         return False
 
 
