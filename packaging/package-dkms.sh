@@ -638,24 +638,28 @@ package_paths_present() {
   return 1
 }
 
+# Rollback helpers are frequently called from if/|| contexts, where Bash
+# suppresses errexit inside the entire function. Propagate destructive failures
+# explicitly so a later best-effort command cannot mask them.
 cleanup_activation_files() {
   rm -f -- "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
     "$primary_generator" "$mapper_service" "$boot_verifier_service" \
-    "$runtime_health_service" "$primary_swap"
+    "$runtime_health_service" "$primary_swap" || return 1
   rmdir -- "$helper_dir" 2>/dev/null || true
 }
 
 cleanup_source_files() {
   if [[ -d "$src" && ! -L "$src" ]]; then
-    rm -rf -- "$src"
+    rm -rf -- "$src" || return 1
   elif [[ -L "$src" ]]; then
-    rm -f -- "$src"
+    rm -f -- "$src" || return 1
   fi
+  return 0
 }
 
 cleanup_package_files() {
   cleanup_activation_files || return 1
-  cleanup_source_files
+  cleanup_source_files || return 1
 }
 
 # Failure paths must report unsuccessful quarantine/journaling rather than
@@ -746,15 +750,40 @@ remove_transaction_record() {
   transaction_name="${transaction_dir##*/}"
   [[ "$transaction_name" =~ ^swapz-(package|uninstall)[.][A-Za-z0-9]{8}$ ]] ||
     return 75
+  [[ "$transaction_dir" == "$transaction_parent/$transaction_name" ]] ||
+    return 75
   cleanup_path="$transaction_parent/.finalized-$transaction_name"
   [[ ! -e "$cleanup_path" && ! -L "$cleanup_path" ]] || return 75
   mv -- "$transaction_dir" "$cleanup_path" || return $?
+  if [[ -n "$test_root" && ${SWAPZ_TEST_PAUSE_TRANSACTION_CLEANUP:-0} == 1 ]]; then
+    : > "$sandbox/package-cleanup.ready"
+    sleep 30
+  fi
   if [[ -n "$test_root" && "$cleanup_failure" == fsync ]]; then
     return 74
   fi
   durable_package_paths "$transaction_parent" || return $?
   rm -rf -- "$cleanup_path" || return $?
   durable_package_paths "$transaction_parent"
+}
+
+# Finalized tombstones are no longer recovery authority, but repeated hard
+# interruptions must not accumulate private rollback snapshots indefinitely.
+cleanup_finalized_transaction_records() {
+  local tombstone tombstone_name removed_any=0
+  local -a tombstones=()
+  shopt -s nullglob
+  tombstones=("$transaction_parent"/.finalized-swapz-package.*
+              "$transaction_parent"/.finalized-swapz-uninstall.*)
+  shopt -u nullglob
+  for tombstone in "${tombstones[@]}"; do
+    tombstone_name="${tombstone##*/}"
+    [[ "$tombstone_name" =~ ^[.]finalized-swapz-(package|uninstall)[.][A-Za-z0-9]{8}$ ]] ||
+      return 1
+    rm -rf -- "$tombstone" || return 1
+    removed_any=1
+  done
+  (( removed_any == 0 )) || durable_package_paths "$transaction_parent"
 }
 
 ensure_transaction_parent() {
@@ -766,6 +795,8 @@ ensure_transaction_parent() {
   else
     install -d -m0700 "$transaction_parent"
   fi
+  cleanup_finalized_transaction_records ||
+    blocked "cannot clean finalized package transaction records"
 }
 
 assert_no_incomplete_package_transactions() {

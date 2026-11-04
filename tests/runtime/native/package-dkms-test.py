@@ -161,6 +161,7 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS="0",
             SWAPZ_TEST_FAIL_TRANSACTION_PHASE="never",
             SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE="never",
+            SWAPZ_TEST_PAUSE_TRANSACTION_CLEANUP="0",
             SWAPZ_FAKE_FAIL_AT="never",
             SWAPZ_FAKE_BUILD_SLEEP="0",
             SWAPZ_FAKE_REMOVE_SLEEP="0",
@@ -1662,6 +1663,31 @@ exec "{flock_binary}" "$@"
         self.assertEqual(self.uninstall_transactions(), [])
         self.assertEqual(self.invoke("recover").returncode, 0)
 
+    def test_uninstall_cleanup_failure_is_not_masked_by_rollback_context(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        helper_dir = self.prefix / "libexec/swapz"
+        helper_dir.chmod(0o555)
+        try:
+            failed = self.invoke("uninstall")
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("attempting transaction rollback", failed.stderr)
+            self.assertIn("activation quarantine failed", failed.stderr)
+            self.assertIn("rollback incomplete", failed.stderr)
+            # The CLI is removed before the unwritable helper directory makes
+            # rm fail, so retained recovery state remains deactivated.
+            self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+            transactions = self.uninstall_transactions()
+            self.assertEqual(len(transactions), 1)
+            state = json.loads((transactions[0] / "state.json").read_text())
+            self.assertEqual(state["phase"], "rollback-incomplete")
+        finally:
+            helper_dir.chmod(0o755)
+
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+
     def test_uninstall_depmod_and_daemon_reload_failures_restore(self):
         self.assertEqual(self.invoke("install").returncode, 0)
 
@@ -2005,6 +2031,51 @@ exec "{flock_binary}" "$@"
         self.assertTrue((transaction / "state.json").exists())
         blocked = self.invoke("uninstall")
         self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_sigkill_during_finalized_record_cleanup_preserves_committed_install(self):
+        ready = self.home / "package-cleanup.ready"
+        environment = dict(
+            self.env,
+            SWAPZ_TEST_PAUSE_TRANSACTION_CLEANUP="1",
+        )
+        process = subprocess.Popen(
+            ["bash", str(self.script), "install", str(self.prefix)],
+            cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline and not ready.exists():
+                if process.poll() is not None:
+                    stdout, stderr = process.communicate(timeout=8)
+                    self.fail(
+                        "transaction cleanup checkpoint not reached: "
+                        f"{stdout}\n{stderr}")
+                time.sleep(0.025)
+            self.assertTrue(ready.exists(), "missing transaction cleanup checkpoint")
+            self.assert_installed_exact()
+            self.assertEqual(
+                list((self.home / "transactions").glob("swapz-package.*")), [])
+            tombstones = list(
+                (self.home / "transactions").glob(
+                    ".finalized-swapz-package.*"))
+            self.assertEqual(len(tombstones), 1)
+
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=8)
+            self.assertEqual(process.returncode, -signal.SIGKILL)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=8)
+
+        self.assert_installed_exact()
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(
+            list((self.home / "transactions").glob(
+                ".finalized-swapz-package.*")), [])
+        self.assertEqual(self.invoke("install").returncode, 0)
 
     def test_committed_record_cleanup_failure_preserves_verified_state(self):
         failed_install = self.invoke("install", {
