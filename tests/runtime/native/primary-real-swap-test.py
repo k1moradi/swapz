@@ -1303,6 +1303,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             sampler.start()
         self.assertFalse(sampler._thread.is_alive())
 
+    def test_stop_sampler_preserves_definite_failure_classification(self):
+        sampler = qualify.StopSampler(
+            (252, 1), "SWAPZ-PRIMARY-" + "1" * 32, "/dev/dm-1")
+        sampler._stop = mock.Mock()
+        sampler._thread = mock.Mock()
+        sampler._thread.is_alive.return_value = False
+        sampler.error = qualify.QualificationFailure("identity changed")
+        with self.assertRaisesRegex(
+                qualify.QualificationFailure,
+                "stop sampler failed: identity changed"):
+            sampler.stop()
+
     def test_stop_sampler_is_stopped_when_final_delay_is_interrupted(self):
         run_id = "1" * 32
         manifest = {"run_id": run_id}

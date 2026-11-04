@@ -246,7 +246,8 @@ appended rather than discarded. If correct teardown is too fast to prove
 the inactive-before-remove interval independently, the result is BLOCKED, not
 PASS. The stop sampler evaluates those transitions online and retains only
 constant-size phase/timestamp/count state; a long bounded stop must not grow a
-per-millisecond sample log. No force cleanup is allowed, including error paths. Oracle-child
+per-millisecond sample log, and online evaluation must preserve definite FAIL
+versus evidentiary BLOCKED classification. No force cleanup is allowed, including error paths. Oracle-child
 termination may use bounded TERM/KILL for the dedicated test processes only;
 signal-delivery exit races must not mask the underlying qualification failure,
 and one worker's cleanup must not wait for the other worker to leave the shared

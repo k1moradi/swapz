@@ -2636,7 +2636,10 @@ class StopSampler:
         if self._thread.is_alive():
             raise Blocked("stop sampler thread did not terminate")
         if self.error:
-            raise Blocked(f"stop sampler failed: {self.error}")
+            if isinstance(self.error, QualificationFailure):
+                raise QualificationFailure(
+                    f"stop sampler failed: {self.error}") from self.error
+            raise Blocked(f"stop sampler failed: {self.error}") from self.error
         return self._tracker.result()
 
     def _run(self) -> None:
