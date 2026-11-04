@@ -1343,6 +1343,39 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     "maximum_capacity_and_ram:" in blocker
                     for blocker in result["code_blockers"]))
 
+    def test_capacity_report_identity_mismatch_cannot_claim_host_peak(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        report_raw = encoded(report)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        modifications = {
+            "record_source": lambda record: record.update(source_sha="b" * 40),
+            "record_policy": lambda record: record.update(
+                policy_sha256="f" * 64),
+            "record_target": lambda record: record.update(
+                target={"partuuid": "f13428f6-02",
+                        "size_bytes": TARGET["size_bytes"]}),
+            "record_digest": lambda record: record.update(
+                evidence_sha256="f" * 64),
+        }
+        for name, damage in modifications.items():
+            with self.subTest(case=name):
+                evidence = current_evidence(
+                    report_raw, policy_raw, physical_raw, campaign_raw)
+                damage(evidence["release_evidence"]["maximum_capacity_and_ram"])
+                result = EVALUATOR.evaluate_release(
+                    SOURCE, report, report_raw, evidence, policy, policy_raw,
+                    physical, physical_raw, campaign, campaign_raw)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                                 "NOT_MEASURED", (name, result["code_blockers"]))
+                self.assertEqual(result["FULL_CAPACITY_LOADED_CONSTRUCTION"],
+                                 "NOT_MEASURED")
+
     def test_robust_ram_medians_accept_isolated_noise_without_new_gates(self):
         report = owner_report()
         policy = acceptance_policy()
