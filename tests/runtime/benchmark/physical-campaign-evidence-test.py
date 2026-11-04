@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import copy
+import datetime
+import hashlib
 import importlib.util
+import json
+import runpy
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 
@@ -20,6 +26,9 @@ def import_helper(filename):
 
 EVIDENCE = import_helper("physical-campaign-evidence.py")
 QUALIFICATION = import_helper("qualification.py")
+RAM_FIXTURES = import_helper("metadata-ram-evidence-test.py")
+READINESS = runpy.run_path(str(
+    HERE.parents[1] / "tools" / "evaluate-production-readiness.py"))
 BOOT = "11111111-2222-3333-4444-555555555555"
 SOURCE = "a" * 40
 
@@ -229,6 +238,253 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertLessEqual(
             len(audit["diagnostics"]), EVIDENCE.MAX_EVIDENCE_DIAGNOSTICS)
         self.assertIn("not direct NAND-wear", audit["claim_boundary"])
+
+
+
+class CapacityRamPropagation(unittest.TestCase):
+    """Synthetic RAM traces exercise the sealer and release consumers, not RAM."""
+
+    LIMIT = QUALIFICATION.CONTRACT["acceptance"]["sustained"][
+        "metadata_and_target_peak_ram_bytes_max"]
+    DEVICE_BYTES = 8 * 1024 * 1024 * 1024
+    PARTUUID = "12345678-aaaa"
+
+    def synthetic_capacity(self, peak_bytes):
+        self.assertEqual(self.LIMIT, 1_342_177_280)
+        self.assertEqual(peak_bytes % 1024, 0)
+        trace, _ = RAM_FIXTURES.synthetic_trace()
+        trace["host_boot_id"] = BOOT
+        for sample in trace["samples"]:
+            if sample["mapper_present"]:
+                sample["mem_available_kib"] = 4_000_000 - peak_bytes // 1024
+
+        record = pair(1, 1100)
+        record["workload"] = "sd-high-occupancy-churn"
+        swapz = record["swapz"]
+        swapz["logical_pages"] = EVIDENCE.RAM_VALIDATOR[
+            "maximum_logical_pages_for_partition"](self.DEVICE_BYTES)
+        swapz["device_identity"] = {"dm_uuid": trace["mapper_uuid"]}
+        swapz["resources"] = {"metadata_and_target_peak_ram_bytes": 0}
+        swapz["arm_started_monotonic_ns"] = 2_200_000_000
+        swapz["arm_finished_monotonic_ns"] = 2_700_000_000
+        swapz["sustained_intervals"] = [{
+            "start_monotonic_ns": 2_450_000_000,
+            "end_monotonic_ns": 2_650_000_000,
+            "gc": {"gc_wall_ns": 1, "gc_victims": 1, "gc_pages": 1},
+        }]
+        return record, trace
+
+    def test_measured_below_at_and_over_frozen_limit(self):
+        for offset, expected in ((-1024, "PASS"), (0, "PASS"),
+                                 (1024, "FAIL")):
+            with self.subTest(offset=offset):
+                record, trace = self.synthetic_capacity(self.LIMIT + offset)
+                capacity = EVIDENCE.campaign_capacity_and_ram(
+                    [record], self.DEVICE_BYTES, SOURCE, trace)
+                self.assertIsNotNone(capacity)
+                self.assertEqual(capacity["ram_acceptance_status"], expected)
+                self.assertEqual(capacity["ram_limit_bytes"], self.LIMIT)
+                self.assertEqual(capacity["peak_ram_bytes"],
+                                 self.LIMIT + offset)
+                self.assertEqual(
+                    capacity["logical_pages"],
+                    EVIDENCE.RAM_VALIDATOR[
+                        "maximum_logical_pages_for_partition"](
+                            self.DEVICE_BYTES))
+                self.assertEqual(
+                    capacity["metadata_ram_summary"]["peak_ram_bytes"],
+                    self.LIMIT + offset)
+
+    def test_unverified_or_inconsistent_trace_is_never_measured_pass(self):
+        record, trace = self.synthetic_capacity(self.LIMIT + 1024)
+        def capacity(row=record, samples=trace, device_bytes=self.DEVICE_BYTES):
+            return EVIDENCE.campaign_capacity_and_ram(
+                [row], device_bytes, SOURCE, samples)
+        self.assertIsNone(capacity(samples=None))
+        self.assertIsNone(capacity(device_bytes=True))
+        self.assertIsNone(capacity(device_bytes=1 << 80))
+        for change in ("nonmaximum", "boolean_pages", "mapper",
+                       "source", "boot", "replay_bool", "replay_float",
+                       "replay_contradiction", "missing_gc"):
+            with self.subTest(change=change):
+                changed_record, changed_trace = copy.deepcopy((record, trace))
+                swapz = changed_record["swapz"]
+                if change == "nonmaximum":
+                    swapz["logical_pages"] -= 1
+                elif change == "boolean_pages":
+                    swapz["logical_pages"] = True
+                elif change == "mapper":
+                    changed_trace["mapper_uuid"] = "SWAPZ-foreign"
+                elif change == "source":
+                    changed_trace["source_sha"] = "b" * 40
+                elif change == "boot":
+                    changed_trace["host_boot_id"] = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                elif change == "replay_bool":
+                    swapz["resources"]["metadata_and_target_peak_ram_bytes"] = False
+                elif change == "replay_float":
+                    swapz["resources"]["metadata_and_target_peak_ram_bytes"] = 0.0
+                elif change == "replay_contradiction":
+                    swapz["resources"]["metadata_and_target_peak_ram_bytes"] = 1
+                else:
+                    swapz["sustained_intervals"] = []
+                if change == "boot":
+                    # The arm validator is independent of the host snapshot.
+                    before, after = self.synthetic_hosts()
+                    checked = capacity(changed_record, changed_trace)
+                    self.assertIsNotNone(checked)
+                    self.assertFalse(EVIDENCE.metadata_ram_trace_within_host_window(
+                        checked, before, after))
+                else:
+                    self.assertIsNone(capacity(changed_record, changed_trace))
+
+    def synthetic_hosts(self):
+        snapshot = {
+            "source_sha": SOURCE, "source_tree_sha": "b" * 40,
+            "captured_at_utc": "2026-11-01T00:00:00Z",
+            "kernel": {"boot_id": BOOT},
+            "memory": {"total_bytes": self.DEVICE_BYTES},
+            "device": {
+                "partuuid": self.PARTUUID,
+                "size_bytes": self.DEVICE_BYTES, "major_minor": "8:17",
+                "parent_major_minor": "8:16", "model": "synthetic",
+                "transport": "usb", "holders": [],
+            },
+            "swap_inventory": [], "mount_inventory": "",
+        }
+        after = copy.deepcopy(snapshot)
+        after["captured_at_utc"] = "2026-11-01T00:00:06Z"
+        return snapshot, after
+
+    def synthetic_seal(self, peak_bytes, *, include_trace=True,
+                       conflicting_host_boot=False):
+        record, trace = self.synthetic_capacity(peak_bytes)
+        before, after = self.synthetic_hosts()
+        if conflicting_host_boot:
+            trace["host_boot_id"] = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        policy = json.loads(EVIDENCE.ACCEPTANCE_MANIFEST.read_text())
+        amendment = json.loads(EVIDENCE.AMENDMENT_MANIFEST.read_text())
+        workload_names = (
+            set(policy["physical_qualification"]["workloads"]) |
+            set(amendment["workloads"]))
+        summary = {
+            "schema": EVIDENCE.SUMMARY_SCHEMA,
+            "acceptance_manifest_sha256": EVIDENCE.sha256_bytes(
+                EVIDENCE.ACCEPTANCE_MANIFEST.read_bytes()),
+            "contract": policy["physical_qualification"],
+            "prospective_amendment": amendment,
+            "evaluation_protocol": "v2", "amendment_active": True,
+            "decisions": {
+                workload: {"status": "PASS"} for workload in workload_names},
+            "status": "PASS", "records": [record],
+            "campaign_source_sha": SOURCE,
+            "campaign_target_identity":
+                EVIDENCE.qualification_target_identity(before),
+            "campaign_target_consistent": True,
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in (
+                "before.json", "after.json", "summary.json",
+                "pair.json", "ram.json")]
+            for path, value in zip(paths, (before, after, summary, record, trace)):
+                path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
+            stability = {"status": "STABLE",
+                         "checks": {"same_boot": True}, "failed_checks": []}
+            with (
+                mock.patch.object(EVIDENCE, "require_clean_source"),
+                mock.patch.object(EVIDENCE, "source_tree_sha",
+                                  return_value="b" * 40),
+                mock.patch.object(EVIDENCE, "validate_host_snapshot"),
+                mock.patch.object(EVIDENCE, "host_stability",
+                                  return_value=stability),
+                mock.patch.object(EVIDENCE, "audit_physical_pairs",
+                                  return_value={"status": "PASS",
+                                                "diagnostics": []}),
+                mock.patch.dict(EVIDENCE.QUALIFICATION, {
+                    "evaluate": lambda records, protocol: summary}),
+            ):
+                return EVIDENCE.seal_campaign(
+                    SOURCE, *paths[:3], [paths[3]],
+                    paths[4] if include_trace else None)
+
+    def test_sealer_preserves_measured_fail_and_blocks_unverified(self):
+        campaign = self.synthetic_seal(self.LIMIT + 1024)
+        self.assertEqual(campaign["campaign_status"], "PASS")
+        self.assertEqual(
+            campaign["capacity_and_ram"]["ram_acceptance_status"], "FAIL")
+        self.assertEqual(
+            campaign["capacity_and_ram"]["peak_ram_bytes"], self.LIMIT + 1024)
+        for kwargs in ({"include_trace": False},
+                       {"conflicting_host_boot": True}):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as caught:
+                    self.synthetic_seal(self.LIMIT + 1024, **kwargs)
+                message = str(caught.exception)
+                for field in (
+                        "BLOCKED", "phase=seal_campaign",
+                        "metric=metadata_and_target_peak_ram_bytes",
+                        f"limit={self.LIMIT}",
+                        "observed=invalid_or_unavailable",
+                        "next_prerequisite="):
+                    self.assertIn(field, message)
+
+    def test_report_and_verdict_rederive_measured_over_limit(self):
+        policy_raw = EVIDENCE.ACCEPTANCE_MANIFEST.read_bytes()
+        policy = json.loads(policy_raw)
+        policy_digest = hashlib.sha256(policy_raw).hexdigest()
+        target = {"partuuid": self.PARTUUID, "size_bytes": self.DEVICE_BYTES}
+        for offset, expected in ((0, "MEASURED_WITHIN_LIMIT"),
+                                 (1024, "MEASURED_OVER_LIMIT")):
+            with self.subTest(offset=offset):
+                campaign = self.synthetic_seal(self.LIMIT + offset)
+                campaign_bytes = (json.dumps(
+                    campaign, sort_keys=True) + "\n").encode()
+                self.assertEqual(READINESS[
+                    "validate_physical_campaign_evidence"](
+                        campaign, campaign_bytes, SOURCE, policy_digest,
+                        (self.PARTUUID, self.DEVICE_BYTES)), [])
+                observed = (
+                    datetime.datetime.fromisoformat(
+                        campaign["sealed_at_utc"]) +
+                    datetime.timedelta(seconds=2)).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ")
+                # PASS here means the release receipt was supplied; the
+                # independently measured over-limit RAM gate must still fail.
+                capacity = campaign["capacity_and_ram"]
+                release_record = {
+                    "status": "PASS", "current": True, "source_sha": SOURCE,
+                    "observed_at_utc": observed, "target": target,
+                    "policy_sha256": policy_digest,
+                    "evidence_sha256": hashlib.sha256(
+                        campaign_bytes).hexdigest(),
+                    "logical_capacity_bytes": capacity["logical_capacity_bytes"],
+                    "peak_ram_bytes": capacity["peak_ram_bytes"],
+                }
+                evidence = {
+                    "schema": "swapz-production-readiness-v2",
+                    "snapshot_kind": "CURRENT",
+                    "authorized_target": target,
+                    "release_evidence": {
+                        "maximum_capacity_and_ram": release_record},
+                }
+                verdict = READINESS["evaluate_release"](
+                    SOURCE, {}, b"{}\n", evidence, policy, policy_raw,
+                    physical_campaign_evidence=campaign,
+                    physical_campaign_evidence_raw=campaign_bytes)
+                self.assertEqual(
+                    verdict["METADATA_RAM_MEASUREMENT"]["status"], expected)
+                self.assertEqual(
+                    verdict["METADATA_RAM_MEASUREMENT"][
+                        "observed_peak_ram_bytes"], self.LIMIT + offset)
+                self.assertEqual(verdict["release_verdict"], "BLOCKED")
+                if offset:
+                    self.assertTrue(any(
+                        "claimed peak exceeds frozen limit" in message
+                        for message in verdict["code_blockers"]))
+                else:
+                    self.assertFalse(any(
+                        "claimed peak exceeds frozen limit" in message
+                        for message in verdict["code_blockers"]))
 
 
 if __name__ == "__main__":

@@ -720,7 +720,7 @@ def campaign_capacity_and_ram(
     if (
             len(accepted) != 1 or
             type(target_device_bytes) is not int or
-            target_device_bytes <= 0):
+            not 0 < target_device_bytes <= RAM_VALIDATOR["MAX_UINT64"]):
         return None
     swapz = accepted[0].get("swapz")
     if not isinstance(swapz, dict):
@@ -729,10 +729,12 @@ def campaign_capacity_and_ram(
     resources = swapz.get("resources")
     if type(logical_pages) is not int or logical_pages <= 0:
         return None
-    logical_capacity_bytes = logical_pages * 4096
+    logical_capacity_bytes = RAM_VALIDATOR["_checked_product"](
+        logical_pages, 4096, RAM_VALIDATOR["MAX_UINT64"])
     # A smaller, easier-to-create mapper is not maximum-capacity evidence.
-    if (logical_pages != RAM_VALIDATOR[
-            "maximum_logical_pages_for_partition"](target_device_bytes) or
+    if (logical_capacity_bytes is None or
+            logical_pages != RAM_VALIDATOR[
+                "maximum_logical_pages_for_partition"](target_device_bytes) or
             logical_capacity_bytes > target_device_bytes):
         return None
     identity = swapz.get("device_identity")
@@ -751,7 +753,8 @@ def campaign_capacity_and_ram(
     peak_ram_bytes = ram_summary["peak_ram_bytes"]
     limit = QUALIFICATION["CONTRACT"]["acceptance"]["sustained"][
         "metadata_and_target_peak_ram_bytes_max"]
-    if peak_ram_bytes > limit:
+    if (type(peak_ram_bytes) is not int or
+            not 0 < peak_ram_bytes <= RAM_VALIDATOR["MAX_UINT64"]):
         return None
     # The replay process cannot know a post-teardown host peak at start. Keep
     # any legacy scalar diagnostic only when it agrees; zero/missing has no
@@ -759,9 +762,15 @@ def campaign_capacity_and_ram(
     replay_peak = (
         resources.get("metadata_and_target_peak_ram_bytes")
         if isinstance(resources, dict) else None)
-    if replay_peak not in (None, 0, peak_ram_bytes):
+    if (replay_peak is not None and
+            (type(replay_peak) is not int or
+             replay_peak not in (0, peak_ram_bytes))):
         return None
     return {
+        # The campaign qualification verdict is independent of RAM acceptance.
+        # Retain an authenticated over-limit measurement for release evaluation.
+        "ram_acceptance_status": "FAIL" if peak_ram_bytes > limit else "PASS",
+        "ram_limit_bytes": limit,
         "page_bytes": 4096,
         "logical_pages": logical_pages,
         "logical_capacity_bytes": logical_capacity_bytes,
@@ -1263,8 +1272,14 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         target_binding["consistent"], arm_boot_consistent,
         physical_audit_ok=physical_audit["status"] == "PASS")
     if sealed_status == "PASS" and capacity_and_ram is None:
+        limit = QUALIFICATION["CONTRACT"]["acceptance"]["sustained"][
+            "metadata_and_target_peak_ram_bytes_max"]
         raise ValueError(
-            "PASS campaign lacks exact maximum-capacity/peak-RAM evidence")
+            "BLOCKED capacity/RAM evidence: phase=seal_campaign "
+            "metric=metadata_and_target_peak_ram_bytes "
+            f"limit={limit} observed=invalid_or_unavailable "
+            "next_prerequisite=verified_source_boot_mapper_maximum_geometry_"
+            "bound_loaded_host_trace_with_teardown")
 
     return {
         "schema": CAMPAIGN_SCHEMA,

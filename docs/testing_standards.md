@@ -5976,7 +5976,22 @@ field and expected/observed numeric bounds without echoing arbitrary evidence
 strings. An exact-mapper mismatch must identify the `mapper_uuid` field
 without printing the supplied identity. Such contradictions are unavailable/BLOCKED evidence, not a measured
 target failure; only a properly validated over-ceiling loaded-host peak is
-a genuine measured RAM FAIL. Neither a synthetic control nor the 740 MiB
+a genuine measured RAM FAIL. The sealer retains such a peak in the same
+`capacity_and_ram` tuple with `ram_acceptance_status=FAIL` and the
+unchanged frozen `ram_limit_bytes`; an at-ceiling or under-ceiling
+measurement uses `ram_acceptance_status=PASS`. Missing, contradictory,
+unverified, or non-maximum geometry leaves that tuple unavailable, and an
+otherwise PASS campaign cannot seal it as measured acceptance. The campaign's
+`campaign_status` describes qualification of the physical pairs, not the
+independent RAM ceiling: the release consumer checks the raw trace/host/arm
+bindings and rederives `MEASURED_OVER_LIMIT` with a code-readiness blocker
+from an authenticated over-limit tuple, rather than mislabeling it
+`NOT_MEASURED`. Release verdicts may remain `BLOCKED` for incomplete
+independent gates; neither campaign PASS nor release receipt PASS overrides
+a measured RAM FAIL. Sealer BLOCKED diagnostics must include phase, metric,
+exact limit, a safe invalid/unavailable category and next prerequisite;
+nonphysical unit fixtures never establish loaded-host measurement.
+Neither a synthetic control nor the 740 MiB
 index-only capacity estimate can become physical RAM acceptance. The focused
 synthetic metadata-RAM validator regression is part of the official rootless
 `make test` discovery path; adding a test file that no rootless entry point
