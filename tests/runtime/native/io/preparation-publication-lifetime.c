@@ -268,12 +268,12 @@ struct submitter_handoff {
 	atomic64_t page_mask;
 	atomic64_t lane_mask;
 	pthread_barrier_t start;
-	pthread_barrier_t clear_gate;
 	pthread_barrier_t owner_observed;
 	pthread_barrier_t return_lane;
 	pthread_barrier_t lane_returned;
 	pthread_barrier_t next_iteration;
 	_Atomic int payload_ready;
+	_Atomic int allow_release;
 	_Atomic unsigned int failures;
 	int codec_result;
 	unsigned int payload;
@@ -302,8 +302,10 @@ static void *prepare_in_submitter(void *opaque)
 		 */
 		atomic_store_explicit(&handoff->payload_ready, 1,
 					      memory_order_relaxed);
-		/* All descriptor and prepared-page accesses end before this gate. */
-		(void)pthread_barrier_wait(&handoff->clear_gate);
+		while (!atomic_load_explicit(&handoff->allow_release,
+						     memory_order_relaxed))
+			sched_yield();
+		/* All modeled descriptor and prepared-page accesses precede this release. */
 		atomic_store_explicit(&handoff->active.value, 0,
 					      memory_order_release);
 		/*
@@ -333,9 +335,9 @@ static int test_submitter_active_gate_and_lane_drain(void)
 	atomic_init(&handoff.page_mask.value, (s64)(1ULL << 63));
 	atomic_init(&handoff.lane_mask.value, 1);
 	atomic_init(&handoff.payload_ready, 0);
+	atomic_init(&handoff.allow_release, 0);
 	atomic_init(&handoff.failures, 0);
 	CHECK(pthread_barrier_init(&handoff.start, NULL, 2) == 0);
-	CHECK(pthread_barrier_init(&handoff.clear_gate, NULL, 2) == 0);
 	CHECK(pthread_barrier_init(&handoff.owner_observed, NULL, 2) == 0);
 	CHECK(pthread_barrier_init(&handoff.return_lane, NULL, 2) == 0);
 	CHECK(pthread_barrier_init(&handoff.lane_returned, NULL, 2) == 0);
@@ -362,6 +364,8 @@ static int test_submitter_active_gate_and_lane_drain(void)
 					      memory_order_relaxed);
 		atomic_store_explicit(&handoff.payload_ready, 0,
 					      memory_order_relaxed);
+		atomic_store_explicit(&handoff.allow_release, 0,
+					      memory_order_relaxed);
 		handoff.codec_result = codec_result;
 		(void)pthread_barrier_wait(&handoff.start);
 		while (!atomic_load_explicit(&handoff.payload_ready,
@@ -372,7 +376,8 @@ static int test_submitter_active_gate_and_lane_drain(void)
 						memory_order_relaxed) == 1);
 		if (closed_admission)
 			CHECK(!swapz_preparation_owner_wake_allowed(0));
-		(void)pthread_barrier_wait(&handoff.clear_gate);
+		atomic_store_explicit(&handoff.allow_release, 1,
+					      memory_order_relaxed);
 		while (atomic_load_explicit(&handoff.active.value,
 						    memory_order_acquire) != 0)
 			sched_yield();
@@ -403,7 +408,6 @@ static int test_submitter_active_gate_and_lane_drain(void)
 	}
 	CHECK(pthread_join(submitter, NULL) == 0);
 	CHECK(pthread_barrier_destroy(&handoff.start) == 0);
-	CHECK(pthread_barrier_destroy(&handoff.clear_gate) == 0);
 	CHECK(pthread_barrier_destroy(&handoff.owner_observed) == 0);
 	CHECK(pthread_barrier_destroy(&handoff.return_lane) == 0);
 	CHECK(pthread_barrier_destroy(&handoff.lane_returned) == 0);

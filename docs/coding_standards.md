@@ -1631,6 +1631,13 @@ ready-residency gauge. An ERROR reader acquires the terminal state before
 consuming the prepared-page errno and leaves BIO completion and slot release
 with the ordered owner.
 
+Native C11 race probes that claim to exercise one of these publication edges
+must make the modeled payload read depend on that same acquire operation.
+Scheduling-only coordination may use relaxed atomics, but no pthread barrier,
+release/acquire side channel or equivalent synchronizing primitive may occur
+between the producer's payload writes and the consumer acquire under test.
+Synchronization after the consumer has observed the payload is permitted.
+
 Loaded qualification may inject one synthetic codec `-EIO` through the exact
 submitter, background-preparation, or ordered-inline compression owner. The
 selector is an optional trailing Device Mapper constructor argument, defaults
