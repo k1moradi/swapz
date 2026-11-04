@@ -318,7 +318,11 @@ by their `st_rdev`, and regular swapfiles conflict by their filesystem
 and unreadable entries refuse formatting. This catches directly backed swapfiles
 visible through `/proc/swaps` even if their mount is outside the formatter's
 mount namespace; it does not prove ancestry through arbitrary stacked filesystems.
-Mount inventory parsing
+Mount inventory must inspect the formatter's own mount table and each
+visible process's /proc/<pid>/mountinfo, not just its own mount namespace.
+Unreadable or vanished process mount tables refuse formatting rather than
+prove absence of use. These are repeated snapshots, not an atomic freeze
+against new mounts or inaccessible mount namespaces. Mount inventory parsing
 must accept Linux pseudo-filesystem major-zero device identifiers (for example
 `0:20`) without mistaking them for the selected nonzero-major block device.
 Malformed mountinfo rows and unverified target identities still fail closed.

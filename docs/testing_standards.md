@@ -3414,7 +3414,10 @@ the write, truncated reads, unexpected permissions, USB/transport-style I/O
 failure, and device disappearance before and after the write. The swap-inventory gate must reject active regular swapfiles with filesystem
 `st_dev` matching the selected partition or parent, while leaving unrelated
 regular-file and block-device entries nonconflicting; unknown entry types must
-fail closed. The mountinfo parser must accept normal major-zero pseudo-filesystem
+fail closed. A rootless proc-directory fixture must prove that a selected partition or
+parent mounted only in another visible PID's namespace blocks formatting,
+while unrelated sibling mounts remain nonconflicting; missing or malformed
+visible PID mountinfo must fail closed. The mountinfo parser must accept normal major-zero pseudo-filesystem
 entries (including `0:0`) while still rejecting malformed/overflowed rows;
 major zero must remain forbidden for a configured physical partition or parent.
 For every ownership/identity uncertainty before publication, the test

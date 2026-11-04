@@ -450,6 +450,83 @@ static void test_mount_and_swap_identity_conflicts(void)
 						  device, parent));
 }
 
+static void test_mountinfo_fixture_path(char path[PATH_MAX],
+					const char *root, const char *relative)
+{
+	int length = snprintf(path, PATH_MAX, "%s/%s", root, relative);
+
+	assert(length > 0 && (size_t)length < PATH_MAX);
+}
+
+static void test_mountinfo_fixture_write(const char *root,
+					 const char *relative,
+					 const char *contents)
+{
+	char path[PATH_MAX];
+	FILE *stream;
+
+	test_mountinfo_fixture_path(path, root, relative);
+	stream = fopen(path, "w");
+	assert(stream);
+	assert(fputs(contents, stream) >= 0);
+	assert(fclose(stream) == 0);
+}
+
+static void test_mounts_in_other_namespaces_refuse_formatting(void)
+{
+	char root[] = "/tmp/swapzctl-mountinfo-XXXXXX";
+	char path[PATH_MAX];
+	const dev_t device = makedev(8U, 1U);
+	const dev_t parent = makedev(8U, 0U);
+
+	/* No real mount, block device, or mount namespace is touched. */
+	assert(mkdtemp(root));
+	test_mountinfo_fixture_path(path, root, "self");
+	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_path(path, root, "3031");
+	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_write(
+		root, "self/mountinfo",
+		"36 25 0:20 / /proc rw - proc proc rw\n");
+	test_mountinfo_fixture_write(
+		root, "3031/mountinfo",
+		"37 25 8:1 / /card rw - ext4 /dev/sda1 rw\n");
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == EBUSY);
+
+	/* The parent disk also conflicts, but a sibling does not. */
+	test_mountinfo_fixture_write(
+		root, "3031/mountinfo",
+		"37 25 8:0 / /disk rw - ext4 /dev/sda rw\n");
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == EBUSY);
+	test_mountinfo_fixture_write(
+		root, "3031/mountinfo",
+		"37 25 8:2 / /other rw - ext4 /dev/sda2 rw\n");
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) == 0);
+
+	/* Malformed, unreadable, or disappeared inventory is not safety proof. */
+	test_mountinfo_fixture_write(root, "3031/mountinfo", "invalid\n");
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == EPROTO);
+	test_mountinfo_fixture_path(path, root, "3031/mountinfo");
+	assert(unlink(path) == 0);
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == ENOENT);
+
+	test_mountinfo_fixture_path(path, root, "self/mountinfo");
+	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, root, "3031");
+	assert(rmdir(path) == 0);
+	test_mountinfo_fixture_path(path, root, "self");
+	assert(rmdir(path) == 0);
+	assert(rmdir(root) == 0);
+}
+
 static void test_superblock_validation_and_reserved_bytes(void)
 {
 	struct format_expectation expected = authorized_expectation();
@@ -785,6 +862,7 @@ int main(void)
 	test_topology_flags_fail_closed();
 	test_mountinfo_device_parser();
 	test_mount_and_swap_identity_conflicts();
+	test_mounts_in_other_namespaces_refuse_formatting();
 	test_superblock_validation_and_reserved_bytes();
 	test_unbound_cli_is_blocked_before_io();
 	test_protected_selector_is_mandatory();

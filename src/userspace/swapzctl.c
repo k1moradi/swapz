@@ -1367,44 +1367,133 @@ static int format_swap_entry_conflicts(const struct stat *info, dev_t device,
 	return 1;
 }
 
-static int format_mount_inventory_clear(dev_t device, dev_t parent_device)
+/*
+ * Mounts in another process's namespace still use the same backing device.
+ * Inspect every visible process, not only /proc/self/mountinfo. Vanished PIDs
+ * and unreadable mount tables are ambiguous, so refuse rather than assume free.
+ */
+static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
+					 dev_t parent_device)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
-	FILE *stream = fopen("/proc/self/mountinfo", "r");
 
-	if (!stream)
+	if (!stream) {
+		errno = EINVAL;
 		return -1;
+	}
 	while (fgets(line, sizeof(line), stream)) {
 		dev_t mounted_device;
 		size_t length = strlen(line);
 
 		if (length && line[length - 1U] != '\n' && !feof(stream)) {
-			fclose(stream);
 			errno = EOVERFLOW;
 			return -1;
 		}
 		if (format_mountinfo_line_device(line, &mounted_device) < 0) {
-			fclose(stream);
 			errno = EPROTO;
 			return -1;
 		}
 		if (format_inventory_device_conflicts(mounted_device, device,
 						     parent_device)) {
-			fclose(stream);
 			errno = EBUSY;
 			return -1;
 		}
 	}
 	if (ferror(stream)) {
-		int saved_errno = errno ? errno : EIO;
+		if (!errno)
+			errno = EIO;
+		return -1;
+	}
+	return 0;
+}
 
-		fclose(stream);
+static int format_mountinfo_path_clear(const char *path, dev_t device,
+				       dev_t parent_device)
+{
+	FILE *stream = fopen(path, "r");
+	int saved_errno;
+
+	if (!stream)
+		return -1;
+	if (format_mountinfo_stream_clear(stream, device, parent_device) < 0) {
+		saved_errno = errno;
+		(void)fclose(stream);
 		errno = saved_errno;
 		return -1;
 	}
-	if (fclose(stream) < 0)
+	return fclose(stream);
+}
+
+static int format_proc_entry_is_pid(const char *name)
+{
+	const unsigned char *cursor = (const unsigned char *)name;
+
+	if (!cursor || !*cursor)
+		return 0;
+	for (; *cursor; ++cursor) {
+		if (*cursor < '0' || *cursor > '9')
+			return 0;
+	}
+	return 1;
+}
+
+static int format_mount_inventory_clear_from_proc(
+	const char *proc_path, dev_t device, dev_t parent_device)
+{
+	char path[PATH_MAX];
+	DIR *directory;
+	struct dirent *entry;
+	int length;
+	int saved_errno = 0;
+
+	if (!proc_path) {
+		errno = EINVAL;
 		return -1;
+	}
+	length = snprintf(path, sizeof(path), "%s/self/mountinfo", proc_path);
+	if (length < 0 || (size_t)length >= sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (format_mountinfo_path_clear(path, device, parent_device) < 0)
+		return -1;
+	directory = opendir(proc_path);
+	if (!directory)
+		return -1;
+	for (;;) {
+		errno = 0;
+		entry = readdir(directory);
+		if (!entry) {
+			saved_errno = errno;
+			break;
+		}
+		if (!format_proc_entry_is_pid(entry->d_name))
+			continue;
+		length = snprintf(path, sizeof(path), "%s/%s/mountinfo",
+				  proc_path, entry->d_name);
+		if (length < 0 || (size_t)length >= sizeof(path)) {
+			saved_errno = ENAMETOOLONG;
+			break;
+		}
+		if (format_mountinfo_path_clear(path, device, parent_device) < 0) {
+			/* Do not treat a disappearing PID as a clean inventory. */
+			saved_errno = errno;
+			break;
+		}
+	}
+	if (closedir(directory) < 0 && !saved_errno)
+		saved_errno = errno;
+	if (saved_errno) {
+		errno = saved_errno;
+		return -1;
+	}
 	return 0;
+}
+
+static int format_mount_inventory_clear(dev_t device, dev_t parent_device)
+{
+	return format_mount_inventory_clear_from_proc("/proc", device,
+						      parent_device);
 }
 
 static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
