@@ -711,7 +711,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe, "_partition_identity",
                     return_value=("cafebabe-02", state["size_bytes"])), \
                 mock.patch.object(probe, "_run", return_value=completed):
-            with self.assertRaisesRegex(probe.ProbeError, "PARTUUID"):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "recovery_partuuid_size"):
                 probe.inspect_target_identity_for_recovery(
                     state, state["device_arg"], state["device_arg"])
 
@@ -1604,7 +1605,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         "partition ownership release refused: "
                         "restoration_stage expected='COMPLETE' "
                         "observed='ORACLE_PASS'; "
-                        "active recovery marker not removed")
+                        "ownership_marker_action=not_attempted")
                     # Read the durable failure record, not a synthetic PASS.
                     state["_test_results"] = json.loads(
                         (Path(directory) / probe.RESULTS_NAME).read_text())
