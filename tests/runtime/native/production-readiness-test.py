@@ -1647,8 +1647,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             for blocker in result["code_blockers"]))
 
         nested_raw = (
-            b'{"nested":' + b"[" * 2000 + b"0" +
-            b"]" * 2000 + b"}\n")
+            b'{"nested":' + b"[" * 10000 + b"0" +
+            b"]" * 10000 + b"}\n")
         evidence = current_evidence(
             report_raw, policy_raw, physical_raw, nested_raw)
         result = EVALUATOR.evaluate_release(
@@ -1845,8 +1845,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                         EVALUATOR.load_json_strict(path)
 
             path.write_bytes(
-                b'{"value":' + b"[" * 2000 + b"0" +
-                b"]" * 2000 + b"}\n")
+                b'{"value":' + b"[" * 10000 + b"0" +
+                b"]" * 10000 + b"}\n")
             with self.assertRaises(EVALUATOR.EvidenceError):
                 EVALUATOR.load_json_strict(path)
 
