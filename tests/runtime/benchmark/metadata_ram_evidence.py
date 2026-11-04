@@ -20,7 +20,7 @@ MEMINFO_UNIT_BYTES = 1024
 SIZE_T_MAX = (1 << (8 * struct.calcsize("P"))) - 1
 PHASES = ("baseline", "initialization", "steady", "gc", "teardown")
 MINIMUM_PHASE_SAMPLES = {
-    "baseline": 10,
+    "baseline": 11,
     "initialization": 2,
     "steady": 2,
     "gc": 2,
@@ -242,7 +242,7 @@ def validate_metadata_ram_trace(
     if any(sample["mapper_present"] for sample in baseline):
         raise ValueError("metadata RAM baseline was sampled with mapper present")
     if (baseline[-1]["monotonic_ns"] - baseline[0]["monotonic_ns"] <
-            900_000_000):
+            1_000_000_000):
         raise ValueError("metadata RAM baseline is shorter than one second")
 
     initialization = phase_samples["initialization"]
