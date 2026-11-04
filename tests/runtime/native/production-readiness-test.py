@@ -1327,6 +1327,11 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                         identity_metric in blocker
                         for blocker in result["code_blockers"]),
                         (name, result["code_blockers"]))
+                if name == "recovered_but_mapper_reappeared":
+                    self.assertTrue(any(
+                        "metric=mapper_present observed=true" in blocker
+                        for blocker in result["code_blockers"]),
+                        result["code_blockers"])
 
     def test_missing_or_mismatched_capacity_provenance_never_passes(self):
         report = owner_report()
@@ -2093,7 +2098,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         mutations = (
             ("source",
              lambda value: value.__setitem__("source_sha", "b" * 40),
-             "source binding mismatch"),
+             "metric=source_sha observed=" + "b" * 40 +
+             " expected=" + SOURCE),
             ("target",
              lambda value: value["target"].__setitem__(
                  "device_bytes", TARGET["size_bytes"] + 4096),
