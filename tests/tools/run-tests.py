@@ -2321,11 +2321,22 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = f"after completed owned RAM comparison {pair_number}/8"
 
     primary_lifecycle_command_failure = None
+    primary_prepare_failure = None
     if loaded:
         # The lifecycle helper prints the coordinator's own fixed BLOCKED line
         # before its generic lifecycle marker. Preserve only the operation and
         # strerror-shaped tail; never copy paths, IDs or arbitrary child output.
         for line in output.splitlines():
+            prepare_match = re.fullmatch(
+                r"PRIMARY_PREPARE=FAILED phase=([a-z0-9-]{1,64}) "
+                r"errno=([0-9]{1,3}) error=([A-Za-z0-9 .()_-]{1,64})"
+                r"(?:\s+.*)?",
+                line.strip())
+            if prepare_match:
+                # The coordinator's phase is a fixed, path-free admission
+                # label. Keep the numeric errno and libc error text so a
+                # generic EPERM report can be traced to the rejecting gate.
+                primary_prepare_failure = prepare_match.groups()
             match = re.fullmatch(
                 r"BLOCKED: primary-swap "
                 r"(preparation|start|stop|recovery) failed: "
@@ -2457,9 +2468,18 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 if primary_lifecycle_command_failure is not None:
                     operation, coordinator_error = (
                         primary_lifecycle_command_failure)
-                    reason = (
-                        f"{label}: coordinator {operation}: "
-                        f"{coordinator_error}")[:180]
+                    if (operation == "preparation" and
+                            primary_prepare_failure is not None):
+                        detail_phase, error_number, detail_error = (
+                            primary_prepare_failure)
+                        reason = (
+                            f"{label}: coordinator preparation phase="
+                            f"{detail_phase} errno={error_number} "
+                            f"error={detail_error}")[:180]
+                    else:
+                        reason = (
+                            f"{label}: coordinator {operation}: "
+                            f"{coordinator_error}")[:180]
                 else:
                     reason = f"{label}: {msg[:155]}"
                 break

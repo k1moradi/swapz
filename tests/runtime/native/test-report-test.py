@@ -3595,6 +3595,25 @@ class ReportContract(unittest.TestCase):
             reason, "FAIL_PRIMARY_NULLBLK_LIFECYCLE: prepare failed")
         self.assertNotIn("/private", reason)
 
+        prepare_gate_failure = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
+            "PRIMARY_PREPARE=FAILED phase=qualification-report-read "
+            "errno=1 error=Operation not permitted "
+            "run_id=0123456789abcdef0123456789abcdef "
+            "claim=retained target_unchanged=true\n"
+            "BLOCKED: primary-swap preparation failed: "
+            "Operation not permitted\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: prepare failed\n"
+        )
+        phase, reason = runner.failure_context(prepare_gate_failure)
+        self.assertEqual(phase, "owned RAM primary lifecycle prepare")
+        self.assertEqual(
+            reason,
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: coordinator preparation "
+            "phase=qualification-report-read errno=1 "
+            "error=Operation not permitted")
+        self.assertNotIn("0123456789abcdef", reason)
+
         interrupted = (
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
             "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:redacted\n"
