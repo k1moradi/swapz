@@ -148,7 +148,7 @@ sample_host_memory_admission() {
             sleep 1
         fi
     done
-    printf 'BLOCKED: ID36 host MemAvailable lacks two consecutive samples at the 1 GiB floor: initial:%s last:%s minimum:%s maximum:%s required:%s unit:kB samples:5; allow ordinary reclaim or free legitimate workloads, do not drop caches or alter host swap\n' \
+    printf 'BLOCKED: ID36 host lacks 1 GiB MemAvailable (two consecutive samples required): initial:%s last:%s minimum:%s maximum:%s required:%s unit:kB samples:5; allow ordinary reclaim or free legitimate workloads, do not drop caches or alter host swap\n' \
         "$initial_available_kib" "$last_available_kib" "$minimum_observed_kib" \
         "$maximum_observed_kib" "$MIN_AVAILABLE_KIB" >&2
     return 2
@@ -167,7 +167,7 @@ read_cgroup_root_memory_inventory() {
     local memory_max memory_current headroom_status
 
     if [[ ! -e $memory_max_path && ! -e $memory_current_path ]]; then
-        printf '%s\n' 'root-exempt root-exempt unbounded unbounded'
+        printf '%s\n' 'root-exempt root-exempt unbounded'
         return 0
     fi
     if [[ ! -e $memory_max_path || ! -e $memory_current_path ]]; then
@@ -207,14 +207,14 @@ try:
     current = parse_u64(current_token)
     required = parse_u64(required_token)
     if maximum_token == "max":
-        print("unbounded unbounded")
+        print("unbounded")
     else:
         maximum = parse_u64(maximum_token)
         if current > maximum:
             raise ValueError("memory.current exceeds memory.max")
         headroom = maximum - current
         status = "sufficient" if headroom >= required else "insufficient"
-        print(f"{status} {headroom}")
+        print(status)
 except ValueError as error:
     print(f"BLOCKED: ID36 parent cgroup memory.max/current invalid: {error}; repair canonical u64 cgroup telemetry", file=sys.stderr)
     raise SystemExit(2)
@@ -229,7 +229,19 @@ fi
 read -r parent_memory_max parent_memory_current parent_headroom_status \
     parent_headroom_bytes <<< "$parent_memory_inventory"
 if [[ $parent_headroom_status == insufficient ]]; then
-    printf 'BLOCKED: ID36 finite parent cgroup headroom insufficient: memory.max:%s memory.current:%s headroom:%s required:%s deficit:%s unit:bytes; raise the delegated parent limit or reduce its legitimate charge before retrying\n' \
+    # The inventory reader retains its canonical three-field interface.
+    # Compute large unsigned byte differences only on the refused path.
+    parent_headroom_bytes="$(python3 -I -B - "$parent_memory_max" "$parent_memory_current" <<'PY'
+import sys
+print(int(sys.argv[1]) - int(sys.argv[2]))
+PY
+    )" || {
+        printf '%s\n' 'BLOCKED: ID36 cannot compute validated parent cgroup headroom; restore Python u64 arithmetic' >&2
+        exit 2
+    }
+    printf 'ID36_PARENT_CGROUP_MEMORY=source:cgroup-v2-root memory_max:%s memory_current:%s headroom:%s required_headroom_bytes:%s\n' \
+        "$parent_memory_max" "$parent_memory_current" "$parent_headroom_bytes" "$MIN_AVAILABLE_BYTES" >&2
+    printf 'BLOCKED: ID36 cgroup root lacks 1 GiB effective memory headroom: finite parent memory.max:%s memory.current:%s headroom:%s required:%s deficit:%s unit:bytes; raise the delegated parent limit or reduce its legitimate charge before retrying\n' \
         "$parent_memory_max" "$parent_memory_current" "$parent_headroom_bytes" \
         "$MIN_AVAILABLE_BYTES" "$((MIN_AVAILABLE_BYTES - parent_headroom_bytes))" >&2
     exit 2
