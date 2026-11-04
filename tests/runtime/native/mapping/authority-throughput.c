@@ -557,6 +557,50 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 			      !large_roles[reserve_segment]);
 		large_live[tail] = 0U;
 
+		/* Advance uses the same full-map authentication. A late corrupt
+		 * compressed interior must not mutate cursor or reserve roles. */
+		{
+			const swapz_u32 saved_next = sample.next_block;
+
+			sample.next_block =
+				reserve_start + SWAPZ_SEGMENT_BLOCKS - 1U;
+			large_classes[tail] = 1U;
+			REQUIRE_CLAIM(swapz_gc_advance_rotation_destination(
+				      &sample, reserve_segment) == -EUCLEAN);
+			REQUIRE_CLAIM(sample.next_block ==
+				      reserve_start + SWAPZ_SEGMENT_BLOCKS - 1U &&
+				      sample.gc_destination == reserve_segment &&
+				      sample.gc_forbidden_victim == 1U &&
+				      large_roles[1U] && !large_roles[reserve_segment]);
+			large_classes[tail] = 0U;
+			sample.next_block = saved_next;
+		}
+
+		/* Retain the historical two-block checks above, then authenticate
+		 * all three interiors of a four-block compressed tail extent. */
+		large_maps[tail - 3U].valid = 0U;
+		large_maps[tail - 2U].valid = 0U;
+		large_maps[tail].start_block = tail - 3U;
+		large_maps[tail].extent_blocks = 4U;
+		large_classes[tail - 3U] = 4U;
+		large_live[tail - 3U] = 1U;
+		large_classes[tail - 2U] = 0U;
+		large_live[tail - 2U] = 0U;
+		large_classes[tail - 1U] = 0U;
+		large_live[tail - 1U] = 0U;
+		large_classes[tail] = 0U;
+		large_live[tail] = 0U;
+		large_classes[tail - 2U] = 1U;
+		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
+			      !large_roles[reserve_segment]);
+		large_classes[tail - 2U] = 0U;
+		large_live[tail - 1U] = 1U;
+		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
+			      !large_roles[reserve_segment]);
+		large_live[tail - 1U] = 0U;
+
 		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == 0);
 		REQUIRE_CLAIM(!sample.gc_allocation && !large_roles[1U] &&
 			      large_roles[reserve_segment]);
@@ -598,6 +642,9 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 
 		printf("SWAPZ_GC_PRODUCTION_CLAIM_SCAN_EVIDENCE={"
 		       "\"scope\":\"OFFLINE_NATIVE_PRODUCTION_AUTHORITY\","
+		       "\"kernel_only_reschedule_opportunity_entries\":4096,"
+		       "\"loaded_kernel_latency\":\"NOT_RUN\","
+		       "\"optional_latency_gate_scope\":\"DEVELOPER_HOST_ONLY\","
 		       "\"logical_pages\":%u,\"map_bytes\":%" PRIu64 ","
 		       "\"repeats\":%u,\"virgin_full_map_scans\":%u,"
 		       "\"claimed_full_map_scans\":%u,"

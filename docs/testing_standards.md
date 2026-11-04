@@ -890,7 +890,55 @@ overwrite from the mandatory foreground headroom, then force repeated
 high-live GC reserve rotations while checking every surviving byte, generation
 and RAW CRC. The GC high-occupancy suite remains the longer 64-rotation stress
 proof; together these establish that capacity acceptance corresponds to actual
-allocator forward progress rather than mapper construction alone. The native
+allocator forward progress rather than mapper construction alone.
+
+### Maximum-geometry rootless GC authority proof
+
+The source-derived native scan fixtures in
+`tests/runtime/native/gc/scan-scaling.c` and
+`tests/runtime/native/mapping/authority-throughput.c` must retain the exact
+27,080,192-logical-page admitted geometry (27,080,191 final logical index),
+plus smaller scaling rows. Run **actual production authority C** for
+zero-sidecar reserve claims, final-map publication and GC role exchanges;
+a host-memory scan model is only a comparator. A forged last-entry reference
+must be refused even with false-zero victim/reserve sidecars. Recovery role
+transitions authenticate physical extent starts and each interior block of
+two- and four-block compressed extents, including independent class-only
+and liveness-only corruption. Refusals leave roles, cursor and the last
+authoritative generation intact. Never replace full-map verification with
+cached counts or a reverse-list-only witness.
+
+`tests/runtime/native/gc/high-occupancy.c` must preserve 64 sustained
+high-live RAW reserve exchanges and additionally exercise repeated uncertain
+writes, byte-exact retries, a physically full GC destination, no-progress
+commit refusal, roll-forward to an independently proven-dead victim, and
+post-recovery RAW CRC/generation verification. Other native compressed/RAW
+engine-GC fixtures remain required for actual encoded-byte relocation and
+partial lower-run completion; synthetic map metadata alone is not a
+compressed byte oracle. A recovery that cannot fit an extent or claim another
+reserve must preserve published authority and **fail closed**, not retry the
+same uncertain physical blocks or report foreground progress. Deterministic
+churn failures must emit a fixed seed, operation index, short bounded
+recent-operation trace, failed invariant, expected/actual generation and
+errno. Successful operations must not log individually or allocate model
+nodes.
+
+The kernel-only `cond_resched()` scheduling opportunity occurs at each
+4,096-entry logical-map scan interval while the ordered owner retains
+authority; that is an *opportunity interval*, **not a 4,096-entry proof
+deadline**. At 27,080,192 entries a complete proof still traverses the
+full map. Native CPU and monotonic wall observations, including medians
+and maxima, characterize only the host fixture, **not loaded-kernel latency
+or actual memory pressure**. `SWAPZ_GC_MAX_PROOF_WALL_NS`, if explicitly
+supplied, is an optional developer-machine-specific diagnostic gate;
+shared CI wall results cannot establish any universal acceptable bound.
+No native PASS qualifies loaded full-capacity metadata/target peak memory
+and allocation success, loaded scheduler and CPU/PSI/tail latency under
+concurrent READ/WRITE/DISCARD/FUA, sustained one-hour actual memory-pressure
+GC/churn, or authorized physical SD-card byte-exact readback, endurance
+and service. These remain independent **NOT RUN** qualification gates.
+
+The native
 authority suite must also sweep segment-rounded physical geometries across the
 minimum and proportional-reserve crossover, verifying exact maximum and
 one-page-over admission without a second test-side capacity formula. At full

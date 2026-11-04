@@ -11,6 +11,7 @@
 
 #define REPEATS 7U
 #define GEOMETRIES 4U
+#define KERNEL_PROOF_RESCHED_INTERVAL_ENTRIES 4096U
 
 struct scale_row {
 	swapz_u32 logical_pages;
@@ -426,6 +427,26 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 	if (records != SWAPZ_SEGMENT_BLOCKS)
 		goto out;
 	/*
+	 * A false-zero candidate can carry a late authoritative reference.
+	 * Supply valid physical-start metadata for that reference, so refusal
+	 * cannot be credited to a missing class or liveness witness.
+	 */
+	{
+		const swapz_u32 tail = logical_pages - 1U;
+		const struct swapz_map saved_tail = maps[tail];
+
+		maps[tail].start_block = logical_pages;
+		live_records[logical_pages] = 1U;
+		extent_classes[logical_pages] = 1U;
+		(void)authoritative_negative_scan(
+			maps, live_records, extent_classes, logical_pages, &safe);
+		if (safe)
+			goto out;
+		maps[tail] = saved_tail;
+		live_records[logical_pages] = 0U;
+		extent_classes[logical_pages] = 0U;
+	}
+	/*
 	 * Last-entry extent: a clean two-block map reaches the end of the
 	 * complete logical traversal, while a nonzero physical interior must
 	 * be refused even though the candidate's cached count is zero.
@@ -509,7 +530,9 @@ int main(void)
 		}
 
 	printf("SWAPZ_GC_SCAN_SCALE_EVIDENCE={\"scope\":"
-	       "\"OFFLINE_NATIVE_GC_SCALE_ONLY\",\"rows\":[");
+	       "\"OFFLINE_NATIVE_GC_SCALE_ONLY\","
+	       "\"kernel_only_reschedule_opportunity_entries\":%u,"
+	       "\"rows\":[", KERNEL_PROOF_RESCHED_INTERVAL_ENTRIES);
 	for (index = 0; index < GEOMETRIES; ++index) {
 		const struct scale_row *row = &rows[index];
 
@@ -539,6 +562,6 @@ int main(void)
 			(double)row->authoritative_negative_scan_ns : 0.0);
 	}
 	puts("]}");
-	puts("PASS: GC selection/dead probes are segment-scaled; relocation list is survivor-scaled; full-map ownership proof is logical-page-scaled (offline host-memory model)");
+	puts("PASS: GC selection/dead probes are segment-scaled; relocation list is survivor-scaled; full-map ownership proof is logical-page-scaled (offline host-memory model; kernel 4096-entry reschedule opportunities are not total proof latency limits)");
 	return evidence_sink == UINT64_MAX ? 1 : 0;
 }

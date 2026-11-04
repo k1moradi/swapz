@@ -9,6 +9,8 @@
  * fill without borrowing a GC reserve for ordinary foreground publication.
  */
 #include <errno.h>
+#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -40,6 +42,78 @@ static unsigned long long foreground_writes;
 static unsigned long long gc_reads;
 static unsigned long long gc_writes;
 static unsigned long long gc_bytes_relocated;
+
+/* One serialized authority owner and a bounded, allocation-free failure trace. */
+#define CHURN_SEED UINT32_C(0x15a0c0de)
+#define CHURN_TRACE_LENGTH 12U
+
+struct churn_operation {
+	uint64_t index;
+	const char *kind;
+	swapz_u32 logical;
+	swapz_u32 expected_generation;
+	swapz_u32 actual_generation;
+	int error;
+};
+
+static struct churn_operation churn_trace[CHURN_TRACE_LENGTH];
+static uint64_t churn_operation_index;
+static unsigned int churn_trace_count;
+static int churn_active;
+
+static void record_churn(const char *kind, swapz_u32 logical,
+			 swapz_u32 expected_generation,
+			 swapz_u32 actual_generation, int error)
+{
+	uint64_t index;
+
+	if (!churn_active)
+		return;
+	index = ++churn_operation_index;
+	churn_trace[(index - 1U) % CHURN_TRACE_LENGTH] =
+		(struct churn_operation) {
+			.index = index, .kind = kind, .logical = logical,
+			.expected_generation = expected_generation,
+			.actual_generation = actual_generation, .error = error,
+		};
+	if (churn_trace_count < CHURN_TRACE_LENGTH)
+		churn_trace_count++;
+}
+
+static int churn_invariant_failure(const char *invariant, int line)
+{
+	const struct churn_operation *last =
+		churn_operation_index ?
+		&churn_trace[(churn_operation_index - 1U) % CHURN_TRACE_LENGTH] :
+		NULL;
+	const uint64_t first =
+		churn_operation_index - churn_trace_count + 1U;
+	unsigned int offset;
+
+	fprintf(stderr, "%s:%d FAIL GC churn seed=0x%08" PRIx32
+		" operation_index=%" PRIu64 " invariant=%s"
+		" expected_generation=%" PRIu32 " actual_generation=%" PRIu32
+		" errno=%d\n", __FILE__, line, (uint32_t)CHURN_SEED,
+		churn_operation_index, invariant,
+		last ? last->expected_generation : 0U,
+		last ? last->actual_generation : 0U, last ? last->error : 0);
+	for (offset = 0; offset < churn_trace_count; ++offset) {
+		const struct churn_operation *entry =
+			&churn_trace[(first + offset - 1U) % CHURN_TRACE_LENGTH];
+
+		fprintf(stderr, "  operation=%" PRIu64 " kind=%s logical=%" PRIu32
+			" expected_generation=%" PRIu32
+			" actual_generation=%" PRIu32 " errno=%d\n",
+			entry->index, entry->kind, entry->logical,
+			entry->expected_generation, entry->actual_generation,
+			entry->error);
+	}
+	return 1;
+}
+
+#define CHURN_CHECK(invariant) do { if (!(invariant)) \
+	return churn_invariant_failure(#invariant, __LINE__); \
+} while (0)
 
 static void make_raw_page(swapz_u32 logical, swapz_u32 version, swapz_u8 *out)
 {
@@ -89,15 +163,21 @@ static int setup(void)
 
 static int write_page(swapz_u32 logical, swapz_u32 version)
 {
+	const swapz_u32 previous_generation = maps[logical].generation;
 	struct swapz_tx tx;
 	int error;
 
 	make_raw_page(logical, version, page_bytes);
 	error = swapz_stage(&a, &logical, 1, 1, &tx);
-	if (error)
+	if (error) {
+		record_churn("stage_raw", logical, previous_generation,
+			     maps[logical].generation, error);
 		return error;
+	}
 	if (tx.start_block >= PHYSICAL_BLOCKS) {
 		(void)swapz_finish_raw(&a, &tx, page_bytes, 0, -ERANGE);
+		record_churn("raw_bounds", logical, previous_generation,
+			     maps[logical].generation, -ERANGE);
 		return -ERANGE;
 	}
 	memcpy(media + (size_t)tx.start_block * SWAPZ_BLOCK_BYTES,
@@ -107,6 +187,9 @@ static int write_page(swapz_u32 logical, swapz_u32 version)
 		versions[logical] = version;
 		foreground_writes++;
 	}
+	record_churn("foreground_raw", logical,
+		     previous_generation + (error == 0),
+		     maps[logical].generation, error);
 	return error;
 }
 
@@ -349,18 +432,21 @@ static int choose_partial_victim(swapz_u32 *victim)
 static int test_sustained_all_raw_gc_rotations(void)
 {
 	const unsigned int rotations = 64U;
-	swapz_u32 next_logical = 0;
+	swapz_u32 next_logical = CHURN_SEED % PHYSICAL_SEGMENTS;
 	struct timespec wall_start, wall_end;
 	clock_t cpu_start, cpu_end;
 	unsigned int rotation;
 
-	CHECK(setup() == 0);
+	CHURN_CHECK(setup() == 0);
 	/* Native host CPU and wall observations are synthetic only: they are
 	 * NOT the physical ten-second stall or hour-long qualification gate. */
-	CHECK(clock_gettime(CLOCK_MONOTONIC, &wall_start) == 0);
+	CHURN_CHECK(clock_gettime(CLOCK_MONOTONIC, &wall_start) == 0);
 	cpu_start = clock();
-	CHECK(cpu_start != (clock_t)-1);
-	CHECK(fill_all_pages(1) == 0);
+	CHURN_CHECK(cpu_start != (clock_t)-1);
+	churn_active = 1;
+	churn_operation_index = 0;
+	churn_trace_count = 0;
+	CHURN_CHECK(fill_all_pages(1) == 0);
 	for (rotation = 0; rotation < rotations; ++rotation) {
 		swapz_u32 victim, block;
 		unsigned int attempts;
@@ -373,33 +459,37 @@ static int test_sustained_all_raw_gc_rotations(void)
 			if (error)
 				break;
 		}
-		CHECK(error == -ENOSPC);
+		CHURN_CHECK(error == -ENOSPC);
 		/*
 		 * Every successful rotation must buy real foreground progress, and
 		 * worst-case RAW occupancy can consume at most one segment before
 		 * requiring the next bounded reserve exchange.
 		 */
-		CHECK(attempts > 0 && attempts <= SWAPZ_SEGMENT_BLOCKS);
-		CHECK(!a.in_flight && !a.batch_pending);
-		CHECK(choose_partial_victim(&victim) == 0);
-		CHECK(segment_maps[victim] < SWAPZ_SEGMENT_BLOCKS);
-		CHECK(relocate_segment(victim) == 0);
-		CHECK(!roles[victim] && !segment_maps[victim]);
+		CHURN_CHECK(attempts > 0 && attempts <= SWAPZ_SEGMENT_BLOCKS);
+		CHURN_CHECK(!a.in_flight && !a.batch_pending);
+		CHURN_CHECK(choose_partial_victim(&victim) == 0);
+		CHURN_CHECK(segment_maps[victim] < SWAPZ_SEGMENT_BLOCKS);
+		error = relocate_segment(victim);
+		record_churn("gc_rotation", victim, 0U,
+			     segment_maps[victim], error);
+		CHURN_CHECK(error == 0);
+		CHURN_CHECK(!roles[victim] && !segment_maps[victim]);
 		for (block = victim * SWAPZ_SEGMENT_BLOCKS;
 		     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
-			CHECK(!live[block]);
-		CHECK(reserve_segments() == PHYSICAL_SEGMENTS - FOREGROUND_SEGMENTS);
-		CHECK(verify_all_pages() == 0);
+			CHURN_CHECK(!live[block]);
+		CHURN_CHECK(reserve_segments() == PHYSICAL_SEGMENTS - FOREGROUND_SEGMENTS);
+		CHURN_CHECK(verify_all_pages() == 0);
 	}
 	/* A tiny one-live-page victim would make the same rotation counter
 	 * pass without exercising nearly full destination relocation. */
-	CHECK(gc_writes >= (unsigned long long)rotations *
+	CHURN_CHECK(gc_writes >= (unsigned long long)rotations *
 		      (SWAPZ_SEGMENT_BLOCKS / 2U));
-	CHECK(gc_reads == gc_writes);
-	CHECK(gc_bytes_relocated == gc_writes * (unsigned long long)SWAPZ_BLOCK_BYTES);
+	CHURN_CHECK(gc_reads == gc_writes);
+	CHURN_CHECK(gc_bytes_relocated == gc_writes * (unsigned long long)SWAPZ_BLOCK_BYTES);
+	churn_active = 0;
 	cpu_end = clock();
-	CHECK(clock_gettime(CLOCK_MONOTONIC, &wall_end) == 0);
-	CHECK(cpu_end != (clock_t)-1);
+	CHURN_CHECK(clock_gettime(CLOCK_MONOTONIC, &wall_end) == 0);
+	CHURN_CHECK(cpu_end != (clock_t)-1);
 	printf("SWAPZ_GC_SYNTHETIC_NATIVE_HOST_CPU_WALL=rotations:%u "
 	       "cpu_ms:%.3f wall_ms:%.3f map_scan_count:%llu "
 	       "physical_qualification:NOT_RUN\n",
@@ -526,19 +616,27 @@ static int test_last_mapped_page_partial_victim_failed_publication(void)
 	memcpy(page_bytes,
 	       media + (size_t)previous.start_block * SWAPZ_BLOCK_BYTES,
 	       SWAPZ_BLOCK_BYTES);
-	CHECK(swapz_stage(&a, &last_logical, 1, 1, &transaction) == 0);
-	failed_block = transaction.start_block;
-	/* All bytes may reach media before the lower error; a success-looking
-	 * buffer never substitutes for an explicit completed-block ACK. */
-	memcpy(media + (size_t)failed_block * SWAPZ_BLOCK_BYTES,
-	       page_bytes, SWAPZ_BLOCK_BYTES);
-	CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 0, -EIO) == -EIO);
-	CHECK(!a.in_flight && a.gc_allocation);
-	CHECK(maps[last_logical].start_block == previous.start_block &&
-	      maps[last_logical].generation == previous.generation);
-	CHECK(!live[failed_block] && !classes[failed_block]);
-	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
-	CHECK(verify_all_pages() == 0);
+	/* Repeated uncertain completions consume unique destination blocks.
+	 * Each failed lower write may still have reached the entire medium. */
+	for (unsigned int attempt = 0; attempt < 3U; ++attempt) {
+		const int lower_error = attempt == 1U ? -ENOSPC : -EIO;
+
+		CHECK(swapz_stage(&a, &last_logical, 1, 1, &transaction) == 0);
+		if (attempt)
+			CHECK(transaction.start_block > failed_block);
+		failed_block = transaction.start_block;
+		memcpy(media + (size_t)failed_block * SWAPZ_BLOCK_BYTES,
+		       page_bytes, SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 0,
+				       lower_error) == lower_error);
+		CHECK(!a.in_flight && a.gc_allocation);
+		CHECK(maps[last_logical].start_block == previous.start_block &&
+		      maps[last_logical].generation == previous.generation);
+		CHECK(!live[failed_block] && !classes[failed_block]);
+		CHECK(a.abandoned_blocks == attempt + 1U);
+		CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
+		CHECK(verify_all_pages() == 0);
+	}
 
 	CHECK(swapz_stage(&a, &last_logical, 1, 1, &transaction) == 0);
 	CHECK(transaction.start_block > failed_block);
@@ -555,6 +653,111 @@ static int test_last_mapped_page_partial_victim_failed_publication(void)
 	return 0;
 }
 
+
+/*
+ * One uncertain destination block and 255 RAW survivors exhaust all 256
+ * blocks. A full destination cannot become foreground: safely roll forward
+ * by reusing the independently proven-dead original victim, preserving each
+ * authoritative generation and the untrusted failed media.
+ */
+static int test_full_destination_raw_roll_forward(void)
+{
+	const swapz_u32 victim = 0U;
+	const swapz_u32 exhausted_destination = FOREGROUND_SEGMENTS;
+	const swapz_u32 destination_start =
+		exhausted_destination * SWAPZ_SEGMENT_BLOCKS;
+	struct swapz_map saved_tail;
+	struct swapz_tx transaction;
+	swapz_u32 logical, failed_block;
+
+	CHECK(setup() == 0);
+	CHECK(fill_all_pages(1U) == 0);
+	CHECK(write_page(0U, 2U) == 0);
+	CHECK(segment_maps[victim] == SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
+	CHECK(a.gc_destination == exhausted_destination);
+
+	logical = 1U;
+	memcpy(page_bytes,
+	       media + (size_t)maps[logical].start_block * SWAPZ_BLOCK_BYTES,
+	       SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_verify_raw(&a, logical, page_bytes) == 0);
+	CHECK(swapz_stage(&a, &logical, 1U, 1U, &transaction) == 0);
+	failed_block = transaction.start_block;
+	CHECK(failed_block == destination_start);
+	memcpy(media + (size_t)failed_block * SWAPZ_BLOCK_BYTES,
+	       page_bytes, SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 0U, -EIO) == -EIO);
+	CHECK(!live[failed_block] && !classes[failed_block]);
+	CHECK(a.abandoned_blocks == 1U);
+
+	for (logical = 1U; logical < SWAPZ_SEGMENT_BLOCKS; ++logical) {
+		const swapz_u32 source = maps[logical].start_block;
+
+		CHECK(source / SWAPZ_SEGMENT_BLOCKS == victim);
+		memcpy(page_bytes, media + (size_t)source * SWAPZ_BLOCK_BYTES,
+		       SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_verify_raw(&a, logical, page_bytes) == 0);
+		CHECK(swapz_stage(&a, &logical, 1U, 1U, &transaction) == 0);
+		CHECK(transaction.start_block > failed_block);
+		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+		       page_bytes, SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1U, 0) == 0);
+		gc_reads++;
+		gc_writes++;
+		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
+	}
+	CHECK(!segment_maps[victim]);
+	CHECK(a.next_block == destination_start + SWAPZ_SEGMENT_BLOCKS);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -ENOSPC);
+	CHECK(a.gc_allocation && roles[victim] &&
+	      !roles[exhausted_destination]);
+	CHECK(verify_all_pages() == 0);
+
+	/* A forged last-entry reference cannot be hidden by false-zero victim
+	 * counts at the roll-forward boundary, or change the recovery cursor. */
+	saved_tail = maps[LOGICAL_PAGES - 1U];
+	maps[LOGICAL_PAGES - 1U].start_block = victim;
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &a, exhausted_destination) == -EUCLEAN);
+	CHECK(a.gc_destination == exhausted_destination &&
+	      a.next_block == destination_start + SWAPZ_SEGMENT_BLOCKS &&
+	      roles[victim] && !roles[exhausted_destination]);
+	maps[LOGICAL_PAGES - 1U] = saved_tail;
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &a, exhausted_destination) == 0);
+	CHECK(a.gc_allocation && a.gc_destination == victim &&
+	      a.gc_forbidden_victim == exhausted_destination);
+	CHECK(!roles[victim] && roles[exhausted_destination] &&
+	      a.next_block == victim * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(verify_all_pages() == 0);
+
+	for (logical = 1U; logical < SWAPZ_SEGMENT_BLOCKS; ++logical) {
+		const swapz_u32 source = maps[logical].start_block;
+
+		CHECK(source / SWAPZ_SEGMENT_BLOCKS == exhausted_destination);
+		CHECK(source != failed_block);
+		memcpy(page_bytes, media + (size_t)source * SWAPZ_BLOCK_BYTES,
+		       SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_verify_raw(&a, logical, page_bytes) == 0);
+		CHECK(swapz_stage(&a, &logical, 1U, 1U, &transaction) == 0);
+		CHECK(transaction.start_block / SWAPZ_SEGMENT_BLOCKS == victim);
+		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+		       page_bytes, SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1U, 0) == 0);
+		gc_reads++;
+		gc_writes++;
+		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
+	}
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(swapz_gc_commit_rotation(&a, exhausted_destination) == 0);
+	CHECK(roles[victim] && !roles[exhausted_destination]);
+	CHECK(reserve_segments() == PHYSICAL_SEGMENTS - FOREGROUND_SEGMENTS);
+	CHECK(!live[failed_block] && !classes[failed_block]);
+	CHECK(verify_all_pages() == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -564,6 +767,8 @@ int main(void)
 	CHECK(test_fragmented_raw_gc_restores_progress() == 0); passed++;
 	CHECK(test_false_zero_sidecar_blocks_commit_and_reuse() == 0); passed++;
 	CHECK(test_last_mapped_page_partial_victim_failed_publication() == 0);
+	passed++;
+	CHECK(test_full_destination_raw_roll_forward() == 0);
 	passed++;
 	printf("SWAPZ_GC_HIGH_OCCUPANCY_PASS=%d "
 	       "foreground_writes=%llu gc_reads=%llu gc_writes=%llu "
