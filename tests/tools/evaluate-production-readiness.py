@@ -703,6 +703,12 @@ def validate_physical_campaign_evidence(
             campaign.get("pair_source_shas") != [source_sha] or
             campaign.get("source_consistent") is not True):
         reject("sealed campaign pair sources are not exact and consistent")
+    # The sealer derives this from the admitted host boot and every raw/swapz
+    # arm, independently of the RAM trace's own host-boot assertion.
+    if campaign.get("arm_boot_consistent") is not True:
+        reject(
+            "sealed campaign arm boot binding mismatch: "
+            "metric=arm_boot_consistent required=true_same_admitted_boot")
     if (
             campaign.get("campaign_status") != "PASS" or
             campaign.get("qualification_status") != "PASS"):
