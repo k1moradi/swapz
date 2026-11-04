@@ -424,6 +424,16 @@ only destructive operation, so a replaced symlink, stale alias, changed
 PARTUUID, changed geometry, new holder/mount/swap use, parent substitution or
 device disappearance cannot reach a write.
 
+The requested O_EXCL flag alone is not proof of a kernel-exclusive admission
+interval. A fake successful exclusive open establishes only the requested
+flags, never BLK_EXCL behavior against real concurrent holders or swapon.
+The production opener currently requests O_RDWR/O_EXCL/O_CLOEXEC/O_NOFOLLOW
+and rechecks BLKROGET and descriptor identity, but does not separately query
+F_GETFL to confirm the returned descriptor's access mode or acquire an
+additional userspace lock. These are source-owner review items, not invariants
+established by synthetic tests. Kernel-level exclusivity and mount/swap races
+after the last snapshot require separate safe loaded-kernel qualification.
+
 Block zero is accepted only when it is all zero or is an exact existing SWZ
 authorization header. The shared validator requires the eight-byte magic,
 format version, 4096-byte header length, exact opened-device byte size, nonzero

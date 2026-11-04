@@ -69,6 +69,7 @@ static FILE *test_format_fopen(const char *path, const char *mode);
  * Snapshot tests do not establish kernel-level BLK_EXCL / swapon exclusion.
  */
 enum admission_change {
+	ADMISSION_UNCHANGED,
 	ADMISSION_BAD_PARTUUID,
 	ADMISSION_PARENT_CHANGED,
 	ADMISSION_SWAPFILE_ACTIVE,
@@ -79,8 +80,13 @@ enum admission_change {
 	ADMISSION_ALIAS_CHANGED,
 	ADMISSION_PATH_SYMLINK,
 	ADMISSION_PATH_INODE_CHANGED,
+	ADMISSION_OPENED_TYPE_CHANGED,
+	ADMISSION_OPENED_FSTAT_FAILED,
+	ADMISSION_OPENED_READ_ONLY,
+	ADMISSION_SWAP_INVENTORY_MALFORMED,
 	ADMISSION_EXITED_PID_CONTROL,
 };
+#define ADMISSION_DIAGNOSTIC_BYTES 512U
 #define ADMISSION_DEVICE_FD 987654
 #define ADMISSION_DEVICE "/dev/swapz-synthetic-card"
 #define ADMISSION_ALIAS "/dev/disk/by-partuuid/f13428f6-01"
@@ -99,6 +105,7 @@ static struct {
 	const char *observed_identity;
 	unsigned int observed_identity_calls;
 	int enabled, path_is_symlink;
+	int open_error, observed_open_flags;
 } admission_fixture;
 
 static void admission_observe_identity(const char *identity)
@@ -160,6 +167,9 @@ static void admission_after_first_read(void)
 		admission_write_text("/proc/swaps", ADMISSION_SWAP_HEADER
 				     "/unresolvable/swapfile file 4 1 -2\n");
 		break;
+	case ADMISSION_SWAP_INVENTORY_MALFORMED:
+		admission_write_text("/proc/swaps", "Filename\tType\n");
+		break;
 	case ADMISSION_PARENT_MOUNTED:
 		admission_write_text("/proc/3031/mountinfo",
 				     "37 25 8:0 / /card rw - ext4 /dev/parent rw\n");
@@ -185,6 +195,11 @@ static void admission_after_first_read(void)
 	case ADMISSION_EXITED_PID_CONTROL:
 		admission_unlink("/proc/3031/mountinfo");
 		admission_unlink("/proc/3031/ns/mnt");
+		break;
+	case ADMISSION_UNCHANGED:
+	case ADMISSION_OPENED_TYPE_CHANGED:
+	case ADMISSION_OPENED_FSTAT_FAILED:
+	case ADMISSION_OPENED_READ_ONLY:
 		break;
 	}
 }
@@ -244,7 +259,18 @@ static int admission_lstat(const char *path, struct stat *info)
 static int admission_fstat(int fd, struct stat *info)
 {
 	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
+		if (admission_fixture.reads &&
+		    admission_fixture.change == ADMISSION_OPENED_FSTAT_FAILED) {
+			admission_observe_identity("opened-fstat-ENODEV");
+			errno = ENODEV;
+			return -1;
+		}
 		*info = admission_block_stat(makedev(8U, 1U), 17U);
+		if (admission_fixture.reads &&
+		    admission_fixture.change == ADMISSION_OPENED_TYPE_CHANGED) {
+			admission_observe_identity("opened-descriptor-not-block");
+			info->st_mode = S_IFREG | 0600;
+		}
 		return 0;
 	}
 	return fstat(fd, info);
@@ -272,12 +298,17 @@ static int admission_open(const char *path, int flags, ...)
 		va_end(arguments);
 	}
 	if (admission_fixture.enabled && !strcmp(path, ADMISSION_DEVICE)) {
-		if ((flags & O_ACCMODE) != O_RDWR || !(flags & O_EXCL) ||
-		    !(flags & O_NOFOLLOW) || !(flags & O_CLOEXEC)) {
+		admission_fixture.observed_open_flags = flags;
+		++admission_fixture.opens;
+		/* Check requested flags, not actual kernel exclusivity. */
+		if (flags != (O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW)) {
 			errno = EPERM;
 			return -1;
 		}
-		++admission_fixture.opens;
+		if (admission_fixture.open_error) {
+			errno = admission_fixture.open_error;
+			return -1;
+		}
 		return ADMISSION_DEVICE_FD;
 	}
 	if (admission_fixture.enabled && !strncmp(path, "/dev/", 5U)) {
@@ -316,7 +347,13 @@ static int admission_ioctl(int fd, unsigned long request, ...)
 			return 0;
 		}
 		if (request == BLKROGET) {
-			*(int *)argument = 0;
+			if (admission_fixture.reads &&
+			    admission_fixture.change == ADMISSION_OPENED_READ_ONLY) {
+				admission_observe_identity("opened-BLKROGET-read-only");
+				*(int *)argument = 1;
+			} else {
+				*(int *)argument = 0;
+			}
 			return 0;
 		}
 		errno = ENOTTY;
@@ -445,6 +482,88 @@ static void admission_stop(void)
 		    FTW_DEPTH | FTW_PHYS) == 0);
 }
 
+static int admission_format_cli(void)
+{
+	char *argv[] = {
+		"swapzctl", "format", ADMISSION_DEVICE,
+		"--expect-major-minor", "8:1",
+		"--expect-bytes", "124787884032",
+		"--expect-partuuid", "f13428f6-01",
+		"--expect-parent-major-minor", "8:0",
+		"--expect-parent-model", "Multi-Card",
+		"--expect-parent-transport", "usb",
+	};
+
+	return swapzctl_program_main((int)(sizeof(argv) / sizeof(argv[0])), argv);
+}
+
+static int admission_capture_cli(
+	char report[ADMISSION_DIAGNOSTIC_BYTES], int *observed_errno)
+{
+	FILE *diagnostics;
+	int saved_stderr, status;
+	size_t length;
+
+	assert(report != NULL && observed_errno != NULL);
+	diagnostics = tmpfile();
+	assert(diagnostics != NULL);
+	assert(fflush(stderr) == 0);
+	saved_stderr = dup(STDERR_FILENO);
+	assert(saved_stderr >= 0);
+	assert(dup2(fileno(diagnostics), STDERR_FILENO) >= 0);
+	errno = 0;
+	status = admission_format_cli();
+	*observed_errno = errno;
+	assert(fflush(stderr) == 0);
+	assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+	assert(close(saved_stderr) == 0);
+	assert(fseek(diagnostics, 0L, SEEK_SET) == 0);
+	length = fread(report, 1U, ADMISSION_DIAGNOSTIC_BYTES - 1U,
+		       diagnostics);
+	assert(!ferror(diagnostics));
+	report[length] = '\0';
+	assert(fclose(diagnostics) == 0);
+	return status;
+}
+
+/*
+ * An exclusive-open permission denial must not acquire the fake descriptor.
+ * O_EXCL matching here does not establish loaded-kernel BLK_EXCL.
+ */
+static void test_real_cli_exclusive_open_permission_refuses_without_io(void)
+{
+	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
+	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+	int status, observed_errno;
+
+	admission_start(ADMISSION_UNCHANGED);
+	admission_fixture.open_error = EACCES;
+	status = admission_capture_cli(report, &observed_errno);
+	if (status != 1 || observed_errno != EACCES ||
+	    !strstr(report, "swapzctl format: exclusive open:") ||
+	    !strstr(report, strerror(EACCES)) ||
+	    strstr(report, ADMISSION_DEVICE) ||
+	    admission_fixture.observed_open_flags !=
+		    (O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW) ||
+	    admission_fixture.opens != 1U ||
+	    admission_fixture.reads != 0U ||
+	    admission_fixture.writes != 0U ||
+	    admission_fixture.syncs != 0U ||
+	    admission_fixture.closes != 0U ||
+	    memcmp(admission_fixture.block_zero, unchanged,
+		   sizeof(unchanged))) {
+		fprintf(stderr, "FAIL: phase=exclusive-open "
+			"prerequisite=permission-denied errno=%d "
+			"expected_errno=%d status=%d opens=%u reads=%u "
+			"writes=%u syncs=%u\n",
+			observed_errno, EACCES, status, admission_fixture.opens,
+			admission_fixture.reads, admission_fixture.writes,
+			admission_fixture.syncs);
+		abort();
+	}
+	admission_stop();
+}
+
 static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 {
 	static const struct {
@@ -465,43 +584,24 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 		{ ADMISSION_ALIAS_CHANGED, "by-partuuid-alias", ESTALE },
 		{ ADMISSION_PATH_SYMLINK, "path-symlink-substitution", ESTALE },
 		{ ADMISSION_PATH_INODE_CHANGED, "same-dev_t-new-inode", ESTALE },
-	};
-	char *argv[] = {
-		"swapzctl", "format", ADMISSION_DEVICE,
-		"--expect-major-minor", "8:1",
-		"--expect-bytes", "124787884032",
-		"--expect-partuuid", "f13428f6-01",
-		"--expect-parent-major-minor", "8:0",
-		"--expect-parent-model", "Multi-Card",
-		"--expect-parent-transport", "usb",
+		{ ADMISSION_OPENED_TYPE_CHANGED, "opened-descriptor-not-block",
+		  ESTALE },
+		{ ADMISSION_OPENED_FSTAT_FAILED, "opened-fstat-ENODEV",
+		  ENODEV },
+		{ ADMISSION_OPENED_READ_ONLY, "opened-BLKROGET-read-only",
+		  EROFS },
+		{ ADMISSION_SWAP_INVENTORY_MALFORMED,
+		  "malformed-late-swap-inventory", EPROTO },
 	};
 	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
 
 	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
 	     ++index) {
-		FILE *diagnostics;
-		char report[512] = {0};
-		int saved_stderr, status, observed_errno;
-		size_t length;
+		char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+		int status, observed_errno;
 
 		admission_start(cases[index].change);
-		diagnostics = tmpfile();
-		assert(diagnostics != NULL);
-		assert(fflush(stderr) == 0);
-		saved_stderr = dup(STDERR_FILENO);
-		assert(saved_stderr >= 0);
-		assert(dup2(fileno(diagnostics), STDERR_FILENO) >= 0);
-		errno = 0;
-		status = swapzctl_program_main(15, argv);
-		observed_errno = errno;
-		assert(fflush(stderr) == 0);
-		assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
-		assert(close(saved_stderr) == 0);
-		assert(fseek(diagnostics, 0L, SEEK_SET) == 0);
-		length = fread(report, 1U, sizeof(report) - 1U, diagnostics);
-		assert(!ferror(diagnostics));
-		report[length] = '\0';
-		assert(fclose(diagnostics) == 0);
+		status = admission_capture_cli(report, &observed_errno);
 
 		if (status != 2 || observed_errno != cases[index].expected_errno ||
 		    !strstr(report, "REFUSED: target identity changed before "
@@ -542,7 +642,7 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 	 * The sole successful write here modifies in-memory fake block zero.
 	 */
 	admission_start(ADMISSION_EXITED_PID_CONTROL);
-	assert(swapzctl_program_main(15, argv) == 0);
+	assert(admission_format_cli() == 0);
 	assert(admission_fixture.opens == 1U);
 	assert(admission_fixture.writes == 1U);
 	assert(admission_fixture.syncs == 1U);
@@ -598,6 +698,10 @@ static FILE *test_format_fopen(const char *path, const char *mode)
 		if (admission_fixture.change == ADMISSION_SWAPFILE_ACTIVE &&
 		    !strcmp(path, "/proc/swaps"))
 			admission_observe_identity("active-swapfile-unauthenticated");
+		else if (admission_fixture.change ==
+			 ADMISSION_SWAP_INVENTORY_MALFORMED &&
+			 !strcmp(path, "/proc/swaps"))
+			admission_observe_identity("malformed-late-swap-inventory");
 		else if (admission_fixture.change == ADMISSION_PARENT_MOUNTED &&
 			 !strcmp(path, "/proc/3031/mountinfo"))
 			admission_observe_identity("foreign-parent-mount");
@@ -2411,6 +2515,7 @@ int main(void)
 	test_repeat_format_is_idempotent_and_non_destructive();
 	test_disappearance_after_write_is_never_success();
 	test_truncated_read_and_close_failure_are_not_success();
+	test_real_cli_exclusive_open_permission_refuses_without_io();
 	test_real_cli_snapshots_refuse_before_first_header_write();
 	puts("PASS: swapzctl formatter identity and destructive-action gates");
 	return 0;
