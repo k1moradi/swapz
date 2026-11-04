@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: project-goals-${{ github.ref }}-${{ github.run_id }}
+  group: project-goals-${{ github.ref }}
   cancel-in-progress: false
 env:
   PYTHONPYCACHEPREFIX: ${{ github.workspace }}/build/python-cache
