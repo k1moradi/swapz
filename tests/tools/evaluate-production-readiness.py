@@ -1219,6 +1219,8 @@ def evaluate_release(
             # calculated capacity or a self-declared scalar report.
             if (not campaign_issues and matches_campaign and
                     peak_ram_limit is not None and
+                    capacity.get("policy_sha256") == policy_sha256 and
+                    _normalize_target(capacity.get("target")) == target and
                     capacity.get("evidence_sha256") ==
                     sha256_bytes(physical_campaign_evidence_raw)):
                 summary = sealed_capacity["metadata_ram_summary"]
