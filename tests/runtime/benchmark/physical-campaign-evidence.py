@@ -693,7 +693,10 @@ def campaign_capacity_and_ram(
             type(peak_ram_bytes) is not int or peak_ram_bytes <= 0):
         return None
     logical_capacity_bytes = logical_pages * 4096
-    if logical_capacity_bytes > target_device_bytes:
+    # A smaller, easier-to-create mapper is not maximum-capacity evidence.
+    if (logical_pages != RAM_VALIDATOR[
+            "maximum_logical_pages_for_partition"](target_device_bytes) or
+            logical_capacity_bytes > target_device_bytes):
         return None
     identity = swapz.get("device_identity")
     mapper_uuid = identity.get("dm_uuid") if isinstance(identity, dict) else None
