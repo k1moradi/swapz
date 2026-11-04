@@ -469,9 +469,21 @@ static int test_sustained_all_raw_gc_rotations(void)
 		CHURN_CHECK(!a.in_flight && !a.batch_pending);
 		CHURN_CHECK(choose_partial_victim(&victim) == 0);
 		CHURN_CHECK(segment_maps[victim] < SWAPZ_SEGMENT_BLOCKS);
-		error = relocate_segment(victim);
-		record_churn("gc_rotation", victim, 0U,
-			     segment_maps[victim], error);
+		/* A trace generation must come from the authoritative map, never
+		 * from a segment's mapped-page occupancy sidecar. */
+		{
+			const swapz_u32 tracked_logical = LOGICAL_PAGES - 1U;
+			const swapz_u32 expected_generation =
+				maps[tracked_logical].generation +
+				(maps[tracked_logical].valid &&
+				 maps[tracked_logical].start_block /
+				 SWAPZ_SEGMENT_BLOCKS == victim);
+
+			error = relocate_segment(victim);
+			record_churn("gc_rotation", tracked_logical,
+				     expected_generation,
+				     maps[tracked_logical].generation, error);
+		}
 		CHURN_CHECK(error == 0);
 		CHURN_CHECK(!roles[victim] && !segment_maps[victim]);
 		for (block = victim * SWAPZ_SEGMENT_BLOCKS;

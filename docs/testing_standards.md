@@ -923,7 +923,8 @@ must refuse role exchange; a live last-survivor mapping remains byte-exact,
 and exhausted recovery returns `-ENOSPC` without reusing either destination. Deterministic
 churn failures must emit a fixed seed, operation index, short bounded
 recent-operation trace, failed invariant, expected/actual generation and
-errno. Successful operations must not log individually or allocate model
+errno, with generation values read from authoritative map records rather
+than mapped-page occupancy sidecars. Successful operations must not log individually or allocate model
 nodes.
 
 The kernel-only `cond_resched()` scheduling opportunity occurs at each
