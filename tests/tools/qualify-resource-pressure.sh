@@ -8,11 +8,11 @@ case "$script_source" in
     */*) script_directory="${script_source%/*}" ;;
     *) script_directory=. ;;
 esac
-ROOT="$(cd -- "$script_directory/../.." && pwd -P)" || {
+ROOT="$(cd -- "$script_directory/../.." 2>/dev/null && pwd -P)" || {
     printf '%s\n' 'BLOCKED: ID36 cannot resolve the qualification checkout root' >&2
     exit 2
 }
-cd "$ROOT" || {
+cd "$ROOT" 2>/dev/null || {
     printf '%s\n' 'BLOCKED: ID36 cannot enter the qualification checkout root' >&2
     exit 2
 }
@@ -21,7 +21,7 @@ cleanup_helper="$ROOT/tests/tools/clear-tmp-before-memory-check.sh"
     printf '%s\n' 'BLOCKED: ID36 owned temporary-cleanup helper unavailable; restore the readable checkout helper before admission' >&2
     exit 2
 }
-if ! source "$cleanup_helper"; then
+if ! source "$cleanup_helper" 2>/dev/null; then
     printf '%s\n' 'BLOCKED: ID36 owned temporary-cleanup helper could not be loaded safely' >&2
     exit 2
 fi
