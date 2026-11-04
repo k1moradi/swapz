@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Private, opt-in physical swap-partition correctness smoke and recovery.
+"""Private physical correctness smoke/recovery and campaign preflight.
 
 This is not part of make test and produces no performance qualification.
-Before any write it requires an explicitly repeated stable device path, an
+The campaign-plan action is read-only and can only report admission readiness;
+it never substitutes for paired physical workloads. Before any correctness-smoke
+write the helper requires an explicitly repeated stable device path, an
 unused active swap partition, a latest-source owner PASS and identical
 qualified-artifact evidence, plus a verbal review record bound to source,
 helper and device.
@@ -49,6 +51,13 @@ MAX_RECORDED_OUTPUT_CHARS = 4096
 # The swapz DM status ABI contains many named counters. Preserve a bounded
 # complete status line rather than certifying a clipped prefix as healthy.
 MAX_STATUS_OUTPUT_CHARS = 32768
+LOWER_IO_CLAIM_BOUNDARY = (
+    "lower-device bytes and requests are host-visible physical I/O; "
+    "they are not direct NAND-wear or endurance measurements"
+)
+KERNEL_FATAL_PATTERN = re.compile(
+    r"\b(?:BUG|Oops|panic|WARNING|error|failed|failure|drain invariant|"
+    r"corrupt(?:ion|ed)?)\b", re.IGNORECASE)
 POST_QUALIFICATION_PATHS = frozenset({
     "tests/tools/physical-swap-probe.py",
     "tests/runtime/native/physical-swap-probe-test.py",
@@ -1056,11 +1065,13 @@ def _captured_command(args, timeout=15):
 # logical/physical sector sizes. These are host-visible device I/O counters,
 # NOT direct SD NAND wear, write amplification or endurance observations.
 MAX_BLOCK_COUNTER = (1 << 64) - 1
+MIN_BLOCK_STAT_FIELDS = 16
 LOWER_COUNTER_FIELDS = (
     ("lower_read_requests", 0),
     ("lower_read_sectors", 2),
     ("lower_write_requests", 4),
     ("lower_write_sectors", 6),
+    ("lower_flush_requests", 15),
 )
 
 
@@ -1074,9 +1085,10 @@ def _block_stat_snapshot(target):
     path = Path(f"/sys/dev/block/{parent}/stat")
     try:
         tokens = path.read_text().split()
-        if len(tokens) < 11:
+        if len(tokens) < MIN_BLOCK_STAT_FIELDS:
             raise ValueError(
-                f"lower_stat_fields expected>=11 observed={len(tokens)}")
+                f"lower_stat_fields expected>={MIN_BLOCK_STAT_FIELDS} "
+                f"observed={len(tokens)}")
         fields = []
         for index, token in enumerate(tokens):
             if not token.isascii() or not token.isdecimal():
@@ -1109,11 +1121,12 @@ def _lower_io_delta(before, after):
             raise ProbeError(
                 f"lower_io_{label} expected=available observed={_bounded_text(detail)}")
         values = snapshot.get("values")
-        if not isinstance(values, list) or len(values) < 11 or any(
+        if not isinstance(values, list) or len(values) < MIN_BLOCK_STAT_FIELDS or any(
                 type(value) is not int or value < 0 or value > MAX_BLOCK_COUNTER
                 for value in values):
             raise ProbeError(
-                f"lower_io_{label}.values expected>=11_uint64_counters "
+                f"lower_io_{label}.values "
+                f"expected>={MIN_BLOCK_STAT_FIELDS}_uint64_counters "
                 f"observed={_bounded_text(values)}")
         for field, index in LOWER_COUNTER_FIELDS:
             if "sectors" in field and values[index] > MAX_BLOCK_COUNTER // 512:
@@ -1197,6 +1210,39 @@ def _kernel_swapz_messages(start_timestamp):
             "messages": _bounded_text(selected)}
 
 
+def _kernel_diagnostics_error(record):
+    """Return a named fail-closed kernel-evidence error, or None when usable."""
+    if not isinstance(record, dict):
+        return f"kernel_trace expected=object observed={record!r}"
+    if record.get("available") is not True:
+        return (
+            "kernel_trace expected=available "
+            f"observed={_bounded_text(record.get('error', record))}")
+    if record.get("time_filter_applied") is not True:
+        return (
+            "kernel_trace expected=time_filtered "
+            f"observed_source={record.get('source')!r}")
+    if record.get("truncated") is not False:
+        return (
+            "kernel_trace expected=complete "
+            f"observed_truncated={record.get('truncated')!r}")
+    messages = record.get("messages")
+    if not isinstance(messages, str):
+        return f"kernel_trace.messages expected=string observed={messages!r}"
+    for line in messages.splitlines():
+        if KERNEL_FATAL_PATTERN.search(line):
+            return (
+                "kernel_trace_health expected=no_swapz_failure_or_warning "
+                f"observed={_bounded_text(line)!r}")
+    return None
+
+
+def _require_kernel_diagnostics(record, context):
+    error = _kernel_diagnostics_error(record)
+    if error is not None:
+        raise ProbeError(f"{context}: {error}")
+
+
 def _swapz_status_healthy(captured):
     """Require a complete, unique terminal-health pair from the exact DM status."""
     if (not isinstance(captured, dict) or captured.get("return_code") != 0
@@ -1241,7 +1287,8 @@ def _dm_info_rows(stdout, field_count):
     return rows
 
 
-def _dm_inventory_snapshot(owned_name=None, owned_uuid=None):
+def _dm_inventory_snapshot(
+        owned_name=None, owned_uuid=None, *, reject_swapz_namespace=False):
     result = _run([
         "dmsetup", "info", "-c", "--noheadings", "-o", "name,uuid",
     ], check=False)
@@ -1249,6 +1296,11 @@ def _dm_inventory_snapshot(owned_name=None, owned_uuid=None):
         raise ProbeError("cannot snapshot Device Mapper inventory")
     rows = []
     for name, uuid in _dm_info_rows(result.stdout, 2):
+        if reject_swapz_namespace and (
+                name.startswith("swapz") or uuid.startswith("SWAPZ")):
+            raise ProbeError(
+                "mapper_provenance expected=no_swapz_namespace "
+                f"observed=name={name!r},uuid={uuid!r}")
         if name == owned_name or uuid == owned_uuid:
             if (name, uuid) != (owned_name, owned_uuid):
                 raise ProbeError("owned mapper name or UUID changed in inventory")
@@ -1258,6 +1310,19 @@ def _dm_inventory_snapshot(owned_name=None, owned_uuid=None):
     digest = hashlib.sha256(json.dumps(
         rows, separators=(",", ":")).encode()).hexdigest()
     return {"other_mapper_count": len(rows), "other_mapper_sha256": digest}
+
+
+def _module_mapper_preflight():
+    """Prove a clean swapz module baseline and readable DM inventory."""
+    module_path = Path("/sys/module/dm_swapz")
+    if module_path.exists():
+        raise ProbeError(
+            "module_provenance expected=dm_swapz_absent observed=loaded")
+    inventory = _dm_inventory_snapshot(reject_swapz_namespace=True)
+    if module_path.exists():
+        raise ProbeError(
+            "module_provenance expected=stable_absence observed=loaded_during_check")
+    return inventory
 
 
 def _final_observations(results, state_dir, state, target):
@@ -1290,14 +1355,11 @@ def _final_observations(results, state_dir, state, target):
     results["kernel_swapz_messages"] = _kernel_swapz_messages(
         results.get("start_timestamp", "now"))
     diagnostics = results["kernel_swapz_messages"]
+    diagnostics_error = _kernel_diagnostics_error(diagnostics)
     results["kernel_diagnostics_gate"] = (
-        "AVAILABLE" if diagnostics.get("available") is True
-        and diagnostics.get("time_filter_applied") is True
-        and diagnostics.get("truncated") is False else "BLOCKED")
-    if results["kernel_diagnostics_gate"] == "BLOCKED":
-        results["kernel_diagnostics_error"] = (
-            "kernel_trace expected=available,time_filtered,complete "
-            f"observed={_bounded_text(diagnostics)}")
+        "AVAILABLE" if diagnostics_error is None else "BLOCKED")
+    if diagnostics_error is not None:
+        results["kernel_diagnostics_error"] = diagnostics_error
     row = results.get("final_swap_row")
     # The identity-only recovery target omits original swap parameters.
     # Compare with the durable saved state, including after standalone recovery.
@@ -1836,13 +1898,14 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
     review = validate_review(review_path, evidence, target)
     state_dir_arg = _recovery_run_directory(state_dir_arg, review["run_id"])
     _check_review_unconsumed(target, review["run_id"])
-    if Path("/sys/module/dm_swapz").exists():
-        raise ProbeError("dm_swapz already loaded; ambiguous module ownership")
     for command in ("blockdev", "dmsetup", "insmod", "modprobe", "rmmod",
                     "swapoff", "swapon", "findmnt", "udevadm"):
         if not shutil.which(command):
             raise ProbeError(f"required command is missing: {command}")
-    dm_inventory_before = _dm_inventory_snapshot()
+    dm_inventory_before = _module_mapper_preflight()
+    preflight_kernel = _kernel_swapz_messages(start_timestamp)
+    _require_kernel_diagnostics(
+        preflight_kernel, "preflight_kernel_diagnostics")
     preflight_block_stats = _block_stat_snapshot(target)
     if preflight_block_stats.get("available") is not True:
         raise ProbeError(
@@ -1891,12 +1954,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             "dm_name": state["dm_name"],
             "dm_uuid": state["dm_uuid"],
             "dm_inventory_before": dm_inventory_before,
+            "kernel_diagnostics_preflight": preflight_kernel,
             "block_stats_before": preflight_block_stats,
             "lower_io_source": (
                 f"/sys/dev/block/{target['parent_major_minor']}/stat"),
-            "lower_io_claim_boundary": (
-                "512-byte sectors and requests are host-visible parent-device "
-                "I/O; not direct NAND wear, flash write amplification or endurance"),
+            "lower_io_claim_boundary": LOWER_IO_CLAIM_BOUNDARY,
             "physical_oracle_phases": [],
             "final_recovery_state": "BACKED_UP",
         }
@@ -2084,7 +2146,12 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                 if failure is None:
                     failure = ProbeError(
                         f"cannot reload final physical results: {exc}")
-            if isinstance(results, dict):
+            if not isinstance(results, dict):
+                if failure is None:
+                    failure = ProbeError(
+                        "final physical results expected=object "
+                        f"observed={type(results).__name__}")
+            else:
                 required_true = (
                     "original_header_matches_final",
                     "restored_swap_verified",
@@ -2105,6 +2172,25 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                     for field, expected in required
                     if results.get(field) != expected
                 ]
+                try:
+                    recomputed_lower = _lower_io_delta(
+                        results.get("block_stats_before"),
+                        results.get("block_stats_after"))
+                    if results.get("lower_io_delta") != recomputed_lower:
+                        failures.append(
+                            "lower_io_delta expected="
+                            f"{recomputed_lower!r} "
+                            f"observed={results.get('lower_io_delta')!r}")
+                except ProbeError as exc:
+                    failures.append(
+                        "lower_io_evidence expected=recomputable observed="
+                        + _bounded_text(exc))
+                diagnostics_error = _kernel_diagnostics_error(
+                    results.get("kernel_swapz_messages"))
+                if diagnostics_error is not None:
+                    failures.append(
+                        "kernel_diagnostics expected=healthy observed="
+                        + diagnostics_error)
                 if failures and failure is None:
                     failure = ProbeError(
                         "final physical restoration/evidence checks failed: "
@@ -2133,6 +2219,9 @@ def plan(device_arg, confirm_arg, review_path=None):
         raise ProbeError(
             f"preflight_lower_io expected=available "
             f"observed={lower_preflight.get('error')}")
+    dm_inventory = _module_mapper_preflight()
+    diagnostics = _kernel_swapz_messages(_utc_timestamp())
+    _require_kernel_diagnostics(diagnostics, "preflight_kernel_diagnostics")
     try:
         _recovery_base(target)
         recovery_message = (
@@ -2183,6 +2272,15 @@ def plan(device_arg, confirm_arg, review_path=None):
           f"partuuid={target['partuuid']} bytes={target['size_bytes']} "
           f"used_kib={target['swap_used_kib']}")
     print(f"RECOVERY_GATE={recovery_message}")
+    print("MODULE_MAPPER_GATE=PASS module=absent "
+          f"other_mapper_count={dm_inventory['other_mapper_count']} "
+          f"other_mapper_sha256={dm_inventory['other_mapper_sha256']}")
+    print("KERNEL_DIAGNOSTICS_GATE=PASS source="
+          f"{diagnostics.get('source')} time_filtered=true complete=true")
+    print("LOWER_IO_GATE=PASS source="
+          f"/sys/dev/block/{target['parent_major_minor']}/stat "
+          f"fields={len(lower_preflight['values'])} sector_bytes=512")
+    print(f"LOWER_IO_CLAIM_BOUNDARY={LOWER_IO_CLAIM_BOUNDARY}")
     print(f"SOURCE_GATE={evidence_message}")
     if evidence is not None:
         print(f"QUALIFIED_SOURCE_SHA={evidence['source_sha']}")
@@ -2199,27 +2297,205 @@ def plan(device_arg, confirm_arg, review_path=None):
     print("PHYSICAL_WRITE=NOT_PERFORMED")
 
 
+
+def _normalize_expected_partuuid(value):
+    normalized = value.lower() if isinstance(value, str) else None
+    if (
+            normalized is None or
+            not 8 <= len(normalized) <= 64 or
+            not re.fullmatch(r"[0-9a-f]+(?:-[0-9a-f]+)*", normalized) or
+            sum(ch != "-" for ch in normalized) < 8):
+        raise ProbeError(
+            f"expected_partuuid expected=stable_hex observed={value!r}")
+    return normalized
+
+
+def _require_campaign_target_quiescent(target):
+    """Campaign arms require the admitted partition to be entirely inactive."""
+    _verify_target_identity(target)
+    try:
+        holders = _holder_names(target["major"], target["minor"])
+    except OSError as exc:
+        raise ProbeError(
+            f"campaign_holders expected=[] observed=unavailable:{_bounded_text(exc)}"
+        ) from exc
+    if holders:
+        raise ProbeError(
+            f"campaign_holders expected=[] observed={holders!r}")
+    if _mountinfo_has_device(target["major"], target["minor"]):
+        raise ProbeError(
+            f"campaign_mount expected=absent observed="
+            f"{target['major']}:{target['minor']}")
+    active = _active_swap_for(target["major"], target["minor"])
+    if active is not None:
+        raise ProbeError(
+            "campaign_active_swap expected=absent observed="
+            f"path={active.get('path')!r},size_kib={active.get('size_kib')!r},"
+            f"used_kib={active.get('used_kib')!r},"
+            f"priority={active.get('priority')!r}")
+
+
+def inspect_campaign_target(device_arg, confirm_arg, expected_partuuid):
+    """Read-only admission for the future physical performance campaign."""
+    if not device_arg or device_arg != confirm_arg:
+        raise ProbeError("--device and --confirm-device must match exactly")
+    expected_partuuid = _normalize_expected_partuuid(expected_partuuid)
+    prefix = "/dev/disk/by-partuuid/"
+    if not device_arg.startswith(prefix):
+        raise ProbeError(
+            "campaign device must use /dev/disk/by-partuuid/<exact-PARTUUID>")
+    selected_partuuid = Path(device_arg).name.lower()
+    if selected_partuuid != expected_partuuid:
+        raise ProbeError(
+            f"device_partuuid_path expected={expected_partuuid!r} "
+            f"observed={selected_partuuid!r}")
+    try:
+        device = str(Path(device_arg).resolve(strict=True))
+    except (OSError, RuntimeError) as exc:
+        raise ProbeError(
+            f"campaign_device_path expected=resolvable observed={_bounded_text(exc)}"
+        ) from exc
+    major, minor = block_identity(device)
+    try:
+        sys_entry = Path(
+            f"/sys/dev/block/{major}:{minor}").resolve(strict=True)
+        if not (sys_entry / "partition").is_file():
+            raise ProbeError(
+                f"campaign_device_type expected=partition "
+                f"observed={sys_entry.name!r}")
+        holders = sorted(path.name for path in (sys_entry / "holders").iterdir())
+    except (OSError, RuntimeError) as exc:
+        raise ProbeError(
+            f"campaign_topology expected=readable_partition observed="
+            f"{_bounded_text(exc)}") from exc
+    parent_major_minor = _physical_parent_identity(major, minor)
+    if holders:
+        raise ProbeError(
+            f"campaign_holders expected=[] observed={holders!r}")
+    if _mountinfo_has_device(major, minor):
+        raise ProbeError(
+            f"campaign_mount expected=absent observed={major}:{minor}")
+    _require_root_not_on_target(major, minor)
+    partuuid, size_bytes = _partition_identity(device)
+    if partuuid != expected_partuuid:
+        raise ProbeError(
+            f"campaign_partuuid expected={expected_partuuid!r} "
+            f"observed={partuuid!r}")
+    try:
+        blockdev_size = int(_run(
+            ["blockdev", "--getsize64", device]).stdout.strip())
+    except ValueError as exc:
+        raise ProbeError(
+            "campaign_geometry expected=integer_bytes observed=unparseable") from exc
+    if blockdev_size != size_bytes:
+        raise ProbeError(
+            f"campaign_geometry expected={size_bytes} observed={blockdev_size}")
+    target = {
+        "device": device,
+        "major": major,
+        "minor": minor,
+        "parent_major_minor": parent_major_minor,
+        "size_bytes": size_bytes,
+        "partuuid": partuuid,
+    }
+    _require_campaign_target_quiescent(target)
+    return target
+
+
+def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
+    """Read-only campaign admission; it never substitutes for physical arms."""
+    preflight_start = _utc_timestamp()
+    if not isinstance(source_sha, str) or not re.fullmatch(
+            r"[0-9a-f]{40}", source_sha):
+        raise ProbeError(
+            f"campaign_source_sha expected=40_lower_hex observed={source_sha!r}")
+    target = inspect_campaign_target(
+        device_arg, confirm_arg, expected_partuuid)
+    lower_before = _block_stat_snapshot(target)
+    if lower_before.get("available") is not True:
+        raise ProbeError(
+            "campaign_lower_io_before expected=available "
+            f"observed={lower_before.get('error')}")
+    dm_inventory = _module_mapper_preflight()
+    evidence = current_source_evidence()
+    if evidence.get("head") != source_sha or evidence.get("source_sha") != source_sha:
+        raise ProbeError(
+            f"campaign_source_sha expected={source_sha!r} "
+            f"observed_head={evidence.get('head')!r},"
+            f"qualified={evidence.get('source_sha')!r}")
+    live_artifacts = _artifact_digests()
+    if live_artifacts != evidence.get("artifact_digests"):
+        raise ProbeError(
+            "campaign_artifacts expected=qualified_bytes observed=mismatch")
+    # The network/source checks above may take time. Re-prove target/module and
+    # lower-counter continuity immediately before publishing a preflight PASS.
+    _require_campaign_target_quiescent(target)
+    dm_inventory_after = _module_mapper_preflight()
+    if dm_inventory_after != dm_inventory:
+        raise ProbeError(
+            "campaign_mapper_inventory expected=stable "
+            f"observed_before={dm_inventory!r},observed_after={dm_inventory_after!r}")
+    lower_after = _block_stat_snapshot(target)
+    if lower_after.get("available") is not True:
+        raise ProbeError(
+            "campaign_lower_io_after expected=available "
+            f"observed={lower_after.get('error')}")
+    _lower_io_delta(lower_before, lower_after)
+    diagnostics = _kernel_swapz_messages(preflight_start)
+    _require_kernel_diagnostics(
+        diagnostics, "campaign_kernel_diagnostics")
+
+    print("CAMPAIGN_PREFLIGHT=PASS "
+          f"major_minor={target['major']}:{target['minor']} "
+          f"parent_major_minor={target['parent_major_minor']} "
+          f"partuuid={target['partuuid']} bytes={target['size_bytes']}")
+    print(f"CAMPAIGN_SOURCE_SHA={source_sha}")
+    print("CAMPAIGN_MODULE_MAPPER_GATE=PASS module=absent "
+          f"other_mapper_count={dm_inventory['other_mapper_count']} "
+          f"other_mapper_sha256={dm_inventory['other_mapper_sha256']}")
+    print("CAMPAIGN_KERNEL_DIAGNOSTICS_GATE=PASS source="
+          f"{diagnostics.get('source')} time_filtered=true complete=true")
+    print("CAMPAIGN_LOWER_IO_GATE=PASS source="
+          f"/sys/dev/block/{target['parent_major_minor']}/stat "
+          f"fields={len(lower_after['values'])} sector_bytes=512")
+    print(f"LOWER_IO_CLAIM_BOUNDARY={LOWER_IO_CLAIM_BOUNDARY}")
+    print("PAIRED_RAW_VS_SWAPZ=NOT_RUN")
+    print("HIGH_OCCUPANCY_3600S=NOT_RUN")
+    print("ANONYMOUS_LINUX_SWAP=NOT_RUN")
+    print("PHYSICAL_SERVICE_EXECUTED=NO")
+    print("PHYSICAL_WRITE=NOT_PERFORMED")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Private physical-swap correctness smoke; never part of make test")
-    parser.add_argument("action", choices=("plan", "run", "recover"))
+        description=(
+            "Private physical-swap correctness smoke and read-only campaign "
+            "preflight; never part of make test"))
+    parser.add_argument(
+        "action", choices=("plan", "campaign-plan", "run", "recover"))
     parser.add_argument("--device")
     parser.add_argument("--confirm-device")
+    parser.add_argument("--partuuid")
+    parser.add_argument("--source-sha")
     parser.add_argument("--state-dir")
     parser.add_argument("--review-record")
     args = parser.parse_args(argv)
-    if args.action in {"plan", "run"} and not args.device:
+    if args.action in {"plan", "campaign-plan", "run", "recover"} and not args.device:
         parser.error("--device is required")
-    if args.action in {"plan", "run", "recover"} and not args.device:
-        parser.error("--device is required")
-    if args.action in {"plan", "run", "recover"} and not args.confirm_device:
+    if args.action in {"plan", "campaign-plan", "run", "recover"} and not args.confirm_device:
         parser.error("--confirm-device is required")
+    if args.action == "campaign-plan" and (not args.partuuid or not args.source_sha):
+        parser.error("campaign-plan requires --partuuid and --source-sha")
     if args.action == "run" and (not args.state_dir or not args.review_record):
         parser.error("run requires --state-dir and --review-record")
     if args.action == "recover" and not args.state_dir:
         parser.error("recover requires --state-dir")
     if args.action == "plan":
         plan(args.device, args.confirm_device, args.review_record)
+        return 0
+    if args.action == "campaign-plan":
+        campaign_plan(
+            args.device, args.confirm_device, args.partuuid, args.source_sha)
         return 0
     if args.action == "recover":
         if os.geteuid() != 0:

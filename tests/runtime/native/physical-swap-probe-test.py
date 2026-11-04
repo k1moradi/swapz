@@ -1273,7 +1273,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               missing_lower_after_at=None,
                               truncated_oracle_at=None,
                               teardown_missing_gate=False,
-                              teardown_not_complete=False):
+                              teardown_not_complete=False,
+                              teardown_fabricated_lower=False):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         token = "1234567890abcdef"
@@ -1378,7 +1379,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 counter_reads += 1
                 if counter_reads == missing_lower_after_at:
                     return "0 0 0\n"  # Missing required kernel counters.
-                return "0 0 0 0 0 0 0 0 0 0 0\n"
+                return " ".join(["0"] * probe.MIN_BLOCK_STAT_FIELDS) + "\n"
             return REAL_PATH_READ_TEXT(path, *args, **kwargs)
 
         def is_file(path):
@@ -1404,6 +1405,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 saved_results["block_stats_before"],
                 saved_results["block_stats_after"])
             saved_results["lower_io_evidence_gate"] = "AVAILABLE"
+            if teardown_fabricated_lower:
+                # A serialized AVAILABLE label must not override missing raw
+                # counters when run_probe performs its final revalidation.
+                saved_results["block_stats_after"] = {
+                    "available": False, "error": "injected missing lower stat"}
             saved_results["kernel_swapz_messages"] = {
                 "available": True, "time_filter_applied": True,
                 "truncated": False, "matching_line_count": 0, "messages": "",
@@ -1457,6 +1463,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "inspect_target", return_value=target),
                 mock.patch.object(probe, "_artifact_digests",
                                   return_value=evidence["artifact_digests"]),
+                mock.patch.object(
+                    probe, "_kernel_swapz_messages",
+                    return_value={
+                        "available": True, "source": "journalctl",
+                        "time_filter_applied": True, "truncated": False,
+                        "matching_line_count": 0, "messages": "",
+                    }),
                 mock.patch.object(probe, "validate_review", return_value=review),
                 mock.patch.object(probe.shutil, "which", return_value="/usr/bin/mock"),
                 mock.patch.object(probe.Path, "exists", return_value=False),
@@ -1504,7 +1517,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         oracle_failure_at is not None or \
                         missing_lower_after_at is not None or \
                         truncated_oracle_at is not None or \
-                        teardown_missing_gate or teardown_not_complete:
+                        teardown_missing_gate or teardown_not_complete or \
+                        teardown_fabricated_lower:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
                             "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state"):
@@ -1829,8 +1843,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                           return_value=False),
                         mock.patch.object(probe, "_kernel_swapz_messages",
                                           return_value={
-                                              "available": False,
-                                              "error": "mocked unavailable"}),
+                                              "available": True,
+                                              "source": "journalctl",
+                                              "time_filter_applied": True,
+                                              "truncated": False,
+                                              "matching_line_count": 0,
+                                              "messages": ""}),
                         mock.patch.object(probe.shutil, "which",
                                           return_value="/usr/bin/mock"),
                         mock.patch.object(probe, "_prepare_state", prepare),
@@ -2184,20 +2202,33 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def test_lower_stat_parsing_is_strict_and_host_visible_only(self):
         target = {"parent_major_minor": "8:16"}
-        good = "4 0 8 0 5 0 10 0 0 0 0\n"
+        good_values = [0] * probe.MIN_BLOCK_STAT_FIELDS
+        for index, value in ((0, 4), (2, 8), (4, 5), (6, 10), (15, 2)):
+            good_values[index] = value
+        good = " ".join(str(value) for value in good_values) + "\n"
         with mock.patch.object(probe.Path, "read_text", return_value=good):
             snapshot = probe._block_stat_snapshot(target)
         self.assertTrue(snapshot["available"])
         self.assertEqual(snapshot["device_major_minor"], "8:16")
         self.assertEqual(snapshot["sector_bytes"], 512)
-        for contents, expected in (
-                ("0 1 2\n", "lower_stat_fields"),
-                ("0 0 -1 0 0 0 0 0 0 0 0\n", "lower_stat\\[2\\]"),
-                ("0 0 nan 0 0 0 0 0 0 0 0\n", "lower_stat\\[2\\]"),
-                (f"{2**64} 0 0 0 0 0 0 0 0 0 0\n", "uint64_max"),
-                (f"0 0 {2**64 // 512} 0 0 0 0 0 0 0 0\n",
-                 "uint64_max/512"),
+        self.assertEqual(len(snapshot["values"]), probe.MIN_BLOCK_STAT_FIELDS)
+
+        negative = list(good_values)
+        negative[2] = -1
+        nonnumeric = list(good_values)
+        nonnumeric[2] = "nan"
+        counter_overflow = list(good_values)
+        counter_overflow[0] = 2 ** 64
+        sector_overflow = list(good_values)
+        sector_overflow[2] = 2 ** 64 // 512
+        for values, expected in (
+                ([0] * 15, "lower_stat_fields"),
+                (negative, "lower_stat\\[2\\]"),
+                (nonnumeric, "lower_stat\\[2\\]"),
+                (counter_overflow, "uint64_max"),
+                (sector_overflow, "uint64_max/512"),
         ):
+            contents = " ".join(str(value) for value in values) + "\n"
             with self.subTest(contents=contents), mock.patch.object(
                     probe.Path, "read_text", return_value=contents):
                 failed = probe._block_stat_snapshot(target)
@@ -2207,27 +2238,35 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def test_lower_delta_rejects_reset_wrap_substitution_and_unavailable(self):
         def snapshot(read_requests=3, read_sectors=4, write_requests=5,
-                     write_sectors=6, parent="8:16"):
-            values = [0] * 11
-            for index, value in ((0, read_requests), (2, read_sectors),
-                                 (4, write_requests), (6, write_sectors)):
+                     write_sectors=6, flush_requests=7, parent="8:16"):
+            values = [0] * probe.MIN_BLOCK_STAT_FIELDS
+            for index, value in (
+                    (0, read_requests), (2, read_sectors),
+                    (4, write_requests), (6, write_sectors),
+                    (15, flush_requests)):
                 values[index] = value
             return {"available": True, "values": values,
                     "device_major_minor": parent, "sector_bytes": 512}
         before = snapshot()
-        after = snapshot(4, 6, 8, 10)
+        after = snapshot(4, 6, 8, 10, 9)
         self.assertEqual(probe._lower_io_delta(before, after), {
             "lower_read_requests": 1, "lower_read_bytes": 1024,
             "lower_write_requests": 3, "lower_write_bytes": 2048,
+            "lower_flush_requests": 2,
         })
         for changed, expected in (
-                (snapshot(2, 6, 8, 10), "lower_read_requests.*reset_or_wrap"),
-                (snapshot(4, 3, 8, 10), "lower_read_sectors.*reset_or_wrap"),
-                (snapshot(4, 6, 8, 5), "lower_write_sectors.*reset_or_wrap"),
-                (snapshot(4, 6, 8, 10, "8:32"), "lower_io_device"),
-                ({**after, "values": [-1] + [0] * 10}, "uint64"),
-                ({**after, "values": [2**64] + [0] * 10}, "uint64"),
-                ({**after, "values": after["values"][:10]}, "uint64"),
+                (snapshot(2, 6, 8, 10, 9),
+                 "lower_read_requests.*reset_or_wrap"),
+                (snapshot(4, 3, 8, 10, 9),
+                 "lower_read_sectors.*reset_or_wrap"),
+                (snapshot(4, 6, 8, 5, 9),
+                 "lower_write_sectors.*reset_or_wrap"),
+                (snapshot(4, 6, 8, 10, 6),
+                 "lower_flush_requests.*reset_or_wrap"),
+                (snapshot(4, 6, 8, 10, 9, "8:32"), "lower_io_device"),
+                ({**after, "values": [-1] + [0] * 15}, "uint64"),
+                ({**after, "values": [2**64] + [0] * 15}, "uint64"),
+                ({**after, "values": after["values"][:15]}, "uint64"),
                 ({"available": False, "error": "missing stat"},
                  "lower_io_after.*missing stat"),
         ):
@@ -2288,6 +2327,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertTrue(truncated["stdout_truncated"])
         self.assertFalse(probe._swapz_status_healthy(truncated))
 
+    def test_serialized_available_lower_gate_cannot_hide_missing_counters(self):
+        events, state, _ = self.simulate_physical_run(
+            teardown_fabricated_lower=True)
+        results = state["_test_results"]
+        self.assertEqual(results["lower_io_evidence_gate"], "AVAILABLE")
+        self.assertFalse(results["block_stats_after"]["available"])
+        self.assertIn(("recover",), events)
+
     def test_incomplete_normal_teardown_never_publishes_smoke_pass(self):
         events, state, _ = self.simulate_physical_run(
             teardown_not_complete=True)
@@ -2302,7 +2349,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with mock.patch.object(probe, "inspect_target", return_value=target), \
                 mock.patch.object(probe, "_block_stat_snapshot",
                     return_value={"available": False,
-                                  "error": "lower_stat_fields expected>=11 observed=0"}), \
+                                  "error": "lower_stat_fields expected>=16 observed=0"}), \
                 mock.patch.object(probe, "current_source_evidence",
                                   side_effect=AssertionError(
                                       "source evidence should not be consulted")):
@@ -2345,6 +2392,268 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                       result["lower_io_evidence_error"])
         self.assertEqual(result["kernel_diagnostics_gate"], "BLOCKED")
         self.assertIn("complete", result["kernel_diagnostics_error"])
+
+    def test_kernel_diagnostics_rejects_failure_warning_and_unusable_trace(self):
+        base = {
+            "available": True, "source": "journalctl",
+            "time_filter_applied": True, "truncated": False,
+            "matching_line_count": 1,
+        }
+        self.assertIsNone(probe._kernel_diagnostics_error(
+            {**base, "messages": "device-mapper: swapz alpha loaded"}))
+        for changed, expected in (
+                ({**base, "messages":
+                  "device-mapper: swapz: terminal failure errno=-5"},
+                 "no_swapz_failure_or_warning"),
+                ({**base, "messages":
+                  "kernel: WARNING: swapz invariant warning"},
+                 "no_swapz_failure_or_warning"),
+                ({**base, "truncated": True, "messages": ""},
+                 "expected=complete"),
+                ({**base, "time_filter_applied": False, "messages": ""},
+                 "expected=time_filtered"),
+                ({"available": False, "error": "journal unavailable"},
+                 "expected=available"),
+        ):
+            with self.subTest(changed=changed):
+                self.assertRegex(
+                    probe._kernel_diagnostics_error(changed), expected)
+
+    def test_campaign_quiescence_rejects_any_selected_card_active_swap(self):
+        target = {
+            "device": "/dev/synthetic", "major": 8, "minor": 17,
+            "parent_major_minor": "8:16", "partuuid": "deadbeef-01",
+            "size_bytes": 64 << 20,
+        }
+        active = {
+            "path": "/dev/disk/by-partuuid/deadbeef-01",
+            "kind": "partition", "size_kib": 65532,
+            "used_kib": 0, "priority": -1,
+        }
+        with mock.patch.object(probe, "_verify_target_identity"), \
+                mock.patch.object(probe, "_holder_names", return_value=[]), \
+                mock.patch.object(probe, "_mountinfo_has_device",
+                                  return_value=False), \
+                mock.patch.object(probe, "_active_swap_for",
+                                  return_value=active):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "campaign_active_swap expected=absent.*used_kib=0"):
+                probe._require_campaign_target_quiescent(target)
+
+    def test_campaign_exact_partuuid_path_rejects_stale_card_identity(self):
+        with self.assertRaisesRegex(
+                probe.ProbeError,
+                "device_partuuid_path expected='deadbeef-01' "
+                "observed='cafebabe-01'"):
+            probe.inspect_campaign_target(
+                "/dev/disk/by-partuuid/cafebabe-01",
+                "/dev/disk/by-partuuid/cafebabe-01",
+                "deadbeef-01")
+
+    def campaign_preflight_fixture(self):
+        target = {
+            "device": "/dev/synthetic", "major": 8, "minor": 17,
+            "parent_major_minor": "8:16", "partuuid": "deadbeef-01",
+            "size_bytes": 64 << 20,
+        }
+        source_sha = "a" * 40
+        evidence = {
+            "head": source_sha, "source_sha": source_sha,
+            "artifact_digests": {
+                key: str(index) * 64 for index, (key, _, _) in
+                enumerate(probe.PHYSICAL_ARTIFACTS, start=1)},
+        }
+        values = [0] * probe.MIN_BLOCK_STAT_FIELDS
+        lower = {
+            "available": True, "values": values,
+            "device_major_minor": target["parent_major_minor"],
+            "sector_bytes": 512,
+        }
+        inventory = {
+            "other_mapper_count": 0,
+            "other_mapper_sha256": hashlib.sha256(b"[]").hexdigest(),
+        }
+        diagnostics = {
+            "available": True, "source": "journalctl",
+            "time_filter_applied": True, "truncated": False,
+            "matching_line_count": 0, "messages": "",
+        }
+        return target, source_sha, evidence, lower, inventory, diagnostics
+
+    def test_campaign_plan_source_trace_and_lower_evidence_fail_closed(self):
+        target, source_sha, evidence, lower, inventory, diagnostics = (
+            self.campaign_preflight_fixture())
+        cases = (
+            ("source", {
+                "current_source_evidence": {
+                    **evidence, "head": "b" * 40},
+            }, "campaign_source_sha"),
+            ("truncated", {
+                "kernel": {**diagnostics, "truncated": True},
+            }, "campaign_kernel_diagnostics.*expected=complete"),
+            ("missing-lower", {
+                "lower": {"available": False, "error": "stat missing"},
+            }, "campaign_lower_io_before.*stat missing"),
+        )
+        for name, changes, expected in cases:
+            with self.subTest(name=name):
+                source_evidence = changes.get(
+                    "current_source_evidence", evidence)
+                kernel = changes.get("kernel", diagnostics)
+                first_lower = changes.get("lower", lower)
+                with mock.patch.object(
+                        probe, "inspect_campaign_target",
+                        return_value=target), \
+                        mock.patch.object(
+                            probe, "_block_stat_snapshot",
+                            side_effect=[first_lower, lower]), \
+                        mock.patch.object(
+                            probe, "_module_mapper_preflight",
+                            return_value=inventory), \
+                        mock.patch.object(
+                            probe, "_kernel_swapz_messages",
+                            return_value=kernel), \
+                        mock.patch.object(
+                            probe, "current_source_evidence",
+                            return_value=source_evidence), \
+                        mock.patch.object(
+                            probe, "_artifact_digests",
+                            return_value=evidence["artifact_digests"]), \
+                        mock.patch.object(
+                            probe, "_require_campaign_target_quiescent"):
+                    with self.assertRaisesRegex(probe.ProbeError, expected):
+                        probe.campaign_plan(
+                            "/dev/disk/by-partuuid/deadbeef-01",
+                            "/dev/disk/by-partuuid/deadbeef-01",
+                            "deadbeef-01", source_sha)
+
+    def test_campaign_plan_counter_reset_and_required_work_stay_not_run(self):
+        target, source_sha, evidence, lower, inventory, diagnostics = (
+            self.campaign_preflight_fixture())
+        before = {**lower, "values": list(lower["values"])}
+        after = {**lower, "values": list(lower["values"])}
+        before["values"][0] = 2
+        after["values"][0] = 1
+        def campaign_patches():
+            return (
+                mock.patch.object(probe, "inspect_campaign_target",
+                                  return_value=target),
+                mock.patch.object(probe, "_module_mapper_preflight",
+                                  return_value=inventory),
+                mock.patch.object(probe, "_kernel_swapz_messages",
+                                  return_value=diagnostics),
+                mock.patch.object(probe, "current_source_evidence",
+                                  return_value=evidence),
+                mock.patch.object(probe, "_artifact_digests",
+                                  return_value=evidence["artifact_digests"]),
+                mock.patch.object(probe, "_require_campaign_target_quiescent"),
+            )
+        with ExitStack() as stack:
+            for patch in campaign_patches():
+                stack.enter_context(patch)
+            stack.enter_context(mock.patch.object(
+                probe, "_block_stat_snapshot",
+                side_effect=[before, after]))
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "lower_read_requests reset_or_wrap expected>=2 observed=1"):
+                probe.campaign_plan(
+                    "/dev/disk/by-partuuid/deadbeef-01",
+                    "/dev/disk/by-partuuid/deadbeef-01",
+                    "deadbeef-01", source_sha)
+
+        with ExitStack() as stack:
+            for patch in campaign_patches():
+                stack.enter_context(patch)
+            stack.enter_context(mock.patch.object(
+                probe, "_block_stat_snapshot",
+                side_effect=[lower, lower]))
+            printed = stack.enter_context(mock.patch("builtins.print"))
+            probe.campaign_plan(
+                "/dev/disk/by-partuuid/deadbeef-01",
+                "/dev/disk/by-partuuid/deadbeef-01",
+                "deadbeef-01", source_sha)
+        output = "\n".join(
+            str(call.args[0]) for call in printed.call_args_list)
+        self.assertIn("CAMPAIGN_PREFLIGHT=PASS", output)
+        self.assertIn("PAIRED_RAW_VS_SWAPZ=NOT_RUN", output)
+        self.assertIn("HIGH_OCCUPANCY_3600S=NOT_RUN", output)
+        self.assertIn("ANONYMOUS_LINUX_SWAP=NOT_RUN", output)
+        self.assertIn(probe.LOWER_IO_CLAIM_BOUNDARY, output)
+
+    def test_module_mapper_preflight_rejects_swapz_namespaced_inventory(self):
+        completed = subprocess.CompletedProcess(
+            [], 0,
+            stdout="swapz-stale:SWAPZ-FOREIGN-0123456789abcdef\n",
+            stderr="")
+        with mock.patch.object(probe.Path, "exists", return_value=False), \
+                mock.patch.object(probe, "_run", return_value=completed):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "mapper_provenance expected=no_swapz_namespace"):
+                probe._module_mapper_preflight()
+
+    def test_module_and_kernel_preflight_block_before_review_or_device_write(self):
+        target, evidence = self.physical_preparation_fixture()
+        review = {
+            "reviewer": probe.VERBAL_REVIEWER,
+            "approval_mode": "verbal",
+            "run_id": "0123456789abcdef0123456789abcdef",
+        }
+        lower_values = [0] * probe.MIN_BLOCK_STAT_FIELDS
+        lower = {
+            "available": True, "values": lower_values,
+            "device_major_minor": target["parent_major_minor"],
+            "sector_bytes": 512,
+        }
+        for module_error, kernel, expected in (
+                (probe.ProbeError(
+                    "module_provenance expected=dm_swapz_absent observed=loaded"),
+                 None, "module_provenance"),
+                (None, {"available": False, "error": "journal unavailable"},
+                 "preflight_kernel_diagnostics.*expected=available"),
+        ):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
+                module = mock.Mock(
+                    side_effect=module_error,
+                    return_value={
+                        "other_mapper_count": 0,
+                        "other_mapper_sha256": "a" * 64,
+                    })
+                kernel_record = kernel or {
+                    "available": True, "source": "journalctl",
+                    "time_filter_applied": True, "truncated": False,
+                    "matching_line_count": 0, "messages": "",
+                }
+                with mock.patch.object(probe.os, "geteuid", return_value=0), \
+                        mock.patch.object(probe, "current_source_evidence",
+                                          return_value=evidence), \
+                        mock.patch.object(probe, "inspect_target",
+                                          return_value=target), \
+                        mock.patch.object(probe, "_recovery_base",
+                                          return_value=Path(directory)), \
+                        mock.patch.object(probe, "_artifact_digests",
+                                          return_value=evidence["artifact_digests"]), \
+                        mock.patch.object(probe, "validate_review",
+                                          return_value=review), \
+                        mock.patch.object(probe, "_check_review_unconsumed"), \
+                        mock.patch.object(probe.shutil, "which",
+                                          return_value="/usr/bin/mock"), \
+                        mock.patch.object(probe, "_module_mapper_preflight",
+                                          module), \
+                        mock.patch.object(probe, "_kernel_swapz_messages",
+                                          return_value=kernel_record), \
+                        mock.patch.object(probe, "_block_stat_snapshot",
+                                          return_value=lower), \
+                        mock.patch.object(probe, "_burn_review") as burn, \
+                        mock.patch.object(probe, "_write_block0") as write:
+                    with self.assertRaisesRegex(probe.ProbeError, expected):
+                        probe.run_probe(
+                            target["device_arg"], target["device_arg"],
+                            directory, "/reviewed/review.json")
+                burn.assert_not_called()
+                write.assert_not_called()
 
     def test_source_sha_mismatch_never_grants_review(self):
         target, evidence, review = self.reviewed_device_fixture()
