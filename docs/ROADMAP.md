@@ -41,11 +41,16 @@ different goal drive is a configuration and authorization update, not a source
 constant edit. Package cleanup protects every active PARTUUID ownership marker,
 and packaged units no longer name a historical device or UUID. The installed
 systemd generator now derives the selected `.device` ordering and by-PARTUUID
-`.swap` conflict from the protected selector. The units and privileged
-lifecycle remain disabled pending full lifecycle qualification; deployment
-must also prevent a raw swap alias (for example a by-UUID fstab entry) from
-activating the same partition. The historical live-swap supervisor remains
-tied to its old host and is not a deployment path for the current card.
+`.swap` conflict from the protected selector. The packaged units remain disabled. Ordinary production includes the
+lifecycle implementation but keeps activation runtime-locked until the
+owner-armed, current-boot preflight proves exact source, installed artifacts,
+PARTUUID and target geometry after the code and card qualification gates pass.
+Stop/recovery is separately guarded and may act only on an independently
+verified durable, run-owned transaction; compiled capability alone is never
+activation authorization. Deployment must also prevent a raw swap alias
+(for example a by-UUID fstab entry) from activating the same partition.
+The historical live-swap supervisor remains tied to its old host and is
+not a deployment path for the current card.
 
 The [archived early primary-manager implementation notes](handoff/old-host-physical-and-live-swap-evidence.md)
 document the former fixed-device design. Any `/dev/sda4`, `8:4`, 16 GiB, or original-header
