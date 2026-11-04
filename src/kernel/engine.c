@@ -35,10 +35,15 @@ static int swapz_append_page(struct swapz_engine *engine,
 	int error;
 
 	if (!page->payload_crc32c_valid) {
-		if (logical_page_unique)
+		if (logical_page_unique) {
+			/* Preserve engine-only page semantics; codec owns payload-range
+			 * validation and hashes only after those checks succeed. */
+			if (!swapz_page_valid(page) || !generation)
+				return -EINVAL;
 			return swapz_append_encoded_unique(
 				builder, page->logical_page, generation,
 				page->payload, page->length, page->encoding);
+		}
 		return swapz_append_encoded(
 			builder, page->logical_page, generation,
 			page->payload, page->length, page->encoding);
