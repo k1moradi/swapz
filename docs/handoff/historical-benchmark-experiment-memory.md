@@ -354,3 +354,46 @@ trade-offs and resource limits remain explicit. Preserve fresh-backed canonical
 qualification and keep materialized observations in their separate protocol.
 The study motivates mechanism/residual-owner attribution, not a product gain,
 RAM-bandwidth diagnosis or a replacement of historical raw controls.
+
+## Audit-migrated residual benchmark narrative
+
+These passages were still present in the active benchmark after the first
+historical migration. They are reproduced verbatim from the same
+`docs/benchmark.md` source blob named at the top of this archive. Their
+qualification state and source-pinned chronology are historical; the active
+benchmark and canonical ROADMAP/testing standards define current requirements.
+
+### Partial extent residency before qualification
+
+The current unqualified candidate also retains successfully read payload blocks
+from one immutable 16KiB extent so sequential sibling records do not re-read a
+block already present in `read_scratch`. This is a duplicate-I/O elimination
+experiment, not yet evidence that the faster packed-read verdict becomes
+FASTER. The next owner run must report actual lower READ bytes/requests and
+latency before any such claim. It also reports
+`batch_snapshot_crc_wall_ns` for the unchanged full-transaction pause/resume
+CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
+
+## Confirmation gate
+
+Fast and serial ID63 remain five-pair confirmations because they are promoted
+request-efficiency mechanisms. The owner run must continue to report paired
+95% CIs for useful read throughput, p99, lower bytes and lower requests, with
+zero `parallel_read_coalesce_extra_blocks`.
+
+ID64 no longer has a confirmation gate. Its loaded A/B is removed. The active scheduling question is shallow K=1 detachment: fast QD4/QD8/QD32 use five matched sync/async rounds while fast mixed retains five matched pairs.
+
+ID65 and ID66 are owner-qualified at source
+`2fabd0dc4b3fe09b8e52e9a624e9452647229e09`. The READ helper remains absent
+and compatibility read-worker telemetry stays zero. ID63 owns adjacent-range
+coalescing, while the ordered worker separately has bounded independent
+lower-READ fan-out through the same private-slot infrastructure. Standalone
+same-extent grouping is retired. The final fan-out decision at `11fbc839...`
+established large useful-service and tail-latency gains with ID63 disabled, so
+fan-out is now fixed on and its runtime selector/routine A/B are retired.
+
+Multi-page DISCARD retains all-or-nothing
+generation/mapping/shared-extent-liveness validation with no per-physical-block
+discard epoch/count arrays. The temporary live-ref accounting must be fully
+restored before either error return or commit.
+
