@@ -1359,6 +1359,23 @@ class CiFailureDiagnosticContract(unittest.TestCase):
         self.assertEqual(result["first_error"],
                          "AssertionError: wrong tail guard")
 
+        source_contract = self.diagnostics.diagnose_ci_failure(
+            [
+                "FAIL: test_contract "
+                "(__main__.SourceQualification.test_contract)",
+                '  File "/repo/tests/runtime/native/source-contract-test.py", '
+                "line 42, in test_contract",
+                "ValueError: substring not found",
+                "FAILED (errors=1)",
+            ],
+            1, "native-rootless")
+        self.assertEqual(source_contract["category"], "SOURCE_CONTRACT")
+        self.assertEqual(
+            source_contract["test"],
+            "__main__.SourceQualification.test_contract")
+        self.assertEqual(source_contract["first_error"],
+                         "ValueError: substring not found")
+
         aborted = self.diagnostics.diagnose_ci_failure(
             ["make[1]: *** [Makefile:156: test-userspace] Error 134"],
             2, "native-rootless")
