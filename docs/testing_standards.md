@@ -2951,10 +2951,18 @@ ordinary benchmark path is not switched to this replay mode. The cgroup sets
 `memory.max=896MiB` and `memory.swap.max=0` when supported. The helper first
 establishes the resident baseline without memory.high throttling; immediately
 before releasing the benchmark, `memory.high` becomes the measured ready-state
-`memory.current` plus 64MiB. The host must
-have at least 1 GiB MemAvailable before this destructive-to-performance but
-RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
-weakened.
+`memory.current` plus 64MiB. Before allocating ID36 resources,
+admission may sample `/proc/meminfo` up to five times over four seconds so
+ordinary teardown reclaim can finish; every sample still uses the unchanged
+1 GiB `MemAvailable` floor, and the earlier loaded-preflight observation is
+diagnostic only. The final admission inventory records canonical kernel-kB
+host fields plus the mounted cgroup-root memory controls. A true cgroup-v2 root
+legitimately has no `memory.max` or `memory.current` and is recorded as
+`root-exempt`; when both files are exposed at a namespaced/non-root hierarchy
+root, their canonical values are reported but the child's 896 MiB containment
+ceiling is not a second admission floor. The host must have at least 1 GiB
+MemAvailable before this destructive-to-performance but RAM-only stress begins;
+otherwise qualification is BLOCKED rather than silently weakened.
 
 Immediately before reading the ID36 host-memory inventory, the helper removes
 only `fixture.bin`, `plan/trace.jsonl`, and `plan/manifest.json` from benchmark
