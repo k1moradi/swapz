@@ -151,7 +151,9 @@ Uninstall is transactional too. It refuses active/enabled deployment state,
 active mapper/module use, recovery ownership, or any ownership/digest mismatch,
 then makes and fsyncs a private exact rollback snapshot plus a hash manifest
 before deleting anything. Snapshot bytes and their directory entries are
-fsynced at the initial `prepared` checkpoint. Later phase updates recheck every
+fsynced at the initial `prepared` checkpoint. The private mode-0600 journal
+is applied before its contents are fsynced, and rollback rejects substituted
+journal or rollback-directory metadata. Later phase updates recheck every
 snapshot hash and metadata record, then fsync the new journal and transaction
 directory without repeating fsyncs of the unchanged snapshot. Activation entry
 points are removed first; DKMS, source/module removal, depmod and daemon-reload

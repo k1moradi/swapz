@@ -622,16 +622,24 @@ state = {
 if final.exists() or final.is_symlink():
     if final.is_symlink() or not final.is_file():
         raise SystemExit("unsafe previous package journal")
+    previous_metadata = final.stat()
+    if (previous_metadata.st_uid != os.geteuid()
+            or previous_metadata.st_gid != os.getegid()
+            or stat.S_IMODE(previous_metadata.st_mode) != 0o600
+            or previous_metadata.st_nlink != 1):
+        raise SystemExit("unsafe previous package journal metadata")
     previous = json.loads(final.read_text(encoding="utf-8"))
     for field in ("schema", "version", "kernel_release", "backup_files"):
         if previous.get(field) != state[field]:
             raise SystemExit(f"package rollback snapshot changed: {field}")
 with temporary.open("w", encoding="utf-8") as stream:
+    # Make the private mode part of the same durable file state as the
+    # journal contents; chmod after fsync can lose the mode on power failure.
+    os.fchmod(stream.fileno(), 0o600)
     json.dump(state, stream, sort_keys=True, separators=(",", ":"))
     stream.write("\n")
     stream.flush()
     os.fsync(stream.fileno())
-os.chmod(temporary, 0o600)
 os.replace(temporary, final)
 descriptor = os.open(transaction, os.O_RDONLY | os.O_DIRECTORY)
 try:
@@ -645,6 +653,7 @@ verify_transaction_snapshot() {
   python3 - "$transaction_dir" "$action" "$version" "$kernel_release" <<'PY'
 import hashlib
 import json
+import os
 import stat
 import sys
 from pathlib import Path
@@ -658,6 +667,18 @@ journal = transaction / "state.json"
 if (backup.is_symlink() or not backup.is_dir() or journal.is_symlink()
         or not journal.is_file()):
     raise SystemExit("missing or unsafe package rollback snapshot")
+for directory in (transaction.parent, transaction, backup):
+    metadata = directory.stat()
+    if (metadata.st_uid != os.geteuid()
+            or metadata.st_gid != os.getegid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700):
+        raise SystemExit("unsafe package rollback directory metadata")
+journal_metadata = journal.stat()
+if (journal_metadata.st_uid != os.geteuid()
+        or journal_metadata.st_gid != os.getegid()
+        or stat.S_IMODE(journal_metadata.st_mode) != 0o600
+        or journal_metadata.st_nlink != 1):
+    raise SystemExit("unsafe package rollback journal metadata")
 state = json.loads(journal.read_text(encoding="utf-8"))
 if (state.get("schema") != f"swapz-package-{operation}-v1"
         or state.get("version") != version

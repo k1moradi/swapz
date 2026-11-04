@@ -914,7 +914,9 @@ exec "{flock_binary}" "$@"
         self.assertEqual(upgraded.returncode, 0, upgraded.stderr)
         self.assert_installed_exact()
 
-    def interrupt_upgrade_with_snapshot(self, corrupt_backup, corrupt_metadata=False):
+    def interrupt_upgrade_with_snapshot(
+            self, corrupt_backup, corrupt_metadata=False,
+            corrupt_journal_metadata=False):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_module = self.installed_module.read_bytes()
         self.module.write_bytes(b"replacement-qualified-module\n")
@@ -956,11 +958,13 @@ exec "{flock_binary}" "$@"
                 # Byte-exact content is insufficient if snapshot permissions
                 # have changed since the prepared journal checkpoint.
                 (transaction / "backup/source/dkms.conf").chmod(0o666)
+            if corrupt_journal_metadata:
+                state_path.chmod(0o666)
 
             os.killpg(process.pid, signal.SIGTERM)
             stdout, stderr = process.communicate(timeout=8)
             self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
-            if corrupt_backup or corrupt_metadata:
+            if corrupt_backup or corrupt_metadata or corrupt_journal_metadata:
                 self.assertIn("rollback snapshot invalid", stderr)
                 self.assertFalse((self.prefix / "sbin/swapzctl").exists())
                 self.assertEqual(
@@ -989,6 +993,20 @@ exec "{flock_binary}" "$@"
     def test_upgrade_snapshot_metadata_tamper_quarantines_activation(self):
         self.interrupt_upgrade_with_snapshot(
             corrupt_backup=False, corrupt_metadata=True)
+
+    def test_upgrade_journal_metadata_tamper_quarantines_activation(self):
+        self.interrupt_upgrade_with_snapshot(
+            corrupt_backup=False, corrupt_journal_metadata=True)
+
+    def test_transaction_journal_mode_is_durable_before_publish(self):
+        source = self.script.read_text()
+        start = source.index('with temporary.open("w", encoding="utf-8") as stream:')
+        end = source.index("os.replace(temporary, final)", start)
+        journal_write = source[start:end]
+        mode_set = journal_write.index("os.fchmod(stream.fileno(), 0o600)")
+        durable_write = journal_write.index("os.fsync(stream.fileno())")
+        self.assertLess(mode_set, durable_write)
+        self.assertNotIn("os.chmod(temporary, 0o600)", journal_write)
 
     def test_upgrade_rollback_resolves_module_before_restoring_cli(self):
         self.assertEqual(self.invoke("install").returncode, 0)
