@@ -29,6 +29,7 @@ METADATA_RAM_VALIDATOR = (
     ROOT / "tests/runtime/benchmark/metadata_ram_evidence.py")
 RAM_TRACE_VALIDATOR = runpy.run_path(str(METADATA_RAM_VALIDATOR))
 MAX_EVIDENCE_INPUT_BYTES = 256 * 1024 * 1024
+MAX_ENV_EVIDENCE_INPUT_BYTES = 1024 * 1024
 PHYSICAL_CAMPAIGN_AMENDMENT = (
     ROOT / "tests/runtime/benchmark/physical-qualification-amendment-v2.json")
 
@@ -165,12 +166,20 @@ def load_json_strict(path: Path) -> tuple[dict[str, Any], bytes]:
     return _parse_json_object_bytes(raw, str(path)), raw
 
 
-def sha256_bytes(raw: bytes) -> str:
+def sha256_bytes(raw: Any) -> str | None:
+    """Hash serialized evidence without throwing on malformed direct inputs."""
+    if not isinstance(raw, bytes):
+        return None
     return hashlib.sha256(raw).hexdigest()
 
 
-def parse_env_strict(raw: bytes) -> dict[str, str]:
-    """Parse the verifier's newline-delimited key=value evidence fail closed."""
+def parse_env_strict(raw: Any) -> dict[str, str]:
+    """Parse bounded newline-delimited key=value evidence fail closed."""
+    if not isinstance(raw, bytes) or not raw:
+        raise EvidenceError("cold-boot evidence bytes are empty or invalid")
+    if len(raw) > MAX_ENV_EVIDENCE_INPUT_BYTES:
+        raise EvidenceError(
+            "cold-boot evidence exceeds 1048576-byte input bound")
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -197,10 +206,11 @@ def parse_env_strict(raw: bytes) -> dict[str, str]:
 
 def load_env_strict(path: Path) -> tuple[dict[str, str], bytes]:
     with path.open("rb") as evidence_file:
-        raw = evidence_file.read(1024 * 1024 + 1)
-    if len(raw) > 1024 * 1024:
-        raise EvidenceError(f"{path}: cold-boot evidence exceeds 1 MiB")
-    return parse_env_strict(raw), raw
+        raw = evidence_file.read(MAX_ENV_EVIDENCE_INPUT_BYTES + 1)
+    try:
+        return parse_env_strict(raw), raw
+    except EvidenceError as exc:
+        raise EvidenceError(f"{path}: {exc}") from exc
 
 
 def maximum_logical_sectors(device_bytes: Any) -> int | None:
