@@ -135,7 +135,11 @@ enum fixture_scenario {
     FIXTURE_HOLDER_INITIAL, FIXTURE_UNRELATED_SWAPFILE,
     FIXTURE_WRONG_MOUNT_DEVICE, FIXTURE_REMOTE_OVERSIZED,
     FIXTURE_LOCAL_OVERSIZED, FIXTURE_PID_INVENTORY_EACCES,
-    FIXTURE_SYMLINK_MOUNTINFO, FIXTURE_WRONG_TARGET_OPEN, FIXTURE_SCENARIO_COUNT
+    FIXTURE_SYMLINK_MOUNTINFO, FIXTURE_WRONG_TARGET_OPEN,
+    FIXTURE_TRUNCATED_REMOTE, FIXTURE_TRUNCATED_LOCAL,
+    FIXTURE_NAMESPACE_STAT_EACCES, FIXTURE_STALE_PARTUUID,
+    FIXTURE_POST_SNAPSHOT_MOUNT, FIXTURE_POST_SNAPSHOT_SWAPON,
+    FIXTURE_SCENARIO_COUNT
 };
 static const char *const scenario_names[] = {
     "safe control", "selected mount late", "selected parent mount late",
@@ -152,7 +156,11 @@ static const char *const scenario_names[] = {
     "unrelated /swapfile late", "wrong-device mount alias late",
     "oversized remote mountinfo late", "oversized local mountinfo late",
     "unreadable PID inventory late", "symlink mountinfo late",
-    "selected device identity changed before exclusive open"
+    "selected device identity changed before exclusive open",
+    "truncated remote mountinfo late", "truncated local mountinfo late",
+    "inaccessible PID namespace late", "stale PARTUUID on exclusive open",
+    "new mount immediately after final safe inventory",
+    "new swap immediately after final safe inventory"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -164,6 +172,10 @@ static unsigned int mkswap_calls;
 static unsigned int swapon_calls;
 static unsigned int module_loads;
 static unsigned int recovery_marks;
+static unsigned int starting_state_writes;
+static unsigned int active_state_writes;
+static unsigned int active_inventory_reads;
+static int post_snapshot_injected;
 static struct swapz_primary_target selected_target;
 static struct swapz_primary_target swapz_primary_selected_target;
 
@@ -333,6 +345,19 @@ static void fixture_apply_late_inventory(void)
         assert(length > 0 && (size_t)length < sizeof(path));
         assert(symlink("../3031/mountinfo", path) == 0);
         break;
+    case FIXTURE_TRUNCATED_REMOTE:
+        fixture_inventory_file("3031/mountinfo",
+            "36 25 259:9 / / rw - ext4 /dev/other rw\n"
+            "37 36 8:1 / /selected rw - ext4 /dev/selected");
+        break;
+    case FIXTURE_TRUNCATED_LOCAL:
+        fixture_inventory_file("self/mountinfo",
+            "36 25 259:0 / / rw - ext4 /dev/root rw\n"
+            "37 36 8:1 / /selected rw - ext4 /dev/selected");
+        break;
+    case FIXTURE_NAMESPACE_STAT_EACCES:
+        fixture_mount_open_error = ENOENT;
+        break;
     default:
         /* Every other test also starts with a freshly initialized safe table. */
         break;
@@ -392,6 +417,9 @@ static int fixture_proc_stat(const char *path, struct stat *info)
 {
     char converted[PATH_MAX];
 
+    if (late && scenario == FIXTURE_NAMESPACE_STAT_EACCES &&
+        !strcmp(path, "/proc/3031/ns/mnt"))
+        return fixture_admission_error(EACCES);
     return stat(fixture_proc_path(path, converted), info);
 }
 
@@ -505,6 +533,8 @@ static int fixture_swap_inventory(struct swapz_primary_swap_entry *entries,
         text = unrelated;
     if (late && scenario == FIXTURE_SWAP_INVENTORY_MALFORMED)
         text = "broken inventory\n";
+    if (post_snapshot_injected && scenario == FIXTURE_POST_SNAPSHOT_SWAPON)
+        text = regular;
     if (swapz_primary_parse_swaps(text, entries, capacity, count) < 0)
         return fixture_admission_error(EINVAL);
     return 0;
@@ -532,12 +562,34 @@ static int fixture_stat(const char *path, struct stat *info)
     }
     return fixture_admission_error(ENOENT);
 }
-#define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define swapz_primary_read_swap_inventory(a,b,c) fixture_swap_inventory(a,b,c)
 #define stat(path,info) fixture_stat(path,info)
 @@SWAP_FUNCTION@@
 #undef stat
 #undef swapz_primary_read_swap_inventory
+
+/*
+ * Keep the real production swap admission result. Only after the fourth
+ * (final selected-device) inventory has returned safe do we inject a new
+ * mount or swap. This is an observation of the remaining gap, NOT proof of
+ * kernel exclusivity, and the header-write seam never touches a device.
+ */
+static int fixture_observed_swap_device_active(dev_t device)
+{
+    int active = swapz_primary_swap_device_active(device);
+
+    ++active_inventory_reads;
+    if (late && active == 0 && active_inventory_reads == 4U &&
+        (scenario == FIXTURE_POST_SNAPSHOT_MOUNT ||
+         scenario == FIXTURE_POST_SNAPSHOT_SWAPON)) {
+        post_snapshot_injected = 1;
+        if (scenario == FIXTURE_POST_SNAPSHOT_MOUNT)
+            fixture_inventory_file("3031/mountinfo",
+                "36 25 259:9 / / rw - ext4 /dev/other rw\n"
+                "37 36 8:1 / /selected rw - ext4 /dev/selected rw\n");
+    }
+    return active;
+}
 
 static int fixture_target(struct swapz_primary_target *target)
 {
@@ -594,6 +646,8 @@ static int fixture_target_inspect(const char *partuuid,
     *target = selected_target;
     if (scenario == FIXTURE_WRONG_TARGET_OPEN)
         target->device_minor = 2U;
+    if (scenario == FIXTURE_STALE_PARTUUID)
+        strcpy(target->partuuid, "f13428f6-02");
     return 0;
 }
 
@@ -643,6 +697,19 @@ static int fixture_intent(void)
 }
 static int fixture_header_write(void)
 {
+    /* A diagnostic reread proves that the post-snapshot change is visible,
+     * but it deliberately does not gate the simulated destructive boundary. */
+    if (scenario == FIXTURE_POST_SNAPSHOT_MOUNT) {
+        struct swapz_primary_mount_facts facts = {0};
+
+        assert(post_snapshot_injected);
+        assert(swapz_primary_read_mount_facts(
+            &facts, makedev(8U, 0U)) == 0 && facts.target_mounted);
+    }
+    if (scenario == FIXTURE_POST_SNAPSHOT_SWAPON) {
+        assert(post_snapshot_injected);
+        assert(swapz_primary_swap_device_active(makedev(8U, 1U)) == 1);
+    }
     ++header_writes;
     return 0;
 }
@@ -675,6 +742,16 @@ static int fixture_record_read(size_t *length)
     *length = 1U;
     return 0;
 }
+static int fixture_state_write(const struct swapz_primary_state *state)
+{
+    if (state->stage == SWAPZ_PRIMARY_STAGE_STARTING)
+        ++starting_state_writes;
+    else if (state->stage == SWAPZ_PRIMARY_STAGE_ACTIVE)
+        ++active_state_writes;
+    else
+        abort();
+    return 0;
+}
 static int fixture_hashes(char *control, char *module, char *oracle)
 {
     control[0] = module[0] = oracle[0] = '\0';
@@ -701,7 +778,7 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_header_backup_read_at(...) 0
 #define swapz_primary_header_build(...) 0
 #define swapz_primary_exact_read(...) 0
-#define swapz_primary_state_write_at(...) 0
+#define swapz_primary_state_write_at(a,b,state,owner) fixture_state_write(state)
 #define swapz_primary_module_load_intent_write_at(...) fixture_intent()
 #define swapz_primary_write_header_checked_fd(...) fixture_header_write()
 #define swapz_primary_load_qualified_module(loaded) fixture_load_module(loaded)
@@ -710,27 +787,57 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_format_mapper_swap(...) fixture_mkswap()
 #define swapz_primary_activate_mapper_swap(a,b,c,d,e) fixture_swapon(e)
 #define swapz_primary_state_require_recovery_at(...) (++recovery_marks, 0)
+#define swapz_primary_swap_device_active(device) fixture_observed_swap_device_active(device)
 #define close(fd) 0
 
 /* The actual production coordinator function is inserted verbatim. */
 @@START_FUNCTION@@
+#undef close
+#undef swapz_primary_swap_device_active
 
 static int check_case(enum fixture_scenario candidate)
 {
     int expected_safe;
     int expected_error = 0;
     int result;
+    int result_errno;
+    int saved_stderr;
+    int gap_probe;
+    char diagnostic[512] = {0};
+    char expected_diagnostic[128];
+    size_t diagnostic_length;
+    FILE *diagnostic_stream;
     unsigned int writes;
     scenario = candidate;
     late = 0;
     memset(&swapz_primary_selected_target, 0,
            sizeof(swapz_primary_selected_target));
-    admission_reads = prewrite_reads = 0U;
+    admission_reads = prewrite_reads = active_inventory_reads = 0U;
+    post_snapshot_injected = 0;
     fixture_reset_mount_inventory();
     header_writes = mapper_mutations = mkswap_calls = swapon_calls = 0U;
     module_loads = recovery_marks = 0U;
+    starting_state_writes = active_state_writes = 0U;
+    diagnostic_stream = tmpfile();
+    assert(diagnostic_stream != NULL);
+    assert(fflush(stderr) == 0);
+    saved_stderr = dup(STDERR_FILENO);
+    assert(saved_stderr >= 0);
+    assert(dup2(fileno(diagnostic_stream), STDERR_FILENO) == STDERR_FILENO);
     errno = 0;
     result = swapz_primary_start_prepared();
+    result_errno = errno;
+    assert(fflush(stderr) == 0);
+    assert(dup2(saved_stderr, STDERR_FILENO) == STDERR_FILENO);
+    assert(close(saved_stderr) == 0);
+    assert(fseek(diagnostic_stream, 0L, SEEK_SET) == 0);
+    diagnostic_length = fread(diagnostic, 1U, sizeof(diagnostic) - 1U,
+                              diagnostic_stream);
+    assert(!ferror(diagnostic_stream) && feof(diagnostic_stream));
+    assert(fclose(diagnostic_stream) == 0);
+    diagnostic[diagnostic_length] = '\0';
+    gap_probe = candidate == FIXTURE_POST_SNAPSHOT_MOUNT ||
+                candidate == FIXTURE_POST_SNAPSHOT_SWAPON;
     expected_safe = candidate == FIXTURE_CLEAN ||
         candidate == FIXTURE_UNRELATED_SIBLING ||
         candidate == FIXTURE_UNRELATED_SWAPFILE ||
@@ -756,6 +863,7 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_REMOTE_EACCES:
     case FIXTURE_SWAP_STAT_EACCES:
     case FIXTURE_PID_INVENTORY_EACCES:
+    case FIXTURE_NAMESPACE_STAT_EACCES:
         expected_error = EACCES;
         break;
     case FIXTURE_REMOTE_EIO:
@@ -765,12 +873,15 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_EMPTY:
     case FIXTURE_LOCAL_MALFORMED:
     case FIXTURE_SWAP_INVENTORY_MALFORMED:
+    case FIXTURE_TRUNCATED_REMOTE:
+    case FIXTURE_TRUNCATED_LOCAL:
         expected_error = EINVAL;
         break;
     case FIXTURE_PARENT_SUBSTITUTED:
     case FIXTURE_ROOT_SUBSTITUTED:
     case FIXTURE_ROOT_ON_SELECTED_PARENT:
     case FIXTURE_WRONG_TARGET_OPEN:
+    case FIXTURE_STALE_PARTUUID:
         expected_error = ESTALE;
         break;
     case FIXTURE_ROOT_INITIAL:
@@ -797,10 +908,32 @@ static int check_case(enum fixture_scenario candidate)
                 fixture_mount_read_count, admission_reads);
         return 1;
     }
+    if (gap_probe) {
+        /* The injected mount/swap is detected by a diagnostic production
+         * reread, but no atomic kernel exclusion is established by this test. */
+        if (result != 0 || !post_snapshot_injected ||
+            admission_reads != 2U || prewrite_reads != 1U ||
+            active_inventory_reads != 4U || writes != 4U ||
+            starting_state_writes != 1U || active_state_writes != 1U ||
+            recovery_marks != 0U || diagnostic_length != 0U) {
+            fprintf(stderr, "FAIL: %s: post-snapshot gap result=%d "
+                    "injected=%d reads=%u swap_reads=%u mutations=%u "
+                    "diagnostic=%s\n", scenario_names[candidate], result,
+                    post_snapshot_injected, admission_reads,
+                    active_inventory_reads, writes, diagnostic);
+            return 1;
+        }
+        printf("UNPROVEN: %s: post-final-snapshot mount/swapon exclusivity "
+               "requires a separate host-only kernel proof\n",
+               scenario_names[candidate]);
+        return 0;
+    }
     if (expected_safe) {
         if (result != 0 || admission_reads != 2U || prewrite_reads != 1U ||
             header_writes != 1U || mapper_mutations != 1U ||
-            mkswap_calls != 1U || swapon_calls != 1U) {
+            mkswap_calls != 1U || swapon_calls != 1U ||
+            starting_state_writes != 1U || active_state_writes != 1U ||
+            recovery_marks != 0U || diagnostic_length != 0U) {
             fprintf(stderr, "FAIL: %s: safe result=%d initial+late=%u "
                     "late=%u header_write=%u mapper=%u mkswap=%u swapon=%u\n",
                     scenario_names[candidate], result, admission_reads,
@@ -809,22 +942,44 @@ static int check_case(enum fixture_scenario candidate)
             return 1;
         }
     } else {
-        if (result == 0 || errno != expected_error || writes || module_loads ||
+        const char *phase = late ? "header-write" : "admission";
+        int prefix_length = snprintf(expected_diagnostic,
+            sizeof(expected_diagnostic),
+            "PRIMARY_START=FAILED phase=%s errno=%d error=",
+            phase, expected_error);
+
+        assert(prefix_length > 0 &&
+               (size_t)prefix_length < sizeof(expected_diagnostic));
+        if (result == 0 || result_errno != expected_error ||
+            strncmp(diagnostic, expected_diagnostic,
+                    (size_t)prefix_length) != 0 ||
+            strchr(diagnostic, '\n') != diagnostic + strlen(diagnostic) - 1U ||
+            strstr(diagnostic, "run_id") ||
+            strstr(diagnostic, "0123456789abcdef") ||
+            strstr(diagnostic, "secret") || writes || module_loads ||
+            starting_state_writes != (unsigned int)late ||
+            active_state_writes != 0U ||
+            recovery_marks != (unsigned int)late ||
             ((candidate == FIXTURE_DM_INITIAL ||
               candidate == FIXTURE_SWAPS_INITIAL ||
               candidate == FIXTURE_ROOT_INITIAL ||
               candidate == FIXTURE_HOLDER_INITIAL ||
               candidate == FIXTURE_WRONG_TARGET_OPEN ||
+              candidate == FIXTURE_STALE_PARTUUID ||
               candidate == FIXTURE_PARENT_SUBSTITUTED ||
               candidate == FIXTURE_HOLDER_LATE) ?
                  prewrite_reads != 0U : prewrite_reads != 1U)) {
             fprintf(stderr, "FAIL: %s: refusal result=%d errno=%d expected=%d "
                     "initial+late=%u late=%u header_write=%u mapper=%u mkswap=%u swapon=%u\n",
-                    scenario_names[candidate], result, errno, expected_error,
+                    scenario_names[candidate], result, result_errno, expected_error,
                     admission_reads, prewrite_reads, header_writes,
                     mapper_mutations, mkswap_calls, swapon_calls);
+            fprintf(stderr, "FAIL: diagnostic=%s\n", diagnostic);
             return 1;
         }
+        printf("DENY: %s phase=%s errno=%d claim=retained "
+               "state=%s mutations=0\n", scenario_names[candidate],
+               phase, expected_error, late ? "recovery-requested" : "READY");
     }
     return 0;
 }
@@ -846,7 +1001,8 @@ int main(int argc, char **argv)
                 FTW_DEPTH | FTW_PHYS) == 0);
     if (failures)
         return 1;
-    printf("PASS: production primary-start lifecycle late-race (%d cases)\n",
+    printf("PASS: production primary-start visible admission checks (%d cases; "
+           "post-snapshot probes are explicitly UNPROVEN)\n",
            argc > 1 ? 1 : FIXTURE_SCENARIO_COUNT);
     return 0;
 }
@@ -863,6 +1019,7 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     parser_source = '\n\n'.join(production_function(source, helper) for helper in helpers)
     production_defines = '\n'.join(production_define(source, name) for name in (
         "SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES",
+        "SWAPZ_PRIMARY_SWAP_ROWS_MAX",
         "SWAPZ_PRIMARY_VISIBLE_PIDS_MAX",
         "SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES",
         "SWAPZ_PRIMARY_STATE_RECORD_MAX",
@@ -882,6 +1039,8 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         "swapz_primary_read_mount_facts",
     ))
     coordinator = production_function(source, "swapz_primary_start_prepared")
+    if re.search(r'\bswapz_primary_release_partition_owner_at\s*\(', coordinator):
+        raise AssertionError("Primary start must not consume a prepared claim")
     if mutant:
         coordinator = omit_final_revalidation(coordinator)
     unit = HARNESS.replace('@@PRODUCTION_DEFINES@@', production_defines).replace(
@@ -898,6 +1057,8 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     c_path.write_text(unit)
     compilation = subprocess.run(
         ["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
+         "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+         "-fno-omit-frame-pointer",
          "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-but-set-variable", "-I", str(INCLUDE_DIR), str(c_path),
          "-o", str(binary)], text=True, capture_output=True, check=False)
     if compilation.returncode:

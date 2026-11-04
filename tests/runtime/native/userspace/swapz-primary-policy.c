@@ -695,6 +695,26 @@ static void test_target_config_and_dynamic_geometry(void)
 	assert(!device_unit[0] && !swap_unit[0]);
 	assert(swapz_primary_target_valid(&alternate));
 	assert(swapz_primary_target_identity_equal(&alternate, &alternate));
+	/* The actual production comparator binds all four target identity
+	 * fields, not just a PARTUUID pathname or a device label. */
+	{
+		struct swapz_primary_target stale = alternate;
+
+		stale.partuuid[0] = '8';
+		assert(!swapz_primary_target_identity_equal(&alternate, &stale));
+		stale = alternate;
+		stale.device_major = 8U;
+		assert(!swapz_primary_target_identity_equal(&alternate, &stale));
+		stale = alternate;
+		stale.device_minor = 19U;
+		assert(!swapz_primary_target_identity_equal(&alternate, &stale));
+		stale = alternate;
+		stale.device_bytes += SWAPZ_PRIMARY_BLOCK_BYTES;
+		assert(!swapz_primary_target_identity_equal(&alternate, &stale));
+		stale = alternate;
+		stale.partuuid[0] = 'z';
+		assert(!swapz_primary_target_identity_equal(&alternate, &stale));
+	}
 	assert(swapz_primary_target_valid(&zero_minor));
 	assert(!swapz_primary_target_identity_equal(&alternate, &zero_minor));
 	assert(swapz_primary_target_config_parse(
@@ -2854,12 +2874,14 @@ static void test_package_transaction_process_death_guard(void)
 		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(unlink(journal) == 0);
 	write_package_test_artifact(journal, "{corrupt-json\\n");
+	errno = 0;
 	assert(swapz_primary_package_transactions_clear_at(
-		       transactions, geteuid()) < 0);
+		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(unlink(journal) == 0);
 	assert(symlink("../../published-swapzctl", journal) == 0);
+	errno = 0;
 	assert(swapz_primary_package_transactions_clear_at(
-		       transactions, geteuid()) < 0);
+		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(unlink(journal) == 0);
 	assert(mkfifo(journal, 0600) == 0);
 	/* No journal opens: a FIFO must not cause activation to hang. */
@@ -2868,19 +2890,22 @@ static void test_package_transaction_process_death_guard(void)
 		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(unlink(journal) == 0);
 	/* Even a directory left before the prepared journal is unsafe. */
+	errno = 0;
 	assert(swapz_primary_package_transactions_clear_at(
-		       transactions, geteuid()) < 0);
+		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(rmdir(transaction) == 0);
 	assert(swapz_primary_package_transactions_clear_at(
 		       transactions, geteuid()) == 0);
 
 	assert(mkdir(uninstall_transaction, 0700) == 0);
+	errno = 0;
 	assert(swapz_primary_package_transactions_clear_at(
-		       transactions, geteuid()) < 0);
+		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(rmdir(uninstall_transaction) == 0);
 	write_package_test_artifact(unknown_entry, "ambiguous\n");
+	errno = 0;
 	assert(swapz_primary_package_transactions_clear_at(
-		       transactions, geteuid()) < 0);
+		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(unlink(unknown_entry) == 0);
 	assert(chmod(transactions, 0755) == 0);
 	errno = 0;

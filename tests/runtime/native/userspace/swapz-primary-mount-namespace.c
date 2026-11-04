@@ -270,7 +270,10 @@ static void fixture_reset(void)
 
 static unsigned int fixture_failures;
 
-static void expect_mount_admission(const char *case_name, int should_allow)
+/* expected_errno == 0 means a parsed inventory; in that case a mounted
+ * target refuses through target_mounted rather than an errno value. */
+static void expect_mount_admission(const char *case_name, int should_allow,
+                                   int expected_errno)
 {
 	struct swapz_primary_mount_facts facts = {0};
 	int result;
@@ -280,6 +283,8 @@ static void expect_mount_admission(const char *case_name, int should_allow)
 	result = swapz_primary_read_mount_facts(&facts, makedev(8U, 0U));
 	allowed = result == 0 && !facts.target_mounted;
 	if (allowed != should_allow ||
+	    (expected_errno ? (result == 0 || errno != expected_errno) :
+			      result != 0) ||
 	    (result == 0 && (!facts.root_mount_seen ||
 			    facts.root_device != makedev(259U, 0U)))) {
 		fprintf(stderr, "FAIL: %s: result=%d errno=%d target=%d "
@@ -454,64 +459,75 @@ int main(void)
 	swapz_primary_selected_target.device_bytes =
 		16ULL * 1024ULL * 1024ULL * 1024ULL;
 	fixture_reset();
-	expect_mount_admission("only local root mount", 1);
+	expect_mount_admission("only local root mount", 1, 0);
 	fixture_file("3031/mountinfo",
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:2 / /other rw - ext4 /dev/sda2 rw\n");
-	expect_mount_admission("unrelated sibling", 1);
+	expect_mount_admission("unrelated sibling", 1, 0);
 	/* An apparent /dev/sda1 source with a different major:minor is not ours. */
 	fixture_file("3031/mountinfo",
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:2 / /selected rw - ext4 /dev/sda1 rw\n");
-	expect_mount_admission("wrong-device alias", 1);
+	expect_mount_admission("wrong-device alias", 1, 0);
 	fixture_file("3031/mountinfo",
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
-	expect_mount_admission("selected partition in another namespace", 0);
+	expect_mount_admission("selected partition in another namespace", 0, 0);
 	fixture_file("3031/mountinfo",
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
-	expect_mount_admission("selected parent in another namespace", 0);
+	expect_mount_admission("selected parent in another namespace", 0, 0);
 	fixture_reset();
 	fixture_file("self/mountinfo",
 		     "36 25 259:0 / / rw - ext4 /dev/root rw\n"
 		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
-	expect_mount_admission("selected partition mounted locally", 0);
+	expect_mount_admission("selected partition mounted locally", 0, 0);
 	fixture_reset();
 	fixture_file("self/mountinfo",
 		     "36 25 259:0 / / rw - ext4 /dev/root rw\n"
 		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
-	expect_mount_admission("selected parent mounted locally", 0);
+	expect_mount_admission("selected parent mounted locally", 0, 0);
 
 	fixture_reset();
 	fixture_file("self/mountinfo", "malformed\n");
-	expect_mount_admission("malformed local mount table", 0);
+	expect_mount_admission("malformed local mount table", 0, EINVAL);
 	fixture_reset();
 	fixture_unlink("self/mountinfo");
-	expect_mount_admission("missing local mount table", 0);
+	expect_mount_admission("missing local mount table", 0, ENOENT);
 	fixture_reset();
 	fixture_file("3031/mountinfo", "malformed\n");
-	expect_mount_admission("malformed remote mount table", 0);
+	expect_mount_admission("malformed remote mount table", 0, EINVAL);
 	fixture_reset();
 	fixture_file("3031/mountinfo", "");
-	expect_mount_admission("empty remote mount table", 0);
+	expect_mount_admission("empty remote mount table", 0, EINVAL);
+	/* A partial final mount row must fail parsing, not hide selected 8:1. */
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
+		     "37 36 8:1 / /selected rw - ext4 /dev/selected");
+	expect_mount_admission("truncated remote mount row", 0, EINVAL);
+	fixture_reset();
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - ext4 /dev/root rw\n"
+		     "37 36 8:1 / /selected rw - ext4 /dev/selected");
+	expect_mount_admission("truncated local mount row", 0, EINVAL);
 	fixture_reset();
 	fixture_oversized_file("3031/mountinfo");
-	expect_mount_admission("oversized remote mount table", 0);
+	expect_mount_admission("oversized remote mount table", 0, EOVERFLOW);
 	if (errno != EOVERFLOW) {
 		fprintf(stderr, "FAIL: remote overflow errno=%d\n", errno);
 		++fixture_failures;
 	}
 	fixture_reset();
 	fixture_oversized_file("self/mountinfo");
-	expect_mount_admission("oversized local mount table", 0);
+	expect_mount_admission("oversized local mount table", 0, EOVERFLOW);
 	if (errno != EOVERFLOW) {
 		fprintf(stderr, "FAIL: local overflow errno=%d\n", errno);
 		++fixture_failures;
 	}
 	fixture_reset();
 	fixture_self_mount_open_error = EACCES;
-	expect_mount_admission("unreadable local mount table", 0);
+	expect_mount_admission("unreadable local mount table", 0, EACCES);
 	if (errno != EACCES) {
 		fprintf(stderr, "FAIL: unreadable local errno=%d\n", errno);
 		++fixture_failures;
@@ -520,7 +536,7 @@ int main(void)
 	fixture_unlink("self/mountinfo");
 	assert(snprintf(path, sizeof(path), "%s/self/mountinfo", fixture_proc_root) > 0);
 	assert(symlink("../3031/mountinfo", path) == 0);
-	expect_mount_admission("no-follow local mountinfo symlink", 0);
+	expect_mount_admission("no-follow local mountinfo symlink", 0, ELOOP);
 	if (errno != ELOOP) {
 		fprintf(stderr, "FAIL: symlink mountinfo errno=%d\n", errno);
 		++fixture_failures;
@@ -528,32 +544,32 @@ int main(void)
 	fixture_unlink("self/mountinfo");
 	fixture_reset();
 	fixture_mount_read_error = EIO;
-	expect_mount_admission("opened remote table read error", 0);
+	expect_mount_admission("opened remote table read error", 0, EIO);
 	fixture_reset();
 	fixture_inventory_error = EACCES;
-	expect_mount_admission("permission-denied PID inventory", 0);
+	expect_mount_admission("permission-denied PID inventory", 0, EACCES);
 	fixture_reset();
 	fixture_mount_open_error = EACCES;
-	expect_mount_admission("permission-denied remote table", 0);
+	expect_mount_admission("permission-denied remote table", 0, EACCES);
 	fixture_reset();
 	fixture_unlink("3031/mountinfo");
-	expect_mount_admission("missing table with live namespace", 0);
+	expect_mount_admission("missing table with live namespace", 0, ENOENT);
 
 	for (index = 0; index < sizeof(exit_errors) / sizeof(exit_errors[0]); ++index) {
 		fixture_reset();
 		fixture_mount_open_error = exit_errors[index];
-		expect_mount_admission("exit errno with live namespace", 0);
+		expect_mount_admission("exit errno with live namespace", 0, exit_errors[index]);
 		fixture_unlink("3031/ns/mnt");
-		expect_mount_admission("exit errno with absent namespace", 1);
+		expect_mount_admission("exit errno with absent namespace", 1, 0);
 	}
 	fixture_reset();
 	fixture_mount_open_error = EINVAL;
 	fixture_namespace_stat_error = EACCES;
-	expect_mount_admission("uninspectable namespace is not process exit", 0);
+	expect_mount_admission("uninspectable namespace is not process exit", 0, EACCES);
 	fixture_reset();
 	fixture_unlink("3031/mountinfo");
 	fixture_unlink("3031/ns/mnt");
-	expect_mount_admission("missing table and vanished namespace", 1);
+	expect_mount_admission("missing table and vanished namespace", 1, 0);
 	test_active_swapfile_gate();
 	test_independent_admission_gates();
 	assert(nftw(fixture_proc_root, fixture_remove_entry, 16,
