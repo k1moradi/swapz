@@ -818,7 +818,8 @@ version = sys.argv[3]
 kernel_release = sys.argv[4]
 backup = transaction / "backup"
 journal = transaction / "state.json"
-if (backup.is_symlink() or not backup.is_dir() or journal.is_symlink()
+if (transaction.parent.is_symlink() or transaction.is_symlink()
+        or backup.is_symlink() or not backup.is_dir() or journal.is_symlink()
         or not journal.is_file()):
     raise SystemExit("missing or unsafe package rollback snapshot")
 for directory in (transaction.parent, transaction, backup):
