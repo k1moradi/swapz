@@ -644,6 +644,37 @@ completions fail closed.
 
 Stages are ordered and fail fast. Privileged device sessions must never overlap. If noninteractive privilege or safe owned-device provisioning is unavailable, the complete run reports BLOCKED rather than silently skipping loaded work.
 
+### Native/rootless fail-only subprocess attribution
+
+The private `tests/tools/test-rootless.sh` runner must keep the exact registered
+suite invocations and their sequential order, including package transactions.
+Each unexpected child failure is attributed to its source-controlled suite
+pathname or static shell-check phase, with the **original** numeric exit status,
+a phase elapsed wall-clock count, total rootless-stage elapsed wall-clock count,
+and a source line for directly failing shell assertions. The first nonzero
+command wins: later checks must not run or replace its reason. Bash's built-in
+`SECONDS` is sufficient for fail-only wall-time attribution; do not spawn
+`date`, `time` or `tee` for every passing test, add PASS chatter, adjust frozen
+timeouts, or reinterpret a long-running phase as a hang. Exit 124 alone is
+ambiguous between a watchdog timeout and a child returning 124, and a TERM
+signal cannot prove why termination occurred.
+
+On failure only, retain one bounded diagnostic containing safe phase/status/time
+fields and a next inspection step in a freshly allocated private 0700 directory
+under `build/tests`, with a 0600 regular log file. The failure marker may give
+its **repository-relative** log location but must never print root checkout
+paths, arbitrary child stderr, credentials, payload bytes, device identities,
+UUIDs or `BASH_COMMAND`. The original subprocess output remains in the
+caller's privately captured official-stage output for finding the first
+`FAIL:`/`ERROR:` unittest; do not copy that output into publishable reports.
+Only the fail-only `FAIL:`, `Failed during:`, and `Reason:` markers expose
+bounded safe fields to the existing reporter. A failing status must survive
+diagnostic write errors and EXIT/ERR/signal traps without a duplicate marker.
+Successful stdout/stderr and exit status are unchanged and no failure log is
+created. Synthetic regular-file/stub-command tests must cover success, ordinary
+nonzero child failure, timeout-style 124, explicit shell exit, and failing shell
+assertions; they are not substitutes for the single official `make test`.
+
 Package install, upgrade and uninstall must preserve primary recovery authority.
 An exact already-installed identity may return as a no-op, but any package
 mutation is BLOCKED while `primary-state.json` or a partition ownership marker
