@@ -160,6 +160,7 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_TEST_DKMS_VERSION=VERSION,
             SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS="0",
             SWAPZ_TEST_FAIL_TRANSACTION_PHASE="never",
+            SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE="never",
             SWAPZ_FAKE_FAIL_AT="never",
             SWAPZ_FAKE_BUILD_SLEEP="0",
             SWAPZ_FAKE_REMOVE_SLEEP="0",
@@ -1969,6 +1970,102 @@ exec "{flock_binary}" "$@"
         self.assertTrue((transaction / "state.json").exists())
         blocked = self.invoke("uninstall")
         self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_committed_record_cleanup_failure_preserves_verified_state(self):
+        failed_install = self.invoke("install", {
+            "SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE": "remove",
+        })
+        self.assertEqual(failed_install.returncode, 73, failed_install.stderr)
+        self.assertIn("install committed and exact package verified",
+                      failed_install.stderr)
+        self.assert_installed_exact()
+        install_transactions = list(
+            (self.home / "transactions").glob("swapz-package.*"))
+        self.assertEqual(len(install_transactions), 1)
+        self.assertEqual(
+            json.loads((install_transactions[0] / "state.json").read_text())["phase"],
+            "committed")
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
+        self.assertFalse(install_transactions[0].exists())
+
+        failed_uninstall = self.invoke("uninstall", {
+            "SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE": "remove",
+        })
+        self.assertEqual(failed_uninstall.returncode, 73,
+                         failed_uninstall.stderr)
+        self.assertIn("uninstall committed and empty state verified",
+                      failed_uninstall.stderr)
+        self.assert_absent()
+        uninstall_transactions = self.uninstall_transactions()
+        self.assertEqual(len(uninstall_transactions), 1)
+        self.assertEqual(
+            json.loads((uninstall_transactions[0] / "state.json").read_text())["phase"],
+            "committed")
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_absent()
+        self.assertFalse(uninstall_transactions[0].exists())
+
+    def test_rollback_record_cleanup_failure_keeps_exact_previous_install(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        failed = self.invoke("uninstall", {
+            "SWAPZ_TEST_UNINSTALL_FAIL_AFTER": "dkms-removed",
+            "SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE": "remove",
+        })
+        self.assertEqual(failed.returncode, 2, failed.stderr)
+        self.assertIn("uninstall rollback succeeded", failed.stderr)
+        self.assertIn("transaction-record cleanup failed", failed.stderr)
+        self.assert_installed_exact()
+        transactions = self.uninstall_transactions()
+        self.assertEqual(len(transactions), 1)
+        self.assertEqual(
+            json.loads((transactions[0] / "state.json").read_text())["phase"],
+            "rolled-back")
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
+        self.assertFalse(transactions[0].exists())
+
+    def test_recover_reports_succeeded_rollback_if_final_record_cleanup_fails(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase(
+            "uninstall", "dkms-removed")
+        failed = self.invoke("recover", {
+            "SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE": "remove",
+        })
+        self.assertEqual(failed.returncode, 73, failed.stderr)
+        self.assertIn("rollback succeeded", failed.stderr)
+        self.assertNotIn("rollback incomplete", failed.stderr)
+        self.assert_installed_exact()
+        self.assertTrue(transaction.exists())
+        self.assertEqual(
+            json.loads((transaction / "state.json").read_text())["phase"],
+            "rolled-back")
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
+        self.assertFalse(transaction.exists())
+
+    def test_recover_committed_install_cleanup_failure_preserves_activation(self):
+        transaction = self.kill_at_durable_phase("install", "committed")
+        failed = self.invoke("recover", {
+            "SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE": "remove",
+        })
+        self.assertEqual(failed.returncode, 73, failed.stderr)
+        self.assertIn("final state verified", failed.stderr)
+        self.assertIn("rollback not attempted", failed.stderr)
+        self.assertNotIn("rollback incomplete", failed.stderr)
+        self.assert_installed_exact()
+        self.assertTrue(transaction.exists())
+        self.assertEqual(
+            json.loads((transaction / "state.json").read_text())["phase"],
+            "committed")
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
+        self.assertFalse(transaction.exists())
 
     def test_recover_committed_install_and_uninstall_after_sigkill(self):
         committed_install = self.kill_at_durable_phase("install", "committed")
