@@ -90,13 +90,28 @@ canonical_unsigned()
 	esac
 }
 
-canonical_signed()
+canonical_status_error()
 {
 	case "$1" in
-	0|[1-9]|[1-9][0-9]*) canonical_unsigned "$1" ;;
-	-[1-9]|-[1-9][0-9]*) canonical_unsigned "${1#-}" ;;
-	*) return 1 ;;
+	0)
+		return 0
+		;;
+	-[1-9]|-[1-9][0-9]*)
+		magnitude=${1#-}
+		limit=2147483648
+		;;
+	[1-9]|[1-9][0-9]*)
+		magnitude=$1
+		limit=2147483647
+		;;
+	*)
+		return 1
+		;;
 	esac
+	canonical_unsigned "$magnitude" || return 1
+	[ "${#magnitude}" -lt 10 ] && return 0
+	[ "${#magnitude}" -eq 10 ] || return 1
+	[ "$magnitude" -le "$limit" ]
 }
 
 canonical_partuuid()
@@ -714,7 +729,7 @@ observe_runtime()
 			*) append_reason observation_reasons target_failure_state_invalid ;;
 			esac
 			if [ "$first_error" != unavailable ]; then
-				if canonical_signed "$first_error"; then
+				if canonical_status_error "$first_error"; then
 					error_state_valid=1
 				else
 					append_reason observation_reasons target_failure_state_invalid

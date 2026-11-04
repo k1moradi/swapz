@@ -1417,6 +1417,8 @@ class RuntimeHealthTests(unittest.TestCase):
             ("failed=0", "failed=2"),
             ("failed=0", "failed=not-a-number"),
             ("error=0", "error=-0"),
+            ("error=0", "error=2147483648"),
+            ("error=0", "error=-2147483649"),
             ("error=0", "error=not-a-number"),
         ):
             with self.subTest(malformed_value=malformed_value):
@@ -1439,12 +1441,16 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("failures=target_failed", failed.stderr)
         self.assertIn("failed=1", failed.stderr)
 
-        env["MOCK_DM_STATUS"] = valid_status.replace("error=0", "error=-5")
-        terminal_error = self.run_helper("once", env)
-        self.assertEqual(terminal_error.returncode, 1, terminal_error.stderr)
-        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", terminal_error.stderr)
-        self.assertIn("failures=first_terminal_error", terminal_error.stderr)
-        self.assertIn("first_error=-5", terminal_error.stderr)
+        for valid_error in ("-5", "-2147483648", "2147483647"):
+            with self.subTest(valid_error=valid_error):
+                env["MOCK_DM_STATUS"] = valid_status.replace(
+                    "error=0", f"error={valid_error}"
+                )
+                terminal_error = self.run_helper("once", env)
+                self.assertEqual(terminal_error.returncode, 1, terminal_error.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", terminal_error.stderr)
+                self.assertIn("failures=first_terminal_error", terminal_error.stderr)
+                self.assertIn(f"first_error={valid_error}", terminal_error.stderr)
 
     def test_monitoring_error_is_degraded_not_a_destructive_action(self) -> None:
         env = self.env.copy()
