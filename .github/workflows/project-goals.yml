@@ -5,8 +5,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# GitHub replaces an older pending member of a shared concurrency group even
+# when cancel-in-progress is false. Keep every exact-SHA run independently
+# observable; hosted-runner capacity may queue it without superseding it.
 concurrency:
-  group: project-goals-${{ github.ref }}
+  group: project-goals-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 env:
   PYTHONPYCACHEPREFIX: ${{ github.workspace }}/build/python-cache
