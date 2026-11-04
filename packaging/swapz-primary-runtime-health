@@ -721,7 +721,7 @@ observe_runtime()
 				esac
 			done
 			for token_name in flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
-				eval "value=\$token_name"
+				eval "value=\$$token_name"
 				[ "$value" = unavailable ] || canonical_unsigned "${value#-}" || append_reason observation_reasons dm_status_counter_invalid
 			done
 			# Missing or malformed terminal-state telemetry is incomplete
