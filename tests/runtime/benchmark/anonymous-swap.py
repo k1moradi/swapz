@@ -78,8 +78,8 @@ def require_isolated_cgroup(cgroup: dict) -> None:
 
 
 def page_bytes(index: int) -> bytes:
-    if index < 0:
-        raise ValueError("page index must be nonnegative")
+    if type(index) is not int or not 0 <= index < (1 << 64):
+        raise ValueError("page index must be an unsigned 64-bit integer")
     if index & 1:
         return hashlib.shake_256(index.to_bytes(8, "little") + b"swapz-entropy").digest(PAGE)
     header = b"swapz-anonymous-page:" + str(index).encode("ascii") + b"\0"
@@ -504,18 +504,26 @@ def run(args):
     mapping = mmap.mmap(
         -1, args.bytes, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS,
         prot=mmap.PROT_READ | mmap.PROT_WRITE)
+    args._partial_report["cleanup"] = "mapping-open"
     try:
+        args._partial_report["stage"] = "fill"
         fill_cpu_before = resource.getrusage(resource.RUSAGE_SELF)
         fill_start = time.monotonic_ns()
         for page in range(page_count):
             offset = page * PAGE
-            mapping[offset:offset + PAGE] = page_bytes(page)
+            expected = page_bytes(page)
+            if len(expected) != PAGE:
+                raise ValueError(
+                    f"phase=fill page={page} expected_size={PAGE} "
+                    f"observed_size={len(expected)} cause=page-size-mismatch")
+            mapping[offset:offset + PAGE] = expected
         fill_seconds = (time.monotonic_ns() - fill_start) / 1e9
         fill_cpu_after = resource.getrusage(resource.RUSAGE_SELF)
         fill_process_cpu = process_cpu_delta(fill_cpu_before, fill_cpu_after)
 
         rounds, mismatches, combined, max_observed = [], 0, array.array("Q"), 0
         for round_index in range(args.rounds):
+            args._partial_report["stage"] = f"round-{round_index + 1}-verify"
             cgroup = cgroup_values()
             if args.expected_swap_device:
                 require_isolated_cgroup(cgroup)
@@ -551,11 +559,23 @@ def run(args):
 
                 verify_begin = time.monotonic_ns()
                 actual = mapping[offset:offset + PAGE]
+                if len(expected) != PAGE or len(actual) != PAGE:
+                    raise ValueError(
+                        f"phase=verify round={round_index + 1} page={page} "
+                        f"expected_size={PAGE} generated_size={len(expected)} "
+                        f"observed_size={len(actual)} cause=page-size-mismatch")
                 if actual != expected:
                     mismatches += 1
-                    if mismatches > 16:
-                        raise ValueError(
-                            "anonymous byte oracle exceeded mismatch limit")
+                    args._partial_report["oracle"] = {
+                        "mismatches": mismatches,
+                        "verified_pages": round_index * page_count + page,
+                    }
+                    raise ValueError(
+                        f"phase=verify round={round_index + 1} page={page} "
+                        f"expected_size={PAGE} observed_size={len(actual)} "
+                        f"expected_sha256={hashlib.sha256(expected).hexdigest()} "
+                        f"observed_sha256={hashlib.sha256(actual).hexdigest()} "
+                        "cause=page-hash-mismatch")
                 verification_ns += time.monotonic_ns() - verify_begin
             round_seconds = (time.monotonic_ns() - start) / 1e9
             round_cpu_after = resource.getrusage(resource.RUSAGE_SELF)
@@ -766,11 +786,22 @@ def run(args):
                     "host CPU are excluded and host_cpu is reported separately"),
             },
         }
-        args._partial_report = report
-        write_new_json(Path(args.result), report)
-        print(json.dumps(report, sort_keys=True))
+        args._partial_report = {
+            **report, "stage": "publish", "cleanup": "mapping-open"}
     finally:
-        mapping.close()
+        prior_failure = sys.exc_info()[1]
+        try:
+            mapping.close()
+        except (OSError, BufferError) as close_error:
+            args._partial_report["cleanup"] = "mapping-close-failed"
+            args._partial_report["cleanup_error"] = type(close_error).__name__
+            if prior_failure is None:
+                raise
+        else:
+            args._partial_report["cleanup"] = "mapping-closed"
+    # Never publish PASS while an anonymous mapping can still fail to close.
+    write_new_json(Path(args.result), report)
+    print(json.dumps(report, sort_keys=True))
 
 
 def main():
@@ -786,9 +817,11 @@ def main():
     previous_sigint = signal.signal(signal.SIGINT, interrupt_benchmark)
     previous_sigterm = signal.signal(signal.SIGTERM, interrupt_benchmark)
     try: run(args)
-    except (OSError, ValueError, KeyError, TypeError, BenchmarkInterrupted,
-            subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, BufferError,
+            MemoryError, BenchmarkInterrupted, subprocess.SubprocessError) as exc:
         failure = dict(getattr(args, "_partial_report", {}) or {})
+        failure.setdefault("stage", "preflight")
+        failure.setdefault("cleanup", "mapping-not-allocated")
         failure.update({"schema": SCHEMA, "verdict": "FAIL", "workload_id": args.workload_id,
                         "candidate": args.candidate, "source_sha": args.source_sha, "failure_reason": str(exc)})
         try:

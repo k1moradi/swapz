@@ -110,6 +110,15 @@ def parse_weights(text):
 
 
 def schedule(seed, count, weights):
+    # Guard direct callers too: main's --pages check must not be the only
+    # barrier before the count-sized schedule allocation.
+    if type(count) is not int or not 1 <= count <= 65536:
+        raise ValueError("fixture pages must be in 1..65536")
+    if (not isinstance(weights, dict) or not weights or
+            any(name not in PROFILES or type(weight) is not int or weight < 0
+                for name, weight in weights.items()) or
+            not any(weights.values())):
+        raise ValueError("invalid fixture profile weights")
     total = sum(weights.values())
     quotas = {name: count * value // total for name, value in weights.items()}
     missing = count - sum(quotas.values())
@@ -137,6 +146,10 @@ def lz4_compressor():
 
 
 def measure(compress, page):
+    if len(page) != PAGE:
+        raise ValueError(
+            f"phase=measure expected_size={PAGE} observed_size={len(page)} "
+            "cause=page-size-mismatch")
     source = ctypes.create_string_buffer(page, PAGE)
     output = ctypes.create_string_buffer(CAP)
     size = compress(source, output, PAGE, CAP, 1)
@@ -200,6 +213,40 @@ def generate(seed, count, weights, compress):
     return bytes(payload), result
 
 
+def verify_fixture(path, manifest):
+    """Independently reread every generated record before accepting the fixture."""
+    names = schedule(
+        manifest["seed"], manifest["pages"], manifest["requested_profile_weights"])
+    if (manifest.get("page_bytes") != PAGE or
+            manifest.get("profile_pages") != dict(Counter(names))):
+        raise ValueError("phase=verify cause=workload-metadata-mismatch")
+
+    observed_digest = hashlib.sha256()
+    with path.open("rb") as fixture:
+        for index, profile in enumerate(names):
+            observed = fixture.read(PAGE)
+            if len(observed) != PAGE:
+                raise ValueError(
+                    f"phase=verify record={index} expected_size={PAGE} "
+                    f"observed_size={len(observed)} cause=truncated-record")
+            expected = page_bytes(manifest["seed"], index, profile)
+            if observed != expected:
+                raise ValueError(
+                    f"phase=verify record={index} expected_sha256="
+                    f"{hashlib.sha256(expected).hexdigest()} observed_sha256="
+                    f"{hashlib.sha256(observed).hexdigest()} cause=page-hash-mismatch")
+            observed_digest.update(observed)
+        if fixture.read(1):
+            raise ValueError(
+                f"phase=verify record={len(names)} expected_size=0 "
+                "observed_size=nonzero cause=trailing-record")
+    if observed_digest.hexdigest() != manifest.get("fixture_sha256"):
+        raise ValueError(
+            "phase=verify expected_sha256=" + str(manifest.get("fixture_sha256")) +
+            " observed_sha256=" + observed_digest.hexdigest() +
+            " cause=fixture-hash-mismatch")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--output-prefix", type=Path, required=True)
@@ -213,9 +260,15 @@ def main():
     content, manifest = generate(args.seed, args.pages, weights,
                                  lz4_compressor())
     args.output_prefix.parent.mkdir(parents=True, exist_ok=True)
-    args.output_prefix.with_suffix(".bin").write_bytes(content)
-    args.output_prefix.with_suffix(".json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    fixture_path = args.output_prefix.with_suffix(".bin")
+    if fixture_path.write_bytes(content) != len(content):
+        raise ValueError("phase=write cause=short-fixture-write")
+    verify_fixture(fixture_path, manifest)
+    metadata_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    metadata_path = args.output_prefix.with_suffix(".json")
+    if (metadata_path.write_text(metadata_text) != len(metadata_text) or
+            metadata_path.read_text() != metadata_text):
+        raise ValueError("phase=verify cause=workload-metadata-write-mismatch")
     print(json.dumps(manifest, sort_keys=True))
 
 

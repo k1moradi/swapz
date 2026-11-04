@@ -1380,6 +1380,17 @@ classification. Representative fixtures retain the existing no-dump/mlock
 protection and fail closed if it cannot be established. A filename never proves
 a content class.
 
+The synthetic anonymous-page generator must reject invalid page counts before
+allocating its schedule, refuse liblz4 measurements of non-4096-byte pages,
+and reread each written page against the deterministic seed/index/profile
+recipe and whole-fixture SHA-256 before writing its sidecar. Truncated, extra
+or changed records and mismatched metadata are failures, not qualification.
+The anonymous-swap worker independently compares every 4096-byte page on
+every admitted reread; failed comparisons report the phase, page index and
+expected/observed digests and cleanup outcome. PASS is written only after
+the anonymous mapping closes successfully; rootless fixture checks do not
+establish physical swap-in evidence.
+
 The sustained replay's write permutation has a closed-form inverse, so latest
 page generations are reconstructed from per-lane completed-write counters. It
 must never allocate a logical-page map proportional to the advertised swap
