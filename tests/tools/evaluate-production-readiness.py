@@ -731,8 +731,20 @@ def validate_physical_campaign_evidence(
     if not _same_json_value(serialized_campaign, campaign):
         reject("sealed campaign object differs from artifact bytes")
     campaign = serialized_campaign
-    if campaign.get("source_sha") != source_sha:
-        reject("sealed campaign source binding mismatch")
+    campaign_source_sha = campaign.get("source_sha")
+    if campaign_source_sha != source_sha:
+        if (
+                isinstance(campaign_source_sha, str) and
+                GIT_SHA_RE.fullmatch(campaign_source_sha)):
+            reject(
+                "sealed campaign source binding mismatch: "
+                f"metric=source_sha observed={campaign_source_sha} "
+                f"expected={source_sha}")
+        else:
+            reject(
+                "sealed campaign source binding mismatch: "
+                "metric=source_sha observed=invalid "
+                f"expected={source_sha}")
 
     source_tree_sha = campaign.get("source_tree_sha")
     if (
