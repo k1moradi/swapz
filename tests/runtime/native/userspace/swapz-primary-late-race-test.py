@@ -10,6 +10,7 @@ mount or swap activation after that snapshot returns and before header mutation.
 A deliberately weakened local copy must demonstrate the regression's power.
 """
 from pathlib import Path
+import os
 import re
 import subprocess
 import sys
@@ -172,6 +173,7 @@ static unsigned int mkswap_calls;
 static unsigned int swapon_calls;
 static unsigned int module_loads;
 static unsigned int recovery_marks;
+static unsigned int owner_release_calls;
 static unsigned int starting_state_writes;
 static unsigned int active_state_writes;
 static unsigned int active_inventory_reads;
@@ -752,6 +754,11 @@ static int fixture_state_write(const struct swapz_primary_state *state)
         abort();
     return 0;
 }
+static int fixture_owner_release(void)
+{
+    ++owner_release_calls;
+    return 0;
+}
 static int fixture_hashes(char *control, char *module, char *oracle)
 {
     control[0] = module[0] = oracle[0] = '\0';
@@ -787,6 +794,7 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_format_mapper_swap(...) fixture_mkswap()
 #define swapz_primary_activate_mapper_swap(a,b,c,d,e) fixture_swapon(e)
 #define swapz_primary_state_require_recovery_at(...) (++recovery_marks, 0)
+#define swapz_primary_release_partition_owner_at(...) fixture_owner_release()
 #define swapz_primary_swap_device_active(device) fixture_observed_swap_device_active(device)
 #define close(fd) 0
 
@@ -794,6 +802,7 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 @@START_FUNCTION@@
 #undef close
 #undef swapz_primary_swap_device_active
+#undef swapz_primary_release_partition_owner_at
 
 static int check_case(enum fixture_scenario candidate)
 {
@@ -816,7 +825,7 @@ static int check_case(enum fixture_scenario candidate)
     post_snapshot_injected = 0;
     fixture_reset_mount_inventory();
     header_writes = mapper_mutations = mkswap_calls = swapon_calls = 0U;
-    module_loads = recovery_marks = 0U;
+    module_loads = recovery_marks = owner_release_calls = 0U;
     starting_state_writes = active_state_writes = 0U;
     diagnostic_stream = tmpfile();
     assert(diagnostic_stream != NULL);
@@ -915,7 +924,8 @@ static int check_case(enum fixture_scenario candidate)
             admission_reads != 2U || prewrite_reads != 1U ||
             active_inventory_reads != 4U || writes != 4U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
-            recovery_marks != 0U || diagnostic_length != 0U) {
+            recovery_marks != 0U || owner_release_calls != 0U ||
+            diagnostic_length != 0U) {
             fprintf(stderr, "FAIL: %s: post-snapshot gap result=%d "
                     "injected=%d reads=%u swap_reads=%u mutations=%u "
                     "diagnostic_bytes=%zu\n", scenario_names[candidate], result,
@@ -933,7 +943,8 @@ static int check_case(enum fixture_scenario candidate)
             header_writes != 1U || mapper_mutations != 1U ||
             mkswap_calls != 1U || swapon_calls != 1U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
-            recovery_marks != 0U || diagnostic_length != 0U) {
+            recovery_marks != 0U || owner_release_calls != 0U ||
+            diagnostic_length != 0U) {
             fprintf(stderr, "FAIL: %s: safe result=%d initial+late=%u "
                     "late=%u header_write=%u mapper=%u mkswap=%u swapon=%u\n",
                     scenario_names[candidate], result, admission_reads,
@@ -961,6 +972,7 @@ static int check_case(enum fixture_scenario candidate)
             starting_state_writes != (unsigned int)late ||
             active_state_writes != 0U ||
             recovery_marks != (unsigned int)late ||
+            owner_release_calls != 0U ||
             ((candidate == FIXTURE_DM_INITIAL ||
               candidate == FIXTURE_SWAPS_INITIAL ||
               candidate == FIXTURE_ROOT_INITIAL ||
@@ -1041,8 +1053,6 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         "swapz_primary_read_mount_facts",
     ))
     coordinator = production_function(source, "swapz_primary_start_prepared")
-    if re.search(r'\bswapz_primary_release_partition_owner_at\s*\(', coordinator):
-        raise AssertionError("Primary start must not consume a prepared claim")
     if mutant:
         coordinator = omit_final_revalidation(coordinator)
     unit = HARNESS.replace('@@PRODUCTION_DEFINES@@', production_defines).replace(
@@ -1058,16 +1068,24 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     binary = workdir / ("mutant" if mutant else "production")
     c_path.write_text(unit)
     compilation = subprocess.run(
-        ["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
+        ["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Wpedantic",
+         "-Wstrict-prototypes", "-Werror",
          "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
          "-fno-omit-frame-pointer",
-         "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-but-set-variable", "-I", str(INCLUDE_DIR), str(c_path),
-         "-o", str(binary)], text=True, capture_output=True, check=False)
+         "-Wno-unused-function", "-Wno-unused-variable",
+         "-Wno-unused-but-set-variable", "-I", str(INCLUDE_DIR), str(c_path),
+         "-o", str(binary)], text=True, capture_output=True, timeout=30,
+        check=False)
     if compilation.returncode:
         raise AssertionError(f"{c_path.name} compile failed:\n{compilation.stderr}")
+    sanitizer_environment = dict(
+        os.environ,
+        ASAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_leaks=1",
+        UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
     return subprocess.run(
         [str(binary), "negative-control"] if mutant else [str(binary)],
-        text=True, capture_output=True, check=False)
+        text=True, capture_output=True, env=sanitizer_environment,
+        timeout=10, check=False)
 
 
 def main() -> int:
