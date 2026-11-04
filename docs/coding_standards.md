@@ -433,12 +433,16 @@ device disappearance cannot reach a write.
 The requested O_EXCL flag alone is not proof of a kernel-exclusive admission
 interval. A fake successful exclusive open establishes only the requested
 flags, never BLK_EXCL behavior against real concurrent holders or swapon.
-The production opener currently requests O_RDWR/O_EXCL/O_CLOEXEC/O_NOFOLLOW
-and rechecks BLKROGET and descriptor identity, but does not separately query
-F_GETFL to confirm the returned descriptor's access mode or acquire an
-additional userspace lock. These are source-owner review items, not invariants
-established by synthetic tests. Kernel-level exclusivity and mount/swap races
-after the last snapshot require separate safe loaded-kernel qualification.
+Synthetic final-gate tests must model reachable failures such as pathname
+terminal-object replacement, descriptor state-query failure, or a read-only
+transition; they must not manufacture an already-open inode changing file type
+or make fstat() stand in for device-driver liveness. The production opener
+currently requests O_RDWR/O_EXCL/O_CLOEXEC/O_NOFOLLOW and rechecks BLKROGET
+and descriptor identity, but does not separately query F_GETFL to confirm the
+returned descriptor's access mode or acquire an additional userspace lock.
+These are source-owner review items, not invariants established by synthetic
+tests. Kernel-level exclusivity and mount/swap races after the last snapshot
+require separate safe loaded-kernel qualification.
 
 Block zero is accepted only when it is all zero or is an exact existing SWZ
 authorization header. The shared validator requires the eight-byte magic,
@@ -457,7 +461,10 @@ Once the publication call has been issued, a failed/short write, fsync failure,
 post-write transport/identity/readback failure, or close failure is reported as
 `UNCERTAIN` with process status 3 and requires explicit recovery before retry.
 Status 2 remains a pre-publication refusal and status 1 is reserved for
-operational errors where no header publication was attempted. The standalone
+operational errors where no header publication was attempted. Every
+pre-publication rejection must preserve the triggering prerequisite errno
+across diagnostic output and descriptor cleanup; reporting functions are not
+allowed to become the returned error authority. The standalone
 formatter never creates a mapper or activates swap. After a successful write it
 revalidates device identity, rereads the entire header, requires byte-for-byte
 equality and full SWZ validation, then revalidates identity once more before

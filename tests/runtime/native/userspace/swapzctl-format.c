@@ -80,8 +80,8 @@ enum admission_change {
 	ADMISSION_ALIAS_CHANGED,
 	ADMISSION_PATH_SYMLINK,
 	ADMISSION_PATH_INODE_CHANGED,
-	ADMISSION_OPENED_TYPE_CHANGED,
-	ADMISSION_OPENED_FSTAT_FAILED,
+	ADMISSION_PATH_REGULAR_CHANGED,
+	ADMISSION_OPENED_RO_QUERY_FAILED,
 	ADMISSION_OPENED_READ_ONLY,
 	ADMISSION_SWAP_INVENTORY_MALFORMED,
 	ADMISSION_EXITED_PID_CONTROL,
@@ -104,7 +104,7 @@ static struct {
 	unsigned int opens, reads, writes, syncs, closes;
 	const char *observed_identity;
 	unsigned int observed_identity_calls;
-	int enabled, path_is_symlink;
+	int enabled, path_is_symlink, path_is_regular;
 	int open_error, observed_open_flags;
 } admission_fixture;
 
@@ -192,13 +192,16 @@ static void admission_after_first_read(void)
 	case ADMISSION_PATH_INODE_CHANGED:
 		++admission_fixture.path_inode;
 		break;
+	case ADMISSION_PATH_REGULAR_CHANGED:
+		++admission_fixture.path_inode;
+		admission_fixture.path_is_regular = 1;
+		break;
 	case ADMISSION_EXITED_PID_CONTROL:
 		admission_unlink("/proc/3031/mountinfo");
 		admission_unlink("/proc/3031/ns/mnt");
 		break;
 	case ADMISSION_UNCHANGED:
-	case ADMISSION_OPENED_TYPE_CHANGED:
-	case ADMISSION_OPENED_FSTAT_FAILED:
+	case ADMISSION_OPENED_RO_QUERY_FAILED:
 	case ADMISSION_OPENED_READ_ONLY:
 		break;
 	}
@@ -246,6 +249,11 @@ static int admission_lstat(const char *path, struct stat *info)
 					    admission_fixture.path_inode);
 		if (admission_fixture.path_is_symlink)
 			info->st_mode = S_IFLNK | 0777;
+		else if (admission_fixture.path_is_regular) {
+			admission_observe_identity("path-terminal-regular-replacement");
+			info->st_mode = S_IFREG | 0600;
+			info->st_rdev = 0;
+		}
 		return 0;
 	}
 	if (admission_fixture.enabled && !strncmp(path, "/dev/", 5U)) {
@@ -259,18 +267,7 @@ static int admission_lstat(const char *path, struct stat *info)
 static int admission_fstat(int fd, struct stat *info)
 {
 	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
-		if (admission_fixture.reads &&
-		    admission_fixture.change == ADMISSION_OPENED_FSTAT_FAILED) {
-			admission_observe_identity("opened-fstat-ENODEV");
-			errno = ENODEV;
-			return -1;
-		}
 		*info = admission_block_stat(makedev(8U, 1U), 17U);
-		if (admission_fixture.reads &&
-		    admission_fixture.change == ADMISSION_OPENED_TYPE_CHANGED) {
-			admission_observe_identity("opened-descriptor-not-block");
-			info->st_mode = S_IFREG | 0600;
-		}
 		return 0;
 	}
 	return fstat(fd, info);
@@ -347,6 +344,13 @@ static int admission_ioctl(int fd, unsigned long request, ...)
 			return 0;
 		}
 		if (request == BLKROGET) {
+			if (admission_fixture.reads &&
+			    admission_fixture.change ==
+				    ADMISSION_OPENED_RO_QUERY_FAILED) {
+				admission_observe_identity("opened-BLKROGET-ENODEV");
+				errno = ENODEV;
+				return -1;
+			}
 			if (admission_fixture.reads &&
 			    admission_fixture.change == ADMISSION_OPENED_READ_ONLY) {
 				admission_observe_identity("opened-BLKROGET-read-only");
@@ -584,9 +588,9 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 		{ ADMISSION_ALIAS_CHANGED, "by-partuuid-alias", ESTALE },
 		{ ADMISSION_PATH_SYMLINK, "path-symlink-substitution", ESTALE },
 		{ ADMISSION_PATH_INODE_CHANGED, "same-dev_t-new-inode", ESTALE },
-		{ ADMISSION_OPENED_TYPE_CHANGED, "opened-descriptor-not-block",
-		  ESTALE },
-		{ ADMISSION_OPENED_FSTAT_FAILED, "opened-fstat-ENODEV",
+		{ ADMISSION_PATH_REGULAR_CHANGED,
+		  "path-terminal-regular-replacement", ESTALE },
+		{ ADMISSION_OPENED_RO_QUERY_FAILED, "opened-BLKROGET-ENODEV",
 		  ENODEV },
 		{ ADMISSION_OPENED_READ_ONLY, "opened-BLKROGET-read-only",
 		  EROFS },
