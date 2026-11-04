@@ -983,6 +983,9 @@ struct swapz_dm {
 	u64 lower_read_submitted_bytes;
 	u64 lower_read_submitted_reqs;
 	struct swapz_flush_meter flush_meter;
+	/* Ordered-owner only: FUA lower completion includes its cache flush
+	 * before engine/RAW authority may publish the next generation. */
+	bool prepublication_fua;
 	u64 worker_requeues;
 	u64 one_page_windows;
 	u64 compressed_pages;
@@ -2532,8 +2535,9 @@ static int swapz_kernel_lower_flush(void *opaque)
 	return blkdev_issue_flush(ctx->backing->bdev);
 }
 
-static int swapz_issue_flush(struct swapz_dm *ctx)
+static int swapz_issue_flush(void *opaque)
 {
+	struct swapz_dm *ctx = opaque;
 	int error = swapz_flush_accounted(&ctx->flush_meter,
 				      swapz_kernel_lower_flush, ctx);
 
@@ -2550,6 +2554,10 @@ static int swapz_lower_write(void *opaque, swapz_u32 block, swapz_u8 blocks,
 
 	*completed = 0;
 	error = swapz_lower(ctx, REQ_OP_WRITE, block, blocks, (u8 *)bytes);
+	/* The ordered caller retains this reservation until this FUA succeeds.
+	 * A failed flush is a failed lower WRITE result for publication. */
+	error = swapz_write_flush_before_publish(error, ctx->prepublication_fua,
+						 swapz_issue_flush, ctx);
 	if (!error)
 		*completed = blocks;
 	return error;
@@ -2573,6 +2581,8 @@ static int swapz_lower_write_run(void *opaque, swapz_u32 block,
 	if (!blocks || blocks > SWAPZ_BULK_BLOCKS)
 		return -ERANGE;
 	error = swapz_lower(ctx, REQ_OP_WRITE, block, blocks, (u8 *)bytes);
+	error = swapz_write_flush_before_publish(error, ctx->prepublication_fua,
+						 swapz_issue_flush, ctx);
 	if (!error)
 		*completed = blocks;
 	return error;
@@ -4691,6 +4701,9 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
+	/* Exactly the ordered owner can set this: all synchronous writes (also
+	 * GC relocation while obtaining space) must clear FUA before publishing. */
+	ctx->prepublication_fua = needs_fua;
 	/*
 	 * ID175: a submitter-owned lone WRITE runs inside ->map, where a lower BIO
 	 * is only queued until ->map returns. It must detach; it can never wait.
@@ -4986,13 +4999,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		break;
 	}
 commit_done:
-	/*
-	 * Do not end any upper FUA BIO before the lower cache flush reports
-	 * success. A failed post-write flush permanently fails this target:
-	 * the newly published RAM mapping must not be trusted after -EIO.
-	 */
-	if (!error && committed == count && needs_fua)
-		error = swapz_issue_flush(ctx);
+	/* Lower WRITE adapters already fenced each successful FUA run before
+	 * authority replay. A post-publication flush here would be too late. */
 	if (error && needs_fua &&
 	    (!recoverable_gc_error || committed))
 		swapz_fail(ctx, error);
@@ -5055,6 +5063,9 @@ commit_done:
 	if (acknowledgements.delivered_ns)
 		swapz_lane_gap_ack_flush(ctx, &acknowledgements);
 accounted:
+	/* No callback owns this flag; the ordered owner clears it before
+	 * processing another BIO or releasing ordered_owner. */
+	ctx->prepublication_fua = false;
 	ctx->windows++;
 	ctx->window_records_total += count;
 	ctx->window_size_counts[count]++;
@@ -5875,14 +5886,16 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				became_dead =
 					ctx->segment_mapped_pages[old_segment] == 1U;
 			}
+			/* Zero overwrite is a publication too: require the lower FUA
+			 * before the generation becomes an authoritative zero. */
+			if (!error && (bio->bi_opf & REQ_FUA))
+				error = swapz_issue_flush(ctx);
 			if (!error)
 				error = swapz_discard_page(&ctx->authority, logical);
 		}
 		if (!error && became_dead &&
 		    old_segment != ctx->authority.open_segment)
 			error = swapz_discard_dead_segment(ctx, old_segment);
-		if (!error && (bio->bi_opf & REQ_FUA))
-			error = swapz_issue_flush(ctx);
 		if (error) {
 			swapz_fail(ctx, error);
 		} else {
@@ -5935,9 +5948,11 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		error = swapz_flush_window(ctx);
 		if (error)
 			return error;
+		/* A standalone RAW write has the same pre-publication FUA gate
+		 * as packed writes. Only this ordered caller sets the flag. */
+		ctx->prepublication_fua = !!(bio->bi_opf & REQ_FUA);
 		error = swapz_raw_write(ctx, bio, logical);
-		if (!error && (bio->bi_opf & REQ_FUA))
-			error = swapz_issue_flush(ctx);
+		ctx->prepublication_fua = false;
 		/*
 		 * A standalone RAW write can be the request that first discovers
 		 * foreground ENOSPC and starts GC. If that GC then hits a transient
@@ -6357,8 +6372,8 @@ static bool swapz_parallel_read_extent_mapped(struct swapz_dm *ctx,
 
 	logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	map = &ctx->maps[logical];
-	if (!map->valid || map->raw || !map->extent_blocks ||
-	    map->extent_blocks > SWAPZ_MAX_BLOCKS)
+	if (!map->valid || map->raw ||
+	    !swapz_map_extent_bounds_valid(ctx, map))
 		return false;
 	*start_block = map->start_block;
 	*extent_blocks = map->extent_blocks;

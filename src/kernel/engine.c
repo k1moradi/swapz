@@ -957,9 +957,11 @@ static int swapz_engine_required_read_range_resident(
 
 	if (!engine || !engine->authority || !logical_pages || !count ||
 	    count > SWAPZ_MAX_RECORDS || !first_block || !blocks ||
-	    !extent_blocks || extent_blocks > SWAPZ_MAX_BLOCKS ||
+	    (extent_blocks != 1U && extent_blocks != 2U && extent_blocks != 4U) ||
 	    start_block >= engine->authority->physical_blocks ||
-	    extent_blocks > engine->authority->physical_blocks - start_block)
+	    extent_blocks > engine->authority->physical_blocks - start_block ||
+	    start_block % SWAPZ_SEGMENT_BLOCKS + extent_blocks >
+		SWAPZ_SEGMENT_BLOCKS)
 		return -EINVAL;
 	resident &= (swapz_u8)((1U << extent_blocks) - 1U);
 	{
@@ -1911,11 +1913,14 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	*payload_length = 0;
 	engine->read_validated_payload_crc32c = 0;
 	observed = engine->authority->maps[logical_page];
-	if (!observed.valid || observed.raw || !observed.extent_blocks ||
-	    observed.extent_blocks > SWAPZ_MAX_BLOCKS ||
+	if (!observed.valid || observed.raw ||
+	    (observed.extent_blocks != 1U &&
+	     observed.extent_blocks != 2U && observed.extent_blocks != 4U) ||
 	    observed.start_block >= engine->authority->physical_blocks ||
 	    observed.extent_blocks >
 			engine->authority->physical_blocks - observed.start_block ||
+	    observed.start_block % SWAPZ_SEGMENT_BLOCKS +
+		observed.extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
 	    !observed.payload_length ||
 	    observed.payload_offset >=
 		(swapz_u32)observed.extent_blocks * SWAPZ_BLOCK_BYTES ||

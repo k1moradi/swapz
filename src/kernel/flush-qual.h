@@ -48,4 +48,19 @@ static inline int swapz_flush_accounted(struct swapz_flush_meter *meter,
 	return error;
 }
 
+
+/*
+ * The synchronous ordered owner must treat a required FUA flush as part of
+ * the lower WRITE result, before swapz_finish()/swapz_finish_raw() can publish.
+ * A failed WRITE must not issue a flush or gain a successful completion.
+ * Detached asynchronous writes do not carry FUA and never use this helper.
+ */
+static inline int swapz_write_flush_before_publish(
+	int write_error, int needs_fua, int (*issue_flush)(void *), void *opaque)
+{
+	if (write_error || !needs_fua)
+		return write_error;
+	return issue_flush ? issue_flush(opaque) : -EINVAL;
+}
+
 #endif

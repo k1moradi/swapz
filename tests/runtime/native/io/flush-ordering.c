@@ -70,6 +70,30 @@ static int test_null_argument_rejected(void)
 	CHECK(s.attempts == 0 && !s.successes && !s.failures);
 	return 0;
 }
+static int test_prepublication_fua_write_gate(void)
+{
+	struct fake_lower lower = { 0 };
+
+	/* A lower WRITE failure cannot trigger a success-shaped FUA. */
+	CHECK(swapz_write_flush_before_publish(-EIO, 1, lower_flush,
+						 &lower) == -EIO);
+	CHECK(lower.called == 0);
+	/* Non-FUA writes do not gain an extra hardware flush. */
+	CHECK(swapz_write_flush_before_publish(0, 0, lower_flush,
+						 &lower) == 0);
+	CHECK(lower.called == 0);
+	CHECK(swapz_write_flush_before_publish(0, 1, lower_flush,
+						 &lower) == 0);
+	CHECK(lower.called == 1);
+	lower.next_error = -EIO;
+	CHECK(swapz_write_flush_before_publish(0, 1, lower_flush,
+						 &lower) == -EIO);
+	CHECK(lower.called == 2);
+	CHECK(swapz_write_flush_before_publish(0, 1, NULL, &lower) == -EINVAL);
+	CHECK(lower.called == 2);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -78,6 +102,7 @@ int main(void)
 	CHECK(test_synthetic_failure_before_lower() == 0); passed++;
 	CHECK(test_genuine_lower_error() == 0); passed++;
 	CHECK(test_null_argument_rejected() == 0); passed++;
+	CHECK(test_prepublication_fua_write_gate() == 0); passed++;
 	printf("SWAPZ_FLUSH_ACCOUNTING_TESTS_PASS=%d\n", passed);
 	return 0;
 }

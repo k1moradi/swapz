@@ -10,6 +10,9 @@
 #include <string.h>
 #include <errno.h>
 #include "authority.h"
+/* Compile the exact production engine body into this test: no change to
+ * shared suite/link rules or a duplicated read-range model. */
+#include "engine.c"
 
 #define CHECK(expr) do { \
 	if (!(expr)) { \
@@ -180,6 +183,68 @@ static int test_mutated_replacement_preserves_prior_authority(void)
 	return 0;
 }
 
+static unsigned int invalid_extent_read_calls;
+
+static int invalid_extent_read(void *opaque, swapz_u32 start_block,
+			       swapz_u8 extent_blocks, swapz_u8 *destination)
+{
+	(void)opaque;
+	(void)start_block;
+	(void)extent_blocks;
+	(void)destination;
+	invalid_extent_read_calls++;
+	return -EIO;
+}
+
+static int test_engine_extent_geometry_before_lower_read(void)
+{
+	struct swapz_engine engine = { 0 };
+	const swapz_u32 logical = 0;
+	swapz_u8 first_block = 0, blocks = 0;
+	swapz_u16 payload_length = 0;
+
+	CHECK(init() == 0);
+	invalid_extent_read_calls = 0;
+	engine.authority = &a;
+	engine.read_scratch = bytes;
+	engine.io.read_blocks = invalid_extent_read;
+	maps[0].valid = 1;
+	maps[0].raw = 0;
+	maps[0].extent_blocks = 2;
+	maps[0].payload_offset = 64;
+	maps[0].payload_length = 8;
+	/* Full extent fits physical media but crosses a 256-block segment. */
+	maps[0].start_block = SWAPZ_SEGMENT_BLOCKS - 1U;
+	CHECK(swapz_engine_required_read_range(&engine, &logical, 1,
+		maps[0].start_block, 2, &first_block, &blocks) == -EINVAL);
+	CHECK(swapz_engine_read_page(&engine, logical, compressed,
+		sizeof(compressed), &payload_length) == -ESTALE);
+	CHECK(invalid_extent_read_calls == 0);
+	/* Full extent, not merely its start, must fit the physical device. */
+	maps[0].start_block = PHYSICAL - 1U;
+	CHECK(swapz_engine_required_read_range(&engine, &logical, 1,
+		maps[0].start_block, 2, &first_block, &blocks) == -EINVAL);
+	CHECK(swapz_engine_read_page(&engine, logical, compressed,
+		sizeof(compressed), &payload_length) == -ESTALE);
+	CHECK(invalid_extent_read_calls == 0);
+	/* An impossible three-block class is never a valid SWZ extent. */
+	maps[0].start_block = 0;
+	maps[0].extent_blocks = 3;
+	CHECK(swapz_engine_required_read_range(&engine, &logical, 1,
+		maps[0].start_block, 3, &first_block, &blocks) == -EINVAL);
+	CHECK(swapz_engine_read_page(&engine, logical, compressed,
+		sizeof(compressed), &payload_length) == -ESTALE);
+	CHECK(invalid_extent_read_calls == 0);
+	/* Preserve the valid boundary: two blocks ending at media end. */
+	maps[0].extent_blocks = 2;
+	maps[0].start_block = PHYSICAL - 2U;
+	CHECK(swapz_engine_required_read_range(&engine, &logical, 1,
+		maps[0].start_block, 2, &first_block, &blocks) == 0);
+	CHECK(first_block == 0 && blocks == 1);
+	CHECK(invalid_extent_read_calls == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -189,6 +254,7 @@ int main(void)
 	CHECK(test_last_sibling_mutation_is_all_or_nothing() == 0); passed++;
 	CHECK(test_duplicate_media_descriptor_fails_closed() == 0); passed++;
 	CHECK(test_mutated_replacement_preserves_prior_authority() == 0); passed++;
+	CHECK(test_engine_extent_geometry_before_lower_read() == 0); passed++;
 	printf("SWAPZ_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=%d\n", passed);
 	return 0;
 }

@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "authority.h"
+#include "flush-qual.h"
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s\n", \
 	__FILE__, __LINE__, #x); return 1; } } while (0)
 #define NPHYS 1024U
@@ -152,6 +153,60 @@ static int test_missing_raw_buffer_fails_closed(void)
 	return 0;
 }
 
+struct fua_failure_control {
+	unsigned int calls;
+	int error;
+};
+
+static int issue_fua(void *opaque)
+{
+	struct fua_failure_control *control = opaque;
+
+	control->calls++;
+	return control->error;
+}
+
+static int test_fua_failure_preserves_previous_raw_generation(void)
+{
+	struct swapz_tx tx;
+	struct swapz_map previous;
+	struct fua_failure_control control = { .error = -EIO };
+	int error;
+
+	CHECK(init() == 0);
+	memset(disk_page, 0x52, sizeof(disk_page));
+	CHECK(stage_raw(6, &tx) == 0);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
+	previous = maps[6];
+	CHECK(stage_raw(6, &tx) == 0);
+	/* Exact production FUA gate executes before the authority finish.
+	 * The media WRITE succeeded, but the cache flush failed. */
+	error = swapz_write_flush_before_publish(0, 1, issue_fua, &control);
+	CHECK(error == -EIO && control.calls == 1);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, error) == -EIO);
+	CHECK(maps[6].valid && maps[6].generation == previous.generation &&
+	      maps[6].start_block == previous.start_block);
+	CHECK(live[previous.start_block] == 1 && !live[tx.start_block]);
+	CHECK(!a.in_flight && a.abandoned_blocks == 1);
+	return 0;
+}
+
+static int test_postpublication_flush_negative_control(void)
+{
+	struct swapz_tx tx;
+	struct fua_failure_control control = { .error = -EIO };
+
+	CHECK(init() == 0);
+	CHECK(stage_raw(7, &tx) == 0);
+	/* The former order (finish, then flush) already exposes generation 1
+	 * before -EIO: this negative control demonstrates that ordering gap. */
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
+	CHECK(maps[7].valid && maps[7].generation == 1);
+	CHECK(issue_fua(&control) == -EIO && control.calls == 1);
+	CHECK(maps[7].valid && maps[7].generation == 1);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -163,6 +218,8 @@ int main(void)
 	CHECK(test_discard_generation_overflow_fails_without_mutation() == 0); passed++;
 	CHECK(test_raw_page_crc_rejects_silent_corruption() == 0); passed++;
 	CHECK(test_missing_raw_buffer_fails_closed() == 0); passed++;
+	CHECK(test_fua_failure_preserves_previous_raw_generation() == 0); passed++;
+	CHECK(test_postpublication_flush_negative_control() == 0); passed++;
 	printf("SWAPZ_RAW_DISCARD_AUTHORITY_TESTS_PASS=%d\n", passed);
 	return 0;
 }
