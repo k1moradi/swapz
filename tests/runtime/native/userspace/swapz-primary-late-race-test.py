@@ -5,6 +5,8 @@ Compile the unmodified start coordinator and actual production mount-inventory
 reader and swap parsers in a private C fixture. Its /proc and mutations are
 intercepted: no real mounts, devices, mappers, mkswap or swapon are touched.
 The late inventory is changed after initial admission, before header write.
+This proves only the bounded final snapshot: it cannot exclude a concurrent
+mount or swap activation after that snapshot returns and before header mutation.
 A deliberately weakened local copy must demonstrate the regression's power.
 """
 from pathlib import Path
@@ -922,7 +924,7 @@ def main() -> int:
                   file=sys.stderr)
             print(mutant.stdout + mutant.stderr, file=sys.stderr, end="")
             return 1
-        print("PASS: negative control fails on intercepted header write")
+        print("PASS: negative control exposes all intercepted destructive boundaries")
     return 0
 
 
