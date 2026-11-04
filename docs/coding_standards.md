@@ -1470,6 +1470,21 @@ Private logs are bounded; memory samples and private paths are not exposed.
 Regression coverage must use synthetic proc/cgroup fixtures and fake workers,
 never actual host memory pressure or privileged cgroup mutation.
 
+ID36 cleanup never writes group-wide `cgroup.kill`: a membership snapshot cannot
+authenticate a process that enters before the later group-wide signal. Use the
+cooperative stop file, and signal only running directly tracked Bash child jobs,
+never a previously recorded PID number by itself. After reaping, classify
+`cgroup.procs` with bounded canonical parsing; any nonempty, foreign, stale,
+malformed, missing or unreadable inventory retains both the child cgroup and
+private session and cannot print PASS. Recheck the empty inventory immediately
+before `rmdir`; an occupied or replaced group or failed removal likewise
+retains evidence. A failed initial cgroup creation grants no teardown ownership.
+Cleanup diagnostics identify phase, required ownership, observed safe category,
+original exit status and retained obligation without paths or PID lists;
+original FAIL/signal status takes precedence over cleanup BLOCKED. Rootless
+regression fixtures must inject late membership changes and deletion races
+without mutating host cgroups.
+
 ### Foreground GC pressure and scaling telemetry
 
 ID61 evidence must observe the existing serialized collector without changing

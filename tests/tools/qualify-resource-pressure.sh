@@ -351,6 +351,7 @@ PASS_EVIDENCE=""
 # A foreign process in the private ID36 cgroup invalidates exclusive ownership.
 # Retain both evidence resources rather than applying group-wide cleanup.
 RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=0
+CGROUP_WAS_CREATED=0
 
 # Extract at most one short fail-only reason from a private helper log. Never
 # echo paths or unbounded diagnostics from privileged children.
@@ -489,66 +490,183 @@ preserve_pair_failure_before_telemetry() {
     return 1
 }
 
+# A recorded PID alone is not cleanup authority: Bash may have reaped a
+# child, leaving its numeric PID available for an unrelated process. Only
+# signal a still-running direct background job of this exact shell.
+direct_owned_child_running() {
+    local tracked_pid="$1" job_pid
+    [[ $tracked_pid =~ ^[1-9][0-9]*$ && ${#tracked_pid} -le 7 ]] || return 1
+    while IFS= read -r job_pid; do
+        [[ $job_pid == "$tracked_pid" ]] && return 0
+    done < <(jobs -pr)
+    return 1
+}
+
+stop_direct_owned_child() {
+    local tracked_pid="$1" grace_before_term="$2"
+    [[ -n $tracked_pid ]] || return 0
+    if [[ $grace_before_term == no ]] && direct_owned_child_running "$tracked_pid"; then
+        kill -TERM -- "$tracked_pid" 2>/dev/null || true
+    fi
+    for _ in {1..40}; do
+        direct_owned_child_running "$tracked_pid" || break
+        sleep 0.05
+    done
+    if direct_owned_child_running "$tracked_pid"; then
+        kill -TERM -- "$tracked_pid" 2>/dev/null || true
+        for _ in {1..40}; do
+            direct_owned_child_running "$tracked_pid" || break
+            sleep 0.05
+        done
+    fi
+    if direct_owned_child_running "$tracked_pid"; then
+        kill -KILL -- "$tracked_pid" 2>/dev/null || true
+        for _ in {1..40}; do
+            direct_owned_child_running "$tracked_pid" || break
+            sleep 0.05
+        done
+    fi
+    # Never perform an unbounded wait on a child which survived escalation.
+    direct_owned_child_running "$tracked_pid" && return 1
+    wait "$tracked_pid" 2>/dev/null || true
+    return 0
+}
+
+# This is a post-reap inventory: previously admitted/started PID numbers are
+# stale, not proof that the remaining processes are still ours. Even a wholly
+# canonical nonempty inventory must never authorize cgroup.kill. The kernel's
+# rmdir supplies the final occupied-cgroup refusal after our last snapshot.
+classify_cleanup_cgroup_membership() {
+    local membership_path="$CGROUP/cgroup.procs" observation
+    if [[ ! -f $membership_path || ! -r $membership_path || -L $membership_path ]]; then
+        printf '%s\n' unreadable
+        return 0
+    fi
+    if ! observation="$(awk -v pair_pid="${pair_cgroup_pid:-}" \
+                              -v pressure_pid="${PRESSURE_PID:-}" '
+        NR > 128 { malformed = 1; exit }
+        NF != 1 || $1 !~ /^[1-9][0-9]*$/ ||
+            length($1) > 7 || $1 + 0 > 4194304 {
+            malformed = 1
+            next
+        }
+        {
+            if (seen[$1]++)
+                malformed = 1
+            ++entries
+            if ($1 != pair_pid && $1 != pressure_pid)
+                foreign = 1
+        }
+        END {
+            if (malformed)
+                print "malformed"
+            else if (foreign)
+                print "foreign"
+            else if (entries)
+                print "stale"
+            else
+                print "empty"
+        }
+    ' "$membership_path" 2>/dev/null)"; then
+        printf '%s\n' unreadable
+        return 0
+    fi
+    printf '%s\n' "$observation"
+}
+
+# Retain both resources and report only bounded categories, never a PID list or
+# a private path. Preserve the original FAIL/signal status over later BLOCKED.
+report_cleanup_refusal() {
+    local phase="$1" observed="$2" original_exit="$3" severity=BLOCKED
+    (( original_exit == 0 || original_exit == 2 )) || severity=FAIL
+    RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    case "$phase" in
+        rmdir)
+            printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:exclusive empty canonical membership and removable cgroup observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
+                "$severity" "$phase" "$observed" "$original_exit" >&2
+            ;;
+        session-remove)
+            printf '%s: ID36 private scratch cleanup did not complete; phase:%s required:owned removable private session observed:%s original_exit:%s retained_cleanup:private-session\n' \
+                "$severity" "$phase" "$observed" "$original_exit" >&2
+            ;;
+        *)
+            printf '%s: ID36 cleanup ownership refused; phase:%s required:exclusive empty canonical membership and positively owned direct children observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
+                "$severity" "$phase" "$observed" "$original_exit" >&2
+            ;;
+    esac
+}
+
 cleanup() {
-    local result=$?
+    local result=$? original_result observed initially_retained
+    original_result=$result
+    initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
     trap - EXIT HUP INT TERM
     set +e
     (: > "$STOP") 2>/dev/null || true
-    if [[ -n $PAIR_PID ]]; then
-        kill -TERM "$PAIR_PID" 2>/dev/null
-        for _ in {1..40}; do
-            kill -0 "$PAIR_PID" 2>/dev/null || break
-            sleep 0.05
-        done
-        if kill -0 "$PAIR_PID" 2>/dev/null; then
-            kill -KILL "$PAIR_PID" 2>/dev/null
+    if (( initially_retained )); then
+        if (( original_result == 0 || original_result == 2 )); then
+            printf 'BLOCKED: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" >&2
+        else
+            printf 'FAIL: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" >&2
         fi
-        wait "$PAIR_PID" 2>/dev/null
     fi
-    if [[ -n $PRESSURE_PID ]]; then
+    if [[ -n $PAIR_PID ]] && ! stop_direct_owned_child "$PAIR_PID" no; then
+        report_cleanup_refusal pair-child owned-child-still-running "$original_result"
+    fi
+    if [[ -n $PRESSURE_PID ]] && ! stop_direct_owned_child "$PRESSURE_PID" yes; then
+        report_cleanup_refusal pressure-child owned-child-still-running "$original_result"
+    fi
+    if (( RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
+        # Retain an earlier admission or child-termination refusal even when
+        # the original command status happened to be successful.
+        :
+    elif (( ! ${CGROUP_WAS_CREATED:-0} )); then
+        # A failed mkdir never granted this invocation ownership of a
+        # possibly pre-existing cgroup, even if it currently looks empty.
+        if [[ -e $CGROUP || -L $CGROUP ]]; then
+            report_cleanup_refusal cgroup-identity unowned "$original_result"
+        fi
+    elif [[ -L $CGROUP || ( -e $CGROUP && ! -d $CGROUP ) ]]; then
+        report_cleanup_refusal cgroup-identity stale "$original_result"
+    elif [[ -d $CGROUP ]]; then
+        # Bounded grace for known processes to leave. Any other observation
+        # immediately retains the evidence rather than broad-killing a group.
         for _ in {1..40}; do
-            kill -0 "$PRESSURE_PID" 2>/dev/null || break
+            observed="$(classify_cleanup_cgroup_membership)"
+            [[ $observed == stale ]] || break
             sleep 0.05
         done
-        if kill -0 "$PRESSURE_PID" 2>/dev/null; then
-            kill -TERM "$PRESSURE_PID" 2>/dev/null
-            for _ in {1..40}; do
-                kill -0 "$PRESSURE_PID" 2>/dev/null || break
-                sleep 0.05
-            done
-            if kill -0 "$PRESSURE_PID" 2>/dev/null; then
-                kill -KILL "$PRESSURE_PID" 2>/dev/null
+        if [[ $observed != empty ]]; then
+            report_cleanup_refusal membership "$observed" "$original_result"
+        else
+            # A new arrival after the first empty observation must not be
+            # silently accepted. rmdir also refuses a later occupied group.
+            observed="$(classify_cleanup_cgroup_membership)"
+            if [[ $observed != empty ]]; then
+                report_cleanup_refusal pre-rmdir "$observed" "$original_result"
+            elif ! rmdir "$CGROUP" 2>/dev/null; then
+                report_cleanup_refusal rmdir occupied-or-unremovable "$original_result"
+            elif [[ -e $CGROUP || -L $CGROUP ]]; then
+                report_cleanup_refusal post-rmdir stale "$original_result"
             fi
         fi
-        wait "$PRESSURE_PID" 2>/dev/null
-    fi
-    if [[ -d $CGROUP ]] && (( ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
-        if [[ -f $CGROUP/cgroup.kill &&
-              -n $(cat "$CGROUP/cgroup.procs" 2>/dev/null) ]]; then
-            (printf '%s\n' 1 > "$CGROUP/cgroup.kill") 2>/dev/null || true
-        fi
-        for _ in {1..40}; do
-            [[ -z $(cat "$CGROUP/cgroup.procs" 2>/dev/null) ]] && break
-            sleep 0.05
-        done
-        if ! rmdir "$CGROUP" 2>/dev/null; then
-            if (( result == 0 || result == 2 )); then
-                printf '%s\n' 'BLOCKED: ID36 isolated cgroup cleanup did not complete; preserve only the private child cgroup for read-only investigation' >&2
-                result=2
-            else
-                printf '%s\n' 'FAIL: ID36 isolated cgroup cleanup also failed; preserve only the private child cgroup for read-only investigation' >&2
-            fi
-        fi
+    elif [[ ${CGROUP_WAS_CREATED:-0} == 1 ]]; then
+        report_cleanup_refusal cgroup-identity stale "$original_result"
     fi
     if (( ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
-        if ! rm -rf -- "$SESSION" 2>/dev/null; then
-            if (( result == 0 || result == 2 )); then
-                printf '%s\n' 'BLOCKED: ID36 private scratch cleanup did not complete; preserve the owned session for read-only investigation and retry only after safe cleanup' >&2
-                result=2
+        if [[ ! -d $SESSION || -L $SESSION ]]; then
+            report_cleanup_refusal session-identity stale "$original_result"
+        elif ! rm -rf -- "$SESSION" 2>/dev/null; then
+            RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+            if (( original_result == 0 || original_result == 2 )); then
+                printf 'BLOCKED: ID36 private scratch cleanup did not complete; phase:session-remove required:owned removable private session observed:unremovable original_exit:%s retained_cleanup:private-session\n' "$original_result" >&2
             else
-                printf '%s\n' 'FAIL: ID36 private scratch cleanup also failed; preserve the owned session for read-only investigation' >&2
+                printf 'FAIL: ID36 private scratch cleanup did not complete; phase:session-remove required:owned removable private session observed:unremovable original_exit:%s retained_cleanup:private-session\n' "$original_result" >&2
             fi
         fi
+    fi
+    if (( RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION && result == 0 )); then
+        result=2
     fi
     # Do not advertise PASS until both owned cgroup and scratch cleanup
     # succeeded. A cleanup refusal must not leave a misleading PASS record.
@@ -565,6 +683,7 @@ mkdir "$CGROUP" 2>/dev/null || {
     printf '%s\n' 'BLOCKED: ID36 cannot create isolated cgroup; require delegated writable cgroup v2 memory/CPU subtree without changing existing host groups' >&2
     exit 2
 }
+CGROUP_WAS_CREATED=1
 for control in memory.max memory.high memory.current memory.peak memory.events cpu.pressure cgroup.procs; do
     [[ -e "$CGROUP/$control" ]] || {
         printf 'BLOCKED: ID36 missing cgroup v2 control %s; provide delegated memory/CPU controllers and a kernel supporting this telemetry\n' "$control" >&2

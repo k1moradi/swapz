@@ -15,6 +15,7 @@ fi
 python3 -B tests/runtime/native/source-contract-test.py -v
 python3 -B tests/runtime/native/tmp-cleanup-test.py -v
 python3 -B tests/runtime/native/resource-admission-test.py -v
+python3 -B tests/runtime/native/resource-pressure-cleanup-ownership-test.py -v
 python3 -B tests/runtime/native/primary-lifecycle-audit-test.py -v
 python3 -B tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py -v
 python3 -B tests/runtime/native/primary-real-swap-test.py -v
