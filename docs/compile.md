@@ -58,9 +58,13 @@ No other root aliases or public test targets are permitted.
 
 ## Direct-main CI standards co-changes
 
-The project-goals repository-policy job checks each pushed commit against its
-**first parent**, including changes in `src/`, `tests/`, `packaging/`,
-`.github/workflows/`, `Makefile`, and `dkms.conf`. Every such implementation
+When a push triggers project-goals, the repository-policy job checks **every
+first-parent commit introduced by that push** against that commit's own first
+parent, including
+changes in `src/`, `tests/`, `packaging/`, `.github/workflows/`,
+`Makefile`, and `dkms.conf`. It retains the pushed history needed for this
+per-commit comparison, so a later documentation-only commit in the same push
+cannot hide an earlier implementation-only violation. Every such implementation
 commit must also make a **meaningful update in that same commit** to at least
 one canonical standard: `docs/coding_standards.md`,
 `docs/testing_standards.md`, `docs/compile.md`, or `docs/benchmark.md`.
@@ -82,7 +86,10 @@ commits require no extra standards edit. The test reporter labels its
 report-only evidence commits `[skip ci]`; that prevents a new Actions run,
 not a policy exemption for implementation work and not a fresh exact-SHA CI
 PASS. An implementation commit labeled `[skip ci]` remains noncompliant
-without a same-commit standard update. Rootless CI is partial evidence:
+without a same-commit standard update; because GitHub suppresses push-triggered
+Actions for that marker, such a commit also has no exact-SHA project-goal CI
+result and must never be used to bypass the direct-main policy. Rootless CI is
+partial evidence:
 the exact-SHA conclusion rejects failed, skipped, and cancelled dependencies
 and never substitutes for owner-run `make test` qualification.
 

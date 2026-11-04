@@ -148,10 +148,11 @@ jobs:
     timeout-minutes: 5
     env:
       SWAPZ_CI_ARTIFACT_NAME: project-goals-repository-policy-${{ github.sha }}
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Configure the reusable build root
         run: mkdir -p build/tests/native build/tests/model build/python-cache
       - name: Enforce active product layout and naming
@@ -226,49 +227,86 @@ jobs:
           if [[ "$(git symbolic-ref --quiet --short HEAD)" != main ]]; then
             fail "commit=$head_sha checkout must be on main"
           fi
-          if ! parent_sha="$(git rev-parse --verify 'HEAD^1^{commit}' 2>/dev/null)"; then
-            fail "commit=$head_sha missing first parent (checkout must fetch parent history)"
-          fi
           changeset_file="$(mktemp)"
-          trap 'rm -f "$changeset_file"' EXIT
-          # Compare commit objects, not the mutable checkout or a previous documentation commit.
-          if ! git diff --name-only --no-renames -z "$parent_sha" "$head_sha" -- > "$changeset_file"; then
-            fail "commit=$head_sha unable to read first-parent changeset"
-          fi
-          # A partial NUL-delimited record must not silently disappear from the policy scan.
-          if [[ -s "$changeset_file" ]] &&
-             [[ "$(tail -c 1 "$changeset_file" | od -An -tu1 | tr -d '[:space:]')" != 0 ]]; then
-            fail "commit=$head_sha malformed NUL-delimited changeset metadata"
-          fi
-          implementation_count=0
-          implementation_paths=()
-          standard_changed=0
-          while IFS= read -r -d '' changed_path; do
-            if [[ -z "$changed_path" ]]; then
-              fail "commit=$head_sha empty path in changeset metadata"
+          commit_list_file="$(mktemp)"
+          trap 'rm -f "$changeset_file" "$commit_list_file"' EXIT
+          if [[ "${GITHUB_EVENT_NAME:-}" == push ]]; then
+            push_before="${SWAPZ_PUSH_BEFORE_SHA:-}"
+            if [[ ! "$push_before" =~ ^[0-9a-f]{40}$ ||
+                  "$push_before" == 0000000000000000000000000000000000000000 ]]; then
+              fail "commit=$head_sha push base SHA unavailable or malformed: ${push_before:-unset}"
             fi
-            case "$changed_path" in
-              src/*|tests/*|packaging/*|.github/workflows/*|Makefile|dkms.conf)
-                ((implementation_count += 1))
-                if (( ${#implementation_paths[@]} < 8 )); then
-                  implementation_paths+=("$changed_path")
-                fi
-                ;;
-              docs/coding_standards.md|docs/testing_standards.md|docs/compile.md|docs/benchmark.md)
-                standard_changed=1
-                ;;
-            esac
-          done < "$changeset_file"
-          if (( implementation_count > 0 && !standard_changed )); then
-            printf -v first_implementation_path '%q' "${implementation_paths[0]:0:64}"
-            printf 'SOURCE_CONTRACT_MISMATCH: commit=%s implementation_path=%s requires same-commit change to one of: %s\n' \
-              "$head_sha" "$first_implementation_path" "${standards[*]}" >&2
-            printf 'SOURCE_CONTRACT_MISMATCH: commit=%s first_parent=%s implementation paths (showing %d/%d):\n' \
-              "$head_sha" "$parent_sha" "${#implementation_paths[@]}" "$implementation_count" >&2
-            for implementation_path in "${implementation_paths[@]}"; do
-              printf 'SOURCE_CONTRACT_MISMATCH: implementation_path=%q\n' "$implementation_path" >&2
-            done
-            exit 1
+            if ! git merge-base --is-ancestor "$push_before" "$head_sha"; then
+              fail "commit=$head_sha push base=$push_before is not an ancestor (non-fast-forward or incomplete checkout)"
+            fi
+            if ! git rev-list --first-parent --reverse "$push_before..$head_sha" > "$commit_list_file"; then
+              fail "commit=$head_sha unable to enumerate pushed first-parent commits"
+            fi
+          else
+            printf '%s\n' "$head_sha" > "$commit_list_file"
+          fi
+          audit_count=0
+          last_audited_sha=
+          while IFS= read -r commit_sha; do
+            if [[ ! "$commit_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              fail "commit=$head_sha malformed commit-list metadata"
+            fi
+            ((audit_count += 1))
+            last_audited_sha="$commit_sha"
+            if ! parent_sha="$(git rev-parse --verify "$commit_sha^1^{commit}" 2>/dev/null)"; then
+              fail "commit=$commit_sha missing first parent (checkout must include pushed history)"
+            fi
+            if (( audit_count == 1 )) && [[ "${GITHUB_EVENT_NAME:-}" == push ]] &&
+               [[ "$parent_sha" != "$push_before" ]]; then
+              fail "commit=$commit_sha first_parent=$parent_sha does not match push base=$push_before"
+            fi
+            : > "$changeset_file"
+            # Compare each commit object to its own first parent. A later documentation
+            # commit cannot qualify an earlier implementation commit from the same push.
+            if ! git diff --name-only --no-renames -z "$parent_sha" "$commit_sha" -- > "$changeset_file"; then
+              fail "commit=$commit_sha unable to read first-parent changeset"
+            fi
+            # A partial NUL-delimited record must not silently disappear from the policy scan.
+            if [[ -s "$changeset_file" ]] &&
+               [[ "$(tail -c 1 "$changeset_file" | od -An -tu1 | tr -d '[:space:]')" != 0 ]]; then
+              fail "commit=$commit_sha malformed NUL-delimited changeset metadata"
+            fi
+            implementation_count=0
+            implementation_paths=()
+            standard_changed=0
+            while IFS= read -r -d '' changed_path; do
+              if [[ -z "$changed_path" ]]; then
+                fail "commit=$commit_sha empty path in changeset metadata"
+              fi
+              case "$changed_path" in
+                src/*|tests/*|packaging/*|.github/workflows/*|Makefile|dkms.conf)
+                  ((implementation_count += 1))
+                  if (( ${#implementation_paths[@]} < 8 )); then
+                    implementation_paths+=("$changed_path")
+                  fi
+                  ;;
+                docs/coding_standards.md|docs/testing_standards.md|docs/compile.md|docs/benchmark.md)
+                  standard_changed=1
+                  ;;
+              esac
+            done < "$changeset_file"
+            if (( implementation_count > 0 && !standard_changed )); then
+              printf -v first_implementation_path '%q' "${implementation_paths[0]:0:64}"
+              printf 'SOURCE_CONTRACT_MISMATCH: commit=%s implementation_path=%s requires same-commit change to one of: %s\n' \
+                "$commit_sha" "$first_implementation_path" "${standards[*]}" >&2
+              printf 'SOURCE_CONTRACT_MISMATCH: commit=%s first_parent=%s implementation paths (showing %d/%d):\n' \
+                "$commit_sha" "$parent_sha" "${#implementation_paths[@]}" "$implementation_count" >&2
+              for implementation_path in "${implementation_paths[@]}"; do
+                printf 'SOURCE_CONTRACT_MISMATCH: implementation_path=%q\n' "$implementation_path" >&2
+              done
+              exit 1
+            fi
+          done < "$commit_list_file"
+          if (( audit_count == 0 )); then
+            fail "commit=$head_sha pushed first-parent range is empty"
+          fi
+          if [[ "$last_audited_sha" != "$head_sha" ]]; then
+            fail "commit=$head_sha pushed first-parent range ended at=$last_audited_sha"
           fi
           SWAPZ_CI_SCRIPT
           python3 -B tests/tools/product_goals.py ci-run --suite standards-policy -- bash build/ci-standards-policy.sh

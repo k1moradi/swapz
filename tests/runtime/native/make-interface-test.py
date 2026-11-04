@@ -1352,6 +1352,10 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
     def check_policy(self, sha=None, repository=None, extra_environment=None):
         environment = os.environ.copy()
         environment["GITHUB_SHA"] = sha or self.git("rev-parse", "HEAD")
+        # Synthetic fixtures default to manual-dispatch semantics. Tests that
+        # exercise push ranges opt in with an explicit pre-push SHA.
+        environment["GITHUB_EVENT_NAME"] = "workflow_dispatch"
+        environment.pop("SWAPZ_PUSH_BEFORE_SHA", None)
         environment.update(extra_environment or {})
         return subprocess.run(
             ["bash", "-c", self.policy_script],
@@ -1403,6 +1407,54 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(violation_sha, result.stderr)
         self.assertIn("Makefile", result.stderr)
+
+    def test_push_audits_every_introduced_first_parent_commit(self):
+        workflow = (ROOT / ".github/workflows/project-goals.yml").read_text()
+        repository_job = workflow.split("  repository-policy:\n", 1)[1].split(
+            "\n  project-goals-conclusion:", 1)[0]
+        self.assertIn("fetch-depth: 0", repository_job)
+        self.assertIn(
+            "SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}",
+            repository_job)
+
+        push_before = self.git("rev-parse", "HEAD")
+        violating_sha = self.commit(
+            {"src/kernel/codec.c": "int codec = 1;\n"},
+            "implementation without standard")
+        self.commit(
+            {"docs/compile.md": "initial standard\nlate documentation\n"},
+            "documentation cannot qualify previous commit")
+        result = self.check_policy(extra_environment={
+            "GITHUB_EVENT_NAME": "push",
+            "SWAPZ_PUSH_BEFORE_SHA": push_before,
+        })
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(violating_sha, result.stderr)
+        self.assertIn("src/kernel/codec.c", result.stderr)
+        self.assertIn("same-commit", result.stderr)
+
+        # A multi-commit push remains valid when each implementation commit
+        # independently carries its own canonical standards update.
+        self.git("reset", "--hard", push_before)
+        self.commit({
+            "src/kernel/codec.c": "int codec = 2;\n",
+            "docs/compile.md": "initial standard\ncode contract updated\n",
+        }, "implementation and same-commit standard")
+        self.commit({"docs/README.md": "documentation-only follow-up\n"},
+                    "documentation-only follow-up")
+        result = self.check_policy(extra_environment={
+            "GITHUB_EVENT_NAME": "push",
+            "SWAPZ_PUSH_BEFORE_SHA": push_before,
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        malformed = self.check_policy(extra_environment={
+            "GITHUB_EVENT_NAME": "push",
+            "SWAPZ_PUSH_BEFORE_SHA": "not-a-sha",
+        })
+        self.assertNotEqual(malformed.returncode, 0)
+        self.assertIn("push base SHA unavailable or malformed",
+                      malformed.stderr)
 
     def test_missing_checkout_parent_sha_and_malformed_changeset_fail_closed(self):
         initial_sha = self.git("rev-parse", "HEAD")
