@@ -2180,6 +2180,37 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "metric=sealed_at_utc" in blocker
             for blocker in result["code_blockers"]))
 
+    def test_campaign_and_host_times_require_canonical_utc(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        campaign = physical_campaign_evidence(policy_raw)
+        trace = campaign["capacity_and_ram"]["metadata_ram_trace"]
+        binding = copy.deepcopy(
+            campaign["capacity_and_ram"]["metadata_ram_host_binding"])
+        binding["host_after_captured_at_utc"] = (
+            "2026-11-03 00:00:10+00:00")
+        with self.assertRaisesRegex(ValueError, "canonical UTC"):
+            EVALUATOR.RAM_TRACE_VALIDATOR[
+                "validate_metadata_ram_host_binding"](trace, binding)
+
+        for sealed_at in (
+                "2026-11-03 00:00:11+00:00",
+                "2026-11-03T00:00:11." + "1" * 10000 + "+00:00"):
+            with self.subTest(sealed_at=sealed_at[:32]):
+                malformed = physical_campaign_evidence(policy_raw)
+                malformed["sealed_at_utc"] = sealed_at
+                result = evaluate(policy=policy, campaign=malformed)
+                self.assertEqual(
+                    result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(
+                    result["METADATA_RAM_MEASUREMENT"]["status"],
+                    "NOT_MEASURED")
+                ram_blockers = [
+                    blocker for blocker in result["code_blockers"]
+                    if "sealed campaign RAM trace is invalid" in blocker]
+                self.assertTrue(ram_blockers, result["code_blockers"])
+                self.assertLess(max(map(len, ram_blockers)), 500)
+
     def test_campaign_report_cannot_predate_sealed_host_evidence(self):
         report = owner_report()
         policy = acceptance_policy()
