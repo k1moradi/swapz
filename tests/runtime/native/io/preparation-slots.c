@@ -545,6 +545,186 @@ static int test_production_failure_and_wake_gates(void)
  * is used as the publication edge. The relaxed-reread mutant above is
  * the deliberately broken negative control for the READY acquire edge.
  */
+/*
+ * Both preparers race for the only free bit. The loser cannot observe or
+ * publish that slot until the first producer has dropped its reference and
+ * the final consumer has returned the bit. Barriers schedule the two epochs;
+ * they are NOT evidence of payload visibility (the concurrent test below
+ * observes payload only after the actual terminal-state acquire).
+ */
+struct rival_slot_context {
+	atomic64_t free_mask;
+	atomic_t state;
+	_Atomic unsigned int references;
+	pthread_barrier_t start;
+	pthread_barrier_t first_done;
+	pthread_barrier_t retry;
+	pthread_barrier_t second_done;
+	int first_claim[2];
+	int second_claim[2];
+	int first_publication[2];
+	int second_publication[2];
+	unsigned int payload_owner;
+};
+
+struct rival_slot_argument {
+	struct rival_slot_context *context;
+	unsigned int producer_index;
+};
+
+static void *rival_slot_producer(void *opaque)
+{
+	const struct rival_slot_argument *argument = opaque;
+	struct rival_slot_context *context = argument->context;
+	const unsigned int producer_index = argument->producer_index;
+	int slot;
+
+	(void)pthread_barrier_wait(&context->start);
+	slot = swapz_preparation_claim_slot(&context->free_mask);
+	context->first_claim[producer_index] = slot;
+	if (slot >= 0) {
+		atomic_store_explicit(&context->state.value,
+				      SWAPZ_PREPARATION_PREPARING,
+				      memory_order_relaxed);
+		context->payload_owner = producer_index + 1U;
+		context->first_publication[producer_index] =
+			swapz_preparation_publish_codec_result(&context->state, 2048);
+		/* The producer is finished; only the consumer still owns the page. */
+		(void)atomic_fetch_sub_explicit(&context->references, 1,
+						 memory_order_acq_rel);
+	}
+	(void)pthread_barrier_wait(&context->first_done);
+	(void)pthread_barrier_wait(&context->retry);
+	if (slot < 0) {
+		slot = swapz_preparation_claim_slot(&context->free_mask);
+		context->second_claim[producer_index] = slot;
+		if (slot >= 0) {
+			atomic_store_explicit(&context->state.value,
+					      SWAPZ_PREPARATION_PREPARING,
+					      memory_order_relaxed);
+			context->payload_owner = producer_index + 1U;
+			context->second_publication[producer_index] =
+				swapz_preparation_publish_codec_result(&context->state, 0);
+			(void)atomic_fetch_sub_explicit(&context->references, 1,
+							 memory_order_acq_rel);
+		}
+	}
+	(void)pthread_barrier_wait(&context->second_done);
+	return NULL;
+}
+
+static int test_two_producers_reclaim_only_after_final_consumer(void)
+{
+	struct rival_slot_context context = { 0 };
+	struct rival_slot_argument arguments[2];
+	pthread_t producers[2];
+	unsigned int index, winning_producer, losing_producer;
+	unsigned int first_references, second_references;
+	unsigned int first_payload_owner, second_payload_owner;
+	uint64_t first_free_mask, second_free_mask, final_free_mask;
+	int first_terminal_state, second_terminal_state, premature_claim;
+
+	atomic_init(&context.free_mask.value, (s64)(1ULL << 63));
+	atomic_init(&context.state.value, SWAPZ_PREPARATION_EMPTY);
+	atomic_init(&context.references, 2);
+	for (index = 0; index < 2; ++index) {
+		context.first_claim[index] = -2;
+		context.second_claim[index] = -2;
+		context.first_publication[index] = -2;
+		context.second_publication[index] = -2;
+	}
+	CHECK(pthread_barrier_init(&context.start, NULL, 3) == 0);
+	CHECK(pthread_barrier_init(&context.first_done, NULL, 3) == 0);
+	CHECK(pthread_barrier_init(&context.retry, NULL, 3) == 0);
+	CHECK(pthread_barrier_init(&context.second_done, NULL, 3) == 0);
+	for (index = 0; index < 2; ++index) {
+		arguments[index].context = &context;
+		arguments[index].producer_index = index;
+		CHECK(pthread_create(&producers[index], NULL, rival_slot_producer,
+				     &arguments[index]) == 0);
+	}
+	(void)pthread_barrier_wait(&context.start);
+	(void)pthread_barrier_wait(&context.first_done);
+
+	/* One successful claim and one rejection while the slot is occupied. */
+	winning_producer = context.first_claim[0] == 63 ? 0U : 1U;
+	losing_producer = winning_producer ^ 1U;
+	first_terminal_state = swapz_preparation_read_state(&context.state);
+	first_payload_owner = context.payload_owner;
+	first_references = atomic_load_explicit(&context.references,
+						 memory_order_relaxed);
+	premature_claim = swapz_preparation_claim_slot(&context.free_mask);
+	/* Final consumer put and EMPTY store precede slot bit publication. */
+	(void)atomic_fetch_sub_explicit(&context.references, 1,
+					memory_order_acq_rel);
+	atomic_store_explicit(&context.state.value, SWAPZ_PREPARATION_EMPTY,
+			      memory_order_relaxed);
+	swapz_preparation_release_slot(&context.free_mask, 63);
+	first_free_mask = (uint64_t)atomic64_read(&context.free_mask);
+	atomic_store_explicit(&context.references, 2, memory_order_relaxed);
+
+	(void)pthread_barrier_wait(&context.retry);
+	(void)pthread_barrier_wait(&context.second_done);
+	second_terminal_state = swapz_preparation_read_state(&context.state);
+	second_payload_owner = context.payload_owner;
+	second_references = atomic_load_explicit(&context.references,
+						  memory_order_relaxed);
+	second_free_mask = (uint64_t)atomic64_read(&context.free_mask);
+	(void)atomic_fetch_sub_explicit(&context.references, 1,
+					memory_order_acq_rel);
+	atomic_store_explicit(&context.state.value, SWAPZ_PREPARATION_EMPTY,
+			      memory_order_relaxed);
+	swapz_preparation_release_slot(&context.free_mask, 63);
+	final_free_mask = (uint64_t)atomic64_read(&context.free_mask);
+
+	for (index = 0; index < 2; ++index)
+		CHECK(pthread_join(producers[index], NULL) == 0);
+	CHECK(pthread_barrier_destroy(&context.start) == 0);
+	CHECK(pthread_barrier_destroy(&context.first_done) == 0);
+	CHECK(pthread_barrier_destroy(&context.retry) == 0);
+	CHECK(pthread_barrier_destroy(&context.second_done) == 0);
+	/* All validations follow thread joins; a failure cannot strand a barrier. */
+	if (context.first_claim[winning_producer] != 63 ||
+	    context.first_claim[losing_producer] != -1 ||
+	    context.first_publication[winning_producer] !=
+		    SWAPZ_PREPARATION_PREPARING ||
+	    first_terminal_state != SWAPZ_PREPARATION_READY_COMPRESSED ||
+	    first_payload_owner != winning_producer + 1U ||
+	    first_references != 1 || premature_claim != -1 ||
+	    first_free_mask != (1ULL << 63) ||
+	    context.second_claim[losing_producer] != 63 ||
+	    context.second_claim[winning_producer] != -2 ||
+	    context.second_publication[losing_producer] !=
+		    SWAPZ_PREPARATION_PREPARING ||
+	    second_terminal_state != SWAPZ_PREPARATION_READY_RAW ||
+	    second_payload_owner != losing_producer + 1U ||
+	    second_references != 1 || second_free_mask != 0 ||
+	    final_free_mask != (1ULL << 63)) {
+		fprintf(stderr, "two-producer slot 63: claims=(%d,%d) retry=(%d,%d) "
+			"CAS=(%d,%d)/(%d,%d) terminal=%d/%d refs=%u/%u "
+			"payload_owner=%u/%u mask=0x%llx/0x%llx/0x%llx "
+			"premature_claim=%d\n",
+			context.first_claim[0], context.first_claim[1],
+			context.second_claim[0], context.second_claim[1],
+			context.first_publication[0], context.first_publication[1],
+			context.second_publication[0], context.second_publication[1],
+			first_terminal_state, second_terminal_state,
+			first_references, second_references,
+			first_payload_owner, second_payload_owner,
+			(unsigned long long)first_free_mask,
+			(unsigned long long)second_free_mask,
+			(unsigned long long)final_free_mask, premature_claim);
+		return 1;
+	}
+	CHECK(swapz_preparation_read_state(&context.state) ==
+	      SWAPZ_PREPARATION_EMPTY);
+	CHECK(atomic_load_explicit(&context.references, memory_order_relaxed) == 0);
+	CHECK(swapz_preparation_claim_slot(&context.free_mask) == 63);
+	CHECK(swapz_preparation_claim_slot(&context.free_mask) == -1);
+	swapz_preparation_release_slot(&context.free_mask, 63);
+	return 0;
+}
+
 #define TRANSFERS 8192U
 #define PRODUCERS 4U
 #define MAX_STALLED_POLLS 20000000U
@@ -732,7 +912,8 @@ int main(void)
 	CHECK(!test_closed_admission_suppresses_producer_owner_wake());
 	CHECK(!test_production_failure_and_wake_gates());
 	CHECK(!test_capacity_high_bit_and_reuse());
+	CHECK(!test_two_producers_reclaim_only_after_final_consumer());
 	CHECK(!test_concurrent_reuse());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=7");
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=8");
 	return 0;
 }
