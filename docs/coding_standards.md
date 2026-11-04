@@ -79,7 +79,17 @@ For each LIST_DEVICES record, require the NUL-terminated name plus its
 8-byte-aligned event-number/flags trailer to fit inside the record, and bind
 that enumerated event generation to both status observations. A generation
 change after enumeration is UNAVAILABLE, not permission to report a newer
-table under an older list identity. For nonfinal DM_TABLE_STATUS records,
+table under an older list identity. Even unchanged listed mappings do not
+prove a complete inventory: another mapping may be added, removed, renamed
+or reordered while the two per-mapping INFO reads succeed. After staging all
+status results, perform a final read-only DM_LIST_DEVICES and compare the
+complete ordered mapping names, device numbers, event generations, flags and
+bounded UUIDs (when present) against the initial list, before emitting any
+numeric results. A changed, malformed, oversized or unreadable final list
+withholds every staged metric and reports a bounded BLOCKED or UNAVAILABLE
+diagnostic. This is drift detection between observations, **not** an atomic
+kernel-wide snapshot: changes after the final ioctl or changes that occur and
+reverse between observations cannot be ruled out. For nonfinal DM_TABLE_STATUS records,
 require spec.next to equal the exact 8-byte alignment immediately after the
 status NUL; aligned gaps are malformed rather than ignorable padding.
 

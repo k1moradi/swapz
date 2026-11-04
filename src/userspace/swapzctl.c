@@ -388,8 +388,10 @@ struct status_ready_report {
 
 struct dm_list_record {
 	const char *name;
+	const char *uuid;
 	uint64_t device_id;
 	uint32_t event_number;
+	uint32_t flags;
 	size_t record_size;
 };
 
@@ -883,7 +885,21 @@ static int status_parse_name_list_record(
 	       sizeof(parsed->event_number));
 	memcpy(&flags, record + metadata_offset + sizeof(parsed->event_number),
 	       sizeof(flags));
-	(void)flags;
+	parsed->flags = flags;
+	if (flags & DM_NAME_LIST_FLAG_HAS_UUID) {
+		const size_t uuid_offset = metadata_offset + 2U * sizeof(uint32_t);
+		size_t uuid_bytes = parsed->record_size - uuid_offset;
+
+		if (uuid_bytes > DM_UUID_LEN)
+			uuid_bytes = DM_UUID_LEN;
+		if (!uuid_bytes || !memchr(record + uuid_offset, '\0', uuid_bytes)) {
+			status_set_problem(problem, "dm_name_list.uuid",
+					   "bounded NUL-terminated mapping UUID when flagged",
+					   "truncated or unterminated device-list UUID");
+			return -1;
+		}
+		parsed->uuid = (const char *)record + uuid_offset;
+	}
 	if (!parsed->device_id) {
 		status_set_problem(problem, "dm_name_list.dev",
 				   "nonzero LIST_DEVICES identity",
@@ -892,6 +908,111 @@ static int status_parse_name_list_record(
 	}
 	parsed->name = name;
 	return 0;
+}
+
+
+/* Every LIST reply is an independent, bounded observation, not an atomic snapshot. */
+static int status_parse_list_header(const unsigned char *buffer, size_t buffer_size,
+				    struct dm_ioctl *header,
+				    struct status_problem *problem)
+{
+	if (!buffer || buffer_size < sizeof(*header)) {
+		status_set_problem(problem, "dm_ioctl.data_size",
+				   "complete DM_LIST_DEVICES header",
+				   "truncated device-list header");
+		return -1;
+	}
+	memcpy(header, buffer, sizeof(*header));
+	if (header->data_size > buffer_size ||
+	    header->data_size < sizeof(*header) ||
+	    header->data_start < sizeof(*header) ||
+	    header->data_start > header->data_size ||
+	    header->data_start % SWAPZ_DM_WIRE_ALIGNMENT) {
+		status_set_problem(problem, "dm_ioctl.data_start/data_size",
+				   "bounded 8-byte-aligned device-list payload",
+				   "invalid Device Mapper device-list bounds or alignment");
+		return -1;
+	}
+	return 0;
+}
+
+/*
+ * Re-read every identity after staging all INFO observations. An unrelated
+ * mapping can change while previously listed mappings and counters stay
+ * unchanged. This detects observed drift but cannot make ioctls atomic.
+ */
+static int status_list_inventories_equal(
+	const unsigned char *first_buffer, const struct dm_ioctl *first_header,
+	const unsigned char *second_buffer, size_t second_buffer_size,
+	struct status_problem *problem)
+{
+	struct dm_ioctl second_header;
+	size_t first_offset = first_header->data_start;
+	size_t second_offset;
+	int result;
+
+	if (status_parse_list_header(second_buffer, second_buffer_size,
+				     &second_header, problem) < 0)
+		return -1;
+	second_offset = second_header.data_start;
+	while (first_offset < first_header->data_size &&
+	       second_offset < second_header.data_size) {
+		struct dm_list_record first;
+		struct dm_list_record second;
+
+		if (status_parse_name_list_record(
+			    first_buffer + first_offset, first_header->data_size - first_offset,
+			    &first, problem) < 0 ||
+		    status_parse_name_list_record(
+			    second_buffer + second_offset, second_header.data_size - second_offset,
+			    &second, problem) < 0)
+			return -1;
+		if (strcmp(first.name, second.name) ||
+		    first.device_id != second.device_id ||
+		    first.event_number != second.event_number ||
+		    first.flags != second.flags ||
+		    (first.uuid != NULL) != (second.uuid != NULL) ||
+		    (first.uuid && strcmp(first.uuid, second.uuid)))
+			goto changed;
+		first_offset += first.record_size;
+		second_offset += second.record_size;
+	}
+	result = first_offset == first_header->data_size &&
+		 second_offset == second_header.data_size;
+	if (result)
+		return 1;
+changed:
+	status_set_problem(problem, "DM_LIST_DEVICES inventory",
+			   "identical ordered names, UUIDs, device numbers, flags and events",
+			   "mapping inventory changed between enumerations");
+	return 0;
+}
+
+static int status_report_list_problem(const char *state,
+				      const struct status_problem *problem)
+{
+	fprintf(stderr, "swapzctl status: %s: field '%s'; expected %s; observed %s\n",
+		state, problem->field, problem->expected, problem->observed);
+	errno = !strcmp(state, "UNAVAILABLE") ? EAGAIN : EPROTO;
+	return 1;
+}
+
+static int status_report_list_ioctl_failure(const char *phase, int error_number)
+{
+	if (error_number == EPROTO || error_number == EOVERFLOW) {
+		fprintf(stderr,
+			"swapzctl status: %s: %s DM_LIST_DEVICES reply; errno=%d (%s)\n",
+			error_number == EPROTO ? "BLOCKED" : "UNAVAILABLE",
+			phase, error_number, strerror(error_number));
+	} else {
+		fprintf(stderr,
+			"swapzctl status: UNAVAILABLE: %s DM_LIST_DEVICES errno=%d (%s)%s\n",
+			phase, error_number, strerror(error_number),
+			(error_number == EPERM || error_number == EACCES) ?
+			"; observational ioctl requires CAP_SYS_ADMIN; no escalation attempted" : "");
+	}
+	errno = error_number;
+	return 1;
 }
 
 static void status_free_observation(struct dm_status_observation *observation)
@@ -1530,6 +1651,84 @@ static int report_device_status(int fd, const char *name, uint64_t expected_devi
 						name, expected_device, report);
 }
 
+typedef int (*status_list_reader)(void *context, unsigned char **reply,
+				  size_t *reply_size);
+typedef int (*status_device_reader)(void *context, const char *name,
+				    uint64_t device_id, uint32_t event_number,
+				    struct status_ready_report *report);
+
+static int status_read_list_with_fd(void *context, unsigned char **reply,
+				    size_t *reply_size)
+{
+	return dm_query(*(const int *)context, DM_LIST_DEVICES, NULL,
+			 reply, reply_size);
+}
+
+static int status_read_device_with_fd(void *context, const char *name,
+				      uint64_t device_id, uint32_t event_number,
+				      struct status_ready_report *report)
+{
+	return report_device_status(*(const int *)context, name, device_id,
+				    event_number, report);
+}
+
+/* Stage complete results before comparing a fresh, read-only device inventory. */
+static int status_collect_targets_with_readers(
+	void *context, status_list_reader read_list, status_device_reader read_device,
+	struct status_ready_report *report)
+{
+	unsigned char *first_buffer = NULL;
+	unsigned char *second_buffer = NULL;
+	size_t first_buffer_size = 0;
+	size_t second_buffer_size = 0;
+	struct dm_ioctl first_header;
+	struct status_problem problem = { 0 };
+	size_t current_offset;
+	int comparison;
+	int result = 1;
+
+	if (read_list(context, &first_buffer, &first_buffer_size) < 0) {
+		result = status_report_list_ioctl_failure("initial", errno);
+		goto out;
+	}
+	if (status_parse_list_header(first_buffer, first_buffer_size,
+				     &first_header, &problem) < 0) {
+		result = status_report_list_problem("BLOCKED", &problem);
+		goto out;
+	}
+	current_offset = first_header.data_start;
+	while (current_offset < first_header.data_size) {
+		struct dm_list_record record;
+		const size_t remaining = first_header.data_size - current_offset;
+
+		if (status_parse_name_list_record(first_buffer + current_offset,
+						  remaining, &record, &problem) < 0) {
+			result = status_report_list_problem("BLOCKED", &problem);
+			goto out;
+		}
+		if (read_device(context, record.name, record.device_id,
+				record.event_number, report) < 0)
+			goto out;
+		current_offset += record.record_size;
+	}
+	if (read_list(context, &second_buffer, &second_buffer_size) < 0) {
+		result = status_report_list_ioctl_failure("final", errno);
+		goto out;
+	}
+	comparison = status_list_inventories_equal(first_buffer, &first_header,
+						  second_buffer, second_buffer_size, &problem);
+	if (comparison <= 0) {
+		result = status_report_list_problem(
+			comparison < 0 ? "BLOCKED" : "UNAVAILABLE", &problem);
+		goto out;
+	}
+	result = 0;
+out:
+	free(first_buffer);
+	free(second_buffer);
+	return result;
+}
+
 static int status_control_open_flags(void)
 {
 	/* Status uses only DM_LIST_DEVICES and DM_TABLE_STATUS, never a mutation. */
@@ -1538,14 +1737,9 @@ static int status_control_open_flags(void)
 
 static int status_targets(void)
 {
-	unsigned char *buffer = NULL;
-	size_t buffer_size = 0;
-	struct dm_ioctl header;
 	struct status_ready_report report = { 0 };
-	size_t current_offset;
-	size_t payload_size;
 	int fd;
-	int result = 1;
+	int result;
 
 	fd = open(SWAPZ_DM_CONTROL_PATH, status_control_open_flags());
 	if (fd < 0) {
@@ -1556,52 +1750,13 @@ static int status_targets(void)
 			perror("swapzctl status: open /dev/mapper/control");
 		return 1;
 	}
-	if (dm_query(fd, DM_LIST_DEVICES, NULL, &buffer, &buffer_size) < 0) {
-		if (errno == EPROTO)
-			fputs("swapzctl status: BLOCKED: field 'dm_ioctl.data_start/data_size'; expected bounded device-list header; observed invalid DM reply\n",
-			      stderr);
-		else if (errno == EOVERFLOW)
-			fputs("swapzctl status: UNAVAILABLE: field 'DM_BUFFER_FULL_FLAG'; expected complete device list <= 1048576 bytes; observed buffer-full reply\n",
-			      stderr);
-		else if (errno == EPERM || errno == EACCES)
-			fprintf(stderr, "swapzctl status: UNAVAILABLE: DM_LIST_DEVICES errno=%d (%s); observational ioctl requires CAP_SYS_ADMIN; no escalation attempted\n",
-				errno, strerror(errno));
-		else
-			perror("swapzctl status: list Device Mapper devices");
-		goto out;
-	}
-	memcpy(&header, buffer, sizeof(header));
-	if (header.data_start % SWAPZ_DM_WIRE_ALIGNMENT) {
-		fputs("swapzctl status: BLOCKED: field 'dm_ioctl.data_start'; expected 8-byte wire alignment; observed unaligned device-list offset\n", stderr);
-		goto out;
-	}
-	current_offset = header.data_start;
-	payload_size = header.data_size;
-	while (current_offset < payload_size) {
-		struct dm_list_record record;
-		struct status_problem problem;
-		const size_t remaining = payload_size - current_offset;
-
-		if (status_parse_name_list_record(buffer + current_offset, remaining,
-						  &record, &problem) < 0) {
-			fprintf(stderr,
-				"swapzctl status: BLOCKED: field '%s'; expected %s; observed %s\n",
-				problem.field, problem.expected, problem.observed);
-			goto out;
-		}
-		if (report_device_status(fd, record.name, record.device_id,
-					 record.event_number, &report) < 0)
-			goto out;
-		current_offset += record.record_size;
-	}
-	result = 0;
-out:
-	free(buffer);
+	result = status_collect_targets_with_readers(&fd, status_read_list_with_fd,
+						    status_read_device_with_fd, &report);
 	if (close(fd) < 0) {
 		perror("swapzctl status: close /dev/mapper/control");
 		result = 1;
 	}
-	/* Nothing numeric is printed until every device and both generations pass. */
+	/* No numeric output until both INFO reads and the final inventory agree. */
 	if (!result) {
 		size_t index;
 

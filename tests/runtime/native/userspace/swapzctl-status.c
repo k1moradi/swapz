@@ -918,6 +918,268 @@ static void test_complete_snapshot_before_output(void)
 	free(report.targets);
 }
 
+
+static void test_saturated_staged_padding_is_unavailable(void)
+{
+	const char *status =
+		"logical_write=16384 physical_write=12288 gc_write=0 "
+		"compressed=4 raw=0 zero_elided=0 bulk_mode=2 "
+		"bulk_padding=4294967295 failed=0 error=0";
+	struct swapz_ratio_status ratio;
+	struct status_problem problem;
+	FILE *capture = tmpfile();
+	int saved_stdout = dup(STDOUT_FILENO);
+	char output[2048] = { 0 };
+	size_t bytes;
+
+	assert(capture && saved_stdout >= 0);
+	assert(parse_swapz_ratio_status_diagnostic(status, &ratio, &problem) ==
+	       STATUS_READY);
+	assert(ratio.bulk_padding_blocks == UINT_MAX);
+	assert(!ratio.compressed_extent_ratio_exact);
+	assert(ratio.compressed_extent_bytes == 0);
+	assert(ratio.overall_physical_bytes == 12288);
+	fflush(stdout);
+	assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+	report_swapz_target("fixture", 0, &ratio);
+	fflush(stdout);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	rewind(capture);
+	bytes = fread(output, 1, sizeof(output) - 1U, capture);
+	output[bytes] = '\0';
+	assert(strstr(output, "compressed ratio (SWZ extents): UNAVAILABLE"));
+	assert(strstr(output, "nonzero staged padding"));
+	assert(strstr(output, "overall ratio (compressed + RAW + zero): 1.33:1"));
+	assert(!strstr(output, "compressed ratio (SWZ extents): 1.33:1"));
+	close(saved_stdout);
+	fclose(capture);
+}
+
+enum fake_inventory_change {
+	FAKE_INVENTORY_STABLE,
+	FAKE_INVENTORY_ADD,
+	FAKE_INVENTORY_REMOVE,
+	FAKE_INVENTORY_RENAME,
+	FAKE_INVENTORY_REORDER,
+	FAKE_INVENTORY_DEVICE,
+	FAKE_INVENTORY_EVENT,
+	FAKE_INVENTORY_UUID,
+	FAKE_INVENTORY_MALFORMED,
+	FAKE_INVENTORY_IOCTL_FAILURE
+};
+
+struct fake_list_device {
+	const char *name;
+	uint64_t device_id;
+	uint32_t event_number;
+	const char *uuid;
+};
+
+struct fake_inventory_ioctl {
+	enum fake_inventory_change change;
+	unsigned int list_reads;
+	unsigned int status_reads;
+	unsigned int devices_observed;
+};
+
+/* Fake DM_LIST_DEVICES, including its optional UUID metadata and record links. */
+static int fake_list_devices_ioctl(void *context, unsigned char **reply,
+				   size_t *reply_size)
+{
+	struct fake_inventory_ioctl *fixture = context;
+	struct fake_list_device devices[3] = {
+		{ "alpha", 1, 7, "uuid-alpha" },
+		{ "beta", 2, 9, "uuid-beta" },
+		{ "gamma", 3, 11, "uuid-gamma" }
+	};
+	const size_t capacity = 1024U;
+	struct dm_ioctl header = { 0 };
+	unsigned char *buffer;
+	size_t record_offset = sizeof(header);
+	size_t final_record_offset = record_offset;
+	size_t count = 2;
+	size_t index;
+	int final_read = fixture->list_reads != 0;
+
+	assert(fixture->list_reads < 2U);
+	++fixture->list_reads;
+	if (final_read) {
+		switch (fixture->change) {
+		case FAKE_INVENTORY_ADD:
+			count = 3;
+			break;
+		case FAKE_INVENTORY_REMOVE:
+			count = 1;
+			break;
+		case FAKE_INVENTORY_RENAME:
+			devices[1].name = "renamed";
+			break;
+		case FAKE_INVENTORY_REORDER: {
+			struct fake_list_device moved = devices[0];
+
+			devices[0] = devices[1];
+			devices[1] = moved;
+			break;
+		}
+		case FAKE_INVENTORY_DEVICE:
+			devices[1].device_id = 22;
+			break;
+		case FAKE_INVENTORY_EVENT:
+			devices[1].event_number++;
+			break;
+		case FAKE_INVENTORY_UUID:
+			devices[1].uuid = "uuid-replaced";
+			break;
+		case FAKE_INVENTORY_IOCTL_FAILURE:
+			errno = EACCES;
+			return -1;
+		default:
+			break;
+		}
+	}
+	buffer = calloc(1, capacity);
+	assert(buffer);
+	for (index = 0; index < count; ++index) {
+		const size_t name_offset = offsetof(struct dm_name_list, name);
+		const size_t metadata_offset = fixture_align_target_offset(
+			name_offset + strlen(devices[index].name) + 1U);
+		const size_t uuid_offset = metadata_offset + 2U * sizeof(uint32_t);
+		const size_t uuid_bytes = strlen(devices[index].uuid) + 1U;
+		const size_t record_size = fixture_align_target_offset(uuid_offset + uuid_bytes);
+		uint32_t flags = DM_NAME_LIST_FLAG_HAS_UUID;
+
+		assert(record_offset + record_size <= capacity);
+		final_record_offset = record_offset;
+		assert(make_dm_name_list_fixture(buffer + record_offset,
+				capacity - record_offset, devices[index].name,
+				devices[index].device_id, devices[index].event_number) <=
+		       record_size);
+		memcpy(buffer + record_offset + metadata_offset + sizeof(uint32_t),
+		       &flags, sizeof(flags));
+		memcpy(buffer + record_offset + uuid_offset,
+		       devices[index].uuid, uuid_bytes);
+		if (index + 1U < count) {
+			uint32_t next = (uint32_t)record_size;
+
+			memcpy(buffer + record_offset + offsetof(struct dm_name_list, next),
+			       &next, sizeof(next));
+		}
+		record_offset += record_size;
+	}
+	if (final_read && fixture->change == FAKE_INVENTORY_MALFORMED) {
+		uint32_t invalid_next = 23U;
+
+		memcpy(buffer + final_record_offset +
+		       offsetof(struct dm_name_list, next),
+		       &invalid_next, sizeof(invalid_next));
+	}
+	header.data_start = sizeof(header);
+	header.data_size = (uint32_t)record_offset;
+	memcpy(buffer, &header, sizeof(header));
+	*reply = buffer;
+	*reply_size = capacity;
+	return 0;
+}
+
+/* Each initially listed mapping yields two unchanged fake DM_TABLE_STATUS replies. */
+static int fake_device_status_ioctl(void *context, const char *name,
+				    uint64_t device_id, uint32_t event_number,
+				    struct status_ready_report *report)
+{
+	struct fake_inventory_ioctl *fixture = context;
+	const char *const stable[] = { fixture_valid_status };
+	struct status_reader_fixture observations = {
+		.statuses = stable, .count = 1
+	};
+	int result;
+
+	assert(fixture->list_reads == 1U);
+	assert(fixture->devices_observed < 2U);
+	assert(!strcmp(name, fixture->devices_observed ? "beta" : "alpha"));
+	assert(device_id == (uint64_t)fixture->devices_observed + 1U);
+	assert(event_number == (fixture->devices_observed ? 9U : 7U));
+	result = report_device_status_with_reader(&observations,
+			read_fixture_observation, name, device_id, report);
+	fixture->status_reads += (unsigned int)observations.calls;
+	++fixture->devices_observed;
+	return result;
+}
+
+static void test_final_inventory_fake_ioctl_observation_gap(void)
+{
+	const enum fake_inventory_change changes[] = {
+		FAKE_INVENTORY_STABLE, FAKE_INVENTORY_ADD,
+		FAKE_INVENTORY_REMOVE, FAKE_INVENTORY_RENAME,
+		FAKE_INVENTORY_REORDER, FAKE_INVENTORY_DEVICE,
+		FAKE_INVENTORY_EVENT, FAKE_INVENTORY_UUID,
+		FAKE_INVENTORY_MALFORMED, FAKE_INVENTORY_IOCTL_FAILURE
+	};
+	size_t case_index;
+
+	for (case_index = 0; case_index < sizeof(changes) / sizeof(changes[0]);
+	     ++case_index) {
+		struct fake_inventory_ioctl fixture = { .change = changes[case_index] };
+		struct status_ready_report report = { 0 };
+		FILE *stdout_capture = tmpfile();
+		FILE *stderr_capture = tmpfile();
+		int saved_stdout = dup(STDOUT_FILENO);
+		int saved_stderr = dup(STDERR_FILENO);
+		char output[2048] = { 0 };
+		char diagnostic[2048] = { 0 };
+		size_t output_bytes;
+		size_t diagnostic_bytes;
+		size_t target;
+		int result;
+
+		assert(stdout_capture && stderr_capture);
+		assert(saved_stdout >= 0 && saved_stderr >= 0);
+		fflush(stdout);
+		fflush(stderr);
+		assert(dup2(fileno(stdout_capture), STDOUT_FILENO) >= 0);
+		assert(dup2(fileno(stderr_capture), STDERR_FILENO) >= 0);
+		result = status_collect_targets_with_readers(
+			&fixture, fake_list_devices_ioctl, fake_device_status_ioctl, &report);
+		/* Match the CLI's all-or-nothing output gate. */
+		if (!result)
+			for (target = 0; target < report.count; ++target)
+				report_swapz_target(report.targets[target].name,
+						    report.targets[target].target_index,
+						    &report.targets[target].ratio);
+		fflush(stdout);
+		fflush(stderr);
+		assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+		assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+		rewind(stdout_capture);
+		output_bytes = fread(output, 1, sizeof(output) - 1U, stdout_capture);
+		output[output_bytes] = '\0';
+		rewind(stderr_capture);
+		diagnostic_bytes = fread(diagnostic, 1, sizeof(diagnostic) - 1U,
+					 stderr_capture);
+		diagnostic[diagnostic_bytes] = '\0';
+		assert(fixture.list_reads == 2U);
+		assert(fixture.devices_observed == 2U);
+		assert(fixture.status_reads == 4U);
+		assert(report.count == 4U);
+		if (fixture.change == FAKE_INVENTORY_STABLE) {
+			assert(result == 0);
+			assert(strstr(output, "compressed ratio (SWZ extents)"));
+			assert(!diagnostic_bytes);
+		} else {
+			assert(result != 0);
+			assert(!output_bytes); /* No staged numeric metric can escape. */
+			assert(strstr(diagnostic, "DM_LIST_DEVICES"));
+			assert(strstr(diagnostic,
+				fixture.change == FAKE_INVENTORY_MALFORMED ?
+				"BLOCKED" : "UNAVAILABLE"));
+		}
+		free(report.targets);
+		close(saved_stdout);
+		close(saved_stderr);
+		fclose(stdout_capture);
+		fclose(stderr_capture);
+	}
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -958,8 +1220,10 @@ int main(void)
 	test_absolute_offsets_for_multiple_dm_targets();
 	test_full_target_inventory_comparison();
 	test_padding_output_has_no_fabricated_compressed_ratio();
+	test_saturated_staged_padding_is_unavailable();
 	test_snapshot_retry_exhaustion_and_failures();
 	test_complete_snapshot_before_output();
+	test_final_inventory_fake_ioctl_observation_gap();
 	test_status_is_read_only();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
