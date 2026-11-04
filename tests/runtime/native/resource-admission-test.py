@@ -344,13 +344,19 @@ sample_host_memory_admission
             "BLOCKED: ID36 owned temporary-cleanup helper unavailable",
             qualifier)
         self.assertIn(
-            'if ! source "$cleanup_helper"; then',
+            'if ! source "$cleanup_helper" 2>/dev/null; then',
             qualifier)
         self.assertIn(
-            'source "$cleanup_helper" ||',
+            'source "$cleanup_helper" 2>/dev/null ||',
             preflight)
         self.assertIn(
             "owned temporary-cleanup helper unavailable",
+            preflight)
+        self.assertIn(
+            'cd "$ROOT" 2>/dev/null || {',
+            qualifier)
+        self.assertIn(
+            'SCRIPT_DIR="$(cd -- "$script_directory" 2>/dev/null && pwd -P)" ||',
             preflight)
 
     def test_cleanup_helper_error_is_propagated_without_touching_tmp(self):
