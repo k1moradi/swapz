@@ -2861,13 +2861,31 @@ def _normal_stop(swapzctl: Path, manifest: dict, active: dict | None,
                 f"; stop sampler also failed: "
                 f"{_exception_text(sampler_error)}")
         raise QualificationFailure(message)
+    completion_error: BaseException | None = None
+    try:
+        _read_primary_output(
+            stopped, f"PRIMARY_STOP=COMPLETE run_id={manifest['run_id']} ")
+        if active is not None:
+            _post_stop_verify(
+                manifest, active, baseline_identity, partuuid)
+        else:
+            _verify_completed_cleanup(
+                manifest, baseline_identity, partuuid)
+    except BaseException as exc:
+        completion_error = exc
+
+    if completion_error is not None:
+        if sampler_error is not None:
+            details = (
+                f"{_exception_text(completion_error)}; stop sampler also "
+                f"failed: {_exception_text(sampler_error)}")
+            if isinstance(completion_error, Blocked) and \
+                    not isinstance(sampler_error, QualificationFailure):
+                raise Blocked(details) from completion_error
+            raise QualificationFailure(details) from completion_error
+        raise completion_error
     if sampler_error is not None:
         raise sampler_error
-    _read_primary_output(stopped, f"PRIMARY_STOP=COMPLETE run_id={manifest['run_id']} ")
-    if active is not None:
-        _post_stop_verify(manifest, active, baseline_identity, partuuid)
-    else:
-        _verify_completed_cleanup(manifest, baseline_identity, partuuid)
     return sampler_evidence
 
 

@@ -1381,6 +1381,35 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertIn(
             "stop sampler also failed: missed transition witness", message)
 
+    def test_sampler_failure_does_not_skip_post_stop_verification(self):
+        run_id = "1" * 32
+        manifest = {"run_id": run_id}
+        active = {
+            "mapper_device": (252, 1),
+            "mapper_uuid": "SWAPZ-PRIMARY-" + run_id,
+            "swap_path": "/dev/dm-1",
+        }
+        stopped = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0,
+            stdout=f"PRIMARY_STOP=COMPLETE run_id={run_id} swapoff=true\n",
+            stderr="")
+        sampler = mock.Mock()
+        sampler.stop.side_effect = qualify.Blocked("sampler evidence missing")
+        with mock.patch.object(qualify, "StopSampler", return_value=sampler), \
+                mock.patch.object(qualify, "_primary", return_value=stopped), \
+                mock.patch.object(qualify.time, "sleep", return_value=None), \
+                mock.patch.object(
+                    qualify, "_post_stop_verify",
+                    side_effect=qualify.QualificationFailure(
+                        "mapper cleanup incomplete")) as post_verify, \
+                self.assertRaises(qualify.QualificationFailure) as raised:
+            qualify._normal_stop(
+                Path("/synthetic/swapzctl"), manifest, active, set(),
+                "f13428f6-01", 60)
+        post_verify.assert_called_once()
+        self.assertIn("mapper cleanup incomplete", str(raised.exception))
+        self.assertIn("sampler evidence missing", str(raised.exception))
+
     def test_run_cycle_requires_parent_revalidation_before_prepare(self):
         admission = mock.Mock()
         admission.require.side_effect = qualify.Blocked(

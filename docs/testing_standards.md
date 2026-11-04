@@ -242,7 +242,9 @@ swap-inactive, then mapper absence in chronological order; out-of-order or
 regressing stable observations cannot qualify even if all states appear.
 Disappearance while still in the known swap inventory is FAIL. A definite stop/`swapoff` failure is FAIL and remains
 the primary teardown error, but a simultaneous stop-sampler failure must be
-appended rather than discarded. If correct teardown is too fast to prove
+appended rather than discarded. When stop itself succeeds, sampler uncertainty
+must not skip independent post-stop mapper/module/state verification; if both
+fail, both reasons remain visible. If correct teardown is too fast to prove
 the inactive-before-remove interval independently, the result is BLOCKED, not
 PASS. The stop sampler evaluates those transitions online and retains only
 constant-size phase/timestamp/count state; a long bounded stop must not grow a
