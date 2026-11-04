@@ -587,6 +587,11 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
  * without scheduling and does not impose a wall-clock completion bound.
  */
 #define SWAPZ_MAP_PROOF_RESCHED_PAGES 4096U
+_Static_assert(
+	SWAPZ_MAP_PROOF_RESCHED_PAGES != 0U &&
+	!(SWAPZ_MAP_PROOF_RESCHED_PAGES &
+	  (SWAPZ_MAP_PROOF_RESCHED_PAGES - 1U)),
+	"map proof reschedule interval must be a nonzero power of two");
 
 static inline void swapz_map_proof_resched(swapz_u32 logical)
 {
@@ -1125,7 +1130,8 @@ int swapz_gc_advance_rotation_destination(struct swapz_authority *a,
 		    a->segment_foreground[segment]) {
 			/* Claimed only a dead reserve, so fail closed if internal state
 			 * contradicts the claim rather than attempting rollback. */
-			return -EUCLEAN;
+			return swapz_map_proof_refuse(
+				"gc_advance", "claimed_cursor_state", -EUCLEAN);
 		}
 		a->segment_foreground[blocked_destination] = 1;
 		a->gc_destination = segment;
@@ -1156,7 +1162,8 @@ int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 	    evacuated_victim == a->gc_forbidden_open ||
 	    !a->segment_foreground[evacuated_victim] ||
 	    a->segment_foreground[exhausted_destination])
-		return -EUCLEAN;
+		return swapz_map_proof_refuse(
+			"gc_roll_forward", "role_state", -EUCLEAN);
 
 	/*
 	 * Independently prove the old victim is absent from the authoritative map
