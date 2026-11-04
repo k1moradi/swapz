@@ -60,7 +60,7 @@ static void atomic64_or(s64 bits, atomic64_t *mask)
 #include "preparation-slots.h"
 
 #define CHECK(expression) do { if (!(expression)) { \
-	fprintf(stderr, "%s:%d failed %s\\n", __FILE__, __LINE__, #expression); \
+	fprintf(stderr, "%s:%d failed %s\n", __FILE__, __LINE__, #expression); \
 	return 1; \
 } } while (0)
 
@@ -171,9 +171,16 @@ static uint64_t publication_payload(unsigned int iteration)
 	       ((uint64_t)iteration * 0xbf58476d1ce4e5b9ULL);
 }
 
-static void publication_race_fail(struct publication_race_context *context)
+static void publication_race_fail(struct publication_race_context *context,
+				  const char *phase, unsigned int iteration,
+				  int observed_state)
 {
-	atomic_store_explicit(&context->failed, 1, memory_order_relaxed);
+	if (!atomic_exchange_explicit(&context->failed, 1,
+				      memory_order_relaxed))
+		fprintf(stderr, "codec-publication %s: iteration=%u codec=%d "
+			"observed_state=%d expected_terminal=%d\n",
+			phase, iteration, context->codec_result, observed_state,
+			swapz_preparation_codec_result_state(context->codec_result));
 }
 
 static void *publish_codec_results(void *opaque)
@@ -193,7 +200,7 @@ static void *publish_codec_results(void *opaque)
 			&context->state, context->codec_result);
 		if (observed != SWAPZ_PREPARATION_PREPARING &&
 		    observed != SWAPZ_PREPARATION_RAW_SELECTED)
-			publication_race_fail(context);
+			publication_race_fail(context, "producer-or-consumer", iteration, observed);
 		(void)pthread_barrier_wait(&context->finish);
 	}
 	return NULL;
@@ -213,22 +220,22 @@ static void *select_raw_concurrently(void *opaque)
 		case SWAPZ_PREPARATION_READY_COMPRESSED:
 			if (context->codec_result <= 0 ||
 			    context->payload != publication_payload(iteration))
-				publication_race_fail(context);
+				publication_race_fail(context, "producer-or-consumer", iteration, observed);
 			break;
 		case SWAPZ_PREPARATION_READY_RAW:
 			if (context->codec_result != 0 ||
 			    context->payload != publication_payload(iteration))
-				publication_race_fail(context);
+				publication_race_fail(context, "producer-or-consumer", iteration, observed);
 			break;
 		case SWAPZ_PREPARATION_ERROR:
 			if (context->codec_result >= 0 ||
 			    context->preparation_error != context->codec_result)
-				publication_race_fail(context);
+				publication_race_fail(context, "producer-or-consumer", iteration, observed);
 			break;
 		case SWAPZ_PREPARATION_RAW_SELECTED:
 			break;
 		default:
-			publication_race_fail(context);
+			publication_race_fail(context, "producer-or-consumer", iteration, observed);
 			break;
 		}
 		(void)pthread_barrier_wait(&context->finish);
@@ -265,19 +272,19 @@ static int test_concurrent_codec_publication_preserves_payload_visibility(void)
 		final_state = swapz_preparation_read_state(&context.state);
 		if (final_state == SWAPZ_PREPARATION_PREPARING ||
 		    final_state == SWAPZ_PREPARATION_EMPTY)
-			publication_race_fail(&context);
+			publication_race_fail(&context, "drain-final", iteration, final_state);
 		if (context.codec_result < 0 &&
 		    final_state != SWAPZ_PREPARATION_ERROR &&
 		    final_state != SWAPZ_PREPARATION_RAW_SELECTED)
-			publication_race_fail(&context);
+			publication_race_fail(&context, "drain-final", iteration, final_state);
 		if (context.codec_result == 0 &&
 		    final_state != SWAPZ_PREPARATION_READY_RAW &&
 		    final_state != SWAPZ_PREPARATION_RAW_SELECTED)
-			publication_race_fail(&context);
+			publication_race_fail(&context, "drain-final", iteration, final_state);
 		if (context.codec_result > 0 &&
 		    final_state != SWAPZ_PREPARATION_READY_COMPRESSED &&
 		    final_state != SWAPZ_PREPARATION_RAW_SELECTED)
-			publication_race_fail(&context);
+			publication_race_fail(&context, "drain-final", iteration, final_state);
 	}
 	CHECK(pthread_join(producer, NULL) == 0);
 	CHECK(pthread_join(consumer, NULL) == 0);

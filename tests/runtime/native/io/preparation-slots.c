@@ -533,15 +533,38 @@ static int test_production_failure_and_wake_gates(void)
 	return 0;
 }
 
+/*
+ * Bounded C11 publication/ref-release/slot-reuse model (NOT an LKMM proof):
+ * each producer owns a claimed slot and is its only PREPARING->terminal
+ * publisher. Its metadata is sequenced before the real production CAS.
+ * The consumer's acquire read of that CAS exposes immutable metadata.
+ * The final owner stores EMPTY before release_slot's fence + relaxed OR;
+ * the next producer's successful acquire CAS on the mask orders reuse.
+ * Four concurrent producers contend for slots; no test-only ready store
+ * is used as the publication edge. The relaxed-reread mutant above is
+ * the deliberately broken negative control for the READY acquire edge.
+ */
 #define TRANSFERS 8192U
 #define PRODUCERS 4U
+#define MAX_STALLED_POLLS 20000000U
 _Static_assert(TRANSFERS % PRODUCERS == 0, "even producer sequence ranges");
 static struct {
 	atomic64_t mask;
-	atomic_uint ready[SWAPZ_MAX_RECORDS];
+	atomic_t states[SWAPZ_MAX_RECORDS];
+	unsigned int sequences[SWAPZ_MAX_RECORDS];
 	uint64_t bytes[SWAPZ_MAX_RECORDS][16];
 	atomic_int failed;
+	pthread_barrier_t start;
 } exchange;
+
+static void exchange_fail(const char *phase, unsigned int sequence,
+			  unsigned int slot, int state, int expected_state)
+{
+	/* Emit one fail-only diagnostic even if several workers notice failure. */
+	if (!atomic_exchange_explicit(&exchange.failed, 1, memory_order_relaxed))
+		fprintf(stderr, "slot-reuse %s: sequence=%u slot=%u state=%d expected=%d\n",
+			phase, sequence, slot, state, expected_state);
+}
 
 static void *produce(void *opaque)
 {
@@ -550,55 +573,122 @@ static void *produce(void *opaque)
 		producer_index * (TRANSFERS / PRODUCERS) + 1U;
 	const unsigned int final_sequence =
 		(producer_index + 1U) * (TRANSFERS / PRODUCERS);
-	unsigned int sequence, i;
+	unsigned int sequence, byte;
 
+	(void)pthread_barrier_wait(&exchange.start);
 	for (sequence = first_sequence; sequence <= final_sequence; ++sequence) {
-		int slot;
+		unsigned int stalled_polls;
+		int slot = -1;
+		int codec_result = sequence % 3U == 0U ? -EIO :
+			(sequence % 3U == 1U ? 0 : 2048);
+		int previous_state;
 
-		while ((slot = swapz_preparation_claim_slot(&exchange.mask)) < 0) {
-			if (atomic_load(&exchange.failed))
-				return NULL;
+		for (stalled_polls = 0; stalled_polls < MAX_STALLED_POLLS;
+		     ++stalled_polls) {
+			slot = swapz_preparation_claim_slot(&exchange.mask);
+			if (slot >= 0 || atomic_load_explicit(
+					&exchange.failed, memory_order_relaxed))
+				break;
 			sched_yield();
 		}
-		for (i = 0; i < 16; ++i)
-			exchange.bytes[slot][i] = (uint64_t)sequence * 17U + i;
-		atomic_store_explicit(&exchange.ready[slot], sequence,
-				      memory_order_release);
+		if (atomic_load_explicit(&exchange.failed, memory_order_relaxed))
+			return NULL;
+		if (slot < 0) {
+			exchange_fail("producer-claim-timeout", sequence,
+				      SWAPZ_MAX_RECORDS, -1, 0);
+			return NULL;
+		}
+		/* The successful slot claim orders the previous owner's return. */
+		atomic_store_explicit(&exchange.states[slot].value,
+				      SWAPZ_PREPARATION_PREPARING,
+				      memory_order_relaxed);
+		exchange.sequences[slot] = sequence;
+		for (byte = 0; byte < 16; ++byte)
+			exchange.bytes[slot][byte] = (uint64_t)sequence * 17U + byte;
+		previous_state = swapz_preparation_publish_codec_result(
+			&exchange.states[slot], codec_result);
+		if (previous_state != SWAPZ_PREPARATION_PREPARING) {
+			exchange_fail("producer-publish-CAS", sequence,
+				      (unsigned int)slot, previous_state,
+				      SWAPZ_PREPARATION_PREPARING);
+			return NULL;
+		}
+		/* The consumer owns reclamation; no producer reads this slot again. */
 	}
 	return NULL;
 }
 
 static void *consume(void *unused)
 {
-	unsigned int completed = 0, slot, i;
+	unsigned int completed = 0, slot, byte, stalled_polls = 0;
 	unsigned char seen[TRANSFERS] = { 0 };
 
 	(void)unused;
-	while (completed < TRANSFERS && !atomic_load(&exchange.failed)) {
-		for (slot = 0; slot < SWAPZ_MAX_RECORDS; ++slot) {
-			unsigned int sequence = atomic_load_explicit(
-				&exchange.ready[slot], memory_order_acquire);
+	(void)pthread_barrier_wait(&exchange.start);
+	while (completed < TRANSFERS &&
+	       !atomic_load_explicit(&exchange.failed, memory_order_relaxed)) {
+		unsigned int progress = 0;
 
-			if (!sequence)
+		for (slot = 0; slot < SWAPZ_MAX_RECORDS; ++slot) {
+			const int state = swapz_preparation_read_state(
+				&exchange.states[slot]);
+			unsigned int sequence;
+			int expected_state, codec_result;
+
+			if (state == SWAPZ_PREPARATION_EMPTY ||
+			    state == SWAPZ_PREPARATION_PREPARING)
 				continue;
-			if (sequence > TRANSFERS || seen[sequence - 1]) {
-				atomic_store(&exchange.failed, 1);
+			if (state != SWAPZ_PREPARATION_READY_COMPRESSED &&
+			    state != SWAPZ_PREPARATION_READY_RAW &&
+			    state != SWAPZ_PREPARATION_ERROR) {
+				exchange_fail("consumer-terminal-state", 0,
+					      slot, state, SWAPZ_PREPARATION_ERROR);
 				return NULL;
 			}
-			seen[sequence - 1] = 1;
-			for (i = 0; i < 16; ++i) {
-				if (exchange.bytes[slot][i] !=
-				    (uint64_t)sequence * 17U + i) {
-					atomic_store(&exchange.failed, 1);
+			/* Acquire of the real producer CAS precedes plain payload reads. */
+			sequence = exchange.sequences[slot];
+			if (!sequence || sequence > TRANSFERS ||
+			    seen[sequence - 1]) {
+				exchange_fail("consumer-duplicate-sequence", sequence,
+					      slot, state, 0);
+				return NULL;
+			}
+			codec_result = sequence % 3U == 0U ? -EIO :
+				(sequence % 3U == 1U ? 0 : 2048);
+			expected_state =
+				swapz_preparation_codec_result_state(codec_result);
+			if (state != expected_state) {
+				exchange_fail("consumer-codec-state", sequence,
+					      slot, state, expected_state);
+				return NULL;
+			}
+			for (byte = 0; byte < 16; ++byte) {
+				if (exchange.bytes[slot][byte] !=
+				    (uint64_t)sequence * 17U + byte) {
+					exchange_fail("consumer-payload", sequence,
+						      slot, state, expected_state);
 					return NULL;
 				}
 			}
-			atomic_store_explicit(&exchange.ready[slot], 0,
+			seen[sequence - 1] = 1;
+			/* Final consumer reference: EMPTY before reuse publication. */
+			atomic_store_explicit(&exchange.states[slot].value,
+					      SWAPZ_PREPARATION_EMPTY,
 					      memory_order_relaxed);
 			swapz_preparation_release_slot(&exchange.mask, slot);
 			completed++;
+			progress++;
 		}
-		sched_yield();
+		if (progress) {
+			stalled_polls = 0;
+		} else {
+			if (++stalled_polls == MAX_STALLED_POLLS) {
+				exchange_fail("consumer-drain-timeout", completed,
+					      SWAPZ_MAX_RECORDS, -1, 0);
+				return NULL;
+			}
+			sched_yield();
+		}
 	}
 	return NULL;
 }
@@ -607,26 +697,29 @@ static int test_concurrent_reuse(void)
 {
 	pthread_t producers[PRODUCERS], consumer;
 	unsigned int producer_indices[PRODUCERS];
-	unsigned int i;
+	unsigned int index;
 
 	atomic_init(&exchange.mask.value, (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic_init(&exchange.failed, 0);
-	for (i = 0; i < SWAPZ_MAX_RECORDS; ++i)
-		atomic_init(&exchange.ready[i], 0);
+	for (index = 0; index < SWAPZ_MAX_RECORDS; ++index)
+		atomic_init(&exchange.states[index].value, SWAPZ_PREPARATION_EMPTY);
+	CHECK(pthread_barrier_init(&exchange.start, NULL, PRODUCERS + 1U) == 0);
 	CHECK(pthread_create(&consumer, NULL, consume, NULL) == 0);
-	for (i = 0; i < PRODUCERS; ++i) {
-		producer_indices[i] = i;
-		CHECK(pthread_create(&producers[i], NULL, produce,
-				     &producer_indices[i]) == 0);
+	for (index = 0; index < PRODUCERS; ++index) {
+		producer_indices[index] = index;
+		CHECK(pthread_create(&producers[index], NULL, produce,
+				     &producer_indices[index]) == 0);
 	}
-	for (i = 0; i < PRODUCERS; ++i)
-		CHECK(pthread_join(producers[i], NULL) == 0);
+	for (index = 0; index < PRODUCERS; ++index)
+		CHECK(pthread_join(producers[index], NULL) == 0);
 	CHECK(pthread_join(consumer, NULL) == 0);
-	CHECK(!atomic_load(&exchange.failed));
+	CHECK(pthread_barrier_destroy(&exchange.start) == 0);
+	CHECK(!atomic_load_explicit(&exchange.failed, memory_order_relaxed));
 	CHECK((uint64_t)atomic64_read(&exchange.mask) ==
 	      SWAPZ_PREPARATION_FREE_MASK);
-	for (i = 0; i < SWAPZ_MAX_RECORDS; ++i)
-		CHECK(!atomic_load(&exchange.ready[i]));
+	for (index = 0; index < SWAPZ_MAX_RECORDS; ++index)
+		CHECK(swapz_preparation_read_state(&exchange.states[index]) ==
+		      SWAPZ_PREPARATION_EMPTY);
 	return 0;
 }
 

@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Deterministic producer/ordered-owner interleavings of the production helpers.
+/* Bounded C11 producer/ordered-owner lifetime model of production helpers.
  * READY/ERROR payloads require the state acquire; RAW_SELECTED completion
- * instead supplies the late-result acquire. This is not an LKMM proof. */
+ * instead supplies the late-result acquire. Refcount acq_rel RMWs establish
+ * the final owner, but only final-put's EMPTY store and release_slot's fence/OR
+ * authorize the next claimant's acquire-CAS slot reuse. The ordered drain's
+ * lane lease is modeled separately from BIO reference lifetime. These test
+ * executions are NOT an LKMM exhaustive proof or loaded kernel coverage. */
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <pthread.h>
@@ -61,7 +65,12 @@ static void atomic64_or(s64 bits, atomic64_t *value)
 
 /* A failed assertion must not strand the other thread at a test barrier. */
 #define RACE_CHECK(condition) do { if (!(condition)) { \
-	fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #condition); \
+	fprintf(stderr, "prepared-lifetime iteration=%u codec=%d state=%d " \
+		"refs=%u free_mask=0x%llx: %s:%d: %s\n", \
+		iteration, codec_result, state, \
+		atomic_load_explicit(&handoff.references, memory_order_relaxed), \
+		(unsigned long long)atomic64_read(&handoff.free_mask), \
+		__FILE__, __LINE__, #condition); \
 	atomic_fetch_add(&handoff.protocol_failures, 1); \
 } } while (0)
 
@@ -177,7 +186,7 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 			(sizeof(results) / sizeof(results[0]))];
 		const int raw_wins_race = iteration % 2U == 0U;
 		unsigned int byte;
-		int state;
+		int state = SWAPZ_PREPARATION_EMPTY;
 
 		RACE_CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == 63);
 		RACE_CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == -1);
