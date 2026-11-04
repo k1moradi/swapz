@@ -45,6 +45,9 @@ may be reconciled by exact inactive inventory proof. Ambiguous inventory,
 wrong-device activation, stale identity, or an active raw backing partition
 remains recoverable and fail-closed. A stale run ID must never activate,
 deactivate, remove, or complete a newer transaction.
+The direct-C owner-claim regression must complete run A, let run B claim the
+same partition with a fresh run ID, reject stale A-side ACTIVE/COMPLETE and
+recovery-state writes, and prove B's canonical state bytes remain unchanged.
 
 `tests/runtime/native/primary-lifecycle-audit-test.py` is a rootless
 adversarial model for those invariants and performs no privileged or physical

@@ -2463,10 +2463,18 @@ static void test_orphan_ready_claim_reconciliation(void)
 	char next_record[192];
 	char recovered_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	char unchanged_state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+	char next_state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	struct swapz_primary_state state = {0};
+	struct swapz_primary_state stale_state = {0};
+	static const enum swapz_primary_stage stale_stages[] = {
+		SWAPZ_PRIMARY_STAGE_ACTIVE,
+		SWAPZ_PRIMARY_STAGE_COMPLETE,
+	};
 	struct stat active_info;
 	size_t recovered_length;
 	size_t unchanged_state_length;
+	size_t next_state_length;
+	size_t stale_index;
 	int formatted_length;
 	int directory_fd;
 	int lock_fd;
@@ -2568,6 +2576,33 @@ static void test_orphan_ready_claim_reconciliation(void)
 					&state) == 0);
 	assert(state.stage == SWAPZ_PRIMARY_STAGE_READY &&
 	       !strcmp(state.run_id, next_run_id));
+	/* A stale activation/deactivation or recovery result from A must not
+	 * overwrite B after B has claimed the same partition. */
+	next_state_length = recovered_length;
+	memcpy(next_state_record, recovered_record,
+	       recovered_length + 1U);
+	for (stale_index = 0;
+	     stale_index < sizeof(stale_stages) / sizeof(stale_stages[0]);
+	     ++stale_index) {
+		stale_state = state;
+		memcpy(stale_state.run_id, first_run_id,
+		       sizeof(stale_state.run_id));
+		stale_state.stage = stale_stages[stale_index];
+		errno = 0;
+		assert(swapz_primary_state_write_at(
+			directory_fd, lock_fd, &stale_state, geteuid()) < 0);
+		assert(errno == EPERM);
+	}
+	errno = 0;
+	assert(swapz_primary_state_require_recovery_at(
+		directory_fd, lock_fd, first_run_id, geteuid()) < 0);
+	assert(errno == EPERM);
+	assert(swapz_primary_record_read_at(
+		directory_fd, "primary-state.json", geteuid(), recovered_record,
+		sizeof(recovered_record), &recovered_length, NULL) == 0);
+	assert(recovered_length == next_state_length &&
+	       !memcmp(recovered_record, next_state_record,
+		       next_state_length));
 	assert(swapz_primary_reconcile_metadata_claim_at(
 		directory_fd, lock_fd, geteuid()) == 0);
 	assert(fstatat(directory_fd, active_name, &active_info,
