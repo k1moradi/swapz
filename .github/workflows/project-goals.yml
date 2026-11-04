@@ -68,12 +68,13 @@ jobs:
       - name: Install native prerequisites on GitHub-hosted runner
         run: |
           python3 -B tests/tools/product_goals.py ci-run --suite apt-prerequisites -- bash -c 'sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev'
+      - name: Run synthetic CI diagnostics and Make interface regression
+        run: python3 -B tests/tools/product_goals.py ci-run --suite make-interface -- python3 -B tests/runtime/native/make-interface-test.py -v
       - name: Enforce the Make API and mandatory test discovery
         run: |
           cat > build/ci-make-policy.sh <<'SWAPZ_CI_SCRIPT'
           set -Eeuo pipefail
           trap 'printf "SOURCE_CONTRACT_MISMATCH: check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
-          python3 -B tests/tools/product_goals.py ci-run --suite make-interface -- python3 -B tests/runtime/native/make-interface-test.py -v
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
           grep -Fxq '.PHONY: all install uninstall test fast_test' Makefile
           grep -Fq '@+python3 -B tests/tools/run-tests.py --kdir' Makefile
