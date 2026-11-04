@@ -475,6 +475,7 @@ int swapz_lookup_validated_descriptor(const void *bytes,
 				      const swapz_u8 **payload)
 {
 	struct swapz_record record;
+	swapz_u32 metadata_end;
 	swapz_u8 record_count;
 
 	if (!bytes || !out || !payload || !swapz_valid_extent_bytes(bytes_total)) {
@@ -491,9 +492,14 @@ int swapz_lookup_validated_descriptor(const void *bytes,
 		*out = (struct swapz_decoded){ 0 };
 		return -ERANGE;
 	}
+	metadata_end = sizeof(struct swapz_header) +
+		(swapz_u32)record_count * sizeof(struct swapz_record);
 	swapz_get_record(bytes, index, &record);
 	swapz_decode_record(&record, out);
-	if (!out->payload_length || out->payload_length > SWAPZ_MAX_COMPRESSED ||
+	/* A metadata CRC authenticates the record bytes, not their semantics.
+	 * Never expose a payload pointer into the authenticated metadata area. */
+	if (!out->generation || out->payload_offset < metadata_end ||
+	    !out->payload_length || out->payload_length > SWAPZ_MAX_COMPRESSED ||
 	    !swapz_encoding_valid(out->encoding) ||
 	    out->payload_offset >= bytes_total ||
 	    out->payload_length > bytes_total - out->payload_offset) {
