@@ -761,7 +761,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         raw = cold_boot_evidence_raw() + b"status=PASS\n"
         with self.assertRaisesRegex(
                 EVALUATOR.EvidenceError,
-                "duplicate cold-boot evidence key: status"):
+                "duplicate cold-boot evidence key: 'status'"):
             EVALUATOR.parse_env_strict(raw)
 
     def test_cold_boot_report_field_set_and_dm_table_are_exact(self):
@@ -1570,7 +1570,10 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
                          "NOT_MEASURED")
-        self.assertIsNone(result["METADATA_RAM_MEASUREMENT"]["limit_bytes"])
+        self.assertEqual(
+            result["METADATA_RAM_MEASUREMENT"]["limit_bytes"],
+            frozen_policy["physical_qualification"]["acceptance"][
+                "sustained"]["metadata_and_target_peak_ram_bytes_max"])
         self.assertTrue(any(
             "production acceptance policy: parsed object differs from "
             "serialized bytes" in blocker
@@ -1847,8 +1850,23 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             path.write_bytes(
                 b'{"value":' + b"[" * 10000 + b"0" +
                 b"]" * 10000 + b"}\n")
-            with self.assertRaises(EVALUATOR.EvidenceError):
+            with self.assertRaisesRegex(
+                    EVALUATOR.EvidenceError, "nesting exceeds validation depth"):
                 EVALUATOR.load_json_strict(path)
+
+            # The top-level object contributes one container level.
+            bounded = EVALUATOR.MAX_JSON_NESTING_DEPTH - 1
+            path.write_bytes(
+                b'{"value":' + b"[" * bounded + b"0" +
+                b"]" * bounded + b"}\n")
+            parsed, _raw = EVALUATOR.load_json_strict(path)
+            self.assertIn("value", parsed)
+
+            # Bracket characters inside JSON strings do not count as
+            # container nesting.
+            path.write_text('{"value":"' + "[" * 10000 + "}" * 10000 + '"}')
+            parsed, _raw = EVALUATOR.load_json_strict(path)
+            self.assertEqual(len(parsed["value"]), 20000)
 
     def test_unresolved_critical_issue_blocks_code_readiness(self):
         report = owner_report()

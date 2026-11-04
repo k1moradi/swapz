@@ -31,6 +31,7 @@ METADATA_RAM_VALIDATOR = (
 RAM_TRACE_VALIDATOR = runpy.run_path(str(METADATA_RAM_VALIDATOR))
 MAX_EVIDENCE_INPUT_BYTES = 256 * 1024 * 1024
 MAX_ENV_EVIDENCE_INPUT_BYTES = 1024 * 1024
+MAX_JSON_NESTING_DEPTH = 128
 UNIX_EPOCH_ORDINAL = datetime.date(1970, 1, 1).toordinal()
 PHYSICAL_CAMPAIGN_AMENDMENT = (
     ROOT / "tests/runtime/benchmark/physical-qualification-amendment-v2.json")
@@ -147,6 +148,32 @@ def _reject_json_constant(value: str) -> None:
     raise EvidenceError(f"nonfinite JSON constant is not evidence: {value}")
 
 
+def _check_json_nesting_depth(raw: bytes) -> None:
+    """Bound container nesting before the standard decoder builds objects."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == ord("\\"):
+                escaped = True
+            elif byte == ord('"'):
+                in_string = False
+            continue
+        if byte == ord('"'):
+            in_string = True
+        elif byte in (ord("{"), ord("[")):
+            depth += 1
+            if depth > MAX_JSON_NESTING_DEPTH:
+                raise ValueError(
+                    "JSON evidence nesting exceeds validation depth "
+                    f"{MAX_JSON_NESTING_DEPTH}")
+        elif byte in (ord("}"), ord("]")):
+            depth -= 1
+
+
 def _parse_json_object_bytes(raw: Any, evidence_name: str) -> dict[str, Any]:
     if not isinstance(raw, bytes) or not raw:
         raise EvidenceError(f"{evidence_name}: serialized JSON evidence is empty")
@@ -155,6 +182,7 @@ def _parse_json_object_bytes(raw: Any, evidence_name: str) -> dict[str, Any]:
             f"{evidence_name}: evidence exceeds "
             f"{MAX_EVIDENCE_INPUT_BYTES}-byte input bound")
     try:
+        _check_json_nesting_depth(raw)
         value = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_unique_object,
             parse_int=_bounded_json_integer,
@@ -728,6 +756,7 @@ def validate_physical_campaign_evidence(
     # The digest belongs to these exact serialized bytes, not a separate
     # mutable Python object supplied by a caller.
     try:
+        _check_json_nesting_depth(raw)
         serialized_campaign = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_unique_object,
             parse_int=_bounded_json_integer,

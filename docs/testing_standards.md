@@ -5446,7 +5446,9 @@ retained real-swap or physical-campaign artifacts, it must never promote
 `real_linux_swap`, `maximum_capacity_and_ram`, or
 `sustained_physical_performance` from summary PASS to release PASS. Those
 summary PASS values are BLOCKED until the canonical evaluator validates the
-persistent evidence bytes. It strictly rejects duplicate JSON keys,
+persistent evidence bytes. Strict JSON rejects duplicate keys,
+nonfinite/overflowing numbers, and more than 128 nested JSON containers before
+decoding, so malformed depth cannot consume unbounded parser/validator recursion.
 requires a FROZEN canonical production-acceptance policy, hashes the exact
 policy bytes, binds owner `make test`, all three required CI workflows
 (`Native kernel-C project-goal regressions`,
