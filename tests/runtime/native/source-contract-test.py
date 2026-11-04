@@ -167,6 +167,52 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("swapz_primary_stop_active()", command)
         self.assertNotIn("swapz_primary_recover()", command)
 
+    def test_primary_prepare_failures_report_the_rejecting_gate(self):
+        primary = PRIMARY
+        prepare = source_body("swapz_primary_prepare_metadata", primary)
+        mutation = source_body("swapz_primary_run_mutating_action", primary)
+        for phase in (
+                "identity-admission", "configured-target-identity",
+                "recovery-directory-open", "partition-lock-and-prior-claim",
+                "prior-claim-reconciliation", "recovery-storage-inspection",
+                "recovery-directory-safety",
+                "recovery-filesystem-persistence",
+                "recovery-target-device-separation",
+                "recovery-physical-parent-identity", "prior-active-marker",
+                "qualification-report-read", "qualification-source-identity",
+                "qualified-artifact-hash-readback",
+                "qualified-artifact-identity", "target-header-inspection",
+                "target-geometry-identity", "original-header-rollback-proof",
+                "original-header-digest", "raw-target-swap-inventory",
+                "target-physical-parent-identity",
+                "cross-namespace-mount-inventory",
+                "target-mounted-in-visible-namespace",
+                "root-device-parent-identity",
+                "target-root-device-parent-separation",
+                "repeated-raw-target-swap-inventory",
+                "repeated-target-physical-parent-identity",
+                "repeated-target-recovery-parent-separation",
+                "repeated-cross-namespace-mount-inventory",
+                "repeated-target-mounted-in-visible-namespace",
+                "repeated-root-device-parent-identity",
+                "repeated-target-root-parent-separation",
+                "physical-parent-swap-inventory", "module-mapper-inventory",
+                "unexpected-module-or-mapper-present",
+                "final-raw-target-swap-inventory", "partition-owner-claim",
+                "original-header-backup-write", "manifest-write",
+                "original-header-backup-readback", "manifest-readback"):
+            with self.subTest(phase=phase):
+                self.assertIn(f'failure_phase = "{phase}"', prepare)
+        self.assertIn(
+            '"PRIMARY_PREPARE=FAILED phase=%s errno=%d error=%s "',
+            prepare)
+        self.assertIn("claim=retained target_unchanged=true", prepare)
+        self.assertIn("phase=global-mutation-lock", mutation)
+        self.assertIn("phase=package-transaction-", mutation)
+        self.assertLess(
+            prepare.index('"PRIMARY_PREPARE=FAILED'),
+            prepare.index("errno = saved_errno"))
+
     def test_native_make_stage_keeps_analyzer_contract_discovered(self):
         relative_path = (
             "tests/runtime/native/codec/anon-page-analyzer-test.py")

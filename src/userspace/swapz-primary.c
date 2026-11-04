@@ -9019,22 +9019,28 @@ static int swapz_primary_prepare_metadata(void)
 	int claimed = 0;
 	int result = -1;
 	int saved_errno;
+	const char *failure_phase = "identity-admission";
 
 	if (geteuid() != 0 || SWAPZ_BUILD_SOURCE_CLEAN != 1 ||
 	    !swapz_primary_valid_source_sha(SWAPZ_BUILD_SOURCE_SHA)) {
 		errno = EPERM;
 		goto out;
 	}
+	failure_phase = "configured-target-identity";
 	if (swapz_primary_configured_target(&target) < 0)
 		goto out;
+	failure_phase = "recovery-directory-open";
 	recovery_fd = swapz_primary_recovery_base_open(
 		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
 	if (recovery_fd < 0)
 		goto out;
+	failure_phase = "partition-lock-and-prior-claim";
 	lock_fd = swapz_primary_partition_lock_at(
 		recovery_fd, SWAPZ_PRIMARY_PARTUUID, 0);
-	if (lock_fd < 0 ||
-	    swapz_primary_reconcile_metadata_claim_at(
+	if (lock_fd < 0)
+		goto out;
+	failure_phase = "prior-claim-reconciliation";
+	if (swapz_primary_reconcile_metadata_claim_at(
 		    recovery_fd, lock_fd, 0) < 0)
 		goto out;
 	if (swapz_primary_recovery_preflight(
@@ -9042,50 +9048,147 @@ static int swapz_primary_prepare_metadata(void)
 		    &recovery_filesystem_major, &recovery_filesystem_minor,
 		    &recovery_directly_not_target, &recovery_source_chain_checked,
 		    &recovery_parent_major, &recovery_parent_minor,
-		    &active_marker_clear) < 0 ||
-	    !directory_safe || !persistent_filesystem ||
-	    !recovery_directly_not_target || !recovery_source_chain_checked ||
-	    !active_marker_clear) {
+		    &active_marker_clear) < 0) {
+		failure_phase = "recovery-storage-inspection";
+		goto out;
+	}
+	if (!directory_safe) {
+		failure_phase = "recovery-directory-safety";
 		errno = EPERM;
 		goto out;
 	}
-	if (swapz_primary_read_qualification_report(&qualification) < 0 ||
-	    strcmp(qualification.source_sha, SWAPZ_BUILD_SOURCE_SHA) ||
-	    swapz_primary_live_artifact_hashes(
+	if (!persistent_filesystem) {
+		failure_phase = "recovery-filesystem-persistence";
+		errno = EPERM;
+		goto out;
+	}
+	if (!recovery_directly_not_target) {
+		failure_phase = "recovery-target-device-separation";
+		errno = EPERM;
+		goto out;
+	}
+	if (!recovery_source_chain_checked) {
+		failure_phase = "recovery-physical-parent-identity";
+		errno = EPERM;
+		goto out;
+	}
+	if (!active_marker_clear) {
+		failure_phase = "prior-active-marker";
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "qualification-report-read";
+	if (swapz_primary_read_qualification_report(&qualification) < 0)
+		goto out;
+	if (strcmp(qualification.source_sha, SWAPZ_BUILD_SOURCE_SHA)) {
+		failure_phase = "qualification-source-identity";
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "qualified-artifact-hash-readback";
+	if (swapz_primary_live_artifact_hashes(
 		    live_swapzctl_sha256, live_module_sha256,
-		    live_oracle_sha256, qualification.module_sha256, NULL) < 0 ||
-	    !swapz_primary_qualification_artifacts_match(
+		    live_oracle_sha256, qualification.module_sha256, NULL) < 0)
+		goto out;
+	if (!swapz_primary_qualification_artifacts_match(
 		    &qualification, live_swapzctl_sha256, live_module_sha256,
 		    live_oracle_sha256)) {
+		failure_phase = "qualified-artifact-identity";
 		errno = EPERM;
 		goto out;
 	}
+	failure_phase = "target-header-inspection";
 	if (swapz_primary_target_preflight(
 		    target.partuuid, &target, &device_bytes, &original_swap_header,
-		    &original_header_digest_available, original_header) < 0 ||
-	    device_bytes != target.device_bytes ||
-	    !original_header_digest_available ||
-	    swapz_primary_sha256(original_header, sizeof(original_header),
-			     original_header_sha256) < 0) {
+		    &original_header_digest_available, original_header) < 0)
+		goto out;
+	if (device_bytes != target.device_bytes) {
+		failure_phase = "target-geometry-identity";
 		errno = EPERM;
 		goto out;
 	}
+	if (!original_header_digest_available) {
+		failure_phase = "original-header-rollback-proof";
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_sha256(original_header, sizeof(original_header),
+			     original_header_sha256) < 0) {
+		failure_phase = "original-header-digest";
+		goto out;
+	}
+	failure_phase = "raw-target-swap-inventory";
 	if (swapz_primary_original_swap_is_quiescent() < 0)
 		goto out;
+	failure_phase = "target-physical-parent-identity";
 	if (!swapz_primary_recovery_source_chain(
-		    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0, &target_parent) ||
-	    target_parent == makedev(recovery_parent_major,
-				      recovery_parent_minor) ||
-	    swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0 ||
-	    mount_facts.target_mounted ||
-	    !swapz_primary_recovery_source_chain(
+		    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0, &target_parent)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (target_parent == makedev(recovery_parent_major,
+				      recovery_parent_minor)) {
+		failure_phase = "target-recovery-parent-separation";
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "cross-namespace-mount-inventory";
+	if (swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0)
+		goto out;
+	if (mount_facts.target_mounted) {
+		failure_phase = "target-mounted-in-visible-namespace";
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "root-device-parent-identity";
+	if (!swapz_primary_recovery_source_chain(
 		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
-		    &root_parent) ||
-	    target_parent == root_parent) {
+		    &root_parent)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (target_parent == root_parent) {
+		failure_phase = "target-root-device-parent-separation";
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "repeated-raw-target-swap-inventory";
+	if (swapz_primary_original_swap_is_quiescent() < 0)
+		goto out;
+	failure_phase = "repeated-target-physical-parent-identity";
+	if (!swapz_primary_recovery_source_chain(
+		    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0, &target_parent)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (target_parent == makedev(recovery_parent_major,
+				      recovery_parent_minor)) {
+		failure_phase = "repeated-target-recovery-parent-separation";
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "repeated-cross-namespace-mount-inventory";
+	if (swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0)
+		goto out;
+	if (mount_facts.target_mounted) {
+		failure_phase = "repeated-target-mounted-in-visible-namespace";
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "repeated-root-device-parent-identity";
+	if (!swapz_primary_recovery_source_chain(
+		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
+		    &root_parent)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (target_parent == root_parent) {
+		failure_phase = "repeated-target-root-parent-separation";
 		errno = EPERM;
 		goto out;
 	}
 	{
+		failure_phase = "physical-parent-swap-inventory";
 		int parent_swap_active =
 			swapz_primary_swap_device_active(target_parent);
 
@@ -9095,12 +9198,16 @@ static int swapz_primary_prepare_metadata(void)
 			goto out;
 		}
 	}
+	failure_phase = "module-mapper-inventory";
 	if (swapz_primary_read_module_mapper_inventory(
-		    &module_loaded, &mapper_present) < 0 || module_loaded ||
-	    mapper_present) {
+		    &module_loaded, &mapper_present) < 0)
+		goto out;
+	if (module_loaded || mapper_present) {
+		failure_phase = "unexpected-module-or-mapper-present";
 		errno = EBUSY;
 		goto out;
 	}
+	failure_phase = "final-raw-target-swap-inventory";
 	if (swapz_primary_original_swap_is_quiescent() < 0)
 		goto out;
 	{
@@ -9175,6 +9282,7 @@ static int swapz_primary_prepare_metadata(void)
 			}
 		}
 	}
+	failure_phase = "run-id-and-header-construction";
 	if (swapz_primary_run_id_generate(run_id) < 0 ||
 	    swapz_primary_header_build(run_id, device_bytes, proposed_header) < 0)
 		goto out;
@@ -9191,17 +9299,21 @@ static int swapz_primary_prepare_metadata(void)
 	       sizeof(manifest.qualification_report_sha256));
 	memcpy(manifest.original_header_sha256, original_header_sha256,
 	       sizeof(manifest.original_header_sha256));
+	failure_phase = "partition-owner-claim";
 	if (swapz_primary_claim_partition_owner_at(
 		    recovery_fd, lock_fd, run_id, 0) < 0)
 		goto out;
 	claimed = 1;
+	failure_phase = "original-header-backup-write";
 	if (swapz_primary_header_backup_write_at(
 		    recovery_fd, lock_fd, run_id, original_header,
 		    original_header_sha256, 0) < 0)
 		goto out;
+	failure_phase = "manifest-write";
 	if (swapz_primary_manifest_write_at(
 		    recovery_fd, lock_fd, &manifest, 0) < 0)
 		goto out;
+	failure_phase = "original-header-backup-readback";
 	if (swapz_primary_header_backup_read_at(
 		    recovery_fd, lock_fd, run_id, original_header_sha256, 0,
 		    verified_header) < 0)
@@ -9210,6 +9322,7 @@ static int swapz_primary_prepare_metadata(void)
 		errno = EBADMSG;
 		goto out;
 	}
+	failure_phase = "manifest-readback";
 	if (swapz_primary_manifest_read_at(
 		    recovery_fd, lock_fd, run_id, target.partuuid, 0,
 		    &verified_manifest) < 0)
@@ -9224,10 +9337,12 @@ static int swapz_primary_prepare_metadata(void)
 	if (lock_fd >= 0 && close(lock_fd) < 0 && result == 0) {
 		result = -1;
 		saved_errno = errno;
+		failure_phase = "partition-lock-close";
 	}
 	if (recovery_fd >= 0 && close(recovery_fd) < 0 && result == 0) {
 		result = -1;
 		saved_errno = errno;
+		failure_phase = "recovery-directory-close";
 	}
 	memset(original_header, 0, sizeof(original_header));
 	memset(verified_current_header, 0, sizeof(verified_current_header));
@@ -9248,9 +9363,14 @@ static int swapz_primary_prepare_metadata(void)
 	}
 	if (result < 0 && claimed)
 		fprintf(stderr,
-			"PRIMARY_PREPARE=INCOMPLETE run_id=%s claim=retained "
-			"target_unchanged=true error=%s\n",
-			run_id, strerror(saved_errno));
+			"PRIMARY_PREPARE=FAILED phase=%s errno=%d error=%s "
+			"run_id=%s claim=retained target_unchanged=true\n",
+			failure_phase, saved_errno, strerror(saved_errno), run_id);
+	else if (result < 0)
+		fprintf(stderr,
+			"PRIMARY_PREPARE=FAILED phase=%s errno=%d error=%s "
+			"claim=none\n",
+			failure_phase, saved_errno, strerror(saved_errno));
 	if (result < 0)
 		errno = saved_errno;
 	return result;
@@ -10405,13 +10525,32 @@ static int swapz_primary_run_mutating_action(
 	 * recovery lock acquired by the selected lifecycle operation.
 	 */
 	mutation_lock_fd = swapz_primary_mutation_lock();
-	if (mutation_lock_fd < 0)
+	if (mutation_lock_fd < 0) {
+		if (action == SWAPZ_PRIMARY_MUTATING_PREPARE) {
+			int failure_errno = errno ? errno : EIO;
+
+			fprintf(stderr,
+				"PRIMARY_PREPARE=FAILED phase=global-mutation-lock "
+				"errno=%d error=%s\n",
+				failure_errno, strerror(failure_errno));
+			errno = failure_errno;
+		}
 		return -1;
+	}
 	/* The volatile flock survives no process crash; durable state must agree. */
 	if ((action == SWAPZ_PRIMARY_MUTATING_PREPARE ||
 	     action == SWAPZ_PRIMARY_MUTATING_START) &&
 	    swapz_primary_package_transactions_clear_at(
 		    SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY, 0) < 0) {
+		if (action == SWAPZ_PRIMARY_MUTATING_PREPARE) {
+			int failure_errno = errno ? errno : EIO;
+
+			fprintf(stderr,
+				"PRIMARY_PREPARE=FAILED phase=package-transaction-"
+				"preflight errno=%d error=%s\n",
+				failure_errno, strerror(failure_errno));
+			errno = failure_errno;
+		}
 		result = -1;
 		goto unlock;
 	}

@@ -625,10 +625,12 @@ references, identity drift or a failed query stop cleanup and preserve the
 durable recovery state. These primitives remain disabled until the complete
 provisioning, activation, teardown, recovery and boot lifecycle is qualified.
 Lifecycle coordinators must emit one fail-only boundary diagnostic before
-attempting durable recovery-state repair, naming the current start/stop/recover
-phase and the original errno. Successful commands stay quiet except for their
-existing completion record, and diagnostic logging must never replace,
-reinterpret or mask the original failure or recovery obligation.
+attempting durable recovery-state repair, naming the current prepare/start/stop/
+recover phase and the original errno. Preparation diagnostics must identify the
+specific admission or persistence check that failed without exposing secret
+contents. Successful commands stay quiet except for their existing completion
+record, and diagnostic logging must never replace, reinterpret or mask the
+original failure or recovery obligation.
 
 The shared transaction admission check must read the run's immutable 4096-byte
 block-zero backup when the transaction records one and verify its recorded
