@@ -29,26 +29,10 @@ TARGET = {"partuuid": "f13428f6-01", "size_bytes": 124787884032}
 
 
 def acceptance_policy():
-    return {
-        "schema": "swapz-production-acceptance-v1",
-        "status": "FROZEN",
-        "primary_real_swap": {
-            "page_bytes": 4096,
-            "cycles": 2,
-            "workload_mib": 384,
-            "resident_mib": 128,
-            "swap_limit_mib": 384,
-            "timeout_seconds": 240,
-        },
-        "physical_qualification": {
-            "schema": "swapz-performance-qualification-v1",
-            "acceptance": {
-                "sustained": {
-                    "metadata_and_target_peak_ram_bytes_max": 1342177280,
-                },
-            },
-        },
-    }
+    # Synthetic tests must exercise the tracked frozen manifest, not a
+    # partial policy that could silently drift from production.
+    return json.loads(
+        (ROOT / "docs/production-acceptance.json").read_text(encoding="utf-8"))
 
 
 def encoded(value):
@@ -313,7 +297,7 @@ def physical_campaign_evidence(policy_raw):
             expected_peak_ram_bytes=900 * 1024 * 1024)
     return {
         "schema": "swapz-performance-campaign-evidence-v1",
-        "sealed_at_utc": "2026-11-03T00:00:00+00:00",
+        "sealed_at_utc": "2026-11-03T00:00:11+00:00",
         "source_sha": SOURCE,
         "source_tree_sha": "b" * 40,
         "campaign_source_sha": SOURCE,
@@ -2115,6 +2099,66 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 '"physical_qualification":{}}\n')
             with self.assertRaises(EVALUATOR.EvidenceError):
                 EVALUATOR.load_json_strict(path)
+
+    def test_self_declared_frozen_policy_cannot_raise_host_ram_limit(self):
+        policy = acceptance_policy()
+        policy["physical_qualification"]["acceptance"]["sustained"][
+            "metadata_and_target_peak_ram_bytes_max"] *= 2
+        result = evaluate(policy=policy)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "NOT_MEASURED")
+        self.assertTrue(any(
+            "differs from tracked frozen manifest" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_seal_must_follow_host_after_capture(self):
+        policy = acceptance_policy()
+        campaign = physical_campaign_evidence(encoded(policy))
+        campaign["sealed_at_utc"] = "2026-11-03T00:00:00+00:00"
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "NOT_MEASURED")
+        self.assertTrue(any(
+            "metric=sealed_at_utc" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_adversarial_ram_diagnostics_are_bounded(self):
+        validator = EVALUATOR.RAM_TRACE_VALIDATOR[
+            "validate_metadata_ram_trace"]
+        for metric, invalid in (
+                ("timestamp_utc", "private-data" * 10000),
+                ("monotonic_ns", 1 << 100000),
+                ("mem_available_kib", float("inf")),
+                ("mapper_present", "private-data" * 10000)):
+            with self.subTest(metric=metric):
+                trace = sampled_metadata_ram_trace()
+                trace["samples"][15][metric] = invalid
+                with self.assertRaises(ValueError) as failure:
+                    validator(
+                        trace, source_sha=SOURCE,
+                        mapper_uuid=trace["mapper_uuid"])
+                self.assertLess(len(str(failure.exception)), 400)
+                self.assertIn(
+                    ("MemAvailable_kib" if metric == "mem_available_kib"
+                     else metric), str(failure.exception))
+
+    def test_missing_host_peak_names_frozen_limit_and_required_samples(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw, policy_raw = encoded(report), encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        evidence = current_evidence(report_raw, policy_raw, physical_raw)
+        verdict = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw)
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "metric=metadata_and_target_peak_ram_bytes observed=unavailable "
+            "limit=1342177280" in blocker and "verified teardown" in blocker
+            for blocker in verdict["code_blockers"]))
 
     def test_policy_rejects_extra_top_level_fields(self):
         policy = acceptance_policy()
