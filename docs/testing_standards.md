@@ -717,9 +717,13 @@ header. The first page beyond that limit must fail allocation-free with
 `-ENOSPC`. Capacity-index payload is 776,070,968 bytes (740.1189 MiB); on a
 4KiB-page host, independently rounding each current array to an allocation-page
 boundary is 776,114,176 bytes, 43,208 bytes of page rounding. The largest one
-is the 433,283,072-byte mapping array. vmalloc
-metadata, page tables, fixed target scratch/caches/workspaces and allocator
-implementation overhead remain outside those figures and require loaded-host
+is the 433,283,072-byte mapping array. As an allocation-free page-table scale
+oracle, independently placing each of the 17 rounded arrays behind its own
+4KiB-page vmalloc leaf mapping requires 382 leaf PTE pages, or 1,564,672 bytes,
+on the 4KiB-page x86_64/arm64 qualification builds. This is deliberately
+conservative and is not added to the payload as a measured total: actual
+vmalloc metadata, shared upper page-table levels, slab/allocator overhead,
+fixed target scratch/caches/workspaces and residency require loaded-host
 measurement. The source-contract allocation inventory independently requires
 exactly 17 capacity-scaled `kvcalloc` sites (three logical-page indexes, three
 physical-block indexes and eleven per-segment indexes), every matching
@@ -1217,12 +1221,19 @@ emulation must not be described as Linux swap behavior.
 Independent lower-device accounting uses the selected card's parent block
 statistics bracketed around each measured interval and separate cold-read
 brackets. Peak target RAM is sampled every 100 ms from a one-second pre-create
-baseline through mapper creation/workload plus two seconds of quiescence; record
-\`MemAvailable\`, \`SUnreclaim\` and \`VmallocUsed\`, and use the baseline-median minus
-minimum-\`MemAvailable\` delta as the conservative metadata+target peak. Repeat the
-same host sampler for the raw control. This whole-host observation is deliberately
-conservative and not exact allocation attribution, but an estimate from C type
-sizes alone cannot satisfy the gate. Reports include useful throughput, p95/p99,
+baseline through mapper initialization, steady operation, measured GC and
+ordinary mapper teardown, followed by at least two seconds with the mapper
+observed absent. Each sample records \`MemAvailable\`, \`SUnreclaim\`,
+\`VmallocUsed\`, UTC time, a monotonic timestamp and mapper-presence state.
+The qualifying peak is derived from the raw samples as baseline-median
+\`MemAvailable\` minus the minimum \`MemAvailable\` while the mapper is
+present; an asserted replay scalar is diagnostic only. The final target-absent
+second must return the median \`MemAvailable\` to the baseline envelope
+without leaving \`SUnreclaim\` or \`VmallocUsed\` above their pre-create
+envelope. Repeat the same whole-host sampler for the raw control when collecting
+the physical comparison. This observation is deliberately conservative rather
+than exact target attribution, but an estimate from C type sizes alone cannot
+satisfy the gate. Reports include useful throughput, p95/p99,
 CPU, peak RAM, GC and allocator costs, lower bytes/requests, minute drift and
 forward progress. Anonymous reports retain diagnostic process-CPU phase splits
 for fill and reread/verification without changing the frozen whole-arm CPU
@@ -5311,25 +5322,28 @@ even if a plausible capacity/peak scalar is provided: capacity is independently
 recomputed from the target partition, its SWZ header reservation, GC reserve,
 segment alignment and foreground headroom. Rootless synthetic traces never
 qualify the host. A resource PASS must carry source-bound and mapper-UUID-bound
-serialized loaded-host metadata RAM samples including a boot identity, strict
-UTC and monotonic timestamps, a bounded declared sample interval with no
-unexplained gaps, and ordered baseline, initialization, steady, GC and teardown
-phases (at least two samples each). The sealed peak must equal the maximum
-observed sample, not an asserted constant. Teardown must show recovery to or
-below the stable pre-create baseline after the observed allocation peak.
-The sample scope includes metadata and target resident memory plus page tables;
-unmeasured vmalloc/slab costs may not be excluded by relabeling them as
-estimates. Since mapper teardown happens after the replay arm is written, the
-serialized loaded-host sampler must publish a separate, immutable post-teardown
-JSON artifact using the canonical JSON evidence writer. The campaign sealer
+serialized loaded-host samples from the conservative whole-host measurement
+above: exact 100 ms cadence declaration, boot identity, UTC and monotonic
+timestamps, raw \`MemAvailable\`/\`SUnreclaim\`/\`VmallocUsed\` counters,
+mapper-presence state, one second of target-absent baseline, initialization,
+steady and GC observations, ordinary teardown, and at least two seconds of
+target-absent recovery. The sealer derives the peak from those raw counters and
+stores the derived summary; the release evaluator independently recomputes the
+summary and rejects any mismatch. It must not trust an asserted per-sample
+"target RAM" byte count or a replay-time peak scalar, because this whole-host
+method is conservative rather than exact target allocation attribution. Since
+mapper teardown happens after the replay arm is written, the serialized
+loaded-host sampler must publish a separate, immutable post-teardown JSON
+artifact using the canonical JSON evidence writer. The campaign sealer
 takes `--metadata-ram-trace` on its `seal` subcommand, verifies canonical bytes
 and SHA-256 provenance, checks the boot ID against both host snapshots, and
 requires sample timestamps within the host snapshot window. The release
-evaluator checks the sealed trace against its artifact size and digest. A
-scalar embedded in an early replay pair cannot substitute for this later
-artifact. Missing phases, inconsistent timestamps, peak mismatch, malformed
-provenance or unrecovered teardown block the campaign and the release
-evaluator, even if the supplied campaign digest was recomputed. The serialized
+evaluator checks the sealed trace against its artifact size and digest. A scalar embedded in an early replay pair cannot substitute for this later
+artifact; zero or absent is acceptable diagnostic state, while a nonzero scalar
+that contradicts the derived host trace is invalid. Missing phases, inconsistent
+timestamps, raw-counter/summary mismatch, malformed provenance, mapper lifecycle
+ambiguity or unrecovered teardown block the campaign and the release evaluator,
+even if the supplied campaign digest was recomputed. The serialized
 Codex loaded-host collector remains a separate required qualification; an
 unbound scalar from `--metadata-and-target-peak-ram-bytes` alone is not a
 resource PASS.
