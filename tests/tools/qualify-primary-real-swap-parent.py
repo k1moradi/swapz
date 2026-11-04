@@ -392,7 +392,16 @@ def _serve_admission(server: socket.socket,
 
     if not passed_phases and child.poll() is None:
         _stop_unadmitted_child(child)
-    result = child.wait()
+    try:
+        # Once the admission channel closes, no further phase can succeed.
+        # Bound a stuck child so the parent does not lose terminal diagnostics.
+        result = child.wait(timeout=45)
+    except subprocess.TimeoutExpired as exc:
+        failure = Blocked(
+            "privileged qualifier abnormal teardown: child did not exit "
+            "after source admission channel closed")
+        _stop_unadmitted_child_preserving(child, failure)
+        raise failure from exc
     if result == 0 and passed_phases != expected_phases:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="

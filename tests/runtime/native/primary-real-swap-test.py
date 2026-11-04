@@ -1396,6 +1396,79 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(
             responses[-1]["reason"], "production source tree is not clean")
 
+    def test_parent_bounds_abnormal_child_teardown_after_admission(self):
+        # A child that disconnects after initial admission must not hang the
+        # unprivileged parent indefinitely or erase a termination error.
+        source_sha = "a" * 40
+        hashes = {relative: "c" * 64
+                  for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS}
+        request = {
+            "schema": parent.SOURCE_ADMISSION_SCHEMA,
+            "source_sha": source_sha,
+            "phase": "initial",
+            "nonce": "b" * 32,
+            "physical_control_inputs_sha256": hashes,
+            "executed_helper_sha256": "8" * 64,
+        }
+
+        class FakeStream:
+            def __init__(self):
+                self.input = io.BytesIO((json.dumps(request) + "\n").encode("ascii"))
+                self.output = io.BytesIO()
+
+            def readline(self, limit):
+                return self.input.readline(limit)
+
+            def write(self, payload):
+                return self.output.write(payload)
+
+            def flush(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+        stream = FakeStream()
+        connection = mock.MagicMock()
+        connection.getsockopt.return_value = struct.pack("3i", 123, 0, 0)
+        connection.makefile.return_value = stream
+        server = mock.Mock()
+        server.accept.return_value = (connection, None)
+        child = mock.Mock()
+        child.poll.return_value = None
+        child.wait.side_effect = [
+            subprocess.TimeoutExpired("qualifier", 45), None,
+        ]
+        with mock.patch.object(parent, "_check_git_source"):
+            with self.assertRaisesRegex(
+                    parent.Blocked, "abnormal teardown: child did not exit"):
+                parent._serve_admission(
+                    server, child, source_sha, "/usr/bin/git", "d" * 64,
+                    hashes, "8" * 64, 2)
+        self.assertEqual(
+            child.wait.call_args_list,
+            [mock.call(timeout=45), mock.call(timeout=10)])
+        child.terminate.assert_called_once_with()
+        self.assertEqual(
+            json.loads(stream.output.getvalue().splitlines()[0])["status"],
+            "PASS")
+
+        # If termination also fails, both reasons must remain actionable.
+        stream.input.seek(0)
+        child.wait.side_effect = [subprocess.TimeoutExpired("qualifier", 45)]
+        child.terminate.side_effect = OSError("synthetic termination refusal")
+        with mock.patch.object(parent, "_check_git_source"):
+            with self.assertRaisesRegex(
+                    parent.Blocked,
+                    "abnormal teardown:.*cleanup also failed: "
+                    "cannot terminate unadmitted privileged qualifier"):
+                parent._serve_admission(
+                    server, child, source_sha, "/usr/bin/git", "d" * 64,
+                    hashes, "8" * 64, 2)
+
     def test_client_reports_exact_blocked_provenance_boundary(self):
         source_sha = "a" * 40
         client = object.__new__(qualify.SourceAdmissionClient)
