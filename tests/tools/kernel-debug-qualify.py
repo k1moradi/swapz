@@ -686,6 +686,7 @@ def verify_owned_run(
     module_evidence: dict[str, str] | None = None,
     configuration: dict[str, str] | None = None,
     kernel_release: str | None = None,
+    preflight_block_reason: str | None = None,
 ) -> tuple[str, str]:
     # Defect evidence is monotonic only when its observation is attributable
     # to this bounded run. A missing/truncated dmesg baseline is incomplete
@@ -776,6 +777,13 @@ def verify_owned_run(
         return "BLOCKED", f"owned lower blocked: {blocked_lines[0][:180]}"
     if quarantined_lines:
         return "BLOCKED", f"owned lower quarantined: {quarantined_lines[0][:180]}"
+
+    # Configuration/kernel identity preflight can be unavailable while the
+    # bounded artifacts still independently prove a kernel/helper failure.
+    # Defer that BLOCKED reason until all independently verifiable FAIL paths
+    # above have had a chance to win.
+    if preflight_block_reason is not None:
+        return "BLOCKED", preflight_block_reason
 
     if not required or not check_features(features, required):
         return "BLOCKED", missing_debug_feature_reason(
@@ -945,13 +953,15 @@ def main() -> int:
             snapshot = capture_runtime_snapshot(required)
             print(json.dumps(snapshot, sort_keys=True, separators=(",", ":")))
             return 0
-        config_path = arguments.config or host_config_path()
-        features = probe(config_path, arguments.cmdline)
-        print("KERNEL_DEBUG_PROBE=" + json.dumps(features, sort_keys=True))
         if arguments.action == "probe":
+            config_path = arguments.config or host_config_path()
+            features = probe(config_path, arguments.cmdline)
+            print("KERNEL_DEBUG_PROBE=" + json.dumps(features, sort_keys=True))
             return 0 if check_features(features, required) else 2
-        # Read independently: missing late observations cannot hide a failure
-        # already recorded in another evidence file.
+
+        # Read independently before fallible host preflight. A real bounded
+        # kernel/helper failure must remain FAIL even when Kconfig, uname or a
+        # later provenance query is unavailable.
         def read_optional(path: Path) -> str | None:
             try:
                 return path.read_text(encoding="utf-8")
@@ -963,13 +973,44 @@ def main() -> int:
         execution = read_optional(arguments.execution)
         runtime_before = read_optional(arguments.runtime_before) or ""
         runtime_after = read_optional(arguments.runtime_after) or ""
-        configuration = load_config(config_path) if config_path is not None else None
+
+        preflight_reasons: list[str] = []
+        config_path = arguments.config
+        if config_path is None:
+            try:
+                config_path = host_config_path()
+            except ValueError as error:
+                preflight_reasons.append(str(error))
+        configuration: dict[str, str] | None = None
+        features = {feature: "UNKNOWN" for feature in FEATURE_SYMBOLS}
+        if config_path is None:
+            preflight_reasons.append(
+                "running-kernel configuration unavailable")
+        else:
+            try:
+                configuration = load_config(config_path)
+                features = probe(config_path, arguments.cmdline)
+            except ValueError as error:
+                preflight_reasons.append(str(error))
+        print("KERNEL_DEBUG_PROBE=" + json.dumps(features, sort_keys=True))
+
+        kernel_release: str | None = None
+        try:
+            kernel_release = running_kernel_release()
+        except ValueError as error:
+            preflight_reasons.append(str(error))
+        # Preserve the first actionable blocker and avoid duplicate text when
+        # host_config_path() and the explicit release probe fail identically.
+        preflight_block_reason = next(
+            iter(dict.fromkeys(preflight_reasons)), None)
+
         status, reason = verify_owned_run(
             required, features, baseline, final, execution,
             runtime_before, runtime_after, arguments.source_sha,
             module_evidence=inspect_module_provenance(arguments.module),
             configuration=configuration,
-            kernel_release=running_kernel_release(),
+            kernel_release=kernel_release,
+            preflight_block_reason=preflight_block_reason,
         )
         print(f"{status}_KERNEL_DEBUG_OWNED=features:{','.join(required)} reason:{reason}")
         return {"PASS": 0, "FAIL": 1, "BLOCKED": 2}[status]

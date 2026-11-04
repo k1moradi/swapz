@@ -94,7 +94,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
                required: tuple[str, ...] = ("kasan", "lockdep"),
                baseline: str = "old\n", runtime_before: str | None = None,
                runtime_after: str | None = None,
-               module_evidence: dict[str, str] | None = None) -> tuple[str, str]:
+               module_evidence: dict[str, str] | None = None,
+               preflight_block_reason: str | None = None) -> tuple[str, str]:
         if runtime_before is None and runtime_after is not None:
             # Callers construct an explicit after-snapshot before entering this
             # helper. Give the synthetic before-snapshot an earlier timestamp
@@ -126,6 +127,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             module_evidence=module_evidence,
             configuration=qualification.load_config(self.configuration),
             kernel_release=KERNEL_RELEASE,
+            preflight_block_reason=preflight_block_reason,
         )
 
     def test_detected_is_not_executed(self) -> None:
@@ -303,6 +305,74 @@ class KernelDebugQualificationTests(unittest.TestCase):
             self.verify(runtime_after=malformed_runtime)[0],
             "BLOCKED",
         )
+
+    def test_preflight_blocker_never_hides_independent_failure(self) -> None:
+        status, reason = self.verify(
+            final="old\nBUG: KASAN: synthetic use-after-free\n",
+            preflight_block_reason="kernel configuration unreadable: synthetic",
+        )
+        self.assertEqual(status, "FAIL")
+        self.assertIn("KASAN", reason)
+
+        status, reason = self.verify(
+            preflight_block_reason="kernel configuration unreadable: synthetic",
+        )
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("kernel configuration unreadable", reason)
+
+        status, reason = self.verify(
+            execution=GOOD_LOG + "\nFAIL: helper detected corruption",
+            baseline="", final="", runtime_after="{}",
+            preflight_block_reason="running kernel release unavailable",
+        )
+        self.assertEqual(status, "FAIL")
+        self.assertIn("helper detected corruption", reason)
+
+    def test_cli_malformed_config_does_not_demote_bounded_kernel_failure(self) -> None:
+        directory = Path(self.temporary_directory.name)
+        malformed_config = directory / "duplicate-config"
+        malformed_config.write_text(
+            CONFIG + "\nCONFIG_KASAN=y\n", encoding="utf-8")
+        baseline = directory / "preflight-baseline"
+        final = directory / "preflight-final"
+        execution = directory / "preflight-execution"
+        runtime_before = directory / "preflight-runtime-before"
+        runtime_after = directory / "preflight-runtime-after"
+        baseline.write_text("old\n", encoding="utf-8")
+        final.write_text(
+            "old\nBUG: KASAN: synthetic bounded failure\n",
+            encoding="utf-8")
+        execution.write_text(GOOD_LOG + "\n", encoding="utf-8")
+        required = ("kasan", "lockdep")
+        runtime_before.write_text(
+            self.runtime_snapshot(required), encoding="utf-8")
+        runtime_after.write_text(
+            self.runtime_snapshot(required), encoding="utf-8")
+        command = [
+            sys.executable, "-B", str(SCRIPT), "verify",
+            "--config", str(malformed_config),
+            "--cmdline", str(self.cmdline),
+            "--require", "kasan,lockdep",
+            "--source-sha", SOURCE_SHA,
+            "--module", str(directory / "unbuilt.ko"),
+            "--baseline", str(baseline),
+            "--final", str(final),
+            "--execution", str(execution),
+            "--runtime-before", str(runtime_before),
+            "--runtime-after", str(runtime_after),
+        ]
+        failed = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, check=False)
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertIn("synthetic bounded failure", failed.stdout)
+
+        final.write_text("old\nclean\n", encoding="utf-8")
+        blocked = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, check=False)
+        self.assertEqual(blocked.returncode, 2, blocked.stdout + blocked.stderr)
+        self.assertIn("duplicate symbol: CONFIG_KASAN", blocked.stdout)
 
     def test_verify_cli_preserves_fail_vs_blocked_exit_status(self) -> None:
         directory = Path(self.temporary_directory.name)
