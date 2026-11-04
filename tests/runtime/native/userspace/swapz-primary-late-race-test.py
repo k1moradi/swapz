@@ -91,6 +91,7 @@ HARNESS = r'''
 #define SWAPZ_PRIMARY_BLOCK_BYTES 4096U
 #define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/fixture/recovery"
+#define SWAPZ_PRIMARY_PARTUUID_PATH_FORMAT "/dev/disk/by-partuuid/%s"
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
 #define SWAPZ_BUILD_SOURCE_CLEAN 1
 #define SWAPZ_BUILD_SOURCE_SHA "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -144,7 +145,7 @@ static const char *const scenario_names[] = {
     "unrelated /swapfile late", "wrong-device mount alias late",
     "oversized remote mountinfo late", "oversized local mountinfo late",
     "unreadable PID inventory late", "symlink mountinfo late",
-    "checked target opener reports wrong device"
+    "selected device identity changed before exclusive open"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -157,6 +158,7 @@ static unsigned int swapon_calls;
 static unsigned int module_loads;
 static unsigned int recovery_marks;
 static struct swapz_primary_target selected_target;
+static struct swapz_primary_target swapz_primary_selected_target;
 
 static int fixture_admission_error(int error)
 {
@@ -577,15 +579,52 @@ static int fixture_module_inventory(int *loaded, int *mapper)
     *mapper = scenario == FIXTURE_DM_INITIAL;
     return 0;
 }
-static int fixture_target_open(void)
+static int fixture_target_inspect(const char *partuuid,
+                                  struct swapz_primary_target *target)
 {
+    if (strcmp(partuuid, selected_target.partuuid))
+        return fixture_admission_error(EINVAL);
+    *target = selected_target;
+    if (scenario == FIXTURE_WRONG_TARGET_OPEN)
+        target->device_minor = 2U;
+    return 0;
+}
+
+static int fixture_target_checked_open(const char *device_path,
+                                       const char *uuid_path,
+                                       const char *partuuid_path,
+                                       int flags)
+{
+    char expected_path[PATH_MAX];
+    int length = snprintf(expected_path, sizeof(expected_path),
+                          SWAPZ_PRIMARY_PARTUUID_PATH_FORMAT,
+                          selected_target.partuuid);
+
+    assert(length > 0 && (size_t)length < sizeof(expected_path));
+    assert(!strcmp(device_path, expected_path));
+    assert(!strcmp(uuid_path, expected_path));
+    assert(!strcmp(partuuid_path, expected_path));
+    assert(flags == (O_RDWR | O_EXCL));
     if (scenario == FIXTURE_HOLDER_INITIAL)
         return fixture_admission_error(EBUSY);
-    /* A changed selected-device identity must stop before header write. */
-    if (scenario == FIXTURE_WRONG_TARGET_OPEN)
-        return fixture_admission_error(ESTALE);
     return 99;
 }
+
+#define swapz_primary_manifest_valid(...) 1
+#define swapz_primary_target_inspect(partuuid, target) \
+    fixture_target_inspect(partuuid, target)
+#define swapz_primary_open_target_checked_partuuid_paths_mode(a,b,c,d) \
+    fixture_target_checked_open(a,b,c,d)
+/*
+ * Keep production target normalization/geometry/identity and the exclusive
+ * opener. Only device inspection and the final block-device open are rooted in
+ * the fixture, so wrong major:minor is detected by production comparison code.
+ */
+@@TARGET_HELPERS@@
+@@TARGET_OPEN_FUNCTION@@
+#undef swapz_primary_open_target_checked_partuuid_paths_mode
+#undef swapz_primary_target_inspect
+#undef swapz_primary_manifest_valid
 static int fixture_intent(void)
 {
     /* All initial admissions happened before the environment changes. */
@@ -654,7 +693,6 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_read_module_mapper_inventory(a,b) fixture_module_inventory(a,b)
 #define swapz_primary_header_backup_read_at(...) 0
 #define swapz_primary_header_build(...) 0
-#define swapz_primary_target_open_exclusive(...) fixture_target_open()
 #define swapz_primary_exact_read(...) 0
 #define swapz_primary_state_write_at(...) 0
 #define swapz_primary_module_load_intent_write_at(...) fixture_intent()
@@ -815,6 +853,12 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     )
     parser_source = '\n\n'.join(production_function(source, helper) for helper in helpers)
     swap_function = production_function(source, "swapz_primary_swap_device_active")
+    target_helpers = '\n\n'.join(production_function(source, name) for name in (
+        "swapz_primary_partuuid_normalize",
+        "swapz_primary_target_valid",
+        "swapz_primary_target_identity_equal",
+    ))
+    target_open = production_function(source, "swapz_primary_target_open_exclusive")
     mount_reader = '\n\n'.join(production_function(source, name) for name in (
         "swapz_primary_proc_entry_is_pid",
         "swapz_primary_mountinfo_read_fd",
@@ -827,7 +871,11 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     unit = HARNESS.replace('@@PARSERS@@', parser_source).replace(
         '@@MOUNT_READER@@', mount_reader).replace(
         '@@SWAP_FUNCTION@@', swap_function).replace(
+        '@@TARGET_HELPERS@@', target_helpers).replace(
+        '@@TARGET_OPEN_FUNCTION@@', target_open).replace(
         '@@START_FUNCTION@@', coordinator)
+    if "@@" in unit:
+        raise AssertionError("Unexpanded harness placeholder")
     c_path = workdir / ("mutant.c" if mutant else "production.c")
     binary = workdir / ("mutant" if mutant else "production")
     c_path.write_text(unit)
@@ -853,8 +901,10 @@ def main() -> int:
             return 1
         print(production.stdout, end="")
         mutant = compile_and_run(source, workdir, mutant=True)
-        if mutant.returncode == 0 or "header_write=1" not in mutant.stderr:
-            print("FAIL: omission of final recheck did not expose a write", file=sys.stderr)
+        expected_mutations = "header_write=1 mapper=1 mkswap=1 swapon=1"
+        if mutant.returncode != 1 or expected_mutations not in mutant.stderr:
+            print("FAIL: omission of final recheck did not expose all intercepted mutations",
+                  file=sys.stderr)
             print(mutant.stdout + mutant.stderr, file=sys.stderr, end="")
             return 1
         print("PASS: negative control fails on intercepted header write")
