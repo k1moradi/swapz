@@ -2681,7 +2681,7 @@ static void test_primary_preparation_refusal_helpers(void)
 	char module_hash[65];
 	char oracle_hash[65];
 	char original_entries_inventory[] =
-		"Filename Type Size Used Priority\\n";
+		"Filename Type Size Used Priority\n";
 	size_t entry_count = 17U;
 	dev_t target_device = makedev(8U, 4U);
 
@@ -2740,14 +2740,14 @@ static void test_primary_preparation_refusal_helpers(void)
 
 	/* Parent mounts are rejected regardless of target-partition aliases. */
 	assert(swapz_primary_parse_mountinfo(
-		"36 25 259:0 / / rw - ext4 /dev/root rw\\n"
-		"37 36 8:0 / /fixture/parent rw - ext4 /fixture/parent rw\\n",
+		"36 25 259:0 / / rw - ext4 /dev/root rw\n"
+		"37 36 8:0 / /fixture/parent rw - ext4 /fixture/parent rw\n",
 		target_device, makedev(8U, 0U), &mount_facts) == 0);
 	assert(mount_facts.root_mount_seen);
 	assert(mount_facts.target_mounted);
 	original_mount_facts = mount_facts;
 	assert(swapz_primary_parse_mountinfo(
-		"broken kernel mount inventory\\n",
+		"broken kernel mount inventory\n",
 		target_device, makedev(8U, 0U), &mount_facts) < 0);
 	assert(!memcmp(&mount_facts, &original_mount_facts,
 		       sizeof(mount_facts)));
@@ -2842,9 +2842,9 @@ static void test_package_transaction_process_death_guard(void)
 		assert(S_ISREG(retained_journal.st_mode));
 		assert(retained_journal.st_size == (off_t)(sizeof(journal_record) - 1U));
 		assert(stat(module_artifact, &retained_module) == 0);
-		assert(retained_module.st_size == (off_t)(sizeof("module-published\\n") - 1U));
+		assert(retained_module.st_size == (off_t)(sizeof("module-published\n") - 1U));
 		assert(stat(cli_artifact, &retained_cli) == 0);
-		assert(retained_cli.st_size == (off_t)(sizeof("cli-published\\n") - 1U));
+		assert(retained_cli.st_size == (off_t)(sizeof("cli-published\n") - 1U));
 	}
 
 	/* Journal validity is not permission to activate before completion. */
