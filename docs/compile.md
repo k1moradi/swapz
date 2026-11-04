@@ -56,6 +56,36 @@ Exactly five commands are public:
 
 No other root aliases or public test targets are permitted.
 
+## Direct-main CI standards co-changes
+
+The project-goals repository-policy job checks each pushed commit against its
+**first parent**, including changes in `src/`, `tests/`, `packaging/`,
+`.github/workflows/`, `Makefile`, and `dkms.conf`. Every such implementation
+commit must also make a **meaningful update in that same commit** to at least
+one canonical standard: `docs/coding_standards.md`,
+`docs/testing_standards.md`, `docs/compile.md`, or `docs/benchmark.md`.
+Document the changed contract, expectation, or operational implication; a
+previous commit's standard, a noncanonical documentation change, and a green
+compile or rootless test run do not waive this requirement.
+
+On the permitted `main` branch, stage the implementation and relevant
+standard together, inspect the staged diff, and make one focused commit.
+Fetch and verify `origin/main` before publication; publish only by a
+non-force, head-checked fast-forward. If `main` advances concurrently,
+reconcile the unpublished implementation and standard edits against its new
+head and recheck before pushing. Do not create a branch or PR or rewrite
+published commits. `make test` remains the sole official qualification
+command, with `make fast_test` only the nonqualifying development loop.
+
+Documentation-only changes and generated `test_results.json`-only evidence
+commits require no extra standards edit. The test reporter labels its
+report-only evidence commits `[skip ci]`; that prevents a new Actions run,
+not a policy exemption for implementation work and not a fresh exact-SHA CI
+PASS. An implementation commit labeled `[skip ci]` remains noncompliant
+without a same-commit standard update. Rootless CI is partial evidence:
+the exact-SHA conclusion rejects failed, skipped, and cancelled dependencies
+and never substitutes for owner-run `make test` qualification.
+
 ## Incremental builds
 
 Kernel staging compares content before copying so unchanged source does not invalidate all object timestamps. W=1, W=2 and normal builds use separate output directories. Userspace/helper changes should not force unrelated kernel recompilation.

@@ -216,15 +216,60 @@ jobs:
           set -Eeuo pipefail
           trap 'printf "SOURCE_CONTRACT_MISMATCH: check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
           standards=(docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
-          changed="$(git diff --name-only HEAD^ HEAD)"
-          if printf '%s\n' "$changed" | grep -Eq '^(src/|tests/|packaging/|\.github/workflows/|Makefile$|dkms\.conf$)'; then
-            if ! printf '%s\n' "$changed" | grep -Eq '^docs/(coding_standards|testing_standards|compile|benchmark)\.md$'; then
-              echo 'FAIL: implementation must update a canonical standard in the same commit'
-              exit 1
-            fi
+          fail() { printf 'SOURCE_CONTRACT_MISMATCH: %s\n' "$*" >&2; exit 1; }
+          if ! head_sha="$(git rev-parse --verify 'HEAD^{commit}' 2>/dev/null)"; then
+            fail 'missing checked-out HEAD commit'
           fi
-          test "$(git branch --show-current)" = main
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if [[ ! "${GITHUB_SHA:-}" =~ ^[0-9a-f]{40}$ || "$head_sha" != "$GITHUB_SHA" ]]; then
+            fail "checkout SHA mismatch expected=${GITHUB_SHA:-unset} actual=$head_sha"
+          fi
+          if [[ "$(git symbolic-ref --quiet --short HEAD)" != main ]]; then
+            fail "commit=$head_sha checkout must be on main"
+          fi
+          if ! parent_sha="$(git rev-parse --verify 'HEAD^1^{commit}' 2>/dev/null)"; then
+            fail "commit=$head_sha missing first parent (checkout must fetch parent history)"
+          fi
+          changeset_file="$(mktemp)"
+          trap 'rm -f "$changeset_file"' EXIT
+          # Compare commit objects, not the mutable checkout or a previous documentation commit.
+          if ! git diff --name-only --no-renames -z "$parent_sha" "$head_sha" -- > "$changeset_file"; then
+            fail "commit=$head_sha unable to read first-parent changeset"
+          fi
+          # A partial NUL-delimited record must not silently disappear from the policy scan.
+          if [[ -s "$changeset_file" ]] &&
+             [[ "$(tail -c 1 "$changeset_file" | od -An -tu1 | tr -d '[:space:]')" != 0 ]]; then
+            fail "commit=$head_sha malformed NUL-delimited changeset metadata"
+          fi
+          implementation_count=0
+          implementation_paths=()
+          standard_changed=0
+          while IFS= read -r -d '' changed_path; do
+            if [[ -z "$changed_path" ]]; then
+              fail "commit=$head_sha empty path in changeset metadata"
+            fi
+            case "$changed_path" in
+              src/*|tests/*|packaging/*|.github/workflows/*|Makefile|dkms.conf)
+                ((implementation_count += 1))
+                if (( ${#implementation_paths[@]} < 8 )); then
+                  implementation_paths+=("$changed_path")
+                fi
+                ;;
+              docs/coding_standards.md|docs/testing_standards.md|docs/compile.md|docs/benchmark.md)
+                standard_changed=1
+                ;;
+            esac
+          done < "$changeset_file"
+          if (( implementation_count > 0 && !standard_changed )); then
+            printf -v first_implementation_path '%q' "${implementation_paths[0]:0:64}"
+            printf 'SOURCE_CONTRACT_MISMATCH: commit=%s implementation_path=%s requires same-commit change to one of: %s\n' \
+              "$head_sha" "$first_implementation_path" "${standards[*]}" >&2
+            printf 'SOURCE_CONTRACT_MISMATCH: commit=%s first_parent=%s implementation paths (showing %d/%d):\n' \
+              "$head_sha" "$parent_sha" "${#implementation_paths[@]}" "$implementation_count" >&2
+            for implementation_path in "${implementation_paths[@]}"; do
+              printf 'SOURCE_CONTRACT_MISMATCH: implementation_path=%q\n' "$implementation_path" >&2
+            done
+            exit 1
+          fi
           SWAPZ_CI_SCRIPT
           python3 -B tests/tools/product_goals.py ci-run --suite standards-policy -- bash build/ci-standards-policy.sh
       - name: Retain bounded sanitized failing-suite logs

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Owner policy: only five user-visible root Make commands."""
 import importlib.util
+import os
 import pathlib
 import re
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -1295,6 +1298,227 @@ class PublicMakeContract(unittest.TestCase):
         ci = (ROOT / ".github/workflows/project-goals.yml").read_text()
         self.assertIn("bash tests/tools/test-rootless.sh", ci)
         self.assertNotIn("make verify", ci)
+
+
+
+class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
+    """Exercise real CI policy and aggregate scripts against rootless Git fixtures."""
+
+    @classmethod
+    def setUpClass(cls):
+        workflow = (ROOT / ".github/workflows/project-goals.yml").read_text()
+        policy_marker = (
+            "          cat > build/ci-standards-policy.sh <<'SWAPZ_CI_SCRIPT'\n")
+        conclusion_marker = (
+            "      - name: Reject failed, skipped, or cancelled prerequisite jobs\n"
+            "        shell: bash\n"
+            "        run: |\n")
+        if workflow.count(policy_marker) != 1 or workflow.count(conclusion_marker) != 1:
+            raise ValueError("project-goal CI script markers missing or ambiguous")
+        cls.policy_script = "\n".join(
+            line.removeprefix("          ")
+            for line in workflow.split(policy_marker, 1)[1].split(
+                "\n          SWAPZ_CI_SCRIPT", 1)[0].splitlines()) + "\n"
+        cls.conclusion_script = "\n".join(
+            line.removeprefix("          ")
+            for line in workflow.split(conclusion_marker, 1)[1].splitlines()) + "\n"
+
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory(
+            prefix="swapz-policy-")
+        self.addCleanup(self.temporary_directory.cleanup)
+        self.repository = pathlib.Path(self.temporary_directory.name) / "repo"
+        self.repository.mkdir()
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.name", "Rootless Fixture")
+        self.git("config", "user.email", "fixture@example.invalid")
+        self.commit({"docs/compile.md": "initial standard\n"}, "initial standard")
+
+    def git(self, *arguments, input_text=None):
+        completed = subprocess.run(
+            ["git", *arguments], cwd=self.repository, input=input_text,
+            capture_output=True, text=True, timeout=6, check=True)
+        return completed.stdout.strip()
+
+    def commit(self, files, message):
+        for name, content in files.items():
+            path = self.repository / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        self.git("add", "-A")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD")
+
+    def check_policy(self, sha=None, repository=None, extra_environment=None):
+        environment = os.environ.copy()
+        environment["GITHUB_SHA"] = sha or self.git("rev-parse", "HEAD")
+        environment.update(extra_environment or {})
+        return subprocess.run(
+            ["bash", "-c", self.policy_script],
+            cwd=repository or self.repository, env=environment,
+            capture_output=True, text=True, timeout=8)
+
+    def test_compliant_code_only_docs_only_rootless_and_evidence_commits(self):
+        self.commit({
+            "src/kernel/codec.c": "int codec = 1;\n",
+            "docs/compile.md": "initial standard\ncode contract updated\n",
+        }, "implementation and updated standard")
+        result = self.check_policy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout + result.stderr, "")
+
+        commit_sha = self.commit(
+            {"src/kernel/codec.c": "int codec = 2;\n"},
+            "implementation without standard")
+        result = self.check_policy()
+        self.assertNotEqual(result.returncode, 0)
+        for token in (commit_sha, "src/kernel/codec.c", "docs/compile.md",
+                      "docs/testing_standards.md", "same-commit"):
+            self.assertIn(token, result.stderr)
+
+        self.commit({"docs/README.md": "documentation-only\n"}, "docs only")
+        self.assertEqual(self.check_policy().returncode, 0)
+
+        rootless_sha = self.commit({
+            "tests/runtime/native/rootless-fixture.py": "# rootless test\n",
+        }, "test change without standard")
+        result = self.check_policy()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(rootless_sha, result.stderr)
+        self.assertIn("tests/runtime/native/rootless-fixture.py", result.stderr)
+
+        self.commit({
+            "tests/runtime/native/rootless-fixture.py": "# amended test\n",
+            "docs/testing_standards.md": "new rootless test contract\n",
+        }, "rootless test with standard")
+        self.assertEqual(self.check_policy().returncode, 0)
+
+        self.commit({"test_results.json": '{"status":"BLOCKED"}\n'},
+                    "evidence only [skip ci]")
+        self.assertEqual(self.check_policy().returncode, 0)
+
+        violation_sha = self.commit({"Makefile": "all:\n\t@true\n"},
+                                    "implementation [skip ci]")
+        result = self.check_policy()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(violation_sha, result.stderr)
+        self.assertIn("Makefile", result.stderr)
+
+    def test_missing_checkout_parent_sha_and_malformed_changeset_fail_closed(self):
+        initial_sha = self.git("rev-parse", "HEAD")
+        result = self.check_policy()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing first parent", result.stderr)
+        self.assertIn(initial_sha, result.stderr)
+
+        result = self.check_policy(sha="0" * 40)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checkout SHA mismatch", result.stderr)
+
+        absent_checkout = pathlib.Path(self.temporary_directory.name) / "absent"
+        absent_checkout.mkdir()
+        result = self.check_policy(repository=absent_checkout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing checked-out HEAD", result.stderr)
+
+        self.commit({"src/kernel/codec.c": "int codec = 1;\n"}, "code only")
+        fake_bin = pathlib.Path(self.temporary_directory.name) / "bin"
+        fake_bin.mkdir()
+        real_git = pathlib.Path(shutil.which("git")).resolve()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = diff ]; then printf 'src/kernel/unclosed'; exit 0; fi\n"
+            f"exec '{real_git}' \"$@\"\n")
+        fake_git.chmod(0o755)
+        environment = {"PATH": f"{fake_bin}:{os.environ['PATH']}"}
+        result = self.check_policy(extra_environment=environment)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("malformed NUL-delimited changeset", result.stderr)
+
+        fake_git.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = diff ]; then printf '\\000'; exit 0; fi\n"
+            f"exec '{real_git}' \"$@\"\n")
+        result = self.check_policy(extra_environment=environment)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("empty path in changeset", result.stderr)
+
+    def test_bounded_paths_noncanonical_docs_and_diff_errors(self):
+        changed_files = {
+            f"tests/runtime/native/fixture-{index:02d}.py": "# changed\n"
+            for index in range(12)
+        }
+        changed_files["docs/README.md"] = "not a canonical standard\n"
+        commit_sha = self.commit(changed_files, "test changes with noncanonical docs")
+        result = self.check_policy()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(commit_sha, result.stderr)
+        self.assertIn("showing 8/12", result.stderr)
+        self.assertIn("docs/benchmark.md", result.stderr)
+        self.assertNotIn("fixture-11.py", result.stderr)
+
+        fake_bin = pathlib.Path(self.temporary_directory.name) / "bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        real_git = pathlib.Path(shutil.which("git")).resolve()
+        fake_git.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = diff ]; then exit 3; fi\n"
+            f"exec '{real_git}' \"$@\"\n")
+        fake_git.chmod(0o755)
+        result = self.check_policy(extra_environment={
+            "PATH": f"{fake_bin}:{os.environ['PATH']}"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unable to read first-parent changeset", result.stderr)
+
+    def test_merge_compares_only_first_parent(self):
+        base = self.git("rev-parse", "HEAD")
+        second_parent = self.commit(
+            {"docs/compile.md": "a second parent's documentation\n"},
+            "independent documentation")
+        self.git("reset", "--hard", base)
+        tree_commit = self.commit({
+            "src/kernel/codec.c": "int codec = 1;\n",
+            "docs/compile.md": "a second parent's documentation\n",
+        }, "merged tree content")
+        merged_tree = self.git("rev-parse", "HEAD^{tree}")
+        self.git("reset", "--hard", base)
+        # Construct a merge object without creating any additional branch.
+        merge_sha = self.git("commit-tree", merged_tree, "-p", base,
+                             "-p", second_parent,
+                             input_text="synthetic two-parent changeset\n")
+        self.git("update-ref", "refs/heads/main", merge_sha, base)
+        result = self.check_policy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(tree_commit, merge_sha)
+        self.assertIn("src/kernel/codec.c", self.git(
+            "diff", "--name-only", second_parent, merge_sha))
+        self.assertNotIn("docs/compile.md", self.git(
+            "diff", "--name-only", second_parent, merge_sha))
+
+    def test_skipped_dependency_cannot_qualify_exact_sha(self):
+        sha = self.git("rev-parse", "HEAD")
+        environment = os.environ.copy()
+        environment.update({"GITHUB_SHA": sha, "GITHUB_RUN_ID": "12345",
+                            "NATIVE_RESULT": "success", "MAKE_RESULT": "success",
+                            "FOCUSED_RESULT": "success", "POLICY_RESULT": "success"})
+        passed = subprocess.run(["bash", "-c", self.conclusion_script],
+                                env=environment, capture_output=True,
+                                text=True, timeout=6)
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+        self.assertEqual(passed.stdout, f"EXACT_SHA_ROOTLESS_CI_COMPLETE={sha}\n")
+        for failed_result in ("failure", "skipped", "cancelled", ""):
+            with self.subTest(result=failed_result):
+                environment["POLICY_RESULT"] = failed_result
+                failed = subprocess.run(
+                    ["bash", "-c", self.conclusion_script], env=environment,
+                    capture_output=True, text=True, timeout=6)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn(
+                    f"job=POLICY result={failed_result} tested_sha={sha}",
+                    failed.stdout)
+                self.assertNotIn("EXACT_SHA_ROOTLESS_CI_COMPLETE", failed.stdout)
 
 
 class CiFailureDiagnosticContract(unittest.TestCase):
