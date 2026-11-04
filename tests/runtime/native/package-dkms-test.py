@@ -122,6 +122,7 @@ class PackageLifecycle(unittest.TestCase):
         self.systemctl_fail_marker = self.home / "systemctl-fail.once"
         self.systemctl_log = self.home / "systemctl.log"
         self.remove_sleep_marker = self.home / "remove-sleep.once"
+        self.module_lookup_saw_cli_marker = self.home / "module-lookup-saw-cli"
         self.cert = self.home / "MOK.der"
         self.cert.write_text("certificate")
         self.write_fake_tools()
@@ -147,6 +148,10 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_REMOVE_SLEEP_MARKER=str(self.remove_sleep_marker),
             SWAPZ_TEST_INSTALLED_MODULE=str(self.installed_module),
             SWAPZ_TEST_INSTALLED_CLI=str(self.home / "usr/local/sbin/swapzctl"),
+            SWAPZ_MODULE_LOOKUP_SAW_CLI_MARKER=str(
+                self.module_lookup_saw_cli_marker),
+            SWAPZ_FAKE_MODULE_LOOKUP_FAIL_AFTER_BUILDS="0",
+            SWAPZ_TEST_FAIL_TRANSACTION_PHASE="never",
             SWAPZ_FAKE_FAIL_AT="never",
             SWAPZ_FAKE_BUILD_SLEEP="0",
             SWAPZ_FAKE_REMOVE_SLEEP="0",
@@ -164,6 +169,7 @@ class PackageLifecycle(unittest.TestCase):
     def write_report(self):
         self.report.write_text(json.dumps({
             "schema": "swapz-test-results-v1",
+            "kernel_release": self.kernel_release,
             "source_sha": SOURCE_SHA,
             "tested_commit_sha": SOURCE_SHA,
             "overall": "PASS",
@@ -253,6 +259,16 @@ elif [[ "$1" == -F && "$2" == sig_key ]]; then
   printf '%s\n' "$SWAPZ_FAKE_SIG_KEY"
 elif [[ "$1" == -n && "$2" == dm_swapz ]]; then
   [[ -f "$SWAPZ_TEST_INSTALLED_MODULE" ]] || exit 1
+  threshold="${SWAPZ_FAKE_MODULE_LOOKUP_FAIL_AFTER_BUILDS:-0}"
+  if [[ "$threshold" != 0 ]]; then
+    build_count="$(grep -c '^build$' "$SWAPZ_DKMS_LOG" 2>/dev/null || true)"
+    if (( build_count >= threshold )); then
+      if [[ -e "$SWAPZ_TEST_INSTALLED_CLI" ]]; then
+        : > "$SWAPZ_MODULE_LOOKUP_SAW_CLI_MARKER"
+      fi
+      exit 61
+    fi
+  fi
   printf '%s\n' "${SWAPZ_FAKE_MODULE_LOOKUP:-$SWAPZ_TEST_INSTALLED_MODULE}"
 else
   exit 1
@@ -400,6 +416,37 @@ esac
                 "another swapz package operation is active", result.stderr)
             self.assert_absent()
 
+    def test_package_lock_metadata_is_fail_closed(self):
+        package_lock = self.home / "package.lock"
+
+        package_lock.touch(mode=0o600)
+        package_lock.chmod(0o666)
+        unsafe_mode = self.invoke("install")
+        self.assertNotEqual(unsafe_mode.returncode, 0)
+        self.assertIn("unsafe package lock file", unsafe_mode.stderr)
+        self.assertEqual(package_lock.stat().st_mode & 0o777, 0o666)
+        package_lock.unlink()
+
+        package_lock.touch(mode=0o600)
+        package_lock.chmod(0o600)
+        hardlink = self.home / "package.lock.hardlink"
+        os.link(package_lock, hardlink)
+        hardlinked = self.invoke("install")
+        self.assertNotEqual(hardlinked.returncode, 0)
+        self.assertIn("unsafe package lock file", hardlinked.stderr)
+        hardlink.unlink()
+        package_lock.unlink()
+
+        self.home.chmod(0o777)
+        try:
+            unsafe_directory = self.invoke("install")
+            self.assertNotEqual(unsafe_directory.returncode, 0)
+            self.assertIn("unsafe package lock directory",
+                          unsafe_directory.stderr)
+        finally:
+            self.home.chmod(0o700)
+        self.assert_absent()
+
     def test_clean_repeat_uninstall_and_reinstall(self):
         first = self.invoke("install")
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -447,6 +494,39 @@ esac
         self.assertEqual(removed_again.returncode, 0, removed_again.stderr)
         self.assert_absent()
         self.assertEqual(self.invoke("install").returncode, 0)
+
+    def test_qualification_kernel_and_dkms_state_must_be_exact(self):
+        report = json.loads(self.report.read_text())
+        report["kernel_release"] = self.kernel_release + "-foreign"
+        self.report.write_text(json.dumps(report, sort_keys=True) + "\n")
+        self.report.chmod(0o600)
+        wrong_kernel = self.invoke("install")
+        self.assertNotEqual(wrong_kernel.returncode, 0)
+        self.assertIn("qualification report is invalid", wrong_kernel.stderr)
+        self.assert_absent()
+
+        self.write_report()
+        status_failure = self.invoke(
+            "install", {"SWAPZ_FAKE_FAIL_AT": "status"})
+        self.assertNotEqual(status_failure.returncode, 0)
+        self.assertIn("cannot inspect current-kernel DKMS state",
+                      status_failure.stderr)
+        self.assert_absent()
+
+        self.fail_marker.unlink(missing_ok=True)
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.dkms_state.unlink()
+        missing_state = self.invoke("install")
+        self.assertNotEqual(missing_state.returncode, 0)
+        self.assertIn("does not have an installed current-kernel DKMS state",
+                      missing_state.stderr)
+        self.assert_installed_exact()
+
+        missing_state_uninstall = self.invoke("uninstall")
+        self.assertNotEqual(missing_state_uninstall.returncode, 0)
+        self.assertIn("does not have an installed current-kernel DKMS state",
+                      missing_state_uninstall.stderr)
+        self.assert_installed_exact()
 
     def test_missing_headers_signing_and_vermagic_refuse(self):
         self.headers_makefile.unlink()
@@ -604,6 +684,10 @@ esac
             self.home / "lib/modules" / next_release / "build")
         next_headers.mkdir(parents=True)
         (next_headers / "Makefile").write_text("all:\n\t@:\n")
+        report = json.loads(self.report.read_text())
+        report["kernel_release"] = next_release
+        self.report.write_text(json.dumps(report, sort_keys=True) + "\n")
+        self.report.chmod(0o600)
         result = self.invoke(
             "install", {"SWAPZ_TEST_KERNEL_RELEASE": next_release})
         self.assertNotEqual(result.returncode, 0)
@@ -870,6 +954,37 @@ esac
     def test_corrupt_upgrade_snapshot_quarantines_activation(self):
         self.interrupt_upgrade_with_snapshot(corrupt_backup=True)
 
+    def test_upgrade_rollback_resolves_module_before_restoring_cli(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        self.systemctl_fail_marker.unlink(missing_ok=True)
+
+        failed = self.invoke("install", {
+            "SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1",
+            "SWAPZ_FAKE_MODULE_LOOKUP_FAIL_AFTER_BUILDS": "3",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("previous package restoration failed", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertFalse(self.module_lookup_saw_cli_marker.exists())
+        transactions = list(
+            (self.home / "transactions").glob("swapz-package.*"))
+        self.assertEqual(len(transactions), 1)
+
+    def test_uninstall_rollback_resolves_module_before_restoring_cli(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        failed = self.invoke("uninstall", {
+            "SWAPZ_TEST_UNINSTALL_FAIL_AFTER": "dkms-removed",
+            "SWAPZ_FAKE_MODULE_LOOKUP_FAIL_AFTER_BUILDS": "2",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("rollback incomplete", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertFalse(self.module_lookup_saw_cli_marker.exists())
+        transactions = self.uninstall_transactions()
+        self.assertEqual(len(transactions), 1)
+
     def test_upgrade_refuses_primary_recovery_authority(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_binary = (self.prefix / "sbin/swapzctl").read_bytes()
@@ -928,6 +1043,33 @@ esac
         self.assertIn("foreign, absent or modified", failed.stderr)
         self.assert_installed_exact()
         self.assertEqual(self.uninstall_transactions(), [])
+
+    def test_qualified_digest_cannot_be_rebased_by_binary_manifest(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        source = self.home / "usr/src" / ("swapz-" + VERSION)
+        binary = self.prefix / "sbin/swapzctl"
+        binary.write_bytes(b"tampered-userspace-with-rebased-manifest\n")
+        binary.chmod(0o755)
+
+        manifest = source / ".swapz-binaries.sha256"
+        rewritten = []
+        replaced = False
+        for line in manifest.read_text().splitlines():
+            digest, path = line.split(None, 1)
+            if path == str(binary):
+                digest = sha256(binary)
+                replaced = True
+            rewritten.append(f"{digest}  {path}\n")
+        self.assertTrue(replaced)
+        manifest.write_text("".join(rewritten))
+        manifest.chmod(0o644)
+
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertEqual(
+            binary.read_bytes(),
+            b"tampered-userspace-with-rebased-manifest\n")
 
     def test_metadata_tamper_cannot_enter_legacy_upgrade_path(self):
         self.assertEqual(self.invoke("install").returncode, 0)
@@ -1005,6 +1147,20 @@ esac
         blocked = self.invoke("install")
         self.assertIn("incomplete package transaction retained", blocked.stderr)
         self.assertFalse((self.prefix / "sbin/swapz-primary-runtime-health").exists())
+
+    def test_uninstall_terminal_rollback_journal_failure_quarantines(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        failed = self.invoke("uninstall", {
+            "SWAPZ_TEST_UNINSTALL_FAIL_AFTER": "dkms-removed",
+            "SWAPZ_TEST_FAIL_TRANSACTION_PHASE": "rolled-back",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("rollback incomplete", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        transactions = self.uninstall_transactions()
+        self.assertEqual(len(transactions), 1)
+        state = json.loads((transactions[0] / "state.json").read_text())
+        self.assertEqual(state["phase"], "rollback-incomplete")
 
     def test_uninstall_unit_queries_distinguish_static_and_fail_closed(self):
         self.assertEqual(self.invoke("install").returncode, 0)
@@ -1209,6 +1365,59 @@ esac
         self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
         self.assertIn("interruption", stderr)
         self.assert_absent()
+
+    def test_interrupted_upgrade_rollback_retains_verifiable_state(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        build_count = self.dkms_log.read_text().splitlines().count("build")
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        environment = dict(
+            self.env,
+            SWAPZ_FAKE_FAIL_AT="build",
+            SWAPZ_FAKE_BUILD_SLEEP="30",
+        )
+        process = subprocess.Popen(
+            ["bash", str(self.script), "install", str(self.prefix)],
+            cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                lines = self.dkms_log.read_text().splitlines()
+                if lines.count("build") >= build_count + 2:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail("upgrade rollback DKMS build did not start")
+
+            transactions = list(
+                (self.home / "transactions").glob("swapz-package.*"))
+            self.assertEqual(len(transactions), 1)
+            transaction = transactions[0]
+            state = json.loads((transaction / "state.json").read_text())
+            self.assertEqual(state["schema"], "swapz-package-install-v1")
+            self.assertEqual(state["phase"], "rollback-started")
+
+            os.killpg(process.pid, signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=8)
+            self.assertIn(
+                process.returncode,
+                (-signal.SIGTERM, 128 + signal.SIGTERM),
+                stdout + "\n" + stderr)
+            self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+            for entry in state["backup_files"]:
+                self.assertEqual(
+                    sha256(transaction / "backup" / entry["path"]),
+                    entry["sha256"])
+
+            refused = self.invoke("install")
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("incomplete package transaction retained",
+                          refused.stderr)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=8)
 
     def test_dkms_config_tracks_changed_canonical_version(self):
         other = self.home / "synthetic-release"

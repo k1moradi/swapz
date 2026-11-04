@@ -140,13 +140,54 @@ fi
 for required_command in python3 sha256sum stat install cp rm mkdir rmdir sed grep find realpath readlink flock modinfo systemd-escape awk cmp basename mktemp git uname mv timeout lsblk dmsetup journalctl blkid tr cut dirname sleep cat; do
   command -v "$required_command" >/dev/null 2>&1 || blocked "$required_command unavailable"
 done
+package_lock_dir="$(dirname "$package_lock")"
+expected_lock_owner="$(id -u)"
+expected_lock_group="$(id -g)"
 if [[ -z "$test_root" ]]; then
-  install -d -o 0 -g 0 -m0755 "$(dirname "$package_lock")"
+  expected_lock_owner=0
+  expected_lock_group=0
+  if [[ ! -e "$package_lock_dir" && ! -L "$package_lock_dir" ]]; then
+    install -d -o 0 -g 0 -m0755 "$package_lock_dir"
+  fi
 fi
-[[ ! -L "$package_lock" ]] || blocked "symlinked package lock"
-exec 9>"$package_lock"
-chmod 0600 "$package_lock" || blocked "cannot secure package lock"
+
+verify_package_lock_directory() {
+  local uid gid mode
+  [[ -d "$package_lock_dir" && ! -L "$package_lock_dir" ]] || return 1
+  IFS=: read -r uid gid mode < <(stat -c '%u:%g:%a' -- "$package_lock_dir") ||
+    return 1
+  [[ "$uid" == "$expected_lock_owner" &&
+     "$gid" == "$expected_lock_group" ]] || return 1
+  (( (8#$mode & 8#022) == 0 ))
+}
+
+verify_package_lock_file() {
+  local uid gid mode links
+  [[ -f "$package_lock" && ! -L "$package_lock" ]] || return 1
+  IFS=: read -r uid gid mode links < <(stat -c '%u:%g:%a:%h' -- "$package_lock") ||
+    return 1
+  [[ "$uid" == "$expected_lock_owner" &&
+     "$gid" == "$expected_lock_group" &&
+     "$mode" == 600 && "$links" == 1 ]]
+}
+
+verify_package_lock_directory || blocked "unsafe package lock directory"
+if [[ ! -e "$package_lock" && ! -L "$package_lock" ]]; then
+  (umask 077; set -o noclobber; : > "$package_lock") 2>/dev/null ||
+    blocked "cannot create package lock safely"
+fi
+verify_package_lock_file || blocked "unsafe package lock file"
+exec 9<>"$package_lock" || blocked "cannot open package lock"
+package_lock_descriptor_identity="$(stat -Lc '%d:%i' -- /proc/self/fd/9 2>/dev/null || true)"
+package_lock_named_identity="$(stat -c '%d:%i' -- "$package_lock" 2>/dev/null || true)"
+[[ -n "$package_lock_descriptor_identity" &&
+   "$package_lock_descriptor_identity" == "$package_lock_named_identity" ]] ||
+  blocked "package lock path changed while opening"
 flock -n 9 || blocked "another swapz package operation is active"
+verify_package_lock_file || blocked "package lock metadata changed while locked"
+package_lock_named_identity="$(stat -c '%d:%i' -- "$package_lock" 2>/dev/null || true)"
+[[ "$package_lock_descriptor_identity" == "$package_lock_named_identity" ]] ||
+  blocked "package lock path changed while locked"
 
 primary_recovery_base="/var/lib/swapz/physical-recovery"
 primary_state="$primary_recovery_base/primary-state.json"
@@ -190,6 +231,15 @@ hash_file() {
   local path="$1"
   [[ -f "$path" && ! -L "$path" ]] || return 1
   sha256sum -- "$path" | awk '{print $1}'
+}
+
+query_dkms_status() {
+  local output_name="$1"
+  local output rc=0
+  shift
+  output="$("$dkms_bin" status "$@" 2>/dev/null)" || rc=$?
+  (( rc == 0 )) || return "$rc"
+  printf -v "$output_name" '%s' "$output"
 }
 
 safe_input_file() {
@@ -351,6 +401,45 @@ verify_owned_legacy() {
   verify_source_manifest && verify_binary_manifest
 }
 
+verify_qualification_identity() {
+  local -a identity_lines
+  local source_sha report_sha cli_sha module_sha oracle_sha
+  local build_source_sha build_source_clean
+
+  [[ -f "$src/$qualification_marker" && ! -L "$src/$qualification_marker" ]] ||
+    return 1
+  mapfile -t identity_lines < "$src/$qualification_marker" || return 1
+  (( ${#identity_lines[@]} == 8 )) || return 1
+  [[ "${identity_lines[0]}" == 'schema=swapz-package-v1' &&
+     "${identity_lines[1]}" == "version=$version" &&
+     "${identity_lines[2]}" == "kernel_release=$kernel_release" &&
+     "${identity_lines[3]}" == source_sha=* &&
+     "${identity_lines[4]}" == qualification_report_sha256=* &&
+     "${identity_lines[5]}" == swapzctl_sha256=* &&
+     "${identity_lines[6]}" == module_sha256=* &&
+     "${identity_lines[7]}" == oracle_sha256=* ]] || return 1
+
+  source_sha="${identity_lines[3]#source_sha=}"
+  report_sha="${identity_lines[4]#qualification_report_sha256=}"
+  cli_sha="${identity_lines[5]#swapzctl_sha256=}"
+  module_sha="${identity_lines[6]#module_sha256=}"
+  oracle_sha="${identity_lines[7]#oracle_sha256=}"
+  [[ "$source_sha" =~ ^[0-9a-f]{40}$ &&
+     "$report_sha" =~ ^[0-9a-f]{64}$ &&
+     "$cli_sha" =~ ^[0-9a-f]{64}$ &&
+     "$module_sha" =~ ^[0-9a-f]{64}$ &&
+     "$oracle_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+
+  build_source_sha="$(sed -n 's/^#define SWAPZ_BUILD_SOURCE_SHA "\([0-9a-f]\{40\}\)"$/\1/p'     "$src/src/kernel/swapz-build-info.h")"
+  build_source_clean="$(sed -n 's/^#define SWAPZ_BUILD_SOURCE_CLEAN \([01]\)$/\1/p'     "$src/src/kernel/swapz-build-info.h")"
+  [[ "$build_source_sha" == "$source_sha" && "$build_source_clean" == 1 ]] ||
+    return 1
+  [[ "$(hash_file "$cli")" == "$cli_sha" &&
+     "$(hash_file "$helper")" == "$oracle_sha" &&
+     "$(hash_file "$module_snapshot")" == "$module_sha" &&
+     "$(hash_file "$installed_module")" == "$module_sha" ]]
+}
+
 verify_installed_module_set() {
   local candidate count=0 matched=""
   for candidate in "${module_candidate_paths[@]}"; do
@@ -386,6 +475,7 @@ verify_owned() {
   installed_file_metadata "$runtime_health_service" 644 || return 1
   installed_file_metadata "$primary_swap" 644 || return 1
   installed_file_metadata "$installed_module" 644 || return 1
+  verify_qualification_identity || return 1
   verify_binary_manifest
 }
 
@@ -456,6 +546,9 @@ assert_no_incomplete_package_transactions() {
 
 persist_transaction_state() {
   local phase="$1"
+  if [[ -n "$test_root" && ${SWAPZ_TEST_FAIL_TRANSACTION_PHASE:-never} == "$phase" ]]; then
+    return 1
+  fi
   python3 - "$transaction_dir" "$phase" "$version" "$kernel_release" "$action" <<'PY'
 import hashlib
 import json
@@ -654,12 +747,12 @@ restore_uninstall_cli_backup() {
 }
 
 restore_uninstall_backup() {
-  local current_status
+  local current_status=""
   backup_dir="$transaction_dir/backup"
+  query_dkms_status current_status -m swapz -v "$version" || return 1
   cleanup_activation_files
   cleanup_source_files
   rm -f -- "$installed_module"
-  current_status="$({ "$dkms_bin" status -m swapz -v "$version" || true; } 2>/dev/null)"
   if [[ -n "$current_status" ]]; then
     "$dkms_bin" remove -m swapz -v "$version" --all || return 1
   fi
@@ -681,10 +774,13 @@ restore_uninstall_backup() {
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
   "$depmod_bin" "$kernel_release" || return 1
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
+  verify_installed_module_set || return 1
+  verify_module_resolution || return 1
   persist_transaction_state rollback-backend-restored || return 1
 
-  # Restore all non-CLI package files only after module/DKMS state and depmod
-  # are valid. The CLI is the activation gate and is restored atomically last.
+  # Restore all non-CLI package files only after module/DKMS state, depmod and
+  # module resolution are valid. The CLI is the activation gate and is restored
+  # atomically last.
   restore_uninstall_file_backups_except_cli || return 1
   persist_transaction_state rollback-files-restored || return 1
   "$systemctl_bin" daemon-reload || return 1
@@ -713,8 +809,7 @@ uninstall_rollback() {
     echo "BLOCKED: cannot journal uninstall rollback; recovery data retained at $transaction_dir" >&2
     exit "$rc"
   fi
-  if restore_uninstall_backup; then
-    persist_transaction_state rolled-back >/dev/null 2>&1 || true
+  if restore_uninstall_backup && persist_transaction_state rolled-back; then
     rm -rf -- "$transaction_dir"
   else
     # A failed final check must never leave activation entry points online.
@@ -736,6 +831,11 @@ uninstall_test_checkpoint() {
 assert_no_incomplete_package_transactions
 
 if [[ "$action" == uninstall ]]; then
+  uninstall_dkms_status=""
+  query_dkms_status uninstall_dkms_status -m swapz -v "$version" -k "$kernel_release" ||
+    blocked "cannot inspect current-kernel DKMS state before package removal"
+  [[ "$uninstall_dkms_status" == *": installed"* ]] ||
+    blocked "verified package does not have an installed current-kernel DKMS state"
   if [[ -z "$test_root" && "$action" == uninstall ]] &&
      [[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]; then
     echo "BLOCKED: loaded module; refusing DKMS removal" >&2
@@ -854,13 +954,14 @@ for payload in dkms.conf src/kernel/VERSION \
   safe_input_file "$payload" || blocked "unsafe package payload: $payload"
 done
 
-qualification_output="$(python3 - "$qualification_report" <<'PY'
+qualification_output="$(python3 - "$qualification_report" "$kernel_release" <<'PY'
 import json
 import re
 import sys
 from pathlib import Path
 
 report = json.loads(Path(sys.argv[1]).read_text())
+expected_kernel_release = sys.argv[2]
 required_stages = (
     "Build module and helpers",
     "Native and rootless contracts",
@@ -870,6 +971,8 @@ required_stages = (
 )
 if report.get("schema") != "swapz-test-results-v1":
     raise SystemExit("bad schema")
+if report.get("kernel_release") != expected_kernel_release:
+    raise SystemExit("wrong kernel")
 source = report.get("source_sha")
 tested = report.get("tested_commit_sha")
 if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{40}", source) or tested != source:
@@ -964,20 +1067,32 @@ existing_kind=""
 if package_paths_present; then
   if verify_owned; then
     existing_kind="current"
-  elif verify_owned_legacy; then
+  elif [[ ! -e "$src/$qualification_marker" && ! -L "$src/$qualification_marker" ]] &&
+       verify_owned_legacy; then
     existing_kind="legacy"
   else
     blocked "existing package is partial, foreign, or modified"
   fi
 fi
 
-current_dkms_status="$({ "$dkms_bin" status -m swapz -v "$version" -k "$kernel_release" || true; } 2>/dev/null)"
+current_dkms_status=""
+query_dkms_status current_dkms_status -m swapz -v "$version" -k "$kernel_release" ||
+  blocked "cannot inspect current-kernel DKMS state"
 if [[ -z "$existing_kind" && -n "$current_dkms_status" ]]; then
   blocked "DKMS state exists without a verified package"
 fi
+if [[ -n "$existing_kind" && "$current_dkms_status" != *": installed"* ]]; then
+  blocked "verified package does not have an installed current-kernel DKMS state"
+fi
+if [[ -n "$existing_kind" ]]; then
+  verify_installed_module_set ||
+    blocked "verified package does not own exactly one current-kernel module image"
+  verify_module_resolution ||
+    blocked "verified package module lookup does not match package ownership"
+fi
 if [[ "$existing_kind" == current ]] &&
    cmp -s "$src/$qualification_marker" <(incoming_identity) &&
-   [[ "$current_dkms_status" == *installed* ]]; then
+   [[ "$current_dkms_status" == *": installed"* ]]; then
   verify_module_resolution ||
     blocked "installed module lookup does not match package ownership"
   echo "Installed swapz package already matches the exact qualified artifacts"
@@ -1021,9 +1136,7 @@ if [[ -n "$existing_kind" ]]; then
     cp -a -- "$file" "$backup_dir/files/$(printf '%s' "$file" | sha256sum | awk '{print $1}')"
     printf '%s\n' "$file" >> "$backup_dir/file-paths"
   done
-  if [[ -f "$installed_module" && ! -L "$installed_module" ]]; then
-    cp -a -- "$installed_module" "$backup_dir/installed-module"
-  fi
+  cp -a -- "$installed_module" "$backup_dir/installed-module"
 fi
 
 # Stage and hash every replacement before touching a verified installation.
@@ -1107,18 +1220,24 @@ restore_previous_package() {
   "$dkms_bin" add -m swapz -v "$version" || return 1
   "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" || return 1
   "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
-  if [[ -f "$backup_dir/installed-module" ]]; then
-    install -d -m0755 "$installed_module_dir"
-    install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
-    cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
-  fi
+  [[ -f "$backup_dir/installed-module" && ! -L "$backup_dir/installed-module" ]] ||
+    return 1
+  install -d -m0755 "$installed_module_dir"
+  install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
+  cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
   "$depmod_bin" "$kernel_release" || return 1
-  if [[ -f "$backup_dir/installed-module" ]]; then
-    cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
-  fi
+  [[ -f "$backup_dir/installed-module" && ! -L "$backup_dir/installed-module" ]] ||
+    return 1
+  cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
+  verify_installed_module_set || return 1
+  verify_module_resolution || return 1
+  persist_transaction_state rollback-backend-restored || return 1
   restore_file_backups_except_cli || return 1
+  persist_transaction_state rollback-files-restored || return 1
   "$systemctl_bin" daemon-reload || return 1
+  persist_transaction_state rollback-systemd-reloaded || return 1
   restore_cli_backup || return 1
+  persist_transaction_state rollback-cli-restored || return 1
   if [[ -n "$test_root" && ${SWAPZ_TEST_UPGRADE_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
     return 1
   fi
@@ -1131,7 +1250,7 @@ restore_previous_package() {
 }
 
 rollback() {
-  local rc="${1:-1}" reason="${2:-failure}"
+  local rc="${1:-1}" reason="${2:-failure}" rollback_dkms_status=""
   (( rollback_in_progress == 0 )) || exit "$rc"
   rollback_in_progress=1
   trap - ERR HUP INT TERM
@@ -1149,8 +1268,21 @@ rollback() {
     echo "BLOCKED: cannot journal install rollback; recovery data retained at $transaction_dir" >&2
     exit "$rc"
   fi
-  if (( new_dkms_registered == 1 )) || [[ -n "$({ "$dkms_bin" status -m swapz -v "$version" || true; } 2>/dev/null)" ]]; then
-    "$dkms_bin" remove -m swapz -v "$version" --all >/dev/null 2>&1 || true
+  if (( new_dkms_registered == 0 )); then
+    if ! query_dkms_status rollback_dkms_status -m swapz -v "$version"; then
+      cleanup_activation_files || true
+      persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
+      echo "BLOCKED: cannot inspect DKMS state during rollback; recovery data retained at $transaction_dir" >&2
+      exit "$rc"
+    fi
+  fi
+  if (( new_dkms_registered == 1 )) || [[ -n "$rollback_dkms_status" ]]; then
+    if ! "$dkms_bin" remove -m swapz -v "$version" --all >/dev/null 2>&1; then
+      cleanup_activation_files || true
+      persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
+      echo "BLOCKED: cannot clear DKMS state during rollback; recovery data retained at $transaction_dir" >&2
+      exit "$rc"
+    fi
   fi
   cleanup_package_files
   rm -f -- "$installed_module"
@@ -1234,8 +1366,10 @@ persist_transaction_state installing-dkms
 "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release"
 persist_transaction_state dkms-installed
 install_test_checkpoint dkms-installed
-status="$("$dkms_bin" status -m swapz -v "$version" -k "$kernel_release")"
-[[ "$status" == *installed* && "$status" == *"$kernel_release"* ]] ||
+status=""
+query_dkms_status status -m swapz -v "$version" -k "$kernel_release" ||
+  blocked "cannot verify current-kernel DKMS state after installation"
+[[ "$status" == *": installed"* && "$status" == *"$kernel_release"* ]] ||
   blocked "DKMS did not report the current kernel installed"
 
 existing_module_candidates=()

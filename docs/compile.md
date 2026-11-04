@@ -116,10 +116,13 @@ artifacts are never loaded and are not signed by this hook.
 
 DKMS uses `AUTOINSTALL="no"`. `make install` is an admission operation rather
 than a build operation: it requires an exact five-stage PASS qualification
-report, clean embedded source provenance, matching userspace/oracle/module
-SHA-256 values, current-kernel headers and matching module vermagic. On Secure
-Boot hosts it verifies the already-qualified module signature and never signs
-or otherwise changes those bytes during packaging.
+report whose recorded kernel release is the target running kernel, clean
+embedded source provenance, matching userspace/oracle/module SHA-256 values,
+current-kernel headers and matching module vermagic. Installed qualification
+metadata is rechecked against the exact installed CLI, oracle and both module
+copies, so a rewritten local binary manifest cannot rebaseline a different
+qualified artifact. On Secure Boot hosts packaging verifies the already-
+qualified module signature and never signs or otherwise changes those bytes.
 
 DKMS still performs a current-kernel compatibility build, but that rebuild is
 not promoted as the qualified image. After DKMS succeeds, packaging replaces
@@ -135,12 +138,14 @@ the private rollback snapshot and each destructive transition. Upgrade revokes
 the existing activation entry points before touching DKMS. It publishes the
 activation-capable CLI atomically only after the qualified module resolves,
 all non-CLI helpers/units are installed and systemd reload has succeeded.
-Failure restores the previous verified package with the backend and module
-resolution restored before the CLI; changed rollback snapshots are refused,
-and incomplete recovery keeps activation revoked and later package operations
-blocked. Abrupt process or host termination can retain a journal requiring
-explicit recovery; the installer never guesses that a partial transaction
-succeeded.
+Failure restores the previous verified package with DKMS state, the exact
+qualified module, depmod and module-path resolution all proven before the CLI
+is restored; changed rollback snapshots are refused, and incomplete recovery
+keeps activation revoked and later package operations blocked. DKMS status
+query failures are uncertainty and block mutation rather than being interpreted
+as an empty registration. Abrupt process or host termination can retain a
+journal requiring explicit recovery; the installer never guesses that a
+partial transaction succeeded.
 
 Uninstall is transactional too. It refuses active/enabled deployment state,
 active mapper/module use, recovery ownership, or any ownership/digest mismatch,
@@ -157,6 +162,10 @@ Packaging never unloads a module, removes a mapper, or calls swapon/swapoff.
 Production uses the fixed `/usr/local` prefix, trusted system executables,
 root-owned package files, a dedicated root-owned mode-0700 transaction
 directory outside shared temporary paths, and symlink/path substitution checks.
+The shared package lock directory must be trusted and non-writable, and the
+single-link mode-0600 lock file must retain the same inode and metadata across
+open and nonblocking flock; packaging never chmods an unsafe pre-existing lock
+into acceptance.
 Existing package source/destination metadata and every current-kernel module
 candidate are part of admission, so a stray compressed or uncompressed
 `dm-swapz.ko` cannot be silently overwritten. Distribution command symlinks
@@ -166,12 +175,15 @@ and within trusted system executable directories.
 A kernel upgrade is deliberately not automatic deployment: because
 `AUTOINSTALL="no"` is retained, the new kernel needs matching headers, a
 qualified module for that kernel, and an explicit admission/install cycle.
-Rootless packaging tests exercise repeated install/uninstall, missing headers,
-cryptographic signature/enrollment mismatch, path substitution, foreign and
-tampered artifacts, each install/upgrade and uninstall mutation checkpoint,
-failed depmod and daemon-reload, active upgrade/uninstall refusal, signal rollback,
-journaled snapshot tampering, interrupted rollback retention and cleanup. They are hermetic package contract
-evidence, not system-install or target-kernel module-acceptance qualification.
+Rootless packaging tests exercise repeated install/uninstall, exact-kernel
+qualification binding, missing headers, cryptographic signature/enrollment
+mismatch, lock/path substitution, foreign and tampered artifacts (including
+manifest-rebase attempts), each install/upgrade and uninstall mutation
+checkpoint, failed DKMS-state inspection, depmod and daemon-reload, active
+upgrade/uninstall refusal, rollback module-resolution ordering, signal rollback,
+journaled snapshot tampering, interrupted rollback retention and cleanup. They
+are hermetic package contract evidence, not system-install or target-kernel
+module-acceptance qualification.
 
 ## Removed build paths
 
