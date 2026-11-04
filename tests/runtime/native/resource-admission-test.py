@@ -219,6 +219,73 @@ sample_host_memory_admission
         result = self.run_shell(script + 'cpu_some_total\n', directory)
         self.assert_blocked(result, "cpu.pressure some total")
 
+    def test_bounded_child_diagnostics_preserve_reason_without_private_paths(self):
+        directory = self.root / "logs"
+        directory.mkdir()
+        log = directory / "pair.log"
+        helper = shell_function(QUALIFIER, "bounded_safe_log_reason")
+        script = helper + 'bounded_safe_log_reason "$1" "$2"\n'
+
+        log.write_text(
+            "BLOCKED: ID36 allocation-bounded native replay helper missing\n",
+            encoding="ascii")
+        result = self.run_shell(script, log, "BLOCKED: ")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "ID36 allocation-bounded native replay helper missing")
+
+        log.write_text(
+            "BLOCKED: prerequisite failed under /private/host/path\n",
+            encoding="ascii")
+        result = self.run_shell(script, log, "BLOCKED: ")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "diagnostic details withheld for privacy")
+        self.assertNotIn("/private/host/path", result.stdout)
+
+        log.write_text(
+            ("noise\n" * 128) + "BLOCKED: too late to expose\n",
+            encoding="ascii")
+        result = self.run_shell(script, log, "BLOCKED: ")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_cgroup_control_write_failure_is_blocked_without_path_leak(self):
+        directory = self.root / "cgroup"
+        directory.mkdir()
+        (directory / "memory.max").mkdir()
+        helper = shell_function(QUALIFIER, "write_cgroup_control")
+        script = 'CGROUP=$1\n' + helper + 'write_cgroup_control memory.max 1\n'
+        result = self.run_shell(script, directory)
+        self.assertEqual(result.returncode, 2, (result.stdout, result.stderr))
+        self.assertIn(
+            "BLOCKED: ID36 cannot set cgroup control memory.max",
+            result.stderr)
+        self.assertNotIn(str(directory), result.stderr)
+
+    def test_prerequisite_command_failures_are_explicitly_guarded(self):
+        source = QUALIFIER.read_text(encoding="utf-8")
+        self.assertIn(
+            'BLOCKED: ID36 missing required command %s;', source)
+        self.assertIn(
+            'if ! token="$(od -An -N8 -tx1 /dev/urandom', source)
+        self.assertIn(
+            'if ! SESSION="$(mktemp -d "', source)
+        self.assertIn(
+            'if ! online_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null)"; then',
+            source)
+        self.assertIn(
+            "BLOCKED: ID36 pressure-helper prerequisite before readiness:",
+            source)
+        self.assertIn(
+            "BLOCKED: ID36 owned-RAM pair prerequisite before prewarm:",
+            source)
+        self.assertIn(
+            "BLOCKED: ID36 pressure helper could not enter isolated cgroup",
+            source)
+
     def test_cleanup_helper_error_is_propagated_without_touching_tmp(self):
         # Override timeout and id inside an isolated process. The original
         # wrapper is never allowed to invoke its /tmp cleaner.
@@ -241,6 +308,12 @@ swapz_clear_tmp_before_memory_check
         self.assertIn("MIN_AVAILABLE_KIB=$((1024 * 1024))", source)
         self.assertIn("sample_host_memory_admission || exit 2", source)
         self.assertIn("headroom:%s required:%s deficit:%s unit:bytes", source)
+        self.assertIn(
+            'write_cgroup_control memory.max "$MEMORY_MAX_BYTES" || exit 2',
+            source)
+        self.assertIn(
+            'write_cgroup_control memory.high "$MEMORY_HIGH_BYTES" || exit 2',
+            source)
         self.assertNotIn("rm -rf /tmp", source)
         self.assertNotIn("drop_caches", source)
 
