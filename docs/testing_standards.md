@@ -4459,9 +4459,10 @@ recovery, mapper/module cleanup, host swap identity, or owned-device identity
 cannot be proved, quarantine the RAM device and evidence instead of forcing
 removal. This private credential is never an owner qualification and must never
 be imported into production recovery storage. If initial metadata preparation
-refuses, emit the read-only `primary plan` JSON before cleanup so the exact
-failed target, recovery, mount, swap or artifact gate remains visible in the
-owner report. The owned-null_blk build may
+refuses, capture the read-only `primary plan` output before cleanup even when
+the command exits with its expected BLOCKED status, so the exact failed target,
+recovery, mount, swap or artifact gate remains visible in the owner report. The
+owned-null_blk build may
 also expose deterministic process-death points through
 `SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER`; the production build must compile every
 such point to a no-op and must not read the environment. A selected test point

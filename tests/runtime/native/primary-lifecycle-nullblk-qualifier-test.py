@@ -148,6 +148,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
 
     def test_prepare_failure_emits_read_only_gate_plan(self):
         self.assertIn('"$CONTROL" primary plan', self.script)
+        self.assertIn(')" || true', self.script)
         self.assertIn('PRIMARY_PREPARE_DIAGNOSTIC_PLAN=', self.script)
 
     def test_fault_results_require_exact_hit_evidence(self):
