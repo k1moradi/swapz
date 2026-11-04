@@ -2997,12 +2997,21 @@ class PairReplayContract(unittest.TestCase):
                 ))
             ],
         }
+        # Four segment-rounded data segments support exactly 256 pages after
+        # the separate two-segment GC reserve and foreground headroom.
+        target_bytes = (1024 + 1) * 4096
+        self.assertEqual(
+            evidence.RAM_VALIDATOR["maximum_logical_pages_for_partition"](
+                target_bytes), 256)
+        self.assertEqual(
+            evidence.RAM_VALIDATOR["maximum_logical_pages_for_partition"](
+                124787884032), 27080192)
         capacity_pair = {
             "workload": "sd-high-occupancy-churn",
             "status": "PASS",
             "excluded": False,
             "swapz": {
-                "logical_pages": 27,
+                "logical_pages": 256,
                 "device_identity": {"dm_uuid": mapper_uuid},
                 "resources": {
                     "metadata_and_target_peak_ram_bytes": 8192,
@@ -3012,11 +3021,11 @@ class PairReplayContract(unittest.TestCase):
         }
         self.assertEqual(
             evidence.campaign_capacity_and_ram(
-                [capacity_pair], 27 * 4096 + 4096, source_sha),
+                [capacity_pair], target_bytes, source_sha),
             {
                 "page_bytes": 4096,
-                "logical_pages": 27,
-                "logical_capacity_bytes": 27 * 4096,
+                "logical_pages": 256,
+                "logical_capacity_bytes": 256 * 4096,
                 "peak_ram_bytes": 8192,
                 "mapper_uuid": mapper_uuid,
                 "metadata_ram_trace": trace,
