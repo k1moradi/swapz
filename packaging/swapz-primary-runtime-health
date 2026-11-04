@@ -90,6 +90,32 @@ canonical_unsigned()
 	esac
 }
 
+canonical_partuuid()
+{
+	value=$1
+	[ "${#value}" -ge 8 ] && [ "${#value}" -le 64 ] || return 1
+	hex_digit_count=0
+	previous_was_hyphen=1
+	while [ -n "$value" ]; do
+		case "$value" in
+		[0-9a-f]*)
+			value=${value#?}
+			hex_digit_count=$((hex_digit_count + 1))
+			previous_was_hyphen=0
+			;;
+		-*)
+			[ "$previous_was_hyphen" -eq 0 ] || return 1
+			value=${value#-}
+			previous_was_hyphen=1
+			;;
+		*)
+			return 1
+			;;
+		esac
+	done
+	[ "$hex_digit_count" -ge 8 ] && [ "$previous_was_hyphen" -eq 0 ]
+}
+
 run_bounded()
 {
 	timeout --signal=TERM --kill-after=1s "${command_timeout_seconds}s" "$@"
@@ -128,7 +154,9 @@ manager_target_identity()
 	raw_encoded=${raw_encoded%.swap}
 	[ "$encoded" = "$raw_encoded" ] || return 1
 	selected_partuuid=$(printf '%s\n' "$encoded" | sed 's/\\x2d/-/g')
-	printf '%s\n' "$selected_partuuid" | grep -Eq '^[0-9a-f][0-9a-f-]{6,62}[0-9a-f]$' || return 1
+	canonical_partuuid "$selected_partuuid" || return 1
+	reencoded=$(printf '%s\n' "$selected_partuuid" | sed 's/-/\\x2d/g')
+	[ "$encoded" = "$reencoded" ] || return 1
 	selected_path=$dev_root/disk/by-partuuid/$selected_partuuid
 	selected_major_minor=unavailable
 	# Keep the parsed selected identity even when removable media vanished.
@@ -238,7 +266,7 @@ resume_spec_matches_swapz()
 		case "$normalized" in
 		partuuid=*)
 			candidate_partuuid=${normalized#partuuid=}
-			if printf '%s\n' "$candidate_partuuid" | grep -Eq '^[0-9a-f][0-9a-f-]{6,62}[0-9a-f]$'; then
+			if canonical_partuuid "$candidate_partuuid"; then
 				# A distinct canonical PARTUUID proves this tagged resume
 				# target is not the selected primary partition even when
 				# removable media is currently absent.
@@ -423,9 +451,12 @@ active_swapz_swap()
 		if [ -n "$mapper_major_minor" ] && [ "$source_major_minor" = "$mapper_major_minor" ]; then
 			exit 10
 		fi
-		# A resolved block number does not prove a DM alias unrelated if
-		# the kernel's mapper-name identity is missing or unreadable.
-		dm_name_file=$sys_root/dev/block/$source_major_minor/dm/name
+		# Classify the captured block identity, never a second resolution of
+		# the mutable source pathname. A by-id/by-UUID alias can change after
+		# path_major_minor(), while /proc/swaps still names the original device.
+		block_sysfs=$sys_root/dev/block/$source_major_minor
+		dm_dir=$block_sysfs/dm
+		dm_name_file=$dm_dir/name
 		case "$source" in
 		/dev/dm-[0-9]*|/dev/mapper/*|"$dev_root"/dm-[0-9]*|"$dev_root"/mapper/*)
 			[ -r "$dm_name_file" ] || exit 11
@@ -436,14 +467,13 @@ active_swapz_swap()
 			[ -n "$dm_name" ] || exit 11
 			[ "$dm_name" = "$mapper_name" ] && exit 10
 		elif [ "$type" = partition ]; then
-			# A DM block node may also be exposed through by-id/by-UUID
-			# aliases. Without sysfs dm/name, its kernel name must prove
-			# it is not a DM device before hibernation can be admitted.
-			kernel_name=$(run_bounded lsblk -dnro KNAME -- "$source" 2>/dev/null) || exit 11
-			case "$kernel_name" in
-			''|*'
-'*|dm-[0-9]*) exit 11 ;;
-			esac
+			# A captured DM object with an unreadable/missing name is
+			# ambiguous. A missing sysfs object is equally unsafe; only an
+			# existing non-DM block identity proves this swap unrelated.
+			if [ -e "$dm_dir" ] || [ -L "$dm_dir" ]; then
+				exit 11
+			fi
+			[ -e "$block_sysfs" ] || [ -L "$block_sysfs" ] || exit 11
 		fi
 	done; then
 		status=0

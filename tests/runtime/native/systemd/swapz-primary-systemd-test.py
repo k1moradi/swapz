@@ -1140,6 +1140,15 @@ class BootVerifierTests(unittest.TestCase):
         self.assertNotEqual(preflight.returncode, 0)
         self.assertIn("unsupported hibernation/resume configuration", preflight.stderr)
 
+    def test_malformed_distinct_partuuid_resume_blocks_arm(self) -> None:
+        self.write_proc_swaps(active=False)
+        (self.proc / "cmdline").write_text(
+            "quiet resume=PARTUUID=1234---5678\n", encoding="ascii"
+        )
+        arm = self.run_verifier("arm")
+        self.assertNotEqual(arm.returncode, 0, arm.stderr)
+        self.assertIn("unsupported hibernation/resume configuration", arm.stderr)
+
     def test_hibernation_configuration_drift_prevents_cold_boot_pass(self) -> None:
         self.arm_then_reboot()
         config_dir = self.etc / "initramfs-tools" / "conf.d"
@@ -1583,12 +1592,9 @@ class RuntimeHealthTests(unittest.TestCase):
         write_executable(
             self.bin / "lsblk",
             "#!/bin/sh\n"
+            '[ "$2" = MAJ:MIN ] || exit 1\n'
             '[ "$4" = /dev/disk/by-id/opaque-swap ] || exit 1\n'
-            'case "$2" in\n'
-            'MAJ:MIN) echo "$MOCK_ALIAS_MAJOR_MINOR" ;;\n'
-            'KNAME) echo "$MOCK_ALIAS_KERNEL_NAME" ;;\n'
-            '*) exit 1 ;;\n'
-            'esac\n',
+            'printf "%s\\n" "$MOCK_ALIAS_MAJOR_MINOR"\n',
         )
         (self.proc / "swaps").write_text(
             "Filename Type Size Used Priority\n"
@@ -1596,20 +1602,25 @@ class RuntimeHealthTests(unittest.TestCase):
             encoding="ascii",
         )
         env = self.env.copy()
+
+        # Bind ambiguity to the captured 253:7 object. The alias itself is
+        # never re-resolved to infer a later kernel name.
+        dm_dir = self.sys / "dev" / "block" / "253:7" / "dm"
+        dm_dir.mkdir(parents=True)
         env["MOCK_ALIAS_MAJOR_MINOR"] = "253:7"
-        env["MOCK_ALIAS_KERNEL_NAME"] = "dm-7"
         blocked = self.run_helper("hibernate-guard", env)
         self.assertEqual(blocked.returncode, 1, blocked.stderr)
         self.assertIn("cannot prove swapz-primary inactive", blocked.stderr)
 
-        # A proven physical partition with no dm/name remains unrelated.
+        shutil.rmtree(self.sys / "dev" / "block" / "253:7")
+        (self.sys / "dev" / "block" / "8:7").mkdir(parents=True)
         env["MOCK_ALIAS_MAJOR_MINOR"] = "8:7"
-        env["MOCK_ALIAS_KERNEL_NAME"] = "sdc7"
         allowed = self.run_helper("hibernate-guard", env)
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
-        # Unknown kernel identity is also not evidence of safe hibernation.
-        env["MOCK_ALIAS_KERNEL_NAME"] = ""
+        # A resolved major:minor without its captured sysfs object is still
+        # ambiguous and must never become hibernation-safe.
+        shutil.rmtree(self.sys / "dev" / "block" / "8:7")
         ambiguous = self.run_helper("hibernate-guard", env)
         self.assertEqual(ambiguous.returncode, 1, ambiguous.stderr)
 
@@ -1629,6 +1640,16 @@ class RuntimeHealthTests(unittest.TestCase):
         unresolved_uuid = self.run_helper("hibernation-config-check")
         self.assertEqual(unresolved_uuid.returncode, 1, unresolved_uuid.stderr)
         self.assertIn("unresolved:UUID=missing", unresolved_uuid.stderr)
+
+        for malformed_partuuid in ("1234---5678", "1234-567"):
+            (self.proc / "cmdline").write_text(
+                f"quiet resume=PARTUUID={malformed_partuuid}\n", encoding="ascii"
+            )
+            malformed = self.run_helper("hibernation-config-check")
+            self.assertEqual(malformed.returncode, 1, malformed.stderr)
+            self.assertIn(
+                f"unresolved:PARTUUID={malformed_partuuid}", malformed.stderr
+            )
 
         (self.proc / "cmdline").write_text(
             f"quiet resume=PARTUUID={OTHER_PARTUUID}\n", encoding="ascii"
@@ -1667,6 +1688,19 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(configured.returncode, 1)
         self.assertIn("kernel-cmdline:unavailable", configured.stderr)
         self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
+
+    def test_runtime_identity_rejects_noncanonical_manager_unit_encoding(self) -> None:
+        write_executable(
+            self.sbin / "swapzctl",
+            "#!/bin/sh\n"
+            "[ \"$1\" = primary ] && [ \"$2\" = systemd-units ] || exit 2\n"
+            "printf '%s\\n' "
+            "'dev-disk-by\\x2dpartuuid-01234567-89abcdef.device "
+            "dev-disk-by\\x2dpartuuid-01234567-89abcdef.swap'\n",
+        )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("selected_target_identity_unavailable", observed.stderr)
 
     def test_live_mapper_without_selected_authority_is_failure(self) -> None:
         write_executable(self.sbin / "swapzctl", "#!/bin/sh\nexit 2\n")

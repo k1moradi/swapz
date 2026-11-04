@@ -20,9 +20,11 @@ two-sided admission policy closes the check-then-activate race without
 automatically stopping swap.
 
 Resolved block-swap aliases under by-id/by-UUID are not automatically
-physical: when the sysfs DM name is unavailable, the read-only hibernation
-check requires a non-DM kernel block name, otherwise it refuses hibernation.
-Resume aliases that cannot be resolved are rejected when a selected swapz
+physical: classification stays bound to the captured major:minor's sysfs
+object. A DM object without a readable mapper name, or a missing captured
+sysfs identity, refuses hibernation rather than re-resolving the mutable alias.
+Resume PARTUUIDs use the same strict canonical grammar as the protected selector;
+malformed or otherwise unresolvable aliases are rejected when a selected swapz
 identity exists. A provably distinct canonical PARTUUID may still be treated as
 unrelated when the removable target is absent. Current runtime/config checks do
 not by themselves prove the bytes embedded in every distribution's initramfs

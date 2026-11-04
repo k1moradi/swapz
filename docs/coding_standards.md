@@ -2598,8 +2598,10 @@ swap/mapper operations. A syntactically valid active block-swap row with an
 unresolvable device identity is not proof that it is unrelated to swapz and
 must also deny hibernation, including when the primary target selector is
 absent. A resolved Device Mapper alias also requires readable sysfs DM-name
-identity before its active swap can be ruled out. Verified unrelated
-swapfiles remain permitted. Unreadable current kernel command-line evidence
+identity before its active swap can be ruled out. Keep that classification
+bound to the major:minor captured from the active swap entry; never re-resolve
+a mutable by-id/by-UUID pathname to infer a later kernel identity. Verified
+unrelated swapfiles remain permitted. Unreadable current kernel command-line evidence
 must likewise deny resume admission. A live mapper without provable selected
 backing/run authority is a failure, not a degraded optional metric.
 Keep repeated kernel-journal queries capped to a small recent-error window,
