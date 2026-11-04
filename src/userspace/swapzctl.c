@@ -323,34 +323,63 @@ struct swapz_ratio_status {
 	unsigned long long bulk_mode;
 	unsigned long long bulk_padding_blocks;
 	unsigned long long failed;
+	int error;
 	unsigned long long compressed_logical_bytes;
 	unsigned long long compressed_extent_bytes;
 	unsigned long long overall_physical_bytes;
 	int compressed_extent_ratio_exact;
 };
 
+enum status_ratio_state {
+	STATUS_BLOCKED = -1,
+	STATUS_READY = 0,
+	STATUS_RETRY = 1,
+	STATUS_FAILED = 2,
+	STATUS_UNAVAILABLE = 3
+};
+
+struct status_problem {
+	const char *field;
+	const char *expected;
+	const char *observed;
+};
+
 struct swapz_target_snapshot {
 	uint64_t sector_start;
 	uint64_t length;
+	uint64_t device_id;
+	uint32_t event_number;
 	struct swapz_ratio_status ratio;
+	struct status_problem problem;
 	int ratio_state;
 };
+
+static void status_set_problem(struct status_problem *problem,
+			       const char *field, const char *expected,
+			       const char *observed)
+{
+	problem->field = field;
+	problem->expected = expected;
+	problem->observed = observed;
+}
 
 static int status_separator(char character)
 {
 	return character == ' ' || character == '\t' || character == '\n';
 }
 
-static int parse_status_unsigned(const char *status, const char *key,
-				 unsigned long long *value)
+/* Find exactly one complete key=value token; unknown status keys are harmless. */
+static int status_find_value(const char *status, const char *key,
+			     const char *expected, const char **value_start,
+			     const char **value_end, struct status_problem *problem)
 {
 	const size_t key_length = strlen(key);
 	const char *cursor = status;
+	int found = 0;
 
 	while (*cursor) {
 		const char *token_end;
-		const char *parsed_end;
-		unsigned long long parsed;
+		size_t token_length;
 
 		while (*cursor && status_separator(*cursor))
 			++cursor;
@@ -359,16 +388,99 @@ static int parse_status_unsigned(const char *status, const char *key,
 		token_end = cursor;
 		while (*token_end && !status_separator(*token_end))
 			++token_end;
-		if ((size_t)(token_end - cursor) > key_length + 1U &&
-		    !memcmp(cursor, key, key_length) && cursor[key_length] == '=' &&
-		    parse_unsigned_decimal(cursor + key_length + 1U, ULLONG_MAX,
-					   &parsed_end, &parsed) == 0 &&
-		    parsed_end == token_end) {
-			*value = parsed;
-			return 0;
+		token_length = (size_t)(token_end - cursor);
+		if (token_length >= key_length &&
+		    !memcmp(cursor, key, key_length) &&
+		    (token_length == key_length || cursor[key_length] == '=')) {
+			if (found) {
+				status_set_problem(problem, key, expected, "duplicate token");
+				return -1;
+			}
+			if (token_length == key_length) {
+				status_set_problem(problem, key, expected,
+						   "token has no '=' or value");
+				return -1;
+			}
+			*value_start = cursor + key_length + 1U;
+			*value_end = token_end;
+			found = 1;
 		}
 		cursor = token_end;
 	}
+	return found;
+}
+
+static int parse_status_unsigned(const char *status, const char *key,
+				 unsigned long long limit,
+				 unsigned long long *value,
+				 struct status_problem *problem)
+{
+	const char *value_start;
+	const char *value_end;
+	const char *parsed_end;
+	const char *expected = limit == 1ULL ?
+		"one canonical decimal boolean (0 or 1)" :
+		limit == 2ULL ? "one canonical decimal mode (0, 1 or 2)" :
+		limit == UINT_MAX ?
+		"one canonical unsigned 32-bit decimal (0..4294967295)" :
+		"one canonical unsigned 64-bit decimal (0..18446744073709551615)";
+	int found = status_find_value(status, key, expected, &value_start,
+				      &value_end, problem);
+
+	if (found < 0)
+		return -1;
+	if (!found) {
+		status_set_problem(problem, key, expected, "missing token");
+		return -1;
+	}
+	if (parse_unsigned_decimal(value_start, limit, &parsed_end, value) < 0 ||
+	    parsed_end != value_end) {
+		status_set_problem(problem, key, expected,
+				   "empty, noncanonical, signed or out-of-range value");
+		return -1;
+	}
+	return 0;
+}
+
+static int parse_status_errno(const char *status, const char *key,
+			      int optional, int *value,
+			      struct status_problem *problem)
+{
+	const char *value_start;
+	const char *value_end;
+	const char *parsed_end;
+	const char *expected =
+		"one canonical signed errno (0 or -1..-4095)";
+	unsigned long long magnitude;
+	int found = status_find_value(status, key, expected, &value_start,
+				      &value_end, problem);
+
+	if (found < 0)
+		return -1;
+	if (!found) {
+		if (optional)
+			return 0;
+		status_set_problem(problem, key, expected, "missing token");
+		return -1;
+	}
+	if (*value_start == '-') {
+		if (parse_unsigned_decimal(value_start + 1, 4095ULL,
+					   &parsed_end, &magnitude) < 0 ||
+		    parsed_end != value_end || magnitude == 0ULL)
+			goto invalid;
+		*value = -(int)magnitude;
+	} else {
+		if (parse_unsigned_decimal(value_start, 0ULL,
+					   &parsed_end, &magnitude) < 0 ||
+		    parsed_end != value_end)
+			goto invalid;
+		*value = 0;
+	}
+	return 1;
+
+invalid:
+	status_set_problem(problem, key, expected,
+			   "empty, positive, noncanonical or out-of-range errno");
 	return -1;
 }
 
@@ -385,69 +497,136 @@ static int pages_to_bytes(unsigned long long pages,
  * Build ratios only from successfully committed target counters. Device Mapper
  * status is observational, so a live commit can cross the individual reads.
  * Return 1 for a bounded retry, 2 for a failed target, and -1 for malformed
- * status. The caller also requires two identical relevant snapshots before
+ * status; 3 denotes a kernel INFO snapshot unavailable to the observer.
+ * The caller also requires two identical relevant snapshots before
  * printing a ratio.
  */
-static int parse_swapz_ratio_status(const char *status,
-				    struct swapz_ratio_status *ratio)
+static int parse_swapz_ratio_status_diagnostic(
+	const char *status, struct swapz_ratio_status *ratio,
+	struct status_problem *problem)
 {
 	unsigned long long total_pages;
 	unsigned long long page_logical_bytes;
 	unsigned long long raw_physical_bytes;
+	int snapshot_error = 0;
+	int snapshot_error_present;
 
 	memset(ratio, 0, sizeof(*ratio));
-	if (parse_status_unsigned(status, "logical_write",
-				  &ratio->logical_write_bytes) < 0 ||
-	    parse_status_unsigned(status, "physical_write",
-				  &ratio->physical_write_bytes) < 0 ||
-	    parse_status_unsigned(status, "gc_write", &ratio->gc_write_bytes) < 0 ||
-	    parse_status_unsigned(status, "compressed", &ratio->compressed_pages) < 0 ||
-	    parse_status_unsigned(status, "raw", &ratio->raw_pages) < 0 ||
-	    parse_status_unsigned(status, "zero_elided", &ratio->zero_elided_pages) < 0 ||
-	    parse_status_unsigned(status, "bulk_mode", &ratio->bulk_mode) < 0 ||
-	    parse_status_unsigned(status, "bulk_padding",
-				  &ratio->bulk_padding_blocks) < 0 ||
-	    parse_status_unsigned(status, "failed", &ratio->failed) < 0)
-		return -1;
+	memset(problem, 0, sizeof(*problem));
+	snapshot_error_present = parse_status_errno(
+		status, "status_snapshot_error", 1, &snapshot_error, problem);
+	if (snapshot_error_present < 0)
+		return STATUS_BLOCKED;
+	if (snapshot_error_present && !snapshot_error) {
+		status_set_problem(problem, "status_snapshot_error",
+				   "negative errno -1..-4095 when present",
+				   "zero is not a kernel snapshot failure");
+		return STATUS_BLOCKED;
+	}
+	if (snapshot_error) {
+		status_set_problem(problem, "status_snapshot_error",
+				   "absent when kernel INFO counters are available",
+				   "kernel could not produce a status snapshot (negative errno)");
+		return STATUS_UNAVAILABLE;
+	}
+	if (parse_status_unsigned(status, "failed", 1ULL,
+				  &ratio->failed, problem) < 0)
+		return STATUS_BLOCKED;
+	if (ratio->failed) {
+		status_set_problem(problem, "failed", "0 for a healthy target",
+				   "1: kernel target is failed");
+		return STATUS_FAILED;
+	}
+	if (parse_status_errno(status, "error", 0, &ratio->error, problem) < 0)
+		return STATUS_BLOCKED;
+	if (ratio->error) {
+		status_set_problem(problem, "error",
+				   "0 for a healthy target (-1..-4095 indicates errno)",
+				   "negative kernel error");
+		return STATUS_FAILED;
+	}
+	if (parse_status_unsigned(status, "logical_write", ULLONG_MAX,
+				  &ratio->logical_write_bytes, problem) < 0 ||
+	    parse_status_unsigned(status, "physical_write", ULLONG_MAX,
+				  &ratio->physical_write_bytes, problem) < 0 ||
+	    parse_status_unsigned(status, "gc_write", ULLONG_MAX,
+				  &ratio->gc_write_bytes, problem) < 0 ||
+	    parse_status_unsigned(status, "compressed", ULLONG_MAX,
+				  &ratio->compressed_pages, problem) < 0 ||
+	    parse_status_unsigned(status, "raw", ULLONG_MAX,
+				  &ratio->raw_pages, problem) < 0 ||
+	    parse_status_unsigned(status, "zero_elided", ULLONG_MAX,
+				  &ratio->zero_elided_pages, problem) < 0 ||
+	    parse_status_unsigned(status, "bulk_mode", 2ULL,
+				  &ratio->bulk_mode, problem) < 0 ||
+	    parse_status_unsigned(status, "bulk_padding", UINT_MAX,
+				  &ratio->bulk_padding_blocks, problem) < 0)
+		return STATUS_BLOCKED;
 
-	if (ratio->failed)
-		return 2;
 	if (ratio->compressed_pages > ULLONG_MAX - ratio->raw_pages ||
 	    ratio->compressed_pages + ratio->raw_pages >
-			ULLONG_MAX - ratio->zero_elided_pages)
-		return -1;
+			ULLONG_MAX - ratio->zero_elided_pages) {
+		status_set_problem(problem, "compressed+raw+zero_elided",
+				   "sum of pages <= UINT64_MAX / 4096",
+				   "64-bit page-count addition overflow");
+		return STATUS_BLOCKED;
+	}
 	total_pages = ratio->compressed_pages + ratio->raw_pages +
 		      ratio->zero_elided_pages;
-	if (pages_to_bytes(total_pages, &page_logical_bytes) < 0 ||
-	    pages_to_bytes(ratio->compressed_pages,
+	if (pages_to_bytes(total_pages, &page_logical_bytes) < 0) {
+		status_set_problem(problem, "compressed+raw+zero_elided",
+				   "sum of pages <= UINT64_MAX / 4096",
+				   "page-to-byte multiplication overflow");
+		return STATUS_BLOCKED;
+	}
+	if (pages_to_bytes(ratio->compressed_pages,
 			   &ratio->compressed_logical_bytes) < 0 ||
-	    pages_to_bytes(ratio->raw_pages, &raw_physical_bytes) < 0)
-		return -1;
+	    pages_to_bytes(ratio->raw_pages, &raw_physical_bytes) < 0) {
+		status_set_problem(problem, "compressed/raw",
+				   "each page count <= UINT64_MAX / 4096",
+				   "page-to-byte multiplication overflow");
+		return STATUS_BLOCKED;
+	}
 
 	/* A mismatch is most likely one status read crossing a live commit. */
-	if (page_logical_bytes != ratio->logical_write_bytes ||
-	    ratio->physical_write_bytes < ratio->gc_write_bytes)
-		return 1;
+	if (page_logical_bytes != ratio->logical_write_bytes) {
+		status_set_problem(problem, "logical_write",
+				   "(compressed + raw + zero_elided) * 4096 bytes",
+				   "does not equal committed foreground page counts");
+		return STATUS_RETRY;
+	}
+	if (ratio->physical_write_bytes < ratio->gc_write_bytes) {
+		status_set_problem(problem, "gc_write",
+				   "<= physical_write (cumulative lower-WRITE bytes)",
+				   "GC lower writes exceed total lower writes");
+		return STATUS_RETRY;
+	}
 	ratio->overall_physical_bytes =
 		ratio->physical_write_bytes - ratio->gc_write_bytes;
-	if (ratio->overall_physical_bytes < raw_physical_bytes)
-		return 1;
+	if (ratio->overall_physical_bytes < raw_physical_bytes) {
+		status_set_problem(problem, "physical_write-gc_write",
+				   ">= raw * 4096 lower-WRITE bytes",
+				   "foreground lower writes smaller than committed RAW bytes");
+		return STATUS_RETRY;
+	}
 	ratio->compressed_extent_bytes =
 		ratio->overall_physical_bytes - raw_physical_bytes;
 	if ((!ratio->compressed_pages && ratio->compressed_extent_bytes) ||
-	    (ratio->compressed_pages && !ratio->compressed_extent_bytes))
-		return 1;
+	    (ratio->compressed_pages && !ratio->compressed_extent_bytes)) {
+		status_set_problem(problem, "physical_write-gc_write-raw*4096",
+				   "zero exactly when compressed=0",
+				   "compressed lower extents disagree with compressed pages");
+		return STATUS_RETRY;
+	}
 
 	/*
 	 * lower_bulk=0/1 never writes padding. With mode 2, a nonzero cumulative
 	 * padding counter is not success- or foreground-partitioned, so do not
 	 * pretend it can be subtracted from compressed SWZ extent bytes.
 	 */
-	if (ratio->bulk_mode > 2ULL)
-		return -1;
 	ratio->compressed_extent_ratio_exact =
 		ratio->bulk_mode <= 1ULL || ratio->bulk_padding_blocks == 0ULL;
-	return 0;
+	return STATUS_READY;
 }
 
 static int ratio_status_equal(const struct swapz_ratio_status *left,
@@ -461,7 +640,8 @@ static int ratio_status_equal(const struct swapz_ratio_status *left,
 	       left->zero_elided_pages == right->zero_elided_pages &&
 	       left->bulk_mode == right->bulk_mode &&
 	       left->bulk_padding_blocks == right->bulk_padding_blocks &&
-	       left->failed == right->failed;
+	       left->failed == right->failed &&
+	       left->error == right->error;
 }
 
 static void format_bytes(unsigned long long bytes, char *text, size_t text_size)
@@ -522,6 +702,10 @@ static int dm_query(int fd, unsigned long request, const char *name,
 {
 	size_t buffer_size = SWAPZ_DM_BUFFER_INITIAL;
 
+	if (request != DM_TABLE_STATUS && request != DM_LIST_DEVICES) {
+		errno = EPERM;
+		return -1;
+	}
 	if (name && strlen(name) >= DM_NAME_LEN) {
 		errno = ENAMETOOLONG;
 		return -1;
@@ -548,7 +732,8 @@ static int dm_query(int fd, unsigned long request, const char *name,
 			buffer_size *= 2U;
 			continue;
 		}
-		if (io->data_size > buffer_size || io->data_start > io->data_size) {
+		if (io->data_size > buffer_size || io->data_size < sizeof(*io) ||
+		    io->data_start < sizeof(*io) || io->data_start > io->data_size) {
 			free(buffer);
 			errno = EPROTO;
 			return -1;
@@ -561,95 +746,204 @@ static int dm_query(int fd, unsigned long request, const char *name,
 	return -1;
 }
 
+/*
+ * DM_TABLE_STATUS spec.next is an offset from the first target specification,
+ * unlike the relative offsets in DM_LIST_DEVICES. Decode bounded replies
+ * without trusting kernel-provided alignment, record counts or terminators.
+ */
+static int parse_dm_target_snapshot(const unsigned char *buffer,
+				    size_t buffer_size, const char *expected_name,
+				    unsigned int wanted_target,
+				    struct swapz_target_snapshot *snapshot)
+{
+	struct dm_ioctl header;
+	struct dm_target_spec selected_spec = { 0 };
+	const char *record_base;
+	const char *cursor;
+	const char *data_end;
+	const char *selected_params = NULL;
+	uint32_t target;
+	unsigned int swapz_index = 0;
+
+	memset(snapshot, 0, sizeof(*snapshot));
+	if (buffer_size < sizeof(header)) {
+		status_set_problem(&snapshot->problem, "dm_ioctl.data_size",
+				   ">= sizeof(dm_ioctl)", "truncated DM ioctl header");
+		return -1;
+	}
+	memcpy(&header, buffer, sizeof(header));
+	if (header.data_size > buffer_size ||
+	    header.data_size < sizeof(header) ||
+	    header.data_start < sizeof(header) ||
+	    header.data_start > header.data_size) {
+		status_set_problem(&snapshot->problem, "dm_ioctl.data_start/data_size",
+				   "sizeof(dm_ioctl) <= start <= size <= reply capacity",
+				   "out-of-bounds DM INFO payload");
+		return -1;
+	}
+	if (!memchr(header.name, '\0', sizeof(header.name)) ||
+	    strcmp(header.name, expected_name)) {
+		status_set_problem(&snapshot->problem, "dm_ioctl.name",
+				   "NUL-terminated name matching the queried target",
+				   "missing terminator or changed target identity");
+		return -1;
+	}
+	if (!header.dev) {
+		status_set_problem(&snapshot->problem, "dm_ioctl.dev",
+				   "nonzero device identity", "zero device identity");
+		return -1;
+	}
+	if (header.flags & DM_STATUS_TABLE_FLAG) {
+		status_set_problem(&snapshot->problem, "dm_ioctl.flags",
+				   "INFO status, not table parameters",
+				   "DM_STATUS_TABLE_FLAG set");
+		return -1;
+	}
+	record_base = (const char *)buffer + header.data_start;
+	cursor = record_base;
+	data_end = (const char *)buffer + header.data_size;
+	for (target = 0; target < header.target_count; ++target) {
+		struct dm_target_spec specification;
+		const char *record_end;
+		const char *parameters;
+		const char *parameters_end;
+		size_t type_length;
+		size_t current_offset = (size_t)(cursor - record_base);
+
+		if ((size_t)(data_end - cursor) < sizeof(specification)) {
+			status_set_problem(&snapshot->problem, "dm_target_spec",
+					   "complete target header within DM reply",
+					   "truncated target record");
+			return -1;
+		}
+		memcpy(&specification, cursor, sizeof(specification));
+		if (specification.next) {
+			if (specification.next <= current_offset ||
+			    specification.next - current_offset < sizeof(specification) ||
+			    (size_t)specification.next > (size_t)(data_end - record_base)) {
+				status_set_problem(&snapshot->problem, "dm_target_spec.next",
+						   "forward offset from first spec, within DM data_size",
+						   "backward, overlapping or truncated next record");
+				return -1;
+			}
+			record_end = record_base + specification.next;
+			if (target + 1U == header.target_count) {
+				status_set_problem(&snapshot->problem, "dm_target_spec.next",
+						   "0 for the last target record",
+						   "extra target after advertised target_count");
+				return -1;
+			}
+		} else {
+			record_end = data_end;
+			if (target + 1U != header.target_count) {
+				status_set_problem(&snapshot->problem, "dm_target_spec.next",
+						   "forward offset for each nonfinal target",
+						   "early zero offset before target_count");
+				return -1;
+			}
+		}
+		type_length = strnlen(specification.target_type,
+				      sizeof(specification.target_type));
+		if (type_length == sizeof(specification.target_type)) {
+			status_set_problem(&snapshot->problem, "dm_target_spec.target_type",
+					   "NUL-terminated target type, exactly 'swapz' for swapz",
+					   "unterminated target identity");
+			return -1;
+		}
+		parameters = cursor + sizeof(specification);
+		parameters_end = memchr(parameters, '\0',
+				       (size_t)(record_end - parameters));
+		if (!parameters_end) {
+			status_set_problem(&snapshot->problem, "dm_target_spec.params",
+					   "NUL-terminated INFO token string inside record",
+					   "missing status terminator or truncated DM reply");
+			return -1;
+		}
+		if (!strcmp(specification.target_type, "swapz")) {
+			if (!specification.length ||
+			    specification.sector_start > UINT64_MAX - specification.length) {
+				status_set_problem(&snapshot->problem, "dm_target_spec.sector_start/length",
+						   "nonzero length and uint64 sector end without overflow",
+						   "invalid target geometry");
+				return -1;
+			}
+			if (swapz_index == wanted_target) {
+				selected_spec = specification;
+				selected_params = parameters;
+			}
+			++swapz_index;
+		}
+		cursor = record_end;
+	}
+	if (!selected_params)
+		return 0;
+	snapshot->sector_start = selected_spec.sector_start;
+	snapshot->length = selected_spec.length;
+	snapshot->device_id = header.dev;
+	snapshot->event_number = header.event_nr;
+	if (selected_spec.status > 0 || selected_spec.status < -4095) {
+		status_set_problem(&snapshot->problem, "dm_target_spec.status",
+				   "0 (healthy) or negative errno -1..-4095",
+				   "positive or out-of-range DM status");
+		snapshot->ratio_state = STATUS_BLOCKED;
+	} else if (selected_spec.status) {
+		status_set_problem(&snapshot->problem, "dm_target_spec.status",
+				   "0 for healthy target",
+				   "negative errno: Device Mapper reports target failure");
+		snapshot->ratio_state = STATUS_FAILED;
+	} else {
+		snapshot->ratio_state = parse_swapz_ratio_status_diagnostic(
+			selected_params, &snapshot->ratio, &snapshot->problem);
+	}
+	return 1;
+}
+
 static int read_swapz_target_snapshot(int fd, const char *name,
 				      unsigned int wanted_target,
 				      struct swapz_target_snapshot *snapshot)
 {
 	unsigned char *buffer = NULL;
 	size_t buffer_size = 0;
-	struct dm_ioctl *io;
-	char *cursor;
-	char *data_end;
-	uint32_t target;
-	unsigned int swapz_index = 0;
-	int result = 0;
+	int result;
 
+	memset(snapshot, 0, sizeof(*snapshot));
 	if (dm_query(fd, DM_TABLE_STATUS, name, &buffer, &buffer_size) < 0)
 		return -1;
-	(void)buffer_size;
-	io = (struct dm_ioctl *)buffer;
-	cursor = (char *)buffer + io->data_start;
-	data_end = (char *)buffer + io->data_size;
-	for (target = 0; target < io->target_count; ++target) {
-		struct dm_target_spec *spec;
-		char *record_end;
-		char *params;
-		size_t type_length;
-		const char *params_end;
-
-		if ((size_t)(data_end - cursor) < sizeof(*spec)) {
-			errno = EPROTO;
-			result = -1;
-			break;
-		}
-		spec = (struct dm_target_spec *)cursor;
-		if (spec->next) {
-			if (spec->next < sizeof(*spec) ||
-			    (size_t)(data_end - cursor) < spec->next) {
-				errno = EPROTO;
-				result = -1;
-				break;
-			}
-			record_end = cursor + spec->next;
-		} else {
-			record_end = data_end;
-		}
-		type_length = strnlen(spec->target_type, sizeof(spec->target_type));
-		if (type_length == sizeof(spec->target_type)) {
-			errno = EPROTO;
-			result = -1;
-			break;
-		}
-		params = (char *)(spec + 1);
-		if (params > record_end) {
-			errno = EPROTO;
-			result = -1;
-			break;
-		}
-		params_end = memchr(params, '\0', (size_t)(record_end - params));
-		if (!params_end) {
-			errno = EPROTO;
-			result = -1;
-			break;
-		}
-		if (type_length == sizeof("swapz") - 1U &&
-		    !memcmp(spec->target_type, "swapz", sizeof("swapz") - 1U)) {
-			if (swapz_index == wanted_target) {
-				snapshot->sector_start = spec->sector_start;
-				snapshot->length = spec->length;
-				snapshot->ratio_state =
-					parse_swapz_ratio_status(params, &snapshot->ratio);
-				if (snapshot->ratio_state < 0) {
-					errno = EPROTO;
-					result = -1;
-				} else {
-					result = 1;
-				}
-				break;
-			}
-			swapz_index++;
-		}
-		if (!spec->next) {
-			if (target + 1U != io->target_count) {
-				errno = EPROTO;
-				result = -1;
-			}
-			break;
-		}
-		cursor = record_end;
-	}
+	result = parse_dm_target_snapshot(buffer, buffer_size, name,
+					  wanted_target, snapshot);
 	free(buffer);
+	if (result < 0)
+		errno = EPROTO;
 	return result;
+}
+
+static void status_safe_mapping_name(const char *name,
+				     char safe_name[DM_NAME_LEN + 1U])
+{
+	size_t index;
+	size_t length = strnlen(name, DM_NAME_LEN);
+
+	/* Escape path punctuation and control bytes rather than echoing paths. */
+	if (!length || length >= DM_NAME_LEN) {
+		memcpy(safe_name, "<unverified>", sizeof("<unverified>"));
+		return;
+	}
+	if (memchr(name, '/', length) || memchr(name, '\\', length)) {
+		memcpy(safe_name, "<redacted>", sizeof("<redacted>"));
+		return;
+	}
+	for (index = 0; index < length; ++index) {
+		char character = name[index];
+
+		safe_name[index] =
+			(character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '_' || character == '-' ||
+			character == '.' || character == '+' ?
+			character : '_';
+	}
+	safe_name[length] = '\0';
 }
 
 static void report_swapz_target(const char *name, unsigned int target_index,
@@ -657,8 +951,10 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 {
 	char gc_text[64];
 	char foreground_text[64];
+	char safe_name[DM_NAME_LEN + 1U];
 
-	printf("swapz target: %s", name);
+	status_safe_mapping_name(name, safe_name);
+	printf("swapz target: %s", safe_name);
 	if (target_index)
 		printf(" (target %u)", target_index + 1U);
 	putchar('\n');
@@ -673,8 +969,9 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 				    ratio->compressed_logical_bytes,
 				    ratio->compressed_extent_bytes);
 		else
-			puts("  compressed ratio (SWZ extents): unavailable "
-			     "(nonzero lower_bulk padding cannot be partitioned exactly)");
+			puts("  compressed ratio (SWZ extents): UNAVAILABLE: field 'bulk_padding' "
+			     "expected 0 with bulk_mode=2 for exact compressed lower bytes; "
+			     "observed nonzero cumulative padding without foreground/GC separation");
 	} else {
 		puts("  compressed ratio (SWZ extents): n/a (no compressed pages)");
 	}
@@ -690,13 +987,49 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 	puts("  scope: cumulative successful foreground writes since target creation");
 }
 
-static int report_device_status(int fd, const char *name, int *swapz_targets)
+/* Do not include untrusted INFO text, device paths or unverified counters. */
+static int status_report_problem(const char *state, const char *name,
+				 unsigned int target_index,
+				 const struct status_problem *problem)
+{
+	char safe_name[DM_NAME_LEN + 1U];
+
+	status_safe_mapping_name(name, safe_name);
+	fprintf(stderr,
+		"swapzctl status: %s: mapping '%s' target %u: field '%s'; expected %s; observed %s\n",
+		state, safe_name, target_index + 1U, problem->field,
+		problem->expected, problem->observed);
+	errno = EPROTO;
+	return -2; /* A precise diagnostic has already been emitted. */
+}
+
+typedef int (*status_snapshot_reader)(void *context, const char *name,
+				      unsigned int target_index,
+				      struct swapz_target_snapshot *snapshot);
+
+static int status_read_snapshot_with_fd(void *context, const char *name,
+					unsigned int target_index,
+					struct swapz_target_snapshot *snapshot)
+{
+	const int fd = *(const int *)context;
+
+	return read_swapz_target_snapshot(fd, name, target_index, snapshot);
+}
+
+static int report_device_status_with_reader(
+	void *context, status_snapshot_reader read_snapshot,
+	const char *name, int *swapz_targets)
 {
 	unsigned int target_index;
 
 	for (target_index = 0;; ++target_index) {
 		unsigned int attempt;
 		int found_target = 0;
+		struct status_problem last_problem = {
+			.field = "consecutive DM INFO snapshots",
+			.expected = "two identical target identities and committed counters within 8 retries",
+			.observed = "target identity or counters changed between reads"
+		};
 
 		for (attempt = 0; attempt < SWAPZ_STATUS_SNAPSHOT_RETRIES; ++attempt) {
 			struct swapz_target_snapshot first = { 0 };
@@ -704,36 +1037,77 @@ static int report_device_status(int fd, const char *name, int *swapz_targets)
 			int first_result;
 			int second_result;
 
-			first_result = read_swapz_target_snapshot(
-				fd, name, target_index, &first);
-			if (first_result < 0)
+			first_result = read_snapshot(
+				context, name, target_index, &first);
+			if (first_result < 0) {
+				if (first.problem.field)
+					return status_report_problem("BLOCKED", name, target_index,
+								     &first.problem);
 				return -1;
-			if (!first_result)
+			}
+			if (!first_result) {
+				if (found_target)
+					continue; /* A previously seen target disappeared. */
 				break;
+			}
 			found_target = 1;
-			second_result = read_swapz_target_snapshot(
-				fd, name, target_index, &second);
-			if (second_result < 0)
+			if (first.ratio_state == STATUS_BLOCKED ||
+			    first.ratio_state == STATUS_FAILED ||
+			    first.ratio_state == STATUS_UNAVAILABLE)
+				return status_report_problem(
+					first.ratio_state == STATUS_BLOCKED ? "BLOCKED" :
+					first.ratio_state == STATUS_FAILED ? "FAILED" : "UNAVAILABLE",
+					name, target_index, &first.problem);
+			second_result = read_snapshot(
+				context, name, target_index, &second);
+			if (second_result < 0) {
+				if (second.problem.field)
+					return status_report_problem("BLOCKED", name, target_index,
+								     &second.problem);
 				return -1;
+			}
+			if (second_result &&
+			    (second.ratio_state == STATUS_BLOCKED ||
+			     second.ratio_state == STATUS_FAILED ||
+			     second.ratio_state == STATUS_UNAVAILABLE))
+				return status_report_problem(
+					second.ratio_state == STATUS_BLOCKED ? "BLOCKED" :
+					second.ratio_state == STATUS_FAILED ? "FAILED" : "UNAVAILABLE",
+					name, target_index, &second.problem);
 			if (!second_result ||
 			    first.sector_start != second.sector_start ||
 			    first.length != second.length ||
+			    first.device_id != second.device_id ||
+			    first.event_number != second.event_number ||
 			    first.ratio_state != second.ratio_state ||
 			    !ratio_status_equal(&first.ratio, &second.ratio))
 				continue;
-			if (first.ratio_state == 1)
+			if (first.ratio_state == STATUS_RETRY) {
+				last_problem = first.problem;
 				continue;
+			}
 			report_swapz_target(name, target_index, &first.ratio);
 			(*swapz_targets)++;
 			break;
 		}
 		if (!found_target)
 			return 0;
-		if (attempt == SWAPZ_STATUS_SNAPSHOT_RETRIES) {
-			errno = EAGAIN;
-			return -1;
-		}
+		if (attempt == SWAPZ_STATUS_SNAPSHOT_RETRIES)
+			return status_report_problem("UNAVAILABLE", name, target_index,
+						     &last_problem);
 	}
+}
+
+static int report_device_status(int fd, const char *name, int *swapz_targets)
+{
+	return report_device_status_with_reader(&fd, status_read_snapshot_with_fd,
+						name, swapz_targets);
+}
+
+static int status_control_open_flags(void)
+{
+	/* Status uses only DM_LIST_DEVICES and DM_TABLE_STATUS, never a mutation. */
+	return O_RDONLY | O_CLOEXEC;
 }
 
 static int status_targets(void)
@@ -747,7 +1121,7 @@ static int status_targets(void)
 	int swapz_targets = 0;
 	int result = 1;
 
-	fd = open(SWAPZ_DM_CONTROL_PATH, O_RDWR | O_CLOEXEC);
+	fd = open(SWAPZ_DM_CONTROL_PATH, status_control_open_flags());
 	if (fd < 0) {
 		perror("swapzctl status: open /dev/mapper/control");
 		return 1;
@@ -791,10 +1165,16 @@ static int status_targets(void)
 			perror("swapzctl status: malformed Device Mapper device name");
 			goto out;
 		}
-		if (*name && report_device_status(fd, name, &swapz_targets) < 0 &&
-		    errno != ENXIO && errno != ENODEV) {
-			perror("swapzctl status: read Device Mapper target status");
-			goto out;
+		if (*name) {
+			int device_result = report_device_status(fd, name, &swapz_targets);
+
+			if (device_result < 0 &&
+			    (device_result == -2 ||
+			     (errno != ENXIO && errno != ENODEV))) {
+				if (device_result != -2)
+					perror("swapzctl status: read Device Mapper target status");
+				goto out;
+			}
 		}
 		if (!entry->next)
 			break;
