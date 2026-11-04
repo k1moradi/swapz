@@ -159,7 +159,7 @@ def pass_record(**extra):
         "status": "PASS",
         "current": True,
         "source_sha": SOURCE,
-        "observed_at_utc": "2026-11-03T00:00:00Z",
+        "observed_at_utc": "2026-11-03T00:00:12Z",
         **extra,
     }
 
@@ -2147,8 +2147,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
                          "NOT_MEASURED")
+        self.assertEqual(
+            result["METADATA_RAM_MEASUREMENT"]["limit_bytes"], 1342177280)
         self.assertTrue(any(
             "differs from tracked frozen manifest" in blocker
+            for blocker in result["code_blockers"]))
+        self.assertTrue(any(
+            "metric=metadata_and_target_peak_ram_bytes observed=unavailable "
+            "limit=1342177280" in blocker
             for blocker in result["code_blockers"]))
 
     def test_seal_must_follow_host_after_capture(self):
@@ -2162,6 +2168,36 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "metric=sealed_at_utc" in blocker
             for blocker in result["code_blockers"]))
+
+    def test_campaign_report_cannot_predate_sealed_host_evidence(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw, policy_raw = encoded(report), encoded(policy)
+        physical_raw = encoded(real_swap_evidence(report_raw, policy_raw))
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        for record_name in (
+                "maximum_capacity_and_ram",
+                "sustained_physical_performance"):
+            with self.subTest(record=record_name):
+                evidence = current_evidence(
+                    report_raw, policy_raw, physical_raw, campaign_raw)
+                evidence["release_evidence"][record_name][
+                    "observed_at_utc"] = "2026-11-03T00:00:10Z"
+                result = evaluate(
+                    report=report, evidence=evidence, policy=policy,
+                    physical=json.loads(physical_raw), campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    f"{record_name}: observation predates sealed campaign"
+                    in blocker for blocker in result["code_blockers"]))
+                if record_name == "maximum_capacity_and_ram":
+                    self.assertEqual(
+                        result["METADATA_RAM_MEASUREMENT"]["status"],
+                        "NOT_MEASURED")
+                    self.assertEqual(
+                        result["FULL_CAPACITY_LOADED_CONSTRUCTION"],
+                        "NOT_MEASURED")
 
     def test_gc_binding_handles_many_ordered_activity_windows(self):
         # Rootless stress of the declared evidence bounds, with no loaded
