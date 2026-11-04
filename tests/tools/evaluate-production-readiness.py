@@ -199,7 +199,9 @@ def parse_env_strict(raw: Any) -> dict[str, str]:
             raise EvidenceError(
                 f"cold-boot evidence line {line_number} has invalid key")
         if key in result:
-            raise EvidenceError(f"duplicate cold-boot evidence key: {key}")
+            raise EvidenceError(
+                f"duplicate cold-boot evidence key: {key[:80]!r}"
+                f"{' (truncated)' if len(key) > 80 else ''}")
         if any(ord(character) < 0x20 for character in value):
             raise EvidenceError(
                 f"cold-boot evidence line {line_number} has control characters")
