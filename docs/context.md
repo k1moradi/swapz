@@ -1,4 +1,4 @@
-# Linux memory, swap, zswap and Swapz: technical context
+# Linux memory, swap, zswap and swapz: technical context
 
 This is the durable **technical reference** for agents changing swapz behavior
 around memory identity, Linux reclaim, swap I/O, folios, zswap and extent
@@ -10,11 +10,15 @@ belong in [ROADMAP.md](ROADMAP.md); normative constraints belong in
 [testing_standards.md](testing_standards.md). The compact current owner scope,
 target identity, autonomy rules, documentation budget and production-ready
 definition live in [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and take precedence over
-historical host-specific authorization text.
+historical host-specific authorization text. Historical qualification,
+rejected pilots and deferred research are catalogued in the
+[handoff index](handoff/README.md), not maintained as active instructions here.
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
-
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Current contracts (linked rather than restated):** [VISION.md](VISION.md)
+defines immutable product/module/SWZ names and the sole official qualification
+interface `make test`; `make fast_test` remains development-only and never
+qualifies a source. [AGENTS.md](../AGENTS.md) and
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md) govern ownership and execution safety.
 
 **Device safety:** generic loaded qualification continues to use newly created,
 positively identified RAM-backed `null_blk`. The current dedicated physical
@@ -26,12 +30,12 @@ does not broaden that device scope; see [VISION.md](VISION.md).
 
 The upstream functions cited here were inspected on Linux master at
 `c339f4010dea8b0d754f84ace70cd1b089878ef8` and on tag `v7.0`; where the two
-differ, the text names the version. The development host runs Ubuntu
+differ, the text names the version. At that source inspection, the development host reported Ubuntu
 `7.0.0-42-generic` (7.0.14 base), so the `v7.0` behavior is the nearest
 upstream model for it; distribution backports can still differ. Kernel
 internals are not a stable ABI; recheck the target kernel source before
-implementing a coupled feature. The SWZ information describes the current
-swapz implementation.
+implementing a coupled feature. The SWZ-specific descriptions record the implementation at that inspection;
+recheck current source and the normative standards before changing code.
 
 ## 1. Storage abstractions: files, RAM objects, pages and extents
 

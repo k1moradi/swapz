@@ -8,6 +8,13 @@ use those and [current decisions](../ROADMAP.md) before changing source.
 Commands and the final deletion instruction below are historical, not a
 request to delete this retained evidence.
 
+**Completed parser instruction:** The later
+[`parse_storage_envelope_sessions(output)`](../../tests/tools/run-tests.py)
+already calls `host_cpu_record(obj)`; the instruction below that it "drops
+`host_cpu`" describes the previous implementation, not a current defect.
+Private helper arguments, counter names and source paths in this brief are
+historical; check current sources and the linked standards before acting.
+
 Implementer: external agent. Reviewer: lead developer. Owner runs loaded tests.
 
 ## Why

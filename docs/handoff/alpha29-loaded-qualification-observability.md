@@ -8,6 +8,16 @@ preflight and rootless test contracts are normative in
 interface and current evidence policy are documented in
 [README.md](../README.md) and [AGENT_CONTEXT.md](../AGENT_CONTEXT.md).
 
+**Qualification-failure distinction:** The historical "no output after
+stage 4" event was a visibility/watchdog problem, not evidence of stage-5
+PASS or a kernel-data-integrity regression. The later shell status-2 exits
+were preflight/harness failures before a valid safety verdict; they did not
+qualify a source. Even when every recorded stage passes, a current run can
+fail post-stage benchmark-verdict, write-saturation or artifact gates. Use
+[first-record triage](../README.md#diagnose-the-first-record) to find the
+earliest failed phase and original error before a safe, read-only ownership
+inspection; do not infer permission to retry loaded tests from these records.
+
 ### Alpha.29 loaded qualification observability repair
 
 After alpha.29 portable qualification, an owner `make test` was observed with
