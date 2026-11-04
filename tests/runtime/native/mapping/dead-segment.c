@@ -35,6 +35,108 @@ static int recycle_hook_calls;
 static swapz_u32 recycle_hook_last_segment;
 static int recycle_hook_error;
 
+/*
+ * Compare the complete logical/physical ownership arrays, GC sidecars and
+ * recycle-hook effects. Diagnostic probe counts and the intentionally consumed
+ * in-flight extent are not ownership and may change on failed operations.
+ */
+struct authority_integrity_snapshot {
+	struct swapz_map maps[32];
+	swapz_u16 live[1280];
+	swapz_u8 classes[1280];
+	swapz_u8 roles[5];
+	swapz_u32 mapped_pages[5];
+	swapz_u32 program_counts[5];
+	swapz_u32 gc_live_bytes[5];
+	swapz_u32 gc_io_cost[5];
+	swapz_u16 gc_min_live_blocks[5];
+	swapz_u32 first_page[5];
+	swapz_u32 last_page[5];
+	swapz_u32 prev_page[32];
+	swapz_u32 next_page[32];
+	swapz_u32 next_block;
+	swapz_u32 open_segment;
+	swapz_u32 next_segment_probe;
+	swapz_u32 recycled_dead_segments;
+	swapz_u32 gc_destination;
+	swapz_u32 gc_forbidden_open;
+	swapz_u32 gc_forbidden_victim;
+	swapz_u8 gc_allocation;
+	int recycle_hook_calls;
+	swapz_u32 recycle_hook_last_segment;
+};
+
+static struct authority_integrity_snapshot integrity_before;
+
+static void snapshot_integrity(void)
+{
+	memcpy(integrity_before.maps, maps, sizeof(maps));
+	memcpy(integrity_before.live, live, sizeof(live));
+	memcpy(integrity_before.classes, classes, sizeof(classes));
+	memcpy(integrity_before.roles, roles, sizeof(roles));
+	memcpy(integrity_before.mapped_pages, mapped_pages,
+	       sizeof(mapped_pages));
+	memcpy(integrity_before.program_counts, program_counts,
+	       sizeof(program_counts));
+	memcpy(integrity_before.gc_live_bytes, gc_live_bytes,
+	       sizeof(gc_live_bytes));
+	memcpy(integrity_before.gc_io_cost, gc_io_cost, sizeof(gc_io_cost));
+	memcpy(integrity_before.gc_min_live_blocks, gc_min_live_blocks,
+	       sizeof(gc_min_live_blocks));
+	memcpy(integrity_before.first_page, first_page, sizeof(first_page));
+	memcpy(integrity_before.last_page, last_page, sizeof(last_page));
+	memcpy(integrity_before.prev_page, prev_page, sizeof(prev_page));
+	memcpy(integrity_before.next_page, next_page, sizeof(next_page));
+	integrity_before.next_block = a.next_block;
+	integrity_before.open_segment = a.open_segment;
+	integrity_before.next_segment_probe = a.next_segment_probe;
+	integrity_before.recycled_dead_segments = a.recycled_dead_segments;
+	integrity_before.gc_destination = a.gc_destination;
+	integrity_before.gc_forbidden_open = a.gc_forbidden_open;
+	integrity_before.gc_forbidden_victim = a.gc_forbidden_victim;
+	integrity_before.gc_allocation = a.gc_allocation;
+	integrity_before.recycle_hook_calls = recycle_hook_calls;
+	integrity_before.recycle_hook_last_segment = recycle_hook_last_segment;
+}
+
+static int integrity_unchanged(void)
+{
+	return !memcmp(integrity_before.maps, maps, sizeof(maps)) &&
+	       !memcmp(integrity_before.live, live, sizeof(live)) &&
+	       !memcmp(integrity_before.classes, classes, sizeof(classes)) &&
+	       !memcmp(integrity_before.roles, roles, sizeof(roles)) &&
+	       !memcmp(integrity_before.mapped_pages, mapped_pages,
+		       sizeof(mapped_pages)) &&
+	       !memcmp(integrity_before.program_counts, program_counts,
+		       sizeof(program_counts)) &&
+	       !memcmp(integrity_before.gc_live_bytes, gc_live_bytes,
+		       sizeof(gc_live_bytes)) &&
+	       !memcmp(integrity_before.gc_io_cost, gc_io_cost,
+		       sizeof(gc_io_cost)) &&
+	       !memcmp(integrity_before.gc_min_live_blocks, gc_min_live_blocks,
+		       sizeof(gc_min_live_blocks)) &&
+	       !memcmp(integrity_before.first_page, first_page,
+		       sizeof(first_page)) &&
+	       !memcmp(integrity_before.last_page, last_page,
+		       sizeof(last_page)) &&
+	       !memcmp(integrity_before.prev_page, prev_page,
+		       sizeof(prev_page)) &&
+	       !memcmp(integrity_before.next_page, next_page,
+		       sizeof(next_page)) &&
+	       integrity_before.next_block == a.next_block &&
+	       integrity_before.open_segment == a.open_segment &&
+	       integrity_before.next_segment_probe == a.next_segment_probe &&
+	       integrity_before.recycled_dead_segments ==
+		       a.recycled_dead_segments &&
+	       integrity_before.gc_destination == a.gc_destination &&
+	       integrity_before.gc_forbidden_open == a.gc_forbidden_open &&
+	       integrity_before.gc_forbidden_victim == a.gc_forbidden_victim &&
+	       integrity_before.gc_allocation == a.gc_allocation &&
+	       integrity_before.recycle_hook_calls == recycle_hook_calls &&
+	       integrity_before.recycle_hook_last_segment ==
+		       recycle_hook_last_segment;
+}
+
 static int recycle_hook(void *opaque, swapz_u32 segment)
 {
 	struct swapz_authority *authority = opaque;
@@ -338,6 +440,40 @@ static int test_indexed_false_empty_victim_cannot_exchange_gc_roles(void)
 }
 
 
+/*
+ * Claim history, extent classes, live counts, map counts, reverse links and
+ * GC scores can ALL falsely report virgin. They cannot erase the primary
+ * map's two live owners or permit a physical reuse/trim side effect.
+ */
+static int test_forged_virgin_witness_still_requires_full_map_proof(void)
+{
+	struct swapz_tx tx;
+	swapz_u32 logical = 3U;
+	int index;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(write_page(0) == 0);
+	for (index = 1; index < (int)SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(write_page(1) == 0);
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	forge_false_empty_indexed_segment();
+	classes[0] = 0U;
+	classes[SWAPZ_SEGMENT_BLOCKS - 1U] = 0U;
+	program_counts[0] = 0U;
+	a.next_segment_probe = 0U;
+	snapshot_integrity();
+
+	/* stage is before any lower media write: it MUST reject, not reserve. */
+	CHECK(swapz_stage(&a, &logical, 1U, 1U, &tx) == -EUCLEAN);
+	CHECK(integrity_unchanged());
+	CHECK(a.in_flight == 0 && !maps[logical].valid);
+	CHECK(a.alloc_probe_full_scans > 0U);
+	/* A repeated attempt cannot gradually make a forged claim acceptable. */
+	CHECK(swapz_stage(&a, &logical, 1U, 1U, &tx) == -EUCLEAN);
+	CHECK(integrity_unchanged());
+	return 0;
+}
+
 static void forge_segment0_single_mapping_view(swapz_u32 survivor,
 					       swapz_u32 stale)
 {
@@ -383,7 +519,9 @@ static int test_false_final_mapping_discard_is_rejected(void)
 	 * a still-mapped extent.
 	 */
 	forge_segment0_single_mapping_view(0U, 1U);
+	snapshot_integrity();
 	CHECK(swapz_discard_page(&a, 0U) == -EUCLEAN);
+	CHECK(integrity_unchanged());
 	CHECK(maps[0].valid && maps[0].generation == generation &&
 	      maps[0].start_block == survivor_start);
 	CHECK(maps[1].valid && maps[1].start_block == stale_start);
@@ -391,6 +529,60 @@ static int test_false_final_mapping_discard_is_rejected(void)
 	CHECK(live[survivor_start] == 1U && classes[survivor_start] == 1U);
 	CHECK(!live[stale_start] && !classes[stale_start]);
 	CHECK(first_page[0] == 0U && last_page[0] == 0U);
+	return 0;
+}
+
+/*
+ * An overwrite relocates its old physical mapping, unlike logical DISCARD.
+ * When a forged mapped count says the source has one survivor but a second
+ * valid map remains, neither RAW nor compressed publication may zero the
+ * cached count and authorize the caller's closed-segment early-TRIM.
+ */
+static int test_false_final_mapping_overwrite_is_rejected(void)
+{
+	struct swapz_builder builder;
+	struct swapz_tx tx;
+	swapz_u32 logical = 0U;
+	int encoding, retry, index, rc;
+
+	for (encoding = 0; encoding < 2; ++encoding) {
+		CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+		CHECK(write_page(0) == 0);
+		for (index = 1; index < (int)SWAPZ_SEGMENT_BLOCKS; ++index)
+			CHECK(write_page(1) == 0);
+		CHECK(write_page(2) == 0);
+		CHECK(a.open_segment == 1U && mapped_pages[0] == 2U);
+		forge_segment0_single_mapping_view(0U, 1U);
+
+		for (retry = 0; retry < 2; ++retry) {
+			CHECK(swapz_stage(&a, &logical, 1U, 1U, &tx) == 0);
+			if (encoding == 0) {
+				memset(bytes, 0x5a, sizeof(bytes));
+			} else {
+				memset(data, 0x5a, sizeof(data));
+				CHECK(swapz_begin(&builder, bytes,
+						  SWAPZ_BLOCK_BYTES, tx.sequence) == 0);
+				CHECK(swapz_append(&builder, logical,
+						   tx.records[0].generation,
+						   data, sizeof(data)) == 0);
+				CHECK(swapz_seal(&builder) == 0);
+			}
+			snapshot_integrity();
+			if (encoding == 0)
+				rc = swapz_finish_raw(&a, &tx, bytes, 1U, 0);
+			else
+				rc = swapz_finish(&a, &tx, bytes,
+						 SWAPZ_BLOCK_BYTES, 1U, 0);
+			CHECK(rc == -EUCLEAN);
+			CHECK(integrity_unchanged());
+			CHECK(!a.in_flight);
+			CHECK(maps[0].valid && maps[0].start_block == 0U &&
+			      maps[0].generation == 1U);
+			CHECK(maps[1].valid &&
+			      maps[1].start_block == SWAPZ_SEGMENT_BLOCKS - 1U);
+			CHECK(mapped_pages[0] == 1U && !recycle_hook_calls);
+		}
+	}
 	return 0;
 }
 
@@ -580,7 +772,9 @@ int main(void)
 	CHECK(test_dead_recycle_rejects_stale_gc_score() == 0); passed++;
 	CHECK(test_indexed_false_empty_reclaim_preserves_live_extents() == 0); passed++;
 	CHECK(test_indexed_false_empty_victim_cannot_exchange_gc_roles() == 0); passed++;
+	CHECK(test_forged_virgin_witness_still_requires_full_map_proof() == 0); passed++;
 	CHECK(test_false_final_mapping_discard_is_rejected() == 0); passed++;
+	CHECK(test_false_final_mapping_overwrite_is_rejected() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
 	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
 	CHECK(test_circular_allocator_fairness_probes_sequentially() == 0); passed++;

@@ -20,6 +20,17 @@ static swapz_u16 live[1024];
 static swapz_u8 classes[1024];
 static swapz_u8 raw_page[SWAPZ_BLOCK_BYTES];
 
+static int unexpected_recycle_calls;
+
+static int unexpected_recycle(void *opaque, swapz_u32 segment)
+{
+	int *calls = opaque;
+
+	(void)segment;
+	++*calls;
+	return -EIO;
+}
+
 static int initialize_gc(void)
 {
 	if (swapz_authority_init(&a, maps, live, classes, 32, 1024))
@@ -87,6 +98,56 @@ static int test_fail_closed_when_only_forbidden_segments_are_free(void)
 	return 0;
 }
 
+/*
+ * Unindexed GC still scans the primary logical map when both the block
+ * liveness and extent-class caches falsely report that all writable targets
+ * are blank. Repeated reserve exhaustion must neither reclaim a live map nor
+ * invoke a physical recycle callback.
+ */
+static int test_forged_empty_reserves_fail_without_recycling(void)
+{
+	struct swapz_tx tx;
+	struct swapz_map original_maps[32];
+	swapz_u16 original_live[1024];
+	swapz_u8 original_classes[1024];
+	swapz_u32 page;
+	unsigned int index, attempt;
+
+	CHECK(initialize_gc() == 0);
+	for (page = 0; page < 2U; ++page) {
+		for (index = 0; index < SWAPZ_SEGMENT_BLOCKS; ++index) {
+			CHECK(swapz_stage(&a, &page, 1, 1, &tx) == 0);
+			CHECK(swapz_finish_raw(&a, &tx, raw_page, 1, 0) == 0);
+		}
+	}
+	CHECK(maps[0].valid && maps[1].valid &&
+	      maps[0].start_block == 3U * SWAPZ_SEGMENT_BLOCKS - 1U &&
+	      maps[1].start_block == 4U * SWAPZ_SEGMENT_BLOCKS - 1U);
+	a.dead_segment_recycle = unexpected_recycle;
+	a.dead_segment_recycle_opaque = &unexpected_recycle_calls;
+	unexpected_recycle_calls = 0;
+	memset(live, 0, sizeof(live));
+	memset(classes, 0, sizeof(classes));
+	memcpy(original_maps, maps, sizeof(maps));
+	memcpy(original_live, live, sizeof(live));
+	memcpy(original_classes, classes, sizeof(classes));
+
+	page = 2U;
+	for (attempt = 0; attempt < 2U; ++attempt) {
+		CHECK(swapz_stage(&a, &page, 1, 1, &tx) == -ENOSPC);
+		CHECK(!memcmp(original_maps, maps, sizeof(maps)));
+		CHECK(!memcmp(original_live, live, sizeof(live)));
+		CHECK(!memcmp(original_classes, classes, sizeof(classes)));
+		CHECK(a.next_block == 4U * SWAPZ_SEGMENT_BLOCKS &&
+		      a.open_segment == 3U && a.in_flight == 0);
+		CHECK(a.gc_allocation && a.gc_forbidden_open == 0U &&
+		      a.gc_forbidden_victim == 1U);
+		CHECK(unexpected_recycle_calls == 0 &&
+		      a.recycled_dead_segments == 0U);
+	}
+	return 0;
+}
+
 static int test_idle_mode_allows_dead_segment_without_gc_guards(void)
 {
 	struct swapz_tx tx;
@@ -109,6 +170,8 @@ int main(void)
 	CHECK(test_no_allocation_into_paused_foreground_or_victim() == 0);
 	passed++;
 	CHECK(test_fail_closed_when_only_forbidden_segments_are_free() == 0);
+	passed++;
+	CHECK(test_forged_empty_reserves_fail_without_recycling() == 0);
 	passed++;
 	CHECK(test_idle_mode_allows_dead_segment_without_gc_guards() == 0);
 	passed++;

@@ -171,6 +171,8 @@ struct swapz_authority {
 	 * allocator telemetry, not physical NAND wear. Because claim increments
 	 * before any extent can be staged and the count never decreases, zero is
 	 * also the production allocator's "never previously claimed" witness.
+	 * This is only a cached hint: even a false-zero witness cannot bypass
+	 * the authoritative full logical-map scan before segment reuse.
 	 */
 	swapz_u32 *segment_program_counts;
 	/* Optional exact logical-page membership lists per physical segment. */

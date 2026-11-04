@@ -576,21 +576,21 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
  * 1MiB segments. A live object is NEVER copied or overwritten here.
  *
  * The primary logical map is the final ownership authority. Exact segment
- * sidecars reject obvious live candidates cheaply, while a previously claimed
- * zero-sidecar segment receives an independent full-map proof before reuse.
- * A genuinely virgin segment may skip that proof because segment_program_counts
- * is incremented before any extent can be staged and never returns to zero.
+ * sidecars reject obvious live candidates cheaply, while every zero-sidecar
+ * segment receives an independent full-map proof before reuse. A false-zero
+ * program count or lost extent-class byte must never waive that proof.
  */
 static int swapz_verify_segment_authoritative_maps(
 	const struct swapz_authority *a, swapz_u32 segment,
-	swapz_u32 expected_logical)
+	swapz_u32 expected_logical, swapz_u32 expected_count)
 {
 	const swapz_u32 none = ~(swapz_u32)0;
-	swapz_u32 logical, start_block, end_block;
-	int found_expected = 0;
+	swapz_u32 logical, start_block, end_block, found_count = 0;
 
 	if (!a || !a->maps || segment >= a->segment_count ||
-	    (expected_logical != none && expected_logical >= a->logical_pages))
+	    expected_count > a->logical_pages ||
+	    (expected_logical != none &&
+	     (expected_logical >= a->logical_pages || expected_count != 1U)))
 		return -EINVAL;
 	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
 	end_block = start_block + SWAPZ_SEGMENT_BLOCKS;
@@ -610,14 +610,12 @@ static int swapz_verify_segment_authoritative_maps(
 		map_end_block = map->start_block + map->extent_blocks;
 		if (map->start_block >= end_block || map_end_block <= start_block)
 			continue;
-		if (expected_logical == none || logical != expected_logical ||
-		    found_expected)
+		if ((expected_logical != none && logical != expected_logical) ||
+		    found_count >= expected_count)
 			return -EUCLEAN;
-		found_expected = 1;
+		found_count++;
 	}
-	if (expected_logical != none && !found_expected)
-		return -EUCLEAN;
-	return 0;
+	return found_count == expected_count ? 0 : -EUCLEAN;
 }
 
 static int swapz_claim_dead_segment(struct swapz_authority *a,
@@ -644,14 +642,12 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 		if (live_total)
 			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
 		/*
-		 * Only a segment with both zero extent history and a never-claimed
-		 * program count is provably virgin. Every other indexed zero
-		 * candidate must be checked against the authoritative logical map,
-		 * including after lost/corrupt extent-class bytes.
+		 * Program counts and extent classes are cached witnesses, not map
+		 * authority. Even a seemingly virgin segment needs the primary-map
+		 * proof: both cached witnesses may be falsely zero after corruption.
 		 */
-		if ((!a->segment_program_counts || reclaim_required) &&
-		    swapz_verify_segment_authoritative_maps(
-			    a, segment, ~(swapz_u32)0))
+		if (swapz_verify_segment_authoritative_maps(
+			    a, segment, ~(swapz_u32)0, 0U))
 			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
 	} else {
 		if (live_total)
@@ -923,7 +919,7 @@ static int swapz_verify_recovery_victim_dead(
 	if (!a || !a->live_records || segment >= a->segment_count)
 		return -EINVAL;
 	error = swapz_verify_segment_authoritative_maps(
-		a, segment, ~(swapz_u32)0);
+		a, segment, ~(swapz_u32)0, 0U);
 	if (error)
 		return error;
 	if (a->segment_mapped_pages && a->segment_mapped_pages[segment])
@@ -1628,6 +1624,19 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = -EUCLEAN;
 		goto fail;
 	}
+	/*
+	 * Replacing a closed segment's apparent final map can expose a physical
+	 * early-TRIM to the caller. A false-one mapped count must not make an
+	 * unmentioned surviving logical map disappear from physical storage.
+	 */
+	if (a->segment_mapped_pages && old->valid &&
+	    old_segment != new_segment &&
+	    a->segment_mapped_pages[old_segment] == 1U &&
+	    swapz_verify_segment_authoritative_maps(
+		    a, old_segment, page, 1U)) {
+		error = -EUCLEAN;
+		goto fail;
+	}
 	error = swapz_gc_account_transition_commit(a, old, &new_map);
 	if (error)
 		goto fail;
@@ -1712,7 +1721,7 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 		if (old_segment != a->open_segment &&
 		    a->segment_mapped_pages[old_segment] == 1U &&
 		    swapz_verify_segment_authoritative_maps(
-			    a, old_segment, logical_page))
+			    a, old_segment, logical_page, 1U))
 			return -EUCLEAN;
 	}
 	if (swapz_page_list_validate_entry(a, logical_page))
@@ -2018,6 +2027,31 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	    swapz_page_list_validate_segment(a, new_segment)) {
 		error = -EUCLEAN;
 		goto fail;
+	}
+	/*
+	 * Publishing a batch can zero several cached source-segment counts.
+	 * Before any such count becomes visible to early-TRIM or GC, independently
+	 * prove that the batch replaces every map still in each source segment.
+	 * The phase-1 delta already contains distinct validated source mappings.
+	 */
+	if (a->segment_mapped_pages) {
+		swapz_u8 delta_index;
+
+		for (delta_index = 0; delta_index < segment_delta_count;
+		     ++delta_index) {
+			const struct swapz_finish_segment_delta *delta =
+				&a->finish_segment_deltas[delta_index];
+
+			if (delta->segment != new_segment &&
+			    a->segment_mapped_pages[delta->segment] ==
+				    delta->mapped_pages &&
+			    swapz_verify_segment_authoritative_maps(
+				    a, delta->segment, ~(swapz_u32)0,
+				    delta->mapped_pages)) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+		}
 	}
 	if (a->segment_mapped_pages || gc_enabled) {
 		const struct swapz_finish_segment_delta *new_seg_delta = NULL;
