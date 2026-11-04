@@ -1121,6 +1121,34 @@ static void test_swap_adversarial_inventory(void)
 		assert(fclose(stream) == 0);
 	}
 
+	/* Later malformed records take precedence over active-row ambiguity. */
+	{
+		static const char invalid_after_active[] =
+			"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+			"/tmp/foreign file 1 0 -2\n"
+			"/tmp/foreign file 1 0\n";
+
+		stream = test_inventory_binary_stream(invalid_after_active,
+						       sizeof(invalid_after_active) - 1U);
+		errno = 0;
+		assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+		assert(errno == EPROTO);
+		assert(fclose(stream) == 0);
+	}
+	/* The row count remains explicitly bounded without allocating identities. */
+	{
+		stream = tmpfile();
+		assert(stream);
+		assert(fputs(header, stream) >= 0);
+		for (size_t row = 0; row <= SWAPZ_FORMAT_PROC_MAX_ROWS; ++row)
+			assert(fputs("/tmp/foreign file 1 0 -2\n", stream) >= 0);
+		assert(fseek(stream, 0L, SEEK_SET) == 0);
+		errno = 0;
+		assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+		assert(errno == EOVERFLOW);
+		assert(fclose(stream) == 0);
+	}
+
 	/*
 	 * An unrelated active swapfile name is emitted escaped by the kernel.
 	 * Decode the exact grammar, but local stat cannot grant clearance.
