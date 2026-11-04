@@ -4928,7 +4928,12 @@ calls disabled until the whole coordinator is qualified. Rootless production-C
 tests must exercise the manifest-derived maximum table, exact stable
 `swapz-primary` name, run-bound UUID, ioctl buffer alignment, one-target bounds, exact `swapz` parameters,
 and rejection of altered lengths, target counts, versions, UUIDs, padding and
-unaligned payloads. The rootless build must prove that mapper create/remove
+unaligned payloads. The status-table parser must distinguish the
+`DM_TABLE_LOAD` final-target `next=0` representation from the
+`DM_TABLE_STATUS` aligned stride to the next target slot, and accept only the
+exact one-target stride with bounded zero padding. Rootless direct-C coverage
+must model the status response returned for an inactive loaded table, including
+its nonzero final-target stride. The rootless build must prove that mapper create/remove
 return `ENODEV` without setting any side-effect result. A strict production
 userspace compile must also compile the guarded ioctl implementation. These
 checks do not emulate kernel Device Mapper behavior or authorize a mapper on

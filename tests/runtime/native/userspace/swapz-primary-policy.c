@@ -1352,6 +1352,9 @@ static void test_primary_dm_table(void)
 	char mapper_uuid[64];
 	char table[128];
 	char expected_table[128];
+	size_t status_record_bytes;
+	size_t status_next;
+	size_t status_bytes;
 	int table_length;
 
 	memcpy(manifest.run_id, run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U);
@@ -1403,44 +1406,66 @@ static void test_primary_dm_table(void)
 	       target->length == logical_sectors && target->next == 0U);
 	assert(!strcmp(target->target_type, "swapz"));
 	assert(!strcmp((char *)(target + 1), "8:4 0 64 0 2 0 1 0 0"));
+	status_record_bytes = sizeof(*target) +
+		strlen((char *)(target + 1)) + 1U;
+	status_next = swapz_primary_dm_align8(status_record_bytes);
+	status_bytes = io->data_start + status_record_bytes;
+	assert(status_next > status_record_bytes &&
+	       status_next <= UINT32_MAX && status_bytes < used_bytes);
+	/* DM_TABLE_STATUS uses the aligned next-record stride, unlike DM_TABLE_LOAD. */
+	target->next = (uint32_t)status_next;
+	io->data_size = (uint32_t)status_bytes;
+	assert(swapz_primary_dm_table_status_matches(
+		buffer, status_bytes, &manifest));
+	/* Some kernels include the zero alignment byte in data_size. */
+	io->data_size = (uint32_t)used_bytes;
 	assert(swapz_primary_dm_table_status_matches(
 		buffer, used_bytes, &manifest));
+	io->data_size = (uint32_t)status_bytes;
 	--target->length;
 	assert(!swapz_primary_dm_table_status_matches(
-		buffer, used_bytes, &manifest));
+		buffer, status_bytes, &manifest));
 	++target->length;
 	((char *)(target + 1))[0] = '9';
 	assert(!swapz_primary_dm_table_status_matches(
-		buffer, used_bytes, &manifest));
+		buffer, status_bytes, &manifest));
 	((char *)(target + 1))[0] = '8';
 	io->target_count = 2U;
 	assert(!swapz_primary_dm_table_status_matches(
-		buffer, used_bytes, &manifest));
+		buffer, status_bytes, &manifest));
 	io->target_count = 1U;
 	io->data_size = (uint32_t)(used_bytes + 1U);
 	assert(!swapz_primary_dm_table_status_matches(
-		buffer, used_bytes, &manifest));
-	io->data_size = (uint32_t)used_bytes;
+		buffer, used_bytes + 1U, &manifest));
+	io->data_size = (uint32_t)status_bytes;
 	io->version[0] = DM_VERSION_MAJOR + 1U;
 	assert(!swapz_primary_dm_table_status_matches(
-		buffer, used_bytes, &manifest));
+		buffer, status_bytes, &manifest));
 	io->version[0] = DM_VERSION_MAJOR;
 	io->data_start++;
 	assert(!swapz_primary_dm_table_status_matches(
-		buffer, used_bytes, &manifest));
+		buffer, status_bytes, &manifest));
 	io->data_start = sizeof(*io);
+	target->next = 0U;
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, status_bytes, &manifest));
 	target->next = 8U;
 	assert(!swapz_primary_dm_table_status_matches(
-		buffer, used_bytes, &manifest));
-	target->next = 0U;
+		buffer, status_bytes, &manifest));
+	target->next = (uint32_t)(status_next + 8U);
+	assert(!swapz_primary_dm_table_status_matches(
+		buffer, status_bytes, &manifest));
+	target->next = (uint32_t)status_next;
 	io->uuid[0] = 'X';
 	assert(!swapz_primary_dm_table_status_matches(
-		buffer, used_bytes, &manifest));
+		buffer, status_bytes, &manifest));
 	io->uuid[0] = 'S';
+	io->data_size = (uint32_t)used_bytes;
 	buffer[used_bytes - 1U] = 1U;
 	assert(!swapz_primary_dm_table_status_matches(
 		buffer, used_bytes, &manifest));
 	buffer[used_bytes - 1U] = 0U;
+	io->data_size = (uint32_t)status_bytes;
 	assert(swapz_primary_dm_table_load_buffer(
 		&manifest, buffer + 1U, sizeof(buffer) - 1U, &used_bytes) < 0);
 	assert(errno == EINVAL);

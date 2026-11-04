@@ -1610,6 +1610,8 @@ static int swapz_primary_dm_table_status_matches(
 	int expected_parameters_length;
 	size_t data_bytes;
 	size_t record_bytes;
+	size_t expected_record_bytes;
+	size_t expected_next;
 	size_t i;
 
 	if (!buffer ||
@@ -1628,6 +1630,13 @@ static int swapz_primary_dm_table_status_matches(
 		errno = EOVERFLOW;
 		return 0;
 	}
+	expected_record_bytes = sizeof(*target) +
+		(size_t)expected_parameters_length + 1U;
+	expected_next = swapz_primary_dm_align8(expected_record_bytes);
+	if (!expected_next || expected_next > UINT32_MAX) {
+		errno = EOVERFLOW;
+		return 0;
+	}
 	if (io->version[0] != DM_VERSION_MAJOR ||
 	    io->data_size < sizeof(*io) || io->data_size > buffer_bytes ||
 	    io->data_start != sizeof(*io) || io->data_start > io->data_size ||
@@ -1642,13 +1651,21 @@ static int swapz_primary_dm_table_status_matches(
 		return 0;
 	}
 	data_bytes = (size_t)io->data_size - io->data_start;
-	if (data_bytes < sizeof(*target)) {
+	if (data_bytes < expected_record_bytes ||
+	    data_bytes > expected_next) {
 		errno = EPROTO;
 		return 0;
 	}
 	target = (struct dm_target_spec *)((unsigned char *)buffer +
 						 io->data_start);
-	if (target->next != 0U) {
+	/*
+	 * DM_TABLE_LOAD uses next=0 for this final target, but DM_TABLE_STATUS
+	 * reports the aligned stride to the following target slot even when the
+	 * table has only one target. Validate that exact stride; requiring the
+	 * load representation here makes recovery reject a legitimate inactive
+	 * table before it can clear and remove the transaction-owned mapper.
+	 */
+	if ((size_t)target->next != expected_next) {
 		errno = EPROTO;
 		return 0;
 	}
