@@ -24,6 +24,9 @@ STAGES = (
     "Kernel warnings W=2",
     "Owned RAM smoke + mixed/QD pilot",
 )
+# Upgrade publication can exceed the old 8-second test deadline on this host.
+# Keep crash-injection waits bounded while allowing durable filesystem work to finish.
+DURABLE_CHECKPOINT_TIMEOUT_SECONDS = 30
 
 
 def sha256(path):
@@ -1977,7 +1980,8 @@ exec "{flock_binary}" "$@"
             cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
         try:
-            deadline = time.monotonic() + 8
+            deadline = (time.monotonic() +
+                        DURABLE_CHECKPOINT_TIMEOUT_SECONDS)
             while time.monotonic() < deadline and not ready.exists():
                 if process.poll() is not None:
                     stdout, stderr = process.communicate(timeout=8)
@@ -2008,7 +2012,8 @@ exec "{flock_binary}" "$@"
             cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
         try:
-            deadline = time.monotonic() + 8
+            deadline = (time.monotonic() +
+                        DURABLE_CHECKPOINT_TIMEOUT_SECONDS)
             while time.monotonic() < deadline and not ready.exists():
                 if process.poll() is not None:
                     stdout, stderr = process.communicate(timeout=8)
