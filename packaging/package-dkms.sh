@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # swapz package only: never load modules, create DM devices or activate swap.
+# To replay a retained journal under the package lock: package-dkms.sh recover /usr/local
+# Recovery never auto-runs as part of install/uninstall.
 set -Eeuo pipefail
 umask 022
 
@@ -23,12 +25,16 @@ blocked() {
     staging_abort 2 failure
   elif (( transaction_active == 3 )); then
     uninstall_rollback 2 failure
+  elif (( transaction_active == 4 )); then
+    # A retained journal may coexist with an activation-capable CLI.
+    cleanup_activation_files || true
+    printf "BLOCKED: recovery record retained at %s\n" "$transaction_dir" >&2
   fi
   exit 2
 }
 
-[[ $# == 2 && ( $1 == install || $1 == uninstall ) ]] ||
-  blocked "usage install|uninstall ABSOLUTE_PREFIX"
+[[ $# == 2 && ( $1 == install || $1 == uninstall || $1 == recover ) ]] ||
+  blocked "usage install|uninstall|recover ABSOLUTE_PREFIX"
 action="$1"
 prefix="$2"
 [[ "$prefix" == /* && "$prefix" != / && "$prefix" != */ &&
@@ -265,6 +271,51 @@ dkms_status_exact_installed() {
   [[ "$architecture" =~ ^[A-Za-z0-9_+.-]+$ ]]
 }
 
+# --all must never erase a registration for another installed kernel.
+# A -k status query alone hides those registrations.
+dkms_status_single_kernel_scope() {
+  local report="$1" record architecture
+  local -a records=()
+  [[ -n "$report" ]] || return 0
+  mapfile -t records <<< "$report"
+  (( ${#records[@]} == 1 )) || return 1
+  record="${records[0]}"
+  case "$record" in
+    "swapz/$version: added"|"swapz, $version: added") return 0 ;;
+    "swapz/$version, $kernel_release, "*)
+      architecture="${record#"swapz/$version, $kernel_release, "}" ;;
+    "swapz, $version, $kernel_release, "*)
+      architecture="${record#"swapz, $version, $kernel_release, "}" ;;
+    *) return 1 ;;
+  esac
+  [[ "$architecture" =~ ^[A-Za-z0-9_+.-]+:\ (installed|built)$ ]]
+}
+
+# Compressed module variants for nonrunning kernels cannot be silently lost.
+other_kernel_module_candidates_absent() {
+  local kernel_directory candidate suffix
+  for kernel_directory in "$modules_root"/*; do
+    [[ -d "$kernel_directory" || -L "$kernel_directory" ]] || continue
+    [[ "$kernel_directory" != "$modules_root/$kernel_release" ]] || continue
+    [[ ! -L "$kernel_directory" && ! -L "$kernel_directory/updates" &&
+       ! -L "$kernel_directory/updates/dkms" ]] || return 1
+    for suffix in "" .xz .zst .gz; do
+      candidate="$kernel_directory/updates/dkms/dm-swapz.ko$suffix"
+      [[ ! -e "$candidate" && ! -L "$candidate" ]] || return 1
+    done
+  done
+}
+
+assert_single_kernel_dkms_scope() {
+  local all_kernel_status=""
+  query_dkms_status all_kernel_status -m swapz -v "$version" ||
+    blocked "cannot inspect DKMS registrations across installed kernels"
+  dkms_status_single_kernel_scope "$all_kernel_status" ||
+    blocked "other-kernel or ambiguous DKMS registrations; refusing --all"
+  other_kernel_module_candidates_absent ||
+    blocked "other-kernel DKMS module variants exist; refusing --all"
+}
+
 safe_input_file() {
   local path="$1" mode owner links
   [[ -f "$path" && ! -L "$path" ]] || return 1
@@ -382,6 +433,7 @@ verify_binary_manifest() {
 }
 
 verify_owned_legacy() {
+  temporary_activation_paths_absent || return 1
   verify_source_metadata || return 1
   [[ -d "$src" && ! -L "$src" && -f "$src/$marker" &&
      -f "$src/$source_manifest" && -f "$src/$binary_manifest" &&
@@ -524,7 +576,31 @@ verify_owned() {
   verify_binary_manifest
 }
 
+# An interrupted atomic CLI publish/restore may leave a separate executable.
+# It is not a valid installed package, even when the named CLI is absent.
+temporary_activation_paths_absent() {
+  local -a pending_cli=()
+  shopt -s nullglob
+  pending_cli=("$cli_dir"/.swapzctl.publish.* "$cli_dir"/.swapzctl.restore.*)
+  shopt -u nullglob
+  (( ${#pending_cli[@]} == 0 ))
+}
+
+cleanup_temporary_activation_files() {
+  local candidate
+  local -a pending_cli=()
+  shopt -s nullglob
+  pending_cli=("$cli_dir"/.swapzctl.publish.* "$cli_dir"/.swapzctl.restore.*)
+  shopt -u nullglob
+  for candidate in "${pending_cli[@]}"; do
+    installed_file_metadata "$candidate" 755 || return 1
+    rm -f -- "$candidate" || return 1
+  done
+  durable_package_paths "$cli_dir"
+}
+
 package_paths_present() {
+  temporary_activation_paths_absent || return 0
   local candidate
   if [[ -e "$src" || -L "$src" || -e "$cli" || -L "$cli" ||
         -e "$boot_verifier" || -L "$boot_verifier" ||
@@ -567,6 +643,7 @@ cleanup_package_files() {
 # A missing path records a deletion; no symlink or special file is followed.
 durable_package_paths() {
   python3 - "$@" <<'PY'
+import errno
 import os
 import stat
 import sys
@@ -608,6 +685,9 @@ for path in sorted(paths, key=lambda candidate: len(candidate.parts), reverse=Tr
         flags |= os.O_DIRECTORY
     descriptor = os.open(path, flags)
     try:
+        if (os.environ.get("SWAPZ_PACKAGE_RECOVERY_ACTIVE") == "1"
+                and os.environ.get("SWAPZ_TEST_RECOVERY_IO_FAILURE") == "fsync"):
+            raise OSError(errno.EIO, "injected recovery fsync failure")
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
@@ -646,6 +726,7 @@ persist_transaction_state() {
     return 1
   fi
   python3 - "$transaction_dir" "$phase" "$version" "$kernel_release" "$action" <<'PY' || return 1
+import errno
 import hashlib
 import json
 import os
@@ -709,6 +790,11 @@ allowed_phases = {
 }
 if phase not in allowed_phases:
     raise SystemExit("invalid package transaction phase")
+if os.environ.get("SWAPZ_PACKAGE_RECOVERY_ACTIVE") == "1":
+    failure = os.environ.get("SWAPZ_TEST_RECOVERY_IO_FAILURE", "")
+    if failure in ("enospc", "eio"):
+        error_number = errno.ENOSPC if failure == "enospc" else errno.EIO
+        raise OSError(error_number, "injected recovery journal write failure")
 final = transaction / "state.json"
 temporary = transaction / "state.json.tmp"
 # The prepared state is the first durable point after the complete rollback
@@ -793,6 +879,25 @@ if final.exists() or final.is_symlink():
 state_bytes = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
 if len(state_bytes) > 1024 * 1024:
     raise SystemExit("package journal exceeds size bound")
+# A failed rename can leave a fully written temp journal. Only retry when
+# its metadata and exact bytes match this independently verified transition.
+# Partial writes and symlinks stay quarantined, never rebaselined.
+if temporary.exists() or temporary.is_symlink():
+    metadata = temporary.lstat()
+    if (not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_gid != os.getegid()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+            or metadata.st_size != len(state_bytes)
+            or temporary.read_bytes() != state_bytes):
+        raise SystemExit("unsafe incomplete package journal temp")
+    temporary.unlink()
+    sync_descriptor = os.open(transaction, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(sync_descriptor)
+    finally:
+        os.close(sync_descriptor)
 temporary_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
                    os.O_NOFOLLOW | os.O_CLOEXEC)
 temporary_descriptor = os.open(temporary, temporary_flags, 0o600)
@@ -803,6 +908,9 @@ with os.fdopen(temporary_descriptor, "w", encoding="utf-8") as stream:
     stream.write(state_bytes.decode("utf-8"))
     stream.flush()
     os.fsync(stream.fileno())
+if (os.environ.get("SWAPZ_PACKAGE_RECOVERY_ACTIVE") == "1"
+        and os.environ.get("SWAPZ_TEST_RECOVERY_IO_FAILURE") == "rename"):
+    raise OSError(errno.EIO, "injected recovery journal rename failure")
 os.replace(temporary, final)
 descriptor = os.open(transaction, os.O_RDONLY | os.O_DIRECTORY)
 try:
@@ -820,6 +928,7 @@ PY
 
 verify_transaction_snapshot() {
   python3 - "$transaction_dir" "$action" "$version" "$kernel_release" <<'PY'
+import errno
 import hashlib
 import json
 import os
@@ -890,6 +999,19 @@ allowed_phases = {
     "systemd-reload-complete",
     "systemd-reload-pending",
 }
+if not isinstance(state, dict):
+    raise SystemExit("noncanonical package rollback journal type")
+# Reject nonsensical operation/phase pairings, even if rehashed as canonical.
+install_only = {
+    "adding-dkms", "building-dkms", "cli-published", "creating-source",
+    "dkms-added", "dkms-built", "dkms-installed", "installing-dkms",
+    "module-promoted", "package-files-published", "promoting-qualified-module",
+    "publishing-cli", "publishing-package-files", "source-created",
+}
+uninstall_only = {"installed-module-removed", "removing-installed-module"}
+if (operation == "uninstall" and state.get("phase") in install_only
+        or operation == "install" and state.get("phase") in uninstall_only):
+    raise SystemExit("journal phase does not belong to this package operation")
 if (not isinstance(state, dict) or set(state) != {
         "schema", "phase", "version", "kernel_release", "backup_files"}
         or state.get("phase") not in allowed_phases
@@ -907,6 +1029,7 @@ seen = set()
 for entry in entries:
     relative = entry.get("path") if isinstance(entry, dict) else None
     if (not isinstance(relative, str) or not relative or len(relative) > 4096
+            or relative != Path(relative).as_posix()
             or Path(relative).is_absolute()
             or any(part in (".", "..") for part in Path(relative).parts)
             or relative in seen):
@@ -933,10 +1056,164 @@ for path in backup.rglob("*"):
         raise SystemExit("substituted rollback entry")
     if path.is_file():
         actual.add(str(path.relative_to(backup)))
-    elif not path.is_dir():
+        if len(actual) > 1024:
+            raise SystemExit("rollback snapshot file count exceeds bound")
+    elif path.is_dir():
+        metadata = path.stat()
+        if (metadata.st_uid != os.geteuid()
+                or metadata.st_gid != os.getegid()
+                or stat.S_IMODE(metadata.st_mode) & 0o022):
+            raise SystemExit("unsafe rollback subdirectory metadata")
+    else:
         raise SystemExit("unexpected rollback entry type")
 if actual != seen:
     raise SystemExit("rollback file set changed")
+for path in transaction.rglob("*"):
+    if path.is_symlink():
+        raise SystemExit("symlinked package transaction entry")
+PY
+}
+
+
+# A verified hash journal protects bytes, but a recovery snapshot must also be
+# a *complete original package*, not an arbitrary set of hash-consistent files.
+verify_recovery_backup() {
+  python3 - "$backup_dir" "$version" "$kernel_release" "$installed_module" \
+      "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
+      "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+      "$runtime_health_service" "$primary_swap" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+backup = Path(sys.argv[1])
+version, kernel_release, installed_module = sys.argv[2:5]
+package_files = sys.argv[5:]
+source = backup / "source"
+file_list = backup / "file-paths"
+image = backup / "installed-module"
+if not any(backup.iterdir()):
+    print("none")
+    raise SystemExit(0)
+if not (source.is_dir() and (backup / "files").is_dir()
+        and file_list.is_file() and image.is_file()):
+    raise SystemExit("recovery backup lacks complete source, file map or module")
+expected_directories = {"source", "source/src", "source/src/kernel", "files"}
+actual_directories = {str(path.relative_to(backup))
+                      for path in backup.rglob("*") if path.is_dir()}
+if actual_directories != expected_directories:
+    raise SystemExit("recovery backup directory layout differs")
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+def check_file(path, mode):
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit(f"unsafe recovery backup file: {path}")
+    metadata = path.stat()
+    if (metadata.st_uid != os.geteuid()
+            or metadata.st_gid != os.getegid()
+            or stat.S_IMODE(metadata.st_mode) != mode
+            or metadata.st_nlink != 1):
+        raise SystemExit(f"wrong recovery backup provenance: {path}")
+
+source_files = {
+    str(path.relative_to(source)): path
+    for path in source.rglob("*") if path.is_file()
+}
+required_source = {
+    "dkms.conf", ".swapz-owned", ".swapz-sources.sha256",
+    ".swapz-binaries.sha256", "src/kernel/VERSION", "src/kernel/Makefile",
+}
+if not required_source <= source_files.keys():
+    raise SystemExit("recovery source is incomplete")
+for relative, path in source_files.items():
+    check_file(path, 0o644)
+    if relative not in required_source and relative != ".swapz-qualification" \
+            and not re.fullmatch(r"src/kernel/[A-Za-z0-9_.+-]+\.[ch]", relative):
+        raise SystemExit("unexpected recovery source file")
+if source_files[".swapz-owned"].read_bytes() != f"swapz:{version}\n".encode():
+    raise SystemExit("recovery source ownership marker differs")
+
+source_manifest = {}
+for line in source_files[".swapz-sources.sha256"].read_text().splitlines():
+    match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_.+/-]+)", line)
+    if not match or match[2] in source_manifest or \
+            match[2] not in source_files:
+        raise SystemExit("noncanonical recovery source manifest")
+    source_manifest[match[2]] = match[1]
+if set(source_manifest) != set(source_files) - {
+        ".swapz-owned", ".swapz-sources.sha256", ".swapz-binaries.sha256"}:
+    raise SystemExit("recovery source manifest is incomplete")
+for relative, expected_hash in source_manifest.items():
+    if digest(source_files[relative]) != expected_hash:
+        raise SystemExit("recovery source provenance digest differs")
+
+check_file(file_list, 0o644)
+check_file(image, 0o644)
+paths = file_list.read_text().splitlines()
+legacy_files = [path for index, path in enumerate(package_files)
+                if index not in (2, 8)]
+if paths not in (package_files, legacy_files):
+    raise SystemExit("noncanonical recovery destination map")
+for path in paths:
+    if not path.startswith("/") or ".." in Path(path).parts:
+        raise SystemExit("unsafe recovery destination")
+expected_backups = {
+    "installed-module", "file-paths",
+    *("files/" + hashlib.sha256(path.encode()).hexdigest()
+      for path in paths),
+    *("source/" + relative for relative in source_files),
+}
+actual_backups = {str(path.relative_to(backup))
+                  for path in backup.rglob("*") if path.is_file()}
+if actual_backups != expected_backups:
+    raise SystemExit("unexpected recovery backup contents")
+
+binary_manifest = {}
+for line in source_files[".swapz-binaries.sha256"].read_text().splitlines():
+    match = re.fullmatch(r"([0-9a-f]{64})  (/[^\r\n]+)", line)
+    if not match or match[2] in binary_manifest:
+        raise SystemExit("noncanonical recovery binary manifest")
+    binary_manifest[match[2]] = match[1]
+if set(binary_manifest) != set(paths) | {installed_module}:
+    raise SystemExit("recovery binary manifest destination mismatch")
+for path in paths:
+    saved_file = backup / "files" / hashlib.sha256(path.encode()).hexdigest()
+    check_file(saved_file, 0o755 if path in (
+        package_files[0], package_files[1], package_files[2],
+        package_files[3], package_files[5]) else 0o644)
+    if digest(saved_file) != binary_manifest[path]:
+        raise SystemExit("recovery binary provenance digest differs")
+if digest(image) != binary_manifest[installed_module]:
+    raise SystemExit("recovery kernel module digest differs")
+
+qualification = source / ".swapz-qualification"
+if qualification.exists() or qualification.is_symlink():
+    check_file(qualification, 0o644)
+    identity = qualification.read_text().splitlines()
+    if (len(identity) != 8 or identity[:3] != [
+            "schema=swapz-package-v1", f"version={version}",
+            f"kernel_release={kernel_release}"]):
+        raise SystemExit("recovery qualification identity differs")
+    required_fields = {
+        "source_sha": 40, "qualification_report_sha256": 64,
+        "swapzctl_sha256": 64, "module_sha256": 64, "oracle_sha256": 64,
+    }
+    for line, (field, width) in zip(identity[3:], required_fields.items()):
+        if not re.fullmatch(field + r"=[0-9a-f]{" + str(width) + r"}", line):
+            raise SystemExit("malformed recovery qualification identity")
+    if (identity[5] != "swapzctl_sha256=" + binary_manifest[package_files[0]]
+            or identity[6] != "module_sha256=" + digest(image)
+            or identity[7] != "oracle_sha256=" +
+                binary_manifest[package_files[3]]):
+        raise SystemExit("wrong recovery qualification provenance")
+    print("current")
+else:
+    print("legacy")
 PY
 }
 
@@ -994,17 +1271,23 @@ restore_uninstall_backup() {
   local current_status="" restored_status=""
   backup_dir="$transaction_dir/backup"
   query_dkms_status current_status -m swapz -v "$version" || return 1
+  dkms_status_single_kernel_scope "$current_status" &&
+    other_kernel_module_candidates_absent || return 1
   cleanup_activation_files
   cleanup_source_files
   rm -f -- "$installed_module"
   if [[ -n "$current_status" ]]; then
     "$dkms_bin" remove -m swapz -v "$version" --all || return 1
   fi
+  query_dkms_status current_status -m swapz -v "$version" || return 1
+  [[ -z "$current_status" ]] && module_candidates_absent || return 1
 
   install -d -m0755 "$src/src/kernel"
   cp -a -- "$backup_dir/source/dkms.conf" "$src/dkms.conf"
   cp -a -- "$backup_dir/source/$marker" "$src/$marker"
-  cp -a -- "$backup_dir/source/$qualification_marker" "$src/$qualification_marker"
+  if [[ -f "$backup_dir/source/$qualification_marker" ]]; then
+    cp -a -- "$backup_dir/source/$qualification_marker" "$src/$qualification_marker"
+  fi
   cp -a -- "$backup_dir/source/$source_manifest" "$src/$source_manifest"
   cp -a -- "$backup_dir/source/$binary_manifest" "$src/$binary_manifest"
   cp -a -- "$backup_dir/source/src/kernel/"* "$src/src/kernel/"
@@ -1016,6 +1299,9 @@ restore_uninstall_backup() {
   query_dkms_status restored_status -m swapz -v "$version" -k "$kernel_release" ||
     return 1
   dkms_status_exact_installed "$restored_status" || return 1
+  query_dkms_status restored_status -m swapz -v "$version" || return 1
+  dkms_status_exact_installed "$restored_status" || return 1
+  other_kernel_module_candidates_absent || return 1
   prepare_exact_module_restore || return 1
   install -d -m0755 "$installed_module_dir"
   install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
@@ -1047,7 +1333,11 @@ restore_uninstall_backup() {
   if [[ -n "$test_root" && ${SWAPZ_TEST_UNINSTALL_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
     return 1
   fi
-  verify_owned || return 1
+  if [[ "$existing_kind" == legacy ]]; then
+    verify_owned_legacy || return 1
+  else
+    verify_owned || return 1
+  fi
   durable_package_paths "$cli" "$installed_module" || return 1
 }
 
@@ -1085,6 +1375,174 @@ uninstall_test_checkpoint() {
   }
 }
 
+# Recovery is deliberately explicit. Normal install/uninstall always retain the
+# incomplete-transaction admission gate, including after SIGKILL at "committed".
+if [[ "$action" == recover ]]; then
+  ensure_transaction_parent
+  shopt -s nullglob
+  retained_transactions=(
+    "$transaction_parent"/swapz-package.*
+    "$transaction_parent"/swapz-uninstall.*
+  )
+  shopt -u nullglob
+  (( ${#retained_transactions[@]} <= 1 )) ||
+    blocked "recovery selection ambiguous: multiple retained package transactions"
+  if (( ${#retained_transactions[@]} == 0 )); then
+    # A repeat recovery is a no-op only for a complete installed or empty state.
+    assert_single_kernel_dkms_scope
+    repeated_status=""
+    query_dkms_status repeated_status -m swapz -v "$version" ||
+      blocked "recovery repeat cannot inspect DKMS state"
+    if package_paths_present; then
+      verify_owned || verify_owned_legacy ||
+        blocked "recovery repeat found unverified installed package"
+      dkms_status_exact_installed "$repeated_status" ||
+        blocked "recovery repeat found unverified DKMS registration"
+    else
+      [[ -z "$repeated_status" ]] && module_candidates_absent ||
+        blocked "recovery repeat found unowned DKMS state"
+    fi
+    echo "No retained package recovery record; installed state verified"
+    exit 0
+  fi
+
+  transaction_dir="${retained_transactions[0]}"
+  case "$transaction_dir" in
+    "$transaction_parent"/swapz-package.*)
+      [[ "${transaction_dir##*/}" =~ ^swapz-package\.[A-Za-z0-9]{8}$ ]] ||
+        blocked "recovery directory name is not canonical"
+      recovery_action=install ;;
+    "$transaction_parent"/swapz-uninstall.*)
+      [[ "${transaction_dir##*/}" =~ ^swapz-uninstall\.[A-Za-z0-9]{8}$ ]] ||
+        blocked "recovery directory name is not canonical"
+      recovery_action=uninstall ;;
+    *) blocked "recovery directory selection is unsafe" ;;
+  esac
+  transaction_active=4
+  action="$recovery_action"
+  backup_dir="$transaction_dir/backup"
+  verify_transaction_snapshot || blocked "recovery snapshot verification failed"
+  recovery_kind="$(verify_recovery_backup)" ||
+    blocked "recovery source, destination or binary provenance invalid"
+  [[ "$recovery_kind" == none || "$recovery_kind" == current ||
+     "$recovery_kind" == legacy ]] ||
+    blocked "recovery backup identity ambiguous"
+  if [[ "$action" == uninstall ]]; then
+    [[ "$recovery_kind" == current ]] ||
+      blocked "recovery uninstall lacks a verified current-package snapshot"
+  fi
+  recovery_phase="$(python3 - "$transaction_dir/state.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["phase"])
+PY
+  )" || blocked "recovery cannot read validated journal phase"
+
+  # These preflight checks happen under the existing package lock before any
+  # DKMS --all or cleanup. A foreign kernel must not be silently erased.
+  assert_single_kernel_dkms_scope
+  swapz_module_loaded && blocked "recovery blocked by loaded swapz module"
+  swapz_mapper_present && blocked "recovery blocked by active swapz mapping"
+  assert_no_primary_recovery_authority recovery
+
+  # Test-only fault injection never runs in production. The original I/O
+  # exception stays on stderr; neither a failed fsync nor rename clears state.
+  if [[ -n "$test_root" ]]; then
+    export SWAPZ_PACKAGE_RECOVERY_ACTIVE=1
+  fi
+
+  cleanup_temporary_activation_files ||
+    blocked "recovery temporary CLI provenance or durability invalid"
+  if [[ "$recovery_phase" != committed ]]; then
+    # Do not normalize substituted live destinations during rollback.
+    for recovery_path in "$src" "$cli" "$boot_verifier" "$runtime_health" \
+        "$helper" "$module_snapshot" "$primary_generator" "$mapper_service" \
+        "$boot_verifier_service" "$runtime_health_service" "$primary_swap" \
+        "$installed_module" "${module_candidate_paths[@]}"; do
+      [[ ! -L "$recovery_path" ]] ||
+        blocked "recovery found symlinked installed package path: $recovery_path"
+    done
+    # Replay the saved *previous* state, never forward-complete an ambiguous
+    # install or uninstall. A rolled-back journal is also safe to re-verify.
+    persist_transaction_state rollback-started ||
+      blocked "recovery rollback-started journal not durable"
+    if [[ "$recovery_kind" == none ]]; then
+      recovery_status=""
+      query_dkms_status recovery_status -m swapz -v "$version" ||
+        blocked "recovery cannot inspect DKMS before clean rollback"
+      dkms_status_single_kernel_scope "$recovery_status" ||
+        blocked "recovery detected other-kernel DKMS registrations"
+      if [[ -n "$recovery_status" ]]; then
+        "$dkms_bin" remove -m swapz -v "$version" --all ||
+          blocked "recovery failed to remove new-kernel DKMS registration"
+      fi
+      cleanup_package_files ||
+        blocked "recovery could not remove partial package files"
+      rm -f -- "$installed_module" ||
+        blocked "recovery could not remove partial module image"
+      module_candidates_absent && other_kernel_module_candidates_absent ||
+        blocked "recovery left compressed or other-kernel module variants"
+      durable_package_paths "$src" "$cli" "$boot_verifier" "$runtime_health" \
+          "$helper" "$module_snapshot" "$primary_generator" "$mapper_service" \
+          "$boot_verifier_service" "$runtime_health_service" "$primary_swap" \
+          "$installed_module_dir" ||
+        blocked "recovery clean rollback filesystem sync failed"
+      "$depmod_bin" "$kernel_release" ||
+        blocked "recovery clean rollback depmod failed"
+      "$systemctl_bin" daemon-reload ||
+        blocked "recovery clean rollback systemd reload failed"
+    else
+      existing_kind="$recovery_kind"
+      restore_uninstall_backup ||
+        blocked "recovery previous package rollback failed"
+    fi
+    persist_transaction_state rolled-back ||
+      blocked "recovery rolled-back journal not durable"
+  fi
+
+  # A crash after committed must not uninstall an already-published package.
+  # Before forgetting *any* record, independently verify the final state,
+  # complete DKMS scope, and fsync both installed files and directory entries.
+  final_status=""
+  query_dkms_status final_status -m swapz -v "$version" ||
+    blocked "recovery final DKMS query failed"
+  if [[ "$recovery_phase" == committed && "$action" == install ]]; then
+    verify_owned && dkms_status_exact_installed "$final_status" ||
+      blocked "recovery committed install verification failed"
+  elif [[ "$recovery_phase" == committed && "$action" == uninstall ||
+          "$recovery_kind" == none ]]; then
+    [[ -z "$final_status" ]] && ! package_paths_present &&
+      module_candidates_absent ||
+      blocked "recovery empty-state verification failed"
+  else
+    if [[ "$recovery_kind" == legacy ]]; then
+      verify_owned_legacy || blocked "recovery legacy package verification failed"
+    else
+      verify_owned || blocked "recovery restored package verification failed"
+    fi
+    dkms_status_exact_installed "$final_status" ||
+      blocked "recovery restored all-kernel DKMS verification failed"
+  fi
+  other_kernel_module_candidates_absent ||
+    blocked "recovery final other-kernel module image detected"
+  durable_package_paths "$src" "$cli" "$boot_verifier" "$runtime_health" \
+      "$helper" "$module_snapshot" "$primary_generator" "$mapper_service" \
+      "$boot_verifier_service" "$runtime_health_service" "$primary_swap" \
+      "$installed_module" "$installed_module_dir" ||
+    blocked "recovery final installed filesystem sync failed"
+  verify_transaction_snapshot && verify_recovery_backup >/dev/null ||
+    blocked "recovery final rollback record re-verification failed"
+
+  rm -rf -- "$transaction_dir" ||
+    blocked "recovery completed but transaction directory removal failed"
+  durable_package_paths "$transaction_parent" ||
+    blocked "recovery transaction parent fsync failed"
+  transaction_active=0
+  echo "Recovered verified swapz package transaction ($action: $recovery_phase)"
+  exit 0
+fi
+
 assert_no_incomplete_package_transactions
 
 if [[ "$action" == uninstall ]]; then
@@ -1093,6 +1551,7 @@ if [[ "$action" == uninstall ]]; then
     blocked "cannot inspect current-kernel DKMS state before package removal"
   dkms_status_exact_installed "$uninstall_dkms_status" ||
     blocked "verified package does not have an installed current-kernel DKMS state"
+  assert_single_kernel_dkms_scope
   if [[ -z "$test_root" && "$action" == uninstall ]] &&
      [[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]; then
     echo "BLOCKED: loaded module; refusing DKMS removal" >&2
@@ -1163,6 +1622,7 @@ if [[ "$action" == uninstall ]]; then
   uninstall_test_checkpoint activation-files-removed
 
   persist_transaction_state removing-dkms
+  assert_single_kernel_dkms_scope
   "$dkms_bin" remove -m swapz -v "$version" --all
   removed_dkms_status=""
   query_dkms_status removed_dkms_status -m swapz -v "$version" ||
@@ -1194,6 +1654,14 @@ if [[ "$action" == uninstall ]]; then
   "$systemctl_bin" daemon-reload
   persist_transaction_state systemd-reload-complete
   uninstall_test_checkpoint systemd-reload-complete
+  removed_dkms_status=""
+  query_dkms_status removed_dkms_status -m swapz -v "$version" ||
+    blocked "cannot verify all-kernel DKMS state after uninstall"
+  [[ -z "$removed_dkms_status" ]] && ! package_paths_present &&
+    other_kernel_module_candidates_absent ||
+    blocked "uninstall left DKMS registrations or package files"
+  durable_package_paths "$srcbase" "$installed_module_dir" "$cli_dir" "$unit_dir" "$generator_dir"
+  persist_transaction_state committed
 
   transaction_active=0
   trap - ERR HUP INT TERM
@@ -1344,6 +1812,7 @@ fi
 current_dkms_status=""
 query_dkms_status current_dkms_status -m swapz -v "$version" -k "$kernel_release" ||
   blocked "cannot inspect current-kernel DKMS state"
+assert_single_kernel_dkms_scope
 if [[ -z "$existing_kind" && -n "$current_dkms_status" ]]; then
   blocked "DKMS state exists without a verified package"
 fi
@@ -1490,6 +1959,9 @@ restore_previous_package() {
   query_dkms_status restored_status -m swapz -v "$version" -k "$kernel_release" ||
     return 1
   dkms_status_exact_installed "$restored_status" || return 1
+  query_dkms_status restored_status -m swapz -v "$version" || return 1
+  dkms_status_exact_installed "$restored_status" || return 1
+  other_kernel_module_candidates_absent || return 1
   prepare_exact_module_restore || return 1
   [[ -f "$backup_dir/installed-module" && ! -L "$backup_dir/installed-module" ]] ||
     return 1
@@ -1548,15 +2020,15 @@ rollback() {
     echo "BLOCKED: cannot journal install rollback; recovery data retained at $transaction_dir" >&2
     exit "$rc"
   fi
-  if (( new_dkms_registered == 0 )); then
-    if ! query_dkms_status rollback_dkms_status -m swapz -v "$version"; then
+  if ! query_dkms_status rollback_dkms_status -m swapz -v "$version" ||
+     ! dkms_status_single_kernel_scope "$rollback_dkms_status" ||
+     ! other_kernel_module_candidates_absent; then
       cleanup_activation_files || true
       persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
-      echo "BLOCKED: cannot inspect DKMS state during rollback; recovery data retained at $transaction_dir" >&2
+      echo "BLOCKED: rollback DKMS scope uncertain (query, other kernel or variant); recovery data retained at $transaction_dir" >&2
       exit "$rc"
-    fi
   fi
-  if (( new_dkms_registered == 1 )) || [[ -n "$rollback_dkms_status" ]]; then
+  if [[ -n "$rollback_dkms_status" ]]; then
     if ! "$dkms_bin" remove -m swapz -v "$version" --all >/dev/null 2>&1; then
       cleanup_activation_files || true
       persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
@@ -1613,6 +2085,7 @@ if (( had_existing == 1 )); then
   install_test_checkpoint activation-files-removed
 
   persist_transaction_state removing-dkms
+  assert_single_kernel_dkms_scope
   "$dkms_bin" remove -m swapz -v "$version" --all
   removed_dkms_status=""
   query_dkms_status removed_dkms_status -m swapz -v "$version" ||
