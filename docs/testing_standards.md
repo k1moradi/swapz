@@ -306,10 +306,10 @@ qualification entrypoint.
 command. It builds the current working tree (dirty trees allowed), runs the
 native and replay contract checks (including the lower-I/O window policy and
 offline page analyzer), runs the root preflight, and then runs
-one counterbalance-free raw/swapz pair per selected scenario through the same
-private owned null_blk pair helper and exact device models used by `make test`
-(default: three repeats each of SATA mixed, NVMe Gen4 mixed, fast mixed,
-fast QD4 and fast QD8). A selected `nvme5-stripes` or `sata-stripes` scenario runs the
+the requested counterbalance-free raw/swapz pairs per selected ordinary
+scenario through the same private owned null_blk pair helper and exact device
+models used by `make test` (default: three repeats each of SATA mixed,
+NVMe Gen4 mixed, NVMe Gen5 mixed, fast mixed, fast QD4 and fast QD8). A selected `nvme5-stripes` or `sata-stripes` scenario runs the
 existing mixed-QD32 multi-target N=1/2/4 experiment. `fast-stripes-w4` and
 `fast-stripes-w8` run the same independent-target experiment with sustained
 WRITE-only QD4 or QD8, respectively, as described below. It prints one table of useful READ/WRITE, lower WRITE bytes ratio
@@ -344,8 +344,9 @@ selects an early async work-conserving hand threshold for ordinary owned-null_bl
 development pairs. Eight is the unchanged default; 16/64 are rejected for
 calibration, stripes and physical backing. It never writes or publishes `test_results.json`,
 never records a qualification verdict and never substitutes for `make test`:
-single unpaired observations decide only which candidate deserves the full
-owner matrix.
+these repeated development pairs decide only which candidate deserves the full
+owner matrix; they do not create qualification evidence or paired confidence
+intervals.
 
 `CONTENT=medium` keeps the existing fixture. `CONTENT=entropy` supplies only
 incompressible pages; `CONTENT=balanced` supplies equal numbers of medium and
