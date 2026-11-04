@@ -1691,6 +1691,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 b"schema=" +
                 b"x" * EVALUATOR.MAX_ENV_EVIDENCE_INPUT_BYTES + b"\n")
 
+        long_key = b"a" * 4096
+        duplicate_key_evidence = (
+            long_key + b"=first\n" + long_key + b"=second\n")
+        with self.assertRaises(EVALUATOR.EvidenceError) as failure:
+            EVALUATOR.parse_env_strict(duplicate_key_evidence)
+        self.assertLess(len(str(failure.exception)), 400)
+        self.assertIn("(truncated)", str(failure.exception))
+
         report = owner_report()
         policy = acceptance_policy()
         report_raw = encoded(report)
@@ -2253,6 +2261,17 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 self.assertIn(
                     ("MemAvailable_kib" if metric == "mem_available_kib"
                      else metric), str(failure.exception))
+
+        trace = sampled_metadata_ram_trace()
+        with self.assertRaises(ValueError) as failure:
+            validator(
+                trace, source_sha=SOURCE, mapper_uuid=trace["mapper_uuid"],
+                expected_peak_ram_bytes=1 << 100000)
+        self.assertLess(len(str(failure.exception)), 400)
+        self.assertIn("<integer_over_64_bits>", str(failure.exception))
+        self.assertIn(
+            f"maximum={EVALUATOR.RAM_TRACE_VALIDATOR['MAX_UINT64']}",
+            str(failure.exception))
 
     def test_missing_host_peak_names_frozen_limit_and_required_samples(self):
         report = owner_report()
