@@ -4530,11 +4530,15 @@ loaded stage must also execute one private success-cycle rehearsal with
 `SWAPZ_PRIMARY_OWNED_NULLBLK_TEST`: create a uniquely owned memory-backed
 null_blk disk, create exactly one real partition with a kernel PARTUUID using
 `sfdisk --lock`, and rely on sfdisk's normal kernel notification rather than
-issuing a second unlocked `blockdev --rereadpt` that can race with udevd. Settle
-udev before enumerating the partition. Then
-verify its PARTUUID against the partition's sysfs uevent, trigger udev's add
-event only for that exact sysfs partition path, and require udev to publish the
-by-PARTUUID block-device alias with the same major:minor. Before any physical-
+issuing a second unlocked `blockdev --rereadpt` that can race with udevd. The
+fixture must convert the actual lower `/dev` node's `rdev` to major:minor and
+require an exact match with the owned null_blk sysfs device number before
+`sfdisk`. Settle udev before enumerating the partition, then require the actual
+partition node's `rdev` to match the partition sysfs device number before
+`blkid` or `mkswap`. Verify its PARTUUID against the partition's sysfs uevent,
+trigger udev's add event only for that exact sysfs partition path, and require
+udev to publish the by-PARTUUID block-device alias with that same partition
+major:minor. Before any physical-
 backing mapper admission, the fixture must preserve the manager-written SWZ
 authorization header at block zero and the source contract must prove that the
 kernel accepts the header-backed nullblk path without weakening the ordinary

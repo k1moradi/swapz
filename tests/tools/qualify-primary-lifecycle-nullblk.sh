@@ -32,6 +32,21 @@ block0_sha256() {
 	printf '%s\n' "$digest"
 }
 
+block_node_devno() {
+	local device_path="$1"
+	local device_hex major_hex minor_hex device_number
+
+	[[ -b "$device_path" ]] || return 1
+	device_hex="$(stat -Lc '%t:%T' "$device_path")" || return 1
+	IFS=: read -r major_hex minor_hex <<< "$device_hex"
+	[[ "$major_hex" =~ ^[0-9a-fA-F]+$ &&
+	   "$minor_hex" =~ ^[0-9a-fA-F]+$ ]] || return 1
+	printf -v device_number '%d:%d' "0x$major_hex" "0x$minor_hex" ||
+		return 1
+	[[ "$device_number" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+	printf '%s\n' "$device_number"
+}
+
 if [[ $# -ne 2 || $1 != --validated-source ]]; then
 	blocked "expected --validated-source <40-hex-sha>"
 fi
@@ -1259,6 +1274,10 @@ for ignored in {1..50}; do
 	sleep 0.1
 done
 [[ -b "$LOWER" ]] || blocked "owned null_blk device node is unavailable"
+LOWER_NODE_DEVNO="$(block_node_devno "$LOWER")" ||
+	fail "cannot resolve owned null_blk device node identity"
+[[ "$LOWER_NODE_DEVNO" == "$DEVNO" ]] ||
+	fail "owned null_blk device node major/minor differs from sysfs"
 [[ "$(blockdev --getsize64 "$LOWER")" == $((NULLBLK_SIZE_MIB * 1024 * 1024)) ]] ||
 	fail "owned null_blk size differs from requested RAM geometry"
 [[ -z "$(ls -A "/sys/block/$DISK/holders")" ]] ||
@@ -1291,12 +1310,18 @@ done
 PART_NAME="$(basename "$PART_SYSFS")"
 PARTITION="/dev/$PART_NAME"
 PART_DEVNO="$(cat "$PART_SYSFS/dev")"
+[[ "$PART_DEVNO" =~ ^[0-9]+:[0-9]+$ ]] ||
+	fail "owned null_blk partition sysfs major/minor is malformed"
 for ignored in {1..50}; do
 	[[ -b "$PARTITION" ]] && break
 	sleep 0.1
 done
-[[ -b "$PARTITION" && "$PART_DEVNO" =~ ^[0-9]+:[0-9]+$ ]] ||
+[[ -b "$PARTITION" ]] ||
 	blocked "owned null_blk partition node is unavailable"
+PARTITION_NODE_DEVNO="$(block_node_devno "$PARTITION")" ||
+	fail "cannot resolve owned null_blk partition node identity"
+[[ "$PARTITION_NODE_DEVNO" == "$PART_DEVNO" ]] ||
+	fail "owned null_blk partition node major/minor differs from sysfs"
 [[ "$(readlink -f "/sys/dev/block/$PART_DEVNO")" == "$(readlink -f "$PART_SYSFS")" ]] ||
 	fail "owned partition sysfs identity changed"
 
@@ -1310,9 +1335,10 @@ BY_PARTUUID="/dev/disk/by-partuuid/$PARTUUID"
 udev_alias_verified() {
 	local alias_dev partition_dev udev_properties
 	[[ -b "$BY_PARTUUID" ]] || return 1
-	alias_dev="$(stat -Lc '%t:%T' "$BY_PARTUUID")" || return 1
-	partition_dev="$(stat -Lc '%t:%T' "$PARTITION")" || return 1
-	[[ "$alias_dev" == "$partition_dev" ]] || return 1
+	alias_dev="$(block_node_devno "$BY_PARTUUID")" || return 1
+	partition_dev="$(block_node_devno "$PARTITION")" || return 1
+	[[ "$alias_dev" == "$PART_DEVNO" &&
+	   "$partition_dev" == "$PART_DEVNO" ]] || return 1
 	[[ "$(readlink -f "$BY_PARTUUID")" == "$(readlink -f "$PARTITION")" ]] ||
 		return 1
 	udev_properties="$(udevadm info --query=property --path="$PART_SYSFS" 2>/dev/null)" ||

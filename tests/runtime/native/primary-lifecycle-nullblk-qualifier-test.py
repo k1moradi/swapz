@@ -135,6 +135,45 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             'udevadm test --verbose --action=add "$PART_SYSFS"', self.script)
         self.assertNotRegex(self.script, r"(?m)^\s*ln\s+-s\b")
 
+    def test_owned_nullblk_nodes_match_sysfs_devno_before_mutation(self):
+        lower_sysfs = self.script.index(
+            'DEVNO="$(cat "/sys/block/$DISK/dev")"')
+        lower_node = self.script.index(
+            'LOWER_NODE_DEVNO="$(block_node_devno "$LOWER")"', lower_sysfs)
+        partition_write = self.script.index(
+            'if ! sfdisk --lock --wipe always "$LOWER"', lower_node)
+        self.assertLess(lower_sysfs, lower_node)
+        self.assertLess(lower_node, partition_write)
+        self.assertIn(
+            '[[ "$LOWER_NODE_DEVNO" == "$DEVNO" ]] ||\n'
+            '\tfail "owned null_blk device node major/minor differs from sysfs"',
+            self.script[lower_node:partition_write])
+
+        partition_sysfs = self.script.index(
+            'PART_DEVNO="$(cat "$PART_SYSFS/dev")"', partition_write)
+        partition_node = self.script.index(
+            'PARTITION_NODE_DEVNO="$(block_node_devno "$PARTITION")"',
+            partition_sysfs)
+        partuuid_read = self.script.index(
+            'PARTUUID="$(blkid -s PARTUUID -o value "$PARTITION"', partition_node)
+        mkswap = self.script.index('mkswap "$PARTITION" >/dev/null',
+                                   partuuid_read)
+        self.assertLess(partition_sysfs, partition_node)
+        self.assertLess(partition_node, partuuid_read)
+        self.assertLess(partuuid_read, mkswap)
+        self.assertIn(
+            '[[ "$PARTITION_NODE_DEVNO" == "$PART_DEVNO" ]] ||\n'
+            '\tfail "owned null_blk partition node major/minor differs from sysfs"',
+            self.script[partition_node:partuuid_read])
+
+        alias_start = self.script.index('udev_alias_verified() {', partuuid_read)
+        alias_end = self.script.index('\n}', alias_start)
+        alias_verifier = self.script[alias_start:alias_end]
+        self.assertIn('block_node_devno "$BY_PARTUUID"', alias_verifier)
+        self.assertIn('block_node_devno "$PARTITION"', alias_verifier)
+        self.assertIn('"$alias_dev" == "$PART_DEVNO"', alias_verifier)
+        self.assertIn('"$partition_dev" == "$PART_DEVNO"', alias_verifier)
+
     def test_partition_reread_is_locked_and_not_duplicated_after_sfdisk(self):
         partition_write = self.script.index(
             'if ! sfdisk --lock --wipe always "$LOWER"')
