@@ -72,7 +72,9 @@ workload size, resident limit, swap limit or timeout differs from its
 `primary_real_swap` values. The manifest also carries the exact prospective
 physical workload/acceptance contract used by `qualification.py`, so a
 threshold change is an explicit source-controlled policy change rather than a
-runtime override.
+runtime override. JSON objects consumed by the physical helper must reject
+duplicate keys and non-finite numeric constants rather than accept Python's
+permissive `NaN`/`Infinity` extensions.
 
 `tests/tools/qualify-primary-real-swap.py` is private Agent-8 test
 infrastructure, not a second public command; Agent 12 owns registration in

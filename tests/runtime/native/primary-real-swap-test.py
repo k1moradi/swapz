@@ -162,6 +162,19 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with self.assertRaises(ValueError):
             oracle.page_pattern("a" * 32, -1)
 
+    def test_strict_json_object_parser_rejects_duplicates_and_nonfinite_numbers(self):
+        self.assertEqual(
+            qualify._load_unique_json('{"value":1}', "fixture"),
+            {"value": 1})
+        for payload in (
+                '{"value":1,"value":2}',
+                '{"value":NaN}',
+                '{"value":Infinity}',
+                '{"value":-Infinity}'):
+            with self.subTest(payload=payload), \
+                    self.assertRaises(qualify.Blocked):
+                qualify._load_unique_json(payload, "fixture")
+
     def test_selector_is_exact_single_partuuid_line(self):
         self.assertEqual(
             qualify.parse_selector("PARTUUID=f13428f6-01\n"),

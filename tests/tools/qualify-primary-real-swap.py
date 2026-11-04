@@ -690,8 +690,13 @@ def _load_unique_json(text: str, label: str) -> dict:
                 raise ValueError(f"duplicate key {key}")
             result[key] = value
         return result
+
+    def reject_constant(value: str):
+        raise ValueError(f"non-finite JSON number {value}")
+
     try:
-        value = json.loads(text, object_pairs_hook=unique)
+        value = json.loads(
+            text, object_pairs_hook=unique, parse_constant=reject_constant)
     except (ValueError, TypeError) as exc:
         raise Blocked(f"cannot parse {label}: {exc}") from exc
     if not isinstance(value, dict):
