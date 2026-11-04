@@ -272,12 +272,15 @@ static void test_numeric_bound_parser(void)
 	assert(parse_unsigned_decimal("1", 1ULL, &end, &value) == 0);
 	assert(*end == '\0' && value == 1ULL);
 	assert(parse_unsigned_decimal("2", 1ULL, &end, &value) < 0);
+	assert(parse_unsigned_decimal("01", 10ULL, &end, &value) < 0);
+	assert(parse_unsigned_decimal("00", 10ULL, &end, &value) < 0);
 	assert(parse_unsigned_decimal("9", 0ULL, &end, &value) < 0);
 	assert(parse_unsigned_decimal(NULL, 1ULL, &end, &value) < 0);
 	assert(parse_unsigned_decimal("1", 1ULL, NULL, &value) < 0);
 	assert(parse_unsigned_decimal("1", 1ULL, &end, NULL) < 0);
 	assert(format_parse_text_u64("1\n", 1ULL, &value) == 0);
 	assert(value == 1ULL);
+	assert(format_parse_text_u64("01\n", 10ULL, &value) < 0);
 	assert(format_parse_text_u64("2\n", 1ULL, &value) < 0);
 }
 
@@ -320,6 +323,12 @@ static void test_format_expectation_parser(void)
 					too_long, &expected) < 0);
 
 	assert(parse_format_expectation("-8:1", "8:0", "124787884032",
+					"f13428f6-01", &expected) < 0);
+	assert(parse_format_expectation("08:1", "8:0", "124787884032",
+					"f13428f6-01", &expected) < 0);
+	assert(parse_format_expectation("8:01", "8:0", "124787884032",
+					"f13428f6-01", &expected) < 0);
+	assert(parse_format_expectation("8:1", "8:0", "0124787884032",
 					"f13428f6-01", &expected) < 0);
 	assert(parse_format_expectation("0:1", "8:0", "124787884032",
 					"f13428f6-01", &expected) < 0);
@@ -420,9 +429,15 @@ static void test_mountinfo_device_parser(void)
 	assert(format_mountinfo_line_device("36 25 bad / /mnt rw\n",
 					    &device) < 0);
 	assert(format_mountinfo_line_device("36 25 8:1\n", &device) < 0);
+	assert(format_mountinfo_line_device(
+		"036 25 8:2 / /other rw - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"2147483648 25 8:2 / /other rw - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
 	/*
-	 * Pseudo-filesystem mounts (major zero) are normal on Linux hosts.
-	 * They must be parseable without ever authorizing a physical target.
+	 * Pseudo-filesystem mounts (major zero) and filesystem-specific root
+	 * tokens are normal. They must not reject unrelated host namespaces.
 	 */
 	assert(format_mountinfo_line_device(
 		"36 25 0:20 / /proc rw - proc proc rw\n", &device) == 0);
@@ -433,10 +448,14 @@ static void test_mountinfo_device_parser(void)
 		"37 25 0:0 / /tmp rw - tmpfs tmpfs rw\n", &device) == 0);
 	assert(device == makedev(0U, 0U));
 	assert(format_mountinfo_line_device(
+		"38 25 0:4 net:[4026531840] /run/netns/example rw - nsfs nsfs rw\n",
+		&device) == 0);
+	assert(format_mountinfo_line_device(
 		"36 25 0:4294967296 / /proc rw - proc proc rw\n",
 		&device) < 0);
 	assert(format_mountinfo_line_device(
 		"36 25 -1:20 / /proc rw - proc proc rw\n", &device) < 0);
+
 	/* An unrelated device cannot make an incomplete inventory harmless. */
 	assert(format_mountinfo_line_device(
 		"garbage 25 8:2 / /other rw - ext4 /dev/sda2 rw\n",
@@ -449,26 +468,31 @@ static void test_mountinfo_device_parser(void)
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw - ext4 /dev/sda2 rw trailing\n",
 		&device) < 0);
+
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw shared:7 - ext4 /dev/sda2 rw\n",
 		&device) == 0);
+	/* Unknown optional fields are explicitly forward-compatible mountinfo. */
 	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\040name /other rw shared:7 - ext4 /dev/sdb2 rw\n",
+		"36 25 8:2 / /other rw future:abc - ext4 /dev/sdb2 rw\n",
 		&device) == 0);
 	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\9xx /other rw - ext4 /dev/sdb2 rw\n",
-		&device) < 0);
-	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\000 /other rw - ext4 /dev/sdb2 rw\n",
-		&device) < 0);
-	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\377 /other rw - ext4 /dev/sdb2 rw\n",
-		&device) < 0);
-	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\011tab /other rw - ext4 /dev/sdb2 rw\n",
+		"36 25 8:2 / /other\\040name rw shared:7 - ext4 /dev/sdb2 rw\n",
 		&device) == 0);
 	assert(format_mountinfo_line_device(
-		"36 25 8:2 relative /other rw - ext4 /dev/sdb2 rw\n",
+		"36 25 8:2 / /other\\9xx rw - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other\\000 rw - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other\\377 rw - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other\\011tab rw - ext4 /dev/sdb2 rw\n",
+		&device) == 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 opaque-root relative rw - ext4 /dev/sdb2 rw\n",
 		&device) < 0);
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw shared:garbage - ext4 /dev/sdb2 rw\n",
@@ -478,8 +502,7 @@ static void test_mountinfo_device_parser(void)
 		&device) < 0);
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw mysterious:123 - ext4 /dev/sdb2 rw\n",
-		&device) < 0);
-
+		&device) == 0);
 }
 
 static void test_mount_and_swap_identity_conflicts(void)
@@ -652,9 +675,18 @@ static void test_swap_inventory_requires_complete_kernel_table(void)
 	assert(fclose(stream) == 0);
 
 	stream = test_swap_inventory_stream(
-		"Filename Type Size Used Priority\n");
+		"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n");
 	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
 						  parent_device) == 0);
+	assert(fclose(stream) == 0);
+
+	/* The kernel header grammar is literal, not merely five whitespace tokens. */
+	stream = test_swap_inventory_stream(
+		"Filename Type Size Used Priority\n");
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, info.st_dev,
+						  parent_device) < 0);
+	assert(errno == EPROTO);
 	assert(fclose(stream) == 0);
 
 	stream = test_swap_inventory_stream(
@@ -677,7 +709,7 @@ static void test_swap_inventory_requires_complete_kernel_table(void)
 
 	length = snprintf(
 		inventory, sizeof(inventory),
-		"Filename Type Size Used Priority\n%s file 1 0 -2\n",
+		"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n%s file 1 0 -2\n",
 		swap_path);
 	assert(length > 0 && (size_t)length < sizeof(inventory));
 	stream = test_swap_inventory_stream(inventory);
@@ -689,7 +721,7 @@ static void test_swap_inventory_requires_complete_kernel_table(void)
 
 	length = snprintf(
 		inventory, sizeof(inventory),
-		"Filename Type Size Used Priority\n%s partition 1 0 -2\n",
+		"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n%s partition 1 0 -2\n",
 		swap_path);
 	assert(length > 0 && (size_t)length < sizeof(inventory));
 	stream = test_swap_inventory_stream(inventory);
@@ -729,6 +761,8 @@ static void test_mountinfo_adversarial_inventory(void)
 		"37 25 8:1 / /card rw - ext4 /dev/sda1 rw\n";
 	static const char high_bytes[] =
 		"36 25 8:2 /r\xc3\xa9 /mnt rw - ext4 /dev/sdb2 rw\n";
+	static const char raw_control[] =
+		"36 25 8:2 / /mnt\rname rw - ext4 /dev/sdb2 rw\n";
 	const dev_t device = makedev(8U, 1U);
 	const dev_t parent = makedev(8U, 0U);
 	char oversized[SWAPZ_FORMAT_PROC_LINE_BYTES + 4U];
@@ -739,6 +773,11 @@ static void test_mountinfo_adversarial_inventory(void)
 	assert(format_mountinfo_stream_clear(stream, device, parent) == 0);
 	assert(fclose(stream) == 0);
 	stream = test_inventory_binary_stream(high_bytes, sizeof(high_bytes) - 1U);
+	assert(format_mountinfo_stream_clear(stream, device, parent) == 0);
+	assert(fclose(stream) == 0);
+	/* Only NUL is impossible in a pathname; other raw filename bytes are legal. */
+	stream = test_inventory_binary_stream(raw_control,
+					     sizeof(raw_control) - 1U);
 	assert(format_mountinfo_stream_clear(stream, device, parent) == 0);
 	assert(fclose(stream) == 0);
 	stream = test_inventory_binary_stream(duplicate, sizeof(duplicate) - 1U);
@@ -786,7 +825,8 @@ static void test_mountinfo_adversarial_inventory(void)
 
 static void test_swap_adversarial_inventory(void)
 {
-	static const char header[] = "Filename Type Size Used Priority\n";
+	static const char header[] =
+		"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n";
 	char file_path[] = "/tmp/swapzctl-unrelated-XXXXXX";
 	char second_path[] = "/tmp/swapzctl-second-XXXXXX";
 	char alias_path[] = "/tmp/swapzctl-same-inode-XXXXXX";
@@ -869,6 +909,23 @@ static void test_swap_adversarial_inventory(void)
 		       "/tmp/\xc3\xa9 file 1 0 -2\n", parsed_path,
 		       &block_entry) == 0);
 	assert(!block_entry);
+	assert(!strcmp(parsed_path, "/tmp/\xc3\xa9"));
+	assert(format_swap_inventory_entry_parse(
+		       "/tmp/swap\\040file file 1 0 -2\n", parsed_path,
+		       &block_entry) == 0);
+	assert(!strcmp(parsed_path, "/tmp/swap file"));
+	assert(format_swap_inventory_entry_parse(
+		       "/tmp/swap\\134name file 1 0 -2\n", parsed_path,
+		       &block_entry) == 0);
+	assert(!strcmp(parsed_path, "/tmp/swap\\name"));
+	assert(format_swap_inventory_entry_parse(
+		       "/tmp/swap\\011name file 1 0 -2\n", parsed_path,
+		       &block_entry) == 0);
+	assert(!strcmp(parsed_path, "/tmp/swap\tname"));
+	assert(format_swap_inventory_entry_parse(
+		       "/tmp/swap\\012name file 1 0 -2\n", parsed_path,
+		       &block_entry) == 0);
+	assert(!strcmp(parsed_path, "/tmp/swap\nname"));
 
 	/* Unknown row types, invalid sizes, priorities and missing columns fail. */
 	static const char *const malformed_rows[] = {
@@ -877,6 +934,13 @@ static void test_swap_adversarial_inventory(void)
 		"/tmp/file file 1 2 -2\n",
 		"/tmp/file file -1 0 -2\n",
 		"/tmp/file file 1 0 +2\n",
+		"/tmp/file file 1 0 -0\n",
+		"/tmp/file file 01 0 -2\n",
+		"/tmp/file file 1 00 -2\n",
+		"/tmp/file file 1 0 -02\n",
+		"/tmp/swap\\000name file 1 0 -2\n",
+		"/tmp/swap\\777name file 1 0 -2\n",
+		"/tmp/swap\\9xx file 1 0 -2\n",
 		"/tmp/file file 18446744073709551616 0 -2\n",
 		"/tmp/file file 1 0 -2147483649\n",
 		"/tmp/file file 1 0\n",
@@ -903,6 +967,34 @@ static void test_swap_adversarial_inventory(void)
 		assert(format_swap_inventory_stream_clear(stream, device,
 								     parent) < 0);
 		assert(fclose(stream) == 0);
+	}
+
+	/*
+	 * An unrelated active swapfile name is emitted escaped by the kernel.
+	 * Decode it before stat/lstat so a harmless filename cannot block format.
+	 */
+	{
+		char directory[] = "/tmp/swapzctl-escaped-XXXXXX";
+		char spaced_path[PATH_MAX];
+		char encoded_path[PATH_MAX + 16U];
+		int spaced_fd;
+
+		assert(mkdtemp(directory));
+		assert(snprintf(spaced_path, sizeof(spaced_path), "%s/swap file",
+				directory) > 0);
+		spaced_fd = open(spaced_path, O_CREAT | O_EXCL | O_RDWR, 0600);
+		assert(spaced_fd >= 0);
+		assert(snprintf(encoded_path, sizeof(encoded_path), "%s/swap\\040file",
+				directory) > 0);
+		length = snprintf(inventory, sizeof(inventory),
+				  "%s%s file 1 0 -2\n", header, encoded_path);
+		assert(length > 0 && (size_t)length < sizeof(inventory));
+		stream = test_inventory_binary_stream(inventory, (size_t)length);
+		assert(format_swap_inventory_stream_clear(stream, device, parent) == 0);
+		assert(fclose(stream) == 0);
+		assert(close(spaced_fd) == 0);
+		assert(unlink(spaced_path) == 0);
+		assert(rmdir(directory) == 0);
 	}
 
 	/* Byte and row budgets are checked without allocating enormous fixtures. */
