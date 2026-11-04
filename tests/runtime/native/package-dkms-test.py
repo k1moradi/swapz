@@ -1161,9 +1161,11 @@ exec "{flock_binary}" "$@"
                   or unsafe_transaction_mode or corrupt_journal_phase):
                 self.assertIn("rollback snapshot invalid", stderr)
                 self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+                # The relocated original and substituted link are both stale.
+                expected_transactions = 2 if substitute_directory else 1
                 self.assertEqual(
                     len(list((self.home / "transactions").glob(
-                        "swapz-package.*"))), 1)
+                        "swapz-package.*"))), expected_transactions)
                 refused = self.invoke("install")
                 self.assertIn("incomplete package transaction retained",
                               refused.stderr)
