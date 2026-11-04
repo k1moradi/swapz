@@ -913,14 +913,16 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
  * the full destination foreground progress.
  *
  * Roll forward without exposing that no-progress role exchange to foreground:
- * first run the original victim through the same full dead-segment validator
- * and recycle hook used by ordinary allocation. Only after that succeeds do
+ * first run the original victim through a full-map validator that also
+ * authenticates every surviving map's physical start sidecars, then through
+ * the same recycle hook used by ordinary allocation. Only after that succeeds do
  * the infallible in-memory role changes below make the full destination the
  * next GC victim and the verified-dead original victim the next destination.
  * No mapping, generation or live refcount changes here.
  */
 static int swapz_verify_recovery_victim_dead(
-	const struct swapz_authority *a, swapz_u32 segment)
+	const struct swapz_authority *a, swapz_u32 segment,
+	int verify_global_map_physical_metadata)
 {
 	swapz_u32 start_block, block;
 	int error;
@@ -928,7 +930,8 @@ static int swapz_verify_recovery_victim_dead(
 	if (!a || !a->live_records || segment >= a->segment_count)
 		return -EINVAL;
 	error = swapz_verify_segment_authoritative_maps(
-		a, segment, ~(swapz_u32)0, 0U, 1);
+		a, segment, ~(swapz_u32)0, 0U,
+		verify_global_map_physical_metadata);
 	if (error)
 		return error;
 	if (a->segment_mapped_pages && a->segment_mapped_pages[segment])
@@ -993,7 +996,7 @@ int swapz_gc_advance_rotation_destination(struct swapz_authority *a,
 		 * destination. Treat contradictory maps/liveness as corruption, not
 		 * as a candidate to skip and silently route around.
 		 */
-		error = swapz_verify_recovery_victim_dead(a, segment);
+		error = swapz_verify_recovery_victim_dead(a, segment, 0);
 		if (error)
 			return error;
 		error = swapz_claim_dead_segment(a, segment, probe_start);
@@ -1048,7 +1051,8 @@ int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 	 * dead-segment metadata and performs the only externally fallible hook.
 	 * Roles remain unchanged until every check and the hook have succeeded.
 	 */
-	error = swapz_verify_recovery_victim_dead(a, evacuated_victim);
+	error = swapz_verify_recovery_victim_dead(
+		a, evacuated_victim, 1);
 	if (error)
 		return error;
 	probe_start = swapz_authority_now_ns();
@@ -1117,7 +1121,7 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 		return -EUCLEAN;
 	/* Cached zero sidecars are not proof of zero authoritative maps.
 	 * Verify the primary mapping table before publishing a new GC role. */
-	if (swapz_verify_recovery_victim_dead(a, victim))
+	if (swapz_verify_recovery_victim_dead(a, victim, 0))
 		return -EUCLEAN;
 	/* Commit both roles without further lower I/O or fallible work. */
 	a->segment_foreground[dest] = 1;
