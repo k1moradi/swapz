@@ -19,6 +19,14 @@ if [[ $# != 0 || ! -d $SHARED_PLAN ]]; then
     printf '%s\n' 'BLOCKED: ID36 requires validated source and owned shared plan' >&2
     exit 2
 fi
+for required_command in awk bash cat cut getconf grep id mkdir mktemp od python3 \
+                        rm rmdir sleep tail timeout tr; do
+    command -v "$required_command" >/dev/null 2>&1 || {
+        printf 'BLOCKED: ID36 missing required command %s; restore the standard qualification toolchain before retrying\n' \
+            "$required_command" >&2
+        exit 2
+    }
+done
 [[ $(id -u) == 0 ]] || {
     printf '%s\n' 'BLOCKED: ID36 resource-pressure qualification requires root' >&2
     exit 2
@@ -69,14 +77,6 @@ grep -qw cpu "$CGROUP_ROOT/cgroup.subtree_control" || {
     printf '%s\n' 'BLOCKED: ID36 required owned RAM pair or pressure helper unavailable; restore readable checkout helpers before qualification' >&2
     exit 2
 }
-for required_command in awk bash cat cut getconf grep id mkdir mktemp od python3 \
-                        rm rmdir sleep tail timeout tr; do
-    command -v "$required_command" >/dev/null 2>&1 || {
-        printf 'BLOCKED: ID36 missing required command %s; restore the standard qualification toolchain before retrying\n' \
-            "$required_command" >&2
-        exit 2
-    }
-done
 
 # This marker precedes admission so an early BLOCKED result cannot inherit the
 # preceding synthetic storage envelope's last benchmark phase.
