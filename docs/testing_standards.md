@@ -6024,6 +6024,22 @@ binding, while direct `gc_allocation`, forbidden-segment and role-reset
 assertions are made against the authority begin/commit helpers that exclusively
 own those fields. Tests must not require obsolete direct field writes in a
 caller after ownership has moved behind those helpers.
+For the native flush-ordering contract, a data-bearing
+`WRITE|PREFLUSH|FUA` upper BIO must first drain earlier work and complete the
+lower preflush successfully, then wait for its one owned lower data WRITE
+completion, then complete the required lower FUA flush before publishing its
+generation or acknowledging success. Failure at any stage propagates the
+original lower errno, preserves the prior authoritative mapping, latches
+terminal failure and bars later drain/retry from creating a success ACK. A
+zero-sector Linux upper flush is `REQ_OP_WRITE|REQ_PREFLUSH`, optionally with
+`REQ_FUA`: it needs the preflush result but has no data WRITE or extra
+post-write FUA command. `REQ_OP_FLUSH` is not a valid upper BIO opcode.
+Rootless fixtures must check separate flush submissions/success/failure counts,
+the exact single data-BIO completion owner, callback notification duplication
+without inventing independently completed BIOs, and durable-publication/upper
+completion counts. Their finite faults are not loaded-kernel, device-cache,
+KASAN or physical-media evidence.
+
 Mandatory Python qualification suites must remain syntactically valid; a path that exists but cannot execute does not satisfy discovery coverage.
 
 

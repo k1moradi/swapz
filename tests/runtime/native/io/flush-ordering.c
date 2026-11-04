@@ -288,6 +288,279 @@ static int test_first_terminal_error_and_no_late_success(void)
 	return 0;
 }
 
+/*
+ * Finite, rootless ordered-owner model: synchronous preflush and FUA use the
+ * exact production helpers; only the data WRITE completion is scheduled.
+ * Every modeled data callback refers to ONE submitted, owned lower BIO.
+ * A duplicate notification is a protocol-invalid repeat of that callback,
+ * not evidence of a second lower BIO or independent completion.
+ */
+enum ordered_upper_kind {
+	ORDERED_DATA_WRITE,
+	ORDERED_EMPTY_PREFLUSH_WRITE,
+};
+
+struct ordered_scenario {
+	const char *name;
+	enum ordered_upper_kind kind;
+	bool preflush;
+	bool fua;
+	int preflush_errno;
+	int data_errno;
+	int fua_errno;
+	int expected_errno;
+};
+
+struct ordered_fixture {
+	const struct ordered_scenario *scenario;
+	struct swapz_flush_meter flush_meter;
+	struct fake_lower lower;
+	unsigned int generation;
+	unsigned int authoritative_extent;
+	unsigned int successful_acks;
+	unsigned int data_submissions;
+	unsigned int data_completions;
+	unsigned int callback_notifications;
+	unsigned int duplicate_notifications;
+	unsigned int upper_completions;
+	bool drained;
+	bool preflush_done;
+	bool data_submitted;
+	bool data_done;
+	bool upper_done;
+	int data_errno;
+	int original_lower_errno;
+	int terminal_errno;
+	int upper_errno;
+};
+
+static int ordered_check(const struct ordered_fixture *fixture,
+			 const char *phase, bool valid, int expected, int actual)
+{
+	if (valid)
+		return 0;
+	fprintf(stderr,
+		"flush request=%s phase=%s original_lower_errno=%d "
+		"expected_ack_errno=%d actual_ack_errno=%d "
+		"expected=%d actual=%d acks=%u generations=%u\n",
+		fixture->scenario->name, phase, fixture->original_lower_errno,
+		fixture->scenario->expected_errno, fixture->upper_done ?
+		fixture->upper_errno : -EAGAIN, expected, actual,
+		fixture->successful_acks, fixture->generation);
+	return 1;
+}
+
+#define ORDERED_CHECK(fixture, phase, condition, expected, actual) do { \
+	if (ordered_check((fixture), (phase), (condition), (expected), (actual))) \
+		return 1; \
+} while (0)
+
+static int ordered_account_flush(void *opaque)
+{
+	struct ordered_fixture *fixture = opaque;
+
+	return swapz_flush_accounted(&fixture->flush_meter, lower_flush,
+				     &fixture->lower);
+}
+
+static int ordered_complete_upper(struct ordered_fixture *fixture, int error)
+{
+	if (fixture->upper_done)
+		return fixture->upper_errno;
+	fixture->upper_done = true;
+	fixture->upper_completions++;
+	fixture->upper_errno = error;
+	if (error) {
+		if (!fixture->terminal_errno)
+			fixture->terminal_errno = error;
+	} else {
+		fixture->successful_acks++;
+		if (fixture->scenario->kind == ORDERED_DATA_WRITE) {
+			fixture->generation++;
+			fixture->authoritative_extent = 0x92U;
+		}
+	}
+	return error;
+}
+
+static int ordered_advance(struct ordered_fixture *fixture)
+{
+	const struct ordered_scenario *scenario = fixture->scenario;
+	int error;
+
+	if (fixture->upper_done)
+		return fixture->upper_errno;
+	if (!fixture->drained)
+		return -EAGAIN;
+	if (scenario->preflush && !fixture->preflush_done) {
+		fixture->lower.next_error = scenario->preflush_errno;
+		error = ordered_account_flush(fixture);
+		fixture->preflush_done = true;
+		if (error) {
+			fixture->original_lower_errno = error;
+#ifndef SWAPZ_TEST_BYPASS_PREFLUSH_FENCE
+			return ordered_complete_upper(fixture, error);
+#endif
+		}
+	}
+	if (scenario->kind == ORDERED_EMPTY_PREFLUSH_WRITE)
+		return ordered_complete_upper(fixture, 0);
+	if (!fixture->data_submitted) {
+		fixture->data_submitted = true;
+		fixture->data_submissions++;
+		return -EAGAIN;
+	}
+	if (!fixture->data_done)
+		return -EAGAIN;
+	fixture->lower.next_error = scenario->fua_errno;
+	error = swapz_write_flush_before_publish(fixture->data_errno,
+						       scenario->fua,
+						       ordered_account_flush,
+						       fixture);
+	if (error && !fixture->original_lower_errno)
+		fixture->original_lower_errno = error;
+	return ordered_complete_upper(fixture, error);
+}
+
+static void ordered_data_callback(struct ordered_fixture *fixture, int error)
+{
+	fixture->callback_notifications++;
+	if (!fixture->data_submitted || fixture->data_done) {
+		fixture->duplicate_notifications++;
+		return;
+	}
+	fixture->data_done = true;
+	fixture->data_completions++;
+	fixture->data_errno = error;
+	if (error && !fixture->original_lower_errno)
+		fixture->original_lower_errno = error;
+}
+
+static int ordered_retry_after_failure(struct ordered_fixture *fixture)
+{
+	/* Once terminal, the target rejects a fresh upper BIO before lower I/O. */
+	if (fixture->terminal_errno)
+		return fixture->terminal_errno;
+	return -EINVAL;
+}
+
+static int test_ordered_preflush_data_fua_matrix(void)
+{
+	static const struct ordered_scenario scenarios[] = {
+		{ "WRITE|PREFLUSH|FUA", ORDERED_DATA_WRITE, true, true,
+		  0, 0, 0, 0 },
+		{ "WRITE|PREFLUSH preflush-failure", ORDERED_DATA_WRITE,
+		  true, true, -EOPNOTSUPP, 0, 0, -EOPNOTSUPP },
+		{ "WRITE|PREFLUSH data-failure", ORDERED_DATA_WRITE,
+		  true, true, 0, -EIO, 0, -EIO },
+		{ "WRITE|PREFLUSH FUA-failure", ORDERED_DATA_WRITE,
+		  true, true, 0, 0, -EIO, -EIO },
+		{ "WRITE|FUA lower-failure", ORDERED_DATA_WRITE,
+		  false, true, 0, 0, -EOPNOTSUPP, -EOPNOTSUPP },
+		{ "WRITE|PREFLUSH without-FUA", ORDERED_DATA_WRITE,
+		  true, false, 0, 0, 0, 0 },
+		{ "empty WRITE|PREFLUSH", ORDERED_EMPTY_PREFLUSH_WRITE,
+		  true, false, 0, 0, 0, 0 },
+		{ "empty WRITE|PREFLUSH|FUA", ORDERED_EMPTY_PREFLUSH_WRITE,
+		  true, true, 0, 0, 0, 0 },
+		{ "empty WRITE|PREFLUSH failure", ORDERED_EMPTY_PREFLUSH_WRITE,
+		  true, false, -EIO, 0, 0, -EIO },
+	};
+	unsigned int index;
+
+	for (index = 0; index < sizeof(scenarios) / sizeof(scenarios[0]);
+	     ++index) {
+		const struct ordered_scenario *scenario = &scenarios[index];
+		struct ordered_fixture fixture = {
+			.scenario = scenario,
+			.generation = 7,
+			.authoritative_extent = 0x91U,
+		};
+		unsigned int expected_data = scenario->kind ==
+			ORDERED_DATA_WRITE && !scenario->preflush_errno;
+		unsigned int expected_flushes = scenario->preflush ? 1U : 0U;
+		unsigned int expected_acks = !scenario->expected_errno;
+		unsigned int expected_failed_flushes;
+		int result;
+
+		/* Both previous work and this request are fenced by drain. */
+		result = ordered_advance(&fixture);
+		ORDERED_CHECK(&fixture, "pre-drain", result == -EAGAIN &&
+			!fixture.flush_meter.attempts && !fixture.data_submissions,
+			-EAGAIN, result);
+		fixture.drained = true;
+		result = ordered_advance(&fixture);
+		if (!expected_data) {
+			ORDERED_CHECK(&fixture, "preflush-completion",
+				result == scenario->expected_errno,
+				scenario->expected_errno, result);
+		} else {
+			ORDERED_CHECK(&fixture, "data-submission",
+				result == -EAGAIN && fixture.data_submissions == 1,
+				-EAGAIN, result);
+			/* A drain before the delayed lower callback cannot ACK. */
+			result = ordered_advance(&fixture);
+			ORDERED_CHECK(&fixture, "delayed-data-completion",
+				result == -EAGAIN && !fixture.upper_done,
+				-EAGAIN, result);
+			ordered_data_callback(&fixture, scenario->data_errno);
+			/* Duplicate notification is NOT a second owned lower BIO. */
+			ordered_data_callback(&fixture, 0);
+			result = ordered_advance(&fixture);
+			ORDERED_CHECK(&fixture, "data-fua-completion",
+				result == scenario->expected_errno,
+				scenario->expected_errno, result);
+			ordered_data_callback(&fixture, -EIO);
+			ORDERED_CHECK(&fixture, "duplicate-terminal-callback",
+				fixture.data_completions == 1 &&
+				fixture.callback_notifications == 3 &&
+				fixture.duplicate_notifications == 2 &&
+				fixture.data_errno == scenario->data_errno,
+				1, fixture.data_completions);
+		}
+		if (expected_data && scenario->fua && !scenario->data_errno)
+			expected_flushes++;
+		expected_failed_flushes = (scenario->preflush_errno != 0) +
+			(scenario->fua_errno != 0 && expected_data &&
+			 scenario->fua && !scenario->data_errno);
+		ORDERED_CHECK(&fixture, "upper-completion",
+			fixture.upper_done && fixture.upper_completions == 1 &&
+			fixture.successful_acks == expected_acks &&
+			fixture.generation == 7 +
+				(expected_data && expected_acks ? 1U : 0U) &&
+			fixture.authoritative_extent ==
+				(expected_data && expected_acks ? 0x92U : 0x91U) &&
+			fixture.original_lower_errno == scenario->expected_errno &&
+			fixture.data_submissions == expected_data &&
+			fixture.data_completions == expected_data &&
+			fixture.flush_meter.attempts == expected_flushes &&
+			fixture.flush_meter.successes ==
+				expected_flushes - expected_failed_flushes &&
+			fixture.flush_meter.failures == expected_failed_flushes &&
+			!fixture.flush_meter.injected &&
+			fixture.lower.called == expected_flushes,
+			(int)expected_acks, (int)fixture.successful_acks);
+		/* Repeated drain and a new retry after error cannot add an ACK. */
+		result = ordered_advance(&fixture);
+		ORDERED_CHECK(&fixture, "drain-after-terminal",
+			result == scenario->expected_errno &&
+			fixture.upper_completions == 1 &&
+			fixture.successful_acks == expected_acks &&
+			fixture.flush_meter.attempts == expected_flushes,
+			scenario->expected_errno, result);
+		if (scenario->expected_errno) {
+			result = ordered_retry_after_failure(&fixture);
+			ORDERED_CHECK(&fixture, "retry-after-error",
+				result == scenario->expected_errno &&
+				fixture.successful_acks == 0 &&
+				fixture.generation == 7 &&
+				fixture.authoritative_extent == 0x91U,
+				scenario->expected_errno, result);
+		}
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -301,6 +574,7 @@ int main(void)
 	CHECK(test_no_ack_or_new_generation_before_fua() == 0); passed++;
 	CHECK(test_callback_before_or_after_drain() == 0); passed++;
 	CHECK(test_first_terminal_error_and_no_late_success() == 0); passed++;
+	CHECK(test_ordered_preflush_data_fua_matrix() == 0); passed++;
 	printf("SWAPZ_FLUSH_ACCOUNTING_TESTS_PASS=%d\n", passed);
 	return 0;
 }
