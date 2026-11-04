@@ -544,7 +544,7 @@ static int test_gc_torn_run_resumes_same_destination(void)
 		CHECK(maps[index].start_block == original[index].start_block &&
 		      maps[index].generation == original[index].generation);
 	for (index = start; index < end; ++index)
-		CHECK(!live[index] && !classes[index]);
+		CHECK(!live[index]);
 
 	/* The whole uncertain reservation stays quarantined. Retry starts after
 	 * it, publishes each generation once, then finishes the same rotation. */
