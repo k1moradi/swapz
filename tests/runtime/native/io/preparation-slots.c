@@ -441,7 +441,9 @@ static int test_production_failure_and_wake_gates(void)
 			in_producer = 1;
 		if (strstr(line, "static void swapz_order_window_greedy("))
 			in_producer = 0;
-		if (strstr(line, "static void swapz_fail("))
+		if (!failure_bytes &&
+		    (strstr(line, "static void swapz_fail_at(") ||
+		     strstr(line, "static void swapz_fail(")))
 			in_failure = 1;
 		if (in_failure) {
 			size_t length = strlen(line);
