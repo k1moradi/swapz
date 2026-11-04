@@ -329,12 +329,22 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
 
         self.assertIn("os.O_NOFOLLOW", verifier)
         self.assertIn("os.O_NONBLOCK", verifier)
-        self.assertIn("identity = os.fstat(state_fd)", verifier)
+        self.assertIn("named_identity = os.lstat(sys.argv[1])", verifier)
+        self.assertIn("opened_identity = os.fstat(state_fd)", verifier)
+        self.assertIn("after_identity = os.lstat(sys.argv[1])", verifier)
         self.assertIn("stat.S_ISREG(identity.st_mode)", verifier)
-        self.assertIn("stat.S_IMODE(identity.st_mode) != 0o600", verifier)
-        self.assertIn("identity.st_nlink != 1", verifier)
-        self.assertIn("identity.st_size > 4096", verifier)
-        self.assertLess(verifier.index("os.fstat(state_fd)"),
+        self.assertIn("stat.S_IMODE(identity.st_mode) == 0o600", verifier)
+        self.assertIn("identity.st_nlink == 1", verifier)
+        self.assertIn("0 < identity.st_size <= 4096", verifier)
+        self.assertIn(
+            "opened_identity.st_ino != named_identity.st_ino", verifier)
+        self.assertIn(
+            "after_identity.st_ino != opened_identity.st_ino", verifier)
+        self.assertLess(verifier.index("named_identity = os.lstat"),
+                        verifier.index("state_fd = os.open"))
+        self.assertLess(verifier.index("opened_identity = os.fstat(state_fd)"),
+                        verifier.index("json.loads(actual_bytes.decode"))
+        self.assertLess(verifier.index("after_identity = os.lstat"),
                         verifier.index("json.loads(actual_bytes.decode"))
         self.assertNotIn('with open(sys.argv[1]', verifier)
 

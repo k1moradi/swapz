@@ -1050,26 +1050,46 @@ import os
 import stat
 import sys
 
+def state_identity_safe(identity):
+    return (
+        stat.S_ISREG(identity.st_mode) and
+        identity.st_uid == 0 and
+        stat.S_IMODE(identity.st_mode) == 0o600 and
+        identity.st_nlink == 1 and
+        0 < identity.st_size <= 4096
+    )
+
+
 state_fd = -1
 valid = False
 try:
-    # Never block on or follow an unsafe replacement for durable state.
+    # Reject special files before open, then pin and revalidate the exact inode.
+    named_identity = os.lstat(sys.argv[1])
+    if not state_identity_safe(named_identity):
+        raise ValueError("unsafe named durable state identity")
     state_fd = os.open(
         sys.argv[1],
         os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
-    identity = os.fstat(state_fd)
-    if (not stat.S_ISREG(identity.st_mode) or identity.st_uid != 0 or
-            stat.S_IMODE(identity.st_mode) != 0o600 or identity.st_nlink != 1 or
-            identity.st_size <= 0 or identity.st_size > 4096):
-        raise ValueError("unsafe durable state identity")
+    opened_identity = os.fstat(state_fd)
+    if (not state_identity_safe(opened_identity) or
+            opened_identity.st_dev != named_identity.st_dev or
+            opened_identity.st_ino != named_identity.st_ino or
+            opened_identity.st_size != named_identity.st_size):
+        raise ValueError("durable state identity changed while opening")
     payload = bytearray()
-    while len(payload) < identity.st_size:
-        chunk = os.read(state_fd, identity.st_size - len(payload))
+    while len(payload) < opened_identity.st_size:
+        chunk = os.read(state_fd, opened_identity.st_size - len(payload))
         if not chunk:
             raise OSError("short durable state read")
         payload.extend(chunk)
     if os.read(state_fd, 1):
         raise ValueError("durable state changed size while reading")
+    after_identity = os.lstat(sys.argv[1])
+    if (not state_identity_safe(after_identity) or
+            after_identity.st_dev != opened_identity.st_dev or
+            after_identity.st_ino != opened_identity.st_ino or
+            after_identity.st_size != opened_identity.st_size):
+        raise ValueError("durable state path changed while reading")
     actual_bytes = bytes(payload)
     state = json.loads(actual_bytes.decode("utf-8"))
     previous = state.get("recovery_previous_stage")
