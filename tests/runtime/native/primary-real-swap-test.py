@@ -1396,6 +1396,24 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(
             responses[-1]["reason"], "production source tree is not clean")
 
+        # The parent must retain BLOCKED when its explicit final source
+        # refusal makes the privileged child exit with a generic FAIL code.
+        stream.input.seek(0)
+        stream.output = io.BytesIO()
+        child.wait.return_value = 1
+        with mock.patch.object(
+                parent, "_check_git_source",
+                side_effect=[None, None, None,
+                             parent.Blocked("production source tree is not clean")]):
+            result = parent._serve_admission(
+                server, child, source_sha, "/usr/bin/git",
+                "d" * 64, hashes, "8" * 64, 2)
+        self.assertEqual(result, 2)
+        self.assertEqual(
+            [json.loads(line)["status"]
+             for line in stream.output.getvalue().splitlines()],
+            ["PASS", "PASS", "PASS", "BLOCKED"])
+
     def test_parent_bounds_abnormal_child_teardown_after_admission(self):
         # A child that disconnects after initial admission must not hang the
         # unprivileged parent indefinitely or erase a termination error.

@@ -320,6 +320,7 @@ def _serve_admission(server: socket.socket,
         [f"cycle-{index}" for index in range(1, cycles + 1)] +
         ["final"])
     passed_phases: list[str] = []
+    parent_rejected = False
     server.settimeout(30)
     try:
         connection, _address = server.accept()
@@ -364,6 +365,7 @@ def _serve_admission(server: socket.socket,
                 except EOFError:
                     break
                 except Blocked as exc:
+                    parent_rejected = True
                     print(
                         "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
                         file=sys.stderr)
@@ -372,6 +374,7 @@ def _serve_admission(server: socket.socket,
                     expected_phases[len(passed_phases)]
                     if len(passed_phases) < len(expected_phases) else None)
                 if request["phase"] != expected_phase:
+                    parent_rejected = True
                     _reply(stream, request, "BLOCKED", oracle_sha256,
                            "unexpected_source_admission_phase")
                     print(
@@ -382,6 +385,7 @@ def _serve_admission(server: socket.socket,
                 try:
                     _check_git_source(validated_source, git)
                 except Blocked as exc:
+                    parent_rejected = True
                     _reply(stream, request, "BLOCKED", oracle_sha256, str(exc))
                     print(
                         "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
@@ -402,6 +406,9 @@ def _serve_admission(server: socket.socket,
             "after source admission channel closed")
         _stop_unadmitted_child_preserving(child, failure)
         raise failure from exc
+    if parent_rejected:
+        # A parent-owned source refusal is BLOCKED even when the child exits 1.
+        return 2
     if result == 0 and passed_phases != expected_phases:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
