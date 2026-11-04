@@ -5,6 +5,13 @@ The behavioral model is intentionally independent of the production coordinator:
 it describes externally observable transaction/kernel-state invariants without
 performing swapon, swapoff, Device Mapper operations, or privileged I/O.
 """
+import errno
+import fcntl
+import importlib.util
+import json
+import os
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -1122,6 +1129,370 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             "python3 -B tests/runtime/native/primary-lifecycle-audit-test.py -v"
         )
         self.assertIn(invocation, runner)
+
+
+class PackageCrashToPrimaryAdmissionTest(unittest.TestCase):
+    """SIGKILL a real rootless package transaction, then call primary's C API.
+
+    Only the production C function boundaries and guard are source-extracted;
+    privileged lifecycle side effects are replaced by counters. The package
+    process and its durable journal come from package-dkms-test.py unchanged.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if os.geteuid() == 0:
+            raise unittest.SkipTest("package crash fixture requires nonroot")
+        cls.fixture_directory = tempfile.TemporaryDirectory(
+            prefix="swapz-package-primary-admission-")
+        cls.addClassCleanup(cls.fixture_directory.cleanup)
+        cls.executable = cls._compile_primary_admission_fixture()
+
+    @staticmethod
+    def _function_definition(source: str, symbol: str) -> str:
+        """Keep production declarations and bodies; never match comments."""
+        executable = _c_code_only(source)
+        match = re.search(
+            r"(?m)^(?:static\s+)?int\s+" + re.escape(symbol) +
+            r"\s*\([^;]*?\)\s*\{", executable, re.S)
+        if match is None:
+            raise AssertionError(f"missing primary definition: {symbol}")
+        depth = 1
+        for position in range(match.end(), len(executable)):
+            if executable[position] == "{":
+                depth += 1
+            elif executable[position] == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[match.start():position + 1]
+        raise AssertionError(f"unclosed primary definition: {symbol}")
+
+    @classmethod
+    def _compile_primary_admission_fixture(cls, *, unsafe_bypass=False):
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        headers = (ROOT / "src/userspace/swapz-primary.h").read_text(
+            encoding="utf-8")
+        symbols = (
+            "swapz_primary_mutation_lock_at",
+            "swapz_primary_mutation_lock",
+            "swapz_primary_package_transactions_clear_at",
+            "swapz_primary_run_mutating_action",
+            "swapz_primary_command",
+        )
+        definitions = {name: cls._function_definition(source, name)
+                       for name in symbols}
+        # The only rootless change to each real coordinator boundary is to
+        # substitute our nonroot fixture uid for the production uid 0. The
+        # directory macros below similarly redirect to private test paths.
+        for name, function_call in (
+                ("swapz_primary_mutation_lock",
+                 "SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY"),
+                ("swapz_primary_run_mutating_action",
+                 "SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY")):
+            pattern = (r"(" + re.escape(function_call) + r"\s*,\s*)0(\s*\))")
+            # The coordinator calls the guard across a line break; the lock
+            # wrapper calls _at with the same arguments and owner literal.
+            changed, count = re.subn(
+                pattern, lambda match: match.group(1) +
+                "geteuid()" + match.group(2), definitions[name])
+            if count != 1:
+                raise AssertionError(f"uid seam moved in {name}: {count}")
+            definitions[name] = changed
+        if unsafe_bypass:
+            old = ("action == SWAPZ_PRIMARY_MUTATING_PREPARE ||\n"
+                   "\t     action == SWAPZ_PRIMARY_MUTATING_START")
+            new = ("action == SWAPZ_PRIMARY_MUTATING_STOP ||\n"
+                   "\t     action == SWAPZ_PRIMARY_MUTATING_RECOVER")
+            if definitions["swapz_primary_run_mutating_action"].count(old) != 1:
+                raise AssertionError("production coordinator guard moved")
+            definitions["swapz_primary_run_mutating_action"] = (
+                definitions["swapz_primary_run_mutating_action"].replace(
+                    old, new, 1))
+        constants = {}
+        for name in ("SWAPZ_PRIMARY_PARTUUID_LENGTH",
+                     "SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX"):
+            match = re.search(r"(?m)^#define\s+" + name +
+                              r"\s+(\d+U?)\s*$", headers)
+            if not match:
+                raise AssertionError("missing source-derived constant " + name)
+            constants[name] = match.group(1)
+        preamble = f'''/* Source-extracted production C, unprivileged test linkage. */
+#define _GNU_SOURCE
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <linux/stat.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#define SWAPZ_PRIMARY_PARTUUID_LENGTH {constants["SWAPZ_PRIMARY_PARTUUID_LENGTH"]}
+#define SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX {constants["SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX"]}
+#define SWAPZ_PRIMARY_MUTATION_LOCK_NAME "package.lock"
+#define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY getenv("SWAPZ_TEST_LOCK_DIRECTORY")
+#define SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY getenv("SWAPZ_TEST_PACKAGE_TRANSACTIONS")
+enum swapz_primary_mutating_action {{
+    SWAPZ_PRIMARY_MUTATING_PREPARE,
+    SWAPZ_PRIMARY_MUTATING_START,
+    SWAPZ_PRIMARY_MUTATING_STOP,
+    SWAPZ_PRIMARY_MUTATING_RECOVER,
+}};
+int swapz_primary_prepare_metadata(void);
+int swapz_primary_start_prepared(void);
+int swapz_primary_stop_active(void);
+int swapz_primary_recover(void);
+int swapz_primary_privileged_execution_enabled(void);
+int swapz_primary_cleanup_execution_enabled(void);
+int swapz_primary_read_only_plan(void);
+int swapz_primary_target_config_read(char *partuuid);
+int swapz_primary_systemd_target_units(const char *partuuid,
+    char *device_unit, char *swap_unit);
+int swapz_primary_qualification_import_serialized(const char *report_path);
+'''
+        fixture_name = "primary-admission-unsafe" if unsafe_bypass else "primary-admission"
+        fixture_source = Path(cls.fixture_directory.name) / (fixture_name + ".c")
+        executable = Path(cls.fixture_directory.name) / fixture_name
+        fixture_source.write_text(
+            preamble + "\n\n".join(definitions.values()) + "\n",
+            encoding="utf-8")
+        command = [
+            "cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra",
+            "-Wpedantic", "-Werror", "-Wstrict-prototypes",
+            "-DSWAPZ_PRIMARY_PACKAGE_ADMISSION_FIXTURE",
+        ]
+        if os.getenv("SWAPZ_TEST_ADMISSION_SANITIZERS") == "1":
+            command.extend(("-fsanitize=address,undefined", "-fno-omit-frame-pointer"))
+        command.extend((
+            str(fixture_source),
+            str(ROOT / "tests/runtime/native/primary-lifecycle-fault-shim-harness.c"),
+            "-o", str(executable)))
+        compiled = subprocess.run(
+            command, cwd=ROOT, text=True, capture_output=True, check=False)
+        if compiled.returncode:
+            raise AssertionError("primary admission C fixture compilation failed:\n" +
+                                 compiled.stderr)
+        return executable
+
+    def _package_fixture(self):
+        spec = importlib.util.spec_from_file_location(
+            "swapz_package_crash_tests",
+            ROOT / "tests/runtime/native/package-dkms-test.py")
+        if spec is None or spec.loader is None:
+            self.fail("cannot import real package crash fixture")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        package = module.PackageLifecycle(
+            methodName="test_clean_repeat_uninstall_and_reinstall")
+        package.setUp()
+        self.addCleanup(package.doCleanups)
+        return package
+
+    def _primary(self, package, action, *, executable=None, extra=None):
+        environment = dict(os.environ,
+                           SWAPZ_TEST_LOCK_DIRECTORY=str(package.home),
+                           SWAPZ_TEST_PACKAGE_TRANSACTIONS=str(
+                               package.home / "transactions"))
+        if extra:
+            environment.update(extra)
+        result = subprocess.run(
+            [str(executable or self.executable), action],
+            cwd=package.repo_root, env=environment, text=True,
+            capture_output=True, timeout=10, check=False)
+        match = re.fullmatch(
+            r"SIMULATION prepare=(\d+) start=(\d+) stop=(\d+) "
+            r"recover=(\d+) header=(\d+) mapper=(\d+) "
+            r"mkswap=(\d+) swapon=(\d+)\n", result.stdout)
+        self.assertIsNotNone(match, f"invalid primary fixture trace: {result!r}")
+        return result, dict(zip(
+            ("prepare", "start", "stop", "recover", "header", "mapper",
+             "mkswap", "swapon"), map(int, match.groups())))
+
+    def _assert_package_blocked(self, package, action, *, extra=None,
+                                executable=None, expected_errno=errno.EBUSY):
+        result, calls = self._primary(package, action, executable=executable,
+                                      extra=extra)
+        self.assertEqual(result.returncode, 2, result)
+        self.assertEqual(set(calls.values()), {0}, result)
+        if action == "prepare":
+            self.assertIn("PRIMARY_PREPARE=FAILED "
+                          "phase=package-transaction-preflight", result.stderr)
+            if expected_errno is not None:
+                self.assertIn(f"errno={expected_errno}", result.stderr)
+        elif action == "start":
+            # Production start currently emits no phase (reported separately);
+            # the actual guard must nevertheless return EBUSY at this boundary.
+            self.assertIn("BLOCKED: primary-swap start failed:", result.stderr)
+            if expected_errno is not None:
+                self.assertIn(os.strerror(expected_errno), result.stderr)
+        else:
+            self.fail("only prepare/start are package-gated")
+
+    def _assert_cleanup_allowed(self, package):
+        for action in ("stop", "recover"):
+            with self.subTest(action=action):
+                result, calls = self._primary(package, action)
+                self.assertEqual(result.returncode, 0, result)
+                self.assertEqual(calls[action], 1, result)
+                self.assertEqual(sum(calls.values()), 1, result)
+
+    def _assert_clean_admission(self, package):
+        for action, forbidden in (
+                ("prepare", {"mkswap", "swapon"}),
+                ("start", {"header"})):
+            with self.subTest(action=action):
+                result, calls = self._primary(package, action)
+                self.assertEqual(result.returncode, 0, result)
+                self.assertEqual(calls[action], 1, result)
+                self.assertGreater(sum(calls.values()), 1, result)
+                for name in forbidden:
+                    self.assertEqual(calls[name], 0, result)
+
+    def _crash_and_reacquire(self, package, action, phase, extra=None):
+        transaction = package.kill_at_durable_phase(action, phase, extra)
+        self.assertTrue(transaction.is_dir())
+        self.assertEqual(json.loads((transaction / "state.json").read_text())[
+            "phase"], phase)
+        # The killed installer no longer holds flock. Reacquiring this same
+        # inode is a negative control for a test that only checks lock refusal.
+        with (package.home / "package.lock").open("r+b") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked, _ = self._primary(package, "prepare")
+            self.assertIn("phase=global-mutation-lock", locked.stderr)
+            self.assertNotIn("phase=package-transaction-preflight",
+                             locked.stderr)
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        self._assert_package_blocked(package, "prepare")
+        self._assert_package_blocked(package, "start")
+        self._assert_cleanup_allowed(package)
+        return transaction
+
+    def test_clean_and_empty_directory_admit_and_cleanup(self):
+        package = self._package_fixture()
+        self._assert_clean_admission(package)  # missing transaction root
+        transactions = package.home / "transactions"
+        transactions.mkdir(mode=0o700)
+        self._assert_clean_admission(package)  # existing, empty root
+        self._assert_cleanup_allowed(package)
+
+    def test_real_sigkill_phases_block_both_commands_not_cleanup(self):
+        for action, phase, install_first in (
+                ("install", "source-created", False),
+                ("install", "module-promoted", False),
+                ("install", "cli-published", False),
+                ("uninstall", "dkms-removed", True),
+                ("uninstall", "systemd-reload-complete", True)):
+            with self.subTest(action=action, phase=phase):
+                package = self._package_fixture()
+                if install_first:
+                    installed = package.invoke("install")
+                    self.assertEqual(installed.returncode, 0, installed.stderr)
+                self._crash_and_reacquire(package, action, phase)
+
+    def test_malformed_and_substituted_package_journals_fail_closed(self):
+        package = self._package_fixture()
+        transaction = self._crash_and_reacquire(
+            package, "install", "module-promoted")
+        journal = transaction / "state.json"
+        original = journal.read_bytes()
+        try:
+            journal.write_bytes(b"{bad package journal\n")
+            for action in ("prepare", "start"):
+                self._assert_package_blocked(package, action)
+            self._assert_cleanup_allowed(package)
+        finally:
+            journal.write_bytes(original)
+        transactions = package.home / "transactions"
+        retained = package.home / "transactions-retained"
+        transactions.rename(retained)
+        try:
+            transactions.symlink_to(retained, target_is_directory=True)
+            for action in ("prepare", "start"):
+                self._assert_package_blocked(
+                    package, action, expected_errno=None)
+            self._assert_cleanup_allowed(package)
+            transactions.unlink()
+            transactions.write_text("not a directory")
+            for action in ("prepare", "start"):
+                self._assert_package_blocked(
+                    package, action, expected_errno=None)
+            self._assert_cleanup_allowed(package)
+        finally:
+            if transactions.is_symlink() or transactions.is_file():
+                transactions.unlink()
+            retained.rename(transactions)
+        # Wrong owner is rejected before the journal entry is enumerated.
+        for action in ("prepare", "start"):
+            result, calls = self._primary(
+                package, action,
+                extra={"SWAPZ_TEST_WRONG_TRANSACTION_OWNER": "1"})
+            self.assertEqual(result.returncode, 2, result)
+            self.assertEqual(set(calls.values()), {0}, result)
+            if action == "prepare":
+                self.assertIn("phase=package-transaction-preflight",
+                              result.stderr)
+                self.assertIn(f"errno={errno.EPERM}", result.stderr)
+        self._assert_cleanup_allowed(package)
+
+        # A nonempty directory rejects at readdir(EBUSY) first. An empty
+        # directory is essential for proving the later statx mount-ID check.
+        clean_package = self._package_fixture()
+        (clean_package.home / "transactions").mkdir(mode=0o700)
+        self._assert_clean_admission(clean_package)
+        for action in ("prepare", "start"):
+            result, calls = self._primary(
+                clean_package, action,
+                extra={"SWAPZ_TEST_CHANGED_MOUNT_ID": "1"})
+            self.assertEqual(result.returncode, 2, result)
+            self.assertEqual(set(calls.values()), {0}, result)
+            if action == "prepare":
+                self.assertIn("phase=package-transaction-preflight",
+                              result.stderr)
+                self.assertIn(f"errno={errno.ESTALE}", result.stderr)
+        self._assert_cleanup_allowed(clean_package)
+
+    def test_committed_journal_then_verified_test_recovery_allows_reentry(self):
+        package = self._package_fixture()
+        transaction = self._crash_and_reacquire(
+            package, "install", "committed")
+        state = json.loads((transaction / "state.json").read_text())
+        self.assertEqual(state["schema"], "swapz-package-install-v1")
+        self.assertEqual(state["phase"], "committed")
+        package.assert_installed_exact()  # verified installed payload, not a guess
+        # The package CLI currently has no crash-recovery command; test-only
+        # removal represents verified external recovery after checking the
+        # durable terminal state and exact installed package bytes.
+        shutil.rmtree(transaction)
+        self.assertEqual(list((package.home / "transactions").iterdir()), [])
+        for _ in range(2):
+            self._assert_clean_admission(package)
+            self._assert_cleanup_allowed(package)
+
+    def test_unsafe_coordinator_bypass_mutant_is_observably_rejected(self):
+        package = self._package_fixture()
+        self._crash_and_reacquire(package, "install", "module-promoted")
+        unsafe = self._compile_primary_admission_fixture(unsafe_bypass=True)
+        for action in ("prepare", "start"):
+            with self.subTest(action=action):
+                # An inverted coordinator guard must demonstrably fail the
+                # same assertion as the real path, and reach side-effect fakes.
+                with self.assertRaises(AssertionError):
+                    self._assert_package_blocked(
+                        package, action, executable=unsafe)
+                result, calls = self._primary(package, action, executable=unsafe)
+                self.assertEqual(result.returncode, 0, result)
+                self.assertEqual(calls[action], 1, result)
+                self.assertGreater(
+                    sum(calls[name] for name in
+                        ("header", "mapper", "mkswap", "swapon")), 0)
+        for action in ("stop", "recover"):
+            with self.subTest(action=action):
+                result, calls = self._primary(package, action, executable=unsafe)
+                self.assertEqual(result.returncode, 2, result)
+                self.assertEqual(set(calls.values()), {0}, result)
 
 
 if __name__ == "__main__":
