@@ -8,9 +8,10 @@ any copied formatter parser. The executable fixture
 fixture is a checkpoint behavior test, not an architectural requirement that
 cross-PID scanning live inside `swapz_primary_read_mount_facts()`. The
 architecture-neutral source guard in
-`tests/runtime/native/primary-lifecycle-audit-test.py` discovers the
-production cross-PID scanner by its behavior and requires the coordinator to
-reach it at the final safe pre-mutation boundary.
+`tests/runtime/native/primary-lifecycle-audit-test.py` discovers production
+cross-PID scan paths by behavior rather than by function name and requires the
+coordinator to reach a path with the corrected namespace-exit classification at
+the final safe pre-mutation boundary.
 
 ## Source boundary and independent checks
 

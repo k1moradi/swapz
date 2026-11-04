@@ -87,8 +87,8 @@ def c_function_reaches(source: str, start: str, target: str,
         for called in c_function_calls(source, start, available))
 
 
-def cross_namespace_mount_scanner(source: str) -> str:
-    """Locate the production PID mount-table scanner by behavior, not name."""
+def cross_namespace_mount_scanners(source: str) -> tuple[str, ...]:
+    """Locate production PID mount-table scanners by behavior, not name."""
     candidates = []
     for symbol in c_primary_function_names(source):
         executable = c_function_body(source, symbol)
@@ -98,11 +98,10 @@ def cross_namespace_mount_scanner(source: str) -> str:
             executable)
         if "mountinfo" in raw and enumerates:
             candidates.append(symbol)
-    if len(candidates) != 1:
+    if not candidates:
         raise AssertionError(
-            "expected exactly one production cross-PID mountinfo scanner, "
-            f"found {candidates}")
-    return candidates[0]
+            "missing production cross-PID mountinfo scanner")
+    return tuple(candidates)
 
 
 def _primary_preprocessor(definitions=(), source_text=None):
@@ -706,43 +705,51 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
     def test_cross_namespace_mount_scan_revalidates_before_first_mutation(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         functions = set(c_primary_function_names(source))
-        scanner = cross_namespace_mount_scanner(source)
+        scanners = cross_namespace_mount_scanners(source)
 
-        # Root identity remains a current-namespace fact. The cross-PID
-        # inventory is a separate production scanner, not a replacement root.
-        self.assertNotEqual(scanner, "swapz_primary_read_mount_facts")
+        # Root identity remains a current-namespace fact. Cross-PID scanning
+        # may be integrated or wrapped, but it must never replace the self-root
+        # evidence read from the current namespace.
         current_mounts_raw = c_function_body(
             source, "swapz_primary_read_mount_facts", code_only=False)
         self.assertIn("/proc/self/mountinfo", current_mounts_raw)
 
-        scanner_raw = c_function_body(source, scanner, code_only=False)
         namespace_helpers = {
             symbol for symbol in functions
             if "ns/mnt" in c_function_body(
                 source, symbol, code_only=False)
         }
-        self.assertTrue(
-            "ns/mnt" in scanner_raw or
+        classified_scanners = tuple(
+            scanner for scanner in scanners
+            if "ns/mnt" in c_function_body(
+                source, scanner, code_only=False) or
             any(c_function_reaches(
                 source, scanner, helper, functions)
-                for helper in namespace_helpers),
+                for helper in namespace_helpers))
+        self.assertTrue(
+            classified_scanners,
             "PID scanner does not classify vanished mount namespaces")
 
-        # The scanner or one of its wrappers must be used in initial metadata
+        # A scanner or one of its wrappers must be used in initial metadata
         # admission, but the critical requirement is a fresh call after the
         # exact target descriptor is opened and before the first partition
-        # write. This permits the scanner to be wrapped without pinning a name.
+        # write. This permits implementation wrappers without pinning a name.
         prepare = c_function_body(source, "swapz_primary_prepare_metadata")
         start = c_function_body(source, "swapz_primary_start_prepared")
+        target_open_body = c_function_body(
+            source, "swapz_primary_target_open_exclusive")
         write_checked = c_function_body(
             source, "swapz_primary_write_header_checked_fd")
 
         def text_reaches_scanner(text: str) -> bool:
             for symbol in functions:
-                if re.search(r"\b" + re.escape(symbol) + r"\s*\(", text):
-                    if c_function_reaches(
-                            source, symbol, scanner, functions):
-                        return True
+                if not re.search(
+                        r"\b" + re.escape(symbol) + r"\s*\(", text):
+                    continue
+                if any(c_function_reaches(
+                        source, symbol, scanner, functions)
+                       for scanner in classified_scanners):
+                    return True
             return False
 
         self.assertTrue(
@@ -757,6 +764,16 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         final_window = start[target_open_complete:first_partition_write]
         revalidated_in_start = text_reaches_scanner(final_window)
 
+        opened_target_call = target_open_body.find(
+            "swapz_primary_open_target_checked_partuuid_paths_mode(")
+        revalidated_in_target_open = False
+        if opened_target_call >= 0:
+            opened_target_complete = target_open_body.find(
+                ";", opened_target_call)
+            if opened_target_complete >= 0:
+                revalidated_in_target_open = text_reaches_scanner(
+                    target_open_body[opened_target_complete + 1:])
+
         pwrite_position = write_checked.find("pwrite(")
         self.assertGreaterEqual(
             pwrite_position, 0,
@@ -765,7 +782,8 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             write_checked[:pwrite_position])
 
         self.assertTrue(
-            revalidated_in_start or revalidated_in_writer,
+            revalidated_in_start or revalidated_in_target_open or
+            revalidated_in_writer,
             "cross-PID mount inventory is not revalidated at the final "
             "safe pre-mutation boundary")
 
