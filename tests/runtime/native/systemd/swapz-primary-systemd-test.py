@@ -499,6 +499,8 @@ class BootVerifierTests(unittest.TestCase):
         (self.sys / "power").mkdir(parents=True)
         (self.sys / "power" / "resume").write_text("0:0\n", encoding="ascii")
         (self.sys / "module" / "dm_swapz" / "parameters").mkdir(parents=True)
+        (self.sys / "dev" / "block" / "253:0" / "dm").mkdir(parents=True)
+        (self.sys / "dev" / "block" / "253:0" / "dm" / "name").write_text("swapz-primary\n", encoding="ascii")
         (self.dev / "disk" / "by-partuuid").mkdir(parents=True)
         (self.dev / "disk" / "by-uuid").mkdir(parents=True)
         (self.dev / "mapper").mkdir(parents=True)
@@ -685,7 +687,11 @@ class BootVerifierTests(unittest.TestCase):
                 info) printf '%s\\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}" ;;
                 table) printf '%s\\n' "${MOCK_DM_TABLE:-0 216641536 swapz 8:1 0 64 0 2 0 1 0 0}" ;;
                 status)
-                    printf '0 216641536 swapz version=0 flush_err=0 segment_discards_failed=%s failed=%s error=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0\\n' "$MOCK_DM_DISCARD_FAIL" "$MOCK_DM_STATUS_FAIL"
+                    if [ "$MOCK_DM_STATUS_OVERRIDE_SET" = 1 ]; then
+                        printf '%s\\n' "$MOCK_DM_STATUS_OVERRIDE"
+                    else
+                        printf '0 216641536 swapz version=0 flush_err=0 segment_discards_failed=%s failed=%s error=0 upper_write_completed_err=0 endio_write_seen_err=0 endio_write_forced_err=0 gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 gc_reserve_segments_initial=2 gc_reserve_segments_current=2 gc_destination_advances=0 window_gc_pressure=0\\n' "$MOCK_DM_DISCARD_FAIL" "$MOCK_DM_STATUS_FAIL"
+                    fi
                     ;;
                 *) exit 2 ;;
                 esac
@@ -1158,6 +1164,153 @@ class BootVerifierTests(unittest.TestCase):
         self.assertEqual(observed.returncode, 1, observed.stderr)
         report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
         self.assertIn("hibernation_resume_configuration_conflict", report)
+
+
+
+    def test_same_boot_observation_never_passes(self) -> None:
+        self.write_proc_swaps(active=False)
+        arm = self.run_verifier("arm")
+        self.assertEqual(arm.returncode, 0, arm.stderr)
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        report = (self.report / f"report-{BOOT_A}.env").read_text(encoding="utf-8")
+        self.assertIn("cold_boot_observed=no", report)
+        self.assertIn("owner_reboot_not_observed", report)
+        self.assertNotIn("status=PASS", report)
+
+    def test_durable_arm_record_mutations_never_authorize_activation(self) -> None:
+        self.arm_then_reboot()
+        arm_file = self.report / "armed.env"
+        valid_arm = arm_file.read_text(encoding="ascii")
+        mutations = (
+            valid_arm.replace("schema=swapz-primary-boot-arm-v1", "schema=invalid"),
+            valid_arm.replace(f"arm_boot_id={BOOT_A}", f"arm_boot_id={BOOT_B}"),
+            valid_arm.replace(f"expected_module_sha256={MODULE_SHA}",
+                              "expected_module_sha256=" + "f" * 64),
+            valid_arm.replace(f"expected_module_source_sha={SOURCE_SHA}",
+                              "expected_module_source_sha=" + "f" * 40),
+            valid_arm.replace("expected_module_source_clean=1",
+                              "expected_module_source_clean=0"),
+            valid_arm.replace("expected_target_size_bytes=",
+                              "duplicate=1\nexpected_target_size_bytes="),
+            valid_arm.replace(f"expected_partuuid={PARTUUID}\n", ""),
+            valid_arm + "unexpected=value\n",
+            valid_arm + "x" * 4096,
+        )
+        for malformed in mutations:
+            with self.subTest(malformed=malformed[:80]):
+                arm_file.write_text(malformed, encoding="ascii")
+                arm_file.chmod(0o600)
+                preflight = self.run_verifier("preflight")
+                self.assertNotEqual(preflight.returncode, 0, preflight.stderr)
+                self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
+                observed = self.run_verifier("observe")
+                self.assertNotEqual(observed.returncode, 0, observed.stderr)
+                self.assertNotIn("status=PASS", (self.report / "latest.env").read_text())
+        arm_file.write_text(valid_arm, encoding="ascii")
+        arm_file.chmod(0o600)
+        self.assertEqual(self.run_verifier("preflight").returncode, 0)
+
+    def test_arm_file_symlink_hardlink_special_files_and_mode_are_rejected(self) -> None:
+        import socket
+
+        self.arm_then_reboot()
+        arm_file = self.report / "armed.env"
+        valid_arm = arm_file.read_bytes()
+        outside = self.root / "outside-evidence"
+        outside.write_bytes(valid_arm)
+        outside.chmod(0o600)
+        for kind in ("symlink", "hardlink", "fifo", "directory", "socket", "wrong-mode"):
+            with self.subTest(kind=kind):
+                arm_file.unlink()
+                if kind == "symlink":
+                    arm_file.symlink_to(outside)
+                elif kind == "hardlink":
+                    os.link(outside, arm_file)
+                elif kind == "fifo":
+                    os.mkfifo(arm_file)
+                elif kind == "directory":
+                    arm_file.mkdir()
+                elif kind == "socket":
+                    with socket.socket(socket.AF_UNIX) as connection:
+                        connection.bind(str(arm_file))
+                else:
+                    arm_file.write_bytes(valid_arm)
+                    arm_file.chmod(0o644)
+                self.assertNotEqual(self.run_verifier("preflight").returncode, 0)
+                self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
+                observed = self.run_verifier("observe")
+                self.assertNotEqual(observed.returncode, 0)
+                self.assertNotIn("status=PASS", (self.report / "latest.env").read_text())
+                self.assertEqual(outside.read_bytes(), valid_arm)
+                if arm_file.is_dir() and not arm_file.is_symlink():
+                    arm_file.rmdir()
+                else:
+                    arm_file.unlink()
+                arm_file.write_bytes(valid_arm)
+                arm_file.chmod(0o600)
+
+    def test_unsafe_report_directory_mode_is_not_repaired_by_verifier(self) -> None:
+        self.report.chmod(0o755)
+        result = self.run_verifier("observe")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.report.stat().st_mode & 0o777, 0o755)
+
+    def test_duplicate_and_missing_kernel_status_fields_are_incomplete(self) -> None:
+        self.arm_then_reboot()
+        valid = (
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=2 "
+            "gc_destination_advances=0 window_gc_pressure=0"
+        )
+        for ambiguous in (
+            valid.replace("failed=0", "failed=0 failed=1"),
+            valid.replace("error=0", "error=0 error=-5"),
+            valid.replace("flush_err=0 ", ""),
+            valid.replace("gc_destination_advances=0 ", ""),
+            valid.replace("failed=0", "failed=1 failed=0"),
+            valid + "\nstatus=PASS",
+            valid.replace("swapz", "linear", 1),
+        ):
+            with self.subTest(ambiguous=ambiguous[-55:]):
+                env = self.env.copy()
+                env["MOCK_DM_STATUS_OVERRIDE_SET"] = "1"
+                env["MOCK_DM_STATUS_OVERRIDE"] = ambiguous
+                observed = self.run_verifier("observe", env=env)
+                self.assertEqual(observed.returncode, 2, observed.stderr)
+                self.assertIn("status=INCOMPLETE", (self.report / "latest.env").read_text())
+        env = self.env.copy()
+        env["MOCK_DM_STATUS_OVERRIDE_SET"] = "1"
+        env["MOCK_DM_STATUS_OVERRIDE"] = valid.replace("failed=0", "failed=1")
+        failed = self.run_verifier("observe", env=env)
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertIn("swapz_target_failed", (self.report / "latest.env").read_text())
+
+    def test_sysfs_mapper_identity_must_match_boot_observation(self) -> None:
+        self.arm_then_reboot()
+        dm_name = self.sys / "dev" / "block" / "253:0" / "dm" / "name"
+        dm_name.write_text("foreign-mapper\n", encoding="ascii")
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("mapper_sysfs_identity_mismatch", (self.report / "latest.env").read_text())
+
+    def test_evidence_symlink_cannot_overwrite_or_leave_activation_token(self) -> None:
+        self.arm_then_reboot()
+        self.assertEqual(self.run_verifier("preflight").returncode, 0)
+        activation_token = self.report / "runtime" / "primary-execution.env"
+        self.assertTrue(activation_token.exists())
+        sentinel = self.root / "outside-status"
+        sentinel.write_text("protected\n", encoding="ascii")
+        sentinel.chmod(0o600)
+        destination = self.report / f"report-{BOOT_B}.dm-status.txt"
+        destination.symlink_to(sentinel)
+        rejected = self.run_verifier("observe")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertEqual(sentinel.read_text(encoding="ascii"), "protected\n")
+        self.assertFalse(activation_token.exists())
 
 
 class RuntimeHealthTests(unittest.TestCase):
@@ -1873,6 +2026,54 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("SWAPZ_RUNTIME_HEALTH=WARN", observed.stderr)
         self.assertIn("relevant_kernel_errors", observed.stderr)
         self.assertIn("kernel_error_count=1", observed.stderr)
+
+
+
+    def test_full_dm_table_grammar_and_status_geometry_are_enforced(self) -> None:
+        write_executable(
+            self.bin / "dmsetup",
+            "#!/bin/sh\n"
+            'case "$1" in\n'
+            'info) echo SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef ;;\n'
+            'table) printf "%s\\n" "$MOCK_DM_TABLE" ;;\n'
+            'status) printf "%s\\n" "$MOCK_DM_STATUS" ;;\n'
+            '*) exit 2 ;;\n'
+            'esac\n',
+        )
+        valid_status = (
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=2 "
+            "gc_destination_advances=0 window_gc_pressure=0"
+        )
+        env = self.env.copy()
+        env["MOCK_DM_STATUS"] = valid_status
+        for malformed in (
+            "0 216641536 swapz 8:1 0 64 0 2 0 1 0 0 extra",
+            "0 216641536 swapz 8:1 0 64 0 2 0 1 0 1",
+        ):
+            with self.subTest(table=malformed):
+                env["MOCK_DM_TABLE"] = malformed
+                observed = self.run_helper("once", env)
+                self.assertEqual(observed.returncode, 1, observed.stderr)
+                self.assertIn("mapper_table_invalid", observed.stderr)
+        env["MOCK_DM_TABLE"] = "0 216641536 swapz 8:1 0 64 0 2 0 1 0 0"
+        env["MOCK_DM_STATUS"] = valid_status.replace(
+            "0 216641536 swapz", "0 216641528 swapz", 1
+        )
+        observed = self.run_helper("once", env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("mapper_status_geometry_invalid", observed.stderr)
+
+    def test_missing_dm_status_is_degraded_not_terminal_failure(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_STATUS_UNAVAILABLE"] = "1"
+        observed = self.run_helper("once", env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+        self.assertNotIn("failures=target_failed", observed.stderr)
 
 
 if __name__ == "__main__":
