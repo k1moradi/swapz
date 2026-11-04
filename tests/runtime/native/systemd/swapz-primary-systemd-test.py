@@ -1253,6 +1253,28 @@ class BootVerifierTests(unittest.TestCase):
                 arm_file.write_bytes(valid_arm)
                 arm_file.chmod(0o600)
 
+    def test_wrong_owner_arm_file_is_rejected_without_root_privileges(self) -> None:
+        # Override only the arm-record UID query. The rest of the system's
+        # stat operations use the real tool, so this is a narrow rootless fault.
+        self.arm_then_reboot()
+        write_executable(
+            self.bin / "stat",
+            "#!/bin/sh\n"
+            'if [ "$2" = "%u" ] && '
+            '[ "$4" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/armed.env" ]; then\n'
+            '    printf "%s\\n" "$MOCK_OTHER_OWNER_UID"\n'
+            '    exit 0\n'
+            'fi\n'
+            'exec /usr/bin/stat "$@"\n',
+        )
+        env = self.env.copy()
+        env["MOCK_OTHER_OWNER_UID"] = str(os.getuid() + 1)
+        preflight = self.run_verifier("preflight", env=env)
+        self.assertNotEqual(preflight.returncode, 0, preflight.stderr)
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("status=INCOMPLETE", (self.report / "latest.env").read_text())
+
     def test_unsafe_report_directory_mode_is_not_repaired_by_verifier(self) -> None:
         self.report.chmod(0o755)
         result = self.run_verifier("observe")
@@ -1274,6 +1296,10 @@ class BootVerifierTests(unittest.TestCase):
             valid.replace("error=0", "error=0 error=-5"),
             valid.replace("flush_err=0 ", ""),
             valid.replace("gc_destination_advances=0 ", ""),
+            valid.replace("swapz failed=0 error=0 ",
+                          "swapz failed=0 error=-2147483649 "),
+            valid.replace("segment_discards_failed=0",
+                          "segment_discards_failed=-1"),
             valid.replace("swapz failed=0 ", "swapz failed=1 failed=0 "),
             valid + "\nstatus=PASS",
             valid.replace("swapz", "linear", 1),
