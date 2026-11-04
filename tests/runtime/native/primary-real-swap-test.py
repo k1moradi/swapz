@@ -1522,6 +1522,150 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     server, child, source_sha, "/usr/bin/git", "d" * 64,
                     hashes, "8" * 64, 2)
 
+    def test_parent_runtime_channel_failure_reaps_unadmitted_child(self):
+        source_sha = "a" * 40
+        hashes = {relative: "c" * 64
+                  for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS}
+        request = {
+            "schema": parent.SOURCE_ADMISSION_SCHEMA,
+            "source_sha": source_sha,
+            "phase": "initial",
+            "nonce": "b" * 32,
+            "physical_control_inputs_sha256": hashes,
+            "executed_helper_sha256": "8" * 64,
+        }
+
+        class FakeStream:
+            def __init__(self):
+                self.input = io.BytesIO((json.dumps(request) + "\n").encode("ascii"))
+
+            def readline(self, limit):
+                return self.input.readline(limit)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+        stream = FakeStream()
+        connection = mock.MagicMock()
+        connection.getsockopt.return_value = struct.pack("3i", 123, 0, 0)
+        connection.makefile.return_value = stream
+        server = mock.Mock()
+        server.accept.return_value = (connection, None)
+        child = mock.Mock()
+        child.poll.return_value = None
+        child.wait.side_effect = [2, 2]
+        stderr = io.StringIO()
+        with mock.patch.object(parent, "_check_git_source"), \
+                mock.patch.object(
+                    parent, "_reply",
+                    side_effect=BrokenPipeError("synthetic broken pipe")), \
+                contextlib.redirect_stderr(stderr):
+            result = parent._serve_admission(
+                server, child, source_sha, "/usr/bin/git", "d" * 64,
+                hashes, "8" * 64, 2)
+        self.assertEqual(result, 2)
+        self.assertIn(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+            "source_admission_runtime_error:initial:BrokenPipeError",
+            stderr.getvalue())
+        child.terminate.assert_called_once_with()
+        self.assertEqual(
+            child.wait.call_args_list,
+            [mock.call(timeout=10), mock.call(timeout=45)])
+
+    def test_parent_classifies_precycle_and_abnormal_child_exits(self):
+        source_sha = "a" * 40
+        hashes = {relative: "c" * 64
+                  for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS}
+
+        def record(phase):
+            return (json.dumps({
+                "schema": parent.SOURCE_ADMISSION_SCHEMA,
+                "source_sha": source_sha,
+                "phase": phase,
+                "nonce": "b" * 32,
+                "physical_control_inputs_sha256": hashes,
+                "executed_helper_sha256": "8" * 64,
+            }) + "\n").encode("ascii")
+
+        class FakeStream:
+            def __init__(self, phases):
+                self.input = io.BytesIO(b"".join(record(phase) for phase in phases))
+                self.output = io.BytesIO()
+
+            def readline(self, limit):
+                return self.input.readline(limit)
+
+            def write(self, payload):
+                return self.output.write(payload)
+
+            def flush(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+        def run(phases, returncode):
+            stream = FakeStream(phases)
+            connection = mock.MagicMock()
+            connection.getsockopt.return_value = struct.pack("3i", 123, 0, 0)
+            connection.makefile.return_value = stream
+            server = mock.Mock()
+            server.accept.return_value = (connection, None)
+            child = mock.Mock()
+            child.poll.return_value = returncode
+            child.wait.return_value = returncode
+            stderr = io.StringIO()
+            with mock.patch.object(parent, "_check_git_source"), \
+                    contextlib.redirect_stderr(stderr):
+                result = parent._serve_admission(
+                    server, child, source_sha, "/usr/bin/git", "d" * 64,
+                    hashes, "8" * 64, 2)
+            return result, stderr.getvalue()
+
+        result, stderr = run(["initial"], 1)
+        self.assertEqual(result, 2)
+        self.assertIn(
+            "privileged_qualifier_abnormal_teardown:"
+            "failed_before_first_cycle_source_admission", stderr)
+
+        # Once a cycle has been source-admitted, rc=1 remains a real FAIL.
+        result, stderr = run(["initial", "cycle-1"], 1)
+        self.assertEqual(result, 1)
+        self.assertEqual(stderr, "")
+
+        for returncode, reason in (
+                (-9, "terminated_by_signal:9"),
+                (3, "unexpected_exit_status:3")):
+            with self.subTest(returncode=returncode):
+                result, stderr = run(["initial", "cycle-1"], returncode)
+                self.assertEqual(result, 2)
+                self.assertIn(
+                    "privileged_qualifier_abnormal_teardown:" + reason,
+                    stderr)
+
+    def test_parent_rejects_malformed_oracle_before_peer_admission(self):
+        child = mock.Mock()
+        child.poll.return_value = None
+        child.wait.return_value = 2
+        server = mock.Mock()
+        with self.assertRaisesRegex(
+                parent.Blocked, "source admission oracle digest is malformed"):
+            parent._serve_admission(
+                server, child, "a" * 40, "/usr/bin/git", "not-a-digest",
+                {relative: "c" * 64
+                 for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS},
+                "8" * 64, 2)
+        server.accept.assert_not_called()
+        child.terminate.assert_called_once_with()
+        child.wait.assert_called_once_with(timeout=10)
+
     def test_client_reports_exact_blocked_provenance_boundary(self):
         source_sha = "a" * 40
         client = object.__new__(qualify.SourceAdmissionClient)

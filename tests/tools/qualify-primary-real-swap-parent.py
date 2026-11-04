@@ -321,6 +321,10 @@ def _serve_admission(server: socket.socket,
         ["final"])
     passed_phases: list[str] = []
     parent_rejected = False
+    if re.fullmatch(r"[0-9a-f]{64}", oracle_sha256) is None:
+        failure = Blocked("source admission oracle digest is malformed")
+        _stop_unadmitted_child_preserving(child, failure)
+        raise failure
     server.settimeout(30)
     try:
         connection, _address = server.accept()
@@ -335,64 +339,74 @@ def _serve_admission(server: socket.socket,
         _stop_unadmitted_child_preserving(child, failure)
         raise failure from exc
 
-    with connection:
-        try:
-            credentials = connection.getsockopt(
-                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-            _peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
-        except (OSError, struct.error) as exc:
-            failure = Blocked(
-                "cannot authenticate privileged source admission peer")
-            _stop_unadmitted_child_preserving(child, failure)
-            raise failure from exc
-        if peer_uid != 0:
-            failure = Blocked("source admission peer is not privileged")
-            _stop_unadmitted_child_preserving(child, failure)
-            raise failure
-        try:
-            stream_context = connection.makefile("rwb", buffering=0)
-        except OSError as exc:
-            failure = Blocked(
-                "cannot establish privileged source admission stream")
-            _stop_unadmitted_child_preserving(child, failure)
-            raise failure from exc
-        with stream_context as stream:
-            while True:
-                try:
-                    request = _read_request(
-                        stream, validated_source,
-                        physical_control_inputs_sha256, helper_sha256)
-                except EOFError:
-                    break
-                except Blocked as exc:
-                    parent_rejected = True
-                    print(
-                        "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
-                        file=sys.stderr)
-                    break
-                expected_phase = (
-                    expected_phases[len(passed_phases)]
-                    if len(passed_phases) < len(expected_phases) else None)
-                if request["phase"] != expected_phase:
-                    parent_rejected = True
-                    _reply(stream, request, "BLOCKED", oracle_sha256,
-                           "unexpected_source_admission_phase")
-                    print(
-                        "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
-                        "unexpected_source_admission_phase",
-                        file=sys.stderr)
-                    break
-                try:
-                    _check_git_source(validated_source, git)
-                except Blocked as exc:
-                    parent_rejected = True
-                    _reply(stream, request, "BLOCKED", oracle_sha256, str(exc))
-                    print(
-                        "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
-                        file=sys.stderr)
-                    break
-                _reply(stream, request, "PASS", oracle_sha256)
-                passed_phases.append(request["phase"])
+    admission_boundary = "authenticated_channel"
+    try:
+        with connection:
+            try:
+                credentials = connection.getsockopt(
+                    socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+                _peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
+            except (OSError, struct.error) as exc:
+                failure = Blocked(
+                    "cannot authenticate privileged source admission peer")
+                _stop_unadmitted_child_preserving(child, failure)
+                raise failure from exc
+            if peer_uid != 0:
+                failure = Blocked("source admission peer is not privileged")
+                _stop_unadmitted_child_preserving(child, failure)
+                raise failure
+            try:
+                stream_context = connection.makefile("rwb", buffering=0)
+            except OSError as exc:
+                failure = Blocked(
+                    "cannot establish privileged source admission stream")
+                _stop_unadmitted_child_preserving(child, failure)
+                raise failure from exc
+            with stream_context as stream:
+                while True:
+                    expected_phase = (
+                        expected_phases[len(passed_phases)]
+                        if len(passed_phases) < len(expected_phases) else None)
+                    admission_boundary = expected_phase or "post-final"
+                    try:
+                        request = _read_request(
+                            stream, validated_source,
+                            physical_control_inputs_sha256, helper_sha256)
+                    except EOFError:
+                        break
+                    except Blocked as exc:
+                        parent_rejected = True
+                        print(
+                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
+                            file=sys.stderr)
+                        break
+                    if request["phase"] != expected_phase:
+                        parent_rejected = True
+                        _reply(stream, request, "BLOCKED", oracle_sha256,
+                               "unexpected_source_admission_phase")
+                        print(
+                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+                            "unexpected_source_admission_phase",
+                            file=sys.stderr)
+                        break
+                    try:
+                        _check_git_source(validated_source, git)
+                    except Blocked as exc:
+                        parent_rejected = True
+                        _reply(stream, request, "BLOCKED", oracle_sha256, str(exc))
+                        print(
+                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
+                            file=sys.stderr)
+                        break
+                    _reply(stream, request, "PASS", oracle_sha256)
+                    passed_phases.append(request["phase"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        parent_rejected = True
+        print(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+            f"source_admission_runtime_error:{admission_boundary}:"
+            f"{type(exc).__name__}",
+            file=sys.stderr)
 
     if not passed_phases and child.poll() is None:
         _stop_unadmitted_child(child)
@@ -406,10 +420,33 @@ def _serve_admission(server: socket.socket,
             "after source admission channel closed")
         _stop_unadmitted_child_preserving(child, failure)
         raise failure from exc
+    if result not in {0, 1, 2}:
+        detail = (
+            f"terminated_by_signal:{-result}" if result < 0 else
+            f"unexpected_exit_status:{result}")
+        print(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+            f"privileged_qualifier_abnormal_teardown:{detail}",
+            file=sys.stderr)
+        return 2
     if parent_rejected:
         # A parent-owned source refusal is BLOCKED even when the child exits 1.
         return 2
-    if not passed_phases or (result == 0 and passed_phases != expected_phases):
+    if not passed_phases:
+        print(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+            "privileged_child_skipped_source_admission",
+            file=sys.stderr)
+        return 2
+    cycle_admitted = any(phase.startswith("cycle-") for phase in passed_phases)
+    if result == 1 and not cycle_admitted:
+        print(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+            "privileged_qualifier_abnormal_teardown:"
+            "failed_before_first_cycle_source_admission",
+            file=sys.stderr)
+        return 2
+    if result == 0 and passed_phases != expected_phases:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
             "privileged_child_skipped_source_admission",
