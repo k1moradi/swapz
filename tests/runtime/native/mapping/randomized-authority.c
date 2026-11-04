@@ -60,6 +60,8 @@ static swapz_u32 mixed_segment_maps[MIXED_SEGMENTS];
 static swapz_u32 mixed_program_counts[MIXED_SEGMENTS];
 static swapz_u8 mixed_quarantine[MIXED_PHYSICAL_BLOCKS];
 static swapz_u8 mixed_payloads[MIXED_BATCH_LIMIT][SWAPZ_BLOCK_BYTES];
+/* GC must not alias pending foreground retry inputs. */
+static swapz_u8 mixed_relocation_payload[SWAPZ_BLOCK_BYTES];
 static swapz_u8 mixed_raw_oracle[LOGICAL_PAGES][SWAPZ_BLOCK_BYTES];
 static swapz_u8 mixed_mode[LOGICAL_PAGES]; /* 0=discard, 1=SWZ, 2=RAW, 3=zero */
 static swapz_u8 mixed_bulk_scratch[SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES];
@@ -497,10 +499,10 @@ static int mixed_relocate_one(swapz_u32 logical)
 
 	/* Read the old authoritative bytes before allocating a destination. */
 	if (old.raw) {
-		error = lower_read(&disk, old.start_block, 1, mixed_payloads[0]);
+		error = lower_read(&disk, old.start_block, 1, mixed_relocation_payload);
 		length = SWAPZ_BLOCK_BYTES;
 	} else {
-		error = swapz_engine_read_page(&engine, logical, mixed_payloads[0],
+		error = swapz_engine_read_page(&engine, logical, mixed_relocation_payload,
 					    SWAPZ_BLOCK_BYTES, &length);
 	}
 	if (error) {
@@ -515,13 +517,13 @@ static int mixed_relocate_one(swapz_u32 logical)
 		if (error)
 			return error;
 		error = lower_write(&disk, transaction.start_block, 1,
-				    mixed_payloads[0], &written);
+				    mixed_relocation_payload, &written);
 		error = swapz_finish_raw(&authority, &transaction,
-					 mixed_payloads[0], written, error);
+					 mixed_relocation_payload, written, error);
 		completed = error ? 0U : 1U;
 	} else {
 		page = (struct swapz_compressed_page) {
-			.logical_page = logical, .payload = mixed_payloads[0],
+			.logical_page = logical, .payload = mixed_relocation_payload,
 			.length = length, .encoding = swapz_map_encoding(&old),
 		};
 		error = swapz_engine_write_window_batched(&engine, &page, 1,
