@@ -478,49 +478,80 @@ static int test_lower_rejection_retry_rebuilds_scratch(void)
 	unsigned int fault;
 
 	for (fault = 0; fault < sizeof(errors) / sizeof(errors[0]); ++fault) {
-		struct swapz_map prior_map;
+		struct swapz_map prior_maps[3];
 		swapz_u8 committed = 99, result[2072];
 		swapz_u16 length = 0;
 		swapz_u32 rejected_start;
-		unsigned int index;
+		swapz_u8 rejected_blocks;
+		size_t rejected_offset, rejected_bytes, byte_index;
+		unsigned int logical;
 
 		CHECK(setup() == 0);
 		engine.verify_after_write = 1;
 		CHECK(swapz_engine_write_window_batched(
 			      &engine, pages, 3, &committed) == 0);
 		CHECK(committed == 3);
-		prior_map = map[0];
+		memcpy(prior_maps, map, sizeof(prior_maps));
+		CHECK(prior_maps[0].extent_blocks == 2U);
+		for (logical = 1; logical < 3U; ++logical)
+			CHECK(prior_maps[logical].start_block ==
+			      prior_maps[0].start_block);
 		rejected_start = auth.next_block;
-		memset(payloads[0], 0x71 + (int)fault, sizeof(payloads[0]));
+		rejected_blocks = prior_maps[0].extent_blocks;
+		rejected_offset = (size_t)rejected_start * SWAPZ_BLOCK_BYTES;
+		rejected_bytes = (size_t)rejected_blocks * SWAPZ_BLOCK_BYTES;
+		for (logical = 0; logical < 3U; ++logical)
+			memset(payloads[logical],
+			       0x71 + (int)(fault * 3U + logical),
+			       sizeof(payloads[logical]));
 		injected_write_error = errors[fault];
 		CHECK(swapz_engine_write_window_batched(
 			      &engine, pages, 3, &committed) == errors[fault]);
 		CHECK(committed == 0 && !auth.in_flight);
-		CHECK(map[0].valid && map[0].start_block == prior_map.start_block &&
-		      map[0].generation == prior_map.generation);
-		CHECK(live[prior_map.start_block] && !live[rejected_start]);
-		CHECK(auth.next_block == rejected_start + 2U &&
-		      auth.abandoned_blocks == 2U && auth.committed_blocks == 2U);
-		CHECK(swapz_engine_read_page(&engine, 0, result,
-					     sizeof(result), &length) == 0);
-		CHECK(length == sizeof(result));
-		for (index = 0; index < sizeof(result); ++index)
-			CHECK(result[index] == 1U);
+		CHECK(engine.completed_blocks == rejected_blocks);
+		CHECK(live[prior_maps[0].start_block] == 3U &&
+		      !live[rejected_start]);
+		CHECK(auth.next_block == rejected_start + rejected_blocks &&
+		      auth.abandoned_blocks == rejected_blocks &&
+		      auth.committed_blocks == rejected_blocks);
+		for (logical = 0; logical < 3U; ++logical) {
+			CHECK(map[logical].valid &&
+			      map[logical].start_block ==
+				prior_maps[logical].start_block &&
+			      map[logical].generation ==
+				prior_maps[logical].generation);
+			CHECK(swapz_engine_read_page(&engine, logical, result,
+						     sizeof(result), &length) == 0);
+			CHECK(length == sizeof(result));
+			for (byte_index = 0; byte_index < sizeof(result); ++byte_index)
+				CHECK(result[byte_index] == (swapz_u8)(logical + 1U));
+		}
+		for (byte_index = 0; byte_index < rejected_bytes; ++byte_index)
+			CHECK(disk[rejected_offset + byte_index] == 0);
 
 		/* Deliberately poison the now-free scratch before preparing a retry:
-		 * the new extent must be rebuilt from the caller-owned payload. */
+		 * every record in the new extent must be rebuilt from caller payloads. */
 		memset(scratch_w, 0xa5, sizeof(scratch_w));
 		CHECK(swapz_engine_write_window_batched(
 			      &engine, pages, 3, &committed) == 0);
 		CHECK(committed == 3 && !auth.in_flight);
-		CHECK(map[0].generation == prior_map.generation + 1U &&
-		      map[0].start_block >= rejected_start + 2U);
-		CHECK(!live[rejected_start] && live[map[0].start_block]);
-		CHECK(swapz_engine_read_page(&engine, 0, result,
-					     sizeof(result), &length) == 0);
-		CHECK(length == sizeof(result) &&
-		      !memcmp(result, payloads[0], length));
-		CHECK(engine.completed_blocks == 4U);
+		CHECK(engine.completed_blocks ==
+		      (swapz_u32)rejected_blocks * 2U);
+		CHECK(!live[prior_maps[0].start_block] && !live[rejected_start] &&
+		      live[map[0].start_block] == 3U);
+		for (logical = 0; logical < 3U; ++logical) {
+			CHECK(map[logical].generation ==
+			      prior_maps[logical].generation + 1U &&
+			      map[logical].start_block >=
+				rejected_start + rejected_blocks);
+			CHECK(swapz_engine_read_page(&engine, logical, result,
+						     sizeof(result), &length) == 0);
+			CHECK(length == sizeof(result) &&
+			      !memcmp(result, payloads[logical], length));
+		}
+		/* The retry starts after the abandoned extent and cannot overwrite it. */
+		for (byte_index = 0; byte_index < rejected_bytes; ++byte_index)
+			CHECK(disk[rejected_offset + byte_index] == 0);
 	}
 	return 0;
 }
