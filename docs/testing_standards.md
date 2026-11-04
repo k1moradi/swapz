@@ -6106,7 +6106,17 @@ provenance mismatch, boot-ID change, lost diagnostic prefix, missing markers,
 helper exit/timeout/signal and a clean synthetic observation. Each case checks
 exit status, bounded messages, child reaping and temporary evidence cleanup.
 No replay output can be accepted as `LOADED_KERNEL_PASS`; successful
-synthetic evidence is `ROOTLESS_VALIDATOR_ONLY=PASS` only. The replay guard
+synthetic evidence is `ROOTLESS_VALIDATOR_ONLY=PASS` only.
+The evidence verifier rejects incomplete or reordered KASAN/lockdep selections:
+only the full `kasan,lockdep` lane or separate `kcsan` lane can qualify,
+even when all synthetic loaded markers and module hashes otherwise match.
+The read-only feature probe can still report individual capabilities.
+Kernel diagnostics and helper failure reasons use fixed safe categories rather
+than echoing private dmesg records or privileged evidence paths. Runtime JSON,
+kernel configuration, bounded session logs and execution records have finite
+parser limits; oversized evidence cannot produce PASS. A clean synthetic
+verifier result remains rootless-only, not proof of loaded instrumentation.
+The replay guard
 still rejects EUID 0; replay variables never bypass the wrapper's unprivileged
 process requirement. Module source/clean metadata and sanitizer-symbol query
 failures preserve the original command exit status without echoing module

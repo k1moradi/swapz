@@ -168,6 +168,34 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertEqual(self.verify()[0], "PASS")
         self.assertEqual(self.verify(required=("kcsan",))[0], "PASS")
 
+    def test_partial_lane_cannot_claim_loaded_pass(self) -> None:
+        # These full synthetic PASS records previously qualified a lockdep-only
+        # lane with no KASAN symbols, or KASAN with no lockdep runtime checks.
+        clean_module = {
+            "source_sha": SOURCE_SHA,
+            "source_clean": "1",
+            "sha256": MODULE_SHA256,
+            "vermagic": KERNEL_RELEASE + " SMP preempt mod_unload",
+        }
+        for required, symbols in (
+            (("lockdep",), ""),
+            (("kasan",), "__asan_load8"),
+            (("lockdep", "kasan"), "__asan_load8"),
+        ):
+            with self.subTest(required=required):
+                status, reason = self.verify(
+                    required=required,
+                    module_evidence={**clean_module, "symbols": symbols},
+                )
+                self.assertEqual(status, "BLOCKED", reason)
+                self.assertIn("required instrumentation lane incomplete", reason)
+                self.assertIn("expected kasan,lockdep or kcsan", reason)
+                self.assertIn("next: collect", reason)
+        self.assertIsNone(qualification.incomplete_loaded_lane_reason(
+            ("kasan", "lockdep")))
+        self.assertIsNone(qualification.incomplete_loaded_lane_reason(
+            ("kcsan",)))
+
     def test_runtime_state_must_be_active_before_and_after(self) -> None:
         required = ("kcsan",)
         self.assertEqual(
@@ -326,7 +354,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
             preflight_block_reason="running kernel release unavailable",
         )
         self.assertEqual(status, "FAIL")
-        self.assertIn("helper detected corruption", reason)
+        self.assertIn("helper defect", reason)
+        self.assertNotIn("helper detected corruption", reason)
 
     def test_cli_malformed_config_does_not_demote_bounded_kernel_failure(self) -> None:
         directory = Path(self.temporary_directory.name)
@@ -365,7 +394,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, check=False)
         self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
-        self.assertIn("synthetic bounded failure", failed.stdout)
+        self.assertIn("KASAN", failed.stdout)
+        self.assertNotIn("synthetic bounded failure", failed.stdout)
 
         final.write_text("old\nclean\n", encoding="utf-8")
         blocked = subprocess.run(
@@ -557,20 +587,24 @@ class KernelDebugQualificationTests(unittest.TestCase):
             baseline="", final="", runtime_after="{}",
         )
         self.assertEqual(status, "FAIL")
-        self.assertIn("byte verification failed", reason)
+        self.assertIn("helper defect", reason)
+        self.assertNotIn("byte verification failed", reason)
 
     def test_bounded_fault_diagnostics_and_historical_warning(self) -> None:
         baseline = "WARNING: historical boot warning\nold\n"
         self.assertEqual(self.verify(
             baseline=baseline, final=baseline + "clean\n")[0], "PASS")
-        for fault in ("BUG: KCSAN: data-race in swapz",
-                      "possible circular locking dependency detected",
-                      "BUG: KASAN: use-after-free"):
+        for fault, category in (
+            ("BUG: KCSAN: data-race in swapz", "KCSAN"),
+            ("possible circular locking dependency detected", "lockdep"),
+            ("BUG: KASAN: use-after-free", "KASAN"),
+        ):
             with self.subTest(fault=fault):
                 status, reason = self.verify(
                     baseline=baseline, final=baseline + fault + "\n")
                 self.assertEqual(status, "FAIL")
-                self.assertIn(fault, reason)
+                self.assertIn(category, reason)
+                self.assertNotIn(fault, reason)
         status, reason = self.verify(baseline=baseline, final="old\n")
         self.assertEqual(status, "BLOCKED")
         self.assertIn("dmesg truncated or overwritten", reason)
@@ -582,6 +616,31 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertIn("truncated mid-line", reason)
         self.assertEqual(self.verify(
             baseline="", final="WARNING: old warning\n")[0], "BLOCKED")
+
+    def test_private_kernel_text_and_paths_are_not_reported(self) -> None:
+        private_detail = "/private/kernel/debug/owner-only-log"
+        status, reason = self.verify(
+            final=f"old\nWARNING: {private_detail} private diagnostic\n")
+        self.assertEqual(status, "FAIL")
+        self.assertIn("WARNING", reason)
+        self.assertNotIn(private_detail, reason)
+        self.assertNotIn("private diagnostic", reason)
+        status, reason = self.verify(
+            execution=GOOD_LOG + f"\nBLOCKED: {private_detail}")
+        self.assertEqual(status, "BLOCKED")
+        self.assertNotIn(private_detail, reason)
+        missing_module = Path(self.temporary_directory.name) / "private.ko"
+        evidence = qualification.inspect_module_provenance(missing_module)
+        self.assertNotIn(str(missing_module), evidence["error"])
+        with self.assertRaises(ValueError) as failure:
+            qualification._read_runtime_text(
+                Path(self.temporary_directory.name) / "private-boot-id",
+                "kernel boot identity")
+        self.assertNotIn(self.temporary_directory.name, str(failure.exception))
+        with self.assertRaisesRegex(ValueError, "bounded parser input"):
+            qualification.parse_runtime_snapshot(
+                " " * (qualification.MAX_RUNTIME_SNAPSHOT_CHARS + 1),
+                ("kcsan",))
 
     def test_precise_runtime_identity_and_instrumentation_reasons(self) -> None:
         required = ("kcsan",)

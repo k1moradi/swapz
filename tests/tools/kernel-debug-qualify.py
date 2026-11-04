@@ -31,6 +31,10 @@ DEFAULT_PROVE_LOCKING = Path("/proc/sys/kernel/prove_locking")
 DEFAULT_BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
 DEFAULT_MODULE = Path("build/kernel/experimental/dm-swapz.ko")
 MAX_RUNTIME_AGE_NS = 20 * 60 * 1_000_000_000
+MAX_RUNTIME_SNAPSHOT_CHARS = 16 * 1024
+MAX_CONFIG_CHARS = 4 * 1024 * 1024
+MAX_DMESG_BYTES = 64 * 1024 * 1024
+MAX_EXECUTION_BYTES = 16 * 1024 * 1024
 # These are exact observed records from the existing, privately owned RAM
 # lower-device oracle. Each must occur exactly once, not merely as a substring.
 REQUIRED_RECORDS = (
@@ -114,11 +118,20 @@ def load_config(path: Path) -> dict[str, str]:
     try:
         if path.suffix == ".gz":
             with gzip.open(path, "rt", encoding="utf-8") as source:
-                contents = source.read()
+                contents = source.read(MAX_CONFIG_CHARS + 1)
         else:
-            contents = path.read_text(encoding="utf-8")
+            with path.open("r", encoding="utf-8") as source:
+                contents = source.read(MAX_CONFIG_CHARS + 1)
     except (OSError, UnicodeError) as error:
-        raise ValueError(f"kernel configuration unreadable: {error}") from error
+        raise ValueError(
+            f"kernel configuration unreadable ({type(error).__name__}); "
+            "next: supply a readable configuration for the running kernel"
+        ) from error
+    if len(contents) > MAX_CONFIG_CHARS:
+        raise ValueError(
+            "kernel configuration exceeds bounded parser input; "
+            "next: supply a complete running-kernel configuration"
+        )
     values: dict[str, str] = {}
     for line in contents.splitlines():
         match = re.fullmatch(r"(CONFIG_[A-Z0-9_]+)=(y|m|n)", line)
@@ -198,15 +211,37 @@ def probe(config_path: Path | None, cmdline_path: Path) -> dict[str, str]:
     return result
 
 
+def incomplete_loaded_lane_reason(required: tuple[str, ...]) -> str | None:
+    """Reject partial debug lanes independently of a feature-only probe."""
+    if required in (("kasan", "lockdep"), ("kcsan",)):
+        return None
+    observed = ",".join(required) or "<none>"
+    return (
+        "required instrumentation lane incomplete: expected kasan,lockdep or "
+        f"kcsan; observed {observed}; next: collect the full active pre/post "
+        "lane and matching instrumented module evidence"
+    )
+
+
 def check_features(features: dict[str, str], required: tuple[str, ...]) -> bool:
     return all(features[name] == "DETECTED" for name in required)
 
 
 def _read_runtime_text(path: Path, description: str) -> str:
     try:
-        return path.read_text(encoding="utf-8")
+        with path.open("r", encoding="utf-8") as source:
+            contents = source.read(MAX_RUNTIME_SNAPSHOT_CHARS + 1)
     except (OSError, UnicodeError) as error:
-        raise ValueError(f"{description} unreadable: {error}") from error
+        raise ValueError(
+            f"{description} unreadable ({type(error).__name__}); "
+            "next: capture the required live runtime evidence"
+        ) from error
+    if len(contents) > MAX_RUNTIME_SNAPSHOT_CHARS:
+        raise ValueError(
+            f"{description} exceeds bounded parser input; "
+            "next: capture a complete bounded runtime snapshot"
+        )
+    return contents
 
 
 def capture_runtime_snapshot(
@@ -271,6 +306,11 @@ def _reject_json_constant(value: str) -> None:
 def parse_runtime_snapshot(
     contents: str, required: tuple[str, ...],
 ) -> dict[str, object]:
+    if len(contents) > MAX_RUNTIME_SNAPSHOT_CHARS:
+        raise ValueError(
+            "runtime snapshot exceeds bounded parser input; "
+            "next: capture a complete bounded runtime snapshot"
+        )
     try:
         snapshot = json.loads(
             contents, object_pairs_hook=_unique_json_object,
@@ -642,12 +682,14 @@ def _module_sha256(module: Path) -> str:
 def inspect_module_provenance(module: Path) -> dict[str, str]:
     """Read the actual built module, without loading it or claiming host evidence."""
     if not module.is_file():
-        return {"error": f"module artifact missing: {module}"}
+        return {"error": "module artifact missing: expected clean-source dm-swapz.ko; "
+                         "next: build and inspect the matching module"}
     evidence: dict[str, str] = {}
     try:
         evidence["sha256"] = _module_sha256(module)
     except OSError as error:
-        return {"error": f"module artifact unreadable: {error}"}
+        return {"error": f"module artifact unreadable ({type(error).__name__}); "
+                         "next: inspect the matching module"}
     commands = (
         ("source_sha", ("modinfo", "-F", "swapz_build_source_sha", str(module))),
         ("source_clean", ("modinfo", "-F", "swapz_build_source_clean", str(module))),
@@ -663,7 +705,8 @@ def inspect_module_provenance(module: Path) -> dict[str, str]:
                 encoding="utf-8", errors="replace", timeout=10, check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
-            return {"error": f"module provenance {field} unreadable: {error}"}
+            return {"error": f"module provenance {field} unreadable "
+                             f"({type(error).__name__}); next: rerun the query"}
         if result.returncode != 0:
             return {
                 "error": f"module provenance {field} query failed "
@@ -673,10 +716,28 @@ def inspect_module_provenance(module: Path) -> dict[str, str]:
     try:
         final_sha256 = _module_sha256(module)
     except OSError as error:
-        return {"error": f"module artifact unreadable after provenance inspection: {error}"}
+        return {"error": "module artifact unreadable after provenance inspection "
+                         f"({type(error).__name__}); next: recheck module bytes"}
     if final_sha256 != evidence["sha256"]:
         return {"error": "module artifact changed during provenance inspection"}
     return evidence
+
+
+def kernel_diagnostic_category(line: str) -> str:
+    """Report a fixed safe category, never arbitrary private dmesg content."""
+    lower = line.lower()
+    if "kasan:" in lower:
+        return "KASAN"
+    if "kcsan:" in lower:
+        return "KCSAN"
+    if ("locking dependency" in lower or "lock state" in lower or
+            "lock freed" in lower):
+        return "lockdep"
+    if "warning:" in lower:
+        return "WARNING"
+    if "oops:" in lower or "bug:" in lower:
+        return "BUG/Oops"
+    return "kernel diagnostic"
 
 
 def verify_owned_run(
@@ -703,8 +764,11 @@ def verify_owned_run(
             if diagnostic:
                 # A verified in-interval kernel defect outranks later evidence
                 # gaps: never demote a real splat to BLOCKED.
-                excerpt = line[max(0, diagnostic.start() - 30):].strip()[:180]
-                return "FAIL", f"kernel diagnostic in bounded dmesg: {excerpt}"
+                return "FAIL", (
+                    "kernel diagnostic in bounded dmesg: "
+                    f"{kernel_diagnostic_category(line)} (content withheld); "
+                    "next: investigate the authorized host kernel warning"
+                )
 
     execution_lines = execution.splitlines() if execution is not None else []
     explicit_failures = [
@@ -712,7 +776,10 @@ def verify_owned_run(
         if re.match(r"^[ \t]*FAIL(?::|_)", line)
     ]
     if explicit_failures:
-        return "FAIL", f"owned lower reported: {explicit_failures[0][:180]}"
+        return "FAIL", (
+            "owned lower reported FAIL: helper defect (details withheld); "
+            "next: investigate the bounded owned-I/O failure"
+        )
 
     # Parse runtime state before returning any ordinary BLOCKED reason so a
     # verified transition from active instrumentation to disabled state keeps
@@ -774,14 +841,23 @@ def verify_owned_run(
         if re.match(r"^[ \t]*QUARANTINED(?::|_)", line)
     ]
     if blocked_lines:
-        return "BLOCKED", f"owned lower blocked: {blocked_lines[0][:180]}"
+        return "BLOCKED", (
+            "owned lower reported BLOCKED: prerequisite unavailable "
+            "(details withheld); next: restore the owned-helper prerequisite"
+        )
     if quarantined_lines:
-        return "BLOCKED", f"owned lower quarantined: {quarantined_lines[0][:180]}"
+        return "BLOCKED", (
+            "owned lower reported QUARANTINED: teardown uncertain "
+            "(details withheld); next: verify clean teardown on the owner host"
+        )
 
     # Configuration/kernel identity preflight can be unavailable while the
     # bounded artifacts still independently prove a kernel/helper failure.
     # Defer that BLOCKED reason until all independently verifiable FAIL paths
     # above have had a chance to win.
+    lane_reason = incomplete_loaded_lane_reason(required)
+    if lane_reason is not None:
+        return "BLOCKED", lane_reason
     if preflight_block_reason is not None:
         return "BLOCKED", preflight_block_reason
 
@@ -952,6 +1028,10 @@ def main() -> int:
                 return 2
             return 0
         required = required_features(arguments.require)
+        if arguments.action in {"runtime-snapshot", "snapshot-check"}:
+            lane_reason = incomplete_loaded_lane_reason(required)
+            if lane_reason is not None:
+                raise ValueError(lane_reason)
         if arguments.action == "runtime-snapshot":
             snapshot = capture_runtime_snapshot(required)
             print(json.dumps(snapshot, sort_keys=True, separators=(",", ":")))
@@ -982,19 +1062,30 @@ def main() -> int:
         # Read independently before fallible host preflight. A real bounded
         # kernel/helper failure must remain FAIL even when Kconfig, uname or a
         # later provenance query is unavailable.
-        def read_optional(path: Path) -> str | None:
+        oversized_evidence: list[str] = []
+
+        def read_optional(path: Path, limit: int, field: str) -> str | None:
             try:
-                return path.read_text(encoding="utf-8")
+                with path.open("rb") as evidence:
+                    contents = evidence.read(limit + 1)
+                if len(contents) > limit:
+                    oversized_evidence.append(
+                        f"{field} exceeds bounded evidence input; "
+                        "next: recapture the complete owned session")
+                    return None
+                return contents.decode("utf-8")
             except (OSError, UnicodeError):
                 return None
 
-        baseline = read_optional(arguments.baseline) or ""
-        final = read_optional(arguments.final) or ""
-        execution = read_optional(arguments.execution)
-        runtime_before = read_optional(arguments.runtime_before) or ""
-        runtime_after = read_optional(arguments.runtime_after) or ""
+        baseline = read_optional(arguments.baseline, MAX_DMESG_BYTES, "dmesg baseline") or ""
+        final = read_optional(arguments.final, MAX_DMESG_BYTES, "dmesg final") or ""
+        execution = read_optional(arguments.execution, MAX_EXECUTION_BYTES, "owned execution")
+        runtime_before = read_optional(
+            arguments.runtime_before, MAX_RUNTIME_SNAPSHOT_CHARS, "runtime-before") or ""
+        runtime_after = read_optional(
+            arguments.runtime_after, MAX_RUNTIME_SNAPSHOT_CHARS, "runtime-after") or ""
 
-        preflight_reasons: list[str] = []
+        preflight_reasons: list[str] = oversized_evidence.copy()
         config_path = arguments.config
         if config_path is None:
             try:
