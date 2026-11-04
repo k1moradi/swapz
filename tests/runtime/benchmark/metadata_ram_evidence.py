@@ -251,6 +251,53 @@ def validate_metadata_ram_arm_binding(trace: Any, binding: Any) -> None:
                 "metadata RAM GC sample lacks measured target GC activity")
 
 
+def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
+    """Bind a serialized RAM trace to the sealed physical-host time window."""
+    if not isinstance(binding, dict) or set(binding) != {
+            "host_boot_id", "host_before_captured_at_utc",
+            "host_after_captured_at_utc", "memory_total_bytes"}:
+        raise ValueError("metadata RAM host binding fields are invalid")
+    boot_id = binding["host_boot_id"]
+    total_bytes = binding["memory_total_bytes"]
+    if (
+            not isinstance(boot_id, str) or not BOOT_ID.fullmatch(boot_id) or
+            type(total_bytes) is not int or total_bytes <= 0):
+        raise ValueError("metadata RAM host binding identity is invalid")
+    try:
+        before = datetime.datetime.fromisoformat(
+            binding["host_before_captured_at_utc"])
+        after = datetime.datetime.fromisoformat(
+            binding["host_after_captured_at_utc"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("metadata RAM host binding time is invalid") from exc
+    if (
+            before.tzinfo is None or before.utcoffset() is None or
+            after.tzinfo is None or after.utcoffset() is None or
+            after < before):
+        raise ValueError("metadata RAM host binding time envelope is invalid")
+    samples = trace.get("samples") if isinstance(trace, dict) else None
+    if (
+            not isinstance(samples, list) or not samples or
+            trace.get("host_boot_id") != boot_id):
+        raise ValueError("metadata RAM trace host boot binding mismatch")
+    try:
+        first = datetime.datetime.fromisoformat(
+            samples[0]["timestamp_utc"].replace("Z", "+00:00"))
+        last = datetime.datetime.fromisoformat(
+            samples[-1]["timestamp_utc"].replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("metadata RAM trace time envelope is invalid") from exc
+    if not before <= first < last <= after:
+        raise ValueError("metadata RAM trace falls outside host snapshot window")
+    if any(
+            not isinstance(sample, dict) or
+            type(sample.get("mem_available_kib")) is not int or
+            not 0 < sample["mem_available_kib"] * MEMINFO_UNIT_BYTES <=
+                total_bytes
+            for sample in samples):
+        raise ValueError("metadata RAM trace exceeds observed host memory")
+
+
 def validate_metadata_ram_trace(
         trace: Any, *, source_sha: str, mapper_uuid: str,
         expected_peak_ram_bytes: int | None = None) -> dict[str, int]:
