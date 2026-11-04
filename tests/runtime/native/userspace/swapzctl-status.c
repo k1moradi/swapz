@@ -477,6 +477,19 @@ static void test_list_generation_binding(void)
 	assert(errno == EAGAIN);
 	assert(problem_target == UINT_MAX);
 	assert(!strcmp(problem.field, "dm_ioctl.event_nr"));
+
+	problem = (struct status_problem){
+		.field = "dm_target_spec.params",
+		.expected = "original parser expectation",
+		.observed = "original parser failure"
+	};
+	problem_target = 1;
+	errno = EPROTO;
+	assert(status_bind_list_generation(-2, &observation, 11,
+					   &problem, &problem_target) == -2);
+	assert(errno == EPROTO);
+	assert(problem_target == 1);
+	assert(!strcmp(problem.field, "dm_target_spec.params"));
 }
 
 static void test_dm_reply_boundaries_and_identity(void)
@@ -1124,11 +1137,9 @@ static int fake_read_status_observation_ioctl(
 	result = parse_dm_status_observation(buffer, reply_size, name,
 					     expected_device, observation,
 					     problem, problem_target);
-	if (result >= 0 &&
-	    status_validate_list_generation(observation, reader->event_number,
-					    problem, problem_target) < 0)
-		return -1;
-	return result;
+	return status_bind_list_generation(result, observation,
+					   reader->event_number,
+					   problem, problem_target);
 }
 
 /* Each initially listed mapping yields two unchanged fake DM_TABLE_STATUS replies. */

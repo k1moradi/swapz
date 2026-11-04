@@ -1521,6 +1521,20 @@ static int status_validate_list_generation(
 	return -1;
 }
 
+static int status_bind_list_generation(
+	int read_result, const struct dm_status_observation *observation,
+	uint32_t list_event_number, struct status_problem *problem,
+	unsigned int *problem_target)
+{
+	/* A failed read has no valid generation to bind; preserve its diagnosis. */
+	if (read_result < 0)
+		return read_result;
+	if (status_validate_list_generation(observation, list_event_number,
+					    problem, problem_target) < 0)
+		return -1;
+	return read_result;
+}
+
 static int status_read_observation_with_fd(
 	void *context, const char *name, uint64_t expected_device,
 	struct dm_status_observation *observation,
@@ -1531,11 +1545,9 @@ static int status_read_observation_with_fd(
 						 observation, problem,
 						 problem_target);
 
-	if (status_validate_list_generation(observation,
-					    reader->list_event_number,
-					    problem, problem_target) < 0)
-		return -1;
-	return result;
+	return status_bind_list_generation(result, observation,
+					   reader->list_event_number,
+					   problem, problem_target);
 }
 
 static int report_device_status_with_reader(

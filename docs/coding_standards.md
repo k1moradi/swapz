@@ -71,8 +71,11 @@ BLOCKED, FAILED and UNAVAILABLE with device/index/generation/field or errno
 without echoing untrusted INFO text. Observational ioctl permission denial
 may require CAP_SYS_ADMIN and must never trigger privileged escalation.
 Reset per-read diagnostic state before observing the next generation so a
-second-read ioctl errno cannot inherit a prior target parser failure. A
-tableless mapping legitimately reports target_count=0 while DM_TABLE_STATUS
+second-read ioctl errno cannot inherit a prior target parser failure. Apply
+LIST event-generation binding only after a successful INFO parse; a failed or
+unavailable INFO observation is not a valid generation sample and its original
+BLOCKED, FAILED or UNAVAILABLE diagnosis must not be overwritten by EAGAIN.
+A tableless mapping legitimately reports target_count=0 while DM_TABLE_STATUS
 may leave data_size at the caller's request capacity; treat that as an empty
 target inventory and never parse request-buffer slack as returned records.
 For each LIST_DEVICES record, require the NUL-terminated name plus its
