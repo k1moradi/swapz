@@ -638,12 +638,37 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             args=[], returncode=0, stdout=payload, stderr=b"")
         with mock.patch.object(
                     parent.subprocess, "run", return_value=completed) as run:
-            observed = parent._git_file_sha256(source_sha, ORACLE)
+            observed = parent._git_file_sha256(
+                source_sha, ORACLE, "/usr/bin/git")
         self.assertEqual(observed, hashlib.sha256(payload).hexdigest())
         self.assertEqual(
             run.call_args.args[0],
-            ["git", "show",
+            ["/usr/bin/git", "show",
              f"{source_sha}:tests/tools/primary-real-swap-oracle.py"])
+
+    def test_unadmitted_privileged_child_cleanup_is_bounded(self):
+        child = mock.Mock()
+        child.poll.return_value = None
+        child.wait.side_effect = [
+            __import__("subprocess").TimeoutExpired("qualifier", 10),
+            __import__("subprocess").TimeoutExpired("qualifier", 5),
+        ]
+        with self.assertRaisesRegex(
+                parent.Blocked, "did not terminate after kill"):
+            parent._stop_unadmitted_child(child)
+        child.terminate.assert_called_once_with()
+        child.kill.assert_called_once_with()
+
+    def test_unadmitted_child_cleanup_preserves_admission_failure(self):
+        original = parent.Blocked("source admission timeout")
+        with mock.patch.object(
+                    parent, "_stop_unadmitted_child",
+                    side_effect=parent.Blocked("synthetic child cleanup failure")), \
+                self.assertRaisesRegex(
+                    parent.Blocked,
+                    "source admission timeout; privileged child cleanup also "
+                    "failed: synthetic child cleanup failure"):
+            parent._stop_unadmitted_child_preserving(mock.Mock(), original)
 
     def test_default_control_path_uses_installed_package_layout(self):
         args = qualify.build_parser().parse_args([
@@ -665,35 +690,35 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             completed(args=[], returncode=0, stdout="", stderr=""),
         ]
         with mock.patch.object(parent, "_run", side_effect=good):
-            parent._check_git_source(source_sha)
+            parent._check_git_source(source_sha, "/usr/bin/git")
 
         wrong_origin = list(good)
         wrong_origin[2] = completed(
             args=[], returncode=0, stdout="b" * 40 + "\n", stderr="")
         with mock.patch.object(parent, "_run", side_effect=wrong_origin), \
                 self.assertRaisesRegex(parent.Blocked, "main == origin/main"):
-            parent._check_git_source(source_sha)
+            parent._check_git_source(source_sha, "/usr/bin/git")
 
         detached = list(good)
         detached[1] = completed(
             args=[], returncode=0, stdout="HEAD\n", stderr="")
         with mock.patch.object(parent, "_run", side_effect=detached), \
                 self.assertRaisesRegex(parent.Blocked, "main == origin/main"):
-            parent._check_git_source(source_sha)
+            parent._check_git_source(source_sha, "/usr/bin/git")
 
         stale_remote = list(good)
         stale_remote[3] = completed(
             args=[], returncode=0, stdout="b" * 40 + "\trefs/heads/main\n", stderr="")
         with mock.patch.object(parent, "_run", side_effect=stale_remote), \
                 self.assertRaisesRegex(parent.Blocked, "current remote main differs"):
-            parent._check_git_source(source_sha)
+            parent._check_git_source(source_sha, "/usr/bin/git")
 
         unreachable_remote = list(good)
         unreachable_remote[3] = completed(
             args=[], returncode=128, stdout="", stderr="remote unavailable")
         with mock.patch.object(parent, "_run", side_effect=unreachable_remote), \
                 self.assertRaisesRegex(parent.Blocked, "cannot verify the current remote"):
-            parent._check_git_source(source_sha)
+            parent._check_git_source(source_sha, "/usr/bin/git")
 
     def canonical_manifest(self):
         run_id = "1" * 32
@@ -1461,11 +1486,12 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertIn('admission.require(f"cycle-{index}")', source)
         self.assertIn('admission.require("final")', source)
         self.assertIn("def _check_git_source(", admission_parent)
-        self.assertIn('["git", "ls-remote"', admission_parent)
+        self.assertIn('_trusted_executable("git")', admission_parent)
+        self.assertIn('"ls-remote"', admission_parent)
         self.assertIn("os.geteuid() == 0", admission_parent)
         self.assertIn("SO_PEERCRED", admission_parent)
         self.assertIn("def _git_file_sha256(", admission_parent)
-        self.assertIn('"git", "show"', admission_parent)
+        self.assertIn('"show"', admission_parent)
         self.assertIn('"oracle_sha256"', admission_parent)
 
     def test_helper_has_no_direct_swapoff_swapon_or_mapper_remove_command(self):

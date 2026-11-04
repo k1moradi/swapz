@@ -343,7 +343,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn('admission.require(f"cycle-{index}")', child)
         self.assertIn('admission.require("final")', child)
         self.assertIn("def _check_git_source(", parent)
-        self.assertIn('["git", "ls-remote"', parent)
+        self.assertIn('_trusted_executable("git")', parent)
+        self.assertIn('"ls-remote"', parent)
         self.assertIn("source_admission_parent_must_be_unprivileged", parent)
         self.assertIn("socket.SO_PEERCRED", parent)
         for forbidden in ('["swapon"', '["swapoff"', '["dmsetup", "remove"'):

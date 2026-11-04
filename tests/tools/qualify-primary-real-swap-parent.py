@@ -45,15 +45,16 @@ def _run(command: list[str], *, check: bool = True,
     return result
 
 
-def _check_git_source(validated_source: str) -> None:
+def _check_git_source(validated_source: str, git: str | None = None) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", validated_source):
         raise Blocked("validated source must be one full lowercase SHA")
-    head = _run(["git", "rev-parse", "HEAD"], timeout=10).stdout.strip()
+    git = _trusted_executable("git") if git is None else git
+    head = _run([git, "rev-parse", "HEAD"], timeout=10).stdout.strip()
     branch = _run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        [git, "rev-parse", "--abbrev-ref", "HEAD"],
         timeout=10).stdout.strip()
     origin_main = _run(
-        ["git", "rev-parse", "--verify", "refs/remotes/origin/main"],
+        [git, "rev-parse", "--verify", "refs/remotes/origin/main"],
         timeout=10).stdout.strip()
     if head != validated_source:
         raise Blocked(
@@ -64,7 +65,7 @@ def _check_git_source(validated_source: str) -> None:
             "physical qualification requires main == origin/main == "
             "validated source")
     remote_main = _run(
-        ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
+        [git, "ls-remote", "--exit-code", "origin", "refs/heads/main"],
         check=False, timeout=30)
     if remote_main.returncode != 0:
         raise Blocked(
@@ -72,19 +73,21 @@ def _check_git_source(validated_source: str) -> None:
     if remote_main.stdout.strip() != (
             f"{validated_source}\trefs/heads/main"):
         raise Blocked("current remote main differs from the validated source")
-    if _run(["git", "status", "--porcelain"], timeout=10).stdout:
+    if _run([git, "status", "--porcelain"], timeout=10).stdout:
         raise Blocked("production source tree is not clean")
 
 
-def _git_file_sha256(validated_source: str, path: Path) -> str:
+def _git_file_sha256(validated_source: str, path: Path,
+                       git: str | None = None) -> str:
     """Hash exact bytes from the validated commit, not the mutable worktree."""
     try:
         relative = path.resolve().relative_to(ROOT.resolve()).as_posix()
     except (OSError, ValueError) as exc:
         raise Blocked("source admission file is outside the repository") from exc
+    git = _trusted_executable("git") if git is None else git
     try:
         result = subprocess.run(
-            ["git", "show", f"{validated_source}:{relative}"],
+            [git, "show", f"{validated_source}:{relative}"],
             cwd=ROOT, capture_output=True, check=False, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
         raise Blocked("cannot read source admission file from validated commit") from exc
@@ -163,19 +166,55 @@ def _reply(stream, request: dict, status: str,
 
 
 def _stop_unadmitted_child(child: subprocess.Popen) -> None:
+    """Bound cleanup of a child that has not received initial admission."""
     if child.poll() is not None:
         return
-    child.terminate()
+    try:
+        child.terminate()
+    except ProcessLookupError:
+        try:
+            child.wait(timeout=1)
+        except subprocess.TimeoutExpired as exc:
+            raise Blocked(
+                "unadmitted privileged qualifier could not be reaped") from exc
+        return
+    except OSError as exc:
+        raise Blocked(
+            "cannot terminate unadmitted privileged qualifier") from exc
     try:
         child.wait(timeout=10)
+        return
     except subprocess.TimeoutExpired:
+        pass
+    try:
         child.kill()
-        child.wait()
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        raise Blocked(
+            "cannot kill unadmitted privileged qualifier") from exc
+    try:
+        child.wait(timeout=5)
+    except subprocess.TimeoutExpired as exc:
+        raise Blocked(
+            "unadmitted privileged qualifier did not terminate after kill"
+        ) from exc
+
+
+def _stop_unadmitted_child_preserving(
+        child: subprocess.Popen, original: Blocked) -> None:
+    try:
+        _stop_unadmitted_child(child)
+    except Blocked as cleanup_error:
+        raise Blocked(
+            f"{original}; privileged child cleanup also failed: "
+            f"{cleanup_error}") from cleanup_error
 
 
 def _serve_admission(server: socket.socket,
                      child: subprocess.Popen,
                      validated_source: str,
+                     git: str,
                      oracle_sha256: str,
                      cycles: int) -> int:
     expected_phases = (
@@ -187,19 +226,38 @@ def _serve_admission(server: socket.socket,
     try:
         connection, _address = server.accept()
     except socket.timeout as exc:
-        _stop_unadmitted_child(child)
-        raise Blocked(
-            "privileged qualifier did not establish source admission channel"
-        ) from exc
+        failure = Blocked(
+            "privileged qualifier did not establish source admission channel")
+        _stop_unadmitted_child_preserving(child, failure)
+        raise failure from exc
+    except OSError as exc:
+        failure = Blocked(
+            "source admission socket failed before privileged peer admission")
+        _stop_unadmitted_child_preserving(child, failure)
+        raise failure from exc
 
     with connection:
-        credentials = connection.getsockopt(
-            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-        _peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
+        try:
+            credentials = connection.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            _peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
+        except (OSError, struct.error) as exc:
+            failure = Blocked(
+                "cannot authenticate privileged source admission peer")
+            _stop_unadmitted_child_preserving(child, failure)
+            raise failure from exc
         if peer_uid != 0:
-            _stop_unadmitted_child(child)
-            raise Blocked("source admission peer is not privileged")
-        with connection.makefile("rwb", buffering=0) as stream:
+            failure = Blocked("source admission peer is not privileged")
+            _stop_unadmitted_child_preserving(child, failure)
+            raise failure
+        try:
+            stream_context = connection.makefile("rwb", buffering=0)
+        except OSError as exc:
+            failure = Blocked(
+                "cannot establish privileged source admission stream")
+            _stop_unadmitted_child_preserving(child, failure)
+            raise failure from exc
+        with stream_context as stream:
             while True:
                 try:
                     request = _read_request(stream, validated_source)
@@ -221,7 +279,7 @@ def _serve_admission(server: socket.socket,
                         file=sys.stderr)
                     break
                 try:
-                    _check_git_source(validated_source)
+                    _check_git_source(validated_source, git)
                 except Blocked as exc:
                     _reply(stream, request, "BLOCKED", oracle_sha256)
                     print(
@@ -301,9 +359,10 @@ def main() -> int:
         return 2
 
     try:
-        _check_git_source(arguments.validated_source)
+        git = _trusted_executable("git")
+        _check_git_source(arguments.validated_source, git)
         oracle_sha256 = _git_file_sha256(
-            arguments.validated_source, DEFAULT_ORACLE)
+            arguments.validated_source, DEFAULT_ORACLE, git)
         sudo = _trusted_executable("sudo")
         python3 = _trusted_executable("python3")
         true = _trusted_executable("true")
@@ -330,7 +389,7 @@ def main() -> int:
                     cwd=ROOT)
                 return _serve_admission(
                     server, child, arguments.validated_source,
-                    oracle_sha256, arguments.cycles)
+                    git, oracle_sha256, arguments.cycles)
     except Blocked as exc:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),

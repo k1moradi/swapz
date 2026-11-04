@@ -89,8 +89,11 @@ The privileged physical helper must not invoke Git or trust a one-shot SHA.
 Instead it connects to the parent through a private mode-0600 Unix-domain
 socket, authenticates the parent's unprivileged UID with `SO_PEERCRED`, and
 requires a nonce-bound approval at initial admission, immediately before every
-cycle's `primary prepare`, and again before emitting PASS. The parent repeats
-the same clean/local/tracking/remote-main proof for each request; requests must
+cycle's `primary prepare`, and again before emitting PASS. The parent must
+resolve Git through the same root-owned, non-group/world-writable executable
+policy used for its other trusted commands; a PATH-substituted Git binary
+cannot become source authority. The parent repeats the same
+clean/local/tracking/remote-main proof for each request; requests must
 arrive in exact `initial`, `cycle-1..N`, `final` order. A concurrent push,
 parent disconnect, malformed/duplicated JSON, peer-identity change, missing
 approval or unavailable remote blocks before the next durable transaction/card
