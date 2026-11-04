@@ -3273,8 +3273,7 @@ class PairReplayContract(unittest.TestCase):
 
         outside_window_gc = copy.deepcopy(raw)
         outside_window_gc["sustained_intervals"][20]["gc"].update(
-            gc_wall_ns=0, gc_victims=0, gc_pages=0,
-            segment_program_sum=0)
+            gc_victims=0, gc_pages=0)
         after_measure = copy.deepcopy(
             outside_window_gc["sustained_intervals"][-1])
         after_measure.update(
@@ -3285,8 +3284,7 @@ class PairReplayContract(unittest.TestCase):
             end_seconds=3660.0,
         )
         after_measure["gc"].update(
-            gc_wall_ns=1, gc_victims=1, gc_pages=1,
-            segment_program_sum=1)
+            gc_wall_ns=1, gc_victims=1, gc_pages=1)
         outside_window_gc["sustained_intervals"].append(after_measure)
         # Preserve the enclosing target-counter totals so this mutant reaches
         # the absolute measured-window check rather than failing conservation.
