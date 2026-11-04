@@ -592,12 +592,15 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
     def test_release_host_platform_is_fail_closed(self):
         report = owner_report()
         policy = acceptance_policy()
-        evidence = current_evidence(encoded(report), encoded(policy))
-        evidence["host"]["page_size_bytes"] = 65536
-        result = evaluate(report, evidence, policy)
-        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
-        self.assertIn(
-            "release host page size is unsupported", result["code_blockers"])
+        for page_size_bytes in (65536, 4096.0):
+            with self.subTest(page_size_bytes=page_size_bytes):
+                evidence = current_evidence(encoded(report), encoded(policy))
+                evidence["host"]["page_size_bytes"] = page_size_bytes
+                result = evaluate(report, evidence, policy)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertIn(
+                    "release host page size is unsupported",
+                    result["code_blockers"])
 
     def test_owner_reboot_readiness_requires_exact_durable_arm_record(self):
         report = owner_report()
@@ -1169,6 +1172,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "short_capacity": lambda capacity: (
                 capacity.update(logical_pages=27080191,
                                 logical_capacity_bytes=27080191 * 4096)),
+            "float_page_bytes": lambda capacity: capacity.update(
+                page_bytes=4096.0),
         }
         for label, change in changes.items():
             with self.subTest(change=label):
@@ -1183,7 +1188,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
                 expected = (
                     "sealed campaign capacity/RAM evidence is invalid"
-                    if label == "short_capacity" else
+                    if label in ("short_capacity", "float_page_bytes") else
                     "sealed campaign RAM trace summary does not match"
                     if label == "summary_tamper" else
                     "sealed campaign RAM trace is invalid")
@@ -1277,6 +1282,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 vmalloc_used_kib=1 << 64),
             "overflow_clock": lambda trace: trace["samples"][15].update(
                 monotonic_ns=1 << 65),
+            "float_sampling_interval": lambda trace: trace.update(
+                sampling_interval_ns=100_000_000.0),
             "persistent_teardown_leak": persistent_teardown_leak,
             "source_mismatch": lambda trace: trace.update(source_sha="b" * 40),
             "boot_mismatch": lambda trace: trace.update(
