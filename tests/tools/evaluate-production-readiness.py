@@ -296,14 +296,26 @@ def _valid_source(value: Any) -> bool:
     return isinstance(value, str) and bool(GIT_SHA_RE.fullmatch(value))
 
 
-def _valid_observed_at_utc(value: Any) -> bool:
-    if not isinstance(value, str) or not UTC_TIMESTAMP_RE.fullmatch(value):
-        return False
+def _parse_utc_evidence_time(value: Any) -> datetime.datetime | None:
+    """Parse a bounded UTC evidence timestamp without accepting local time."""
+    if not isinstance(value, str) or not value.endswith(("Z", "+00:00")):
+        return None
     try:
         observed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        return False
-    return observed.utcoffset() == datetime.timedelta(0)
+        return None
+    if (
+            observed.tzinfo is None or observed.utcoffset() is None or
+            observed.utcoffset() != datetime.timedelta(0)):
+        return None
+    return observed
+
+
+def _valid_observed_at_utc(value: Any) -> bool:
+    return (
+        isinstance(value, str) and
+        UTC_TIMESTAMP_RE.fullmatch(value) is not None and
+        _parse_utc_evidence_time(value) is not None)
 
 
 def _valid_run_id(value: Any) -> bool:
@@ -416,6 +428,27 @@ def _valid_campaign_artifact(value: Any) -> bool:
         isinstance(value.get("sha256"), str) and
         bool(SHA256_RE.fullmatch(value["sha256"]))
     )
+
+
+def _tracked_frozen_peak_ram_limit() -> int | None:
+    """Return the repository-frozen RAM bound for diagnostics only."""
+    try:
+        frozen_policy, _ = load_json_strict(FROZEN_ACCEPTANCE_MANIFEST)
+    except (OSError, EvidenceError):
+        return None
+    physical = frozen_policy.get("physical_qualification")
+    acceptance = (
+        physical.get("acceptance") if isinstance(physical, dict) else None)
+    sustained = (
+        acceptance.get("sustained") if isinstance(acceptance, dict) else None)
+    memory_limit = (
+        sustained.get("metadata_and_target_peak_ram_bytes_max")
+        if isinstance(sustained, dict) else None)
+    if (
+            type(memory_limit) is not int or
+            not 0 < memory_limit <= RAM_TRACE_VALIDATOR["MAX_UINT64"]):
+        return None
+    return memory_limit
 
 
 def validate_acceptance_policy(
@@ -798,23 +831,22 @@ def validate_physical_campaign_evidence(
                 sealed_at = campaign.get("sealed_at_utc")
                 host_after = capacity_and_ram[
                     "metadata_ram_host_binding"]["host_after_captured_at_utc"]
-                if not isinstance(sealed_at, str) or not sealed_at.endswith(
-                        ("Z", "+00:00")):
+                sealed_time = _parse_utc_evidence_time(sealed_at)
+                captured_time = _parse_utc_evidence_time(host_after)
+                if sealed_time is None:
                     raise ValueError(
-                        "metric=sealed_at_utc required=UTC_after_host_capture")
-                try:
-                    sealed_time = datetime.datetime.fromisoformat(
-                        sealed_at.replace("Z", "+00:00"))
-                    captured_time = datetime.datetime.fromisoformat(
-                        host_after.replace("Z", "+00:00"))
-                except ValueError as exc:
+                        "metric=sealed_at_utc observed=invalid "
+                        "required=UTC_after_host_capture")
+                if captured_time is None:
                     raise ValueError(
-                        "metric=sealed_at_utc required=valid_UTC_after_host_capture"
-                    ) from exc
-                if (sealed_time.utcoffset() != datetime.timedelta(0) or
-                        sealed_time < captured_time):
+                        "metric=host_after_captured_at_utc observed=invalid "
+                        "required=canonical_loaded_host_UTC")
+                if sealed_time < captured_time:
                     raise ValueError(
-                        "metric=sealed_at_utc required=not_before_host_after_capture")
+                        "metric=sealed_at_utc "
+                        f"observed={sealed_at[:80]!r} "
+                        f"minimum={host_after[:80]!r} "
+                        "required=not_before_host_after_capture")
             except ValueError as exc:
                 reject(f"sealed campaign RAM trace is invalid: {exc}")
 
@@ -1160,6 +1192,7 @@ def evaluate_release(
         except EvidenceError:
             test_results = {}
 
+    frozen_peak_ram_limit = _tracked_frozen_peak_ram_limit()
     try:
         policy = _bound_json_object(
             policy, policy_raw, "production acceptance policy")
@@ -1418,7 +1451,9 @@ def evaluate_release(
     memory_measurement = {
         "status": "NOT_MEASURED",
         "observed_peak_ram_bytes": None,
-        "limit_bytes": peak_ram_limit,
+        "limit_bytes": (
+            peak_ram_limit
+            if peak_ram_limit is not None else frozen_peak_ram_limit),
         "initialization_peak_ram_bytes": None,
         "initialization_samples": None,
         "steady_peak_ram_bytes": None,
@@ -1430,11 +1465,39 @@ def evaluate_release(
         "teardown_recovery_span_ns": None,
     }
     campaign_issues = None
+    campaign_sealed_at = None
+    campaign_sealed_time = None
     if (physical_campaign_evidence is not None and
             physical_campaign_evidence_raw is not None):
         campaign_issues = validate_physical_campaign_evidence(
             physical_campaign_evidence, physical_campaign_evidence_raw,
             source_sha, policy_sha256, target)
+        if isinstance(physical_campaign_evidence, dict):
+            campaign_sealed_at = physical_campaign_evidence.get(
+                "sealed_at_utc")
+            campaign_sealed_time = _parse_utc_evidence_time(
+                campaign_sealed_at)
+
+    def require_campaign_chronology(
+            name: str, record: dict[str, Any] | None) -> bool:
+        if (
+                record is None or campaign_sealed_time is None or
+                not isinstance(campaign_sealed_at, str)):
+            return False
+        observed_text = record.get("observed_at_utc")
+        observed_time = _parse_utc_evidence_time(observed_text)
+        if observed_time is None:
+            return False
+        if observed_time < campaign_sealed_time:
+            block_code(
+                f"{name}: observation predates sealed campaign "
+                f"(metric=observed_at_utc observed={observed_text} "
+                f"minimum={campaign_sealed_at})")
+            return False
+        return True
+
+    capacity_chronology_valid = require_campaign_chronology(
+        "maximum_capacity_and_ram", capacity)
     if capacity is not None:
         logical = capacity.get("logical_capacity_bytes")
         peak = capacity.get("peak_ram_bytes")
@@ -1480,6 +1543,7 @@ def evaluate_release(
             # calculated capacity or a self-declared scalar report.
             if (not campaign_issues and matches_campaign and
                     peak_ram_limit is not None and
+                    capacity_chronology_valid and
                     capacity.get("policy_sha256") == policy_sha256 and
                     _normalize_target(capacity.get("target")) == target and
                     capacity.get("evidence_sha256") ==
@@ -1507,13 +1571,14 @@ def evaluate_release(
         block_code(
             "maximum_capacity_and_ram: loaded-host peak unavailable; "
             "metric=metadata_and_target_peak_ram_bytes observed=unavailable "
-            f"limit={peak_ram_limit} "
+            f"limit={frozen_peak_ram_limit} "
             "required=sealed source/boot/artifact-bound constructor, steady, "
             "GC and verified teardown host samples")
 
     physical = pass_record("sustained_physical_performance")
     require_target("sustained_physical_performance", physical)
     require_policy("sustained_physical_performance", physical)
+    require_campaign_chronology("sustained_physical_performance", physical)
     if physical is not None:
         if campaign_issues is None:
             block_code(
