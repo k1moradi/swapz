@@ -598,7 +598,7 @@ static int test_last_mapped_page_partial_victim_failed_publication(void)
 	const swapz_u32 last_logical = LOGICAL_PAGES - 1U;
 	struct swapz_map previous;
 	struct swapz_tx transaction;
-	swapz_u32 failed_block;
+	swapz_u32 failed_block = ~(swapz_u32)0;
 	swapz_u32 logical;
 
 	CHECK(setup() == 0);
