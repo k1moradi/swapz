@@ -370,6 +370,164 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify.validate_loaded_module_provenance(
                     observed_source, clean, physical, source_sha)
 
+
+    def test_mutated_worktree_inputs_cannot_pass_commit_hash_admission(self):
+        # Synthetic source fixture: no tracked file, real swap or privilege touched.
+        source_sha = "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            worktree = root / "worktree"
+            worktree.mkdir()
+            originals = {}
+            for relative in qualify.PHYSICAL_CONTROL_INPUT_PATHS:
+                path = worktree / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                data = f"trusted {relative}\n".encode("ascii")
+                path.write_bytes(data)
+                originals[relative] = data
+            expected = {
+                relative: hashlib.sha256(payload).hexdigest()
+                for relative, payload in originals.items()
+            }
+            candidates = (
+                "src/userspace/swapzctl.c",
+                "src/userspace/swapz-primary.c",
+                "src/kernel/codec.h",
+                "src/kernel/authority.h",
+                "docs/production-acceptance.json",
+                "docs/handoff/production-readiness.json",
+            )
+            with mock.patch.object(qualify, "ROOT", worktree):
+                for index, relative in enumerate(candidates):
+                    with self.subTest(input=relative):
+                        source_path = worktree / relative
+                        source_path.write_bytes(b"unauthorized changed bytes\n")
+                        attempt = root / f"attempt-{index}"
+                        attempt.mkdir()
+                        try:
+                            _, observed = qualify.pin_physical_control_inputs(attempt)
+                            request = {
+                                "schema": parent.SOURCE_ADMISSION_SCHEMA,
+                                "phase": "initial",
+                                "source_sha": source_sha,
+                                "nonce": "b" * 32,
+                                "physical_control_inputs_sha256": observed,
+                                "executed_helper_sha256": "8" * 64,
+                            }
+                            encoded = (json.dumps(request) + "\n").encode("ascii")
+                            with self.assertRaisesRegex(
+                                    parent.Blocked,
+                                    "source admission request identity is invalid"):
+                                parent._read_request(
+                                    io.BytesIO(encoded), source_sha, expected, "8" * 64)
+                        finally:
+                            source_path.write_bytes(originals[relative])
+
+    def test_private_source_hashes_reject_mutation_before_and_during_compile(self):
+        completed = __import__("subprocess").CompletedProcess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            qualified = root / "prefix/sbin/swapzctl"
+            qualified.parent.mkdir(parents=True)
+            qualified.write_bytes(b"qualified installed control")
+            candidates = (
+                "src/userspace/swapzctl.c",
+                "src/userspace/swapz-primary.c",
+                "src/kernel/codec.h",
+                "src/kernel/authority.h",
+                "docs/production-acceptance.json",
+                "docs/handoff/production-readiness.json",
+            )
+            for index, relative in enumerate(candidates):
+                with self.subTest(input=relative, phase="before_compile"):
+                    attempt = root / f"before-{index}"
+                    attempt.mkdir(mode=0o700)
+                    source_root, digests = qualify.pin_physical_control_inputs(attempt)
+                    changed = source_root / relative
+                    changed.chmod(0o600)
+                    changed.write_bytes(b"changed after initial source admission\n")
+                    changed.chmod(0o400)
+                    with mock.patch.object(
+                            qualify, "_run",
+                            side_effect=AssertionError("compiler must not run")):
+                        with self.assertRaisesRegex(
+                                qualify.Blocked,
+                                "differs from validated commit at before_compile:"):
+                            qualify.build_physical_execution_control(
+                                "a" * 40, qualified, attempt / "control",
+                                source_root=source_root, expected_input_hashes=digests)
+
+            for index, relative in enumerate(candidates[:4]):
+                with self.subTest(input=relative, phase="during_compile"):
+                    attempt = root / f"during-{index}"
+                    attempt.mkdir(mode=0o700)
+                    source_root, digests = qualify.pin_physical_control_inputs(attempt)
+
+                    def modified_compile(argv, **kwargs):
+                        self.assertEqual(kwargs["cwd"], attempt / "control")
+                        changed = source_root / relative
+                        changed.chmod(0o600)
+                        changed.write_bytes(b"mutated while compiler is running\n")
+                        changed.chmod(0o400)
+                        Path(argv[argv.index("-o") + 1]).write_bytes(b"untrusted binary")
+                        return completed(args=argv, returncode=0, stdout="", stderr="")
+
+                    with mock.patch.object(
+                            qualify, "_run", side_effect=modified_compile):
+                        with self.assertRaisesRegex(
+                                qualify.Blocked,
+                                "differs from validated commit at after_compile:"):
+                            qualify.build_physical_execution_control(
+                                "a" * 40, qualified, attempt / "control",
+                                source_root=source_root, expected_input_hashes=digests)
+
+    def test_private_compile_rejects_worktree_root_and_unpinned_transitive_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_root, digests = qualify.pin_physical_control_inputs(root)
+            private_control = root / "control"
+            with self.assertRaisesRegex(qualify.Blocked, "not private"):
+                qualify.require_pinned_physical_control_inputs(
+                    ROOT, private_control, digests, "before_compile")
+            changed = source_root / "src/kernel/codec.h"
+            changed.chmod(0o600)
+            changed.write_bytes(changed.read_bytes() + b'\n#include "untracked.h"\n')
+            changed.chmod(0o400)
+            digests["src/kernel/codec.h"] = hashlib.sha256(
+                changed.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(
+                    qualify.Blocked, "unpinned transitive header"):
+                qualify.require_pinned_physical_control_inputs(
+                    source_root, private_control, digests, "before_compile")
+
+    def test_mutated_pinned_policy_and_readiness_are_blocked_at_use(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative, verifier in (
+                    ("docs/production-acceptance.json",
+                     qualify._verify_acceptance_manifest_snapshot),
+                    ("docs/handoff/production-readiness.json",
+                     qualify._read_readiness_snapshot)):
+                with self.subTest(document=relative):
+                    original = (ROOT / relative).read_bytes()
+                    expected = hashlib.sha256(original).hexdigest()
+                    snapshot = root / Path(relative).name
+                    snapshot.write_bytes(b'{"unauthorized":true}\n')
+                    if relative.endswith("production-acceptance.json"):
+                        with self.assertRaisesRegex(
+                                qualify.Blocked, "validated commit at policy_use"):
+                            verifier(
+                                cycles=qualify.DEFAULT_CYCLES,
+                                workload_mib=qualify.DEFAULT_WORKLOAD_MIB,
+                                resident_mib=qualify.DEFAULT_RESIDENT_MIB,
+                                swap_limit_mib=qualify.DEFAULT_SWAP_LIMIT_MIB,
+                                timeout_seconds=qualify.DEFAULT_TIMEOUT_SECONDS,
+                                path=snapshot, expected_sha256=expected)
+                    else:
+                        with self.assertRaisesRegex(
+                                qualify.Blocked, "validated commit at policy_use"):
+                            verifier(snapshot, expected_sha256=expected)
+
     def test_private_physical_control_build_binds_exact_source_and_installed_control(self):
         source_sha = "a" * 40
         completed = __import__("subprocess").CompletedProcess
@@ -379,6 +537,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             qualified.parent.mkdir(parents=True)
             qualified.write_bytes(b"qualified-installed-control")
             private_directory = root / "private"
+            source_root, source_hashes = qualify.pin_physical_control_inputs(root)
 
             def fake_compile(argv, **_kwargs):
                 output = Path(argv[argv.index("-o") + 1])
@@ -387,9 +546,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
             with mock.patch.object(qualify, "_run", side_effect=fake_compile) as run:
                 control, digest = qualify.build_physical_execution_control(
-                    source_sha, qualified, private_directory)
+                    source_sha, qualified, private_directory,
+                    source_root=source_root, expected_input_hashes=source_hashes)
 
             argv = run.call_args.args[0]
+            self.assertEqual(run.call_args.kwargs["cwd"], private_directory)
+            self.assertNotIn("-I", argv)
+            self.assertNotIn("-include", argv)
             self.assertIn("-DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1", argv)
             self.assertIn(
                 f"-DSWAPZ_BUILD_SOURCE_SHA={json.dumps(source_sha)}", argv)
@@ -410,8 +573,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             qualified.parent.mkdir(parents=True)
             qualified.write_bytes(b"qualified-installed-control")
             qualified.chmod(0o700)
+            source_root, source_hashes = qualify.pin_physical_control_inputs(root)
             control, digest = qualify.build_physical_execution_control(
-                source_sha, qualified, root / "private")
+                source_sha, qualified, root / "private", source_root=source_root,
+                expected_input_hashes=source_hashes)
             self.assertEqual(digest, hashlib.sha256(control.read_bytes()).hexdigest())
 
             unmarked_environment = dict(os.environ)
@@ -436,6 +601,34 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             marked_plan = json.loads(marked.stdout)
             self.assertIs(marked_plan["privileged_execution_enabled"], True)
             self.assertEqual(marked_plan["control_build_source_sha"], source_sha)
+
+
+    def test_private_runtime_artifact_mutations_block_each_execution_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            control = root / "swapzctl"
+            oracle_path = root / "oracle.py"
+            control.write_bytes(b"trusted control")
+            oracle_path.write_bytes(b"trusted oracle")
+            expected_control = hashlib.sha256(control.read_bytes()).hexdigest()
+            expected_oracle = hashlib.sha256(oracle_path.read_bytes()).hexdigest()
+            for phase in ("before_qualification_import", "before_cycle-1",
+                          "before_final_publication"):
+                qualify.require_private_execution_artifact_identity(
+                    control, oracle_path, expected_control, expected_oracle, phase)
+                for label, path in (("coordinator", control), ("oracle", oracle_path)):
+                    with self.subTest(phase=phase, artifact=label):
+                        original = path.read_bytes()
+                        path.write_bytes(b"unauthorized changed artifact")
+                        try:
+                            with self.assertRaisesRegex(
+                                    qualify.Blocked,
+                                    f"private {label} artifact changed at {phase}"):
+                                qualify.require_private_execution_artifact_identity(
+                                    control, oracle_path, expected_control,
+                                    expected_oracle, phase)
+                        finally:
+                            path.write_bytes(original)
 
     def test_installed_control_plan_never_receives_private_runtime_marker(self):
         completed = __import__("subprocess").CompletedProcess
@@ -646,7 +839,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             self.assertEqual(cleanup_called, [True])
 
     def test_terminal_pass_waits_for_owned_cleanup(self):
-        for failure_point in ("private workspace", "source admission channel"):
+        for failure_point in ("private workspace", "source admission channel",
+                              "published source change"):
             with self.subTest(failure_point=failure_point), \
                     tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -711,7 +905,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     "--executed-helper-sha256", "8" * 64,
                 ])
                 admission = mock.Mock()
-                admission.require.side_effect = ["0" * 64, "0" * 64]
+                admission.require.side_effect = (
+                    ["0" * 64, "0" * 64,
+                     qualify.Blocked(
+                         "unprivileged source admission refused at published: "
+                         "production source tree is not clean")]
+                    if failure_point == "published source change"
+                    else ["0" * 64] * 3)
                 cycle_results = iter([
                     {"run_id": "1" * 32, "linux_swap_uuid": "1" * 32},
                     {"run_id": "2" * 32, "linux_swap_uuid": "2" * 32},
@@ -811,7 +1011,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "_sha256_file",
-                            return_value="5" * 64))
+                            side_effect=lambda path, **_kwargs: (
+                                "1" * 64 if Path(path) == private_control else
+                                "2" * 64)))
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "PersistentEvidence", FakeEvidence))
@@ -823,29 +1025,37 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             qualify, "run_cycle",
                             side_effect=fake_cycle))
                     stack.enter_context(
-                        self.assertRaises(qualify.QualificationFailure))
+                        self.assertRaises(
+                            qualify.Blocked if failure_point == "published source change"
+                            else qualify.QualificationFailure))
                     qualify._execute_admitted(
                         args, admission, terminal_cleanup=terminal_cleanup)
 
                 self.assertEqual(len(evidence_instances), 1)
-                self.assertEqual(
-                    [status for status, _reason
-                     in evidence_instances[0].finish_calls],
-                    ["FAIL"])
-                failure_reason = evidence_instances[0].finish_calls[0][1]
-                self.assertNotIn("PASS", [
+                statuses = [
                     status for status, _reason
-                    in evidence_instances[0].finish_calls])
+                    in evidence_instances[0].finish_calls]
+                self.assertEqual(
+                    statuses, ["BLOCKED"] if failure_point == "published source change"
+                    else ["FAIL"])
+                failure_reason = evidence_instances[0].finish_calls[-1][1]
+                self.assertEqual(statuses[-1],
+                                 "BLOCKED" if failure_point == "published source change"
+                                 else "FAIL")
                 if failure_point == "private workspace":
                     self.assertEqual(workspace_cleanup_calls, [True, True])
                     self.assertEqual(terminal_cleanup_calls, [])
                     self.assertIn(
                         "synthetic terminal workspace cleanup failure",
                         failure_reason)
-                else:
+                elif failure_point == "source admission channel":
                     self.assertEqual(workspace_cleanup_calls, [True])
                     self.assertEqual(terminal_cleanup_calls, [True])
                     self.assertIn("synthetic close failure", failure_reason)
+                else:
+                    self.assertEqual(workspace_cleanup_calls, [True])
+                    self.assertEqual(terminal_cleanup_calls, [])
+                    self.assertIn("at published", failure_reason)
 
     def test_terminal_pass_orders_cleanup_and_pins_verified_report_digest(self):
         source = HELPER.read_text(encoding="utf-8")
@@ -863,12 +1073,21 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             "require_final_installed_artifact_identity(", result_index)
         final_admission_index = execute_source.index(
             'admission.require("final")', final_artifact_index)
+        pending_index = execute_source.index(
+            'evidence.update("FINAL_PUBLICATION_PENDING"', final_admission_index)
+        published_admission_index = execute_source.index(
+            'admission.require("published")', pending_index)
+        close_index = execute_source.index(
+            "terminal_cleanup()", published_admission_index)
         pass_index = execute_source.index(
-            'evidence.finish("PASS"', final_admission_index)
+            'evidence.finish("PASS"', published_admission_index)
         self.assertLess(cleanup_index, result_index)
         self.assertLess(result_index, final_artifact_index)
         self.assertLess(final_artifact_index, final_admission_index)
-        self.assertLess(final_admission_index, pass_index)
+        self.assertLess(final_admission_index, pending_index)
+        self.assertLess(pending_index, published_admission_index)
+        self.assertLess(published_admission_index, close_index)
+        self.assertLess(close_index, pass_index)
 
         self.assertIn(
             'qualification_report_sha256 = '
@@ -982,6 +1201,97 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertRaisesRegex(
                     qualify.Blocked, "response identity mismatch"):
             client.require("cycle-1")
+
+
+    def test_parent_revalidates_changed_main_after_evidence_publication(self):
+        # All five admission phases are synthetic; no privileged child is launched.
+        source_sha = "a" * 40
+        hashes = {relative: "c" * 64
+                  for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS}
+        records = []
+        for phase in ("initial", "cycle-1", "cycle-2", "final", "published"):
+            records.append(
+                (json.dumps({
+                    "schema": parent.SOURCE_ADMISSION_SCHEMA,
+                    "source_sha": source_sha,
+                    "phase": phase,
+                    "nonce": "b" * 32,
+                    "physical_control_inputs_sha256": hashes,
+                    "executed_helper_sha256": "8" * 64,
+                }) + "\n").encode("ascii"))
+
+        class FakeStream:
+            def __init__(self):
+                self.input = io.BytesIO(b"".join(records))
+                self.output = io.BytesIO()
+
+            def readline(self, limit):
+                return self.input.readline(limit)
+
+            def write(self, payload):
+                return self.output.write(payload)
+
+            def flush(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+        stream = FakeStream()
+        connection = mock.MagicMock()
+        connection.getsockopt.return_value = struct.pack("3i", 123, 0, 0)
+        connection.makefile.return_value = stream
+        server = mock.Mock()
+        server.accept.return_value = (connection, None)
+        child = mock.Mock()
+        child.wait.return_value = 2
+        with mock.patch.object(
+                parent, "_check_git_source",
+                side_effect=[None, None, None, None,
+                             parent.Blocked("production source tree is not clean")]
+                ) as check:
+            result = parent._serve_admission(
+                server, child, source_sha, "/usr/bin/git",
+                "d" * 64, hashes, "8" * 64, 2)
+        self.assertEqual(result, 2)
+        self.assertEqual(check.call_count, 5)
+        responses = [json.loads(line) for line in stream.output.getvalue().splitlines()]
+        self.assertEqual([reply["status"] for reply in responses],
+                         ["PASS", "PASS", "PASS", "PASS", "BLOCKED"])
+        self.assertEqual(responses[-1]["phase"], "published")
+        self.assertEqual(
+            responses[-1]["reason"], "production source tree is not clean")
+
+    def test_client_reports_exact_blocked_provenance_boundary(self):
+        source_sha = "a" * 40
+        client = object.__new__(qualify.SourceAdmissionClient)
+        client._validated_source = source_sha
+        client._oracle_sha256 = None
+        client._executed_helper_sha256 = "8" * 64
+        client._physical_control_inputs_sha256 = {
+            relative: "c" * 64 for relative in qualify.PHYSICAL_CONTROL_INPUT_PATHS
+        }
+        response = {
+            "schema": qualify.SOURCE_ADMISSION_SCHEMA,
+            "source_sha": source_sha,
+            "phase": "published",
+            "status": "BLOCKED",
+            "nonce": "b" * 32,
+            "oracle_sha256": "d" * 64,
+            "reason": "current remote main differs from the validated source",
+        }
+        wire = (json.dumps(response) + "\n").encode("ascii")
+        channel = mock.Mock()
+        channel.recv.side_effect = [bytes([item]) for item in wire]
+        client._channel = channel
+        with mock.patch.object(qualify.os, "urandom", return_value=b"\xbb" * 16):
+            with self.assertRaisesRegex(
+                    qualify.Blocked,
+                    "at published: current remote main differs"):
+                client.require("published")
 
     def test_parent_hashes_oracle_from_validated_commit_object(self):
         source_sha = "a" * 40
@@ -2326,6 +2636,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             final = json.loads(evidence.path.read_text(encoding="utf-8"))
             self.assertEqual(final["status"], "BLOCKED")
             self.assertEqual(final["reason"], "synthetic evidence gap")
+            # Publication can be revoked if the parent refuses the post-PASS
+            # source proof; nested result must not advertise a stale PASS.
+            evidence.finish("PASS", result={"status": "PASS"})
+            evidence.finish("BLOCKED", "source changed at published")
+            revoked = json.loads(evidence.path.read_text(encoding="utf-8"))
+            self.assertEqual(revoked["status"], "BLOCKED")
+            self.assertNotIn("result", revoked)
 
 
     def test_exited_worker_pid_is_not_valid_live_cgroup_ownership(self):
