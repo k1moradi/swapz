@@ -114,7 +114,7 @@ enum fixture_scenario {
     FIXTURE_DISAPPEARED_PID, FIXTURE_PID_STILL_PRESENT,
     FIXTURE_REMOTE_EACCES, FIXTURE_REMOTE_EIO, FIXTURE_MALFORMED,
     FIXTURE_EMPTY, FIXTURE_LOCAL_MALFORMED, FIXTURE_PARENT_SUBSTITUTED,
-    FIXTURE_ROOT_SUBSTITUTED, FIXTURE_ROOT_ON_SELECTED_PARENT,
+    FIXTURE_ROOT_SUBSTITUTED, FIXTURE_ROOT_ON_SELECTED_PARENT, FIXTURE_HOLDER_LATE,
     FIXTURE_SWAP_INVENTORY_MALFORMED, FIXTURE_SWAP_STAT_EACCES,
     FIXTURE_DM_INITIAL, FIXTURE_SWAPS_INITIAL, FIXTURE_ROOT_INITIAL,
     FIXTURE_HOLDER_INITIAL, FIXTURE_SCENARIO_COUNT
@@ -127,7 +127,7 @@ static const char *const scenario_names[] = {
     "disappeared PID late", "PID still present late",
     "remote EACCES late", "remote EIO late", "malformed remote late",
     "empty remote late", "malformed self late", "parent substitution late",
-    "root parent substitution late", "root on target parent late",
+    "root parent substitution late", "root on target parent late", "holder appears late",
     "malformed swap inventory late", "swapfile stat EACCES late",
     "DM initially active", "selected swap initially active",
     "root initially on selected parent", "holder initially active"
@@ -165,14 +165,18 @@ static int fixture_mount_facts(struct swapz_primary_mount_facts *facts,
         ++prewrite_reads;
     if (late && scenario == FIXTURE_LOCAL_MALFORMED)
         local = "malformed\n";
+    if (late && scenario == FIXTURE_SELECTED_MOUNT)
+        local = "36 25 259:0 / / rw - ext4 /dev/root rw\n"
+                "37 36 8:1 / /mnt/selected rw - ext4 /dev/sda1 rw\n";
+    if (late && scenario == FIXTURE_PARENT_MOUNT)
+        local = "36 25 259:0 / / rw - ext4 /dev/root rw\n"
+                "37 36 8:0 / /mnt/parent rw - ext4 /dev/sda rw\n";
     if (late) {
         switch (scenario) {
-        case FIXTURE_SELECTED_MOUNT:
         case FIXTURE_FOREIGN_SELECTED:
             foreign = "36 25 259:9 / / rw - ext4 /dev/other rw\n"
                       "37 36 8:1 / /mnt/selected rw - ext4 /dev/sda1 rw\n";
             break;
-        case FIXTURE_PARENT_MOUNT:
         case FIXTURE_FOREIGN_PARENT:
             foreign = "36 25 259:9 / / rw - ext4 /dev/other rw\n"
                       "37 36 8:0 / /mnt/parent rw - ext4 /dev/sda rw\n";
@@ -216,6 +220,11 @@ static int fixture_source_chain(const char *sysfs_root, dev_t device,
     (void)sysfs_root;
     (void)excluded;
     if (device == SWAPZ_PRIMARY_TARGET_DEVICE) {
+        /* The source-chain gate also checks selected/parent holders. */
+        if (late && scenario == FIXTURE_HOLDER_LATE) {
+            errno = EBUSY;
+            return 0;
+        }
         *parent = late && scenario == FIXTURE_PARENT_SUBSTITUTED
             ? makedev(8U, 9U) : makedev(8U, 0U);
         return 1;
@@ -447,8 +456,10 @@ static int check_case(enum fixture_scenario candidate)
         }
     } else {
         if (result == 0 || writes || module_loads ||
-            (candidate >= FIXTURE_DM_INITIAL ? prewrite_reads != 0U :
-                                                prewrite_reads != 1U)) {
+            ((candidate >= FIXTURE_DM_INITIAL ||
+              candidate == FIXTURE_PARENT_SUBSTITUTED ||
+              candidate == FIXTURE_HOLDER_LATE) ?
+                 prewrite_reads != 0U : prewrite_reads != 1U)) {
             fprintf(stderr, "FAIL: %s: refusal result=%d initial+late=%u "
                     "late=%u header_write=%u mapper=%u mkswap=%u swapon=%u\n",
                     scenario_names[candidate], result, admission_reads,
@@ -501,7 +512,7 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     c_path.write_text(unit)
     compilation = subprocess.run(
         ["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
-         "-Wno-unused-function", "-Wno-unused-but-set-variable", "-I", str(INCLUDE_DIR), str(c_path),
+         "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-but-set-variable", "-I", str(INCLUDE_DIR), str(c_path),
          "-o", str(binary)], text=True, capture_output=True, check=False)
     if compilation.returncode:
         raise AssertionError(f"{c_path.name} compile failed:\n{compilation.stderr}")
