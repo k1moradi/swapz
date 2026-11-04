@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Private root preflight for make test loaded qualification.
-# It clears /tmp before its memory observation and may remove only an idle
-# module or one provably stale harness-owned mapping.
+# It cleans verified completed swapz benchmark scratch before its memory
+# observation and may remove only an idle module or a proven stale mapping.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -38,14 +38,14 @@ preflight_internal_error() {
 }
 trap 'rc=$?; preflight_internal_error "$rc" "$LINENO"' ERR
 
-for cmd in rmmod dmsetup timeout awk tr findmnt cat readlink stat sleep id ls find rm; do
+for cmd in rmmod dmsetup timeout awk tr findmnt cat readlink stat sleep id ls find rm python3; do
     command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "root required for loaded preflight"
 
 swapz_clear_tmp_before_memory_check ||
-    fail "cannot clear /tmp before the early memory observation"
-note "LOADED_PREFLIGHT_TMP_CLEANUP=cleared"
+    fail "cannot safely clean completed swapz scratch before the early memory observation"
+note "LOADED_PREFLIGHT_TMP_CLEANUP=completed-owned-only"
 
 # Diagnostic only: early loaded-stage RAM is not the later ID36 admission
 # sample. Never fail preflight from a transient low reading, and never mutate

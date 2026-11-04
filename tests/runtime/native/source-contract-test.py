@@ -5612,6 +5612,7 @@ int main(void)
                 sample.replace("894992 kB", "0894992 kB"),
                 sample.replace("MemAvailable: 894992 kB\n", ""),
                 sample + "MemAvailable: 894992 kB\n",
+                sample.replace("894992 kB", "99999999999999999999 kB"),
             ):
                 with self.subTest(bad=bad[-55:]):
                     self.assertNotEqual(observe(bad).returncode, 0)
@@ -5653,6 +5654,15 @@ int main(void)
 
             # The same frozen 1 GiB floor also applies to a finite ancestor
             # budget so an environmental cgroup cap cannot become a later OOM.
+            # One byte under the 1 GiB floor near 2^53 must stay BLOCKED.
+            huge_current = 2**53 + 1
+            huge_limit = huge_current + 1024**3 - 1
+            (root / "memory.max").write_text(str(huge_limit) + "\n")
+            (root / "memory.current").write_text(str(huge_current) + "\n")
+            result = cgroup_inventory()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(result.stdout.strip().endswith("insufficient"))
+
             (root / "memory.max").write_text(str(512 * 1024 * 1024) + "\n")
             (root / "memory.current").write_text("123\n")
             result = cgroup_inventory()

@@ -76,10 +76,10 @@ printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
 
 swapz_clear_tmp_before_memory_check || {
     printf '%s\n' \
-        'BLOCKED: cannot clear /tmp before ID36 memory admission' >&2
+        'BLOCKED: cannot safely clean completed swapz scratch before ID36 memory admission' >&2
     exit 2
 }
-printf '%s\n' 'ID36_TMP_CLEANUP=cleared'
+printf '%s\n' 'ID36_TMP_CLEANUP=completed-owned-only'
 
 # Read one coherent host snapshot with canonical kernel kB units. Reject
 # missing, duplicated, nondecimal or unitless fields instead of treating
@@ -91,7 +91,7 @@ read_host_memory_inventory() {
         $1 == "SReclaimable:" || $1 == "SwapTotal:" ||
         $1 == "SwapFree:" {
             if (NF != 3 || $2 !~ /^(0|[1-9][0-9]*)$/ ||
-                $3 != "kB" || ++seen[$1] != 1)
+                $3 != "kB" || length($2) > 18 || ++seen[$1] != 1)
                 invalid = 1
             else
                 values[$1] = $2
@@ -161,17 +161,19 @@ read_cgroup_root_memory_inventory() {
     if [[ $memory_max == max ]]; then
         headroom_status=unbounded
     else
-        headroom_status="$(awk -v limit="$memory_max" \
-            -v current="$memory_current" -v required="$MIN_AVAILABLE_BYTES" '
-            BEGIN {
-                if (current > limit)
-                    exit 1
-                if ((limit - current) >= required)
-                    print "sufficient"
-                else
-                    print "insufficient"
-            }
-        ')" || return 1
+        # awk numeric values are floating point: near 2^53 an insufficient
+        # finite-parent margin can round up to a false PASS. Compare exactly.
+        [[ $memory_max =~ ^[0-9]{1,20}$ &&
+           $memory_current =~ ^[0-9]{1,20}$ ]] || return 1
+        headroom_status="$(python3 -B - "$memory_max" "$memory_current" \
+            "$MIN_AVAILABLE_BYTES" <<'PY'
+import sys
+maximum, current, required = (int(value) for value in sys.argv[1:])
+if current > maximum:
+    sys.exit(1)
+print("sufficient" if maximum - current >= required else "insufficient")
+PY
+        )" || return 1
     fi
     printf '%s %s %s\n' "$memory_max" "$memory_current" "$headroom_status"
 }
