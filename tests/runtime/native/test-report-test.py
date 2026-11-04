@@ -1124,6 +1124,15 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.parse_kernel_debug_evidence(implicated)["overall"],
                          "FAIL")
 
+        for malformed_marker in (
+                "KERNEL_DEBUG_FEATURES=kasan:1 kcsan:0 lockdep:1 config:bogus",
+                "KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 reports:x swapz_reports:0"):
+            with self.subTest(malformed_marker=malformed_marker):
+                malformed = output + malformed_marker + "\n"
+                verdict = runner.parse_kernel_debug_evidence(malformed)
+                self.assertEqual(verdict["overall"], "INCOMPLETE")
+                self.assertIn("malformed", verdict["reason"])
+
     def test_loaded_maximum_capacity_constructor_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_MAXIMUM_CAPACITY=logical_pages:3727616 "
                   "logical_bytes:15268315136 lower_bytes:17178820608 "
@@ -1197,6 +1206,12 @@ class ReportContract(unittest.TestCase):
         result = runner.parse_loaded_correctness(duplicated)
         self.assertEqual(result["overall"], "INCOMPLETE")
 
+        malformed_interruption = (
+            output + "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=INVALID\n")
+        result = runner.parse_loaded_correctness(malformed_interruption)
+        self.assertEqual(result["overall"], "INCOMPLETE")
+        self.assertIn("malformed primary lifecycle interruption", result["reason"])
+
         # The three primary aggregate PASS records must each occur once.
         for marker in required_markers:
             with self.subTest(duplicated=marker):
@@ -1224,6 +1239,11 @@ class ReportContract(unittest.TestCase):
                 verdict = runner.parse_loaded_correctness(repeated)
                 self.assertEqual(verdict["overall"], "INCOMPLETE")
                 self.assertIn("duplicate loaded correctness", verdict["reason"])
+
+                malformed = output + prefix + "malformed\n"
+                verdict = runner.parse_loaded_correctness(malformed)
+                self.assertEqual(verdict["overall"], "INCOMPLETE")
+                self.assertIn("malformed loaded correctness", verdict["reason"])
 
     def test_raw_read_fanout_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 "

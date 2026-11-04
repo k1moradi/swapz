@@ -1637,13 +1637,23 @@ def parse_kernel_debug_evidence(output):
     observation_re = re.compile(
         r"KERNEL_DEBUG_OBSERVATION=checked:([01]) baseline_stable:([01]) "
         r"reports:(\d+) swapz_reports:(\d+)$")
+    feature_prefix = "KERNEL_DEBUG_FEATURES="
+    observation_prefix = "KERNEL_DEBUG_OBSERVATION="
     features = []
     observations = []
     for line in output.splitlines():
         text = line.strip()
-        if match := features_re.fullmatch(text):
+        if text.startswith(feature_prefix):
+            match = features_re.fullmatch(text)
+            if match is None:
+                return {"overall": "INCOMPLETE",
+                        "reason": "kernel debug evidence marker malformed"}
             features.append(match.groups())
-        if match := observation_re.fullmatch(text):
+        if text.startswith(observation_prefix):
+            match = observation_re.fullmatch(text)
+            if match is None:
+                return {"overall": "INCOMPLETE",
+                        "reason": "kernel debug evidence marker malformed"}
             observations.append(tuple(int(value) for value in match.groups()))
     if len(features) != 1 or len(observations) != 1:
         return {"overall": "INCOMPLETE",
@@ -1787,29 +1797,49 @@ def parse_loaded_correctness(output):
         "recover-mapper-removed", "recover-module-unloaded",
         "recover-restored",
     )
+    interruption_prefix = "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION="
     interruption_pattern = re.compile(
         r"PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=([a-z0-9-]+)$")
+    marker_prefixes = {
+        name: pattern.pattern.split("=", 1)[0] + "="
+        for name, pattern in patterns.items()
+    }
     observed_interruption_phases = []
     found = {}
     for line in output.splitlines():
         text = line.strip()
-        interruption_match = interruption_pattern.fullmatch(text)
-        if interruption_match:
+        if text.startswith(interruption_prefix):
+            interruption_match = interruption_pattern.fullmatch(text)
+            if interruption_match is None:
+                return {
+                    "overall": "INCOMPLETE",
+                    "reason": (
+                        "malformed primary lifecycle interruption evidence marker"),
+                }
             observed_interruption_phases.append(interruption_match.group(1))
         for name, pattern in patterns.items():
+            if not text.startswith(marker_prefixes[name]):
+                continue
             match = pattern.fullmatch(text)
-            if match:
-                # Repeated PASS claims are not independent proof.
-                # Earlier matches must never be silently overwritten.
-                if name in found:
-                    return {
-                        "overall": "INCOMPLETE",
-                        "reason": (
-                            "duplicate primary lifecycle evidence marker"
-                            if name.startswith("primary_") else
-                            "duplicate loaded correctness evidence marker"),
-                    }
-                found[name] = tuple(int(value) for value in match.groups())
+            if match is None:
+                return {
+                    "overall": "INCOMPLETE",
+                    "reason": (
+                        "malformed primary lifecycle evidence marker"
+                        if name.startswith("primary_") else
+                        "malformed loaded correctness evidence marker"),
+                }
+            # Repeated PASS claims are not independent proof.
+            # Earlier matches must never be silently overwritten.
+            if name in found:
+                return {
+                    "overall": "INCOMPLETE",
+                    "reason": (
+                        "duplicate primary lifecycle evidence marker"
+                        if name.startswith("primary_") else
+                        "duplicate loaded correctness evidence marker"),
+                }
+            found[name] = tuple(int(value) for value in match.groups())
     missing = [name for name in patterns if name not in found]
     if missing:
         # Reasons are operator/test diagnostics, not stable machine keys.

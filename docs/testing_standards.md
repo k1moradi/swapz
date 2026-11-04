@@ -5247,11 +5247,12 @@ containing fake gate or syscall text never satisfy safety assertions.
 
 Canonical CI release evidence contains exactly one row for each of the three
 mandatory workflows, with distinct canonical positive signed-64-bit GitHub
-run IDs. Extra, malformed,
-or duplicated rows cannot qualify the release even when the required rows
-claim completed success. Every mandatory loaded correctness marker is
-single-occurrence evidence, including the fault, kernel-debug and
-resource-pressure markers; duplicate PASS claims are incomplete.
+run IDs. Extra, malformed, or duplicated rows cannot qualify the release even
+when the required rows claim completed success. Every claim using a mandatory
+loaded-evidence marker prefix must match its canonical grammar; a malformed
+sibling claim cannot be ignored beside a valid marker. Canonical fault,
+kernel-debug, resource-pressure and lifecycle markers are single-occurrence
+evidence; duplicate PASS claims are incomplete.
 
 The official rootless stage directly executes every mandatory Python contract
 owned by that stage, including the owned-null_blk lifecycle qualifier and
