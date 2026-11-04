@@ -613,10 +613,29 @@ static int swapz_verify_segment_authoritative_maps(
 		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
 			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
 			return -EUCLEAN;
-		if (verify_physical_metadata &&
-		    (a->extent_classes[map->start_block] != map->extent_blocks ||
-		     !a->live_records[map->start_block]))
-			return -EUCLEAN;
+		if (verify_physical_metadata) {
+			swapz_u8 block_offset;
+
+			if (a->extent_classes[map->start_block] !=
+				    map->extent_blocks ||
+			    !a->live_records[map->start_block])
+				return -EUCLEAN;
+			/*
+			 * Physical descriptors and liveness exist only at an
+			 * extent START. Any nonzero interior entry contradicts
+			 * this live extent and can also witness an overlapping
+			 * physical start. Recovery must reject that state before
+			 * publishing a segment-role exchange.
+			 */
+			for (block_offset = 1U;
+			     block_offset < map->extent_blocks;
+			     ++block_offset)
+				if (a->extent_classes[map->start_block +
+						     block_offset] ||
+				    a->live_records[map->start_block +
+						    block_offset])
+					return -EUCLEAN;
+		}
 		map_end_block = map->start_block + map->extent_blocks;
 		if (map->start_block >= end_block || map_end_block <= start_block)
 			continue;

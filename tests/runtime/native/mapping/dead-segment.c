@@ -30,6 +30,7 @@ static swapz_u32 last_page[5];
 static swapz_u32 prev_page[32];
 static swapz_u32 next_page[32];
 static swapz_u8 bytes[SWAPZ_BLOCK_BYTES];
+static swapz_u8 multi_block_bytes[2U * SWAPZ_BLOCK_BYTES];
 static swapz_u8 data[100];
 static int recycle_hook_calls;
 static swapz_u32 recycle_hook_last_segment;
@@ -232,6 +233,32 @@ static int write_page(swapz_u32 logical)
 		return rc;
 	}
 	return swapz_finish(&a, &tx, bytes, SWAPZ_BLOCK_BYTES, 1, 0);
+}
+
+static int write_two_block_page(swapz_u32 logical)
+{
+	struct swapz_tx tx;
+	struct swapz_builder builder;
+	const swapz_u32 extent_bytes = 2U * SWAPZ_BLOCK_BYTES;
+	int rc;
+
+	rc = swapz_stage(&a, &logical, 1U, 2U, &tx);
+	if (rc)
+		return rc;
+	memset(data, logical + 1U, sizeof(data));
+	rc = swapz_begin(&builder, multi_block_bytes, extent_bytes,
+			 tx.sequence);
+	if (!rc)
+		rc = swapz_append(&builder, logical,
+				  tx.records[0].generation,
+				  data, sizeof(data));
+	if (!rc)
+		rc = swapz_seal(&builder);
+	if (rc) {
+		swapz_abort(&a, &tx);
+		return rc;
+	}
+	return swapz_finish(&a, &tx, multi_block_bytes, extent_bytes, 2U, 0);
 }
 
 static int test_recycle_wholly_dead_segment(void)
@@ -568,12 +595,17 @@ static int test_roll_forward_rejects_unrelated_map_sidecar_corruption(void)
 			live[start] = 0U;
 		snapshot_integrity();
 
-		CHECK(swapz_gc_roll_forward_rotation(&a, destination) == -EUCLEAN);
-		CHECK(integrity_unchanged());
-		CHECK(recycle_hook_calls == 0);
-		CHECK(a.gc_allocation && a.gc_forbidden_victim == 0U &&
-		      a.gc_destination == destination);
-		CHECK(roles[0] == 1U && roles[destination] == 0U);
+		for (int attempt = 0; attempt < 3; ++attempt) {
+			CHECK(swapz_gc_roll_forward_rotation(
+				      &a, destination) == -EUCLEAN);
+			CHECK(integrity_unchanged());
+			CHECK(recycle_hook_calls == 0);
+			CHECK(a.gc_allocation &&
+			      a.gc_forbidden_victim == 0U &&
+			      a.gc_destination == destination);
+			CHECK(roles[0] == 1U &&
+			      roles[destination] == 0U);
+		}
 	}
 	return 0;
 }
@@ -629,6 +661,67 @@ static int test_gc_commit_rejects_unrelated_survivor_corruption(void)
 			      maps[destination_page].valid &&
 			      maps[destination_page].start_block == destination_start);
 			CHECK(live[destination_start] == 1U &&
+			      classes[destination_start] == 1U);
+			CHECK(!recycle_hook_calls);
+		}
+	}
+	return 0;
+}
+
+
+/*
+ * Extent class/liveness descriptors are start-only. A nonzero interior byte
+ * contradicts a live multi-block extent and may represent an overlapping
+ * physical extent start. Recovery role publication must reject either witness
+ * independently and remain fail-closed across retries.
+ */
+static int test_gc_commit_rejects_live_extent_interior_metadata(void)
+{
+	const swapz_u32 survivor = 7U;
+	const swapz_u32 destination_page = 8U;
+	int corruption, attempt;
+
+	for (corruption = 0; corruption < 2; ++corruption) {
+		swapz_u32 survivor_start, destination, destination_start;
+
+		CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+		a.next_segment_probe = 1U;
+		CHECK(write_two_block_page(survivor) == 0);
+		survivor_start = maps[survivor].start_block;
+		CHECK(survivor_start == SWAPZ_SEGMENT_BLOCKS);
+		CHECK(maps[survivor].extent_blocks == 2U);
+		CHECK(!classes[survivor_start + 1U] &&
+		      !live[survivor_start + 1U]);
+
+		CHECK(swapz_gc_begin_rotation(&a, 0U) == 0);
+		destination = a.gc_destination;
+		CHECK(destination == 2U);
+		CHECK(write_page(destination_page) == 0);
+		destination_start = maps[destination_page].start_block;
+		CHECK(destination_start / SWAPZ_SEGMENT_BLOCKS == destination);
+
+		if (corruption == 0)
+			classes[survivor_start + 1U] = 1U;
+		else
+			live[survivor_start + 1U] = 1U;
+		snapshot_integrity();
+
+		for (attempt = 0; attempt < 3; ++attempt) {
+			CHECK(swapz_gc_commit_rotation(&a, 0U) == -EUCLEAN);
+			CHECK(integrity_unchanged());
+			CHECK(a.gc_allocation &&
+			      a.gc_forbidden_victim == 0U &&
+			      a.gc_destination == destination);
+			CHECK(roles[0] == 1U && roles[destination] == 0U);
+			CHECK(maps[survivor].valid &&
+			      maps[survivor].start_block == survivor_start &&
+			      maps[survivor].extent_blocks == 2U);
+			CHECK(live[survivor_start] == 1U &&
+			      classes[survivor_start] == 2U);
+			CHECK(maps[destination_page].valid &&
+			      maps[destination_page].start_block ==
+				      destination_start &&
+			      live[destination_start] == 1U &&
 			      classes[destination_start] == 1U);
 			CHECK(!recycle_hook_calls);
 		}
@@ -1064,6 +1157,7 @@ int main(void)
 	CHECK(test_false_final_mapping_discard_is_rejected() == 0); passed++;
 	CHECK(test_roll_forward_rejects_unrelated_map_sidecar_corruption() == 0); passed++;
 	CHECK(test_gc_commit_rejects_unrelated_survivor_corruption() == 0); passed++;
+	CHECK(test_gc_commit_rejects_live_extent_interior_metadata() == 0); passed++;
 	CHECK(test_gc_advance_rejects_unrelated_survivor_corruption() == 0); passed++;
 	CHECK(test_gc_roll_forward_recycle_failure_preserves_ownership() == 0); passed++;
 	CHECK(test_gc_partial_relocation_bad_payload_is_atomic() == 0); passed++;

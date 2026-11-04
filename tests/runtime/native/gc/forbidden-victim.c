@@ -179,9 +179,9 @@ static int test_single_witness_reserve_corruption_is_fail_closed(void)
 		a.dead_segment_recycle_opaque = &unexpected_recycle_calls;
 		unexpected_recycle_calls = 0;
 		if (witness == 0U)
-			memset(live, 0, sizeof(live));
+			live[maps[0].start_block] = 0U;
 		else
-			memset(classes, 0, sizeof(classes));
+			classes[maps[0].start_block] = 0U;
 		memcpy(original_maps, maps, sizeof(maps));
 		memcpy(original_live, live, sizeof(live));
 		memcpy(original_classes, classes, sizeof(classes));
