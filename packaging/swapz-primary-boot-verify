@@ -441,6 +441,30 @@ qualified_installed_package()
 	[ "$qualified_count" -eq 1 ]
 }
 
+package_transaction_present()
+{
+	# manager_target_identity disables globbing to parse fixed tokens. Expand
+	# only these trusted recovery-journal names, then restore shell state.
+	case $- in
+	*f*)
+		set +f
+		set -- "$package_transaction_parent"/swapz-package.* \
+			"$package_transaction_parent"/swapz-uninstall.*
+		set -f
+		;;
+	*)
+		set -- "$package_transaction_parent"/swapz-package.* \
+			"$package_transaction_parent"/swapz-uninstall.*
+		;;
+	esac
+	for transaction do
+		if [ -e "$transaction" ] || [ -L "$transaction" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
 package_transaction_guard()
 {
 	# Retained installation/uninstallation journals require explicit rollback.
@@ -452,11 +476,9 @@ package_transaction_guard()
 			[ "$(stat -c '%a' -- "$package_transaction_parent")" = 700 ] ||
 			fail "unsafe package transaction directory; require owned mode 0700"
 	fi
-	for transaction in "$package_transaction_parent"/swapz-package.* \
-		"$package_transaction_parent"/swapz-uninstall.*; do
-		[ ! -e "$transaction" ] && [ ! -L "$transaction" ] ||
-			fail "incomplete package transaction at $transaction; finish package rollback before arming"
-	done
+	if package_transaction_present; then
+		fail "incomplete package transaction in $package_transaction_parent; finish package rollback before arming"
+	fi
 }
 
 passive_swap_unit_guard()
@@ -1005,13 +1027,9 @@ observe_boot()
 				append_failure package_transaction_directory_unsafe
 			fi
 		fi
-		for transaction in "$package_transaction_parent"/swapz-package.* \
-			"$package_transaction_parent"/swapz-uninstall.*; do
-			if [ -e "$transaction" ] || [ -L "$transaction" ]; then
-				append_failure incomplete_package_transaction
-				break
-			fi
-		done
+		if package_transaction_present; then
+			append_failure incomplete_package_transaction
+		fi
 	fi
 
 	if [ ! -x "$runtime_health" ]; then
