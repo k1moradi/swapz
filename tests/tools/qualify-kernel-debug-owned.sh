@@ -101,10 +101,16 @@ if (( helper_rc != 0 )); then
         "$helper_rc" "$session/execution.log" >&2
     exit 1
 fi
-capture_runtime_snapshot "$session/runtime-after.json" ||
-    fail "cannot observe required debug feature after owned I/O"
 sudo -n dmesg --color=never --notime > "$session/final.log" ||
     fail "cannot read final kernel diagnostics"
+runtime_after_rc=0
+capture_runtime_snapshot "$session/runtime-after.json" ||
+    runtime_after_rc=$?
+if (( runtime_after_rc != 0 )); then
+    # Do not let a later observation failure hide stronger kernel/helper
+    # failure evidence already captured by this bounded execution.
+    printf '%s\n' '{}' > "$session/runtime-after.json"
+fi
 
 set +e
 python3 -B tests/tools/kernel-debug-qualify.py verify \

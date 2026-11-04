@@ -5747,7 +5747,9 @@ prefix. Any KASAN/KCSAN report, lockdep report, kernel warning, refcount
 diagnostic, workqueue-after-free indication, shortened log, missing/repeated
 marker, helper failure, or uncertain teardown fails or blocks the lane.
 Executed defects return FAIL rather than being relabeled BLOCKED merely because
-the wrapper is private.
+the wrapper is private. Failure evidence is monotonic: a post-run runtime-state
+observation gap may block an otherwise clean result but must not downgrade an
+already captured kernel diagnostic or helper defect from FAIL to BLOCKED.
 
 This lane still does not establish every requested kernel-debug claim.
 Full simultaneous READ/WRITE/DISCARD/FUA while GC is active, actual bounded

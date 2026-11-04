@@ -291,17 +291,11 @@ def verify_owned_run(
         return "BLOCKED", "required running-kernel debug features unavailable"
     if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
         return "BLOCKED", "validated source SHA is malformed"
-    try:
-        before_state = parse_runtime_snapshot(runtime_before, required)
-        after_state = parse_runtime_snapshot(runtime_after, required)
-    except ValueError as error:
-        return "BLOCKED", str(error)
-    if not runtime_features_active(before_state, required):
-        return "BLOCKED", "required debug feature was inactive before owned I/O"
-    if not runtime_features_active(after_state, required):
-        return "FAIL", "required debug feature became inactive during owned I/O"
     if not baseline or not final or not final.startswith(baseline):
         return "BLOCKED", "dmesg baseline missing, overwritten or unreadable"
+
+    # Evidence is monotonic: a later observation failure must not downgrade an
+    # already observed kernel/helper defect from FAIL to BLOCKED.
     delta = final[len(baseline):]
     if KERNEL_DIAGNOSTIC.search(delta):
         return "FAIL", "kernel diagnostic appeared during owned run"
@@ -314,8 +308,17 @@ def verify_owned_run(
         expression = re.compile(r"^" + record + r"$")
         if sum(bool(expression.fullmatch(line)) for line in lines) != 1:
             return "FAIL", f"missing, repeated or malformed loaded evidence: {record.split('=')[0]}"
-    return "PASS", "private RAM lower completed and kernel diagnostics were clean"
 
+    try:
+        before_state = parse_runtime_snapshot(runtime_before, required)
+        after_state = parse_runtime_snapshot(runtime_after, required)
+    except ValueError as error:
+        return "BLOCKED", str(error)
+    if not runtime_features_active(before_state, required):
+        return "BLOCKED", "required debug feature was inactive before owned I/O"
+    if not runtime_features_active(after_state, required):
+        return "FAIL", "required debug feature became inactive during owned I/O"
+    return "PASS", "private RAM lower completed and kernel diagnostics were clean"
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)

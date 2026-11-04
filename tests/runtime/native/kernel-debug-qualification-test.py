@@ -218,6 +218,20 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertEqual(self.verify(baseline="", final="new\n")[0], "BLOCKED")
         self.assertEqual(self.verify(final="different\n")[0], "BLOCKED")
 
+    def test_strong_failure_evidence_precedes_late_observation_gap(self) -> None:
+        malformed_runtime = "{}"
+        self.assertEqual(
+            self.verify(
+                final="old\nWARNING: synthetic post-run warning\n",
+                runtime_after=malformed_runtime,
+            )[0],
+            "FAIL",
+        )
+        self.assertEqual(
+            self.verify(runtime_after=malformed_runtime)[0],
+            "BLOCKED",
+        )
+
     def test_verify_cli_preserves_fail_vs_blocked_exit_status(self) -> None:
         directory = Path(self.temporary_directory.name)
         baseline = directory / "baseline"
@@ -315,6 +329,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertIn('--runtime-before "$session/runtime-before.json"', source)
         self.assertIn('--runtime-after "$session/runtime-after.json"', source)
         self.assertIn("verify_rc=$?", source)
+        self.assertIn("runtime_after_rc=$?", source)
         self.assertNotIn("kcsan.enabled=0", source)
         self.assertNotIn("lockdep=off", source)
 
